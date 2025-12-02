@@ -1,0 +1,54 @@
+# Haskell / Stack / Cabal build artifacts
+.stack-work/
+dist/
+dist-newstyle/
+.cabal-sandbox/
+cabal.sandbox.config
+cabal.project.local
+
+# GHC build artifacts
+*.hi
+*.o
+*.dyn_o
+*.dyn_hi
+*.prof
+*.aux
+*.p_o
+*.p_hi
+
+# Haddock / docs
+*.haddock
+*.haddock-html
+*.haddock-cache
+
+# HIE / tooling files
+.hie/
+.hie-*
+*.hie
+.hie.db
+
+# GHC environment files
+.ghc.environment.*
+ghc.environment.*
+
+# Stack result (Nix / CI)
+result
+
+# Cabal local/project files
+cabal.project.local
+
+# Nix
+.nix-*
+
+# Editor / OS files
+.DS_Store
+*.swp
+*~
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+# Test / coverage / profiling
+*.tix
+*.eventlog
