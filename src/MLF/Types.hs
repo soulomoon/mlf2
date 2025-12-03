@@ -39,6 +39,7 @@ data TyNode
     = TyVar
         { tnId :: NodeId
         , tnLevel :: GNodeId
+            -- ^ Binding level that owns this variable; see Note [G-nodes].
         }
     | TyArrow
         { tnId :: NodeId
@@ -54,12 +55,39 @@ data TyNode
         , tnQuantLevel :: GNodeId
         , tnBody :: NodeId
         }
+    -- | Expansion node created for let-bindings; see Note [Expansion nodes].
     | TyExp
         { tnId :: NodeId
         , tnExpVar :: ExpVarId
         , tnBody :: NodeId
         }
     deriving (Eq, Show)
+
+{- Note [Expansion nodes]
+~~~~~~~~~~~~~~~~~~~~~~~~~
+Every let-binding produces a "scheme placeholder" in the constraint graph so
+that later uses can decide whether to instantiate or generalize it. We model
+that placeholder as a 'TyExp' node that stores:
+
+    * 'tnExpVar' — the expansion variable s allocated for the binding; Phase 4
+        will map s to an 'Expansion' recipe (instantiate, add ∀ levels, compose…).
+    * 'tnBody' — the graphic type τ of the RHS. Keeping τ around allows the solver
+        to re-enter the body when an instantiation edge demands structure.
+
+The pair (s, τ) must stay explicit, otherwise we could not distinguish between
+multiple instantiations of the same binding or record minimal expansions.
+
+Each application site contributes an instantiation edge
+
+    s · τ ≤ demanded_type
+
+where the left-hand side points at the 'TyExp' node and the right-hand side
+encodes the arrow/base shape required by the call site. When Phase 4 processes
+an instantiation edge it consults the presolution for s, performs the requested
+expansion recipe, and emits any unification work needed to make s · τ match the
+right-hand side. This is how a single let-generalized binding can be shared
+across multiple instantiations while still remembering its original scheme.
+-}
 
 -- | Generalization nodes model the levels introduced by let-generalization in
 -- the graphic constraint. Each level forms a tree (parent/children) so that we
@@ -72,6 +100,7 @@ data TyNode
 --   are the candidates for ∀-introduction when solving.
 -- * 'gChildren' enumerates nested levels created by inner let-bindings, giving
 --   the solver the forest structure it needs for scope checks.
+--   See Note [G-nodes].
 data GNode = GNode
     { gnodeId :: GNodeId
     , gParent :: Maybe GNodeId
@@ -79,6 +108,26 @@ data GNode = GNode
     , gChildren :: [GNodeId]
     }
     deriving (Eq, Show)
+
+{- Note [G-nodes]
+~~~~~~~~~~~~~~~~~
+Rémy–Yakobowski levels form a tree where each let-binding introduces a child
+scope. We encode that hierarchy explicitly so later phases can answer:
+
+    * Which variables are allowed to generalize at this scope?  → 'gBinds'.
+    * Does this scope sit under another generalization level?     → 'gParent'.
+    * Which nested lets did this binding introduce?               → 'gChildren'.
+
+During Phase 1 every TyVar records the G-node that owns it via 'tnLevel'. When
+Phase 4 decides whether a variable may be quantified it consults 'gBinds' for
+the child level introduced by a let, walks up the parent chain ('gParent') to
+check that all uses stay within scope, and then records the chosen variables in
+the presolution for that binding. This is how we decide which TyVars become
+∀-bound in the let-generalized scheme. Keeping an explicit forest also lets us
+describe programs with multiple roots (e.g. module initializers) without
+imposing an artificial single g₀, and it ensures each 'TyVar' remembers exactly
+which generalization level created it.
+-}
 
 -- | Instantiation edge (Tₗ ≤ Tᵣ) connecting a polymorphic binding to the
 -- type shape it must instantiate to; Phase 4 consumes these edges when
@@ -112,11 +161,12 @@ data Constraint = Constraint
             -- ^ Roots of the generalization forest (most programs yield a singleton [g₀]).
             --   Keeping track of the forest roots lets us traverse all scopes even when
             --   multiple disconnected components exist (e.g. for multiple top-level lets).
+            --   See Note [G-nodes].
         , cGNodes :: IntMap GNode
             -- ^ The lookup table for G-nodes keyed by their 'GNodeId'. The solver uses
             --   this to answer queries like "what is the parent of this level?" or
             --   "which TyVar nodes are bound here?" whenever it decides whether a
-            --   variable may be generalized or instantiated.
+            --   variable may be generalized or instantiated. See Note [G-nodes].
         , cNodes :: IntMap TyNode
             -- ^ The hash-consed DAG of graphic type nodes. Every structural operation
             --   (unification, grafting, elaboration) needs fast access to the canonical
@@ -134,6 +184,10 @@ data Constraint = Constraint
     deriving (Eq, Show)
 
 data Expansion
+-- | Presolution recipes the solver assigns to each expansion variable. See
+-- Note [Expansion nodes] for why we keep these recipes explicit and how they
+-- correspond to the operations from the paper (identity, add ∀ levels,
+-- instantiate by grafting fresh metas, compose steps).
     = ExpIdentity
     | ExpForall (NonEmpty GNodeId)
     | ExpInstantiate [NodeId]
