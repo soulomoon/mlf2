@@ -1,5 +1,7 @@
 # Roadmap for Implementing Rémy & Yakobowski MLF Type Inference Algorithm
 
+> **Implementation progress:** See [TODO.md](TODO.md) for the current checklist.
+
 Excellent — below I give a self-contained, paper-faithful presentation of the Rémy & Yakobowski (ICFP 2008) algorithm for MLF type inference: definitions, the solver strategy, the data structures you need, and precise pseudocode for each stage. I base this on the PDF you asked me to read and I cite the paper at the end for the most important claims and definitions I rely on.  ￼
 
 This answer is long but organised so you can (a) read the overview and then (b) follow the step-by-step algorithm/pseudocode and (c) consult the cited paper sections for formal proofs and details.
@@ -284,10 +286,57 @@ Final notes and offer
 
 This answer gives the full algorithmic recipe and the exact subroutines you must implement to get a faithful Rémy & Yakobowski MLF inference engine. The paper contains the formal inference and correctness proofs and gives the exact local rewrite rules and the presolution decision rules that I summarized; please consult §4–§5 in the PDF for the constructive rules for decideMinimalExpansions and the formal solved-form definition if you want the mechanically precise case analyses.
 
-If you want, I can now (choose one):
+⸻
 
- 1. Implement the full algorithm in Haskell (production-quality, faithful to paper) — this is a sizable task but I can produce it incrementally; I will start by implementing the graph data structures, constraint generator, and the rewrite rules (and deliver code in this session).
- 2. Translate the paper’s decideMinimalExpansions rules into line-by-line pseudocode (complete case analysis) so you can implement them yourself.
- 3. Produce a worked, annotated run of the algorithm on a tricky example (show the graph at each step: constraints, presolution decisions, node merges).
+## Implementation Status
 
-Which of these do you want me to do now?
+> **Detailed checklist:** [TODO.md](TODO.md)
+
+| Phase | Description | Status |
+|-------|-------------|--------|
+| 0 | Data structures (`TyNode`, `GNode`, `Constraint`, `Expansion`) | ✅ Done |
+| 1 | Constraint generation (`inferConstraintGraph`) | ✅ Done |
+| 2 | Normalize / Local transformations | ⬚ Not started |
+| 3 | Acyclicity check | ⬚ Not started |
+| 4 | Principal presolution (`decideMinimalExpansions`) | ⬚ Not started |
+| 5 | Unification solver (union-find) | ⬚ Not started |
+| 6 | Elaboration to xMLF | ⬚ Not started |
+
+### Phase 1 — Complete ✅
+
+All constraint-generation functionality is implemented and tested:
+
+```text
+src/MLF/
+  Syntax.hs      -- AST: Expr, Literal
+  Types.hs       -- TyNode, GNode, Constraint, InstEdge, Expansion
+  ConstraintGen.hs -- inferConstraintGraph
+```
+
+**Test coverage (23 specs):**
+
+- Literals (`Int`, `Bool`, `String`)
+- Variables & scope (shadowing, unknown-variable errors)
+- Lambda nodes (shared parameters, G-node registration)
+- Applications (instantiation edges, immediate lambda apps)
+- Let-generalization & G-nodes (child levels, nested/sibling lets)
+- Expansion nodes (shared across uses, distinct per binding)
+- Higher-order structure
+
+Run tests with:
+
+```bash
+cabal test
+```
+
+### Next Steps — Phase 2
+
+The next milestone is implementing `normalize :: Constraint -> Constraint` with:
+
+1. **Grafting** — insert structure under variable nodes when demanded by instantiation edges.
+2. **Merging** — combine nodes that represent the same structural requirement.
+3. **Collapse identity expansions** — remove `s · τ` when `s ↦ identity`.
+4. **Push/pull G-nodes** — ensure G-nodes sit only at the top of the type graph.
+5. **Simplify trivial edges** — drop `T ≤ T` or `T = T` edges.
+
+These rewrites are defined in §4 of the paper and must preserve constraint semantics while simplifying the graph for the presolution phase.
