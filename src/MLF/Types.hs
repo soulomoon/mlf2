@@ -155,6 +155,44 @@ data InstEdge = InstEdge
     }
     deriving (Eq, Show)
 
+{- Note [Unification Edges]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Unification edges (T₁ = T₂) represent equality constraints between type nodes.
+They arise from two sources:
+
+  1. Direct generation: When the constraint generator determines that two types
+     must be identical (e.g., function argument matches parameter type).
+
+  2. Grafting output: When Phase 2 grafts structure onto a variable, the
+     instantiation edge α ≤ τ is converted into unification edges:
+       - α = (α₁ → α₂) where α₁, α₂ are fresh variables
+       - α₁ = dom(τ), α₂ = cod(τ)
+     See Note [Grafting] in MLF.Normalize.
+
+Processing (TLDI 2007 §3 "Graphical Unification"):
+  Phase 2's mergeUnifyEdges processes these via union-find:
+
+    Var = Var       → Union the variables (one points to other)
+    Var = Structure → Variable points to the structure
+    Arrow = Arrow   → Union arrows, emit dom₁ = dom₂, cod₁ = cod₂
+    Base = Base     → Check equality; error if different
+    Arrow = Base    → Type error (constructor clash)
+
+  The algorithm is incremental: new edges can be added during processing
+  (e.g., Arrow = Arrow generates two child edges). We iterate until all
+  edges are consumed or errors remain.
+
+Unlike InstEdges which require presolution to determine *how* to instantiate,
+UnifyEdges are resolved immediately by structural unification. The union-find
+structure is applied to all node references at the end of each normalization
+iteration, ensuring the constraint graph uses canonical representatives.
+
+Remaining edges after normalization represent type errors (e.g., Int = Bool).
+-}
+
+-- | Unification edge (T₁ = T₂) representing a monotype equality constraint.
+-- These are processed by Phase 2's merging algorithm via union-find.
+-- See Note [Unification Edges].
 data UnifyEdge = UnifyEdge
     { uniLeft :: NodeId
     , uniRight :: NodeId

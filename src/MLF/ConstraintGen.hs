@@ -14,6 +14,34 @@ import qualified Data.Map.Strict as Map
 import MLF.Syntax
 import MLF.Types
 
+{- Note [Phase 1: Constraint Generation]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+This module implements Phase 1 of the MLF type inference algorithm: translating
+a source expression into a graphic constraint. This is the "compositional
+translation" described in Rémy & Yakobowski (ICFP 2008) §1.
+
+The translation is syntax-directed and produces:
+  1. A DAG of type nodes (TyVar, TyArrow, TyBase, TyExp)
+  2. A forest of G-nodes representing generalization levels
+  3. Instantiation edges (≤) at application sites
+  4. The root NodeId representing the expression's type
+
+Key invariants maintained:
+  - Every TyVar records its binding level via tnLevel :: GNodeId
+  - G-nodes form a proper tree (child levels point to parent)
+  - Lambda parameters are bound at the CURRENT level (monomorphic)
+  - Let bindings create a CHILD level and wrap RHS in TyExp
+
+The constraint graph is the input to subsequent phases:
+  - Phase 2 normalizes via grafting/merging
+  - Phase 3 checks acyclicity of instantiation dependencies
+  - Phase 4 computes the principal presolution
+  - Phase 5 solves remaining unification
+  - Phase 6 elaborates to xMLF
+
+Paper reference: ICFP 2008, §1 "From ML to constraints"
+-}
+
 {- Note [Lambda vs Let Polymorphism]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 MLF distinguishes between lambda-bound and let-bound variables in how they
@@ -145,11 +173,13 @@ buildExpr :: Env -> GNodeId -> Expr -> ConstraintM NodeId
 buildExpr env level expr = case expr of
     EVar name -> lookupVar env name
     ELit lit -> allocBase (baseFor lit)
+    -- See Note [Lambda Translation]
     ELam param body -> do
         argNode <- allocVar level
         let env' = Map.insert param (Binding argNode level) env
         bodyNode <- buildExpr env' level body
         allocArrow argNode bodyNode
+    -- See Note [Application and Instantiation Edges]
     EApp fun arg -> do
         funNode <- buildExpr env level fun
         argNode <- buildExpr env level arg
@@ -157,12 +187,135 @@ buildExpr env level expr = case expr of
         arrowNode <- allocArrow argNode resultNode
         addInstEdge funNode arrowNode
         pure resultNode
+    -- See Note [Let Bindings and Expansion Variables]
     ELet name rhs body -> do
         childLevel <- newChildLevel (Just level)
         rhsNode <- buildExpr env childLevel rhs
         schemeNode <- allocExpNode rhsNode
         let env' = Map.insert name (Binding schemeNode level) env
         buildExpr env' level body
+
+{- Note [Lambda Translation]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Lambda abstraction `λx. e` is translated as follows:
+
+  1. Allocate a fresh type variable α for the parameter at the CURRENT level
+  2. Extend the environment to bind x to α
+  3. Recursively translate the body e to get type τ
+  4. Return a fresh arrow node (α → τ)
+
+The parameter is bound at the current G-node level, NOT a child level. This
+means lambda parameters are monomorphic — they cannot be generalized. This
+is the key difference from let-bindings.
+
+From the paper's pseudocode (§1):
+  "lambda λx.e: create nodes for argument and body; tie argument var node
+   to scope, produce arrow node with succ = [argnode, bodyNode]"
+
+Example:
+  λx. λy. x y
+
+  Generates (at level g₀):
+    - α : TyVar at g₀ (for x)
+    - β : TyVar at g₀ (for y)
+    - γ : TyVar at g₀ (result of application)
+    - (β → γ) : TyArrow
+    - InstEdge: α ≤ (β → γ)
+    - (α → (β → γ)) : TyArrow (final type)
+
+Note that all variables are at the same level — no generalization happens
+inside a lambda body unless there's a nested let.
+-}
+
+{- Note [Application and Instantiation Edges]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Function application `e₁ e₂` is the source of instantiation edges (≤).
+This is where MLF's polymorphism machinery connects to the constraint graph.
+
+Translation:
+  1. Recursively translate e₁ to get node n₁ (the function)
+  2. Recursively translate e₂ to get node n₂ (the argument)
+  3. Allocate a fresh result variable r at the current level
+  4. Create an arrow node (n₂ → r)
+  5. Emit instantiation edge: n₁ ≤ (n₂ → r)
+  6. Return r as the application's type
+
+From the paper's pseudocode (§1):
+  "application e1 e2: n1 = gen(e1); n2 = gen(e2); res = fresh variable node r;
+   add inst-edge: (n1, Arrow(n2, r)); return r"
+
+Why an instantiation edge, not unification?
+  If e₁ has a polymorphic type (wrapped in TyExp from a let-binding), we
+  don't want to immediately unify it with (n₂ → r). The instantiation edge
+  says "n₁ must be AT LEAST as polymorphic as (n₂ → r)" — the presolution
+  phase will decide HOW to instantiate the polymorphism.
+
+Example: `let id = λx.x in id 42`
+  - id has type: s · (α → α)  where s is an expansion variable
+  - The application emits: s · (α → α) ≤ (Int → β)
+  - Phase 4 will decide s := inst, grafting Int onto α
+  - This generates unification: α = Int, β = Int
+
+The instantiation edge is the key mechanism that delays the instantiation
+decision until we have enough information (from all use sites) to choose
+the minimal expansion.
+
+Paper reference: ICFP 2008, §1 (constraint generation), §5 (presolution)
+-}
+
+{- Note [Let Bindings and Expansion Variables]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Let-bindings `let x = e₁ in e₂` introduce generalization and are the source
+of polymorphism in MLF. The translation differs from lambda in crucial ways:
+
+  1. Create a CHILD G-node level for the RHS
+  2. Translate e₁ at the child level → get node τ
+  3. Wrap τ in an expansion node: s · τ (where s is fresh)
+  4. Bind x to the expansion node (s · τ) in the environment
+  5. Translate e₂ at the ORIGINAL level (not the child)
+
+From the paper's pseudocode (§1):
+  "let x = e1 in e2: create new G-node g (child of current G);
+   n1 = gen(e1) in environment bound to g;
+   create ExpVar s for this let binding and represent scheme as s n1;
+   bind occurrences of x in e2 to the s n1 scheme;
+   n2 = gen(e2) in environment extended with that binding;
+   return n2"
+
+Why a child G-node?
+  Variables created while translating e₁ are bound at the child level. This
+  marks them as candidates for generalization. When Phase 4 processes the
+  instantiation edges, it can see which variables are "inside" the let-RHS
+  scope and choose to quantify them.
+
+Why an expansion node?
+  The expansion variable s is a placeholder for the "expansion recipe" that
+  Phase 4 will compute. Options include:
+    - s := Identity (no instantiation needed)
+    - s := Inst (instantiate all quantifiers)
+    - s := ∀(levels) (add explicit quantification)
+
+  Different use sites of x may need different instantiations. Each use
+  references the same s · τ node, but contributes its own instantiation
+  edge that Phase 4 uses to compute the minimal expansion.
+
+Example: `let f = λx.x in (f 1, f True)`
+  - Child G-node g₁ created
+  - λx.x translated at g₁: α → α (where α is at g₁)
+  - Expansion node: s · (α → α)
+  - Use sites emit:
+      s · (α → α) ≤ (Int → β₁)
+      s · (α → α) ≤ (Bool → β₂)
+  - Phase 4 processes these and can instantiate α differently each time
+
+This is how let-polymorphism works: the expansion variable s allows the
+solver to defer the generalization decision until all constraints are known.
+
+Paper references:
+  - ICFP 2008, §1 for the translation
+  - ICFP 2008, §3 for expansion variables and solved forms
+  - ICFP 2008, §5 for computing minimal expansions
+-}
 
 lookupVar :: Env -> VarName -> ConstraintM NodeId
 lookupVar env name = case Map.lookup name env of
