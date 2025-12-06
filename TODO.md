@@ -24,13 +24,23 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
-## Phase 2 — Normalize / Local Transformations
+## Phase 2 — Normalize / Local Transformations ✅
 
-- [ ] Grafting and merging nodes
-- [ ] Collapse identity expansions
-- [ ] Push / pull G-nodes to canonical positions
-- [ ] Simplify trivial instantiation/unification edges
-- [ ] `normalize :: Constraint -> Constraint`
+- [x] Simplify trivial instantiation/unification edges (T ≤ T, T = T)
+- [x] `normalize :: Constraint -> Constraint` with fixed-point iteration
+- [x] `dropReflexiveInstEdges`, `dropReflexiveUnifyEdges` helpers
+- [x] Grafting: copy structure onto variables when demanded by `InstEdge`
+- [x] Merging: process `UnifyEdge`s via union-find
+- [x] `graftInstEdges`, `mergeUnifyEdges` helpers
+- [x] `NormalizeState` with fresh node allocation and union-find
+
+**Tests:** 16 examples, all passing
+
+> **Note:** Identity expansion collapse is a Phase 4 concern (presolution decides
+> `s := Identity`). G-node push/pull is a structural invariant enforced by the
+> data types — G-nodes form a separate forest (`cGNodes`) and cannot appear
+> inside type constructors like `TyArrow`; variables just *point* to their
+> binding level via `tnLevel :: GNodeId`.
 
 ---
 

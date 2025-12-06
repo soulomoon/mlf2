@@ -1,5 +1,7 @@
 # Roadmap for Implementing Rémy & Yakobowski MLF Type Inference Algorithm
 
+papers are in the papers directory
+
 > **Implementation progress:** See [TODO.md](TODO.md) for the current checklist.
 
 Excellent — below I give a self-contained, paper-faithful presentation of the Rémy & Yakobowski (ICFP 2008) algorithm for MLF type inference: definitions, the solver strategy, the data structures you need, and precise pseudocode for each stage. I base this on the PDF you asked me to read and I cite the paper at the end for the most important claims and definitions I rely on.  ￼
@@ -121,11 +123,19 @@ Remarks:
 
 Phase 2 — Normalize / Local transformations
 
-Apply the paper’s small set of semantics-preserving transformations (§4) until none apply. You must implement these transformations as rewrite rules on the graph:
+Apply the paper's small set of semantics-preserving transformations (§4) until none apply. You must implement these transformations as rewrite rules on the graph:
  • Grafting and merging: combine nodes that represent the same structural requirement (see definitions).
  • Collapse identity expansions: remove redundant s wrappers where safe.
  • Push / pull G-nodes: move G-nodes to canonical places so that type graph has G-nodes only at the top (they must not appear inside type nodes).
  • Simplify trivial instantiation/unification edges (e.g. if left is a variable node equal to right, drop).
+
+> **Implementation note:** In our Haskell implementation, G-node push/pull is
+> a structural invariant enforced by the data types, not a runtime transformation.
+> G-nodes live in a separate forest (`cGNodes :: IntMap GNode`) and type nodes
+> only *reference* their binding level via `tnLevel :: GNodeId`. This makes it
+> impossible to have G-nodes nested inside type constructors like `TyArrow`.
+> Identity expansion collapse is handled during Phase 4 (presolution) rather
+> than normalization.
 
 Pseudocode (iterative):
 
@@ -292,51 +302,61 @@ This answer gives the full algorithmic recipe and the exact subroutines you must
 
 > **Detailed checklist:** [TODO.md](TODO.md)
 
-| Phase | Description | Status |
-|-------|-------------|--------|
-| 0 | Data structures (`TyNode`, `GNode`, `Constraint`, `Expansion`) | ✅ Done |
-| 1 | Constraint generation (`inferConstraintGraph`) | ✅ Done |
-| 2 | Normalize / Local transformations | ⬚ Not started |
-| 3 | Acyclicity check | ⬚ Not started |
-| 4 | Principal presolution (`decideMinimalExpansions`) | ⬚ Not started |
-| 5 | Unification solver (union-find) | ⬚ Not started |
-| 6 | Elaboration to xMLF | ⬚ Not started |
+| Phase | Description | Status | Tests |
+|-------|-------------|--------|-------|
+| 0 | Data structures (`TyNode`, `GNode`, `Constraint`, `Expansion`) | ✅ Done | — |
+| 1 | Constraint generation (`inferConstraintGraph`) | ✅ Done | 23 |
+| 2 | Normalize / Local transformations | ✅ Done | 16 |
+| 3 | Acyclicity check | ⬚ Not started | — |
+| 4 | Principal presolution (`decideMinimalExpansions`) | ⬚ Not started | — |
+| 5 | Unification solver (union-find) | ⬚ Not started | — |
+| 6 | Elaboration to xMLF | ⬚ Not started | — |
 
-### Phase 1 — Complete ✅
+**Total tests: 39** — Run with `cabal test`
 
-All constraint-generation functionality is implemented and tested:
+**Key papers:**
+
+- Rémy & Yakobowski, "Graphic Type Constraints" (ICFP 2008) — Main algorithm (Phases 1-5)
+- Rémy & Yakobowski, "A graphical representation of MLF types" (TLDI 2007) — Graphical unification
+- Rémy & Yakobowski, "A Church-Style Intermediate Language for MLF" (FLOPS 2010) — xMLF elaboration (Phase 6)
+
+---
+
+### Phase 1 — Constraint Generation ✅
 
 ```text
 src/MLF/
-  Syntax.hs      -- AST: Expr, Literal
-  Types.hs       -- TyNode, GNode, Constraint, InstEdge, Expansion
+  Syntax.hs        -- AST: Expr, Literal
+  Types.hs         -- TyNode, GNode, Constraint, InstEdge, Expansion
   ConstraintGen.hs -- inferConstraintGraph
 ```
 
-**Test coverage (23 specs):**
+Covers: literals, variables & scope, lambda nodes, applications, let-generalization, expansion nodes, higher-order structure.
 
-- Literals (`Int`, `Bool`, `String`)
-- Variables & scope (shadowing, unknown-variable errors)
-- Lambda nodes (shared parameters, G-node registration)
-- Applications (instantiation edges, immediate lambda apps)
-- Let-generalization & G-nodes (child levels, nested/sibling lets)
-- Expansion nodes (shared across uses, distinct per binding)
-- Higher-order structure
+---
 
-Run tests with:
+### Phase 2 — Normalization ✅
 
-```bash
-cabal test
+```text
+src/MLF/
+  Normalize.hs   -- normalize, NormalizeState, graftInstEdges, mergeUnifyEdges
 ```
 
-### Next Steps — Phase 2
+**Transformations:**
 
-The next milestone is implementing `normalize :: Constraint -> Constraint` with:
+- Drop reflexive edges (T ≤ T, T = T)
+- Grafting: copy structure onto variables when demanded by `InstEdge`
+- Merging: process `UnifyEdge`s via union-find
+- Fixed-point iteration
 
-1. **Grafting** — insert structure under variable nodes when demanded by instantiation edges.
-2. **Merging** — combine nodes that represent the same structural requirement.
-3. **Collapse identity expansions** — remove `s · τ` when `s ↦ identity`.
-4. **Push/pull G-nodes** — ensure G-nodes sit only at the top of the type graph.
-5. **Simplify trivial edges** — drop `T ≤ T` or `T = T` edges.
+> **Note:** G-node push/pull is a structural invariant (see `Note [G-node Push/Pull Invariant]` in Types.hs). Identity expansion collapse happens in Phase 4.
 
-These rewrites are defined in §4 of the paper and must preserve constraint semantics while simplifying the graph for the presolution phase.
+---
+
+### Next Up — Phase 3: Acyclicity Check
+
+1. Build dependency graph between `InstEdge`s
+2. Topological sort for processing order
+3. Cycle detection (DFS)
+
+This prepares constraints for Phase 4's presolution computation.

@@ -127,6 +127,22 @@ the presolution for that binding. This is how we decide which TyVars become
 describe programs with multiple roots (e.g. module initializers) without
 imposing an artificial single g₀, and it ensures each 'TyVar' remembers exactly
 which generalization level created it.
+
+Note [G-node Push/Pull Invariant]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The paper (§4) describes a "push/pull G-nodes" transformation that ensures
+G-nodes appear only at the top of types, not nested inside type constructors.
+In our implementation, this invariant is enforced structurally by the data
+types themselves:
+
+  1. G-nodes live in a separate forest: 'cGNodes :: IntMap GNode'
+  2. Type nodes only *reference* G-nodes via 'tnLevel :: GNodeId'
+  3. Type constructors like 'TyArrow' contain 'NodeId' fields, not 'GNode's
+
+This means it's impossible to construct a type like "(∀α.α) → Int" where the
+quantifier is nested inside the arrow. The separation between the G-node forest
+and the type graph makes the push/pull transformation unnecessary — we get the
+invariant "for free" from the Haskell type system.
 -}
 
 -- | Instantiation edge (Tₗ ≤ Tᵣ) connecting a polymorphic binding to the
