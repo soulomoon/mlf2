@@ -14,6 +14,53 @@ import qualified Data.Map.Strict as Map
 import MLF.Syntax
 import MLF.Types
 
+{- Note [Lambda vs Let Polymorphism]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+MLF distinguishes between lambda-bound and let-bound variables in how they
+handle polymorphism. This follows standard ML-style let-polymorphism.
+
+Lambda-bound variables (monomorphic by default):
+  In `λf. (f 1, f True)`, the parameter `f` gets a plain type variable `α`.
+  Each use of `f` must have the SAME type, so this fails: we can't unify
+  `α → Int` with `α → Bool`.
+
+Let-bound variables (polymorphic via expansion nodes):
+  In `let f = λx. x in (f 1, f True)`, the binding `f` is wrapped in an
+  expansion node `s · (α → α)`. Each USE of `f` can instantiate differently,
+  so `f 1 : Int` and `f True : Bool` both work.
+
+The classic example that illustrates this difference:
+
+    (λf. (f 1, f True)) (λx. x)     -- FAILS in ML and MLF (without annotation)
+    let f = λx. x in (f 1, f True)  -- WORKS in ML and MLF
+
+Why can't MLF infer polymorphism for lambda parameters?
+
+To type the lambda version, you need HIGHER-RANK polymorphism:
+  (λf. ...) : (∀α. α → α) → (Int, Bool)
+
+MLF CAN express this type, but cannot INFER it without help because:
+  1. The argument type (∀α. α → α) is not determined by the lambda body alone
+  2. Multiple valid types exist (the type is not principal without annotation)
+  3. Inference would require "guessing" where to place ∀ quantifiers
+
+This is why our implementation:
+  - ELam: allocates a plain TyVar for the parameter (monomorphic)
+  - ELet: wraps the RHS in a TyExp expansion node (polymorphic)
+
+Future extensions could support explicit type annotations like:
+  ELamAnnot :: VarName -> Type -> Expr -> Expr
+  -- λ(f : ∀α. α → α). (f 1, f True)
+
+This would allow the user to request higher-rank types where needed.
+
+Paper references:
+  - ICFP 2008, §1 describes the constraint language and type syntax
+  - ICFP 2008, §3 defines solved forms and expansion variables (s · τ)
+  - Le Botlan & Rémy (2003) "MLF: Raising ML to the Power of System F"
+    discusses the design choice of annotation-free let-polymorphism
+-}
+
 -- | Errors that can surface during constraint generation.
 data ConstraintError
     = UnknownVariable VarName
