@@ -44,12 +44,17 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
-## Phase 3 — Acyclicity Check
+## Phase 3 — Acyclicity Check ✅
 
-- [ ] Build instantiation dependency graph
-- [ ] Topological sort of `InstEdge` list
-- [ ] Cycle detection (DFS)
-- [ ] `isAcyclic :: Constraint -> Bool`
+- [x] Build instantiation dependency graph
+- [x] Topological sort of `InstEdge` list
+- [x] Cycle detection (DFS)
+- [x] `isAcyclic :: Constraint -> Bool`
+- [x] `checkAcyclicity :: Constraint -> Either CycleError AcyclicityResult`
+- [x] `collectReachableNodes` for dependency analysis
+- [x] `AcyclicityResult` with sorted edges and dependency graph
+
+**Tests:** 41 examples (was 27 new, total 92), all passing
 
 ---
 

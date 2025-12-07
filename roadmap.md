@@ -353,10 +353,23 @@ src/MLF/
 
 ---
 
-### Next Up — Phase 3: Acyclicity Check
+### Phase 3: Acyclicity Check ✅ Complete
 
-1. Build dependency graph between `InstEdge`s
-2. Topological sort for processing order
-3. Cycle detection (DFS)
+**Implementation:** `MLF.Acyclicity` module
 
-This prepares constraints for Phase 4's presolution computation.
+1. ✅ `buildDependencyGraph` — constructs graph between `InstEdge`s based on reachable node overlap
+2. ✅ `topologicalSort` — DFS-based sort with cycle detection (returns `Either [EdgeId] [EdgeId]`)
+3. ✅ `checkAcyclicity` — main API returning `Either CycleError AcyclicityResult`
+4. ✅ `collectReachableNodes` — traverses type graph through `TyArrow`, `TyForall`, `TyExp`
+
+**Tests:** 41 tests covering trivial cases, chains, diamonds, cycles, structured types, edge cases.
+
+---
+
+### Next Up — Phase 4: Principal Presolution
+
+1. Process `InstEdge`s in topological order from Phase 3
+2. Compute minimal expansions for `ExpVar`s
+3. Apply expansions and generate unification edges
+
+This is the algorithmic heart of MLF inference.
