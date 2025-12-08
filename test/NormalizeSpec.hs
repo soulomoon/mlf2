@@ -107,6 +107,24 @@ spec = describe "Phase 2 — Normalization" $ do
             cInstEdges result `shouldBe` []
             cUnifyEdges result `shouldBe` []
 
+        it "rejects grafting when RHS arrow contains the LHS variable (occurs-check)" $ do
+            -- α ≤ (α → Int) should be a type error and left for later phases
+            let varNode = TyVar (NodeId 0) (GNodeId 0)
+                baseNode = TyBase (NodeId 2) (BaseTy "Int")
+                arrowNode = TyArrow (NodeId 1) (NodeId 0) (NodeId 2)
+                edge = InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)
+                constraint = emptyConstraint
+                    { cNodes = IntMap.fromList
+                        [ (0, varNode)
+                        , (1, arrowNode)
+                        , (2, baseNode)
+                        ]
+                    , cInstEdges = [edge]
+                    }
+                result = normalize constraint
+            -- Type error: keep the inst edge to signal unsolved occurs-check
+            length (cInstEdges result) `shouldBe` 1
+
         it "decomposes arrow ≤ arrow into component unifications" $ do
             -- (α → β) ≤ (Int → Bool)
             let dom1 = TyVar (NodeId 0) (GNodeId 0)

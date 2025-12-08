@@ -389,6 +389,32 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                     expn `shouldBe` ExpIdentity
                     unifs `shouldBe` [(srcVarId, tgtVarId)]
 
+        it "rejects expansions that would point a binder back into its own body" $ do
+            -- Edge: s · (forall@1 a. a) ≤ forall@1 b. (s · (forall@1 a. a))
+            -- The requested body unification would point the bound var `a`
+            -- back into a structure containing the same expansion, which should
+            -- be rejected by the presolution occurs-check guard.
+            let boundVarId = NodeId 0
+                srcForallId = NodeId 1
+                srcExpId = NodeId 2
+                tgtForallId = NodeId 3
+
+                nodes = IntMap.fromList
+                    [ (0, TyVar boundVarId (GNodeId 1))
+                    , (1, TyForall srcForallId (GNodeId 1) boundVarId)
+                    , (2, TyExp srcExpId (ExpVarId 0) srcForallId)
+                    , (3, TyForall tgtForallId (GNodeId 1) srcExpId)
+                    ]
+
+                edge = InstEdge (EdgeId 0) srcExpId tgtForallId
+                constraint = emptyConstraint { cNodes = nodes, cInstEdges = [edge] }
+                acyclicityRes = AcyclicityResult { arSortedEdges = [edge], arDepGraph = undefined }
+
+            case computePresolution acyclicityRes constraint of
+                Left OccursCheckPresolution{} -> return ()
+                Left other -> expectationFailure $ "Unexpected error: " ++ show other
+                Right _ -> expectationFailure "Expected presolution occurs-check failure"
+
         it "returns ExpForall for structure <= forall" $ do
             -- s · (int -> int) ≤ (forall@3 b. int -> int)
             -- Target is a forall at level 3, source is monomorphic: we should

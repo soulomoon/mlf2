@@ -34,6 +34,7 @@ import Control.Monad (when, foldM)
 import Control.Monad.State.Strict
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
+import qualified Data.IntSet as IntSet
 
 import MLF.Types
 
@@ -318,7 +319,9 @@ graftEdge edge = do
 
     case (leftNode, rightNode) of
         -- Variable ≤ Arrow: graft arrow structure
-        (Just (TyVar { tnLevel = level }), Just (TyArrow { tnDom = rDom, tnCod = rCod })) -> do
+        (Just (TyVar { tnLevel = level }), Just (TyArrow { tnDom = rDom, tnCod = rCod }))
+          | occursIn nodes uf leftId rightId -> pure Nothing
+          | otherwise -> do
             -- Create fresh variable nodes for domain and codomain
             domVar <- freshVar level
             codVar <- freshVar level
@@ -352,6 +355,26 @@ graftEdge edge = do
 
         -- Other cases: shouldn't reach here (filtered by partitionGraftable)
         _ -> pure $ Just []
+
+-- | Check whether target (under UF reps) contains the variable.
+occursIn :: IntMap TyNode -> IntMap NodeId -> NodeId -> NodeId -> Bool
+occursIn nodes uf var target = go IntSet.empty (findRoot uf target)
+  where
+    v = findRoot uf var
+    go visited nid
+        | nid == v = True
+        | IntSet.member (getNodeIdInt nid) visited = False
+        | otherwise =
+            case IntMap.lookup (getNodeIdInt nid) nodes of
+                Nothing -> False
+                Just node ->
+                    let visited' = IntSet.insert (getNodeIdInt nid) visited
+                        children = case node of
+                            TyArrow { tnDom = d, tnCod = c } -> [d, c]
+                            TyForall { tnBody = b } -> [b]
+                            TyExp { tnBody = b } -> [b]
+                            _ -> []
+                    in any (go visited' . findRoot uf) children
 
 -- | Allocate a fresh variable node.
 freshVar :: GNodeId -> NormalizeM NodeId

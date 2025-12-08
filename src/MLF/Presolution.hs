@@ -60,6 +60,7 @@ data PresolutionError
     | ArityMismatch String Int Int           -- ^ (context, expected, actual)
     | InstantiateOnNonForall NodeId          -- ^ Tried to instantiate a non-forall node
     | NodeLookupFailed NodeId                -- ^ Missing node in constraint
+    | OccursCheckPresolution NodeId NodeId   -- ^ Unification would make node reachable from itself
     | InternalError String                   -- ^ Unexpected internal state
     deriving (Eq, Show)
 
@@ -137,11 +138,11 @@ processInstEdge edge = do
             setExpansion s finalExp
 
             -- Perform unifications requested by expansion decision
-            mapM_ (uncurry unify) unifications
+            mapM_ (uncurry unifyAcyclic) unifications
 
             -- Apply expansion to get the concrete node and unify with target
             expandedNodeId <- applyExpansion finalExp n1
-            unify expandedNodeId (tnId n2)
+            unifyAcyclic expandedNodeId (tnId n2)
 
         _ -> do
             -- n1 is not an expansion node.
@@ -149,7 +150,7 @@ processInstEdge edge = do
             -- In MLF, non-expansion instantiation is just unification or check?
             -- "If the left hand side is not an expansion node, it must be equal to the right hand side"
             -- (Simplification for now, might need refinement for full MLF)
-            unify (tnId n1) (tnId n2)
+            unifyAcyclic (tnId n1) (tnId n2)
 
 -- | Get the current expansion for an expansion variable.
 getExpansion :: ExpVarId -> PresolutionM Expansion
@@ -169,7 +170,7 @@ mergeExpansions _ ExpIdentity e2 = return e2
 mergeExpansions _ e1 ExpIdentity = return e1
 mergeExpansions _ (ExpInstantiate args1) (ExpInstantiate args2)
     | length args1 == length args2 = do
-        zipWithM_ unify args1 args2
+        zipWithM_ unifyAcyclic args1 args2
         return (ExpInstantiate args1)
     | otherwise = throwError $ ArityMismatch "ExpInstantiate merge" (length args1) (length args2)
 mergeExpansions _ (ExpForall l1) (ExpForall l2)
@@ -477,6 +478,30 @@ getCanonicalNode nid = do
         Just node -> return node
         Nothing -> throwError $ NodeLookupFailed rootId
 
+-- | Lightweight reachability to prevent emitting a unification that would
+-- immediately create a self-reference (occurs-check for presolution).
+occursIn :: NodeId -> NodeId -> PresolutionM Bool
+occursIn needle start = do
+    needleRoot <- findRoot needle
+    let go visited nid = do
+            root <- findRoot nid
+            if IntSet.member (getNodeId root) visited
+                then return False
+                else if root == needleRoot
+                    then return True
+                    else do
+                        node <- getCanonicalNode root
+                        let children = case node of
+                                TyArrow { tnDom = d, tnCod = c } -> [d, c]
+                                TyForall { tnBody = b } -> [b]
+                                TyExp { tnBody = b } -> [b]
+                                _ -> []
+                        foldM
+                            (\acc child -> if acc then return True else go (IntSet.insert (getNodeId root) visited) child)
+                            False
+                            children
+    go IntSet.empty start
+
 findRoot :: NodeId -> PresolutionM NodeId
 findRoot nid = do
     uf <- gets psUnionFind
@@ -488,12 +513,17 @@ findRoot nid = do
             modify $ \st -> st { psUnionFind = IntMap.insert (getNodeId nid) root (psUnionFind st) }
             return root
 
-unify :: NodeId -> NodeId -> PresolutionM ()
-unify n1 n2 = do
+unifyAcyclic :: NodeId -> NodeId -> PresolutionM ()
+unifyAcyclic n1 n2 = do
     root1 <- findRoot n1
     root2 <- findRoot n2
     when (root1 /= root2) $ do
-        -- Link root1 to root2
+        occurs12 <- occursIn root1 root2
+        when occurs12 $ throwError $ OccursCheckPresolution root1 root2
+
+        occurs21 <- occursIn root2 root1
+        when occurs21 $ throwError $ OccursCheckPresolution root2 root1
+
         modify $ \st -> st { psUnionFind = IntMap.insert (getNodeId root1) root2 (psUnionFind st) }
         return ()
 
