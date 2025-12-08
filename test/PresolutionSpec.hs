@@ -7,6 +7,7 @@ import qualified Data.List.NonEmpty as NE
 import MLF.Types
 import MLF.Presolution
 import MLF.Acyclicity (AcyclicityResult(..))
+import MLF.Solve (SolveResult(..), validateSolvedGraphStrict)
 
 gNode :: Int -> GNode
 gNode n = GNode (GNodeId n) Nothing [] []
@@ -563,4 +564,41 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                             Just parent -> findRoot ufMap parent
 
                     findRoot uf (NodeId 4) `shouldBe` findRoot uf (NodeId 5)
+
+        it "materializes expansions and clears inst edges for strict solve" $ do
+            -- After presolution, TyExp nodes should be gone, instantiation edges cleared,
+            -- and the resulting graph should satisfy the strict solved validator when
+            -- paired with the presolution union-find.
+            let bound = NodeId 0
+                forallId = NodeId 1
+                expId = NodeId 2
+                targetId = NodeId 3
+
+                nodes = IntMap.fromList
+                    [ (0, TyVar bound (GNodeId 1))
+                    , (1, TyForall forallId (GNodeId 1) bound)
+                    , (2, TyExp expId (ExpVarId 0) forallId)
+                    , (3, TyBase targetId (BaseTy "int"))
+                    ]
+
+                edge = InstEdge (EdgeId 0) expId targetId
+                gnodes = IntMap.fromList [ (1, gNode 1) ]
+                constraint = emptyConstraint
+                    { cNodes = nodes
+                    , cInstEdges = [edge]
+                    , cGNodes = gnodes
+                    , cGForest = [GNodeId 1]
+                    }
+                acyclicityRes = AcyclicityResult { arSortedEdges = [edge], arDepGraph = undefined }
+
+                isExp TyExp{} = True
+                isExp _ = False
+
+            case computePresolution acyclicityRes constraint of
+                Left err -> expectationFailure $ "Presolution failed: " ++ show err
+                Right PresolutionResult{ prConstraint = c', prUnionFind = uf } -> do
+                    any isExp (IntMap.elems (cNodes c')) `shouldBe` False
+                    cInstEdges c' `shouldBe` []
+                    validateSolvedGraphStrict SolveResult { srConstraint = c', srUnionFind = uf }
+                        `shouldBe` []
 

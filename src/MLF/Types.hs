@@ -84,14 +84,14 @@ Flow across phases
     instantiation edge  s · τ ≤ σ_use  where the LHS node is the 'TyExp'.
 * Phase 3 (acyclicity): orders these edges so presolution can process them
     without dependency cycles.
-* Phase 4 (presolution): decides the minimal expansion for s using the lattice
-    above (identity / instantiate / add ∀ / compose). It may allocate fresh
-    nodes for bound vars, wrap ∀ at target levels, and emit follow-up unifications
-    so that E(τ) matches σ_use.
-* Phase 5 (solve): materializes the chosen expansion by rewriting the graph
-    (instantiating copies, inserting ∀ shells) and then discharges the queued
-    unifications. Sharing is preserved: multiple uses of the same binding point
-    to the same (s, τ) but can have distinct expansions.
+* Phase 4 (presolution): decides and *materializes* the minimal expansion for s
+    using the lattice above (identity / instantiate / add ∀ / compose). It may
+    allocate fresh nodes for bound vars, wrap ∀ at target levels, and emit
+    follow-up unifications so that E(τ) matches σ_use. Sharing is preserved:
+    multiple uses of the same binding point to the same (s, τ) but can have
+    distinct expansions.
+* Phase 5 (solve): assumes TyExp nodes are gone; if any survive, they are
+    rejected as `UnexpectedExpNode` while final unifications are discharged.
 
 Why explicit TyExp + Expansion
 ------------------------------

@@ -65,6 +65,7 @@ library
                       MLF.Normalize,
                       MLF.Acyclicity,
                       MLF.Presolution,
+                      MLF.Solve,
 
     -- Modules included in this library but not exported.
     -- other-modules:
@@ -119,6 +120,8 @@ test-suite mlf2-test
                       NormalizeSpec,
                       AcyclicitySpec,
                       PresolutionSpec,
+                      SolveSpec,
+                      PipelineSpec,
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:

@@ -6,6 +6,8 @@ import qualified ConstraintGenSpec
 import qualified NormalizeSpec
 import qualified AcyclicitySpec
 import qualified PresolutionSpec
+import qualified SolveSpec
+import qualified PipelineSpec
 
 main :: IO ()
 main = hspec $ do
@@ -13,3 +15,5 @@ main = hspec $ do
     NormalizeSpec.spec
     AcyclicitySpec.spec
     PresolutionSpec.spec
+    SolveSpec.spec
+    PipelineSpec.spec

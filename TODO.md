@@ -81,12 +81,14 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
-## Phase 5 — Unification Solver
+## Phase 5 — Unification Solver ✅
 
-- [ ] Union-find over node IDs
-- [ ] Structural checking for constructors
-- [ ] Occurs-check
-- [ ] `solveUnify :: Constraint -> Substitution`
+- [x] Implement `MLF.Solve` entrypoint `solveUnify :: Constraint -> Either SolveError SolveResult` that consumes `cUnifyEdges` (plus any residual edges after presolution) and returns updated `Constraint`, `UnionFind`, and a substitution view for elaboration.
+- [x] Robust union-find: reuse canonical NodeId representatives and path compression; expose `find`, `union`, and an applicative pass `applyUF` to rewrite `Constraint` nodes/edges.
+- [x] Structural unification cases: Var=Var, Var=Structure (respect levels, allow sharing), Arrow=Arrow (enqueue dom/cod), Base=Base (clash → error), Forall=Forall (levels must match; else error), Exp=Exp (should be absent post-presolution; otherwise error).
+- [x] Occurs check on DAG: prevent `Var` from unifying with a node reachable from itself (walk children respecting current UF), report `OccursCheckFailed nid target`.
+- [x] Error reporting: constructor clash, level mismatch, missing node, occurs check, unexpected TyExp after presolution.
+- [x] Tests: success cases (var=var, var=arrow, arrow=arrow nested, base=base), failure cases (constructor clash, occurs check, forall level mismatch, leftover exp), and UF application correctness (canonicalization of cNodes/cEdges).
 
 ---
 

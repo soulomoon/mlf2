@@ -32,12 +32,12 @@ module MLF.Presolution (
 
 import Control.Monad.State
 import Control.Monad.Except (throwError)
-import Control.Monad (forM_, zipWithM_, when, foldM)
+import Control.Monad (forM, forM_, zipWithM_, when, foldM)
 import qualified Data.List.NonEmpty as NE
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, mapMaybe)
 
 import MLF.Types
 import MLF.Acyclicity (AcyclicityResult(..))
@@ -95,7 +95,9 @@ computePresolution acyclicityResult constraint = do
             }
 
     -- Run the presolution loop
-    (finalState) <- execStateT (runPresolutionLoop (arSortedEdges acyclicityResult)) initialState
+    presState <- execStateT (runPresolutionLoop (arSortedEdges acyclicityResult)) initialState
+    -- Materialize expansions, rewrite TyExp away, and apply UF canonicalization.
+    (_, finalState) <- runPresolutionM presState finalizePresolution
 
     return PresolutionResult
         { prPresolution = psPresolution finalState
@@ -108,6 +110,76 @@ findMaxNodeId :: Constraint -> Int
 findMaxNodeId c =
     let maxNode = if IntMap.null (cNodes c) then 0 else fst (IntMap.findMax (cNodes c))
     in maxNode
+
+-- | Finalize presolution by materializing expansions, rewriting TyExp away,
+-- applying union-find canonicalization, and clearing consumed instantiation
+-- edges. This prepares the constraint for Phase 5.
+finalizePresolution :: PresolutionM ()
+finalizePresolution = do
+    mapping <- materializeExpansions
+    rewriteConstraint mapping
+
+-- | Apply final expansions to all TyExp nodes and record their replacements.
+materializeExpansions :: PresolutionM (IntMap NodeId)
+materializeExpansions = do
+    nodes <- gets (cNodes . psConstraint)
+    let exps = [ n | n@TyExp{} <- IntMap.elems nodes ]
+    fmap IntMap.fromList $ forM exps $ \expNode -> do
+        let eid = tnId expNode
+        expn <- getExpansion (tnExpVar expNode)
+        nid' <- applyExpansion expn expNode
+        pure (getNodeId eid, nid')
+
+-- | Rewrite constraint by removing TyExp nodes, applying expansion mapping and
+-- union-find canonicalization, collapsing duplicates (preferring structure over
+-- vars), and clearing instantiation edges (consumed in presolution).
+rewriteConstraint :: IntMap NodeId -> PresolutionM ()
+rewriteConstraint mapping = do
+    st <- get
+    let c = psConstraint st
+        uf = psUnionFind st
+
+        chaseMap nid = case IntMap.lookup (getNodeId nid) mapping of
+            Nothing -> nid
+            Just n' -> chaseMap n'
+
+        canonical nid = frWith uf (chaseMap nid)
+
+        isVar TyVar{} = True
+        isVar _ = False
+
+        choose new old = case (isVar old, isVar new) of
+            (True, False) -> new
+            (False, True) -> old
+            _ -> old
+
+        rewriteNode :: TyNode -> Maybe (Int, TyNode)
+        rewriteNode TyExp{} = Nothing
+        rewriteNode n =
+            let nid' = canonical (tnId n)
+                node' = case n of
+                    TyVar { tnLevel = l } -> TyVar nid' l
+                    TyArrow { tnDom = d, tnCod = cod } -> TyArrow nid' (canonical d) (canonical cod)
+                    TyBase { tnBase = b } -> TyBase nid' b
+                    TyForall { tnQuantLevel = l, tnBody = b } -> TyForall nid' l (canonical b)
+                in Just (getNodeId nid', node')
+
+        rewriteUnify (UnifyEdge l r) = UnifyEdge (canonical l) (canonical r)
+
+        newNodes = IntMap.fromListWith choose (mapMaybe rewriteNode (IntMap.elems (cNodes c)))
+
+    put st { psConstraint = c
+                { cNodes = newNodes
+                , cInstEdges = []
+                , cUnifyEdges = map rewriteUnify (cUnifyEdges c)
+                }
+           }
+
+-- | Read-only chase like Solve.frWith
+frWith :: IntMap NodeId -> NodeId -> NodeId
+frWith uf nid = case IntMap.lookup (getNodeId nid) uf of
+    Nothing -> nid
+    Just p -> frWith uf p
 
 -- | The main loop processing sorted instantiation edges.
 runPresolutionLoop :: [InstEdge] -> PresolutionM ()
@@ -281,6 +353,11 @@ decideMinimalExpansion (TyExp { tnBody = bodyId }) targetNode = do
 decideMinimalExpansion _ _ = return (ExpIdentity, [])
 
 -- | Apply an expansion to a TyExp node.
+-- Note: this helper is used twice for distinct purposes.
+--   • processInstEdge: enforce a single instantiation edge now (expansion choice
+--     plus the unifications it triggers) so later edges see the refined graph.
+--   • materializeExpansions: after all edges are processed, rewrite the graph to
+--     erase TyExp nodes and clear inst edges before Solve.
 applyExpansion :: Expansion -> TyNode -> PresolutionM NodeId
 applyExpansion expansion expNode = case (expansion, expNode) of
     (ExpIdentity, TyExp { tnBody = b }) -> return b

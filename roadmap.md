@@ -45,9 +45,13 @@ Big picture solver strategy (as in the paper)
  3. Check acyclicity: typing constraints produced from program are acyclic; the solver depends on acyclicity to guarantee termination and principality. If cycles exist they indicate unsolvable recursion of expansions. (Section 5.)  ￼
  4. Compute principal presolution ρ: [DONE]
  • Build a dependency graph of instantiation edges (which instantiation edges depend on the result of other instantiation edges).
- • Process instantiation edges in a topological order. For each edge T_left ≤ T_right choose the minimal expansion on the left that permits instantiation and generate the unification constraints that follow; after each instantiation, run unification (or incrementally maintain solved unification). This step ensures minimal instantiation (maximal generality) and gives principality. (Section 5.)  ￼
- 5. Solve the unification graph of monotypes (graphic unification algorithm on DAGs) to a solved form (merged nodes, renaming). This is standard graph unification (the paper references Rémy’s earlier graphic unification work). (Section 3 & 7.)  ￼
- 6. Elaborate: apply presolution ρ to the partial (annotated) term to produce explicit ∀ binders and instantiations t[T] (xMLF term). This is straightforward replay of choices stored during solving. (Section 6.)  ￼
+ • Process instantiation edges in a topological order. For each edge T_left ≤ T_right choose the minimal expansion on the left that permits instantiation and generate the unification constraints that follow; after each instantiation, run unification (or incrementally maintain solved unification). This step ensures minimal instantiation (maximal generality) and gives principality. (Section 5.)
+ 5. Solve the unification graph of monotypes (graphic unification algorithm on DAGs) to a solved form (merged nodes, renaming). This is standard graph unification (the paper references Rémy’s earlier graphic unification work). (Section 3 & 7.)
+
+- Implement a union-find with path compression and rewrite the graph to canonical reps after each batch.
+- Structural cases: Var=Var, Var=Structure, Arrow=Arrow (enqueue dom/cod), Base=Base (clash → error), Forall=Forall (levels must match), Exp=Exp should not appear after presolution (treat as error).
+- Occurs-check on the DAG before linking Var→Structure to avoid cycles.
+- Surface clear errors for constructor clash, level mismatch, occurs check, unexpected TyExp, missing node.
 
 ⸻
 
@@ -309,7 +313,7 @@ This answer gives the full algorithmic recipe and the exact subroutines you must
 | 2 | Normalize / Local transformations | ✅ Done | 16 |
 | 3 | Acyclicity check | ⬚ Not started | — |
 | 4 | Principal presolution (`decideMinimalExpansions`) | ✅ Done | 5 |
-| 5 | Unification solver (union-find) | ⬚ Not started | — |
+| 5 | Unification solver (union-find, occurs check) | ⬚ Not started | — |
 | 6 | Elaboration to xMLF | ⬚ Not started | — |
 
 **Total tests: 39** — Run with `cabal test`
