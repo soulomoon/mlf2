@@ -472,6 +472,10 @@ mergeUnifyEdges = do
 processUnifyEdges :: [UnifyEdge] -> NormalizeM [UnifyEdge]
 processUnifyEdges = foldM processOne []
   where
+    -- Handles Var=?, Arrow=Arrow, Base=Base (same head), Forall=Forall with
+    -- matching levels, and Exp=Exp with matching expansion vars. Any other
+    -- pairing (missing nodes, constructor clash, mismatched levels/exp vars)
+    -- is preserved in the accumulator so later phases can surface an error.
     processOne acc edge = do
         uf <- gets nsUnionFind
         c <- gets nsConstraint
@@ -510,6 +514,22 @@ processUnifyEdges = foldM processOne []
                         | otherwise ->
                             -- Type error! Keep edge to signal error later
                             pure (edge : acc)
+
+                    -- Forall = Forall: unify bodies if levels match
+                    (Just (TyForall { tnQuantLevel = l1, tnBody = b1 }),
+                     Just (TyForall { tnQuantLevel = l2, tnBody = b2 }))
+                        | l1 == l2 -> do
+                            unionNodes left right
+                            pure (acc ++ [UnifyEdge b1 b2])
+                        | otherwise -> pure (edge : acc)
+
+                    -- Exp = Exp: unify bodies if vars match
+                    (Just (TyExp { tnExpVar = s1, tnBody = b1 }),
+                     Just (TyExp { tnExpVar = s2, tnBody = b2 }))
+                        | s1 == s2 -> do
+                            unionNodes left right
+                            pure (acc ++ [UnifyEdge b1 b2])
+                        | otherwise -> pure (edge : acc)
 
                     -- Incompatible structures: keep edge to signal error
                     _ -> pure (edge : acc)

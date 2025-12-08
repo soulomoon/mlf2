@@ -63,7 +63,8 @@ library
                       MLF.Syntax,
                       MLF.ConstraintGen,
                       MLF.Normalize,
-                      MLF.Acyclicity
+                      MLF.Acyclicity,
+                      MLF.Presolution,
 
     -- Modules included in this library but not exported.
     -- other-modules:
@@ -116,7 +117,8 @@ test-suite mlf2-test
     -- Modules included in this executable, other than Main.
     other-modules:    ConstraintGenSpec,
                       NormalizeSpec,
-                      AcyclicitySpec
+                      AcyclicitySpec,
+                      PresolutionSpec,
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:

@@ -58,13 +58,26 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
-## Phase 4 — Principal Presolution
+## Phase 4 — Principal Presolution ✅
 
-- [ ] Dependency graph between `InstEdge`s
-- [ ] `decideMinimalExpansions` (core routine)
-- [ ] Presolution map (`ExpVar -> Expansion`)
-- [ ] Apply expansions and generate unification edges
-- [ ] `computePresolution :: Constraint -> (Presolution, Constraint')`
+- [x] Topological processing of `InstEdge`s using `AcyclicityResult`
+- [x] Minimal expansion lattice implemented: `ExpIdentity`, `ExpInstantiate`, `ExpForall`, `ExpCompose`
+- [x] `decideMinimalExpansion` covers forall↔forall (re-gen), forall→structure (instantiate), structure→forall (wrap), structure→structure (identity+unify)
+- [x] `applyExpansion`/`instantiateScheme` to realize expansions and graft fresh nodes
+- [x] Incremental unification inside presolution loop
+- [x] Tests: `test/PresolutionSpec.hs` covers identity, instantiate, forall-intro, and compose (instantiate→forall)
+
+## Phase 5 — Solve / Unification ✅ (recap)
+
+- [x] `Presolution` data type (map ExpVar -> Expansion)
+- [x] `computePresolution :: AcyclicityResult -> Constraint -> Either Error PresolutionResult`
+- [x] Topological traversal of instantiation edges
+- [x] `decideMinimalExpansion` logic (Identity vs Instantiate)
+- [x] `instantiateScheme` helper (copying graph structure)
+- [x] `applyExpansion` helper (updating constraint)
+- [x] Incremental unification during presolution
+
+**Tests:** 2 examples, passing
 
 ---
 
@@ -77,11 +90,11 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
-## Phase 6 — Elaboration
+## Phase 6 — Elaboration (xMLF) ⏳
 
-- [ ] Replay presolution to produce explicit `Λ` binders
-- [ ] Insert type instantiations `t[T]`
-- [ ] `elaborate :: AnnotatedExpr -> Presolution -> Substitution -> xMLFTerm`
+- [ ] `ElaboratedTerm` data type (System F-like)
+- [ ] `elaborate :: Constraint -> Expr -> ElaboratedTerm`
+- [ ] Reconstruct term with explicit type applications
 
 ---
 

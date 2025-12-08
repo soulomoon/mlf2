@@ -65,28 +65,43 @@ data TyNode
 
 {- Note [Expansion nodes]
 ~~~~~~~~~~~~~~~~~~~~~~~~~
-Every let-binding produces a "scheme placeholder" in the constraint graph so
-that later uses can decide whether to instantiate or generalize it. We model
-that placeholder as a 'TyExp' node that stores:
+Paper link (Rémy & Yakobowski, ICFP 2008, §3–§5): Expansion variables mediate
+between a let-bound scheme and its uses. We mirror that mechanism explicitly:
 
-    * 'tnExpVar' — the expansion variable s allocated for the binding; Phase 4
-        will map s to an 'Expansion' recipe (instantiate, add ∀ levels, compose…).
-    * 'tnBody' — the graphic type τ of the RHS. Keeping τ around allows the solver
-        to re-enter the body when an instantiation edge demands structure.
+Shape
+-----
+* 'TyExp' carries (s, τ) where s is an expansion variable and τ is the graphic
+    type of the binding's RHS.
+* 'Expansion' (Phase 4 output) captures the paper's lattice: identity,
+    instantiation with fresh metas, ∀-introduction (possibly multiple levels),
+    and explicit composition of steps. Keeping s ↦ Expansion separate from τ lets
+    us remember the original scheme while still applying the minimal recipe per
+    use site.
 
-The pair (s, τ) must stay explicit, otherwise we could not distinguish between
-multiple instantiations of the same binding or record minimal expansions.
+Flow across phases
+------------------
+* Phase 1 (constraint gen): for each application of a let-bound value, emit an
+    instantiation edge  s · τ ≤ σ_use  where the LHS node is the 'TyExp'.
+* Phase 3 (acyclicity): orders these edges so presolution can process them
+    without dependency cycles.
+* Phase 4 (presolution): decides the minimal expansion for s using the lattice
+    above (identity / instantiate / add ∀ / compose). It may allocate fresh
+    nodes for bound vars, wrap ∀ at target levels, and emit follow-up unifications
+    so that E(τ) matches σ_use.
+* Phase 5 (solve): materializes the chosen expansion by rewriting the graph
+    (instantiating copies, inserting ∀ shells) and then discharges the queued
+    unifications. Sharing is preserved: multiple uses of the same binding point
+    to the same (s, τ) but can have distinct expansions.
 
-Each application site contributes an instantiation edge
-
-    s · τ ≤ demanded_type
-
-where the left-hand side points at the 'TyExp' node and the right-hand side
-encodes the arrow/base shape required by the call site. When Phase 4 processes
-an instantiation edge it consults the presolution for s, performs the requested
-expansion recipe, and emits any unification work needed to make s · τ match the
-right-hand side. This is how a single let-generalized binding can be shared
-across multiple instantiations while still remembering its original scheme.
+Why explicit TyExp + Expansion
+------------------------------
+* Distinguishes separate instantiations of the same let-binding without copying
+    τ eagerly.
+* Allows faithful implementation of the paper's minimal-expansion lattice and
+    its composition rules (e.g., instantiate then re-generalize).
+* Keeps scope information intact: instantiation only allocates fresh nodes for
+    τ's bound vars; free/shared nodes remain shared, matching the paper's sharing
+    discipline.
 -}
 
 -- | Generalization nodes model the levels introduced by let-generalization in
@@ -242,10 +257,10 @@ data Expansion
 -- Note [Expansion nodes] for why we keep these recipes explicit and how they
 -- correspond to the operations from the paper (identity, add ∀ levels,
 -- instantiate by grafting fresh metas, compose steps).
-    = ExpIdentity
-    | ExpForall (NonEmpty GNodeId)
-    | ExpInstantiate [NodeId]
-    | ExpCompose (NonEmpty Expansion)
+    = ExpIdentity                    -- ^ Do nothing; reuse the underlying body.
+    | ExpForall (NonEmpty GNodeId)   -- ^ Introduce one or more ∀ levels around the body.
+    | ExpInstantiate [NodeId]        -- ^ Substitute bound vars with fresh nodes (arity matches binders).
+    | ExpCompose (NonEmpty Expansion) -- ^ Execute several steps in order (e.g., instantiate then ∀).
     deriving (Eq, Show)
 
 newtype Presolution = Presolution { getAssignments :: IntMap Expansion }
