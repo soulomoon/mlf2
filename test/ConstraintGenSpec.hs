@@ -5,6 +5,7 @@ import Data.Maybe (catMaybes)
 import qualified Data.IntMap.Strict as IntMap
 import Test.Hspec
 
+import MLF.ConstraintGen (AnnExpr (..))
 import MyLib
 
 spec :: Spec
@@ -49,10 +50,15 @@ spec = describe "Phase 1 — Constraint generation" $ do
                     nodes = cNodes constraint
                 case IntMap.lookup (getNodeId (crRoot result)) nodes of
                     Just TyExp { tnBody = bodyId } -> do
+                        -- With the fix, the body of the EVar's TyExp is the Forall node from the binding
                         body <- lookupNode nodes bodyId
                         case body of
-                            TyBase { tnBase = BaseTy name } -> name `shouldBe` "Int"
-                            other -> expectationFailure $ "Expected Int body, saw " ++ show other
+                            TyForall { tnBody = innerBody } -> do
+                                inner <- lookupNode nodes innerBody
+                                case inner of
+                                    TyBase { tnBase = BaseTy name } -> name `shouldBe` "Int"
+                                    other -> expectationFailure $ "Expected Int body inside Forall, saw " ++ show other
+                            other -> expectationFailure $ "Expected Forall body, saw " ++ show other
                     other -> expectationFailure $ "Root is not the let scheme: " ++ show other
 
         -- Shadowing should behave like lexical scope: a nested let reuses the
@@ -70,10 +76,16 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 let constraint = crConstraint result
                     nodes = cNodes constraint
                 case IntMap.lookup (getNodeId (crRoot result)) nodes of
-                    Just TyExp { tnBody = bodyId } ->
-                        case IntMap.lookup (getNodeId bodyId) nodes of
-                            Just TyBase { tnBase = BaseTy name } -> name `shouldBe` "Bool"
-                            other -> expectationFailure $ "Expected Bool body, saw " ++ show other
+                    Just TyExp { tnBody = bodyId } -> do
+                        -- Expect Forall -> Bool
+                        body <- lookupNode nodes bodyId
+                        case body of
+                            TyForall { tnBody = innerBody } -> do
+                                inner <- lookupNode nodes innerBody
+                                case inner of
+                                    TyBase { tnBase = BaseTy name } -> name `shouldBe` "Bool"
+                                    other -> expectationFailure $ "Expected Bool body inside Forall, saw " ++ show other
+                            other -> expectationFailure $ "Expected Forall body, saw " ++ show other
                     other -> expectationFailure $ "Root is not an expansion node: " ++ show other
 
         it "reports unknown variables" $ do
@@ -82,6 +94,176 @@ spec = describe "Phase 1 — Constraint generation" $ do
         it "reports unknown variables that appear inside let RHS" $ do
             let expr = ELet "x" (EVar "ghost") (ELit (LInt 0))
             inferConstraintGraph expr `shouldBe` Left (UnknownVariable "ghost")
+
+    describe "Annotated Terms" $ do
+        it "respects lambda parameter annotations" $ do
+            -- λ(x:Int). x
+            let ann = STBase "Int"
+                expr = ELamAnn "x" ann (EVar "x")
+            expectRight (inferConstraintGraph expr) $ \result -> do
+                let nodes = cNodes (crConstraint result)
+                case IntMap.lookup (getNodeId (crRoot result)) nodes of
+                    Just TyArrow { tnDom = domId } -> do
+                        domNode <- lookupNode nodes domId
+                        case domNode of
+                            TyBase { tnBase = BaseTy name } -> name `shouldBe` "Int"
+                            other -> expectationFailure $ "Expected Int parameter, saw " ++ show other
+                    other -> expectationFailure $ "Root is not an arrow: " ++ show other
+
+        it "respects polymorphic let annotations" $ do
+            -- let id : ∀α. α → α = λx. x in id
+            let scheme = SrcScheme [("a", Nothing)] (STArrow (STVar "a") (STVar "a"))
+                expr = ELetAnn "id" scheme (ELam "x" (EVar "x")) (EVar "id")
+            expectRight (inferConstraintGraph expr) $ \result -> do
+                let nodes = cNodes (crConstraint result)
+                    gnodes = cGNodes (crConstraint result)
+                -- The result should be the body (id), which refers to the expansion of the scheme
+                case IntMap.lookup (getNodeId (crRoot result)) nodes of
+                    Just TyExp { tnBody = bodyId } -> do
+                        body <- lookupNode nodes bodyId
+                        -- Expect Forall (scheme) -> Arrow. No extra let-gen layer.
+                        case body of
+                            TyForall { tnBody = arrowBody } -> do -- Scheme layer
+                                arrow <- lookupNode nodes arrowBody
+                                case arrow of
+                                    TyArrow { tnDom = domId, tnCod = codId } -> do
+                                        domId `shouldBe` codId
+                                    other -> expectationFailure $ "Expected Arrow body, saw " ++ show other
+                            other -> expectationFailure $ "Expected Scheme Forall, saw " ++ show other
+                    other -> expectationFailure $ "Root is not an expansion: " ++ show other
+
+        it "respects term annotations" $ do
+            -- (1 : Int)
+            let ann = STBase "Int"
+                expr = EAnn (ELit (LInt 1)) ann
+            expectRight (inferConstraintGraph expr) $ \result -> do
+                let nodes = cNodes (crConstraint result)
+                case IntMap.lookup (getNodeId (crRoot result)) nodes of
+                    Just TyBase { tnBase = BaseTy name } -> name `shouldBe` "Int"
+                    other -> expectationFailure $ "Expected Int node, saw " ++ show other
+
+        it "respects bounded quantification in schemes" $ do
+            -- let f : ∀(a ⩾ Int). a -> a = ...
+            -- This checks internalizeBinders with a bound
+            let scheme = SrcScheme [("a", Just (STBase "Int"))] (STArrow (STVar "a") (STVar "a"))
+                expr = ELetAnn "f" scheme (ELam "x" (EVar "x")) (EVar "f")
+            expectRight (inferConstraintGraph expr) $ \result -> do
+                let nodes = cNodes (crConstraint result)
+                    gnodes = cGNodes (crConstraint result)
+                -- We verify that the 'a' variable has an instantiation edge to 'Int'
+                case IntMap.lookup (getNodeId (crRoot result)) nodes of
+                    Just TyExp { tnBody = bodyId } -> do
+                        body <- lookupNode nodes bodyId
+                        -- Expect Forall (scheme) -> Arrow. No extra let-gen layer.
+                        case body of
+                            TyForall { tnBody = arrowBody } -> do
+                                arrow <- lookupNode nodes arrowBody
+                                case arrow of
+                                    TyArrow { tnDom = domId } -> do
+                                        -- domId is 'a'. Its bound is recorded in the G-node bind list.
+                                        domNode <- lookupNode nodes domId
+                                        case domNode of
+                                            TyVar{ tnLevel = lvl } -> do
+                                                case IntMap.lookup (getGNodeId lvl) gnodes of
+                                                    Nothing ->
+                                                        expectationFailure "Missing GNode for binder level"
+                                                    Just gnode ->
+                                                        case lookup domId (gBinds gnode) of
+                                                            Just (Just boundId) -> do
+                                                                rhs <- lookupNode nodes boundId
+                                                                case rhs of
+                                                                    TyBase { tnBase = BaseTy name } -> name `shouldBe` "Int"
+                                                                    other -> expectationFailure $ "Expected bound Int, saw " ++ show other
+                                                            Just Nothing ->
+                                                                expectationFailure "Expected bound for variable, saw Nothing"
+                                                            Nothing ->
+                                                                expectationFailure "Missing binder entry for variable"
+                                            other ->
+                                                expectationFailure $ "Expected TyVar for domain, saw " ++ show other
+                                    other -> expectationFailure $ "Expected Arrow body, saw " ++ show other
+                            other -> expectationFailure $ "Expected Scheme Forall, saw " ++ show other
+                    other -> expectationFailure $ "Root is not an expansion: " ++ show other
+
+        it "respects instance bounds in Forall types" $ do
+            -- λ(x : ∀(a ⩾ Int). a). x
+            -- This checks internalizeSrcType STForall with a bound
+            let ann = STForall "a" (Just (STBase "Int")) (STVar "a")
+                expr = ELamAnn "x" ann (EVar "x")
+            expectRight (inferConstraintGraph expr) $ \result -> do
+                let nodes = cNodes (crConstraint result)
+                    gnodes = cGNodes (crConstraint result)
+                case IntMap.lookup (getNodeId (crRoot result)) nodes of
+                    Just TyArrow { tnDom = domId } -> do
+                        -- domId is the Forall node
+                        domNode <- lookupNode nodes domId
+                        case domNode of
+                            TyForall { tnQuantLevel = qLevel, tnBody = bodyId } -> do
+                                -- bodyId is 'a'. Its bound is recorded in the quantifier level's G-node.
+                                case IntMap.lookup (getGNodeId qLevel) gnodes of
+                                    Nothing ->
+                                        expectationFailure "Missing GNode for quant level"
+                                    Just gnode ->
+                                        case lookup bodyId (gBinds gnode) of
+                                            Just (Just boundId) -> do
+                                                rhs <- lookupNode nodes boundId
+                                                case rhs of
+                                                    TyBase { tnBase = BaseTy name } -> name `shouldBe` "Int"
+                                                    other -> expectationFailure $ "Expected bound Int, saw " ++ show other
+                                            Just Nothing ->
+                                                expectationFailure "Expected bound for variable, saw Nothing"
+                                            Nothing ->
+                                                expectationFailure "Missing binder entry for variable"
+                            other -> expectationFailure $ "Expected TyForall, saw " ++ show other
+                    other -> expectationFailure $ "Root is not an arrow: " ++ show other
+
+        it "internalizes Bottom type" $ do
+            -- λ(x : ⊥). x
+            let ann = STBottom
+                expr = ELamAnn "x" ann (EVar "x")
+            expectRight (inferConstraintGraph expr) $ \result -> do
+                let nodes = cNodes (crConstraint result)
+                case IntMap.lookup (getNodeId (crRoot result)) nodes of
+                    Just TyArrow { tnDom = domId } -> do
+                        domNode <- lookupNode nodes domId
+                        case domNode of
+                            -- Bottom is internalized as a fresh TyVar
+                            TyVar {} -> pure ()
+                            other -> expectationFailure $ "Expected TyVar for Bottom, saw " ++ show other
+                    other -> expectationFailure $ "Root is not an arrow: " ++ show other
+
+    describe "Annotation Edge Cases" $ do
+        it "handles free type variables in annotations" $ do
+            -- (1 : a) where 'a' is free
+            -- This checks STVar with Nothing lookup result
+            let ann = STVar "a"
+                expr = EAnn (ELit (LInt 1)) ann
+            expectRight (inferConstraintGraph expr) $ \result -> do
+                let nodes = cNodes (crConstraint result)
+                case IntMap.lookup (getNodeId (crRoot result)) nodes of
+                    Just TyVar { tnLevel = level } -> do
+                        -- The free variable should be allocated at the current level
+                        let rootLevel = case cGForest (crConstraint result) of
+                                [gid] -> gid
+                                _ -> error "Expected single root"
+                        level `shouldBe` rootLevel
+                    other -> expectationFailure $ "Expected TyVar for free var, saw " ++ show other
+
+        it "produces valid AnnExpr structure" $ do
+             -- let x = 1 in x
+             let expr = ELet "x" (ELit (LInt 1)) (EVar "x")
+             expectRight (inferConstraintGraph expr) $ \result -> do
+                 let ann = crAnnotated result
+                 case ann of
+                     ALet name schemeNode expVar childLevel rhsAnn bodyAnn resNode -> do
+                         name `shouldBe` "x"
+                         -- Basic structural check
+                         case rhsAnn of
+                             ALit (LInt 1) _ -> pure ()
+                             _ -> expectationFailure "RHS annotation mismatch"
+                         case bodyAnn of
+                             AVar "x" _ -> pure ()
+                             _ -> expectationFailure "Body annotation mismatch"
+                     _ -> expectationFailure "Expected ALet annotation"
 
     describe "Lambda nodes" $ do
         -- A λx.x term yields a single parameter node whose identifier appears in
@@ -93,12 +275,24 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 let nodes = IntMap.elems (cNodes (crConstraint result))
                     arrowNodes = [n | n@TyArrow {} <- nodes]
                     varNodes = [n | n@TyVar {} <- nodes]
-                case (arrowNodes, varNodes) of
-                    ([TyArrow { tnDom = dom, tnCod = cod }], [TyVar { tnId = varId }]) -> do
+                    expNodes = [n | n@TyExp {} <- nodes] -- EVar usage adds a fresh TyExp
+
+                -- We should have 1 Arrow, 1 Param Var, and 1 Exp node (for the usage of x)
+                case (arrowNodes, varNodes, expNodes) of
+                    ([TyArrow { tnDom = dom, tnCod = cod }], [TyVar { tnId = varId }], [TyExp { tnBody = bodyId }]) -> do
                         dom `shouldBe` varId
-                        cod `shouldBe` varId
+                        -- The codomain is the expansion of the parameter variable
+                        -- But wait, ELam "x" (EVar "x")
+                        -- buildExpr ELam: allocVar (param). bind x -> param. buildExpr body.
+                        -- buildExpr EVar "x": lookup param. allocExpNode param. return expNode.
+                        -- So body result is expNode.
+                        -- Arrow is param -> expNode.
+                        -- So tnDom = varId. tnCod = expId.
+                        -- tnBody of expNode = varId.
+                        tnId (head expNodes) `shouldBe` cod
+                        bodyId `shouldBe` varId
                     _ ->
-                        expectationFailure $ "Unexpected lambda nodes: " ++ show (length arrowNodes, length varNodes)
+                        expectationFailure $ "Unexpected lambda nodes: " ++ show (length arrowNodes, length varNodes, length expNodes)
 
         -- Each lambda parameter should be registered with the G-node that
         -- represents its scope so Phase 2+ know which variables can be
@@ -116,7 +310,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
                     [gid] -> pure gid
                     other -> expectationFailure ("Unexpected forest: " ++ show other) >> pure (error "unreachable")
                 rootNode <- lookupGNode (cGNodes constraint) rootLevel
-                (tnDom arrow `elem` gBinds rootNode) `shouldBe` True
+                (tnDom arrow `elem` map fst (gBinds rootNode)) `shouldBe` True
 
         it "records lambda parameters inside child binding levels" $ do
             let expr = ELet "f" (ELam "x" (EVar "x")) (ELit (LInt 0))
@@ -124,14 +318,18 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 let constraint = crConstraint result
                     nodes = cNodes constraint
                     gnodes = cGNodes constraint
-                -- Locate the TyExp introduced for the let RHS by scanning nodes.
-                expNode <- case [n | n@TyExp {} <- IntMap.elems nodes] of
+                -- Locate the Forall introduced for the let RHS by scanning nodes.
+                -- There should be one Forall for the let binding.
+                forallNode <- case [n | n@TyForall {} <- IntMap.elems nodes] of
                     [node] -> pure node
-                    other -> expectationFailure ("Expected single expansion node, saw " ++ show other) >> pure (error "unreachable")
-                bodyNode <- lookupNode nodes (tnBody expNode)
+                    other -> expectationFailure ("Expected single Forall node, saw " ++ show other) >> pure (error "unreachable")
+
+                -- The body of the Forall is the lambda arrow
+                bodyNode <- lookupNode nodes (tnBody forallNode)
                 paramId <- case bodyNode of
                     TyArrow { tnDom = dom } -> pure dom
-                    other -> expectationFailure ("Expansion body is not a lambda: " ++ show other) >> pure (error "unreachable")
+                    other -> expectationFailure ("Forall body is not a lambda: " ++ show other) >> pure (error "unreachable")
+
                 rootId <- case cGForest constraint of
                     [gid] -> pure gid
                     other -> expectationFailure ("Unexpected forest: " ++ show other) >> pure (error "unreachable")
@@ -140,7 +338,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
                     [cid] -> pure cid
                     other -> expectationFailure ("Expected single child, saw " ++ show other) >> pure (error "unreachable")
                 childNode <- lookupGNode gnodes childId
-                paramId `elem` gBinds childNode `shouldBe` True
+                paramId `elem` map fst (gBinds childNode) `shouldBe` True
 
     describe "Applications" $ do
         -- Verify that application translation produces a single instantiation edge
@@ -160,17 +358,25 @@ spec = describe "Phase 1 — Constraint generation" $ do
                     [edge] -> do
                         lhs <- lookupNode nodes (instLeft edge)
                         case lhs of
+                            -- The usage of 'f' creates a TyExp wrapping the bound Forall
                             TyExp { tnBody = bodyId } -> do
                                 body <- lookupNode nodes bodyId
                                 case body of
-                                    TyArrow { tnDom = domId, tnCod = codId } -> do
-                                        domNode <- lookupNode nodes domId
-                                        codNode <- lookupNode nodes codId
-                                        case (domNode, codNode) of
-                                            (TyVar { tnId = domVar }, TyVar { tnId = codVar }) ->
-                                                domVar `shouldBe` codVar
-                                            other -> expectationFailure $ "Lambda arrow points to unexpected nodes: " ++ show other
-                                    other -> expectationFailure $ "Expansion body is not a lambda arrow: " ++ show other
+                                    TyForall { tnBody = innerBody } -> do
+                                        inner <- lookupNode nodes innerBody
+                                        case inner of
+                                            TyArrow { tnDom = domId, tnCod = codId } -> do
+                                                -- domId/codId are the bound variable.
+                                                -- But codId is actually the Expansion of that var (from EVar "x")
+                                                -- So domId = var. codId = TyExp(var).
+                                                domNode <- lookupNode nodes domId
+                                                codNode <- lookupNode nodes codId
+                                                case (domNode, codNode) of
+                                                    (TyVar { tnId = domVar }, TyExp { tnBody = expBody }) ->
+                                                        domVar `shouldBe` expBody
+                                                    other -> expectationFailure $ "Lambda arrow points to unexpected nodes: " ++ show other
+                                            other -> expectationFailure $ "Forall body is not a lambda arrow: " ++ show other
+                                    other -> expectationFailure $ "Expansion body is not a Forall: " ++ show other
                             other -> expectationFailure $ "Instantiation left-hand side is not an expansion: " ++ show other
                         rhs <- lookupNode nodes (instRight edge)
                         case rhs of
@@ -231,10 +437,21 @@ spec = describe "Phase 1 — Constraint generation" $ do
                     pure (catMaybes candidateSets)
                 length literalInsts `shouldBe` 2
                 let lhsIds = map instLeft literalInsts
-                length (nub lhsIds) `shouldBe` 1
-                paramVar <- case lhsIds of
-                    (lhsId:_) -> lookupNode nodes lhsId
-                    [] -> expectationFailure "Missing instantiation left-hand side" >> pure (error "unreachable")
+                -- Now that we wrap usages in fresh TyExp nodes, the LHS IDs will be different!
+                -- They will be distinct TyExp nodes wrapping the same underlying parameter variable.
+                length (nub lhsIds) `shouldBe` 2
+
+                -- Verify they wrap the same parameter
+                let checkParam lhsId = do
+                        lhs <- lookupNode nodes lhsId
+                        case lhs of
+                            TyExp { tnBody = bodyId } -> pure bodyId
+                            _ -> expectationFailure "Expected TyExp" >> pure (error "unreachable")
+
+                paramIds <- mapM checkParam lhsIds
+                length (nub paramIds) `shouldBe` 1
+
+                paramVar <- lookupNode nodes (head paramIds)
                 case paramVar of
                     TyVar { tnLevel = level } -> do
                         rootLevel <- case cGForest constraint of
@@ -314,7 +531,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 childNode <- lookupGNode gnodes childId
                 let childVars = [tnId n | n@TyVar { tnLevel = level } <- IntMap.elems nodes, level == childId]
                 childVars `shouldSatisfy` (not . null)
-                all (`elem` gBinds childNode) childVars `shouldBe` True
+                all (`elem` map fst (gBinds childNode)) childVars `shouldBe` True
 
         -- Nested lets should form a linear chain g₀ → g₁ → g₂ so that each inner
         -- binding knows its parent level. For
@@ -389,17 +606,45 @@ spec = describe "Phase 1 — Constraint generation" $ do
                             (EApp (EVar "f") (ELit (LBool True)))
             expectRight (inferConstraintGraph expr) $ \result -> do
                 let insts = cInstEdges (crConstraint result)
+                -- Should contain 2 edges for the applications of 'f'
+                -- Plus 2 edges for the usages of 'x' inside the lambda? No, inside 'lam' x is used once.
+                -- Let's trace 'f' usages.
+                -- EVar "f" -> allocExpNode -> TyExp1(Forall(lam))
+                -- EVar "f" -> allocExpNode -> TyExp2(Forall(lam))
+                -- So inst edges will have different LHS.
                 length insts `shouldBe` 2
-                length (nub (map instLeft insts)) `shouldBe` 1
+                length (nub (map instLeft insts)) `shouldBe` 2
+
+                -- But they should wrap the same underlying Forall node
+                let nodes = cNodes (crConstraint result)
+                let checkBody lhsId = do
+                        lhs <- lookupNode nodes lhsId
+                        case lhs of
+                            TyExp { tnBody = bodyId } -> pure bodyId
+                            _ -> expectationFailure "Expected TyExp" >> pure (error "unreachable")
+
+                bodyIds <- mapM checkBody (map instLeft insts)
+                length (nub bodyIds) `shouldBe` 1
 
         it "allocates distinct expansion variables for independent lets" $ do
             let expr =
                     ELet "f" (ELam "x" (EVar "x")) $
                         ELet "g" (ELam "y" (EVar "y")) (EVar "g")
             expectRight (inferConstraintGraph expr) $ \result -> do
-                let expNodes = [n | n@TyExp {} <- IntMap.elems (cNodes (crConstraint result))]
-                length expNodes `shouldBe` 2
-                length (nub (map tnExpVar expNodes)) `shouldBe` 2
+                -- We look for TyForall nodes now, as they represent the let bindings
+                let forallNodes = [n | n@TyForall {} <- IntMap.elems (cNodes (crConstraint result))]
+                -- One for 'f', one for 'g'.
+                -- Wait, ELet "f" ... -> allocForall.
+                -- ELet "g" ... -> allocForall.
+                -- EVar "g" -> allocExpNode -> TyExp(Forall_g).
+                -- Also inside f and g bodies there are usages of x and y (EVar "x", EVar "y") which create TyExps.
+                -- So we check for unique Foralls.
+                -- But wait, inside f: ELam "x" (EVar "x"). EVar "x" -> TyExp(x).
+                -- inside g: ELam "y" (EVar "y"). EVar "y" -> TyExp(y).
+                -- So there are TyExps for x and y.
+                -- And TyExp for usage of g.
+                -- We specifically want to check the Let bindings.
+                length forallNodes `shouldBe` 2
 
         it "emits one instantiation edge per application" $ do
             let lam = ELam "x" (EVar "x")
@@ -411,7 +656,17 @@ spec = describe "Phase 1 — Constraint generation" $ do
             expectRight (inferConstraintGraph expr) $ \result -> do
                 let insts = cInstEdges (crConstraint result)
                 length insts `shouldBe` 3
-                length (nub (map instLeft insts)) `shouldBe` 1
+                length (nub (map instLeft insts)) `shouldBe` 3 -- Each usage has fresh TyExp
+
+                -- Verify same underlying source
+                let nodes = cNodes (crConstraint result)
+                let checkBody lhsId = do
+                        lhs <- lookupNode nodes lhsId
+                        case lhs of
+                            TyExp { tnBody = bodyId } -> pure bodyId
+                            _ -> expectationFailure "Expected TyExp" >> pure (error "unreachable")
+                bodyIds <- mapM checkBody (map instLeft insts)
+                length (nub bodyIds) `shouldBe` 1
 
     describe "Higher-order structure" $ do
         it "creates nested arrow nodes and one instantiation for higher-order lambdas" $ do

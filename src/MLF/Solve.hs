@@ -101,7 +101,8 @@ module MLF.Solve (
     SolveResult(..),
     solveUnify,
     validateSolvedGraph,
-    validateSolvedGraphStrict
+    validateSolvedGraphStrict,
+    frWith
 ) where
 
 import Control.Monad (foldM, when)
@@ -302,7 +303,8 @@ applyUFConstraint uf c = c
     choose new old = case (isVar old, isVar new) of
         (True, False) -> new
         (False, True) -> old
-        _ -> old
+        (True, True) -> old -- Tie-break vars (arbitrary but deterministic)
+        (False, False) -> old -- Tie-break structures (arbitrary)
 
     isVar TyVar{} = True
     isVar _ = False
@@ -314,7 +316,8 @@ applyUFConstraint uf c = c
             TyVar { tnLevel = l } -> TyVar nid' l
             TyArrow { tnDom = d, tnCod = cod } -> TyArrow nid' (frWith uf d) (frWith uf cod)
             TyBase { tnBase = b } -> TyBase nid' b
-            TyForall { tnQuantLevel = l, tnBody = b } -> TyForall nid' l (frWith uf b)
+            TyForall { tnLevel = ownerLvl, tnQuantLevel = quantLvl, tnBody = b } ->
+                TyForall nid' quantLvl ownerLvl (frWith uf b)
             TyExp { tnExpVar = s, tnBody = b } -> TyExp nid' s (frWith uf b)
             )
 
@@ -432,7 +435,8 @@ validateWith opts SolveResult { srConstraint = c, srUnionFind = uf } =
                 , IntMap.notMember (getNodeId child) nodes
                 ]
 
-        -- 6. Forall/Var levels must exist in cGNodes when required.
+        -- 6. All tnLevel values must exist in cGNodes when required.
+        -- Only TyVar and TyForall have tnLevel fields.
         gnodes = cGNodes c
         forallLevelViolations =
             if not (voRequireGNodes opts)
@@ -441,8 +445,8 @@ validateWith opts SolveResult { srConstraint = c, srUnionFind = uf } =
                     [ msg "Missing GNode for level" [GNodeId (getGNodeId lvl)]
                     | n <- IntMap.elems nodes
                     , lvl <- case n of
-                        TyForall { tnQuantLevel = l } -> [l]
                         TyVar { tnLevel = l } -> [l]
+                        TyForall { tnLevel = ownerLvl, tnQuantLevel = quantLvl } -> [ownerLvl, quantLvl]
                         _ -> []
                     , IntMap.notMember (getGNodeId lvl) gnodes
                     ]

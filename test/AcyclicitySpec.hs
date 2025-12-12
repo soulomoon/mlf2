@@ -270,7 +270,7 @@ spec = describe "Phase 3 — Acyclicity Check" $ do
                     [ (0, TyVar (NodeId 0) (GNodeId 0))  -- α
                     , (1, TyVar (NodeId 1) (GNodeId 1))  -- β (at inner level)
                     , (2, TyVar (NodeId 2) (GNodeId 0))  -- γ
-                    , (3, TyForall (NodeId 3) (GNodeId 1) (NodeId 1))  -- ∀g.β
+                    , (3, TyForall (NodeId 3) (GNodeId 0) (GNodeId 1) (NodeId 1))  -- ∀g.β
                     ]
                 e1 = InstEdge (EdgeId 0) (NodeId 0) (NodeId 3)  -- α ≤ ∀g.β
                 e2 = InstEdge (EdgeId 1) (NodeId 1) (NodeId 2)  -- β ≤ γ
@@ -293,8 +293,8 @@ spec = describe "Phase 3 — Acyclicity Check" $ do
             let nodes = IntMap.fromList
                     [ (0, TyVar (NodeId 0) (GNodeId 0))  -- α
                     , (1, TyVar (NodeId 1) (GNodeId 1))  -- β
-                    , (2, TyForall (NodeId 2) (GNodeId 1) (NodeId 1))  -- ∀g.β
-                    , (3, TyForall (NodeId 3) (GNodeId 1) (NodeId 0))  -- ∀g.α
+                    , (2, TyForall (NodeId 2) (GNodeId 0) (GNodeId 1) (NodeId 1))  -- ∀g.β
+                    , (3, TyForall (NodeId 3) (GNodeId 0) (GNodeId 1) (NodeId 0))  -- ∀g.α
                     ]
                 e1 = InstEdge (EdgeId 0) (NodeId 0) (NodeId 2)  -- α ≤ ∀g.β
                 e2 = InstEdge (EdgeId 1) (NodeId 1) (NodeId 3)  -- β ≤ ∀g.α
@@ -496,7 +496,7 @@ spec = describe "Phase 3 — Acyclicity Check" $ do
 
         it "traverses forall body" $ do
             let nodes = IntMap.fromList
-                    [ (0, TyForall (NodeId 0) (GNodeId 1) (NodeId 1))  -- ∀g.body
+                    [ (0, TyForall (NodeId 0) (GNodeId 0) (GNodeId 1) (NodeId 1))  -- ∀g.body
                     , (1, TyArrow (NodeId 1) (NodeId 2) (NodeId 3))    -- body = Int → β
                     , (2, TyBase (NodeId 2) (BaseTy "Int"))
                     , (3, TyVar (NodeId 3) (GNodeId 1))                -- β

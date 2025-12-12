@@ -139,7 +139,7 @@ spec = describe "Phase 5 -- Solve" $ do
 
         it "detects constructor clashes (base vs forall)" $ do
             let base = TyBase (NodeId 0) (BaseTy "Int")
-                forallNode = TyForall (NodeId 1) (GNodeId 1) (NodeId 2)
+                forallNode = TyForall (NodeId 1) (GNodeId 0) (GNodeId 1) (NodeId 2)
                 forallBody = TyBase (NodeId 2) (BaseTy "Int")
                 constraint = emptyConstraint
                     { cNodes = IntMap.fromList
@@ -155,7 +155,7 @@ spec = describe "Phase 5 -- Solve" $ do
             let dom = TyBase (NodeId 2) (BaseTy "Int")
                 cod = TyBase (NodeId 3) (BaseTy "Bool")
                 arrow = TyArrow (NodeId 0) (tnId dom) (tnId cod)
-                forallNode = TyForall (NodeId 1) (GNodeId 1) (tnId dom)
+                forallNode = TyForall (NodeId 1) (GNodeId 1) (GNodeId 0) (tnId dom)
                 constraint = emptyConstraint
                     { cNodes = IntMap.fromList
                         [ (0, arrow)
@@ -180,8 +180,8 @@ spec = describe "Phase 5 -- Solve" $ do
         it "fails when forall nodes have mismatched quantification levels" $ do
             let body1 = TyVar (NodeId 2) (GNodeId 2)
                 body2 = TyVar (NodeId 3) (GNodeId 3)
-                forall1 = TyForall (NodeId 0) (GNodeId 1) (tnId body1)
-                forall2 = TyForall (NodeId 1) (GNodeId 4) (tnId body2)
+                forall1 = TyForall (NodeId 0) (GNodeId 1) (GNodeId 0) (tnId body1)
+                forall2 = TyForall (NodeId 1) (GNodeId 4) (GNodeId 0) (tnId body2)
                 constraint = emptyConstraint
                     { cNodes = IntMap.fromList
                         [ (0, forall1)
@@ -196,8 +196,8 @@ spec = describe "Phase 5 -- Solve" $ do
         it "succeeds when forall levels match and bodies agree" $ do
             let body1 = TyBase (NodeId 2) (BaseTy "Int")
                 body2 = TyBase (NodeId 3) (BaseTy "Int")
-                forall1 = TyForall (NodeId 0) (GNodeId 1) (tnId body1)
-                forall2 = TyForall (NodeId 1) (GNodeId 1) (tnId body2)
+                forall1 = TyForall (NodeId 0) (GNodeId 1) (GNodeId 0) (tnId body1)
+                forall2 = TyForall (NodeId 1) (GNodeId 1) (GNodeId 0) (tnId body2)
                 constraint = emptyConstraint
                     { cNodes = IntMap.fromList
                         [ (0, forall1)
@@ -215,8 +215,8 @@ spec = describe "Phase 5 -- Solve" $ do
         it "fails when forall levels match but bodies clash" $ do
             let body1 = TyBase (NodeId 2) (BaseTy "Int")
                 body2 = TyBase (NodeId 3) (BaseTy "Bool")
-                forall1 = TyForall (NodeId 0) (GNodeId 1) (tnId body1)
-                forall2 = TyForall (NodeId 1) (GNodeId 1) (tnId body2)
+                forall1 = TyForall (NodeId 0) (GNodeId 1) (GNodeId 0) (tnId body1)
+                forall2 = TyForall (NodeId 1) (GNodeId 1) (GNodeId 0) (tnId body2)
                 constraint = emptyConstraint
                     { cNodes = IntMap.fromList
                         [ (0, forall1)
@@ -235,8 +235,8 @@ spec = describe "Phase 5 -- Solve" $ do
                 c2 = TyBase (NodeId 7) (BaseTy "Bool")
                 b1 = TyArrow (NodeId 2) (tnId d1) (tnId c1)
                 b2 = TyArrow (NodeId 3) (tnId d2) (tnId c2)
-                f1 = TyForall (NodeId 0) (GNodeId 1) (tnId b1)
-                f2 = TyForall (NodeId 1) (GNodeId 1) (tnId b2)
+                f1 = TyForall (NodeId 0) (GNodeId 1) (GNodeId 0) (tnId b1)
+                f2 = TyForall (NodeId 1) (GNodeId 1) (GNodeId 0) (tnId b2)
                 constraint = emptyConstraint
                     { cNodes = IntMap.fromList
                         [ (0, f1), (1, f2)
@@ -310,7 +310,56 @@ spec = describe "Phase 5 -- Solve" $ do
                     }
             solveUnify constraint `shouldBe` Left (UnexpectedExpNode (tnId expNode))
 
-    describe "validateSolvedGraphStrict" $ do
+    describe "Validation Edge Cases" $ do
+        it "reports unexpected TyExp in TyExp-TyExp clash" $ do
+            let exp1 = TyExp (NodeId 0) (ExpVarId 0) (NodeId 2)
+                exp2 = TyExp (NodeId 1) (ExpVarId 1) (NodeId 3)
+                body1 = TyBase (NodeId 2) (BaseTy "Int")
+                body2 = TyBase (NodeId 3) (BaseTy "Int")
+                constraint = emptyConstraint
+                    { cNodes = IntMap.fromList
+                        [ (0, exp1), (1, exp2), (2, body1), (3, body2) ]
+                    , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 1)]
+                    }
+            solveUnify constraint `shouldBe` Left (UnexpectedExpNode (NodeId 0))
+
+        it "validates: reports MissingNode when child is missing" $ do
+            -- Arrow points to non-existent dom
+            let arrow = TyArrow (NodeId 0) (NodeId 1) (NodeId 2)
+                cod = TyBase (NodeId 2) (BaseTy "Int")
+                -- NodeId 1 is missing
+                constraint = emptyConstraint
+                    { cNodes = IntMap.fromList [(0, arrow), (2, cod)]
+                    }
+                res = SolveResult { srConstraint = constraint, srUnionFind = IntMap.empty }
+                msgs = validateSolvedGraphStrict res
+            msgs `shouldSatisfy` any ("Missing child node" `isPrefixOf`)
+
+        it "validates: reports non-canonical node id" $ do
+            -- Node stored at key 0 has id 1
+            let base = TyBase (NodeId 1) (BaseTy "Int")
+                constraint = emptyConstraint
+                    { cNodes = IntMap.fromList [(0, base)] -- Mismatch key vs id
+                    }
+                res = SolveResult { srConstraint = constraint, srUnionFind = IntMap.empty }
+                msgs = validateSolvedGraphStrict res
+            msgs `shouldSatisfy` any ("Node key/id mismatch" `isPrefixOf`)
+
+        it "validates: reports non-canonical child reference" $ do
+            -- Arrow points to 1, but UF says 1 -> 2
+            let arrow = TyArrow (NodeId 0) (NodeId 1) (NodeId 2)
+                base = TyBase (NodeId 2) (BaseTy "Int")
+                -- Node 1 exists but is aliased to 2 in UF
+                alias = TyBase (NodeId 1) (BaseTy "Int") 
+                
+                constraint = emptyConstraint
+                    { cNodes = IntMap.fromList [(0, arrow), (1, alias), (2, base)]
+                    }
+                uf = IntMap.fromList [(1, NodeId 2)]
+                res = SolveResult { srConstraint = constraint, srUnionFind = uf }
+                msgs = validateSolvedGraphStrict res
+            -- Arrow child 1 is not canonical (should be 2)
+            msgs `shouldSatisfy` any ("Non-canonical child id" `isPrefixOf`)
         it "accepts a solved graph when g-nodes are present" $ do
             let var = TyVar (NodeId 0) (GNodeId 0)
                 base = TyBase (NodeId 1) (BaseTy "Int")

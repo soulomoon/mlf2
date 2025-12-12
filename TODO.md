@@ -1,6 +1,6 @@
-# MLF Type Inference Implementation — TODO
+# MLF Type Inference & Elaboration — TODO
 
-See [roadmap.md](roadmap.md) for the full algorithm description and paper references.
+See [roadmap.md](roadmap.md) for the full algorithm description and paper references (especially `papers/xmlf.txt`).
 
 ---
 
@@ -36,12 +36,6 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 **Tests:** 16 examples, all passing
 
-> **Note:** Identity expansion collapse is a Phase 4 concern (presolution decides
-> `s := Identity`). G-node push/pull is a structural invariant enforced by the
-> data types — G-nodes form a separate forest (`cGNodes`) and cannot appear
-> inside type constructors like `TyArrow`; variables just *point* to their
-> binding level via `tnLevel :: GNodeId`.
-
 ---
 
 ## Phase 3 — Acyclicity Check ✅
@@ -67,43 +61,51 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 - [x] Incremental unification inside presolution loop
 - [x] Tests: `test/PresolutionSpec.hs` covers identity, instantiate, forall-intro, and compose (instantiate→forall)
 
-## Phase 5 — Solve / Unification ✅ (recap)
-
-- [x] `Presolution` data type (map ExpVar -> Expansion)
-- [x] `computePresolution :: AcyclicityResult -> Constraint -> Either Error PresolutionResult`
-- [x] Topological traversal of instantiation edges
-- [x] `decideMinimalExpansion` logic (Identity vs Instantiate)
-- [x] `instantiateScheme` helper (copying graph structure)
-- [x] `applyExpansion` helper (updating constraint)
-- [x] Incremental unification during presolution
-
-**Tests:** 2 examples, passing
-
----
-
 ## Phase 5 — Unification Solver ✅
 
-- [x] Implement `MLF.Solve` entrypoint `solveUnify :: Constraint -> Either SolveError SolveResult` that consumes `cUnifyEdges` (plus any residual edges after presolution) and returns updated `Constraint`, `UnionFind`, and a substitution view for elaboration.
-- [x] Robust union-find: reuse canonical NodeId representatives and path compression; expose `find`, `union`, and an applicative pass `applyUF` to rewrite `Constraint` nodes/edges.
-- [x] Structural unification cases: Var=Var, Var=Structure (respect levels, allow sharing), Arrow=Arrow (enqueue dom/cod), Base=Base (clash → error), Forall=Forall (levels must match; else error), Exp=Exp (should be absent post-presolution; otherwise error).
-- [x] Occurs check on DAG: prevent `Var` from unifying with a node reachable from itself (walk children respecting current UF), report `OccursCheckFailed nid target`.
-- [x] Error reporting: constructor clash, level mismatch, missing node, occurs check, unexpected TyExp after presolution.
-- [x] Tests: success cases (var=var, var=arrow, arrow=arrow nested, base=base), failure cases (constructor clash, occurs check, forall level mismatch, leftover exp), and UF application correctness (canonicalization of cNodes/cEdges).
+- [x] `Solve` entrypoint `solveUnify :: Constraint -> Either SolveError SolveResult`
+- [x] Robust union-find: reuse canonical NodeId representatives and path compression
+- [x] Structural unification cases: Var=Var, Var=Structure, Arrow=Arrow, Base=Base, Forall=Forall
+- [x] Occurs check on DAG
+- [x] Error reporting
+- [x] Tests: success cases and failure cases
 
 ---
 
-## Phase 6 — Elaboration (xMLF) ⏳
+## Phase 6 — Elaboration to xMLF (New Foundation) ⏳
 
-- [ ] `ElaboratedTerm` data type (System F-like)
-- [ ] `elaborate :: Constraint -> Expr -> ElaboratedTerm`
-- [ ] Reconstruct term with explicit type applications
+Based on `papers/xmlf.txt` §3.
+
+- [ ] **Define xMLF AST** (`XMLF.AST`)
+    - [ ] Types `τ` (including `∀(α ≥ τ)`)
+    - [ ] Instantiations `φ` (Witnesses: `!α`, `N`, `O`, `Inside`, `Under`, `Comp`)
+    - [ ] Terms `a` (including `Λ` and `a φ`)
+- [ ] **Implement Elaboration Logic** (`Elaborate.hs`)
+    - [ ] `elaborate :: Expr -> Presolution -> Constraint -> XMLF.Term`
+    - [ ] Generate instantiation witnesses `φ` from graph paths
+    - [ ] Insert `Λ` abstractions based on presolution expansions
+    - [ ] Insert explicit type annotations on lambda arguments
+- [ ] **Tests**
+    - [ ] Verify elaboration of basic terms (id, const)
+    - [ ] Verify elaboration of polymorphic let-bindings
+
+---
+
+## Phase 7 — xMLF Execution & Verification ⏳
+
+Based on `papers/xmlf.txt` §1 & §2.
+
+- [ ] **Type Checker** (`XMLF.Check`)
+    - [ ] Implement `Γ ⊢ a : τ` rules
+    - [ ] Verify elaborated terms are well-typed
+- [ ] **Evaluator** (`XMLF.Eval`)
+    - [ ] Implement small-step reduction `a ⟶ a'`
+    - [ ] Implement instantiation reduction rules (e.g., `(Λ...) N ⟶ ...`)
 
 ---
 
 ## Stretch Goals / Future Work
 
-- [ ] Better error messages with source locations
-- [ ] Pretty-printer for graphic constraints
+- [ ] Pretty-printer for xMLF terms
 - [ ] Visualization of constraint graph (Graphviz / DOT)
-- [ ] Incremental / interactive mode
-- [ ] Benchmark suite
+- [ ] REPL that prints the inferred type and the elaborated xMLF term

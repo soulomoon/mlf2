@@ -1,11 +1,13 @@
 module MLF.ConstraintGen (
     ConstraintError (..),
     ConstraintResult (..),
+  AnnExpr (..),
     generateConstraints
 ) where
 
 import Control.Monad.Except (Except, MonadError (throwError), runExcept)
 import Control.Monad.State.Strict (StateT, gets, modify', runStateT)
+import Control.Monad (foldM)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import Data.Map.Strict (Map)
@@ -97,29 +99,45 @@ data ConstraintError
 -- | Successful constraint generation returns the full constraint graph and the
 -- root 'NodeId' that represents the program's type.
 data ConstraintResult = ConstraintResult
-    { crConstraint :: Constraint
-    , crRoot :: NodeId
-    }
+  { crConstraint :: Constraint
+  , crRoot :: NodeId
+  , crAnnotated :: AnnExpr
+  }
+    deriving (Eq, Show)
+
+-- | Expression annotated with the NodeIds allocated during constraint generation.
+-- The NodeIds are stable and match the ones found in the constraint graph, so
+-- later phases (e.g., elaboration) can recover binder types.
+data AnnExpr
+    = AVar VarName NodeId
+    | ALit Lit NodeId
+    | ALam VarName NodeId GNodeId AnnExpr NodeId
+      -- ^ param name, param node, param level, body, result node
+    | AApp AnnExpr AnnExpr EdgeId NodeId
+      -- ^ fun, arg, inst edge id, result node
+    | ALet VarName NodeId ExpVarId GNodeId AnnExpr AnnExpr NodeId
+      -- ^ binder name, scheme node (TyExp), expansion var, child level of RHS, rhs, body, result node
+    | AAnn AnnExpr NodeId
+      -- ^ expression, annotation node
     deriving (Eq, Show)
 
 data Binding = Binding
-    { bindingNode :: NodeId
-    , bindingLevel :: GNodeId
-    }
+  { bindingNode :: NodeId
+  }
 
 type Env = Map VarName Binding
 
 data BuildState = BuildState
-    { bsNextNode :: !Int
-    , bsNextGNode :: !Int
-    , bsNextExpVar :: !Int
-    , bsNextEdge :: !Int
-    , bsNodes :: !(IntMap TyNode)
-    , bsGNodes :: !(IntMap GNode)
-    , bsForest :: ![GNodeId]
-    , bsInstEdges :: ![InstEdge]
-    , bsUnifyEdges :: ![UnifyEdge]
-    , bsRootLevel :: !GNodeId
+    { bsNextNode :: !Int          -- ^ Next available NodeId
+    , bsNextGNode :: !Int         -- ^ Next available GNodeId
+    , bsNextExpVar :: !Int        -- ^ Next available ExpVarId
+    , bsNextEdge :: !Int          -- ^ Next available EdgeId
+    , bsNodes :: !(IntMap TyNode) -- ^ Map of all allocated type nodes
+    , bsGNodes :: !(IntMap GNode) -- ^ Map of all generalization nodes
+    , bsForest :: ![GNodeId]      -- ^ Roots of the G-node forest
+    , bsInstEdges :: ![InstEdge]  -- ^ Instantiation edges (accumulated in reverse)
+    , bsUnifyEdges :: ![UnifyEdge] -- ^ Unification edges (accumulated in reverse)
+    , bsRootLevel :: !GNodeId     -- ^ The root generalization level
     }
 
 type ConstraintM = StateT BuildState (Except ConstraintError)
@@ -131,11 +149,13 @@ generateConstraints :: Expr -> Either ConstraintError ConstraintResult
 generateConstraints expr = do
     let initialState = mkInitialState
         rootLevel = bsRootLevel initialState
-    (rootNode, finalState) <- runConstraintM (buildExpr Map.empty rootLevel expr) initialState
+    ((rootNode, annRoot), finalState) <-
+        runConstraintM (buildExpr Map.empty rootLevel expr) initialState
     let constraint = buildConstraint finalState
     pure ConstraintResult
         { crConstraint = constraint
         , crRoot = rootNode
+        , crAnnotated = annRoot
         }
 
 mkInitialState :: BuildState
@@ -169,31 +189,126 @@ buildConstraint st = Constraint
     , cUnifyEdges = reverse (bsUnifyEdges st)
     }
 
-buildExpr :: Env -> GNodeId -> Expr -> ConstraintM NodeId
+buildExpr :: Env -> GNodeId -> Expr -> ConstraintM (NodeId, AnnExpr)
 buildExpr env level expr = case expr of
-    EVar name -> lookupVar env name
-    ELit lit -> allocBase (baseFor lit)
-    -- See Note [Lambda Translation]
-    ELam param body -> do
-        argNode <- allocVar level
-        let env' = Map.insert param (Binding argNode level) env
-        bodyNode <- buildExpr env' level body
-        allocArrow argNode bodyNode
-    -- See Note [Application and Instantiation Edges]
-    EApp fun arg -> do
-        funNode <- buildExpr env level fun
-        argNode <- buildExpr env level arg
-        resultNode <- allocVar level
-        arrowNode <- allocArrow argNode resultNode
-        addInstEdge funNode arrowNode
-        pure resultNode
-    -- See Note [Let Bindings and Expansion Variables]
-    ELet name rhs body -> do
-        childLevel <- newChildLevel (Just level)
-        rhsNode <- buildExpr env childLevel rhs
-        schemeNode <- allocExpNode rhsNode
-        let env' = Map.insert name (Binding schemeNode level) env
-        buildExpr env' level body
+  EVar name -> do
+    nid <- lookupVar env name
+    -- Wrap in fresh expansion node to allow instantiation at this specific use site
+    (expNode, _) <- allocExpNode nid
+    pure (expNode, AVar name expNode)
+  ELit lit -> do
+    nid <- allocBase (baseFor lit)
+    pure (nid, ALit lit nid)
+  -- See Note [Lambda Translation]
+  ELam param body -> do
+    argNode <- allocVar level
+    let env' = Map.insert param (Binding argNode) env
+    (bodyNode, bodyAnn) <- buildExpr env' level body
+    arrowNode <- allocArrow argNode bodyNode
+    pure (arrowNode, ALam param argNode level bodyAnn arrowNode)
+
+  -- See Note [Annotated Lambda]
+  ELamAnn param srcType body -> do
+    -- Translate the annotation to a constraint graph node
+    argNode <- internalizeSrcType Map.empty level srcType
+    let env' = Map.insert param (Binding argNode) env
+    (bodyNode, bodyAnn) <- buildExpr env' level body
+    arrowNode <- allocArrow argNode bodyNode
+    pure (arrowNode, ALam param argNode level bodyAnn arrowNode)
+
+  -- See Note [Application and Instantiation Edges]
+  EApp fun arg -> do
+    (funNode, funAnn) <- buildExpr env level fun
+    (argNode, argAnn) <- buildExpr env level arg
+    resultNode <- allocVar level
+    arrowNode <- allocArrow argNode resultNode
+    eid <- addInstEdge funNode arrowNode
+    pure (resultNode, AApp funAnn argAnn eid resultNode)
+
+  -- See Note [Let Bindings and Expansion Variables]
+  ELet name rhs body -> do
+    childLevel <- newChildLevel level
+    (rhsNode, rhsAnn) <- buildExpr env childLevel rhs
+
+    -- Insert TyForall to mark generalization at childLevel
+    forallNode <- allocForall level childLevel rhsNode
+
+    -- Bind the Forall node directly (no expansion node at definition)
+    -- Expansion happens at use sites via EVar
+    let env' = Map.insert name (Binding forallNode) env
+    (bodyNode, bodyAnn) <- buildExpr env' level body
+    -- We pass forallNode as schemeNode to ALet, and 0 as expVar (unused)
+    -- This is a slight hack on ALet structure, but consistent with the graph change.
+    pure (bodyNode, ALet name forallNode (ExpVarId 0) childLevel rhsAnn bodyAnn bodyNode)
+
+  -- See Note [Annotated Let]
+  ELetAnn name (SrcScheme bindings bodyType) rhs body -> do
+    childLevel <- newChildLevel level
+    -- Create a type variable environment for the quantified variables
+    (tyEnv, quantVars) <- internalizeBinders childLevel bindings
+    -- Internalize the scheme body type
+    schemeBodyNode <- internalizeSrcType tyEnv childLevel bodyType
+    -- Translate the RHS and unify with the annotated type
+    (rhsNode, rhsAnn) <- buildExpr env childLevel rhs
+    -- Emit instantiation: inferred RHS type must be capable of generating the annotated type
+    -- (rhsNode <= schemeBodyNode)
+    _ <- addInstEdge rhsNode schemeBodyNode
+
+    -- Insert TyForall to mark generalization at childLevel
+    -- For ELetAnn, we first wrap the scheme binders (explicit polymorphism).
+    schemeNode <- foldM (\body _var -> allocForall level childLevel body) schemeBodyNode (reverse quantVars)
+
+    -- We do NOT wrap in an extra let-generalization TyForall if the scheme is already explicit.
+    -- This avoids "double quantification" (forall a. forall t. T).
+    -- If quantVars was empty, schemeNode is just the body.
+    -- If we want to support implicit generalization ON TOP of explicit schemes, we would wrap.
+    -- But usually annotations are exhaustive.
+    -- However, standard ELet *always* has a TyForall anchor.
+    -- To satisfy tests that expect a single Forall for "let id : forall a...", we rely on schemeNode.
+    -- If schemeNode is NOT a Forall (monomorphic annotation), we use it as is.
+    -- Presolution handles Monomorphic <= Type by Identity expansion, which is correct.
+
+    -- Bind the scheme node directly
+    let env' = Map.insert name (Binding schemeNode) env
+    (bodyNode, bodyAnn) <- buildExpr env' level body
+    -- Pass schemeNode as scheme, 0 as dummy expVar
+    pure (bodyNode, ALet name schemeNode (ExpVarId 0) childLevel rhsAnn bodyAnn bodyNode)
+
+  -- Term Annotation
+  EAnn expr srcType -> do
+    (exprNode, exprAnn) <- buildExpr env level expr
+    annNode <- internalizeSrcType Map.empty level srcType
+    _ <- addInstEdge exprNode annNode
+    pure (annNode, AAnn exprAnn annNode)
+
+{- Note [Annotated Lambda]
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+An annotated lambda `λ(x : τ). e` is similar to a regular lambda, but instead
+of allocating a fresh type variable for the parameter, we translate the type
+annotation `τ` into a constraint graph node using `internalizeSrcType`.
+
+This allows the user to request higher-rank polymorphism. For example:
+  λ(f : ∀α. α → α). (f 1, f True)
+
+The annotation creates the polymorphic type in the constraint, and the body
+can then use `f` at multiple instantiations.
+
+Paper reference: eMLF annotations in Rémy & Yakobowski's work.
+-}
+
+{- Note [Annotated Let]
+~~~~~~~~~~~~~~~~~~~~~~~
+An annotated let `let x : σ = e₁ in e₂` allows the user to specify the type
+scheme for a let-bound variable. We:
+  1. Create a child level for the RHS (as with regular let)
+  2. Internalize the binders from the scheme (creating type variables)
+  3. Internalize the body type of the scheme
+  4. Translate the RHS and emit a unification constraint
+  5. Wrap in an expansion node as usual
+
+This allows explicit type annotations while maintaining the MLF constraint
+solving approach.
+-}
 
 {- Note [Lambda Translation]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -322,6 +437,98 @@ lookupVar env name = case Map.lookup name env of
     Just binding -> pure (bindingNode binding)
     Nothing -> throwError (UnknownVariable name)
 
+-- | Type variable environment for internalizing source types.
+type TyEnv = Map VarName NodeId
+
+-- | Internalize a source type annotation into a constraint graph.
+-- This creates nodes for the type structure and connects them appropriately.
+--
+-- The tyEnv maps type variable names to their allocated NodeIds (for quantified vars).
+internalizeSrcType :: TyEnv -> GNodeId -> SrcType -> ConstraintM NodeId
+internalizeSrcType tyEnv level srcType = case srcType of
+    STVar name -> case Map.lookup name tyEnv of
+        Just nid -> pure nid
+        Nothing -> do
+            -- Free type variable: allocate a fresh variable
+            nid <- allocVar level
+            pure nid
+
+    STArrow dom cod -> do
+        domNode <- internalizeSrcType tyEnv level dom
+        codNode <- internalizeSrcType tyEnv level cod
+        allocArrow domNode codNode
+
+    STBase name -> allocBase (BaseTy name)
+
+    STForall var mBound body -> do
+        -- Create a child level for the quantifier
+        childLevel <- newChildLevel level
+        -- Allocate a type variable for the bound variable
+        varNode <- allocVar childLevel
+        -- Extend the environment with this binding
+        let tyEnv' = Map.insert var varNode tyEnv
+        -- Process the bound if present (for instance bounds)
+        mbBoundNode <- case mBound of
+            Nothing -> pure Nothing
+            Just bound -> do
+                -- The bound type at the same level as the quantifier body
+                boundNode <- internalizeSrcType tyEnv' childLevel bound
+                pure (Just boundNode)
+
+        -- Record the bound on the variable
+        setVarBound childLevel varNode mbBoundNode
+
+        -- Internalize the body with the extended environment
+        bodyNode <- internalizeSrcType tyEnv' childLevel body
+        -- Create the forall node
+        allocForall level childLevel bodyNode
+
+    STBottom -> do
+        -- Bottom is the minimal type, represented as a fresh variable
+        -- that can be instantiated to anything
+        allocVar level
+
+-- | Allocate a TyForall node.
+allocForall :: GNodeId -> GNodeId -> NodeId -> ConstraintM NodeId
+allocForall ownerLevel quantLevel bodyNode = do
+    nid <- freshNodeId
+    insertNode TyForall
+        { tnId = nid
+        , tnLevel = ownerLevel
+        , tnQuantLevel = quantLevel
+        , tnBody = bodyNode
+        }
+    pure nid
+
+-- | Internalize a list of binders from a source scheme.
+-- Returns an environment mapping variable names to their nodes,
+-- and the list of allocated nodes.
+internalizeBinders :: GNodeId -> [(String, Maybe SrcType)] -> ConstraintM (TyEnv, [NodeId])
+internalizeBinders level bindings = go Map.empty [] bindings
+  where
+    go tyEnv acc [] = pure (tyEnv, reverse acc)
+    go tyEnv acc ((name, mBound):rest) = do
+        -- Allocate a type variable for this binding
+        varNode <- allocVar level
+        let tyEnv' = Map.insert name varNode tyEnv
+        -- Process the bound if present
+        mbBoundNode <- case mBound of
+            Nothing -> pure Nothing
+            Just bound -> do
+                boundNode <- internalizeSrcType tyEnv' level bound
+                pure (Just boundNode)
+
+        -- Set the bound
+        setVarBound level varNode mbBoundNode
+
+        go tyEnv' (varNode:acc) rest
+
+-- | Add a unification edge (T₁ = T₂).
+addUnifyEdge :: NodeId -> NodeId -> ConstraintM ()
+addUnifyEdge left right = do
+    let edge = UnifyEdge left right
+    modify' $ \st -> st { bsUnifyEdges = edge : bsUnifyEdges st }
+
 baseFor :: Lit -> BaseTy
 baseFor lit = BaseTy $ case lit of
     LInt _ -> "Int"
@@ -358,47 +565,53 @@ allocArrow domNode codNode = do
         }
     pure nid
 
-allocExpNode :: NodeId -> ConstraintM NodeId
+allocExpNode :: NodeId -> ConstraintM (NodeId, ExpVarId)
 allocExpNode bodyNode = do
-    expVar <- freshExpVarId
-    nid <- freshNodeId
-    insertNode TyExp
-        { tnId = nid
-        , tnExpVar = expVar
-        , tnBody = bodyNode
-        }
-    pure nid
+  expVar <- freshExpVarId
+  nid <- freshNodeId
+  insertNode TyExp
+    { tnId = nid
+    , tnExpVar = expVar
+    , tnBody = bodyNode
+    }
+  pure (nid, expVar)
 
-newChildLevel :: Maybe GNodeId -> ConstraintM GNodeId
+newChildLevel :: GNodeId -> ConstraintM GNodeId
 newChildLevel parent = do
     gid <- freshGNodeId
     let node = GNode
             { gnodeId = gid
-            , gParent = parent
+            , gParent = Just parent
             , gBinds = []
             , gChildren = []
             }
     modify' $ \st ->
         st { bsGNodes = IntMap.insert (intFromG gid) node (bsGNodes st)
-           , bsForest = case parent of
-                Nothing -> gid : bsForest st
-                Just _ -> bsForest st
+           , bsForest = bsForest st
            }
-    case parent of
-        Nothing -> pure ()
-        Just p -> modify' $ \st ->
-            st { bsGNodes = IntMap.adjust (\gn -> gn { gChildren = gid : gChildren gn }) (intFromG p) (bsGNodes st) }
+    modify' $ \st ->
+        st { bsGNodes = IntMap.adjust (\gn -> gn { gChildren = gid : gChildren gn }) (intFromG parent) (bsGNodes st) }
     pure gid
 
 attachVar :: GNodeId -> NodeId -> ConstraintM ()
 attachVar level nodeId = modify' $ \st ->
-    st { bsGNodes = IntMap.adjust (\gn -> gn { gBinds = nodeId : gBinds gn }) (intFromG level) (bsGNodes st) }
+    st { bsGNodes = IntMap.adjust (\gn -> gn { gBinds = (nodeId, Nothing) : gBinds gn }) (intFromG level) (bsGNodes st) }
 
-addInstEdge :: NodeId -> NodeId -> ConstraintM ()
+setVarBound :: GNodeId -> NodeId -> Maybe NodeId -> ConstraintM ()
+setVarBound level varNode bound = modify' $ \st ->
+    st { bsGNodes = IntMap.adjust (\gn -> gn { gBinds = updateBinds (gBinds gn) }) (intFromG level) (bsGNodes st) }
+  where
+    updateBinds [] = []
+    updateBinds ((v, _) : xs) | v == varNode = (v, bound) : xs
+    updateBinds (x : xs) = x : updateBinds xs
+
+addInstEdge :: NodeId -> NodeId -> ConstraintM EdgeId
 addInstEdge left right = do
-    eid <- freshEdgeId
-    let edge = InstEdge (EdgeId eid) left right
-    modify' $ \st -> st { bsInstEdges = edge : bsInstEdges st }
+  eid <- freshEdgeId
+  let edgeId = EdgeId eid
+      edge = InstEdge edgeId left right
+  modify' $ \st -> st { bsInstEdges = edge : bsInstEdges st }
+  pure edgeId
 
 freshNodeId :: ConstraintM NodeId
 freshNodeId = do

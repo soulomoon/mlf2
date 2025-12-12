@@ -27,12 +27,14 @@ module MLF.Presolution (
     -- * Building blocks (exported for testing)
     decideMinimalExpansion,
     processInstEdge,
-    instantiateScheme
+    instantiateScheme,
+    mergeExpansions,
+    applyExpansion
 ) where
 
 import Control.Monad.State
 import Control.Monad.Except (throwError)
-import Control.Monad (forM, forM_, zipWithM_, when, foldM)
+import Control.Monad (forM, forM_, zipWithM, zipWithM_, when, foldM)
 import qualified Data.List.NonEmpty as NE
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
@@ -46,11 +48,11 @@ import MLF.Acyclicity (AcyclicityResult(..))
 
 -- | Result of the presolution phase.
 data PresolutionResult = PresolutionResult
-    { prPresolution :: Presolution        -- ^ The computed ExpVar → Expansion map
-    , prConstraint :: Constraint          -- ^ Updated constraint (with new UnifyEdges)
-    , prUnionFind :: IntMap NodeId        -- ^ Updated union-find from incremental unification
-    }
-    deriving (Eq, Show)
+    { prConstraint :: Constraint
+    , prEdgeExpansions :: IntMap Expansion
+    , prEdgeWitnesses :: IntMap EdgeWitness
+    , prRedirects :: IntMap NodeId -- ^ Map from old TyExp IDs to their replacement IDs
+    } deriving (Eq, Show)
 
 -- | Errors that can occur during presolution.
 data PresolutionError
@@ -70,6 +72,8 @@ data PresolutionState = PresolutionState
     , psPresolution :: Presolution
     , psUnionFind :: IntMap NodeId
     , psNextNodeId :: Int
+    , psEdgeExpansions :: IntMap Expansion
+    , psEdgeWitnesses :: IntMap EdgeWitness
     }
     deriving (Eq, Show)
 
@@ -92,17 +96,23 @@ computePresolution acyclicityResult constraint = do
             , psPresolution = Presolution IntMap.empty
             , psUnionFind = IntMap.empty -- Should initialize from constraint if needed
             , psNextNodeId = findMaxNodeId constraint + 1
+            , psEdgeExpansions = IntMap.empty
+            , psEdgeWitnesses = IntMap.empty
             }
 
     -- Run the presolution loop
     presState <- execStateT (runPresolutionLoop (arSortedEdges acyclicityResult)) initialState
+
     -- Materialize expansions, rewrite TyExp away, and apply UF canonicalization.
-    (_, finalState) <- runPresolutionM presState finalizePresolution
+    (redirects, finalState) <- runPresolutionM presState $ do
+        mapping <- materializeExpansions
+        rewriteConstraint mapping
 
     return PresolutionResult
-        { prPresolution = psPresolution finalState
-        , prConstraint = psConstraint finalState
-        , prUnionFind = psUnionFind finalState
+        { prConstraint = psConstraint finalState
+        , prEdgeExpansions = psEdgeExpansions finalState
+        , prEdgeWitnesses = psEdgeWitnesses finalState
+        , prRedirects = redirects
         }
 
 -- | Helper to find the next available NodeId
@@ -114,7 +124,7 @@ findMaxNodeId c =
 -- | Finalize presolution by materializing expansions, rewriting TyExp away,
 -- applying union-find canonicalization, and clearing consumed instantiation
 -- edges. This prepares the constraint for Phase 5.
-finalizePresolution :: PresolutionM ()
+finalizePresolution :: PresolutionM (IntMap NodeId)
 finalizePresolution = do
     mapping <- materializeExpansions
     rewriteConstraint mapping
@@ -133,7 +143,8 @@ materializeExpansions = do
 -- | Rewrite constraint by removing TyExp nodes, applying expansion mapping and
 -- union-find canonicalization, collapsing duplicates (preferring structure over
 -- vars), and clearing instantiation edges (consumed in presolution).
-rewriteConstraint :: IntMap NodeId -> PresolutionM ()
+-- Returns the canonicalized redirect map.
+rewriteConstraint :: IntMap NodeId -> PresolutionM (IntMap NodeId)
 rewriteConstraint mapping = do
     st <- get
     let c = psConstraint st
@@ -143,7 +154,7 @@ rewriteConstraint mapping = do
             Nothing -> nid
             Just n' -> chaseMap n'
 
-        canonical nid = frWith uf (chaseMap nid)
+        canonical nid = chaseMap (frWith uf nid)
 
         isVar TyVar{} = True
         isVar _ = False
@@ -161,19 +172,62 @@ rewriteConstraint mapping = do
                     TyVar { tnLevel = l } -> TyVar nid' l
                     TyArrow { tnDom = d, tnCod = cod } -> TyArrow nid' (canonical d) (canonical cod)
                     TyBase { tnBase = b } -> TyBase nid' b
-                    TyForall { tnQuantLevel = l, tnBody = b } -> TyForall nid' l (canonical b)
-                in Just (getNodeId nid', node')
+                    TyForall { tnLevel = ownerLvl, tnQuantLevel = quantLvl, tnBody = b } ->
+                        TyForall nid' quantLvl ownerLvl (canonical b)
+            in Just (getNodeId nid', node')
 
         rewriteUnify (UnifyEdge l r) = UnifyEdge (canonical l) (canonical r)
 
+        -- traceCanonical n = let c = canonical n in trace ("Canonical " ++ show n ++ " -> " ++ show c) c
+
         newNodes = IntMap.fromListWith choose (mapMaybe rewriteNode (IntMap.elems (cNodes c)))
+
+        -- Canonicalize edge expansions
+        canonicalizeExp ExpIdentity = ExpIdentity
+        canonicalizeExp (ExpInstantiate args) = ExpInstantiate (map canonical args)
+        canonicalizeExp (ExpForall levels) = ExpForall levels
+        canonicalizeExp (ExpCompose exps) = ExpCompose (fmap canonicalizeExp exps)
+
+        newExps = IntMap.map canonicalizeExp (psEdgeExpansions st)
+
+        canonicalizeOp :: InstanceOp -> InstanceOp
+        canonicalizeOp op = case op of
+            OpGraft sigma n -> OpGraft (canonical sigma) (canonical n)
+            OpMerge a b -> OpMerge (canonical a) (canonical b)
+            OpRaise n -> OpRaise (canonical n)
+            OpWeaken n -> OpWeaken (canonical n)
+            OpRaiseMerge n m -> OpRaiseMerge (canonical n) (canonical m)
+
+        canonicalizeWitness :: EdgeWitness -> EdgeWitness
+        canonicalizeWitness w =
+            let InstanceWitness ops = ewWitness w
+            in w
+                { ewLeft = canonical (ewLeft w)
+                , ewRight = canonical (ewRight w)
+                , ewRoot = canonical (ewRoot w)
+                , ewWitness = InstanceWitness (map canonicalizeOp ops)
+                }
+
+        newWitnesses = IntMap.map canonicalizeWitness (psEdgeWitnesses st)
+
+        -- Canonicalize redirects (values in the map)
+        -- mapping maps OldId -> NewId. NewId might be non-canonical.
+        -- We want to return a map for ALL nodes that were redirected or merged.
+        fullRedirects = IntMap.fromList
+            [ (nid, canonical (NodeId nid))
+            | nid <- IntMap.keys (cNodes c)
+            ]
 
     put st { psConstraint = c
                 { cNodes = newNodes
                 , cInstEdges = []
                 , cUnifyEdges = map rewriteUnify (cUnifyEdges c)
                 }
+           , psEdgeExpansions = newExps
+           , psEdgeWitnesses = newWitnesses
            }
+
+    return fullRedirects
 
 -- | Read-only chase like Solve.frWith
 frWith :: IntMap NodeId -> NodeId -> NodeId
@@ -190,13 +244,17 @@ processInstEdge :: InstEdge -> PresolutionM ()
 processInstEdge edge = do
     let n1Id = instLeft edge
     let n2Id = instRight edge
+    let edgeId = instEdgeId edge
 
-    -- Resolve canonical nodes
-    n1 <- getCanonicalNode n1Id
+    -- Resolve nodes.
+    -- For LHS, we check the raw node first to handle TyExp properly
+    -- even if it has been unified/replaced in previous steps.
+    n1Raw <- getNode n1Id
     n2 <- getCanonicalNode n2Id
 
-    case n1 of
+    case n1Raw of
         TyExp { tnExpVar = s, tnBody = _bodyId } -> do
+            let n1 = n1Raw
             -- n1 is an expansion node. We need to ensure s expands enough to cover n2.
             currentExp <- getExpansion s
 
@@ -208,21 +266,133 @@ processInstEdge edge = do
 
             -- Update presolution
             setExpansion s finalExp
+            recordEdgeExpansion edgeId finalExp
+            w <- buildEdgeWitness edgeId n1Id n2Id n1 finalExp
+            recordEdgeWitness edgeId w
 
             -- Perform unifications requested by expansion decision
             mapM_ (uncurry unifyAcyclic) unifications
 
-            -- Apply expansion to get the concrete node and unify with target
-            expandedNodeId <- applyExpansion finalExp n1
-            unifyAcyclic expandedNodeId (tnId n2)
+            -- Unify LHS (TyExp) directly with RHS.
+            -- MaterializeExpansions will replace TyExp with its expansion, and
+            -- RewriteConstraint will update this unify edge to point to the expansion.
+            -- However, if expansion is Identity, TyExp effectively becomes its body.
+            -- Unifying TyExp with body (or something unified with body) creates a cycle
+            -- (TyExp -> body -> TyExp).
+            -- So we skip explicit unification for Identity, relying on decideMinimalExpansion
+            -- to have returned unifications between the body and the target.
+            if finalExp == ExpIdentity
+                then return ()
+                else do
+                    -- Eagerly materialize and unify to resolve the constraint immediately.
+                    -- This ensures that the expansion result is unified with the target (n2),
+                    -- and TyExp is unified with the result.
+                    resNodeId <- applyExpansion finalExp n1
+                    unifyStructure resNodeId (tnId n2)
+                    unifyAcyclic (tnId n1) resNodeId
 
         _ -> do
+            n1 <- getCanonicalNode n1Id
             -- n1 is not an expansion node.
             -- This is a standard instantiation constraint (or just subtyping).
-            -- In MLF, non-expansion instantiation is just unification or check?
             -- "If the left hand side is not an expansion node, it must be equal to the right hand side"
             -- (Simplification for now, might need refinement for full MLF)
-            unifyAcyclic (tnId n1) (tnId n2)
+            recordEdgeExpansion edgeId ExpIdentity
+            w <- buildEdgeWitness edgeId n1Id n2Id n1Raw ExpIdentity
+            recordEdgeWitness edgeId w
+            unifyStructure (tnId n1) (tnId n2)
+
+-- | Record a witness for an instantiation edge.
+recordEdgeWitness :: EdgeId -> EdgeWitness -> PresolutionM ()
+recordEdgeWitness (EdgeId eid) w =
+    modify $ \st -> st { psEdgeWitnesses = IntMap.insert eid w (psEdgeWitnesses st) }
+
+-- | Build an edge witness from the chosen expansion recipe.
+--
+-- This is intentionally conservative: we record only the operations induced by
+-- our current presolution lattice (Identity / Instantiate / ∀-intro / Compose).
+-- More elaborate witnesses (raise/merge inside interiors, etc.) can be added
+-- incrementally as the solver gains a more explicit instance-operation engine.
+buildEdgeWitness :: EdgeId -> NodeId -> NodeId -> TyNode -> Expansion -> PresolutionM EdgeWitness
+buildEdgeWitness eid left right leftRaw expn = do
+    root <- case leftRaw of
+        TyExp{ tnBody = b } -> pure b
+        _ -> pure left
+    iw <- witnessFromExpansion root leftRaw expn
+    pure EdgeWitness
+        { ewEdgeId = eid
+        , ewLeft = left
+        , ewRight = right
+        , ewRoot = root
+        , ewWitness = iw
+        }
+
+-- | Convert our presolution expansion recipe into a (coarse) instance-operation witness.
+witnessFromExpansion :: NodeId -> TyNode -> Expansion -> PresolutionM InstanceWitness
+witnessFromExpansion root leftRaw expn = do
+    ops <- go expn
+    pure (InstanceWitness ops)
+  where
+    go :: Expansion -> PresolutionM [InstanceOp]
+    go ExpIdentity = pure []
+    go (ExpCompose es) = concat <$> mapM go (NE.toList es)
+    go (ExpForall ls) = do
+        -- Model ∀-introduction as repeated “raise” at the root.
+        -- (xmlf uses O for ∀-intro; we refine the exact witness/translation later.)
+        pure (replicate (length (NE.toList ls)) (OpRaise root))
+    go (ExpInstantiate args) = do
+        -- If the TyExp body is a forall, instantiate its binders in the same order
+        -- that `applyExpansion` uses (collectBoundVars + zip).
+        case leftRaw of
+            TyExp{ tnBody = b } -> do
+                bNode <- getCanonicalNode b
+                case bNode of
+                    TyForall{ tnBody = inner, tnQuantLevel = q } -> do
+                        boundVars <- collectBoundVars inner q
+                        if length boundVars /= length args
+                            then throwError (ArityMismatch "witnessFromExpansion/ExpInstantiate" (length boundVars) (length args))
+                            else do
+                                let pairs = zip args boundVars
+                                pure $ concatMap (\(arg, bv) -> [OpGraft arg bv, OpWeaken bv]) pairs
+                    _ -> throwError (InstantiateOnNonForall (tnId bNode))
+            _ -> do
+                -- Instantiating a non-TyExp is unexpected in current pipeline; treat as empty.
+                pure []
+
+unifyStructure :: NodeId -> NodeId -> PresolutionM ()
+unifyStructure n1 n2 = do
+    root1 <- findRoot n1
+    root2 <- findRoot n2
+    if root1 == root2 then return ()
+    else do
+        -- Fetch structure before merging
+        node1 <- getCanonicalNode n1
+        node2 <- getCanonicalNode n2
+
+        -- trace ("UnifyStructure " ++ show n1 ++ " " ++ show n2) $ return ()
+
+        -- Perform the merge
+        unifyAcyclic n1 n2
+
+        -- Recursively unify children if structures match
+        case (node1, node2) of
+            (TyArrow { tnDom = d1, tnCod = c1 }, TyArrow { tnDom = d2, tnCod = c2 }) -> do
+                -- trace "Unifying Arrows" $ return ()
+                unifyStructure d1 d2
+                unifyStructure c1 c2
+            (TyForall { tnBody = b1 }, TyForall { tnBody = b2 }) -> do
+                -- trace "Unifying Foralls" $ return ()
+                unifyStructure b1 b2
+            -- Base types: no children to unify.
+            -- Mismatches: handled by Solve or suppressed (Presolution implies compatibility).
+            _ -> return ()
+
+getNode :: NodeId -> PresolutionM TyNode
+getNode nid = do
+    nodes <- gets (cNodes . psConstraint)
+    case IntMap.lookup (getNodeId nid) nodes of
+        Just n -> return n
+        Nothing -> throwError $ NodeLookupFailed nid
 
 -- | Get the current expansion for an expansion variable.
 getExpansion :: ExpVarId -> PresolutionM Expansion
@@ -235,23 +405,32 @@ setExpansion :: ExpVarId -> Expansion -> PresolutionM ()
 setExpansion s expansion = do
     modify $ \st -> st { psPresolution = Presolution $ IntMap.insert (getExpVarId s) expansion (getAssignments (psPresolution st)) }
 
+recordEdgeExpansion :: EdgeId -> Expansion -> PresolutionM ()
+recordEdgeExpansion (EdgeId eid) expn =
+    modify $ \st -> st { psEdgeExpansions = IntMap.insert eid expn (psEdgeExpansions st) }
+
 -- | Merge two expansions for the same variable.
 -- This may trigger unifications if we merge two Instantiates.
 mergeExpansions :: ExpVarId -> Expansion -> Expansion -> PresolutionM Expansion
-mergeExpansions _ ExpIdentity e2 = return e2
-mergeExpansions _ e1 ExpIdentity = return e1
-mergeExpansions _ (ExpInstantiate args1) (ExpInstantiate args2)
-    | length args1 == length args2 = do
-        zipWithM_ unifyAcyclic args1 args2
-        return (ExpInstantiate args1)
-    | otherwise = throwError $ ArityMismatch "ExpInstantiate merge" (length args1) (length args2)
-mergeExpansions _ (ExpForall l1) (ExpForall l2)
-    | l1 == l2  = return (ExpForall l1)
-    | otherwise = return (ExpCompose (ExpForall l1 NE.:| [ExpForall l2]))
-mergeExpansions _ (ExpCompose xs) (ExpCompose ys) = return (ExpCompose (xs <> ys))
-mergeExpansions _ (ExpCompose xs) e2 = return (ExpCompose (xs <> pure e2))
-mergeExpansions _ e1 (ExpCompose ys) = return (ExpCompose (e1 NE.<| ys))
-mergeExpansions _ e1 e2 = return (ExpCompose (e1 NE.<| (e2 NE.:| [])))
+mergeExpansions v e1 e2 = case (e1, e2) of
+    (ExpIdentity, _) -> pure e2
+    (_, ExpIdentity) -> pure e1
+    (ExpInstantiate args1, ExpInstantiate args2) -> do
+        if length args1 /= length args2
+            then throwError (ArityMismatch "ExpInstantiate merge" (length args1) (length args2))
+            else do
+                zipWithM_ unifyAcyclic args1 args2
+                pure e1
+    (ExpForall l1, ExpForall l2) -> do
+        if l1 == l2 then pure e1
+        else throwError (InternalError "Merging distinct Forall expansions not supported")
+    (ExpCompose exps1, ExpCompose exps2) -> do
+        if length exps1 /= length exps2
+            then throwError (ArityMismatch "ExpCompose merge" (length exps1) (length exps2))
+            else do
+                merged <- zipWithM (mergeExpansions v) (NE.toList exps1) (NE.toList exps2)
+                pure (ExpCompose (NE.fromList merged))
+    _ -> throwError (InternalError ("Incompatible expansions: " ++ show e1 ++ " vs " ++ show e2))
 
 {- Note [Minimal Expansion Decision]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -352,6 +531,20 @@ decideMinimalExpansion (TyExp { tnBody = bodyId }) targetNode = do
 
 decideMinimalExpansion _ _ = return (ExpIdentity, [])
 
+-- | Get the level from a node if it has one.
+-- Only TyVar and TyForall have tnLevel; others return root level (GNodeId 0).
+getNodeLevel :: TyNode -> GNodeId
+getNodeLevel node = case node of
+    TyVar { tnLevel = l } -> l
+    TyForall { tnLevel = l } -> l
+    _ -> GNodeId 0  -- Default to root level for structure nodes
+
+-- | Get the level from a TyExp's body by looking up the body node.
+getLevelFromBody :: NodeId -> PresolutionM GNodeId
+getLevelFromBody bodyId = do
+    bodyNode <- getCanonicalNode bodyId
+    return $ getNodeLevel bodyNode
+
 -- | Apply an expansion to a TyExp node.
 -- Note: this helper is used twice for distinct purposes.
 --   • processInstEdge: enforce a single instantiation edge now (expansion choice
@@ -370,33 +563,39 @@ applyExpansion expansion expNode = case (expansion, expNode) of
                     then throwError $ ArityMismatch "applyExpansion" (length boundVars) (length args)
                     else instantiateScheme innerBody q (zip boundVars args)
             _ -> throwError $ InstantiateOnNonForall (tnId body)
-    (ExpForall levels, TyExp { tnBody = b }) ->
-        wrapForall (NE.toList levels) b
-    (ExpCompose exps, TyExp { tnBody = b }) ->
+    (ExpForall levels, TyExp { tnBody = b }) -> do
+        -- Get level from the body (which should have a TyVar or TyForall)
+        ownerLvl <- getLevelFromBody b
+        wrapForall ownerLvl (NE.toList levels) b
+    (ExpCompose exps, TyExp { tnBody = b }) -> do
+        ownerLvl <- getLevelFromBody b
         foldM (\nid e -> do
                 node <- getCanonicalNode nid
-                applyExpansionOverNode e node nid)
+                applyExpansionOverNode ownerLvl e node nid)
               b
               (NE.toList exps)
     -- If expansion is applied to a non-expansion node (after composition), use the helper
-    (expn, otherNode) -> applyExpansionOverNode expn otherNode (tnId otherNode)
+    (expn, otherNode) -> do
+        -- Get level from the node if it has one, or use root level as fallback
+        let ownerLvl = getNodeLevel otherNode
+        applyExpansionOverNode ownerLvl expn otherNode (tnId otherNode)
   where
-    wrapForall :: [GNodeId] -> NodeId -> PresolutionM NodeId
-    wrapForall [] nid = return nid
-    wrapForall (l:ls) nid = do
+    wrapForall :: GNodeId -> [GNodeId] -> NodeId -> PresolutionM NodeId
+    wrapForall _ [] nid = return nid
+    wrapForall ownerLvl (quantLvl:ls) nid = do
         newId <- createFreshNodeId
-        let node = TyForall newId l nid
+        let node = TyForall newId quantLvl ownerLvl nid
         registerNode newId node
-        wrapForall ls newId
+        wrapForall ownerLvl ls newId
 
     -- Allow composing over an already-expanded node (not necessarily TyExp)
-    applyExpansionOverNode :: Expansion -> TyNode -> NodeId -> PresolutionM NodeId
-    applyExpansionOverNode ExpIdentity _ nid = return nid
-    applyExpansionOverNode (ExpForall ls) _ nid = wrapForall (NE.toList ls) nid
-    applyExpansionOverNode (ExpCompose es) _ nid = foldM (\n e -> do
+    applyExpansionOverNode :: GNodeId -> Expansion -> TyNode -> NodeId -> PresolutionM NodeId
+    applyExpansionOverNode _ ExpIdentity _ nid = return nid
+    applyExpansionOverNode ownerLvl (ExpForall ls) _ nid = wrapForall ownerLvl (NE.toList ls) nid
+    applyExpansionOverNode ownerLvl (ExpCompose es) _ nid = foldM (\n e -> do
                                                             nNode <- getCanonicalNode n
-                                                            applyExpansionOverNode e nNode n) nid (NE.toList es)
-    applyExpansionOverNode (ExpInstantiate args) node _ =
+                                                            applyExpansionOverNode ownerLvl e nNode n) nid (NE.toList es)
+    applyExpansionOverNode _ (ExpInstantiate args) node _ =
         case node of
             TyExp{} -> throwError $ InstantiateOnNonForall (tnId node)
             TyForall { tnBody = innerBody, tnQuantLevel = q } -> do
@@ -460,30 +659,62 @@ instantiateScheme bodyId quantLevel substList = do
 
                         if shouldShare then return nid
                         else do
-                            -- Create fresh node shell
-                            freshId <- lift createFreshNodeId
-                            modify $ IntMap.insert (getNodeId nid) freshId
-
-                            -- Recursively copy children
-                            newNode <- case node of
-                                TyArrow { tnDom = d, tnCod = c } -> do
-                                    d' <- copyNode subst d
-                                    c' <- copyNode subst c
-                                    return $ TyArrow freshId d' c'
-                                TyForall { tnQuantLevel = q, tnBody = b } -> do
-                                    b' <- copyNode subst b
-                                    return $ TyForall freshId q b'
+                            -- Special handling for TyExp to inline expansions
+                            case node of
                                 TyExp { tnExpVar = s, tnBody = b } -> do
-                                    b' <- copyNode subst b
-                                    return $ TyExp freshId s b'
-                                TyVar { tnLevel = l } -> do
-                                    return $ TyVar freshId l
-                                TyBase { tnBase = b } -> do
-                                    return $ TyBase freshId b
+                                    expn <- lift $ getExpansion s
+                                    case expn of
+                                        ExpIdentity -> do
+                                            -- Inline Identity expansion: just copy body
+                                            -- Update cache after copy to handle cycles correctly?
+                                            -- Actually, if we skip TyExp, the cycle is on the body.
+                                            -- The cache for 'nid' (the TyExp) should point to the copy of 'b'.
+                                            -- We can defer cache update or do it after.
+                                            -- But if 'b' refers back to 'nid', we loop.
+                                            -- 'b' referring to 'nid' means Body contains parent TyExp.
+                                            -- Infinite type. MLF allows recursive types?
+                                            -- If so, we need to be careful.
+                                            -- Let's allocate a placeholder or use lazy tying?
+                                            -- Simpler: just recurse. If cycle, 'copyNode b' will handle it via its own cache entry.
+                                            -- But 'nid' cache entry is needed if 'b' refers to 'nid'.
+                                            -- If we skip 'nid', then 'b' referring to 'nid' effectively refers to 'b' (or copy of b).
+                                            -- This is knot-tying.
+                                            -- For now, let's assume no cycles involving TyExp skipping.
+                                            res <- copyNode subst b
+                                            modify $ IntMap.insert (getNodeId nid) res
+                                            return res
+                                        _ -> do
+                                            -- Non-identity expansion.
+                                            -- We must materialize the expansion result.
+                                            b' <- copyNode subst b
+                                            res <- lift $ applyExpansion expn (TyExp (NodeId (-1)) s b')
+                                            modify $ IntMap.insert (getNodeId nid) res
+                                            return res
 
-                            -- Register new node in constraint
-                            lift $ registerNode freshId newNode
-                            return freshId
+                                _ -> do
+                                    -- Create fresh node shell
+                                    freshId <- lift createFreshNodeId
+                                    modify $ IntMap.insert (getNodeId nid) freshId
+
+                                    -- Recursively copy children
+                                    newNode <- case node of
+                                        TyArrow { tnDom = d, tnCod = c } -> do
+                                            d' <- copyNode subst d
+                                            c' <- copyNode subst c
+                                            return $ TyArrow freshId d' c'
+                                        TyForall { tnLevel = ownerLvl, tnQuantLevel = q, tnBody = b } -> do
+                                            b' <- copyNode subst b
+                                            return $ TyForall freshId q ownerLvl b'
+                                        TyVar { tnLevel = l } -> do
+                                            return $ TyVar freshId l
+                                        TyBase { tnBase = b } -> do
+                                            return $ TyBase freshId b
+                                        -- TyExp handled above
+                                        TyExp {} -> error "Unreachable TyExp"
+
+                                    -- Register new node in constraint
+                                    lift $ registerNode freshId newNode
+                                    return freshId
 
 -- | Helper to create a fresh NodeId
 createFreshNodeId :: PresolutionM NodeId
@@ -522,7 +753,9 @@ collectBoundVars rootId level = do
     -- We need to access the graph.
     st <- get
     let nodes = cNodes (psConstraint st)
-    return $ go nodes IntSet.empty [rootId]
+    let vars = go nodes IntSet.empty [rootId]
+    -- trace ("collectBoundVars root=" ++ show rootId ++ " level=" ++ show level ++ " found=" ++ show vars) $ return vars
+    return vars
   where
     go _ _ [] = []
     go nodes visited (nid:rest)
@@ -595,6 +828,7 @@ unifyAcyclic n1 n2 = do
     root1 <- findRoot n1
     root2 <- findRoot n2
     when (root1 /= root2) $ do
+        -- trace ("unifyAcyclic " ++ show root1 ++ " " ++ show root2) $ return ()
         occurs12 <- occursIn root1 root2
         when occurs12 $ throwError $ OccursCheckPresolution root1 root2
 

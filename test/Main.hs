@@ -8,6 +8,7 @@ import qualified AcyclicitySpec
 import qualified PresolutionSpec
 import qualified SolveSpec
 import qualified PipelineSpec
+import qualified ElaborationSpec
 
 main :: IO ()
 main = hspec $ do
@@ -17,3 +18,4 @@ main = hspec $ do
     PresolutionSpec.spec
     SolveSpec.spec
     PipelineSpec.spec
+    ElaborationSpec.spec

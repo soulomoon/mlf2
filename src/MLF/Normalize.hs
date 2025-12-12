@@ -322,7 +322,7 @@ graftEdge edge = do
         (Just (TyVar { tnLevel = level }), Just (TyArrow { tnDom = rDom, tnCod = rCod }))
           | occursIn nodes uf leftId rightId -> pure Nothing
           | otherwise -> do
-            -- Create fresh variable nodes for domain and codomain
+            -- Create fresh variable nodes for domain and codomain (using the var's level)
             domVar <- freshVar level
             codVar <- freshVar level
             -- Create fresh arrow node
@@ -386,7 +386,7 @@ freshVar level = do
     modify' $ \s ->
         let c = nsConstraint s
             gnodes = cGNodes c
-            gnodes' = IntMap.adjust (\g -> g { gBinds = nid : gBinds g })
+            gnodes' = IntMap.adjust (\g -> g { gBinds = (nid, Nothing) : gBinds g })
                                      (getGNodeIdInt level) gnodes
         in s { nsConstraint = c { cGNodes = gnodes' } }
     pure nid
@@ -512,6 +512,31 @@ processUnifyEdges = foldM processOne []
                 let leftNode = IntMap.lookup (getNodeIdInt left) nodes
                     rightNode = IntMap.lookup (getNodeIdInt right) nodes
                 case (leftNode, rightNode) of
+                    -- TyExp vs TyVar:
+                    --
+                    -- Prefer keeping the *structured* node (`TyExp`) as representative so we
+                    -- don't lose information (notably: λ-parameters are referenced through
+                    -- fresh `TyExp` nodes created by `EVar`, and application relies on
+                    -- propagating those wrappers through unification).
+                    --
+                    -- However, if the expansion node's body is (up to UF) the variable itself,
+                    -- then unifying Var ~ (s·Var) would create a self-loop if we made Var point
+                    -- to the `TyExp`. In that special case, we collapse the wrapper by making
+                    -- the `TyExp` point to the variable (this corresponds to forcing `s` to be
+                    -- the identity expansion).
+                    (Just TyVar {}, Just (TyExp { tnBody = b })) -> do
+                        let bRoot = findRoot uf b
+                        if bRoot == left
+                            then unionNodes right left   -- collapse (s·Var) ~ Var
+                            else unionNodes left right   -- Var points to TyExp (keep structure)
+                        pure acc
+                    (Just (TyExp { tnBody = b }), Just TyVar {}) -> do
+                        let bRoot = findRoot uf b
+                        if bRoot == right
+                            then unionNodes left right   -- collapse (s·Var) ~ Var
+                            else unionNodes right left   -- Var points to TyExp (keep structure)
+                        pure acc
+
                     -- Variable = anything: point variable to other
                     (Just TyVar {}, _) -> do
                         unionNodes left right
@@ -543,15 +568,17 @@ processUnifyEdges = foldM processOne []
                      Just (TyForall { tnQuantLevel = l2, tnBody = b2 }))
                         | l1 == l2 -> do
                             unionNodes left right
-                            pure (acc ++ [UnifyEdge b1 b2])
-                        | otherwise -> pure (edge : acc)
+                            pure (UnifyEdge b1 b2 : acc)
+                        | otherwise -> do
+                            -- Mismatched levels: type error, keep edge
+                            pure (edge : acc)
 
                     -- Exp = Exp: unify bodies if vars match
                     (Just (TyExp { tnExpVar = s1, tnBody = b1 }),
                      Just (TyExp { tnExpVar = s2, tnBody = b2 }))
                         | s1 == s2 -> do
                             unionNodes left right
-                            pure (acc ++ [UnifyEdge b1 b2])
+                            pure (UnifyEdge b1 b2 : acc)
                         | otherwise -> pure (edge : acc)
 
                     -- Incompatible structures: keep edge to signal error
@@ -577,8 +604,8 @@ applyUnionFindToConstraint = do
     uf <- gets nsUnionFind
     when (not (IntMap.null uf)) $ modify' $ \s ->
         let c = nsConstraint s
-            -- Update nodes
-            nodes' = IntMap.map (applyToNode uf) (cNodes c)
+            -- Update nodes: dereference variables to their canonical structure
+            nodes' = IntMap.map (applyToNode uf (cNodes c)) (cNodes c)
             -- Update instantiation edges
             instEdges' = map (applyToInstEdge uf) (cInstEdges c)
             -- Update unification edges
@@ -590,15 +617,39 @@ applyUnionFindToConstraint = do
                  }
              }
 
--- | Apply union-find to a node's internal references.
-applyToNode :: IntMap NodeId -> TyNode -> TyNode
-applyToNode uf node = case node of
+-- | Apply union-find to a node.
+-- If the node is a variable that has been unified with a structure,
+-- we replace the variable with that structure (preserving the variable's ID).
+applyToNode :: IntMap NodeId -> IntMap TyNode -> TyNode -> TyNode
+applyToNode uf nodes node =
+    let nid = tnId node
+        rootId = findRoot uf nid
+    in if nid /= rootId
+        then
+            -- Node has been merged. Check if the root has structure we should copy.
+            case IntMap.lookup (getNodeIdInt rootId) nodes of
+                Just rootNode ->
+                    -- If root is structure (not Var), copy it to this node ID.
+                    -- If root is also Var, we keep this node as Var (but canonicalized?).
+                    -- Actually, if root is Var, it doesn't matter much (it's a var alias).
+                    -- But if root is structure, we MUST copy it so 'nid' behaves like structure.
+                    case rootNode of
+                        TyVar {} -> node -- Keep as var (alias)
+                        _ -> applyToStructure uf (rootNode { tnId = nid })
+                Nothing -> node -- Should not happen
+        else
+            -- Node is a root (or not in UF). Update its children.
+            applyToStructure uf node
+
+-- | Update children of a structure node using UF.
+applyToStructure :: IntMap NodeId -> TyNode -> TyNode
+applyToStructure uf node = case node of
     TyVar {} -> node
     TyArrow { tnId = nid, tnDom = dom, tnCod = cod } ->
         TyArrow { tnId = nid, tnDom = findRoot uf dom, tnCod = findRoot uf cod }
     TyBase {} -> node
-    TyForall { tnId = nid, tnQuantLevel = lvl, tnBody = body } ->
-        TyForall { tnId = nid, tnQuantLevel = lvl, tnBody = findRoot uf body }
+    TyForall { tnId = nid, tnLevel = ownerLvl, tnQuantLevel = quantLvl, tnBody = body } ->
+        TyForall { tnId = nid, tnLevel = ownerLvl, tnQuantLevel = quantLvl, tnBody = findRoot uf body }
     TyExp { tnId = nid, tnExpVar = ev, tnBody = body } ->
         TyExp { tnId = nid, tnExpVar = ev, tnBody = findRoot uf body }
 

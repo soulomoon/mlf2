@@ -10,6 +10,9 @@ module MLF.Types (
     UnifyEdge (..),
     Constraint (..),
     Expansion (..),
+    InstanceOp(..),
+    InstanceWitness(..),
+    EdgeWitness(..),
     Presolution (..),
     SolverState (..),
     DepGraph (..)
@@ -53,6 +56,7 @@ data TyNode
     | TyForall
         { tnId :: NodeId
         , tnQuantLevel :: GNodeId
+        , tnLevel :: GNodeId
         , tnBody :: NodeId
         }
     -- | Expansion node created for let-bindings; see Note [Expansion nodes].
@@ -119,7 +123,9 @@ Why explicit TyExp + Expansion
 data GNode = GNode
     { gnodeId :: GNodeId
     , gParent :: Maybe GNodeId
-    , gBinds :: [NodeId]
+    , gBinds :: [(NodeId, Maybe NodeId)]
+        -- ^ List of (TyVar, Optional Bound) pairs bound at this level.
+        -- The optional bound is the NodeId of the type τ in ∀(α ⩾ τ).
     , gChildren :: [GNodeId]
     }
     deriving (Eq, Show)
@@ -261,6 +267,38 @@ data Expansion
     | ExpForall (NonEmpty GNodeId)   -- ^ Introduce one or more ∀ levels around the body.
     | ExpInstantiate [NodeId]        -- ^ Substitute bound vars with fresh nodes (arity matches binders).
     | ExpCompose (NonEmpty Expansion) -- ^ Execute several steps in order (e.g., instantiate then ∀).
+    deriving (Eq, Show)
+
+-- | Atomic instance operations (Rémy–Yakobowski) used to witness that an
+-- instantiation edge is solved. These are the operations that appear in
+-- normalized witnesses in `papers/xmlf.txt` §3.4 (Figure 10) and the earlier
+-- graphic-constraint papers (grafting, merging, raising, weakening).
+--
+-- We store “graft σ at n” as `(OpGraft sigmaRoot n)` where `sigmaRoot` is the
+-- root `NodeId` of a (possibly shared) type subgraph in the constraint.
+data InstanceOp
+    = OpGraft NodeId NodeId
+    | OpMerge NodeId NodeId
+    | OpRaise NodeId
+    | OpWeaken NodeId
+    | OpRaiseMerge NodeId NodeId
+    deriving (Eq, Show)
+
+-- | A (normalized) instance-operation witness: a sequence of atomic operations.
+newtype InstanceWitness = InstanceWitness { getInstanceOps :: [InstanceOp] }
+    deriving (Eq, Show)
+
+-- | Per-instantiation-edge witness metadata. `ewRoot` designates the root of
+-- the expansion side that the witness is phrased against (xmlf: the root `r` of
+-- the expansion in χₑ). `ewLeft`/`ewRight` capture the original endpoints of the
+-- instantiation edge so elaboration can reify source/target types.
+data EdgeWitness = EdgeWitness
+    { ewEdgeId :: EdgeId
+    , ewLeft :: NodeId
+    , ewRight :: NodeId
+    , ewRoot :: NodeId
+    , ewWitness :: InstanceWitness
+    }
     deriving (Eq, Show)
 
 newtype Presolution = Presolution { getAssignments :: IntMap Expansion }

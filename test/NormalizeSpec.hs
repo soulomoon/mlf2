@@ -125,6 +125,38 @@ spec = describe "Phase 2 — Normalization" $ do
             -- Type error: keep the inst edge to signal unsolved occurs-check
             length (cInstEdges result) `shouldBe` 1
 
+        it "rejects grafting when RHS Forall contains the LHS variable (occurs-check)" $ do
+            -- α ≤ ∀(β). α
+            let varNode = TyVar (NodeId 0) (GNodeId 0)
+                forallNode = TyForall (NodeId 1) (GNodeId 0) (GNodeId 1) (NodeId 0)
+                -- We need a TyArrow to trigger the check in grafting, as Forall/Exp are filtered out
+                -- So: α ≤ (Int → (∀(β). α))
+                intNode = TyBase (NodeId 2) (BaseTy "Int")
+                arrowNode = TyArrow (NodeId 3) (NodeId 2) (NodeId 1)
+                edge = InstEdge (EdgeId 0) (NodeId 0) (NodeId 3)
+                constraint = emptyConstraint
+                    { cNodes = IntMap.fromList
+                        [ (0, varNode), (1, forallNode), (2, intNode), (3, arrowNode) ]
+                    , cInstEdges = [edge]
+                    }
+                result = normalize constraint
+            length (cInstEdges result) `shouldBe` 1
+
+        it "rejects grafting when RHS Expansion contains the LHS variable (occurs-check)" $ do
+             -- α ≤ (Int → (s · α))
+             let varNode = TyVar (NodeId 0) (GNodeId 0)
+                 expNode = TyExp (NodeId 1) (ExpVarId 0) (NodeId 0)
+                 intNode = TyBase (NodeId 2) (BaseTy "Int")
+                 arrowNode = TyArrow (NodeId 3) (NodeId 2) (NodeId 1)
+                 edge = InstEdge (EdgeId 0) (NodeId 0) (NodeId 3)
+                 constraint = emptyConstraint
+                     { cNodes = IntMap.fromList
+                         [ (0, varNode), (1, expNode), (2, intNode), (3, arrowNode) ]
+                     , cInstEdges = [edge]
+                     }
+                 result = normalize constraint
+             length (cInstEdges result) `shouldBe` 1
+
         it "decomposes arrow ≤ arrow into component unifications" $ do
             -- (α → β) ≤ (Int → Bool)
             let dom1 = TyVar (NodeId 0) (GNodeId 0)
@@ -354,6 +386,73 @@ spec = describe "Phase 2 — Normalization" $ do
                     edge = UnifyEdge (NodeId 0) (NodeId 1)
                     constraint = emptyConstraint
                         { cNodes = IntMap.fromList [(0, node1), (1, node2)]
+                        , cUnifyEdges = [edge]
+                        }
+                    result = normalize constraint
+                length (cUnifyEdges result) `shouldBe` 1
+
+        -- Forall = Forall cases
+        describe "Forall = Forall" $ do
+            it "unifies bodies when levels match" $ do
+                -- ∀(α). α = ∀(β). β
+                let var1 = TyVar (NodeId 0) (GNodeId 1)
+                    forall1 = TyForall (NodeId 1) (GNodeId 0) (GNodeId 1) (NodeId 0)
+                    var2 = TyVar (NodeId 2) (GNodeId 1)
+                    forall2 = TyForall (NodeId 3) (GNodeId 0) (GNodeId 1) (NodeId 2)
+                    edge = UnifyEdge (NodeId 1) (NodeId 3)
+                    constraint = emptyConstraint
+                        { cNodes = IntMap.fromList
+                            [ (0, var1), (1, forall1), (2, var2), (3, forall2) ]
+                        , cUnifyEdges = [edge]
+                        }
+                    result = normalize constraint
+                cUnifyEdges result `shouldBe` []
+
+            it "reports error when levels mismatch" $ do
+                -- ∀(α at g1). ... = ∀(β at g2). ...
+                -- TyForall constructor is: TyForall nid quantLvl ownerLvl body
+                -- To mismatch levels, we need different quantLvl
+                let forall1 = TyForall (NodeId 0) (GNodeId 1) (GNodeId 0) (NodeId 2)
+                    forall2 = TyForall (NodeId 1) (GNodeId 2) (GNodeId 0) (NodeId 3)
+                    -- Dummy body nodes
+                    var1 = TyVar (NodeId 2) (GNodeId 1)
+                    var2 = TyVar (NodeId 3) (GNodeId 2)
+                    edge = UnifyEdge (NodeId 0) (NodeId 1)
+                    constraint = emptyConstraint
+                        { cNodes = IntMap.fromList
+                            [ (0, forall1), (1, forall2), (2, var1), (3, var2) ]
+                        , cUnifyEdges = [edge]
+                        }
+                    result = normalize constraint
+                length (cUnifyEdges result) `shouldBe` 1
+
+        -- Expansion = Expansion cases
+        describe "Exp = Exp" $ do
+            it "unifies bodies when expansion vars match" $ do
+                -- s · α = s · β
+                let var1 = TyVar (NodeId 0) (GNodeId 0)
+                    exp1 = TyExp (NodeId 1) (ExpVarId 0) (NodeId 0)
+                    var2 = TyVar (NodeId 2) (GNodeId 0)
+                    exp2 = TyExp (NodeId 3) (ExpVarId 0) (NodeId 2)
+                    edge = UnifyEdge (NodeId 1) (NodeId 3)
+                    constraint = emptyConstraint
+                        { cNodes = IntMap.fromList
+                            [ (0, var1), (1, exp1), (2, var2), (3, exp2) ]
+                        , cUnifyEdges = [edge]
+                        }
+                    result = normalize constraint
+                cUnifyEdges result `shouldBe` []
+
+            it "reports error when expansion vars mismatch" $ do
+                -- s1 · ... = s2 · ...
+                let exp1 = TyExp (NodeId 0) (ExpVarId 0) (NodeId 2)
+                    exp2 = TyExp (NodeId 1) (ExpVarId 1) (NodeId 3)
+                    var1 = TyVar (NodeId 2) (GNodeId 0)
+                    var2 = TyVar (NodeId 3) (GNodeId 0)
+                    edge = UnifyEdge (NodeId 0) (NodeId 1)
+                    constraint = emptyConstraint
+                        { cNodes = IntMap.fromList
+                            [ (0, exp1), (1, exp2), (2, var1), (3, var2) ]
                         , cUnifyEdges = [edge]
                         }
                     result = normalize constraint
