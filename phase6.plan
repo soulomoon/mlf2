@@ -1,0 +1,82 @@
+# Phase 6 — Elaboration to xMLF/System F (GPT-5.1-Codex-Max plan)
+
+Goal: Given a successful Phase 5 result (`SolveResult`) and the original surface `Expr`, produce an explicitly-typed elaboration (xMLF/System F-like) with explicit `forall` binders and type applications, preserving sharing and respecting G-node scoping.
+
+## Scope & Outputs
+- New module `MLF.Elab` exporting:
+  - Data types: `ElabType`, `ElabScheme`, `ElabTerm` (plus pretty-printers).
+  - Entry points: `elaborate :: SolveResult -> Expr -> Either ElabError ElabTerm`, `runPipelineElab :: Expr -> Either String (ElabTerm, ElabType)`.
+- Tests: `test/ElaborationSpec.hs` golden/structural checks on elaborated terms for representative programs (id, apply-twice, make-const, higher-order closures, rebound cases).
+- Non-goals: No new language features; reuse existing bases/constructors. Keep `runPipeline` unchanged for current tests.
+
+## Design Decisions
+- **AST**
+  - `ElabType`: `TVar Name`, `TArrow ElabType ElabType`, `TBase BaseTy`, `TForall [Name] ElabType`.
+  - `ElabScheme`: `Forall [Name] ElabType` (alias of `ElabType` form or distinct if clearer).
+  - `ElabTerm`: `EVar VarName`, `ELam VarName ElabType ElabTerm`, `EApp ElabTerm ElabTerm`, `ELet VarName ElabScheme ElabTerm ElabTerm`, `ELit Lit`, `ETyAbs [Name] ElabTerm`, `ETyApp ElabTerm [ElabType]`.
+  - Keep variable/type names as plain `String`; ensure deterministic freshening.
+- **Name ordering**: Use stable ordering from G-node info: sort `gBinds` ascending by `NodeId` or use DFS over `cGForest`/`cGNodes` to derive binder order. Pretty-print with canonical names (a, b, c, …, then a1, b1, …) to avoid clashes.
+- **Quantification rule**: For a let-bound RHS at G-node g:
+  - Compute free type vars of the RHS type; quantify exactly those whose `tnLevel` == g and are in `gBinds g`; do NOT quantify outer-scope vars.
+  - Reject if g is missing in `cGNodes` (error).
+- **Sharing**: Reify the solved graph as a DAG to avoid duplication; memoize `NodeId -> ElabType` during reification.
+- **Validation precondition**: Require `validateSolvedGraphStrict` to pass before elaboration; fail fast otherwise.
+
+## Algorithm Outline
+1) **Reify solved types**
+   - Input: `SolveResult`, `NodeId`.
+   - Chase UF via `srUnionFind` (use `frWith`), lookup canonical node in `cNodes`.
+   - Reject `TyExp` (should be absent). Error on missing nodes.
+   - Memoized DFS:
+     - `TyVar nid lvl` -> `TVar (nameFor nid)`; record level for quant calc.
+     - `TyBase b` -> `TBase b`.
+     - `TyArrow d c` -> `TArrow (reify d) (reify c)`.
+     - `TyForall lvl body` -> `TForall [lvl-name?] (reify body)`? (Better: treat forall at term-level via schemes; inside monotypes, retain as part of type shape if present.)
+   - Track `varLevels :: Map NodeId GNodeId` for quantification.
+
+2) **Scheme generalization**
+   - `generalizeAt :: SolveResult -> GNodeId -> NodeId -> Either ElabError ElabScheme`:
+     - Compute free vars of `NodeId`’s reified type (by NodeId identity, not names).
+     - Candidate binders = `gBinds g` intersect free vars.
+     - Order candidates deterministically; map each to a fresh type name.
+     - Substitute names in the reified type (alpha-renaming) to build `Forall [a..] type`.
+
+3) **Elaborate expression**
+   - Thread env `Env = Map VarName (SchemeInfo { defNode :: NodeId, gLevel :: GNodeId, scheme :: Maybe ElabScheme })` collected from constraint gen results (need mapping from surface vars to NodeIds). Options:
+     - Re-run a lightweight pass over `ConstraintResult` (extend it to carry var→NodeId map), or reconstruct from `Constraint` root annotations if available. If missing, extend Phase 1 output to include var-node mapping for elaboration (preferred).
+   - Cases:
+     - `ELit` -> `ELit` unchanged.
+     - `EVar x`: lookup scheme; if polymorphic, emit `ETyApp (EVar x) [instantiated types]` as needed; otherwise plain `EVar` with implicit monotype.
+     - `ELam x e`: get parameter node from env mapping; reify its type; elaborate body under extended env; produce `ELam x ty body`.
+     - `EApp f a`: elaborate subterms; no new type abstractions unless f elaborates to polymorphic form; type apps are introduced at var uses (above) or when re-elaborating known schemes.
+     - `ELet x e1 e2`: elaborate RHS to `t1`; generalize scheme at g-level of x; emit `ELet x scheme t1 t2` where t2 elaborates under env[x↦scheme]. Also emit `ETyAbs` around RHS term if representing explicit type abstraction for generalized vars.
+   - Ensure type applications align with schemes: instantiate `Forall` vars with reified types of uses (from solved constraint along the instantiation edges). If per-use substitution is unavailable, use a simpler scheme where let-binding introduces `ETyAbs` and every use `ETyApp` with the quantifier vars as they appear in the scheme (monotypes already baked from solver UF).
+
+4) **Pipeline wrapper**
+   - `runPipelineElab expr = do { (res, root) <- runPipeline expr; term <- elaborate res expr; ty <- reifyType res root; pure (term, ty) }`.
+
+5) **Testing**
+   - Add `test/ElaborationSpec.hs` with golden strings via pretty-printer:
+     - let-id Bool → `let id = Λa. λ(x:a). x in id Bool True` style.
+     - apply twice (polymorphic apply) ensuring distinct instantiations.
+     - make-const showing generalization.
+     - higher-order closure materialization case from PipelineSpec.
+   - Reuse existing `PipelineSpec` expressions; just assert elaboration succeeds and pretty output matches expected.
+
+## Error Handling
+- `ElabError = ResidualTyExp NodeId | MissingNode NodeId | MissingGNode GNodeId | FreeVarOutOfScope NodeId | EnvLookup VarName | ValidationFailed [String] | NameConflict String`.
+- Fail early if `validateSolvedGraphStrict` is non-empty.
+
+## Work Breakdown
+- W1: Add `ElabType/Term/Scheme`, pretty-printer, `ElabError` (new module).
+- W2: Implement UF-aware `reifyType` with memoization and free-var collection.
+- W3: Implement `generalizeAt` using `cGNodes` and free-vars.
+- W4: Extend constraint generation output to carry var→NodeId mapping for elaboration (if missing), or add a secondary pass to recover bindings.
+- W5: Implement `elaborate` and `runPipelineElab`.
+- W6: Add `ElaborationSpec` tests + hook into test suite; keep existing pipeline tests untouched.
+- W7: Docs: note Phase 6 in `roadmap.md` and TODO tracking.
+
+## Solved Open Questions
+- Best source for var→NodeId map: extend `ConstraintResult` to carry binding metadata for elaboration (preferred over reconstruction).
+- `TyForall` nodes are kept post-solve; only `TyExp` is eliminated. Reification must preserve `TyForall` and avoid double-quantifying by skipping vars already syntactically under matching `TyForall` when computing free vars for `generalizeAt`.
+- Type application placement: introduce `ETyAbs` at let definitions for quantified vars and apply `ETyApp` at each use based on the scheme, avoiding per-edge tracking.
