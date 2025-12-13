@@ -5,7 +5,7 @@ import Data.Bifunctor (first)
 import qualified Data.IntMap.Strict as IntMap
 import Test.Hspec
 
-import MLF.Elab (reifyType, reifyTypeWithBound, generalizeAt, applyRedirectsToAnn, ElabType(..))
+import MLF.Elab (reifyTypeWithBound, generalizeAt, applyRedirectsToAnn, ElabType(..))
 import MLF.Syntax
 import MLF.ConstraintGen
 import MLF.Normalize
@@ -26,8 +26,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 Right (res, root) -> do
                     -- The root should be f's type: ∀(a ⩾ Int). a -> a
                     -- We check if reifyTypeWithBound reconstructs this correctly
-                    let gnodes = cGNodes (srConstraint res)
-                        rootLevel = case cGForest (srConstraint res) of
+                    let rootLevel = case cGForest (srConstraint res) of
                             [r] -> r
                             _ -> error "Expected single root GNode"
 
@@ -176,7 +175,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
 -- Helpers
 runPipelineWithInternals :: Expr -> Either String (SolveResult, AnnExpr)
 runPipelineWithInternals expr = do
-    ConstraintResult{ crConstraint = c0, crRoot = root, crAnnotated = ann } <- first show (generateConstraints expr)
+    ConstraintResult{ crConstraint = c0, crRoot = _root, crAnnotated = ann } <- first show (generateConstraints expr)
     let c1 = normalize c0
     acyc <- first show (checkAcyclicity c1)
     pres <- first show (computePresolution acyc c1)

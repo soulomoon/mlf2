@@ -18,7 +18,8 @@ module MLF.Elab (
     runPipelineElab,
     applyRedirectsToAnn,
     -- * Exported for testing/debugging
-    chaseRedirects
+    chaseRedirects,
+    SchemeInfo(..)
 ) where
 
 import qualified Data.IntMap.Strict as IntMap
@@ -335,7 +336,7 @@ generalizeAt res gid nid = do
             let activeBinders = filter (\(_, canon, _) -> IntSet.member (getNodeId canon) fv) canonicalBinders
 
             -- Use canonical IDs for substitution
-            let grouped = IntMap.fromListWith (\(n1, b1) (n2, b2) -> (n1, b1))
+            let grouped = IntMap.fromListWith (\x _ -> x)
                         [ (getNodeId canon, (canon, mb)) | (_, canon, mb) <- activeBinders ]
 
             let candidates = IntMap.keys grouped
@@ -369,7 +370,7 @@ generalizeAt res gid nid = do
             let activeBinders = filter (\(_, canon, _) -> IntSet.member (getNodeId canon) fv) canonicalBinders
 
             -- Use canonical IDs for substitution
-            let grouped = IntMap.fromListWith (\(n1, b1) (n2, b2) -> (n1, b1))
+            let grouped = IntMap.fromListWith (\x _ -> x)
                         [ (getNodeId canon, (canon, mb)) | (_, canon, mb) <- activeBinders ]
 
             let candidates = IntMap.keys grouped
@@ -477,20 +478,20 @@ reifyTypeWithNames res subst nid = snd <$> go IntMap.empty (canonical nid)
     varsAtLevelInNode lvl start = goV IntSet.empty [start]
       where
         goV seen [] = Right seen
-        goV seen (nid:rest)
-            | IntSet.member (getNodeId nid) seen = goV seen rest
+        goV seen (nid0:rest)
+            | IntSet.member (getNodeId nid0) seen = goV seen rest
             | otherwise =
-                case IntMap.lookup (getNodeId nid) nodes of
+                case IntMap.lookup (getNodeId nid0) nodes of
                     Nothing -> Right seen
                     Just node ->
-                        let seen' = IntSet.insert (getNodeId nid) seen
+                        let seen' = IntSet.insert (getNodeId nid0) seen
                             kids = case node of
                                 TyArrow{ tnDom = d, tnCod = c } -> [canonical d, canonical c]
                                 TyForall{ tnBody = b } -> [canonical b]
                                 TyExp{ tnBody = b } -> [canonical b]
                                 _ -> []
                             addVar = case node of
-                                TyVar{ tnLevel = l } | l == lvl -> IntSet.insert (getNodeId nid) seen'
+                                TyVar{ tnLevel = l } | l == lvl -> IntSet.insert (getNodeId nid0) seen'
                                 _ -> seen'
                         in goV addVar (kids ++ rest)
 
@@ -652,7 +653,9 @@ applyInstantiation ty inst = snd <$> go 0 ty inst
     pickFresh :: String -> [String] -> String
     pickFresh base used =
         let cands = base : [base ++ show i | i <- [(1::Int)..]]
-        in head (filter (`notElem` used) cands)
+        in case filter (`notElem` used) cands of
+            (x:_) -> x
+            [] -> base  -- unreachable (cands is infinite)
 
     -- Rename bound variable occurrences inside an instantiation body.
     -- This is α-renaming of the instantiation’s binder: occurrences of `old`
@@ -821,11 +824,11 @@ phiFromEdgeWitness res mSchemeInfo ew =
             Just 0 -> Right (InstId, ty)
             Just i -> bubble InstId ty i
       where
-        bubble acc ty 0 = Right (acc, ty)
-        bubble acc ty i = do
-            sw <- swapAt (i - 1) ty
-            ty' <- applyInstantiation ty sw
-            bubble (composeInst acc sw) ty' (i - 1)
+        bubble acc ty0 0 = Right (acc, ty0)
+        bubble acc ty0 i = do
+            sw <- swapAt (i - 1) ty0
+            ty1 <- applyInstantiation ty0 sw
+            bubble (composeInst acc sw) ty1 (i - 1)
 
         -- uses the top-level `splitForalls`
 

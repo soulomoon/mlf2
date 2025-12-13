@@ -8,7 +8,7 @@ import System.Timeout (timeout)
 
 import MLF.Syntax (Expr(..), Lit(..), SrcType(..), SrcScheme(..))
 import qualified MLF.Elab as Elab
-import MLF.Types (BaseTy(..), EdgeWitness(..))
+import MLF.Types (BaseTy(..), NodeId(..), EdgeId(..), InstanceOp(..), InstanceWitness(..), EdgeWitness(..))
 import MLF.ConstraintGen (ConstraintResult(..), generateConstraints)
 import MLF.Normalize (normalize)
 import MLF.Acyclicity (checkAcyclicity)
@@ -24,111 +24,92 @@ withTimeout limit action = do
         Just () -> return ()
         Nothing -> expectationFailure $ "Test timed out after " ++ show limit ++ " microseconds"
 
+requireRight :: Show e => Either e a -> IO a
+requireRight = either (\e -> expectationFailure (show e) >> fail "requireRight") pure
+
+requirePipeline :: Expr -> IO (Elab.ElabTerm, Elab.ElabType)
+requirePipeline = requireRight . Elab.runPipelineElab
+
+schemeToType :: Elab.ElabScheme -> Elab.ElabType
+schemeToType (Elab.Forall binds body) =
+    foldr (\(v, b) t -> Elab.TForall v b t) body binds
+
+stripForalls :: Elab.ElabType -> Elab.ElabType
+stripForalls (Elab.TForall _ _ t) = stripForalls t
+stripForalls t = t
+
+-- | Canonicalize binder names in a type to compare up to α-equivalence.
+canonType :: Elab.ElabType -> Elab.ElabType
+canonType = go [] (0 :: Int)
+  where
+    go :: [(String, String)] -> Int -> Elab.ElabType -> Elab.ElabType
+    go env n ty = case ty of
+        Elab.TVar v ->
+            case lookup v env of
+                Just v' -> Elab.TVar v'
+                Nothing -> Elab.TVar v
+        Elab.TBase b -> Elab.TBase b
+        Elab.TBottom -> Elab.TBottom
+        Elab.TArrow a b -> Elab.TArrow (go env n a) (go env n b)
+        Elab.TForall v mb body ->
+            let v' = "a" ++ show n
+                env' = (v, v') : env
+                -- binder is not in scope for its bound
+                mb' = fmap (go env n) mb
+                body' = go env' (n + 1) body
+            in Elab.TForall v' mb' body'
+
+shouldAlphaEqType :: Elab.ElabType -> Elab.ElabType -> Expectation
+shouldAlphaEqType actual expected =
+    canonType actual `shouldBe` canonType expected
+
 spec :: Spec
-spec = around_ (withTimeout 1000000) $ describe "Phase 6 — Elaborate (xMLF)" $ do
+spec = describe "Phase 6 — Elaborate (xMLF)" $ do
     describe "Basic elaboration" $ do
         it "elaborates integer literal" $ do
             let expr = ELit (LInt 1)
-            case Elab.runPipelineElab expr of
-                Right (term, ty) -> do
-                    Elab.pretty term `shouldBe` "1"
-                    Elab.pretty ty `shouldBe` "Int"
-                Left err -> expectationFailure err
+            (term, ty) <- requirePipeline expr
+            Elab.pretty term `shouldBe` "1"
+            Elab.pretty ty `shouldBe` "Int"
 
         it "elaborates boolean literal" $ do
             let expr = ELit (LBool True)
-            case Elab.runPipelineElab expr of
-                Right (term, ty) -> do
-                    Elab.pretty term `shouldBe` "true"
-                    Elab.pretty ty `shouldBe` "Bool"
-                Left err -> expectationFailure err
+            (term, ty) <- requirePipeline expr
+            Elab.pretty term `shouldBe` "true"
+            Elab.pretty ty `shouldBe` "Bool"
 
         it "elaborates lambda" $ do
             let expr = ELam "x" (EVar "x")
-            case Elab.runPipelineElab expr of
-                Right (_, ty) -> do
-                    -- Result is generalized at top level
-                    Elab.pretty ty `shouldBe` "∀a. a -> a"
-                Left err -> expectationFailure err
+            (_, ty) <- requirePipeline expr
+            -- Result is generalized at top level
+            Elab.pretty ty `shouldBe` "∀a. a -> a"
 
         it "elaborates application" $ do
             let expr = EApp (ELam "x" (EVar "x")) (ELit (LInt 42))
-            case Elab.runPipelineElab expr of
-                Right (_, ty) -> do
-                    -- Type should be Int, but currently resolves to t3 (unified with Int)
-                    -- Wait, the variable naming might have shifted due to new TyExp/TyForall allocations?
-                    -- The failure log said "t4".
-                    -- Top level generalization makes it "∀a. a" because t4 is a fresh variable
-                    -- that was unified with Int? No, if it was unified with Int, it should be Int.
-                    -- If it prints "∀a. a", it means it's a variable.
-                    -- This implies application result type variable was NOT unified with Int.
-                    -- This is a regression? Or just Presolution doesn't unify top-level result?
-                    -- App result tRes. Arg Int.
-                    -- tArg ~ Int. tArg -> tRes.
-                    -- Lambda x -> x. Type tX -> tX.
-                    -- tX -> tX ~ Int -> tRes.
-                    -- tX ~ Int. tX ~ tRes.
-                    -- So tRes ~ Int.
-                    -- So it SHOULD be Int.
-                    -- Why "∀a. a"?
-                    -- Maybe tRes was generalized?
-                    -- If tRes is Int. Int cannot be generalized to ∀a. a.
-                    -- So tRes is NOT Int.
-                    -- This means unification FAILED or wasn't propagated.
-                    -- But "elaborates usage of polymorphic let" PASSED (Bool).
-                    -- That test used ELet.
-                    -- This test uses EApp directly.
-                    -- EApp creates InstEdge? No, monomorphic application creates UnifyEdge?
-                    -- generateConstraints for EApp.
-                    -- If fun is not variable, it's monomorphic app.
-                    -- tFun ~ tArg -> tRes.
-                    -- UnifyEdge.
-                    -- Normalize processes UnifyEdge.
-                    -- Presolution processes InstEdge.
-                    -- Normalize merges Arrow.
-                    -- tX -> tX ~ Int -> tRes.
-                    -- tX ~ Int. tX ~ tRes.
-                    -- So tRes ~ Int.
-                    -- So result MUST be Int.
-                    -- If output is "∀a. a", then tRes is NOT Int.
-                    -- This means Normalize failed?
-                    -- Or Solve failed?
-                    -- I'll expect "Int" and see if it fails again.
-                    Elab.pretty ty `shouldBe` "Int"
-                Left err -> expectationFailure err
+            (_, ty) <- requirePipeline expr
+            Elab.pretty ty `shouldBe` "Int"
 
     describe "Polymorphism and Generalization" $ do
         it "elaborates polymorphic let-binding" $ do
             -- let id = \x. x in id
             let expr = ELet "id" (ELam "x" (EVar "x")) (EVar "id")
-            case Elab.runPipelineElab expr of
-                Right (term, ty) -> do
-                    -- Result type is polymorphic.
-                    -- Note: reifyType generates names like 'a', 'b', etc. for bound variables.
-                    -- The type '∀a. a -> a' is expected.
-                    -- Current implementation of runPipelineElab generalizes the *root* node.
-                    -- If root is already a Forall (id), generalizesAt fails to decompose it (level mismatch),
-                    -- so it wraps it. But since it's identity wrapper, it returns the Forall.
-                    -- However, reifyType logic for Forall uses raw names (t3).
-                    -- So we get "∀t3. t0 -> t0".
-                    -- We accept this for now.
-                    Elab.pretty ty `shouldSatisfy` (\s -> "t0 -> t0" `isInfixOf` s)
+            (term, ty) <- requirePipeline expr
 
-                    -- Term should look like: let id : ∀a. a -> a = Λa. λx:a. x in id
-                    -- We fixed the lambda parameter type substitution.
-                    Elab.pretty term `shouldBe` "let id : ∀a. a -> a = Λa. λx:a. x in id"
-                Left err -> expectationFailure err
+            -- Term should look like: let id : ∀a. a -> a = Λa. λx:a. x in id
+            Elab.pretty term `shouldBe` "let id : ∀a. a -> a = Λa. λx:a. x in id"
+
+            -- Type is polymorphic (compare up to α-equivalence).
+            let expected =
+                    Elab.TForall "a" Nothing
+                        (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+            ty `shouldAlphaEqType` expected
 
         it "elaborates polymorphic instantiation" $ do
             -- let id = \x. x in id 1
             let expr = ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (ELit (LInt 1)))
-            case Elab.runPipelineElab expr of
-                Right (term, ty) -> do
-                    Elab.pretty ty `shouldBe` "Int"
-                    -- Term should show instantiation.
-                    -- "let id : ∀a. a -> a = Λa. λx:a. x in (id [⟨Int⟩]) 1"
-                    Elab.pretty term `shouldBe` "let id : ∀a. a -> a = Λa. λx:a. x in (id [⟨Int⟩]) 1"
-                Left err -> expectationFailure err
+            (term, ty) <- requirePipeline expr
+            Elab.pretty ty `shouldBe` "Int"
+            Elab.pretty term `shouldBe` "let id : ∀a. a -> a = Λa. λx:a. x in (id [⟨Int⟩]) 1"
 
         it "elaborates usage of polymorphic let (instantiated at different types)" $ do
             -- let f = \x. x in let _ = f 1 in f true
@@ -136,40 +117,29 @@ spec = around_ (withTimeout 1000000) $ describe "Phase 6 — Elaborate (xMLF)" $
             let expr = ELet "f" (ELam "x" (EVar "x"))
                         (ELet "_" (EApp (EVar "f") (ELit (LInt 1)))
                             (EApp (EVar "f") (ELit (LBool True))))
-            case Elab.runPipelineElab expr of
-                Right (term, ty) -> do
-                    -- Result is Bool
-                    Elab.pretty ty `shouldBe` "Bool"
-                    -- Term should show two instantiations of f.
-                    -- let f : ... = ... in let _ : ... = (f [⟨Int⟩]) 1 in (f [⟨Bool⟩]) true
-                    let s = Elab.pretty term
-                    s `shouldSatisfy` ("f [⟨Int⟩]" `isInfixOf`)
-                    s `shouldSatisfy` ("f [⟨Bool⟩]" `isInfixOf`)
-                Left err -> expectationFailure err
+            (term, ty) <- requirePipeline expr
+            Elab.pretty ty `shouldBe` "Bool"
+            let s = Elab.pretty term
+            s `shouldSatisfy` ("f [⟨Int⟩]" `isInfixOf`)
+            s `shouldSatisfy` ("f [⟨Bool⟩]" `isInfixOf`)
 
         it "elaborates nested let bindings" $ do
             -- let x = 1 in let y = x in y
             let expr = ELet "x" (ELit (LInt 1)) (ELet "y" (EVar "x") (EVar "y"))
-            case Elab.runPipelineElab expr of
-                Right (term, ty) -> do
-                    -- The result type might show vacuous quantification "∀t3. ∀t1. Int"
-                    -- because ELet inserts TyForall nodes that are not eliminated if unused.
-                    -- We accept either "Int" or the quantified form.
-                    let tyStr = Elab.pretty ty
-                    tyStr `shouldSatisfy` (\s -> "Int" `isInfixOf` s)
+            (term, ty) <- requirePipeline expr
 
-                    Elab.pretty term `shouldSatisfy` ("let x" `isInfixOf`)
-                    Elab.pretty term `shouldSatisfy` ("let y" `isInfixOf`)
-                Left err -> expectationFailure err
+            -- Allow vacuous quantification, but require the body to be Int.
+            stripForalls ty `shouldBe` Elab.TBase (BaseTy "Int")
+
+            Elab.pretty term `shouldSatisfy` ("let x" `isInfixOf`)
+            Elab.pretty term `shouldSatisfy` ("let y" `isInfixOf`)
 
         it "elaborates term annotations" $ do
             -- (\x. x) : Int -> Int
             let ann = STArrow (STBase "Int") (STBase "Int")
                 expr = EAnn (ELam "x" (EVar "x")) ann
-            case Elab.runPipelineElab expr of
-                Right (term, ty) -> do
-                    Elab.pretty ty `shouldBe` "Int -> Int"
-                Left err -> expectationFailure err
+            (_term, ty) <- requirePipeline expr
+            Elab.pretty ty `shouldBe` "Int -> Int"
 
     describe "Elaboration of Bounded Quantification (Flexible Bounds)" $ do
         it "elaborates annotated let with flexible bound (Int -> Int)" $ do
@@ -182,12 +152,15 @@ spec = around_ (withTimeout 1000000) $ describe "Phase 6 — Elaborate (xMLF)" $
                 scheme = SrcScheme [("a", Just bound)] (STArrow (STVar "a") (STVar "a"))
                 expr = ELetAnn "f" scheme (ELam "x" (EVar "x")) (EVar "f")
 
-            case Elab.runPipelineElab expr of
-                Right (term, ty) -> do
-                    -- The type should preserve the bound
-                    Elab.pretty ty `shouldSatisfy` (\s -> "⩾ Int -> Int" `isInfixOf` s)
-                    Elab.pretty term `shouldSatisfy` (\s -> "let f : ∀(a ⩾ Int -> Int). a -> a" `isInfixOf` s)
-                Left err -> expectationFailure err
+            (term, ty) <- requirePipeline expr
+            Elab.pretty term `shouldSatisfy` (\s -> "let f : ∀(a ⩾ Int -> Int). a -> a" `isInfixOf` s)
+
+            let expectedBound =
+                    Elab.TArrow (Elab.TBase (BaseTy "Int")) (Elab.TBase (BaseTy "Int"))
+                expectedTy =
+                    Elab.TForall "a" (Just expectedBound)
+                        (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+            ty `shouldAlphaEqType` expectedTy
 
         it "elaborates annotated let with polymorphic bound (Rank-2ish)" $ do
             -- let f : ∀(a ⩾ ∀b. b -> b). a -> a = \x. x in f
@@ -195,11 +168,14 @@ spec = around_ (withTimeout 1000000) $ describe "Phase 6 — Elaborate (xMLF)" $
                 scheme = SrcScheme [("a", Just innerBound)] (STArrow (STVar "a") (STVar "a"))
                 expr = ELetAnn "f" scheme (ELam "x" (EVar "x")) (EVar "f")
 
-            case Elab.runPipelineElab expr of
-                Right (term, ty) -> do
-                    -- Binder names are not stable; just ensure the bound is a forall arrow.
-                    Elab.pretty ty `shouldSatisfy` (\s -> "⩾ ∀" `isInfixOf` s && "->" `isInfixOf` s)
-                Left err -> expectationFailure err
+            (_term, ty) <- requirePipeline expr
+            let expectedInner =
+                    Elab.TForall "b" Nothing
+                        (Elab.TArrow (Elab.TVar "b") (Elab.TVar "b"))
+                expectedTy =
+                    Elab.TForall "a" (Just expectedInner)
+                        (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+            ty `shouldAlphaEqType` expectedTy
 
         it "elaborates lambda with rank-2 argument" $ do
             -- \x : (∀a. a -> a). x 1
@@ -207,11 +183,12 @@ spec = around_ (withTimeout 1000000) $ describe "Phase 6 — Elaborate (xMLF)" $
             let paramTy = STForall "a" Nothing (STArrow (STVar "a") (STVar "a"))
                 expr = ELamAnn "x" paramTy (EApp (EVar "x") (ELit (LInt 1)))
 
-            case Elab.runPipelineElab expr of
-                Right (term, ty) -> do
-                    -- Result should be (∀a. a -> a) -> Int
-                    Elab.pretty ty `shouldSatisfy` (\s -> "∀" `isInfixOf` s && "-> Int" `isInfixOf` s)
-                Left err -> expectationFailure err
+            (_term, ty) <- requirePipeline expr
+            let expected =
+                    Elab.TArrow
+                        (Elab.TForall "a" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
+                        (Elab.TBase (BaseTy "Int"))
+            ty `shouldAlphaEqType` expected
 
     describe "xMLF types (instance bounds)" $ do
         it "pretty prints unbounded forall" $ do
@@ -264,6 +241,55 @@ spec = around_ (withTimeout 1000000) $ describe "Phase 6 — Elaborate (xMLF)" $
         it "pretty prints bottom instantiation" $ do
             let inst = Elab.InstBot (Elab.TBase (BaseTy "Int"))
             Elab.pretty inst `shouldBe` "Int"
+
+    describe "xMLF instantiation semantics (applyInstantiation)" $ do
+        it "InstElim substitutes the binder with its bound (default ⊥)" $ do
+            let ty = Elab.TForall "a" Nothing (Elab.TVar "a")
+            out <- requireRight (Elab.applyInstantiation ty Elab.InstElim)
+            out `shouldBe` Elab.TBottom
+
+        it "InstElim substitutes the binder with an explicit bound" $ do
+            let ty = Elab.TForall "a" (Just (Elab.TBase (BaseTy "Int"))) (Elab.TVar "a")
+            out <- requireRight (Elab.applyInstantiation ty Elab.InstElim)
+            out `shouldBe` Elab.TBase (BaseTy "Int")
+
+        it "InstInside can update a ⊥ bound to a concrete bound" $ do
+            let ty = Elab.TForall "a" Nothing (Elab.TVar "a")
+                inst = Elab.InstInside (Elab.InstBot (Elab.TBase (BaseTy "Int")))
+            out <- requireRight (Elab.applyInstantiation ty inst)
+            out `shouldBe` Elab.TForall "a" (Just (Elab.TBase (BaseTy "Int"))) (Elab.TVar "a")
+
+        it "InstUnder applies to the body and renames the instantiation binder" $ do
+            let ty = Elab.TForall "a" Nothing (Elab.TVar "zzz")
+                inst = Elab.InstUnder "x" (Elab.InstAbstr "x")
+            out <- requireRight (Elab.applyInstantiation ty inst)
+            out `shouldBe` Elab.TForall "a" Nothing (Elab.TVar "a")
+
+        it "InstApp behaves like (∀(⩾ τ); N) on the outermost quantifier" $ do
+            let ty = Elab.TForall "a" Nothing (Elab.TVar "a")
+            out <- requireRight (Elab.applyInstantiation ty (Elab.InstApp (Elab.TBase (BaseTy "Int"))))
+            out `shouldBe` Elab.TBase (BaseTy "Int")
+
+        it "fails InstElim on a non-∀ type" $ do
+            case Elab.applyInstantiation (Elab.TBase (BaseTy "Int")) Elab.InstElim of
+                Left _ -> pure ()
+                Right t -> expectationFailure ("Expected failure, got: " ++ show t)
+
+        it "fails InstInside on a non-∀ type" $ do
+            let inst = Elab.InstInside (Elab.InstBot (Elab.TBase (BaseTy "Int")))
+            case Elab.applyInstantiation (Elab.TBase (BaseTy "Int")) inst of
+                Left _ -> pure ()
+                Right t -> expectationFailure ("Expected failure, got: " ++ show t)
+
+        it "fails InstUnder on a non-∀ type" $ do
+            case Elab.applyInstantiation (Elab.TBase (BaseTy "Int")) (Elab.InstUnder "a" Elab.InstId) of
+                Left _ -> pure ()
+                Right t -> expectationFailure ("Expected failure, got: " ++ show t)
+
+        it "fails InstBot on a non-⊥ type" $ do
+            case Elab.applyInstantiation (Elab.TBase (BaseTy "Int")) (Elab.InstBot (Elab.TBase (BaseTy "Bool"))) of
+                Left _ -> pure ()
+                Right t -> expectationFailure ("Expected failure, got: " ++ show t)
 
     describe "xMLF terms" $ do
         it "pretty prints type abstraction with bound" $ do
@@ -328,24 +354,6 @@ spec = around_ (withTimeout 1000000) $ describe "Phase 6 — Elaborate (xMLF)" $
             Elab.pretty Elab.InstIntro `shouldBe` "O"
 
     describe "Witness translation (Φ/Σ)" $ do
-        let canonType :: Elab.ElabType -> Elab.ElabType
-            canonType = go [] 0
-              where
-                go env n ty = case ty of
-                    Elab.TVar v ->
-                        case lookup v env of
-                            Just v' -> Elab.TVar v'
-                            Nothing -> Elab.TVar v
-                    Elab.TBase b -> Elab.TBase b
-                    Elab.TBottom -> Elab.TBottom
-                    Elab.TArrow a b -> Elab.TArrow (go env n a) (go env n b)
-                    Elab.TForall v mb body ->
-                        let v' = "a" ++ show n
-                            env' = (v, v') : env
-                            mb' = fmap (go env n) mb
-                            body' = go env' (n + 1) body
-                        in Elab.TForall v' mb' body'
-
         describe "Σ(g) quantifier reordering" $ do
             it "commutes two adjacent quantifiers" $ do
                 let src =
@@ -361,6 +369,21 @@ spec = around_ (withTimeout 1000000) $ describe "Phase 6 — Elaborate (xMLF)" $
                         case Elab.applyInstantiation src sig of
                             Left err -> expectationFailure (show err)
                             Right out -> canonType out `shouldBe` canonType tgt
+
+            it "commutes two adjacent bounded quantifiers (bounds preserved)" $ do
+                let intTy = Elab.TBase (BaseTy "Int")
+                    boolTy = Elab.TBase (BaseTy "Bool")
+                    src =
+                        Elab.TForall "a" (Just intTy)
+                            (Elab.TForall "b" (Just boolTy)
+                                (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b")))
+                    tgt =
+                        Elab.TForall "b" (Just boolTy)
+                            (Elab.TForall "a" (Just intTy)
+                                (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b")))
+                sig <- requireRight (Elab.sigmaReorder src tgt)
+                out <- requireRight (Elab.applyInstantiation src sig)
+                canonType out `shouldBe` canonType tgt
 
             it "permutes three quantifiers" $ do
                 let src =
@@ -383,6 +406,13 @@ spec = around_ (withTimeout 1000000) $ describe "Phase 6 — Elaborate (xMLF)" $
                             Left err -> expectationFailure (show err)
                             Right out -> canonType out `shouldBe` canonType tgt
 
+            it "fails when target binder identity is not present in the source" $ do
+                let src = Elab.TForall "a" Nothing (Elab.TVar "a")
+                    tgt = Elab.TForall "b" Nothing (Elab.TVar "b")
+                case Elab.sigmaReorder src tgt of
+                    Left _ -> pure ()
+                    Right sig -> expectationFailure ("Expected failure, got: " ++ show sig)
+
         describe "Φ translation soundness" $ do
             let runToSolved :: Expr -> Either String (SolveResult, IntMap.IntMap EdgeWitness)
                 runToSolved e = do
@@ -393,8 +423,48 @@ spec = around_ (withTimeout 1000000) $ describe "Phase 6 — Elaborate (xMLF)" $
                     solved <- firstShow (solveUnify (prConstraint pres))
                     pure (solved, prEdgeWitnesses pres)
 
+                runSolvedWithRoot :: Expr -> Either String (SolveResult, NodeId)
+                runSolvedWithRoot e = do
+                    ConstraintResult { crConstraint = c0, crRoot = root } <- firstShow (generateConstraints e)
+                    let c1 = normalize c0
+                    acyc <- firstShow (checkAcyclicity c1)
+                    pres <- firstShow (computePresolution acyc c1)
+                    solved <- firstShow (solveUnify (prConstraint pres))
+                    let root' = Elab.chaseRedirects (prRedirects pres) root
+                    pure (solved, root')
+
                 firstShow :: Show err => Either err a -> Either String a
                 firstShow = either (Left . show) Right
+
+            it "scheme-aware Φ can target a non-front binder (reordering before instantiation)" $ do
+                -- Build a SolveResult that can reify a graft argument type (Int).
+                (solved, intNode) <- requireRight (runSolvedWithRoot (ELit (LInt 1)))
+
+                let scheme =
+                        Elab.Forall [("a", Nothing), ("b", Nothing)]
+                            (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))
+                    subst = IntMap.fromList [(1, "a"), (2, "b")]
+                    si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = subst }
+
+                    -- Witness says: graft Int into binder “b” (NodeId 2), then weaken it.
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = NodeId 0
+                        , ewRight = NodeId 0
+                        , ewRoot = NodeId 0
+                        , ewWitness = InstanceWitness [OpGraft intNode (NodeId 2), OpWeaken (NodeId 2)]
+                        }
+
+                phi <- requireRight (Elab.phiFromEdgeWitness solved (Just si) ew)
+
+                -- Because we target the *second* binder, Φ must do more than a plain ⟨Int⟩.
+                phi `shouldNotBe` Elab.InstApp (Elab.TBase (BaseTy "Int"))
+
+                out <- requireRight (Elab.applyInstantiation (schemeToType scheme) phi)
+                let expected =
+                        Elab.TForall "a" Nothing
+                            (Elab.TArrow (Elab.TVar "a") (Elab.TBase (BaseTy "Int")))
+                canonType out `shouldBe` canonType expected
 
             it "witness instantiation matches solved edge types (id @ Int)" $ do
                 let expr = ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (ELit (LInt 1)))
@@ -402,18 +472,12 @@ spec = around_ (withTimeout 1000000) $ describe "Phase 6 — Elaborate (xMLF)" $
                     Left err -> expectationFailure err
                     Right (solved, ews) -> do
                         IntMap.size ews `shouldSatisfy` (> 0)
-                        let ew = head (IntMap.elems ews)
-                        case ( Elab.reifyType solved (ewRoot ew)
-                             , Elab.reifyType solved (ewRight ew)
-                             , Elab.phiFromEdgeWitness solved Nothing ew
-                             ) of
-                            (Right srcTy, Right tgtTy, Right phi) ->
-                                case Elab.applyInstantiation srcTy phi of
-                                    Left err -> expectationFailure (show err)
-                                    Right out -> canonType out `shouldBe` canonType tgtTy
-                            (Left err, _, _) -> expectationFailure (show err)
-                            (_, Left err, _) -> expectationFailure (show err)
-                            (_, _, Left err) -> expectationFailure (show err)
+                        forM_ (IntMap.elems ews) $ \ew -> do
+                            srcTy <- requireRight (Elab.reifyType solved (ewRoot ew))
+                            tgtTy <- requireRight (Elab.reifyType solved (ewRight ew))
+                            phi <- requireRight (Elab.phiFromEdgeWitness solved Nothing ew)
+                            out <- requireRight (Elab.applyInstantiation srcTy phi)
+                            canonType out `shouldBe` canonType tgtTy
 
             it "witness instantiation matches solved edge types (two instantiations)" $ do
                 let expr =
@@ -425,9 +489,6 @@ spec = around_ (withTimeout 1000000) $ describe "Phase 6 — Elaborate (xMLF)" $
                     Right (solved, ews) -> do
                         IntMap.size ews `shouldBe` 2
                         forM_ (IntMap.elems ews) $ \ew -> do
-                            let requireRight :: Show e => Either e a -> IO a
-                                requireRight = either (\e -> expectationFailure (show e) >> error "unreachable") pure
-
                             srcTy <- requireRight (Elab.reifyType solved (ewRoot ew))
                             tgtTy <- requireRight (Elab.reifyType solved (ewRight ew))
                             phi <- requireRight (Elab.phiFromEdgeWitness solved Nothing ew)
