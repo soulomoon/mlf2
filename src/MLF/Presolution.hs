@@ -345,19 +345,24 @@ witnessFromExpansion root leftRaw expn = do
         -- that `applyExpansion` uses (collectBoundVars + zip).
         case leftRaw of
             TyExp{ tnBody = b } -> do
-                bNode <- getCanonicalNode b
-                case bNode of
-                    TyForall{ tnBody = inner, tnQuantLevel = q } -> do
-                        boundVars <- collectBoundVars inner q
-                        if length boundVars /= length args
-                            then throwError (ArityMismatch "witnessFromExpansion/ExpInstantiate" (length boundVars) (length args))
-                            else do
-                                let pairs = zip args boundVars
-                                pure $ concatMap (\(arg, bv) -> [OpGraft arg bv, OpWeaken bv]) pairs
-                    _ -> throwError (InstantiateOnNonForall (tnId bNode))
+                boundVars <- firstNonVacuousBinders b
+                if length boundVars /= length args
+                    then throwError (ArityMismatch "witnessFromExpansion/ExpInstantiate" (length boundVars) (length args))
+                    else do
+                        let pairs = zip args boundVars
+                        pure $ concatMap (\(arg, bv) -> [OpGraft arg bv, OpWeaken bv]) pairs
             _ -> do
                 -- Instantiating a non-TyExp is unexpected in current pipeline; treat as empty.
                 pure []
+      where
+        firstNonVacuousBinders :: NodeId -> PresolutionM [NodeId]
+        firstNonVacuousBinders nid = do
+            n <- getCanonicalNode nid
+            case n of
+                TyForall{ tnBody = inner, tnQuantLevel = q } -> do
+                    bvs <- collectBoundVars inner q
+                    if null bvs then firstNonVacuousBinders inner else pure bvs
+                _ -> throwError (InstantiateOnNonForall (tnId n))
 
 unifyStructure :: NodeId -> NodeId -> PresolutionM ()
 unifyStructure n1 n2 = do
@@ -484,12 +489,19 @@ level. The sequence preserves sharing outside the binder and remains the least
 expansion that satisfies the edge (principality argument in §5).
 -}
 decideMinimalExpansion :: TyNode -> TyNode -> PresolutionM (Expansion, [(NodeId, NodeId)])
-decideMinimalExpansion (TyExp { tnBody = bodyId }) targetNode = do
+decideMinimalExpansion expNode@(TyExp { tnBody = bodyId }) targetNode = do
     body <- getCanonicalNode bodyId
     case body of
         TyForall { tnBody = forallBody, tnQuantLevel = lvl } -> do
             boundVars <- collectBoundVars forallBody lvl
-            case targetNode of
+            -- A TyForall node can be "vacuous" in our constraint graph: it marks a
+            -- generalization boundary even when there are no binders at that level.
+            -- In that case it should behave transparently for expansion decisions
+            -- (otherwise we may unify a non-vacuous ∀ against structure and lose
+            -- instantiation opportunities; see xmlf.txt §3.1 desugaring cases).
+            if null boundVars then
+                decideMinimalExpansion expNode { tnBody = forallBody } targetNode
+            else case targetNode of
                 TyForall { tnQuantLevel = lvl', tnBody = targetBody }
                     | lvl == lvl' ->
                         -- Note [Minimal Expansion Decision] case 1 (∀≤∀ same level)
@@ -502,13 +514,9 @@ decideMinimalExpansion (TyExp { tnBody = bodyId }) targetNode = do
                         return (expn, [])
                 _ -> do
                     -- target is not a forall → instantiate to expose structure
-                    if null boundVars then
-                        -- Note [Minimal Expansion Decision] case 2 (∀≤structure, degenerate ∀)
-                        return (ExpIdentity, [(forallBody, tnId targetNode)])
-                    else do
-                        -- Note [Minimal Expansion Decision] case 2 (∀≤structure, with binders)
-                        freshNodes <- mapM (const (createFreshVarAt lvl)) boundVars
-                        return (ExpInstantiate freshNodes, [])
+                    -- Note [Minimal Expansion Decision] case 2 (∀≤structure, with binders)
+                    freshNodes <- mapM (const (createFreshVarAt lvl)) boundVars
+                    return (ExpInstantiate freshNodes, [])
 
         TyArrow { tnDom = bDom, tnCod = bCod } -> do
             case targetNode of
@@ -554,12 +562,17 @@ getLevelFromBody bodyId = do
 applyExpansion :: Expansion -> TyNode -> PresolutionM NodeId
 applyExpansion expansion expNode = case (expansion, expNode) of
     (ExpIdentity, TyExp { tnBody = b }) -> return b
-    (ExpInstantiate args, TyExp { tnBody = b }) -> do
+    (ExpInstantiate args, expNode'@TyExp { tnBody = b }) -> do
         body <- getCanonicalNode b
         case body of
             TyForall { tnBody = innerBody, tnQuantLevel = q } -> do
                 boundVars <- collectBoundVars innerBody q
-                if length boundVars /= length args
+                if null boundVars then
+                    -- Vacuous ∀: skip it and instantiate the first non-vacuous one underneath.
+                    if null args
+                        then pure innerBody
+                        else applyExpansion (ExpInstantiate args) expNode' { tnBody = innerBody }
+                else if length boundVars /= length args
                     then throwError $ ArityMismatch "applyExpansion" (length boundVars) (length args)
                     else instantiateScheme innerBody q (zip boundVars args)
             _ -> throwError $ InstantiateOnNonForall (tnId body)
@@ -595,12 +608,18 @@ applyExpansion expansion expNode = case (expansion, expNode) of
     applyExpansionOverNode ownerLvl (ExpCompose es) _ nid = foldM (\n e -> do
                                                             nNode <- getCanonicalNode n
                                                             applyExpansionOverNode ownerLvl e nNode n) nid (NE.toList es)
-    applyExpansionOverNode _ (ExpInstantiate args) node _ =
+    applyExpansionOverNode ownerLvl (ExpInstantiate args) node _ =
         case node of
             TyExp{} -> throwError $ InstantiateOnNonForall (tnId node)
             TyForall { tnBody = innerBody, tnQuantLevel = q } -> do
                 boundVars <- collectBoundVars innerBody q
-                if length boundVars /= length args
+                if null boundVars then
+                    if null args
+                        then pure innerBody
+                        else do
+                            innerNode <- getCanonicalNode innerBody
+                            applyExpansionOverNode ownerLvl (ExpInstantiate args) innerNode innerBody
+                else if length boundVars /= length args
                     then throwError $ ArityMismatch "applyExpansionOverNode" (length boundVars) (length args)
                     else instantiateScheme innerBody q (zip boundVars args)
             _ -> throwError $ InstantiateOnNonForall (tnId node)
@@ -837,4 +856,3 @@ unifyAcyclic n1 n2 = do
 
         modify $ \st -> st { psUnionFind = IntMap.insert (getNodeId root1) root2 (psUnionFind st) }
         return ()
-

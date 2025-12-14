@@ -96,18 +96,30 @@ spec = describe "Phase 1 — Constraint generation" $ do
             inferConstraintGraph expr `shouldBe` Left (UnknownVariable "ghost")
 
     describe "Annotated Terms" $ do
-        it "respects lambda parameter annotations" $ do
-            -- λ(x:Int). x
+        it "desugars lambda parameter annotations via κσ coercions" $ do
+            -- λ(x:Int). x  ≜  λ(x). let x = (x : Int) in x
             let ann = STBase "Int"
                 expr = ELamAnn "x" ann (EVar "x")
             expectRight (inferConstraintGraph expr) $ \result -> do
-                let nodes = cNodes (crConstraint result)
+                let constraint = crConstraint result
+                    nodes = cNodes constraint
+                    instEdges = cInstEdges constraint
                 case IntMap.lookup (getNodeId (crRoot result)) nodes of
                     Just TyArrow { tnDom = domId } -> do
                         domNode <- lookupNode nodes domId
                         case domNode of
-                            TyBase { tnBase = BaseTy name } -> name `shouldBe` "Int"
-                            other -> expectationFailure $ "Expected Int parameter, saw " ++ show other
+                            -- The lambda parameter itself remains monomorphic (fresh var),
+                            -- and the annotation is enforced by a coerced let-binding.
+                            TyVar{} -> do
+                                case instEdges of
+                                    [InstEdge _ leftId rightId] -> do
+                                        rightNode <- lookupNode nodes rightId
+                                        leftId `shouldBe` domId
+                                        case rightNode of
+                                            TyBase{ tnBase = BaseTy name } -> name `shouldBe` "Int"
+                                            other -> expectationFailure $ "Expected Int annotation node, saw " ++ show other
+                                    other -> expectationFailure $ "Expected exactly 1 inst edge, saw " ++ show other
+                            other -> expectationFailure $ "Expected TyVar parameter, saw " ++ show other
                     other -> expectationFailure $ "Root is not an arrow: " ++ show other
 
         it "respects polymorphic let annotations" $ do
@@ -185,18 +197,19 @@ spec = describe "Phase 1 — Constraint generation" $ do
                     other -> expectationFailure $ "Root is not an expansion: " ++ show other
 
         it "respects instance bounds in Forall types" $ do
-            -- λ(x : ∀(a ⩾ Int). a). x
-            -- This checks internalizeSrcType STForall with a bound
+            -- λ(x : ∀(a ⩾ Int). a). x  desugars through a coercion in the body,
+            -- which exercises internalizeSrcType STForall with a bound.
             let ann = STForall "a" (Just (STBase "Int")) (STVar "a")
                 expr = ELamAnn "x" ann (EVar "x")
             expectRight (inferConstraintGraph expr) $ \result -> do
-                let nodes = cNodes (crConstraint result)
-                    gnodes = cGNodes (crConstraint result)
-                case IntMap.lookup (getNodeId (crRoot result)) nodes of
-                    Just TyArrow { tnDom = domId } -> do
-                        -- domId is the Forall node
-                        domNode <- lookupNode nodes domId
-                        case domNode of
+                let constraint = crConstraint result
+                    nodes = cNodes constraint
+                    gnodes = cGNodes constraint
+                    instEdges = cInstEdges constraint
+                case instEdges of
+                    [InstEdge _ _ annId] -> do
+                        annNode <- lookupNode nodes annId
+                        case annNode of
                             TyForall { tnQuantLevel = qLevel, tnBody = bodyId } -> do
                                 -- bodyId is 'a'. Its bound is recorded in the quantifier level's G-node.
                                 case IntMap.lookup (getGNodeId qLevel) gnodes of
@@ -213,23 +226,26 @@ spec = describe "Phase 1 — Constraint generation" $ do
                                                 expectationFailure "Expected bound for variable, saw Nothing"
                                             Nothing ->
                                                 expectationFailure "Missing binder entry for variable"
-                            other -> expectationFailure $ "Expected TyForall, saw " ++ show other
-                    other -> expectationFailure $ "Root is not an arrow: " ++ show other
+                            other -> expectationFailure $ "Expected TyForall annotation node, saw " ++ show other
+                    other -> expectationFailure $ "Expected exactly 1 inst edge, saw " ++ show other
 
         it "internalizes Bottom type" $ do
-            -- λ(x : ⊥). x
+            -- λ(x : ⊥). x desugars through a coercion in the body, which
+            -- exercises internalizeSrcType STBottom.
             let ann = STBottom
                 expr = ELamAnn "x" ann (EVar "x")
             expectRight (inferConstraintGraph expr) $ \result -> do
-                let nodes = cNodes (crConstraint result)
-                case IntMap.lookup (getNodeId (crRoot result)) nodes of
-                    Just TyArrow { tnDom = domId } -> do
-                        domNode <- lookupNode nodes domId
-                        case domNode of
-                            -- Bottom is internalized as a fresh TyVar
+                let constraint = crConstraint result
+                    nodes = cNodes constraint
+                    instEdges = cInstEdges constraint
+                case instEdges of
+                    [InstEdge _ _ annId] -> do
+                        annNode <- lookupNode nodes annId
+                        case annNode of
+                            -- Bottom is internalized as a fresh TyVar.
                             TyVar {} -> pure ()
                             other -> expectationFailure $ "Expected TyVar for Bottom, saw " ++ show other
-                    other -> expectationFailure $ "Root is not an arrow: " ++ show other
+                    other -> expectationFailure $ "Expected exactly 1 inst edge, saw " ++ show other
 
     describe "Annotation Edge Cases" $ do
         it "handles free type variables in annotations" $ do

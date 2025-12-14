@@ -11,6 +11,7 @@
 - **Per-edge instance witnesses (`Φ` input)**:
   - Presolution now records an `EdgeWitness` for each processed instantiation edge (`psEdgeWitnesses` / `prEdgeWitnesses`).
   - Today this witness is derived conservatively from the chosen `Expansion` recipe (covers the operations our presolution currently produces: `OpRaise` for `ExpForall`, and `OpGraft` + `OpWeaken` pairs for `ExpInstantiate`).
+  - `ExpInstantiate` witness/application logic skips “vacuous” `TyForall` wrappers (quantifier levels with no binders) so `Φ` construction doesn’t fail on nested/structural ∀ nodes.
 - **`rewriteConstraint`**: Fixed `canonical` logic (`chaseMap . frWith uf`) to prioritize Union-Find redirection over node removal mapping, ensuring that eagerly unified nodes are correctly resolved.
 
 ### 2. src/MLF/Normalize.hs
@@ -24,6 +25,7 @@
 - **`elaborate`**: Updated to apply substitution to the RHS of let-bindings.
 - **Witness translation (`Φ`) + quantifier reordering (`Σ`)**:
   - Elaboration now reifies instantiations from recorded per-edge witnesses (`prEdgeWitnesses`) via `phiFromEdgeWitness` (rather than via `expansionToInst`).
+  - Current `Φ` support is intentionally small: `OpRaise` → `InstIntro` (`O`), and `OpGraft`+`OpWeaken` → `InstApp` (⟨τ⟩).
   - Implemented explicit quantifier reordering instantiations (`sigmaReorder`) using adjacent swaps per `papers/xmlf.txt` §3.4.
   - Implemented `applyInstantiation` to check/apply xMLF instantiations to xMLF types (xmlf Fig. 3), which is used by tests to validate that `Φ(e)` actually transforms the source type into the target type.
 - **`expansionToInst`**: Kept as a legacy/debug conversion from `Expansion` to `Instantiation` (no longer the main path for elaboration).

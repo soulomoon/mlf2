@@ -14,6 +14,7 @@ import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 
 import MLF.Syntax
+import MLF.Desugar (desugarCoercions)
 import MLF.Types
 
 {- Note [Phase 1: Constraint Generation]
@@ -147,10 +148,11 @@ runConstraintM action st = runExcept (runStateT action st)
 
 generateConstraints :: Expr -> Either ConstraintError ConstraintResult
 generateConstraints expr = do
+    let expr' = desugarCoercions expr
     let initialState = mkInitialState
         rootLevel = bsRootLevel initialState
     ((rootNode, annRoot), finalState) <-
-        runConstraintM (buildExpr Map.empty rootLevel expr) initialState
+        runConstraintM (buildExpr Map.empty rootLevel expr') initialState
     let constraint = buildConstraint finalState
     pure ConstraintResult
         { crConstraint = constraint
@@ -191,6 +193,9 @@ buildConstraint st = Constraint
 
 buildExpr :: Env -> GNodeId -> Expr -> ConstraintM (NodeId, AnnExpr)
 buildExpr env level expr = case expr of
+  EVarRaw name -> do
+    nid <- lookupVar env name
+    pure (nid, AVar name nid)
   EVar name -> do
     nid <- lookupVar env name
     -- Wrap in fresh expansion node to allow instantiation at this specific use site
@@ -207,14 +212,9 @@ buildExpr env level expr = case expr of
     arrowNode <- allocArrow argNode bodyNode
     pure (arrowNode, ALam param argNode level bodyAnn arrowNode)
 
-  -- See Note [Annotated Lambda]
-  ELamAnn param srcType body -> do
-    -- Translate the annotation to a constraint graph node
-    argNode <- internalizeSrcType Map.empty level srcType
-    let env' = Map.insert param (Binding argNode) env
-    (bodyNode, bodyAnn) <- buildExpr env' level body
-    arrowNode <- allocArrow argNode bodyNode
-    pure (arrowNode, ALam param argNode level bodyAnn arrowNode)
+  -- ELamAnn is desugared to ELam + let-bound κσ coercion (see `MLF.Desugar`).
+  ELamAnn{} ->
+    buildExpr env level (desugarCoercions expr)
 
   -- See Note [Application and Instantiation Edges]
   EApp fun arg -> do
@@ -282,19 +282,16 @@ buildExpr env level expr = case expr of
     eid <- addInstEdge exprNode annNode
     pure (annNode, AAnn exprAnn annNode eid)
 
-{- Note [Annotated Lambda]
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-An annotated lambda `λ(x : τ). e` is similar to a regular lambda, but instead
-of allocating a fresh type variable for the parameter, we translate the type
-annotation `τ` into a constraint graph node using `internalizeSrcType`.
+{- Note [Annotated Lambda parameters via κσ]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+`papers/xmlf.txt` (§3.1) presents annotated lambda parameters as syntactic sugar:
 
-This allows the user to request higher-rank polymorphism. For example:
-  λ(f : ∀α. α → α). (f 1, f True)
+  λ(x : σ) b  ≜  λ(x) let x = κσ x in b
 
-The annotation creates the polymorphic type in the constraint, and the body
-can then use `f` at multiple instantiations.
-
-Paper reference: eMLF annotations in Rémy & Yakobowski's work.
+We follow that structure by desugaring `ELamAnn` before Phase 1 (see
+`MLF.Desugar.desugarCoercions`). Constraint generation therefore only needs the
+core lambda translation (allocate a fresh parameter type variable), while the
+inserted `let` + `EAnn` nodes enforce the annotation.
 -}
 
 {- Note [Annotated Let]

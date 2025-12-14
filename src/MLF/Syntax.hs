@@ -113,17 +113,20 @@ data SrcScheme = SrcScheme [(String, Maybe SrcType)] SrcType
 -- ------------------------------
 -- `Expr` does not itself encode polymorphism rules. Instead:
 --
---   - lambda binders (`ELam`, `ELamAnn`) behave monomorphically,
+--   - lambda binders (`ELam`) behave monomorphically,
 --   - let binders (`ELet`, `ELetAnn`) are generalization points,
 --   - applications (`EApp`) generate instantiation constraints (≤),
---   - annotations (`ELamAnn`, `ELetAnn`, `EAnn`) are turned into constraint graph
---     structure by Phase 1.
+--   - annotations (`ELetAnn`, `EAnn`) are turned into constraint graph structure
+--     by Phase 1,
+--   - annotated lambda parameters (`ELamAnn`) are desugared via κσ coercions
+--     (see `MLF.Desugar`) before constraint generation.
 --
 -- See `MLF.ConstraintGen` for the authoritative translation.
 --
 -- Unannotated forms infer types; annotated forms check against provided types.
 data Expr
     = EVar VarName
+    | EVarRaw VarName                           -- ^ Internal: skip per-use TyExp wrapping
     | ELam VarName Expr                         -- ^ λx. e (inferred parameter type)
     | ELamAnn VarName SrcType Expr              -- ^ λ(x : τ). e (annotated parameter)
     | EApp Expr Expr
