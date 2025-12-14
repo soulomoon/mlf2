@@ -169,10 +169,10 @@ rewriteConstraint mapping = do
         rewriteNode n =
             let nid' = canonical (tnId n)
                 node' = case n of
-                    TyVar { tnLevel = l } -> TyVar nid' l
+                    TyVar { tnVarLevel = l } -> TyVar nid' l
                     TyArrow { tnDom = d, tnCod = cod } -> TyArrow nid' (canonical d) (canonical cod)
                     TyBase { tnBase = b } -> TyBase nid' b
-                    TyForall { tnLevel = ownerLvl, tnQuantLevel = quantLvl, tnBody = b } ->
+                    TyForall { tnOwnerLevel = ownerLvl, tnQuantLevel = quantLvl, tnBody = b } ->
                         TyForall nid' quantLvl ownerLvl (canonical b)
             in Just (getNodeId nid', node')
 
@@ -532,11 +532,11 @@ decideMinimalExpansion (TyExp { tnBody = bodyId }) targetNode = do
 decideMinimalExpansion _ _ = return (ExpIdentity, [])
 
 -- | Get the level from a node if it has one.
--- Only TyVar and TyForall have tnLevel; others return root level (GNodeId 0).
+-- Only TyVar and TyForall have level fields; others return root level (GNodeId 0).
 getNodeLevel :: TyNode -> GNodeId
 getNodeLevel node = case node of
-    TyVar { tnLevel = l } -> l
-    TyForall { tnLevel = l } -> l
+    TyVar { tnVarLevel = l } -> l
+    TyForall { tnOwnerLevel = l } -> l
     _ -> GNodeId 0  -- Default to root level for structure nodes
 
 -- | Get the level from a TyExp's body by looking up the body node.
@@ -653,7 +653,7 @@ instantiateScheme bodyId quantLevel substList = do
 
                         -- Check level to decide whether to copy or share
                         shouldShare <- case node of
-                            TyVar { tnLevel = l } -> return (l < quantLevel)
+                            TyVar { tnVarLevel = l } -> return (l < quantLevel)
                             TyBase {} -> return True -- Optimization: share base types
                             _ -> return False
 
@@ -702,10 +702,10 @@ instantiateScheme bodyId quantLevel substList = do
                                             d' <- copyNode subst d
                                             c' <- copyNode subst c
                                             return $ TyArrow freshId d' c'
-                                        TyForall { tnLevel = ownerLvl, tnQuantLevel = q, tnBody = b } -> do
+                                        TyForall { tnOwnerLevel = ownerLvl, tnQuantLevel = q, tnBody = b } -> do
                                             b' <- copyNode subst b
                                             return $ TyForall freshId q ownerLvl b'
-                                        TyVar { tnLevel = l } -> do
+                                        TyVar { tnVarLevel = l } -> do
                                             return $ TyVar freshId l
                                         TyBase { tnBase = b } -> do
                                             return $ TyBase freshId b
@@ -749,7 +749,7 @@ ensureLevelExists lvl = do
 -- | Helper to collect variables bound at a specific level
 collectBoundVars :: NodeId -> GNodeId -> PresolutionM [NodeId]
 collectBoundVars rootId level = do
-    -- BFS/DFS to find TyVars with tnLevel == level
+    -- BFS/DFS to find TyVars with tnVarLevel == level
     -- We need to access the graph.
     st <- get
     let nodes = cNodes (psConstraint st)
@@ -764,7 +764,7 @@ collectBoundVars rootId level = do
             let visited' = IntSet.insert (getNodeId nid) visited
                 node = IntMap.lookup (getNodeId nid) nodes
                 vars = case node of
-                    Just (TyVar { tnId = vid, tnLevel = vLevel })
+                    Just (TyVar { tnId = vid, tnVarLevel = vLevel })
                         | vLevel == level -> [vid]
                     _ -> []
                 children = case node of

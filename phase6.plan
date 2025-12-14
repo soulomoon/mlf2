@@ -17,7 +17,7 @@ Goal: Given a successful Phase 5 result (`SolveResult`) and the original surface
   - Keep variable/type names as plain `String`; ensure deterministic freshening.
 - **Name ordering**: Use stable ordering from G-node info: sort `gBinds` ascending by `NodeId` or use DFS over `cGForest`/`cGNodes` to derive binder order. Pretty-print with canonical names (a, b, c, …, then a1, b1, …) to avoid clashes.
 - **Quantification rule**: For a let-bound RHS at G-node g:
-  - Compute free type vars of the RHS type; quantify exactly those whose `tnLevel` == g and are in `gBinds g`; do NOT quantify outer-scope vars.
+  - Compute free type vars of the RHS type; quantify exactly those whose `tnVarLevel` == g and are in `gBinds g`; do NOT quantify outer-scope vars.
   - Reject if g is missing in `cGNodes` (error).
 - **Sharing**: Reify the solved graph as a DAG to avoid duplication; memoize `NodeId -> ElabType` during reification.
 - **Validation precondition**: Require `validateSolvedGraphStrict` to pass before elaboration; fail fast otherwise.

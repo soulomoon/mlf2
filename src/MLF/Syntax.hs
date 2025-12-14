@@ -8,25 +8,69 @@ module MLF.Syntax (
     BindingSite (..)
 ) where
 
--- | Simple variable name representation; for now a plain String is enough.
+{- Note [Surface syntax and paper alignment]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+This module defines the *surface language* accepted by the pipeline:
+
+  - `Expr` is the core eMLF term language (partially annotated λ-calculus).
+  - `SrcType` / `SrcScheme` are the user-written type annotations.
+
+Paper reference
+--------------
+In `papers/xmlf.txt` (§"From λ-terms to typing constraints"), the grammar for
+eMLF terms is (using the paper’s notation):
+
+  b ::= x | λ(x) b | λ(x : σ) b | b b | let x = b in b | (b : σ)
+
+Our `Expr` constructors correspond one-to-one to that grammar:
+
+  - `EVar`       ↔ x
+  - `ELam`       ↔ λ(x) b
+  - `ELamAnn`    ↔ λ(x : σ) b
+  - `EApp`       ↔ b b
+  - `ELet`       ↔ let x = b in b
+  - `ELetAnn`    ↔ let x : σ = b in b
+  - `EAnn`       ↔ (b : σ)
+
+The paper notes that term/type annotations can be desugared using coercion
+functions κσ. This repository keeps annotations explicit in the AST and
+implements their meaning directly during constraint generation.
+
+Implementation boundary
+-----------------------
+These types intentionally remain simple (mostly `String`s) and do not encode
+scope/levels. Binding levels and polymorphism decisions live in the constraint
+representation (`MLF.Types`) produced by Phase 1.
+-}
+
+-- | Source-level term variable names.
+--
+-- We use plain `String`s. Uniqueness / alpha-renaming is handled by the parser
+-- or assumed by construction in tests.
 type VarName = String
 
--- | Literal subset we care about while generating constraints.
+-- | Literal subset used by the pipeline.
+--
+-- These map to base types in constraint generation (e.g. `Int`, `Bool`, `String`).
 data Lit
     = LInt Integer
     | LBool Bool
     | LString String
     deriving (Eq, Show)
 
--- | Source-level type syntax (eMLF annotations).
+-- | Source-level type syntax for annotations.
 --
--- This is the surface syntax for type annotations that users can write.
--- It supports:
---   - Type variables: α, β, ...
---   - Arrow types: τ → σ
---   - Base types: Int, Bool, ...
---   - Instance-bounded quantification: ∀(α ⩾ τ). σ
---   - Bottom type: ⊥ (the minimal/most polymorphic type)
+-- This corresponds closely to the type language presented in `papers/xmlf.txt`:
+--
+--   - type variables (written !α in the paper; we use names like "a")
+--   - arrows (τ → σ)
+--   - bounded quantification ∀(α ⩾ τ). σ
+--   - bottom type ⊥ (the default bound for unbounded quantification)
+--
+-- We add a small convenience notationally:
+--
+--   - In `STForall v Nothing body`, the missing bound means “bound = ⊥”, i.e.
+--     the common unbounded form ∀(v). body.
 --
 -- Examples:
 --   - @Int → Bool@
@@ -41,10 +85,18 @@ data SrcType
     | STBottom                                  -- ^ Bottom type: ⊥
     deriving (Eq, Show)
 
--- | Source-level type scheme (multiple quantifiers).
+-- | Source-level type scheme (multiple binders) used by `ELetAnn`.
 --
--- A scheme is a sequence of quantified variables with optional bounds,
--- followed by a body type.
+-- `SrcScheme` is a syntactic convenience for user-facing let annotations:
+--
+--   let x : ∀(a ⩾ τa). ∀(b). body = rhs in ...
+--
+-- is represented as:
+--
+--   SrcScheme [("a", Just τa), ("b", Nothing)] body
+--
+-- It is equivalent to nesting `STForall` binders (right-associatively), but a
+-- list is more convenient for parsing/pretty-printing and for internalization.
 --
 -- Example: @∀(α ⩾ Int)(β). α → β@ represents a scheme where
 --   - α has bound Int
@@ -53,11 +105,21 @@ data SrcType
 data SrcScheme = SrcScheme [(String, Maybe SrcType)] SrcType
     deriving (Eq, Show)
 
--- | Core ML-like language supported by the constraint generator (eMLF).
+-- | Core term language (eMLF) supported by constraint generation.
 --
--- This extends the basic ML expression syntax with optional type annotations:
---   - ELamAnn: Lambda with annotated parameter type
---   - ELetAnn: Let with annotated type scheme
+-- This is intentionally small and matches the paper’s eMLF term grammar.
+--
+-- Downstream meaning (high level)
+-- ------------------------------
+-- `Expr` does not itself encode polymorphism rules. Instead:
+--
+--   - lambda binders (`ELam`, `ELamAnn`) behave monomorphically,
+--   - let binders (`ELet`, `ELetAnn`) are generalization points,
+--   - applications (`EApp`) generate instantiation constraints (≤),
+--   - annotations (`ELamAnn`, `ELetAnn`, `EAnn`) are turned into constraint graph
+--     structure by Phase 1.
+--
+-- See `MLF.ConstraintGen` for the authoritative translation.
 --
 -- Unannotated forms infer types; annotated forms check against provided types.
 data Expr
@@ -71,7 +133,11 @@ data Expr
     | ELit Lit
     deriving (Eq, Show)
 
--- | Annotated expression produced by constraint generation.
+-- | Optional wrapper for attaching binding-site metadata to a surface expression.
+--
+-- This is primarily useful for tooling/debugging (e.g. reporting “this variable
+-- occurrence is a lambda parameter vs a let-binding”). The main constraint
+-- generator uses its own annotation structure (`MLF.ConstraintGen.AnnExpr`).
 data AnnotatedExpr = AnnotatedExpr
     { annExpr :: Expr
     , annBinding :: Maybe BindingSite
@@ -79,6 +145,10 @@ data AnnotatedExpr = AnnotatedExpr
     deriving (Eq, Show)
 
 -- | Distinguish between lambda parameters and let-bound values.
+--
+-- This mirrors the paper’s key distinction:
+--   - lambda-bound variables are not generalized (monomorphic),
+--   - let-bound variables may be generalized and later instantiated.
 data BindingSite
     = LamParam VarName
     | LetBinding VarName

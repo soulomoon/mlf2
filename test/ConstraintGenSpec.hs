@@ -163,7 +163,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
                                         -- domId is 'a'. Its bound is recorded in the G-node bind list.
                                         domNode <- lookupNode nodes domId
                                         case domNode of
-                                            TyVar{ tnLevel = lvl } -> do
+                                            TyVar{ tnVarLevel = lvl } -> do
                                                 case IntMap.lookup (getGNodeId lvl) gnodes of
                                                     Nothing ->
                                                         expectationFailure "Missing GNode for binder level"
@@ -240,7 +240,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
             expectRight (inferConstraintGraph expr) $ \result -> do
                 let nodes = cNodes (crConstraint result)
                 case IntMap.lookup (getNodeId (crRoot result)) nodes of
-                    Just TyVar { tnLevel = level } -> do
+                    Just TyVar { tnVarLevel = level } -> do
                         -- The free variable should be allocated at the current level
                         let rootLevel = case cGForest (crConstraint result) of
                                 [gid] -> gid
@@ -453,7 +453,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
 
                 paramVar <- lookupNode nodes (head paramIds)
                 case paramVar of
-                    TyVar { tnLevel = level } -> do
+                    TyVar { tnVarLevel = level } -> do
                         rootLevel <- case cGForest constraint of
                             [gid] -> pure gid
                             other -> expectationFailure ("Unexpected forest: " ++ show other) >> pure (error "unreachable")
@@ -475,7 +475,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 let constraint = crConstraint result
                     nodes = cNodes constraint
                 case IntMap.lookup (getNodeId (crRoot result)) nodes of
-                    Just TyVar { tnLevel = level } -> do
+                    Just TyVar { tnVarLevel = level } -> do
                         rootLevel <- case cGForest constraint of
                             [gid] -> pure gid
                             other -> expectationFailure ("Unexpected forest: " ++ show other) >> pure (error "unreachable")
@@ -529,7 +529,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
                     [cid] -> pure cid
                     other -> expectationFailure ("Expected single child, saw " ++ show other) >> pure (error "unreachable")
                 childNode <- lookupGNode gnodes childId
-                let childVars = [tnId n | n@TyVar { tnLevel = level } <- IntMap.elems nodes, level == childId]
+                let childVars = [tnId n | n@TyVar { tnVarLevel = level } <- IntMap.elems nodes, level == childId]
                 childVars `shouldSatisfy` (not . null)
                 all (`elem` map fst (gBinds childNode)) childVars `shouldBe` True
 

@@ -230,14 +230,14 @@ reifyType res nid = snd <$> go IntMap.empty (canonical nid)
                                 TyExp{ tnBody = b } -> [canonical b]
                                 _ -> []
                             addVar = case node of
-                                TyVar{ tnLevel = l } | l == lvl -> IntSet.insert (getNodeId x) seen'
+                                TyVar{ tnVarLevel = l } | l == lvl -> IntSet.insert (getNodeId x) seen'
                                 _ -> seen'
                         in goV addVar (kids ++ xs)
 
 -- | Reify a type with proper instance bounds computation (xMLF style).
--- The bound is computed by examining the tnLevel of the TyForall:
---   - If tnLevel == currentScope: rigid (no bound needed)
---   - If tnLevel < currentScope: flexible (bound = the type constrained by outer scope)
+-- The bound is computed by examining the tnOwnerLevel of the TyForall:
+--   - If tnOwnerLevel == currentScope: rigid (no bound needed)
+--   - If tnOwnerLevel < currentScope: flexible (bound = the type constrained by outer scope)
 --
 -- For simplicity in this version, we compute bounds based on whether the forall
 -- is at the "expected" level (rigid) or not (flexible).
@@ -262,7 +262,7 @@ reifyTypeWithBound res currentScope nid = snd <$> go IntMap.empty (canonical nid
                     (cache1, d') <- go cache (canonical d)
                     (cache2, c') <- go cache1 (canonical c)
                     pure (cache2, TArrow d' c')
-                TyForall{ tnLevel = ownerLvl, tnQuantLevel = quantLvl, tnBody = b } -> do
+                TyForall{ tnOwnerLevel = ownerLvl, tnQuantLevel = quantLvl, tnBody = b } -> do
                     -- Compute bound based on whether this forall is "flexible"
                     -- A forall is flexible if it's owned by an outer scope
                     let isFlexible = ownerLvl /= currentScope && getGNodeId ownerLvl < getGNodeId currentScope
@@ -491,7 +491,7 @@ reifyTypeWithNames res subst nid = snd <$> go IntMap.empty (canonical nid)
                                 TyExp{ tnBody = b } -> [canonical b]
                                 _ -> []
                             addVar = case node of
-                                TyVar{ tnLevel = l } | l == lvl -> IntSet.insert (getNodeId nid0) seen'
+                                TyVar{ tnVarLevel = l } | l == lvl -> IntSet.insert (getNodeId nid0) seen'
                                 _ -> seen'
                         in goV addVar (kids ++ rest)
 
@@ -897,7 +897,12 @@ elaborate res edgeWitnesses ann = go Map.empty ann
                     Forall binds _ -> foldr (\(name, bound) e -> ETyAbs name bound e) rhsSubst binds
             body' <- go env' body
             pure (ELet v sch rhsAbs body')
-        AAnn expr _ -> go env expr -- Annotations are checked by constraint generation; elaboration just traverses through
+        AAnn expr _ eid -> do
+            expr' <- go env expr
+            inst <- reifyInst env expr eid
+            pure $ case inst of
+                InstId -> expr'
+                _      -> ETyInst expr' inst
 
     -- | Convert an edge witness to an xMLF instantiation witness.
     --
@@ -994,7 +999,7 @@ applyRedirectsToAnn redirects ann = case ann of
     AApp fAnn argAnn eid nid -> AApp (applyRedirectsToAnn redirects fAnn) (applyRedirectsToAnn redirects argAnn) eid (redir nid)
     ALet v schNode ev childLevel rhsAnn bodyAnn nid ->
         ALet v (redir schNode) ev childLevel (applyRedirectsToAnn redirects rhsAnn) (applyRedirectsToAnn redirects bodyAnn) (redir nid)
-    AAnn exprAnn nid -> AAnn (applyRedirectsToAnn redirects exprAnn) (redir nid)
+    AAnn exprAnn nid eid -> AAnn (applyRedirectsToAnn redirects exprAnn) (redir nid) eid
   where
     redir = chaseRedirects redirects
 

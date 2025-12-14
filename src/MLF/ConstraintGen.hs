@@ -29,7 +29,7 @@ The translation is syntax-directed and produces:
   4. The root NodeId representing the expression's type
 
 Key invariants maintained:
-  - Every TyVar records its binding level via tnLevel :: GNodeId
+  - Every TyVar records its binding level via tnVarLevel :: GNodeId
   - G-nodes form a proper tree (child levels point to parent)
   - Lambda parameters are bound at the CURRENT level (monomorphic)
   - Let bindings create a CHILD level and wrap RHS in TyExp
@@ -117,7 +117,7 @@ data AnnExpr
       -- ^ fun, arg, inst edge id, result node
     | ALet VarName NodeId ExpVarId GNodeId AnnExpr AnnExpr NodeId
       -- ^ binder name, scheme node (TyExp), expansion var, child level of RHS, rhs, body, result node
-    | AAnn AnnExpr NodeId
+    | AAnn AnnExpr NodeId EdgeId
       -- ^ expression, annotation node
     deriving (Eq, Show)
 
@@ -252,7 +252,8 @@ buildExpr env level expr = case expr of
     (rhsNode, rhsAnn) <- buildExpr env childLevel rhs
     -- Emit instantiation: inferred RHS type must be capable of generating the annotated type
     -- (rhsNode <= schemeBodyNode)
-    _ <- addInstEdge rhsNode schemeBodyNode
+    rhsEdge <- addInstEdge rhsNode schemeBodyNode
+    let rhsAnn' = AAnn rhsAnn schemeBodyNode rhsEdge
 
     -- Insert TyForall to mark generalization at childLevel
     -- For ELetAnn, we first wrap the scheme binders (explicit polymorphism).
@@ -272,14 +273,14 @@ buildExpr env level expr = case expr of
     let env' = Map.insert name (Binding schemeNode) env
     (bodyNode, bodyAnn) <- buildExpr env' level body
     -- Pass schemeNode as scheme, 0 as dummy expVar
-    pure (bodyNode, ALet name schemeNode (ExpVarId 0) childLevel rhsAnn bodyAnn bodyNode)
+    pure (bodyNode, ALet name schemeNode (ExpVarId 0) childLevel rhsAnn' bodyAnn bodyNode)
 
   -- Term Annotation
   EAnn expr srcType -> do
     (exprNode, exprAnn) <- buildExpr env level expr
     annNode <- internalizeSrcType Map.empty level srcType
-    _ <- addInstEdge exprNode annNode
-    pure (annNode, AAnn exprAnn annNode)
+    eid <- addInstEdge exprNode annNode
+    pure (annNode, AAnn exprAnn annNode eid)
 
 {- Note [Annotated Lambda]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -494,7 +495,7 @@ allocForall ownerLevel quantLevel bodyNode = do
     nid <- freshNodeId
     insertNode TyForall
         { tnId = nid
-        , tnLevel = ownerLevel
+        , tnOwnerLevel = ownerLevel
         , tnQuantLevel = quantLevel
         , tnBody = bodyNode
         }
@@ -540,7 +541,7 @@ allocVar level = do
     nid <- freshNodeId
     let node = TyVar
             { tnId = nid
-            , tnLevel = level
+            , tnVarLevel = level
             }
     insertNode node
     attachVar level nid

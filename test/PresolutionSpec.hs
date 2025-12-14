@@ -221,9 +221,9 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                     -- Wait, if TyExp is skipped, we just copy 'forallNode'.
                     -- 'forallNode' is at level 1? tnQuantLevel=1.
                     -- instantiateScheme target level is 1.
-                    -- 'forallNode' tnLevel is 0? (GNodeId 0).
-                    -- If tnLevel < quantLevel, it is shared.
-                    -- tnLevel of TyForall is the owner level.
+                    -- 'forallNode' tnOwnerLevel is 0? (GNodeId 0).
+                    -- If tnOwnerLevel < quantLevel, it is shared.
+                    -- tnOwnerLevel of TyForall is the owner level.
                     -- Here forallNode is owned by 0. quantLevel is 1.
                     -- So it should be SHARED.
                     -- So d and c should be the ORIGINAL forallNode (3).

@@ -319,7 +319,7 @@ graftEdge edge = do
 
     case (leftNode, rightNode) of
         -- Variable ≤ Arrow: graft arrow structure
-        (Just (TyVar { tnLevel = level }), Just (TyArrow { tnDom = rDom, tnCod = rCod }))
+        (Just (TyVar { tnVarLevel = level }), Just (TyArrow { tnDom = rDom, tnCod = rCod }))
           | occursIn nodes uf leftId rightId -> pure Nothing
           | otherwise -> do
             -- Create fresh variable nodes for domain and codomain (using the var's level)
@@ -380,7 +380,7 @@ occursIn nodes uf var target = go IntSet.empty (findRoot uf target)
 freshVar :: GNodeId -> NormalizeM NodeId
 freshVar level = do
     nid <- freshNodeId
-    let node = TyVar { tnId = nid, tnLevel = level }
+    let node = TyVar { tnId = nid, tnVarLevel = level }
     insertNode node
     -- Register with G-node if it exists
     modify' $ \s ->
@@ -648,8 +648,8 @@ applyToStructure uf node = case node of
     TyArrow { tnId = nid, tnDom = dom, tnCod = cod } ->
         TyArrow { tnId = nid, tnDom = findRoot uf dom, tnCod = findRoot uf cod }
     TyBase {} -> node
-    TyForall { tnId = nid, tnLevel = ownerLvl, tnQuantLevel = quantLvl, tnBody = body } ->
-        TyForall { tnId = nid, tnLevel = ownerLvl, tnQuantLevel = quantLvl, tnBody = findRoot uf body }
+    TyForall { tnId = nid, tnOwnerLevel = ownerLvl, tnQuantLevel = quantLvl, tnBody = body } ->
+        TyForall { tnId = nid, tnOwnerLevel = ownerLvl, tnQuantLevel = quantLvl, tnBody = findRoot uf body }
     TyExp { tnId = nid, tnExpVar = ev, tnBody = body } ->
         TyExp { tnId = nid, tnExpVar = ev, tnBody = findRoot uf body }
 

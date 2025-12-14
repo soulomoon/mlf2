@@ -156,7 +156,8 @@ After solve succeeds, the constraint should satisfy:
     • Sharing preserved: common substructure stays shared; distinct instantiations
         got fresh nodes as chosen in presolution.
     • G-node invariant unchanged: levels remain in cGNodes/cGForest; type nodes
-        only reference levels via tnLevel, never embed them.
+        only reference levels via level fields (tnVarLevel/tnOwnerLevel/tnQuantLevel),
+        never embed them.
 -}
 
 data SolveState = SolveState
@@ -313,10 +314,10 @@ applyUFConstraint uf c = c
     rewriteNode n =
         let nid' = frWith uf (tnId n)
         in (getNodeId nid', case n of
-            TyVar { tnLevel = l } -> TyVar nid' l
+            TyVar { tnVarLevel = l } -> TyVar nid' l
             TyArrow { tnDom = d, tnCod = cod } -> TyArrow nid' (frWith uf d) (frWith uf cod)
             TyBase { tnBase = b } -> TyBase nid' b
-            TyForall { tnLevel = ownerLvl, tnQuantLevel = quantLvl, tnBody = b } ->
+            TyForall { tnOwnerLevel = ownerLvl, tnQuantLevel = quantLvl, tnBody = b } ->
                 TyForall nid' quantLvl ownerLvl (frWith uf b)
             TyExp { tnExpVar = s, tnBody = b } -> TyExp nid' s (frWith uf b)
             )
@@ -435,8 +436,8 @@ validateWith opts SolveResult { srConstraint = c, srUnionFind = uf } =
                 , IntMap.notMember (getNodeId child) nodes
                 ]
 
-        -- 6. All tnLevel values must exist in cGNodes when required.
-        -- Only TyVar and TyForall have tnLevel fields.
+        -- 6. All level values must exist in cGNodes when required.
+        -- Only TyVar and TyForall carry level fields.
         gnodes = cGNodes c
         forallLevelViolations =
             if not (voRequireGNodes opts)
@@ -445,8 +446,8 @@ validateWith opts SolveResult { srConstraint = c, srUnionFind = uf } =
                     [ msg "Missing GNode for level" [GNodeId (getGNodeId lvl)]
                     | n <- IntMap.elems nodes
                     , lvl <- case n of
-                        TyVar { tnLevel = l } -> [l]
-                        TyForall { tnLevel = ownerLvl, tnQuantLevel = quantLvl } -> [ownerLvl, quantLvl]
+                        TyVar { tnVarLevel = l } -> [l]
+                        TyForall { tnOwnerLevel = ownerLvl, tnQuantLevel = quantLvl } -> [ownerLvl, quantLvl]
                         _ -> []
                     , IntMap.notMember (getGNodeId lvl) gnodes
                     ]
