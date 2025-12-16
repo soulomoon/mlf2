@@ -22,6 +22,7 @@ module MLF.Elab (
     SchemeInfo(..)
 ) where
 
+import Control.Monad (when)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Map.Strict as Map
@@ -329,14 +330,27 @@ generalizeAt res gid nid = do
             let fv = freeVars res target IntSet.empty
 
             -- Map bound variables to their canonical representatives and bounds
-            let boundVars = gBinds g
+            let boundVars =
+                    [ (v, mb)
+                    | (v, mb) <- gBinds g
+                    , case IntMap.lookup (getNodeId (canonical v)) nodes of
+                        Just TyVar{ tnVarLevel = l } -> l == gid
+                        _ -> False
+                    ]
                 canonicalBinders = [ (v, canonical v, mb) | (v, mb) <- boundVars ]
 
             -- Filter those whose canonical rep is in free variables
             let activeBinders = filter (\(_, canon, _) -> IntSet.member (getNodeId canon) fv) canonicalBinders
 
             -- Use canonical IDs for substitution
-            let grouped = IntMap.fromListWith (\x _ -> x)
+            let grouped =
+                    IntMap.fromListWith
+                        (\(canon1, mb1) (_, mb2) ->
+                            let mb = case mb1 of
+                                    Just{} -> mb1
+                                    Nothing -> mb2
+                            in (canon1, mb)
+                        )
                         [ (getNodeId canon, (canon, mb)) | (_, canon, mb) <- activeBinders ]
 
             let candidates = IntMap.keys grouped
@@ -363,14 +377,27 @@ generalizeAt res gid nid = do
             let fv = freeVars res target IntSet.empty
 
             -- Map bound variables to their canonical representatives and bounds
-            let boundVars = gBinds g
+            let boundVars =
+                    [ (v, mb)
+                    | (v, mb) <- gBinds g
+                    , case IntMap.lookup (getNodeId (canonical v)) nodes of
+                        Just TyVar{ tnVarLevel = l } -> l == gid
+                        _ -> False
+                    ]
                 canonicalBinders = [ (v, canonical v, mb) | (v, mb) <- boundVars ]
 
             -- Filter those whose canonical rep is in free variables
             let activeBinders = filter (\(_, canon, _) -> IntSet.member (getNodeId canon) fv) canonicalBinders
 
             -- Use canonical IDs for substitution
-            let grouped = IntMap.fromListWith (\x _ -> x)
+            let grouped =
+                    IntMap.fromListWith
+                        (\(canon1, mb1) (_, mb2) ->
+                            let mb = case mb1 of
+                                    Just{} -> mb1
+                                    Nothing -> mb2
+                            in (canon1, mb)
+                        )
                         [ (getNodeId canon, (canon, mb)) | (_, canon, mb) <- activeBinders ]
 
             let candidates = IntMap.keys grouped
@@ -763,74 +790,197 @@ sigmaReorderTo ty0 ids0 desired = go InstId ty0 ids0 0
 phiFromEdgeWitness :: SolveResult -> Maybe SchemeInfo -> EdgeWitness -> Either ElabError Instantiation
 phiFromEdgeWitness res mSchemeInfo ew =
     let InstanceWitness ops = ewWitness ew
+        introPhi = instMany (replicate (ewForallIntros ew) InstIntro)
     in case mSchemeInfo of
-        Nothing -> phiSimple ops
-        Just si -> phiWithScheme si ops
+        Nothing -> phiFromType introPhi ops
+        Just si -> phiWithScheme si introPhi ops
   where
-    phiSimple :: [InstanceOp] -> Either ElabError Instantiation
-    phiSimple ops = do
-        steps <- opsToSteps ops
-        pure (instMany steps)
+    phiFromType :: Instantiation -> [InstanceOp] -> Either ElabError Instantiation
+    phiFromType introPhi ops = do
+        ty0 <- reifyType res (ewRoot ew)
+        let ids0 = idsFromType ty0
+            lookupBinder nid = Just ("t" ++ show (getNodeId nid))
+        (_, _, phi) <- go ty0 ids0 InstId ops lookupBinder
+        pure (composeInst phi introPhi)
 
-    phiWithScheme :: SchemeInfo -> [InstanceOp] -> Either ElabError Instantiation
-    phiWithScheme si ops = do
+    phiWithScheme :: SchemeInfo -> Instantiation -> [InstanceOp] -> Either ElabError Instantiation
+    phiWithScheme si introPhi ops = do
         let ty0 = schemeToType (siScheme si)
             subst = siSubst si
             lookupBinder (NodeId i) = IntMap.lookup i subst
-        (_, phi) <- go ty0 InstId ops lookupBinder
-        pure phi
+            ids0 = idsForStartType si ty0
+        (_, _, phi) <- go ty0 ids0 InstId ops lookupBinder
+        pure (composeInst phi introPhi)
 
-    opsToSteps :: [InstanceOp] -> Either ElabError [Instantiation]
-    opsToSteps = \case
-        [] -> Right []
-        (OpRaise _ : rest) -> (InstIntro :) <$> opsToSteps rest
-        (OpGraft arg _ : OpWeaken _ : rest) -> do
-            t <- reifyType res arg
-            (InstApp t :) <$> opsToSteps rest
-        (op:_) ->
-            Left (InstantiationError ("phiSimple: unsupported op " ++ show op))
+    -- Interpret witness ops while tracking the current type.
+    --
+    -- Paper Fig. 10 uses instantiation contexts (C{·}) to reach a binder rather
+    -- than swapping quantifiers. Using `InstUnder` keeps binder nesting intact,
+    -- which matters for operations like Merge that reference outer binders.
+    go :: ElabType -> [Maybe NodeId] -> Instantiation -> [InstanceOp] -> (NodeId -> Maybe String)
+       -> Either ElabError (ElabType, [Maybe NodeId], Instantiation)
+    go ty ids phi ops lookupBinder = case ops of
+        [] -> Right (ty, ids, phi)
 
-    -- Interpret witness ops while tracking the current type so we can
-    -- reorder quantifiers (Σ) before instantiating a chosen binder.
-    go :: ElabType -> Instantiation -> [InstanceOp] -> (NodeId -> Maybe String)
-       -> Either ElabError (ElabType, Instantiation)
-    go ty phi ops lookupBinder = case ops of
-        [] -> Right (ty, phi)
-        (OpRaise _ : rest) -> do
-            ty' <- applyInstantiation ty InstIntro
-            go ty' (composeInst phi InstIntro) rest lookupBinder
         (OpGraft arg bv : OpWeaken bv' : rest)
             | bv == bv' -> do
-                let name = case lookupBinder bv of
-                        Just nm -> nm
-                        Nothing -> "t" ++ show (getNodeId bv)
-                (sig, ty1) <- bringToFront ty name
-                argTy <- reifyType res arg
-                ty2 <- applyInstantiation ty1 (InstApp argTy)
-                let phi' = composeInst (composeInst phi sig) (InstApp argTy)
-                go ty2 phi' rest lookupBinder
+                (inst, ids1) <- atBinder ids ty bv $ do
+                    argTy <- reifyType res arg
+                    pure (InstApp argTy)
+                ty' <- applyInstantiation ty inst
+                go ty' ids1 (composeInst phi inst) rest lookupBinder
             | otherwise ->
                 Left (InstantiationError "witness op mismatch: OpGraft/OpWeaken refer to different nodes")
-        (op:_) ->
-            Left (InstantiationError ("phiWithScheme: unsupported op " ++ show op))
 
-    -- Bubble the requested binder name to the front via adjacent swaps.
-    bringToFront :: ElabType -> String -> Either ElabError (Instantiation, ElabType)
-    bringToFront ty name = do
+        (OpGraft arg bv : rest) -> do
+            (inst, ids1) <- atBinderKeep ids ty bv $ do
+                argTy <- reifyType res arg
+                pure (InstInside (InstBot argTy))
+            ty' <- applyInstantiation ty inst
+            go ty' ids1 (composeInst phi inst) rest lookupBinder
+
+        (OpWeaken bv : rest) -> do
+            (inst, ids1) <- atBinder ids ty bv (pure InstElim)
+            ty' <- applyInstantiation ty inst
+            go ty' ids1 (composeInst phi inst) rest lookupBinder
+
+        (OpRaise n : rest) -> do
+            -- Paper Fig. 10: Raise(n) introduces a fresh quantifier one level higher,
+            -- bounds it by Tξ(n), then aliases/eliminates the old binder.
+            --
+            -- For now we approximate the “one level higher / choose m” placement by
+            -- raising `n` to the *front* of the current binder spine. This keeps the
+            -- witness paper-shaped (it is a real O; ∀(⩾ …); … construction) while we
+            -- incrementally improve placement using interior provenance.
+            i <- binderIndex ids n
+            let (qs, _) = splitForalls ty
+            when (length qs /= length ids) $
+                Left (InstantiationError "OpRaise: binder spine / identity list length mismatch")
+            when (i < 0 || i >= length qs) $
+                Left (InstantiationError "OpRaise: binder index out of range")
+            let mbBound = snd (qs !! i)
+                boundTy = maybe TBottom id mbBound
+                hAbsBeta = InstSeq (InstInside (InstAbstr "β")) InstElim
+
+            -- Eliminate the *old* binder `n` in the body, aliasing it to the fresh β.
+            (instBody, idsNoN) <- atBinder ids ty n (pure hAbsBeta)
+
+            let inst = instMany
+                    [ InstIntro
+                    , InstInside (InstBot boundTy)
+                    , InstUnder "β" instBody
+                    ]
+            ty' <- applyInstantiation ty inst
+
+            -- `n` remains a logical binder identity; it just moves to the fresh front binder.
+            go ty' (Just n : idsNoN) (composeInst phi inst) rest lookupBinder
+
+        (OpMerge n m : rest) -> do
+            mName <- binderNameFor ty ids m lookupBinder
+            let hAbs = InstSeq (InstInside (InstAbstr mName)) InstElim
+            (inst, ids1) <- atBinder ids ty n (pure hAbs)
+            ty' <- applyInstantiation ty inst
+            go ty' ids1 (composeInst phi inst) rest lookupBinder
+
+        (OpRaiseMerge n m : rest) ->
+            -- Paper Fig. 10 special-cases RaiseMerge(r, m) at the expansion root
+            -- as !αm. We approximate this by using !αm when `n` is not a quantified
+            -- binder in the current type.
+            case elemIndex (Just n) ids of
+                Nothing -> do
+                    mName <- binderNameFor ty ids m lookupBinder
+                    ty' <- applyInstantiation ty (InstAbstr mName)
+                    go ty' [] (composeInst phi (InstAbstr mName)) rest lookupBinder
+                Just _ -> do
+                    mName <- binderNameFor ty ids m lookupBinder
+                    let hAbs = InstSeq (InstInside (InstAbstr mName)) InstElim
+                    (inst, ids1) <- atBinder ids ty n (pure hAbs)
+                    ty' <- applyInstantiation ty inst
+                    go ty' ids1 (composeInst phi inst) rest lookupBinder
+
+    idsForStartType :: SchemeInfo -> ElabType -> [Maybe NodeId]
+    idsForStartType si ty =
+        let nameToId =
+                Map.fromList
+                    [ (nm, NodeId k)
+                    | (k, nm) <- IntMap.toList (siSubst si)
+                    ]
+            (qs, _) = splitForalls ty
+        in [ case Map.lookup nm nameToId of
+                Just nid -> Just nid
+                Nothing -> parseBinderId nm
+           | (nm, _) <- qs
+           ]
+
+    idsFromType :: ElabType -> [Maybe NodeId]
+    idsFromType ty =
+        let (qs, _) = splitForalls ty
+        in map (parseBinderId . fst) qs
+
+    parseBinderId :: String -> Maybe NodeId
+    parseBinderId ('t':rest) = NodeId <$> readMaybe rest
+    parseBinderId _ = Nothing
+
+    binderNameFor :: ElabType -> [Maybe NodeId] -> NodeId -> (NodeId -> Maybe String) -> Either ElabError String
+    binderNameFor ty ids nid lookupBinder =
+        case elemIndex (Just nid) ids of
+            Just i -> do
+                let (qs, _) = splitForalls ty
+                    names = map fst qs
+                if length names /= length ids
+                    then Left (InstantiationError "binderNameFor: binder spine / identity list length mismatch")
+                    else if i >= length names
+                        then Left (InstantiationError "binderNameFor: index out of range")
+                        else Right (names !! i)
+            Nothing ->
+                case lookupBinder nid of
+                    Just nm -> Right nm
+                    Nothing -> Right ("t" ++ show (getNodeId nid))
+
+    atBinder :: [Maybe NodeId] -> ElabType -> NodeId -> Either ElabError Instantiation
+             -> Either ElabError (Instantiation, [Maybe NodeId])
+    atBinder ids ty nid mkInner = do
+        i <- binderIndex ids nid
+        prefix <- prefixBinderNames ty ids i
+        inner <- mkInner
+        ids' <- deleteAt i ids
+        pure (underContext prefix inner, ids')
+
+    atBinderKeep :: [Maybe NodeId] -> ElabType -> NodeId -> Either ElabError Instantiation
+                 -> Either ElabError (Instantiation, [Maybe NodeId])
+    atBinderKeep ids ty nid mkInner = do
+        i <- binderIndex ids nid
+        prefix <- prefixBinderNames ty ids i
+        inner <- mkInner
+        pure (underContext prefix inner, ids)
+
+    binderIndex :: [Maybe NodeId] -> NodeId -> Either ElabError Int
+    binderIndex ids nid =
+        case elemIndex (Just nid) ids of
+            Just i -> Right i
+            Nothing -> Left (InstantiationError ("binder " ++ show nid ++ " not found in identity list"))
+
+    prefixBinderNames :: ElabType -> [Maybe NodeId] -> Int -> Either ElabError [String]
+    prefixBinderNames ty ids i = do
         let (qs, _) = splitForalls ty
             names = map fst qs
-        case elemIndex name names of
-            Nothing -> Left (InstantiationError ("binder " ++ name ++ " not found in type " ++ pretty ty))
-            Just 0 -> Right (InstId, ty)
-            Just i -> bubble InstId ty i
-      where
-        bubble acc ty0 0 = Right (acc, ty0)
-        bubble acc ty0 i = do
-            sw <- swapAt (i - 1) ty0
-            ty1 <- applyInstantiation ty0 sw
-            bubble (composeInst acc sw) ty1 (i - 1)
+        if length names /= length ids
+            then Left (InstantiationError "prefixBinderNames: binder spine / identity list length mismatch")
+            else if i < 0 || i > length names
+                then Left (InstantiationError "prefixBinderNames: index out of range")
+                else Right (take i names)
 
-        -- uses the top-level `splitForalls`
+    underContext :: [String] -> Instantiation -> Instantiation
+    underContext prefix inner = foldr InstUnder inner prefix
+
+    deleteAt :: Int -> [a] -> Either ElabError [a]
+    deleteAt i xs
+        | i < 0 = Left (InstantiationError "deleteAt: negative index")
+        | otherwise =
+            let (pre, rest) = splitAt i xs
+            in case rest of
+                [] -> Left (InstantiationError "deleteAt: index out of range")
+                (_:rs) -> Right (pre ++ rs)
 
 -- | Collect free variables by NodeId, skipping vars under TyForall.
 freeVars :: SolveResult -> NodeId -> IntSet.IntSet -> IntSet.IntSet

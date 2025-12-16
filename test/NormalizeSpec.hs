@@ -251,6 +251,48 @@ spec = describe "Phase 2 — Normalization" $ do
                 -- Edge is consumed by union-find
                 cUnifyEdges result `shouldBe` []
 
+            it "raises variable levels to the LCA during merging (rank adjustment)" $ do
+                -- Paper Raise(n) / rank adjustment: before Var/Var union, raise both vars
+                -- to their lowest common binder and move `gBinds` accordingly.
+                let g0 =
+                        GNode
+                            { gnodeId = GNodeId 0
+                            , gParent = Nothing
+                            , gBinds = [(NodeId 1, Nothing)]
+                            , gChildren = [GNodeId 1]
+                            }
+                    g1 =
+                        GNode
+                            { gnodeId = GNodeId 1
+                            , gParent = Just (GNodeId 0)
+                            , gBinds = [(NodeId 0, Nothing)]
+                            , gChildren = []
+                            }
+                    nodeInner = TyVar (NodeId 0) (GNodeId 1)
+                    nodeOuter = TyVar (NodeId 1) (GNodeId 0)
+                    edge = UnifyEdge (NodeId 1) (NodeId 0)
+                    constraint =
+                        emptyConstraint
+                            { cGNodes = IntMap.fromList [(0, g0), (1, g1)]
+                            , cNodes = IntMap.fromList [(0, nodeInner), (1, nodeOuter)]
+                            , cUnifyEdges = [edge]
+                            }
+                    result = normalize constraint
+
+                cUnifyEdges result `shouldBe` []
+                IntMap.lookup 0 (cNodes result) `shouldBe` Just (TyVar (NodeId 0) (GNodeId 0))
+                IntMap.lookup 1 (cNodes result) `shouldBe` Just (TyVar (NodeId 1) (GNodeId 0))
+                IntMap.lookup 0 (cGNodes result)
+                    `shouldBe`
+                        Just
+                            g0
+                                { gBinds =
+                                    [ (NodeId 0, Nothing)
+                                    , (NodeId 1, Nothing)
+                                    ]
+                                }
+                IntMap.lookup 1 (cGNodes result) `shouldBe` Just (g1 { gBinds = [] })
+
             it "handles chained variable unifications (transitivity)" $ do
                 -- α = β, β = γ: should all be unified
                 let node1 = TyVar (NodeId 0) (GNodeId 0)

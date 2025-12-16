@@ -15,6 +15,7 @@ import qualified Data.Map.Strict as Map
 
 import MLF.Syntax
 import MLF.Desugar (desugarCoercions)
+import qualified MLF.GNodeOps as GNodeOps
 import MLF.Types
 
 {- Note [Phase 1: Constraint Generation]
@@ -593,15 +594,11 @@ newChildLevel parent = do
 
 attachVar :: GNodeId -> NodeId -> ConstraintM ()
 attachVar level nodeId = modify' $ \st ->
-    st { bsGNodes = IntMap.adjust (\gn -> gn { gBinds = (nodeId, Nothing) : gBinds gn }) (intFromG level) (bsGNodes st) }
+    st { bsGNodes = GNodeOps.ensureVarBindAtLevel level nodeId (bsGNodes st) }
 
 setVarBound :: GNodeId -> NodeId -> Maybe NodeId -> ConstraintM ()
 setVarBound level varNode bound = modify' $ \st ->
-    st { bsGNodes = IntMap.adjust (\gn -> gn { gBinds = updateBinds (gBinds gn) }) (intFromG level) (bsGNodes st) }
-  where
-    updateBinds [] = []
-    updateBinds ((v, _) : xs) | v == varNode = (v, bound) : xs
-    updateBinds (x : xs) = x : updateBinds xs
+    st { bsGNodes = GNodeOps.setVarBoundAtLevel level varNode bound (bsGNodes st) }
 
 addInstEdge :: NodeId -> NodeId -> ConstraintM EdgeId
 addInstEdge left right = do

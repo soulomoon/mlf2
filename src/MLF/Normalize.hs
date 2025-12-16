@@ -36,6 +36,9 @@ import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
+import qualified MLF.GNodeOps as GNodeOps
+import qualified MLF.RankAdjustment as RankAdjustment
+import qualified MLF.UnionFind as UnionFind
 import MLF.Types
 
 {- Note [Normalization / Local Transformations]
@@ -386,8 +389,7 @@ freshVar level = do
     modify' $ \s ->
         let c = nsConstraint s
             gnodes = cGNodes c
-            gnodes' = IntMap.adjust (\g -> g { gBinds = (nid, Nothing) : gBinds g })
-                                     (getGNodeIdInt level) gnodes
+            gnodes' = GNodeOps.ensureVarBindAtLevel level nid gnodes
         in s { nsConstraint = c { cGNodes = gnodes' } }
     pure nid
 
@@ -537,6 +539,14 @@ processUnifyEdges = foldM processOne []
                             else unionNodes right left   -- Var points to TyExp (keep structure)
                         pure acc
 
+                    -- Var = Var: before unioning, raise both vars to their LCA level
+                    -- (paper Raise(n) / ICFP'08 rank adjustment) so scope stays well-formed.
+                    (Just TyVar {}, Just TyVar {}) -> do
+                        modify' $ \s ->
+                            s { nsConstraint = RankAdjustment.harmonizeVarLevels left right (nsConstraint s) }
+                        unionNodes left right
+                        pure acc
+
                     -- Variable = anything: point variable to other
                     (Just TyVar {}, _) -> do
                         unionNodes left right
@@ -584,19 +594,18 @@ processUnifyEdges = foldM processOne []
                     -- Incompatible structures: keep edge to signal error
                     _ -> pure (edge : acc)
 
--- | Union two nodes in the union-find structure.
-unionNodes :: NodeId -> NodeId -> NormalizeM ()
-unionNodes from to = modify' $ \s ->
-    s { nsUnionFind = IntMap.insert (getNodeIdInt from) to (nsUnionFind s) }
+    -- Union-find link; caller is responsible for any scope maintenance (e.g.
+    -- rank adjustment / paper Raise(n) for Var/Var unions).
+    unionNodes :: NodeId -> NodeId -> NormalizeM ()
+    unionNodes = unionNodesRaw
+
+    unionNodesRaw :: NodeId -> NodeId -> NormalizeM ()
+    unionNodesRaw from to = modify' $ \s ->
+        s { nsUnionFind = IntMap.insert (getNodeIdInt from) to (nsUnionFind s) }
 
 -- | Find the root/canonical representative of a node.
 findRoot :: IntMap NodeId -> NodeId -> NodeId
-findRoot uf nid =
-    case IntMap.lookup (getNodeIdInt nid) uf of
-        Nothing -> nid
-        Just parent
-            | parent == nid -> nid
-            | otherwise -> findRoot uf parent
+findRoot = UnionFind.frWith
 
 -- | Apply the union-find substitution to all node references in the constraint.
 applyUnionFindToConstraint :: NormalizeM ()
@@ -670,6 +679,3 @@ applyToUnifyEdge uf edge = edge
 -- Helper to get NodeId as Int
 getNodeIdInt :: NodeId -> Int
 getNodeIdInt (NodeId n) = n
-
-getGNodeIdInt :: GNodeId -> Int
-getGNodeIdInt (GNodeId n) = n

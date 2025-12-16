@@ -2,6 +2,7 @@ module PresolutionSpec (spec) where
 
 import Test.Hspec
 import qualified Data.IntMap.Strict as IntMap
+import qualified Data.IntSet as IntSet
 import qualified Data.List.NonEmpty as NE
 
 import MLF.Types
@@ -52,7 +53,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                     , (10, TyVar fresh (GNodeId 1)) -- fresh binder image
                     ]
                 constraint = emptyConstraint { cNodes = nodes }
-                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntMap.empty IntMap.empty
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntMap.empty IntMap.empty IntMap.empty
 
             case runPresolutionM st0 (instantiateScheme body (GNodeId 1) [(bound, fresh)]) of
                 Left err -> expectationFailure $ "Instantiation failed: " ++ show err
@@ -76,7 +77,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                     , (10, TyVar fresh (GNodeId 1))
                     ]
                 constraint = emptyConstraint { cNodes = nodes }
-                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntMap.empty IntMap.empty
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntMap.empty IntMap.empty IntMap.empty
 
             case runPresolutionM st0 (instantiateScheme body (GNodeId 1) [(bound, fresh)]) of
                 Left err -> expectationFailure $ "Instantiation failed: " ++ show err
@@ -100,7 +101,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                     , (10, TyVar fresh (GNodeId 1))
                     ]
                 constraint = emptyConstraint { cNodes = nodes }
-                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntMap.empty IntMap.empty
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntMap.empty IntMap.empty IntMap.empty
 
             case runPresolutionM st0 (instantiateScheme body (GNodeId 1) [(bound, fresh)]) of
                 Left err -> expectationFailure $ "Instantiation failed: " ++ show err
@@ -128,7 +129,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                     , (10, TyVar fresh (GNodeId 1))
                     ]
                 constraint = emptyConstraint { cNodes = nodes }
-                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntMap.empty IntMap.empty
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntMap.empty IntMap.empty IntMap.empty
 
             case runPresolutionM st0 (instantiateScheme body (GNodeId 1) [(bound, fresh)]) of
                 Left err -> expectationFailure $ "Instantiation failed: " ++ show err
@@ -156,7 +157,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                     , (11, TyVar freshInner (GNodeId 2))
                     ]
                 constraint = emptyConstraint { cNodes = nodes }
-                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 12 IntMap.empty IntMap.empty
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 12 IntMap.empty IntMap.empty IntMap.empty
 
             case runPresolutionM st0 (instantiateScheme topBody (GNodeId 1) [(outer, freshOuter), (innerVar, freshInner)]) of
                 Left err -> expectationFailure $ "Instantiation failed: " ++ show err
@@ -202,7 +203,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                     , (10, TyVar fresh (GNodeId 1))
                     ]
                 constraint = emptyConstraint { cNodes = nodes }
-                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntMap.empty IntMap.empty
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntMap.empty IntMap.empty IntMap.empty
 
             case runPresolutionM st0 (instantiateScheme outerBody (GNodeId 1) [(bound, fresh)]) of
                 Left err -> expectationFailure $ "Instantiation failed: " ++ show err
@@ -254,12 +255,416 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                     , (10, TyVar fresh (GNodeId 1))
                     ]
                 constraint = emptyConstraint { cNodes = nodes }
-                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntMap.empty IntMap.empty
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntMap.empty IntMap.empty IntMap.empty
 
             case runPresolutionM st0 (instantiateScheme body (GNodeId 1) [(bound, fresh)]) of
                 Left (NodeLookupFailed nid) -> nid `shouldBe` body
                 Left other -> expectationFailure $ "Unexpected error: " ++ show other
                 Right _ -> expectationFailure "Expected failure due to missing node"
+
+    describe "EdgeTrace" $ do
+        it "records nodes allocated while solving an instantiation edge" $ do
+            -- TyExp s · (∀@1. a -> a) ≤ (Int -> Int)
+            let a = NodeId 0
+                arrow = NodeId 1
+                forallNode = NodeId 2
+                expNode = NodeId 3
+                intNode = NodeId 4
+                targetArrow = NodeId 5
+
+                nodes =
+                    IntMap.fromList
+                        [ (0, TyVar a (GNodeId 1))
+                        , (1, TyArrow arrow a a)
+                        , (2, TyForall forallNode (GNodeId 1) (GNodeId 0) arrow)
+                        , (3, TyExp expNode (ExpVarId 0) forallNode)
+                        , (4, TyBase intNode (BaseTy "Int"))
+                        , (5, TyArrow targetArrow intNode intNode)
+                        ]
+
+                edge = InstEdge (EdgeId 0) expNode targetArrow
+                constraint = emptyConstraint { cNodes = nodes, cInstEdges = [edge] }
+                st0 =
+                    PresolutionState
+                        constraint
+                        (Presolution IntMap.empty)
+                        IntMap.empty
+                        6
+                        IntMap.empty
+                        IntMap.empty
+                        IntMap.empty
+
+            case runPresolutionM st0 (processInstEdge edge) of
+                Left err -> expectationFailure ("processInstEdge failed: " ++ show err)
+                Right (_, st1) -> do
+                    let traces = psEdgeTraces st1
+                    case IntMap.lookup 0 traces of
+                        Nothing -> expectationFailure "Expected EdgeTrace for EdgeId 0"
+                        Just tr -> do
+                            etRoot tr `shouldBe` forallNode
+                            etInterior tr `shouldSatisfy` (not . IntSet.null)
+                            case etBinderArgs tr of
+                                [(bv, arg)] -> do
+                                    bv `shouldBe` a
+                                    IntSet.member (getNodeId arg) (etInterior tr) `shouldBe` True
+                                other -> expectationFailure ("Unexpected binder/arg pairs: " ++ show other)
+
+        it "tracks binder-argument nodes across merged expansions" $ do
+            -- When an expansion variable is reused across multiple instantiation edges, the
+            -- *final* expansion may keep the argument nodes allocated by an earlier edge
+            -- (mergeExpansions keeps the first ExpInstantiate payload).
+            --
+            -- Phase 1 in merge_raise_merge_plan.txt expects the trace to approximate I(r)
+            -- (the expansion interior) for each edge. We should include the binder
+            -- argument node even when it is reused across edges.
+            let a = NodeId 0
+                arrow = NodeId 1
+                forallNode = NodeId 2
+                expNode = NodeId 3
+                intNode = NodeId 4
+                target1 = NodeId 5
+                boolNode = NodeId 6
+                target2 = NodeId 7
+
+                nodes =
+                    IntMap.fromList
+                        [ (0, TyVar a (GNodeId 1))
+                        , (1, TyArrow arrow a a)
+                        , (2, TyForall forallNode (GNodeId 1) (GNodeId 0) arrow)
+                        , (3, TyExp expNode (ExpVarId 0) forallNode)
+                        , (4, TyBase intNode (BaseTy "Int"))
+                        , (5, TyArrow target1 intNode intNode)
+                        , (6, TyBase boolNode (BaseTy "Bool"))
+                        , (7, TyArrow target2 boolNode boolNode)
+                        ]
+
+                edge0 = InstEdge (EdgeId 0) expNode target1
+                edge1 = InstEdge (EdgeId 1) expNode target2
+                constraint = emptyConstraint { cNodes = nodes, cInstEdges = [edge0, edge1] }
+                st0 =
+                    PresolutionState
+                        constraint
+                        (Presolution IntMap.empty)
+                        IntMap.empty
+                        8
+                        IntMap.empty
+                        IntMap.empty
+                        IntMap.empty
+
+            case runPresolutionM st0 (processInstEdge edge0 >> processInstEdge edge1) of
+                Left err -> expectationFailure ("processInstEdge failed: " ++ show err)
+                Right (_, st1) -> do
+                    let traces = psEdgeTraces st1
+                    case (IntMap.lookup 0 traces, IntMap.lookup 1 traces) of
+                        (Just tr0, Just tr1) -> do
+                            -- sanity: first edge created its binder arg
+                            case etBinderArgs tr0 of
+                                [(_, arg0)] -> IntSet.member (getNodeId arg0) (etInterior tr0) `shouldBe` True
+                                other -> expectationFailure ("Unexpected binder/arg pairs (edge0): " ++ show other)
+                            -- expected: second edge should also include its binder arg in the trace interior
+                            case etBinderArgs tr1 of
+                                [(_, arg1)] -> IntSet.member (getNodeId arg1) (etInterior tr1) `shouldBe` True
+                                other -> expectationFailure ("Unexpected binder/arg pairs (edge1): " ++ show other)
+                        other -> expectationFailure ("Missing traces: " ++ show other)
+
+    describe "Phase 2 — Merge/RaiseMerge emission" $ do
+        it "records Merge when two instantiation metas unify" $ do
+            -- TyExp s · (∀@1. a -> b -> a) ≤ (t -> t -> t)
+            --
+            -- Instantiation introduces fresh metas for a and b. Unifying the instantiated
+            -- body against the target forces those metas to unify, which Phase 2 should
+            -- record as a Merge between the corresponding source binders.
+            let a = NodeId 0
+                b = NodeId 1
+                arrow2 = NodeId 2
+                arrow1 = NodeId 3
+                forallNode = NodeId 4
+                expNode = NodeId 5
+
+                t = NodeId 6
+                targetArrow2 = NodeId 7
+                targetArrow1 = NodeId 8
+
+                nodes =
+                    IntMap.fromList
+                        [ (0, TyVar a (GNodeId 1))
+                        , (1, TyVar b (GNodeId 1))
+                        , (2, TyArrow arrow2 b a) -- b -> a
+                        , (3, TyArrow arrow1 a arrow2) -- a -> (b -> a)
+                        , (4, TyForall forallNode (GNodeId 1) (GNodeId 0) arrow1)
+                        , (5, TyExp expNode (ExpVarId 0) forallNode)
+                        , (6, TyVar t (GNodeId 0))
+                        , (7, TyArrow targetArrow2 t t) -- t -> t
+                        , (8, TyArrow targetArrow1 t targetArrow2) -- t -> (t -> t)
+                        ]
+
+                edge = InstEdge (EdgeId 0) expNode targetArrow1
+                constraint = emptyConstraint { cNodes = nodes, cInstEdges = [edge] }
+                st0 =
+                    PresolutionState
+                        constraint
+                        (Presolution IntMap.empty)
+                        IntMap.empty
+                        9
+                        IntMap.empty
+                        IntMap.empty
+                        IntMap.empty
+
+            case runPresolutionM st0 (processInstEdge edge) of
+                Left err -> expectationFailure ("processInstEdge failed: " ++ show err)
+                Right (_, st1) -> do
+                    case IntMap.lookup 0 (psEdgeWitnesses st1) of
+                        Nothing -> expectationFailure "Expected EdgeWitness for EdgeId 0"
+                        Just ew -> do
+                            let InstanceWitness ops = ewWitness ew
+                                hasMerge = any (\op -> case op of OpMerge{} -> True; _ -> False) ops
+                            hasMerge `shouldBe` True
+
+        it "records RaiseMerge when a bounded binder meta escapes to an outer-scope variable" $ do
+            -- TyExp s · (∀(b ⩾ x). b -> b) ≤ (y -> y)
+            --
+            -- Here `b` is *bounded* (non-⊥ bound `x`), but unification of the instantiated
+            -- body against the target forces its instantiation meta to unify with `y`
+            -- (an outer-scope variable, at an ancestor level). Phase 2 should record
+            -- this as a RaiseMerge(b, y) rather than relying on Weaken(b) (which would
+            -- substitute the bound `x`).
+            let x = NodeId 0
+                b = NodeId 1
+                arrow1 = NodeId 2
+                forallNode = NodeId 3
+                expNode = NodeId 4
+                y = NodeId 5
+                targetArrow = NodeId 6
+
+                g0 =
+                    GNode
+                        { gnodeId = GNodeId 0
+                        , gParent = Nothing
+                        , gBinds = [(x, Nothing), (y, Nothing)]
+                        , gChildren = [GNodeId 1]
+                        }
+                g1 =
+                    GNode
+                        { gnodeId = GNodeId 1
+                        , gParent = Just (GNodeId 0)
+                        , gBinds = [(b, Just x)]
+                        , gChildren = []
+                        }
+
+                nodes =
+                    IntMap.fromList
+                        [ (0, TyVar x (GNodeId 0))
+                        , (1, TyVar b (GNodeId 1))
+                        , (2, TyArrow arrow1 b b)
+                        , (3, TyForall forallNode (GNodeId 1) (GNodeId 0) arrow1)
+                        , (4, TyExp expNode (ExpVarId 0) forallNode)
+                        , (5, TyVar y (GNodeId 0))
+                        , (6, TyArrow targetArrow y y)
+                        ]
+
+                edge = InstEdge (EdgeId 0) expNode targetArrow
+                constraint =
+                    emptyConstraint
+                        { cNodes = nodes
+                        , cGNodes = IntMap.fromList [(0, g0), (1, g1)]
+                        , cGForest = [GNodeId 0]
+                        , cInstEdges = [edge]
+                        }
+                st0 =
+                    PresolutionState
+                        constraint
+                        (Presolution IntMap.empty)
+                        IntMap.empty
+                        7
+                        IntMap.empty
+                        IntMap.empty
+                        IntMap.empty
+
+                isRaiseMerge op = case op of
+                    OpRaiseMerge n m -> n == b && m == y
+                    _ -> False
+
+            case runPresolutionM st0 (processInstEdge edge) of
+                Left err -> expectationFailure ("processInstEdge failed: " ++ show err)
+                Right (_, st1) -> do
+                    case IntMap.lookup 0 (psEdgeWitnesses st1) of
+                        Nothing -> expectationFailure "Expected EdgeWitness for EdgeId 0"
+                        Just ew -> do
+                            let InstanceWitness ops = ewWitness ew
+                            ops `shouldSatisfy` any isRaiseMerge
+                            ops `shouldNotSatisfy` elem (OpWeaken b)
+
+        it "records Raise when rank adjustment moves an unbounded binder meta to an outer scope" $ do
+            -- TyExp s · (∀b. b -> b) ≤ (y -> y)
+            --
+            -- Instantiation introduces a fresh meta for `b` at the inner quantifier level.
+            -- Unifying the instantiated body against the target forces that meta to unify
+            -- with the outer-scope variable `y`, requiring rank adjustment (raising to the
+            -- LCA in the G-node tree). For paper-faithful witnesses, this should be
+            -- reflected as an explicit `Raise(b)` op in Ω (Fig. 10), but *not* as a
+            -- RaiseMerge (since `b` is unbounded, the instantiation is expressible as a
+            -- plain graft + weaken).
+            let b = NodeId 1
+                arrow1 = NodeId 2
+                forallNode = NodeId 3
+                expNode = NodeId 4
+                y = NodeId 5
+                targetArrow = NodeId 6
+
+                g0 =
+                    GNode
+                        { gnodeId = GNodeId 0
+                        , gParent = Nothing
+                        , gBinds = [(y, Nothing)]
+                        , gChildren = [GNodeId 1]
+                        }
+                g1 =
+                    GNode
+                        { gnodeId = GNodeId 1
+                        , gParent = Just (GNodeId 0)
+                        , gBinds = [(b, Nothing)]
+                        , gChildren = []
+                        }
+
+                nodes =
+                    IntMap.fromList
+                        [ (1, TyVar b (GNodeId 1))
+                        , (2, TyArrow arrow1 b b)
+                        , (3, TyForall forallNode (GNodeId 1) (GNodeId 0) arrow1)
+                        , (4, TyExp expNode (ExpVarId 0) forallNode)
+                        , (5, TyVar y (GNodeId 0))
+                        , (6, TyArrow targetArrow y y)
+                        ]
+
+                edge = InstEdge (EdgeId 0) expNode targetArrow
+                constraint =
+                    emptyConstraint
+                        { cNodes = nodes
+                        , cGNodes = IntMap.fromList [(0, g0), (1, g1)]
+                        , cGForest = [GNodeId 0]
+                        , cInstEdges = [edge]
+                        }
+                st0 =
+                    PresolutionState
+                        constraint
+                        (Presolution IntMap.empty)
+                        IntMap.empty
+                        7
+                        IntMap.empty
+                        IntMap.empty
+                        IntMap.empty
+
+                isRaise op = case op of
+                    OpRaise n -> n == b
+                    _ -> False
+                isRaiseMerge op = case op of
+                    OpRaiseMerge n m -> n == b && m == y
+                    _ -> False
+
+            case runPresolutionM st0 (processInstEdge edge) of
+                Left err -> expectationFailure ("processInstEdge failed: " ++ show err)
+                Right (_, st1) -> do
+                    case IntMap.lookup 0 (psEdgeWitnesses st1) of
+                        Nothing -> expectationFailure "Expected EdgeWitness for EdgeId 0"
+                        Just ew -> do
+                            let InstanceWitness ops = ewWitness ew
+                            ops `shouldSatisfy` any isRaise
+                            ops `shouldSatisfy` elem (OpWeaken b)
+                            any isRaise (takeWhile (/= OpWeaken b) ops) `shouldBe` True
+                            ops `shouldNotSatisfy` any isRaiseMerge
+
+    describe "Phase 3 — Witness normalization" $ do
+        it "pushes Weaken after other ops on the binder" $ do
+            let a = NodeId 1
+                arg = NodeId 10
+                ops0 = [OpWeaken a, OpGraft arg a]
+                ops1 = normalizeInstanceOps ops0
+            ops1 `shouldBe` [OpGraft arg a, OpWeaken a]
+
+        it "drops redundant Graft/Weaken when a binder is eliminated by Merge" $ do
+            let a = NodeId 1
+                b = NodeId 2
+                arg = NodeId 10
+                ops0 = [OpGraft arg b, OpWeaken b, OpMerge b a]
+                ops1 = normalizeInstanceOps ops0
+            ops1 `shouldBe` [OpMerge b a]
+
+        it "coalesces Raise; Merge into RaiseMerge" $ do
+            let n = NodeId 1
+                m = NodeId 2
+            normalizeInstanceOps [OpRaise n, OpMerge n m] `shouldBe` [OpRaiseMerge n m]
+
+        it "coalesces multiple Raises followed by Merge into RaiseMerge" $ do
+            let n = NodeId 1
+                m = NodeId 2
+            normalizeInstanceOps [OpRaise n, OpRaise n, OpRaise n, OpMerge n m] `shouldBe` [OpRaiseMerge n m]
+
+        it "does not mention an eliminated binder after its elimination" $ do
+            let a = NodeId 0
+                b = NodeId 1
+                arrow2 = NodeId 2
+                arrow1 = NodeId 3
+                forallNode = NodeId 4
+                expNode = NodeId 5
+
+                t = NodeId 6
+                targetArrow2 = NodeId 7
+                targetArrow1 = NodeId 8
+
+                nodes =
+                    IntMap.fromList
+                        [ (0, TyVar a (GNodeId 1))
+                        , (1, TyVar b (GNodeId 1))
+                        , (2, TyArrow arrow2 b a) -- b -> a
+                        , (3, TyArrow arrow1 a arrow2) -- a -> (b -> a)
+                        , (4, TyForall forallNode (GNodeId 1) (GNodeId 0) arrow1)
+                        , (5, TyExp expNode (ExpVarId 0) forallNode)
+                        , (6, TyVar t (GNodeId 0))
+                        , (7, TyArrow targetArrow2 t t) -- t -> t
+                        , (8, TyArrow targetArrow1 t targetArrow2) -- t -> (t -> t)
+                        ]
+
+                edge = InstEdge (EdgeId 0) expNode targetArrow1
+                constraint = emptyConstraint { cNodes = nodes, cInstEdges = [edge] }
+                st0 =
+                    PresolutionState
+                        constraint
+                        (Presolution IntMap.empty)
+                        IntMap.empty
+                        9
+                        IntMap.empty
+                        IntMap.empty
+                        IntMap.empty
+
+                mentionsNode nid op = case op of
+                    OpGraft sigma n -> nid == sigma || nid == n
+                    OpMerge n m -> nid == n || nid == m
+                    OpRaise n -> nid == n
+                    OpWeaken n -> nid == n
+                    OpRaiseMerge n m -> nid == n || nid == m
+
+                assertNoMentionsAfterElim ops = go ops
+                  where
+                    go [] = pure ()
+                    go (op : rest) = do
+                        case op of
+                            OpWeaken n ->
+                                any (mentionsNode n) rest `shouldBe` False
+                            OpMerge n _ ->
+                                any (mentionsNode n) rest `shouldBe` False
+                            OpRaiseMerge n _ ->
+                                any (mentionsNode n) rest `shouldBe` False
+                            _ -> pure ()
+                        go rest
+
+            case runPresolutionM st0 (processInstEdge edge) of
+                Left err -> expectationFailure ("processInstEdge failed: " ++ show err)
+                Right (_, st1) -> do
+                    case IntMap.lookup 0 (psEdgeWitnesses st1) of
+                        Nothing -> expectationFailure "Expected EdgeWitness for EdgeId 0"
+                        Just ew -> do
+                            let InstanceWitness ops = ewWitness ew
+                            assertNoMentionsAfterElim ops
 
     describe "decideMinimalExpansion" $ do
         it "returns ExpIdentity for matching monomorphic types" $ do
@@ -541,7 +946,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
 
     describe "Error Conditions" $ do
         it "reports ArityMismatch when merging ExpInstantiate with different lengths" $ do
-            let st0 = PresolutionState emptyConstraint (Presolution IntMap.empty) IntMap.empty 0 IntMap.empty IntMap.empty
+            let st0 = PresolutionState emptyConstraint (Presolution IntMap.empty) IntMap.empty 0 IntMap.empty IntMap.empty IntMap.empty
                 exp1 = ExpInstantiate [NodeId 1]
                 exp2 = ExpInstantiate [NodeId 1, NodeId 2]
 
@@ -566,7 +971,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                     , (1, TyBase bodyId (BaseTy "int"))
                     ]
                 constraint = emptyConstraint { cNodes = nodes }
-                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 2 IntMap.empty IntMap.empty
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 2 IntMap.empty IntMap.empty IntMap.empty
                 expansion = ExpInstantiate [NodeId 2] -- dummy arg
 
             case runPresolutionM st0 (applyExpansion expansion (nodes IntMap.! 0)) of
@@ -584,7 +989,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                     , (2, TyVar boundId (GNodeId 1))
                     ]
                 constraint = emptyConstraint { cNodes = nodes }
-                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 3 IntMap.empty IntMap.empty
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 3 IntMap.empty IntMap.empty IntMap.empty
                 -- Forall has 1 bound var, but we provide 2 args
                 expansion = ExpInstantiate [NodeId 3, NodeId 4]
 
@@ -602,7 +1007,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
             let nid = NodeId 0
                 nodes = IntMap.fromList [(0, TyBase nid (BaseTy "int"))]
                 constraint = emptyConstraint { cNodes = nodes }
-                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 1 IntMap.empty IntMap.empty
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 1 IntMap.empty IntMap.empty IntMap.empty
 
                 -- Construct an expansion: ExpCompose [ExpForall [1], ExpIdentity]
                 -- This will trigger the ExpCompose branch in applyExpansionOverNode
@@ -729,4 +1134,3 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                     -- Passed constraint should be valid with empty UF (since UF is applied)
                     validateSolvedGraphStrict SolveResult { srConstraint = c', srUnionFind = IntMap.empty }
                         `shouldBe` []
-

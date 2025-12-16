@@ -2,9 +2,8 @@ module ElaborationSpec (spec) where
 
 import Test.Hspec
 import Control.Monad (forM_)
-import Data.List (isInfixOf)
+import Data.List (isInfixOf, stripPrefix)
 import qualified Data.IntMap.Strict as IntMap
-import System.Timeout (timeout)
 
 import MLF.Syntax (Expr(..), Lit(..), SrcType(..), SrcScheme(..))
 import qualified MLF.Elab as Elab
@@ -15,20 +14,26 @@ import MLF.Acyclicity (checkAcyclicity)
 import MLF.Presolution (PresolutionResult(..), computePresolution)
 import MLF.Solve (SolveResult, solveUnify)
 
--- | Run an IO action with a timeout (in microseconds).
--- If the action times out, the test fails.
-withTimeout :: Int -> IO () -> IO ()
-withTimeout limit action = do
-    result <- timeout limit action
-    case result of
-        Just () -> return ()
-        Nothing -> expectationFailure $ "Test timed out after " ++ show limit ++ " microseconds"
-
 requireRight :: Show e => Either e a -> IO a
 requireRight = either (\e -> expectationFailure (show e) >> fail "requireRight") pure
 
 requirePipeline :: Expr -> IO (Elab.ElabTerm, Elab.ElabType)
 requirePipeline = requireRight . Elab.runPipelineElab
+
+fInstantiations :: String -> [String]
+fInstantiations = go
+  where
+    go [] = []
+    go s =
+        case stripPrefix "f [" s of
+            Just rest ->
+                let inst = takeWhile (/= ']') rest
+                    afterBracket = dropWhile (/= ']') rest
+                    next = case afterBracket of
+                        [] -> []
+                        (_:xs) -> xs
+                in inst : go next
+            Nothing -> go (drop 1 s)
 
 schemeToType :: Elab.ElabScheme -> Elab.ElabType
 schemeToType (Elab.Forall binds body) =
@@ -120,8 +125,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             (term, ty) <- requirePipeline expr
             Elab.pretty ty `shouldBe` "Bool"
             let s = Elab.pretty term
-            s `shouldSatisfy` ("f [⟨Int⟩]" `isInfixOf`)
-            s `shouldSatisfy` ("f [⟨Bool⟩]" `isInfixOf`)
+            let insts = fInstantiations s
+            insts `shouldSatisfy` any ("Int" `isInfixOf`)
+            insts `shouldSatisfy` any ("Bool" `isInfixOf`)
 
         it "elaborates nested let bindings" $ do
             -- let x = 1 in let y = x in y
@@ -452,6 +458,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewLeft = NodeId 0
                         , ewRight = NodeId 0
                         , ewRoot = NodeId 0
+                        , ewForallIntros = 0
                         , ewWitness = InstanceWitness [OpGraft intNode (NodeId 2), OpWeaken (NodeId 2)]
                         }
 
@@ -464,6 +471,60 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 let expected =
                         Elab.TForall "a" Nothing
                             (Elab.TArrow (Elab.TVar "a") (Elab.TBase (BaseTy "Int")))
+                canonType out `shouldBe` canonType expected
+
+            it "scheme-aware Φ can translate Merge (alias one binder to another)" $ do
+                (solved, _intNode) <- requireRight (runSolvedWithRoot (ELit (LInt 1)))
+
+                let scheme =
+                        Elab.Forall [("a", Nothing), ("b", Nothing)]
+                            (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))
+                    subst = IntMap.fromList [(1, "a"), (2, "b")]
+                    si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = subst }
+
+                    -- Merge binder “b” into binder “a”, i.e. ∀a. ∀b. a -> b  ~~>  ∀a. a -> a
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = NodeId 0
+                        , ewRight = NodeId 0
+                        , ewRoot = NodeId 0
+                        , ewForallIntros = 0
+                        , ewWitness = InstanceWitness [OpMerge (NodeId 2) (NodeId 1)]
+                        }
+
+                phi <- requireRight (Elab.phiFromEdgeWitness solved (Just si) ew)
+                out <- requireRight (Elab.applyInstantiation (schemeToType scheme) phi)
+                let expected =
+                        Elab.TForall "a" Nothing
+                            (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+                canonType out `shouldBe` canonType expected
+
+            it "scheme-aware Φ can translate Raise (raise a binder to the front)" $ do
+                (solved, _intNode) <- requireRight (runSolvedWithRoot (ELit (LInt 1)))
+
+                let scheme =
+                        Elab.Forall [("a", Nothing), ("b", Nothing)]
+                            (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))
+                    subst = IntMap.fromList [(1, "a"), (2, "b")]
+                    si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = subst }
+
+                    -- Raise binder “b” outward by introducing a fresh front binder and
+                    -- aliasing/eliminating the old one (paper Fig. 10 Raise).
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = NodeId 0
+                        , ewRight = NodeId 0
+                        , ewRoot = NodeId 0
+                        , ewForallIntros = 0
+                        , ewWitness = InstanceWitness [OpRaise (NodeId 2)]
+                        }
+
+                phi <- requireRight (Elab.phiFromEdgeWitness solved (Just si) ew)
+                out <- requireRight (Elab.applyInstantiation (schemeToType scheme) phi)
+                let expected =
+                        Elab.TForall "u0" Nothing
+                            (Elab.TForall "a" Nothing
+                                (Elab.TArrow (Elab.TVar "a") (Elab.TVar "u0")))
                 canonType out `shouldBe` canonType expected
 
             it "witness instantiation matches solved edge types (id @ Int)" $ do
@@ -494,3 +555,129 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             phi <- requireRight (Elab.phiFromEdgeWitness solved Nothing ew)
                             out <- requireRight (Elab.applyInstantiation srcTy phi)
                             canonType out `shouldBe` canonType tgtTy
+
+    describe "Presolution witness ops (paper alignment)" $ do
+        it "emits Merge for bounded aliasing (b ⩾ a)" $ do
+            let rhs = ELam "x" (ELam "y" (EVar "x"))
+                scheme =
+                    SrcScheme
+                        [ ("a", Nothing)
+                        , ("b", Just (STVar "a"))
+                        ]
+                        (STArrow (STVar "a") (STArrow (STVar "b") (STVar "a")))
+                ann =
+                    STForall "a" Nothing
+                        (STArrow (STVar "a") (STArrow (STVar "a") (STVar "a")))
+                expr = ELetAnn "c" scheme rhs (EAnn (EVar "c") ann)
+
+            let runToPresolutionWitnesses :: Expr -> Either String (IntMap.IntMap EdgeWitness)
+                runToPresolutionWitnesses e = do
+                    ConstraintResult { crConstraint = c0 } <- firstShow (generateConstraints e)
+                    let c1 = normalize c0
+                    acyc <- firstShow (checkAcyclicity c1)
+                    pres <- firstShow (computePresolution acyc c1)
+                    pure (prEdgeWitnesses pres)
+
+                firstShow :: Show err => Either err a -> Either String a
+                firstShow = either (Left . show) Right
+
+            ews <- requireRight (runToPresolutionWitnesses expr)
+            let ops =
+                    [ op
+                    | ew <- IntMap.elems ews
+                    , let InstanceWitness xs = ewWitness ew
+                    , op <- xs
+                    ]
+            let isMerge :: InstanceOp -> Bool
+                isMerge op = case op of
+                    OpMerge{} -> True
+                    _ -> False
+            ops `shouldSatisfy` any isMerge
+
+    describe "Paper alignment baselines (expected failures)" $ do
+        it "let id = (\\x. x) in id id should have type ∀a. a -> a" $ do
+            let expr =
+                    ELet "id" (ELam "x" (EVar "x"))
+                        (EApp (EVar "id") (EVar "id"))
+            (_term, ty) <- requirePipeline expr
+            let expected =
+                    Elab.TForall "a" Nothing
+                        (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+            ty `shouldAlphaEqType` expected
+
+        it "\\y. let id = (\\x. x) in id y should have type ∀a. a -> a" $ do
+            let expr =
+                    ELam "y"
+                        (ELet "id" (ELam "x" (EVar "x"))
+                            (EApp (EVar "id") (EVar "y")))
+            (_term, ty) <- requirePipeline expr
+            let expected =
+                    Elab.TForall "a" Nothing
+                        (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+            ty `shouldAlphaEqType` expected
+
+        it "bounded aliasing (b ⩾ a) coerces to ∀a. a -> a -> a (needs Merge/RaiseMerge)" $ do
+            -- This corresponds to “aliasing” a bounded variable to an existing binder:
+            --   ∀a. ∀(b ⩾ a). a -> b -> a  ≤  ∀a. a -> a -> a
+            --
+            -- In paper terms, this is naturally witnessed via Merge/RaiseMerge (Fig. 10).
+            -- Today, presolution witnesses are derived only from expansions (Graft/Weaken),
+            -- which translates to InstApp and fails on non-⊥ bounds.
+            let rhs = ELam "x" (ELam "y" (EVar "x"))
+                scheme =
+                    SrcScheme
+                        [ ("a", Nothing)
+                        , ("b", Just (STVar "a"))
+                        ]
+                        (STArrow (STVar "a") (STArrow (STVar "b") (STVar "a")))
+                ann =
+                    STForall "a" Nothing
+                        (STArrow (STVar "a") (STArrow (STVar "a") (STVar "a")))
+                expr = ELetAnn "c" scheme rhs (EAnn (EVar "c") ann)
+
+            case Elab.runPipelineElab expr of
+                Left err ->
+                    expectationFailure ("Expected this to typecheck per xmlf.txt, but got: " ++ err)
+                Right (_term, ty) -> do
+                    let expected =
+                            Elab.TForall "a" Nothing
+                                (Elab.TArrow (Elab.TVar "a")
+                                    (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
+                    ty `shouldAlphaEqType` expected
+
+        it "term annotation can instantiate a polymorphic result (expected failure)" $ do
+            -- Paper view (xmlf.txt §3.1): (b : σ) is κσ b, which checks that
+            -- type(b) ≤ σ (instantiation), not type(b) == σ.
+            --
+            -- Here the lambda returns a polymorphic `id`, and the annotation asks
+            -- for a monomorphic instance of that result.
+            let ann =
+                    STArrow (STBase "Int")
+                        (STArrow (STBase "Int") (STBase "Int"))
+                expr =
+                    EAnn
+                        (ELam "x"
+                            (ELet "id" (ELam "y" (EVar "y")) (EVar "id")))
+                        ann
+
+            (_term, ty) <- requirePipeline expr
+            ty `shouldBe`
+                Elab.TArrow
+                    (Elab.TBase (BaseTy "Int"))
+                    (Elab.TArrow (Elab.TBase (BaseTy "Int")) (Elab.TBase (BaseTy "Int")))
+
+        it "annotated lambda parameter should accept a polymorphic argument via κσ (expected failure)" $ do
+            -- λ(f : Int -> Int). f 1   applied to polymorphic id
+            -- Desugaring: λf. let f = κ(Int->Int) f in f 1
+            -- Outer f may be ∀a. a -> a as long as it can be instantiated to Int -> Int.
+            let idExpr = ELam "x" (EVar "x")
+                paramTy = STArrow (STBase "Int") (STBase "Int")
+                use =
+                    EApp
+                        (ELamAnn "f" paramTy
+                            (EApp (EVar "f") (ELit (LInt 1))))
+                        (EVar "id")
+                expr = ELet "id" idExpr use
+
+            (_term, ty) <- requirePipeline expr
+            ty `shouldBe` Elab.TBase (BaseTy "Int")

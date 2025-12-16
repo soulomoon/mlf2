@@ -69,7 +69,11 @@ library
                       MLF.Elab,
 
     -- Modules included in this library but not exported.
-    other-modules:    MLF.Desugar
+    other-modules:    MLF.Desugar,
+                      MLF.GNodeOps,
+                      MLF.RankAdjustment,
+                      MLF.Scope,
+                      MLF.UnionFind
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:

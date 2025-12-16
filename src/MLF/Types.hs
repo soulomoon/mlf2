@@ -446,6 +446,14 @@ data Expansion
 data InstanceOp
     = OpGraft NodeId NodeId
     | OpMerge NodeId NodeId
+    -- | Paper Raise(n): raising a binding edge for an interior node.
+    --
+    -- `papers/xmlf.txt` translates this operation to an instantiation that
+    -- introduces a fresh quantifier one level higher and aliases/eliminates the
+    -- original binder (Fig. 10, §3.4). The current presolution does not emit
+    -- arbitrary interior Raise ops yet; it currently records Raise steps for
+    -- binders during instantiation-edge solving (rank adjustment). See
+    -- `merge_raise_merge_plan.txt` for alignment details.
     | OpRaise NodeId
     | OpWeaken NodeId
     | OpRaiseMerge NodeId NodeId
@@ -476,6 +484,13 @@ data EdgeWitness = EdgeWitness
     , ewLeft :: NodeId
     , ewRight :: NodeId
     , ewRoot :: NodeId
+    , ewForallIntros :: Int
+        -- ^ Number of xMLF quantifier-introduction steps (`O`) that come from the
+        -- presolution expansion recipe for this edge (e.g. `ExpForall`).
+        --
+        -- Paper alignment: `papers/xmlf.txt` does not include `O` in the witness
+        -- language Ω (Figure 10). We therefore keep Ω as `InstanceOp`s only and
+        -- apply these `O` steps directly when constructing Φ(e).
     , ewWitness :: InstanceWitness
     }
     deriving (Eq, Show)

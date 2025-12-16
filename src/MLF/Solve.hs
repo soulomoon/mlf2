@@ -111,6 +111,8 @@ import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
+import qualified MLF.RankAdjustment as RankAdjustment
+import qualified MLF.UnionFind as UnionFind
 import MLF.Types
 
 -- | Errors that can arise during monotype unification.
@@ -208,7 +210,12 @@ solveUnify c0 = do
                 lNode <- lookupNode lRoot
                 rNode <- lookupNode rRoot
                 case (lNode, rNode) of
-                    (TyVar{}, TyVar{}) -> unionNodes lRoot rRoot
+                    (TyVar{}, TyVar{}) -> do
+                        -- Paper Raise(n) / rank adjustment: keep scope well-formed
+                        -- when merging variables from different levels.
+                        modify' $ \s ->
+                            s { suConstraint = RankAdjustment.harmonizeVarLevels lRoot rRoot (suConstraint s) }
+                        unionNodes lRoot rRoot
 
                     (TyVar{}, _) -> do
                         occursCheck lRoot rRoot
@@ -250,12 +257,9 @@ solveUnify c0 = do
     findRoot :: NodeId -> SolveM NodeId
     findRoot nid = do
         uf <- gets suUnionFind
-        case IntMap.lookup (getNodeId nid) uf of
-            Nothing -> pure nid
-            Just parent -> do
-                root <- findRoot parent
-                modify' $ \s -> s { suUnionFind = IntMap.insert (getNodeId nid) root (suUnionFind s) }
-                pure root
+        let (root, uf') = UnionFind.findRootWithCompression uf nid
+        modify' $ \s -> s { suUnionFind = uf' }
+        pure root
 
     -- | Union two sets, pointing the first root at the second.
     unionNodes :: NodeId -> NodeId -> SolveM ()
@@ -337,9 +341,7 @@ applyUFConstraint uf c = c
 -- is unnecessary for a single pass over the nodes/edges. All hot-path finds in
 -- `solveUnify` use the compressed `findRoot` instead.
 frWith :: IntMap NodeId -> NodeId -> NodeId
-frWith uf nid = case IntMap.lookup (getNodeId nid) uf of
-    Nothing -> nid
-    Just p -> frWith uf p
+frWith = UnionFind.frWith
 
 -- | Debug validator for Note [Solved graph properties]. Returns a list of
 -- violation messages; the list is empty when the solved graph satisfies the
@@ -475,8 +477,3 @@ validateWith opts SolveResult { srConstraint = c, srUnionFind = uf } =
 
         msg :: Show a => String -> [a] -> String
         msg label payload = label ++ ": " ++ unwords (map show payload)
-
-
-
-
-

@@ -51,6 +51,48 @@ spec = describe "Phase 5 -- Solve" $ do
                     cUnifyEdges sc `shouldBe` []
                     IntMap.lookup 0 uf `shouldBe` Just (NodeId 1)
 
+        it "raises variable levels to the LCA during merging (rank adjustment)" $ do
+            -- Paper Raise(n) / rank adjustment: before Var/Var union, raise both vars
+            -- to their lowest common binder and move `gBinds` accordingly.
+            let g0 =
+                    GNode
+                        { gnodeId = GNodeId 0
+                        , gParent = Nothing
+                        , gBinds = [(NodeId 1, Nothing)]
+                        , gChildren = [GNodeId 1]
+                        }
+                g1 =
+                    GNode
+                        { gnodeId = GNodeId 1
+                        , gParent = Just (GNodeId 0)
+                        , gBinds = [(NodeId 0, Nothing)]
+                        , gChildren = []
+                        }
+                vInner = TyVar (NodeId 0) (GNodeId 1)
+                vOuter = TyVar (NodeId 1) (GNodeId 0)
+                constraint =
+                    emptyConstraint
+                        { cGForest = [GNodeId 0]
+                        , cGNodes = IntMap.fromList [(0, g0), (1, g1)]
+                        , cNodes = IntMap.fromList [(0, vInner), (1, vOuter)]
+                        , cUnifyEdges = [UnifyEdge (NodeId 1) (NodeId 0)]
+                        }
+
+            case solveUnify constraint of
+                Left err -> expectationFailure $ "Unexpected solve error: " ++ show err
+                Right SolveResult{ srConstraint = sc } -> do
+                    IntMap.lookup 0 (cNodes sc) `shouldBe` Just (TyVar (NodeId 0) (GNodeId 0))
+                    IntMap.lookup 0 (cGNodes sc)
+                        `shouldBe`
+                            Just
+                                g0
+                                    { gBinds =
+                                        [ (NodeId 0, Nothing)
+                                        , (NodeId 1, Nothing)
+                                        ]
+                                    }
+                    IntMap.lookup 1 (cGNodes sc) `shouldBe` Just (g1 { gBinds = [] })
+
         it "unifies variable with arrow when acyclic" $ do
             let dom = TyBase (NodeId 2) (BaseTy "Int")
                 cod = TyBase (NodeId 3) (BaseTy "Bool")
@@ -392,4 +434,3 @@ spec = describe "Phase 5 -- Solve" $ do
             msgs `shouldSatisfy` (not . null)
             msgs `shouldSatisfy` any ("Residual instantiation edge" `isPrefixOf`)
             msgs `shouldSatisfy` any ("Missing GNode" `isPrefixOf`)
-

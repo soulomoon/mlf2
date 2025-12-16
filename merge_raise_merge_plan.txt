@@ -1,0 +1,419 @@
+Emitting Merge/RaiseMerge/Raise from Presolution — Status & Plan
+===============================================================
+
+Context
+-------
+In papers/xmlf.txt (Rémy & Yakobowski), solved instantiation edges come with a
+normalized instance-operation witness Ω. Figure 10 translates Ω to an xMLF
+instantiation (Φ), and Ω may contain operations like:
+  - Graft(σ, n)
+  - Weaken(n)
+  - Merge(n, m)
+  - Raise(n)
+  - RaiseMerge(n, m)     (shorthand for (Raise(n))^k; Merge(n, m))
+
+In this repo, these are represented as `InstanceOp` constructors in
+`src/MLF/Types.hs` (`OpGraft`, `OpWeaken`, `OpMerge`, `OpRaise`, `OpRaiseMerge`),
+while xMLF quantifier-introduction `O` (paper Figure 1) is *not* part of the
+witness language Ω (paper Figure 10).
+
+Repo alignment: we store the number of `O` steps demanded by the presolution
+expansion recipe (e.g. `ExpForall`) as `EdgeWitness.ewForallIntros` and append
+them directly when constructing Φ(e) (so Ω remains a sequence of `InstanceOp`s).
+For now we require `ExpForall` to appear only as a suffix in a composed
+expansion recipe (otherwise presolution throws an `InternalError`), so `O`
+introductions do not need to be interleaved with Ω operations.
+
+How presolution emits Merge/RaiseMerge/Raise today
+--------------------------------------------------
+Presolution now emits paper-shaped witnesses from two sources:
+
+1) Expansion-derived ops (`witnessFromExpansion`, `src/MLF/Presolution.hs`)
+   - `ExpForall`      → increments `ewForallIntros` (xMLF `O`), not an Ω op.
+   - `ExpInstantiate` → per-binder ops:
+       * unbounded binder: `OpGraft arg bv` then `OpWeaken bv`
+       * bounded-by-binder: `OpMerge bv bound` (Fig. 10 Merge)
+       * bounded-by-structure: `OpWeaken bv` (substitute the bound)
+   This matches Fig. 10’s “graft/merge before weaken” shape and avoids invalid
+   grafting under non-⊥ bounds.
+
+2) Edge-local unification tracing while solving one instantiation edge
+   (`unifyStructureEdge`/`unifyAcyclicEdge`, `src/MLF/Presolution.hs`)
+   - When two instantiation metas unify: record `OpMerge` between the
+     corresponding *source binders* (deterministic direction: larger → smaller).
+   - When a bounded binder meta “escapes” by unifying with an outer-scope `TyVar`:
+     record paper-shaped `OpRaise binder; OpMerge binder ext`, then normalize
+     it to `OpRaiseMerge binder ext`.
+   - When rank adjustment raises instantiation metas to the LCA in the `GNode`
+     tree: apply the graph transformation (rank adjustment) and also record
+     explicit `OpRaise(binder)` steps (one per parent-step in the `GNode` tree).
+
+This is still not a full Yakobowski’08 operation engine: today we only record
+non-root `Raise(n)` for binders (and binder-indexed metas), not for arbitrary
+interior nodes.
+
+Bottom line:
+  - This does NOT make the current implementation “invalid”: the solver can be
+    sound for the fragment it implements, and elaboration can still be correct
+    because it instantiates with the solved (reified) types.
+  - We are still incomplete vs `xmlf.txt`’s witness machinery:
+      * `OpRaise`’s Φ translation is currently approximate (“raise to the front”
+        of the binder spine) and does not implement the paper’s `m = min≺ {...}`
+        placement (Figure 10).
+      * Witness normalization is lightweight, not the full Yakobowski’08 algorithm.
+
+Status (current repo)
+---------------------
+Implemented alignment steps:
+  - `Merge` from expansion bounds: `witnessFromExpansion` emits `OpMerge` when a
+    binder is bounded by another in-scope binder (e.g. `b ⩾ a`).
+  - Edge-local tracing emits `Merge`/`RaiseMerge`/`Raise`:
+      * `OpMerge` when instantiation metas unify
+      * `OpRaise; OpMerge` (normalized to `OpRaiseMerge`) for bounded escapes
+      * `OpRaise` for rank-adjustment (LCA harmonization) steps
+  - Witness integration + normalization:
+      * `integratePhase2Ops` ensures `OpRaise` appears before any elimination of
+        that binder (including eliminations coming from expansion-derived ops).
+      * `normalizeInstanceOps` is barrier-aware (normalizes each segment
+        separated by `OpRaise`) and coalesces `Raise;Merge` to `RaiseMerge`.
+      * Redundant `Graft`/`Weaken` are dropped for binders eliminated by merges;
+        eliminations are deduplicated; weakens are pushed later when possible.
+  - Φ translation (`src/MLF/Elab.hs`) supports `OpRaise` (approximate placement).
+  - We also record internal per-edge trace (`EdgeTrace`): binder↦argument pairs
+    plus a copy provenance map (original→copied/replaced) and an interior set
+    I(r) derived from `instantiateSchemeWithTrace`/`copyNode` (plus ∀ wrappers),
+    as a hook for future “merge by union-find provenance” work.
+  - Traces are canonicalized/redirected alongside witnesses during
+    `rewriteConstraint`, so later phases can safely consume trace NodeIds.
+  - Identity `TyExp` wrappers are now erased even when they are not the UF root
+    (redirecting the whole UF class to the wrapper’s body). This fixes paper
+    baselines like `let id = (\x. x) in id id` and `\y. let id = (\x. x) in id y`.
+  - `materializeExpansions` avoids duplicating fresh nodes for non-Identity
+    expansions by reusing the already-unified expansion result.
+
+
+Implementation plan (completed steps + remaining gaps)
+-----------------------------------------------------
+
+Goal:
+  Preserve the current inference pipeline, while making per-edge witnesses
+  closer to `papers/xmlf.txt` Figure 10 by emitting Merge/RaiseMerge/Raise
+  operations (and translating them via Φ).
+
+Non-goals (initially):
+  - Implement the full Yakobowski’08 witness normalization algorithm in one go.
+  - Implement every edge-case of instantiation contexts Cₙʳ exactly (we can
+    start with “forall-spine-only” behavior and refine later).
+
+Phase 0 — Define triggers + ordering (implemented)
+  A. Trigger conditions (as implemented):
+     - Merge(n, m): two instantiation metas unify while solving one instantiation
+       edge; record a `Merge` between their corresponding source binders.
+     - RaiseMerge(n, m): a bounded binder meta unifies with an outer-scope `TyVar`
+       (above the instantiation’s quantifier level); record `Raise; Merge` and
+       normalize to `RaiseMerge`.
+     - Raise(n): rank adjustment (LCA harmonization) moves an instantiation meta
+       to a higher binder level; record explicit `Raise(n)` steps.
+  B. Ordering / direction (as implemented):
+     - For binder-binder merges recorded from UF equivalence classes: eliminate
+       larger binder ids into the smallest binder id.
+     - For bounded-by-binder instantiation (`b ⩾ a`): emit `Merge(b, a)` (the
+       bound binder must be in-scope for the instantiation).
+
+Phase 1 — Add provenance (implemented)
+  A. `EdgeTrace` is recorded per instantiation edge:
+     - `etBinderArgs`: source binder → instantiation argument node id
+     - `etInterior`: interior set I(r) (copied nodes + binder args)
+     - `etCopyMap`: original node id → copied/replaced node id
+  B. Traces are canonicalized/redirected alongside witnesses during
+     `rewriteConstraint`, so later phases can safely consume trace NodeIds.
+
+Phase 2 — Emit merges during edge-local unification (implemented)
+  A. Instantiation-edge solving runs unification under an `EdgeUnifyM` trace
+     (`unifyStructureEdge`/`unifyAcyclicEdge` in `src/MLF/Presolution.hs`).
+  B. Merge emission:
+     - Track UF classes that contain instantiation arguments (binder metas).
+     - When classes merge, record `OpMerge` between the corresponding source
+       binders (larger → smaller binder id).
+  C. RaiseMerge emission (“escape under bounds”):
+     - When a bounded binder class merges with an exterior `TyVar` class from a
+       proper ancestor scope, record `OpRaise binder; OpMerge binder ext` and
+       normalize to `OpRaiseMerge binder ext`.
+
+Phase 3 — Integrate + normalize ops (implemented)
+  A. Integration (`integratePhase2Ops`, `src/MLF/Presolution.hs`):
+     - Merges edge-local traced ops into the expansion-derived witness.
+     - Ensures standalone `OpRaise n` appears before any elimination of `n`
+       (`OpWeaken`/`OpMerge`/`OpRaiseMerge`), including eliminations coming from
+       `witnessFromExpansion`.
+  B. Normalization (`normalizeInstanceOps`, `src/MLF/Presolution.hs`):
+     - Barrier-aware: normalizes each segment separated by `OpRaise`.
+     - Drops redundant `Graft`/`Weaken` when a binder is eliminated by merge-like ops.
+     - Deduplicates eliminations per binder and pushes weakens later when possible.
+     - Coalesces `(Raise(n))^k; Merge(n, m)` into `RaiseMerge(n, m)` (k ≥ 1).
+
+Phase 4 — Scope via graph Raise (rank adjustment) + explicit Raise recording (implemented)
+  Paper anchor:
+    - `papers/xmlf.txt` uses `Raise(n)` in the witness language Ω (Fig. 10, §3.4)
+      to mean “raise a binding edge” (extrude a node one level higher).
+    - ICFP'08 (§1.2) describes the same graph operation operationally and notes
+      the analogy with ML rank adjustment: before merging two vars, raise them
+      to their lowest common binder.
+
+  Repo representation (paper-faithful):
+    - Scope ownership is represented directly in the graph:
+        * `TyVar.tnVarLevel` points at the owning `GNodeId`
+        * `GNode.gBinds` lists the binders owned by that level (plus optional bounds)
+    - Rank adjustment is implemented as the paper’s `Raise` graph transformation:
+        * when unifying two `TyVar`s, raise both to the LCA in the `GNode.gParent`
+          tree by mutating `tnVarLevel` and moving their `gBinds` entries.
+        * this logic is centralized in `src/MLF/RankAdjustment.hs`.
+    - This keeps the solved graph scope-correct independent of UF representative choice.
+
+  Witness effect (paper-faithful Ω, per-edge and executable):
+    D. In `unifyAcyclicEdge` / `unifyAcyclicEdgeNoMerge`, the underlying union
+       (`unifyAcyclicRawWithRaiseCounts`) executes rank adjustment on χe (graph
+       mutation) and returns how many parent-steps each side was raised by.
+       Presolution records that many `OpRaise` operations for every affected source
+       binder in the corresponding UF class, before any elimination ops on that binder.
+
+  Note:
+    - This is driven by `scope_tracking_redesign_plan.txt`: we align with `xmlf.txt`
+      by making `Raise` a real graph transformation (not UF metadata) and recording
+      the same steps in Ω for Φ translation.
+
+Phase 5 — Tests (implemented)
+  A. `test/PresolutionSpec.hs` covers:
+     - `Merge` when instantiation metas unify.
+     - `RaiseMerge` for bounded “escape” to an outer-scope variable.
+     - `Raise` when effective-level LCA raising is required
+       (and asserts `Raise` appears before the binder’s elimination).
+     - Witness normalization invariants (no mentions after elimination, coalescing, etc.).
+  B. `test/ElaborationSpec.hs` includes a unit test for Φ translating `OpRaise`
+     (current approximation).
+
+Phase 6 — Make Ω executable on χe (implemented)
+  Paper anchor:
+    - `papers/xmlf.txt` §3.1 defines the expansion χe of an instantiation edge as χ
+      extended with a copy of the type scheme plus a unification edge, and §3.4
+      treats Ω as a derivation χe ⊑ χ where ω operations are the *actual graph
+      transformations* on χe.
+
+  Repo change:
+    A. `processInstEdge` now materializes instantiation via an explicit χe-style copy:
+       - `applyExpansionEdgeTraced` (new) copies the ∀ body while substituting each
+         binder by a fresh *binder-meta* node (not the instantiation argument node),
+         so the binder exists as a real node in the copied interior.
+       - `copyBinderBounds` copies/rewires instance bounds for these binder-metas and
+         stores them in `gBinds`, so `Weaken` can be executed by substituting the bound.
+
+    B. Expansion-derived ops are executed, not just recorded (paper-faithful ordering):
+       - `executeBaseOpsPre` applies only `Graft` and base `Merge` *before* unifying the
+         χe copy against the target:
+           * `Graft` updates the binder-meta’s bound in `gBinds`
+           * base `Merge` unifies binder-metas and drops the eliminated binder-meta from
+             `gBinds` (elimination)
+       - `executeBaseOpsPost` applies base `Weaken` only *after* unification against the
+         target, and skips it if the binder was eliminated by a merge-like Phase-2 op:
+           * `Weaken` unifies the binder-meta with its bound and drops it from `gBinds`
+           * eliminated binders’ metas are dropped to avoid re-quantification
+
+       This matches the paper’s “elimination last” shape and avoids executing `Weaken`
+       eagerly in a way that would preempt `RaiseMerge` emission for bounded binders.
+
+    C. Avoiding “opposed merges” while executing base `Merge`:
+       - `unifyAcyclicEdgeNoMerge` performs the directed χe union needed to execute a
+         base `Merge(b, a)` without also emitting a Phase-2 merge in the opposite
+         direction (which would otherwise eliminate the wrong binder).
+       - `recordMergesIntoRep` now chooses a non-eliminated binder as the representative
+         (when possible), preventing later ops from targeting an already-eliminated binder.
+
+    D. Supporting invariants:
+       - `createFreshVarAt` now registers new vars in the level’s `gBinds` (matching
+         Phase 1 and Phase 2 behaviour).
+       - Added helpers `setVarBound` and `dropVarBind` to mutate `gBinds` consistently.
+       - Extracted shared union-find helpers to `src/MLF/UnionFind.hs` and reused
+         them across Normalize/Presolution/Solve.
+
+Phase 7 — Incremental rollout / safety (implemented)
+  A. Keep the expansion-derived witness as the baseline and only add extra ops
+     when they are justified by unifications performed while solving a specific
+     instantiation edge.
+  B. Integration/normalization defends Φ translation:
+     - ensure `Raise(n)` is never placed after eliminating `n`
+     - drop redundant ops on binders eliminated by merges
+
+Phase 8 — Remaining gaps (TODO)
+  Goal
+  ----
+  Close the two remaining “paper alignment” gaps that still block a faithful
+  Figure 10 story for `Raise(n)`:
+
+    1) `Φξ(Raise(n))` must choose the *correct insertion point* `m = min≺ {...}`
+       (not “always raise to the front”), and
+    2) the total order ≺ used by Φ (and by Merge directions) must match the
+       paper’s “leftmost-lowermost” ordering, not our current “NodeId order”.
+
+  Scope clarification (what we can do now)
+  ---------------------------------------
+  Today the presolution only emits `OpRaise` for *binder variables* (source
+  binders of the instantiated scheme), as a reflection of rank-adjustment while
+  unifying χe. That means we can implement a faithful `Φ(Raise(n))` placement
+  **for binder raises first** (no `InstInside` contexts required), and then
+  extend it later to arbitrary interior nodes once we actually emit such raises.
+
+
+  Phase 8A — Paper-faithful `Φξ(Raise(n))` placement (binder-raise first)
+  ----------------------------------------------------------------------
+
+  Paper anchor
+    - `papers/xmlf.txt` Fig. 10:
+        Φξ (Raise(n)) = C^r_m { O; ∀ (⩾ Tξ(n)); ∀ (βn ⩾) C^n_m {h!βn i} }
+      where
+        m = min≺ { m | n ≻−→≻−→←−≺ m ∧ n ≺ m }.
+
+  Repo goal
+    - Replace the current approximation in `src/MLF/Elab.hs` (`OpRaise` always
+      “moves to the front of the binder spine”) with a placement that matches
+      the paper’s `m = min≺ {...}` choice.
+
+  8A.0  Make edge provenance available to elaboration (plumbing)
+    - We need per-edge information to compute ≺ and the candidate set for `m`.
+    - Proposed interface change:
+        * Expose `psEdgeTraces` as `prEdgeTraces :: IntMap EdgeTrace` in
+          `PresolutionResult`.
+        * Thread that map to `MLF.Elab.elaborate` (or embed `EdgeTrace` directly
+          into `EdgeWitness`) so `phiFromEdgeWitness` can consult it.
+    - Maintain invariants:
+        * traces are already canonicalized alongside witnesses in
+          `rewriteConstraint` (so NodeIds match the solved graph).
+
+  8A.1  Define a concrete ≺ for *this edge* (binder subset)
+    - We want a total order over the binders quantified at `Tξ(r)` (the ones
+      that appear in `ids :: [Maybe NodeId]` for this edge), consistent with
+      the paper’s “leftmost-lowermost” intent.
+    - Compute for each binder `b` a “best position” in the (solved) term-DAG:
+        * Traverse the type graph rooted at `ewRoot` / `etRoot` with a
+          left-to-right child order (`TyArrow` dom then cod; `TyForall` body).
+        * Track occurrences of each binder node id and assign a position key:
+            (depth, path) where
+              - depth is path length from root (deeper = “lowermost”), and
+              - path is the child-index sequence (lexicographic = “leftmost”).
+        * Choose the *best* position per binder by:
+            - prefer larger depth (deeper first),
+            - tie-break by lexicographically smaller path.
+    - This yields a per-edge ordering function:
+        compare≺(a,b) = compare orderKey(a) orderKey(b)
+      (fall back to NodeId order only if a binder is unreachable in traversal).
+
+  8A.2  Compute `m = min≺ {...}` for binder-raises in repo terms
+    - For our binder-only `OpRaise n`, the insertion point must satisfy the
+      scoping/order constraints induced by bounds:
+        * The new quantifier’s bound is `Tξ(n)` (in repo: the current bound
+          carried by binder `n`, i.e. the bound of α_n in the current `ty`).
+        * Any binder that appears free in that bound must be in scope before we
+          introduce the new βn binder.
+    - Concrete algorithm (binder-only, edge-local):
+        1) Locate the current binder index of `n` in the identity spine `ids`.
+        2) Extract `boundTy = boundOfBinder(n)` from the current `ty`.
+        3) Compute `deps = FVbinders(boundTy)` where `FVbinders` returns the set
+           of binder identities (NodeIds in `ids`) that occur free in `boundTy`.
+        4) Let `cutoff` be the maximum spine index among `deps`.
+        5) Choose the insertion point as “just after the deps”:
+              insertIndex = cutoff + 1
+           and define `m` as the binder currently at `insertIndex` (or “end of
+           spine” if `insertIndex == length spine`).
+        6) When ≺-ordering is needed (paper’s `min≺`), interpret this as:
+           the earliest binder (by ≺) that is *after* all deps and still yields a
+           well-scoped bound. In the “top-level binder spine” case, the index-based
+           rule and the `min≺` rule coincide once the spine is ordered by ≺.
+    - Fallback/defensive behavior:
+        * If `boundTy` is ⊥ (unbounded), `deps = ∅` so `insertIndex = 0` and we
+          recover the “raise to front” behavior (which is correct in this case).
+
+  8A.3  Implement the exact Raise translation at the chosen insertion point
+    - Update `phiFromEdgeWitness` (`src/MLF/Elab.hs`) `OpRaise` case:
+        * Build `C^r_m` as an `InstUnder` prefix of length `insertIndex`.
+        * Under that prefix, perform:
+            O; ∀(⩾ boundTy); (under β) (alias+elim old binder `n`)
+          using the existing “alias+elim” pattern already implemented.
+        * Update the identity list `ids`:
+            - remove `n` from its old position (it is eliminated),
+            - insert `Just n` at `insertIndex` (it is now represented by the new βn).
+    - Keep existing safety properties:
+        * `integratePhase2Ops` already ensures `Raise(n)` is never placed after
+          eliminating `n`; translation should preserve that assumption.
+
+  8A.4  Tests (make the approximation failure visible, then fix)
+    - Add a focused Φ test where “raise-to-front” is observably wrong:
+        * construct a type where binder `b`’s bound mentions binder `a`, and
+          raising `a` must be inserted *before* `b` but not necessarily at the
+          global front (depending on deps).
+        * assert the resulting instantiation is well-scoped and that
+          `applyInstantiation source Φ(e) == target`.
+    - Add a unit test that checks the computed `insertIndex`/`m` for a small
+      synthetic spine to guard regressions.
+
+
+  Phase 8B — Make ≺ paper-like (leftmost-lowermost), and use it consistently
+  ----------------------------------------------------------------------------
+
+  8B.0  Centralize ordering logic
+    - Introduce a dedicated module (e.g. `src/MLF/Order.hs`) or extend an existing
+      helper module to compute:
+        * `orderKey :: Constraint -> NodeId root -> NodeId -> Maybe OrderKey`
+        * `compareByOrderKey :: OrderKeyMap -> NodeId -> NodeId -> Ordering`
+      where `OrderKey` captures the “best (depth,path)” position.
+
+  8B.1  Use `EdgeTrace` to bound the ordering problem
+    - Use `EdgeTrace.etInterior` (I(r) approximation) to restrict traversal to
+      the nodes that actually belong to this edge’s expansion interior.
+    - Use `EdgeTrace.etCopyMap` to relate “original nodes” to “copied nodes” if
+      we want a paper-like ≺ that is stable across copying.
+
+  8B.2  Apply ≺ to Merge direction (paper requirement: m ≺ n)
+    - Update presolution’s merge emission policy:
+        * `recordMergesIntoRep` currently chooses reps by numeric NodeId; change it
+          to choose reps by ≺ order (and emit `OpMerge(n, m)` only when m ≺ n).
+        * Do the same for any other place we pick merge directions among binders
+          (expansion-derived merge, phase-2 merge-like ops).
+
+  8B.3  Apply ≺ to quantifier/binder ordering in type reification
+    - Today reification orders binders by NodeId (`sortOnFst` / `sort`).
+    - Replace this with ≺ (computed from the term-DAG position) so that:
+        * `T(hi)` / `S(g)` follow the paper’s “leftmost-lowermost” convention, and
+        * Σ(g) reordering becomes rarer (and more predictable).
+
+  8B.4  Extend Raise beyond binders (future, once emitted)
+    - Once presolution emits `OpRaise` for non-binder interior nodes, extend the
+      `Φ(Raise(n))` implementation to use the full instantiation context grammar
+      (needs `InstInside` paths, not only `InstUnder` prefix).
+    - This requires:
+        * computing `C^r_m` / `C^n_m` for arbitrary interior nodes, and
+        * enriching `EdgeTrace` (or adding a new per-edge “context map”) to find
+          these contexts deterministically.
+
+  8B.5  Regression suite for ordering
+    - Add tests that distinguish NodeId order from leftmost-lowermost order:
+        * a type where two binders occur in different branches and the leftmost
+          one must quantify first;
+        * a type where one binder occurs deeper and must quantify earlier.
+    - Add invariant tests:
+        * if binder `a` occurs free in binder `b`’s bound, then a ≺ b.
+
+
+Where to change code (initial touchpoints)
+------------------------------------------
+  - src/MLF/Presolution.hs
+      * `witnessFromExpansion` (Graft/Weaken/Merge from expansion recipes)
+      * `unifyStructureEdge` / `unifyAcyclicEdge` (edge-local Merge/Raise/RaiseMerge)
+      * `integratePhase2Ops` + `normalizeInstanceOps`
+      * `instantiateSchemeWithTrace` / `copyNode` (interior provenance)
+  - src/MLF/Types.hs
+      * already has InstanceOp constructors; may need extra metadata types
+  - src/MLF/Elab.hs
+      * `phiFromEdgeWitness` (`OpRaise` translation is currently approximate)
+  - test/ElaborationSpec.hs
+      * tests for Φ/Σ translation (including `OpRaise`)
+  - test/PresolutionSpec.hs
+      * unit tests for Merge/RaiseMerge/Raise emission and normalization
