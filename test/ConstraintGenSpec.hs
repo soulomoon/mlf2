@@ -1,10 +1,12 @@
 module ConstraintGenSpec (spec) where
 
+import Control.Monad (filterM)
 import Data.List (nub)
 import Data.Maybe (catMaybes)
 import qualified Data.IntMap.Strict as IntMap
 import Test.Hspec
 
+import MLF.Binding (checkBindingTree)
 import MLF.ConstraintGen (AnnExpr (..))
 import MyLib
 
@@ -128,7 +130,6 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 expr = ELetAnn "id" scheme (ELam "x" (EVar "x")) (EVar "id")
             expectRight (inferConstraintGraph expr) $ \result -> do
                 let nodes = cNodes (crConstraint result)
-                    gnodes = cGNodes (crConstraint result)
                 -- The result should be the body (id), which refers to the expansion of the scheme
                 case IntMap.lookup (getNodeId (crRoot result)) nodes of
                     Just TyExp { tnBody = bodyId } -> do
@@ -160,8 +161,8 @@ spec = describe "Phase 1 — Constraint generation" $ do
             let scheme = SrcScheme [("a", Just (STBase "Int"))] (STArrow (STVar "a") (STVar "a"))
                 expr = ELetAnn "f" scheme (ELam "x" (EVar "x")) (EVar "f")
             expectRight (inferConstraintGraph expr) $ \result -> do
-                let nodes = cNodes (crConstraint result)
-                    gnodes = cGNodes (crConstraint result)
+                let constraint = crConstraint result
+                    nodes = cNodes constraint
                 -- We verify that the 'a' variable has an instantiation edge to 'Int'
                 case IntMap.lookup (getNodeId (crRoot result)) nodes of
                     Just TyExp { tnBody = bodyId } -> do
@@ -172,24 +173,20 @@ spec = describe "Phase 1 — Constraint generation" $ do
                                 arrow <- lookupNode nodes arrowBody
                                 case arrow of
                                     TyArrow { tnDom = domId } -> do
-                                        -- domId is 'a'. Its bound is recorded in the G-node bind list.
+                                        -- domId is 'a'. Its bound is recorded in `Constraint.cVarBounds`.
                                         domNode <- lookupNode nodes domId
                                         case domNode of
-                                            TyVar{ tnVarLevel = lvl } -> do
-                                                case IntMap.lookup (getGNodeId lvl) gnodes of
+                                            TyVar{} -> do
+                                                case IntMap.lookup (getNodeId domId) (cVarBounds constraint) of
+                                                    Just (Just boundId) -> do
+                                                        rhs <- lookupNode nodes boundId
+                                                        case rhs of
+                                                            TyBase { tnBase = BaseTy name } -> name `shouldBe` "Int"
+                                                            other -> expectationFailure $ "Expected bound Int, saw " ++ show other
+                                                    Just Nothing ->
+                                                        expectationFailure "Expected bound for variable, saw Nothing"
                                                     Nothing ->
-                                                        expectationFailure "Missing GNode for binder level"
-                                                    Just gnode ->
-                                                        case lookup domId (gBinds gnode) of
-                                                            Just (Just boundId) -> do
-                                                                rhs <- lookupNode nodes boundId
-                                                                case rhs of
-                                                                    TyBase { tnBase = BaseTy name } -> name `shouldBe` "Int"
-                                                                    other -> expectationFailure $ "Expected bound Int, saw " ++ show other
-                                                            Just Nothing ->
-                                                                expectationFailure "Expected bound for variable, saw Nothing"
-                                                            Nothing ->
-                                                                expectationFailure "Missing binder entry for variable"
+                                                        expectationFailure "Expected bound entry for variable, saw missing key"
                                             other ->
                                                 expectationFailure $ "Expected TyVar for domain, saw " ++ show other
                                     other -> expectationFailure $ "Expected Arrow body, saw " ++ show other
@@ -204,28 +201,23 @@ spec = describe "Phase 1 — Constraint generation" $ do
             expectRight (inferConstraintGraph expr) $ \result -> do
                 let constraint = crConstraint result
                     nodes = cNodes constraint
-                    gnodes = cGNodes constraint
                     instEdges = cInstEdges constraint
                 case instEdges of
                     [InstEdge _ _ annId] -> do
                         annNode <- lookupNode nodes annId
                         case annNode of
-                            TyForall { tnQuantLevel = qLevel, tnBody = bodyId } -> do
-                                -- bodyId is 'a'. Its bound is recorded in the quantifier level's G-node.
-                                case IntMap.lookup (getGNodeId qLevel) gnodes of
+                            TyForall { tnBody = bodyId } -> do
+                                -- bodyId is 'a'. Its bound is recorded in `Constraint.cVarBounds`.
+                                case IntMap.lookup (getNodeId bodyId) (cVarBounds constraint) of
+                                    Just (Just boundId) -> do
+                                        rhs <- lookupNode nodes boundId
+                                        case rhs of
+                                            TyBase { tnBase = BaseTy name } -> name `shouldBe` "Int"
+                                            other -> expectationFailure $ "Expected bound Int, saw " ++ show other
+                                    Just Nothing ->
+                                        expectationFailure "Expected bound for variable, saw Nothing"
                                     Nothing ->
-                                        expectationFailure "Missing GNode for quant level"
-                                    Just gnode ->
-                                        case lookup bodyId (gBinds gnode) of
-                                            Just (Just boundId) -> do
-                                                rhs <- lookupNode nodes boundId
-                                                case rhs of
-                                                    TyBase { tnBase = BaseTy name } -> name `shouldBe` "Int"
-                                                    other -> expectationFailure $ "Expected bound Int, saw " ++ show other
-                                            Just Nothing ->
-                                                expectationFailure "Expected bound for variable, saw Nothing"
-                                            Nothing ->
-                                                expectationFailure "Missing binder entry for variable"
+                                        expectationFailure "Expected bound entry for variable, saw missing key"
                             other -> expectationFailure $ "Expected TyForall annotation node, saw " ++ show other
                     other -> expectationFailure $ "Expected exactly 1 inst edge, saw " ++ show other
 
@@ -256,12 +248,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
             expectRight (inferConstraintGraph expr) $ \result -> do
                 let nodes = cNodes (crConstraint result)
                 case IntMap.lookup (getNodeId (crRoot result)) nodes of
-                    Just TyVar { tnVarLevel = level } -> do
-                        -- The free variable should be allocated at the current level
-                        let rootLevel = case cGForest (crConstraint result) of
-                                [gid] -> gid
-                                _ -> error "Expected single root"
-                        level `shouldBe` rootLevel
+                    Just TyVar {} -> pure ()
                     other -> expectationFailure $ "Expected TyVar for free var, saw " ++ show other
 
         it "produces valid AnnExpr structure" $ do
@@ -270,8 +257,9 @@ spec = describe "Phase 1 — Constraint generation" $ do
              expectRight (inferConstraintGraph expr) $ \result -> do
                  let ann = crAnnotated result
                  case ann of
-                     ALet name schemeNode expVar childLevel rhsAnn bodyAnn resNode -> do
+                     ALet name schemeNode _ scopeRoot rhsAnn bodyAnn _resNode -> do
                          name `shouldBe` "x"
+                         schemeNode `shouldBe` scopeRoot
                          -- Basic structural check
                          case rhsAnn of
                              ALit (LInt 1) _ -> pure ()
@@ -295,7 +283,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
 
                 -- We should have 1 Arrow, 1 Param Var, and 1 Exp node (for the usage of x)
                 case (arrowNodes, varNodes, expNodes) of
-                    ([TyArrow { tnDom = dom, tnCod = cod }], [TyVar { tnId = varId }], [TyExp { tnBody = bodyId }]) -> do
+                    ([TyArrow { tnDom = dom, tnCod = cod }], [TyVar { tnId = varId }], [TyExp { tnId = expId, tnBody = bodyId }]) -> do
                         dom `shouldBe` varId
                         -- The codomain is the expansion of the parameter variable
                         -- But wait, ELam "x" (EVar "x")
@@ -305,56 +293,10 @@ spec = describe "Phase 1 — Constraint generation" $ do
                         -- Arrow is param -> expNode.
                         -- So tnDom = varId. tnCod = expId.
                         -- tnBody of expNode = varId.
-                        tnId (head expNodes) `shouldBe` cod
+                        expId `shouldBe` cod
                         bodyId `shouldBe` varId
                     _ ->
                         expectationFailure $ "Unexpected lambda nodes: " ++ show (length arrowNodes, length varNodes, length expNodes)
-
-        -- Each lambda parameter should be registered with the G-node that
-        -- represents its scope so Phase 2+ know which variables can be
-        -- generalized. For λx.x the parameter lives at the root level g₀, so we
-        -- ensure that the TyVar id for x appears inside gBinds(g₀).
-        it "records lambda parameters at the surrounding binding level" $ do
-            let expr = ELam "x" (EVar "x")
-            expectRight (inferConstraintGraph expr) $ \result -> do
-                let constraint = crConstraint result
-                    nodes = cNodes constraint
-                arrow <- case IntMap.lookup (getNodeId (crRoot result)) nodes of
-                    Just node@TyArrow {} -> pure node
-                    other -> expectationFailure ("Root is not a lambda arrow: " ++ show other) >> pure (error "unreachable")
-                rootLevel <- case cGForest constraint of
-                    [gid] -> pure gid
-                    other -> expectationFailure ("Unexpected forest: " ++ show other) >> pure (error "unreachable")
-                rootNode <- lookupGNode (cGNodes constraint) rootLevel
-                (tnDom arrow `elem` map fst (gBinds rootNode)) `shouldBe` True
-
-        it "records lambda parameters inside child binding levels" $ do
-            let expr = ELet "f" (ELam "x" (EVar "x")) (ELit (LInt 0))
-            expectRight (inferConstraintGraph expr) $ \result -> do
-                let constraint = crConstraint result
-                    nodes = cNodes constraint
-                    gnodes = cGNodes constraint
-                -- Locate the Forall introduced for the let RHS by scanning nodes.
-                -- There should be one Forall for the let binding.
-                forallNode <- case [n | n@TyForall {} <- IntMap.elems nodes] of
-                    [node] -> pure node
-                    other -> expectationFailure ("Expected single Forall node, saw " ++ show other) >> pure (error "unreachable")
-
-                -- The body of the Forall is the lambda arrow
-                bodyNode <- lookupNode nodes (tnBody forallNode)
-                paramId <- case bodyNode of
-                    TyArrow { tnDom = dom } -> pure dom
-                    other -> expectationFailure ("Forall body is not a lambda: " ++ show other) >> pure (error "unreachable")
-
-                rootId <- case cGForest constraint of
-                    [gid] -> pure gid
-                    other -> expectationFailure ("Unexpected forest: " ++ show other) >> pure (error "unreachable")
-                rootNode <- lookupGNode gnodes rootId
-                childId <- case gChildren rootNode of
-                    [cid] -> pure cid
-                    other -> expectationFailure ("Expected single child, saw " ++ show other) >> pure (error "unreachable")
-                childNode <- lookupGNode gnodes childId
-                paramId `elem` map fst (gBinds childNode) `shouldBe` True
 
     describe "Applications" $ do
         -- Verify that application translation produces a single instantiation edge
@@ -467,38 +409,14 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 paramIds <- mapM checkParam lhsIds
                 length (nub paramIds) `shouldBe` 1
 
-                paramVar <- lookupNode nodes (head paramIds)
+                paramVar <- case paramIds of
+                    (paramId:_) -> lookupNode nodes paramId
+                    [] -> expectationFailure "Expected parameter ids" >> pure (error "unreachable")
                 case paramVar of
-                    TyVar { tnVarLevel = level } -> do
-                        rootLevel <- case cGForest constraint of
-                            [gid] -> pure gid
-                            other -> expectationFailure ("Unexpected forest: " ++ show other) >> pure (error "unreachable")
-                        level `shouldBe` rootLevel
+                    TyVar {} -> pure ()
                     other -> expectationFailure $ "Instantiation left-hand side is not a parameter TyVar: " ++ show other
 
-        -- Applying an un-generalized lambda must leave the result at the caller
-        -- level (g₀ here) instead of allocating a fresh child G-node, otherwise
-        -- the returned TyVar would be eligible for quantification it should not
-        -- receive. This ensures application results inherit the surrounding
-        -- generalization level. Type tree view for the identity call:
-        --   TyVar ρ (level g₀)
-        --   └─ TyArrow λx.x (level g₀)
-        --      ├─ dom: TyBase "Int"
-        --      └─ cod: TyVar ρ
-        it "keeps application results at the current generalization level" $ do
-            let expr = EApp (ELam "x" (EVar "x")) (ELit (LInt 0))
-            expectRight (inferConstraintGraph expr) $ \result -> do
-                let constraint = crConstraint result
-                    nodes = cNodes constraint
-                case IntMap.lookup (getNodeId (crRoot result)) nodes of
-                    Just TyVar { tnVarLevel = level } -> do
-                        rootLevel <- case cGForest constraint of
-                            [gid] -> pure gid
-                            other -> expectationFailure ("Unexpected forest: " ++ show other) >> pure (error "unreachable")
-                        level `shouldBe` rootLevel
-                    other -> expectationFailure $ "Application result is not a TyVar: " ++ show other
-
-    describe "Let-generalization and G-nodes" $ do
+    describe "Binding edges" $ do
         it "does not emit instantiation edges for unused let bindings" $ do
             let expr =
                     ELet "f" (ELam "x" (EVar "x"))
@@ -506,102 +424,76 @@ spec = describe "Phase 1 — Constraint generation" $ do
             expectRight (inferConstraintGraph expr) $ \result -> do
                 cInstEdges (crConstraint result) `shouldBe` []
 
-        -- Let-bound RHS terms allocate a fresh G-node child under the current
-        -- generalization level so that any TyVar nodes introduced in the binding
-        -- can later be quantified. In the graphic constraint this manifests as the
-        -- root level g₀ gaining a child g₁ such that gParent(g₁) = g₀ and gChildren(g₀)
-        -- contains g₁. This test inspects the forest and G-node table to confirm
-        -- that exact lattice fragment g₀ → g₁ exists.
-        it "creates a child generalization node for let-bindings" $ do
-            let expr = ELet "id" (ELam "x" (EVar "x")) (EVar "id")
-            expectRight (inferConstraintGraph expr) $ \result -> do
-                let constraint = crConstraint result
-                    forest = cGForest constraint
-                    gnodes = cGNodes constraint
-                case forest of
-                    [rootId] -> do
-                        case IntMap.lookup (getGNodeId rootId) gnodes of
-                            Nothing -> expectationFailure "Missing root G-node"
-                            Just rootNode ->
-                                case gChildren rootNode of
-                                    (childId:_) ->
-                                        case IntMap.lookup (getGNodeId childId) gnodes of
-                                            Nothing -> expectationFailure "Missing child G-node"
-                                            Just childNode -> gParent childNode `shouldBe` Just rootId
-                                    [] -> expectationFailure "Root G-node has no children"
-                    other -> expectationFailure $ "Unexpected root forest shape: " ++ show other
-
-        it "stores RHS lambda parameters inside the child generalization node" $ do
+        it "binds let RHS nodes to the let-introduced TyForall" $ do
             let expr = ELet "id" (ELam "x" (EVar "x")) (ELit (LInt 0))
             expectRight (inferConstraintGraph expr) $ \result -> do
                 let constraint = crConstraint result
                     nodes = cNodes constraint
-                    gnodes = cGNodes constraint
-                rootId <- case cGForest constraint of
-                    [gid] -> pure gid
-                    other -> expectationFailure ("Unexpected forest: " ++ show other) >> pure (error "unreachable")
-                rootNode <- lookupGNode gnodes rootId
-                childId <- case gChildren rootNode of
-                    [cid] -> pure cid
-                    other -> expectationFailure ("Expected single child, saw " ++ show other) >> pure (error "unreachable")
-                childNode <- lookupGNode gnodes childId
-                let childVars = [tnId n | n@TyVar { tnVarLevel = level } <- IntMap.elems nodes, level == childId]
-                childVars `shouldSatisfy` (not . null)
-                all (`elem` map fst (gBinds childNode)) childVars `shouldBe` True
+                    bindParents = cBindParents constraint
+                forallNode <- case [n | n@TyForall {} <- IntMap.elems nodes] of
+                    [node] -> pure node
+                    other -> expectationFailure ("Expected single Forall node, saw " ++ show other) >> pure (error "unreachable")
+                bodyNode <- lookupNode nodes (tnBody forallNode)
+                paramId <- case bodyNode of
+                    TyArrow { tnDom = dom } -> pure dom
+                    other -> expectationFailure ("Forall body is not a lambda: " ++ show other) >> pure (error "unreachable")
+                case IntMap.lookup (getNodeId paramId) bindParents of
+                    Just (parent, BindFlex) -> parent `shouldBe` tnId forallNode
+                    Just (parent, flag) -> do
+                        parent `shouldBe` tnId forallNode
+                        flag `shouldBe` BindFlex
+                    Nothing -> expectationFailure "Missing binding parent for lambda parameter"
 
-        -- Nested lets should form a linear chain g₀ → g₁ → g₂ so that each inner
-        -- binding knows its parent level. For
-        --   let x = (let y = 0 in y) in x
-        -- we expect the outer binding to create g₁ under g₀ and the inner binding
-        -- to create g₂ under g₁. If we annotate the AST with levels we get:
-        --       Program root (g₀)
-        --       └─ Let x (g₁)
-        --          ├─ bind: Let y (g₂)
-        --          │        ├─ bind: 0
-        --          │        └─ body: y
-        --          └─ body: x
-        -- A linear parent list therefore fully captures the structure. This check
-        -- ensures the stored 'gParent' links match that nesting.
-        it "links nested lets through parent G-nodes" $ do
+        it "preserves inner let binding parents" $ do
             let expr =
                     ELet "x"
                         (ELet "y" (ELit (LInt 0)) (EVar "y"))
                         (EVar "x")
             expectRight (inferConstraintGraph expr) $ \result -> do
                 let constraint = crConstraint result
-                    gnodes = cGNodes constraint
-                IntMap.size gnodes `shouldBe` 3 -- root + inner + nested
-                case cGForest constraint of
-                    [rootId] -> do
-                        rootNode <- lookupGNode gnodes rootId
-                        case gChildren rootNode of
-                            [childId] -> do
-                                childNode <- lookupGNode gnodes childId
-                                gParent childNode `shouldBe` Just rootId
-                                case gChildren childNode of
-                                    [grandChildId] -> do
-                                        grandChild <- lookupGNode gnodes grandChildId
-                                        gParent grandChild `shouldBe` Just childId
-                                    other -> expectationFailure $ "Expected single grandchild, saw " ++ show other
-                            other -> expectationFailure $ "Expected single child, saw " ++ show other
-                    other -> expectationFailure $ "Unexpected root forest shape: " ++ show other
+                    nodes = cNodes constraint
+                    bindParents = cBindParents constraint
+                foralls <- case [n | n@TyForall {} <- IntMap.elems nodes] of
+                    [f1, f2] -> pure (f1, f2)
+                    other -> expectationFailure ("Expected two Forall nodes, saw " ++ show other) >> pure (error "unreachable")
+                let (innerForall, _outerForall) = case foralls of
+                        (f1, f2) ->
+                            case IntMap.lookup (getNodeId (tnBody f1)) nodes of
+                                Just TyBase {} -> (f1, f2)
+                                _ -> (f2, f1)
+                case IntMap.lookup (getNodeId (tnBody innerForall)) bindParents of
+                    Just (parent, _) -> parent `shouldBe` tnId innerForall
+                    Nothing -> expectationFailure "Missing binding parent for inner let RHS"
 
-        it "creates sibling generalization nodes for sequential lets" $ do
-            let expr =
-                    ELet "x" (ELit (LInt 0)) $
-                        ELet "y" (ELit (LBool True)) (ELit (LInt 1))
+        it "binds explicit forall variables to their TyForall" $ do
+            let ann = STForall "a" Nothing (STBase "Int")
+                expr = EAnn (ELit (LInt 1)) ann
             expectRight (inferConstraintGraph expr) $ \result -> do
                 let constraint = crConstraint result
-                    gnodes = cGNodes constraint
-                case cGForest constraint of
-                    [rootId] -> do
-                        rootNode <- lookupGNode gnodes rootId
-                        let children = gChildren rootNode
-                        length children `shouldBe` 2
-                        length (nub children) `shouldBe` 2
-                        all (\cid -> maybe False ((== Just rootId) . gParent) (IntMap.lookup (getGNodeId cid) gnodes)) children
-                            `shouldBe` True
-                    other -> expectationFailure $ "Unexpected root forest shape: " ++ show other
+                    nodes = cNodes constraint
+                    bindParents = cBindParents constraint
+                forallNode <- case [n | n@TyForall {} <- IntMap.elems nodes] of
+                    [node] -> pure node
+                    other -> expectationFailure ("Expected single Forall node, saw " ++ show other) >> pure (error "unreachable")
+                let boundChildren =
+                        [ NodeId childId
+                        | (childId, (parent, _)) <- IntMap.toList bindParents
+                        , parent == tnId forallNode
+                        ]
+                binderVars <- filterM (\nid -> do
+                    node <- lookupNode nodes nid
+                    pure $ case node of
+                        TyVar {} -> True
+                        _ -> False
+                    ) boundChildren
+                binderVars `shouldSatisfy` (not . null)
+
+        it "produces a valid binding tree" $ do
+            let expr =
+                    ELet "id" (ELam "x" (EVar "x"))
+                        (EApp (EVar "id") (ELit (LInt 1)))
+            expectRight (inferConstraintGraph expr) $ \result ->
+                checkBindingTree (crConstraint result) `shouldBe` Right ()
 
     describe "Expansion nodes" $ do
         -- Generalized lets expose a single expansion node s · τ that every call
@@ -707,11 +599,3 @@ lookupNode table nid =
         Nothing -> do
             expectationFailure $ "Missing node: " ++ show nid
             pure (error "unreachable: missing TyNode")
-
-lookupGNode :: IntMap.IntMap GNode -> GNodeId -> IO GNode
-lookupGNode table gid =
-    case IntMap.lookup (getGNodeId gid) table of
-        Just node -> pure node
-        Nothing -> do
-            expectationFailure $ "Missing G-node: " ++ show gid
-            pure (error "unreachable: missing G-node")

@@ -582,6 +582,9 @@ emptyConstraint = Constraint
     , cNodes = IntMap.empty
     , cInstEdges = []
     , cUnifyEdges = []
+    , cBindParents = IntMap.empty
+    , cVarBounds = IntMap.empty
+    , cEliminatedVars = IntSet.empty
     }
 
 isRight :: Either a b -> Bool

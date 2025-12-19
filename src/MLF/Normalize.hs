@@ -37,9 +37,9 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
 import qualified MLF.GNodeOps as GNodeOps
-import qualified MLF.RankAdjustment as RankAdjustment
+import qualified MLF.BindingAdjustment as BindingAdjustment
 import qualified MLF.UnionFind as UnionFind
-import MLF.Types
+import MLF.Types (NodeId(..), GNodeId(..), TyNode(..), Constraint(..), InstEdge(..), UnifyEdge(..), BindFlag(..))
 
 {- Note [Normalization / Local Transformations]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -380,6 +380,7 @@ occursIn nodes uf var target = go IntSet.empty (findRoot uf target)
                     in any (go visited' . findRoot uf) children
 
 -- | Allocate a fresh variable node.
+-- The new node is bound to the first child (dom) if provided, otherwise it becomes a root.
 freshVar :: GNodeId -> NormalizeM NodeId
 freshVar level = do
     nid <- freshNodeId
@@ -391,15 +392,30 @@ freshVar level = do
             gnodes = cGNodes c
             gnodes' = GNodeOps.ensureVarBindAtLevel level nid gnodes
         in s { nsConstraint = c { cGNodes = gnodes' } }
+    -- Note: Binding parent will be set by the caller (e.g., when creating an arrow)
     pure nid
 
 -- | Allocate a fresh arrow node.
+-- The new node becomes the binding parent of its children (dom, cod).
 freshArrow :: NodeId -> NodeId -> NormalizeM NodeId
 freshArrow dom cod = do
     nid <- freshNodeId
     let node = TyArrow { tnId = nid, tnDom = dom, tnCod = cod }
     insertNode node
+    -- Set binding parents: dom and cod are bound to the arrow (flexible by default)
+    setBindParentNorm dom nid BindFlex
+    setBindParentNorm cod nid BindFlex
     pure nid
+
+-- | Set the binding parent for a node in the constraint.
+setBindParentNorm :: NodeId -> NodeId -> BindFlag -> NormalizeM ()
+setBindParentNorm child parent flag =
+    when (child /= parent) $
+        modify' $ \s ->
+            let c = nsConstraint s
+                bp = cBindParents c
+                bp' = IntMap.insert (getNodeIdInt child) (parent, flag) bp
+            in s { nsConstraint = c { cBindParents = bp' } }
 
 -- | Get a fresh NodeId.
 freshNodeId :: NormalizeM NodeId
@@ -539,11 +555,13 @@ processUnifyEdges = foldM processOne []
                             else unionNodes right left   -- Var points to TyExp (keep structure)
                         pure acc
 
-                    -- Var = Var: before unioning, raise both vars to their LCA level
-                    -- (paper Raise(n) / ICFP'08 rank adjustment) so scope stays well-formed.
+                    -- Var = Var: before unioning, harmonize binding parents so
+                    -- scope stays well-formed (paper Raise(n)).
                     (Just TyVar {}, Just TyVar {}) -> do
                         modify' $ \s ->
-                            s { nsConstraint = RankAdjustment.harmonizeVarLevels left right (nsConstraint s) }
+                            let c0 = nsConstraint s
+                                c1 = BindingAdjustment.harmonizeBindParents left right c0
+                            in s { nsConstraint = c1 }
                         unionNodes left right
                         pure acc
 
@@ -595,7 +613,7 @@ processUnifyEdges = foldM processOne []
                     _ -> pure (edge : acc)
 
     -- Union-find link; caller is responsible for any scope maintenance (e.g.
-    -- rank adjustment / paper Raise(n) for Var/Var unions).
+    -- binding-edge harmonization / paper Raise(n) for Var/Var unions).
     unionNodes :: NodeId -> NodeId -> NormalizeM ()
     unionNodes = unionNodesRaw
 
@@ -619,10 +637,25 @@ applyUnionFindToConstraint = do
             instEdges' = map (applyToInstEdge uf) (cInstEdges c)
             -- Update unification edges
             unifyEdges' = map (applyToUnifyEdge uf) (cUnifyEdges c)
+            -- Canonicalize binding parents through UF reps
+            bindParents0 = cBindParents c
+            bindParents' =
+                let canonical = findRoot uf
+                    entries0 =
+                        [ (getNodeIdInt child', (canonical parent0, flag))
+                        | (childId, (parent0, flag)) <- IntMap.toList bindParents0
+                        , let child' = canonical (NodeId childId)
+                        , child' /= canonical parent0
+                        ]
+                    combine (pNew, fNew) (pOld, fOld)
+                        | pNew == pOld = (pOld, max fNew fOld)
+                        | otherwise = (pOld, max fNew fOld)
+                in IntMap.fromListWith combine entries0
         in s { nsConstraint = c
                  { cNodes = nodes'
                  , cInstEdges = instEdges'
                  , cUnifyEdges = unifyEdges'
+                 , cBindParents = bindParents'
                  }
              }
 

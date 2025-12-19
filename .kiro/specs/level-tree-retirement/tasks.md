@@ -1,0 +1,141 @@
+# Implementation Plan
+
+- [x] 1. Binding-edge binder helpers (foundation)
+  - [x] 1.1 Add `boundFlexChildren` and `boundFlexChildrenUnder` helpers in `src/MLF/Binding.hs`
+    - Implement direct-child selection for `BindFlex` + `TyVar`
+    - Add unit tests in `test/BindingSpec.hs` for a small hand-built binding tree
+    - **Verification:** `cabal test --test-show-details=direct --match "/Binding/.*boundFlexChildren/"`
+    - _Requirements: 2.1, 2.2_
+  - [x] 1.2 Add reachability filtering and `orderedBinders`
+    - Add a helper to compute nodes reachable from a body root via term-DAG structure
+    - Implement `orderedBinders` to: use body root for order keys, filter to reachable binders, and sort by `compareNodesByOrderKey`
+    - Add tests for inert binder exclusion + ordering in `test/BindingSpec.hs`
+    - **Verification:** `cabal test --test-show-details=direct --match "/Binding/.*orderedBinders/"`
+    - _Requirements: 2.1, 5.1, 6.1_
+  - [x] 1.3 Add `BoundRef`, `ForallSpec`, and `forallSpecFromForall`
+    - Define `BoundRef` + `ForallSpec` in `src/MLF/Types.hs`
+    - Implement `forallSpecFromForall` in `src/MLF/Binding.hs` using `orderedBinders` and `VarStore.lookupVarBound`
+    - Encode binder-to-binder bounds as `BoundBinder index`
+    - Add regression test in `test/BindingSpec.hs` for bound remapping
+    - **Verification:** `cabal test --test-show-details=direct --match "/Binding/.*forallSpec/"`
+    - _Requirements: 2.3, 2.4, 6.1_
+
+- [x] 2. Constraint generation uses binding-root NodeId
+  - [x] 2.1 Replace `AnnExpr` scope fields with `NodeId` (remove `GNodeId` usage)
+    - Update constructors in `src/MLF/ConstraintGen.hs`
+    - Update expectations in `test/ConstraintGenSpec.hs`
+    - **Verification:** `cabal test --test-show-details=direct --match "/ConstraintGen/"`
+    - _Requirements: 3.4_
+  - [x] 2.2 Add scope tracking in `ConstraintGen`
+    - Add a scope stack in `BuildState` to record nodes created per scope
+    - Add helpers to register newly allocated nodes to the current scope
+    - **Verification:** `rg -n "scope" src/MLF/ConstraintGen.hs`
+    - _Requirements: 3.1, 3.2_
+  - [x] 2.3 Keep structural binding parents and rebind reachable nodes for let
+    - Preserve `setBindParentIfMissing` calls in allocators as fallback parents
+    - After building the RHS, rebind RHS-scope nodes reachable from the RHS root
+      to the new `TyForall` (flex), skipping nodes already bound by nested scopes
+    - Add regression tests in `test/ConstraintGenSpec.hs` for RHS binding parents
+    - **Verification:** `cabal test --test-show-details=direct --match "/ConstraintGen/.*let/"`
+    - _Requirements: 3.1, 3.2_
+  - [x] 2.4 Rebind reachable nodes for top-level scope after root is known
+    - After `buildExpr` completes, rebind reachable top-level nodes to the root node
+    - Add regression test ensuring `Binding.checkBindingTree` passes for generated constraints
+    - **Verification:** `cabal test --test-show-details=direct --match "/ConstraintGen/.*binding-tree/"`
+    - _Requirements: 3.1, 3.5_
+  - [x] 2.5 Bind explicit `forall` variables to their `TyForall` node
+    - Update `internalizeSrcType`/`internalizeBinders` to allocate binders under the `TyForall` scope root
+    - Ensure bounds are recorded in `cVarBounds`
+    - Add regression tests in `test/ConstraintGenSpec.hs` for explicit forall binding parents
+    - **Verification:** `cabal test --test-show-details=direct --match "/ConstraintGen/.*forall/"`
+    - _Requirements: 3.3_
+
+- [ ] 3. Expansion representation migration
+  - [ ] 3.1 Update `Expansion` to use `ExpForall (NonEmpty ForallSpec)`
+    - Update `src/MLF/Types.hs` and adjust pattern matches in `MLF.Presolution` + `MLF.Elab`
+    - Keep behavior identical except for the new payload
+    - **Verification:** `cabal build`
+    - _Requirements: 4.1_
+  - [ ] 3.2 Build `ForallSpec` in `decideMinimalExpansion`
+    - Replace level comparisons with binder-count comparisons using `forallSpecFromForall`
+    - Add regression test in `test/PresolutionSpec.hs` for `forall` mismatch -> `ExpCompose`
+    - **Verification:** `cabal test --test-show-details=direct --match "/Presolution/.*compose/"`
+    - _Requirements: 4.1_
+  - [ ] 3.3 Apply `ExpForall` with bound remapping
+    - Update `applyExpansion` and `applyExpansionTraced` to create `TyForall` nodes and fresh binder vars
+    - Set binding parents (binders + body) to the new `TyForall`
+    - Apply `BoundBinder` references to the fresh binder vars
+    - Add a regression test in `test/PresolutionSpec.hs` for binder parents + bounds after `ExpForall`
+    - **Verification:** `cabal test --test-show-details=direct --match "/Presolution/.*ExpForall/"`
+    - _Requirements: 4.3, 6.2_
+
+- [ ] 4. Presolution uses binding-edge binders
+  - [ ] 4.1 Replace `collectBoundVars`/`firstNonVacuousBinders` with `orderedBinders`
+    - Remove `tnVarLevel` usage in `src/MLF/Presolution.hs`
+    - Add regression test for inert binders being skipped in `ExpInstantiate`
+    - **Verification:** `rg -n "tnVarLevel" src/MLF/Presolution.hs`
+    - _Requirements: 4.2_
+  - [ ] 4.2 Update witness construction to use binding-edge binder lists
+    - Adjust `binderArgsFromExpansion` and `witnessFromExpansion`
+    - Add a regression test for witness operation ordering with bounded binders
+    - **Verification:** `cabal test --test-show-details=direct --match "/Presolution/.*witness/"`
+    - _Requirements: 4.2, 2.3_
+  - [ ] 4.3 Replace level-based helpers (`getNodeLevel`, `isAncestorLevel`, `createFreshVarAt`)
+    - Introduce binding-edge equivalents (e.g., `scopeRootOf`, `createFreshVarUnder`)
+    - Update call sites in `src/MLF/Presolution.hs`
+    - **Verification:** `rg -n "getNodeLevel|isAncestorLevel|createFreshVarAt" src/MLF/Presolution.hs`
+    - _Requirements: 4.1, 4.3_
+
+- [ ] 5. Normalize/Solve drop level checks
+  - [ ] 5.1 Compare `TyForall` by binder counts (and unify bodies)
+    - Update `src/MLF/Normalize.hs` to use `orderedBinders` or `boundFlexChildrenUnder`
+    - Add a regression in `test/NormalizeSpec.hs` for forall-unify arity mismatch
+    - **Verification:** `cabal test --test-show-details=direct --match "/Normalize/.*forall/"`
+    - _Requirements: 4.1, 5.1_
+  - [ ] 5.2 Replace `ForallLevelMismatch` with binder mismatch in `Solve`
+    - Update error type + pattern matches in `src/MLF/Solve.hs`
+    - Update tests in `test/SolveSpec.hs`
+    - **Verification:** `rg -n "ForallLevelMismatch" src/MLF/Solve.hs test/SolveSpec.hs`
+    - _Requirements: 5.1_
+  - [ ] 5.3 Remove level-existence validation in `Solve.validateConstraint`
+    - Drop `cGNodes`/level checks from validation
+    - Add regression test ensuring binding-tree validation still runs
+    - **Verification:** `rg -n "cGNodes|tnVarLevel|tnQuantLevel|tnOwnerLevel" src/MLF/Solve.hs`
+    - _Requirements: 1.1, 5.1_
+
+- [ ] 6. Elaboration uses binding-edge binders
+  - [ ] 6.1 Generalization uses `orderedBinders` + `cEliminatedVars`
+    - Update `generalizeAt` in `src/MLF/Elab.hs`
+    - Remove `varsAtLevelInNode` helper
+    - Update tests in `test/ElaborationSpec.hs`
+    - **Verification:** `rg -n "tnVarLevel|varsAtLevelInNode" src/MLF/Elab.hs`
+    - _Requirements: 5.1, 5.2_
+  - [ ] 6.2 Reify bounds using binding flags (rigid vs flexible)
+    - Replace `tnOwnerLevel` logic in `reifyTypeWithBound` with binding-edge flag checks
+    - Add a regression test for bounded quantifier elaboration
+    - **Verification:** `rg -n "tnOwnerLevel" src/MLF/Elab.hs`
+    - _Requirements: 5.1, 5.2_
+  - [ ] 6.3 Update elaboration paths to accept `ExpForall (ForallSpec)` payload
+    - Adjust `EdgeWitness` translation if needed
+    - Add a small regression test for quantifier-introduction counts
+    - **Verification:** `cabal test --test-show-details=direct --match "/Elaboration/.*forall/"`
+    - _Requirements: 4.3, 5.1_
+
+- [ ] 7. Remove level-tree data model and cleanup
+  - [ ] 7.1 Remove `GNodeId`, `GNode`, `cGNodes`, `cGForest` from `src/MLF/Types.hs`
+    - Update exports and dependent imports in a single sweep
+    - **Verification:** `rg -n "GNodeId|GNode|cGNodes|cGForest" src`
+    - _Requirements: 1.1, 1.2_
+  - [ ] 7.2 Remove `tnVarLevel`, `tnOwnerLevel`, `tnQuantLevel` from `TyNode`
+    - Update constructors/pattern matches across modules
+    - **Verification:** `rg -n "tnVarLevel|tnOwnerLevel|tnQuantLevel" src test`
+    - _Requirements: 1.1, 1.2_
+  - [ ] 7.3 Delete `src/MLF/GNodeOps.hs` and remove cabal references
+    - Update `mlf2.cabal` and any imports
+    - **Verification:** `rg -n "GNodeOps" src mlf2.cabal`
+    - _Requirements: 1.2_
+
+- [ ] 8. Final regression checks
+  - Run the full test suite and `rg` audits for legacy identifiers
+  - **Verification:** `cabal test --test-show-details=direct` and `rg -n "GNodeId|cGNodes|tnVarLevel|tnOwnerLevel|tnQuantLevel" src test`
+  - _Requirements: 1.3, 6.3_

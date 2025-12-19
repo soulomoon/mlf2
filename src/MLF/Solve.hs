@@ -111,7 +111,8 @@ import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
-import qualified MLF.RankAdjustment as RankAdjustment
+import qualified MLF.BindingAdjustment as BindingAdjustment
+import qualified MLF.Binding as Binding
 import qualified MLF.UnionFind as UnionFind
 import MLF.Types
 
@@ -123,6 +124,7 @@ data SolveError
     | ForallLevelMismatch GNodeId GNodeId
     | OccursCheckFailed NodeId NodeId   -- ^ (var, target)
     | UnexpectedExpNode NodeId
+    | BindingTreeError BindingError
     deriving (Eq, Show)
 
 -- | Successful unification result.
@@ -175,15 +177,21 @@ type SolveM = StateT SolveState (Either SolveError)
 -- See Note [Paper alignment: solveUnify] and Note [Algorithm sketch: solveUnify].
 solveUnify :: Constraint -> Either SolveError SolveResult
 solveUnify c0 = do
-    let st = SolveState { suConstraint = c0, suUnionFind = IntMap.empty, suQueue = cUnifyEdges c0 }
-    final <- execStateT loop st
-    let uf = suUnionFind final
-        c' = applyUFConstraint uf (suConstraint final) { cUnifyEdges = [] }
-        res = SolveResult { srConstraint = c', srUnionFind = uf }
-        violations = validateSolvedGraph res
-    if null violations
-        then pure res
-        else error ("validateSolvedGraph failed: " ++ unlines violations)
+    case Binding.checkBindingTree c0 of
+        Left err -> Left (BindingTreeError err)
+        Right () -> do
+            let st = SolveState { suConstraint = c0, suUnionFind = IntMap.empty, suQueue = cUnifyEdges c0 }
+            final <- execStateT loop st
+            let uf = suUnionFind final
+                c' = applyUFConstraint uf (suConstraint final) { cUnifyEdges = [] }
+            case Binding.checkBindingTree c' of
+                Left err -> Left (BindingTreeError err)
+                Right () -> do
+                    let res = SolveResult { srConstraint = c', srUnionFind = uf }
+                        violations = validateSolvedGraph res
+                    if null violations
+                        then pure res
+                        else error ("validateSolvedGraph failed: " ++ unlines violations)
   where
     loop :: SolveM ()
     loop = do
@@ -211,10 +219,12 @@ solveUnify c0 = do
                 rNode <- lookupNode rRoot
                 case (lNode, rNode) of
                     (TyVar{}, TyVar{}) -> do
-                        -- Paper Raise(n) / rank adjustment: keep scope well-formed
-                        -- when merging variables from different levels.
-                        modify' $ \s ->
-                            s { suConstraint = RankAdjustment.harmonizeVarLevels lRoot rRoot (suConstraint s) }
+                        -- Paper Raise(n) / binding-edge harmonization: keep scope well-formed
+                        -- when merging variables from different binders.
+                        cBefore <- gets suConstraint
+                        case BindingAdjustment.harmonizeBindParentsWithTrace lRoot rRoot cBefore of
+                            Left err -> lift $ Left (BindingTreeError err)
+                            Right (c', _trace) -> modify' $ \s -> s { suConstraint = c' }
                         unionNodes lRoot rRoot
 
                     (TyVar{}, _) -> do
@@ -299,11 +309,32 @@ solveUnify c0 = do
 -- | Rewrite every node/edge to UF representatives and collapse duplicates,
 -- preferring structured nodes when both sides share an id.
 applyUFConstraint :: IntMap NodeId -> Constraint -> Constraint
-applyUFConstraint uf c = c
-    { cNodes = IntMap.fromListWith choose (map rewriteNode (IntMap.elems (cNodes c)))
-    , cInstEdges = map (rewriteInst uf) (cInstEdges c)
-    , cUnifyEdges = map (rewriteUnify uf) (cUnifyEdges c)
-    }
+applyUFConstraint uf c =
+    let nodes' = IntMap.fromListWith choose (map rewriteNode (IntMap.elems (cNodes c)))
+        bindParents0 = cBindParents c
+        bindParents' =
+            let entries0 =
+                    [ (getNodeId child', (parent', flag))
+                    | (childId, (parent0, flag)) <- IntMap.toList bindParents0
+                    , let child' = frWith uf (NodeId childId)
+                    , let parent' = frWith uf parent0
+                    , child' /= parent'
+                    ]
+                entries =
+                    [ (childId, parentInfo)
+                    | (childId, parentInfo) <- entries0
+                    , IntMap.member childId nodes'
+                    ]
+                combine (pNew, fNew) (pOld, fOld)
+                    | pNew == pOld = (pOld, max fNew fOld)
+                    | otherwise = (pOld, max fNew fOld)
+            in IntMap.fromListWith combine entries
+    in c
+        { cNodes = nodes'
+        , cInstEdges = map (rewriteInst uf) (cInstEdges c)
+        , cUnifyEdges = map (rewriteUnify uf) (cUnifyEdges c)
+        , cBindParents = bindParents'
+        }
   where
     choose new old = case (isVar old, isVar new) of
         (True, False) -> new

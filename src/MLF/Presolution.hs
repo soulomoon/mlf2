@@ -28,6 +28,8 @@ module MLF.Presolution (
     -- * Building blocks (exported for testing)
     decideMinimalExpansion,
     processInstEdge,
+    unifyAcyclicRawWithRaiseTrace,
+    runEdgeUnifyForTest,
     instantiateScheme,
     instantiateSchemeWithTrace,
     mergeExpansions,
@@ -37,9 +39,9 @@ module MLF.Presolution (
 
 import Control.Monad.State
 import Control.Monad.Except (throwError)
-import Control.Monad (forM, forM_, zipWithM, zipWithM_, when, foldM, replicateM_)
+import Control.Monad (forM, forM_, zipWithM, zipWithM_, when, foldM)
 import qualified Data.List.NonEmpty as NE
-import Data.List (find, mapAccumL, partition, sortOn)
+import Data.List (mapAccumL, partition, sortOn)
 import Data.Ord (Down(..))
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
@@ -47,8 +49,13 @@ import qualified Data.IntSet as IntSet
 import Data.Maybe (fromMaybe, mapMaybe)
 
 import qualified MLF.GNodeOps as GNodeOps
-import qualified MLF.RankAdjustment as RankAdjustment
+import qualified MLF.Order as Order
+import qualified MLF.BindingAdjustment as BindingAdjustment
+import qualified MLF.GraphOps as GraphOps
 import qualified MLF.UnionFind as UnionFind
+import qualified MLF.Binding as Binding
+import qualified MLF.OmegaExec as OmegaExec
+import qualified MLF.VarStore as VarStore
 import MLF.Types
 import MLF.Acyclicity (AcyclicityResult(..))
 -- We will likely need unification logic from Normalize,
@@ -59,6 +66,7 @@ data PresolutionResult = PresolutionResult
     { prConstraint :: Constraint
     , prEdgeExpansions :: IntMap Expansion
     , prEdgeWitnesses :: IntMap EdgeWitness
+    , prEdgeTraces :: IntMap EdgeTrace
     , prRedirects :: IntMap NodeId -- ^ Map from old TyExp IDs to their replacement IDs
     } deriving (Eq, Show)
 
@@ -71,6 +79,7 @@ data PresolutionError
     | InstantiateOnNonForall NodeId          -- ^ Tried to instantiate a non-forall node
     | NodeLookupFailed NodeId                -- ^ Missing node in constraint
     | OccursCheckPresolution NodeId NodeId   -- ^ Unification would make node reachable from itself
+    | BindingTreeError BindingError          -- ^ Invalid binding tree when binding edges are in use
     | InternalError String                   -- ^ Unexpected internal state
     deriving (Eq, Show)
 
@@ -94,7 +103,7 @@ data PresolutionState = PresolutionState
 data EdgeTrace = EdgeTrace
     { etRoot :: NodeId
     , etBinderArgs :: [(NodeId, NodeId)] -- ^ (binder node, instantiation argument node)
-    , etInterior :: IntSet.IntSet -- ^ Nodes in the expansion interior I(r) (approx.)
+    , etInterior :: IntSet.IntSet -- ^ Nodes in I(r) (exact, from the binding tree).
     , etCopyMap :: IntMap NodeId -- ^ Provenance: original node -> copied/replaced node
     }
     deriving (Eq, Show)
@@ -117,8 +126,11 @@ data CopyState = CopyState
 data EdgeUnifyState = EdgeUnifyState
     { eusInteriorRoots :: IntSet.IntSet
     , eusBindersByRoot :: IntMap IntSet.IntSet -- ^ UF-root -> binder NodeIds whose args live in that class
+    , eusInteriorByRoot :: IntMap IntSet.IntSet -- ^ UF-root -> interior NodeIds (all nodes in I(r))
     , eusQuantLevel :: Maybe GNodeId -- ^ Quantifier level of the instantiated binders (if any)
     , eusEliminatedBinders :: IntSet.IntSet -- ^ binders eliminated by Merge/RaiseMerge ops we record
+    , eusBinderMeta :: IntMap NodeId -- ^ source binder -> copied/meta node in χe
+    , eusOrderKeys :: IntMap Order.OrderKey -- ^ order keys for meta nodes (edge-local ≺)
     , eusOps :: [InstanceOp]
     }
 
@@ -130,6 +142,42 @@ type PresolutionM = StateT PresolutionState (Either PresolutionError)
 -- | Run a PresolutionM action with an initial state (testing helper).
 runPresolutionM :: PresolutionState -> PresolutionM a -> Either PresolutionError (a, PresolutionState)
 runPresolutionM st action = runStateT action st
+
+-- | Testing helper: run a single edge-local unification and return the recorded
+-- instance-operation witness slice.
+--
+-- This bypasses expansion copying and is intended for unit tests that want to
+-- assert the precise `OpRaise` targets produced by binding-parent harmonization
+-- (including the “no spray” behavior for interior nodes).
+runEdgeUnifyForTest
+    :: NodeId -- ^ edge root (for ≺ ordering keys)
+    -> IntSet.IntSet -- ^ interior nodes (I(r))
+    -> NodeId -- ^ left node to unify
+    -> NodeId -- ^ right node to unify
+    -> PresolutionM [InstanceOp]
+runEdgeUnifyForTest edgeRoot interior n1 n2 = do
+    requireValidBindingTree
+    eu0 <- initEdgeUnifyState [] interior edgeRoot
+    (_a, eu1) <- runStateT (unifyAcyclicEdge n1 n2) eu0
+    pure (eusOps eu1)
+
+requireValidBindingTree :: PresolutionM ()
+requireValidBindingTree = do
+    c0 <- gets psConstraint
+    uf <- gets psUnionFind
+    let canonical = UnionFind.frWith uf
+    case Binding.checkBindingTreeUnder canonical c0 of
+        Left err -> throwError (BindingTreeError err)
+        Right () -> pure ()
+
+edgeInteriorExact :: NodeId -> PresolutionM IntSet.IntSet
+edgeInteriorExact root0 = do
+    c0 <- gets psConstraint
+    uf <- gets psUnionFind
+    let canonical = UnionFind.frWith uf
+    case Binding.interiorOfUnder canonical c0 root0 of
+        Left err -> throwError (BindingTreeError err)
+        Right interior -> pure interior
 
 -- | Main entry point: compute principal presolution.
 computePresolution
@@ -160,6 +208,7 @@ computePresolution acyclicityResult constraint = do
         { prConstraint = psConstraint finalState
         , prEdgeExpansions = psEdgeExpansions finalState
         , prEdgeWitnesses = psEdgeWitnesses finalState
+        , prEdgeTraces = psEdgeTraces finalState
         , prRedirects = redirects
         }
 
@@ -311,6 +360,26 @@ rewriteConstraint mapping = do
 
         newTraces = IntMap.map canonicalizeTrace (psEdgeTraces st)
 
+        bindingEdges0 = cBindParents c
+        cStruct = c { cNodes = newNodes }
+
+        incomingParents :: IntMap IntSet.IntSet
+        incomingParents =
+            let addOne parent child m =
+                    IntMap.insertWith
+                        IntSet.union
+                        (getNodeId child)
+                        (IntSet.singleton (getNodeId parent))
+                        m
+
+                addNode m node = case node of
+                    TyArrow{ tnId = p, tnDom = d, tnCod = cod } ->
+                        addOne p cod (addOne p d m)
+                    TyForall{ tnId = p, tnBody = b } ->
+                        addOne p b m
+                    _ -> m
+            in IntMap.foldl' addNode IntMap.empty newNodes
+
         -- Canonicalize redirects (values in the map)
         -- mapping maps OldId -> NewId. NewId might be non-canonical.
         -- We want to return a map for ALL nodes that were redirected or merged.
@@ -319,15 +388,118 @@ rewriteConstraint mapping = do
             | nid <- IntMap.keys (cNodes c)
             ]
 
-    put st { psConstraint = c
-                { cNodes = newNodes
-                , cInstEdges = []
-                , cUnifyEdges = map rewriteUnify (cUnifyEdges c)
-                }
-           , psEdgeExpansions = newExps
-           , psEdgeWitnesses = newWitnesses
-           , psEdgeTraces = newTraces
-           }
+    newBindParents <- do
+        let entries0 =
+                [ (getNodeId child', (parent0, flag))
+                | (childId, (parent0, flag)) <- IntMap.toList bindingEdges0
+                , let child' = canonical (NodeId childId)
+                , IntMap.member (getNodeId child') newNodes
+                ]
+
+            chooseBindParent :: NodeId -> NodeId -> PresolutionM (Maybe NodeId)
+            chooseBindParent child' parent0 = do
+                let inNodes nid = IntMap.member (getNodeId nid) newNodes
+                    upper parent = Binding.isUpper cStruct parent child'
+
+                    bindingAncestors :: NodeId -> [NodeId]
+                    bindingAncestors start = go IntSet.empty start
+                      where
+                        go seen nid
+                            | IntSet.member (getNodeId nid) seen = []
+                            | otherwise =
+                                case Binding.lookupBindParent c nid of
+                                    Nothing -> []
+                                    Just (p, _) -> p : go (IntSet.insert (getNodeId nid) seen) p
+
+                    expBody :: NodeId -> Maybe NodeId
+                    expBody nid =
+                        case IntMap.lookup (getNodeId nid) (cNodes c) of
+                            Just TyExp{ tnBody = b } -> Just b
+                            _ -> Nothing
+
+                    structuralParent :: NodeId -> Maybe NodeId
+                    structuralParent nid =
+                        case IntMap.lookup (getNodeId nid) incomingParents of
+                            Nothing -> Nothing
+                            Just ps ->
+                                case IntSet.toList ps of
+                                    [] -> Nothing
+                                    (p:_) -> Just (NodeId p)
+
+                    candidates =
+                        map canonical $
+                            [ parent0 ]
+                                ++ mapMaybe expBody [parent0]
+                                ++ bindingAncestors parent0
+                                ++ maybe [] pure (structuralParent child')
+
+                    firstValid = \case
+                        [] -> Nothing
+                        (p:ps) ->
+                            if p == child' || not (inNodes p) || not (upper p)
+                                then firstValid ps
+                                else Just p
+
+                case firstValid candidates of
+                    Just p -> pure (Just p)
+                    Nothing ->
+                        if IntMap.member (getNodeId child') incomingParents
+                            then throwError $
+                                BindingTreeError $
+                                    InvalidBindingTree $
+                                        "rewriteConstraint: could not find an upper binding parent for "
+                                            ++ show child'
+                                            ++ " (original parent "
+                                            ++ show parent0
+                                            ++ ")"
+                            else pure Nothing
+
+            insertOne :: BindParents -> (Int, (NodeId, BindFlag)) -> PresolutionM BindParents
+            insertOne bp (childId, (parent, flag)) =
+                case IntMap.lookup childId bp of
+                    Nothing -> pure (IntMap.insert childId (parent, flag) bp)
+                    Just (parent0, flag0)
+                        | parent0 == parent ->
+                            let flag' = max flag0 flag
+                            in pure (IntMap.insert childId (parent, flag') bp)
+                        | otherwise ->
+                            -- UF canonicalization can transiently create multiple binding
+                            -- parents for the same rewritten node. Resolve this
+                            -- deterministically by keeping the first parent and taking
+                            -- the max flag (matching the UF-rewrite strategy used in
+                            -- Normalize/Solve).
+                            let flag' = max flag0 flag
+                            in pure (IntMap.insert childId (parent0, flag') bp)
+
+        entries' <- fmap concat $ forM entries0 $ \(childId, (parent0, flag)) -> do
+            let child' = NodeId childId
+            mp <- chooseBindParent child' parent0
+            pure $ case mp of
+                Nothing -> []
+                Just parent ->
+                    if parent == child'
+                        then []
+                        else [(childId, (parent, flag))]
+
+        foldM insertOne IntMap.empty entries'
+
+    let c' = c
+            { cNodes = newNodes
+            , cInstEdges = []
+            , cUnifyEdges = map rewriteUnify (cUnifyEdges c)
+            , cBindParents = newBindParents
+            }
+
+    case Binding.checkBindingTree c' of
+        Left err -> throwError (BindingTreeError err)
+        Right () -> pure ()
+
+    put st
+        { psConstraint = c'
+        , psEdgeExpansions = newExps
+        , psEdgeWitnesses = newWitnesses
+        , psEdgeTraces = newTraces
+        }
 
     return fullRedirects
 
@@ -342,6 +514,7 @@ runPresolutionLoop edges = forM_ edges processInstEdge
 -- | Process a single instantiation edge.
 processInstEdge :: InstEdge -> PresolutionM ()
 processInstEdge edge = do
+    requireValidBindingTree
     let n1Id = instLeft edge
     let n2Id = instRight edge
     let edgeId = instEdgeId edge
@@ -381,25 +554,35 @@ processInstEdge edge = do
                     -- Eagerly materialize and unify to resolve the constraint immediately.
                     -- This ensures that the expansion result is unified with the target (n2),
                     -- and TyExp is unified with the result.
-                    (resNodeId, tr0@(copyMap0, interior0)) <- applyExpansionEdgeTraced finalExp n1
+                    (resNodeId, (copyMap0, interior0)) <- applyExpansionEdgeTraced finalExp n1
+                    
+                    -- Paper alignment (`papers/xmlf.txt` §3.2): bind the expansion root
+                    -- at the same binder as the edge target. This ensures the expansion
+                    -- root is in the correct interior I(r) for subsequent operations.
+                    bindExpansionRootLikeTarget resNodeId (tnId n2)
+                    
+                    -- Bind all copied nodes that don't have binding parents to the
+                    -- expansion root. This ensures the binding tree remains valid.
+                    bindUnboundCopiedNodes copyMap0 interior0 resNodeId
+                    
                     bas <- binderArgsFromExpansion n1 finalExp
                     binderMetas <- forM bas $ \(bv, _arg) ->
                         case IntMap.lookup (getNodeId bv) copyMap0 of
                             Just meta -> pure (bv, meta)
                             Nothing ->
                                 throwError (InternalError ("processInstEdge: missing binder-meta copy for " ++ show bv))
-                    let argSet = IntSet.fromList (map (getNodeId . snd) bas)
-                        interior = IntSet.union interior0 argSet
-                    eu0 <- initEdgeUnifyState binderMetas interior
+                    interior <- edgeInteriorExact resNodeId
+                    eu0 <- initEdgeUnifyState binderMetas interior resNodeId
+                    let omegaEnv = mkOmegaExecEnv copyMap0
                     (_a, eu1) <- runStateT
                         (do
-                            executeBaseOpsPre copyMap0 baseOps
+                            OmegaExec.executeOmegaBaseOpsPre omegaEnv baseOps
                             unifyStructureEdge resNodeId (tnId n2)
                             unifyAcyclicEdge (tnId n1) resNodeId
-                            executeBaseOpsPost copyMap0 baseOps
+                            OmegaExec.executeOmegaBaseOpsPost omegaEnv baseOps
                         )
                         eu0
-                    pure ((fst tr0, interior), eusOps eu1)
+                    pure ((copyMap0, interior), eusOps eu1)
 
             w <- buildEdgeWitness edgeId n1Id n2Id n1 finalExp extraOps
             recordEdgeWitness edgeId w
@@ -426,77 +609,55 @@ recordEdgeTrace :: EdgeId -> EdgeTrace -> PresolutionM ()
 recordEdgeTrace (EdgeId eid) tr =
     modify $ \st -> st { psEdgeTraces = IntMap.insert eid tr (psEdgeTraces st) }
 
--- | Execute base Ω operations induced directly by `ExpInstantiate` as real χe
--- transformations, but split into two phases so that bounded binders can still
--- trigger `RaiseMerge` during unification with the edge target.
+-- | Build an ω executor environment for χe base ops (Graft/Merge/Weaken).
 --
--- Paper alignment (`papers/xmlf.txt` §3.4): `Weaken` is an elimination step that
--- occurs after other operations; executing it eagerly can preempt the
--- unification that should be witnessed as `RaiseMerge`.
-executeBaseOpsPre :: CopyMap -> [InstanceOp] -> EdgeUnifyM ()
-executeBaseOpsPre copyMap ops0 = go ops0
+-- This is used to execute the base operations induced directly by
+-- `ExpInstantiate` as real χe transformations, but split into two phases so
+-- that bounded binders can still trigger `RaiseMerge` during unification with
+-- the edge target.
+--
+-- Paper alignment (`papers/xmlf.txt` §3.4): `Weaken` occurs after other
+-- operations on nodes below it. Executing it eagerly can preempt the unification
+-- that should be witnessed as `RaiseMerge`.
+mkOmegaExecEnv :: CopyMap -> OmegaExec.OmegaExecEnv EdgeUnifyM
+mkOmegaExecEnv copyMap =
+    OmegaExec.OmegaExecEnv
+        { omegaMetaFor = metaFor
+        , omegaLookupMeta = \bv -> pure (IntMap.lookup (getNodeId bv) copyMap)
+        , omegaSetVarBound = \meta mb -> lift $ setVarBound meta mb
+        , omegaDropVarBind = \meta -> lift $ dropVarBind meta
+        , omegaUnifyNoMerge = unifyAcyclicEdgeNoMerge
+        , omegaRecordEliminate = recordEliminate
+        , omegaIsEliminated = isEliminated
+        , omegaEliminatedBinders = do
+            elims <- gets eusEliminatedBinders
+            pure (map NodeId (IntSet.toList elims))
+        , omegaWeakenMeta = \meta -> do
+            metaRoot <- lift $ findRoot meta
+            -- Paper ω semantics: Weaken changes only the binding-edge flag
+            -- (flex → rigid) and does not change the term-DAG.
+            c0 <- lift $ gets psConstraint
+            -- Redundant weakens can arise when multiple edges share the same
+            -- expansion variable (merged χe). Treat "already rigid" as a no-op.
+            case Binding.lookupBindParent c0 metaRoot of
+                -- In our multi-root constraint graphs, unification can make a
+                -- binder-meta equal to a binding root (no parent). Weaken is not
+                -- defined for roots, so treat this as a no-op rather than
+                -- failing the whole edge.
+                Nothing -> pure ()
+                Just (_p, BindRigid) -> pure ()
+                Just _ ->
+                    case GraphOps.applyWeaken metaRoot c0 of
+                        Left err -> lift $ throwError (BindingTreeError err)
+                        Right (c', _op) -> lift $ modify' (\st -> st { psConstraint = c' })
+        }
   where
     metaFor :: NodeId -> EdgeUnifyM NodeId
     metaFor bv =
         case IntMap.lookup (getNodeId bv) copyMap of
             Just m -> pure m
             Nothing ->
-                lift $ throwError (InternalError ("executeBaseOpsPre: missing copy for binder " ++ show bv))
-
-    go :: [InstanceOp] -> EdgeUnifyM ()
-    go = \case
-        [] -> pure ()
-        (OpGraft sigma bv : rest) -> do
-            meta <- metaFor bv
-            lift $ setVarBound meta (Just sigma)
-            go rest
-        (OpMerge bv bound : rest) -> do
-            meta <- metaFor bv
-            metaBound <- metaFor bound
-            -- Execute the merge on χe without emitting a redundant/opposed merge op.
-            unifyAcyclicEdgeNoMerge meta metaBound
-            lift $ dropVarBind meta
-            recordEliminate bv
-            go rest
-        (_ : rest) ->
-            go rest
-
-executeBaseOpsPost :: CopyMap -> [InstanceOp] -> EdgeUnifyM ()
-executeBaseOpsPost copyMap ops0 = do
-    -- Drop binder-metas eliminated by phase-2 merge-like ops, so they won't be
-    -- re-quantified during reification/elaboration.
-    elims <- gets eusEliminatedBinders
-    forM_ (IntSet.toList elims) $ \bid ->
-        case IntMap.lookup bid copyMap of
-            Nothing -> pure ()
-            Just meta -> lift $ dropVarBind meta
-
-    let graftBounds = IntMap.fromList [(getNodeId bv, sigma) | OpGraft sigma bv <- ops0]
-
-    forM_ ops0 $ \case
-        OpWeaken bv -> do
-            eliminated <- isEliminated bv
-            when (not eliminated) $ do
-                meta <- metaFor bv
-                mbBound <- lift $ lookupVarBound meta
-                bound <- case mbBound of
-                    Just bnd -> pure bnd
-                    Nothing ->
-                        case IntMap.lookup (getNodeId bv) graftBounds of
-                            Just bnd -> pure bnd
-                            Nothing ->
-                                lift $ throwError (InternalError ("executeBaseOpsPost: OpWeaken on unbounded var " ++ show meta))
-                unifyAcyclicEdge meta bound
-                lift $ dropVarBind meta
-                recordEliminate bv
-        _ -> pure ()
-  where
-    metaFor :: NodeId -> EdgeUnifyM NodeId
-    metaFor bv =
-        case IntMap.lookup (getNodeId bv) copyMap of
-            Just m -> pure m
-            Nothing ->
-                lift $ throwError (InternalError ("executeBaseOpsPost: missing copy for binder " ++ show bv))
+                lift $ throwError (InternalError ("mkOmegaExecEnv: missing copy for binder " ++ show bv))
 
 -- | Edge-local union like 'unifyAcyclicEdge', but without emitting merge-like
 -- witness ops. This is used to *execute* base `Merge` operations (already
@@ -515,9 +676,11 @@ unifyAcyclicEdgeNoMerge n1 n2 = do
             bs2 = IntMap.findWithDefault IntSet.empty r2 (eusBindersByRoot st0)
             bs = IntSet.union bs1 bs2
 
-        (k1, k2) <- lift $ unifyAcyclicRawWithRaiseCounts root1 root2
-        recordRaisesForBinders bs1 k1
-        recordRaisesForBinders bs2 k2
+        trace <- lift $ unifyAcyclicRootsWithRaiseTrace root1 root2
+        let int1 = IntMap.findWithDefault IntSet.empty r1 (eusInteriorByRoot st0)
+            int2 = IntMap.findWithDefault IntSet.empty r2 (eusInteriorByRoot st0)
+            intAll = IntSet.union int1 int2
+        recordRaisesFromTrace intAll trace
 
         modify $ \st ->
             let roots' =
@@ -528,7 +691,11 @@ unifyAcyclicEdgeNoMerge n1 n2 = do
                     let m0 = eusBindersByRoot st
                         m1 = if IntSet.null bs then IntMap.delete r1 m0 else IntMap.insert r2 bs (IntMap.delete r1 m0)
                     in m1
-            in st { eusInteriorRoots = roots', eusBindersByRoot = binders' }
+                interior' =
+                    let m0 = eusInteriorByRoot st
+                        m1 = if IntSet.null intAll then IntMap.delete r1 m0 else IntMap.insert r2 intAll (IntMap.delete r1 m0)
+                    in m1
+            in st { eusInteriorRoots = roots', eusBindersByRoot = binders', eusInteriorByRoot = interior' }
 
 -- | Build an edge witness from the chosen expansion recipe.
 --
@@ -554,14 +721,18 @@ buildEdgeWitness eid left right leftRaw expn extraOps = do
         , ewWitness = iw
         }
 
+-- | Build an edge trace.
+--
+-- Paper alignment (`papers/xmlf.txt` §3.2): the interior I(r) is defined as all
+-- nodes transitively bound to r in the binding tree. We compute this on the
+-- UF-quotient binding graph so it stays consistent with presolution’s unification.
+--
+-- Requirements: 3.1, 3.2, 3.3
 buildEdgeTrace :: EdgeId -> NodeId -> TyNode -> Expansion -> (CopyMap, InteriorSet) -> PresolutionM EdgeTrace
-buildEdgeTrace _eid left leftRaw expn (copyMap0, interior0) = do
-    root <- case leftRaw of
-        TyExp{ tnBody = b } -> pure b
-        _ -> pure left
+buildEdgeTrace _eid left leftRaw expn (copyMap0, _interior0) = do
     bas <- binderArgsFromExpansion leftRaw expn
-    let args = IntSet.fromList (map (getNodeId . snd) bas)
-        interior = IntSet.union interior0 args
+    root <- findRoot left
+    interior <- edgeInteriorExact root
     pure EdgeTrace { etRoot = root, etBinderArgs = bas, etInterior = interior, etCopyMap = copyMap0 }
 
 integratePhase2Ops :: [InstanceOp] -> [InstanceOp] -> [InstanceOp]
@@ -787,8 +958,8 @@ coalesceRaiseMerge = go
         (op : rest) -> op : go rest
         [] -> []
 
-initEdgeUnifyState :: [(NodeId, NodeId)] -> InteriorSet -> PresolutionM EdgeUnifyState
-initEdgeUnifyState binderArgs interior = do
+initEdgeUnifyState :: [(NodeId, NodeId)] -> InteriorSet -> NodeId -> PresolutionM EdgeUnifyState
+initEdgeUnifyState binderArgs interior edgeRoot = do
     roots <- forM (IntSet.toList interior) $ \i -> findRoot (NodeId i)
     let interiorRoots = IntSet.fromList (map getNodeId roots)
     bindersByRoot <- foldM
@@ -800,6 +971,17 @@ initEdgeUnifyState binderArgs interior = do
         )
         IntMap.empty
         binderArgs
+    -- Build interior-by-root map: for each interior node, track which UF root it belongs to
+    -- This allows us to record OpRaise for ALL interior nodes, not just binders
+    interiorByRoot <- foldM
+        (\m i -> do
+            r <- findRoot (NodeId i)
+            let k = getNodeId r
+                v = IntSet.singleton i
+            pure (IntMap.insertWith IntSet.union k v m)
+        )
+        IntMap.empty
+        (IntSet.toList interior)
     quantLevel <- case binderArgs of
         [] -> pure Nothing
         ((bv, _) : _) -> do
@@ -807,11 +989,19 @@ initEdgeUnifyState binderArgs interior = do
             case n of
                 TyVar{ tnVarLevel = l } -> pure (Just l)
                 _ -> pure Nothing
+    nodes <- gets (cNodes . psConstraint)
+    let binderMetaMap = IntMap.fromList [ (getNodeId bv, meta) | (bv, meta) <- binderArgs ]
+        -- For edge-local ordering we use the expanded χe ids directly (no UF canonicalization),
+        -- and restrict traversal to the interior set when possible.
+        keys = Order.orderKeysFromRootWith id nodes edgeRoot (Just interior)
     pure EdgeUnifyState
         { eusInteriorRoots = interiorRoots
         , eusBindersByRoot = bindersByRoot
+        , eusInteriorByRoot = interiorByRoot
         , eusQuantLevel = quantLevel
         , eusEliminatedBinders = IntSet.empty
+        , eusBinderMeta = binderMetaMap
+        , eusOrderKeys = keys
         , eusOps = []
         }
 
@@ -824,15 +1014,77 @@ recordEliminate bv = modify $ \st -> st { eusEliminatedBinders = IntSet.insert (
 isEliminated :: NodeId -> EdgeUnifyM Bool
 isEliminated bv = gets (IntSet.member (getNodeId bv) . eusEliminatedBinders)
 
-recordRaisesForBinders :: IntSet.IntSet -> Int -> EdgeUnifyM ()
-recordRaisesForBinders bs k
-    | k <= 0 = pure ()
-    | otherwise =
-        forM_ (IntSet.toList bs) $ \bid -> do
-            let b = NodeId bid
-            already <- isEliminated b
-            when (not already) $
-                replicateM_ k (recordOp (OpRaise b))
+recordRaisesFromTrace :: IntSet.IntSet -> [NodeId] -> EdgeUnifyM ()
+recordRaisesFromTrace interiorNodes trace =
+    forM_ trace $ \nid ->
+        when (IntSet.member (getNodeId nid) interiorNodes) $ do
+            already <- isEliminated nid
+            isLocked <- checkNodeLocked nid
+            when (not already && not isLocked) $
+                recordOp (OpRaise nid)
+
+-- | Check if a node is under a rigid binder (locked) in the binding tree.
+--
+-- Paper alignment (`papers/xmlf.txt` §3.4): operations under rigidly bound nodes
+-- should be absent or rejected in the normalized witness Ω.
+--
+-- Requirements: 5.2
+checkNodeLocked :: NodeId -> EdgeUnifyM Bool
+checkNodeLocked nid = do
+    c <- lift $ gets psConstraint
+    uf <- lift $ gets psUnionFind
+    let canonical = UnionFind.frWith uf
+        lookupParent :: NodeId -> EdgeUnifyM (Maybe (NodeId, BindFlag))
+        lookupParent n =
+            case Binding.lookupBindParentUnder canonical c n of
+                Left err -> lift $ throwError (BindingTreeError err)
+                Right p -> pure p
+
+        -- Paper `locked`/“under rigid binder” check: consider only strict ancestors,
+        -- so a restricted node (its own edge rigid) is not treated as locked
+        -- solely because of that edge.
+        goStrict :: NodeId -> EdgeUnifyM Bool
+        goStrict n = do
+            mbParent <- lookupParent n
+            case mbParent of
+                Nothing -> pure False
+                Just (_, BindRigid) -> pure True
+                Just (parent, BindFlex) -> goStrict parent
+
+    mbSelf <- lookupParent nid
+    case mbSelf of
+        Nothing -> pure False
+        Just (parent, _flag) -> goStrict parent
+
+compareBinderIdsByPrec :: Int -> Int -> EdgeUnifyM Ordering
+compareBinderIdsByPrec bid1 bid2 = do
+    keys <- gets eusOrderKeys
+    binderMeta <- gets eusBinderMeta
+    let keyFor bid = do
+            meta <- IntMap.lookup bid binderMeta
+            IntMap.lookup (getNodeId meta) keys
+        k1 = keyFor bid1
+        k2 = keyFor bid2
+    pure $ case (k1, k2) of
+        (Just a, Just b) ->
+            case Order.compareOrderKey a b of
+                EQ -> compare bid1 bid2
+                other -> other
+        (Just _, Nothing) -> LT
+        (Nothing, Just _) -> GT
+        (Nothing, Nothing) -> compare bid1 bid2
+
+pickRepBinderId :: IntSet.IntSet -> EdgeUnifyM Int
+pickRepBinderId bs =
+    case IntSet.toList bs of
+        [] -> lift $ throwError (InternalError "pickRepBinderId: empty binder set")
+        (x:xs) -> foldM pick x xs
+  where
+    pick best cand = do
+        ord <- compareBinderIdsByPrec cand best
+        pure $ case ord of
+            LT -> cand
+            _ -> best
 
 recordMergesIntoRep :: IntSet.IntSet -> EdgeUnifyM ()
 recordMergesIntoRep bs
@@ -840,15 +1092,25 @@ recordMergesIntoRep bs
     | otherwise = do
         eliminated <- gets eusEliminatedBinders
         let live = IntSet.filter (\bid -> not (IntSet.member bid eliminated)) bs
-            repId = if IntSet.null live then IntSet.findMin bs else IntSet.findMin live
-            rep = NodeId repId
-            others = sortOn Down (filter (/= repId) (IntSet.toList bs))
-        forM_ others $ \bid -> do
+        repId <- pickRepBinderId (if IntSet.null live then bs else live)
+        let rep = NodeId repId
+            others = filter (/= repId) (IntSet.toList bs)
+        othersSorted <- sortByM (\a b -> compareBinderIdsByPrec b a) others
+        forM_ othersSorted $ \bid -> do
             let b = NodeId bid
             already <- isEliminated b
             when (not already) $ do
                 recordOp (OpMerge b rep)
                 recordEliminate b
+  where
+    sortByM :: (a -> a -> EdgeUnifyM Ordering) -> [a] -> EdgeUnifyM [a]
+    sortByM _ [] = pure []
+    sortByM cmp xs = do
+        let insertOne x [] = pure [x]
+            insertOne x (y:ys) = do
+                o <- cmp x y
+                if o == LT then pure (x:y:ys) else (y:) <$> insertOne x ys
+        foldM (\acc x -> insertOne x acc) [] xs
 
 unifyAcyclicEdge :: NodeId -> NodeId -> EdgeUnifyM ()
 unifyAcyclicEdge n1 n2 = do
@@ -865,12 +1127,19 @@ unifyAcyclicEdge n1 n2 = do
             bs = IntSet.union bs1 bs2
 
         -- Paper alignment (xmlf.txt §3.4 / Fig. 10): `Raise(n)` is a real
-        -- transformation of χe’s binding edges. We implement that effect as
-        -- rank adjustment on the constraint graph (mutating `tnVarLevel` and
-        -- moving `gBinds`) and record the corresponding `OpRaise` steps in Ω.
-        (k1, k2) <- lift $ unifyAcyclicRawWithRaiseCounts root1 root2
-        recordRaisesForBinders bs1 k1
-        recordRaisesForBinders bs2 k2
+        -- transformation of χe’s binding edges. We implement that effect via
+        -- binding-edge harmonization and record the corresponding `OpRaise`
+        -- steps in Ω.
+        trace <- lift $ unifyAcyclicRootsWithRaiseTrace root1 root2
+
+        let int1 = IntMap.findWithDefault IntSet.empty r1 (eusInteriorByRoot st0)
+            int2 = IntMap.findWithDefault IntSet.empty r2 (eusInteriorByRoot st0)
+            intAll = IntSet.union int1 int2
+
+        -- Paper alignment (xmlf.txt §3.4): record Raise(n) for exactly the node(s)
+        -- that were raised by binding-edge harmonization, restricted to I(r) and
+        -- eliding operations under rigid binders.
+        recordRaisesFromTrace intAll trace
 
         -- Update which UF roots correspond to classes containing interior nodes.
         modify $ \st ->
@@ -882,14 +1151,20 @@ unifyAcyclicEdge n1 n2 = do
                     let m0 = eusBindersByRoot st
                         m1 = if IntSet.null bs then IntMap.delete r1 m0 else IntMap.insert r2 bs (IntMap.delete r1 m0)
                     in m1
-            in st { eusInteriorRoots = roots', eusBindersByRoot = binders' }
+                -- Also update interior-by-root map
+                interior' =
+                    let m0 = eusInteriorByRoot st
+                        m1 = if IntSet.null intAll then IntMap.delete r1 m0 else IntMap.insert r2 intAll (IntMap.delete r1 m0)
+                    in m1
+            in st { eusInteriorRoots = roots', eusBindersByRoot = binders', eusInteriorByRoot = interior' }
 
         -- Record merges among binders that became aliased (inside the interior).
         recordMergesIntoRep bs
 
         -- Record RaiseMerge when a binder-class merges with an exterior TyVar-class.
         when (IntSet.size bs >= 1) $ do
-            let rep = NodeId (IntSet.findMin bs)
+            repId <- pickRepBinderId bs
+            let rep = NodeId repId
             case (IntSet.null bs1, IntSet.null bs2) of
                 (False, True) | inInt1 && not inInt2 -> do
                     node2 <- lift $ getCanonicalNode root2
@@ -944,19 +1219,9 @@ shouldRecordRaiseMerge binder ext = do
 
 lookupVarBound :: NodeId -> PresolutionM (Maybe NodeId)
 lookupVarBound bv = do
-    n <- getNode bv
-    case n of
-        TyVar{ tnVarLevel = lvl } -> do
-            gnodes <- gets (cGNodes . psConstraint)
-            -- Some unit tests build constraints without a binding tree. In that
-            -- mode, treat all variables as unbounded (⊥) rather than failing.
-            if IntMap.null gnodes
-                then pure Nothing
-                else case IntMap.lookup (getGNodeId lvl) gnodes of
-                    Nothing -> pure Nothing
-                    Just g ->
-                        pure $ snd =<< find (\(v, _) -> v == bv) (gBinds g)
-        _ -> pure Nothing
+    root <- findRoot bv
+    c <- gets psConstraint
+    pure (VarStore.lookupVarBound c root)
 
 isProperAncestorLevel :: GNodeId -> GNodeId -> PresolutionM Bool
 isProperAncestorLevel anc lvl =
@@ -1095,12 +1360,8 @@ witnessFromExpansion _root leftRaw expn = do
         binderBound bv = do
             n <- getCanonicalNode bv
             case n of
-                TyVar{ tnVarLevel = lvl } -> do
-                    gnodes <- gets (cGNodes . psConstraint)
-                    case IntMap.lookup (getGNodeId lvl) gnodes of
-                        Nothing -> pure Nothing
-                        Just g ->
-                            pure $ snd =<< find (\(v, _) -> v == bv) (gBinds g)
+                TyVar{} ->
+                    lookupVarBound bv
                 _ -> pure Nothing
 
         isTyVar :: NodeId -> PresolutionM Bool
@@ -1618,9 +1879,41 @@ instantiateScheme bodyId quantLevel substList = do
 
 -- | Like 'instantiateScheme', but also return:
 --   • a copy provenance map (original node → copied/replaced node), and
---   • a coarse approximation of the expansion interior I(r) as an IntSet.
+--   • the expansion interior I(r) as an IntSet (computed from binding edges).
+--
+-- Paper alignment (`papers/xmlf.txt` §3.2): when expanding an instantiation edge,
+-- we copy exactly the nodes "structurally strictly under g and in I(g)" and
+-- preserve binding edges/flags for copied nodes. The expansion root is bound
+-- at the same binder as the target node.
 instantiateSchemeWithTrace :: NodeId -> GNodeId -> [(NodeId, NodeId)] -> PresolutionM (NodeId, IntMap NodeId, IntSet.IntSet)
-instantiateSchemeWithTrace bodyId quantLevel substList = do
+instantiateSchemeWithTrace bodyId _quantLevel substList = do
+    requireValidBindingTree
+    c0 <- gets psConstraint
+    uf0 <- gets psUnionFind
+    let canonical = UnionFind.frWith uf0
+
+    let bodyC = canonical bodyId
+    when (IntMap.notMember (getNodeId bodyC) (cNodes c0)) $
+        throwError (NodeLookupFailed bodyC)
+
+    -- Paper (`xmlf.txt` §3.2): expansion copies nodes structurally under g that
+    -- are in I(g). In our representation, we take g to be the (quotient) binding
+    -- parent of the root we are copying, and compute I(g) on the quotient
+    -- binding graph.
+    --
+    -- If the root is itself a binding root in the quotient relation (e.g. when
+    -- copying a disconnected instance bound), we use it as g.
+    copyInterior <- do
+        mbParent <- case Binding.lookupBindParentUnder canonical c0 bodyC of
+            Left err -> throwError (BindingTreeError err)
+            Right p -> pure p
+        let g = case mbParent of
+                Nothing -> bodyC
+                Just (g', _flag) -> g'
+        case Binding.interiorOfUnder canonical c0 g of
+            Left err -> throwError (BindingTreeError err)
+            Right s -> pure s
+
     let subst = IntMap.fromList [(getNodeId k, v) | (k, v) <- substList]
         initialCopyMap = IntMap.fromList [(getNodeId k, v) | (k, v) <- substList]
         initialInterior = IntSet.fromList (map (getNodeId . snd) substList)
@@ -1630,8 +1923,14 @@ instantiateSchemeWithTrace bodyId quantLevel substList = do
                 , csCopyMap = initialCopyMap
                 , csInterior = initialInterior
                 }
-    (root, st1) <- runStateT (copyNode subst bodyId) st0
-    pure (root, csCopyMap st1, csInterior st1)
+    (root, st1) <- runStateT (copyNode copyInterior canonical subst bodyId) st0
+    let cmap = csCopyMap st1
+        interior = csInterior st1
+    -- Ensure the binding tree remains valid after copying: substitution nodes
+    -- (binder-metas) may become non-roots once referenced by fresh copies, and
+    -- copied nodes whose original parents were not copied need a parent.
+    bindUnboundCopiedNodes cmap interior root
+    pure (root, cmap, interior)
   where
     recordNew :: NodeId -> StateT CopyState PresolutionM ()
     recordNew freshId =
@@ -1648,8 +1947,31 @@ instantiateSchemeWithTrace bodyId quantLevel substList = do
         modify $ \st ->
             st { csCache = IntMap.insert (getNodeId src) dst (csCache st) }
 
-    copyNode :: IntMap NodeId -> NodeId -> StateT CopyState PresolutionM NodeId
-    copyNode subst nid = do
+    -- | Copy binding edge from source node to fresh node, translating parent through copyMap.
+    --
+    -- Paper alignment (`papers/xmlf.txt` §3.2): copied nodes preserve their binding
+    -- edges/flags. If the original parent was also copied, we use the copied parent;
+    -- otherwise we do NOT copy the binding edge (the fresh node becomes a root in
+    -- the expansion graph, to be bound later by bindExpansionRootLikeTarget).
+    --
+    -- Note: We cannot use the original parent if it was not copied, because the
+    -- fresh node is not in the term-DAG structure of the original parent, which
+    -- would violate the "parent is upper than child" invariant.
+    copyBindingEdge :: NodeId -> NodeId -> StateT CopyState PresolutionM ()
+    copyBindingEdge srcNid freshId = do
+        c <- lift $ gets psConstraint
+        case Binding.lookupBindParent c srcNid of
+            Nothing -> pure ()  -- Source is a root, fresh node becomes a root too
+            Just (parentId, flag) -> do
+                copyMap <- gets csCopyMap
+                -- If parent was copied, use the copied parent; otherwise skip
+                -- (the fresh node will be bound later by bindExpansionRootLikeTarget)
+                case IntMap.lookup (getNodeId parentId) copyMap of
+                    Just copiedParent -> lift $ setBindParentM freshId (copiedParent, flag)
+                    Nothing -> pure ()  -- Parent not copied, don't set binding edge
+
+    copyNode :: IntSet.IntSet -> (NodeId -> NodeId) -> IntMap NodeId -> NodeId -> StateT CopyState PresolutionM NodeId
+    copyNode copyInterior canonical subst nid = do
         -- Check explicit substitution (bound vars)
         case IntMap.lookup (getNodeId nid) subst of
             Just freshId -> return freshId
@@ -1663,10 +1985,10 @@ instantiateSchemeWithTrace bodyId quantLevel substList = do
                         node <- lift $ getCanonicalNode nid
 
                         -- Check level to decide whether to copy or share
+                        let k = getNodeId (canonical nid)
                         shouldShare <- case node of
-                            TyVar { tnVarLevel = l } -> return (l < quantLevel)
-                            TyBase {} -> return True -- Optimization: share base types
-                            _ -> return False
+                            TyBase {} -> return True
+                            _ -> return (not (IntSet.member k copyInterior))
 
                         if shouldShare then return nid
                         else do
@@ -1691,14 +2013,14 @@ instantiateSchemeWithTrace bodyId quantLevel substList = do
                                             -- If we skip 'nid', then 'b' referring to 'nid' effectively refers to 'b' (or copy of b).
                                             -- This is knot-tying.
                                             -- For now, let's assume no cycles involving TyExp skipping.
-                                            res <- copyNode subst b
+                                            res <- copyNode copyInterior canonical subst b
                                             cacheInsert nid res
                                             recordCopy nid res
                                             return res
                                         _ -> do
                                             -- Non-identity expansion.
                                             -- We must materialize the expansion result.
-                                            b' <- copyNode subst b
+                                            b' <- copyNode copyInterior canonical subst b
                                             (res, (cmap, interior)) <- lift $ applyExpansionTraced expn (TyExp (NodeId (-1)) s b')
                                             cacheInsert nid res
                                             recordCopy nid res
@@ -1716,14 +2038,18 @@ instantiateSchemeWithTrace bodyId quantLevel substList = do
                                     recordCopy nid freshId
                                     recordNew freshId
 
+                                    -- Copy binding edge from source to fresh node
+                                    -- Paper alignment: preserve binding edges/flags for copied nodes
+                                    copyBindingEdge nid freshId
+
                                     -- Recursively copy children
                                     newNode <- case node of
                                         TyArrow { tnDom = d, tnCod = c } -> do
-                                            d' <- copyNode subst d
-                                            c' <- copyNode subst c
+                                            d' <- copyNode copyInterior canonical subst d
+                                            c' <- copyNode copyInterior canonical subst c
                                             return $ TyArrow freshId d' c'
                                         TyForall { tnOwnerLevel = ownerLvl, tnQuantLevel = q, tnBody = b } -> do
-                                            b' <- copyNode subst b
+                                            b' <- copyNode copyInterior canonical subst b
                                             return $ TyForall freshId q ownerLvl b'
                                         TyVar { tnVarLevel = l } -> do
                                             return $ TyVar freshId l
@@ -1750,6 +2076,132 @@ registerNode nid node = do
             nodes' = IntMap.insert (getNodeId nid) node (cNodes c)
         in st { psConstraint = c { cNodes = nodes' } }
 
+-- | Helper to set a binding parent for a node in the constraint.
+--
+-- Paper alignment (`papers/xmlf.txt` §3.1): this updates the binding tree
+-- to record that `child` is bound by `parent` with the given flag.
+setBindParentM :: NodeId -> (NodeId, BindFlag) -> PresolutionM ()
+setBindParentM child parentInfo = do
+    modify $ \st ->
+        let c = psConstraint st
+            c' = Binding.setBindParent child parentInfo c
+        in st { psConstraint = c' }
+
+-- | Bind the expansion root at the same binder as the edge target.
+--
+-- Paper alignment (`papers/xmlf.txt` §3.2): "the root of the expansion is bound
+-- at the same binder as the target". This ensures the expansion root is in the
+-- correct interior I(r) for subsequent operations.
+--
+-- If the target has a binding parent, we copy that binding to the expansion root.
+-- If the target is a binding root (no parent), the expansion root also becomes
+-- a binding root (we don't set a binding parent for it).
+bindExpansionRootLikeTarget :: NodeId -> NodeId -> PresolutionM ()
+bindExpansionRootLikeTarget expansionRoot targetNode = do
+    c <- gets psConstraint
+    uf <- gets psUnionFind
+    let canonical = UnionFind.frWith uf
+    mbParentInfo <- case Binding.lookupBindParentUnder canonical c targetNode of
+        Left err -> throwError (BindingTreeError err)
+        Right p -> pure p
+    case mbParentInfo of
+        Just parentInfo -> setBindParentM expansionRoot parentInfo
+        Nothing -> pure ()  -- Target is a root, expansion root also becomes a root
+
+-- | Bind all copied nodes that don't have binding parents to the expansion root.
+--
+-- During expansion copying, some nodes may not get binding parents because their
+-- original parents were not copied. This function ensures all copied nodes have
+-- binding parents by binding unbound nodes to the expansion root.
+--
+-- This maintains the binding tree invariant that all non-term-dag-root nodes
+-- have binding parents.
+bindUnboundCopiedNodes :: IntMap NodeId -> IntSet.IntSet -> NodeId -> PresolutionM ()
+bindUnboundCopiedNodes copyMap interior expansionRoot = do
+    c0 <- gets psConstraint
+    uf0 <- gets psUnionFind
+    let canonical = UnionFind.frWith uf0
+        expansionRootC = canonical expansionRoot
+
+    let copiedIds = IntSet.fromList (map getNodeId (IntMap.elems copyMap))
+        candidateIds0 = IntSet.union copiedIds interior
+
+        structuralChildren :: NodeId -> [NodeId]
+        structuralChildren nid =
+            case IntMap.lookup (getNodeId nid) (cNodes c0) of
+                Just TyArrow { tnDom = d, tnCod = c } -> [d, c]
+                Just TyForall { tnBody = b } -> [b]
+                Just TyExp { tnBody = b } -> [b]
+                _ -> []
+
+        reachableFrom :: IntSet.IntSet -> IntSet.IntSet
+        reachableFrom starts = go starts (IntSet.toList starts)
+          where
+            go seen [] = seen
+            go seen (nid:work) =
+                let next = structuralChildren (NodeId nid)
+                    fresh = filter (\(NodeId k) -> not (IntSet.member k seen)) next
+                    seen' = foldr (IntSet.insert . getNodeId) seen fresh
+                    work' = work ++ map getNodeId fresh
+                in go seen' work'
+
+        -- Compute term-dag roots on the UF-quotient structure graph (matching
+        -- `Binding.checkBindingTreeUnder`).
+        termDagRootsUnder :: IntSet.IntSet
+        termDagRootsUnder =
+            let nodes0 = cNodes c0
+
+                rootIdOf :: NodeId -> Int
+                rootIdOf = getNodeId . canonical
+
+                structuralKids :: TyNode -> [NodeId]
+                structuralKids node = case node of
+                    TyVar {} -> []
+                    TyBase {} -> []
+                    TyArrow _ dom cod -> [dom, cod]
+                    TyForall _ _ _ body -> [body]
+                    TyExp _ _ body -> [body]
+
+                addStructEdges :: IntMap.IntMap IntSet.IntSet -> TyNode -> IntMap.IntMap IntSet.IntSet
+                addStructEdges m node =
+                    let parentRoot = rootIdOf (tnId node)
+                        childRoots = IntSet.fromList (map rootIdOf (structuralKids node))
+                    in if IntSet.null childRoots
+                        then m
+                        else IntMap.insertWith IntSet.union parentRoot childRoots m
+
+                structEdges :: IntMap.IntMap IntSet.IntSet
+                structEdges = IntMap.foldl' addStructEdges IntMap.empty nodes0
+
+                allRoots :: IntSet.IntSet
+                allRoots = IntSet.fromList [rootIdOf (NodeId nid) | nid <- IntMap.keys nodes0]
+
+                incomingRoots :: IntSet.IntSet
+                incomingRoots = IntSet.unions (IntMap.elems structEdges)
+            in IntSet.difference allRoots incomingRoots
+
+        candidateIds = reachableFrom candidateIds0
+
+    -- Bind any copied/interior nodes that are not term-dag roots, do not already
+    -- have a binding parent, and are not the expansion root itself.
+    --
+    -- Note: in a multi-root constraint graph, expansion copying may reuse nodes
+    -- that were previously term-dag roots (disconnected components). Once a
+    -- freshly-copied node points to such a reused node, it ceases to be a
+    -- term-dag root in the quotient graph and must have a binding parent.
+    --
+    -- We conservatively bind any newly reachable unbound nodes to the expansion
+    -- root to preserve binding-tree invariants.
+    forM_ (IntSet.toList candidateIds) $ \nid -> do
+        let node0 = NodeId nid
+            nodeC = canonical node0
+        c' <- gets psConstraint
+        let needsParent = not (IntSet.member (getNodeId nodeC) termDagRootsUnder)
+        when (needsParent && nodeC /= expansionRootC) $
+            case Binding.lookupBindParent c' nodeC of
+                Just _ -> pure ()
+                Nothing -> setBindParentM nodeC (expansionRootC, BindFlex)
+
 -- | Helper to create a fresh variable node
 -- | Allocate a fresh variable at the given generalization level.
 createFreshVarAt :: GNodeId -> PresolutionM NodeId
@@ -1771,23 +2223,25 @@ setVarBound :: NodeId -> Maybe NodeId -> PresolutionM ()
 setVarBound vid mb = do
     node <- getNode vid
     case node of
-        TyVar{ tnVarLevel = lvl } ->
-            modify $ \st ->
-                let c = psConstraint st
-                    gnodes' = GNodeOps.setVarBoundAtLevel lvl vid mb (cGNodes c)
-                in st { psConstraint = c { cGNodes = gnodes' } }
+        TyVar{} -> do
+            root <- findRoot vid
+            mbRoot <- mapM findRoot mb
+            modify' $ \st ->
+                let c0 = psConstraint st
+                    c1 = VarStore.setVarBound root mbRoot c0
+                in st { psConstraint = c1 }
         _ -> pure ()
 
--- | Remove a type variable from its level's bind list (if present).
+-- | Mark a type variable as eliminated so elaboration will not re-quantify it.
 dropVarBind :: NodeId -> PresolutionM ()
 dropVarBind vid = do
     node <- getNode vid
     case node of
         TyVar{} ->
-            modify $ \st ->
-                let c = psConstraint st
-                    gnodes' = GNodeOps.dropVarBindFromAllLevels vid (cGNodes c)
-                in st { psConstraint = c { cGNodes = gnodes' } }
+            modify' $ \st ->
+                let c0 = psConstraint st
+                    c1 = VarStore.markEliminatedVar vid c0
+                in st { psConstraint = c1 }
         _ -> pure ()
 
 -- | Verify that the requested G-node exists, unless none are tracked.
@@ -1870,13 +2324,61 @@ findRoot nid = do
     modify $ \st -> st { psUnionFind = uf' }
     pure root
 
--- | Union-Find merge with occurs-check, returning how many Raise steps were
--- executed on each side due to rank adjustment.
+-- | Union-Find merge with occurs-check, returning the Raise trace induced by
+-- binding-edge harmonization.
 --
 -- Paper anchor (`papers/xmlf.txt`): `Raise(n)` is a binding-edge raising
--- operation (a real χe graph transformation). In this codebase, that corresponds
--- to moving a `TyVar` to a higher `GNodeId` (towards the root) and moving its
--- entry in `GNode.gBinds` accordingly.
+-- operation (a real χe graph transformation).
+--
+-- Returns the exact raised-node trace (with multiplicity) induced by binding-edge
+-- harmonization. Presolution records `OpRaise` based on this trace (filtered to
+-- interior nodes and not under rigid binders).
+unifyAcyclicRawWithRaiseTrace :: NodeId -> NodeId -> PresolutionM [NodeId]
+unifyAcyclicRawWithRaiseTrace n1 n2 = do
+    root1 <- findRoot n1
+    root2 <- findRoot n2
+    if root1 == root2
+        then pure []
+        else unifyAcyclicRootsWithRaiseTrace root1 root2
+
+unifyAcyclicRootsWithRaiseTrace :: NodeId -> NodeId -> PresolutionM [NodeId]
+unifyAcyclicRootsWithRaiseTrace root1 root2 = do
+    occurs12 <- occursIn root1 root2
+    when occurs12 $ throwError $ OccursCheckPresolution root1 root2
+
+    occurs21 <- occursIn root2 root1
+    when occurs21 $ throwError $ OccursCheckPresolution root2 root1
+
+    st0 <- get
+    let c0 = psConstraint st0
+
+    (c1, trace0) <-
+        case BindingAdjustment.harmonizeBindParentsWithTrace root1 root2 c0 of
+            Left err -> throwError (BindingTreeError err)
+            Right result -> pure result
+
+    put st0 { psConstraint = c1 }
+    modify $ \st ->
+        st { psUnionFind = IntMap.insert (getNodeId root1) root2 (psUnionFind st) }
+
+    -- Keep the binding-parent relation representative-canonical after UF merges.
+    -- This avoids “forest LCA” artifacts when two binders become equal via UF but
+    -- `cBindParents` still mentions their pre-merge aliases.
+    canonicalizeBindParentsWithUF
+
+    pure trace0
+
+canonicalizeBindParentsWithUF :: PresolutionM ()
+canonicalizeBindParentsWithUF = do
+    st0 <- get
+    let c0 = psConstraint st0
+        uf = psUnionFind st0
+        canonical = UnionFind.frWith uf
+    case Binding.canonicalizeBindParentsUnder canonical c0 of
+        Left err -> throwError (BindingTreeError err)
+        Right bp ->
+            put st0 { psConstraint = c0 { cBindParents = bp } }
+
 unifyAcyclicRawWithRaiseCounts :: NodeId -> NodeId -> PresolutionM (Int, Int)
 unifyAcyclicRawWithRaiseCounts n1 n2 = do
     root1 <- findRoot n1
@@ -1884,22 +2386,9 @@ unifyAcyclicRawWithRaiseCounts n1 n2 = do
     if root1 == root2
         then pure (0, 0)
         else do
-            occurs12 <- occursIn root1 root2
-            when occurs12 $ throwError $ OccursCheckPresolution root1 root2
-
-            occurs21 <- occursIn root2 root1
-            when occurs21 $ throwError $ OccursCheckPresolution root2 root1
-
-            -- Apply rank adjustment (Raise) to TyVar/TyVar unions before linking
-            -- the UF classes, so the solved graph remains scope-correct.
-            st0 <- get
-            let c0 = psConstraint st0
-                (c1, (k1, k2)) = RankAdjustment.harmonizeVarLevelsWithCounts root1 root2 c0
-
-            put st0 { psConstraint = c1 }
-            modify $ \st ->
-                st { psUnionFind = IntMap.insert (getNodeId root1) root2 (psUnionFind st) }
-
+            trace <- unifyAcyclicRootsWithRaiseTrace root1 root2
+            let k1 = length (filter (== root1) trace)
+                k2 = length (filter (== root2) trace)
             pure (k1, k2)
 
 -- | Union-Find merge with occurs-check.

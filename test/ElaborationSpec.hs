@@ -4,15 +4,17 @@ import Test.Hspec
 import Control.Monad (forM_)
 import Data.List (isInfixOf, stripPrefix)
 import qualified Data.IntMap.Strict as IntMap
+import qualified Data.IntSet as IntSet
 
 import MLF.Syntax (Expr(..), Lit(..), SrcType(..), SrcScheme(..))
 import qualified MLF.Elab as Elab
-import MLF.Types (BaseTy(..), NodeId(..), EdgeId(..), InstanceOp(..), InstanceWitness(..), EdgeWitness(..))
+import qualified MLF.Order as Order
+import MLF.Types (BaseTy(..), NodeId(..), EdgeId(..), GNodeId(..), TyNode(..), Constraint(..), InstanceOp(..), InstanceWitness(..), EdgeWitness(..), BindFlag(..))
 import MLF.ConstraintGen (ConstraintResult(..), generateConstraints)
 import MLF.Normalize (normalize)
 import MLF.Acyclicity (checkAcyclicity)
-import MLF.Presolution (PresolutionResult(..), computePresolution)
-import MLF.Solve (SolveResult, solveUnify)
+import MLF.Presolution (PresolutionResult(..), EdgeTrace(..), computePresolution)
+import MLF.Solve (SolveResult(..), solveUnify)
 
 requireRight :: Show e => Either e a -> IO a
 requireRight = either (\e -> expectationFailure (show e) >> fail "requireRight") pure
@@ -196,6 +198,33 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         (Elab.TBase (BaseTy "Int"))
             ty `shouldAlphaEqType` expected
 
+    describe "Elaboration bookkeeping (eliminated vars)" $ do
+        it "generalizeAt ignores eliminated binders" $ do
+            let v = NodeId 1
+                arrow = NodeId 2
+                forallNode = NodeId 3
+                dummyLvl = GNodeId 0
+                c =
+                    Constraint
+                        { cGForest = []
+                        , cGNodes = IntMap.empty
+                        , cVarBounds = IntMap.empty
+                        , cEliminatedVars = IntSet.singleton (getNodeId v)
+                        , cNodes =
+                            IntMap.fromList
+                                [ (getNodeId v, TyVar v dummyLvl)
+                                , (getNodeId arrow, TyArrow arrow v v)
+                                , (getNodeId forallNode, TyForall forallNode dummyLvl dummyLvl arrow)
+                                ]
+                        , cInstEdges = []
+                        , cUnifyEdges = []
+                        , cBindParents = IntMap.fromList [(getNodeId v, (forallNode, BindFlex))]
+                        }
+                solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+
+            (sch, _subst) <- requireRight (Elab.generalizeAt solved forallNode forallNode)
+            sch `shouldBe` Elab.Forall [] (Elab.TArrow (Elab.TVar "t1") (Elab.TVar "t1"))
+
     describe "xMLF types (instance bounds)" $ do
         it "pretty prints unbounded forall" $ do
             let ty = Elab.TForall "a" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
@@ -352,12 +381,129 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
         it "converts ExpInstantiate to InstApp sequence" $ do
             -- InstSeq combines multiple applications
-            let inst = Elab.InstSeq (Elab.InstApp (Elab.TBase (BaseTy "Int")))
-                                    (Elab.InstApp (Elab.TBase (BaseTy "Bool")))
+            let inst =
+                    Elab.InstSeq
+                        (Elab.InstApp (Elab.TBase (BaseTy "Int")))
+                        (Elab.InstApp (Elab.TBase (BaseTy "Bool")))
             Elab.pretty inst `shouldBe` "⟨Int⟩; ⟨Bool⟩"
 
         it "converts ExpForall to InstIntro" $ do
             Elab.pretty Elab.InstIntro `shouldBe` "O"
+
+    describe "Paper ≺ ordering (leftmost-lowermost)" $ do
+        it "generalizeAt orders binders by ≺ (not by NodeId)" $ do
+            -- Construct a tiny solved graph where the leftmost variable in the type
+            -- has a *larger* NodeId than the right one, so NodeId-order would be wrong.
+            let vLeft = NodeId 10
+                vRight = NodeId 5
+                arrow = NodeId 20
+                forallNode = NodeId 30
+                dummyLvl = GNodeId 0
+
+                c =
+                    Constraint
+                        { cGForest = []
+                        , cGNodes = IntMap.empty
+                        , cVarBounds = IntMap.empty
+                        , cEliminatedVars = IntSet.empty
+                        , cNodes =
+                            IntMap.fromList
+                                [ (getNodeId vLeft, TyVar vLeft dummyLvl)
+                                , (getNodeId vRight, TyVar vRight dummyLvl)
+                                , (getNodeId arrow, TyArrow arrow vLeft vRight)
+                                , (getNodeId forallNode, TyForall forallNode dummyLvl dummyLvl arrow)
+                                ]
+                        , cInstEdges = []
+                        , cUnifyEdges = []
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (getNodeId vLeft, (forallNode, BindFlex))
+                                , (getNodeId vRight, (forallNode, BindFlex))
+                                ]
+                        }
+
+                solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+
+            (sch, _subst) <- requireRight (Elab.generalizeAt solved forallNode forallNode)
+            Elab.pretty sch `shouldBe` "∀a b. a -> b"
+
+        it "generalizeAt orders lowermost binders first (depth beats leftmost)" $ do
+            -- Here the deeper variable must quantify before the shallow one, even
+            -- if it has a larger NodeId.
+            let vShallow = NodeId 5
+                vDeep = NodeId 10
+                nOuter = NodeId 20
+                nInner = NodeId 21
+                nInt = NodeId 22
+                forallNode = NodeId 30
+                dummyLvl = GNodeId 0
+
+                c =
+                    Constraint
+                        { cGForest = []
+                        , cGNodes = IntMap.empty
+                        , cVarBounds = IntMap.empty
+                        , cEliminatedVars = IntSet.empty
+                        , cNodes =
+                            IntMap.fromList
+                                [ (getNodeId vShallow, TyVar vShallow dummyLvl)
+                                , (getNodeId vDeep, TyVar vDeep dummyLvl)
+                                , (getNodeId nInt, TyBase nInt (BaseTy "Int"))
+                                , (getNodeId nInner, TyArrow nInner nInt vDeep)
+                                , (getNodeId nOuter, TyArrow nOuter vShallow nInner)
+                                , (getNodeId forallNode, TyForall forallNode dummyLvl dummyLvl nOuter)
+                                ]
+                        , cInstEdges = []
+                        , cUnifyEdges = []
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (getNodeId vShallow, (forallNode, BindFlex))
+                                , (getNodeId vDeep, (forallNode, BindFlex))
+                                ]
+                        }
+
+                solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+
+            (sch, _subst) <- requireRight (Elab.generalizeAt solved forallNode forallNode)
+            Elab.pretty sch `shouldBe` "∀a b. b -> Int -> a"
+
+        it "generalizeAt respects binder bound dependencies (a ≺ b if b’s bound mentions a)" $ do
+            let vA = NodeId 10
+                vB = NodeId 5
+                arrow = NodeId 20
+                forallNode = NodeId 30
+                dummyLvl = GNodeId 0
+
+                c =
+                    Constraint
+                        { cGForest = []
+                        , cGNodes = IntMap.empty
+                        , cVarBounds =
+                            IntMap.fromList
+                                [ (getNodeId vA, Nothing)
+                                , (getNodeId vB, Just vA)
+                                ]
+                        , cEliminatedVars = IntSet.empty
+                        , cNodes =
+                            IntMap.fromList
+                                [ (getNodeId vA, TyVar vA dummyLvl)
+                                , (getNodeId vB, TyVar vB dummyLvl)
+                                , (getNodeId arrow, TyArrow arrow vB vA)
+                                , (getNodeId forallNode, TyForall forallNode dummyLvl dummyLvl arrow)
+                                ]
+                        , cInstEdges = []
+                        , cUnifyEdges = []
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (getNodeId vA, (forallNode, BindFlex))
+                                , (getNodeId vB, (forallNode, BindFlex))
+                                ]
+                        }
+
+                solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+
+            (sch, _subst) <- requireRight (Elab.generalizeAt solved forallNode forallNode)
+            Elab.pretty sch `shouldBe` "∀a (b ⩾ a). b -> a"
 
     describe "Witness translation (Φ/Σ)" $ do
         describe "Σ(g) quantifier reordering" $ do
@@ -420,14 +566,14 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     Right sig -> expectationFailure ("Expected failure, got: " ++ show sig)
 
         describe "Φ translation soundness" $ do
-            let runToSolved :: Expr -> Either String (SolveResult, IntMap.IntMap EdgeWitness)
+            let runToSolved :: Expr -> Either String (SolveResult, IntMap.IntMap EdgeWitness, IntMap.IntMap EdgeTrace)
                 runToSolved e = do
                     ConstraintResult { crConstraint = c0 } <- firstShow (generateConstraints e)
                     let c1 = normalize c0
                     acyc <- firstShow (checkAcyclicity c1)
                     pres <- firstShow (computePresolution acyc c1)
                     solved <- firstShow (solveUnify (prConstraint pres))
-                    pure (solved, prEdgeWitnesses pres)
+                    pure (solved, prEdgeWitnesses pres, prEdgeTraces pres)
 
                 runSolvedWithRoot :: Expr -> Either String (SolveResult, NodeId)
                 runSolvedWithRoot e = do
@@ -527,16 +673,120 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 (Elab.TArrow (Elab.TVar "a") (Elab.TVar "u0")))
                 canonType out `shouldBe` canonType expected
 
+            it "scheme-aware Φ places Raise after bound dependencies (well-scoped bound)" $ do
+                (solved, _intNode) <- requireRight (runSolvedWithRoot (ELit (LInt 1)))
+
+                let scheme =
+                        Elab.Forall
+                            [ ("a", Nothing)
+                            , ("b", Nothing)
+                            , ("c", Just (Elab.TVar "a"))
+                            ]
+                            (Elab.TArrow (Elab.TVar "a") (Elab.TArrow (Elab.TVar "c") (Elab.TVar "b")))
+                    subst = IntMap.fromList [(1, "a"), (2, "b"), (3, "c")]
+                    si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = subst }
+
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = NodeId 0
+                        , ewRight = NodeId 0
+                        , ewRoot = NodeId 0
+                        , ewForallIntros = 0
+                        , ewWitness = InstanceWitness [OpRaise (NodeId 3)]
+                        }
+
+                phi <- requireRight (Elab.phiFromEdgeWitness solved (Just si) ew)
+                out <- requireRight (Elab.applyInstantiation (schemeToType scheme) phi)
+
+                let expected =
+                        Elab.TForall "a" Nothing
+                            (Elab.TForall "u0" (Just (Elab.TVar "a"))
+                                (Elab.TForall "b" Nothing
+                                    (Elab.TArrow (Elab.TVar "a") (Elab.TArrow (Elab.TVar "u0") (Elab.TVar "b")))))
+                canonType out `shouldBe` canonType expected
+
+            it "Φ uses per-edge ≺ (via EdgeTrace) to order binders before placing Raise" $ do
+                let root = NodeId 100
+                    aN = NodeId 1
+                    bN = NodeId 2
+                    cN = NodeId 3
+
+                    c = Constraint
+                        { cGForest = []
+                        , cGNodes = IntMap.empty
+                        , cVarBounds =
+                            IntMap.fromList
+                                [ (getNodeId aN, Nothing)
+                                , (getNodeId bN, Nothing)
+                                , (getNodeId cN, Just bN)
+                                ]
+                        , cEliminatedVars = IntSet.empty
+                        , cNodes =
+                            IntMap.fromList
+                                [ (100, TyArrow root bN aN)
+                                , (1, TyVar aN (GNodeId 0))
+                                , (2, TyVar bN (GNodeId 0))
+                                , (3, TyVar cN (GNodeId 0))
+                                ]
+                        , cInstEdges = []
+                        , cUnifyEdges = []
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (getNodeId aN, (root, BindFlex))
+                                , (getNodeId bN, (root, BindFlex))
+                                ]
+                        }
+                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+
+                    scheme =
+                        Elab.Forall
+                            [ ("a", Nothing)
+                            , ("b", Nothing)
+                            , ("c", Just (Elab.TVar "b"))
+                            ]
+                            (Elab.TArrow (Elab.TVar "b") (Elab.TVar "a"))
+                    subst = IntMap.fromList [(1, "a"), (2, "b"), (3, "c")]
+                    si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = subst }
+
+                    tr =
+                        EdgeTrace
+                            { etRoot = root
+                            , etBinderArgs = []
+                            , etInterior = IntSet.empty
+                            , etCopyMap = IntMap.empty
+                            }
+
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = NodeId 0
+                        , ewRight = NodeId 0
+                        , ewRoot = root
+                        , ewForallIntros = 0
+                        , ewWitness = InstanceWitness [OpRaise cN]
+                        }
+
+                phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace solved (Just si) (Just tr) ew)
+                out <- requireRight (Elab.applyInstantiation (schemeToType scheme) phi)
+
+                let expected =
+                        Elab.TForall "b" Nothing
+                            (Elab.TForall "u0" (Just (Elab.TVar "b"))
+                                (Elab.TForall "a" Nothing
+                                    (Elab.TArrow (Elab.TVar "b") (Elab.TVar "a"))))
+                canonType out `shouldBe` canonType expected
+
             it "witness instantiation matches solved edge types (id @ Int)" $ do
                 let expr = ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (ELit (LInt 1)))
                 case runToSolved expr of
                     Left err -> expectationFailure err
-                    Right (solved, ews) -> do
+                    Right (solved, ews, traces) -> do
                         IntMap.size ews `shouldSatisfy` (> 0)
                         forM_ (IntMap.elems ews) $ \ew -> do
                             srcTy <- requireRight (Elab.reifyType solved (ewRoot ew))
                             tgtTy <- requireRight (Elab.reifyType solved (ewRight ew))
-                            phi <- requireRight (Elab.phiFromEdgeWitness solved Nothing ew)
+                            let EdgeId eid = ewEdgeId ew
+                                mTrace = IntMap.lookup eid traces
+                            phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace solved Nothing mTrace ew)
                             out <- requireRight (Elab.applyInstantiation srcTy phi)
                             canonType out `shouldBe` canonType tgtTy
 
@@ -547,14 +797,141 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 (EApp (EVar "f") (ELit (LBool True))))
                 case runToSolved expr of
                     Left err -> expectationFailure err
-                    Right (solved, ews) -> do
+                    Right (solved, ews, traces) -> do
                         IntMap.size ews `shouldBe` 2
                         forM_ (IntMap.elems ews) $ \ew -> do
                             srcTy <- requireRight (Elab.reifyType solved (ewRoot ew))
                             tgtTy <- requireRight (Elab.reifyType solved (ewRight ew))
-                            phi <- requireRight (Elab.phiFromEdgeWitness solved Nothing ew)
+                            let EdgeId eid = ewEdgeId ew
+                                mTrace = IntMap.lookup eid traces
+                            phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace solved Nothing mTrace ew)
                             out <- requireRight (Elab.applyInstantiation srcTy phi)
                             canonType out `shouldBe` canonType tgtTy
+
+            it "contextToNodeBound computes quantifier-only contexts (context)" $ do
+                -- Binding tree:
+                --   root binds a and m
+                --   m binds n
+                -- Context to reach n from root must go under a, then inside m's bound.
+                let root = NodeId 100
+                    aN = NodeId 1
+                    mN = NodeId 2
+                    nN = NodeId 3
+
+                    c = Constraint
+                        { cGForest = []
+                        , cGNodes = IntMap.empty
+                        , cVarBounds = IntMap.empty
+                        , cEliminatedVars = IntSet.empty
+                        , cNodes =
+                            IntMap.fromList
+                                [ (getNodeId root, TyArrow root aN mN)
+                                , (getNodeId aN, TyVar aN (GNodeId 0))
+                                , (getNodeId mN, TyArrow mN nN aN)
+                                , (getNodeId nN, TyArrow nN aN aN)
+                                ]
+                        , cInstEdges = []
+                        , cUnifyEdges = []
+                        , cBindParents = IntMap.fromList
+                            [ (getNodeId aN, (root, BindFlex))
+                            , (getNodeId mN, (root, BindFlex))
+                            , (getNodeId nN, (mN, BindFlex))
+                            ]
+                        }
+                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+
+                steps <- requireRight (Elab.contextToNodeBound solved root nN)
+                steps `shouldBe` Just [Elab.StepUnder "t1", Elab.StepInside]
+
+            it "selectMinPrecInsertionIndex implements m = min≺ selection (min≺)" $ do
+                -- Keys are ordered by: deeper first, then leftmost path.
+                -- We craft: key(1) ≺ key(n) ≺ key(2) ≺ key(3).
+                let k depth path = Order.OrderKey { Order.okDepth = depth, Order.okPath = path }
+                    keys =
+                        IntMap.fromList
+                            [ (1, k 3 [0])
+                            , (2, k 1 [0])
+                            , (3, k 0 [0])
+                            , (10, k 2 [0])
+                            ]
+                    ids = [Just (NodeId 1), Just (NodeId 2), Just (NodeId 3)]
+                    nN = NodeId 10
+                    canonical = id
+
+                Elab.selectMinPrecInsertionIndex 0 keys canonical nN ids `shouldBe` 1
+                Elab.selectMinPrecInsertionIndex 2 keys canonical nN ids `shouldBe` 2
+
+            -- Regression test for non-spine OpRaise (paper Fig. 10)
+            -- Requirements: 6.1, 6.2, 6.3, 7.3
+            it "Φ translates non-spine OpRaise using binding edges and ≺ ordering (non-spine)" $ do
+                -- This models a Raise(n) where n is a flex node bound under m, and m is
+                -- bound under the edge root. In the type, n's quantifier appears *inside*
+                -- m's bound (non-spine). Raise(n) should:
+                --   1) insert a fresh quantifier at the root level (before m), and
+                --   2) alias/eliminate the original nested quantifier for n inside m's bound.
+                let root = NodeId 100
+                    aN = NodeId 1
+                    mN = NodeId 2
+                    nN = NodeId 3
+
+                    c = Constraint
+                        { cGForest = []
+                        , cGNodes = IntMap.empty
+                        , cVarBounds = IntMap.empty
+                        , cEliminatedVars = IntSet.empty
+                        , cNodes =
+                            IntMap.fromList
+                                [ (getNodeId root, TyArrow root aN mN)
+                                , (getNodeId aN, TyVar aN (GNodeId 0))
+                                , (getNodeId mN, TyArrow mN nN aN)
+                                , (getNodeId nN, TyArrow nN aN aN)
+                                ]
+                        , cInstEdges = []
+                        , cUnifyEdges = []
+                        , cBindParents = IntMap.fromList
+                            [ (getNodeId aN, (root, BindFlex))
+                            , (getNodeId mN, (root, BindFlex))
+                            , (getNodeId nN, (mN, BindFlex))
+                            ]
+                        }
+                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+
+                    nTy = Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")
+                    scheme =
+                        Elab.Forall
+                            [ ("a", Nothing)
+                            , ("m", Just (Elab.TForall "c" (Just nTy) (Elab.TVar "c")))
+                            ]
+                            (Elab.TVar "m")
+                    subst = IntMap.fromList [(getNodeId aN, "a"), (getNodeId mN, "m")]
+                    si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = subst }
+
+                    tr =
+                        EdgeTrace
+                            { etRoot = root
+                            , etBinderArgs = []
+                            , etInterior = IntSet.fromList [getNodeId root, getNodeId aN, getNodeId mN, getNodeId nN]
+                            , etCopyMap = IntMap.empty
+                            }
+
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = NodeId 0
+                        , ewRight = NodeId 0
+                        , ewRoot = root
+                        , ewForallIntros = 0
+                        , ewWitness = InstanceWitness [OpRaise nN]
+                        }
+
+                phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace solved (Just si) (Just tr) ew)
+                out <- requireRight (Elab.applyInstantiation (schemeToType scheme) phi)
+
+                let expected =
+                        Elab.TForall "a" Nothing
+                            (Elab.TForall "u0" (Just nTy)
+                                (Elab.TForall "m" (Just (Elab.TVar "u0"))
+                                    (Elab.TVar "m")))
+                out `shouldAlphaEqType` expected
 
     describe "Presolution witness ops (paper alignment)" $ do
         it "emits Merge for bounded aliasing (b ⩾ a)" $ do

@@ -9,17 +9,81 @@ module MLF.Types (
     InstEdge (..),
     UnifyEdge (..),
     Constraint (..),
+    -- * Variable bounds + elimination stores (scope-model retirement)
+    VarBounds,
+    EliminatedVars,
+    BoundRef(..),
+    ForallSpec(..),
     Expansion (..),
     InstanceOp(..),
     InstanceWitness(..),
     EdgeWitness(..),
     Presolution (..),
     SolverState (..),
-    DepGraph (..)
+    DepGraph (..),
+    -- * Binding tree types
+    BindFlag (..),
+    BindParents,
+    -- * Binding tree errors
+    BindingError (..)
 ) where
 
 import Data.IntMap.Strict (IntMap)
 import Data.List.NonEmpty (NonEmpty)
+import Data.IntSet (IntSet)
+
+-- | Flag indicating whether a binding edge is flexible or rigid.
+--
+-- Paper mapping (`papers/xmlf.txt` §3.1): flexible binders can be raised/weakened
+-- during instantiation; rigid binders are locked and cannot be modified.
+data BindFlag = BindFlex | BindRigid
+    deriving (Eq, Ord, Show)
+
+-- | Binding-edge map: child NodeId -> (parent NodeId, flag).
+--
+-- This represents the paper's binding tree explicitly. Every non-root node
+-- has exactly one binding parent. Roots are nodes that do not appear as keys.
+type BindParents = IntMap (NodeId, BindFlag)
+
+-- | Dedicated variable-bound store (replaces `GNode.gBinds` bounds).
+--
+-- Missing keys are treated as `Nothing` (⊥).
+type VarBounds = IntMap (Maybe NodeId)
+
+-- | Persistent marker for variables eliminated during ω execution / presolution.
+type EliminatedVars = IntSet
+
+-- | Reference to a bound used in forall introductions.
+--
+-- BoundBinder uses a binder index so bounds can be remapped to fresh binders.
+data BoundRef
+    = BoundNode NodeId
+    | BoundBinder Int
+    deriving (Eq, Show)
+
+-- | Binder specification for quantifier introduction.
+data ForallSpec = ForallSpec
+    { fsBinderCount :: Int
+    , fsBounds :: [Maybe BoundRef]
+    }
+    deriving (Eq, Show)
+
+-- | Errors that can occur when validating or manipulating the binding tree.
+data BindingError
+    = MissingBindParent NodeId
+        -- ^ A node that should have a binding parent does not have one.
+    | BindingCycleDetected [NodeId]
+        -- ^ A cycle was detected in the binding-parent chain.
+    | ParentNotUpper NodeId NodeId
+        -- ^ The parent is not "upper" than the child in the term-DAG.
+        -- First NodeId is the child, second is the parent.
+    | OperationOnLockedNode NodeId
+        -- ^ Attempted to raise/weaken a node that is locked (rigidly bound path).
+    | RaiseNotPossible NodeId
+        -- ^ Raise step not possible (e.g., parent is already a root).
+    | InvalidBindingTree String
+        -- ^ Generic binding tree invariant violation with description.
+    deriving (Eq, Show)
 
 -- | Stable identifier for a node in the term-DAG (`TyNode`).
 --
@@ -405,6 +469,28 @@ data Constraint = Constraint
             --   generation or as a side effect of instantiation. The graphic unifier in
             --   Phase 2 may reduce these locally; Phase 5 drains the remainder and
             --   detects inconsistencies.
+        , cBindParents :: BindParents
+            -- ^ Paper-style binding edges: child NodeId -> (parent NodeId, BindFlag).
+            --
+            --   This is the explicit representation of the paper's binding tree
+            --   (`papers/xmlf.txt` §3.1). Every non-root node has exactly one binding
+            --   parent. Roots are nodes that do not appear as keys in this map.
+            --
+            --   The binding tree is used for:
+            --   - Raise/Weaken operations (ω in the paper)
+            --   - Computing the interior I(r) of an expansion
+            --   - Determining which nodes are "instantiable" vs "locked"
+            --
+            --   See Note [Binding Tree] in MLF.Binding for details.
+        , cVarBounds :: VarBounds
+            -- ^ Variable instance bounds (paper: ∀(α ⩾ τ). …).
+            --
+            -- This replaces using `GNode.gBinds` as the bound store. Missing keys
+            -- are treated as ⊥ (`Nothing`).
+        , cEliminatedVars :: EliminatedVars
+            -- ^ Variables eliminated during presolution/ω execution.
+            --
+            -- Elaboration ignores eliminated vars when reifying quantifiers.
         }
     deriving (Eq, Show)
 
@@ -452,7 +538,8 @@ data InstanceOp
     -- introduces a fresh quantifier one level higher and aliases/eliminates the
     -- original binder (Fig. 10, §3.4). The current presolution does not emit
     -- arbitrary interior Raise ops yet; it currently records Raise steps for
-    -- binders during instantiation-edge solving (rank adjustment). See
+    -- binders during instantiation-edge solving via binding-edge harmonization.
+    -- See
     -- `merge_raise_merge_plan.txt` for alignment details.
     | OpRaise NodeId
     | OpWeaken NodeId

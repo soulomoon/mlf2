@@ -9,6 +9,8 @@ import qualified PresolutionSpec
 import qualified SolveSpec
 import qualified PipelineSpec
 import qualified ElaborationSpec
+import qualified BindingSpec
+import qualified GraphOpsSpec
 
 main :: IO ()
 main = hspec $ do
@@ -19,3 +21,5 @@ main = hspec $ do
     SolveSpec.spec
     PipelineSpec.spec
     ElaborationSpec.spec
+    BindingSpec.spec
+    GraphOpsSpec.spec

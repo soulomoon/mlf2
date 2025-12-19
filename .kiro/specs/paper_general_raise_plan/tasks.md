@@ -1,0 +1,320 @@
+# Implementation Plan
+
+> Note: `cabal test` currently includes **2 intentional failing baselines** in `test/ElaborationSpec.hs` under “Paper alignment baselines (expected failures)”.
+> For per-task verification, prefer `cabal test --test-show-details=direct --test-options='--match <pattern>'`.
+> If `cabal test` cannot write its default build logs on your machine, prefix commands with `cabal --config-file=.cabal-config`.
+
+- [x] 1. Binding-edge data model
+  - [x] 1.1 Add binding-tree fields/types on `Constraint`
+    - Files: `src/MLF/Types.hs`
+    - Steps:
+      - Add `BindFlag`, `BindParents`, and `BindingError`.
+      - Add `Constraint.cBindParents :: BindParents`.
+    - Tests: compile + existing suite
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match MLF.Binding'`
+    - _Requirements: 1.1, 2.2_
+  - [x] 1.2 Expose new modules from the library
+    - Files: `mlf2.cabal`
+    - Steps:
+      - Expose `MLF.Binding`, `MLF.BindingAdjustment`, `MLF.GraphOps`.
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match MLF.GraphOps'`
+    - _Requirements: 1.2_
+
+- [x] 2. Binding-tree API + invariant checks
+  - [x] 2.1 Implement core binding-tree operations
+    - Files: `src/MLF/Binding.hs`
+    - Steps:
+      - Implement `lookupBindParent`, `setBindParent`, `removeBindParent`.
+      - Implement `bindingRoots`, `bindingPathToRoot`, `bindingLCA`.
+      - Implement `interiorOf` (paper `I(r)`).
+    - Tests: `test/BindingSpec.hs`
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match MLF.Binding'`
+    - _Requirements: 1.4, 3.2_
+  - [x] 2.2 Implement “parent is upper than child” (`isUpper`) + enforce it
+    - Files: `src/MLF/Binding.hs`
+    - Steps:
+      - Implement `isUpper` via structural reachability in the term-DAG.
+      - Extend `checkBindingTree` to reject non-upper parents (`ParentNotUpper`).
+    - Tests: `test/BindingSpec.hs` regression + properties
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match MLF.Binding'`
+    - _Requirements: 2.1, 2.2, 7.1_
+  - [x] 2.3 Binding-edge mode: reject missing parents for non-term-dag-roots
+    - Files: `src/MLF/Binding.hs`
+    - Steps:
+      - Implement `computeTermDagRoots` and detect `MissingBindParent` when `cBindParents` is non-empty.
+    - Tests: `test/BindingSpec.hs` regression
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match MLF.Binding'`
+    - _Requirements: 1.3, 1.5_
+  - [x] 2.4 Enforce binding-tree validity at call sites (stop silent fallbacks)
+    - Files: `src/MLF/Presolution.hs`, `src/MLF/Elab.hs`, plus any other binding-edge consumers
+    - Steps:
+      - Add a small helper (e.g. `requireValidBindingTree`) that runs `Binding.checkBindingTree`.
+      - Call it at the start of phases that rely on binding edges (`interiorOf`, context building, ω execution).
+      - Remove “fallback to unchanged constraint on error” paths where they hide invalid binding trees.
+    - Tests: update any unit tests that hand-construct constraints to provide complete `cBindParents`
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match validity'`
+    - _Requirements: 1.3, 2.1_
+
+- [x] 3. Populate binding edges in ConstraintGen
+  - [x] 3.1 Make structure allocators set default binding edges
+    - Files: `src/MLF/ConstraintGen.hs`
+    - Steps:
+      - Add `setBindParentIfMissing`.
+      - Update `allocArrow`, `allocForall`, and `allocExpNode` to bind their children by default.
+    - Tests: extend binding-edge regressions to cover annotated types (so `internalizeSrcType` paths are exercised)
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match MLF.Binding'`
+    - _Requirements: 1.1, 1.2_
+  - [x] 3.2 Populate binding edges during term translation (`buildExpr`)
+    - Files: `src/MLF/ConstraintGen.hs`
+    - Steps:
+      - Rely on allocators for binding parents (remove ad-hoc/manual binding edge writes).
+    - Tests: `test/BindingSpec.hs` property “constraints from generateConstraints have binding edges…”
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match generateConstraints'`
+    - _Requirements: 1.1, 7.1_
+
+- [x] 4. ω operations as pure graph transformations
+  - [x] 4.1 Implement `Raise`/`Weaken` and instantiable/locked predicates
+    - Files: `src/MLF/GraphOps.hs`
+    - Steps:
+      - Implement `applyWeaken`, `applyRaiseStep`, `applyRaiseTo`.
+      - Implement `isInstantiable` / `isLocked`.
+    - Tests: `test/GraphOpsSpec.hs`
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match MLF.GraphOps'`
+    - _Requirements: 4.1, 4.2_
+  - [x] 4.2 Property tests: ω preserves invariants + terminates
+    - Files: `test/GraphOpsSpec.hs`
+    - Steps:
+      - Add QuickCheck properties that `Raise`/`Weaken` preserve `checkBindingTree`.
+      - Add a bounded-depth termination check for repeated `Raise`.
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match MLF.GraphOps'`
+    - _Requirements: 4.3, 7.2_
+
+- [x] 5. Binding adjustment (Raise for unification) + integration
+  - [x] 5.1 Implement `harmonizeBindParentsWithTrace`
+    - Files: `src/MLF/BindingAdjustment.hs`
+    - Steps:
+      - Implement LCA-based raising using binding edges (via `GraphOps.applyRaiseStep`).
+      - Preserve backward compatibility by falling back when `cBindParents` is empty.
+    - Tests: `test/BindingSpec.hs` (including replay-via-GraphOps property)
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match MLF.BindingAdjustment'`
+    - _Requirements: 4.2, 7.2_
+  - [x] 5.2 Use binding adjustment in Normalize and Solve
+    - Files: `src/MLF/Normalize.hs`, `src/MLF/Solve.hs`
+    - Steps:
+      - Call `BindingAdjustment.harmonizeBindParents` before UF merges that would violate binding invariants.
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match Normalization'`
+    - _Requirements: 1.2_
+
+- [x] 6. Presolution: χe copying + interior tracking with binding edges
+  - [x] 6.1 Copy binding edges during expansion copying
+    - Files: `src/MLF/Presolution.hs`
+    - Steps:
+      - Copy binding edges for copied nodes when the parent was also copied.
+      - Skip copying binding edges whose parent was not copied (to preserve “upper”).
+      - Bind unbound copied nodes to the expansion root (`bindUnboundCopiedNodes`).
+    - Tests: `test/PresolutionSpec.hs`
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match Presolution'`
+    - _Requirements: 1.2, 3.1_
+  - [x] 6.2 Place the expansion root at the target’s binder (paper §3.2)
+    - Files: `src/MLF/Presolution.hs`
+    - Steps:
+      - Implement `bindExpansionRootLikeTarget` and call it in `processInstEdge`.
+    - Tests: `test/PresolutionSpec.hs`
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match Presolution'`
+    - _Requirements: 3.1_
+  - [x] 6.3 Compute and record `EdgeTrace.etInterior` using exact binding-edge interior `I(r)`
+    - Files: `src/MLF/Presolution.hs`
+    - Steps:
+      - In binding-edge mode, compute `I(r)` exactly via `Binding.interiorOfUnder` (UF-quotient-aware) and record it in both `EdgeUnifyState` and `EdgeTrace`.
+      - Keep the legacy approximate-interior fallback only when `cBindParents` is empty.
+    - Tests: `test/PresolutionSpec.hs`
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match EdgeTrace'`
+    - _Requirements: 3.2, 3.3_
+  - [x] 6.4 Regression: presolution preserves binding-tree validity (when provided)
+    - Files: `test/PresolutionSpec.hs`
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match validity'`
+    - _Requirements: 5.3_
+
+- [x] 7. Presolution: trace-driven `OpRaise` for arbitrary interior nodes
+  - [x] 7.1 Return the exact raised-node trace from edge-local unification
+    - Files: `src/MLF/Presolution.hs`
+    - Steps:
+      - Replace count-based `unifyAcyclicRawWithRaiseCounts` with a trace-returning helper.
+      - Preserve UF merge and occurs-check behavior.
+    - Tests: add a small regression that asserts a known merge produces a non-empty trace
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match OpRaise'`
+    - _Requirements: 5.1_
+  - [x] 7.2 Record `OpRaise` for exactly the raised node(s) (no class-wide “spray”)
+    - Files: `src/MLF/Presolution.hs`
+    - Steps:
+      - Replace `recordRaisesForInterior`’s count-based loop with trace-driven recording.
+      - Ensure only nodes in `etInterior` are recorded and respect “no ops under rigid binders”.
+    - Tests: add a regression that asserts the specific target node id(s) recorded
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match OpRaise'`
+    - _Requirements: 5.1, 5.2_
+  - [x] 7.3 Property: replay recorded raises reproduces presolution’s binding-tree result
+    - Files: `test/PresolutionSpec.hs`
+    - Steps:
+      - Add a replay helper that applies recorded `OpRaise` operations using `GraphOps.applyRaiseStep`.
+      - Assert replayed binding parents match presolution’s final `cBindParents` for interior nodes.
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match replay'`
+    - _Requirements: 5.3, 7.3_
+  - [x] 7.4 Regression: a non-binder interior node is raised and Ω records it
+    - Files: `test/PresolutionSpec.hs`
+    - Steps:
+      - Construct an instantiation edge where a structure node (e.g. `TyArrow`) must be raised.
+      - Assert `EdgeWitness.ewWitness` contains an `OpRaise` targeting that structure node.
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match non-binder'`
+    - _Requirements: 5.1, 7.3_
+
+- [x] 8. Φ: translate non-spine `OpRaise` using paper instantiation contexts (Fig. 10)
+  - [x] 8.1 Replace the current “structural context” with paper instantiation contexts
+    - Files: `src/MLF/Elab.hs`
+    - Steps:
+      - Represent contexts as quantifier-navigation only (under-binders + inside-bounds).
+      - Compute contexts from binding edges + ≺ ordering (restricted to `etInterior` when available).
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match context'`
+    - _Requirements: 6.1_
+  - [x] 8.2 Implement `m = min≺{…}` selection with unit tests
+    - Files: `src/MLF/Elab.hs` (or a small helper module)
+    - Tests: deterministic unit tests for ordering and selection
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match min≺'`
+    - _Requirements: 6.3_
+  - [x] 8.3 Regression: `applyInstantiation source Φ == target` (α-equivalence) for a non-spine Raise case
+    - Files: `test/ElaborationSpec.hs`
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match non-spine'`
+    - _Requirements: 6.2, 7.3_
+
+- [x] 9. Paper-faithfulness gap closure (post-audit)
+  - Gap: `OpWeaken` is still executed as a term-DAG substitution in presolution (`unifyAcyclicEdge meta bound`), but `papers/xmlf.txt` states weakening only changes the binding tree (flex → rigid).
+  - Gap: `instantiateSchemeWithTrace` still uses `tnVarLevel < quantLevel` to decide sharing vs copying, so non-`TyVar` nodes outside `I(g)` may be copied even though the paper shares them.
+
+  - [x] 9.1 Make χe execution of `OpWeaken` binding-tree-only
+    - Files: `src/MLF/Presolution.hs`
+    - Steps:
+      - In `executeBaseOpsPost`, make `OpWeaken` execute only `GraphOps.applyWeaken` (binding-edge flag flip) when binding edges are present.
+      - Remove term-DAG mutation from `OpWeaken` execution (`unifyAcyclicEdge meta bound`) and keep the witness normalization/elimination bookkeeping correct.
+      - Ensure any needed solver behavior is attributed to `Graft`/`Merge`/unification, not to `Weaken`.
+    - Tests: update/add a regression in `test/PresolutionSpec.hs` that asserts `OpWeaken` does not merge UF classes but does flip the binding flag (in binding-edge mode).
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match OpWeaken'`
+    - _Requirements: 4.1, 5.2_
+
+- [x] 9.2 Make expansion copying share nodes outside `I(g)`
+    - Files: `src/MLF/Presolution.hs`
+    - Steps:
+      - In `instantiateSchemeWithTrace`’s `copyNode`, decide copy-vs-share using binding edges:
+        - compute the source interior `I(g)` for the binder that owns `bodyId` (via `Binding.interiorOf`, starting from the binding parent of `bodyId`), and
+        - only copy nodes that are structurally strictly under `g` AND in `I(g)`; share all other reachable nodes.
+      - Note: Phase 10 removes all “binding-edge mode / legacy mode” switching; `cBindParents` emptiness is not a mode signal.
+    - Tests: add a regression in `test/PresolutionSpec.hs` that constructs a scheme where a non-`TyVar` node is reachable under the scheme root but not in `I(g)`, and asserts it is shared (not copied) in the χe copy.
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match instantiateSchemeWithTrace'`
+    - _Requirements: 3.1_
+
+- [x] 10. Remove legacy fallbacks (binding edges always authoritative)
+  - Goal: eliminate all “if `IntMap.null cBindParents` then legacy” branches; an empty `cBindParents` is a valid binding tree for root-only graphs, not a mode bit.
+  - [x] 10.1 Make binding-tree validation unconditional (no emptiness gating)
+    - Files: `src/MLF/Binding.hs`, `src/MLF/Presolution.hs`, `src/MLF/Elab.hs`, `src/MLF/Solve.hs`
+    - Steps:
+      - In `MLF.Binding.checkBindingTree`, always enforce “every non-term-dag-root has a parent” and also reject “term-dag roots that have a binding parent”.
+      - In `MLF.Binding.checkBindingTreeUnder`, add the same “term-dag roots have no parent” check on the UF-quotient binding graph.
+      - Remove all `IntMap.null (cBindParents …)` gates around binding-tree validation (`requireValidBindingTree`, rewrite-time assertions, Φ entrypoints).
+    - Tests:
+      - Update any tests that relied on “legacy mode allows missing parents” to expect `MissingBindParent` instead.
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match MLF.Binding'`
+    - _Requirements: 1.3, 1.5, 2.1_
+
+  - [x] 10.2 Remove “approx interior” fallback (always record exact paper `I(r)`)
+    - Files: `src/MLF/Presolution.hs`
+    - Steps:
+      - In `buildEdgeTrace`, always compute `etInterior` via `Binding.interiorOfUnder` on the UF quotient (no fallback to approximate interior).
+      - In edge processing, always compute interior for edge-local unification via `edgeInteriorExact`.
+    - Tests:
+      - Update any tests that constructed expansion traces without binding edges to provide complete binding parents.
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match interior'`
+    - _Requirements: 3.2, 3.3_
+
+  - [x] 10.3 Remove “lockedness False” fallback (lockedness always derived from binding flags)
+    - Files: `src/MLF/Presolution.hs`
+    - Steps:
+      - In `checkNodeLocked`, remove the `cBindParents` emptiness branch; compute lockedness purely from binding flags on the parent chain.
+    - Tests:
+      - Add/adjust a regression asserting `OpRaise` is not recorded under a rigid binding.
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match locked'`
+    - _Requirements: 5.2_
+
+  - [x] 10.4 Remove “context Nothing when empty binding tree” gating (Φ always consults binding edges)
+    - Files: `src/MLF/Elab.hs`
+    - Steps:
+      - In `contextToNodeBound`, remove the `cBindParents` emptiness branch; treat empty maps as valid trees and still compute contexts when possible.
+      - In `phiFromEdgeWitnessWithTrace`, always validate `checkBindingTree` (no emptiness gating).
+    - Tests:
+      - Update unit tests that build `SolveResult`/`Constraint` by hand to include required binding parents for structural nodes.
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match context'`
+    - _Requirements: 6.1_
+
+  - [x] 10.5 Make Raise trace independent of `RankAdjustment` (no “legacy trace-from-counts”)
+    - Files: `src/MLF/BindingAdjustment.hs`, `src/MLF/Presolution.hs`
+    - Steps:
+      - In `harmonizeBindParentsWithTrace`, remove the `cBindParents`-emptiness conditional and never synthesize a Raise trace from rank-adjustment counts.
+      - Ensure `unifyAcyclicRootsWithRaiseTrace` always returns the binding-edge trace.
+      - (If `RankAdjustment` remains for compatibility, treat it as a separate, non-witness bookkeeping step; the witness trace must come from binding-edge Raise steps only.)
+    - Tests:
+      - Update/remove tests that asserted “legacy fallback returns a non-empty trace”; replace with tests that assert trace corresponds to actual `GraphOps.applyRaiseStep` replay.
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match replay'`
+    - _Requirements: 5.1, 5.3_
+
+  - [x] 10.6 Add quotient-aware parent lookup (`lookupBindParentUnder`)
+    - Files: `src/MLF/Binding.hs`
+    - Steps:
+      - Add `lookupBindParentUnder` and a shared `quotientBindParentsUnder` helper.
+    - Tests: reuse existing quotient regressions in `test/BindingSpec.hs`
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match Interior computation (quotient)'`
+    - _Requirements: 2.1, 3.2_
+
+  - [x] 10.7 Use quotient-aware binding parent lookup in presolution hot spots
+    - Files: `src/MLF/Presolution.hs`
+    - Steps:
+      - In `instantiateSchemeWithTrace`, compute `I(g)` using `lookupBindParentUnder` (avoid raw-map misses under UF).
+      - In `bindExpansionRootLikeTarget`, bind using quotient parent/flag (paper §3.2) and handle redundant `Weaken` in χe execution.
+      - In `checkNodeLocked`, compute lockedness on the quotient binding tree (consistent with `checkBindingTreeUnder`).
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match \"Phase 4\"'`
+    - _Requirements: 3.1, 3.2, 5.2_
+
+  - [x] 10.8 Make χe execution of `Weaken` tolerate merged-expansion duplicates
+    - Files: `src/MLF/Presolution.hs`
+    - Steps:
+      - Treat `Weaken` on an already-rigid node as a no-op during execution (still eliminate the binder for witness bookkeeping).
+    - Tests: rely on existing regression “same ExpVar appears in multiple edges”
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match \"same ExpVar\"'`
+    - _Requirements: 4.1_
+
+  - [x] 10.9 Remove Φ `RaiseMerge` root-case approximation
+    - Files: `src/MLF/Elab.hs`
+    - Steps:
+      - Implement the paper special case exactly when `n` is the expansion root (up to UF canonicalization).
+      - Otherwise, require `n` to be a quantified binder and translate like `Merge` (Fig. 10).
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match \"Φ translation soundness\"'`
+    - _Requirements: 6.2_
+
+  - [x] 10.10 Remove `RankAdjustment` bookkeeping from binding-edge harmonization
+    - Goal: fully decouple binding-edge Raise semantics from `tnVarLevel`/`cGNodes` rank adjustment.
+    - Files: `src/MLF/BindingAdjustment.hs`, `src/MLF/RankAdjustment.hs`, plus any level-dependent callers
+    - Steps:
+      - Remove `RankAdjustment.harmonizeVarLevelsWithCounts` from `harmonizeBindParentsWithTrace`.
+      - Audit level-dependent code paths (`collectBoundVars`, expansion decisions, reification) and either:
+        - keep `RankAdjustment` as a separate phase with no impact on Ω/ω, or
+        - replace remaining uses with binding-edge-based queries.
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match MLF.BindingAdjustment'`
+    - _Requirements: 4.2, 5.3_
+
+  - [x] 10.11 Remove `instantiateSchemeWithTrace`’s level-based sharing fallback for binding-root copies
+    - Goal: eliminate the remaining `tnVarLevel < quantLevel` fallback by making “what is in-scope” fully derivable from binding edges.
+    - Files: `src/MLF/Presolution.hs` (and possibly `src/MLF/Binding.hs` if bounds need structural reachability)
+    - Steps:
+      - Decide how instance bounds participate in the binding tree (paper contexts traverse bounds).
+      - Ensure the copied root always has an associated binder `g` so `I(g)` can be computed.
+      - Update tests to cover copying a bound graph where sharing/copying is decided purely by `I(g)`.
+    - Tests:
+      - Add a regression ensuring root-as-g copying shares nodes outside `I(g)` even when levels would suggest copying.
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match instantiateSchemeWithTrace'`
+    - _Requirements: 3.1_

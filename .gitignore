@@ -54,3 +54,5 @@ cabal.project.local
 *.eventlog
 papers/
 .cabal
+tmp/
+.cabal-logs/build.log

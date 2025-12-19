@@ -6,16 +6,16 @@ module MLF.ConstraintGen (
 ) where
 
 import Control.Monad.Except (Except, MonadError (throwError), runExcept)
-import Control.Monad.State.Strict (StateT, gets, modify', runStateT)
-import Control.Monad (foldM)
+import Control.Monad.State.Strict (StateT, get, gets, modify', put, runStateT)
+import Control.Monad (when)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
+import qualified Data.IntSet as IntSet
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 
 import MLF.Syntax
 import MLF.Desugar (desugarCoercions)
-import qualified MLF.GNodeOps as GNodeOps
 import MLF.Types
 
 {- Note [Phase 1: Constraint Generation]
@@ -113,12 +113,12 @@ data ConstraintResult = ConstraintResult
 data AnnExpr
     = AVar VarName NodeId
     | ALit Lit NodeId
-    | ALam VarName NodeId GNodeId AnnExpr NodeId
-      -- ^ param name, param node, param level, body, result node
+    | ALam VarName NodeId NodeId AnnExpr NodeId
+      -- ^ param name, param node, scope root, body, result node
     | AApp AnnExpr AnnExpr EdgeId NodeId
       -- ^ fun, arg, inst edge id, result node
-    | ALet VarName NodeId ExpVarId GNodeId AnnExpr AnnExpr NodeId
-      -- ^ binder name, scheme node (TyExp), expansion var, child level of RHS, rhs, body, result node
+    | ALet VarName NodeId ExpVarId NodeId AnnExpr AnnExpr NodeId
+      -- ^ binder name, scheme node, expansion var, RHS scope root, rhs, body, result node
     | AAnn AnnExpr NodeId EdgeId
       -- ^ expression, annotation node
     deriving (Eq, Show)
@@ -129,17 +129,20 @@ data Binding = Binding
 
 type Env = Map VarName Binding
 
+data ScopeFrame = ScopeFrame
+  { sfNodes :: !IntSet.IntSet
+  }
+
 data BuildState = BuildState
     { bsNextNode :: !Int          -- ^ Next available NodeId
-    , bsNextGNode :: !Int         -- ^ Next available GNodeId
     , bsNextExpVar :: !Int        -- ^ Next available ExpVarId
     , bsNextEdge :: !Int          -- ^ Next available EdgeId
     , bsNodes :: !(IntMap TyNode) -- ^ Map of all allocated type nodes
-    , bsGNodes :: !(IntMap GNode) -- ^ Map of all generalization nodes
-    , bsForest :: ![GNodeId]      -- ^ Roots of the G-node forest
     , bsInstEdges :: ![InstEdge]  -- ^ Instantiation edges (accumulated in reverse)
     , bsUnifyEdges :: ![UnifyEdge] -- ^ Unification edges (accumulated in reverse)
-    , bsRootLevel :: !GNodeId     -- ^ The root generalization level
+    , bsBindParents :: !BindParents -- ^ Binding edges: child -> (parent, flag)
+    , bsVarBounds :: !(IntMap (Maybe NodeId)) -- ^ Dedicated variable-bound store
+    , bsScopes :: ![ScopeFrame]   -- ^ Stack of scopes tracking newly created nodes
     }
 
 type ConstraintM = StateT BuildState (Except ConstraintError)
@@ -151,49 +154,50 @@ generateConstraints :: Expr -> Either ConstraintError ConstraintResult
 generateConstraints expr = do
     let expr' = desugarCoercions expr
     let initialState = mkInitialState
-        rootLevel = bsRootLevel initialState
+    let topScopeRoot = NodeId (-1)
     ((rootNode, annRoot), finalState) <-
-        runConstraintM (buildExpr Map.empty rootLevel expr') initialState
+        runConstraintM (buildRootExpr topScopeRoot expr') initialState
     let constraint = buildConstraint finalState
     pure ConstraintResult
         { crConstraint = constraint
         , crRoot = rootNode
-        , crAnnotated = annRoot
+        , crAnnotated = replaceScopeRoot topScopeRoot rootNode annRoot
         }
 
 mkInitialState :: BuildState
 mkInitialState = BuildState
     { bsNextNode = 0
-    , bsNextGNode = 1
     , bsNextExpVar = 0
     , bsNextEdge = 0
     , bsNodes = IntMap.empty
-    , bsGNodes = IntMap.singleton (intFromG rootLevel) rootNode
-    , bsForest = [rootLevel]
     , bsInstEdges = []
     , bsUnifyEdges = []
-    , bsRootLevel = rootLevel
+    , bsBindParents = IntMap.empty
+    , bsVarBounds = IntMap.empty
+    , bsScopes = [ScopeFrame IntSet.empty]
     }
-  where
-    rootLevel = GNodeId 0
-    rootNode = GNode
-        { gnodeId = rootLevel
-        , gParent = Nothing
-        , gBinds = []
-        , gChildren = []
-        }
 
 buildConstraint :: BuildState -> Constraint
 buildConstraint st = Constraint
-    { cGForest = bsForest st
-    , cGNodes = bsGNodes st
+    { cGForest = []
+    , cGNodes = IntMap.empty
     , cNodes = bsNodes st
     , cInstEdges = reverse (bsInstEdges st)
     , cUnifyEdges = reverse (bsUnifyEdges st)
+    , cBindParents = bsBindParents st
+    , cVarBounds = bsVarBounds st
+    , cEliminatedVars = IntSet.empty
     }
 
-buildExpr :: Env -> GNodeId -> Expr -> ConstraintM (NodeId, AnnExpr)
-buildExpr env level expr = case expr of
+buildRootExpr :: NodeId -> Expr -> ConstraintM (NodeId, AnnExpr)
+buildRootExpr scopeRoot expr = do
+    (rootNode, annRoot) <- buildExpr Map.empty scopeRoot expr
+    topFrame <- peekScope
+    rebindScopeNodes rootNode rootNode topFrame
+    pure (rootNode, annRoot)
+
+buildExpr :: Env -> NodeId -> Expr -> ConstraintM (NodeId, AnnExpr)
+buildExpr env scopeRoot expr = case expr of
   EVarRaw name -> do
     nid <- lookupVar env name
     pure (nid, AVar name nid)
@@ -201,64 +205,81 @@ buildExpr env level expr = case expr of
     nid <- lookupVar env name
     -- Wrap in fresh expansion node to allow instantiation at this specific use site
     (expNode, _) <- allocExpNode nid
+    -- The TyExp node is a root (no binding parent) - it wraps an existing node
     pure (expNode, AVar name expNode)
   ELit lit -> do
     nid <- allocBase (baseFor lit)
+    -- Literal is a root (no binding parent)
     pure (nid, ALit lit nid)
   -- See Note [Lambda Translation]
   ELam param body -> do
-    argNode <- allocVar level
+    -- Allocate children first, then create the arrow
+    argNode <- allocVar
     let env' = Map.insert param (Binding argNode) env
-    (bodyNode, bodyAnn) <- buildExpr env' level body
+    (bodyNode, bodyAnn) <- buildExpr env' scopeRoot body
+    -- allocArrow sets binding parents for dom/cod automatically
     arrowNode <- allocArrow argNode bodyNode
-    pure (arrowNode, ALam param argNode level bodyAnn arrowNode)
+    pure (arrowNode, ALam param argNode scopeRoot bodyAnn arrowNode)
 
   -- ELamAnn is desugared to ELam + let-bound κσ coercion (see `MLF.Desugar`).
   ELamAnn{} ->
-    buildExpr env level (desugarCoercions expr)
+    buildExpr env scopeRoot (desugarCoercions expr)
 
   -- See Note [Application and Instantiation Edges]
   EApp fun arg -> do
-    (funNode, funAnn) <- buildExpr env level fun
-    (argNode, argAnn) <- buildExpr env level arg
-    resultNode <- allocVar level
+    (funNode, funAnn) <- buildExpr env scopeRoot fun
+    (argNode, argAnn) <- buildExpr env scopeRoot arg
+    resultNode <- allocVar
+    -- allocArrow sets binding parents for dom/cod automatically
     arrowNode <- allocArrow argNode resultNode
     eid <- addInstEdge funNode arrowNode
+    -- The result node is what we return, but the arrow is the structural root
     pure (resultNode, AApp funAnn argAnn eid resultNode)
 
   -- See Note [Let Bindings and Expansion Variables]
   ELet name rhs body -> do
-    childLevel <- newChildLevel level
-    (rhsNode, rhsAnn) <- buildExpr env childLevel rhs
+    pushScope
+    (rhsNode, rhsAnn) <- buildExpr env scopeRoot rhs
+    rhsScope <- popScope
 
-    -- Insert TyForall to mark generalization at childLevel
-    forallNode <- allocForall level childLevel rhsNode
+    -- Insert TyForall to mark generalization over the RHS scope
+    forallNode <- allocForall rhsNode
+    rebindScopeNodes forallNode rhsNode rhsScope
 
     -- Bind the Forall node directly (no expansion node at definition)
     -- Expansion happens at use sites via EVar
     let env' = Map.insert name (Binding forallNode) env
-    (bodyNode, bodyAnn) <- buildExpr env' level body
+    (bodyNode, bodyAnn) <- buildExpr env' scopeRoot body
     -- We pass forallNode as schemeNode to ALet, and 0 as expVar (unused)
     -- This is a slight hack on ALet structure, but consistent with the graph change.
-    pure (bodyNode, ALet name forallNode (ExpVarId 0) childLevel rhsAnn bodyAnn bodyNode)
+    pure (bodyNode, ALet name forallNode (ExpVarId 0) forallNode rhsAnn bodyAnn bodyNode)
 
   -- See Note [Annotated Let]
   ELetAnn name (SrcScheme bindings bodyType) rhs body -> do
-    childLevel <- newChildLevel level
-    -- Create a type variable environment for the quantified variables
-    (tyEnv, quantVars) <- internalizeBinders childLevel bindings
-    -- Internalize the scheme body type
-    schemeBodyNode <- internalizeSrcType tyEnv childLevel bodyType
-    -- Translate the RHS and unify with the annotated type
-    (rhsNode, rhsAnn) <- buildExpr env childLevel rhs
-    -- Emit instantiation: inferred RHS type must be capable of generating the annotated type
-    -- (rhsNode <= schemeBodyNode)
-    rhsEdge <- addInstEdge rhsNode schemeBodyNode
-    let rhsAnn' = AAnn rhsAnn schemeBodyNode rhsEdge
+    -- Build the explicit scheme in its own scope.
+    pushScope
+    (tyEnv, quantVars) <- internalizeBinders bindings
+    schemeBodyNode <- internalizeSrcType tyEnv bodyType
+    schemeScope <- popScope
+    schemeNode <- case quantVars of
+        [] -> pure schemeBodyNode
+        _ -> do
+            node <- allocForall schemeBodyNode
+            mapM_ (\varNode -> setBindParentIfMissing varNode node BindFlex) quantVars
+            pure node
+    rebindScopeNodes schemeNode schemeBodyNode schemeScope
 
-    -- Insert TyForall to mark generalization at childLevel
-    -- For ELetAnn, we first wrap the scheme binders (explicit polymorphism).
-    schemeNode <- foldM (\body _var -> allocForall level childLevel body) schemeBodyNode (reverse quantVars)
+    -- Build the RHS in a fresh scope and bind it under a let-introduced forall.
+    pushScope
+    (rhsNode, rhsAnn) <- buildExpr env scopeRoot rhs
+    rhsScope <- popScope
+
+    rhsScopeNode <- allocForall rhsNode
+    rebindScopeNodes rhsScopeNode rhsNode rhsScope
+
+    -- Emit instantiation: inferred RHS scheme must be an instance of the annotated scheme.
+    rhsEdge <- addInstEdge rhsScopeNode schemeNode
+    let rhsAnn' = AAnn rhsAnn schemeNode rhsEdge
 
     -- We do NOT wrap in an extra let-generalization TyForall if the scheme is already explicit.
     -- This avoids "double quantification" (forall a. forall t. T).
@@ -272,14 +293,14 @@ buildExpr env level expr = case expr of
 
     -- Bind the scheme node directly
     let env' = Map.insert name (Binding schemeNode) env
-    (bodyNode, bodyAnn) <- buildExpr env' level body
+    (bodyNode, bodyAnn) <- buildExpr env' scopeRoot body
     -- Pass schemeNode as scheme, 0 as dummy expVar
-    pure (bodyNode, ALet name schemeNode (ExpVarId 0) childLevel rhsAnn' bodyAnn bodyNode)
+    pure (bodyNode, ALet name schemeNode (ExpVarId 0) rhsScopeNode rhsAnn' bodyAnn bodyNode)
 
   -- Term Annotation
-  EAnn expr srcType -> do
-    (exprNode, exprAnn) <- buildExpr env level expr
-    annNode <- internalizeSrcType Map.empty level srcType
+  EAnn annotatedExpr srcType -> do
+    (exprNode, exprAnn) <- buildExpr env scopeRoot annotatedExpr
+    annNode <- internalizeSrcType Map.empty srcType
     eid <- addInstEdge exprNode annNode
     pure (annNode, AAnn exprAnn annNode eid)
 
@@ -443,90 +464,91 @@ type TyEnv = Map VarName NodeId
 -- This creates nodes for the type structure and connects them appropriately.
 --
 -- The tyEnv maps type variable names to their allocated NodeIds (for quantified vars).
-internalizeSrcType :: TyEnv -> GNodeId -> SrcType -> ConstraintM NodeId
-internalizeSrcType tyEnv level srcType = case srcType of
+internalizeSrcType :: TyEnv -> SrcType -> ConstraintM NodeId
+internalizeSrcType tyEnv srcType = case srcType of
     STVar name -> case Map.lookup name tyEnv of
         Just nid -> pure nid
         Nothing -> do
             -- Free type variable: allocate a fresh variable
-            nid <- allocVar level
+            nid <- allocVar
             pure nid
 
     STArrow dom cod -> do
-        domNode <- internalizeSrcType tyEnv level dom
-        codNode <- internalizeSrcType tyEnv level cod
+        domNode <- internalizeSrcType tyEnv dom
+        codNode <- internalizeSrcType tyEnv cod
         allocArrow domNode codNode
 
     STBase name -> allocBase (BaseTy name)
 
     STForall var mBound body -> do
-        -- Create a child level for the quantifier
-        childLevel <- newChildLevel level
+        pushScope
         -- Allocate a type variable for the bound variable
-        varNode <- allocVar childLevel
+        varNode <- allocVar
         -- Extend the environment with this binding
         let tyEnv' = Map.insert var varNode tyEnv
         -- Process the bound if present (for instance bounds)
         mbBoundNode <- case mBound of
             Nothing -> pure Nothing
             Just bound -> do
-                -- The bound type at the same level as the quantifier body
-                boundNode <- internalizeSrcType tyEnv' childLevel bound
+                boundNode <- internalizeSrcType tyEnv' bound
                 pure (Just boundNode)
 
         -- Record the bound on the variable
-        setVarBound childLevel varNode mbBoundNode
+        setVarBound varNode mbBoundNode
 
         -- Internalize the body with the extended environment
-        bodyNode <- internalizeSrcType tyEnv' childLevel body
+        bodyNode <- internalizeSrcType tyEnv' body
+        scopeFrame <- popScope
         -- Create the forall node
-        allocForall level childLevel bodyNode
+        forallNode <- allocForall bodyNode
+        setBindParentIfMissing varNode forallNode BindFlex
+        rebindScopeNodes forallNode bodyNode scopeFrame
+        pure forallNode
 
     STBottom -> do
         -- Bottom is the minimal type, represented as a fresh variable
         -- that can be instantiated to anything
-        allocVar level
+        allocVar
 
 -- | Allocate a TyForall node.
-allocForall :: GNodeId -> GNodeId -> NodeId -> ConstraintM NodeId
-allocForall ownerLevel quantLevel bodyNode = do
+allocForall :: NodeId -> ConstraintM NodeId
+allocForall bodyNode = do
     nid <- freshNodeId
     insertNode TyForall
         { tnId = nid
-        , tnOwnerLevel = ownerLevel
-        , tnQuantLevel = quantLevel
+        , tnOwnerLevel = GNodeId 0
+        , tnQuantLevel = GNodeId 0
         , tnBody = bodyNode
         }
+    -- Set default binding edge for the body to this forall node,
+    -- but only if it doesn't already have a binding parent.
+    -- This ensures all non-root nodes have binding parents while preserving
+    -- existing binding structure.
+    setBindParentIfMissing bodyNode nid BindFlex
     pure nid
 
 -- | Internalize a list of binders from a source scheme.
 -- Returns an environment mapping variable names to their nodes,
 -- and the list of allocated nodes.
-internalizeBinders :: GNodeId -> [(String, Maybe SrcType)] -> ConstraintM (TyEnv, [NodeId])
-internalizeBinders level bindings = go Map.empty [] bindings
+internalizeBinders :: [(String, Maybe SrcType)] -> ConstraintM (TyEnv, [NodeId])
+internalizeBinders bindings = go Map.empty [] bindings
   where
     go tyEnv acc [] = pure (tyEnv, reverse acc)
     go tyEnv acc ((name, mBound):rest) = do
         -- Allocate a type variable for this binding
-        varNode <- allocVar level
+        varNode <- allocVar
         let tyEnv' = Map.insert name varNode tyEnv
         -- Process the bound if present
         mbBoundNode <- case mBound of
             Nothing -> pure Nothing
             Just bound -> do
-                boundNode <- internalizeSrcType tyEnv' level bound
+                boundNode <- internalizeSrcType tyEnv' bound
                 pure (Just boundNode)
 
         -- Set the bound
-        setVarBound level varNode mbBoundNode
+        setVarBound varNode mbBoundNode
 
         go tyEnv' (varNode:acc) rest
-
--- | Add a unification edge (T₁ = T₂).
-addUnifyEdge :: NodeId -> NodeId -> ConstraintM ()
-addUnifyEdge left right = do
-    let edge = UnifyEdge left right
-    modify' $ \st -> st { bsUnifyEdges = edge : bsUnifyEdges st }
 
 baseFor :: Lit -> BaseTy
 baseFor lit = BaseTy $ case lit of
@@ -534,15 +556,15 @@ baseFor lit = BaseTy $ case lit of
     LBool _ -> "Bool"
     LString _ -> "String"
 
-allocVar :: GNodeId -> ConstraintM NodeId
-allocVar level = do
+allocVar :: ConstraintM NodeId
+allocVar = do
     nid <- freshNodeId
     let node = TyVar
             { tnId = nid
-            , tnVarLevel = level
+            , tnVarLevel = GNodeId 0
             }
     insertNode node
-    attachVar level nid
+    -- Binding parent will be set by the caller
     pure nid
 
 allocBase :: BaseTy -> ConstraintM NodeId
@@ -552,6 +574,7 @@ allocBase base = do
         { tnId = nid
         , tnBase = base
         }
+    -- Binding parent will be set by the caller (or this is a root)
     pure nid
 
 allocArrow :: NodeId -> NodeId -> ConstraintM NodeId
@@ -562,6 +585,12 @@ allocArrow domNode codNode = do
         , tnDom = domNode
         , tnCod = codNode
         }
+    -- Set default binding edges for children (dom/cod) to this arrow node,
+    -- but only if they don't already have binding parents.
+    -- This ensures all non-root nodes have binding parents while preserving
+    -- existing binding structure.
+    setBindParentIfMissing domNode nid BindFlex
+    setBindParentIfMissing codNode nid BindFlex
     pure nid
 
 allocExpNode :: NodeId -> ConstraintM (NodeId, ExpVarId)
@@ -573,32 +602,15 @@ allocExpNode bodyNode = do
     , tnExpVar = expVar
     , tnBody = bodyNode
     }
+  -- Set default binding edge for the body to this TyExp node, but only if
+  -- the body doesn't already have a binding parent. This is important because
+  -- TyExp nodes wrap existing nodes that may already have binding structure.
+  setBindParentIfMissing bodyNode nid BindFlex
   pure (nid, expVar)
 
-newChildLevel :: GNodeId -> ConstraintM GNodeId
-newChildLevel parent = do
-    gid <- freshGNodeId
-    let node = GNode
-            { gnodeId = gid
-            , gParent = Just parent
-            , gBinds = []
-            , gChildren = []
-            }
-    modify' $ \st ->
-        st { bsGNodes = IntMap.insert (intFromG gid) node (bsGNodes st)
-           , bsForest = bsForest st
-           }
-    modify' $ \st ->
-        st { bsGNodes = IntMap.adjust (\gn -> gn { gChildren = gid : gChildren gn }) (intFromG parent) (bsGNodes st) }
-    pure gid
-
-attachVar :: GNodeId -> NodeId -> ConstraintM ()
-attachVar level nodeId = modify' $ \st ->
-    st { bsGNodes = GNodeOps.ensureVarBindAtLevel level nodeId (bsGNodes st) }
-
-setVarBound :: GNodeId -> NodeId -> Maybe NodeId -> ConstraintM ()
-setVarBound level varNode bound = modify' $ \st ->
-    st { bsGNodes = GNodeOps.setVarBoundAtLevel level varNode bound (bsGNodes st) }
+setVarBound :: NodeId -> Maybe NodeId -> ConstraintM ()
+setVarBound varNode bound = modify' $ \st ->
+    st { bsVarBounds = IntMap.insert (intFromNode varNode) bound (bsVarBounds st) }
 
 addInstEdge :: NodeId -> NodeId -> ConstraintM EdgeId
 addInstEdge left right = do
@@ -614,12 +626,6 @@ freshNodeId = do
     modify' $ \st -> st { bsNextNode = next + 1 }
     pure (NodeId next)
 
-freshGNodeId :: ConstraintM GNodeId
-freshGNodeId = do
-    next <- gets bsNextGNode
-    modify' $ \st -> st { bsNextGNode = next + 1 }
-    pure (GNodeId next)
-
 freshExpVarId :: ConstraintM ExpVarId
 freshExpVarId = do
     next <- gets bsNextExpVar
@@ -633,11 +639,106 @@ freshEdgeId = do
     pure next
 
 insertNode :: TyNode -> ConstraintM ()
-insertNode node = modify' $ \st ->
-    st { bsNodes = IntMap.insert (intFromNode (tnId node)) node (bsNodes st) }
+insertNode node = do
+    modify' $ \st ->
+        st { bsNodes = IntMap.insert (intFromNode (tnId node)) node (bsNodes st) }
+    registerScopeNode (tnId node)
+
+-- | Set the binding parent for a node only if it doesn't already have one.
+-- This is useful for structure allocators that want to set a default binding
+-- parent without overwriting an existing one.
+setBindParentIfMissing :: NodeId -> NodeId -> BindFlag -> ConstraintM ()
+setBindParentIfMissing child parent flag =
+    when (child /= parent) $
+        modify' $ \st ->
+            let bp = bsBindParents st
+            in if IntMap.member (intFromNode child) bp
+               then st  -- Already has a parent, don't overwrite
+               else st { bsBindParents = IntMap.insert (intFromNode child) (parent, flag) bp }
 
 intFromNode :: NodeId -> Int
 intFromNode (NodeId x) = x
 
-intFromG :: GNodeId -> Int
-intFromG (GNodeId x) = x
+pushScope :: ConstraintM ()
+pushScope =
+    modify' $ \st -> st { bsScopes = ScopeFrame IntSet.empty : bsScopes st }
+
+popScope :: ConstraintM ScopeFrame
+popScope = do
+    st <- get
+    case bsScopes st of
+        [] -> error "popScope: empty scope stack"
+        (frame:rest) -> do
+            put st { bsScopes = rest }
+            pure frame
+
+peekScope :: ConstraintM ScopeFrame
+peekScope = do
+    st <- get
+    case bsScopes st of
+        [] -> error "peekScope: empty scope stack"
+        (frame:_) -> pure frame
+
+registerScopeNode :: NodeId -> ConstraintM ()
+registerScopeNode (NodeId nid) =
+    modify' $ \st ->
+        case bsScopes st of
+            [] -> st
+            (frame:rest) ->
+                let frame' = frame { sfNodes = IntSet.insert nid (sfNodes frame) }
+                in st { bsScopes = frame' : rest }
+
+rebindScopeNodes :: NodeId -> NodeId -> ScopeFrame -> ConstraintM ()
+rebindScopeNodes binder root frame = do
+    nodes <- gets bsNodes
+    let reachable = structuralReachableFrom nodes root
+        scopeNodes = IntSet.intersection reachable (sfNodes frame)
+        binderId = getNodeId binder
+    modify' $ \st ->
+        st { bsBindParents =
+                IntSet.foldl'
+                    (\bp nid ->
+                        if nid == binderId
+                            then bp
+                            else IntMap.insert nid (binder, BindFlex) bp
+                    )
+                    (bsBindParents st)
+                    scopeNodes
+           }
+
+structuralReachableFrom :: IntMap TyNode -> NodeId -> IntSet.IntSet
+structuralReachableFrom nodes root0 = go IntSet.empty [root0]
+  where
+    go visited [] = visited
+    go visited (nid : rest)
+        | IntSet.member (getNodeId nid) visited = go visited rest
+        | otherwise =
+            let visited' = IntSet.insert (getNodeId nid) visited
+                children =
+                    case IntMap.lookup (getNodeId nid) nodes of
+                        Nothing -> []
+                        Just node -> structuralChildren node
+            in go visited' (children ++ rest)
+
+    structuralChildren :: TyNode -> [NodeId]
+    structuralChildren TyVar{} = []
+    structuralChildren TyBase{} = []
+    structuralChildren TyArrow{ tnDom = d, tnCod = c } = [d, c]
+    structuralChildren TyForall{ tnBody = b } = [b]
+    structuralChildren TyExp{ tnBody = b } = [b]
+
+replaceScopeRoot :: NodeId -> NodeId -> AnnExpr -> AnnExpr
+replaceScopeRoot from to = go
+  where
+    rep nid = if nid == from then to else nid
+    go ann = case ann of
+        AVar v nid -> AVar v (rep nid)
+        ALit lit nid -> ALit lit (rep nid)
+        ALam v param scopeRoot body nid ->
+            ALam v (rep param) (rep scopeRoot) (go body) (rep nid)
+        AApp fun arg eid nid ->
+            AApp (go fun) (go arg) eid (rep nid)
+        ALet v schemeNode expVar scopeRoot rhs body nid ->
+            ALet v (rep schemeNode) expVar (rep scopeRoot) (go rhs) (go body) (rep nid)
+        AAnn expr annNode eid ->
+            AAnn (go expr) (rep annNode) eid

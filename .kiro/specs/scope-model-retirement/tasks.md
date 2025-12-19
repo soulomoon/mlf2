@@ -1,0 +1,97 @@
+# Implementation Plan
+
+> Note: `cabal test` includes intentional expected-failure baselines in `test/ElaborationSpec.hs`.
+> For per-task verification, prefer `cabal test --test-show-details=direct --test-options='--match <pattern>'`.
+> If `cabal test` cannot write its default build logs on your machine, prefix commands with `cabal --config-file=.cabal-config`.
+
+- [x] 1. Add a dedicated variable-bounds store (stop using `GNode.gBinds` for bounds)
+  - [x] 1.1 Add `cVarBounds` (or `tnVarBound`) data model
+    - Files: `src/MLF/Types.hs`
+    - Steps:
+      - Choose Option A (bound on `TyVar`) or Option B (`Constraint.cVarBounds`).
+      - Add the new field(s) and update constructors/pattern matches.
+    - **Verification:** `cabal build`
+    - _Requirements: 1.1_
+  - [x] 1.2 Implement `lookupVarBound`/`setVarBound` helpers in one place
+    - Files: `src/MLF/Types.hs` (or new `src/MLF/VarBounds.hs`)
+    - Steps:
+      - Provide total helpers that do not consult `cGNodes`.
+      - Keep existing GNodeOps-based helpers temporarily but mark them deprecated in a Note block.
+    - **Verification:** `cabal build`
+    - _Requirements: 1.1_
+  - [x] 1.3 Wire constraint generation to populate the new bound store
+    - Files: `src/MLF/ConstraintGen.hs`
+    - Steps:
+      - Replace `GNodeOps.setVarBoundAtLevel` usage with the new bound-store helper.
+      - Ensure STForall binder bounds and scheme binder bounds are recorded.
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match bound'`
+    - _Requirements: 1.1_
+
+- [x] 2. Add a persistent “eliminated var” marker (replace `dropVarBind` semantics)
+  - [x] 2.1 Add `cEliminatedVars` to `Constraint`
+    - Files: `src/MLF/Types.hs`
+    - Steps:
+      - Add `cEliminatedVars :: IntSet` (or equivalent).
+      - Add helpers `isEliminatedVar` / `markEliminatedVar`.
+    - **Verification:** `cabal build`
+    - _Requirements: 1.2_
+  - [x] 2.2 Update presolution “drop var bind” to mark eliminated vars
+    - Files: `src/MLF/Presolution.hs`
+    - Steps:
+      - Update `dropVarBind` to `markEliminatedVar` instead of editing `cGNodes`.
+      - Keep the old `GNodeOps.dropVarBindFromAllLevels` call only if needed for transitional compatibility, but gate it behind a TODO so it can be removed later.
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match eliminate'`
+    - _Requirements: 1.2_
+  - [x] 2.3 Tests: eliminated vars are not re-quantified
+    - Files: `test/ElaborationSpec.hs` or `test/PresolutionSpec.hs`
+    - Steps:
+      - Add a regression where an instantiation binder-meta is eliminated via merge and ensure the reified scheme/type does not quantify it.
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match eliminated'`
+    - _Requirements: 1.2_
+
+- [x] 3. Cut over presolution bound access to the new store (remove `lookupVarBound` legacy)
+  - [x] 3.1 Replace `Presolution.lookupVarBound` implementation
+    - Files: `src/MLF/Presolution.hs`
+    - Steps:
+      - Rewrite `lookupVarBound` to consult the new bound store.
+      - Remove the “IntMap.null gnodes ⇒ Nothing” fallback.
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match RaiseMerge'`
+    - _Requirements: 1.1, 1.3_
+  - [x] 3.2 Replace `Presolution.setVarBound` implementation
+    - Files: `src/MLF/Presolution.hs`
+    - Steps:
+      - Rewrite `setVarBound` to consult the new bound store (no `GNodeOps.setVarBoundAtLevel`).
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match Graft'`
+    - _Requirements: 1.1, 1.3_
+
+- [x] 4. Cut over elaboration to use binding edges + new stores (stop using `cGNodes`)
+  - [x] 4.1 Teach `reifyTypeWithNames` to read bounds from the new store
+    - Files: `src/MLF/Elab.hs`
+    - Steps:
+      - Replace `gBinds`-derived bound lookup with the new bound-store helper.
+      - Exclude vars present in `cEliminatedVars`.
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match reifyTypeWithNames'`
+    - _Requirements: 1.1, 1.2, 3.1_
+  - [x] 4.2 Replace binder enumeration away from `cGNodes` (first pass: scan `cNodes`)
+    - Files: `src/MLF/Elab.hs`
+    - Steps:
+      - Introduce a helper `varsAtLevel :: Constraint -> GNodeId -> [NodeId]` implemented by scanning `cNodes`.
+      - Use it in `generalizeAt`/`reifyTypeWithNames` instead of `gBinds`.
+      - Keep `tnVarLevel` temporarily; this task only removes the `cGNodes` dependency.
+    - **Verification:** `rg -n \"cGNodes\" src/MLF/Elab.hs` returns no matches
+    - _Requirements: 3.3_
+
+- [x] 5. Remove `RankAdjustment` call sites (after elaboration no longer needs it)
+  - [x] 5.1 Remove RankAdjustment usage in Normalize/Solve/Presolution
+    - Files: `src/MLF/Normalize.hs`, `src/MLF/Solve.hs`, `src/MLF/Presolution.hs`
+    - Steps:
+      - Delete calls to `RankAdjustment.harmonizeVarLevels`.
+      - Delete any imports that become unused.
+    - **Verification:** `rg -n \"RankAdjustment\\.harmonizeVarLevels\" src` returns no matches
+    - _Requirements: 4.1_
+  - [x] 5.2 Delete `MLF.RankAdjustment` module (or leave unused with TODO)
+    - Files: `src/MLF/RankAdjustment.hs`, `mlf2.cabal`
+    - Steps:
+      - If no call sites remain, delete the module and remove it from the Cabal file.
+    - **Verification:** `cabal build`
+    - _Requirements: 4.1_

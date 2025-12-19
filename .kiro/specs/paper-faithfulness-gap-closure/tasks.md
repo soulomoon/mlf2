@@ -1,0 +1,110 @@
+# Implementation Plan
+
+> Note: `cabal test` includes intentional expected-failure baselines in `test/ElaborationSpec.hs`.
+> For per-task verification, prefer `cabal test --test-show-details=direct --test-options='--match <pattern>'`.
+> If `cabal test` cannot write its default build logs on your machine, prefix commands with `cabal --config-file=.cabal-config`.
+
+- [x] 1. Fix stale paper-alignment documentation
+  - [x] 1.1 Update `implementation_notes.md` to reflect current Raise/Φ status
+    - Files: `implementation_notes.md`
+    - Steps:
+      - Remove/replace the stale claim that we “do not yet record arbitrary interior `Raise(n)` sequences”.
+      - Add a short bullet pointing to the binding-edge + `EdgeTrace` based solution (Trace-driven graftArg, exact `I(r)`).
+    - **Verification:** `rg -n \"do not yet record arbitrary interior\" implementation_notes.md` returns no matches
+    - _Requirements: 1.1_
+  - [x] 1.2 Refresh `paper_general_raise_plan.txt` “current state” text
+    - Files: `paper_general_raise_plan.txt`
+    - Steps:
+      - Update the “Current state (why we can’t do this yet)” section to reflect the new binding-edge implementation.
+      - Keep Phase R6 (scope-model retirement) as explicitly remaining work if still applicable.
+    - **Verification:** `rg -n \"why we can’t do this yet\" paper_general_raise_plan.txt` either returns no matches or the section is updated to the post-implementation truth
+    - _Requirements: 1.2_
+
+- [x] 2. Add paper-faithful node-kind classification (restricted vs locked)
+  - [x] 2.1 Add `NodeKind` + `nodeKind` API
+    - Files: `src/MLF/Binding.hs`
+    - Steps:
+      - Add `data NodeKind = NodeRoot | NodeInstantiable | NodeRestricted | NodeLocked`.
+      - Implement `nodeKind :: Constraint -> NodeId -> Either BindingError NodeKind`.
+      - Define in terms of binding-parent flags along the path to root (paper §3.1).
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match NodeKind'`
+    - _Requirements: 2.1, 2.2, 2.3_
+  - [x] 2.2 Add `isUnderRigidBinder` helper for Ω normalization
+    - Files: `src/MLF/Binding.hs`
+    - Steps:
+      - Add `isUnderRigidBinder :: Constraint -> NodeId -> Either BindingError Bool`.
+      - Implement as: follow binding parents starting from the *parent* of `nid` and return True iff any edge on that strict-ancestor path is `BindRigid`.
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match under rigid'`
+    - _Requirements: 2.4_
+  - [x] 2.3 Tests: restricted vs locked distinction
+    - Files: `test/BindingSpec.hs`
+    - Steps:
+      - Add a regression where `nid` has `(parent, BindRigid)` and `nodeKind nid == NodeRestricted`.
+      - Add a regression where `nid` has `(parent, BindFlex)` but an ancestor edge is `BindRigid` and `nodeKind nid == NodeLocked`.
+      - Add a regression: `isUnderRigidBinder restrictedNode == False` and `isUnderRigidBinder childOfRestricted == True`.
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match NodeKind'`
+    - _Requirements: 2.1, 2.2, 2.4_
+
+- [x] 3. Tighten binding-edge harmonization (remove silent fallbacks)
+  - [x] 3.1 Remove `findBindingLCA` fallback behavior
+    - Files: `src/MLF/BindingAdjustment.hs`
+    - Steps:
+      - Replace `findBindingLCA` with a call to `Binding.bindingLCA` (or keep the helper but remove the fallback-to-root behavior).
+      - Ensure “no common ancestor” becomes an error (never a silent fallback).
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match MLF.BindingAdjustment'`
+    - _Requirements: 3.2_
+  - [x] 3.2 Make Raise-required-but-locked an error (not a silent stop)
+    - Files: `src/MLF/BindingAdjustment.hs`
+    - Steps:
+      - In `raiseToParentWithCount` and `raiseToRoot`, if the target has not been reached and `isInstantiable` is False, return `Left (OperationOnLockedNode nid)` (or a dedicated error).
+      - Keep “already at target” and “parent is root and no further raise possible” as non-error only when it is logically consistent with the requested target.
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match \"locked\"'`
+    - _Requirements: 3.1_
+  - [x] 3.3 Tests: harmonization fails fast on locked nodes
+  - [x] 3.4 Canonicalize `cBindParents` after UF merges
+    - Files: `src/MLF/Binding.hs`, `src/MLF/Presolution.hs`
+    - Steps:
+      - Add `Binding.canonicalizeBindParentsUnder` as a shared quotient helper.
+      - After each UF merge in presolution, rewrite `cBindParents` to canonical reps to avoid “forest LCA” artifacts.
+      - Ensure ω `Weaken` executes on the UF-canonical meta so it still has a binding edge to flip.
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match \"Phase 4\"'`
+    - _Requirements: 3.2, 4.2_
+    - Files: `test/BindingAdjustmentSpec.hs` (new) or extend `test/BindingSpec.hs`
+    - Steps:
+      - Add a regression where harmonization between two nodes requires raising a locked node; assert it returns `Left OperationOnLockedNode`.
+      - Add a regression where the binding tree is malformed (no LCA) and harmonization errors.
+      - Wire the new spec module into `mlf2.cabal` + `test/Main.hs` if a new file is added.
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match BindingAdjustment'`
+    - _Requirements: 3.1, 3.2_
+
+- [x] 4. Update presolution Ω normalization to use paper “under rigid binder” semantics
+  - [x] 4.1 Switch `checkNodeLocked` to `Binding.isUnderRigidBinder`
+    - Files: `src/MLF/Presolution.hs`
+    - Steps:
+      - Replace the current “any rigid edge on path” logic with `Binding.isUnderRigidBinder` on the UF-quotient binding tree (use `lookupBindParentUnder` semantics).
+      - Ensure `OpRaise` recording is still suppressed under rigid binders but does not conflate restricted/locked.
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match locked'`
+    - _Requirements: 2.4_
+
+- [x] 5. Centralize χe ω execution into a shared module
+  - [x] 5.1 Introduce `MLF.OmegaExec` module
+    - Files: `src/MLF/OmegaExec.hs`, `mlf2.cabal`
+    - Steps:
+      - Move `executeBaseOpsPre` / `executeBaseOpsPost` from `MLF.Presolution` into `MLF.OmegaExec`.
+      - Keep the monad as `EdgeUnifyM` (so the refactor is mechanical).
+      - Export `executeOmegaBaseOpsPre` / `executeOmegaBaseOpsPost`.
+    - **Verification:** `cabal build`
+    - _Requirements: 4.1_
+  - [x] 5.2 Wire presolution to use `MLF.OmegaExec`
+    - Files: `src/MLF/Presolution.hs`
+    - Steps:
+      - Replace calls to local `executeBaseOpsPre/Post` with `OmegaExec.executeOmegaBaseOpsPre/Post`.
+      - Delete the local helper definitions in `MLF.Presolution`.
+    - **Verification:** `rg -n \"executeBaseOpsPre|executeBaseOpsPost\" src/MLF/Presolution.hs` returns no matches
+    - _Requirements: 4.1, 4.3_
+  - [x] 5.3 Refactor-safety regression
+    - Files: `test/PresolutionSpec.hs` (only if needed)
+    - Steps:
+      - Add/adjust a regression asserting `OpWeaken` still flips the binding edge flag and does not UF-merge with its bound.
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match OpWeaken'`
+    - _Requirements: 4.2_

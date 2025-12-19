@@ -1,0 +1,303 @@
+Paper-general Raise (graph-wide binding-edge raising)
+=====================================================
+
+Goal
+----
+Implement `papers/xmlf.txt`’s story literally:
+
+  - χ is a term-DAG + a *binding tree* (a binding edge leaving every node except
+    the root, pointing to an upper node, and flagged flexible/rigid).
+  - The ω operations in Ω (Graft/Merge/Raise/Weaken/RaiseMerge) are **actual
+    executable graph transformations on χe** (the expansion graph for an
+    instantiation edge).
+  - `Raise(n)` is *not* “rank adjustment for TyVar only”; it is the paper’s
+    “binding edge slides over another binding edge” operation, applicable to any
+    instantiable node (not just binder variables).
+
+This file is the concrete redesign plan to get from the current repo model
+(`TyVar.tnVarLevel` + `GNode.gBinds`) to the paper model (binding edges on all
+nodes), and to use that model to emit/execute `Raise(n)` on arbitrary interior
+nodes in presolution.
+
+
+Current state (as of now)
+-------------------------
+This plan’s core goal is implemented in the codebase:
+
+  - Constraints carry an explicit paper-style binding tree (`Constraint.cBindParents`)
+    for all nodes, with flexible/rigid flags (`BindFlag`).
+  - χe (edge expansion graphs) compute and record the exact paper interior `I(r)`
+    (`EdgeTrace.etInterior`) on the UF-quotient binding graph.
+  - `Raise(n)`/`Weaken(n)` are real binding-tree transformations (see
+    `src/MLF/GraphOps.hs`) and presolution records `OpRaise` for arbitrary interior
+    nodes based on the exact binding-edge raise trace.
+  - Φ translation uses the recorded `EdgeTrace` to stay sound when χe execution is
+    paper-faithful (notably for the `Graft; Weaken` pattern).
+
+What remains (follow-up work):
+
+  - Centralize ω execution further (Graft/Merge/RaiseMerge) so more of Ω is both
+    “executable” and “recorded” by a shared graph-op engine.
+  - Retire the legacy scope model (`GNodeId`/`cGNodes`/`tnVarLevel`) and remove
+    `RankAdjustment` bookkeeping once elaboration/reification no longer depends on it.
+
+
+Target representation (paper-faithful χ)
+----------------------------------------
+We model χ as:
+
+  - Term-DAG: existing constructor graph (Arrow/Base/Var/Exp/…)
+  - Binding tree: for every node `n` except the root, a binding edge
+        n -[flag]-> parent(n)
+    where:
+      * `parent(n)` is an “upper” node in the term-DAG (paper: upper in the
+        drawing; formally: reachable from root by reversing some structure edges),
+      * `flag` is Flexible (⩾) or Rigid (=).
+
+Derived relations:
+
+  - “n is bound on m”     := parent(n) == m
+  - “n is transitively bound on m” := follow parent edges from n until reaching m
+  - “I(g)” (interior of a G-node) := all nodes transitively bound to g
+  - node kinds (paper):
+      inert / instantiable / restricted / locked
+    derived from the binding path flags up to the root.
+
+Operational semantics:
+
+  - Graft/Merge: term-DAG transformations, binding tree unchanged
+  - Weaken(n): change flag(n) from Flexible to Rigid
+  - Raise(n): change parent(n) by “sliding” its binding edge upward (details below)
+
+
+Design choice: migrate in two layers (minimize blast radius)
+------------------------------------------------------------
+We should not try to delete `GNode`/`tnVarLevel` in one patch. Instead:
+
+Layer A (compatibility): add *paper binding edges* as an additional field on the
+constraint, and keep existing scope model running while we build confidence.
+
+Layer B (cut-over): gradually rewrite presolution/solve/elab/reify to depend on
+binding edges, then retire `tnVarLevel`/`cGNodes` once all uses are gone.
+
+This plan is written in that order.
+
+
+Phase R0 — Specify Raise precisely (paper rule)
+-----------------------------------------------
+Before coding, we must pin down the exact local rewrite rule for Raise from the
+eMLF/xMLF paper lineage (xmlf.txt references Yakobowski 2008 for constructive
+normalization).
+
+Deliverables:
+  1) A small note in `implementation_notes.md` documenting:
+       - the exact preconditions for Raise (node is instantiable; which flag
+         patterns are allowed; what “upper” means in the DAG),
+       - the exact graph rewrite of the binding tree (and any required side
+         conditions to keep it a tree).
+  2) A tiny “reference checker” helper (pure) that validates invariants:
+       - every non-root node has exactly one binding parent,
+       - parent pointers are acyclic and eventually reach the root,
+       - parent(n) is upper than n (see Phase R1.2).
+
+Implementation note:
+  - Until the rewrite is pinned down, we can implement “raise one step” as:
+        parent(n) := parent(parent(n))
+    because it matches the repo’s current LCA-style raising. But we should treat
+    this as provisional until R0 is confirmed.
+
+
+Phase R1 — Add binding edges to the core graph (no behavior change yet)
+----------------------------------------------------------------------
+R1.1 Data model additions (minimal)
+  - In `src/MLF/Types.hs`:
+      * add `BindFlag = BindFlex | BindRigid`
+      * add `BindParent = IntMap (NodeId, BindFlag)` (node id -> (parent, flag))
+      * extend `Constraint` with a new field:
+            cBindParents :: BindParent
+        (or `cBindEdges`, but parent map is easier for “tree” ops).
+
+  - Invariants:
+      * roots are exactly the nodes that do not appear as keys in cBindParents
+      * every other node appears exactly once
+
+R1.2 “Upper” relation helper
+  - Add `MLF.Binding` (new module) with:
+      * `structureChildren :: Constraint -> NodeId -> [NodeId]`
+      * `isUpper :: Constraint -> NodeId parent -> NodeId child -> Bool`
+        (parent is upper if reachable by reverse-structure; include sharing).
+      * `checkBindingTree :: Constraint -> Either Error ()` used by tests.
+
+R1.3 Populate cBindParents during constraint generation
+  - Update `src/MLF/ConstraintGen.hs` so every allocated node gets a binding
+    parent and a flag.
+
+  - Mapping rule (initial, conservative):
+      * For nodes created under a subexpression G-node `g_b`, bind them to that
+        G-node (paper: “every occurrence of a subexpression b has a distinct G-node”).
+      * Flag is Flexible by default (principal typing without annotations).
+      * Nodes coming from *annotations* (or “must be polymorphic” contexts) get
+        Rigid binding edges at the right binder (paper: rigid bounds arise from
+        type annotations).
+
+  - Compatibility bridge:
+      * keep producing `cGNodes` / `tnVarLevel` for now.
+      * add a cross-check in tests: “vars at level gid correspond to nodes bound
+        to gnode(gid)” (helps validate the migration).
+
+R1.4 Populate cBindParents for existing tests that hand-construct constraints
+  - Many unit tests build `Constraint` values manually.
+  - Provide `emptyConstraint` with `cBindParents = IntMap.empty` and add helpers
+    in tests to fill in binding parents in a small graph (so later phases can rely
+    on it without rewriting every test at once).
+
+
+Phase R2 — Centralize graph operations (ω as executable transformations)
+------------------------------------------------------------------------
+Create `src/MLF/GraphOps.hs` to implement paper operations on χ/χe:
+
+  - `applyGraft :: … -> (Constraint, [InstanceOp])`
+  - `applyMerge :: … -> (Constraint, [InstanceOp])`
+  - `applyWeaken :: NodeId -> (Constraint, InstanceOp)`   -- flips BindFlex→BindRigid
+  - `applyRaiseStep :: NodeId -> (Constraint, Maybe InstanceOp)` -- one Raise step
+  - `applyRaiseTo :: NodeId -> NodeId targetBinder -> (Constraint, [InstanceOp])`
+  - `applyRaiseMerge :: NodeId -> NodeId outsideNode -> …`
+
+Notes:
+  - This module should be pure. Presolution/Normalize/Solve can call into it.
+  - Keep union-find separate; GraphOps should operate on the raw graph state,
+    while callers decide when/what to union.
+  - Add invariant checks behind a debug flag (or only in tests).
+
+
+Phase R3 — Replace rank adjustment with binding-edge raising (graph-wide)
+------------------------------------------------------------------------
+R3.1 Generalize “harmonize” to all nodes
+  - Deprecate `MLF.RankAdjustment` (TyVar-only).
+  - Introduce `MLF.BindingAdjustment` with:
+      * `harmonizeBindParentsWithTrace :: NodeId -> NodeId -> Constraint -> (Constraint, [NodeId])`
+        which:
+          1) computes LCA of the *binding parents* of the two nodes in the binding tree,
+          2) raises each node step-by-step until both are bound at that LCA,
+          3) returns the updated constraint and the exact Raise steps performed
+             (node ids, with multiplicity).
+
+  - Important: because binding parents are NodeIds, LCA is computed in the
+    binding tree (parent pointers), not in the GNode forest.
+
+R3.2 Update all unify sites to use binding-edge harmonization
+  - `src/MLF/Normalize.hs`: before any union that would otherwise break binding
+    invariants, call `harmonizeBindParentsWithTrace`.
+  - `src/MLF/Solve.hs`: same for the final unifier.
+  - `src/MLF/Presolution.hs`: replace `unifyAcyclicRawWithRaiseCounts` with a
+    trace-returning version based on binding edges, not levels.
+
+R3.3 Emitting Ω Raise ops (global vs per-edge)
+  - Outside instantiation edges, we do not need Ω witnesses, only correctness.
+  - Inside an instantiation edge (χe), we must *record* every Raise step that was
+    executed on χe.
+  - Therefore, presolution’s edge-local unifier should:
+      * run `harmonizeBindParentsWithTrace`,
+      * filter the returned raised nodes to those in `I(r)` (using edge trace),
+      * append `OpRaise n` once per step for each raised node `n` (not only binders).
+
+
+Phase R4 — Expansion (χe) must copy binding edges (interior becomes exact)
+------------------------------------------------------------------------
+The paper defines expansion copying by *interior I(g)* (transitive binding).
+To support general Raise, χe must have a correct binding tree for all copied nodes.
+
+R4.1 Copying must preserve binding parents/flags
+  - Update `instantiateSchemeWithTrace` / `copyNode` (presolution) so that:
+      * for each copied node n ↦ n', we also copy:
+            parent(n') := (copy(parent(n)), flag(n))   if parent(n) is copied
+            parent(n') := (parent(n), flag(n))         if parent(n) is shared
+      * the *root of the copied scheme* is bound to the binder of the target node n
+        (paper: “The copy is bound at the same node as n.”).
+
+R4.2 Make `EdgeTrace.etInterior` exact
+  - With binding edges in χe, we can define interior as:
+      I(r) = { x | x is transitively bound to r }
+  - Record that as `etInterior`, rather than the current approximation.
+  - This improves:
+      * which Raise steps are attributed to “inside the edge”,
+      * ≺ restriction for Φ,
+      * normalization legality (“no ops under rigid binders”).
+
+
+Phase R5 — Φ must handle Raise(n) for arbitrary nodes (true contexts)
+--------------------------------------------------------------------
+Once presolution emits `OpRaise` for arbitrary nodes, elaboration must translate
+it as in Figure 10, which requires instantiation contexts, not just “forall spine”.
+
+R5.1 Represent paper contexts in repo instantiation language
+  - Paper contexts grammar:
+      C ::= {·} | ∀(⩾ C) | ∀(α ⩾) C
+  - Repo has:
+      InstInside (∀(⩾ …))  and InstUnder (∀(α ⩾) …)
+  - Add a small internal “context builder”:
+      `data IContextStep = StepInside | StepUnder String`
+      `applyContext :: [IContextStep] -> Instantiation -> Instantiation`
+
+R5.2 Build C^r_n from χe binding tree + ≺
+  - For an instantiable node n transitively flexibly bound to r, the paper claims
+    there is a unique context C^r_n to reach α_n’s bound in T(r), given ≺.
+  - Implement a deterministic function:
+        contextToNodeBound :: SolveResult/Constraint -> root r -> node n -> Either Error [IContextStep]
+    which uses:
+      * binding parents to know which binder chain is relevant,
+      * ≺ ordering (OrderKey) to know the quantifier order among siblings.
+
+R5.3 Implement Φ(Raise(n)) for non-spine nodes
+  - Replace the current binder-spine-only `OpRaise` translation with:
+      Φ(Raise(n)) = C^r_m { O; ∀(⩾ T(n)); ∀(βn ⩾) C^n_m {h!βn i} }
+    where m is the paper’s `min≺{…}` choice (use the same ≺ keys).
+  - Keep the existing “binder-spine fast path” as an optimization when n is a
+    leading binder and the context is only `InstUnder` prefixes.
+
+
+Phase R6 — Retire the old scope model (after parity)
+---------------------------------------------------
+Once R1–R5 are stable and tests cover:
+  - expansion interior by binding edges,
+  - Raise emission for arbitrary nodes,
+  - Φ translation using real contexts,
+we can cut over:
+
+  - remove `tnVarLevel` and `cGNodes`/`GNode.gBinds` (or keep only for term-level
+    bookkeeping if still needed elsewhere),
+  - rewrite `reifyType*` to implement Figure 9 literally (Q/T/S based on binding),
+  - rewrite “rigid presolution” step as weakening inert nodes into rigid ones
+    (paper Lemma 8), operating on BindFlags.
+
+This phase is intentionally last because it is high-churn.
+
+
+Testing strategy (incremental, paper-anchored)
+----------------------------------------------
+Add tests in this order:
+
+  1) Binding tree invariants:
+       - every node except root has a parent
+       - no cycles; parent is upper
+  2) Raise step rewrite:
+       - `applyRaiseStep` preserves invariants and moves parent upward
+  3) Harmonization:
+       - `harmonizeBindParentsWithTrace` raises both sides to same binder
+  4) Expansion copying:
+       - copied nodes have correct parents and flags; `I(r)` matches paper definition
+  5) Presolution witness:
+       - unification inside χe emits `OpRaise` on non-binder interior nodes
+  6) Φ translation:
+       - for a synthetic χe where Raise targets a non-spine node, `applyInstantiation`
+         result matches the solved edge type.
+
+
+Open questions / risks
+----------------------
+  - Precise Raise rewrite rule: must be validated against Yakobowski 2008’s
+    definition to avoid encoding a too-weak “raise-to-parent(parent)” rule.
+  - Performance: `isUpper` / invariant checks must not be on in production paths.
+  - Migration complexity: constraint generation currently encodes polymorphism via
+    `TyForall` + `GNode.gBinds`; aligning that with binding edges will require a
+    careful staged rollout.

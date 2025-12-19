@@ -67,12 +67,16 @@ library
                       MLF.Presolution,
                       MLF.Solve,
                       MLF.Elab,
+                      MLF.Binding,
+                      MLF.BindingAdjustment,
+                      MLF.GraphOps,
+                      MLF.Order,
 
     -- Modules included in this library but not exported.
     other-modules:    MLF.Desugar,
                       MLF.GNodeOps,
-                      MLF.RankAdjustment,
-                      MLF.Scope,
+                      MLF.OmegaExec,
+                      MLF.VarStore,
                       MLF.UnionFind
 
     -- LANGUAGE extensions used by modules in this package.
@@ -128,6 +132,8 @@ test-suite mlf2-test
                       SolveSpec,
                       PipelineSpec,
                       ElaborationSpec,
+                      BindingSpec,
+                      GraphOpsSpec,
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
@@ -146,4 +152,5 @@ test-suite mlf2-test
         base ^>=4.21.0.0,
         containers,
         mlf2,
-        hspec >=2.11 && <2.12
+        hspec >=2.11 && <2.12,
+        QuickCheck >=2.14 && <2.18

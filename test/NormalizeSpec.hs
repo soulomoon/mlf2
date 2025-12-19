@@ -1,6 +1,7 @@
 module NormalizeSpec (spec) where
 
 import qualified Data.IntMap.Strict as IntMap
+import qualified Data.IntSet as IntSet
 import Test.Hspec
 
 import MLF.Types
@@ -251,47 +252,42 @@ spec = describe "Phase 2 — Normalization" $ do
                 -- Edge is consumed by union-find
                 cUnifyEdges result `shouldBe` []
 
-            it "raises variable levels to the LCA during merging (rank adjustment)" $ do
-                -- Paper Raise(n) / rank adjustment: before Var/Var union, raise both vars
-                -- to their lowest common binder and move `gBinds` accordingly.
-                let g0 =
-                        GNode
-                            { gnodeId = GNodeId 0
-                            , gParent = Nothing
-                            , gBinds = [(NodeId 1, Nothing)]
-                            , gChildren = [GNodeId 1]
-                            }
-                    g1 =
-                        GNode
-                            { gnodeId = GNodeId 1
-                            , gParent = Just (GNodeId 0)
-                            , gBinds = [(NodeId 0, Nothing)]
-                            , gChildren = []
-                            }
-                    nodeInner = TyVar (NodeId 0) (GNodeId 1)
-                    nodeOuter = TyVar (NodeId 1) (GNodeId 0)
-                    edge = UnifyEdge (NodeId 1) (NodeId 0)
+            it "harmonizes binding parents to the LCA during merging" $ do
+                -- Paper Raise(n): before Var/Var union, raise binders so both vars
+                -- share the same binding parent.
+                let vInner = NodeId 0
+                    vOuter = NodeId 1
+                    inner = NodeId 2
+                    root = NodeId 3
+
+                    nodeInner = TyVar vInner (GNodeId 1)
+                    nodeOuter = TyVar vOuter (GNodeId 0)
+                    nodeInnerArrow = TyArrow inner vInner vOuter
+                    nodeRoot = TyArrow root inner vOuter
+
+                    edge = UnifyEdge vOuter vInner
                     constraint =
                         emptyConstraint
-                            { cGNodes = IntMap.fromList [(0, g0), (1, g1)]
-                            , cNodes = IntMap.fromList [(0, nodeInner), (1, nodeOuter)]
+                            { cNodes =
+                                IntMap.fromList
+                                    [ (getNodeId vInner, nodeInner)
+                                    , (getNodeId vOuter, nodeOuter)
+                                    , (getNodeId inner, nodeInnerArrow)
+                                    , (getNodeId root, nodeRoot)
+                                    ]
+                            , cBindParents =
+                                IntMap.fromList
+                                    [ (getNodeId vInner, (inner, BindFlex))
+                                    , (getNodeId inner, (root, BindFlex))
+                                    , (getNodeId vOuter, (root, BindFlex))
+                                    ]
                             , cUnifyEdges = [edge]
                             }
                     result = normalize constraint
 
                 cUnifyEdges result `shouldBe` []
-                IntMap.lookup 0 (cNodes result) `shouldBe` Just (TyVar (NodeId 0) (GNodeId 0))
-                IntMap.lookup 1 (cNodes result) `shouldBe` Just (TyVar (NodeId 1) (GNodeId 0))
-                IntMap.lookup 0 (cGNodes result)
-                    `shouldBe`
-                        Just
-                            g0
-                                { gBinds =
-                                    [ (NodeId 0, Nothing)
-                                    , (NodeId 1, Nothing)
-                                    ]
-                                }
-                IntMap.lookup 1 (cGNodes result) `shouldBe` Just (g1 { gBinds = [] })
+                IntMap.lookup (getNodeId vInner) (cBindParents result)
+                    `shouldBe` Just (root, BindFlex)
 
             it "handles chained variable unifications (transitivity)" $ do
                 -- α = β, β = γ: should all be unified
@@ -596,4 +592,7 @@ emptyConstraint = Constraint
     , cNodes = IntMap.empty
     , cInstEdges = []
     , cUnifyEdges = []
+    , cBindParents = IntMap.empty
+    , cVarBounds = IntMap.empty
+    , cEliminatedVars = IntSet.empty
     }
