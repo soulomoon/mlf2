@@ -11,6 +11,7 @@ import MLF.Constraint.Types
 import MLF.Binding.Tree
 import qualified MLF.Binding.Adjustment as BindingAdjustment
 import qualified MLF.Binding.GraphOps as GraphOps
+import qualified MLF.Constraint.Root as ConstraintRoot
 import qualified MLF.Util.Order as Order
 import MLF.Frontend.Syntax (Expr(..), Lit(..), SrcType(..), SrcScheme(..))
 import MLF.Frontend.ConstraintGen (generateConstraints, ConstraintResult(..))
@@ -292,6 +293,31 @@ bindingTreeSpec = describe "MLF.Binding.Tree" $ do
             bindingLCA c (NodeId 3) (NodeId 2) `shouldBe` Right (NodeId 0)
             bindingLCA c (NodeId 3) (NodeId 1) `shouldBe` Right (NodeId 1)
             bindingLCA c (NodeId 1) (NodeId 2) `shouldBe` Right (NodeId 0)
+
+        it "ensureConstraintRoot makes LCA total for disconnected components" $ do
+            let c =
+                    emptyConstraint
+                        { cNodes =
+                            IntMap.fromList
+                                [ (0, TyForall (NodeId 0) (NodeId 1))
+                                , (1, TyVar (NodeId 1))
+                                , (2, TyForall (NodeId 2) (NodeId 3))
+                                , (3, TyVar (NodeId 3))
+                                ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (1, (NodeId 0, BindFlex))
+                                , (3, (NodeId 2, BindFlex))
+                                ]
+                        }
+            bindingLCA c (NodeId 1) (NodeId 3)
+                `shouldBe` Left (NoCommonAncestor (NodeId 1) (NodeId 3))
+
+            let c' = ConstraintRoot.ensureConstraintRoot c
+            case ConstraintRoot.findConstraintRoot c' of
+                Nothing -> expectationFailure "Expected a synthetic root after ensureConstraintRoot"
+                Just rootId ->
+                    bindingLCA c' (NodeId 1) (NodeId 3) `shouldBe` Right rootId
 
     describe "Node kind classification (paper §3.1)" $ do
         it "distinguishes Restricted vs Locked (and strict under-rigid)" $ do

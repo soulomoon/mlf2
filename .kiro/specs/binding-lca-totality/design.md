@@ -14,38 +14,38 @@ lets Raise-to-LCA be implemented without legacy fallbacks.
 
 ## Architecture
 Changes are localized and mostly additive:
-- `src/MLF/Types.hs`: new `BindingError` constructor; new internal `TyRoot` node.
-- `src/MLF/ConstraintRoot.hs`: pure “shaping” pass that ensures a synthetic root.
-- `src/MLF/Binding.hs` / `src/MLF/BindingAdjustment.hs`: remove fallback and make
+- `src/MLF/Constraint/Types.hs`: new `BindingError` constructor; new internal `TyRoot` node.
+- `src/MLF/Constraint/Root.hs`: pure “shaping” pass that ensures a synthetic root.
+- `src/MLF/Binding/Tree.hs` / `src/MLF/Binding/Adjustment.hs`: remove fallback and make
   missing-LCA structured.
-- Phase entry points (`ConstraintGen`, `Presolution`): call `ensureConstraintRoot`
-  to guarantee rooted constraints early.
+- Phase entry points (`MLF.Frontend.ConstraintGen`, `MLF.Constraint.Presolution.Driver`):
+  call `ensureConstraintRoot` to guarantee rooted constraints early.
 - Remaining traversals (`Solve`, `Order`, etc.): treat `TyRoot` as a structural
   node with children.
 
 ## Components and Interfaces
 
 ### `BindingError`
-Add a dedicated constructor:
+Add a dedicated constructor (in `MLF.Constraint.Types`):
 ```hs
 NoCommonAncestor NodeId NodeId
 ```
 so callers can match the failure without string comparisons.
 
 ### `TyNode.TyRoot`
-Add an internal constructor:
+Add an internal constructor (in `MLF.Constraint.Types`):
 ```hs
 TyRoot { tnId :: NodeId, tnChildren :: [NodeId] }
 ```
 with the invariant: `TyRoot` is solver-internal and represents only structural
 edges (it is not an xMLF type constructor).
 
-### `Binding.bindingLCA`
+### `Binding.bindingLCA` (`MLF.Binding.Tree`)
 Change:
 - from `Left (InvalidBindingTree "No common ancestor found")`
 - to `Left (NoCommonAncestor n1 n2)`
 
-### `BindingAdjustment.harmonizeBindParentsWithTrace`
+### `BindingAdjustment.harmonizeBindParentsWithTrace` (`MLF.Binding.Adjustment`)
 Change behavior:
 - previously: `NoCommonAncestor` was treated as “no-op; return (c0, [])”
 - now: propagate the error (`Left NoCommonAncestor{...}`)
@@ -54,7 +54,7 @@ Change behavior:
 Keep it as a convenience wrapper, but remove the special-case no-op; on failure,
 raise an explicit exception (as it already does for other binding errors).
 
-### `MLF.ConstraintRoot.ensureConstraintRoot`
+### `MLF.Constraint.Root.ensureConstraintRoot`
 Expose:
 ```hs
 findConstraintRoot :: Constraint -> Maybe NodeId
@@ -68,10 +68,10 @@ Behavior:
   additional children and ensure they are bound under the root.
 
 ## Data Models
-`BindingError` gains:
+`BindingError` gains (in `MLF.Constraint.Types`):
 - `NoCommonAncestor NodeId NodeId`
 
-`TyNode` gains:
+`TyNode` gains (in `MLF.Constraint.Types`):
 - `TyRoot { tnId :: NodeId, tnChildren :: [NodeId] }`
 
 ## Error Handling
