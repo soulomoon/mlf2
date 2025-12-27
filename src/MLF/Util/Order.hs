@@ -7,7 +7,7 @@ ordering key (§3.4, `papers/xmlf.txt`) over nodes reachable from a root.
 
 It is used by elaboration (Φ/Σ) and presolution to make merge directions and
 quantifier ordering follow the paper’s ≺ convention (see Phase 8B in
-`merge_raise_merge_plan.txt`).
+`plans/merge_raise_merge_plan.txt`).
 -}
 module MLF.Util.Order (
     OrderKey(..),

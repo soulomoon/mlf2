@@ -460,7 +460,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
             -- *final* expansion may keep the argument nodes allocated by an earlier edge
             -- (mergeExpansions keeps the first ExpInstantiate payload).
             --
-            -- Phase 1 in merge_raise_merge_plan.txt expects the trace to record the
+            -- Phase 1 in plans/merge_raise_merge_plan.txt expects the trace to record the
             -- exact I(r) (the expansion interior) for each edge in binding-edge mode.
             -- We should include the binder
             -- argument node even when it is reused across edges.

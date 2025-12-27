@@ -3,7 +3,7 @@
 Status
 ------
 Implemented in `src/MLF/Elab/Pipeline.hs` + `src/MLF/Elab/Types.hs` (plus tests),
-with known paper-alignment gaps tracked in `implementation_notes.md` / `merge_raise_merge_plan.txt`.
+with known paper-alignment gaps tracked in `implementation_notes.md` / `plans/merge_raise_merge_plan.txt`.
 
 Goal
 ----

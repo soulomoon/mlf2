@@ -50,5 +50,5 @@ Elaboration impact
 References
 ----------
 - `implementation_notes.md` (repo ↔ paper mapping)
-- `paper_general_raise_plan.txt` (Raise-specific status)
-- `merge_raise_merge_plan.txt` (end-to-end plan and remaining gaps)
+- `plans/paper_general_raise_plan.txt` (Raise-specific status)
+- `plans/merge_raise_merge_plan.txt` (end-to-end plan and remaining gaps)

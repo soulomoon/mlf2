@@ -461,7 +461,7 @@ data InstanceOp
     -- arbitrary interior Raise ops yet; it currently records Raise steps for
     -- binders during instantiation-edge solving via binding-edge harmonization.
     -- See
-    -- `merge_raise_merge_plan.txt` for alignment details.
+    -- `plans/merge_raise_merge_plan.txt` for alignment details.
     | OpRaise NodeId
     | OpWeaken NodeId
     | OpRaiseMerge NodeId NodeId
