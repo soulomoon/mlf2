@@ -1,75 +1,54 @@
-Scope tracking redesign (paper-faithful Raise-as-graph-transformation)
-=====================================================================
+Scope tracking redesign (paper-faithful binding edges + executable Raise)
+========================================================================
+
+Status
+------
+Implemented. The legacy var-level / level-tree scope model has been retired in
+favor of the paper’s binding-edge story (see `papers/xmlf.txt`).
 
 Goal
 ----
-Make scope tracking match `papers/xmlf.txt`’s operational story:
+Match `papers/xmlf.txt`’s operational account:
 
-  - the ω operations in Ω (notably `Raise(n)`) are **real graph transformations**
-    on the expansion graph χe, and
-  - scope is represented in the solved graph by binding edges, not reconstructed
-    later from union-find metadata.
+  - scope is represented directly in the expansion graph χe via binding edges
+    (flex/rigid), and
+  - `Raise(n)` is an *executable* graph transformation on χe, and is also
+    recorded in the witness language Ω for Φ(e).
 
-In repo terms: scope lives in the constraint graph (`TyVar.tnVarLevel` plus
-`GNode.gBinds`), and `Raise` is executed by mutating those structures.
+Current representation (repo)
+-----------------------------
+- Expansion graph: `Constraint` (`Constraint.cNodes` + edges).
+- Binding tree: `Constraint.cBindParents :: BindParents` (child → (parent, flag)).
+- Connectivity: a synthetic `TyRoot` is inserted (`MLF.Constraint.Root`) so LCAs
+  exist for well-formed graphs.
+- Bounds/eliminations: `Constraint.cVarBounds` / `Constraint.cEliminatedVars`
+  (`MLF.Constraint.VarStore`), keyed by canonical `NodeId`.
 
+Executable `Raise(n)`
+---------------------
+- One-step raise: `MLF.Binding.GraphOps.applyRaiseStep` rewrites a binding edge
+  `n ↦ parent` to `n ↦ parent(parent)` (preserving the edge flag).
+- LCA harmonization: `MLF.Binding.Adjustment.harmonizeBindParentsWithTrace`
+  repeatedly applies `applyRaiseStep` to raise nodes to a binding-tree LCA and
+  returns the exact per-step `OpRaise` trace.
 
-What changed vs the previous plan
----------------------------------
-The earlier “declared level + effective level (UF LCA)” plan intentionally
-diverged from the paper: it *recorded* `Raise` steps but did not *execute* the
-binding-edge raising as a χe transformation. That approach is now removed in
-favor of paper-faithful graph mutation.
+Where Raise is executed / recorded
+----------------------------------
+- Phase 2/5 (Normalize/Solve): before var-var unions, harmonize binding edges so
+  scope is independent of union-find representative choice.
+- Phase 4 (Presolution, χe): edge-local unification uses the same harmonization
+  and records `OpRaise` in the per-edge Ω witness (filtered to the edge interior
+  `I(r)` from `EdgeTrace.etInterior`).
 
+Elaboration impact
+------------------
+- Binder enumeration for generalization uses the binding tree
+  (`MLF.Binding.Tree.orderedBinders`) plus `MLF.Constraint.VarStore` bounds/eliminations.
+- Φ translation uses the normalized Ω witness language; `OpRaise` is translated
+  with paper-faithful placement (binder-raise first) in `MLF.Elab.Pipeline`.
 
-Core invariant (paper-faithful)
--------------------------------
-After every TyVar/TyVar union, both variables are raised to their lowest common
-ancestor (LCA) in the `GNode` tree:
-
-  - update `TyVar.tnVarLevel` to the LCA, and
-  - move that variable’s entry in `GNode.gBinds` to the LCA level.
-
-This is the repo’s concrete representation of the paper’s “raise binding edges”
-operation and keeps scope independent of UF representative choice.
-
-
-Where the transformation is executed
------------------------------------
-Rank adjustment / Raise-as-graph-mutation is centralized in
-`src/MLF/RankAdjustment.hs` and invoked from:
-
-  - `src/MLF/Normalize.hs` (Phase 2): before Var/Var unions.
-  - `src/MLF/Presolution.hs` (Phase 4): in `unifyAcyclicRawWithRaiseCounts`
-    (used by edge-local unification as well).
-  - `src/MLF/Solve.hs` (Phase 5): before Var/Var unions.
-
-
-Where Raise is recorded for Φ (per-edge Ω)
------------------------------------------
-Inside instantiation-edge solving (χe), whenever a Var/Var union requires raising
-by k parent-steps, presolution records k `OpRaise` steps for each *source binder*
-whose instantiation argument lies in that UF class (via `EdgeUnifyState`).
-
-This matches the intent of `papers/xmlf.txt` §3.4: Ω is both executable on χe and
-translatable by Φ (Figure 10).
-
-
-Elaboration/generalization implication
---------------------------------------
-Because scope ownership is represented directly in the graph, elaboration uses:
-
-  - `GNode.gBinds` at the relevant level, and
-  - `TyVar.tnVarLevel` (on canonical reps) for level membership.
-
-No “effective level reconstruction” pass is needed.
-
-
-Open questions (still)
-----------------------
-  - `papers/xmlf.txt` defines `Raise(n)` for arbitrary instantiable interior nodes,
-    not only binder-variables. Today we execute/record Raise only for TyVar-level
-    raising induced by unification (rank adjustment).
-  - `Φ(Raise(n))` placement (`m = min≺ {...}` in Figure 10) is still approximate
-    in elaboration; making it exact will require implementing the paper’s ≺-based
-    placement logic.
+References
+----------
+- `implementation_notes.md` (repo ↔ paper mapping)
+- `paper_general_raise_plan.txt` (Raise-specific status)
+- `merge_raise_merge_plan.txt` (end-to-end plan and remaining gaps)

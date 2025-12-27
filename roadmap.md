@@ -39,8 +39,10 @@ You need two sets of data structures: one for the inference graph (Graphic Types
     *   **Type Instantiation:** `a φ` (applying a term to an instantiation witness).
 
 ### 2. Inference Structures: Graphic Constraints (from 2008 paper)
-*   **Nodes:** Variable (`⊥`), Constructor (`→`), G-Nodes (generalization levels).
-*   **Edges:** Unification (`=`), Instantiation (`≤`), Binding (to G-nodes).
+*   **Nodes:** Variables and structure (`TyVar`, `TyArrow`, `TyBase`, `TyForall`, `TyExp`).
+    * `TyForall` is the repo’s representation of the paper’s binding node `g` (generalization site).
+*   **Edges:** Unification (`=`), Instantiation (`≤`), plus an explicit binding tree
+    `Constraint.cBindParents` (child → (parent, flex/rigid)).
 *   **Expansions:** The mechanism to delay instantiation decisions.
 
 ⸻
@@ -65,8 +67,8 @@ These phases implement the constraint solver. While `xmlf.txt` assumes this exis
     *   Topologically sort instantiation edges.
     *   For each edge, determine the **minimal expansion** (either `Inst` or `∀` introduction) required to satisfy the constraint.
     *   **Output (in this repo):**
-        * `MLF.Presolution.PresolutionResult.prEdgeExpansions` (per-edge expansion decisions), and
-        * `MLF.Presolution.PresolutionResult.prEdgeWitnesses` (per-edge instance-operation witnesses; the input to Φ).
+        * `MLF.Constraint.Presolution.PresolutionResult.prEdgeExpansions` (per-edge expansion decisions), and
+        * `MLF.Constraint.Presolution.PresolutionResult.prEdgeWitnesses` (per-edge instance-operation witnesses; the input to Φ).
 4.  **Unify:** Solve all unification edges to get the final graphic type structure.
 
 **Result:** A **Solved Form** (Presolution) `χ_p` where all instantiation edges are discharged or solved.
@@ -87,7 +89,7 @@ Re-traverse the original AST `a` and transform it into an xMLF term `a'` using t
     *   Result shape: `(a1 [φ]) a2` (or just `a1 a2` if `φ` is identity).
 
 2.  **Let-bindings `let x = a1 in a2`:**
-    *   Compute a polymorphic scheme for the binder via `generalizeAt` using the solved graph’s G-node information and instance bounds.
+    *   Compute a polymorphic scheme for the binder via `generalizeAt` using the solved graph’s binding tree and instance bounds.
     *   Wrap the RHS in explicit type abstractions `Λ(α ≥ τ)` for the scheme binders.
     *   Result shape: `let x : σ = (Λ... a1') in a2'`.
 
@@ -96,7 +98,7 @@ Re-traverse the original AST `a` and transform it into an xMLF term `a'` using t
     *   Result: `λ(x : τ) a'`.
 
 **Key Deliverable (in this repo):**
-`MLF.Elab.elaborate` takes the solved graph plus `prEdgeWitnesses` and produces `MLF.Elab.ElabTerm`. `MLF.Elab.runPipelineElab` runs Phases 1–6 end-to-end.
+`MLF.Elab.Pipeline.elaborate` takes the solved graph plus `prEdgeWitnesses` and produces `MLF.Elab.Pipeline.ElabTerm`. `MLF.Elab.Pipeline.runPipelineElab` runs Phases 1–6 end-to-end.
 
 ⸻
 
@@ -115,7 +117,7 @@ Now that we have an xMLF term, we must treat it as a runnable program.
     *   Rules include: `(β)`, `(let)`, and significantly, the **instantiation reductions** (`ι-rules`) like `(Λ(α ≥ τ) a) N ⟶ a{!α ← 1}{α ← τ}`.
     *   These rules allow executing the code and simplifying the type instantiations.
 
-**Status in this repo:** Phase 7 is not implemented yet. We do have a key building block: `MLF.Elab.applyInstantiation` (xmlf Fig. 3) to apply/check instantiations at the type level, which is used by tests to validate Φ/Σ.
+**Status in this repo:** Phase 7 is not implemented yet. We do have a key building block: `MLF.Elab.Pipeline.applyInstantiation` (xmlf Fig. 3) to apply/check instantiations at the type level, which is used by tests to validate Φ/Σ.
 
 ⸻
 
@@ -133,12 +135,12 @@ Now that we have an xMLF term, we must treat it as a runnable program.
 
 This repo’s module-level decomposition:
 
-1. **`MLF.Syntax`**: Source `Expr` (+ `SrcType`/`SrcScheme` for annotations).
-2. **`MLF.Types`**: Graphic constraints (`Constraint`, `TyNode`, `GNode`, edges) + per-edge witness types (`EdgeWitness`, `InstanceOp`).
-3. **`MLF.ConstraintGen`**: Phase 1 constraint generation (produces annotated AST with `NodeId`/`EdgeId`).
-4. **`MLF.Normalize`**: Phase 2 local rewrites (grafting/merging).
-5. **`MLF.Acyclicity`**: Phase 3 dependency ordering.
-6. **`MLF.Presolution`**: Phase 4 minimal expansions + per-edge witnesses.
-7. **`MLF.Solve`**: Phase 5 unification solve.
-8. **`MLF.Elab`**: Phase 6 elaboration to xMLF (`ElabTerm`, `ElabType`, `Instantiation`, Φ/Σ).
+1. **`MLF.Frontend.Syntax`**: Source `Expr` (+ `SrcType`/`SrcScheme` for annotations).
+2. **`MLF.Constraint.Types`**: Graphic constraints (`Constraint`, `TyNode`, binding edges + bound/elimination stores) + per-edge witness types (`EdgeWitness`, `InstanceOp`).
+3. **`MLF.Frontend.ConstraintGen`**: Phase 1 constraint generation (produces annotated AST with `NodeId`/`EdgeId`).
+4. **`MLF.Constraint.Normalize`**: Phase 2 local rewrites (grafting/merging).
+5. **`MLF.Constraint.Acyclicity`**: Phase 3 dependency ordering.
+6. **`MLF.Constraint.Presolution`**: Phase 4 minimal expansions + per-edge witnesses.
+7. **`MLF.Constraint.Solve`**: Phase 5 unification solve.
+8. **`MLF.Elab.Pipeline`** (+ `MLF.Elab.Types`): Phase 6 elaboration to xMLF (`ElabTerm`, `ElabType`, `Instantiation`, Φ/Σ).
 9. **(Future)**: Phase 7 xMLF typechecker + reduction semantics (xmlf Fig. 4/5).

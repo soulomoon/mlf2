@@ -53,34 +53,59 @@ extra-doc-files:    CHANGELOG.md
 common warnings
     ghc-options: -Wall
 
-library
+library mlf2-internal
     -- Import common warning flags.
     import:           warnings
 
-    -- Modules exported by the library.
-    exposed-modules:  MyLib,
-                      MLF.Types,
-                      MLF.Syntax,
-                      MLF.ConstraintGen,
-                      MLF.Normalize,
-                      MLF.Acyclicity,
-                      MLF.Presolution,
-                      MLF.Solve,
-                      MLF.Elab,
-                      MLF.Binding,
-                      MLF.BindingAdjustment,
-                      MLF.GraphOps,
-                      MLF.Order,
+    visibility:       private
 
-    -- Modules included in this library but not exported.
-    other-modules:    MLF.Desugar,
-                      MLF.GNodeOps,
-                      MLF.OmegaExec,
-                      MLF.VarStore,
-                      MLF.UnionFind
+    -- Modules exported by the internal library (for tests / internal tooling).
+    exposed-modules:  MLF.Constraint.Types,
+                      MLF.Frontend.Syntax,
+                      MLF.Frontend.ConstraintGen,
+                      MLF.Constraint.Normalize,
+                      MLF.Constraint.Acyclicity,
+                      MLF.Constraint.Presolution,
+                      MLF.Constraint.Solve,
+                      MLF.Elab.Pipeline,
+                      MLF.Binding.Tree,
+                      MLF.Binding.Adjustment,
+                      MLF.Binding.GraphOps,
+                      MLF.Util.Order,
+                      MLF.Frontend.Desugar,
+                      MLF.Constraint.Root,
+                      MLF.Witness.OmegaExec,
+                      MLF.Constraint.VarStore,
+                      MLF.Util.UnionFind
 
-    -- LANGUAGE extensions used by modules in this package.
-    -- other-extensions:
+    other-modules:    MLF.Constraint.Presolution.Base,
+                      MLF.Constraint.Presolution.Core,
+                      MLF.Constraint.Presolution.Copy,
+                      MLF.Constraint.Presolution.Driver,
+                      MLF.Constraint.Presolution.EdgeUnify,
+                      MLF.Constraint.Presolution.Expansion,
+                      MLF.Constraint.Presolution.ForallIntro,
+                      MLF.Constraint.Presolution.Ops,
+                      MLF.Constraint.Presolution.Unify,
+                      MLF.Constraint.Presolution.Witness,
+                      MLF.Constraint.Canonicalize,
+                      MLF.Constraint.Traversal,
+                      MLF.Constraint.Unify.Decompose,
+                      MLF.Util.OrderKey,
+                      MLF.Elab.Inst,
+                      MLF.Elab.Elaborate,
+                      MLF.Elab.Generalize,
+                      MLF.Elab.Phi,
+                      MLF.Elab.Reify,
+                      MLF.Elab.Run,
+                      MLF.Elab.Sigma,
+                      MLF.Elab.Util,
+                      MLF.Frontend.ConstraintGen.Types,
+                      MLF.Frontend.ConstraintGen.State,
+                      MLF.Frontend.ConstraintGen.Scope,
+                      MLF.Frontend.ConstraintGen.Emit,
+                      MLF.Frontend.ConstraintGen.Translate,
+                      MLF.Elab.Types
 
     -- Other library packages from which modules are imported.
     build-depends:    base ^>=4.21.0.0,
@@ -89,6 +114,27 @@ library
 
     -- Directories containing source files.
     hs-source-dirs:   src
+
+    -- Base language which the package is written in.
+    default-language: Haskell2010
+
+library
+    -- Import common warning flags.
+    import:           warnings
+
+    -- Modules exported by the public library.
+    exposed-modules:  MyLib,
+                      MLF.API,
+                      MLF.Pipeline
+
+    -- Other library packages from which modules are imported.
+    build-depends:    base ^>=4.21.0.0,
+                      containers,
+                      mtl,
+                      mlf2:mlf2-internal
+
+    -- Directories containing source files.
+    hs-source-dirs:   src-public
 
     -- Base language which the package is written in.
     default-language: Haskell2010
@@ -134,6 +180,7 @@ test-suite mlf2-test
                       ElaborationSpec,
                       BindingSpec,
                       GraphOpsSpec,
+                      SpecUtil,
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
@@ -152,5 +199,6 @@ test-suite mlf2-test
         base ^>=4.21.0.0,
         containers,
         mlf2,
+        mlf2:mlf2-internal,
         hspec >=2.11 && <2.12,
         QuickCheck >=2.14 && <2.18

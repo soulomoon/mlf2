@@ -7,13 +7,14 @@ import qualified Data.IntSet as IntSet
 import Test.Hspec
 import Test.QuickCheck
 
-import MLF.Types
-import MLF.Binding
-import qualified MLF.BindingAdjustment as BindingAdjustment
-import qualified MLF.GraphOps as GraphOps
-import qualified MLF.Order as Order
-import MLF.Syntax (Expr(..), Lit(..), SrcType(..), SrcScheme(..))
-import MLF.ConstraintGen (generateConstraints, ConstraintResult(..))
+import MLF.Constraint.Types
+import MLF.Binding.Tree
+import qualified MLF.Binding.Adjustment as BindingAdjustment
+import qualified MLF.Binding.GraphOps as GraphOps
+import qualified MLF.Util.Order as Order
+import MLF.Frontend.Syntax (Expr(..), Lit(..), SrcType(..), SrcScheme(..))
+import MLF.Frontend.ConstraintGen (generateConstraints, ConstraintResult(..))
+import SpecUtil (emptyConstraint)
 
 -- | Generate a valid binding tree with n nodes.
 -- The tree is structured as a chain of TyForall nodes: node 0 -> node 1 -> ... -> node (n-1)
@@ -23,16 +24,13 @@ genValidBindingTree :: Int -> Gen Constraint
 genValidBindingTree n
     | n <= 0 = return emptyConstraint
     | n == 1 = return emptyConstraint
-        { cGForest = [GNodeId 0]
-        , cGNodes = IntMap.singleton 0 (GNode (GNodeId 0) Nothing [] [])
-        , cNodes = IntMap.singleton 0 (TyVar (NodeId 0) (GNodeId 0))
-        , cBindParents = IntMap.empty
+        { cNodes = IntMap.singleton 0 (TyVar (NodeId 0))
         }
     | otherwise = do
         -- Generate a chain: forall(0) -> forall(1) -> ... -> forall(n-2) -> var(n-1)
         let nodes = IntMap.fromList $
-                [(i, TyForall (NodeId i) (GNodeId 0) (GNodeId 0) (NodeId (i+1))) | i <- [0..n-2]]
-                ++ [(n-1, TyVar (NodeId (n-1)) (GNodeId 0))]
+                [(i, TyForall (NodeId i) (NodeId (i + 1))) | i <- [0..n-2]]
+                ++ [(n-1, TyVar (NodeId (n-1)))]
         
         -- Generate binding parents: node i has parent i-1 (node 0 is root)
         -- This respects the "parent is upper than child" invariant because
@@ -42,9 +40,7 @@ genValidBindingTree n
                 [(i, (NodeId (i-1), flag)) | (i, flag) <- zip [1..n-1] flags]
         
         return Constraint
-            { cGForest = [GNodeId 0]
-            , cGNodes = IntMap.singleton 0 (GNode (GNodeId 0) Nothing [] [])
-            , cNodes = nodes
+            { cNodes = nodes
             , cInstEdges = []
             , cUnifyEdges = []
             , cBindParents = bindParents
@@ -60,17 +56,14 @@ genTreeBindingTree :: Int -> Gen Constraint
 genTreeBindingTree n
     | n <= 0 = return emptyConstraint
     | n == 1 = return emptyConstraint
-        { cGForest = [GNodeId 0]
-        , cGNodes = IntMap.singleton 0 (GNode (GNodeId 0) Nothing [] [])
-        , cNodes = IntMap.singleton 0 (TyVar (NodeId 0) (GNodeId 0))
-        , cBindParents = IntMap.empty
+        { cNodes = IntMap.singleton 0 (TyVar (NodeId 0))
         }
     | otherwise = do
         -- Build a chain structure: forall(0) -> forall(1) -> ... -> var(n-1)
         -- Each node i > 0 has structural parent i-1 (via body pointer).
         let nodes = IntMap.fromList $
-                [(i, TyForall (NodeId i) (GNodeId 0) (GNodeId 0) (NodeId (i+1))) | i <- [0..n-2]]
-                ++ [(n-1, TyVar (NodeId (n-1)) (GNodeId 0))]
+                [(i, TyForall (NodeId i) (NodeId (i + 1))) | i <- [0..n-2]]
+                ++ [(n-1, TyVar (NodeId (n-1)))]
         
         -- Generate binding parents: each node i > 0 can have any ancestor [0..i-1] as binding parent.
         -- This creates a tree-shaped binding structure while respecting the "parent is upper" invariant.
@@ -82,23 +75,9 @@ genTreeBindingTree n
         
         return $
             emptyConstraint
-                { cGForest = [GNodeId 0]
-                , cGNodes = IntMap.singleton 0 (GNode (GNodeId 0) Nothing [] [])
-                , cNodes = nodes
+                { cNodes = nodes
                 , cBindParents = bindParents
                 }
-
-emptyConstraint :: Constraint
-emptyConstraint = Constraint
-    { cGForest = []
-    , cGNodes = IntMap.empty
-    , cNodes = IntMap.empty
-    , cInstEdges = []
-    , cUnifyEdges = []
-    , cBindParents = IntMap.empty
-    , cVarBounds = IntMap.empty
-    , cEliminatedVars = IntSet.empty
-    }
 
 mkOrderedBinderConstraint :: Int -> (Constraint, NodeId, NodeId)
 mkOrderedBinderConstraint n =
@@ -109,8 +88,8 @@ mkOrderedBinderConstraint n =
         binder = NodeId 0
         nodes =
             IntMap.fromList $
-                [ (0, TyForall (NodeId 0) (GNodeId 0) (GNodeId 0) bodyRoot) ]
-                ++ [ (i, TyVar (NodeId i) (GNodeId 0)) | i <- varIds ]
+                [ (0, TyForall (NodeId 0) bodyRoot) ]
+                ++ [ (i, TyVar (NodeId i)) | i <- varIds ]
                 ++ arrowNodes
         bindParents =
             IntMap.fromList
@@ -130,19 +109,19 @@ spec = do
     bindingAdjustmentSpec
 
 bindingTreeSpec :: Spec
-bindingTreeSpec = describe "MLF.Binding" $ do
+bindingTreeSpec = describe "MLF.Binding.Tree" $ do
     describe "Basic operations" $ do
         it "lookupBindParent returns Nothing for root nodes" $ do
             let c = emptyConstraint
-                    { cNodes = IntMap.singleton 0 (TyVar (NodeId 0) (GNodeId 0))
+                    { cNodes = IntMap.singleton 0 (TyVar (NodeId 0))
                     }
             lookupBindParent c (NodeId 0) `shouldBe` Nothing
 
         it "lookupBindParent returns the parent for non-root nodes" $ do
             let c = emptyConstraint
                     { cNodes = IntMap.fromList
-                        [ (0, TyVar (NodeId 0) (GNodeId 0))
-                        , (1, TyVar (NodeId 1) (GNodeId 0))
+                        [ (0, TyVar (NodeId 0))
+                        , (1, TyVar (NodeId 1))
                         ]
                     , cBindParents = IntMap.singleton 1 (NodeId 0, BindFlex)
                     }
@@ -151,8 +130,8 @@ bindingTreeSpec = describe "MLF.Binding" $ do
         it "setBindParent adds a binding parent" $ do
             let c0 = emptyConstraint
                     { cNodes = IntMap.fromList
-                        [ (0, TyVar (NodeId 0) (GNodeId 0))
-                        , (1, TyVar (NodeId 1) (GNodeId 0))
+                        [ (0, TyVar (NodeId 0))
+                        , (1, TyVar (NodeId 1))
                         ]
                     }
                 c1 = setBindParent (NodeId 1) (NodeId 0, BindRigid) c0
@@ -161,8 +140,8 @@ bindingTreeSpec = describe "MLF.Binding" $ do
         it "removeBindParent removes a binding parent" $ do
             let c0 = emptyConstraint
                     { cNodes = IntMap.fromList
-                        [ (0, TyVar (NodeId 0) (GNodeId 0))
-                        , (1, TyVar (NodeId 1) (GNodeId 0))
+                        [ (0, TyVar (NodeId 0))
+                        , (1, TyVar (NodeId 1))
                         ]
                     , cBindParents = IntMap.singleton 1 (NodeId 0, BindFlex)
                     }
@@ -173,9 +152,9 @@ bindingTreeSpec = describe "MLF.Binding" $ do
         it "bindingRoots returns all nodes without parents" $ do
             let c = emptyConstraint
                     { cNodes = IntMap.fromList
-                        [ (0, TyVar (NodeId 0) (GNodeId 0))
-                        , (1, TyVar (NodeId 1) (GNodeId 0))
-                        , (2, TyVar (NodeId 2) (GNodeId 0))
+                        [ (0, TyVar (NodeId 0))
+                        , (1, TyVar (NodeId 1))
+                        , (2, TyVar (NodeId 2))
                         ]
                     , cBindParents = IntMap.singleton 1 (NodeId 0, BindFlex)
                     }
@@ -188,8 +167,8 @@ bindingTreeSpec = describe "MLF.Binding" $ do
         it "isBindingRoot correctly identifies roots" $ do
             let c = emptyConstraint
                     { cNodes = IntMap.fromList
-                        [ (0, TyVar (NodeId 0) (GNodeId 0))
-                        , (1, TyVar (NodeId 1) (GNodeId 0))
+                        [ (0, TyVar (NodeId 0))
+                        , (1, TyVar (NodeId 1))
                         ]
                     , cBindParents = IntMap.singleton 1 (NodeId 0, BindFlex)
                     }
@@ -202,9 +181,9 @@ bindingTreeSpec = describe "MLF.Binding" $ do
                     emptyConstraint
                         { cNodes =
                             IntMap.fromList
-                                [ (0, TyForall (NodeId 0) (GNodeId 0) (GNodeId 0) (NodeId 4))
-                                , (1, TyVar (NodeId 1) (GNodeId 0))
-                                , (2, TyVar (NodeId 2) (GNodeId 0))
+                                [ (0, TyForall (NodeId 0) (NodeId 4))
+                                , (1, TyVar (NodeId 1))
+                                , (2, TyVar (NodeId 2))
                                 , (3, TyBase (NodeId 3) (BaseTy "Int"))
                                 , (4, TyArrow (NodeId 4) (NodeId 1) (NodeId 5))
                                 , (5, TyArrow (NodeId 5) (NodeId 2) (NodeId 3))
@@ -223,10 +202,10 @@ bindingTreeSpec = describe "MLF.Binding" $ do
                     emptyConstraint
                         { cNodes =
                             IntMap.fromList
-                                [ (0, TyForall (NodeId 0) (GNodeId 0) (GNodeId 0) (NodeId 4))
-                                , (1, TyVar (NodeId 1) (GNodeId 0))
-                                , (2, TyVar (NodeId 2) (GNodeId 0))
-                                , (3, TyVar (NodeId 3) (GNodeId 0)) -- unreachable from body
+                                [ (0, TyForall (NodeId 0) (NodeId 4))
+                                , (1, TyVar (NodeId 1))
+                                , (2, TyVar (NodeId 2))
+                                , (3, TyVar (NodeId 3)) -- unreachable from body
                                 , (4, TyArrow (NodeId 4) (NodeId 1) (NodeId 2))
                                 ]
                         , cBindParents =
@@ -243,9 +222,9 @@ bindingTreeSpec = describe "MLF.Binding" $ do
                     emptyConstraint
                         { cNodes =
                             IntMap.fromList
-                                [ (0, TyForall (NodeId 0) (GNodeId 0) (GNodeId 0) (NodeId 3))
-                                , (1, TyVar (NodeId 1) (GNodeId 0))
-                                , (2, TyVar (NodeId 2) (GNodeId 0))
+                                [ (0, TyForall (NodeId 0) (NodeId 3))
+                                , (1, TyVar (NodeId 1))
+                                , (2, TyVar (NodeId 2))
                                 , (3, TyArrow (NodeId 3) (NodeId 1) (NodeId 2))
                                 ]
                         , cBindParents =
@@ -262,9 +241,9 @@ bindingTreeSpec = describe "MLF.Binding" $ do
         it "bindingPathToRoot returns path from node to root" $ do
             let c = emptyConstraint
                     { cNodes = IntMap.fromList
-                        [ (0, TyVar (NodeId 0) (GNodeId 0))
-                        , (1, TyVar (NodeId 1) (GNodeId 0))
-                        , (2, TyVar (NodeId 2) (GNodeId 0))
+                        [ (0, TyVar (NodeId 0))
+                        , (1, TyVar (NodeId 1))
+                        , (2, TyVar (NodeId 2))
                         ]
                     , cBindParents = IntMap.fromList
                         [ (1, (NodeId 0, BindFlex))
@@ -278,8 +257,8 @@ bindingTreeSpec = describe "MLF.Binding" $ do
         it "bindingPathToRoot detects cycles" $ do
             let c = emptyConstraint
                     { cNodes = IntMap.fromList
-                        [ (0, TyVar (NodeId 0) (GNodeId 0))
-                        , (1, TyVar (NodeId 1) (GNodeId 0))
+                        [ (0, TyVar (NodeId 0))
+                        , (1, TyVar (NodeId 1))
                         ]
                     , cBindParents = IntMap.fromList
                         [ (0, (NodeId 1, BindFlex))
@@ -299,10 +278,10 @@ bindingTreeSpec = describe "MLF.Binding" $ do
             --   3
             let c = emptyConstraint
                     { cNodes = IntMap.fromList
-                        [ (0, TyVar (NodeId 0) (GNodeId 0))
-                        , (1, TyVar (NodeId 1) (GNodeId 0))
-                        , (2, TyVar (NodeId 2) (GNodeId 0))
-                        , (3, TyVar (NodeId 3) (GNodeId 0))
+                        [ (0, TyVar (NodeId 0))
+                        , (1, TyVar (NodeId 1))
+                        , (2, TyVar (NodeId 2))
+                        , (3, TyVar (NodeId 3))
                         ]
                     , cBindParents = IntMap.fromList
                         [ (1, (NodeId 0, BindFlex))
@@ -326,10 +305,10 @@ bindingTreeSpec = describe "MLF.Binding" $ do
                     emptyConstraint
                         { cNodes =
                             IntMap.fromList
-                                [ (0, TyForall (NodeId 0) (GNodeId 0) (GNodeId 0) (NodeId 1))
-                                , (1, TyForall (NodeId 1) (GNodeId 0) (GNodeId 0) (NodeId 2))
-                                , (2, TyForall (NodeId 2) (GNodeId 0) (GNodeId 0) (NodeId 3))
-                                , (3, TyVar (NodeId 3) (GNodeId 0))
+                                [ (0, TyForall (NodeId 0) (NodeId 1))
+                                , (1, TyForall (NodeId 1) (NodeId 2))
+                                , (2, TyForall (NodeId 2) (NodeId 3))
+                                , (3, TyVar (NodeId 3))
                                 ]
                         , cBindParents =
                             IntMap.fromList
@@ -359,10 +338,10 @@ bindingTreeSpec = describe "MLF.Binding" $ do
             --   3
             let c = emptyConstraint
                     { cNodes = IntMap.fromList
-                        [ (0, TyVar (NodeId 0) (GNodeId 0))
-                        , (1, TyVar (NodeId 1) (GNodeId 0))
-                        , (2, TyVar (NodeId 2) (GNodeId 0))
-                        , (3, TyVar (NodeId 3) (GNodeId 0))
+                        [ (0, TyVar (NodeId 0))
+                        , (1, TyVar (NodeId 1))
+                        , (2, TyVar (NodeId 2))
+                        , (3, TyVar (NodeId 3))
                         ]
                     , cBindParents = IntMap.fromList
                         [ (1, (NodeId 0, BindFlex))
@@ -397,9 +376,9 @@ bindingTreeSpec = describe "MLF.Binding" $ do
                     emptyConstraint
                         { cNodes =
                             IntMap.fromList
-                                [ (0, TyForall (NodeId 0) (GNodeId 0) (GNodeId 0) (NodeId 1))
-                                , (1, TyForall (NodeId 1) (GNodeId 0) (GNodeId 0) (NodeId 2))
-                                , (2, TyVar (NodeId 2) (GNodeId 0))
+                                [ (0, TyForall (NodeId 0) (NodeId 1))
+                                , (1, TyForall (NodeId 1) (NodeId 2))
+                                , (2, TyVar (NodeId 2))
                                 ]
                         , cBindParents =
                             IntMap.fromList
@@ -422,8 +401,8 @@ bindingTreeSpec = describe "MLF.Binding" $ do
                     emptyConstraint
                         { cNodes =
                             IntMap.fromList
-                                [ (0, TyVar (NodeId 0) (GNodeId 0))
-                                , (1, TyVar (NodeId 1) (GNodeId 0))
+                                [ (0, TyVar (NodeId 0))
+                                , (1, TyVar (NodeId 1))
                                 ]
                         , cBindParents = IntMap.singleton 1 (NodeId 0, BindFlex)
                         }
@@ -441,7 +420,7 @@ bindingTreeSpec = describe "MLF.Binding" $ do
 
         it "checkBindingTree succeeds for valid single-node constraint" $ do
             let c = emptyConstraint
-                    { cNodes = IntMap.singleton 0 (TyVar (NodeId 0) (GNodeId 0))
+                    { cNodes = IntMap.singleton 0 (TyVar (NodeId 0))
                     }
             checkBindingTree c `shouldBe` Right ()
 
@@ -450,9 +429,9 @@ bindingTreeSpec = describe "MLF.Binding" $ do
             -- Binding tree: 2 -> 1 -> 0 (each child bound to its structural parent)
             let c = emptyConstraint
                     { cNodes = IntMap.fromList
-                        [ (0, TyForall (NodeId 0) (GNodeId 0) (GNodeId 0) (NodeId 1))
-                        , (1, TyForall (NodeId 1) (GNodeId 0) (GNodeId 0) (NodeId 2))
-                        , (2, TyVar (NodeId 2) (GNodeId 0))
+                        [ (0, TyForall (NodeId 0) (NodeId 1))
+                        , (1, TyForall (NodeId 1) (NodeId 2))
+                        , (2, TyVar (NodeId 2))
                         ]
                     , cBindParents = IntMap.fromList
                         [ (1, (NodeId 0, BindFlex))  -- 1's parent is 0 (0 can reach 1)
@@ -464,8 +443,8 @@ bindingTreeSpec = describe "MLF.Binding" $ do
         it "checkBindingTree detects cycles" $ do
             let c = emptyConstraint
                     { cNodes = IntMap.fromList
-                        [ (0, TyVar (NodeId 0) (GNodeId 0))
-                        , (1, TyVar (NodeId 1) (GNodeId 0))
+                        [ (0, TyVar (NodeId 0))
+                        , (1, TyVar (NodeId 1))
                         ]
                     , cBindParents = IntMap.fromList
                         [ (0, (NodeId 1, BindFlex))
@@ -478,7 +457,7 @@ bindingTreeSpec = describe "MLF.Binding" $ do
 
         it "checkBindingTree detects missing parent nodes" $ do
             let c = emptyConstraint
-                    { cNodes = IntMap.singleton 1 (TyVar (NodeId 1) (GNodeId 0))
+                    { cNodes = IntMap.singleton 1 (TyVar (NodeId 1))
                     , cBindParents = IntMap.singleton 1 (NodeId 99, BindFlex)  -- 99 doesn't exist
                     }
             case checkBindingTree c of
@@ -492,8 +471,8 @@ bindingTreeSpec = describe "MLF.Binding" $ do
             let c = emptyConstraint
                     { cNodes = IntMap.fromList
                         [ (0, TyArrow (NodeId 0) (NodeId 1) (NodeId 2))
-                        , (1, TyVar (NodeId 1) (GNodeId 0))
-                        , (2, TyVar (NodeId 2) (GNodeId 0))
+                        , (1, TyVar (NodeId 1))
+                        , (2, TyVar (NodeId 2))
                         ]
                     -- Node 1's parent is node 2, but node 2 cannot reach node 1 via structure edges
                     , cBindParents = IntMap.singleton 1 (NodeId 2, BindFlex)
@@ -508,8 +487,8 @@ bindingTreeSpec = describe "MLF.Binding" $ do
             let c = emptyConstraint
                     { cNodes = IntMap.fromList
                         [ (0, TyArrow (NodeId 0) (NodeId 1) (NodeId 2))
-                        , (1, TyVar (NodeId 1) (GNodeId 0))
-                        , (2, TyVar (NodeId 2) (GNodeId 0))
+                        , (1, TyVar (NodeId 1))
+                        , (2, TyVar (NodeId 2))
                         ]
                     -- Node 1's parent is node 0, and node 0 CAN reach node 1 via structure edges
                     , cBindParents = IntMap.fromList
@@ -527,8 +506,8 @@ bindingTreeSpec = describe "MLF.Binding" $ do
             let c = emptyConstraint
                     { cNodes = IntMap.fromList
                         [ (0, TyArrow (NodeId 0) (NodeId 1) (NodeId 2))
-                        , (1, TyVar (NodeId 1) (GNodeId 0))
-                        , (2, TyVar (NodeId 2) (GNodeId 0))
+                        , (1, TyVar (NodeId 1))
+                        , (2, TyVar (NodeId 2))
                         ]
                     -- Only node 1 has a binding parent; node 2 is missing
                     , cBindParents = IntMap.fromList
@@ -544,8 +523,8 @@ bindingTreeSpec = describe "MLF.Binding" $ do
             let c = emptyConstraint
                     { cNodes = IntMap.fromList
                         [ (0, TyArrow (NodeId 0) (NodeId 1) (NodeId 2))
-                        , (1, TyVar (NodeId 1) (GNodeId 0))
-                        , (2, TyVar (NodeId 2) (GNodeId 0))
+                        , (1, TyVar (NodeId 1))
+                        , (2, TyVar (NodeId 2))
                         ]
                     , cBindParents = IntMap.empty
                     }
@@ -556,7 +535,7 @@ bindingTreeSpec = describe "MLF.Binding" $ do
     describe "isUpper predicate" $ do
         it "isUpper returns True for reflexive case (node is upper than itself)" $ do
             let c = emptyConstraint
-                    { cNodes = IntMap.singleton 0 (TyVar (NodeId 0) (GNodeId 0))
+                    { cNodes = IntMap.singleton 0 (TyVar (NodeId 0))
                     }
             isUpper c (NodeId 0) (NodeId 0) `shouldBe` True
 
@@ -565,8 +544,8 @@ bindingTreeSpec = describe "MLF.Binding" $ do
             let c = emptyConstraint
                     { cNodes = IntMap.fromList
                         [ (0, TyArrow (NodeId 0) (NodeId 1) (NodeId 2))
-                        , (1, TyVar (NodeId 1) (GNodeId 0))
-                        , (2, TyVar (NodeId 2) (GNodeId 0))
+                        , (1, TyVar (NodeId 1))
+                        , (2, TyVar (NodeId 2))
                         ]
                     }
             isUpper c (NodeId 0) (NodeId 1) `shouldBe` True
@@ -578,8 +557,8 @@ bindingTreeSpec = describe "MLF.Binding" $ do
             let c = emptyConstraint
                     { cNodes = IntMap.fromList
                         [ (0, TyArrow (NodeId 0) (NodeId 1) (NodeId 2))
-                        , (1, TyVar (NodeId 1) (GNodeId 0))
-                        , (2, TyVar (NodeId 2) (GNodeId 0))
+                        , (1, TyVar (NodeId 1))
+                        , (2, TyVar (NodeId 2))
                         ]
                     }
             isUpper c (NodeId 1) (NodeId 2) `shouldBe` False
@@ -589,10 +568,10 @@ bindingTreeSpec = describe "MLF.Binding" $ do
             -- Structure: node 0 is a forall with body=1, node 1 is an arrow with dom=2, cod=3
             let c = emptyConstraint
                     { cNodes = IntMap.fromList
-                        [ (0, TyForall (NodeId 0) (GNodeId 0) (GNodeId 0) (NodeId 1))
+                        [ (0, TyForall (NodeId 0) (NodeId 1))
                         , (1, TyArrow (NodeId 1) (NodeId 2) (NodeId 3))
-                        , (2, TyVar (NodeId 2) (GNodeId 0))
-                        , (3, TyVar (NodeId 3) (GNodeId 0))
+                        , (2, TyVar (NodeId 2))
+                        , (3, TyVar (NodeId 3))
                         ]
                     }
             -- Node 0 can reach node 2 transitively: 0 -> 1 -> 2
@@ -609,9 +588,9 @@ bindingTreeSpec = describe "MLF.Binding" $ do
                     { cNodes = IntMap.fromList
                         [ (0, TyArrow (NodeId 0) (NodeId 2) (NodeId 3))
                         , (1, TyArrow (NodeId 1) (NodeId 2) (NodeId 4))
-                        , (2, TyVar (NodeId 2) (GNodeId 0))
-                        , (3, TyVar (NodeId 3) (GNodeId 0))
-                        , (4, TyVar (NodeId 4) (GNodeId 0))
+                        , (2, TyVar (NodeId 2))
+                        , (3, TyVar (NodeId 3))
+                        , (4, TyVar (NodeId 4))
                         ]
                     }
             -- Both 0 and 1 can reach node 2
@@ -834,43 +813,39 @@ isJust :: Maybe a -> Bool
 isJust (Just _) = True
 isJust Nothing = False
 
--- | Generate a constraint with GNodes for testing harmonization
-genConstraintWithGNodes :: Int -> Gen Constraint
-genConstraintWithGNodes n
+-- | Generate a constraint for testing harmonization.
+genConstraintWithBinderChain :: Int -> Gen Constraint
+genConstraintWithBinderChain n
     | n <= 0 = return emptyConstraint
-    | otherwise = do
-        -- Create a chain of GNodes: g0 <- g1 <- g2 <- ...
-        let gnodes = IntMap.fromList
-                [ (i, GNode (GNodeId i) (if i == 0 then Nothing else Just (GNodeId (i-1))) [] [])
-                | i <- [0..n-1]
-                ]
-        -- Create a chain of TyForall nodes at different levels, with the last being a TyVar.
-        -- This ensures the "parent is upper than child" invariant is satisfied.
-        let nodes = IntMap.fromList $
-                [(i, TyForall (NodeId i) (GNodeId (i `mod` n)) (GNodeId (i `mod` n)) (NodeId (i+1))) | i <- [0..n-2]]
-                ++ [(n-1, TyVar (NodeId (n-1)) (GNodeId ((n-1) `mod` n)))]
-        -- Create binding parents: node i has parent i-1 (node 0 is root)
-        -- This respects the "parent is upper" invariant because node i-1 can reach node i via body pointer.
-        let bindParents = IntMap.fromList
-                [(i, (NodeId (i-1), BindFlex)) | i <- [1..n-1]]
+    | n == 1 =
         return $
             emptyConstraint
-                { cGForest = [GNodeId 0]
-                , cGNodes = gnodes
-                , cNodes = nodes
+                { cNodes = IntMap.singleton 0 (TyVar (NodeId 0))
+                }
+    | otherwise =
+        let nodes =
+                IntMap.fromList $
+                    [(i, TyForall (NodeId i) (NodeId (i + 1))) | i <- [0..n-2]]
+                        ++ [(n-1, TyVar (NodeId (n-1)))]
+            bindParents =
+                IntMap.fromList
+                    [(i, (NodeId (i - 1), BindFlex)) | i <- [1..n-1]]
+        in return $
+            emptyConstraint
+                { cNodes = nodes
                 , cBindParents = bindParents
                 }
 
 
--- | Tests for MLF.BindingAdjustment
+-- | Tests for MLF.Binding.Adjustment
 bindingAdjustmentSpec :: Spec
-bindingAdjustmentSpec = describe "MLF.BindingAdjustment" $ do
+bindingAdjustmentSpec = describe "MLF.Binding.Adjustment" $ do
     describe "harmonizeBindParentsWithTrace" $ do
         -- **Feature: paper_general_raise_plan, Property 11: Harmonization preserves checkBindingTree**
         -- **Validates: Requirements 1.2, 2.3, 7.2**
         it "harmonization preserves checkBindingTree" $ property $
             forAll (choose (3, 15)) $ \n -> do
-                c <- generate (genConstraintWithGNodes n)
+                c <- generate (genConstraintWithBinderChain n)
                 -- Pick two non-root nodes to harmonize
                 let nonRoots = filter (not . isBindingRoot c) (allNodeIds c)
                 case nonRoots of
@@ -885,7 +860,7 @@ bindingAdjustmentSpec = describe "MLF.BindingAdjustment" $ do
         -- **Validates: Requirements 2.3, 4.2, 4.3, 7.2**
         it "trace is consistent with replaying Raise steps" $ property $
             forAll (choose (3, 15)) $ \n -> do
-                c <- generate (genConstraintWithGNodes n)
+                c <- generate (genConstraintWithBinderChain n)
                 -- Pick two non-root nodes to harmonize
                 let nonRoots = filter (not . isBindingRoot c) (allNodeIds c)
                 case nonRoots of
@@ -931,10 +906,10 @@ bindingAdjustmentSpec = describe "MLF.BindingAdjustment" $ do
                     emptyConstraint
                         { cNodes =
                             IntMap.fromList
-                                [ (0, TyForall (NodeId 0) (GNodeId 0) (GNodeId 0) (NodeId 1))
-                                , (1, TyForall (NodeId 1) (GNodeId 0) (GNodeId 0) (NodeId 2))
-                                , (2, TyForall (NodeId 2) (GNodeId 0) (GNodeId 0) (NodeId 3))
-                                , (3, TyVar (NodeId 3) (GNodeId 0))
+                                [ (0, TyForall (NodeId 0) (NodeId 1))
+                                , (1, TyForall (NodeId 1) (NodeId 2))
+                                , (2, TyForall (NodeId 2) (NodeId 3))
+                                , (3, TyVar (NodeId 3))
                                 ]
                         , cBindParents =
                             IntMap.fromList
@@ -948,16 +923,16 @@ bindingAdjustmentSpec = describe "MLF.BindingAdjustment" $ do
 
         it "fails when no binding LCA exists" $ do
             -- Two disconnected term-DAG roots (0 and 2), so their binding roots
-            -- have no common ancestor. For a multi-root constraint graph, we
-            -- tolerate this and treat harmonization as a no-op.
+            -- have no common ancestor. This is a binding-tree error: the paper’s
+            -- Raise-to-LCA model requires an LCA to exist when harmonization is needed.
             let c =
                     emptyConstraint
                         { cNodes =
                             IntMap.fromList
-                                [ (0, TyForall (NodeId 0) (GNodeId 0) (GNodeId 0) (NodeId 1))
-                                , (1, TyVar (NodeId 1) (GNodeId 0))
-                                , (2, TyForall (NodeId 2) (GNodeId 0) (GNodeId 0) (NodeId 3))
-                                , (3, TyVar (NodeId 3) (GNodeId 0))
+                                [ (0, TyForall (NodeId 0) (NodeId 1))
+                                , (1, TyVar (NodeId 1))
+                                , (2, TyForall (NodeId 2) (NodeId 3))
+                                , (3, TyVar (NodeId 3))
                                 ]
                         , cBindParents =
                             IntMap.fromList
@@ -965,25 +940,18 @@ bindingAdjustmentSpec = describe "MLF.BindingAdjustment" $ do
                                 , (3, (NodeId 2, BindFlex))
                                 ]
                         }
-            case BindingAdjustment.harmonizeBindParentsWithTrace (NodeId 1) (NodeId 3) c of
-                Right (c', trace) -> do
-                    c' `shouldBe` c
-                    trace `shouldBe` []
-                Left err -> expectationFailure $ "Expected success, got: " ++ show err
+            BindingAdjustment.harmonizeBindParentsWithTrace (NodeId 1) (NodeId 3) c
+                `shouldBe` Left (NoCommonAncestor (NodeId 0) (NodeId 2))
 
         it "harmonization with empty binding edges yields an empty Raise trace" $ do
-            -- Create a constraint with GNodes but no binding parents (all nodes are roots)
-            let g0 = GNode (GNodeId 0) Nothing [(NodeId 1, Nothing), (NodeId 2, Nothing)] [GNodeId 1]
-                g1 = GNode (GNodeId 1) (Just (GNodeId 0)) [(NodeId 3, Nothing)] []
-                nodes = IntMap.fromList
-                    [ (1, TyVar (NodeId 1) (GNodeId 0))
-                    , (2, TyVar (NodeId 2) (GNodeId 0))
-                    , (3, TyVar (NodeId 3) (GNodeId 1))
-                    ]
+            let nodes =
+                    IntMap.fromList
+                        [ (1, TyVar (NodeId 1))
+                        , (2, TyVar (NodeId 2))
+                        , (3, TyVar (NodeId 3))
+                        ]
                 c = emptyConstraint
                     { cNodes = nodes
-                    , cGNodes = IntMap.fromList [(0, g0), (1, g1)]
-                    , cGForest = [GNodeId 0]
                     , cBindParents = IntMap.empty  -- No binding parents
                     }
             

@@ -1,7 +1,6 @@
 # Implementation Plan
 
-> Note: `cabal test` currently includes **intentional failing baselines** in `test/ElaborationSpec.hs`.
-> For per-task verification, prefer `cabal test --test-show-details=direct --test-options='--match <pattern>'`.
+> Note: For per-task verification, prefer `cabal test --test-show-details=direct --test-options='--match <pattern>'`.
 > If `cabal test` cannot write its default build logs on your machine, prefix commands with `cabal --config-file=.cabal-config`.
 
 - [x] 1. Add quotient-aware interior API (`Binding.interiorOfUnder`)

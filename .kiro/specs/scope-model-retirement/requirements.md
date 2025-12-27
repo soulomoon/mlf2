@@ -44,5 +44,4 @@ This spec retires the legacy scope model so:
 
 #### Acceptance Criteria
 1. WHEN searching the codebase THEN THE SYSTEM SHALL have no call sites of `RankAdjustment.harmonizeVarLevels` / `harmonizeVarLevelsWithCounts`.
-2. WHEN running the non-expected-failure test suite subset THEN THE SYSTEM SHALL pass without `RankAdjustment` present.
-
+2. WHEN running `cabal test --test-show-details=direct` THEN THE SYSTEM SHALL pass without `RankAdjustment` present.

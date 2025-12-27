@@ -2,73 +2,29 @@ module PresolutionSpec (spec) where
 
 import Test.Hspec
 import Test.QuickCheck
+import Data.List (findIndex)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.List.NonEmpty as NE
 
-import MLF.Types
-import MLF.Presolution
-import MLF.Acyclicity (AcyclicityResult(..))
-import MLF.Solve (SolveResult(..), validateSolvedGraphStrict)
-import qualified MLF.Binding as Binding
-import qualified MLF.GraphOps as GraphOps
-
-gNode :: Int -> GNode
-gNode n = GNode (GNodeId n) Nothing [] []
-
-emptyConstraint :: Constraint
-emptyConstraint = Constraint
-    { cNodes = IntMap.empty
-    , cGNodes = IntMap.empty
-    , cInstEdges = []
-    , cUnifyEdges = []
-    , cGForest = []
-    , cBindParents = IntMap.empty
-    , cVarBounds = IntMap.empty
-    , cEliminatedVars = IntSet.empty
-    }
-
-inferBindParents :: IntMap.IntMap TyNode -> BindParents
-inferBindParents nodes =
-    foldl'
-        (\bp parentNode ->
-            let parent = tnId parentNode
-                kids = case parentNode of
-                    TyArrow{ tnDom = d, tnCod = c } -> [d, c]
-                    TyForall{ tnBody = b } -> [b]
-                    TyExp{ tnBody = b } -> [b]
-                    _ -> []
-                addOne m child
-                    | child == parent = m
-                    | otherwise = IntMap.insertWith (\_ old -> old) (getNodeId child) (parent, BindFlex) m
-            in foldl' addOne bp kids
-        )
-        IntMap.empty
-        (IntMap.elems nodes)
-
-lookupNode :: IntMap.IntMap TyNode -> NodeId -> Maybe TyNode
-lookupNode nodes nid = IntMap.lookup (getNodeId nid) nodes
-
--- | Read-only chase to the canonical representative in a union-find parent map.
---
--- (The test suite cannot import hidden internal modules, so we keep a tiny local copy.)
-frWithUF :: IntMap.IntMap NodeId -> NodeId -> NodeId
-frWithUF uf nid =
-    case IntMap.lookup (getNodeId nid) uf of
-        Nothing -> nid
-        Just parent
-            | parent == nid -> nid
-            | otherwise -> frWithUF uf parent
+import MLF.Constraint.Types
+import MLF.Constraint.Presolution
+import MLF.Constraint.Acyclicity (AcyclicityResult(..))
+import MLF.Constraint.Solve (SolveResult(..), validateSolvedGraphStrict)
+import qualified MLF.Binding.Tree as Binding
+import qualified MLF.Binding.GraphOps as GraphOps
+import qualified MLF.Util.UnionFind as UF
+import SpecUtil (emptyConstraint, inferBindParents, lookupNodeMaybe)
 
 expectArrow :: HasCallStack => IntMap.IntMap TyNode -> NodeId -> IO TyNode
-expectArrow nodes nid = case lookupNode nodes nid of
+expectArrow nodes nid = case lookupNodeMaybe nodes nid of
     Just a@TyArrow{} -> return a
     other -> do
         let msg = "Expected TyArrow at " ++ show nid ++ ", found " ++ show other
         expectationFailure msg >> fail msg
 
 expectForall :: HasCallStack => IntMap.IntMap TyNode -> NodeId -> IO TyNode
-expectForall nodes nid = case lookupNode nodes nid of
+expectForall nodes nid = case lookupNodeMaybe nodes nid of
     Just f@TyForall{} -> return f
     other -> do
         let msg = "Expected TyForall at " ++ show nid ++ ", found " ++ show other
@@ -78,23 +34,23 @@ spec :: Spec
 spec = describe "Phase 4 — Principal Presolution" $ do
     describe "instantiateScheme" $ do
         it "replaces repeated bound vars with the same fresh node" $ do
-            -- forall@1. (a -> a) where a is bound at level 1
+            -- Scheme body (a -> a) where `a` is a bound variable to be substituted.
             let bound = NodeId 1
                 body = NodeId 2
                 fresh = NodeId 10
                 nodes = IntMap.fromList
-                    [ (1, TyVar bound (GNodeId 1))
+                    [ (1, TyVar bound)
                     , (2, TyArrow body bound bound)
-                    , (10, TyVar fresh (GNodeId 1)) -- fresh binder image
+                    , (10, TyVar fresh) -- fresh binder image
                     ]
                 constraint =
                     emptyConstraint
                         { cNodes = nodes
                         , cBindParents = IntMap.singleton 1 (NodeId 2, BindFlex)
                         }
-                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntMap.empty IntMap.empty IntMap.empty
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntSet.empty IntMap.empty IntMap.empty IntMap.empty
 
-            case runPresolutionM st0 (instantiateScheme body (GNodeId 1) [(bound, fresh)]) of
+            case runPresolutionM st0 (instantiateScheme body [(bound, fresh)]) of
                 Left err -> expectationFailure $ "Instantiation failed: " ++ show err
                 Right (root, st1) -> do
                     arrow <- expectArrow (cNodes (psConstraint st1)) root
@@ -112,11 +68,11 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 outerArrow = NodeId 4
                 fresh = NodeId 10
                 nodes = IntMap.fromList
-                    [ (1, TyVar bound (GNodeId 1))
+                    [ (1, TyVar bound)
                     , (2, TyArrow body bound outer)
-                    , (3, TyVar outer (GNodeId 0))
+                    , (3, TyVar outer)
                     , (4, TyArrow outerArrow outer outer)
-                    , (10, TyVar fresh (GNodeId 1))
+                    , (10, TyVar fresh)
                     ]
                 constraint =
                     emptyConstraint
@@ -127,9 +83,9 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                                 , (3, (NodeId 4, BindFlex))
                                 ]
                         }
-                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntMap.empty IntMap.empty IntMap.empty
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntSet.empty IntMap.empty IntMap.empty IntMap.empty
 
-            case runPresolutionM st0 (instantiateScheme body (GNodeId 1) [(bound, fresh)]) of
+            case runPresolutionM st0 (instantiateScheme body [(bound, fresh)]) of
                 Left err -> expectationFailure $ "Instantiation failed: " ++ show err
                 Right (root, st1) -> do
                     arrow <- expectArrow (cNodes (psConstraint st1)) root
@@ -152,13 +108,13 @@ spec = describe "Phase 4 — Principal Presolution" $ do
 
                 nodes =
                     IntMap.fromList
-                        [ (getNodeId b, TyVar b (GNodeId 1))
-                        , (getNodeId y, TyVar y (GNodeId 0))
+                        [ (getNodeId b, TyVar b)
+                        , (getNodeId y, TyVar y)
                         , (getNodeId outerArrow, TyArrow outerArrow y y)
                         , (getNodeId bodyArrow, TyArrow bodyArrow outerArrow b)
-                        , (getNodeId forallNode, TyForall forallNode (GNodeId 1) (GNodeId 0) bodyArrow)
+                        , (getNodeId forallNode, TyForall forallNode bodyArrow)
                         , (getNodeId expNode, TyExp expNode (ExpVarId 0) forallNode)
-                        , (getNodeId meta, TyVar meta (GNodeId 1))
+                        , (getNodeId meta, TyVar meta)
                         ]
 
                 -- Binding edges:
@@ -187,11 +143,12 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         (Presolution IntMap.empty)
                         IntMap.empty
                         11
+                        IntSet.empty
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
 
-            case runPresolutionM st0 (instantiateSchemeWithTrace bodyArrow (GNodeId 1) [(b, meta)]) of
+            case runPresolutionM st0 (instantiateSchemeWithTrace bodyArrow [(b, meta)]) of
                 Left err -> expectationFailure ("instantiateSchemeWithTrace failed: " ++ show err)
                 Right ((root, copyMap, _interior), st1) -> do
                     arrow <- expectArrow (cNodes (psConstraint st1)) root
@@ -201,11 +158,10 @@ spec = describe "Phase 4 — Principal Presolution" $ do
         it "instantiateSchemeWithTrace uses I(g) even when root has no binder (no level fallback)" $ do
             -- When copying a disconnected component (e.g. an instance bound),
             -- the copied root may be a binding root. In that case, we still
-            -- decide share/copy purely from binding-edge interior membership,
-            -- not from `tnVarLevel < quantLevel`.
+            -- decide share/copy purely from binding-edge interior membership.
             --
-            -- Regression: previously, this case fell back to levels and would
-            -- copy `y` below even though it is not in I(g).
+            -- Regression: a legacy fallback would copy `y` below even though it
+            -- is not in I(g).
             let y = NodeId 1
                 b = NodeId 2
                 outerArrow = NodeId 3
@@ -213,8 +169,8 @@ spec = describe "Phase 4 — Principal Presolution" $ do
 
                 nodes =
                     IntMap.fromList
-                        [ (getNodeId y, TyVar y (GNodeId 1))
-                        , (getNodeId b, TyVar b (GNodeId 1))
+                        [ (getNodeId y, TyVar y)
+                        , (getNodeId b, TyVar b)
                         , (getNodeId outerArrow, TyArrow outerArrow y y)
                         , (getNodeId bodyArrow, TyArrow bodyArrow y b)
                         ]
@@ -239,11 +195,12 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         (Presolution IntMap.empty)
                         IntMap.empty
                         10
+                        IntSet.empty
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
 
-            case runPresolutionM st0 (instantiateSchemeWithTrace bodyArrow (GNodeId 1) []) of
+            case runPresolutionM st0 (instantiateSchemeWithTrace bodyArrow []) of
                 Left err -> expectationFailure ("instantiateSchemeWithTrace failed: " ++ show err)
                 Right ((root, copyMap, _interior), st1) -> do
                     arrow <- expectArrow (cNodes (psConstraint st1)) root
@@ -264,10 +221,10 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 body = NodeId 6
                 fresh = NodeId 10
                 nodes = IntMap.fromList
-                    [ (1, TyVar bound (GNodeId 1))
+                    [ (1, TyVar bound)
                     , (5, TyArrow shared bound bound)    -- shared substructure
                     , (6, TyArrow body shared shared)    -- uses shared twice
-                    , (10, TyVar fresh (GNodeId 1))
+                    , (10, TyVar fresh)
                     ]
                 constraint =
                     emptyConstraint
@@ -278,9 +235,9 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                                 , (5, (NodeId 6, BindFlex))
                                 ]
                         }
-                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntMap.empty IntMap.empty IntMap.empty
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntSet.empty IntMap.empty IntMap.empty IntMap.empty
 
-            case runPresolutionM st0 (instantiateScheme body (GNodeId 1) [(bound, fresh)]) of
+            case runPresolutionM st0 (instantiateScheme body [(bound, fresh)]) of
                 Left err -> expectationFailure $ "Instantiation failed: " ++ show err
                 Right (root, st1) -> do
                     arrow <- expectArrow (cNodes (psConstraint st1)) root
@@ -300,19 +257,19 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 body = NodeId 3
                 fresh = NodeId 10
                 nodes = IntMap.fromList
-                    [ (1, TyVar bound (GNodeId 1))
+                    [ (1, TyVar bound)
                     , (2, TyBase base (BaseTy "int"))
                     , (3, TyArrow body base base)
-                    , (10, TyVar fresh (GNodeId 1))
+                    , (10, TyVar fresh)
                     ]
                 constraint =
                     emptyConstraint
                         { cNodes = nodes
                         , cBindParents = IntMap.singleton 2 (NodeId 3, BindFlex)
                         }
-                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntMap.empty IntMap.empty IntMap.empty
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntSet.empty IntMap.empty IntMap.empty IntMap.empty
 
-            case runPresolutionM st0 (instantiateScheme body (GNodeId 1) [(bound, fresh)]) of
+            case runPresolutionM st0 (instantiateScheme body [(bound, fresh)]) of
                 Left err -> expectationFailure $ "Instantiation failed: " ++ show err
                 Right (root, st1) -> do
                     arrow <- expectArrow (cNodes (psConstraint st1)) root
@@ -320,8 +277,8 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                     tnCod arrow `shouldBe` base
 
         it "copies nested forall inside the body" $ do
-            -- Body: forall@1 b. b -> a (a is outer bound); should copy nested forall and freshen inner binders.
-            let outer = NodeId 1   -- bound at level 1
+            -- Nested binder is copied, and substitutions apply under it.
+            let outer = NodeId 1
                 innerVar = NodeId 2
                 innerBody = NodeId 3
                 innerForall = NodeId 4
@@ -329,13 +286,13 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 freshOuter = NodeId 10
                 freshInner = NodeId 11
                 nodes = IntMap.fromList
-                    [ (1, TyVar outer (GNodeId 1))
-                    , (2, TyVar innerVar (GNodeId 2))
+                    [ (1, TyVar outer)
+                    , (2, TyVar innerVar)
                     , (3, TyArrow innerBody innerVar outer)
-                    , (4, TyForall innerForall (GNodeId 2) (GNodeId 1) innerBody)
+                    , (4, TyForall innerForall innerBody)
                     , (5, TyArrow topBody innerForall innerForall)
-                    , (10, TyVar freshOuter (GNodeId 1))
-                    , (11, TyVar freshInner (GNodeId 2))
+                    , (10, TyVar freshOuter)
+                    , (11, TyVar freshInner)
                     ]
                 constraint =
                     emptyConstraint
@@ -348,9 +305,9 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                                 , (4, (NodeId 5, BindFlex))
                                 ]
                         }
-                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 12 IntMap.empty IntMap.empty IntMap.empty
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 12 IntSet.empty IntMap.empty IntMap.empty IntMap.empty
 
-            case runPresolutionM st0 (instantiateScheme topBody (GNodeId 1) [(outer, freshOuter), (innerVar, freshInner)]) of
+            case runPresolutionM st0 (instantiateScheme topBody [(outer, freshOuter), (innerVar, freshInner)]) of
                 Left err -> expectationFailure $ "Instantiation failed: " ++ show err
                 Right (root, st1) -> do
                     let nodes' = cNodes (psConstraint st1)
@@ -362,23 +319,12 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                     let innerCopy = tnBody forall1
                         innerCopy2 = tnBody forall2
                     innerArrow <- expectArrow nodes' innerCopy
-                    tnQuantLevel forall1 `shouldBe` GNodeId 2
-                    tnQuantLevel forall2 `shouldBe` GNodeId 2
                     innerCopy `shouldBe` innerCopy2
                     tnDom innerArrow `shouldBe` freshInner
                     tnCod innerArrow `shouldBe` freshOuter
 
         it "copies nested expansion nodes inside the body" $ do
-            -- Body: exp s (forall@1 a. a) -- expansion wrapper should be copied with its body.
-            -- NOTE: With the recent change to inline identity/instantiated expansions,
-            -- this test must ensure the expansion variable 's' is NOT expanded,
-            -- so it remains a TyExp node.
-            -- However, 'instantiateScheme' runs in isolation without an expansion map.
-            -- The 'copyNode' logic now checks 'getExpansion' via lift.
-            -- In 'runPresolutionM st0', the expansion map is empty (Identity).
-            -- Identity expansions are now INLINED.
-            -- So we expect the result to NOT be a TyExp, but the body itself (forall).
-
+            -- When copying in presolution, an expansion node with identity recipe is inlined.
             let bound = NodeId 1
                 forallBody = NodeId 2
                 forallNode = NodeId 3
@@ -386,12 +332,12 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 outerBody = NodeId 5
                 fresh = NodeId 10
                 nodes = IntMap.fromList
-                    [ (1, TyVar bound (GNodeId 1))
+                    [ (1, TyVar bound)
                     , (2, TyArrow forallBody bound bound)
-                    , (3, TyForall forallNode (GNodeId 1) (GNodeId 0) forallBody)
+                    , (3, TyForall forallNode forallBody)
                     , (4, TyExp expNode (ExpVarId 9) forallNode)
                     , (5, TyArrow outerBody expNode expNode)
-                    , (10, TyVar fresh (GNodeId 1))
+                    , (10, TyVar fresh)
                     ]
                 constraint =
                     emptyConstraint
@@ -404,9 +350,9 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                                 , (4, (NodeId 5, BindFlex))
                                 ]
                         }
-                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntMap.empty IntMap.empty IntMap.empty
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntSet.empty IntMap.empty IntMap.empty IntMap.empty
 
-            case runPresolutionM st0 (instantiateScheme outerBody (GNodeId 1) [(bound, fresh)]) of
+            case runPresolutionM st0 (instantiateScheme outerBody [(bound, fresh)]) of
                 Left err -> expectationFailure $ "Instantiation failed: " ++ show err
                 Right (root, st1) -> do
                     let nodes' = cNodes (psConstraint st1)
@@ -414,32 +360,15 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                     let d = tnDom arrow
                         c = tnCod arrow
 
-                    -- Expectation Update: TyExp expands to Identity (default), so it is inlined.
-                    -- The dom/cod should be the Forall node directly (copied).
                     _ <- expectForall nodes' d
                     _ <- expectForall nodes' c
 
-                    -- They should be distinct copies (because they were under distinct TyExp copies, effectively)
-                    -- Wait, if TyExp is skipped, we just copy 'forallNode'.
-                    -- 'forallNode' is at level 1? tnQuantLevel=1.
-                    -- instantiateScheme target level is 1.
-                    -- 'forallNode' tnOwnerLevel is 0? (GNodeId 0).
-                    -- If tnOwnerLevel < quantLevel, it is shared.
-                    -- tnOwnerLevel of TyForall is the owner level.
-                    -- Here forallNode is owned by 0. quantLevel is 1.
-                    -- So it should be SHARED.
-                    -- So d and c should be the ORIGINAL forallNode (3).
-
                     d `shouldBe` c
 
-                    -- The shared node (forallNode) is COPIED because copyNode always copies structure.
-                    -- So d and c refer to a fresh copy of forallNode.
                     d `shouldNotBe` forallNode
 
                     let forallCopy = d
-                    -- Check it's a Forall
                     fNode <- expectForall nodes' forallCopy
-                    tnQuantLevel fNode `shouldBe` GNodeId 1
 
                     let bodyArrowId = tnBody fNode
                     bArrow <- expectArrow nodes' bodyArrowId
@@ -452,13 +381,13 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 body = NodeId 99  -- missing
                 fresh = NodeId 10
                 nodes = IntMap.fromList
-                    [ (1, TyVar bound (GNodeId 1))
-                    , (10, TyVar fresh (GNodeId 1))
+                    [ (1, TyVar bound)
+                    , (10, TyVar fresh)
                     ]
                 constraint = emptyConstraint { cNodes = nodes }
-                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntMap.empty IntMap.empty IntMap.empty
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntSet.empty IntMap.empty IntMap.empty IntMap.empty
 
-            case runPresolutionM st0 (instantiateScheme body (GNodeId 1) [(bound, fresh)]) of
+            case runPresolutionM st0 (instantiateScheme body [(bound, fresh)]) of
                 Left (NodeLookupFailed nid) -> nid `shouldBe` body
                 Left other -> expectationFailure $ "Unexpected error: " ++ show other
                 Right _ -> expectationFailure "Expected failure due to missing node"
@@ -475,9 +404,9 @@ spec = describe "Phase 4 — Principal Presolution" $ do
 
                 nodes =
                     IntMap.fromList
-                        [ (0, TyVar a (GNodeId 1))
+                        [ (0, TyVar a)
                         , (1, TyArrow arrow a a)
-                        , (2, TyForall forallNode (GNodeId 1) (GNodeId 0) arrow)
+                        , (2, TyForall forallNode arrow)
                         , (3, TyExp expNode (ExpVarId 0) forallNode)
                         , (4, TyBase intNode (BaseTy "Int"))
                         , (5, TyArrow targetArrow intNode intNode)
@@ -490,10 +419,10 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         , cInstEdges = [edge]
                         , cBindParents =
                             IntMap.fromList
-                                [ (0, (NodeId 1, BindFlex))
-                                , (1, (NodeId 2, BindFlex))
-                                , (2, (NodeId 3, BindFlex))
-                                , (4, (NodeId 5, BindFlex))
+                                [ (getNodeId a, (forallNode, BindFlex))
+                                , (getNodeId arrow, (forallNode, BindFlex))
+                                , (getNodeId forallNode, (expNode, BindFlex))
+                                , (getNodeId intNode, (targetArrow, BindFlex))
                                 ]
                         }
                 st0 =
@@ -502,6 +431,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         (Presolution IntMap.empty)
                         IntMap.empty
                         6
+                        IntSet.empty
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
@@ -513,7 +443,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                     case IntMap.lookup 0 traces of
                         Nothing -> expectationFailure "Expected EdgeTrace for EdgeId 0"
                         Just tr -> do
-                            etRoot tr `shouldBe` frWithUF (psUnionFind st1) expNode
+                            etRoot tr `shouldBe` UF.frWith (psUnionFind st1) expNode
                             etInterior tr `shouldSatisfy` (not . IntSet.null)
                             case etBinderArgs tr of
                                 [(bv, _arg)] -> do
@@ -521,7 +451,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                                     case IntMap.lookup (getNodeId bv) (etCopyMap tr) of
                                         Nothing -> expectationFailure "Expected binder meta in etCopyMap"
                                         Just meta ->
-                                            let metaC = frWithUF (psUnionFind st1) meta
+                                            let metaC = UF.frWith (psUnionFind st1) meta
                                             in IntSet.member (getNodeId metaC) (etInterior tr) `shouldBe` True
                                 other -> expectationFailure ("Unexpected binder/arg pairs: " ++ show other)
 
@@ -530,8 +460,9 @@ spec = describe "Phase 4 — Principal Presolution" $ do
             -- *final* expansion may keep the argument nodes allocated by an earlier edge
             -- (mergeExpansions keeps the first ExpInstantiate payload).
             --
-            -- Phase 1 in merge_raise_merge_plan.txt expects the trace to approximate I(r)
-            -- (the expansion interior) for each edge. We should include the binder
+            -- Phase 1 in merge_raise_merge_plan.txt expects the trace to record the
+            -- exact I(r) (the expansion interior) for each edge in binding-edge mode.
+            -- We should include the binder
             -- argument node even when it is reused across edges.
             let a = NodeId 0
                 arrow = NodeId 1
@@ -544,9 +475,9 @@ spec = describe "Phase 4 — Principal Presolution" $ do
 
                 nodes =
                     IntMap.fromList
-                        [ (0, TyVar a (GNodeId 1))
+                        [ (0, TyVar a)
                         , (1, TyArrow arrow a a)
-                        , (2, TyForall forallNode (GNodeId 1) (GNodeId 0) arrow)
+                        , (2, TyForall forallNode arrow)
                         , (3, TyExp expNode (ExpVarId 0) forallNode)
                         , (4, TyBase intNode (BaseTy "Int"))
                         , (5, TyArrow target1 intNode intNode)
@@ -562,11 +493,11 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         , cInstEdges = [edge0, edge1]
                         , cBindParents =
                             IntMap.fromList
-                                [ (0, (NodeId 1, BindFlex))
-                                , (1, (NodeId 2, BindFlex))
-                                , (2, (NodeId 3, BindFlex))
-                                , (4, (NodeId 5, BindFlex))
-                                , (6, (NodeId 7, BindFlex))
+                                [ (getNodeId a, (forallNode, BindFlex))
+                                , (getNodeId arrow, (forallNode, BindFlex))
+                                , (getNodeId forallNode, (expNode, BindFlex))
+                                , (getNodeId intNode, (target1, BindFlex))
+                                , (getNodeId boolNode, (target2, BindFlex))
                                 ]
                         }
                 st0 =
@@ -575,6 +506,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         (Presolution IntMap.empty)
                         IntMap.empty
                         8
+                        IntSet.empty
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
@@ -591,7 +523,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                                     case IntMap.lookup (getNodeId bv0) (etCopyMap tr0) of
                                         Nothing -> expectationFailure "Expected binder meta in etCopyMap (edge0)"
                                         Just meta0 ->
-                                            let meta0C = frWithUF (psUnionFind st1) meta0
+                                            let meta0C = UF.frWith (psUnionFind st1) meta0
                                             in IntSet.member (getNodeId meta0C) (etInterior tr0) `shouldBe` True
                                 other -> expectationFailure ("Unexpected binder/arg pairs (edge0): " ++ show other)
                             -- expected: second edge should also include its binder arg in the trace interior
@@ -600,7 +532,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                                     case IntMap.lookup (getNodeId bv1) (etCopyMap tr1) of
                                         Nothing -> expectationFailure "Expected binder meta in etCopyMap (edge1)"
                                         Just meta1 ->
-                                            let meta1C = frWithUF (psUnionFind st1) meta1
+                                            let meta1C = UF.frWith (psUnionFind st1) meta1
                                             in IntSet.member (getNodeId meta1C) (etInterior tr1) `shouldBe` True
                                 other -> expectationFailure ("Unexpected binder/arg pairs (edge1): " ++ show other)
                         other -> expectationFailure ("Missing traces: " ++ show other)
@@ -624,18 +556,18 @@ spec = describe "Phase 4 — Principal Presolution" $ do
 
                 nodes =
                     IntMap.fromList
-                        [ (0, TyVar a (GNodeId 1))
+                        [ (0, TyVar a)
                         , (1, TyArrow arrow a a)
-                        , (2, TyForall forallNode (GNodeId 1) (GNodeId 0) arrow)
+                        , (2, TyForall forallNode arrow)
                         , (3, TyExp expNode (ExpVarId 0) forallNode)
                         , (4, TyBase intNode (BaseTy "Int"))
                         , (5, TyArrow targetArrow intNode intNode)
-                        , (6, TyForall outerBinder (GNodeId 0) (GNodeId 0) targetArrow)  -- Outer binder
+                        , (6, TyForall outerBinder targetArrow)  -- Outer binder
                         ]
 
                 -- Set up binding edges: target arrow is bound by outerBinder
                 bindParents = IntMap.fromList
-                    [ (getNodeId a, (arrow, BindFlex))
+                    [ (getNodeId a, (forallNode, BindFlex))
                     , (getNodeId arrow, (forallNode, BindFlex))
                     , (getNodeId forallNode, (expNode, BindFlex))
                     , (getNodeId intNode, (targetArrow, BindFlex))
@@ -654,6 +586,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         (Presolution IntMap.empty)
                         IntMap.empty
                         7
+                        IntSet.empty
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
@@ -677,8 +610,8 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                                     "Expected arrow to be copied. CopyMap: " ++ show copyMap
                                 Just copiedArrow -> do
                                     let uf = psUnionFind st1
-                                        copiedArrowC = frWithUF uf copiedArrow
-                                        outerBinderC = frWithUF uf outerBinder
+                                        copiedArrowC = UF.frWith uf copiedArrow
+                                        outerBinderC = UF.frWith uf outerBinder
 
                                     -- The copied arrow (expansion result) should be bound
                                     -- at the same binder as the target (up to UF).
@@ -702,9 +635,9 @@ spec = describe "Phase 4 — Principal Presolution" $ do
 
                 nodes =
                     IntMap.fromList
-                        [ (getNodeId a, TyVar a (GNodeId 1))
+                        [ (getNodeId a, TyVar a)
                         , (getNodeId arrow, TyArrow arrow a a)
-                        , (getNodeId forallNode, TyForall forallNode (GNodeId 1) (GNodeId 0) arrow)
+                        , (getNodeId forallNode, TyForall forallNode arrow)
                         , (getNodeId expNode, TyExp expNode (ExpVarId 0) forallNode)
                         , (getNodeId intNode, TyBase intNode (BaseTy "Int"))
                         , (getNodeId targetArrow, TyArrow targetArrow intNode intNode)
@@ -713,7 +646,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
 
                 bindParents =
                     IntMap.fromList
-                        [ (getNodeId a, (arrow, BindFlex))
+                        [ (getNodeId a, (forallNode, BindFlex))
                         , (getNodeId arrow, (forallNode, BindFlex))
                         , (getNodeId forallNode, (rootArrow, BindFlex))
                         , (getNodeId expNode, (rootArrow, BindFlex))
@@ -766,23 +699,30 @@ spec = describe "Phase 4 — Principal Presolution" $ do
 
                 nodes =
                     IntMap.fromList
-                        [ (0, TyVar a (GNodeId 1))
-                        , (1, TyVar b (GNodeId 1))
+                        [ (0, TyVar a)
+                        , (1, TyVar b)
                         , (2, TyArrow arrow2 b a) -- b -> a
                         , (3, TyArrow arrow1 a arrow2) -- a -> (b -> a)
-                        , (4, TyForall forallNode (GNodeId 1) (GNodeId 0) arrow1)
+                        , (4, TyForall forallNode arrow1)
                         , (5, TyExp expNode (ExpVarId 0) forallNode)
-                        , (6, TyVar t (GNodeId 0))
+                        , (6, TyVar t)
                         , (7, TyArrow targetArrow2 t t) -- t -> t
                         , (8, TyArrow targetArrow1 t targetArrow2) -- t -> (t -> t)
                         ]
 
                 edge = InstEdge (EdgeId 0) expNode targetArrow1
+                bindParents =
+                    IntMap.union
+                        (IntMap.fromList
+                            [ (getNodeId a, (forallNode, BindFlex))
+                            , (getNodeId b, (forallNode, BindFlex))
+                            ])
+                        (inferBindParents nodes)
                 constraint =
                     emptyConstraint
                         { cNodes = nodes
                         , cInstEdges = [edge]
-                        , cBindParents = inferBindParents nodes
+                        , cBindParents = bindParents
                         }
                 st0 =
                     PresolutionState
@@ -790,6 +730,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         (Presolution IntMap.empty)
                         IntMap.empty
                         9
+                        IntSet.empty
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
@@ -805,7 +746,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                             hasMerge `shouldBe` True
 
                             -- Eliminated binder-metas are recorded persistently so
-                            -- elaboration can ignore them without consulting gBinds.
+                            -- elaboration can ignore them when reifying quantifiers.
                             tr <- case IntMap.lookup 0 (psEdgeTraces st1) of
                                 Nothing -> expectationFailure "Expected EdgeTrace for EdgeId 0" >> fail "missing EdgeTrace"
                                 Just tr' -> pure tr'
@@ -842,21 +783,28 @@ spec = describe "Phase 4 — Principal Presolution" $ do
 
                 nodes =
                     IntMap.fromList
-                        [ (getNodeId t, TyVar t (GNodeId 0))
-                        , (getNodeId a, TyVar a (GNodeId 1))
-                        , (getNodeId b, TyVar b (GNodeId 1))
+                        [ (getNodeId t, TyVar t)
+                        , (getNodeId a, TyVar a)
+                        , (getNodeId b, TyVar b)
                         , (getNodeId arrow, TyArrow arrow a b)
-                        , (getNodeId forallNode, TyForall forallNode (GNodeId 1) (GNodeId 0) arrow)
+                        , (getNodeId forallNode, TyForall forallNode arrow)
                         , (getNodeId expNode, TyExp expNode (ExpVarId 0) forallNode)
                         , (getNodeId targetArrow, TyArrow targetArrow t t)
                         ]
 
                 edge = InstEdge (EdgeId 0) expNode targetArrow
+                bindParents =
+                    IntMap.union
+                        (IntMap.fromList
+                            [ (getNodeId a, (forallNode, BindFlex))
+                            , (getNodeId b, (forallNode, BindFlex))
+                            ])
+                        (inferBindParents nodes)
                 constraint =
                     emptyConstraint
                         { cNodes = nodes
                         , cInstEdges = [edge]
-                        , cBindParents = inferBindParents nodes
+                        , cBindParents = bindParents
                         }
                 st0 =
                     PresolutionState
@@ -864,6 +812,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         (Presolution IntMap.empty)
                         IntMap.empty
                         15
+                        IntSet.empty
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
@@ -894,41 +843,31 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 expNode = NodeId 4
                 y = NodeId 5
                 targetArrow = NodeId 6
-
-                g0 =
-                    GNode
-                        { gnodeId = GNodeId 0
-                        , gParent = Nothing
-                        , gBinds = [(x, Nothing), (y, Nothing)]
-                        , gChildren = [GNodeId 1]
-                        }
-                g1 =
-                    GNode
-                        { gnodeId = GNodeId 1
-                        , gParent = Just (GNodeId 0)
-                        , gBinds = [(b, Just x)]
-                        , gChildren = []
-                        }
+                rootArrow = NodeId 7
 
                 nodes =
                     IntMap.fromList
-                        [ (0, TyVar x (GNodeId 0))
-                        , (1, TyVar b (GNodeId 1))
+                        [ (0, TyVar x)
+                        , (1, TyVar b)
                         , (2, TyArrow arrow1 b b)
-                        , (3, TyForall forallNode (GNodeId 1) (GNodeId 0) arrow1)
+                        , (3, TyForall forallNode arrow1)
                         , (4, TyExp expNode (ExpVarId 0) forallNode)
-                        , (5, TyVar y (GNodeId 0))
+                        , (5, TyVar y)
                         , (6, TyArrow targetArrow y y)
+                        , (7, TyArrow rootArrow expNode targetArrow)
                         ]
 
                 edge = InstEdge (EdgeId 0) expNode targetArrow
+                bindParents =
+                    IntMap.insert
+                        (getNodeId b)
+                        (forallNode, BindFlex)
+                        (inferBindParents nodes)
                 constraint =
                     emptyConstraint
                         { cNodes = nodes
-                        , cGNodes = IntMap.fromList [(0, g0), (1, g1)]
-                        , cGForest = [GNodeId 0]
                         , cInstEdges = [edge]
-                        , cBindParents = inferBindParents nodes
+                        , cBindParents = bindParents
                         , cVarBounds = IntMap.fromList [(getNodeId b, Just x)]
                         }
                 st0 =
@@ -936,7 +875,8 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         constraint
                         (Presolution IntMap.empty)
                         IntMap.empty
-                        7
+                        8
+                        IntSet.empty
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
@@ -969,39 +909,27 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 y = NodeId 5
                 targetArrow = NodeId 6
 
-                g0 =
-                    GNode
-                        { gnodeId = GNodeId 0
-                        , gParent = Nothing
-                        , gBinds = [(y, Nothing)]
-                        , gChildren = [GNodeId 1]
-                        }
-                g1 =
-                    GNode
-                        { gnodeId = GNodeId 1
-                        , gParent = Just (GNodeId 0)
-                        , gBinds = [(b, Nothing)]
-                        , gChildren = []
-                        }
-
                 nodes =
                     IntMap.fromList
-                        [ (1, TyVar b (GNodeId 1))
+                        [ (1, TyVar b)
                         , (2, TyArrow arrow1 b b)
-                        , (3, TyForall forallNode (GNodeId 1) (GNodeId 0) arrow1)
+                        , (3, TyForall forallNode arrow1)
                         , (4, TyExp expNode (ExpVarId 0) forallNode)
-                        , (5, TyVar y (GNodeId 0))
+                        , (5, TyVar y)
                         , (6, TyArrow targetArrow y y)
                         ]
 
                 edge = InstEdge (EdgeId 0) expNode targetArrow
+                bindParents =
+                    IntMap.insert
+                        (getNodeId b)
+                        (forallNode, BindFlex)
+                        (inferBindParents nodes)
                 constraint =
                     emptyConstraint
                         { cNodes = nodes
-                        , cGNodes = IntMap.fromList [(0, g0), (1, g1)]
-                        , cGForest = [GNodeId 0]
                         , cInstEdges = [edge]
-                        , cBindParents = inferBindParents nodes
+                        , cBindParents = bindParents
                         }
                 st0 =
                     PresolutionState
@@ -1009,6 +937,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         (Presolution IntMap.empty)
                         IntMap.empty
                         7
+                        IntSet.empty
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
@@ -1039,6 +968,10 @@ spec = describe "Phase 4 — Principal Presolution" $ do
             -- Ensure that executing a base `Weaken(b)` does not substitute/merge the
             -- binder-meta with the instantiation argument (term-DAG), but does flip
             -- the binding-edge flag (flex → rigid) in binding-edge mode.
+            --
+            -- Note: the implementation defers actually applying Weaken until
+            -- presolution finalization (after all edges are processed), so this test
+            -- goes through `computePresolution` rather than `processInstEdge`.
             let b = NodeId 1
                 arrow1 = NodeId 2
                 forallNode = NodeId 3
@@ -1046,66 +979,40 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 y = NodeId 5
                 targetArrow = NodeId 6
 
-                g0 =
-                    GNode
-                        { gnodeId = GNodeId 0
-                        , gParent = Nothing
-                        , gBinds = [(y, Nothing)]
-                        , gChildren = [GNodeId 1]
-                        }
-                g1 =
-                    GNode
-                        { gnodeId = GNodeId 1
-                        , gParent = Just (GNodeId 0)
-                        , gBinds = [(b, Nothing)]
-                        , gChildren = []
-                        }
-
                 nodes =
                     IntMap.fromList
-                        [ (1, TyVar b (GNodeId 1))
+                        [ (1, TyVar b)
                         , (2, TyArrow arrow1 b b)
-                        , (3, TyForall forallNode (GNodeId 1) (GNodeId 0) arrow1)
+                        , (3, TyForall forallNode arrow1)
                         , (4, TyExp expNode (ExpVarId 0) forallNode)
-                        , (5, TyVar y (GNodeId 0))
+                        , (5, TyVar y)
                         , (6, TyArrow targetArrow y y)
                         ]
 
-                -- Binding edges follow term structure:
-                --   b -> arrow1 -> forallNode -> expNode
-                --   y -> targetArrow
+                -- Binding edges model scope: the binder TyVar is flexibly bound
+                -- directly to its `TyForall` node (paper Q(n)).
                 bindParents =
                     IntMap.fromList
-                        [ (getNodeId b, (arrow1, BindFlex))
+                        [ (getNodeId b, (forallNode, BindFlex))
                         , (getNodeId arrow1, (forallNode, BindFlex))
                         , (getNodeId forallNode, (expNode, BindFlex))
                         , (getNodeId y, (targetArrow, BindFlex))
                         ]
 
                 edge = InstEdge (EdgeId 0) expNode targetArrow
+                acyclicityRes = AcyclicityResult { arSortedEdges = [edge], arDepGraph = undefined }
                 constraint =
                     emptyConstraint
                         { cNodes = nodes
-                        , cGNodes = IntMap.fromList [(0, g0), (1, g1)]
-                        , cGForest = [GNodeId 0]
                         , cInstEdges = [edge]
                         , cBindParents = bindParents
                         }
-                st0 =
-                    PresolutionState
-                        constraint
-                        (Presolution IntMap.empty)
-                        IntMap.empty
-                        7
-                        IntMap.empty
-                        IntMap.empty
-                        IntMap.empty
 
-            case runPresolutionM st0 (processInstEdge edge) of
-                Left err -> expectationFailure ("processInstEdge failed: " ++ show err)
-                Right (_, st1) -> do
+            case computePresolution acyclicityRes constraint of
+                Left err -> expectationFailure ("computePresolution failed: " ++ show err)
+                Right pr -> do
                     -- Extract binder-meta and instantiation-arg from the edge trace.
-                    tr <- case IntMap.lookup 0 (psEdgeTraces st1) of
+                    tr <- case IntMap.lookup 0 (prEdgeTraces pr) of
                         Nothing -> expectationFailure "Expected EdgeTrace for EdgeId 0" >> fail "missing EdgeTrace"
                         Just tr' -> pure tr'
 
@@ -1122,19 +1029,94 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         Nothing -> expectationFailure "Expected binder-meta in EdgeTrace.etCopyMap" >> fail "missing binder-meta"
                         Just m -> pure m
 
-                    let c1 = psConstraint st1
-                        uf = psUnionFind st1
-                        metaCanon = frWithUF uf meta
+                    let c1 = prConstraint pr
 
-                    -- 1) Flag flip: the (UF-canonical) binder-meta's binding edge becomes rigid.
-                    case Binding.lookupBindParent c1 metaCanon of
-                        Nothing -> expectationFailure "Expected binder-meta (canonical) to have a binding parent after expansion"
+                    -- 1) Flag flip: the binder-meta's binding edge becomes rigid.
+                    case Binding.lookupBindParent c1 meta of
+                        Nothing -> expectationFailure "Expected binder-meta to have a binding parent after expansion"
                         Just (_p, flag) -> flag `shouldBe` BindRigid
 
                     -- 2) No UF merge: meta is not unified with its bound/arg by OpWeaken.
-                    let repMeta = frWithUF uf meta
-                        repArg = frWithUF uf arg
-                    repMeta `shouldNotBe` repArg
+                    meta `shouldNotBe` arg
+
+        it "orders base witness ops as Graft; Merge; Weaken for bounded binders" $ do
+            -- TyExp s · (∀@1. a -> b) ≤ (Int -> Int), with b ⩾ a.
+            --
+            -- The base witness should:
+            --   • graft the instantiation arg onto the unbounded binder `a`,
+            --   • merge the bounded binder `b` into `a`,
+            --   • and weaken `a` last (so it cannot preempt the merge).
+            let a = NodeId 0
+                b = NodeId 1
+                arrow = NodeId 2
+                forallNode = NodeId 3
+                expNode = NodeId 4
+                intNode = NodeId 5
+                targetArrow = NodeId 6
+
+                nodes =
+                    IntMap.fromList
+                        [ (getNodeId a, TyVar a)
+                        , (getNodeId b, TyVar b)
+                        , (getNodeId arrow, TyArrow arrow a b)
+                        , (getNodeId forallNode, TyForall forallNode arrow)
+                        , (getNodeId expNode, TyExp expNode (ExpVarId 0) forallNode)
+                        , (getNodeId intNode, TyBase intNode (BaseTy "Int"))
+                        , (getNodeId targetArrow, TyArrow targetArrow intNode intNode)
+                        ]
+
+                edge = InstEdge (EdgeId 0) expNode targetArrow
+                bindParents =
+                    IntMap.union
+                        (IntMap.fromList
+                            [ (getNodeId a, (forallNode, BindFlex))
+                            , (getNodeId b, (forallNode, BindFlex))
+                            ])
+                        (inferBindParents nodes)
+                constraint =
+                    emptyConstraint
+                        { cNodes = nodes
+                        , cInstEdges = [edge]
+                        , cBindParents = bindParents
+                        , cVarBounds = IntMap.fromList [(getNodeId b, Just a)]
+                        }
+                st0 =
+                    PresolutionState
+                        constraint
+                        (Presolution IntMap.empty)
+                        IntMap.empty
+                        7
+                        IntSet.empty
+                        IntMap.empty
+                        IntMap.empty
+                        IntMap.empty
+
+                isGraftToA op = case op of
+                    OpGraft _ n -> n == a
+                    _ -> False
+                isMergeBA op = case op of
+                    OpMerge n m -> n == b && m == a
+                    _ -> False
+                isWeakenA op = case op of
+                    OpWeaken n -> n == a
+                    _ -> False
+
+            case runPresolutionM st0 (processInstEdge edge) of
+                Left err -> expectationFailure ("processInstEdge failed: " ++ show err)
+                Right (_, st1) -> do
+                    ew <- case IntMap.lookup 0 (psEdgeWitnesses st1) of
+                        Nothing -> expectationFailure "Expected EdgeWitness for EdgeId 0" >> fail "missing EdgeWitness"
+                        Just ew0 -> pure ew0
+
+                    let InstanceWitness ops = ewWitness ew
+                        idx p = findIndex p ops
+
+                    case (idx isGraftToA, idx isMergeBA, idx isWeakenA) of
+                        (Just iG, Just iM, Just iW) -> do
+                            iG `shouldSatisfy` (< iM)
+                            iM `shouldSatisfy` (< iW)
+                        other ->
+                            expectationFailure ("Expected Graft(a), Merge(b,a), Weaken(a), got indices: " ++ show other ++ " ops: " ++ show ops)
 
     describe "Phase 3 — Witness normalization" $ do
         it "pushes Weaken after other ops on the binder" $ do
@@ -1176,23 +1158,30 @@ spec = describe "Phase 4 — Principal Presolution" $ do
 
                 nodes =
                     IntMap.fromList
-                        [ (0, TyVar a (GNodeId 1))
-                        , (1, TyVar b (GNodeId 1))
+                        [ (0, TyVar a)
+                        , (1, TyVar b)
                         , (2, TyArrow arrow2 b a) -- b -> a
                         , (3, TyArrow arrow1 a arrow2) -- a -> (b -> a)
-                        , (4, TyForall forallNode (GNodeId 1) (GNodeId 0) arrow1)
+                        , (4, TyForall forallNode arrow1)
                         , (5, TyExp expNode (ExpVarId 0) forallNode)
-                        , (6, TyVar t (GNodeId 0))
+                        , (6, TyVar t)
                         , (7, TyArrow targetArrow2 t t) -- t -> t
                         , (8, TyArrow targetArrow1 t targetArrow2) -- t -> (t -> t)
                         ]
 
                 edge = InstEdge (EdgeId 0) expNode targetArrow1
+                bindParents =
+                    IntMap.union
+                        (IntMap.fromList
+                            [ (getNodeId a, (forallNode, BindFlex))
+                            , (getNodeId b, (forallNode, BindFlex))
+                            ])
+                        (inferBindParents nodes)
                 constraint =
                     emptyConstraint
                         { cNodes = nodes
                         , cInstEdges = [edge]
-                        , cBindParents = inferBindParents nodes
+                        , cBindParents = bindParents
                         }
                 st0 =
                     PresolutionState
@@ -1200,6 +1189,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         (Presolution IntMap.empty)
                         IntMap.empty
                         9
+                        IntSet.empty
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
@@ -1279,9 +1269,9 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 rootId = NodeId 7
                 nodes =
                     IntMap.fromList
-                        [ (0, TyVar varId (GNodeId 1)) -- Bound at level 1
+                        [ (0, TyVar varId)
                         , (1, TyArrow arrowId varId varId)
-                        , (2, TyForall forallId (GNodeId 1) (GNodeId 0) arrowId)
+                        , (2, TyForall forallId arrowId)
                         , (3, TyBase targetDomId (BaseTy "int"))
                         , (4, TyBase targetCodId (BaseTy "int"))
                         , (5, TyArrow targetArrowId targetDomId targetCodId)
@@ -1289,11 +1279,16 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         , (7, TyArrow rootId expNodeId targetArrowId)
                         ]
                 edge = InstEdge (EdgeId 0) expNodeId targetArrowId
+                -- Make the forall non-vacuous under binding-edge binder enumeration:
+                -- bind the TyVar directly to the forall node (flex).
+                bindParents0 = inferBindParents nodes
+                bindParents =
+                    IntMap.insert (getNodeId varId) (forallId, BindFlex) bindParents0
                 constraint =
                     emptyConstraint
                         { cNodes = nodes
                         , cInstEdges = [edge]
-                        , cBindParents = inferBindParents nodes
+                        , cBindParents = bindParents
                         }
                 acyclicityRes =
                     AcyclicityResult
@@ -1313,32 +1308,42 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         (Just _, Just _) -> pure ()
                         _ -> expectationFailure "Nodes 2 and 5 should remain distinct"
 
-        it "returns compose (instantiate then forall) when forall levels differ" $ do
-            -- s · (forall@1 a. a) ≤ (forall@2 b. b)
-            -- Different levels mean we must instantiate the source binder (fresh
-            -- at level 2) and then rewrap with ExpForall at the target level.
-            -- The expected expansion is ExpCompose [ExpInstantiate [fresh],
-            -- ExpForall 2].
+        it "returns compose (instantiate then forall) when forall binder arity differs" $ do
+            -- s · (∀ a. a) ≤ (∀ b0 b1. b0 → b1)
+            -- Different binder counts mean we must instantiate the source binder(s)
+            -- and then rewrap with ExpForall matching the target's binder shape.
             let srcVarId = NodeId 0
                 srcForallId = NodeId 1
-                tgtVarId = NodeId 2
-                tgtForallId = NodeId 3
-                expNodeId = NodeId 4
+                tgtDomId = NodeId 2
+                tgtCodId = NodeId 3
+                tgtArrowId = NodeId 4
+                tgtForallId = NodeId 5
+                expNodeId = NodeId 6
 
                 nodes = IntMap.fromList
-                    [ (0, TyVar srcVarId (GNodeId 1))
-                    , (1, TyForall srcForallId (GNodeId 1) (GNodeId 0) srcVarId)
-                    , (2, TyVar tgtVarId (GNodeId 2))
-                    , (3, TyForall tgtForallId (GNodeId 2) (GNodeId 0) tgtVarId)
-                    , (4, TyExp expNodeId (ExpVarId 0) srcForallId)
+                    [ (0, TyVar srcVarId)
+                    , (1, TyForall srcForallId srcVarId)
+                    , (2, TyVar tgtDomId)
+                    , (3, TyVar tgtCodId)
+                    , (4, TyArrow tgtArrowId tgtDomId tgtCodId)
+                    , (5, TyForall tgtForallId tgtArrowId)
+                    , (6, TyExp expNodeId (ExpVarId 0) srcForallId)
                     ]
 
                 edge = InstEdge (EdgeId 0) expNodeId tgtForallId
+
+                -- Make the target forall bind both variables directly (flex) so
+                -- orderedBinders sees arity 2.
+                bindParents0 = inferBindParents nodes
+                bindParents =
+                    IntMap.insert (getNodeId tgtDomId) (tgtForallId, BindFlex) $
+                        IntMap.insert (getNodeId tgtCodId) (tgtForallId, BindFlex) bindParents0
+
                 constraint =
                     emptyConstraint
                         { cNodes = nodes
                         , cInstEdges = [edge]
-                        , cBindParents = inferBindParents nodes
+                        , cBindParents = bindParents
                         }
                 acyclicityRes = AcyclicityResult { arSortedEdges = [edge], arDepGraph = undefined }
 
@@ -1348,11 +1353,11 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                     case IntMap.lookup 0 exps of
                         Just (ExpCompose (ExpInstantiate args NE.:| rest)) -> do
                             length args `shouldBe` 1
-                            rest `shouldBe` [ExpForall (GNodeId 2 NE.:| [])]
+                            rest `shouldBe` [ExpForall (ForallSpec 2 [Nothing, Nothing] NE.:| [])]
                         Just other -> expectationFailure $ "Expected composed instantiate+forall, got " ++ show other
                         Nothing -> expectationFailure "No expansion found for Edge 0"
 
-        it "keeps identity when forall levels match and requests body unification" $ do
+        it "keeps identity when forall arity matches and requests body unification" $ do
             let srcVarId = NodeId 0
                 srcForallId = NodeId 1
                 tgtVarId = NodeId 2
@@ -1361,10 +1366,10 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 rootId = NodeId 5
                 nodes =
                     IntMap.fromList
-                        [ (0, TyVar srcVarId (GNodeId 1))
-                        , (1, TyForall srcForallId (GNodeId 1) (GNodeId 0) srcVarId)
-                        , (2, TyVar tgtVarId (GNodeId 1))
-                        , (3, TyForall tgtForallId (GNodeId 1) (GNodeId 0) tgtVarId)
+                        [ (0, TyVar srcVarId)
+                        , (1, TyForall srcForallId srcVarId)
+                        , (2, TyVar tgtVarId)
+                        , (3, TyForall tgtForallId tgtVarId)
                         , (4, TyExp expNodeId (ExpVarId 0) srcForallId)
                         , (5, TyArrow rootId expNodeId tgtForallId)
                         ]
@@ -1393,28 +1398,39 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         (Nothing, Nothing) -> expectationFailure "Both nodes missing?"
 
         it "rejects expansions that would point a binder back into its own body" $ do
-            -- Edge: s · (forall@1 a. a) ≤ forall@1 b. (s · (forall@1 a. a))
-            -- The requested body unification would point the bound var `a`
-            -- back into a structure containing the same expansion, which should
-            -- be rejected by the presolution occurs-check guard.
+            -- Edge: s · (∀a. a) ≤ ∀b. (b → s · (∀a. a))
+            --
+            -- Minimal expansion would keep identity and request a unification between the
+            -- source binder `a` and the target body. That unification would make `a`
+            -- reachable from itself (via the nested occurrence of s · (∀a. a)), so
+            -- presolution must reject it via occurs-check.
             let boundVarId = NodeId 0
                 srcForallId = NodeId 1
                 srcExpId = NodeId 2
-                tgtForallId = NodeId 3
+                tgtBinderId = NodeId 3
+                tgtBodyId = NodeId 4
+                tgtForallId = NodeId 5
 
                 nodes = IntMap.fromList
-                    [ (0, TyVar boundVarId (GNodeId 1))
-                    , (1, TyForall srcForallId (GNodeId 1) (GNodeId 0) boundVarId)
-                    , (2, TyExp srcExpId (ExpVarId 0) srcForallId)
-                    , (3, TyForall tgtForallId (GNodeId 1) (GNodeId 0) srcExpId)
+                    [ (getNodeId boundVarId, TyVar boundVarId)
+                    , (getNodeId srcForallId, TyForall srcForallId boundVarId)
+                    , (getNodeId srcExpId, TyExp srcExpId (ExpVarId 0) srcForallId)
+                    , (getNodeId tgtBinderId, TyVar tgtBinderId)
+                    , (getNodeId tgtBodyId, TyArrow tgtBodyId tgtBinderId srcExpId)
+                    , (getNodeId tgtForallId, TyForall tgtForallId tgtBodyId)
                     ]
 
                 edge = InstEdge (EdgeId 0) srcExpId tgtForallId
+                bindParents =
+                    IntMap.insert
+                        (getNodeId tgtBinderId)
+                        (tgtForallId, BindFlex)
+                        (inferBindParents nodes)
                 constraint =
                     emptyConstraint
                         { cNodes = nodes
                         , cInstEdges = [edge]
-                        , cBindParents = inferBindParents nodes
+                        , cBindParents = bindParents
                         }
                 acyclicityRes = AcyclicityResult { arSortedEdges = [edge], arDepGraph = undefined }
 
@@ -1441,7 +1457,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         , (3, TyBase tgtDomId (BaseTy "int"))
                         , (4, TyBase tgtCodId (BaseTy "int"))
                         , (5, TyArrow tgtArrowId tgtDomId tgtCodId)
-                        , (6, TyForall tgtForallId (GNodeId 3) (GNodeId 0) tgtArrowId)
+                        , (6, TyForall tgtForallId tgtArrowId)
                         , (7, TyExp expNodeId (ExpVarId 0) srcArrowId)
                         , (8, TyArrow rootId expNodeId tgtForallId)
                         ]
@@ -1458,16 +1474,13 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 Left err -> expectationFailure $ "Presolution failed: " ++ show err
                 Right PresolutionResult{ prEdgeExpansions = exps } ->
                     case IntMap.lookup 0 exps of
-                        Just (ExpForall (l NE.:| [])) -> l `shouldBe` GNodeId 3
+                        Just (ExpForall (s NE.:| [])) -> s `shouldBe` ForallSpec 0 []
                         Just other -> expectationFailure $ "Expected ExpForall, got " ++ show other
                         Nothing -> expectationFailure "No expansion found for Edge 0"
 
-        it "fails when target forall level is missing" $ do
-            -- s · (forall@1 a. a) ≤ (forall@2 b. b)
-            -- The target level 2 is missing from cGNodes, so instantiation should
-            -- fail fast with MissingGNode rather than silently allocating at an
-            -- unknown level. This guards against presolution inventing levels
-            -- that the acyclicity phase never created.
+        it "does not require target foralls to have a binding parent" $ do
+            -- Paper-faithful scope tracking uses binding edges. A forall node may be a
+            -- binding root (no parent) and presolution should still succeed.
             let srcVarId = NodeId 0
                 srcForallId = NodeId 1
                 tgtVarId = NodeId 2
@@ -1475,33 +1488,29 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 expNodeId = NodeId 4
 
                 nodes = IntMap.fromList
-                    [ (0, TyVar srcVarId (GNodeId 1))
-                    , (1, TyForall srcForallId (GNodeId 1) (GNodeId 0) srcVarId)
-                    , (2, TyVar tgtVarId (GNodeId 2))
-                    , (3, TyForall tgtForallId (GNodeId 2) (GNodeId 0) tgtVarId)
+                    [ (0, TyVar srcVarId)
+                    , (1, TyForall srcForallId srcVarId)
+                    , (2, TyVar tgtVarId)
+                    , (3, TyForall tgtForallId tgtVarId)
                     , (4, TyExp expNodeId (ExpVarId 0) srcForallId)
                     ]
 
                 edge = InstEdge (EdgeId 0) expNodeId tgtForallId
-                gnodes = IntMap.fromList [ (1, gNode 1) ]
                 constraint =
                     emptyConstraint
                         { cNodes = nodes
                         , cInstEdges = [edge]
-                        , cGNodes = gnodes
-                        , cGForest = [GNodeId 1]
                         , cBindParents = inferBindParents nodes
                         }
                 acyclicityRes = AcyclicityResult { arSortedEdges = [edge], arDepGraph = undefined }
 
             case computePresolution acyclicityRes constraint of
-                Left MissingGNode {} -> return ()
                 Left other -> expectationFailure $ "Unexpected error: " ++ show other
-                Right _ -> expectationFailure "Expected presolution failure due to missing G-node"
+                Right _ -> pure ()
 
     describe "Error Conditions" $ do
         it "reports ArityMismatch when merging ExpInstantiate with different lengths" $ do
-            let st0 = PresolutionState emptyConstraint (Presolution IntMap.empty) IntMap.empty 0 IntMap.empty IntMap.empty IntMap.empty
+            let st0 = PresolutionState emptyConstraint (Presolution IntMap.empty) IntMap.empty 0 IntSet.empty IntMap.empty IntMap.empty IntMap.empty
                 exp1 = ExpInstantiate [NodeId 1]
                 exp2 = ExpInstantiate [NodeId 1, NodeId 2]
 
@@ -1526,7 +1535,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                     , (1, TyBase bodyId (BaseTy "int"))
                     ]
                 constraint = emptyConstraint { cNodes = nodes }
-                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 2 IntMap.empty IntMap.empty IntMap.empty
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 2 IntSet.empty IntMap.empty IntMap.empty IntMap.empty
                 expansion = ExpInstantiate [NodeId 2] -- dummy arg
 
             case runPresolutionM st0 (applyExpansion expansion (nodes IntMap.! 0)) of
@@ -1540,15 +1549,15 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 boundId = NodeId 2
                 nodes = IntMap.fromList
                     [ (0, TyExp expNodeId (ExpVarId 0) forallId)
-                    , (1, TyForall forallId (GNodeId 1) (GNodeId 0) boundId)
-                    , (2, TyVar boundId (GNodeId 1))
+                    , (1, TyForall forallId boundId)
+                    , (2, TyVar boundId)
                     ]
                 constraint =
                     emptyConstraint
                         { cNodes = nodes
                         , cBindParents = inferBindParents nodes
                         }
-                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 3 IntMap.empty IntMap.empty IntMap.empty
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 3 IntSet.empty IntMap.empty IntMap.empty IntMap.empty
                 -- Forall has 1 bound var, but we provide 2 args
                 expansion = ExpInstantiate [NodeId 3, NodeId 4]
 
@@ -1566,11 +1575,11 @@ spec = describe "Phase 4 — Principal Presolution" $ do
             let nid = NodeId 0
                 nodes = IntMap.fromList [(0, TyBase nid (BaseTy "int"))]
                 constraint = emptyConstraint { cNodes = nodes }
-                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 1 IntMap.empty IntMap.empty IntMap.empty
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 1 IntSet.empty IntMap.empty IntMap.empty IntMap.empty
 
                 -- Construct an expansion: ExpCompose [ExpForall [1], ExpIdentity]
                 -- This will trigger the ExpCompose branch in applyExpansionOverNode
-                expansion = ExpCompose (ExpForall (GNodeId 1 NE.:| []) NE.:| [ExpIdentity])
+                expansion = ExpCompose (ExpForall (ForallSpec 0 [] NE.:| []) NE.:| [ExpIdentity])
 
             case runPresolutionM st0 (applyExpansion expansion (nodes IntMap.! 0)) of
                 Right (resId, _) -> do
@@ -1578,6 +1587,69 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                     -- TyBase -> TyForall(TyBase)
                     resId `shouldNotBe` nid
                 Left err -> expectationFailure $ "Expansion failed: " ++ show err
+
+        it "materializes ExpForall by rebinding binders + bounds" $ do
+            let domVarId = NodeId 0
+                codVarId = NodeId 1
+                arrowId = NodeId 2
+                expNodeId = NodeId 3
+                bndId = NodeId 4
+
+                nodes =
+                    IntMap.fromList
+                        [ (0, TyVar domVarId)
+                        , (1, TyVar codVarId)
+                        , (2, TyArrow arrowId domVarId codVarId)
+                        , (3, TyExp expNodeId (ExpVarId 0) arrowId)
+                        , (4, TyBase bndId (BaseTy "int"))
+                        ]
+                constraint =
+                    emptyConstraint
+                        { cNodes = nodes
+                        , cBindParents = inferBindParents nodes
+                        }
+                st0 =
+                    PresolutionState
+                        constraint
+                        (Presolution IntMap.empty)
+                        IntMap.empty
+                        5
+                        IntSet.empty
+                        IntMap.empty
+                        IntMap.empty
+                        IntMap.empty
+
+                forallSpec =
+                    ForallSpec
+                        { fsBinderCount = 2
+                        , fsBounds =
+                            [ Just (BoundBinder 1)
+                            , Just (BoundNode bndId)
+                            ]
+                        }
+                expansion = ExpForall (forallSpec NE.:| [])
+
+            case runPresolutionM st0 (applyExpansion expansion (nodes IntMap.! getNodeId expNodeId)) of
+                Left err -> expectationFailure $ "Expansion failed: " ++ show err
+                Right (forallId, st1) -> do
+                    let c1 = psConstraint st1
+                        nodes1 = cNodes c1
+                        bp1 = cBindParents c1
+                        vb1 = cVarBounds c1
+
+                    forallNode <- expectForall nodes1 forallId
+                    tnBody forallNode `shouldBe` arrowId
+
+                    IntMap.lookup (getNodeId arrowId) bp1 `shouldBe` Just (forallId, BindFlex)
+                    IntMap.lookup (getNodeId domVarId) bp1 `shouldBe` Just (forallId, BindFlex)
+                    IntMap.lookup (getNodeId codVarId) bp1 `shouldBe` Just (forallId, BindFlex)
+
+                    IntMap.lookup (getNodeId domVarId) vb1 `shouldBe` Just (Just codVarId)
+                    IntMap.lookup (getNodeId codVarId) vb1 `shouldBe` Just (Just bndId)
+
+                    case Binding.orderedBinders id c1 forallId of
+                        Left err -> expectationFailure $ "orderedBinders failed: " ++ show err
+                        Right bs -> bs `shouldBe` [domVarId, codVarId]
         it "handles multiple edges correctly" $ do
             let varId = NodeId 0
                 forallId = NodeId 1
@@ -1590,8 +1662,8 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 rootId = NodeId 8
                 nodes =
                     IntMap.fromList
-                        [ (0, TyVar varId (GNodeId 1))
-                        , (1, TyForall forallId (GNodeId 1) (GNodeId 1) varId)
+                        [ (0, TyVar varId)
+                        , (1, TyForall forallId varId)
                         , (2, TyBase target1Id (BaseTy "int"))
                         , (3, TyBase target2Id (BaseTy "bool"))
                         , (4, TyExp exp1Id (ExpVarId 1) forallId)
@@ -1630,8 +1702,8 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 rootId = NodeId 4
                 nodes =
                     IntMap.fromList
-                        [ (0, TyVar boundId (GNodeId 1))
-                        , (1, TyForall forallId (GNodeId 1) (GNodeId 1) boundId)
+                        [ (0, TyVar boundId)
+                        , (1, TyForall forallId boundId)
                         , (2, TyExp expNodeId (ExpVarId 0) forallId)
                         , (3, TyBase targetId (BaseTy "int"))
                         , (4, TyArrow rootId expNodeId targetId)
@@ -1663,20 +1735,17 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 rootId = NodeId 4
                 nodes =
                     IntMap.fromList
-                        [ (0, TyVar bound (GNodeId 1))
-                        , (1, TyForall forallId (GNodeId 1) (GNodeId 1) bound)
+                        [ (0, TyVar bound)
+                        , (1, TyForall forallId bound)
                         , (2, TyExp expId (ExpVarId 0) forallId)
                         , (3, TyBase targetId (BaseTy "int"))
                         , (4, TyArrow rootId expId targetId)
                         ]
                 edge = InstEdge (EdgeId 0) expId targetId
-                gnodes = IntMap.fromList [(0, gNode 0), (1, gNode 1)]
                 constraint =
                     emptyConstraint
                         { cNodes = nodes
                         , cInstEdges = [edge]
-                        , cGNodes = gnodes
-                        , cGForest = [GNodeId 0]
                         , cBindParents = inferBindParents nodes
                         }
                 acyclicityRes = AcyclicityResult { arSortedEdges = [edge], arDepGraph = undefined }
@@ -1701,9 +1770,9 @@ spec = describe "Phase 4 — Principal Presolution" $ do
 
                 nodes =
                     IntMap.fromList
-                        [ (getNodeId n, TyVar n (GNodeId 0))
-                        , (getNodeId m, TyVar m (GNodeId 0))
-                        , (getNodeId binder, TyForall binder (GNodeId 0) (GNodeId 0) n)
+                        [ (getNodeId n, TyVar n)
+                        , (getNodeId m, TyVar m)
+                        , (getNodeId binder, TyForall binder n)
                         , (getNodeId rootArrow, TyArrow rootArrow binder m)
                         ]
 
@@ -1726,6 +1795,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         (Presolution IntMap.empty)
                         IntMap.empty
                         6
+                        IntSet.empty
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
@@ -1736,7 +1806,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 Right (trace, st1) -> do
                     trace `shouldBe` [n]
                     let uf = psUnionFind st1
-                        nC = frWithUF uf n
+                        nC = UF.frWith uf n
                     Binding.lookupBindParent (psConstraint st1) nC `shouldBe` Just (rootArrow, BindFlex)
 
         it "records OpRaise for exactly the raised node (no spray across the UF class)" $ do
@@ -1755,11 +1825,11 @@ spec = describe "Phase 4 — Principal Presolution" $ do
 
                 nodes =
                     IntMap.fromList
-                        [ (getNodeId a, TyVar a (GNodeId 0))
+                        [ (getNodeId a, TyVar a)
                         -- b is a term-dag root (unbound) but is unioned into a's class.
-                        , (getNodeId b, TyVar b (GNodeId 0))
-                        , (getNodeId c, TyVar c (GNodeId 0))
-                        , (getNodeId forallNode, TyForall forallNode (GNodeId 0) (GNodeId 0) a)
+                        , (getNodeId b, TyVar b)
+                        , (getNodeId c, TyVar c)
+                        , (getNodeId forallNode, TyForall forallNode a)
                         , (getNodeId rootArrow, TyArrow rootArrow forallNode c)
                         ]
 
@@ -1785,6 +1855,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         (Presolution IntMap.empty)
                         uf
                         6
+                        IntSet.empty
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
@@ -1809,28 +1880,13 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 y = NodeId 5
                 targetArrow = NodeId 6
 
-                g0 =
-                    GNode
-                        { gnodeId = GNodeId 0
-                        , gParent = Nothing
-                        , gBinds = [(y, Nothing)]
-                        , gChildren = [GNodeId 1]
-                        }
-                g1 =
-                    GNode
-                        { gnodeId = GNodeId 1
-                        , gParent = Just (GNodeId 0)
-                        , gBinds = [(b, Nothing)]
-                        , gChildren = []
-                        }
-
                 nodes =
                     IntMap.fromList
-                        [ (1, TyVar b (GNodeId 1))
+                        [ (1, TyVar b)
                         , (2, TyArrow arrow1 b b)
-                        , (3, TyForall forallNode (GNodeId 1) (GNodeId 0) arrow1)
+                        , (3, TyForall forallNode arrow1)
                         , (4, TyExp expNode (ExpVarId 0) forallNode)
-                        , (5, TyVar y (GNodeId 0))
+                        , (5, TyVar y)
                         , (6, TyArrow targetArrow y y)
                         ]
 
@@ -1839,8 +1895,6 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 constraint =
                     emptyConstraint
                         { cNodes = nodes
-                        , cGNodes = IntMap.fromList [(0, g0), (1, g1)]
-                        , cGForest = [GNodeId 0]
                         , cInstEdges = [edge]
                         }
                 st0 =
@@ -1849,6 +1903,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         (Presolution IntMap.empty)
                         IntMap.empty
                         7
+                        IntSet.empty
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
@@ -1872,28 +1927,13 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 y = NodeId 5
                 targetArrow = NodeId 6
 
-                g0 =
-                    GNode
-                        { gnodeId = GNodeId 0
-                        , gParent = Nothing
-                        , gBinds = [(y, Nothing)]
-                        , gChildren = [GNodeId 1]
-                        }
-                g1 =
-                    GNode
-                        { gnodeId = GNodeId 1
-                        , gParent = Just (GNodeId 0)
-                        , gBinds = [(b, Nothing)]
-                        , gChildren = []
-                        }
-
                 nodes =
                     IntMap.fromList
-                        [ (1, TyVar b (GNodeId 1))
+                        [ (1, TyVar b)
                         , (2, TyArrow arrow1 b b)
-                        , (3, TyForall forallNode (GNodeId 1) (GNodeId 0) arrow1)
+                        , (3, TyForall forallNode arrow1)
                         , (4, TyExp expNode (ExpVarId 0) forallNode)
-                        , (5, TyVar y (GNodeId 0))
+                        , (5, TyVar y)
                         , (6, TyArrow targetArrow y y)
                         ]
 
@@ -1911,8 +1951,6 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 constraint =
                     emptyConstraint
                         { cNodes = nodes
-                        , cGNodes = IntMap.fromList [(0, g0), (1, g1)]
-                        , cGForest = [GNodeId 0]
                         , cInstEdges = [edge]
                         , cBindParents = bindParents
                         }
@@ -1922,6 +1960,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         (Presolution IntMap.empty)
                         IntMap.empty
                         7
+                        IntSet.empty
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
@@ -1938,7 +1977,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                     -- Verify the binding tree is still valid
                     let finalConstraint = psConstraint st1
                         uf = psUnionFind st1
-                    Binding.checkBindingTreeUnder (frWithUF uf) finalConstraint `shouldBe` Right ()
+                    Binding.checkBindingTreeUnder (UF.frWith uf) finalConstraint `shouldBe` Right ()
 
         it "elides operations under rigid binders" $ do
             -- Test case: When a node is under a rigid binder, operations on it
@@ -1953,29 +1992,14 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 y = NodeId 5
                 targetArrow = NodeId 6
 
-                g0 =
-                    GNode
-                        { gnodeId = GNodeId 0
-                        , gParent = Nothing
-                        , gBinds = [(y, Nothing)]
-                        , gChildren = [GNodeId 1]
-                        }
-                g1 =
-                    GNode
-                        { gnodeId = GNodeId 1
-                        , gParent = Just (GNodeId 0)
-                        , gBinds = [(a, Nothing)]
-                        , gChildren = []
-                        }
-
                 nodes =
                     IntMap.fromList
-                        [ (0, TyVar a (GNodeId 1))
+                        [ (0, TyVar a)
                         , (1, TyBase intNode (BaseTy "Int"))
                         , (2, TyArrow innerArrow a intNode)
-                        , (3, TyForall forallNode (GNodeId 1) (GNodeId 0) innerArrow)
+                        , (3, TyForall forallNode innerArrow)
                         , (4, TyExp expNode (ExpVarId 0) forallNode)
-                        , (5, TyVar y (GNodeId 0))
+                        , (5, TyVar y)
                         , (6, TyArrow targetArrow y intNode)
                         ]
 
@@ -1992,8 +2016,6 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 constraint =
                     emptyConstraint
                         { cNodes = nodes
-                        , cGNodes = IntMap.fromList [(0, g0), (1, g1)]
-                        , cGForest = [GNodeId 0]
                         , cInstEdges = [edge]
                         , cBindParents = bindParents
                         }
@@ -2003,6 +2025,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         (Presolution IntMap.empty)
                         IntMap.empty
                         7
+                        IntSet.empty
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
@@ -2042,12 +2065,12 @@ spec = describe "Phase 4 — Principal Presolution" $ do
 
                 nodes =
                     IntMap.fromList
-                        [ (getNodeId bv, TyVar bv (GNodeId 1))
+                        [ (getNodeId bv, TyVar bv)
                         , (getNodeId innerArrow, TyArrow innerArrow bv bv)
                         , (getNodeId outerArrow, TyArrow outerArrow innerArrow bv)
-                        , (getNodeId forallNode, TyForall forallNode (GNodeId 1) (GNodeId 0) outerArrow)
+                        , (getNodeId forallNode, TyForall forallNode outerArrow)
                         , (getNodeId expNode, TyExp expNode (ExpVarId 0) forallNode)
-                        , (getNodeId y, TyVar y (GNodeId 0))
+                        , (getNodeId y, TyVar y)
                         , (getNodeId targetInnerArrow, TyArrow targetInnerArrow y y)
                         , (getNodeId targetOuterArrow, TyArrow targetOuterArrow targetInnerArrow y)
                         , (getNodeId rootArrow, TyArrow rootArrow expNode targetOuterArrow)
@@ -2081,6 +2104,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         (Presolution IntMap.empty)
                         IntMap.empty
                         10
+                        IntSet.empty
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
@@ -2120,10 +2144,10 @@ spec = describe "Phase 4 — Principal Presolution" $ do
 
                 nodes =
                     IntMap.fromList
-                        [ (getNodeId a, TyVar a (GNodeId 0))
-                        , (getNodeId b, TyVar b (GNodeId 0))
-                        , (getNodeId p1, TyForall p1 (GNodeId 0) (GNodeId 0) a)
-                        , (getNodeId p2, TyForall p2 (GNodeId 0) (GNodeId 0) b)
+                        [ (getNodeId a, TyVar a)
+                        , (getNodeId b, TyVar b)
+                        , (getNodeId p1, TyForall p1 a)
+                        , (getNodeId p2, TyForall p2 b)
                         , (getNodeId r, TyArrow r p1 p2)
                         ]
 
@@ -2147,6 +2171,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         (Presolution IntMap.empty)
                         IntMap.empty
                         5
+                        IntSet.empty
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
@@ -2181,29 +2206,14 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 y = NodeId 5
                 targetArrow = NodeId 6
 
-                g0 =
-                    GNode
-                        { gnodeId = GNodeId 0
-                        , gParent = Nothing
-                        , gBinds = [(y, Nothing)]
-                        , gChildren = [GNodeId 1]
-                        }
-                g1 =
-                    GNode
-                        { gnodeId = GNodeId 1
-                        , gParent = Just (GNodeId 0)
-                        , gBinds = [(a, Nothing)]
-                        , gChildren = []
-                        }
-
                 nodes =
                     IntMap.fromList
-                        [ (0, TyVar a (GNodeId 1))
+                        [ (0, TyVar a)
                         , (1, TyBase intNode (BaseTy "Int"))
                         , (2, TyArrow arrow a intNode)
-                        , (3, TyForall forallNode (GNodeId 1) (GNodeId 0) arrow)
+                        , (3, TyForall forallNode arrow)
                         , (4, TyExp expNode (ExpVarId 0) forallNode)
-                        , (5, TyVar y (GNodeId 0))
+                        , (5, TyVar y)
                         , (6, TyArrow targetArrow y intNode)
                         ]
 
@@ -2219,8 +2229,6 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 constraint =
                     emptyConstraint
                         { cNodes = nodes
-                        , cGNodes = IntMap.fromList [(0, g0), (1, g1)]
-                        , cGForest = [GNodeId 0]
                         , cInstEdges = [edge]
                         , cBindParents = bindParents
                         }
@@ -2230,6 +2238,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         (Presolution IntMap.empty)
                         IntMap.empty
                         7
+                        IntSet.empty
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
@@ -2240,7 +2249,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                     let finalConstraint = psConstraint st1
                         uf = psUnionFind st1
                     -- The binding tree should still be valid after presolution (up to UF).
-                    Binding.checkBindingTreeUnder (frWithUF uf) finalConstraint `shouldBe` Right ()
+                    Binding.checkBindingTreeUnder (UF.frWith uf) finalConstraint `shouldBe` Right ()
 
         it "replay: applying recorded OpRaise reproduces presolution binding parents" $ property $
             forAll (choose (1, 10)) $ \leftDepth ->
@@ -2253,13 +2262,13 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         rightVarId = rightStart + rightDepth
 
                         leftForalls =
-                            [ (nid, TyForall (NodeId nid) (GNodeId 0) (GNodeId 0) (NodeId body))
+                            [ (nid, TyForall (NodeId nid) (NodeId body))
                             | (k, nid) <- zip [0 ..] [leftStart .. leftStart + leftDepth - 1]
                             , let body = if k == leftDepth - 1 then leftVarId else nid + 1
                             ]
 
                         rightForalls =
-                            [ (nid, TyForall (NodeId nid) (GNodeId 0) (GNodeId 0) (NodeId body))
+                            [ (nid, TyForall (NodeId nid) (NodeId body))
                             | (k, nid) <- zip [0 ..] [rightStart .. rightStart + rightDepth - 1]
                             , let body = if k == rightDepth - 1 then rightVarId else nid + 1
                             ]
@@ -2270,8 +2279,8 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                                 ]
                                     ++ leftForalls
                                     ++ rightForalls
-                                    ++ [ (leftVarId, TyVar (NodeId leftVarId) (GNodeId 0))
-                                       , (rightVarId, TyVar (NodeId rightVarId) (GNodeId 0))
+                                    ++ [ (leftVarId, TyVar (NodeId leftVarId))
+                                       , (rightVarId, TyVar (NodeId rightVarId))
                                        ]
 
                         bindParents =
@@ -2306,6 +2315,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                                 (Presolution IntMap.empty)
                                 IntMap.empty
                                 (rightVarId + 1)
+                                IntSet.empty
                                 IntMap.empty
                                 IntMap.empty
                                 IntMap.empty
@@ -2334,7 +2344,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                                     expectationFailure ("replay failed: " ++ show err)
                                 Right replayed -> do
                                     let uf = psUnionFind st1
-                                        canonical = frWithUF uf
+                                        canonical = UF.frWith uf
                                     case ( Binding.canonicalizeBindParentsUnder canonical replayed
                                          , Binding.canonicalizeBindParentsUnder canonical finalConstraint
                                          ) of

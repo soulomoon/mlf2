@@ -92,7 +92,7 @@ forallSpecFromForall
 `forallSpecFromForall` uses `orderedBinders` to enumerate binders and
 `VarStore.lookupVarBound` to collect bounds in the same order. Bounds that
 point at another binder are encoded as `BoundBinder index` so `ExpForall` can
-remap them to fresh binders.
+remap them onto the binders it introduces/rebinds.
 
 `Expansion` changes to:
 
@@ -133,10 +133,15 @@ Presolution uses binding edges to find binders and create quantifiers:
   therefore exclude inert binders.
 - `decideMinimalExpansion` compares binder counts instead of level IDs and
   builds `ForallSpec` via `forallSpecFromForall`.
-- `applyExpansion` for `ExpForall` allocates fresh binder variables and sets:
-  - binding parent of each new binder to the new `TyForall` (flex)
-  - bounds from `ForallSpec`, remapping `BoundBinder` to the fresh binders
-  - binding parent of the body to the new `TyForall` (flex)
+- `applyExpansion` for `ExpForall` introduces `TyForall` wrappers and then:
+  - binds/rebinds reachable binder vars to the new `TyForall` (flex), choosing
+    candidates by ≺ ordering from the forall body
+  - applies bounds from `ForallSpec`, remapping `BoundBinder` indices onto the
+    chosen binders
+  - if there are fewer binder candidates than `fsBinderCount` (e.g. before
+    unifying with the target forall), defers the missing binders/bounds to later
+    unification instead of allocating disconnected “fresh” binders (which would
+    violate binding-tree invariants)
 
 ### 5) Normalize and Solve
 - Forall equality checks use binder counts (and optionally bounds) rather than
@@ -178,7 +183,7 @@ Prefer property tests for invariants and small regressions for integration:
      binder-to-binder remapping.
 
 3) **Presolution expansion regression**
-   - `ExpForall` introduces fresh binder vars with expected bounds and binding
+   - `ExpForall` rebinds reachable binders with expected bounds and binding
      parents.
 
 4) **Pipeline regression**

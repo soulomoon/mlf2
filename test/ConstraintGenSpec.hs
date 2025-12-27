@@ -6,9 +6,10 @@ import Data.Maybe (catMaybes)
 import qualified Data.IntMap.Strict as IntMap
 import Test.Hspec
 
-import MLF.Binding (checkBindingTree)
-import MLF.ConstraintGen (AnnExpr (..))
+import MLF.Binding.Tree (checkBindingTree)
+import MLF.Frontend.ConstraintGen (AnnExpr (..))
 import MyLib
+import SpecUtil (expectRight, lookupNode)
 
 spec :: Spec
 spec = describe "Phase 1 — Constraint generation" $ do
@@ -279,22 +280,13 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 let nodes = IntMap.elems (cNodes (crConstraint result))
                     arrowNodes = [n | n@TyArrow {} <- nodes]
                     varNodes = [n | n@TyVar {} <- nodes]
-                    expNodes = [n | n@TyExp {} <- nodes] -- EVar usage adds a fresh TyExp
+                    expNodes = [n | n@TyExp {} <- nodes]
 
-                -- We should have 1 Arrow, 1 Param Var, and 1 Exp node (for the usage of x)
+                -- Monomorphic bindings (lambda parameters) do not introduce `TyExp`.
                 case (arrowNodes, varNodes, expNodes) of
-                    ([TyArrow { tnDom = dom, tnCod = cod }], [TyVar { tnId = varId }], [TyExp { tnId = expId, tnBody = bodyId }]) -> do
+                    ([TyArrow { tnDom = dom, tnCod = cod }], [TyVar { tnId = varId }], []) -> do
                         dom `shouldBe` varId
-                        -- The codomain is the expansion of the parameter variable
-                        -- But wait, ELam "x" (EVar "x")
-                        -- buildExpr ELam: allocVar (param). bind x -> param. buildExpr body.
-                        -- buildExpr EVar "x": lookup param. allocExpNode param. return expNode.
-                        -- So body result is expNode.
-                        -- Arrow is param -> expNode.
-                        -- So tnDom = varId. tnCod = expId.
-                        -- tnBody of expNode = varId.
-                        expId `shouldBe` cod
-                        bodyId `shouldBe` varId
+                        cod `shouldBe` varId
                     _ ->
                         expectationFailure $ "Unexpected lambda nodes: " ++ show (length arrowNodes, length varNodes, length expNodes)
 
@@ -302,7 +294,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
         -- Verify that application translation produces a single instantiation edge
         -- s τ ≤ (Int → α) where the left-hand side points to the let-generalized
         -- scheme (the TyExp node) and the right-hand side is the arrow demanded by
-        -- the call site. Note [Expansion nodes] in 'MLF.Types' explains how the
+        -- the call site. Note [Expansion nodes] in 'MLF.Constraint.Types' explains how the
         -- solver processes these edges.
         it "emits instantiation edges for applications" $ do
             let expr =
@@ -313,8 +305,13 @@ spec = describe "Phase 1 — Constraint generation" $ do
                     nodes = cNodes constraint
                     insts = cInstEdges constraint
                 case insts of
-                    [edge] -> do
-                        lhs <- lookupNode nodes (instLeft edge)
+                    [edge0, edge1] -> do
+                        let (funEdge, argEdge) =
+                                case IntMap.lookup (getNodeId (instLeft edge0)) nodes of
+                                    Just TyExp{} -> (edge0, edge1)
+                                    _ -> (edge1, edge0)
+
+                        lhs <- lookupNode nodes (instLeft funEdge)
                         case lhs of
                             -- The usage of 'f' creates a TyExp wrapping the bound Forall
                             TyExp { tnBody = bodyId } -> do
@@ -325,27 +322,28 @@ spec = describe "Phase 1 — Constraint generation" $ do
                                         case inner of
                                             TyArrow { tnDom = domId, tnCod = codId } -> do
                                                 -- domId/codId are the bound variable.
-                                                -- But codId is actually the Expansion of that var (from EVar "x")
-                                                -- So domId = var. codId = TyExp(var).
                                                 domNode <- lookupNode nodes domId
                                                 codNode <- lookupNode nodes codId
                                                 case (domNode, codNode) of
-                                                    (TyVar { tnId = domVar }, TyExp { tnBody = expBody }) ->
-                                                        domVar `shouldBe` expBody
-                                                    other -> expectationFailure $ "Lambda arrow points to unexpected nodes: " ++ show other
+                                                    (TyVar { tnId = domVar }, TyVar { tnId = codVar }) -> do
+                                                        domVar `shouldBe` codVar
+                                                    other ->
+                                                        expectationFailure $ "Lambda arrow points to unexpected nodes: " ++ show other
                                             other -> expectationFailure $ "Forall body is not a lambda arrow: " ++ show other
                                     other -> expectationFailure $ "Expansion body is not a Forall: " ++ show other
                             other -> expectationFailure $ "Instantiation left-hand side is not an expansion: " ++ show other
-                        rhs <- lookupNode nodes (instRight edge)
+                        rhs <- lookupNode nodes (instRight funEdge)
                         case rhs of
                             TyArrow { tnDom = dom, tnCod = cod } -> do
-                                domNode <- lookupNode nodes dom
+                                -- Argument instantiation edge should target the domain node.
+                                instRight argEdge `shouldBe` dom
+                                domNode <- lookupNode nodes (instLeft argEdge)
                                 case domNode of
                                     TyBase { tnBase = BaseTy name } -> name `shouldBe` "Int"
                                     other -> expectationFailure $ "Argument node is not the Int literal: " ++ show other
                                 cod `shouldBe` crRoot result
                             other -> expectationFailure $ "Instantiation right-hand side is not an arrow: " ++ show other
-                    other -> expectationFailure $ "Expected a single instantiation edge, saw " ++ show (length other)
+                    other -> expectationFailure $ "Expected two instantiation edges, saw " ++ show (length other)
 
         it "connects lambda applications directly to arrow nodes" $ do
             let expr = EApp (ELam "x" (EVar "x")) (ELit (LInt 0))
@@ -353,18 +351,23 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 let constraint = crConstraint result
                     nodes = cNodes constraint
                 case cInstEdges constraint of
-                    [edge] -> do
-                        lhs <- lookupNode nodes (instLeft edge)
+                    [edge0, edge1] -> do
+                        let (funEdge, _argEdge) =
+                                case IntMap.lookup (getNodeId (instLeft edge0)) nodes of
+                                    Just TyArrow{} -> (edge0, edge1)
+                                    _ -> (edge1, edge0)
+                        lhs <- lookupNode nodes (instLeft funEdge)
                         case lhs of
                             TyArrow {} -> pure ()
                             other -> expectationFailure $ "Instantiation left-hand side is not an arrow: " ++ show other
-                    other -> expectationFailure $ "Expected single instantiation edge, saw " ++ show (length other)
+                    other -> expectationFailure $ "Expected two instantiation edges, saw " ++ show (length other)
 
         -- Even when an immediately applied lambda uses its argument multiple
         -- times (here via (\f -> let tmp = f 1 in f True) (\x -> x)), the
         -- instantiation edges should still point at the same parameter TyVar
-        -- (the λ argument) and that parameter stays bound at the caller level
-        -- g₀. No child G-node should appear because nothing was let-generalized.
+        -- (the λ argument) and that parameter stays bound at the caller binder
+        -- g₀; it is not rebound under any let-introduced binder because lambda
+        -- parameters are monomorphic.
         it "reuses the same arrow for multiple immediate lambda applications" $ do
             let expr =
                     EApp
@@ -378,43 +381,38 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 let constraint = crConstraint result
                     nodes = cNodes constraint
                     insts = cInstEdges constraint
-                literalInsts <- do
+                let isArgEdgeForDom dom edge =
+                        instRight edge == dom && case IntMap.lookup (getNodeId (instLeft edge)) nodes of
+                            Just TyBase{} -> True
+                            _ -> False
+                literalFunEdges <- do
                     candidateSets <-
                         mapM
                             (\edge -> do
                                 rhs <- lookupNode nodes (instRight edge)
                                 case rhs of
-                                    TyArrow { tnDom = dom } -> do
-                                        domNode <- lookupNode nodes dom
-                                        case domNode of
-                                            TyBase {} -> pure (Just edge)
-                                            _ -> pure Nothing
+                                    TyArrow { tnDom = dom } ->
+                                        pure $
+                                            if any (isArgEdgeForDom dom) insts
+                                                then Just edge
+                                                else Nothing
                                     _ -> pure Nothing
                             )
                             insts
                     pure (catMaybes candidateSets)
-                length literalInsts `shouldBe` 2
-                let lhsIds = map instLeft literalInsts
-                -- Now that we wrap usages in fresh TyExp nodes, the LHS IDs will be different!
-                -- They will be distinct TyExp nodes wrapping the same underlying parameter variable.
-                length (nub lhsIds) `shouldBe` 2
-
-                -- Verify they wrap the same parameter
-                let checkParam lhsId = do
+                length literalFunEdges `shouldBe` 2
+                let lhsIds = map instLeft literalFunEdges
+                -- `f` is a lambda parameter, so its uses are monomorphic and do not
+                -- allocate fresh `TyExp` nodes per occurrence.
+                length (nub lhsIds) `shouldBe` 1
+                case lhsIds of
+                    (lhsId:_) -> do
                         lhs <- lookupNode nodes lhsId
                         case lhs of
-                            TyExp { tnBody = bodyId } -> pure bodyId
-                            _ -> expectationFailure "Expected TyExp" >> pure (error "unreachable")
-
-                paramIds <- mapM checkParam lhsIds
-                length (nub paramIds) `shouldBe` 1
-
-                paramVar <- case paramIds of
-                    (paramId:_) -> lookupNode nodes paramId
-                    [] -> expectationFailure "Expected parameter ids" >> pure (error "unreachable")
-                case paramVar of
-                    TyVar {} -> pure ()
-                    other -> expectationFailure $ "Instantiation left-hand side is not a parameter TyVar: " ++ show other
+                            TyVar{} -> pure ()
+                            other ->
+                                expectationFailure $ "Instantiation left-hand side is not a parameter TyVar: " ++ show other
+                    [] -> expectationFailure "Expected instantiation edges"
 
     describe "Binding edges" $ do
         it "does not emit instantiation edges for unused let bindings" $ do
@@ -496,15 +494,15 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 checkBindingTree (crConstraint result) `shouldBe` Right ()
 
     describe "Expansion nodes" $ do
-        -- Generalized lets expose a single expansion node s · τ that every call
-        -- site reuses. For
+        -- Generalized lets expose a shared scheme node (a `TyForall` anchor). Each
+        -- call site wraps that scheme in its own expansion node `s · g` (`TyExp`).
+        -- For
         --   let f = λx.x in
         --     let tmp = f 1
         --     in  f True
-        -- both applications of f must point at the same 'TyExp' node on the left
-        -- of their instantiation edges, proving that Phase 1 does not duplicate
-        -- schemes per use. See Note [Expansion nodes] for how s · τ is later
-        -- instantiated.
+        -- both applications of f must therefore have distinct `TyExp` nodes on the
+        -- left of their function-position instantiation edges, but those `TyExp`s
+        -- must wrap the same underlying `TyForall` node (the shared scheme).
         it "shares the same expansion node across multiple instantiations of a let-bound value" $ do
             let lam = ELam "x" (EVar "x")
                 expr =
@@ -513,25 +511,28 @@ spec = describe "Phase 1 — Constraint generation" $ do
                             (EApp (EVar "f") (ELit (LInt 1)))
                             (EApp (EVar "f") (ELit (LBool True)))
             expectRight (inferConstraintGraph expr) $ \result -> do
-                let insts = cInstEdges (crConstraint result)
-                -- Should contain 2 edges for the applications of 'f'
-                -- Plus 2 edges for the usages of 'x' inside the lambda? No, inside 'lam' x is used once.
-                -- Let's trace 'f' usages.
-                -- EVar "f" -> allocExpNode -> TyExp1(Forall(lam))
-                -- EVar "f" -> allocExpNode -> TyExp2(Forall(lam))
-                -- So inst edges will have different LHS.
-                length insts `shouldBe` 2
-                length (nub (map instLeft insts)) `shouldBe` 2
+                let constraint = crConstraint result
+                    insts = cInstEdges constraint
+                    nodes = cNodes constraint
+                    isTyExpLeft e =
+                        case IntMap.lookup (getNodeId (instLeft e)) nodes of
+                            Just TyExp{} -> True
+                            _ -> False
+                    funEdges = filter isTyExpLeft insts
+                -- Each application emits two instantiation edges (fun + arg). We
+                -- only care about the function-position edges, which should have a
+                -- TyExp node on the left.
+                length funEdges `shouldBe` 2
+                length (nub (map instLeft funEdges)) `shouldBe` 2
 
                 -- But they should wrap the same underlying Forall node
-                let nodes = cNodes (crConstraint result)
                 let checkBody lhsId = do
                         lhs <- lookupNode nodes lhsId
                         case lhs of
                             TyExp { tnBody = bodyId } -> pure bodyId
                             _ -> expectationFailure "Expected TyExp" >> pure (error "unreachable")
 
-                bodyIds <- mapM checkBody (map instLeft insts)
+                bodyIds <- mapM checkBody (map instLeft funEdges)
                 length (nub bodyIds) `shouldBe` 1
 
         it "allocates distinct expansion variables for independent lets" $ do
@@ -562,18 +563,25 @@ spec = describe "Phase 1 — Constraint generation" $ do
                             ELet "b" (EApp (EVar "f") (ELit (LBool True)))
                                 (EApp (EVar "f") (ELit (LString "ok")))
             expectRight (inferConstraintGraph expr) $ \result -> do
-                let insts = cInstEdges (crConstraint result)
-                length insts `shouldBe` 3
-                length (nub (map instLeft insts)) `shouldBe` 3 -- Each usage has fresh TyExp
+                let constraint = crConstraint result
+                    insts = cInstEdges constraint
+                    nodes = cNodes constraint
+                    isTyExpLeft e =
+                        case IntMap.lookup (getNodeId (instLeft e)) nodes of
+                            Just TyExp{} -> True
+                            _ -> False
+                    funEdges = filter isTyExpLeft insts
+                length insts `shouldBe` 6
+                length funEdges `shouldBe` 3
+                length (nub (map instLeft funEdges)) `shouldBe` 3 -- Each usage has fresh TyExp
 
                 -- Verify same underlying source
-                let nodes = cNodes (crConstraint result)
                 let checkBody lhsId = do
                         lhs <- lookupNode nodes lhsId
                         case lhs of
                             TyExp { tnBody = bodyId } -> pure bodyId
                             _ -> expectationFailure "Expected TyExp" >> pure (error "unreachable")
-                bodyIds <- mapM checkBody (map instLeft insts)
+                bodyIds <- mapM checkBody (map instLeft funEdges)
                 length (nub bodyIds) `shouldBe` 1
 
     describe "Higher-order structure" $ do
@@ -584,18 +592,4 @@ spec = describe "Phase 1 — Constraint generation" $ do
                     nodes = IntMap.elems (cNodes constraint)
                     arrowNodes = [n | n@TyArrow {} <- nodes]
                 length arrowNodes `shouldSatisfy` (>= 2)
-                cInstEdges constraint `shouldSatisfy` ((== 1) . length)
-
-expectRight :: (Show e) => Either e a -> (a -> Expectation) -> Expectation
-expectRight value k =
-    case value of
-        Left err -> expectationFailure $ "Expected success, but got: " ++ show err
-        Right result -> k result
-
-lookupNode :: IntMap.IntMap TyNode -> NodeId -> IO TyNode
-lookupNode table nid =
-    case IntMap.lookup (getNodeId nid) table of
-        Just node -> pure node
-        Nothing -> do
-            expectationFailure $ "Missing node: " ++ show nid
-            pure (error "unreachable: missing TyNode")
+                cInstEdges constraint `shouldSatisfy` ((== 2) . length)

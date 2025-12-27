@@ -50,92 +50,92 @@
     - **Verification:** `cabal test --test-show-details=direct --match "/ConstraintGen/.*forall/"`
     - _Requirements: 3.3_
 
-- [ ] 3. Expansion representation migration
-  - [ ] 3.1 Update `Expansion` to use `ExpForall (NonEmpty ForallSpec)`
+- [x] 3. Expansion representation migration
+  - [x] 3.1 Update `Expansion` to use `ExpForall (NonEmpty ForallSpec)`
     - Update `src/MLF/Types.hs` and adjust pattern matches in `MLF.Presolution` + `MLF.Elab`
     - Keep behavior identical except for the new payload
     - **Verification:** `cabal build`
     - _Requirements: 4.1_
-  - [ ] 3.2 Build `ForallSpec` in `decideMinimalExpansion`
+  - [x] 3.2 Build `ForallSpec` in `decideMinimalExpansion`
     - Replace level comparisons with binder-count comparisons using `forallSpecFromForall`
-    - Add regression test in `test/PresolutionSpec.hs` for `forall` mismatch -> `ExpCompose`
-    - **Verification:** `cabal test --test-show-details=direct --match "/Presolution/.*compose/"`
+    - Add regression test in `test/PresolutionSpec.hs` for `forall` binder-arity mismatch -> `ExpCompose`
+    - **Verification:** `cabal --config-file=.cabal-config test --test-show-details=direct --test-options='--match compose'`
     - _Requirements: 4.1_
-  - [ ] 3.3 Apply `ExpForall` with bound remapping
-    - Update `applyExpansion` and `applyExpansionTraced` to create `TyForall` nodes and fresh binder vars
-    - Set binding parents (binders + body) to the new `TyForall`
-    - Apply `BoundBinder` references to the fresh binder vars
+  - [x] 3.3 Apply `ExpForall` with bound remapping
+    - Update `applyExpansion`/`applyExpansionTraced`/edge-traced variants to create `TyForall` nodes
+    - Rebind existing reachable binder vars to the new `TyForall` (paper Q(n)); avoid allocating disconnected binders (violates binding-tree invariants)
+    - Apply `BoundBinder` references onto the chosen binders; if the body does not yet contain enough candidates, defer missing binders/bounds to later unification with the target forall
     - Add a regression test in `test/PresolutionSpec.hs` for binder parents + bounds after `ExpForall`
-    - **Verification:** `cabal test --test-show-details=direct --match "/Presolution/.*ExpForall/"`
+    - **Verification:** `cabal --config-file=.cabal-config test --test-show-details=direct --test-options='--match materializes ExpForall'`
     - _Requirements: 4.3, 6.2_
 
-- [ ] 4. Presolution uses binding-edge binders
-  - [ ] 4.1 Replace `collectBoundVars`/`firstNonVacuousBinders` with `orderedBinders`
+- [x] 4. Presolution uses binding-edge binders
+  - [x] 4.1 Replace `collectBoundVars`/`firstNonVacuousBinders` with `orderedBinders`
     - Remove `tnVarLevel` usage in `src/MLF/Presolution.hs`
     - Add regression test for inert binders being skipped in `ExpInstantiate`
     - **Verification:** `rg -n "tnVarLevel" src/MLF/Presolution.hs`
     - _Requirements: 4.2_
-  - [ ] 4.2 Update witness construction to use binding-edge binder lists
+  - [x] 4.2 Update witness construction to use binding-edge binder lists
     - Adjust `binderArgsFromExpansion` and `witnessFromExpansion`
     - Add a regression test for witness operation ordering with bounded binders
     - **Verification:** `cabal test --test-show-details=direct --match "/Presolution/.*witness/"`
     - _Requirements: 4.2, 2.3_
-  - [ ] 4.3 Replace level-based helpers (`getNodeLevel`, `isAncestorLevel`, `createFreshVarAt`)
+  - [x] 4.3 Replace level-based helpers (`getNodeLevel`, `isAncestorLevel`, `createFreshVarAt`)
     - Introduce binding-edge equivalents (e.g., `scopeRootOf`, `createFreshVarUnder`)
     - Update call sites in `src/MLF/Presolution.hs`
     - **Verification:** `rg -n "getNodeLevel|isAncestorLevel|createFreshVarAt" src/MLF/Presolution.hs`
     - _Requirements: 4.1, 4.3_
 
-- [ ] 5. Normalize/Solve drop level checks
-  - [ ] 5.1 Compare `TyForall` by binder counts (and unify bodies)
+- [x] 5. Normalize/Solve drop level checks
+  - [x] 5.1 Compare `TyForall` by binder counts (and unify bodies)
     - Update `src/MLF/Normalize.hs` to use `orderedBinders` or `boundFlexChildrenUnder`
     - Add a regression in `test/NormalizeSpec.hs` for forall-unify arity mismatch
     - **Verification:** `cabal test --test-show-details=direct --match "/Normalize/.*forall/"`
     - _Requirements: 4.1, 5.1_
-  - [ ] 5.2 Replace `ForallLevelMismatch` with binder mismatch in `Solve`
+  - [x] 5.2 Replace `ForallLevelMismatch` with binder mismatch in `Solve`
     - Update error type + pattern matches in `src/MLF/Solve.hs`
     - Update tests in `test/SolveSpec.hs`
     - **Verification:** `rg -n "ForallLevelMismatch" src/MLF/Solve.hs test/SolveSpec.hs`
     - _Requirements: 5.1_
-  - [ ] 5.3 Remove level-existence validation in `Solve.validateConstraint`
+  - [x] 5.3 Remove level-existence validation in `Solve.validateConstraint`
     - Drop `cGNodes`/level checks from validation
     - Add regression test ensuring binding-tree validation still runs
     - **Verification:** `rg -n "cGNodes|tnVarLevel|tnQuantLevel|tnOwnerLevel" src/MLF/Solve.hs`
     - _Requirements: 1.1, 5.1_
 
-- [ ] 6. Elaboration uses binding-edge binders
-  - [ ] 6.1 Generalization uses `orderedBinders` + `cEliminatedVars`
+- [x] 6. Elaboration uses binding-edge binders
+  - [x] 6.1 Generalization uses `orderedBinders` + `cEliminatedVars`
     - Update `generalizeAt` in `src/MLF/Elab.hs`
     - Remove `varsAtLevelInNode` helper
     - Update tests in `test/ElaborationSpec.hs`
     - **Verification:** `rg -n "tnVarLevel|varsAtLevelInNode" src/MLF/Elab.hs`
     - _Requirements: 5.1, 5.2_
-  - [ ] 6.2 Reify bounds using binding flags (rigid vs flexible)
+  - [x] 6.2 Reify bounds using binding flags (rigid vs flexible)
     - Replace `tnOwnerLevel` logic in `reifyTypeWithBound` with binding-edge flag checks
     - Add a regression test for bounded quantifier elaboration
     - **Verification:** `rg -n "tnOwnerLevel" src/MLF/Elab.hs`
     - _Requirements: 5.1, 5.2_
-  - [ ] 6.3 Update elaboration paths to accept `ExpForall (ForallSpec)` payload
+  - [x] 6.3 Update elaboration paths to accept `ExpForall (ForallSpec)` payload
     - Adjust `EdgeWitness` translation if needed
     - Add a small regression test for quantifier-introduction counts
     - **Verification:** `cabal test --test-show-details=direct --match "/Elaboration/.*forall/"`
     - _Requirements: 4.3, 5.1_
 
-- [ ] 7. Remove level-tree data model and cleanup
-  - [ ] 7.1 Remove `GNodeId`, `GNode`, `cGNodes`, `cGForest` from `src/MLF/Types.hs`
+- [x] 7. Remove level-tree data model and cleanup
+  - [x] 7.1 Remove `GNodeId`, `GNode`, `cGNodes`, `cGForest` from `src/MLF/Types.hs`
     - Update exports and dependent imports in a single sweep
     - **Verification:** `rg -n "GNodeId|GNode|cGNodes|cGForest" src`
     - _Requirements: 1.1, 1.2_
-  - [ ] 7.2 Remove `tnVarLevel`, `tnOwnerLevel`, `tnQuantLevel` from `TyNode`
+  - [x] 7.2 Remove `tnVarLevel`, `tnOwnerLevel`, `tnQuantLevel` from `TyNode`
     - Update constructors/pattern matches across modules
     - **Verification:** `rg -n "tnVarLevel|tnOwnerLevel|tnQuantLevel" src test`
     - _Requirements: 1.1, 1.2_
-  - [ ] 7.3 Delete `src/MLF/GNodeOps.hs` and remove cabal references
+  - [x] 7.3 Delete `src/MLF/GNodeOps.hs` and remove cabal references
     - Update `mlf2.cabal` and any imports
     - **Verification:** `rg -n "GNodeOps" src mlf2.cabal`
     - _Requirements: 1.2_
 
-- [ ] 8. Final regression checks
-  - Run the full test suite and `rg` audits for legacy identifiers
-  - **Verification:** `cabal test --test-show-details=direct` and `rg -n "GNodeId|cGNodes|tnVarLevel|tnOwnerLevel|tnQuantLevel" src test`
+- [x] 8. Final regression checks
+  - `rg -n "GNodeId|cGNodes|tnVarLevel|tnOwnerLevel|tnQuantLevel" src test` is clean.
+  - `cabal test --test-show-details=direct` passes (0 failures) and stays warning-free (`-Wall`).
   - _Requirements: 1.3, 6.3_

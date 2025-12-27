@@ -6,18 +6,16 @@ import Data.List (isInfixOf, stripPrefix)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
-import MLF.Syntax (Expr(..), Lit(..), SrcType(..), SrcScheme(..))
-import qualified MLF.Elab as Elab
-import qualified MLF.Order as Order
-import MLF.Types (BaseTy(..), NodeId(..), EdgeId(..), GNodeId(..), TyNode(..), Constraint(..), InstanceOp(..), InstanceWitness(..), EdgeWitness(..), BindFlag(..))
-import MLF.ConstraintGen (ConstraintResult(..), generateConstraints)
-import MLF.Normalize (normalize)
-import MLF.Acyclicity (checkAcyclicity)
-import MLF.Presolution (PresolutionResult(..), EdgeTrace(..), computePresolution)
-import MLF.Solve (SolveResult(..), solveUnify)
-
-requireRight :: Show e => Either e a -> IO a
-requireRight = either (\e -> expectationFailure (show e) >> fail "requireRight") pure
+import MLF.Frontend.Syntax (Expr(..), Lit(..), SrcType(..), SrcScheme(..))
+import qualified MLF.Elab.Pipeline as Elab
+import qualified MLF.Util.Order as Order
+import MLF.Constraint.Types (BaseTy(..), NodeId(..), EdgeId(..), TyNode(..), Constraint(..), InstanceOp(..), InstanceWitness(..), EdgeWitness(..), BindFlag(..))
+import MLF.Frontend.ConstraintGen (ConstraintResult(..), generateConstraints)
+import MLF.Constraint.Normalize (normalize)
+import MLF.Constraint.Acyclicity (checkAcyclicity)
+import MLF.Constraint.Presolution (PresolutionResult(..), EdgeTrace(..), computePresolution)
+import MLF.Constraint.Solve (SolveResult(..), solveUnify)
+import SpecUtil (requireRight)
 
 requirePipeline :: Expr -> IO (Elab.ElabTerm, Elab.ElabType)
 requirePipeline = requireRight . Elab.runPipelineElab
@@ -36,10 +34,6 @@ fInstantiations = go
                         (_:xs) -> xs
                 in inst : go next
             Nothing -> go (drop 1 s)
-
-schemeToType :: Elab.ElabScheme -> Elab.ElabType
-schemeToType (Elab.Forall binds body) =
-    foldr (\(v, b) t -> Elab.TForall v b t) body binds
 
 stripForalls :: Elab.ElabType -> Elab.ElabType
 stripForalls (Elab.TForall _ _ t) = stripForalls t
@@ -203,22 +197,19 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             let v = NodeId 1
                 arrow = NodeId 2
                 forallNode = NodeId 3
-                dummyLvl = GNodeId 0
                 c =
                     Constraint
-                        { cGForest = []
-                        , cGNodes = IntMap.empty
-                        , cVarBounds = IntMap.empty
-                        , cEliminatedVars = IntSet.singleton (getNodeId v)
-                        , cNodes =
+                        { cNodes =
                             IntMap.fromList
-                                [ (getNodeId v, TyVar v dummyLvl)
+                                [ (getNodeId v, TyVar v)
                                 , (getNodeId arrow, TyArrow arrow v v)
-                                , (getNodeId forallNode, TyForall forallNode dummyLvl dummyLvl arrow)
+                                , (getNodeId forallNode, TyForall forallNode arrow)
                                 ]
                         , cInstEdges = []
                         , cUnifyEdges = []
                         , cBindParents = IntMap.fromList [(getNodeId v, (forallNode, BindFlex))]
+                        , cVarBounds = IntMap.empty
+                        , cEliminatedVars = IntSet.singleton (getNodeId v)
                         }
                 solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 
@@ -398,20 +389,15 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 vRight = NodeId 5
                 arrow = NodeId 20
                 forallNode = NodeId 30
-                dummyLvl = GNodeId 0
 
                 c =
                     Constraint
-                        { cGForest = []
-                        , cGNodes = IntMap.empty
-                        , cVarBounds = IntMap.empty
-                        , cEliminatedVars = IntSet.empty
-                        , cNodes =
+                        { cNodes =
                             IntMap.fromList
-                                [ (getNodeId vLeft, TyVar vLeft dummyLvl)
-                                , (getNodeId vRight, TyVar vRight dummyLvl)
+                                [ (getNodeId vLeft, TyVar vLeft)
+                                , (getNodeId vRight, TyVar vRight)
                                 , (getNodeId arrow, TyArrow arrow vLeft vRight)
-                                , (getNodeId forallNode, TyForall forallNode dummyLvl dummyLvl arrow)
+                                , (getNodeId forallNode, TyForall forallNode arrow)
                                 ]
                         , cInstEdges = []
                         , cUnifyEdges = []
@@ -420,6 +406,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 [ (getNodeId vLeft, (forallNode, BindFlex))
                                 , (getNodeId vRight, (forallNode, BindFlex))
                                 ]
+                        , cVarBounds = IntMap.empty
+                        , cEliminatedVars = IntSet.empty
                         }
 
                 solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
@@ -436,22 +424,17 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 nInner = NodeId 21
                 nInt = NodeId 22
                 forallNode = NodeId 30
-                dummyLvl = GNodeId 0
 
                 c =
                     Constraint
-                        { cGForest = []
-                        , cGNodes = IntMap.empty
-                        , cVarBounds = IntMap.empty
-                        , cEliminatedVars = IntSet.empty
-                        , cNodes =
+                        { cNodes =
                             IntMap.fromList
-                                [ (getNodeId vShallow, TyVar vShallow dummyLvl)
-                                , (getNodeId vDeep, TyVar vDeep dummyLvl)
+                                [ (getNodeId vShallow, TyVar vShallow)
+                                , (getNodeId vDeep, TyVar vDeep)
                                 , (getNodeId nInt, TyBase nInt (BaseTy "Int"))
                                 , (getNodeId nInner, TyArrow nInner nInt vDeep)
                                 , (getNodeId nOuter, TyArrow nOuter vShallow nInner)
-                                , (getNodeId forallNode, TyForall forallNode dummyLvl dummyLvl nOuter)
+                                , (getNodeId forallNode, TyForall forallNode nOuter)
                                 ]
                         , cInstEdges = []
                         , cUnifyEdges = []
@@ -460,6 +443,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 [ (getNodeId vShallow, (forallNode, BindFlex))
                                 , (getNodeId vDeep, (forallNode, BindFlex))
                                 ]
+                        , cVarBounds = IntMap.empty
+                        , cEliminatedVars = IntSet.empty
                         }
 
                 solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
@@ -472,13 +457,10 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 vB = NodeId 5
                 arrow = NodeId 20
                 forallNode = NodeId 30
-                dummyLvl = GNodeId 0
 
                 c =
                     Constraint
-                        { cGForest = []
-                        , cGNodes = IntMap.empty
-                        , cVarBounds =
+                        { cVarBounds =
                             IntMap.fromList
                                 [ (getNodeId vA, Nothing)
                                 , (getNodeId vB, Just vA)
@@ -486,10 +468,10 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , cEliminatedVars = IntSet.empty
                         , cNodes =
                             IntMap.fromList
-                                [ (getNodeId vA, TyVar vA dummyLvl)
-                                , (getNodeId vB, TyVar vB dummyLvl)
+                                [ (getNodeId vA, TyVar vA)
+                                , (getNodeId vB, TyVar vB)
                                 , (getNodeId arrow, TyArrow arrow vB vA)
-                                , (getNodeId forallNode, TyForall forallNode dummyLvl dummyLvl arrow)
+                                , (getNodeId forallNode, TyForall forallNode arrow)
                                 ]
                         , cInstEdges = []
                         , cUnifyEdges = []
@@ -613,7 +595,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 -- Because we target the *second* binder, Φ must do more than a plain ⟨Int⟩.
                 phi `shouldNotBe` Elab.InstApp (Elab.TBase (BaseTy "Int"))
 
-                out <- requireRight (Elab.applyInstantiation (schemeToType scheme) phi)
+                out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
                 let expected =
                         Elab.TForall "a" Nothing
                             (Elab.TArrow (Elab.TVar "a") (Elab.TBase (BaseTy "Int")))
@@ -639,7 +621,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         }
 
                 phi <- requireRight (Elab.phiFromEdgeWitness solved (Just si) ew)
-                out <- requireRight (Elab.applyInstantiation (schemeToType scheme) phi)
+                out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
                 let expected =
                         Elab.TForall "a" Nothing
                             (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
@@ -666,7 +648,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         }
 
                 phi <- requireRight (Elab.phiFromEdgeWitness solved (Just si) ew)
-                out <- requireRight (Elab.applyInstantiation (schemeToType scheme) phi)
+                out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
                 let expected =
                         Elab.TForall "u0" Nothing
                             (Elab.TForall "a" Nothing
@@ -696,7 +678,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         }
 
                 phi <- requireRight (Elab.phiFromEdgeWitness solved (Just si) ew)
-                out <- requireRight (Elab.applyInstantiation (schemeToType scheme) phi)
+                out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
 
                 let expected =
                         Elab.TForall "a" Nothing
@@ -712,9 +694,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     cN = NodeId 3
 
                     c = Constraint
-                        { cGForest = []
-                        , cGNodes = IntMap.empty
-                        , cVarBounds =
+                        { cVarBounds =
                             IntMap.fromList
                                 [ (getNodeId aN, Nothing)
                                 , (getNodeId bN, Nothing)
@@ -724,9 +704,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , cNodes =
                             IntMap.fromList
                                 [ (100, TyArrow root bN aN)
-                                , (1, TyVar aN (GNodeId 0))
-                                , (2, TyVar bN (GNodeId 0))
-                                , (3, TyVar cN (GNodeId 0))
+                                , (1, TyVar aN)
+                                , (2, TyVar bN)
+                                , (3, TyVar cN)
                                 ]
                         , cInstEdges = []
                         , cUnifyEdges = []
@@ -766,7 +746,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         }
 
                 phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace solved (Just si) (Just tr) ew)
-                out <- requireRight (Elab.applyInstantiation (schemeToType scheme) phi)
+                out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
 
                 let expected =
                         Elab.TForall "b" Nothing
@@ -798,7 +778,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 case runToSolved expr of
                     Left err -> expectationFailure err
                     Right (solved, ews, traces) -> do
-                        IntMap.size ews `shouldBe` 2
+                        -- Each application emits two instantiation edges (fun + arg).
+                        IntMap.size ews `shouldBe` 4
                         forM_ (IntMap.elems ews) $ \ew -> do
                             srcTy <- requireRight (Elab.reifyType solved (ewRoot ew))
                             tgtTy <- requireRight (Elab.reifyType solved (ewRight ew))
@@ -819,14 +800,10 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     nN = NodeId 3
 
                     c = Constraint
-                        { cGForest = []
-                        , cGNodes = IntMap.empty
-                        , cVarBounds = IntMap.empty
-                        , cEliminatedVars = IntSet.empty
-                        , cNodes =
+                        { cNodes =
                             IntMap.fromList
                                 [ (getNodeId root, TyArrow root aN mN)
-                                , (getNodeId aN, TyVar aN (GNodeId 0))
+                                , (getNodeId aN, TyVar aN)
                                 , (getNodeId mN, TyArrow mN nN aN)
                                 , (getNodeId nN, TyArrow nN aN aN)
                                 ]
@@ -837,6 +814,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             , (getNodeId mN, (root, BindFlex))
                             , (getNodeId nN, (mN, BindFlex))
                             ]
+                        , cVarBounds = IntMap.empty
+                        , cEliminatedVars = IntSet.empty
                         }
                     solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 
@@ -875,14 +854,10 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     nN = NodeId 3
 
                     c = Constraint
-                        { cGForest = []
-                        , cGNodes = IntMap.empty
-                        , cVarBounds = IntMap.empty
-                        , cEliminatedVars = IntSet.empty
-                        , cNodes =
+                        { cNodes =
                             IntMap.fromList
                                 [ (getNodeId root, TyArrow root aN mN)
-                                , (getNodeId aN, TyVar aN (GNodeId 0))
+                                , (getNodeId aN, TyVar aN)
                                 , (getNodeId mN, TyArrow mN nN aN)
                                 , (getNodeId nN, TyArrow nN aN aN)
                                 ]
@@ -893,6 +868,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             , (getNodeId mN, (root, BindFlex))
                             , (getNodeId nN, (mN, BindFlex))
                             ]
+                        , cVarBounds = IntMap.empty
+                        , cEliminatedVars = IntSet.empty
                         }
                     solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 
@@ -924,7 +901,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         }
 
                 phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace solved (Just si) (Just tr) ew)
-                out <- requireRight (Elab.applyInstantiation (schemeToType scheme) phi)
+                out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
 
                 let expected =
                         Elab.TForall "a" Nothing
@@ -971,7 +948,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     _ -> False
             ops `shouldSatisfy` any isMerge
 
-    describe "Paper alignment baselines (expected failures)" $ do
+    describe "Paper alignment baselines" $ do
         it "let id = (\\x. x) in id id should have type ∀a. a -> a" $ do
             let expr =
                     ELet "id" (ELam "x" (EVar "x"))
@@ -1022,7 +999,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                     (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
                     ty `shouldAlphaEqType` expected
 
-        it "term annotation can instantiate a polymorphic result (expected failure)" $ do
+        it "term annotation can instantiate a polymorphic result" $ do
             -- Paper view (xmlf.txt §3.1): (b : σ) is κσ b, which checks that
             -- type(b) ≤ σ (instantiation), not type(b) == σ.
             --
@@ -1043,7 +1020,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     (Elab.TBase (BaseTy "Int"))
                     (Elab.TArrow (Elab.TBase (BaseTy "Int")) (Elab.TBase (BaseTy "Int")))
 
-        it "annotated lambda parameter should accept a polymorphic argument via κσ (expected failure)" $ do
+        it "annotated lambda parameter should accept a polymorphic argument via κσ" $ do
             -- λ(f : Int -> Int). f 1   applied to polymorphic id
             -- Desugaring: λf. let f = κ(Int->Int) f in f 1
             -- Outer f may be ∀a. a -> a as long as it can be instantiated to Int -> Int.

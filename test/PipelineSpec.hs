@@ -5,14 +5,14 @@ import Data.Bifunctor (first)
 import qualified Data.IntMap.Strict as IntMap
 import Test.Hspec
 
-import MLF.Elab (reifyTypeWithBound, generalizeAt, applyRedirectsToAnn, ElabType(..))
-import MLF.Syntax
-import MLF.ConstraintGen
-import MLF.Normalize
-import MLF.Acyclicity
-import MLF.Presolution
-import MLF.Solve
-import MLF.Types
+import MLF.Elab.Pipeline (generalizeAt, applyRedirectsToAnn, ElabScheme(..), ElabType(..))
+import MLF.Frontend.Syntax
+import MLF.Frontend.ConstraintGen
+import MLF.Constraint.Normalize
+import MLF.Constraint.Acyclicity
+import MLF.Constraint.Presolution
+import MLF.Constraint.Solve
+import MLF.Constraint.Types
 
 spec :: Spec
 spec = describe "Pipeline (Phases 1-5)" $ do
@@ -25,17 +25,14 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             case runPipeline expr of
                 Right (res, root) -> do
                     -- The root should be f's type: ∀(a ⩾ Int). a -> a
-                    -- We check if reifyTypeWithBound reconstructs this correctly
-                    let rootLevel = case cGForest (srConstraint res) of
-                            [r] -> r
-                            _ -> error "Expected single root GNode"
-
-                    case reifyTypeWithBound res rootLevel root of
-                        Right (TForall _ (Just (TBase (BaseTy "Int"))) _) -> pure ()
-                        -- Current reification doesn't recover explicit bounds from InstEdges yet
-                        Right (TForall _ Nothing _) -> pure ()
-                        Right other -> expectationFailure $ "Expected flexible bound Int, got " ++ show other
-                        Left err -> expectationFailure $ "Reify error: " ++ show err
+                    case generalizeAt res root root of
+                        Right (Forall binds _ty, _subst) ->
+                            case binds of
+                                [(_, Just (TBase (BaseTy "Int")))] -> pure ()
+                                -- Allow missing bounds while reification is still evolving.
+                                [(_, Nothing)] -> pure ()
+                                other -> expectationFailure $ "Expected one bound binder, got " ++ show other
+                        Left err -> expectationFailure $ "Generalize error: " ++ show err
                 Left err -> expectationFailure err
 
         it "generalizes at binding site" $ do

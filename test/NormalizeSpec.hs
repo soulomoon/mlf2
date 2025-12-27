@@ -1,17 +1,17 @@
 module NormalizeSpec (spec) where
 
 import qualified Data.IntMap.Strict as IntMap
-import qualified Data.IntSet as IntSet
 import Test.Hspec
 
-import MLF.Types
-import MLF.Normalize
+import MLF.Constraint.Types
+import MLF.Constraint.Normalize
+import SpecUtil (emptyConstraint)
 
 spec :: Spec
 spec = describe "Phase 2 — Normalization" $ do
     describe "Reflexive edge removal" $ do
         it "drops reflexive instantiation edges (T ≤ T)" $ do
-            let node = TyVar (NodeId 0) (GNodeId 0)
+            let node = TyVar (NodeId 0)
                 reflexiveEdge = InstEdge (EdgeId 0) (NodeId 0) (NodeId 0)
                 constraint = emptyConstraint
                     { cNodes = IntMap.singleton 0 node
@@ -21,8 +21,8 @@ spec = describe "Phase 2 — Normalization" $ do
 
         it "keeps non-reflexive inst edges between variables" $ do
             -- α ≤ β where both are variables: can't graft, keep the edge
-            let node1 = TyVar (NodeId 0) (GNodeId 0)
-                node2 = TyVar (NodeId 1) (GNodeId 0)
+            let node1 = TyVar (NodeId 0)
+                node2 = TyVar (NodeId 1)
                 edge = InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)
                 constraint = emptyConstraint
                     { cNodes = IntMap.fromList [(0, node1), (1, node2)]
@@ -35,8 +35,8 @@ spec = describe "Phase 2 — Normalization" $ do
             -- α ≤ β (both vars initially, but after β ≤ Int grafts, becomes α ≤ Int, which grafts)
             -- β ≤ Int (grafts: unifies β with Int)
             let nodes = IntMap.fromList
-                    [ (0, TyVar (NodeId 0) (GNodeId 0))
-                    , (1, TyVar (NodeId 1) (GNodeId 0))
+                    [ (0, TyVar (NodeId 0))
+                    , (1, TyVar (NodeId 1))
                     , (2, TyBase (NodeId 2) (BaseTy "Int"))
                     ]
                 instEdges =
@@ -62,8 +62,8 @@ spec = describe "Phase 2 — Normalization" $ do
 
         it "is idempotent (applying twice gives same result)" $ do
             let nodes = IntMap.fromList
-                    [ (0, TyVar (NodeId 0) (GNodeId 0))
-                    , (1, TyVar (NodeId 1) (GNodeId 0))
+                    [ (0, TyVar (NodeId 0))
+                    , (1, TyVar (NodeId 1))
                     ]
                 edges = [InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)]
                 constraint = emptyConstraint
@@ -80,7 +80,7 @@ spec = describe "Phase 2 — Normalization" $ do
             let domNode = TyBase (NodeId 1) (BaseTy "Int")
                 codNode = TyBase (NodeId 2) (BaseTy "Bool")
                 arrowNode = TyArrow (NodeId 3) (NodeId 1) (NodeId 2)
-                varNode = TyVar (NodeId 0) (GNodeId 0)
+                varNode = TyVar (NodeId 0)
                 edge = InstEdge (EdgeId 0) (NodeId 0) (NodeId 3)
                 constraint = emptyConstraint
                     { cNodes = IntMap.fromList
@@ -97,7 +97,7 @@ spec = describe "Phase 2 — Normalization" $ do
         it "grafts base type onto variable" $ do
             -- α ≤ Int should unify α with Int
             let baseNode = TyBase (NodeId 1) (BaseTy "Int")
-                varNode = TyVar (NodeId 0) (GNodeId 0)
+                varNode = TyVar (NodeId 0)
                 edge = InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)
                 constraint = emptyConstraint
                     { cNodes = IntMap.fromList [(0, varNode), (1, baseNode)]
@@ -110,7 +110,7 @@ spec = describe "Phase 2 — Normalization" $ do
 
         it "rejects grafting when RHS arrow contains the LHS variable (occurs-check)" $ do
             -- α ≤ (α → Int) should be a type error and left for later phases
-            let varNode = TyVar (NodeId 0) (GNodeId 0)
+            let varNode = TyVar (NodeId 0)
                 baseNode = TyBase (NodeId 2) (BaseTy "Int")
                 arrowNode = TyArrow (NodeId 1) (NodeId 0) (NodeId 2)
                 edge = InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)
@@ -128,8 +128,8 @@ spec = describe "Phase 2 — Normalization" $ do
 
         it "rejects grafting when RHS Forall contains the LHS variable (occurs-check)" $ do
             -- α ≤ ∀(β). α
-            let varNode = TyVar (NodeId 0) (GNodeId 0)
-                forallNode = TyForall (NodeId 1) (GNodeId 0) (GNodeId 1) (NodeId 0)
+            let varNode = TyVar (NodeId 0)
+                forallNode = TyForall (NodeId 1) (NodeId 0)
                 -- We need a TyArrow to trigger the check in grafting, as Forall/Exp are filtered out
                 -- So: α ≤ (Int → (∀(β). α))
                 intNode = TyBase (NodeId 2) (BaseTy "Int")
@@ -145,7 +145,7 @@ spec = describe "Phase 2 — Normalization" $ do
 
         it "rejects grafting when RHS Expansion contains the LHS variable (occurs-check)" $ do
              -- α ≤ (Int → (s · α))
-             let varNode = TyVar (NodeId 0) (GNodeId 0)
+             let varNode = TyVar (NodeId 0)
                  expNode = TyExp (NodeId 1) (ExpVarId 0) (NodeId 0)
                  intNode = TyBase (NodeId 2) (BaseTy "Int")
                  arrowNode = TyArrow (NodeId 3) (NodeId 2) (NodeId 1)
@@ -160,8 +160,8 @@ spec = describe "Phase 2 — Normalization" $ do
 
         it "decomposes arrow ≤ arrow into component unifications" $ do
             -- (α → β) ≤ (Int → Bool)
-            let dom1 = TyVar (NodeId 0) (GNodeId 0)
-                cod1 = TyVar (NodeId 1) (GNodeId 0)
+            let dom1 = TyVar (NodeId 0)
+                cod1 = TyVar (NodeId 1)
                 arr1 = TyArrow (NodeId 2) (NodeId 0) (NodeId 1)
                 dom2 = TyBase (NodeId 3) (BaseTy "Int")
                 cod2 = TyBase (NodeId 4) (BaseTy "Bool")
@@ -208,8 +208,8 @@ spec = describe "Phase 2 — Normalization" $ do
 
         it "keeps Arrow ≤ Base as type error" $ do
             -- (α → β) ≤ Int is a type error
-            let dom = TyVar (NodeId 0) (GNodeId 0)
-                cod = TyVar (NodeId 1) (GNodeId 0)
+            let dom = TyVar (NodeId 0)
+                cod = TyVar (NodeId 1)
                 arr = TyArrow (NodeId 2) (NodeId 0) (NodeId 1)
                 base = TyBase (NodeId 3) (BaseTy "Int")
                 edge = InstEdge (EdgeId 0) (NodeId 2) (NodeId 3)
@@ -224,8 +224,8 @@ spec = describe "Phase 2 — Normalization" $ do
         it "keeps Base ≤ Arrow as type error" $ do
             -- Int ≤ (α → β) is a type error
             let base = TyBase (NodeId 0) (BaseTy "Int")
-                dom = TyVar (NodeId 1) (GNodeId 0)
-                cod = TyVar (NodeId 2) (GNodeId 0)
+                dom = TyVar (NodeId 1)
+                cod = TyVar (NodeId 2)
                 arr = TyArrow (NodeId 3) (NodeId 1) (NodeId 2)
                 edge = InstEdge (EdgeId 0) (NodeId 0) (NodeId 3)
                 constraint = emptyConstraint
@@ -241,8 +241,8 @@ spec = describe "Phase 2 — Normalization" $ do
         describe "Var = Var" $ do
             it "merges two variables via union-find" $ do
                 -- α = β: both variables, merged via union-find
-                let node1 = TyVar (NodeId 0) (GNodeId 0)
-                    node2 = TyVar (NodeId 1) (GNodeId 0)
+                let node1 = TyVar (NodeId 0)
+                    node2 = TyVar (NodeId 1)
                     edge = UnifyEdge (NodeId 0) (NodeId 1)
                     constraint = emptyConstraint
                         { cNodes = IntMap.fromList [(0, node1), (1, node2)]
@@ -260,8 +260,8 @@ spec = describe "Phase 2 — Normalization" $ do
                     inner = NodeId 2
                     root = NodeId 3
 
-                    nodeInner = TyVar vInner (GNodeId 1)
-                    nodeOuter = TyVar vOuter (GNodeId 0)
+                    nodeInner = TyVar vInner
+                    nodeOuter = TyVar vOuter
                     nodeInnerArrow = TyArrow inner vInner vOuter
                     nodeRoot = TyArrow root inner vOuter
 
@@ -291,9 +291,9 @@ spec = describe "Phase 2 — Normalization" $ do
 
             it "handles chained variable unifications (transitivity)" $ do
                 -- α = β, β = γ: should all be unified
-                let node1 = TyVar (NodeId 0) (GNodeId 0)
-                    node2 = TyVar (NodeId 1) (GNodeId 0)
-                    node3 = TyVar (NodeId 2) (GNodeId 0)
+                let node1 = TyVar (NodeId 0)
+                    node2 = TyVar (NodeId 1)
+                    node3 = TyVar (NodeId 2)
                     edges = [UnifyEdge (NodeId 0) (NodeId 1), UnifyEdge (NodeId 1) (NodeId 2)]
                     constraint = emptyConstraint
                         { cNodes = IntMap.fromList [(0, node1), (1, node2), (2, node3)]
@@ -306,7 +306,7 @@ spec = describe "Phase 2 — Normalization" $ do
         describe "Var = Structure" $ do
             it "unifies variable with arrow (var points to arrow)" $ do
                 -- α = (Int → Bool)
-                let varNode = TyVar (NodeId 0) (GNodeId 0)
+                let varNode = TyVar (NodeId 0)
                     domNode = TyBase (NodeId 1) (BaseTy "Int")
                     codNode = TyBase (NodeId 2) (BaseTy "Bool")
                     arrNode = TyArrow (NodeId 3) (NodeId 1) (NodeId 2)
@@ -321,7 +321,7 @@ spec = describe "Phase 2 — Normalization" $ do
 
             it "unifies arrow with variable (same as var = arrow)" $ do
                 -- (Int → Bool) = α: symmetric case
-                let varNode = TyVar (NodeId 0) (GNodeId 0)
+                let varNode = TyVar (NodeId 0)
                     domNode = TyBase (NodeId 1) (BaseTy "Int")
                     codNode = TyBase (NodeId 2) (BaseTy "Bool")
                     arrNode = TyArrow (NodeId 3) (NodeId 1) (NodeId 2)
@@ -336,7 +336,7 @@ spec = describe "Phase 2 — Normalization" $ do
 
             it "unifies variable with base type" $ do
                 -- α = Int
-                let varNode = TyVar (NodeId 0) (GNodeId 0)
+                let varNode = TyVar (NodeId 0)
                     baseNode = TyBase (NodeId 1) (BaseTy "Int")
                     edge = UnifyEdge (NodeId 0) (NodeId 1)
                     constraint = emptyConstraint
@@ -348,7 +348,7 @@ spec = describe "Phase 2 — Normalization" $ do
 
             it "unifies base type with variable (symmetric)" $ do
                 -- Int = α
-                let varNode = TyVar (NodeId 0) (GNodeId 0)
+                let varNode = TyVar (NodeId 0)
                     baseNode = TyBase (NodeId 1) (BaseTy "Int")
                     edge = UnifyEdge (NodeId 1) (NodeId 0)  -- Base on left
                     constraint = emptyConstraint
@@ -362,11 +362,11 @@ spec = describe "Phase 2 — Normalization" $ do
         describe "Arrow = Arrow" $ do
             it "merges arrows by unifying components" $ do
                 -- (α → β) = (γ → δ): generates α = γ, β = δ
-                let dom1 = TyVar (NodeId 0) (GNodeId 0)
-                    cod1 = TyVar (NodeId 1) (GNodeId 0)
+                let dom1 = TyVar (NodeId 0)
+                    cod1 = TyVar (NodeId 1)
                     arr1 = TyArrow (NodeId 2) (NodeId 0) (NodeId 1)
-                    dom2 = TyVar (NodeId 3) (GNodeId 0)
-                    cod2 = TyVar (NodeId 4) (GNodeId 0)
+                    dom2 = TyVar (NodeId 3)
+                    cod2 = TyVar (NodeId 4)
                     arr2 = TyArrow (NodeId 5) (NodeId 3) (NodeId 4)
                     edge = UnifyEdge (NodeId 2) (NodeId 5)
                     constraint = emptyConstraint
@@ -381,14 +381,14 @@ spec = describe "Phase 2 — Normalization" $ do
 
             it "merges nested arrows recursively" $ do
                 -- (α → (β → γ)) = (Int → (Bool → δ))
-                let alpha = TyVar (NodeId 0) (GNodeId 0)
-                    beta = TyVar (NodeId 1) (GNodeId 0)
-                    gamma = TyVar (NodeId 2) (GNodeId 0)
+                let alpha = TyVar (NodeId 0)
+                    beta = TyVar (NodeId 1)
+                    gamma = TyVar (NodeId 2)
                     inner1 = TyArrow (NodeId 3) (NodeId 1) (NodeId 2)
                     outer1 = TyArrow (NodeId 4) (NodeId 0) (NodeId 3)
                     intNode = TyBase (NodeId 5) (BaseTy "Int")
                     boolNode = TyBase (NodeId 6) (BaseTy "Bool")
-                    delta = TyVar (NodeId 7) (GNodeId 0)
+                    delta = TyVar (NodeId 7)
                     inner2 = TyArrow (NodeId 8) (NodeId 6) (NodeId 7)
                     outer2 = TyArrow (NodeId 9) (NodeId 5) (NodeId 8)
                     edge = UnifyEdge (NodeId 4) (NodeId 9)
@@ -431,35 +431,60 @@ spec = describe "Phase 2 — Normalization" $ do
 
         -- Forall = Forall cases
         describe "Forall = Forall" $ do
-            it "unifies bodies when levels match" $ do
-                -- ∀(α). α = ∀(β). β
-                let var1 = TyVar (NodeId 0) (GNodeId 1)
-                    forall1 = TyForall (NodeId 1) (GNodeId 0) (GNodeId 1) (NodeId 0)
-                    var2 = TyVar (NodeId 2) (GNodeId 1)
-                    forall2 = TyForall (NodeId 3) (GNodeId 0) (GNodeId 1) (NodeId 2)
-                    edge = UnifyEdge (NodeId 1) (NodeId 3)
+            it "unifies bodies when binder arity matches" $ do
+                -- ∀(α). α = ∀(β). β (one binder on each side)
+                let var1 = TyVar (NodeId 0)
+                    forall1 = TyForall (NodeId 1) (tnId var1)
+                    var2 = TyVar (NodeId 2)
+                    forall2 = TyForall (NodeId 3) (tnId var2)
+                    edge = UnifyEdge (tnId forall1) (tnId forall2)
+                    bindParents =
+                        IntMap.fromList
+                            [ (getNodeId (tnId var1), (tnId forall1, BindFlex))
+                            , (getNodeId (tnId var2), (tnId forall2, BindFlex))
+                            ]
                     constraint = emptyConstraint
                         { cNodes = IntMap.fromList
-                            [ (0, var1), (1, forall1), (2, var2), (3, forall2) ]
+                            [ (getNodeId (tnId var1), var1)
+                            , (getNodeId (tnId forall1), forall1)
+                            , (getNodeId (tnId var2), var2)
+                            , (getNodeId (tnId forall2), forall2)
+                            ]
                         , cUnifyEdges = [edge]
+                        , cBindParents = bindParents
                         }
                     result = normalize constraint
                 cUnifyEdges result `shouldBe` []
 
-            it "reports error when levels mismatch" $ do
-                -- ∀(α at g1). ... = ∀(β at g2). ...
-                -- TyForall constructor is: TyForall nid quantLvl ownerLvl body
-                -- To mismatch levels, we need different quantLvl
-                let forall1 = TyForall (NodeId 0) (GNodeId 1) (GNodeId 0) (NodeId 2)
-                    forall2 = TyForall (NodeId 1) (GNodeId 2) (GNodeId 0) (NodeId 3)
-                    -- Dummy body nodes
-                    var1 = TyVar (NodeId 2) (GNodeId 1)
-                    var2 = TyVar (NodeId 3) (GNodeId 2)
-                    edge = UnifyEdge (NodeId 0) (NodeId 1)
+            it "reports error when binder arity mismatches" $ do
+                -- ∀(α). α = ∀(β γ). β -> γ  (1 binder vs 2 binders)
+                let alpha = TyVar (NodeId 2)
+                    forall1 = TyForall (NodeId 0) (tnId alpha)
+
+                    beta = TyVar (NodeId 3)
+                    gamma = TyVar (NodeId 4)
+                    body2 = TyArrow (NodeId 5) (tnId beta) (tnId gamma)
+                    forall2 = TyForall (NodeId 1) (tnId body2)
+
+                    edge = UnifyEdge (tnId forall1) (tnId forall2)
+                    bindParents =
+                        IntMap.fromList
+                            [ (getNodeId (tnId alpha), (tnId forall1, BindFlex))
+                            , (getNodeId (tnId beta), (tnId forall2, BindFlex))
+                            , (getNodeId (tnId gamma), (tnId forall2, BindFlex))
+                            ]
                     constraint = emptyConstraint
-                        { cNodes = IntMap.fromList
-                            [ (0, forall1), (1, forall2), (2, var1), (3, var2) ]
+                        { cNodes =
+                            IntMap.fromList
+                                [ (getNodeId (tnId forall1), forall1)
+                                , (getNodeId (tnId forall2), forall2)
+                                , (getNodeId (tnId alpha), alpha)
+                                , (getNodeId (tnId beta), beta)
+                                , (getNodeId (tnId gamma), gamma)
+                                , (getNodeId (tnId body2), body2)
+                                ]
                         , cUnifyEdges = [edge]
+                        , cBindParents = bindParents
                         }
                     result = normalize constraint
                 length (cUnifyEdges result) `shouldBe` 1
@@ -468,9 +493,9 @@ spec = describe "Phase 2 — Normalization" $ do
         describe "Exp = Exp" $ do
             it "unifies bodies when expansion vars match" $ do
                 -- s · α = s · β
-                let var1 = TyVar (NodeId 0) (GNodeId 0)
+                let var1 = TyVar (NodeId 0)
                     exp1 = TyExp (NodeId 1) (ExpVarId 0) (NodeId 0)
-                    var2 = TyVar (NodeId 2) (GNodeId 0)
+                    var2 = TyVar (NodeId 2)
                     exp2 = TyExp (NodeId 3) (ExpVarId 0) (NodeId 2)
                     edge = UnifyEdge (NodeId 1) (NodeId 3)
                     constraint = emptyConstraint
@@ -485,8 +510,8 @@ spec = describe "Phase 2 — Normalization" $ do
                 -- s1 · ... = s2 · ...
                 let exp1 = TyExp (NodeId 0) (ExpVarId 0) (NodeId 2)
                     exp2 = TyExp (NodeId 1) (ExpVarId 1) (NodeId 3)
-                    var1 = TyVar (NodeId 2) (GNodeId 0)
-                    var2 = TyVar (NodeId 3) (GNodeId 0)
+                    var1 = TyVar (NodeId 2)
+                    var2 = TyVar (NodeId 3)
                     edge = UnifyEdge (NodeId 0) (NodeId 1)
                     constraint = emptyConstraint
                         { cNodes = IntMap.fromList
@@ -500,8 +525,8 @@ spec = describe "Phase 2 — Normalization" $ do
         describe "Incompatible structures (type errors)" $ do
             it "reports error for Arrow = Base" $ do
                 -- (α → β) = Int: type error
-                let dom = TyVar (NodeId 0) (GNodeId 0)
-                    cod = TyVar (NodeId 1) (GNodeId 0)
+                let dom = TyVar (NodeId 0)
+                    cod = TyVar (NodeId 1)
                     arr = TyArrow (NodeId 2) (NodeId 0) (NodeId 1)
                     base = TyBase (NodeId 3) (BaseTy "Int")
                     edge = UnifyEdge (NodeId 2) (NodeId 3)
@@ -514,8 +539,8 @@ spec = describe "Phase 2 — Normalization" $ do
 
             it "reports error for Base = Arrow" $ do
                 -- Int = (α → β): type error (symmetric)
-                let dom = TyVar (NodeId 0) (GNodeId 0)
-                    cod = TyVar (NodeId 1) (GNodeId 0)
+                let dom = TyVar (NodeId 0)
+                    cod = TyVar (NodeId 1)
                     arr = TyArrow (NodeId 2) (NodeId 0) (NodeId 1)
                     base = TyBase (NodeId 3) (BaseTy "Int")
                     edge = UnifyEdge (NodeId 3) (NodeId 2)  -- Base on left
@@ -530,8 +555,8 @@ spec = describe "Phase 2 — Normalization" $ do
         describe "Complex scenarios" $ do
             it "propagates through multiple edges correctly" $ do
                 -- α = β, β = Int: after normalization, both point to Int
-                let alpha = TyVar (NodeId 0) (GNodeId 0)
-                    beta = TyVar (NodeId 1) (GNodeId 0)
+                let alpha = TyVar (NodeId 0)
+                    beta = TyVar (NodeId 1)
                     intNode = TyBase (NodeId 2) (BaseTy "Int")
                     edges = [UnifyEdge (NodeId 0) (NodeId 1), UnifyEdge (NodeId 1) (NodeId 2)]
                     constraint = emptyConstraint
@@ -543,7 +568,7 @@ spec = describe "Phase 2 — Normalization" $ do
 
             it "handles multiple unifications of same variable" $ do
                 -- α = Int, α = Int: redundant but valid
-                let alpha = TyVar (NodeId 0) (GNodeId 0)
+                let alpha = TyVar (NodeId 0)
                     int1 = TyBase (NodeId 1) (BaseTy "Int")
                     int2 = TyBase (NodeId 2) (BaseTy "Int")
                     edges = [UnifyEdge (NodeId 0) (NodeId 1), UnifyEdge (NodeId 0) (NodeId 2)]
@@ -556,7 +581,7 @@ spec = describe "Phase 2 — Normalization" $ do
 
             it "detects error in chained unifications" $ do
                 -- α = Int, α = Bool: type error discovered via chain
-                let alpha = TyVar (NodeId 0) (GNodeId 0)
+                let alpha = TyVar (NodeId 0)
                     intNode = TyBase (NodeId 1) (BaseTy "Int")
                     boolNode = TyBase (NodeId 2) (BaseTy "Bool")
                     edges = [UnifyEdge (NodeId 0) (NodeId 1), UnifyEdge (NodeId 0) (NodeId 2)]
@@ -570,7 +595,7 @@ spec = describe "Phase 2 — Normalization" $ do
 
             it "handles reflexive unification edge (T = T)" $ do
                 -- α = α: trivially satisfied
-                let alpha = TyVar (NodeId 0) (GNodeId 0)
+                let alpha = TyVar (NodeId 0)
                     edge = UnifyEdge (NodeId 0) (NodeId 0)
                     constraint = emptyConstraint
                         { cNodes = IntMap.singleton 0 alpha
@@ -578,21 +603,3 @@ spec = describe "Phase 2 — Normalization" $ do
                         }
                     result = normalize constraint
                 cUnifyEdges result `shouldBe` []
-
--- | An empty constraint for testing.
-emptyConstraint :: Constraint
-emptyConstraint = Constraint
-    { cGForest = [GNodeId 0]
-    , cGNodes = IntMap.singleton 0 GNode
-        { gnodeId = GNodeId 0
-        , gParent = Nothing
-        , gBinds = []
-        , gChildren = []
-        }
-    , cNodes = IntMap.empty
-    , cInstEdges = []
-    , cUnifyEdges = []
-    , cBindParents = IntMap.empty
-    , cVarBounds = IntMap.empty
-    , cEliminatedVars = IntSet.empty
-    }

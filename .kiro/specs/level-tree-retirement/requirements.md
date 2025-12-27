@@ -79,9 +79,12 @@ without levels.
 2. WHEN applying `ExpInstantiate` THEN THE SYSTEM SHALL use the ordered binder
    list derived from binding edges at the quantified node and exclude inert
    binders (unreachable from the body).
-3. WHEN applying `ExpForall` THEN THE SYSTEM SHALL create fresh binders and
-   attach their bounds based on binding-edge-derived binder specs, remapping
-   binder-to-binder bounds to the fresh binders.
+3. WHEN applying `ExpForall` THEN THE SYSTEM SHALL introduce a `TyForall` node
+   and bind (rebind) reachable binder vars according to the `ForallSpec`,
+   applying bounds and remapping `BoundBinder` indices onto the chosen binders.
+   If the body does not yet contain enough binder candidates (prior to unifying
+   with the target forall), THE SYSTEM SHALL not crash and SHALL defer missing
+   binders/bounds to later unification.
 
 ### Requirement 5
 **User Story:** As an elaboration implementer, I want quantifier construction and
@@ -104,7 +107,7 @@ binding-edge-based binder behavior and expansion invariants.
    confirm that binders are exactly the flexibly bound children of the quantifier
    node that are reachable from its body.
 2. WHEN running expansion tests THEN THE SYSTEM SHALL confirm that `ExpForall`
-   introduces binders with the expected bounds (including binder-to-binder
-   remapping) and binding parents.
+   binds/rebinds reachable binders with the expected bounds (including
+   binder-to-binder remapping) and binding parents.
 3. WHEN running `cabal test --test-show-details=direct` THEN THE SYSTEM SHALL
-   pass (except for documented expected-failure baselines).
+   pass.

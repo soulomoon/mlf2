@@ -2,8 +2,8 @@
 
 ## Project Structure & Module Organization
 
-- `src/` contains the `mlf2` library. Most logic lives in `src/MLF/` and roughly follows the pipeline phases: constraint generation → normalization → acyclicity → presolution → solving → elaboration.
-- `src/MyLib.hs` is the library’s public entry point (re-exports common types and helpers).
+- `src/` contains the private implementation library (`mlf2-internal`). Most logic lives in `src/MLF/` and is organized by domain: `MLF.Frontend.*`, `MLF.Constraint.*`, `MLF.Binding.*`, `MLF.Witness.*`, `MLF.Elab.*`, `MLF.Util.*`.
+- `src-public/` contains the public library entry points intended for downstream users: `MLF.API`, `MLF.Pipeline`, and legacy `MyLib`.
 - `app/` contains the executable entry point (`app/Main.hs`) for the `mlf2` binary.
 - `test/` contains the Hspec suite (`*Spec.hs`) and a manual test runner (`test/Main.hs`).
 - `papers/` holds reference material (PDF/TXT) used to align the implementation with the xMLF/MLF papers; it is not required to build.
@@ -21,7 +21,8 @@
 - Match existing formatting: 4-space indentation, explicit module export lists, and GHC-style `{- Note [...] -}` blocks for design rationale.
 - Keep builds warning-free (`-Wall` is enabled in `mlf2.cabal`). Prefer total pattern matches and clear error constructors.
 - Naming conventions:
-  - Modules: `src/MLF/Foo.hs` defines `module MLF.Foo`.
+  - Modules: `src/MLF/Foo/Bar.hs` defines `module MLF.Foo.Bar`.
+  - Public entry modules: `src-public/MLF/API.hs` defines `module MLF.API` (similarly `MLF.Pipeline`).
   - Tests: `test/FooSpec.hs` defines `spec :: Spec`.
 
 ## Testing Guidelines

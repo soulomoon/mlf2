@@ -7,15 +7,15 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 ## Phase 1 — Constraint Generation ✅
 
 - [x] Graphic type nodes (`TyVar`, `TyArrow`, `TyBase`, `TyForall`, `TyExp`)
-- [x] G-nodes / generalization levels with parent/child forest
+- [x] Binding nodes (`TyForall`) + binding edges (`Constraint.cBindParents`)
 - [x] Expansion nodes (`TyExp`) for let-bindings
 - [x] Instantiation edges (`InstEdge`)
 - [x] Constraint container (`Constraint`)
 - [x] `inferConstraintGraph :: Expr -> Either TypeError ConstraintResult`
 - [x] Literals produce `TyBase` nodes
-- [x] Lambda parameters registered at surrounding G-node level
+- [x] Lambda parameters bound at surrounding binder
 - [x] Applications emit instantiation edges
-- [x] Let-bindings create child G-nodes
+- [x] Let-bindings introduce child binders (`TyForall`)
 - [x] Expansion variables shared across multiple uses of same binding
 - [x] Variable shadowing / lexical scoping
 - [x] Unknown variable error reporting

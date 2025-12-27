@@ -192,7 +192,7 @@ Each checkbox item should include, as indented bullets directly under it:
 - concrete steps (what code to create/modify/test)
 - files/components involved (when reasonable)
 - test expectations (unit/integration/e2e)
-- **Verification:** an explicit command or check that proves completion (e.g. `cabal test --test-show-details=direct --match ...`, `pytest -k ...`, `go test ./...`, etc.)
+- **Verification:** an explicit command or check that proves completion
 - a requirement mapping line, e.g.:
 
 `- _Requirements: 1.1, 2.3_`
