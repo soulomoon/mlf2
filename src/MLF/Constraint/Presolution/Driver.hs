@@ -53,14 +53,9 @@ import MLF.Constraint.Presolution.Expansion (
     )
 import MLF.Constraint.Presolution.Witness (
     binderArgsFromExpansion,
-    coalesceRaiseMergeWithEnv,
-    forallIntroSuffixCount,
-    integratePhase2Ops,
-    normalizeInstanceOpsFull,
+    integratePhase2Steps,
+    normalizeInstanceStepsFull,
     OmegaNormalizeEnv(..),
-    OmegaNormalizeError(..),
-    reorderWeakenWithEnv,
-    validateNormalizedWitness,
     witnessFromExpansion
     )
 import MLF.Constraint.Presolution.EdgeUnify (
@@ -440,7 +435,8 @@ processInstEdge edge = do
                     let root = case n1 of
                             TyExp{ tnBody = b } -> b
                             _ -> tnId n1
-                    InstanceWitness baseOps <- witnessFromExpansion root n1 finalExp
+                    baseSteps <- witnessFromExpansion root n1 finalExp
+                    let baseOps = [op | StepOmega op <- baseSteps]
                     -- Eagerly materialize and unify to resolve the constraint immediately.
                     -- This ensures that the expansion result is unified with the target (n2),
                     -- and TyExp is unified with the result.
@@ -511,8 +507,7 @@ buildEdgeWitness eid left right leftRaw expn extraOps edgeRoot mbPreInterior mbT
     root <- case leftRaw of
         TyExp{ tnBody = b } -> pure b
         _ -> pure left
-    forallIntros <- forallIntroSuffixCount expn
-    InstanceWitness baseOps <- witnessFromExpansion root leftRaw expn
+    baseSteps <- witnessFromExpansion root leftRaw expn
     c0 <- gets psConstraint
     interiorRoot <- case Binding.interiorOf c0 root of
         Left err -> throwError (BindingTreeError err)
@@ -540,31 +535,18 @@ buildEdgeWitness eid left right leftRaw expn extraOps edgeRoot mbPreInterior mbT
                 , constraint = c0
                 , binderArgs = binderArgs
                 }
-    let ops0 = integratePhase2Ops baseOps extraOps
-    ops <- case normalizeInstanceOpsFull env ops0 of
-        Right ops' -> pure ops'
-        Left err@(MergeDirectionInvalid _ _) -> do
-            ops1 <- case coalesceRaiseMergeWithEnv env ops0 of
-                Left err' -> throwError (InternalError ("normalizeInstanceOpsFull failed: " ++ show err' ++ " (fallback from " ++ show err ++ ")"))
-                Right ops' -> pure ops'
-            ops2 <- case reorderWeakenWithEnv env ops1 of
-                Left err' -> throwError (InternalError ("normalizeInstanceOpsFull failed: " ++ show err' ++ " (fallback from " ++ show err ++ ")"))
-                Right ops' -> pure ops'
-            case validateNormalizedWitness env ops2 of
-                Left (MergeDirectionInvalid _ _) -> pure ops2
-                Left err' -> throwError (InternalError ("normalizeInstanceOpsFull failed: " ++ show err' ++ " (fallback from " ++ show err ++ ")"))
-                Right () -> pure ops2
-        Left err ->
-            throwError (InternalError ("normalizeInstanceOpsFull failed: " ++ show err))
-    let iw = InstanceWitness ops
-        steps = map StepOmega ops ++ replicate forallIntros StepIntro
+    let steps0 = integratePhase2Steps baseSteps extraOps
+    steps <- case normalizeInstanceStepsFull env steps0 of
+        Right steps' -> pure steps'
+        Left err -> throwError (InternalError ("normalizeInstanceStepsFull failed: " ++ show err))
+    let ops = [op | StepOmega op <- steps]
+        iw = InstanceWitness ops
     pure EdgeWitness
         { ewEdgeId = eid
         , ewLeft = left
         , ewRight = right
         , ewRoot = root
         , ewSteps = steps
-        , ewForallIntros = forallIntros
         , ewWitness = iw
         }
 

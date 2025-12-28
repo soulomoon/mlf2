@@ -15,7 +15,7 @@ import MLF.Constraint.Normalize (normalize)
 import MLF.Constraint.Acyclicity (checkAcyclicity)
 import MLF.Constraint.Presolution (PresolutionResult(..), EdgeTrace(..), computePresolution)
 import MLF.Constraint.Solve (SolveResult(..), solveUnify)
-import SpecUtil (requireRight)
+import SpecUtil (emptyConstraint, inferBindParents, requireRight)
 
 requirePipeline :: Expr -> IO (Elab.ElabTerm, Elab.ElabType)
 requirePipeline = requireRight . Elab.runPipelineElab
@@ -588,7 +588,6 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewRight = NodeId 0
                         , ewRoot = NodeId 0
                         , ewSteps = map StepOmega ops
-                        , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
 
@@ -602,6 +601,39 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         Elab.TForall "a" Nothing
                             (Elab.TArrow (Elab.TVar "a") (Elab.TBase (BaseTy "Int")))
                 canonType out `shouldBe` canonType expected
+
+            it "interleaves StepIntro with Omega ops in Φ translation" $ do
+                let root = NodeId 0
+                    binder = NodeId 1
+                    nodes =
+                        IntMap.fromList
+                            [ (getNodeId root, TyForall root binder)
+                            , (getNodeId binder, TyVar binder)
+                            ]
+                    constraint =
+                        emptyConstraint
+                            { cNodes = nodes
+                            , cBindParents = inferBindParents nodes
+                            }
+                    solved = SolveResult { srConstraint = constraint, srUnionFind = IntMap.empty }
+
+                    scheme = Elab.Forall [("a", Nothing)] (Elab.TVar "a")
+                    subst = IntMap.fromList [(getNodeId binder, "a")]
+                    si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = subst }
+
+                    ops = [OpWeaken binder]
+                    steps = [StepIntro, StepOmega (OpWeaken binder)]
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewSteps = steps
+                        , ewWitness = InstanceWitness ops
+                        }
+
+                phi <- requireRight (Elab.phiFromEdgeWitness solved (Just si) ew)
+                Elab.pretty phi `shouldBe` "O; ∀(u0 ⩾) N"
 
             it "scheme-aware Φ can translate Merge (alias one binder to another)" $ do
                 (solved, _intNode) <- requireRight (runSolvedWithRoot (ELit (LInt 1)))
@@ -620,7 +652,6 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewRight = NodeId 0
                         , ewRoot = NodeId 0
                         , ewSteps = map StepOmega ops
-                        , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
 
@@ -649,7 +680,6 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewRight = NodeId 0
                         , ewRoot = NodeId 0
                         , ewSteps = map StepOmega ops
-                        , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
 
@@ -681,7 +711,6 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewRight = NodeId 0
                         , ewRoot = NodeId 0
                         , ewSteps = map StepOmega ops
-                        , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
 
@@ -751,7 +780,6 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewRight = NodeId 0
                         , ewRoot = root
                         , ewSteps = map StepOmega ops
-                        , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
 
@@ -908,7 +936,6 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewRight = NodeId 0
                         , ewRoot = root
                         , ewSteps = map StepOmega ops
-                        , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
 

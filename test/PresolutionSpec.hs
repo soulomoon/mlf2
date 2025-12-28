@@ -9,7 +9,7 @@ import qualified Data.List.NonEmpty as NE
 
 import MLF.Constraint.Types
 import MLF.Constraint.Presolution
-import MLF.Constraint.Presolution.Witness (OmegaNormalizeEnv(..), OmegaNormalizeError(..), coalesceRaiseMergeWithEnv, integratePhase2Ops, normalizeInstanceOpsFull, reorderWeakenWithEnv, validateNormalizedWitness)
+import MLF.Constraint.Presolution.Witness (OmegaNormalizeEnv(..), OmegaNormalizeError(..), coalesceRaiseMergeWithEnv, integratePhase2Ops, normalizeInstanceOpsFull, normalizeInstanceStepsFull, reorderWeakenWithEnv, validateNormalizedWitness, witnessFromExpansion)
 import MLF.Constraint.Acyclicity (AcyclicityResult(..))
 import MLF.Constraint.Solve (SolveResult(..), validateSolvedGraphStrict)
 import qualified MLF.Binding.Tree as Binding
@@ -1164,6 +1164,56 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         other ->
                             expectationFailure ("Expected Graft(a), Merge(b,a), Weaken(a), got indices: " ++ show other ++ " ops: " ++ show ops)
 
+    describe "Expansion witness steps" $ do
+        it "preserves ExpCompose ordering with StepIntro" $ do
+            let expNodeId = NodeId 0
+                forallId = NodeId 1
+                binderId = NodeId 2
+                argId = NodeId 3
+                nodes = IntMap.fromList
+                    [ (0, TyExp expNodeId (ExpVarId 0) forallId)
+                    , (1, TyForall forallId binderId)
+                    , (2, TyVar binderId)
+                    ]
+                constraint =
+                    emptyConstraint
+                        { cNodes = nodes
+                        , cBindParents = inferBindParents nodes
+                        }
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 4 IntSet.empty IntMap.empty IntMap.empty IntMap.empty
+                expansion =
+                    ExpCompose
+                        (ExpForall (ForallSpec 1 [Nothing] NE.:| []) NE.:| [ExpInstantiate [argId]])
+
+            case runPresolutionM st0 (witnessFromExpansion expNodeId (nodes IntMap.! 0) expansion) of
+                Left err -> expectationFailure ("witnessFromExpansion failed: " ++ show err)
+                Right (steps, _) ->
+                    steps `shouldBe`
+                        [ StepIntro
+                        , StepOmega (OpGraft argId binderId)
+                        , StepOmega (OpWeaken binderId)
+                        ]
+
+        it "emits StepIntro per binder in ForallSpec" $ do
+            let expNodeId = NodeId 0
+                bodyId = NodeId 1
+                nodes = IntMap.fromList
+                    [ (0, TyExp expNodeId (ExpVarId 0) bodyId)
+                    , (1, TyVar bodyId)
+                    ]
+                constraint =
+                    emptyConstraint
+                        { cNodes = nodes
+                        , cBindParents = inferBindParents nodes
+                        }
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 2 IntSet.empty IntMap.empty IntMap.empty IntMap.empty
+                expansion = ExpForall (ForallSpec 2 [Nothing, Nothing] NE.:| [])
+
+            case runPresolutionM st0 (witnessFromExpansion expNodeId (nodes IntMap.! 0) expansion) of
+                Left err -> expectationFailure ("witnessFromExpansion failed: " ++ show err)
+                Right (steps, _) ->
+                    steps `shouldBe` [StepIntro, StepIntro]
+
     describe "Phase 3 — Witness normalization" $ do
         it "pushes Weaken after ops on strict descendants" $ do
             let c = mkNormalizeConstraint
@@ -1192,6 +1242,28 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 env = mkNormalizeEnv c root (IntSet.fromList [getNodeId a, getNodeId b])
                 ops0 = [OpGraft arg b, OpWeaken b, OpMerge b a]
             normalizeInstanceOpsFull env ops0 `shouldBe` Right ops0
+
+        it "normalizes omega segments without moving StepIntro" $ do
+            let c = mkNormalizeConstraint
+                root = NodeId 0
+                child = NodeId 2
+                arg = NodeId 10
+                arg2 = NodeId 11
+                env = mkNormalizeEnv c root (IntSet.fromList [getNodeId root, getNodeId child])
+                steps0 =
+                    [ StepOmega (OpWeaken root)
+                    , StepOmega (OpGraft arg child)
+                    , StepIntro
+                    , StepOmega (OpGraft arg2 root)
+                    ]
+            normalizeInstanceStepsFull env steps0
+                `shouldBe`
+                    Right
+                        [ StepOmega (OpGraft arg child)
+                        , StepOmega (OpWeaken root)
+                        , StepIntro
+                        , StepOmega (OpGraft arg2 root)
+                        ]
 
         it "preserves Graft/Weaken when a later Merge eliminates the binder during emission" $ do
             let a = NodeId 2

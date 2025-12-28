@@ -20,9 +20,11 @@ operations per the paper.
 1. WHEN presolution constructs a witness for an expansion that includes
    ExpForall, THEN THE SYSTEM SHALL record a corresponding O step in the same
    relative position as that expansion step.
-2. WHEN an expansion is a composition (ExpCompose), THEN THE SYSTEM SHALL
+2. WHEN ExpForall contains a ForallSpec with binder count k, THEN THE SYSTEM
+   SHALL emit k O steps for that spec (one per binder).
+3. WHEN an expansion is a composition (ExpCompose), THEN THE SYSTEM SHALL
    preserve the composition order when emitting witness steps.
-3. WHEN an expansion contains no ExpForall, THEN THE SYSTEM SHALL emit no O
+4. WHEN an expansion contains no ExpForall, THEN THE SYSTEM SHALL emit no O
    steps and behave as before.
 
 ### Requirement 2

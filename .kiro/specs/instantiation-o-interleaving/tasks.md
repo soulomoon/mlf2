@@ -11,7 +11,7 @@
   - Verification: `rg -n "InstanceStep|StepIntro|ewSteps" src/MLF/Constraint/Types.hs`
   - _Requirements: 1.1, 2.1_
 
-- [ ] 2. Emit StepIntro in presolution witnesses
+- [x] 2. Emit StepIntro in presolution witnesses
   - Steps:
     - Update `witnessFromExpansion` to emit `StepIntro` when processing ExpForall.
     - Preserve ExpCompose ordering when building the step list.
@@ -20,7 +20,7 @@
   - Verification: `cabal --config-file=.cabal-config test --test-show-details=direct --test-options='--match /StepIntro/'`
   - _Requirements: 1.1, 1.2, 1.3_
 
-- [ ] 3. Normalize Omega segments without reordering StepIntro
+- [x] 3. Normalize Omega segments without reordering StepIntro
   - Steps:
     - Implement a helper that splits steps into contiguous Omega segments.
     - Run `normalizeInstanceOpsFull` on each Omega segment and reassemble with
@@ -30,7 +30,7 @@
   - Verification: `cabal --config-file=.cabal-config test --test-show-details=direct --test-options='--match /StepIntro.*normalized/'`
   - _Requirements: 2.2, 3.1, 3.2_
 
-- [ ] 4. Update Phi translation to consume step lists
+- [x] 4. Update Phi translation to consume step lists
   - Steps:
     - Translate `StepIntro` to `InstIntro` inline in the instantiation sequence.
     - Translate `StepOmega` using existing Omega Phi logic.
@@ -39,7 +39,7 @@
   - Verification: `cabal --config-file=.cabal-config test --test-show-details=direct --test-options='--match /Phi.*StepIntro/'`
   - _Requirements: 2.1, 2.2_
 
-- [ ] 5. Clean up ewForallIntros usage and update call sites
+- [x] 5. Clean up ewForallIntros usage and update call sites
   - Steps:
     - Remove `ewForallIntros` references from presolution and elaboration.
     - Update any helper functions or tests that assume a suffix-only intro count.
@@ -47,3 +47,13 @@
   - Tests: full test suite
   - Verification: `cabal --config-file=.cabal-config test --test-show-details=direct`
   - _Requirements: 1.3, 2.2, 3.3_
+
+- [x] 6. Emit StepIntro per ForallSpec binder count
+  - Steps:
+    - Update `witnessFromExpansion` so each `ForallSpec` emits `fsBinderCount`
+      `StepIntro` steps.
+    - Add a regression test for multi-binder `ForallSpec`.
+  - Files: `src/MLF/Constraint/Presolution/Witness.hs`, `test/PresolutionSpec.hs`
+  - Tests: Hspec unit tests
+  - Verification: `cabal --config-file=.cabal-config test --test-show-details=direct --test-options='--match /StepIntro/'`
+  - _Requirements: 1.1, 1.2_

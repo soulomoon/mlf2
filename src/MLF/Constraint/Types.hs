@@ -500,10 +500,7 @@ data EdgeWitness = EdgeWitness
     , ewRight :: NodeId
     , ewRoot :: NodeId
     , ewSteps :: [InstanceStep]
-        -- ^ Interleaved witness steps for this edge. For now, quantifier
-        -- introductions are emitted as a suffix to preserve existing behavior.
-    , ewForallIntros :: Int
-        -- ^ Legacy count of `O` steps (kept while StepIntro interleaving lands).
+        -- ^ Interleaved witness steps for this edge, in expansion order.
     , ewWitness :: InstanceWitness
     }
     deriving (Eq, Show)

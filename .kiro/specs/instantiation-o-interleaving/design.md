@@ -23,7 +23,8 @@ Phi translation consumes the step list sequentially.
   - Update `EdgeWitness` to store a list of `InstanceStep` instead of
     `ewForallIntros` + `InstanceWitness`.
 - `MLF.Constraint.Presolution.Witness`
-  - Update `witnessFromExpansion` to emit `StepIntro` for ExpForall.
+  - Update `witnessFromExpansion` to emit `StepIntro` for each binder in
+    `ForallSpec` (use `fsBinderCount`).
   - Provide a normalization function that:
     - normalizes only the Omega ops inside each contiguous Omega segment
     - preserves StepIntro ordering and boundaries

@@ -13,7 +13,9 @@ module MLF.Constraint.Presolution.Witness (
     binderArgsFromExpansion,
     forallIntroSuffixCount,
     integratePhase2Ops,
+    integratePhase2Steps,
     witnessFromExpansion,
+    normalizeInstanceStepsFull,
     coalesceRaiseMergeWithEnv,
     reorderWeakenWithEnv,
     normalizeInstanceOpsFull,
@@ -31,7 +33,7 @@ import Data.Maybe (listToMaybe)
 import Data.Ord (Down(..))
 import qualified Data.List.NonEmpty as NE
 
-import MLF.Constraint.Types (Constraint, Expansion(..), InstanceOp(..), InstanceWitness(..), NodeId, TyNode(..), getNodeId)
+import MLF.Constraint.Types (Constraint, Expansion(..), ForallSpec(..), InstanceOp(..), InstanceStep(..), NodeId, TyNode(..), getNodeId)
 import MLF.Constraint.Presolution.Base (PresolutionM, PresolutionError(..), orderedBindersM)
 import MLF.Constraint.Presolution.Ops (getCanonicalNode, lookupVarBound)
 import qualified MLF.Binding.Tree as Binding
@@ -170,20 +172,16 @@ binderArgsFromExpansion leftRaw expn = do
 
     go expn
 
--- | Convert our presolution expansion recipe into a (coarse) instance-operation witness.
-witnessFromExpansion :: NodeId -> TyNode -> Expansion -> PresolutionM InstanceWitness
-witnessFromExpansion _root leftRaw expn = do
-    ops <- go expn
-    pure (InstanceWitness ops)
+-- | Convert a presolution expansion recipe into interleaved witness steps.
+witnessFromExpansion :: NodeId -> TyNode -> Expansion -> PresolutionM [InstanceStep]
+witnessFromExpansion _root leftRaw expn = go expn
   where
-    go :: Expansion -> PresolutionM [InstanceOp]
+    go :: Expansion -> PresolutionM [InstanceStep]
     go ExpIdentity = pure []
     go (ExpCompose es) = concat <$> mapM go (NE.toList es)
-    go (ExpForall _ls) = do
-        -- `papers/xmlf.txt` does not include quantifier-introduction (`O`) in the
-        -- witness language Ω (Figure 10). We record these separately on the
-        -- `EdgeWitness` and apply them directly when constructing Φ(e).
-        pure []
+    go (ExpForall ls) =
+        let count = sum (map fsBinderCount (NE.toList ls))
+        in pure (replicate count StepIntro)
     go (ExpInstantiate args) = do
         -- If the TyExp body is a forall, instantiate its binders in the same order
         -- that `applyExpansion` uses (binding-edge Q(n) via `orderedBinders`).
@@ -202,7 +200,7 @@ witnessFromExpansion _root leftRaw expn = do
                         --
                         -- This is closer to `papers/xmlf.txt` Fig. 10, and avoids emitting
                         -- invalid grafts under non-⊥ bounds (e.g. bounded variables).
-                        pure (grafts ++ merges ++ weakens)
+                        pure (map StepOmega (grafts ++ merges ++ weakens))
             _ -> do
                 -- Instantiating a non-TyExp is unexpected in current pipeline; treat as empty.
                 pure []
@@ -371,6 +369,72 @@ integratePhase2Ops baseOps extraOps =
 
         leftoverRaises = concat (IntMap.elems raisesAfterWeakens)
     in grafts ++ mergesSorted ++ others ++ leftoverRaises ++ weakensWithRaises ++ afterBarrier
+
+integratePhase2Steps :: [InstanceStep] -> [InstanceOp] -> [InstanceStep]
+integratePhase2Steps steps extraOps =
+    let (prefix, suffix) = splitOnLastIntro steps
+        prefix' = integrateSegments prefix
+        suffixOps = integratePhase2Ops (omegaOps suffix) extraOps
+    in prefix' ++ map StepOmega suffixOps
+  where
+    omegaOps xs = [op | StepOmega op <- xs]
+
+    splitOnLastIntro xs =
+        case findLastIndex isIntro xs of
+            Nothing -> ([], xs)
+            Just idx -> splitAt (idx + 1) xs
+
+    findLastIndex p = go 0 Nothing
+      where
+        go _ acc [] = acc
+        go i acc (y:ys) =
+            let acc' = if p y then Just i else acc
+            in go (i + 1) acc' ys
+
+    isIntro = \case
+        StepIntro -> True
+        _ -> False
+
+    integrateSegments = go []
+      where
+        go acc [] = flush acc
+        go acc (step : rest) = case step of
+            StepOmega op -> go (op : acc) rest
+            StepIntro -> flush acc ++ [StepIntro] ++ go [] rest
+
+        flush opsRev =
+            if null opsRev
+                then []
+                else map StepOmega (integratePhase2Ops (reverse opsRev) [])
+
+normalizeInstanceOpsWithFallback :: OmegaNormalizeEnv -> [InstanceOp] -> Either OmegaNormalizeError [InstanceOp]
+normalizeInstanceOpsWithFallback env ops0 =
+    case normalizeInstanceOpsFull env ops0 of
+        Right ops' -> Right ops'
+        Left (MergeDirectionInvalid _ _) -> do
+            ops1 <- coalesceRaiseMergeWithEnv env ops0
+            ops2 <- reorderWeakenWithEnv env ops1
+            case validateNormalizedWitness env ops2 of
+                Left (MergeDirectionInvalid _ _) -> Right ops2
+                Left err' -> Left err'
+                Right () -> Right ops2
+        Left err -> Left err
+
+normalizeInstanceStepsFull :: OmegaNormalizeEnv -> [InstanceStep] -> Either OmegaNormalizeError [InstanceStep]
+normalizeInstanceStepsFull env = go []
+  where
+    go acc [] = flush acc
+    go acc (step : rest) = case step of
+        StepOmega op -> go (op : acc) rest
+        StepIntro -> do
+            ops <- flush acc
+            rest' <- go [] rest
+            pure (ops ++ [StepIntro] ++ rest')
+
+    flush opsRev =
+        if null opsRev
+            then Right []
+            else map StepOmega <$> normalizeInstanceOpsWithFallback env (reverse opsRev)
 
 coalesceRaiseMergeWithEnv :: OmegaNormalizeEnv -> [InstanceOp] -> Either OmegaNormalizeError [InstanceOp]
 coalesceRaiseMergeWithEnv env = go

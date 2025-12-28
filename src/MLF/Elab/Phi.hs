@@ -132,10 +132,13 @@ phiFromEdgeWitnessWithTrace :: SolveResult -> Maybe SchemeInfo -> Maybe EdgeTrac
 phiFromEdgeWitnessWithTrace res mSchemeInfo mTrace ew = do
     requireValidBindingTree
     let InstanceWitness ops = ewWitness ew
-        introPhi = instMany (replicate (ewForallIntros ew) InstIntro)
+        steps =
+            case ewSteps ew of
+                [] -> map StepOmega ops
+                xs -> xs
     case mSchemeInfo of
-        Nothing -> phiFromType introPhi ops
-        Just si -> phiWithScheme si introPhi ops
+        Nothing -> phiFromType steps
+        Just si -> phiWithScheme si steps
   where
     requireValidBindingTree :: Either ElabError ()
     requireValidBindingTree =
@@ -161,35 +164,61 @@ phiFromEdgeWitnessWithTrace res mSchemeInfo mTrace ew = do
             _ ->
                 Order.orderKeysFromRoot res orderRoot
 
-    phiFromType :: Instantiation -> [InstanceOp] -> Either ElabError Instantiation
-    phiFromType introPhi ops = do
+    phiFromType :: [InstanceStep] -> Either ElabError Instantiation
+    phiFromType steps = do
         ty0 <- reifyType res (ewRoot ew)
         let ids0 = idsFromType ty0
             lookupBinder nid = Just ("t" ++ show (getNodeId nid))
+            omegaOps = [op | StepOmega op <- steps]
         (sigma, ty1, ids1) <-
-            if needsPrec ops
+            if needsPrec omegaOps
                 then reorderBindersByPrec ty0 ids0
                 else Right (InstId, ty0, ids0)
-        (_, _, phiOps) <- go ty1 ids1 InstId ops lookupBinder
-        pure (instMany [sigma, phiOps, introPhi])
+        (_, _, phiOps) <- goSteps ty1 ids1 InstId steps lookupBinder
+        pure (instMany [sigma, phiOps])
 
-    phiWithScheme :: SchemeInfo -> Instantiation -> [InstanceOp] -> Either ElabError Instantiation
-    phiWithScheme si introPhi ops = do
+    phiWithScheme :: SchemeInfo -> [InstanceStep] -> Either ElabError Instantiation
+    phiWithScheme si steps = do
         let ty0 = schemeToType (siScheme si)
             subst = siSubst si
             lookupBinder (NodeId i) = IntMap.lookup i subst
             ids0 = idsForStartType si ty0
+            omegaOps = [op | StepOmega op <- steps]
         (sigma, ty1, ids1) <-
-            if needsPrec ops
+            if needsPrec omegaOps
                 then reorderBindersByPrec ty0 ids0
                 else Right (InstId, ty0, ids0)
-        (_, _, phiOps) <- go ty1 ids1 InstId ops lookupBinder
-        pure (instMany [sigma, phiOps, introPhi])
+        (_, _, phiOps) <- goSteps ty1 ids1 InstId steps lookupBinder
+        pure (instMany [sigma, phiOps])
 
     needsPrec :: [InstanceOp] -> Bool
     needsPrec = any $ \case
         OpRaise{} -> True
         _ -> False
+
+    goSteps
+        :: ElabType
+        -> [Maybe NodeId]
+        -> Instantiation
+        -> [InstanceStep]
+        -> (NodeId -> Maybe String)
+        -> Either ElabError (ElabType, [Maybe NodeId], Instantiation)
+    goSteps ty ids phi steps lookupBinder = case steps of
+        [] -> Right (ty, ids, phi)
+        StepIntro : rest -> do
+            ty' <- applyInstantiation ty InstIntro
+            let ids' = Nothing : ids
+            goSteps ty' ids' (composeInst phi InstIntro) rest lookupBinder
+        _ ->
+            let (segment, rest) = span isOmega steps
+                ops = [op | StepOmega op <- segment]
+            in do
+                (ty', ids', phi') <- go ty ids phi ops lookupBinder
+                goSteps ty' ids' phi' rest lookupBinder
+      where
+        isOmega = \case
+            StepOmega{} -> True
+            _ -> False
 
     reorderBindersByPrec :: ElabType -> [Maybe NodeId] -> Either ElabError (Instantiation, ElabType, [Maybe NodeId])
     reorderBindersByPrec ty ids = do
