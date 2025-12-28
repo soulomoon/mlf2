@@ -9,7 +9,7 @@ import qualified Data.IntSet as IntSet
 import MLF.Frontend.Syntax (Expr(..), Lit(..), SrcType(..), SrcScheme(..))
 import qualified MLF.Elab.Pipeline as Elab
 import qualified MLF.Util.Order as Order
-import MLF.Constraint.Types (BaseTy(..), NodeId(..), EdgeId(..), TyNode(..), Constraint(..), InstanceOp(..), InstanceWitness(..), EdgeWitness(..), BindFlag(..))
+import MLF.Constraint.Types (BaseTy(..), NodeId(..), EdgeId(..), TyNode(..), Constraint(..), InstanceOp(..), InstanceStep(..), InstanceWitness(..), EdgeWitness(..), BindFlag(..))
 import MLF.Frontend.ConstraintGen (ConstraintResult(..), generateConstraints)
 import MLF.Constraint.Normalize (normalize)
 import MLF.Constraint.Acyclicity (checkAcyclicity)
@@ -581,13 +581,15 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = subst }
 
                     -- Witness says: graft Int into binder “b” (NodeId 2), then weaken it.
+                    ops = [OpGraft intNode (NodeId 2), OpWeaken (NodeId 2)]
                     ew = EdgeWitness
                         { ewEdgeId = EdgeId 0
                         , ewLeft = NodeId 0
                         , ewRight = NodeId 0
                         , ewRoot = NodeId 0
+                        , ewSteps = map StepOmega ops
                         , ewForallIntros = 0
-                        , ewWitness = InstanceWitness [OpGraft intNode (NodeId 2), OpWeaken (NodeId 2)]
+                        , ewWitness = InstanceWitness ops
                         }
 
                 phi <- requireRight (Elab.phiFromEdgeWitness solved (Just si) ew)
@@ -611,13 +613,15 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = subst }
 
                     -- Merge binder “b” into binder “a”, i.e. ∀a. ∀b. a -> b  ~~>  ∀a. a -> a
+                    ops = [OpMerge (NodeId 2) (NodeId 1)]
                     ew = EdgeWitness
                         { ewEdgeId = EdgeId 0
                         , ewLeft = NodeId 0
                         , ewRight = NodeId 0
                         , ewRoot = NodeId 0
+                        , ewSteps = map StepOmega ops
                         , ewForallIntros = 0
-                        , ewWitness = InstanceWitness [OpMerge (NodeId 2) (NodeId 1)]
+                        , ewWitness = InstanceWitness ops
                         }
 
                 phi <- requireRight (Elab.phiFromEdgeWitness solved (Just si) ew)
@@ -638,13 +642,15 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
                     -- Raise binder “b” outward by introducing a fresh front binder and
                     -- aliasing/eliminating the old one (paper Fig. 10 Raise).
+                    ops = [OpRaise (NodeId 2)]
                     ew = EdgeWitness
                         { ewEdgeId = EdgeId 0
                         , ewLeft = NodeId 0
                         , ewRight = NodeId 0
                         , ewRoot = NodeId 0
+                        , ewSteps = map StepOmega ops
                         , ewForallIntros = 0
-                        , ewWitness = InstanceWitness [OpRaise (NodeId 2)]
+                        , ewWitness = InstanceWitness ops
                         }
 
                 phi <- requireRight (Elab.phiFromEdgeWitness solved (Just si) ew)
@@ -668,13 +674,15 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     subst = IntMap.fromList [(1, "a"), (2, "b"), (3, "c")]
                     si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = subst }
 
+                    ops = [OpRaise (NodeId 3)]
                     ew = EdgeWitness
                         { ewEdgeId = EdgeId 0
                         , ewLeft = NodeId 0
                         , ewRight = NodeId 0
                         , ewRoot = NodeId 0
+                        , ewSteps = map StepOmega ops
                         , ewForallIntros = 0
-                        , ewWitness = InstanceWitness [OpRaise (NodeId 3)]
+                        , ewWitness = InstanceWitness ops
                         }
 
                 phi <- requireRight (Elab.phiFromEdgeWitness solved (Just si) ew)
@@ -736,13 +744,15 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             , etCopyMap = IntMap.empty
                             }
 
+                    ops = [OpRaise cN]
                     ew = EdgeWitness
                         { ewEdgeId = EdgeId 0
                         , ewLeft = NodeId 0
                         , ewRight = NodeId 0
                         , ewRoot = root
+                        , ewSteps = map StepOmega ops
                         , ewForallIntros = 0
-                        , ewWitness = InstanceWitness [OpRaise cN]
+                        , ewWitness = InstanceWitness ops
                         }
 
                 phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace solved (Just si) (Just tr) ew)
@@ -891,13 +901,15 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             , etCopyMap = IntMap.empty
                             }
 
+                    ops = [OpRaise nN]
                     ew = EdgeWitness
                         { ewEdgeId = EdgeId 0
                         , ewLeft = NodeId 0
                         , ewRight = NodeId 0
                         , ewRoot = root
+                        , ewSteps = map StepOmega ops
                         , ewForallIntros = 0
-                        , ewWitness = InstanceWitness [OpRaise nN]
+                        , ewWitness = InstanceWitness ops
                         }
 
                 phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace solved (Just si) (Just tr) ew)

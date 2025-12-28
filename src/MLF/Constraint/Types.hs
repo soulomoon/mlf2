@@ -17,6 +17,7 @@ module MLF.Constraint.Types (
     ForallSpec(..),
     Expansion (..),
     InstanceOp(..),
+    InstanceStep(..),
     InstanceWitness(..),
     EdgeWitness(..),
     Presolution (..),
@@ -476,6 +477,12 @@ data InstanceOp
 newtype InstanceWitness = InstanceWitness { getInstanceOps :: [InstanceOp] }
     deriving (Eq, Show)
 
+-- | A witness step that can interleave quantifier introductions with Ω ops.
+data InstanceStep
+    = StepOmega InstanceOp
+    | StepIntro
+    deriving (Eq, Show)
+
 -- | Per-instantiation-edge witness metadata.
 --
 -- This is the data that Phase 6 uses to reconstruct an xMLF instantiation for
@@ -492,13 +499,11 @@ data EdgeWitness = EdgeWitness
     , ewLeft :: NodeId
     , ewRight :: NodeId
     , ewRoot :: NodeId
+    , ewSteps :: [InstanceStep]
+        -- ^ Interleaved witness steps for this edge. For now, quantifier
+        -- introductions are emitted as a suffix to preserve existing behavior.
     , ewForallIntros :: Int
-        -- ^ Number of xMLF quantifier-introduction steps (`O`) that come from the
-        -- presolution expansion recipe for this edge (e.g. `ExpForall`).
-        --
-        -- Paper alignment: `papers/xmlf.txt` does not include `O` in the witness
-        -- language Ω (Figure 10). We therefore keep Ω as `InstanceOp`s only and
-        -- apply these `O` steps directly when constructing Φ(e).
+        -- ^ Legacy count of `O` steps (kept while StepIntro interleaving lands).
     , ewWitness :: InstanceWitness
     }
     deriving (Eq, Show)
