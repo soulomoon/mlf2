@@ -9,11 +9,13 @@ import qualified Data.List.NonEmpty as NE
 
 import MLF.Constraint.Types
 import MLF.Constraint.Presolution
+import MLF.Constraint.Presolution.Witness (OmegaNormalizeEnv(..), OmegaNormalizeError(..), coalesceRaiseMergeWithEnv, integratePhase2Ops, normalizeInstanceOpsFull, reorderWeakenWithEnv, validateNormalizedWitness)
 import MLF.Constraint.Acyclicity (AcyclicityResult(..))
 import MLF.Constraint.Solve (SolveResult(..), validateSolvedGraphStrict)
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Binding.GraphOps as GraphOps
 import qualified MLF.Util.UnionFind as UF
+import qualified MLF.Util.Order as Order
 import SpecUtil (emptyConstraint, inferBindParents, lookupNodeMaybe)
 
 expectArrow :: HasCallStack => IntMap.IntMap TyNode -> NodeId -> IO TyNode
@@ -29,6 +31,50 @@ expectForall nodes nid = case lookupNodeMaybe nodes nid of
     other -> do
         let msg = "Expected TyForall at " ++ show nid ++ ", found " ++ show other
         expectationFailure msg >> fail msg
+
+mkNormalizeConstraint :: Constraint
+mkNormalizeConstraint =
+    let root = NodeId 0
+        arrow = NodeId 1
+        dom = NodeId 2
+        cod = NodeId 3
+    in emptyConstraint
+        { cNodes =
+            IntMap.fromList
+                [ (getNodeId root, TyForall root arrow)
+                , (getNodeId arrow, TyArrow arrow dom cod)
+                , (getNodeId dom, TyVar dom)
+                , (getNodeId cod, TyVar cod)
+                ]
+        , cBindParents =
+            IntMap.fromList
+                [ (getNodeId arrow, (root, BindFlex))
+                , (getNodeId dom, (root, BindFlex))
+                , (getNodeId cod, (root, BindFlex))
+                ]
+        }
+
+mkNormalizeEnv :: Constraint -> NodeId -> IntSet.IntSet -> OmegaNormalizeEnv
+mkNormalizeEnv c root interior =
+    OmegaNormalizeEnv
+        { oneRoot = root
+        , interior = interior
+        , orderKeys = Order.orderKeysFromRootWith id (cNodes c) root Nothing
+        , canonical = id
+        , constraint = c
+        , binderArgs = IntMap.empty
+        }
+
+orderedPairByPrec :: Constraint -> NodeId -> (NodeId, NodeId)
+orderedPairByPrec c root =
+    let n1 = NodeId 2
+        n2 = NodeId 3
+        keys = Order.orderKeysFromRootWith id (cNodes c) root Nothing
+        k1 = keys IntMap.! getNodeId n1
+        k2 = keys IntMap.! getNodeId n2
+    in if Order.compareOrderKey k1 k2 == LT
+        then (n1, n2)
+        else (n2, n1)
 
 spec :: Spec
 spec = describe "Phase 4 — Principal Presolution" $ do
@@ -893,7 +939,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         Just ew -> do
                             let InstanceWitness ops = ewWitness ew
                             ops `shouldSatisfy` any isRaiseMerge
-                            ops `shouldNotSatisfy` elem (OpWeaken b)
+                            ops `shouldSatisfy` (not . null)
 
         it "does not record Raise for unbounded binder metas (graft+weaken only)" $ do
             -- TyExp s · (∀b. b -> b) ≤ (y -> y)
@@ -1119,110 +1165,220 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                             expectationFailure ("Expected Graft(a), Merge(b,a), Weaken(a), got indices: " ++ show other ++ " ops: " ++ show ops)
 
     describe "Phase 3 — Witness normalization" $ do
-        it "pushes Weaken after other ops on the binder" $ do
-            let a = NodeId 1
+        it "pushes Weaken after ops on strict descendants" $ do
+            let c = mkNormalizeConstraint
+                root = NodeId 0
+                child = NodeId 1
                 arg = NodeId 10
-                ops0 = [OpWeaken a, OpGraft arg a]
-                ops1 = normalizeInstanceOps ops0
-            ops1 `shouldBe` [OpGraft arg a, OpWeaken a]
+                env = mkNormalizeEnv c root (IntSet.fromList [getNodeId root, getNodeId child])
+                ops0 = [OpWeaken root, OpGraft arg child]
+            normalizeInstanceOpsFull env ops0 `shouldBe` Right [OpGraft arg child, OpWeaken root]
 
-        it "drops redundant Graft/Weaken when a binder is eliminated by Merge" $ do
-            let a = NodeId 1
-                b = NodeId 2
+        it "does not move Weaken past same-binder ops without descendants" $ do
+            let c = mkNormalizeConstraint
+                root = NodeId 0
+                n = NodeId 2
                 arg = NodeId 10
+                env = mkNormalizeEnv c root (IntSet.fromList [getNodeId n])
+                ops0 = [OpWeaken n, OpGraft arg n]
+            normalizeInstanceOpsFull env ops0 `shouldBe` Right [OpWeaken n, OpGraft arg n]
+
+        it "does not drop Graft/Weaken when a binder is eliminated by Merge" $ do
+            let c = mkNormalizeConstraint
+                root = NodeId 0
+                a = NodeId 2
+                b = NodeId 3
+                arg = NodeId 10
+                env = mkNormalizeEnv c root (IntSet.fromList [getNodeId a, getNodeId b])
                 ops0 = [OpGraft arg b, OpWeaken b, OpMerge b a]
-                ops1 = normalizeInstanceOps ops0
-            ops1 `shouldBe` [OpMerge b a]
+            normalizeInstanceOpsFull env ops0 `shouldBe` Right ops0
+
+        it "preserves Graft/Weaken when a later Merge eliminates the binder during emission" $ do
+            let a = NodeId 2
+                b = NodeId 3
+                arg = NodeId 10
+                baseOps = [OpGraft arg b, OpWeaken b]
+                extraOps = [OpMerge b a]
+            integratePhase2Ops baseOps extraOps
+                `shouldBe` [OpGraft arg b, OpMerge b a, OpWeaken b]
 
         it "coalesces Raise; Merge into RaiseMerge" $ do
-            let n = NodeId 1
-                m = NodeId 2
-            normalizeInstanceOps [OpRaise n, OpMerge n m] `shouldBe` [OpRaiseMerge n m]
+            let c = mkNormalizeConstraint
+                root = NodeId 0
+                n = NodeId 2
+                m = NodeId 3
+                env = mkNormalizeEnv c root (IntSet.fromList [getNodeId n])
+            normalizeInstanceOpsFull env [OpRaise n, OpMerge n m] `shouldBe` Right [OpRaiseMerge n m]
 
         it "coalesces multiple Raises followed by Merge into RaiseMerge" $ do
-            let n = NodeId 1
-                m = NodeId 2
-            normalizeInstanceOps [OpRaise n, OpRaise n, OpRaise n, OpMerge n m] `shouldBe` [OpRaiseMerge n m]
+            let c = mkNormalizeConstraint
+                root = NodeId 0
+                n = NodeId 2
+                m = NodeId 3
+                env = mkNormalizeEnv c root (IntSet.fromList [getNodeId n])
+            normalizeInstanceOpsFull env [OpRaise n, OpRaise n, OpRaise n, OpMerge n m]
+                `shouldBe` Right [OpRaiseMerge n m]
 
-        it "does not mention an eliminated binder after its elimination" $ do
-            let a = NodeId 0
-                b = NodeId 1
-                arrow2 = NodeId 2
-                arrow1 = NodeId 3
-                forallNode = NodeId 4
-                expNode = NodeId 5
+        describe "RaiseMerge coalescing (interior aware)" $ do
+            it "coalesces Raise; Merge when the target leaves the interior" $ do
+                let c = mkNormalizeConstraint
+                    root = NodeId 0
+                    n = NodeId 2
+                    m = NodeId 3
+                    env = mkNormalizeEnv c root (IntSet.fromList [getNodeId n])
+                coalesceRaiseMergeWithEnv env [OpRaise n, OpMerge n m]
+                    `shouldBe` Right [OpRaiseMerge n m]
 
-                t = NodeId 6
-                targetArrow2 = NodeId 7
-                targetArrow1 = NodeId 8
+            it "errors when Merge leaves the interior without Raise" $ do
+                let c = mkNormalizeConstraint
+                    root = NodeId 0
+                    n = NodeId 2
+                    m = NodeId 3
+                    env = mkNormalizeEnv c root (IntSet.fromList [getNodeId n])
+                coalesceRaiseMergeWithEnv env [OpMerge n m]
+                    `shouldBe` Left (MalformedRaiseMerge [OpMerge n m])
 
+            it "keeps Raise; Merge when the target stays inside the interior" $ do
+                let c = mkNormalizeConstraint
+                    root = NodeId 0
+                    n = NodeId 2
+                    m = NodeId 3
+                    env = mkNormalizeEnv c root (IntSet.fromList [getNodeId n, getNodeId m])
+                coalesceRaiseMergeWithEnv env [OpRaise n, OpMerge n m]
+                    `shouldBe` Right [OpRaise n, OpMerge n m]
+
+            it "coalesces multiple Raises before Merge" $ do
+                let c = mkNormalizeConstraint
+                    root = NodeId 0
+                    n = NodeId 2
+                    m = NodeId 3
+                    env = mkNormalizeEnv c root (IntSet.fromList [getNodeId n])
+                coalesceRaiseMergeWithEnv env [OpRaise n, OpRaise n, OpMerge n m]
+                    `shouldBe` Right [OpRaiseMerge n m]
+
+        describe "Weaken placement (interior aware)" $ do
+            let root = NodeId 0
+                parent = NodeId 1
+                child = NodeId 2
+                sibling = NodeId 3
                 nodes =
                     IntMap.fromList
-                        [ (0, TyVar a)
-                        , (1, TyVar b)
-                        , (2, TyArrow arrow2 b a) -- b -> a
-                        , (3, TyArrow arrow1 a arrow2) -- a -> (b -> a)
-                        , (4, TyForall forallNode arrow1)
-                        , (5, TyExp expNode (ExpVarId 0) forallNode)
-                        , (6, TyVar t)
-                        , (7, TyArrow targetArrow2 t t) -- t -> t
-                        , (8, TyArrow targetArrow1 t targetArrow2) -- t -> (t -> t)
+                        [ (getNodeId root, TyForall root parent)
+                        , (getNodeId parent, TyForall parent child)
+                        , (getNodeId child, TyVar child)
+                        , (getNodeId sibling, TyVar sibling)
                         ]
-
-                edge = InstEdge (EdgeId 0) expNode targetArrow1
                 bindParents =
-                    IntMap.union
-                        (IntMap.fromList
-                            [ (getNodeId a, (forallNode, BindFlex))
-                            , (getNodeId b, (forallNode, BindFlex))
-                            ])
-                        (inferBindParents nodes)
-                constraint =
-                    emptyConstraint
-                        { cNodes = nodes
-                        , cInstEdges = [edge]
-                        , cBindParents = bindParents
-                        }
-                st0 =
-                    PresolutionState
-                        constraint
-                        (Presolution IntMap.empty)
-                        IntMap.empty
-                        9
-                        IntSet.empty
-                        IntMap.empty
-                        IntMap.empty
-                        IntMap.empty
+                    IntMap.fromList
+                        [ (getNodeId parent, (root, BindFlex))
+                        , (getNodeId child, (parent, BindFlex))
+                        , (getNodeId sibling, (root, BindFlex))
+                        ]
+                c = emptyConstraint { cNodes = nodes, cBindParents = bindParents }
+                env = mkNormalizeEnv c root (IntSet.fromList [getNodeId parent, getNodeId child, getNodeId sibling])
 
-                mentionsNode nid op = case op of
-                    OpGraft sigma n -> nid == sigma || nid == n
-                    OpMerge n m -> nid == n || nid == m
-                    OpRaise n -> nid == n
-                    OpWeaken n -> nid == n
-                    OpRaiseMerge n m -> nid == n || nid == m
+            it "moves Weaken after descendant ops" $ do
+                let ops0 = [OpWeaken parent, OpGraft child child]
+                reorderWeakenWithEnv env ops0
+                    `shouldBe` Right [OpGraft child child, OpWeaken parent]
 
-                assertNoMentionsAfterElim ops = go ops
-                  where
-                    go [] = pure ()
-                    go (op : rest) = do
-                        case op of
-                            OpWeaken n ->
-                                any (mentionsNode n) rest `shouldBe` False
-                            OpMerge n _ ->
-                                any (mentionsNode n) rest `shouldBe` False
-                            OpRaiseMerge n _ ->
-                                any (mentionsNode n) rest `shouldBe` False
-                            _ -> pure ()
-                        go rest
+            it "orders descendant Weaken before ancestor when anchors tie" $ do
+                let ops0 = [OpWeaken parent, OpWeaken child]
+                reorderWeakenWithEnv env ops0
+                    `shouldBe` Right [OpWeaken child, OpWeaken parent]
 
-            case runPresolutionM st0 (processInstEdge edge) of
-                Left err -> expectationFailure ("processInstEdge failed: " ++ show err)
-                Right (_, st1) -> do
-                    case IntMap.lookup 0 (psEdgeWitnesses st1) of
-                        Nothing -> expectationFailure "Expected EdgeWitness for EdgeId 0"
-                        Just ew -> do
-                            let InstanceWitness ops = ewWitness ew
-                            assertNoMentionsAfterElim ops
+            it "preserves unrelated op order while moving Weaken" $ do
+                let ops0 = [OpWeaken parent, OpGraft sibling sibling, OpGraft child child]
+                reorderWeakenWithEnv env ops0
+                    `shouldBe` Right [OpGraft sibling sibling, OpGraft child child, OpWeaken parent]
+
+        it "normalizeInstanceOpsFull produces validated witnesses when it succeeds" $ property $
+            let c = mkNormalizeConstraint
+                root = NodeId 0
+                env = mkNormalizeEnv c root (IntSet.fromList [1, 2, 3])
+                nodes = [NodeId 1, NodeId 2, NodeId 3]
+                genNode = elements nodes
+                genOp =
+                    oneof
+                        [ OpGraft <$> genNode <*> genNode
+                        , OpMerge <$> genNode <*> genNode
+                        , OpRaise <$> genNode
+                        , OpWeaken <$> genNode
+                        , OpRaiseMerge <$> genNode <*> genNode
+                        ]
+                genOps = listOf genOp
+            in forAll genOps $ \ops ->
+                case normalizeInstanceOpsFull env ops of
+                    Left _ -> property True
+                    Right ops' -> validateNormalizedWitness env ops' === Right ()
+
+        it "allows ops on binders that are later eliminated (paper normalization only)" $ do
+            let c = mkNormalizeConstraint
+                root = NodeId 0
+                a = NodeId 2
+                b = NodeId 3
+                arg = NodeId 10
+                env = mkNormalizeEnv c root (IntSet.fromList [getNodeId a, getNodeId b])
+                ops0 = [OpGraft arg b, OpWeaken b, OpMerge b a]
+            normalizeInstanceOpsFull env ops0 `shouldBe` Right ops0
+
+        describe "Normalized witness validation" $ do
+            it "rejects ops outside the interior (condition 1)" $ do
+                let c = mkNormalizeConstraint
+                    root = NodeId 0
+                    env = mkNormalizeEnv c root (IntSet.fromList [2])
+                    op = OpGraft (NodeId 2) (NodeId 3)
+                validateNormalizedWitness env [op]
+                    `shouldBe` Left (OpOutsideInterior op)
+
+            it "rejects Merge with wrong ≺ direction (condition 2)" $ do
+                let c = mkNormalizeConstraint
+                    root = NodeId 0
+                    (mLess, nGreater) = orderedPairByPrec c root
+                    interior = IntSet.fromList [getNodeId mLess, getNodeId nGreater]
+                    env = mkNormalizeEnv c root interior
+                    bad = OpMerge mLess nGreater
+                validateNormalizedWitness env [bad]
+                    `shouldBe` Left (MergeDirectionInvalid mLess nGreater)
+
+            it "rejects Raise outside the interior (condition 3)" $ do
+                let c = mkNormalizeConstraint
+                    root = NodeId 0
+                    env = mkNormalizeEnv c root (IntSet.fromList [2])
+                    n = NodeId 3
+                validateNormalizedWitness env [OpRaise n]
+                    `shouldBe` Left (RaiseNotUnderRoot n root)
+
+            it "rejects RaiseMerge when the target stays inside the interior (condition 4)" $ do
+                let c = mkNormalizeConstraint
+                    root = NodeId 0
+                    (mLess, nGreater) = orderedPairByPrec c root
+                    interior = IntSet.fromList [getNodeId mLess, getNodeId nGreater]
+                    env = mkNormalizeEnv c root interior
+                    op = OpRaiseMerge nGreater mLess
+                validateNormalizedWitness env [op]
+                    `shouldBe` Left (RaiseMergeInsideInterior nGreater mLess)
+
+            it "rejects ops below a Weakened binder (condition 5)" $ do
+                let root = NodeId 0
+                    parent = NodeId 1
+                    child = NodeId 2
+                    nodes =
+                        IntMap.fromList
+                            [ (getNodeId root, TyForall root parent)
+                            , (getNodeId parent, TyForall parent child)
+                            , (getNodeId child, TyVar child)
+                            ]
+                    bindParents =
+                        IntMap.fromList
+                            [ (getNodeId parent, (root, BindFlex))
+                            , (getNodeId child, (parent, BindFlex))
+                            ]
+                    c = emptyConstraint { cNodes = nodes, cBindParents = bindParents }
+                    env = mkNormalizeEnv c root (IntSet.fromList [getNodeId parent, getNodeId child])
+                    ops = [OpWeaken parent, OpGraft child child]
+                validateNormalizedWitness env ops
+                    `shouldBe` Left (OpUnderRigid child)
 
     describe "decideMinimalExpansion" $ do
         it "returns ExpIdentity for matching monomorphic types" $ do

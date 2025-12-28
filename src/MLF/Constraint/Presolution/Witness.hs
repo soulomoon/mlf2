@@ -13,22 +13,131 @@ module MLF.Constraint.Presolution.Witness (
     binderArgsFromExpansion,
     forallIntroSuffixCount,
     integratePhase2Ops,
-    normalizeInstanceOps,
     witnessFromExpansion,
-    coalesceRaiseMerge
+    coalesceRaiseMergeWithEnv,
+    reorderWeakenWithEnv,
+    normalizeInstanceOpsFull,
+    validateNormalizedWitness,
+    OmegaNormalizeEnv(..),
+    OmegaNormalizeError(..)
 ) where
 
 import Control.Monad (foldM)
 import Control.Monad.Except (throwError)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import Data.List (mapAccumL, partition, sortOn)
+import Data.List (mapAccumL, partition, sortBy, sortOn)
+import Data.Maybe (listToMaybe)
 import Data.Ord (Down(..))
 import qualified Data.List.NonEmpty as NE
 
-import MLF.Constraint.Types (Expansion(..), InstanceOp(..), InstanceWitness(..), NodeId, TyNode(..), getNodeId)
+import MLF.Constraint.Types (Constraint, Expansion(..), InstanceOp(..), InstanceWitness(..), NodeId, TyNode(..), getNodeId)
 import MLF.Constraint.Presolution.Base (PresolutionM, PresolutionError(..), orderedBindersM)
 import MLF.Constraint.Presolution.Ops (getCanonicalNode, lookupVarBound)
+import qualified MLF.Binding.Tree as Binding
+import MLF.Util.Order (OrderKey, compareNodesByOrderKey)
+
+data OmegaNormalizeEnv = OmegaNormalizeEnv
+    { oneRoot :: NodeId
+    , interior :: IntSet.IntSet
+    , orderKeys :: IntMap.IntMap OrderKey
+    , canonical :: NodeId -> NodeId
+    , constraint :: Constraint
+    , binderArgs :: IntMap.IntMap NodeId
+    }
+
+data OmegaNormalizeError
+    = OpOutsideInterior InstanceOp
+    | MergeDirectionInvalid NodeId NodeId
+    | RaiseNotUnderRoot NodeId NodeId
+    | RaiseMergeInsideInterior NodeId NodeId
+    | OpUnderRigid NodeId
+    | MissingOrderKey NodeId
+    | MalformedRaiseMerge [InstanceOp]
+    deriving (Eq, Show)
+
+validateNormalizedWitness :: OmegaNormalizeEnv -> [InstanceOp] -> Either OmegaNormalizeError ()
+validateNormalizedWitness env ops = do
+    mapM_ checkOp ops
+    checkWeakenOrdering ops
+  where
+    rootC = canonical env (oneRoot env)
+
+    canon = canonical env
+
+    inInterior nid =
+        IntSet.member (getNodeId (canon nid)) (interior env)
+
+    requireInterior op nid =
+        if inInterior nid
+            then Right ()
+            else Left (OpOutsideInterior op)
+
+    mergeKeyNode nid =
+        case IntMap.lookup (getNodeId (canon nid)) (binderArgs env) of
+            Just arg -> arg
+            Nothing -> canon nid
+
+    checkMergeDirection n m = do
+        let ord = compareNodesByOrderKey (orderKeys env) (mergeKeyNode m) (mergeKeyNode n)
+        case ord of
+            LT -> Right ()
+            _ -> Left (MergeDirectionInvalid (canon n) (canon m))
+
+    checkOp op =
+        case op of
+            OpGraft _ n ->
+                requireInterior op n
+            OpWeaken n ->
+                requireInterior op n
+            OpMerge n m -> do
+                requireInterior op n
+                requireInterior op m
+                checkMergeDirection n m
+            OpRaise n ->
+                if inInterior n
+                    then Right ()
+                    else Left (RaiseNotUnderRoot (canon n) rootC)
+            OpRaiseMerge n m -> do
+                if not (inInterior n)
+                    then Left (OpOutsideInterior op)
+                    else if inInterior m
+                        then Left (RaiseMergeInsideInterior (canon n) (canon m))
+                        else Right ()
+
+    opTargets op =
+        case op of
+            OpGraft _ n -> [n]
+            OpWeaken n -> [n]
+            OpMerge n _ -> [n]
+            OpRaise n -> [n]
+            OpRaiseMerge n _ -> [n]
+
+    -- Paper alignment (`papers/xmlf.txt` §3.4, condition (5)): “below n” means
+    -- strict binding-tree descendants (exclude n itself).
+    descendantsOf nid =
+        case Binding.interiorOf (constraint env) (canon nid) of
+            Left _ -> Left (OpUnderRigid (canon nid))
+            Right s ->
+                Right (IntSet.delete (getNodeId (canon nid)) s)
+
+    firstOffender descSet rest =
+        listToMaybe
+            [ canon t
+            | op <- rest
+            , t <- opTargets op
+            , IntSet.member (getNodeId (canon t)) descSet
+            ]
+
+    checkWeakenOrdering [] = Right ()
+    checkWeakenOrdering (op : rest) =
+        case op of
+            OpWeaken n -> do
+                desc <- descendantsOf n
+                case firstOffender desc rest of
+                    Nothing -> checkWeakenOrdering rest
+                    Just offender -> Left (OpUnderRigid offender)
+            _ -> checkWeakenOrdering rest
 
 -- | Extract binder→argument pairing information from an expansion recipe.
 --
@@ -217,21 +326,7 @@ integratePhase2Ops baseOps extraOps =
             , not (IntSet.member (getNodeId n) baseMerged)
             ]
 
-        extraElims =
-            IntSet.fromList
-                [ getNodeId n
-                | op <- extraElimOps
-                , Just n <- [elimBinder op]
-                ]
-
-        removeElimOps op = case op of
-            OpGraft _ bv -> not (IntSet.member (getNodeId bv) extraElims)
-            OpWeaken bv -> not (IntSet.member (getNodeId bv) extraElims)
-            _ -> True
-
-        baseOps' = filter removeElimOps baseOps
-
-        (beforeBarrier, afterBarrier) = break isBarrier baseOps'
+        (beforeBarrier, afterBarrier) = break isBarrier baseOps
 
         grafts = [ op | op <- beforeBarrier, isGraft op ]
         weakens = [ op | op <- beforeBarrier, isWeaken op ]
@@ -277,104 +372,212 @@ integratePhase2Ops baseOps extraOps =
         leftoverRaises = concat (IntMap.elems raisesAfterWeakens)
     in grafts ++ mergesSorted ++ others ++ leftoverRaises ++ weakensWithRaises ++ afterBarrier
 
--- | Lightweight normalization of a recorded witness op sequence.
---
--- This is a conservative step toward `papers/xmlf.txt`’s “normalized” Ω language:
---  * ensure a binder is not eliminated twice (Weaken after Merge/RaiseMerge), and
---  * ensure `OpWeaken n` appears after other ops mentioning `n` when possible.
-normalizeInstanceOps :: [InstanceOp] -> [InstanceOp]
-normalizeInstanceOps ops0 =
-    let ops1 = coalesceRaiseMerge ops0
-    in go ops1
+coalesceRaiseMergeWithEnv :: OmegaNormalizeEnv -> [InstanceOp] -> Either OmegaNormalizeError [InstanceOp]
+coalesceRaiseMergeWithEnv env = go
   where
-    isBarrier = \case
-        OpRaise{} -> True
+    canon = canonical env
+
+    sameBinder a b = canon a == canon b
+
+    inInterior nid =
+        IntSet.member (getNodeId (canon nid)) (interior env)
+
+    isSameRaise n = \case
+        OpRaise n' -> sameBinder n n'
         _ -> False
+
+    go = \case
+        [] -> Right []
+        (OpRaise n : rest) ->
+            let (moreRaises, rest1) = span (isSameRaise n) rest
+                raises = OpRaise n : moreRaises
+            in case rest1 of
+                (OpMerge n' m : rest2) | sameBinder n n' ->
+                    if inInterior m
+                        then do
+                            rest' <- go rest1
+                            pure (raises ++ rest')
+                        else do
+                            rest' <- go rest2
+                            pure (OpRaiseMerge n m : rest')
+                _ -> (OpRaise n :) <$> go rest
+        (OpMerge n m : rest)
+            | inInterior n && not (inInterior m) -> Left (MalformedRaiseMerge [OpMerge n m])
+            | otherwise -> (OpMerge n m :) <$> go rest
+        (op : rest) -> (op :) <$> go rest
+
+data WeakenInfo = WeakenInfo
+    { wiOp :: InstanceOp
+    , wiBinder :: NodeId
+    , wiAnchor :: Int
+    , wiIndex :: Int
+    , wiDesc :: IntSet.IntSet
+    }
+
+reorderWeakenWithEnv :: OmegaNormalizeEnv -> [InstanceOp] -> Either OmegaNormalizeError [InstanceOp]
+reorderWeakenWithEnv env ops =
+    if null weakenIndexed
+        then Right ops
+        else do
+            infos <- mapM mkWeakenInfo weakenIndexed
+            let groups =
+                    IntMap.fromListWith (++)
+                        [ (wiAnchor info, [info])
+                        | info <- infos
+                        ]
+                orderedGroups = IntMap.map orderWeakenGroup groups
+                nonWeakenByIndex =
+                    IntMap.fromList
+                        [ (idx, op)
+                        | (idx, op) <- opsIndexed
+                        , not (isWeaken op)
+                        ]
+                maxIndex = length ops - 1
+                output =
+                    concat
+                        [ maybe [] (: []) (IntMap.lookup idx nonWeakenByIndex)
+                            ++ IntMap.findWithDefault [] idx orderedGroups
+                        | idx <- [0 .. maxIndex]
+                        ]
+            Right output
+  where
+    opsIndexed = zip [0 ..] ops
+
+    weakenIndexed =
+        [ (idx, n)
+        | (idx, OpWeaken n) <- opsIndexed
+        ]
+
+    canon = canonical env
 
     isWeaken = \case
         OpWeaken{} -> True
         _ -> False
 
-    isMergeLike = \case
-        OpMerge{} -> True
-        OpRaiseMerge{} -> True
-        _ -> False
+    opTargets op =
+        case op of
+            OpGraft _ n -> [n]
+            OpWeaken n -> [n]
+            OpMerge n _ -> [n]
+            OpRaise n -> [n]
+            OpRaiseMerge n _ -> [n]
 
-    elimBinder = \case
-        OpMerge n _ -> Just n
-        OpRaiseMerge n _ -> Just n
-        OpWeaken n -> Just n
-        _ -> Nothing
+    descendantsOf nid =
+        case Binding.interiorOf (constraint env) (canon nid) of
+            Left _ -> Left (OpUnderRigid (canon nid))
+            Right s ->
+                Right (IntSet.delete (getNodeId (canon nid)) s)
 
-    normalizePreRaise :: [InstanceOp] -> [InstanceOp]
-    normalizePreRaise ops =
-        let mergeElims =
-                IntSet.fromList
-                    [ getNodeId n
-                    | op <- ops
-                    , Just n <- [case op of OpMerge n _ -> Just n; OpRaiseMerge n _ -> Just n; _ -> Nothing]
-                    ]
+    isDescendant descSet nid =
+        IntSet.member (getNodeId (canon nid)) descSet
 
-            -- If an op eliminates a binder via Merge/RaiseMerge, do not also emit Weaken/Graft on it.
-            opsNoRedundant =
-                [ op
-                | op <- ops
-                , case op of
-                    OpWeaken n -> not (IntSet.member (getNodeId n) mergeElims)
-                    OpGraft _ n -> not (IntSet.member (getNodeId n) mergeElims)
-                    _ -> True
+    lastDescendantIndex descSet =
+        let hits =
+                [ idx
+                | (idx, op) <- opsIndexed
+                , any (isDescendant descSet) (opTargets op)
                 ]
+        in case hits of
+            [] -> -1
+            _ -> maximum hits
 
-            opsDedupElims = dedupElims opsNoRedundant
+    mkWeakenInfo (idx, n) = do
+        descSet <- descendantsOf n
+        let anchor = max idx (lastDescendantIndex descSet)
+        pure
+            WeakenInfo
+                { wiOp = OpWeaken n
+                , wiBinder = canon n
+                , wiAnchor = anchor
+                , wiIndex = idx
+                , wiDesc = descSet
+                }
 
-            grafts = [ op | op <- opsDedupElims, case op of OpGraft{} -> True; _ -> False ]
-            merges = [ op | op <- opsDedupElims, isMergeLike op ]
-            others = [ op | op <- opsDedupElims, not (case op of OpGraft{} -> True; _ -> False) && not (isMergeLike op) && not (isWeaken op) ]
-            weakens = [ op | op <- opsDedupElims, isWeaken op ]
-
-            elimKey = \case
-                OpMerge n _ -> getNodeId n
-                OpRaiseMerge n _ -> getNodeId n
-                _ -> -1
-
-            mergesSorted = sortOn (Down . elimKey) merges
-        in grafts ++ mergesSorted ++ others ++ weakens
-
-    go :: [InstanceOp] -> [InstanceOp]
-    go ops = case break isBarrier ops of
-        (chunk, []) -> normalizePreRaise chunk
-        (chunk, barrierOp : rest) ->
-            normalizePreRaise chunk ++ (barrierOp : go rest)
-
-    dedupElims :: [InstanceOp] -> [InstanceOp]
-    dedupElims = goDedup IntSet.empty
+    orderWeakenGroup infos0 = map wiOp (go infos0 [])
       where
-        goDedup _ [] = []
-        goDedup eliminated (op : rest) =
-            case elimBinder op of
-                Nothing -> op : goDedup eliminated rest
-                Just n ->
-                    let k = getNodeId n
-                    in if IntSet.member k eliminated
-                        then goDedup eliminated rest
-                        else op : goDedup (IntSet.insert k eliminated) rest
+        compareReady a b =
+            case compareNodesByOrderKey (orderKeys env) (wiBinder a) (wiBinder b) of
+                EQ -> compare (wiIndex a) (wiIndex b)
+                ord -> ord
 
--- | Coalesce the paper-shaped pattern “Raise(n); Merge(n, m)” into a single
--- `OpRaiseMerge(n, m)` operation.
---
--- Note: ∀-introduction (`O`) is not recorded in Ω; it is stored separately on
--- `EdgeWitness` as `ewForallIntros` and applied directly when constructing Φ(e).
-coalesceRaiseMerge :: [InstanceOp] -> [InstanceOp]
-coalesceRaiseMerge = go
+        hasDescendant remaining info =
+            any
+                (\other ->
+                    IntSet.member
+                        (getNodeId (wiBinder other))
+                        (wiDesc info)
+                )
+                remaining
+
+        go remaining acc =
+            case remaining of
+                [] -> acc
+                _ ->
+                    let (ready, blocked) = partition (not . hasDescendant remaining) remaining
+                    in if null ready
+                        then acc ++ sortBy compareReady remaining
+                        else go blocked (acc ++ sortBy compareReady ready)
+
+-- | Normalize Ω by enforcing `papers/xmlf.txt` conditions (1)–(5) only.
+normalizeInstanceOpsFull :: OmegaNormalizeEnv -> [InstanceOp] -> Either OmegaNormalizeError [InstanceOp]
+normalizeInstanceOpsFull env ops0 = do
+    ops1 <- canonicalizeOps ops0
+    ops2 <- coalesceRaiseMergeWithEnv env ops1
+    ops3 <- checkMergeDirection ops2
+    ops4 <- reorderWeakenWithEnv env ops3
+    validateNormalizedWitness env ops4
+    pure ops4
   where
-    go = \case
-        (OpRaise n : rest) ->
-            let isSameRaise = \case
-                    OpRaise n' -> n' == n
-                    _ -> False
-                (_moreRaises, rest1) = span isSameRaise rest
-            in case rest1 of
-                (OpMerge n' m : rest2) | n' == n -> OpRaiseMerge n m : go rest2
-                _ -> OpRaise n : go rest
-        (op : rest) -> op : go rest
-        [] -> []
+    canon = canonical env
+
+    opTargets op =
+        case op of
+            OpGraft _ n -> [n]
+            OpWeaken n -> [n]
+            OpMerge n _ -> [n]
+            OpRaise n -> [n]
+            OpRaiseMerge n _ -> [n]
+
+    canonicalizeOps = mapM canonicalizeOp
+
+    canonicalizeOp op = do
+        mapM_ checkRigid (opTargets op)
+        pure $ case op of
+            OpGraft sigma n -> OpGraft (canon sigma) (canon n)
+            OpMerge n m -> OpMerge (canon n) (canon m)
+            OpRaise n -> OpRaise (canon n)
+            OpWeaken n -> OpWeaken (canon n)
+            OpRaiseMerge n m -> OpRaiseMerge (canon n) (canon m)
+
+    checkRigid nid =
+        case Binding.isUnderRigidBinder (constraint env) (canon nid) of
+            Left _ -> Left (OpUnderRigid (canon nid))
+            Right True -> Left (OpUnderRigid (canon nid))
+            Right False -> Right ()
+
+    mergeKeyNode nid =
+        case IntMap.lookup (getNodeId (canon nid)) (binderArgs env) of
+            Just arg -> arg
+            Nothing -> canon nid
+
+    inInterior nid =
+        IntSet.member (getNodeId (canon nid)) (interior env)
+
+    checkMergeDirection ops = do
+        mapM_ checkOp ops
+        pure ops
+
+    checkOp op =
+        case op of
+            OpMerge n m ->
+                if inInterior n && inInterior m
+                    then checkDir n m
+                    else Right ()
+            OpRaiseMerge{} -> Right ()
+            _ -> Right ()
+
+    checkDir n m = do
+        let ord = compareNodesByOrderKey (orderKeys env) (mergeKeyNode m) (mergeKeyNode n)
+        case ord of
+            LT -> Right ()
+            _ -> Left (MergeDirectionInvalid (canon n) (canon m))
