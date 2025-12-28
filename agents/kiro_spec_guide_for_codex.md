@@ -206,7 +206,7 @@ Add this as the last bullet under non-trivial checkboxes:
 - **Verification:** <exact command(s) + expected result>
 
 Examples:
-- `cabal test --test-show-details=direct --match "/Binding/.*upper/"` passes
+- `cabal test --test-show-details=direct` passes
 - `rg -n "OldFunctionName" src` returns no matches
 - `hlint` / formatter runs cleanly (if the repo uses one)
 
