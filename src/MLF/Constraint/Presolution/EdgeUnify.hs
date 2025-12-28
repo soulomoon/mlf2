@@ -390,7 +390,7 @@ unifyAcyclicEdge n1 n2 = do
                             already <- isEliminated rep
                             when (should && not already) $ do
                                 -- Paper-shaped RaiseMerge is a sequence (Raise(n))^k; Merge(n, m).
-                                -- We record it in that explicit form and let `normalizeInstanceOps`
+                                -- We record it in that explicit form and let `normalizeInstanceOpsFull`
                                 -- coalesce it back to `OpRaiseMerge`.
                                 recordOp (OpRaise rep)
                                 recordOp (OpMerge rep root2)

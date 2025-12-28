@@ -1,14 +1,14 @@
 # Implementation Plan
 
-- [ ] 1. Create `witness-normalization-yakobowski` spec set
-  - [ ] 1.1 Write `requirements.md`
+- [x] 1. Create `witness-normalization-yakobowski` spec set
+  - [x] 1.1 Write `requirements.md`
     - Steps: create `.kiro/specs/witness-normalization-yakobowski/requirements.md`
       with EARS acceptance criteria and explicit scope.
     - Files: `.kiro/specs/witness-normalization-yakobowski/requirements.md`
     - Tests: N/A (spec authoring).
     - Verification: `test -f .kiro/specs/witness-normalization-yakobowski/requirements.md`
     - _Requirements: 1.1, 1.2, 2.1, 2.2_
-  - [ ] 1.2 Write `design.md`
+  - [x] 1.2 Write `design.md`
     - Steps: create `.kiro/specs/witness-normalization-yakobowski/design.md`
       with architecture, interfaces, and testing strategy (include a property
       test candidate).
@@ -16,7 +16,7 @@
     - Tests: N/A (spec authoring).
     - Verification: `test -f .kiro/specs/witness-normalization-yakobowski/design.md`
     - _Requirements: 1.1, 1.2, 2.1, 2.3_
-  - [ ] 1.3 Write `tasks.md`
+  - [x] 1.3 Write `tasks.md`
     - Steps: create `.kiro/specs/witness-normalization-yakobowski/tasks.md`
       with small, verifiable tasks and requirement mapping.
     - Files: `.kiro/specs/witness-normalization-yakobowski/tasks.md`
@@ -24,15 +24,15 @@
     - Verification: `test -f .kiro/specs/witness-normalization-yakobowski/tasks.md`
     - _Requirements: 1.1, 1.2, 3.1, 3.2_
 
-- [ ] 2. Create `instantiation-o-interleaving` spec set
-  - [ ] 2.1 Write `requirements.md`
+- [x] 2. Create `instantiation-o-interleaving` spec set
+  - [x] 2.1 Write `requirements.md`
     - Steps: create `.kiro/specs/instantiation-o-interleaving/requirements.md`
       with EARS acceptance criteria and explicit scope.
     - Files: `.kiro/specs/instantiation-o-interleaving/requirements.md`
     - Tests: N/A (spec authoring).
     - Verification: `test -f .kiro/specs/instantiation-o-interleaving/requirements.md`
     - _Requirements: 1.1, 1.2, 2.1, 2.2_
-  - [ ] 2.2 Write `design.md`
+  - [x] 2.2 Write `design.md`
     - Steps: create `.kiro/specs/instantiation-o-interleaving/design.md`
       with data-model changes for interleaving `O` with Omega ops and a
       testing strategy.
@@ -40,7 +40,7 @@
     - Tests: N/A (spec authoring).
     - Verification: `test -f .kiro/specs/instantiation-o-interleaving/design.md`
     - _Requirements: 1.1, 1.2, 2.1, 2.3_
-  - [ ] 2.3 Write `tasks.md`
+  - [x] 2.3 Write `tasks.md`
     - Steps: create `.kiro/specs/instantiation-o-interleaving/tasks.md`
       with small, verifiable tasks and requirement mapping.
     - Files: `.kiro/specs/instantiation-o-interleaving/tasks.md`

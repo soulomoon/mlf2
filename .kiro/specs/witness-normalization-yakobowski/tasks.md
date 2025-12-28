@@ -1,6 +1,6 @@
 # Implementation Plan
 
-- [ ] 1. Add normalization context + error types
+- [x] 1. Add normalization context + error types
   - Steps:
     - Define `OmegaNormalizeEnv` and `OmegaNormalizeError` in
       `src/MLF/Constraint/Presolution/Witness.hs` (or a new
@@ -11,7 +11,7 @@
   - Verification: `rg -n "OmegaNormalizeEnv|OmegaNormalizeError" src/MLF/Constraint/Presolution` returns matches
   - _Requirements: 1.1, 2.1, 4.1_
 
-- [ ] 2. Implement a validator for paper conditions (1)–(5)
+- [x] 2. Implement a validator for paper conditions (1)–(5)
   - Steps:
     - Add `validateNormalizedWitness` that checks:
       - Graft/Weaken target in I(r)
@@ -27,7 +27,7 @@
   - Verification: `cabal test --test-show-details=direct --test-options='--match /normalized witness/'`
   - _Requirements: 1.1, 1.2, 3.1_
 
-- [ ] 3. Normalize RaiseMerge sequences
+- [x] 3. Normalize RaiseMerge sequences
   - Steps:
     - Implement a pass to coalesce `Raise(n)^k; Merge(n, m)` into
       `OpRaiseMerge n m` when `m ∉ I(r)`.
@@ -39,7 +39,7 @@
   - Verification: `cabal test --test-show-details=direct --test-options='--match /RaiseMerge/'`
   - _Requirements: 1.1, 1.2, 3.1_
 
-- [ ] 4. Normalize Weaken placement
+- [x] 4. Normalize Weaken placement
   - Steps:
     - Implement a pass that moves `OpWeaken n` after all operations on nodes
       below `n` (binding-tree descendants), preserving relative order of
@@ -51,7 +51,7 @@
   - Verification: `cabal test --test-show-details=direct --test-options='--match /Weaken.*normalized/'`
   - _Requirements: 1.1, 2.1, 3.1_
 
-- [ ] 5. Assemble `normalizeInstanceOpsFull`
+- [x] 5. Assemble `normalizeInstanceOpsFull`
   - Steps:
     - Compose passes: canonicalize -> coalesce RaiseMerge -> check merge
       direction -> reorder Weaken -> validate.
@@ -62,7 +62,7 @@
   - Verification: `cabal test --test-show-details=direct --test-options='--match /normalizeInstanceOpsFull/'`
   - _Requirements: 1.1, 2.1, 3.2_
 
-- [ ] 6. Wire normalization context at call sites
+- [x] 6. Wire normalization context at call sites
   - Steps:
     - Build `OmegaNormalizeEnv` in `buildEdgeWitness` using
       `EdgeTrace.etInterior`, `Order.orderKeysFromRoot`, and the current
@@ -75,7 +75,7 @@
   - Verification: `cabal test --test-show-details=direct --test-options='--match /Presolution witness ops/'`
   - _Requirements: 4.1, 4.2_
 
-- [ ] 7. Keep compatibility wrapper
+- [x] 7. Keep compatibility wrapper
   - Steps:
     - Keep `normalizeInstanceOps` as a wrapper that calls the full normalizer
       (or update all call sites in this change set and delete the old name).
@@ -85,6 +85,6 @@
   - Verification: `cabal build`
   - _Requirements: 4.1_
 
-- [ ] 8. Full test run
+- [x] 8. Full test run
   - Verification: `cabal --config-file=.cabal-config test --test-show-details=direct`
   - _Requirements: 3.1, 3.2, 4.1_

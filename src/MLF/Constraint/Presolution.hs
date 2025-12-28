@@ -27,7 +27,6 @@ module MLF.Constraint.Presolution (
     instantiateScheme,
     instantiateSchemeWithTrace,
     mergeExpansions,
-    normalizeInstanceOps,
     applyExpansion
 ) where
 
@@ -45,7 +44,6 @@ import MLF.Constraint.Presolution.Core (
     instantiateScheme,
     instantiateSchemeWithTrace,
     mergeExpansions,
-    normalizeInstanceOps,
     processInstEdge,
     runEdgeUnifyForTest,
     unifyAcyclicRawWithRaiseTrace
