@@ -1,5 +1,9 @@
 # Repository Guidelines
 
+## Project Goals
+
+- Keep the implementation paper-faithful to `papers/xmlf.txt` (xMLF calculus + graphic-constraint pipeline). Document and test any intentional deviations.
+
 ## Project Structure & Module Organization
 
 - `src/` contains the private implementation library (`mlf2-internal`). Most logic lives in `src/MLF/` and is organized by domain: `MLF.Frontend.*`, `MLF.Constraint.*`, `MLF.Binding.*`, `MLF.Witness.*`, `MLF.Elab.*`, `MLF.Util.*`.
@@ -7,6 +11,7 @@
 - `app/` contains the executable entry point (`app/Main.hs`) for the `mlf2` binary.
 - `test/` contains the Hspec suite (`*Spec.hs`) and a manual test runner (`test/Main.hs`).
 - `papers/` holds reference material (PDF/TXT) used to align the implementation with the xMLF/MLF papers; it is not required to build.
+- `MLF.Constraint.Types.EdgeWitness` now records `ewSteps` (interleaved O/Ω steps for Φ) alongside Ω-only `ewWitness`.
 
 ## Build, Test, and Development Commands
 

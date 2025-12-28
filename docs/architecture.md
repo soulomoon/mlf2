@@ -1,6 +1,7 @@
 # Architecture / Repo Layout
 
 This repository implements the MLF → xMLF pipeline described in `papers/xmlf.txt`.
+Goal: keep the implementation paper-faithful to that reference and document any deviations.
 
 ## Public API (downstream users)
 
@@ -32,6 +33,11 @@ The code is organized by domain (not by phase) under `src/MLF/`:
 - `MLF.Elab.*` — elaboration to xMLF (Φ/Σ translation, reify/generalize)
 - `MLF.Util.*` — shared utilities (order keys, union-find, etc.)
 
+## Witness Representation (Φ/Σ)
+
+- `EdgeWitness.ewWitness` stores the Ω-only instance operations (Graft/Merge/Raise/Weaken/RaiseMerge).
+- `EdgeWitness.ewSteps` stores the interleaved step stream used for Φ translation, including `StepIntro` (O) in expansion order and `StepOmega` for Ω operations.
+
 ## Tests
 
 The test suite depends on both:
@@ -40,4 +46,3 @@ The test suite depends on both:
 - `mlf2:mlf2-internal` (private internal library)
 
 This keeps the downstream surface small while still allowing specs to import internal modules.
-

@@ -2,6 +2,7 @@
 
 > **Foundational Reference:** `papers/xmlf.txt` ("A Church-Style Intermediate Language for MLF", Rémy & Yakobowski, 2009).
 > **Secondary Reference:** ICFP 2008 ("From ML to MLF") for the specific graphic constraint solving algorithm.
+> **Project Goal:** stay paper-faithful to `papers/xmlf.txt` and document/test any intentional deviations.
 
 **Implementation progress:** See [TODO.md](TODO.md) for the current checklist.
 
@@ -68,7 +69,8 @@ These phases implement the constraint solver. While `xmlf.txt` assumes this exis
     *   For each edge, determine the **minimal expansion** (either `Inst` or `∀` introduction) required to satisfy the constraint.
     *   **Output (in this repo):**
         * `MLF.Constraint.Presolution.PresolutionResult.prEdgeExpansions` (per-edge expansion decisions), and
-        * `MLF.Constraint.Presolution.PresolutionResult.prEdgeWitnesses` (per-edge instance-operation witnesses; the input to Φ).
+        * `MLF.Constraint.Presolution.PresolutionResult.prEdgeWitnesses` (per-edge witnesses:
+          `ewWitness` stores Ω ops; `ewSteps` interleaves O with Ω for Φ).
 4.  **Unify:** Solve all unification edges to get the final graphic type structure.
 
 **Result:** A **Solved Form** (Presolution) `χ_p` where all instantiation edges are discharged or solved.
@@ -85,7 +87,7 @@ Re-traverse the original AST `a` and transform it into an xMLF term `a'` using t
 
 1.  **Applications (the instantiation sites in this repo)**:
     *   Each application carries an `EdgeId` for the function position.
-    *   Look up the recorded per-edge witness `EdgeWitness` and translate it to an xMLF instantiation `φ = Φ(e)` (Fig. 10), including quantifier reordering `Σ(g)` when needed (`xmlf.txt` “Reordering quantifiers”).
+    *   Look up the recorded per-edge witness `EdgeWitness` and translate `ewSteps` to an xMLF instantiation `φ = Φ(e)` (Fig. 10), including quantifier reordering `Σ(g)` when needed (`xmlf.txt` “Reordering quantifiers”).
     *   Result shape: `(a1 [φ]) a2` (or just `a1 a2` if `φ` is identity).
 
 2.  **Let-bindings `let x = a1 in a2`:**
