@@ -1,15 +1,20 @@
 module ConstraintGenSpec (spec) where
 
-import Control.Monad (filterM)
+import Control.Monad (filterM, forM, when)
 import Data.List (nub)
 import Data.Maybe (catMaybes)
 import qualified Data.IntMap.Strict as IntMap
+import qualified Data.IntSet as IntSet
 import Test.Hspec
 
-import MLF.Binding.Tree (checkBindingTree)
+import MLF.Binding.Tree (boundFlexChildren, checkBindingTree)
+import MLF.Constraint.Acyclicity (checkAcyclicity)
+import MLF.Constraint.Normalize (normalize)
+import MLF.Constraint.Presolution (PresolutionResult(..), computePresolution)
+import MLF.Constraint.Solve (SolveResult(..), solveUnify)
 import MLF.Frontend.ConstraintGen (AnnExpr (..))
 import MyLib
-import SpecUtil (expectRight, lookupNode)
+import SpecUtil (expectRight, lookupNode, requireRight)
 
 spec :: Spec
 spec = describe "Phase 1 — Constraint generation" $ do
@@ -19,9 +24,9 @@ spec = describe "Phase 1 — Constraint generation" $ do
             expectRight (inferConstraintGraph expr) $ \result -> do
                 let constraint = crConstraint result
                     nodes = cNodes constraint
-                IntMap.size nodes `shouldBe` 1
-                case IntMap.elems nodes of
-                    [TyBase { tnBase = BaseTy name }] -> name `shouldBe` "Int"
+                IntMap.size nodes `shouldBe` 2
+                case [name | TyBase { tnBase = BaseTy name } <- IntMap.elems nodes] of
+                    ["Int"] -> pure ()
                     other -> expectationFailure $ "Unexpected nodes: " ++ show other
                 case IntMap.lookup (getNodeId (crRoot result)) nodes of
                     Just TyBase { tnBase = BaseTy name } -> name `shouldBe` "Int"
@@ -31,18 +36,18 @@ spec = describe "Phase 1 — Constraint generation" $ do
             let expr = ELit (LBool True)
             expectRight (inferConstraintGraph expr) $ \result -> do
                 let nodes = cNodes (crConstraint result)
-                IntMap.size nodes `shouldBe` 1
-                case IntMap.elems nodes of
-                    [TyBase { tnBase = BaseTy name }] -> name `shouldBe` "Bool"
+                IntMap.size nodes `shouldBe` 2
+                case [name | TyBase { tnBase = BaseTy name } <- IntMap.elems nodes] of
+                    ["Bool"] -> pure ()
                     other -> expectationFailure $ "Unexpected nodes: " ++ show other
 
         it "creates a single base node for string literals" $ do
             let expr = ELit (LString "hi")
             expectRight (inferConstraintGraph expr) $ \result -> do
                 let nodes = cNodes (crConstraint result)
-                IntMap.size nodes `shouldBe` 1
-                case IntMap.elems nodes of
-                    [TyBase { tnBase = BaseTy name }] -> name `shouldBe` "String"
+                IntMap.size nodes `shouldBe` 2
+                case [name | TyBase { tnBase = BaseTy name } <- IntMap.elems nodes] of
+                    ["String"] -> pure ()
                     other -> expectationFailure $ "Unexpected nodes: " ++ show other
 
     describe "Variables and scope" $ do
@@ -97,6 +102,22 @@ spec = describe "Phase 1 — Constraint generation" $ do
         it "reports unknown variables that appear inside let RHS" $ do
             let expr = ELet "x" (EVar "ghost") (ELit (LInt 0))
             inferConstraintGraph expr `shouldBe` Left (UnknownVariable "ghost")
+
+    describe "Applications" $ do
+        it "emits instantiation edges for both function and argument" $ do
+            let expr = EApp (ELam "x" (EVar "x")) (ELit (LInt 1))
+            expectRight (inferConstraintGraph expr) $ \result -> do
+                let constraint = crConstraint result
+                    instEdges = cInstEdges constraint
+                length instEdges `shouldBe` 2
+                case crAnnotated result of
+                    AApp _ _ funEid argEid _ -> do
+                        funEid `shouldNotBe` argEid
+                        let edgeIds = [eid | InstEdge eid _ _ <- instEdges]
+                        edgeIds `shouldSatisfy` elem funEid
+                        edgeIds `shouldSatisfy` elem argEid
+                    other ->
+                        expectationFailure $ "Expected application annotation, saw " ++ show other
 
     describe "Annotated Terms" $ do
         it "desugars lambda parameter annotations via κσ coercions" $ do
@@ -492,6 +513,44 @@ spec = describe "Phase 1 — Constraint generation" $ do
                         (EApp (EVar "id") (ELit (LInt 1)))
             expectRight (inferConstraintGraph expr) $ \result ->
                 checkBindingTree (crConstraint result) `shouldBe` Right ()
+
+        it "elimination rewrite removes eliminated binders from Q(n)" $ do
+            let rhs = ELam "x" (ELam "y" (EVar "x"))
+                scheme =
+                    SrcScheme
+                        [ ("a", Nothing)
+                        , ("b", Just (STVar "a"))
+                        ]
+                        (STArrow (STVar "a") (STArrow (STVar "b") (STVar "a")))
+                ann =
+                    STForall "a" Nothing
+                        (STArrow (STVar "a") (STArrow (STVar "a") (STVar "a")))
+                expr = ELetAnn "c" scheme rhs (EAnn (EVar "c") ann)
+
+                runToPresolution :: Expr -> Either String PresolutionResult
+                runToPresolution e = do
+                    ConstraintResult { crConstraint = c0 } <- firstShow (inferConstraintGraph e)
+                    let c1 = normalize c0
+                    acyc <- firstShow (checkAcyclicity c1)
+                    firstShow (computePresolution acyc c1)
+
+                firstShow :: Show err => Either err a -> Either String a
+                firstShow = either (Left . show) Right
+
+            pres <- requireRight (runToPresolution expr)
+            let eliminated = cEliminatedVars (prConstraint pres)
+            IntSet.null eliminated `shouldBe` False
+
+            solved <- requireRight (solveUnify (prConstraint pres))
+            let cSolved = srConstraint solved
+                foralls = [tnId n | n@TyForall{} <- IntMap.elems (cNodes cSolved)]
+            when (null foralls) $
+                expectationFailure "Expected at least one Forall node"
+
+            qn <- fmap concat $ forM foralls $ \bid ->
+                requireRight (boundFlexChildren cSolved bid)
+            let qnIds = IntSet.fromList (map getNodeId qn)
+            IntSet.intersection eliminated qnIds `shouldBe` IntSet.empty
 
     describe "Expansion nodes" $ do
         -- Generalized lets expose a shared scheme node (a `TyForall` anchor). Each

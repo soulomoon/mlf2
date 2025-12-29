@@ -177,6 +177,7 @@ rewriteConstraint mapping = do
             let nid' = canonical (tnId n)
                 node' = case n of
                     TyVar {} -> TyVar nid'
+                    TyBottom {} -> TyBottom nid'
                     TyArrow { tnDom = d, tnCod = cod } -> TyArrow nid' (canonical d) (canonical cod)
                     TyBase { tnBase = b } -> TyBase nid' b
                     TyForall { tnBody = b } -> TyForall nid' (canonical b)
@@ -186,6 +187,8 @@ rewriteConstraint mapping = do
         -- traceCanonical n = let c = canonical n in trace ("Canonical " ++ show n ++ " -> " ++ show c) c
 
         newNodes = IntMap.fromListWith Canonicalize.chooseRepNode (mapMaybe rewriteNode (IntMap.elems (cNodes c)))
+        varBounds' = rewriteVarBounds canonical newNodes (cVarBounds c)
+        eliminated' = rewriteEliminated canonical newNodes (cEliminatedVars c)
 
         -- Canonicalize edge expansions
         canonicalizeExp ExpIdentity = ExpIdentity
@@ -274,7 +277,8 @@ rewriteConstraint mapping = do
             ]
 
     newBindParents <- do
-        let entries0 =
+        let constraintRoot = ConstraintRoot.findConstraintRoot cStruct
+            entries0 =
                 [ (getNodeId child', (parent0, flag))
                 | (childId, (parent0, flag)) <- IntMap.toList bindingEdges0
                 , let child' = canonical (NodeId childId)
@@ -313,6 +317,7 @@ rewriteConstraint mapping = do
                                 ++ mapMaybe expBody [parent0]
                                 ++ bindingAncestors parent0
                                 ++ maybe [] pure (structuralParent child')
+                                ++ maybe [] pure constraintRoot
 
                     firstValid = \case
                         [] -> Nothing
@@ -364,12 +369,16 @@ rewriteConstraint mapping = do
 
         foldM insertOne IntMap.empty entries'
 
-    let c' = c
+    let c0' = c
             { cNodes = newNodes
             , cInstEdges = []
             , cUnifyEdges = Canonicalize.rewriteUnifyEdges canonical (cUnifyEdges c)
             , cBindParents = newBindParents
+            , cVarBounds = varBounds'
+            , cEliminatedVars = eliminated'
             }
+        -- Keep the synthetic constraint root total after rewriting/canonicalization.
+        c' = ConstraintRoot.ensureConstraintRoot c0'
 
     case Binding.checkBindingTree c' of
         Left err -> throwError (BindingTreeError err)
@@ -383,6 +392,31 @@ rewriteConstraint mapping = do
         }
 
     return fullRedirects
+
+rewriteVarBounds :: (NodeId -> NodeId) -> IntMap TyNode -> VarBounds -> VarBounds
+rewriteVarBounds canon nodes0 vb0 =
+    IntMap.fromListWith mergeBounds
+        [ (getNodeId vC, fmap canon mb)
+        | (vid, mb) <- IntMap.toList vb0
+        , let vC = canon (NodeId vid)
+        , IntMap.member (getNodeId vC) nodes0
+        ]
+  where
+    mergeBounds new old =
+        case (old, new) of
+            (Just _, Nothing) -> old
+            (Nothing, Just _) -> new
+            (Just _, Just _) -> old
+            (Nothing, Nothing) -> Nothing
+
+rewriteEliminated :: (NodeId -> NodeId) -> IntMap TyNode -> EliminatedVars -> EliminatedVars
+rewriteEliminated canon nodes0 elims0 =
+    IntSet.fromList
+        [ getNodeId vC
+        | vid <- IntSet.toList elims0
+        , let vC = canon (NodeId vid)
+        , IntMap.member (getNodeId vC) nodes0
+        ]
 
 -- | Read-only chase like Solve.frWith
 frWith :: IntMap NodeId -> NodeId -> NodeId

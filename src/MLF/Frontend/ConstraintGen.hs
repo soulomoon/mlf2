@@ -92,11 +92,11 @@ generateConstraints expr = do
     let expr' = desugarCoercions expr
     let initialState = mkInitialState
     let topScopeRoot = NodeId (-1)
-    ((rootNode, annRoot), finalState) <-
+    ((_rootBinder, rootNode, annRoot), finalState) <-
         runConstraintM (buildRootExpr topScopeRoot expr') initialState
     let constraint = ConstraintRoot.ensureConstraintRoot (buildConstraint finalState)
     pure ConstraintResult
         { crConstraint = constraint
         , crRoot = rootNode
-        , crAnnotated = replaceScopeRoot topScopeRoot rootNode annRoot
+        , crAnnotated = annRoot
         }

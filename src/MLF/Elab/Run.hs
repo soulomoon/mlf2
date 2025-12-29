@@ -10,6 +10,7 @@ import MLF.Frontend.Syntax (Expr)
 import MLF.Frontend.ConstraintGen (AnnExpr(..), ConstraintResult(..), generateConstraints)
 import MLF.Constraint.Normalize (normalize)
 import MLF.Constraint.Acyclicity (checkAcyclicity)
+import qualified MLF.Constraint.Root as ConstraintRoot
 import MLF.Constraint.Presolution (computePresolution, PresolutionResult(..))
 import MLF.Constraint.Solve hiding (BindingTreeError, MissingNode)
 import MLF.Constraint.Types (NodeId, getNodeId)
@@ -34,7 +35,11 @@ runPipelineElab expr = do
             let root' = chaseRedirects (prRedirects pres) root
 
             -- Generalize at the root (top-level generalization).
-            (sch, _subst) <- firstShow (generalizeAt solved root' root')
+            let scopeRoot =
+                    case ConstraintRoot.findConstraintRoot (srConstraint solved) of
+                        Just rootId -> rootId
+                        Nothing -> root'
+            (sch, _subst) <- firstShow (generalizeAt solved scopeRoot root')
             let ty = case sch of
                     Forall binds body -> foldr (\(n, b) t -> TForall n b t) body binds
 

@@ -13,7 +13,7 @@ import MLF.Elab.Types
 import MLF.Elab.Util (topoSortBy)
 import MLF.Constraint.Solve hiding (BindingTreeError, MissingNode)
 import qualified MLF.Constraint.Solve as Solve (frWith)
-import MLF.Binding.Tree (orderedBinders)
+import MLF.Binding.Tree (orderedBinders, lookupBindParent, lookupBindParentUnder)
 import qualified MLF.Constraint.VarStore as VarStore
 
 reifyWith
@@ -39,8 +39,21 @@ reifyWith contextLabel res nameForVar nameForDummy bindersFor nid =
         Nothing -> do
             node <- lookupNode n
             (cache', t) <- case node of
-                TyVar{} -> pure (cache, TVar (nameForVar n))
+                TyVar{} -> do
+                    let inlineBound =
+                            case VarStore.lookupVarBound constraint n of
+                                Nothing -> pure (cache, TBottom)
+                                Just bnd ->
+                                    let bndC = canonical bnd
+                                    in if bndC == n
+                                        then pure (cache, TBottom)
+                                        else go cache bndC
+                    mbParent <- bindingToElab (lookupBindParentUnder canonical constraint n)
+                    case mbParent of
+                        Just (_, BindRigid) -> inlineBound
+                        _ -> pure (cache, TVar (nameForVar n))
                 TyBase{ tnBase = b } -> pure (cache, TBase b)
+                TyBottom{} -> pure (cache, TBottom)
                 TyArrow{ tnDom = d, tnCod = c } -> do
                     (cache1, d') <- go cache (canonical d)
                     (cache2, c') <- go cache1 (canonical c)
@@ -88,12 +101,7 @@ reifyType res nid =
 
     bindersFor forallId _bodyId = do
         binders0 <- bindingToElab (orderedBinders canonical constraint forallId)
-        let binders =
-                [ v
-                | v <- binders0
-                , not (VarStore.isEliminatedVar constraint v || VarStore.isEliminatedVar constraint (canonical v))
-                ]
-        pure [ (v, Nothing) | v <- binders ]
+        pure [ (v, Nothing) | v <- binders0 ]
 
 -- | Reify with an explicit name substitution for vars.
 reifyTypeWithNames :: SolveResult -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
@@ -120,7 +128,6 @@ reifyTypeWithNames res subst nid =
         let usedBinders =
                 [ (v, fmap canonical (VarStore.lookupVarBound constraint v))
                 | v <- binders0
-                , not (VarStore.isEliminatedVar constraint v)
                 ]
         orderUsedBinders (canonical bodyId) usedBinders
 
@@ -171,8 +178,15 @@ freeVars res nid visited
         let visited' = IntSet.insert key visited
         in case IntMap.lookup key nodes of
             Nothing -> IntSet.empty
-            Just TyVar{} -> IntSet.singleton key
+            Just TyVar{} ->
+                case lookupBindParent constraint (canonical nid) of
+                    Just (_, BindRigid) ->
+                        case VarStore.lookupVarBound constraint (canonical nid) of
+                            Nothing -> IntSet.empty
+                            Just bnd -> freeVars res (canonical bnd) visited'
+                    _ -> IntSet.singleton key
             Just TyBase{} -> IntSet.empty
+            Just TyBottom{} -> IntSet.empty
             Just TyArrow{ tnDom = d, tnCod = c } ->
                 freeVars res (canonical d) visited' `IntSet.union`
                 freeVars res (canonical c) visited'
@@ -181,7 +195,8 @@ freeVars res nid visited
             Just TyRoot{ tnChildren = cs } ->
                 IntSet.unions (map (\child -> freeVars res (canonical child) visited') cs)
   where
-    nodes = cNodes (srConstraint res)
+    constraint = srConstraint res
+    nodes = cNodes constraint
     uf = srUnionFind res
     canonical = Solve.frWith uf
     key = getNodeId (canonical nid)

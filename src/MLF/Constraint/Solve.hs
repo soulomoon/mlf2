@@ -105,11 +105,12 @@ module MLF.Constraint.Solve (
     frWith
 ) where
 
-import Control.Monad (when)
+import Control.Monad (forM, forM_, unless, when)
 import Control.Monad.State.Strict
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
+import Data.Maybe (mapMaybe)
 
 import qualified MLF.Binding.Adjustment as BindingAdjustment
 import qualified MLF.Binding.Tree as Binding
@@ -185,10 +186,13 @@ solveUnify c0 = do
             final <- execStateT loop st
             let uf = suUnionFind final
                 c' = applyUFConstraint uf (suConstraint final) { cUnifyEdges = [] }
-            case Binding.checkBindingTree c' of
+            c'' <- case rewriteEliminatedBinders c' of
+                Left err -> Left (BindingTreeError err)
+                Right out -> Right out
+            case Binding.checkBindingTree c'' of
                 Left err -> Left (BindingTreeError err)
                 Right () -> do
-                    let res = SolveResult { srConstraint = c', srUnionFind = uf }
+                    let res = SolveResult { srConstraint = c'', srUnionFind = uf }
                         violations = validateSolvedGraph res
                     if null violations
                         then pure res
@@ -326,11 +330,15 @@ applyUFConstraint uf c =
                 canonical
                 (\childC -> IntMap.member (getNodeId childC) nodes')
                 bindParents0
+        varBounds' = rewriteVarBounds canonical nodes' (cVarBounds c)
+        eliminated' = rewriteEliminated canonical nodes' (cEliminatedVars c)
     in c
         { cNodes = nodes'
         , cInstEdges = Canonicalize.rewriteInstEdges canonical (cInstEdges c)
         , cUnifyEdges = Canonicalize.rewriteUnifyEdges canonical (cUnifyEdges c)
         , cBindParents = bindParents'
+        , cVarBounds = varBounds'
+        , cEliminatedVars = eliminated'
         }
   where
     rewriteNode :: TyNode -> (Int, TyNode)
@@ -338,12 +346,192 @@ applyUFConstraint uf c =
         let nid' = frWith uf (tnId n)
         in (getNodeId nid', case n of
             TyVar{} -> TyVar nid'
+            TyBottom{} -> TyBottom nid'
             TyArrow { tnDom = d, tnCod = cod } -> TyArrow nid' (frWith uf d) (frWith uf cod)
             TyBase { tnBase = b } -> TyBase nid' b
             TyForall { tnBody = b } -> TyForall nid' (frWith uf b)
             TyExp { tnExpVar = s, tnBody = b } -> TyExp nid' s (frWith uf b)
             TyRoot { tnChildren = cs } -> TyRoot nid' (map (frWith uf) cs)
             )
+
+    rewriteVarBounds :: (NodeId -> NodeId) -> IntMap TyNode -> VarBounds -> VarBounds
+    rewriteVarBounds canon nodes0 vb0 =
+        IntMap.fromListWith mergeBounds
+            [ (getNodeId vC, fmap canon mb)
+            | (vid, mb) <- IntMap.toList vb0
+            , let vC = canon (NodeId vid)
+            , IntMap.member (getNodeId vC) nodes0
+            ]
+      where
+        mergeBounds new old =
+            case (old, new) of
+                (Just _, Nothing) -> old
+                (Nothing, Just _) -> new
+                (Just _, Just _) -> old
+                (Nothing, Nothing) -> Nothing
+
+    rewriteEliminated :: (NodeId -> NodeId) -> IntMap TyNode -> EliminatedVars -> EliminatedVars
+    rewriteEliminated canon nodes0 elims0 =
+        IntSet.fromList
+            [ getNodeId vC
+            | vid <- IntSet.toList elims0
+            , let vC = canon (NodeId vid)
+            , IntMap.member (getNodeId vC) nodes0
+            ]
+
+rewriteEliminatedBinders :: Constraint -> Either BindingError Constraint
+rewriteEliminatedBinders c0
+    | IntSet.null elims0 = Right c0
+    | otherwise = do
+        let nodes0 = cNodes c0
+            bindParents0 = cBindParents c0
+            varBounds0 = cVarBounds c0
+            maxId = maxNodeIdKeyOr0 c0
+            elimList = IntSet.toList elims0
+
+        forM_ elimList $ \vid ->
+            unless (IntMap.member vid nodes0) $
+                Left $
+                    InvalidBindingTree $
+                        "rewriteEliminatedBinders: eliminated node " ++ show vid ++ " not in cNodes"
+
+        let unbounded =
+                [ vid
+                | vid <- elimList
+                , VarStore.lookupVarBound c0 (NodeId vid) == Nothing
+                ]
+            bottomIds = [NodeId i | i <- [maxId + 1 .. maxId + length unbounded]]
+            bottomMap = IntMap.fromList (zip unbounded bottomIds)
+            bottomNodes =
+                IntMap.fromList
+                    [ (getNodeId bid, TyBottom bid)
+                    | bid <- bottomIds
+                    ]
+            bottomSet = IntSet.fromList (map getNodeId bottomIds)
+
+            resolve :: IntSet.IntSet -> NodeId -> Either BindingError NodeId
+            resolve seen nid
+                | not (IntSet.member (getNodeId nid) elims0) =
+                    if IntMap.member (getNodeId nid) nodes0
+                        then Right nid
+                        else Left $
+                            InvalidBindingTree $
+                                "rewriteEliminatedBinders: missing node " ++ show nid
+                | IntSet.member (getNodeId nid) seen =
+                    Left $
+                        InvalidBindingTree "rewriteEliminatedBinders: cycle in eliminated-binder bounds"
+                | otherwise =
+                    case VarStore.lookupVarBound c0 nid of
+                        Nothing ->
+                            case IntMap.lookup (getNodeId nid) bottomMap of
+                                Just b -> Right b
+                                Nothing ->
+                                    Left $
+                                        InvalidBindingTree $
+                                            "rewriteEliminatedBinders: missing bottom mapping for " ++ show nid
+                        Just bnd ->
+                            resolve (IntSet.insert (getNodeId nid) seen) bnd
+
+        substPairs <- forM elimList $ \vid -> do
+            rep <- resolve IntSet.empty (NodeId vid)
+            pure (vid, rep)
+        let subst = IntMap.fromList substPairs
+            substNode nid = IntMap.findWithDefault nid (getNodeId nid) subst
+
+            rewriteNode node = case node of
+                TyVar{} -> node
+                TyBottom{} -> node
+                TyArrow { tnId = nid, tnDom = d, tnCod = cod } ->
+                    TyArrow nid (substNode d) (substNode cod)
+                TyBase{} -> node
+                TyForall { tnId = nid, tnBody = b } ->
+                    TyForall nid (substNode b)
+                TyExp { tnId = nid, tnExpVar = s, tnBody = b } ->
+                    TyExp nid s (substNode b)
+                TyRoot { tnId = nid, tnChildren = cs } ->
+                    TyRoot nid (map substNode cs)
+
+            nodes1 =
+                IntMap.fromList
+                    [ (getNodeId (tnId n), rewriteNode n)
+                    | n <- IntMap.elems nodes0
+                    ]
+            nodes' = IntMap.union nodes1 bottomNodes
+            inNodes nid = IntMap.member (getNodeId nid) nodes'
+
+        bindEntries <- forM (IntMap.toList bindParents0) $ \(childId, (parent0, flag)) ->
+            if IntSet.member childId elims0
+                then pure Nothing
+                else if IntSet.member (getNodeId parent0) elims0
+                    then Left $
+                        InvalidBindingTree $
+                            "rewriteEliminatedBinders: binding parent eliminated for child "
+                                ++ show childId
+                    else do
+                        let parent' = substNode parent0
+                        if parent' == NodeId childId
+                            then pure Nothing
+                            else if not (inNodes (NodeId childId))
+                                then pure Nothing
+                                else if not (inNodes parent')
+                                    then Left $
+                                        InvalidBindingTree $
+                                            "rewriteEliminatedBinders: missing binding parent "
+                                                ++ show parent'
+                                                ++ " for child "
+                                                ++ show childId
+                                    else pure (Just (childId, (parent', flag)))
+
+        let bottomParents =
+                [ (getNodeId bid, (parent0, flag))
+                | (vid, bid) <- zip unbounded bottomIds
+                , Just (parent0, flag) <- [IntMap.lookup vid bindParents0]
+                , not (IntSet.member (getNodeId parent0) elims0)
+                , inNodes parent0
+                ]
+            bindParents' = IntMap.fromList (mapMaybe id bindEntries ++ bottomParents)
+
+            varBounds' =
+                IntMap.fromListWith mergeBounds
+                    [ (vid, mb')
+                    | (vid, mb) <- IntMap.toList varBounds0
+                    , IntMap.member vid nodes'
+                    , let mb' =
+                            case mb of
+                                Nothing -> Nothing
+                                Just b ->
+                                    let b' = substNode b
+                                    in if IntSet.member (getNodeId b') bottomSet
+                                        then Nothing
+                                        else Just b'
+                    ]
+              where
+                mergeBounds new old =
+                    case (old, new) of
+                        (Just _, Nothing) -> old
+                        (Nothing, Just _) -> new
+                        (Just _, Just _) -> old
+                        (Nothing, Nothing) -> Nothing
+
+            instEdges' =
+                [ InstEdge eid (substNode l) (substNode r)
+                | InstEdge eid l r <- cInstEdges c0
+                ]
+            unifyEdges' =
+                [ UnifyEdge (substNode l) (substNode r)
+                | UnifyEdge l r <- cUnifyEdges c0
+                ]
+
+        pure c0
+            { cNodes = nodes'
+            , cBindParents = bindParents'
+            , cVarBounds = varBounds'
+            , cInstEdges = instEdges'
+            , cUnifyEdges = unifyEdges'
+            , cEliminatedVars = IntSet.empty
+            }
+  where
+    elims0 = cEliminatedVars c0
 
 -- Note [frWith]
 -- --------------

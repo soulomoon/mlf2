@@ -3,6 +3,7 @@ module MLF.Frontend.ConstraintGen.Emit (
     allocVar,
     allocBase,
     allocArrow,
+    allocRoot,
     allocExpNode,
     setVarBound,
     addInstEdge,
@@ -67,6 +68,15 @@ allocArrow domNode codNode = do
     -- existing binding structure.
     setBindParentIfMissing domNode nid BindFlex
     setBindParentIfMissing codNode nid BindFlex
+    pure nid
+
+allocRoot :: [NodeId] -> ConstraintM NodeId
+allocRoot children = do
+    nid <- freshNodeId
+    insertNode TyRoot
+        { tnId = nid
+        , tnChildren = children
+        }
     pure nid
 
 allocExpNode :: NodeId -> ConstraintM (NodeId, ExpVarId)
@@ -134,4 +144,3 @@ setBindParentIfMissing child parent flag =
 
 intFromNode :: NodeId -> Int
 intFromNode (NodeId x) = x
-

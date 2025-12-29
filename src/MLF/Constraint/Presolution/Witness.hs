@@ -174,25 +174,37 @@ binderArgsFromExpansion leftRaw expn = do
 
 -- | Convert a presolution expansion recipe into interleaved witness steps.
 witnessFromExpansion :: NodeId -> TyNode -> Expansion -> PresolutionM [InstanceStep]
-witnessFromExpansion _root leftRaw expn = go expn
+witnessFromExpansion _root leftRaw expn = do
+    let parts = flatten expn
+        suffix = scanr (\e acc -> isForall e || acc) False parts
+        flags = case suffix of
+            [] -> []
+            (_:rest) -> rest
+    steps <- mapM (uncurry (go leftRaw)) (zip flags parts)
+    pure (concat steps)
   where
-    go :: Expansion -> PresolutionM [InstanceStep]
-    go ExpIdentity = pure []
-    go (ExpCompose es) = concat <$> mapM go (NE.toList es)
-    go (ExpForall ls) =
+    isForall (ExpForall _) = True
+    isForall _ = False
+
+    flatten (ExpCompose es) = concatMap flatten (NE.toList es)
+    flatten other = [other]
+
+    go :: TyNode -> Bool -> Expansion -> PresolutionM [InstanceStep]
+    go _ _ ExpIdentity = pure []
+    go _ _ (ExpForall ls) =
         let count = sum (map fsBinderCount (NE.toList ls))
         in pure (replicate count StepIntro)
-    go (ExpInstantiate args) = do
+    go lr suppressWeaken (ExpInstantiate args) = do
         -- If the TyExp body is a forall, instantiate its binders in the same order
         -- that `applyExpansion` uses (binding-edge Q(n) via `orderedBinders`).
-        case leftRaw of
+        case lr of
             TyExp{ tnBody = b } -> do
                 boundVars <- binderArgsForFirstNonVacuousForall b
                 if length boundVars /= length args
                     then throwError (ArityMismatch "witnessFromExpansion/ExpInstantiate" (length boundVars) (length args))
                     else do
                         let pairs = zip args boundVars
-                        (grafts, merges, weakens) <- foldM (classify boundVars) ([], [], []) pairs
+                        (grafts, merges, weakens) <- foldM (classify suppressWeaken boundVars) ([], [], []) pairs
                         -- Order:
                         --   • grafts first (update ⊥ bounds)
                         --   • then merges (alias + eliminate)
@@ -204,40 +216,44 @@ witnessFromExpansion _root leftRaw expn = go expn
             _ -> do
                 -- Instantiating a non-TyExp is unexpected in current pipeline; treat as empty.
                 pure []
-      where
-        classify
-            :: [NodeId] -- binders at this instantiation site
-            -> ([InstanceOp], [InstanceOp], [InstanceOp])
-            -> (NodeId, NodeId) -- (arg, binder)
-            -> PresolutionM ([InstanceOp], [InstanceOp], [InstanceOp])
-        classify binders (gAcc, mAcc, wAcc) (arg, bv) = do
-            mbBound <- binderBound bv
-            case mbBound of
-                Nothing ->
-                    -- Unbounded binder: graft then eliminate later via weaken.
-                    pure (gAcc ++ [OpGraft arg bv], mAcc, wAcc ++ [OpWeaken bv])
-                Just bnd -> do
-                    isVarBound <- isTyVar bnd
-                    if isVarBound && bnd `elem` binders
-                        -- Bounded by an in-scope variable: alias + eliminate via Merge (Fig. 10).
-                        then pure (gAcc, mAcc ++ [OpMerge bv bnd], wAcc)
-                        -- Bounded by structure: eliminate via Weaken (substitute bound).
-                        else pure (gAcc, mAcc, wAcc ++ [OpWeaken bv])
+    go lr suppressWeaken (ExpCompose es) =
+        concat <$> mapM (go lr suppressWeaken) (NE.toList es)
 
-        binderBound :: NodeId -> PresolutionM (Maybe NodeId)
-        binderBound bv = do
-            n <- getCanonicalNode bv
-            case n of
-                TyVar{} ->
-                    lookupVarBound bv
-                _ -> pure Nothing
+    classify
+        :: Bool
+        -> [NodeId] -- binders at this instantiation site
+        -> ([InstanceOp], [InstanceOp], [InstanceOp])
+        -> (NodeId, NodeId) -- (arg, binder)
+        -> PresolutionM ([InstanceOp], [InstanceOp], [InstanceOp])
+    classify suppressWeaken binders (gAcc, mAcc, wAcc) (arg, bv) = do
+        mbBound <- binderBound bv
+        let weakenOp = if suppressWeaken then [] else [OpWeaken bv]
+        case mbBound of
+            Nothing ->
+                -- Unbounded binder: graft then eliminate later via weaken.
+                pure (gAcc ++ [OpGraft arg bv], mAcc, wAcc ++ weakenOp)
+            Just bnd -> do
+                isVarBound <- isTyVar bnd
+                if isVarBound && bnd `elem` binders
+                    -- Bounded by an in-scope variable: alias + eliminate via Merge (Fig. 10).
+                    then pure (gAcc, mAcc ++ [OpMerge bv bnd], wAcc)
+                    -- Bounded by structure: eliminate via Weaken (substitute bound).
+                    else pure (gAcc, mAcc, wAcc ++ weakenOp)
 
-        isTyVar :: NodeId -> PresolutionM Bool
-        isTyVar nid = do
-            n <- getCanonicalNode nid
-            pure $ case n of
-                TyVar{} -> True
-                _ -> False
+    binderBound :: NodeId -> PresolutionM (Maybe NodeId)
+    binderBound bv = do
+        n <- getCanonicalNode bv
+        case n of
+            TyVar{} ->
+                lookupVarBound bv
+            _ -> pure Nothing
+
+    isTyVar :: NodeId -> PresolutionM Bool
+    isTyVar nid = do
+        n <- getCanonicalNode nid
+        pure $ case n of
+            TyVar{} -> True
+            _ -> False
 
 forallIntroSuffixCount :: Expansion -> PresolutionM Int
 forallIntroSuffixCount expn =

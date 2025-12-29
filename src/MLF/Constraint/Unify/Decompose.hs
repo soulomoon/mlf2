@@ -41,10 +41,12 @@ decomposeUnifyChildren n1 n2 = case (n1, n2) of
         | b1 == b2 -> Right []
         | otherwise -> Left (MismatchBase b1 b2)
 
+    (TyBottom{}, TyBottom{}) ->
+        Right []
+
     (TyExp { tnExpVar = s1, tnBody = b1 }, TyExp { tnExpVar = s2, tnBody = b2 })
         | s1 == s2 -> Right [UnifyEdge b1 b2]
         | otherwise -> Left (MismatchExpVar s1 s2)
 
     _ ->
         Left MismatchConstructor
-

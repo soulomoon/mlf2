@@ -232,12 +232,18 @@ partitionGraftable edges nodes = do
                 -- Variable ≤ Structure: graft the structure
                 (Just TyVar {}, Just TyArrow {}) -> True
                 (Just TyVar {}, Just TyBase {}) -> True
+                (Just TyVar {}, Just TyBottom {}) -> True
                 -- Structure ≤ Structure: decompose or check compatibility
                 (Just TyArrow {}, Just TyArrow {}) -> True
                 (Just TyBase {}, Just TyBase {}) -> True
+                (Just TyBottom {}, Just TyBottom {}) -> True
                 -- Incompatible structures: type error, but we process them
                 (Just TyArrow {}, Just TyBase {}) -> True
                 (Just TyBase {}, Just TyArrow {}) -> True
+                (Just TyArrow {}, Just TyBottom {}) -> True
+                (Just TyBottom {}, Just TyArrow {}) -> True
+                (Just TyBase {}, Just TyBottom {}) -> True
+                (Just TyBottom {}, Just TyBase {}) -> True
                 -- Variable ≤ Variable: can't graft, keep for Phase 4
                 -- TyForall/TyExp cases: require presolution, keep for Phase 4
                 _ -> False
@@ -339,6 +345,10 @@ graftEdge edge = do
         (Just TyVar {}, Just TyBase {}) ->
             pure $ Just [UnifyEdge leftId rightId]
 
+        -- Variable ≤ Bottom: unify directly
+        (Just TyVar {}, Just TyBottom {}) ->
+            pure $ Just [UnifyEdge leftId rightId]
+
         -- Arrow ≤ Arrow: decompose into unification of components
         (Just (TyArrow { tnDom = lDom, tnCod = lCod }),
          Just (TyArrow { tnDom = rDom, tnCod = rCod })) ->
@@ -351,9 +361,17 @@ graftEdge edge = do
             | lBase == rBase -> pure $ Just []  -- Same type, trivially satisfied
             | otherwise -> pure Nothing  -- Type error: keep edge to report later
 
+        -- Bottom ≤ Bottom: trivially satisfied
+        (Just TyBottom {}, Just TyBottom {}) ->
+            pure $ Just []
+
         -- Arrow ≤ Base or Base ≤ Arrow: type error (incompatible structures)
         (Just TyArrow {}, Just TyBase {}) -> pure Nothing
         (Just TyBase {}, Just TyArrow {}) -> pure Nothing
+        (Just TyArrow {}, Just TyBottom {}) -> pure Nothing
+        (Just TyBottom {}, Just TyArrow {}) -> pure Nothing
+        (Just TyBase {}, Just TyBottom {}) -> pure Nothing
+        (Just TyBottom {}, Just TyBase {}) -> pure Nothing
 
         -- Other cases: shouldn't reach here (filtered by partitionGraftable)
         _ -> pure $ Just []
@@ -636,6 +654,7 @@ applyToNode uf nodes node =
 applyToStructure :: IntMap NodeId -> TyNode -> TyNode
 applyToStructure uf node = case node of
     TyVar {} -> node
+    TyBottom {} -> node
     TyArrow { tnId = nid, tnDom = dom, tnCod = cod } ->
         TyArrow { tnId = nid, tnDom = findRoot uf dom, tnCod = findRoot uf cod }
     TyBase {} -> node

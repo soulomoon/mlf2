@@ -1,7 +1,7 @@
 module ElaborationSpec (spec) where
 
 import Test.Hspec
-import Control.Monad (forM_)
+import Control.Monad (forM_, when)
 import Data.List (isInfixOf, stripPrefix)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
@@ -9,12 +9,15 @@ import qualified Data.IntSet as IntSet
 import MLF.Frontend.Syntax (Expr(..), Lit(..), SrcType(..), SrcScheme(..))
 import qualified MLF.Elab.Pipeline as Elab
 import qualified MLF.Util.Order as Order
-import MLF.Constraint.Types (BaseTy(..), NodeId(..), EdgeId(..), TyNode(..), Constraint(..), InstanceOp(..), InstanceStep(..), InstanceWitness(..), EdgeWitness(..), BindFlag(..))
+import MLF.Constraint.Types (BaseTy(..), BindingError(..), NodeId(..), EdgeId(..), TyNode(..), Constraint(..), InstanceOp(..), InstanceStep(..), InstanceWitness(..), EdgeWitness(..), BindFlag(..), getNodeId)
+import qualified MLF.Binding.Tree as Binding
+import qualified MLF.Constraint.Root as ConstraintRoot
 import MLF.Frontend.ConstraintGen (ConstraintResult(..), generateConstraints)
 import MLF.Constraint.Normalize (normalize)
 import MLF.Constraint.Acyclicity (checkAcyclicity)
 import MLF.Constraint.Presolution (PresolutionResult(..), EdgeTrace(..), computePresolution)
 import MLF.Constraint.Solve (SolveResult(..), solveUnify)
+import qualified MLF.Constraint.Solve as Solve (frWith)
 import SpecUtil (emptyConstraint, inferBindParents, requireRight)
 
 requirePipeline :: Expr -> IO (Elab.ElabTerm, Elab.ElabType)
@@ -112,6 +115,52 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             Elab.pretty ty `shouldBe` "Int"
             Elab.pretty term `shouldBe` "let id : ∀a. a -> a = Λa. λx:a. x in (id [⟨Int⟩]) 1"
 
+        it "generalizeAt quantifies vars bound under the scope root" $ do
+            let root = NodeId 0
+                arrow = NodeId 1
+                var = NodeId 2
+                nodes = IntMap.fromList
+                    [ (getNodeId root, TyRoot root [arrow])
+                    , (getNodeId arrow, TyArrow { tnId = arrow, tnDom = var, tnCod = var })
+                    , (getNodeId var, TyVar { tnId = var })
+                    ]
+                bindParents = IntMap.fromList
+                    [ (getNodeId arrow, (root, BindFlex))
+                    , (getNodeId var, (arrow, BindFlex))
+                    ]
+                constraint = emptyConstraint
+                    { cNodes = nodes
+                    , cBindParents = bindParents
+                    }
+                solved = SolveResult
+                    { srConstraint = constraint
+                    , srUnionFind = IntMap.empty
+                    }
+
+            (Elab.Forall binds ty, _subst) <- requireRight (Elab.generalizeAt solved root arrow)
+            binds `shouldBe` [("a", Nothing)]
+            ty `shouldBe` Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")
+
+        it "elaborates dual instantiation in application" $ do
+            -- let id = \x. x in id id
+            let expr = ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (EVar "id"))
+            (term, _ty) <- requirePipeline expr
+            case term of
+                Elab.ELet _ _ _ body ->
+                    case body of
+                        Elab.EApp fun arg ->
+                            case (fun, arg) of
+                                (Elab.ETyInst (Elab.EVar "id") instF, Elab.ETyInst (Elab.EVar "id") instA) -> do
+                                    instF `shouldNotBe` Elab.InstId
+                                    instA `shouldNotBe` Elab.InstId
+                                _ ->
+                                    expectationFailure $
+                                        "Expected instantiation on both sides, saw " ++ show body
+                        other ->
+                            expectationFailure $ "Expected application body, saw " ++ show other
+                other ->
+                    expectationFailure $ "Expected let-binding result, saw " ++ show other
+
         it "elaborates usage of polymorphic let (instantiated at different types)" $ do
             -- let f = \x. x in let _ = f 1 in f true
             -- This forces 'f' to be instantiated twice: once at Int, once at Bool
@@ -136,12 +185,128 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             Elab.pretty term `shouldSatisfy` ("let x" `isInfixOf`)
             Elab.pretty term `shouldSatisfy` ("let y" `isInfixOf`)
 
+        it "top-level generalization ignores binders outside the type" $ do
+            let expr =
+                    ELet "unused" (ELam "x" (EVar "x"))
+                        (ELam "y" (EVar "y"))
+            (_term, ty) <- requirePipeline expr
+            let expected =
+                    Elab.TForall "a" Nothing
+                        (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+            ty `shouldAlphaEqType` expected
+
         it "elaborates term annotations" $ do
             -- (\x. x) : Int -> Int
             let ann = STArrow (STBase "Int") (STBase "Int")
                 expr = EAnn (ELam "x" (EVar "x")) ann
             (_term, ty) <- requirePipeline expr
             Elab.pretty ty `shouldBe` "Int -> Int"
+
+    describe "Binding tree coverage" $ do
+        let firstShow :: Show err => Either err a -> Either String a
+            firstShow = either (Left . show) Right
+
+            runSolvedWithScope :: Expr -> Either String (SolveResult, NodeId, NodeId)
+            runSolvedWithScope e = do
+                ConstraintResult { crConstraint = c0, crRoot = root } <- firstShow (generateConstraints e)
+                let c1 = normalize c0
+                acyc <- firstShow (checkAcyclicity c1)
+                pres <- firstShow (computePresolution acyc c1)
+                solved <- firstShow (solveUnify (prConstraint pres))
+                let root' = Elab.chaseRedirects (prRedirects pres) root
+                scopeRoot <- case ConstraintRoot.findConstraintRoot (srConstraint solved) of
+                    Nothing -> Left "Missing constraint root"
+                    Just r -> Right r
+                pure (solved, scopeRoot, root')
+
+            bindingPathToRootUnder
+                :: (NodeId -> NodeId)
+                -> Constraint
+                -> NodeId
+                -> Either BindingError [NodeId]
+            bindingPathToRootUnder canonical constraint start0 =
+                let startC = canonical start0
+                    go visited path nid = do
+                        let key = getNodeId nid
+                        if IntSet.member key visited
+                            then Left (BindingCycleDetected (reverse path))
+                            else do
+                                mbParent <- Binding.lookupBindParentUnder canonical constraint nid
+                                case mbParent of
+                                    Nothing -> Right (reverse path)
+                                    Just (parent, _flag) ->
+                                        go (IntSet.insert key visited) (parent : path) parent
+                in go IntSet.empty [startC] startC
+
+            freeVarsUnder :: SolveResult -> NodeId -> Either BindingError IntSet.IntSet
+            freeVarsUnder res nid0 =
+                let constraint = srConstraint res
+                    nodes = cNodes constraint
+                    canonical = Solve.frWith (srUnionFind res)
+                    go bound visited nid =
+                        let key = getNodeId nid
+                        in if IntSet.member key visited
+                            then Right IntSet.empty
+                            else case IntMap.lookup key nodes of
+                                Nothing ->
+                                    Left (InvalidBindingTree ("freeVarsUnder: missing node " ++ show nid))
+                                Just TyVar{} ->
+                                    if IntSet.member key bound
+                                        then Right IntSet.empty
+                                        else Right (IntSet.singleton key)
+                                Just TyBase{} -> Right IntSet.empty
+                                Just TyBottom{} -> Right IntSet.empty
+                                Just TyArrow{ tnDom = d, tnCod = c } -> do
+                                    let visited' = IntSet.insert key visited
+                                    fv1 <- go bound visited' (canonical d)
+                                    fv2 <- go bound visited' (canonical c)
+                                    pure (fv1 `IntSet.union` fv2)
+                                Just TyForall{ tnId = fId, tnBody = b } -> do
+                                    let visited' = IntSet.insert key visited
+                                    binders <- Binding.boundFlexChildrenUnder canonical constraint (canonical fId)
+                                    let bound' =
+                                            bound `IntSet.union`
+                                            IntSet.fromList (map (getNodeId . canonical) binders)
+                                    go bound' visited' (canonical b)
+                                Just TyExp{ tnBody = b } -> do
+                                    let visited' = IntSet.insert key visited
+                                    go bound visited' (canonical b)
+                                Just TyRoot{ tnChildren = cs } -> do
+                                    let visited' = IntSet.insert key visited
+                                    fvs <- mapM (go bound visited' . canonical) cs
+                                    pure (IntSet.unions fvs)
+                in go IntSet.empty IntSet.empty (canonical nid0)
+
+            assertBindingCoverage :: Expr -> IO ()
+            assertBindingCoverage expr = do
+                (solved, scopeRoot, typeRoot) <- requireRight (runSolvedWithScope expr)
+                freeVars <- requireRight (freeVarsUnder solved typeRoot)
+                freeVars `shouldSatisfy` (not . IntSet.null)
+                let canonical = Solve.frWith (srUnionFind solved)
+                    constraint = srConstraint solved
+                    scopeRootC = canonical scopeRoot
+                forM_ (IntSet.toList freeVars) $ \vid -> do
+                    let v = NodeId vid
+                    path <- requireRight (bindingPathToRootUnder canonical constraint v)
+                    let hasRoot = scopeRootC `elem` path
+                    when (not hasRoot) $
+                        expectationFailure $
+                            "Free var missing binding path to scope root: "
+                                ++ show v
+                                ++ " path "
+                                ++ show path
+
+        it "covers free vars for top-level lambda" $ do
+            let expr = ELam "x" (EVar "x")
+            assertBindingCoverage expr
+
+        it "covers free vars for let-polymorphic instantiation (f 1)" $ do
+            -- let f = \x. \y. x in f 1  ==>  a -> Int
+            -- The free var in the result (a) comes from instantiation copying.
+            let expr =
+                    ELet "f" (ELam "x" (ELam "y" (EVar "x")))
+                        (EApp (EVar "f") (ELit (LInt 1)))
+            assertBindingCoverage expr
 
     describe "Elaboration of Bounded Quantification (Flexible Bounds)" $ do
         it "elaborates annotated let with flexible bound (Int -> Int)" $ do
@@ -207,14 +372,48 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 ]
                         , cInstEdges = []
                         , cUnifyEdges = []
-                        , cBindParents = IntMap.fromList [(getNodeId v, (forallNode, BindFlex))]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (getNodeId arrow, (forallNode, BindFlex))
+                                , (getNodeId v, (forallNode, BindFlex))
+                                ]
                         , cVarBounds = IntMap.empty
                         , cEliminatedVars = IntSet.singleton (getNodeId v)
                         }
-                solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 
+            solved <- requireRight (solveUnify c)
             (sch, _subst) <- requireRight (Elab.generalizeAt solved forallNode forallNode)
-            sch `shouldBe` Elab.Forall [] (Elab.TArrow (Elab.TVar "t1") (Elab.TVar "t1"))
+            sch `shouldBe` Elab.Forall [] (Elab.TArrow Elab.TBottom Elab.TBottom)
+
+        it "generalizeAt drops eliminated binders with bounds" $ do
+            let v = NodeId 1
+                b = NodeId 2
+                arrow = NodeId 3
+                forallNode = NodeId 4
+                c =
+                    Constraint
+                        { cNodes =
+                            IntMap.fromList
+                                [ (getNodeId v, TyVar v)
+                                , (getNodeId b, TyVar b)
+                                , (getNodeId arrow, TyArrow arrow v b)
+                                , (getNodeId forallNode, TyForall forallNode arrow)
+                                ]
+                        , cInstEdges = []
+                        , cUnifyEdges = []
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (getNodeId arrow, (forallNode, BindFlex))
+                                , (getNodeId v, (forallNode, BindFlex))
+                                , (getNodeId b, (forallNode, BindFlex))
+                                ]
+                        , cVarBounds = IntMap.fromList [(getNodeId v, Just b)]
+                        , cEliminatedVars = IntSet.singleton (getNodeId v)
+                        }
+
+            solved <- requireRight (solveUnify c)
+            (sch, _subst) <- requireRight (Elab.generalizeAt solved forallNode forallNode)
+            Elab.pretty sch `shouldBe` "∀a. a -> a"
 
     describe "xMLF types (instance bounds)" $ do
         it "pretty prints unbounded forall" $ do
@@ -997,6 +1196,39 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     Elab.TForall "a" Nothing
                         (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
             ty `shouldAlphaEqType` expected
+
+        it "generalizeAt inlines rigid vars via bounds at top-level" $ do
+            let root = NodeId 0
+                arrow = NodeId 1
+                rigidVar = NodeId 2
+                flexVar = NodeId 3
+                c =
+                    Constraint
+                        { cNodes =
+                            IntMap.fromList
+                                [ (getNodeId root, TyRoot root [arrow])
+                                , (getNodeId arrow, TyArrow arrow rigidVar rigidVar)
+                                , (getNodeId rigidVar, TyVar rigidVar)
+                                , (getNodeId flexVar, TyVar flexVar)
+                                ]
+                        , cInstEdges = []
+                        , cUnifyEdges = []
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (getNodeId arrow, (root, BindRigid))
+                                , (getNodeId rigidVar, (arrow, BindRigid))
+                                , (getNodeId flexVar, (root, BindFlex))
+                                ]
+                        , cVarBounds =
+                            IntMap.fromList
+                                [ (getNodeId rigidVar, Just flexVar)
+                                ]
+                        , cEliminatedVars = IntSet.empty
+                        }
+                solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+
+            (sch, _subst) <- requireRight (Elab.generalizeAt solved root arrow)
+            Elab.pretty sch `shouldBe` "∀a. a -> a"
 
         it "\\y. let id = (\\x. x) in id y should have type ∀a. a -> a" $ do
             let expr =

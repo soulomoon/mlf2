@@ -16,12 +16,14 @@ import qualified MLF.Frontend.ConstraintGen.Scope as Scope
 import MLF.Frontend.ConstraintGen.State (BuildState(..), ConstraintM)
 import MLF.Frontend.ConstraintGen.Types
 
-buildRootExpr :: NodeId -> Expr -> ConstraintM (NodeId, AnnExpr)
+buildRootExpr :: NodeId -> Expr -> ConstraintM (NodeId, NodeId, AnnExpr)
 buildRootExpr scopeRoot expr = do
     (rootNode, annRoot) <- buildExpr Map.empty scopeRoot expr
     topFrame <- Scope.peekScope
-    Scope.rebindScopeNodes rootNode rootNode topFrame
-    pure (rootNode, annRoot)
+    rootBinder <- allocRoot [rootNode]
+    Scope.rebindScopeNodes rootBinder rootNode topFrame
+    let annRoot' = replaceScopeRoot scopeRoot rootBinder annRoot
+    pure (rootBinder, rootNode, annRoot')
 
 buildExpr :: Env -> NodeId -> Expr -> ConstraintM (NodeId, AnnExpr)
 buildExpr env scopeRoot expr = case expr of

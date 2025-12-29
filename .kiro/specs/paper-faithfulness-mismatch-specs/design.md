@@ -30,6 +30,16 @@ Mismatch inventory and target spec names:
   - Gap: Replace top-level generalization fallback when root has no direct
     binders (align to paper binder enumeration).
   - Primary modules: `MLF.Elab.Generalize`, `MLF.Binding.Tree`.
+- `rigid-bound-inlining`
+  - Gap: Inline rigidly bound variables (R(n)=T(n)) and keep non-Forall
+    generalization aligned with rigid binding edges.
+  - Primary modules: `MLF.Elab.Generalize`, `MLF.Elab.Reify`.
+- `omega-elimination-graph-rewrite`
+  - Gap: Elimination is tracked via `cEliminatedVars` instead of rewriting the
+    graph (ω operations should transform χe into χ with eliminated binders
+    removed from Q(n) and inlined by bounds).
+  - Primary modules: `MLF.Constraint.Presolution.Driver`,
+    `MLF.Constraint.Types`, `MLF.Elab.Reify`.
 - `xmlf-phase7-semantics`
   - Gap: Implement xMLF typechecking (Figure 4) and reduction semantics
     (Figure 5).

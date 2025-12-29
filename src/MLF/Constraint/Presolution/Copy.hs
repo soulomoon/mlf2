@@ -195,6 +195,7 @@ instantiateSchemeWithTrace bodyId substList = do
                         let shouldShare =
                                 case node of
                                     TyBase {} -> True
+                                    TyBottom {} -> True
                                     _ -> not (IntSet.member k copyInterior)
 
                         if shouldShare
@@ -222,6 +223,8 @@ instantiateSchemeWithTrace bodyId substList = do
                                                         TyForall freshId b
                                                     TyVar {} ->
                                                         TyVar freshId
+                                                    TyBottom {} ->
+                                                        TyBottom freshId
                                                     TyBase { tnBase = b } ->
                                                         TyBase freshId b
                                                     TyRoot { tnChildren = cs } ->
@@ -239,6 +242,8 @@ instantiateSchemeWithTrace bodyId substList = do
                                                 return $ TyForall freshId b'
                                             TyVar {} ->
                                                 pure $ TyVar freshId
+                                            TyBottom {} ->
+                                                pure $ TyBottom freshId
                                             TyBase { tnBase = b } -> do
                                                 return $ TyBase freshId b
                                             TyRoot { tnChildren = cs } -> do
@@ -289,7 +294,6 @@ bindUnboundCopiedNodes copyMap interior expansionRoot = do
     uf0 <- gets psUnionFind
     let canonical = UnionFind.frWith uf0
         expansionRootC = canonical expansionRoot
-
     let copiedIds = IntSet.fromList (map getNodeId (IntMap.elems copyMap))
         candidateIds0 = IntSet.union copiedIds interior
 

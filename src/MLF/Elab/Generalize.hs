@@ -2,62 +2,141 @@ module MLF.Elab.Generalize (
     generalizeAt
 ) where
 
-import Data.List (nub)
+import Control.Monad (foldM)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import Data.Maybe (mapMaybe)
-import Text.Read (readMaybe)
+import qualified Data.Set as Set
 
 import qualified MLF.Util.Order as Order
 import MLF.Constraint.Types
 import MLF.Elab.Types
 import MLF.Elab.Util (topoSortBy)
-import MLF.Elab.Reify (freeVars, reifyType, reifyTypeWithNames)
+import MLF.Elab.Reify (freeVars, reifyTypeWithNames)
 import MLF.Constraint.Solve hiding (BindingTreeError, MissingNode)
 import qualified MLF.Constraint.Solve as Solve (frWith)
-import MLF.Binding.Tree (orderedBinders)
+import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.VarStore as VarStore
 
 -- | Generalize a node at the given binding site into a polymorphic scheme.
 -- For xMLF, quantified variables can have bounds.
 -- Returns the scheme and the substitution used to rename variables.
 generalizeAt :: SolveResult -> NodeId -> NodeId -> Either ElabError (ElabScheme, IntMap.IntMap String)
-generalizeAt res scopeRoot nid = do
+generalizeAt res scopeRoot targetNode = do
     let constraint = srConstraint res
         nodes = cNodes constraint
         uf = srUnionFind res
         canonical = Solve.frWith uf
         scopeRootC = canonical scopeRoot
-    let target0 = case IntMap.lookup (getNodeId (canonical nid)) nodes of
+    let target0 = case IntMap.lookup (getNodeId (canonical targetNode)) nodes of
             Just TyExp{ tnBody = b } -> canonical b
-            _ -> canonical nid
-        orderRoot = case IntMap.lookup (getNodeId target0) nodes of
-            Just TyForall{ tnBody = b } -> canonical b
-            _ -> target0
+            _ -> canonical targetNode
+        (orderRoot, typeRoot) =
+            case IntMap.lookup (getNodeId target0) nodes of
+                Just TyForall{ tnBody = b } ->
+                    let bodyRoot = canonical b
+                    in if scopeRootC == target0
+                        then (bodyRoot, bodyRoot)
+                        else (bodyRoot, target0)
+                _ -> (target0, target0)
 
-    binders0 <- bindingToElab (orderedBinders canonical constraint scopeRootC)
-    -- Paper-style binder enumeration uses Q(n) (direct flex children).
-    --
-    -- Top-level generalization is not a paper construct; it exists to give a
-    -- principal scheme to the whole program. When the binding tree does not
-    -- expose free vars as direct children of the root (common in our multi-root
-    -- term-DAG graphs), fall back to HM-style free-variable generalization.
-    bindersFallback <-
-        if null binders0
-            then do
-                ty0 <- reifyType res orderRoot
-                pure (freeNodeIdsFromType ty0)
-            else pure binders0
+    let reachableWithRigidBounds root0 = go IntSet.empty [root0]
+          where
+            lookupNode nid = IntMap.lookup (getNodeId nid) nodes
+            rigidBoundChildren nid = do
+                case lookupNode nid of
+                    Just TyVar{} ->
+                        do
+                            mbParent <- bindingToElab (Binding.lookupBindParentUnder canonical constraint nid)
+                            case mbParent of
+                                Just (_, BindRigid) ->
+                                    pure (maybe [] (: []) (VarStore.lookupVarBound constraint nid))
+                                _ -> pure []
+                    _ -> pure []
 
+            go visited [] = Right visited
+            go visited (nid0 : rest) = do
+                let nid = canonical nid0
+                    key = getNodeId nid
+                if IntSet.member key visited
+                    then go visited rest
+                    else do
+                        let visited' = IntSet.insert key visited
+                            children =
+                                case lookupNode nid of
+                                    Nothing -> []
+                                    Just node -> map canonical (structuralChildren node)
+                        boundChildren <- rigidBoundChildren nid
+                        go visited' (children ++ map canonical boundChildren ++ rest)
+
+    reachable <- reachableWithRigidBounds orderRoot
+    reachableType <- reachableWithRigidBounds typeRoot
+
+    let isBinderNode nid =
+            case IntMap.lookup (getNodeId nid) nodes of
+                Just TyForall{} -> True
+                Just TyRoot{} -> True
+                _ -> False
+        boundAtScope v0 = go True IntSet.empty (canonical v0)
+          where
+            go isFirst visited nid =
+                let key = getNodeId nid
+                in if IntSet.member key visited
+                    then Left $
+                        BindingTreeError $
+                            InvalidBindingTree "generalizeAt: cycle in binding path"
+                    else do
+                        mbParent <- bindingToElab (Binding.lookupBindParentUnder canonical constraint nid)
+                        case mbParent of
+                            Nothing -> Right False
+                            Just (parent, flag) ->
+                                if isFirst && flag == BindRigid
+                                    then Right False
+                                    else if isBinderNode parent
+                                        then case IntMap.lookup (getNodeId parent) nodes of
+                                            Just TyRoot{} ->
+                                                Right (canonical parent == scopeRootC)
+                                            Just TyForall{} ->
+                                                if IntSet.member (getNodeId (canonical parent)) reachableType
+                                                    then Right (canonical parent == scopeRootC)
+                                                    else go False (IntSet.insert key visited) (canonical parent)
+                                            _ ->
+                                                Right False
+                                        else go False (IntSet.insert key visited) (canonical parent)
+    let scopeIsForall =
+            case IntMap.lookup (getNodeId scopeRootC) nodes of
+                Just TyForall{} -> True
+                _ -> False
+    binders0 <-
+        if scopeIsForall
+            then bindingToElab (Binding.boundFlexChildrenUnder canonical constraint scopeRootC)
+            else do
+                let varCandidates =
+                        [ NodeId nid
+                        | (nid, TyVar{}) <- IntMap.toList nodes
+                        ]
+                foldM
+                    (\acc v -> do
+                        ok <- boundAtScope v
+                        pure (if ok then v : acc else acc)
+                    )
+                    []
+                    varCandidates
     let binders =
-            [ v
-            | v <- bindersFallback
-            , not (VarStore.isEliminatedVar constraint v)
+            [ canonical v
+            | v <- binders0
+            , IntSet.member (getNodeId (canonical v)) reachable
             ]
-        grouped =
+        bindersCanon =
+            IntMap.elems $
+                IntMap.fromList
+                    [ (getNodeId v, v)
+                    | v <- binders
+                    ]
+
+    let grouped =
             IntMap.fromList
                 [ (getNodeId v, (v, fmap canonical (VarStore.lookupVarBound constraint v)))
-                | v <- binders
+                | v <- bindersCanon
                 ]
 
     ordered <- orderBinderCandidates orderRoot grouped
@@ -87,8 +166,11 @@ generalizeAt res scopeRoot nid = do
             pure (name, boundTy)
         ) (zip names ordered)
 
-    ty <- reifyTypeWithNames res subst orderRoot
-    pure (Forall bindings ty, subst)
+    ty0 <- reifyTypeWithNames res subst typeRoot
+    let ty = stripVacuousForalls ty0
+        usedNames = usedBinderNames bindings ty
+        bindings' = filter (\(name, _) -> Set.member name usedNames) bindings
+    pure (Forall bindings' ty, subst)
   where
     orderBinderCandidates :: NodeId -> IntMap.IntMap (NodeId, Maybe NodeId) -> Either ElabError [Int]
     orderBinderCandidates root grouped = do
@@ -115,25 +197,49 @@ generalizeAt res scopeRoot nid = do
             depsFor
             candidates
 
-    freeNodeIdsFromType :: ElabType -> [NodeId]
-    freeNodeIdsFromType ty0 =
-        let names = nub (freeTypeVarNames [] ty0)
-        in nub (mapMaybe nameToNodeId names)
+    usedBinderNames :: [(String, Maybe ElabType)] -> ElabType -> Set.Set String
+    usedBinderNames binds body =
+        let needed0 = freeTypeVars body
+            depsFor name =
+                case lookup name binds of
+                    Nothing -> Set.empty
+                    Just Nothing -> Set.empty
+                    Just (Just bnd) -> freeTypeVars bnd
+            close s =
+                let s' = foldl'
+                        (\acc name -> Set.union acc (depsFor name))
+                        s
+                        (Set.toList s)
+                in if s' == s then s else close s'
+        in close needed0
 
-    freeTypeVarNames :: [String] -> ElabType -> [String]
-    freeTypeVarNames bound ty0 = case ty0 of
-        TVar v -> if v `elem` bound then [] else [v]
-        TArrow a b -> freeTypeVarNames bound a ++ freeTypeVarNames bound b
-        TBase _ -> []
-        TBottom -> []
+    freeTypeVars :: ElabType -> Set.Set String
+    freeTypeVars = go Set.empty
+      where
+        go bound ty0 = case ty0 of
+            TVar v -> if Set.member v bound then Set.empty else Set.singleton v
+            TArrow a b -> go bound a `Set.union` go bound b
+            TBase _ -> Set.empty
+            TBottom -> Set.empty
+            TForall v mb body ->
+                let fvBound = maybe Set.empty (go bound) mb
+                    fvBody = go (Set.insert v bound) body
+                in fvBound `Set.union` fvBody
+
+    stripVacuousForalls :: ElabType -> ElabType
+    stripVacuousForalls ty0 = case ty0 of
+        TArrow a b -> TArrow (stripVacuousForalls a) (stripVacuousForalls b)
         TForall v mb body ->
-            let fvBound = maybe [] (freeTypeVarNames bound) mb
-                fvBody = freeTypeVarNames (v : bound) body
-            in fvBound ++ fvBody
-
-    nameToNodeId :: String -> Maybe NodeId
-    nameToNodeId ('t':rest) = NodeId <$> readMaybe rest
-    nameToNodeId _ = Nothing
+            let mb' = fmap stripVacuousForalls mb
+                body' = stripVacuousForalls body
+                appearsInBody = Set.member v (freeTypeVars body')
+                appearsInBound = maybe False (Set.member v . freeTypeVars) mb'
+            in if appearsInBody || appearsInBound
+                then TForall v mb' body'
+                else body'
+        TVar{} -> ty0
+        TBase{} -> ty0
+        TBottom -> ty0
 
 alphaName :: Int -> Int -> String
 alphaName idx _ = letters !! (idx `mod` length letters) ++ suffix

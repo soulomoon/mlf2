@@ -152,6 +152,13 @@ data TyNode
     = TyVar
         { tnId :: NodeId
         }
+    -- | Bottom type node (⊥).
+    --
+    -- This is introduced by the omega-elimination rewrite pass to inline
+    -- eliminated binders with no explicit bound.
+    | TyBottom
+        { tnId :: NodeId
+        }
     -- | Arrow type node (τ₁ → τ₂).
     --
     -- In the paper’s term-DAG view, `TyArrow` is a constructor node with two
@@ -205,6 +212,7 @@ data TyNode
 -- list; roots preserve their stored child order.
 structuralChildren :: TyNode -> [NodeId]
 structuralChildren TyVar{} = []
+structuralChildren TyBottom{} = []
 structuralChildren TyBase{} = []
 structuralChildren TyArrow{ tnDom = d, tnCod = c } = [d, c]
 structuralChildren TyForall{ tnBody = b } = [b]
