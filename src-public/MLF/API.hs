@@ -8,8 +8,14 @@ module MLF.API
     , ElabTerm
     , Instantiation (..)
     , ElabError (..)
+    , TypeCheckError (..)
     , Pretty (..)
     , runPipelineElab
+    , runPipelineElabChecked
+    , typeCheck
+    , step
+    , normalize
+    , isValue
     ) where
 
 import MLF.Frontend.Syntax
@@ -20,7 +26,13 @@ import MLF.Elab.Pipeline
     , ElabTerm
     , ElabType (..)
     , Instantiation (..)
+    , TypeCheckError (..)
     , Pretty (..)
+    , isValue
+    , normalize
     , runPipelineElab
+    , runPipelineElabChecked
+    , step
+    , typeCheck
     )
 import MLF.Pipeline (inferConstraintGraph)

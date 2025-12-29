@@ -61,6 +61,9 @@ normalizeInstanceOpsFull
   :: OmegaNormalizeEnv -> [InstanceOp] -> Either OmegaNormalizeError [InstanceOp]
 ```
 Pipeline steps (pure, deterministic):
+0. **Strip exterior ops**: drop operations that touch no nodes in I(r); these
+   correspond to the frontier-unification prefix Iu (thesis §11.5/§15.2) and are
+   excluded from propagation witnesses.
 1. **Canonicalize** NodeIds via `canonical` and drop ops on rigid nodes
    (or return `OpUnderRigid`).
 2. **Coalesce RaiseMerge**: collapse `Raise(n)^k; Merge(n, m)` when

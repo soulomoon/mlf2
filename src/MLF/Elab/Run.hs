@@ -1,5 +1,6 @@
 module MLF.Elab.Run (
     runPipelineElab,
+    runPipelineElabChecked,
     applyRedirectsToAnn,
     chaseRedirects
 ) where
@@ -16,6 +17,7 @@ import MLF.Constraint.Solve hiding (BindingTreeError, MissingNode)
 import MLF.Constraint.Types (NodeId, getNodeId)
 import MLF.Elab.Elaborate (elaborate)
 import MLF.Elab.Generalize (generalizeAt)
+import MLF.Elab.TypeCheck (typeCheck)
 import MLF.Elab.Types
 
 -- | Run the full pipeline (Phases 1–5) then elaborate.
@@ -45,9 +47,12 @@ runPipelineElab expr = do
 
             pure (term, ty)
         vs -> Left ("validateSolvedGraph failed:\n" ++ unlines vs)
-  where
-    firstShow :: Show e => Either e a -> Either String a
-    firstShow = either (Left . show) Right
+
+runPipelineElabChecked :: Expr -> Either String (ElabTerm, ElabType)
+runPipelineElabChecked expr = do
+    (term, _ty) <- runPipelineElab expr
+    tyChecked <- firstShow (typeCheck term)
+    pure (term, tyChecked)
 
 applyRedirectsToAnn :: IntMap.IntMap NodeId -> AnnExpr -> AnnExpr
 applyRedirectsToAnn redirects ann = case ann of
@@ -73,3 +78,6 @@ chaseRedirects :: IntMap.IntMap NodeId -> NodeId -> NodeId
 chaseRedirects redirects nid = case IntMap.lookup (getNodeId nid) redirects of
     Just n' -> if n' == nid then nid else chaseRedirects redirects n'
     Nothing -> nid
+
+firstShow :: Show e => Either e a -> Either String a
+firstShow = either (Left . show) Right

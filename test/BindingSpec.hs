@@ -238,6 +238,48 @@ bindingTreeSpec = describe "MLF.Binding.Tree" $ do
             forallSpecFromForall id c (NodeId 0)
                 `shouldBe` Right (ForallSpec 2 [Just (BoundBinder 1), Nothing])
 
+    describe "Order keys (<P)" $ do
+        it "prefers leftmost paths when branches diverge" $ do
+            -- Root arrow: left child is shallow, right child contains a deeper var.
+            -- Paths: left = [0], deep = [1,0] so left is ≺ deep.
+            let root = NodeId 0
+                left = NodeId 1
+                right = NodeId 2
+                deep = NodeId 3
+                rightLeaf = NodeId 4
+                nodes =
+                    IntMap.fromList
+                        [ (getNodeId root, TyArrow root left right)
+                        , (getNodeId left, TyVar left)
+                        , (getNodeId right, TyArrow right deep rightLeaf)
+                        , (getNodeId deep, TyVar deep)
+                        , (getNodeId rightLeaf, TyVar rightLeaf)
+                        ]
+                keys = Order.orderKeysFromRootWith id nodes root Nothing
+            Order.compareNodesByOrderKey keys left deep `shouldBe` LT
+
+        it "selects the leftmost-lowermost path for shared nodes" $ do
+            -- Shared node reachable via [0,0] and [1,0]; choose [0,0].
+            let root = NodeId 0
+                left = NodeId 1
+                right = NodeId 2
+                shared = NodeId 3
+                leftLeaf = NodeId 4
+                rightLeaf = NodeId 5
+                nodes =
+                    IntMap.fromList
+                        [ (getNodeId root, TyArrow root left right)
+                        , (getNodeId left, TyArrow left shared leftLeaf)
+                        , (getNodeId right, TyArrow right shared rightLeaf)
+                        , (getNodeId shared, TyVar shared)
+                        , (getNodeId leftLeaf, TyVar leftLeaf)
+                        , (getNodeId rightLeaf, TyVar rightLeaf)
+                        ]
+                keys = Order.orderKeysFromRootWith id nodes root Nothing
+            case IntMap.lookup (getNodeId shared) keys of
+                Nothing -> expectationFailure "Expected order key for shared node"
+                Just key -> Order.okPath key `shouldBe` [0, 0]
+
     describe "Path operations" $ do
         it "bindingPathToRoot returns path from node to root" $ do
             let c = emptyConstraint

@@ -614,9 +614,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             (sch, _subst) <- requireRight (Elab.generalizeAt solved forallNode forallNode)
             Elab.pretty sch `shouldBe` "∀a b. a -> b"
 
-        it "generalizeAt orders lowermost binders first (depth beats leftmost)" $ do
-            -- Here the deeper variable must quantify before the shallow one, even
-            -- if it has a larger NodeId.
+        it "generalizeAt orders binders by <P when paths diverge (leftmost beats depth)" $ do
+            -- The leftmost binder should quantify first even if it is shallower.
             let vShallow = NodeId 5
                 vDeep = NodeId 10
                 nOuter = NodeId 20
@@ -649,7 +648,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 
             (sch, _subst) <- requireRight (Elab.generalizeAt solved forallNode forallNode)
-            Elab.pretty sch `shouldBe` "∀a b. b -> Int -> a"
+            Elab.pretty sch `shouldBe` "∀a b. a -> Int -> b"
 
         it "generalizeAt respects binder bound dependencies (a ≺ b if b’s bound mentions a)" $ do
             let vA = NodeId 10
@@ -1060,15 +1059,15 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 steps `shouldBe` Just [Elab.StepUnder "t1", Elab.StepInside]
 
             it "selectMinPrecInsertionIndex implements m = min≺ selection (min≺)" $ do
-                -- Keys are ordered by: deeper first, then leftmost path.
+                -- Keys are ordered by <P (lexicographic with empty path greatest).
                 -- We craft: key(1) ≺ key(n) ≺ key(2) ≺ key(3).
-                let k depth path = Order.OrderKey { Order.okDepth = depth, Order.okPath = path }
+                let k path = Order.OrderKey { Order.okDepth = length path, Order.okPath = path }
                     keys =
                         IntMap.fromList
-                            [ (1, k 3 [0])
-                            , (2, k 1 [0])
-                            , (3, k 0 [0])
-                            , (10, k 2 [0])
+                            [ (1, k [0])
+                            , (2, k [2])
+                            , (3, k [3])
+                            , (10, k [1])
                             ]
                     ids = [Just (NodeId 1), Just (NodeId 2), Just (NodeId 3)]
                     nN = NodeId 10

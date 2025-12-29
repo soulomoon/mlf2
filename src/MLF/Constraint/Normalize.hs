@@ -485,7 +485,6 @@ mergeUnifyEdges :: NormalizeM ()
 mergeUnifyEdges = do
     c <- gets nsConstraint
     let edges = cUnifyEdges c
-
     -- Process each edge
     remainingEdges <- processUnifyEdges edges
 

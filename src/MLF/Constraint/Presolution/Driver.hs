@@ -33,6 +33,7 @@ import qualified MLF.Util.Order as Order
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Witness.OmegaExec as OmegaExec
 import qualified MLF.Constraint.Canonicalize as Canonicalize
+import qualified MLF.Constraint.Inert as Inert
 import MLF.Constraint.Types
 import MLF.Constraint.Presolution.Base
 import MLF.Constraint.Presolution.Ops (
@@ -97,7 +98,9 @@ computePresolution acyclicityResult constraint = do
     (redirects, finalState) <- runPresolutionM presState $ do
         mapping <- materializeExpansions
         flushPendingWeakens
-        rewriteConstraint mapping
+        weakenInertLockedNodesM
+        redirects <- rewriteConstraint mapping
+        pure redirects
 
     return PresolutionResult
         { prConstraint = psConstraint finalState
@@ -393,6 +396,14 @@ rewriteConstraint mapping = do
 
     return fullRedirects
 
+-- | Weaken inert-locked nodes to obtain a translatable presolution.
+weakenInertLockedNodesM :: PresolutionM ()
+weakenInertLockedNodesM = do
+    c0 <- gets psConstraint
+    case Inert.weakenInertLockedNodes c0 of
+        Left err -> throwError (BindingTreeError err)
+        Right c1 -> modify' $ \st -> st { psConstraint = c1 }
+
 rewriteVarBounds :: (NodeId -> NodeId) -> IntMap TyNode -> VarBounds -> VarBounds
 rewriteVarBounds canon nodes0 vb0 =
     IntMap.fromListWith mergeBounds
@@ -543,14 +554,17 @@ buildEdgeWitness eid left right leftRaw expn extraOps edgeRoot mbPreInterior mbT
         _ -> pure left
     baseSteps <- witnessFromExpansion root leftRaw expn
     c0 <- gets psConstraint
-    interiorRoot <- case Binding.interiorOf c0 root of
+    c1 <- case Inert.weakenInertLockedNodes c0 of
+        Left err -> throwError (BindingTreeError err)
+        Right out -> pure out
+    interiorRoot <- case Binding.interiorOf c1 root of
         Left err -> throwError (BindingTreeError err)
         Right s -> pure s
     interiorEdgeKeys <- case mbPreInterior of
         Just pre -> pure pre
         Nothing -> edgeInteriorExact edgeRoot
     let canonical = id
-        orderKeys = Order.orderKeysFromRootWith canonical (cNodes c0) edgeRoot (Just interiorEdgeKeys)
+        orderKeys = Order.orderKeysFromRootWith canonical (cNodes c1) edgeRoot (Just interiorEdgeKeys)
         interior = IntSet.union interiorRoot (fromMaybe IntSet.empty mbPreInterior)
         binderArgs =
             case mbTrace of
@@ -560,13 +574,17 @@ buildEdgeWitness eid left right leftRaw expn extraOps edgeRoot mbPreInterior mbT
                         [ (getNodeId bv, arg)
                         | (bv, arg) <- etBinderArgs tr
                         ]
-        env =
+    inertLocked <- case Inert.inertLockedNodes c1 of
+        Left err -> throwError (BindingTreeError err)
+        Right s -> pure s
+    let env =
             OmegaNormalizeEnv
                 { oneRoot = root
                 , interior = interior
+                , inertLocked = inertLocked
                 , orderKeys = orderKeys
                 , canonical = canonical
-                , constraint = c0
+                , constraint = c1
                 , binderArgs = binderArgs
                 }
     let steps0 = integratePhase2Steps baseSteps extraOps

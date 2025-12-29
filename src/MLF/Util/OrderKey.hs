@@ -20,16 +20,14 @@ module MLF.Util.OrderKey (
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import Data.Ord (Down(..))
 
 import MLF.Constraint.Types (NodeId(..), TyNode, structuralChildren)
 
 -- | A “best occurrence” position key for a node in a (shared) type DAG.
 --
--- Paper intent: order nodes by “lowermost first”, breaking ties by “leftmost”.
--- We encode that as:
---   - deeper depth is better (ordered descending),
---   - path is compared lexicographically (ascending).
+-- Paper intent: order nodes by the leftmost-lowermost path order (<P) from
+-- §15.2.4. This is lexicographic on paths with the empty path considered
+-- *greatest* (so deeper paths are smaller only when they share a prefix).
 data OrderKey = OrderKey
     { okDepth :: !Int
     , okPath :: [Int]
@@ -37,7 +35,16 @@ data OrderKey = OrderKey
 
 compareOrderKey :: OrderKey -> OrderKey -> Ordering
 compareOrderKey a b =
-    compare (Down (okDepth a), okPath a) (Down (okDepth b), okPath b)
+    comparePaths (okPath a) (okPath b)
+
+comparePaths :: [Int] -> [Int] -> Ordering
+comparePaths [] [] = EQ
+comparePaths [] (_:_) = GT  -- empty path is greatest
+comparePaths (_:_) [] = LT
+comparePaths (i:is) (j:js) =
+    case compare i j of
+        EQ -> comparePaths is js
+        other -> other
 
 -- | Compute best order keys for nodes reachable from @root@.
 --
@@ -102,4 +109,3 @@ compareNodesByOrderKey m a b =
         (Just _, Nothing) -> LT
         (Nothing, Just _) -> GT
         (Nothing, Nothing) -> compare a b
-

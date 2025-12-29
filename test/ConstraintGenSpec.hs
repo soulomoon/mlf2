@@ -13,7 +13,7 @@ import MLF.Constraint.Normalize (normalize)
 import MLF.Constraint.Presolution (PresolutionResult(..), computePresolution)
 import MLF.Constraint.Solve (SolveResult(..), solveUnify)
 import MLF.Frontend.ConstraintGen (AnnExpr (..))
-import MyLib
+import MyLib hiding (normalize)
 import SpecUtil (expectRight, lookupNode, requireRight)
 
 spec :: Spec

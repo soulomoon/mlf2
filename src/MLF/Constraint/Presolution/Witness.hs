@@ -42,6 +42,7 @@ import MLF.Util.Order (OrderKey, compareNodesByOrderKey)
 data OmegaNormalizeEnv = OmegaNormalizeEnv
     { oneRoot :: NodeId
     , interior :: IntSet.IntSet
+    , inertLocked :: IntSet.IntSet
     , orderKeys :: IntMap.IntMap OrderKey
     , canonical :: NodeId -> NodeId
     , constraint :: Constraint
@@ -423,17 +424,48 @@ integratePhase2Steps steps extraOps =
                 then []
                 else map StepOmega (integratePhase2Ops (reverse opsRev) [])
 
+-- | Drop operations that do not touch I(r), or that target inert-locked nodes.
+--
+-- Thesis alignment (§11.5/§15.2): treat such operations as the Iu prefix that
+-- solves frontier unification edges, and exclude them from the propagation
+-- witness we translate. Inert-locked nodes are removed per §15.2.3.
+stripExteriorOps :: OmegaNormalizeEnv -> [InstanceOp] -> [InstanceOp]
+stripExteriorOps env =
+    filter keepOp
+  where
+    canon = canonical env
+
+    inInterior nid =
+        IntSet.member (getNodeId (canon nid)) (interior env)
+
+    isInertLocked nid =
+        IntSet.member (getNodeId (canon nid)) (inertLocked env)
+
+    opTargets op =
+        case op of
+            OpGraft _ n -> [n]
+            OpWeaken n -> [n]
+            OpMerge n m -> [n, m]
+            OpRaise n -> [n]
+            OpRaiseMerge n m -> [n, m]
+
+    touchesInterior op = any inInterior (opTargets op)
+    touchesInertLocked op = any isInertLocked (opTargets op)
+
+    keepOp op = touchesInterior op && not (touchesInertLocked op)
+
 normalizeInstanceOpsWithFallback :: OmegaNormalizeEnv -> [InstanceOp] -> Either OmegaNormalizeError [InstanceOp]
 normalizeInstanceOpsWithFallback env ops0 =
     case normalizeInstanceOpsFull env ops0 of
         Right ops' -> Right ops'
         Left (MergeDirectionInvalid _ _) -> do
-            ops1 <- coalesceRaiseMergeWithEnv env ops0
-            ops2 <- reorderWeakenWithEnv env ops1
-            case validateNormalizedWitness env ops2 of
-                Left (MergeDirectionInvalid _ _) -> Right ops2
+            let ops1 = stripExteriorOps env ops0
+            ops2 <- coalesceRaiseMergeWithEnv env ops1
+            ops3 <- reorderWeakenWithEnv env ops2
+            case validateNormalizedWitness env ops3 of
+                Left (MergeDirectionInvalid _ _) -> Right ops3
                 Left err' -> Left err'
-                Right () -> Right ops2
+                Right () -> Right ops3
         Left err -> Left err
 
 normalizeInstanceStepsFull :: OmegaNormalizeEnv -> [InstanceStep] -> Either OmegaNormalizeError [InstanceStep]
@@ -601,12 +633,13 @@ reorderWeakenWithEnv env ops =
 -- | Normalize Ω by enforcing `papers/xmlf.txt` conditions (1)–(5) only.
 normalizeInstanceOpsFull :: OmegaNormalizeEnv -> [InstanceOp] -> Either OmegaNormalizeError [InstanceOp]
 normalizeInstanceOpsFull env ops0 = do
-    ops1 <- canonicalizeOps ops0
-    ops2 <- coalesceRaiseMergeWithEnv env ops1
-    ops3 <- checkMergeDirection ops2
-    ops4 <- reorderWeakenWithEnv env ops3
-    validateNormalizedWitness env ops4
-    pure ops4
+    let ops1 = stripExteriorOps env ops0
+    ops2 <- canonicalizeOps ops1
+    ops3 <- coalesceRaiseMergeWithEnv env ops2
+    ops4 <- checkMergeDirection ops3
+    ops5 <- reorderWeakenWithEnv env ops4
+    validateNormalizedWitness env ops5
+    pure ops5
   where
     canon = canonical env
 

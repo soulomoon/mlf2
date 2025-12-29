@@ -8,6 +8,8 @@ import qualified AcyclicitySpec
 import qualified PresolutionSpec
 import qualified SolveSpec
 import qualified PipelineSpec
+import qualified TypeCheckSpec
+import qualified ReduceSpec
 import qualified ElaborationSpec
 import qualified BindingSpec
 import qualified GraphOpsSpec
@@ -20,6 +22,8 @@ main = hspec $ do
     PresolutionSpec.spec
     SolveSpec.spec
     PipelineSpec.spec
+    TypeCheckSpec.spec
+    ReduceSpec.spec
     ElaborationSpec.spec
     BindingSpec.spec
     GraphOpsSpec.spec

@@ -209,7 +209,8 @@ solveUnify c0 = do
                 loop
 
     enqueue :: [UnifyEdge] -> SolveM ()
-    enqueue es = modify' $ \s -> s { suQueue = es ++ suQueue s }
+    enqueue es = modify' $ \s ->
+        s { suQueue = es ++ suQueue s }
 
     -- | Process one equality edge using canonical representatives, decomposing
     -- arrows/foralls as needed and performing occurs-checks for var = structure.
@@ -458,7 +459,6 @@ rewriteEliminatedBinders c0
                     ]
             nodes' = IntMap.union nodes1 bottomNodes
             inNodes nid = IntMap.member (getNodeId nid) nodes'
-
         bindEntries <- forM (IntMap.toList bindParents0) $ \(childId, (parent0, flag)) ->
             if IntSet.member childId elims0
                 then pure Nothing

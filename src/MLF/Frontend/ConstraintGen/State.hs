@@ -58,4 +58,3 @@ buildConstraint st = Constraint
     , cVarBounds = bsVarBounds st
     , cEliminatedVars = IntSet.empty
     }
-

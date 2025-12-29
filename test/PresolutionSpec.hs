@@ -12,6 +12,7 @@ import MLF.Constraint.Presolution
 import MLF.Constraint.Presolution.Witness (OmegaNormalizeEnv(..), OmegaNormalizeError(..), coalesceRaiseMergeWithEnv, integratePhase2Ops, normalizeInstanceOpsFull, normalizeInstanceStepsFull, reorderWeakenWithEnv, validateNormalizedWitness, witnessFromExpansion)
 import MLF.Constraint.Acyclicity (AcyclicityResult(..))
 import MLF.Constraint.Solve (SolveResult(..), validateSolvedGraphStrict)
+import qualified MLF.Constraint.Inert as Inert
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Binding.GraphOps as GraphOps
 import qualified MLF.Util.UnionFind as UF
@@ -59,6 +60,7 @@ mkNormalizeEnv c root interior =
     OmegaNormalizeEnv
         { oneRoot = root
         , interior = interior
+        , inertLocked = IntSet.empty
         , orderKeys = Order.orderKeysFromRootWith id (cNodes c) root Nothing
         , canonical = id
         , constraint = c
@@ -1243,6 +1245,29 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 ops0 = [OpGraft arg b, OpWeaken b, OpMerge b a]
             normalizeInstanceOpsFull env ops0 `shouldBe` Right ops0
 
+        it "drops ops that target inert-locked nodes" $ do
+            let c = mkNormalizeConstraint
+                root = NodeId 0
+                n = NodeId 2
+                arg = NodeId 10
+                env =
+                    (mkNormalizeEnv c root (IntSet.fromList [getNodeId n]))
+                        { inertLocked = IntSet.fromList [getNodeId n] }
+                ops0 = [OpGraft arg n, OpWeaken n]
+            normalizeInstanceOpsFull env ops0 `shouldBe` Right []
+
+        it "drops ops that only touch nodes outside the interior" $ do
+            let c = mkNormalizeConstraint
+                root = NodeId 0
+                interior = IntSet.fromList [getNodeId (NodeId 2)]
+                env = mkNormalizeEnv c root interior
+                ops0 =
+                    [ OpGraft (NodeId 2) (NodeId 3)
+                    , OpWeaken (NodeId 1)
+                    , OpMerge (NodeId 3) (NodeId 1)
+                    ]
+            normalizeInstanceOpsFull env ops0 `shouldBe` Right []
+
         it "normalizes omega segments without moving StepIntro" $ do
             let c = mkNormalizeConstraint
                 root = NodeId 0
@@ -1477,6 +1502,59 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                     ops = [OpWeaken parent, OpMerge parent child]
                 validateNormalizedWitness env ops
                     `shouldBe` Left (OpUnderRigid child)
+
+        describe "Inert-locked detection" $ do
+            it "does not mark nodes with flex path to ⊥ as inert-locked" $ do
+                let root = NodeId 0
+                    mid = NodeId 1
+                    n = NodeId 2
+                    bottom = NodeId 3
+                    base = NodeId 4
+                    nodes =
+                        IntMap.fromList
+                            [ (getNodeId root, TyRoot root [mid])
+                            , (getNodeId mid, TyArrow mid n base)
+                            , (getNodeId n, TyForall n bottom)
+                            , (getNodeId bottom, TyBottom bottom)
+                            , (getNodeId base, TyBase base (BaseTy "int"))
+                            ]
+                    bindParents =
+                        IntMap.fromList
+                            [ (getNodeId mid, (root, BindRigid))
+                            , (getNodeId n, (mid, BindFlex))
+                            , (getNodeId bottom, (n, BindFlex))
+                            , (getNodeId base, (mid, BindFlex))
+                            ]
+                    c = emptyConstraint { cNodes = nodes, cBindParents = bindParents }
+                case Inert.inertLockedNodes c of
+                    Left err -> expectationFailure ("inertLockedNodes failed: " ++ show err)
+                    Right s -> IntSet.member (getNodeId n) s `shouldBe` False
+
+            it "identifies inert-locked nodes under rigid ancestors" $ do
+                let root = NodeId 0
+                    mid = NodeId 1
+                    n = NodeId 2
+                    v = NodeId 3
+                    base = NodeId 4
+                    nodes =
+                        IntMap.fromList
+                            [ (getNodeId root, TyRoot root [mid])
+                            , (getNodeId mid, TyArrow mid n base)
+                            , (getNodeId n, TyArrow n v base)
+                            , (getNodeId v, TyVar v)
+                            , (getNodeId base, TyBase base (BaseTy "int"))
+                            ]
+                    bindParents =
+                        IntMap.fromList
+                            [ (getNodeId mid, (root, BindRigid))
+                            , (getNodeId n, (mid, BindFlex))
+                            , (getNodeId v, (n, BindRigid))
+                            , (getNodeId base, (n, BindFlex))
+                            ]
+                    c = emptyConstraint { cNodes = nodes, cBindParents = bindParents }
+                case Inert.inertLockedNodes c of
+                    Left err -> expectationFailure ("inertLockedNodes failed: " ++ show err)
+                    Right s -> IntSet.member (getNodeId n) s `shouldBe` True
 
     describe "decideMinimalExpansion" $ do
         it "returns ExpIdentity for matching monomorphic types" $ do

@@ -24,6 +24,7 @@ import MLF.Constraint.Solve hiding (BindingTreeError, MissingNode)
 import qualified MLF.Constraint.Solve as Solve (frWith)
 import MLF.Constraint.Presolution (EdgeTrace(..))
 import MLF.Binding.Tree (checkBindingTree, bindingPathToRoot, lookupBindParent)
+import qualified MLF.Constraint.Inert as Inert
 
 -- | Compute an instantiation-context path from a root node to a target node.
 --
@@ -131,11 +132,13 @@ phiFromEdgeWitness res mSchemeInfo ew =
 phiFromEdgeWitnessWithTrace :: SolveResult -> Maybe SchemeInfo -> Maybe EdgeTrace -> EdgeWitness -> Either ElabError Instantiation
 phiFromEdgeWitnessWithTrace res mSchemeInfo mTrace ew = do
     requireValidBindingTree
+    inertLocked <- bindingToElab (Inert.inertLockedNodes (srConstraint res))
     let InstanceWitness ops = ewWitness ew
-        steps =
+        steps0 =
             case ewSteps ew of
                 [] -> map StepOmega ops
                 xs -> xs
+        steps = filterInertLocked inertLocked steps0
     case mSchemeInfo of
         Nothing -> phiFromType steps
         Just si -> phiWithScheme si steps
@@ -148,6 +151,27 @@ phiFromEdgeWitnessWithTrace res mSchemeInfo mTrace ew = do
 
     canonicalNode :: NodeId -> NodeId
     canonicalNode = Solve.frWith (srUnionFind res)
+
+    filterInertLocked :: IntSet.IntSet -> [InstanceStep] -> [InstanceStep]
+    filterInertLocked locked =
+        filter keepStep
+      where
+        keepStep = \case
+            StepIntro -> True
+            StepOmega op -> not (touchesLocked op)
+
+        touchesLocked op = any isLocked (opTargets op)
+
+        isLocked nid =
+            IntSet.member (getNodeId (canonicalNode nid)) locked
+
+        opTargets op =
+            case op of
+                OpGraft _ n -> [n]
+                OpWeaken n -> [n]
+                OpMerge n m -> [n, m]
+                OpRaise n -> [n]
+                OpRaiseMerge n m -> [n, m]
 
     orderRoot :: NodeId
     -- Paper root `r` for Φ/Σ is the expansion root (TyExp body), not the TyExp

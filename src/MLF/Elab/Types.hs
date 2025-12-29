@@ -5,6 +5,7 @@ module MLF.Elab.Types (
     ElabTerm(..),
     Instantiation(..),
     ElabError(..),
+    TypeCheckError(..),
     bindingToElab,
     Pretty(..),
     ContextStep(..),
@@ -155,6 +156,17 @@ data ElabError
     | BindingTreeError BindingError
     | NameConflict String
     | InstantiationError String
+    deriving (Eq, Show)
+
+data TypeCheckError
+    = TCUnboundVar String
+    | TCExpectedArrow ElabType
+    | TCArgumentMismatch ElabType ElabType
+    | TCInstantiationError Instantiation ElabType String
+    | TCTypeAbsVarInScope String
+    | TCTypeAbsBoundMentionsVar String
+    | TCUnboundTypeVar String
+    | TCLetTypeMismatch ElabType ElabType
     deriving (Eq, Show)
 
 bindingToElab :: Either BindingError a -> Either ElabError a
