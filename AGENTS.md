@@ -3,6 +3,7 @@
 ## Project Goals
 
 - Keep the implementation paper-faithful to `papers/xmlf.txt` (xMLF calculus + graphic-constraint pipeline). Document and test any intentional deviations.
+- Treat `papers/xmlf.txt` as the source of truth; use `papers/these-finale-english.txt` as the algorithmic guide (e.g., constructive normalization proofs) when needed.
 
 ## Project Structure & Module Organization
 
