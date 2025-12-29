@@ -1354,6 +1354,11 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 reorderWeakenWithEnv env ops0
                     `shouldBe` Right [OpGraft child child, OpWeaken parent]
 
+            it "moves Weaken when descendant is the merge RHS" $ do
+                let ops0 = [OpWeaken parent, OpMerge parent child]
+                reorderWeakenWithEnv env ops0
+                    `shouldBe` Right [OpMerge parent child, OpWeaken parent]
+
             it "orders descendant Weaken before ancestor when anchors tie" $ do
                 let ops0 = [OpWeaken parent, OpWeaken child]
                 reorderWeakenWithEnv env ops0
@@ -1449,6 +1454,27 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                     c = emptyConstraint { cNodes = nodes, cBindParents = bindParents }
                     env = mkNormalizeEnv c root (IntSet.fromList [getNodeId parent, getNodeId child])
                     ops = [OpWeaken parent, OpGraft child child]
+                validateNormalizedWitness env ops
+                    `shouldBe` Left (OpUnderRigid child)
+
+            it "rejects ops below a Weakened binder when merge touches a descendant RHS" $ do
+                let root = NodeId 0
+                    parent = NodeId 1
+                    child = NodeId 2
+                    nodes =
+                        IntMap.fromList
+                            [ (getNodeId root, TyForall root parent)
+                            , (getNodeId parent, TyForall parent child)
+                            , (getNodeId child, TyVar child)
+                            ]
+                    bindParents =
+                        IntMap.fromList
+                            [ (getNodeId parent, (root, BindFlex))
+                            , (getNodeId child, (parent, BindFlex))
+                            ]
+                    c = emptyConstraint { cNodes = nodes, cBindParents = bindParents }
+                    env = mkNormalizeEnv c root (IntSet.fromList [getNodeId parent, getNodeId child])
+                    ops = [OpWeaken parent, OpMerge parent child]
                 validateNormalizedWitness env ops
                     `shouldBe` Left (OpUnderRigid child)
 

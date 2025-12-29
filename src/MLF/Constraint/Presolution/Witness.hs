@@ -111,9 +111,9 @@ validateNormalizedWitness env ops = do
         case op of
             OpGraft _ n -> [n]
             OpWeaken n -> [n]
-            OpMerge n _ -> [n]
+            OpMerge n m -> [n, m]
             OpRaise n -> [n]
-            OpRaiseMerge n _ -> [n]
+            OpRaiseMerge n m -> [n, m]
 
     -- Paper alignment (`papers/xmlf.txt` §3.4, condition (5)): “below n” means
     -- strict binding-tree descendants (exclude n itself).
@@ -538,9 +538,9 @@ reorderWeakenWithEnv env ops =
         case op of
             OpGraft _ n -> [n]
             OpWeaken n -> [n]
-            OpMerge n _ -> [n]
+            OpMerge n m -> [n, m]
             OpRaise n -> [n]
-            OpRaiseMerge n _ -> [n]
+            OpRaiseMerge n m -> [n, m]
 
     descendantsOf nid =
         case Binding.interiorOf (constraint env) (canon nid) of
@@ -614,9 +614,9 @@ normalizeInstanceOpsFull env ops0 = do
         case op of
             OpGraft _ n -> [n]
             OpWeaken n -> [n]
-            OpMerge n _ -> [n]
+            OpMerge n m -> [n, m]
             OpRaise n -> [n]
-            OpRaiseMerge n _ -> [n]
+            OpRaiseMerge n m -> [n, m]
 
     canonicalizeOps = mapM canonicalizeOp
 
