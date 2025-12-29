@@ -16,6 +16,7 @@
   - Recorded op sequences are normalized (`MLF.Constraint.Presolution.normalizeInstanceOps`) so that binders are not eliminated twice and `Weaken` operations appear after other ops targeting the same binder (aligning with the paper’s “normalized Ω” expectations in Fig. 10).
   - `ExpInstantiate` witness/application logic skips “vacuous” `TyForall` wrappers (quantifier levels with no binders) so `Φ` construction doesn’t fail on nested/structural ∀ nodes.
   - `ExpInstantiate` witnesses now avoid emitting invalid grafts under non-⊥ bounds: if a binder has an instance bound that is another in-scope variable (e.g. `b ⩾ a`), presolution emits `OpMerge(b, a)` rather than `OpGraft` (paper Fig. 10 “alias + eliminate”).
+  - When an expansion includes a later `ExpForall`, `ExpInstantiate` witnesses suppress `OpWeaken` so binder metas stay flexible until the new quantifier is introduced (avoids empty Q(n) and lost ∀ in bounded-aliasing cases).
   - Presolution can also record `OpRaiseMerge(b, m)` when unification forces a **bounded** binder’s instantiation meta to unify with a `TyVar` bound **above the instantiation-edge root** in the binding tree, and `m` is not already the binder’s bound. This matches the paper’s “escape to bound-above node” shape.
 - **Scope tracking (paper `Raise` as graph transformation)**:
   - TyVar/TyVar unions harmonize binding parents by executing the paper `Raise(n)` graph operation as a binding-edge rewrite on `Constraint.cBindParents` (`MLF.Binding.Adjustment` / `MLF.Binding.GraphOps`).
@@ -30,13 +31,19 @@
 
 ### 3. src/MLF/Constraint/Solve.hs
 - **Binding-edge Raise harmonization**: Phase 5 harmonizes `Constraint.cBindParents` (paper `Raise(n)`) before unioning, keeping scope stable regardless of UF representative choice.
+- **Elimination rewrite**: `solveUnify` now rewrites eliminated binders into their bounds (or explicit `TyBottom` nodes), removes them from the binding tree, and clears `cEliminatedVars` before elaboration.
+  - Eliminated binder nodes remain in `cNodes` as detached roots (no binding parent, no structural references) so Φ translation can still reify `Tξ(n)` for witness ops like Raise/Merge.
 
 ### 4. src/MLF/Elab/Pipeline.hs + src/MLF/Elab/Types.hs
 - **`generalizeAt`**:
   - Optimized to handle structural `TyForall` nodes (avoiding double quantification).
   - Modified to return the `subst` (renaming map) along with the scheme.
 - **Scope follows the solved graph**:
-  - Elaboration enumerates binders from the binding tree (`Constraint.cBindParents` via `MLF.Binding.Tree.orderedBinders`) and consults `MLF.Constraint.VarStore` for bounds/eliminations; when a site has no direct binders (common for the top-level scheme), it falls back to HM-style free-variable generalization.
+  - Elaboration enumerates binders from the binding tree (`Constraint.cBindParents`): `TyForall` scopes use Q(n), while non-Forall scopes use binding-parent paths to the scope root.
+  - Presolution rewrite reattaches the synthetic constraint root after canonicalization so new term-DAG roots introduced by expansion/copy stay under `TyRoot`, and binding-edge coverage regressions confirm generalized free vars are reachable via binding-parent paths (enabling fallback removal).
+  - `generalizeAt` now relies solely on binding-tree enumeration (no free-variable fallback).
+  - Non-Forall scope enumeration filters rigid binding edges and treats rigid vars as inlined via their bounds (bounds are treated as reachable for binder enumeration).
+  - Elaboration no longer consults `cEliminatedVars`; eliminated binders are already rewritten out of the graph. `generalizeAt` still strips vacuous ∀ from reified types to avoid unused binders in schemes.
 - **`substInTerm` / `substInType`**: Implemented substitution functions to apply the renaming map from `generalizeAt` to the elaborated term body. This ensures that terms use the same variable names as their type schemes (e.g., `Λa. λx:a. x` instead of `Λa. λx:t0. x`).
 - **`elaborate`**: Updated to apply substitution to the RHS of let-bindings.
 - **Witness translation (`Φ`) + quantifier reordering (`Σ`)**:
@@ -45,7 +52,7 @@
   - Implemented explicit quantifier reordering instantiations (`sigmaReorder`) using adjacent swaps per `papers/xmlf.txt` §3.4.
   - Implemented `applyInstantiation` to check/apply xMLF instantiations to xMLF types (xmlf Fig. 3), which is used by tests to validate that `Φ(e)` actually transforms the source type into the target type.
 - **`expansionToInst`**: Kept as a legacy/debug conversion from `Expansion` to `Instantiation` (no longer the main path for elaboration).
-- **`runPipelineElab`**: Updated to generalize the top-level result, consistent with xMLF's pervasive generalization.
+- **`runPipelineElab`**: Generalizes the top-level result using the constraint root (`TyRoot`) when present, falling back to the expression root otherwise.
 
 ## Testing
 - **`test/ElaborationSpec.hs`**: Updated expectations to reflect correct polymorphic behavior and variable naming. Added integration tests for polymorphic instantiation.
@@ -102,6 +109,6 @@ This repo’s design is primarily informed by:
   - Quantifier-introduction (`O`) is not part of Ω in `xmlf.txt`; the repo records these steps separately as `EdgeWitness.ewForallIntros` (from `ExpForall`) and appends them directly when constructing Φ(e).
   - Ω ops emitted today include `OpGraft`+`OpWeaken`, `OpMerge` (bounded aliasing like `b ⩾ a`, plus unification-induced aliasing during instantiation-edge solving), `OpRaise` (paper-general binding-edge raising on arbitrary interior nodes), and `OpRaiseMerge` for bounded-binder “escape” patterns. χe execution is paper-shaped for binding-tree ops: Raise/Weaken are executable binding-edge rewrites, and `EdgeTrace.etInterior` records the exact paper interior `I(r)` for filtering.
 - **Quantifier reordering (`Σ(g)`)**: implemented as `MLF.Elab.Pipeline.sigmaReorder` (adjacent swaps per `xmlf.txt` §3.4). `phiFromEdgeWitness` targets binders using `InstUnder` instantiation contexts (paper’s `C{·}`) rather than swapping quantifiers; `sigmaReorder` remains available as an explicit/validated Σ construction when reordering is required.
-- **Application elaboration shape**: the paper’s Fig. 7 instantiates *both* sides (`b1` and `b2`) according to their edges. The current pipeline attaches an `EdgeId` expansion to the **application’s function position** and elaborates it as `ETyInst f inst` before applying; there is no separate per-argument instantiation edge.
-- **Constraint representation differences**: `xmlf.txt`’s graphical presentation uses a term-dag plus a binding tree with flexible/rigid edges and node classes (inert/instantiable/restricted/locked). The repo mirrors the same split (`Constraint.cNodes` + `Constraint.cBindParents` with `BindFlex`/`BindRigid`); some paper machinery remains simplified (e.g. lightweight witness normalization and a top-level generalization fallback when the root has no direct binders).
+- **Application elaboration shape**: now matches Fig. 7 — constraint generation emits instantiation edges for both function and argument, and elaboration wraps each side with `ETyInst` when non-identity.
+- **Constraint representation differences**: `xmlf.txt`’s graphical presentation uses a term-dag plus a binding tree with flexible/rigid edges and node classes (inert/instantiable/restricted/locked). The repo mirrors the same split (`Constraint.cNodes` + `Constraint.cBindParents` with `BindFlex`/`BindRigid`); some paper machinery remains simplified (e.g. lightweight witness normalization and binding-edge coverage regressions tracking readiness to remove fallback behavior).
 - **xMLF Phase 7**: the repo currently has xMLF AST + pretty-printing, but not the full **type-checking rules (Fig. 4)** and **reduction semantics (Fig. 5)** from `xmlf.txt` (useful future work if we want to validate elaboration by re-checking and/or execute reductions).
