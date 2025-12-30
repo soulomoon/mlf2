@@ -98,8 +98,9 @@ computePresolution acyclicityResult constraint = do
     (redirects, finalState) <- runPresolutionM presState $ do
         mapping <- materializeExpansions
         flushPendingWeakens
-        weakenInertLockedNodesM
         redirects <- rewriteConstraint mapping
+        weakenInertLockedNodesM
+        normalizeEdgeWitnessesM
         pure redirects
 
     return PresolutionResult
@@ -404,6 +405,94 @@ weakenInertLockedNodesM = do
         Left err -> throwError (BindingTreeError err)
         Right c1 -> modify' $ \st -> st { psConstraint = c1 }
 
+-- | Normalize edge witnesses against the finalized presolution constraint.
+normalizeEdgeWitnessesM :: PresolutionM ()
+normalizeEdgeWitnessesM = do
+    c0 <- gets psConstraint
+    let nodes = cNodes c0
+    inertLocked <- case Inert.inertLockedNodes c0 of
+        Left err -> throwError (BindingTreeError err)
+        Right s -> pure s
+    traces <- gets psEdgeTraces
+    witnesses0 <- gets psEdgeWitnesses
+    let rewriteNodeWith copyMap nid =
+            IntMap.findWithDefault nid (getNodeId nid) copyMap
+        weakened =
+            IntSet.fromList
+                [ getNodeId (rewriteNodeWith copyMap n)
+                | (eid, w0) <- IntMap.toList witnesses0
+                , let copyMap = maybe IntMap.empty etCopyMap (IntMap.lookup eid traces)
+                , StepOmega (OpWeaken n) <- ewSteps w0
+                ]
+    witnesses <- forM (IntMap.toList witnesses0) $ \(eid, w0) -> do
+        let (edgeRoot, copyMap, binderArgs0) =
+                case IntMap.lookup eid traces of
+                    Nothing -> (ewRoot w0, IntMap.empty, [])
+                    Just tr -> (etRoot tr, etCopyMap tr, etBinderArgs tr)
+            rewriteNode = rewriteNodeWith copyMap
+            binderArgs =
+                IntMap.fromList
+                    [ (getNodeId (rewriteNode bv), rewriteNode arg)
+                    | (bv, arg) <- binderArgs0
+                    ]
+            copyToOriginal =
+                IntMap.fromListWith min
+                    [ (getNodeId copy, NodeId orig)
+                    | (orig, copy) <- IntMap.toList copyMap
+                    ]
+            restoreNode nid =
+                IntMap.findWithDefault nid (getNodeId nid) copyToOriginal
+            rewriteOp op =
+                case op of
+                    OpGraft sigma n -> OpGraft (rewriteNode sigma) (rewriteNode n)
+                    OpMerge n m -> OpMerge (rewriteNode n) (rewriteNode m)
+                    OpRaise n -> OpRaise (rewriteNode n)
+                    OpWeaken n -> OpWeaken (rewriteNode n)
+                    OpRaiseMerge n m -> OpRaiseMerge (rewriteNode n) (rewriteNode m)
+            rewriteStep step =
+                case step of
+                    StepOmega op -> StepOmega (rewriteOp op)
+                    StepIntro -> StepIntro
+            restoreOp op =
+                case op of
+                    OpGraft sigma n -> OpGraft (restoreNode sigma) (restoreNode n)
+                    OpMerge n m -> OpMerge (restoreNode n) (restoreNode m)
+                    OpRaise n -> OpRaise (restoreNode n)
+                    OpWeaken n -> OpWeaken (restoreNode n)
+                    OpRaiseMerge n m -> OpRaiseMerge (restoreNode n) (restoreNode m)
+            restoreStep step =
+                case step of
+                    StepOmega op -> StepOmega (restoreOp op)
+                    StepIntro -> StepIntro
+        let interiorRoot =
+                case Binding.lookupBindParent c0 edgeRoot of
+                    Just (parent, _) -> parent
+                    Nothing -> edgeRoot
+        interior <- case Binding.interiorOf c0 interiorRoot of
+            Left err -> throwError (BindingTreeError err)
+            Right s -> pure s
+        let steps0 = map rewriteStep (ewSteps w0)
+            orderKeys = Order.orderKeysFromRootWith id nodes edgeRoot (Just interior)
+            env =
+                OmegaNormalizeEnv
+                    { oneRoot = edgeRoot
+                    , interior = interior
+                    , inertLocked = inertLocked
+                    , weakened = weakened
+                    , orderKeys = orderKeys
+                    , canonical = id
+                    , constraint = c0
+                    , binderArgs = binderArgs
+                    }
+        steps <- case normalizeInstanceStepsFull env steps0 of
+            Right steps' -> pure steps'
+            Left err ->
+                throwError (InternalError ("normalizeInstanceStepsFull failed: " ++ show err))
+        let stepsFinal = map restoreStep steps
+            ops = [op | StepOmega op <- stepsFinal]
+        pure (eid, w0 { ewSteps = stepsFinal, ewWitness = InstanceWitness ops })
+    modify' $ \st -> st { psEdgeWitnesses = IntMap.fromList witnesses }
+
 rewriteVarBounds :: (NodeId -> NodeId) -> IntMap TyNode -> VarBounds -> VarBounds
 rewriteVarBounds canon nodes0 vb0 =
     IntMap.fromListWith mergeBounds
@@ -517,7 +606,7 @@ processInstEdge edge = do
 
             tr <- buildEdgeTrace edgeId n1Id n1 finalExp expTrace
             recordEdgeTrace edgeId tr
-            w <- buildEdgeWitness edgeId n1Id n2Id n1 finalExp extraOps edgeRoot (Just (snd expTrace)) (Just tr)
+            w <- buildEdgeWitness edgeId n1Id n2Id n1 finalExp extraOps edgeRoot
             recordEdgeWitness edgeId w
 
         _ -> do
@@ -528,7 +617,7 @@ processInstEdge edge = do
             -- (Simplification for now, might need refinement for full MLF)
             recordEdgeExpansion edgeId ExpIdentity
             let edgeRoot = tnId n1
-            w <- buildEdgeWitness edgeId n1Id n2Id n1Raw ExpIdentity [] edgeRoot Nothing Nothing
+            w <- buildEdgeWitness edgeId n1Id n2Id n1Raw ExpIdentity [] edgeRoot
             recordEdgeWitness edgeId w
             unifyStructure (tnId n1) (tnId n2)
 
@@ -547,58 +636,27 @@ recordEdgeTrace (EdgeId eid) tr =
 -- our current presolution lattice (Identity / Instantiate / ∀-intro / Compose).
 -- More elaborate witnesses (raise/merge inside interiors, etc.) can be added
 -- incrementally as the solver gains a more explicit instance-operation engine.
-buildEdgeWitness :: EdgeId -> NodeId -> NodeId -> TyNode -> Expansion -> [InstanceOp] -> NodeId -> Maybe InteriorSet -> Maybe EdgeTrace -> PresolutionM EdgeWitness
-buildEdgeWitness eid left right leftRaw expn extraOps edgeRoot mbPreInterior mbTrace = do
+--
+-- Normalization is deferred until the presolution constraint is finalized so
+-- inert-locked weakening and canonicalization are reflected in the witness.
+--
+-- Note: we retain the TyExp body as the witness root for Φ/Σ translation,
+-- and use the expansion root from EdgeTrace when normalizing.
+buildEdgeWitness :: EdgeId -> NodeId -> NodeId -> TyNode -> Expansion -> [InstanceOp] -> NodeId -> PresolutionM EdgeWitness
+buildEdgeWitness eid left right leftRaw expn extraOps _edgeRoot = do
     root <- case leftRaw of
         TyExp{ tnBody = b } -> pure b
         _ -> pure left
     baseSteps <- witnessFromExpansion root leftRaw expn
-    c0 <- gets psConstraint
-    c1 <- case Inert.weakenInertLockedNodes c0 of
-        Left err -> throwError (BindingTreeError err)
-        Right out -> pure out
-    interiorRoot <- case Binding.interiorOf c1 root of
-        Left err -> throwError (BindingTreeError err)
-        Right s -> pure s
-    interiorEdgeKeys <- case mbPreInterior of
-        Just pre -> pure pre
-        Nothing -> edgeInteriorExact edgeRoot
-    let canonical = id
-        orderKeys = Order.orderKeysFromRootWith canonical (cNodes c1) edgeRoot (Just interiorEdgeKeys)
-        interior = IntSet.union interiorRoot (fromMaybe IntSet.empty mbPreInterior)
-        binderArgs =
-            case mbTrace of
-                Nothing -> IntMap.empty
-                Just tr ->
-                    IntMap.fromList
-                        [ (getNodeId bv, arg)
-                        | (bv, arg) <- etBinderArgs tr
-                        ]
-    inertLocked <- case Inert.inertLockedNodes c1 of
-        Left err -> throwError (BindingTreeError err)
-        Right s -> pure s
-    let env =
-            OmegaNormalizeEnv
-                { oneRoot = root
-                , interior = interior
-                , inertLocked = inertLocked
-                , orderKeys = orderKeys
-                , canonical = canonical
-                , constraint = c1
-                , binderArgs = binderArgs
-                }
     let steps0 = integratePhase2Steps baseSteps extraOps
-    steps <- case normalizeInstanceStepsFull env steps0 of
-        Right steps' -> pure steps'
-        Left err -> throwError (InternalError ("normalizeInstanceStepsFull failed: " ++ show err))
-    let ops = [op | StepOmega op <- steps]
+        ops = [op | StepOmega op <- steps0]
         iw = InstanceWitness ops
     pure EdgeWitness
         { ewEdgeId = eid
         , ewLeft = left
         , ewRight = right
         , ewRoot = root
-        , ewSteps = steps
+        , ewSteps = steps0
         , ewWitness = iw
         }
 

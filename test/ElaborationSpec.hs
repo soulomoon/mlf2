@@ -5,6 +5,7 @@ import Control.Monad (forM_, when)
 import Data.List (isInfixOf, stripPrefix)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
+import qualified Data.Set as Set
 
 import MLF.Frontend.Syntax (Expr(..), Lit(..), SrcType(..), SrcScheme(..))
 import qualified MLF.Elab.Pipeline as Elab
@@ -378,6 +379,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 , (getNodeId v, (forallNode, BindFlex))
                                 ]
                         , cVarBounds = IntMap.empty
+                        , cPolySyms = Set.empty
                         , cEliminatedVars = IntSet.singleton (getNodeId v)
                         }
 
@@ -408,6 +410,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 , (getNodeId b, (forallNode, BindFlex))
                                 ]
                         , cVarBounds = IntMap.fromList [(getNodeId v, Just b)]
+                        , cPolySyms = Set.empty
                         , cEliminatedVars = IntSet.singleton (getNodeId v)
                         }
 
@@ -606,6 +609,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 , (getNodeId vRight, (forallNode, BindFlex))
                                 ]
                         , cVarBounds = IntMap.empty
+                        , cPolySyms = Set.empty
                         , cEliminatedVars = IntSet.empty
                         }
 
@@ -642,6 +646,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 , (getNodeId vDeep, (forallNode, BindFlex))
                                 ]
                         , cVarBounds = IntMap.empty
+                        , cPolySyms = Set.empty
                         , cEliminatedVars = IntSet.empty
                         }
 
@@ -678,6 +683,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 [ (getNodeId vA, (forallNode, BindFlex))
                                 , (getNodeId vB, (forallNode, BindFlex))
                                 ]
+                        , cPolySyms = Set.empty
                         }
 
                 solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
@@ -950,6 +956,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 [ (getNodeId aN, (root, BindFlex))
                                 , (getNodeId bN, (root, BindFlex))
                                 ]
+                        , cPolySyms = Set.empty
                         }
                     solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 
@@ -1051,6 +1058,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             , (getNodeId nN, (mN, BindFlex))
                             ]
                         , cVarBounds = IntMap.empty
+                        , cPolySyms = Set.empty
                         , cEliminatedVars = IntSet.empty
                         }
                     solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
@@ -1105,6 +1113,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             , (getNodeId nN, (mN, BindFlex))
                             ]
                         , cVarBounds = IntMap.empty
+                        , cPolySyms = Set.empty
                         , cEliminatedVars = IntSet.empty
                         }
                     solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
@@ -1222,6 +1231,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             IntMap.fromList
                                 [ (getNodeId rigidVar, Just flexVar)
                                 ]
+                        , cPolySyms = Set.empty
                         , cEliminatedVars = IntSet.empty
                         }
                 solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }

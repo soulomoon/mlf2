@@ -19,6 +19,7 @@ module MLF.Constraint.Inert (
 import Control.Monad (foldM)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
+import qualified Data.Set as Set
 
 import qualified MLF.Binding.GraphOps as GraphOps
 import qualified MLF.Binding.Tree as Binding
@@ -27,11 +28,12 @@ import MLF.Constraint.Types (BindFlag(..), BindingError, Constraint(..), NodeId(
 -- | True for nodes that count as "intrinsically polymorphic" anchors when
 -- computing inertness.
 --
--- Thesis note: polymorphic symbols include ⊥ (§5.2.1). We currently treat
--- ⊥ as the only polymorphic constructor in the term-DAG.
-isPolymorphicAnchor :: TyNode -> Bool
-isPolymorphicAnchor TyBottom{} = True
-isPolymorphicAnchor _ = False
+-- Thesis note: polymorphic symbols include ⊥ (§5.2.1), and may include other
+-- type constructors in Poly (stored on the constraint).
+isPolymorphicAnchor :: Constraint -> TyNode -> Bool
+isPolymorphicAnchor _ TyBottom{} = True
+isPolymorphicAnchor c TyBase{ tnBase = b } = Set.member b (cPolySyms c)
+isPolymorphicAnchor _ _ = False
 
 -- | Compute the set of inert nodes.
 --
@@ -43,7 +45,7 @@ inertNodes c = do
         anchors =
             [ NodeId nid
             | (nid, node) <- IntMap.toList nodes
-            , isPolymorphicAnchor node
+            , isPolymorphicAnchor c node
             ]
         nonInert = collectFlexAncestors c anchors
         allNodes = IntSet.fromList (IntMap.keys nodes)

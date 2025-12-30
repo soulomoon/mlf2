@@ -13,6 +13,7 @@ module MLF.Constraint.Types (
     -- * Variable bounds + elimination stores (scope-model retirement)
     VarBounds,
     EliminatedVars,
+    PolySyms,
     BoundRef(..),
     ForallSpec(..),
     Expansion (..),
@@ -34,6 +35,7 @@ import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import Data.List.NonEmpty (NonEmpty)
 import Data.IntSet (IntSet)
+import Data.Set (Set)
 
 -- | Flag indicating whether a binding edge is flexible or rigid.
 --
@@ -55,6 +57,9 @@ type VarBounds = IntMap (Maybe NodeId)
 
 -- | Persistent marker for variables eliminated during ω execution / presolution.
 type EliminatedVars = IntSet
+
+-- | Polymorphic type constructor symbols (paper Poly set).
+type PolySyms = Set BaseTy
 
 -- | Reference to a bound used in forall introductions.
 --
@@ -403,6 +408,8 @@ data Constraint = Constraint
             -- ^ Variable instance bounds (paper: ∀(α ⩾ τ). …).
             --
             -- Missing keys are treated as ⊥ (`Nothing`).
+        , cPolySyms :: PolySyms
+            -- ^ Polymorphic symbols (paper Poly set), used when computing inert nodes.
         , cEliminatedVars :: EliminatedVars
             -- ^ Variables eliminated during presolution/ω execution.
             --

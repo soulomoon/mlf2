@@ -61,6 +61,7 @@ mkNormalizeEnv c root interior =
         { oneRoot = root
         , interior = interior
         , inertLocked = IntSet.empty
+        , weakened = IntSet.empty
         , orderKeys = Order.orderKeysFromRootWith id (cNodes c) root Nothing
         , canonical = id
         , constraint = c
@@ -918,30 +919,34 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         , cBindParents = bindParents
                         , cVarBounds = IntMap.fromList [(getNodeId b, Just x)]
                         }
-                st0 =
-                    PresolutionState
-                        constraint
-                        (Presolution IntMap.empty)
-                        IntMap.empty
-                        8
-                        IntSet.empty
-                        IntMap.empty
-                        IntMap.empty
-                        IntMap.empty
+                acyclicityRes = AcyclicityResult { arSortedEdges = [edge], arDepGraph = undefined }
 
-                isRaiseMerge op = case op of
-                    OpRaiseMerge n m -> n == b && m == y
-                    _ -> False
-
-            case runPresolutionM st0 (processInstEdge edge) of
-                Left err -> expectationFailure ("processInstEdge failed: " ++ show err)
-                Right (_, st1) -> do
-                    case IntMap.lookup 0 (psEdgeWitnesses st1) of
-                        Nothing -> expectationFailure "Expected EdgeWitness for EdgeId 0"
-                        Just ew -> do
-                            let InstanceWitness ops = ewWitness ew
-                            ops `shouldSatisfy` any isRaiseMerge
-                            ops `shouldSatisfy` (not . null)
+            case computePresolution acyclicityRes constraint of
+                Left err -> expectationFailure ("computePresolution failed: " ++ show err)
+                Right pr -> do
+                    tr <- case IntMap.lookup 0 (prEdgeTraces pr) of
+                        Nothing -> expectationFailure "Expected EdgeTrace for EdgeId 0" >> fail "missing EdgeTrace"
+                        Just tr' -> pure tr'
+                    meta <- case IntMap.lookup (getNodeId b) (etCopyMap tr) of
+                        Nothing -> expectationFailure "Expected binder-meta in EdgeTrace.etCopyMap" >> fail "missing binder-meta"
+                        Just m -> pure m
+                    let isRaiseMerge op = case op of
+                            OpRaiseMerge n m -> n == meta && m == y
+                            _ -> False
+                        isRaise op = case op of
+                            OpRaise{} -> True
+                            _ -> False
+                        isMerge op = case op of
+                            OpMerge{} -> True
+                            _ -> False
+                        ops =
+                            [ op
+                            | ew <- IntMap.elems (prEdgeWitnesses pr)
+                            , let InstanceWitness xs = ewWitness ew
+                            , op <- xs
+                            ]
+                    ops `shouldSatisfy` (\xs -> any isRaiseMerge xs || (any isRaise xs && any isMerge xs))
+                    ops `shouldSatisfy` (not . null)
 
         it "does not record Raise for unbounded binder metas (graft+weaken only)" $ do
             -- TyExp s · (∀b. b -> b) ≤ (y -> y)
@@ -1267,6 +1272,32 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                     , OpMerge (NodeId 3) (NodeId 1)
                     ]
             normalizeInstanceOpsFull env ops0 `shouldBe` Right []
+
+        it "keeps ops under a rigid ancestor that was weakened" $ do
+            let root = NodeId 0
+                parent = NodeId 1
+                child = NodeId 2
+                arg = NodeId 10
+                nodes =
+                    IntMap.fromList
+                        [ (getNodeId root, TyRoot root [parent, arg])
+                        , (getNodeId parent, TyArrow parent child child)
+                        , (getNodeId child, TyVar child)
+                        , (getNodeId arg, TyVar arg)
+                        ]
+                bindParents =
+                    IntMap.fromList
+                        [ (getNodeId parent, (root, BindRigid))
+                        , (getNodeId child, (parent, BindFlex))
+                        , (getNodeId arg, (root, BindFlex))
+                        ]
+                c = emptyConstraint { cNodes = nodes, cBindParents = bindParents }
+                interior = IntSet.fromList [getNodeId parent, getNodeId child]
+                env =
+                    (mkNormalizeEnv c parent interior)
+                        { weakened = IntSet.fromList [getNodeId parent] }
+                ops0 = [OpGraft arg child]
+            normalizeInstanceOpsFull env ops0 `shouldBe` Right ops0
 
         it "normalizes omega segments without moving StepIntro" $ do
             let c = mkNormalizeConstraint

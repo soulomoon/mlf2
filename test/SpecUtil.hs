@@ -10,6 +10,7 @@ module SpecUtil (
 
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
+import qualified Data.Set as Set
 import GHC.Stack (HasCallStack)
 import Test.Hspec (Expectation, expectationFailure)
 
@@ -22,6 +23,7 @@ emptyConstraint = Constraint
     , cUnifyEdges = []
     , cBindParents = IntMap.empty
     , cVarBounds = IntMap.empty
+    , cPolySyms = Set.empty
     , cEliminatedVars = IntSet.empty
     }
 

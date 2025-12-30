@@ -11,6 +11,7 @@ import Control.Monad.Except (Except, runExcept)
 import Control.Monad.State.Strict (StateT, runStateT)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
+import qualified Data.Set as Set
 
 import MLF.Constraint.Types
 import MLF.Frontend.ConstraintGen.Types (ConstraintError)
@@ -28,6 +29,7 @@ data BuildState = BuildState
     , bsUnifyEdges :: ![UnifyEdge] -- ^ Unification edges (accumulated in reverse)
     , bsBindParents :: !BindParents -- ^ Binding edges: child -> (parent, flag)
     , bsVarBounds :: !(IntMap.IntMap (Maybe NodeId)) -- ^ Dedicated variable-bound store
+    , bsPolySyms :: !PolySyms -- ^ Polymorphic type constructors (paper Poly)
     , bsScopes :: ![ScopeFrame]    -- ^ Stack of scopes tracking newly created nodes
     }
 
@@ -46,6 +48,7 @@ mkInitialState = BuildState
     , bsUnifyEdges = []
     , bsBindParents = IntMap.empty
     , bsVarBounds = IntMap.empty
+    , bsPolySyms = Set.empty
     , bsScopes = [ScopeFrame IntSet.empty]
     }
 
@@ -56,5 +59,6 @@ buildConstraint st = Constraint
     , cUnifyEdges = reverse (bsUnifyEdges st)
     , cBindParents = bsBindParents st
     , cVarBounds = bsVarBounds st
+    , cPolySyms = bsPolySyms st
     , cEliminatedVars = IntSet.empty
     }

@@ -33,7 +33,7 @@ import Data.Maybe (listToMaybe)
 import Data.Ord (Down(..))
 import qualified Data.List.NonEmpty as NE
 
-import MLF.Constraint.Types (Constraint, Expansion(..), ForallSpec(..), InstanceOp(..), InstanceStep(..), NodeId, TyNode(..), getNodeId)
+import MLF.Constraint.Types (BindFlag(..), Constraint, Expansion(..), ForallSpec(..), InstanceOp(..), InstanceStep(..), NodeId, TyNode(..), getNodeId)
 import MLF.Constraint.Presolution.Base (PresolutionM, PresolutionError(..), orderedBindersM)
 import MLF.Constraint.Presolution.Ops (getCanonicalNode, lookupVarBound)
 import qualified MLF.Binding.Tree as Binding
@@ -43,6 +43,7 @@ data OmegaNormalizeEnv = OmegaNormalizeEnv
     { oneRoot :: NodeId
     , interior :: IntSet.IntSet
     , inertLocked :: IntSet.IntSet
+    , weakened :: IntSet.IntSet
     , orderKeys :: IntMap.IntMap OrderKey
     , canonical :: NodeId -> NodeId
     , constraint :: Constraint
@@ -663,10 +664,19 @@ normalizeInstanceOpsFull env ops0 = do
             OpRaiseMerge n m -> OpRaiseMerge (canon n) (canon m)
 
     checkRigid nid =
-        case Binding.isUnderRigidBinder (constraint env) (canon nid) of
+        case Binding.bindingPathToRoot (constraint env) (canon nid) of
             Left _ -> Left (OpUnderRigid (canon nid))
-            Right True -> Left (OpUnderRigid (canon nid))
-            Right False -> Right ()
+            Right path ->
+                let strictAncestors = drop 1 path
+                    softened n =
+                        IntSet.member (getNodeId (canon n)) (weakened env)
+                    rigidAncestor n =
+                        case Binding.lookupBindParent (constraint env) n of
+                            Just (_, BindRigid) -> not (softened n)
+                            _ -> False
+                in if any rigidAncestor strictAncestors
+                    then Left (OpUnderRigid (canon nid))
+                    else Right ()
 
     mergeKeyNode nid =
         case IntMap.lookup (getNodeId (canon nid)) (binderArgs env) of
