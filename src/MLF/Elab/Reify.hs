@@ -139,6 +139,11 @@ reifyTypeWithNames res subst nid =
             binderKeys = [ getNodeId v | (v, _) <- bs ]
             binderSet = IntSet.fromList binderKeys
             pairsByKey = IntMap.fromList [ (getNodeId v, (v, mb)) | (v, mb) <- bs ]
+            missing =
+                [ k
+                | k <- binderKeys
+                , not (IntMap.member k keys)
+                ]
 
             depsFor :: (NodeId, Maybe NodeId) -> [Int]
             depsFor (v, mb) =
@@ -162,13 +167,19 @@ reifyTypeWithNames res subst nid =
                     EQ -> compare a b
                     other -> other
 
-        orderedKeys <-
-            topoSortBy
-                "reifyTypeWithNames: cycle in binder bound dependencies"
-                cmpReady
-                depsForKey
-                binderKeys
-        pure [ p | k <- orderedKeys, Just p <- [IntMap.lookup k pairsByKey] ]
+        if null missing
+            then do
+                orderedKeys <-
+                    topoSortBy
+                        "reifyTypeWithNames: cycle in binder bound dependencies"
+                        cmpReady
+                        depsForKey
+                        binderKeys
+                pure [ p | k <- orderedKeys, Just p <- [IntMap.lookup k pairsByKey] ]
+            else
+                Left $
+                    InstantiationError $
+                        "reifyTypeWithNames: missing order keys for " ++ show (map NodeId missing)
 
 -- | Collect free variables by NodeId, skipping vars under TyForall.
 freeVars :: SolveResult -> NodeId -> IntSet.IntSet -> IntSet.IntSet

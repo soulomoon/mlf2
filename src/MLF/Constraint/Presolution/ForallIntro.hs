@@ -12,7 +12,7 @@ module MLF.Constraint.Presolution.ForallIntro (
     bindForallBindersFromSpec
 ) where
 
-import Control.Monad (forM_, when)
+import Control.Monad (forM_, unless, when)
 import Control.Monad.Except (throwError)
 import Control.Monad.State (gets)
 import Data.List (partition, sortBy)
@@ -89,6 +89,11 @@ bindForallBindersFromSpec forallId bodyRoot ForallSpec{ fsBinderCount = k, fsBou
             , let n = NodeId nid
             , isLiveVar n
             ]
+        missing =
+            [ nid
+            | nid <- liveVarsReachable
+            , not (IntMap.member (getNodeId nid) orderKeys)
+            ]
 
         parentInfoOf nid = IntMap.lookup (getNodeId nid) bp
 
@@ -110,6 +115,11 @@ bindForallBindersFromSpec forallId bodyRoot ForallSpec{ fsBinderCount = k, fsBou
         freeLike = sortBy (Order.compareNodesByOrderKey orderKeys) freeLike0
         other = sortBy (Order.compareNodesByOrderKey orderKeys) (filter isFlexBound other0)
         candidates = freeLike ++ other
+
+    unless (null missing) $
+        throwError $
+            InternalError $
+                "bindForallBindersFromSpec: missing order keys for " ++ show missing
 
     let binders = take k candidates
         binderByIndex = IntMap.fromList (zip [0..] binders)

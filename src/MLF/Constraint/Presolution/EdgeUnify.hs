@@ -205,11 +205,14 @@ initEdgeUnifyState binderArgs interior edgeRoot = do
         )
         IntMap.empty
         (IntSet.toList interior)
-    nodes <- gets (cNodes . psConstraint)
-    let binderMetaMap = IntMap.fromList [ (getNodeId bv, meta) | (bv, meta) <- binderArgs ]
-        -- For edge-local ordering we use the expanded χe ids directly (no UF canonicalization),
-        -- and restrict traversal to the interior set when possible.
-        keys = Order.orderKeysFromRootWith id nodes edgeRoot (Just interior)
+    constraint <- gets psConstraint
+    let interiorRoot =
+            case Binding.lookupBindParent constraint edgeRoot of
+                Just (parent, _) -> parent
+                Nothing -> edgeRoot
+        binderMetaMap = IntMap.fromList [ (getNodeId bv, meta) | (bv, meta) <- binderArgs ]
+        -- For edge-local ordering we use the expanded χe ids directly (no UF canonicalization).
+        keys = Order.orderKeysFromConstraintWith id constraint interiorRoot Nothing
     pure EdgeUnifyState
         { eusInteriorRoots = interiorRoots
         , eusBindersByRoot = bindersByRoot

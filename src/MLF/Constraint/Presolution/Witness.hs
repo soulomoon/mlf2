@@ -37,12 +37,11 @@ import MLF.Constraint.Types (BindFlag(..), Constraint, Expansion(..), ForallSpec
 import MLF.Constraint.Presolution.Base (PresolutionM, PresolutionError(..), orderedBindersM)
 import MLF.Constraint.Presolution.Ops (getCanonicalNode, lookupVarBound)
 import qualified MLF.Binding.Tree as Binding
-import MLF.Util.Order (OrderKey, compareNodesByOrderKey)
+import MLF.Util.Order (OrderKey, compareOrderKey, compareNodesByOrderKey)
 
 data OmegaNormalizeEnv = OmegaNormalizeEnv
     { oneRoot :: NodeId
     , interior :: IntSet.IntSet
-    , inertLocked :: IntSet.IntSet
     , weakened :: IntSet.IntSet
     , orderKeys :: IntMap.IntMap OrderKey
     , canonical :: NodeId -> NodeId
@@ -59,6 +58,18 @@ data OmegaNormalizeError
     | MissingOrderKey NodeId
     | MalformedRaiseMerge [InstanceOp]
     deriving (Eq, Show)
+
+compareNodesByOrderKeyM :: OmegaNormalizeEnv -> NodeId -> NodeId -> Either OmegaNormalizeError Ordering
+compareNodesByOrderKeyM env a b =
+    case (IntMap.lookup (getNodeId (canon a)) (orderKeys env), IntMap.lookup (getNodeId (canon b)) (orderKeys env)) of
+        (Just ka, Just kb) ->
+            case compareOrderKey ka kb of
+                EQ -> Right (compare (canon a) (canon b))
+                other -> Right other
+        (Nothing, _) -> Left (MissingOrderKey (canon a))
+        (_, Nothing) -> Left (MissingOrderKey (canon b))
+  where
+    canon = canonical env
 
 validateNormalizedWitness :: OmegaNormalizeEnv -> [InstanceOp] -> Either OmegaNormalizeError ()
 validateNormalizedWitness env ops = do
@@ -79,11 +90,15 @@ validateNormalizedWitness env ops = do
 
     mergeKeyNode nid =
         case IntMap.lookup (getNodeId (canon nid)) (binderArgs env) of
-            Just arg -> arg
+            Just arg ->
+                let argC = canon arg
+                in if IntMap.member (getNodeId argC) (orderKeys env)
+                    then argC
+                    else canon nid
             Nothing -> canon nid
 
     checkMergeDirection n m = do
-        let ord = compareNodesByOrderKey (orderKeys env) (mergeKeyNode m) (mergeKeyNode n)
+        ord <- compareNodesByOrderKeyM env (mergeKeyNode m) (mergeKeyNode n)
         case ord of
             LT -> Right ()
             _ -> Left (MergeDirectionInvalid (canon n) (canon m))
@@ -425,11 +440,10 @@ integratePhase2Steps steps extraOps =
                 then []
                 else map StepOmega (integratePhase2Ops (reverse opsRev) [])
 
--- | Drop operations that do not touch I(r), or that target inert-locked nodes.
+-- | Drop operations that do not touch I(r).
 --
--- Thesis alignment (§11.5/§15.2): treat such operations as the Iu prefix that
--- solves frontier unification edges, and exclude them from the propagation
--- witness we translate. Inert-locked nodes are removed per §15.2.3.
+-- Thesis alignment: §15.2.2 (Convention after Definition 15.2.1) splits
+-- derivations into Iu ; I, keeps only I, and I is defined by touching I(r).
 stripExteriorOps :: OmegaNormalizeEnv -> [InstanceOp] -> [InstanceOp]
 stripExteriorOps env =
     filter keepOp
@@ -438,9 +452,6 @@ stripExteriorOps env =
 
     inInterior nid =
         IntSet.member (getNodeId (canon nid)) (interior env)
-
-    isInertLocked nid =
-        IntSet.member (getNodeId (canon nid)) (inertLocked env)
 
     opTargets op =
         case op of
@@ -451,9 +462,8 @@ stripExteriorOps env =
             OpRaiseMerge n m -> [n, m]
 
     touchesInterior op = any inInterior (opTargets op)
-    touchesInertLocked op = any isInertLocked (opTargets op)
 
-    keepOp op = touchesInterior op && not (touchesInertLocked op)
+    keepOp op = touchesInterior op
 
 normalizeInstanceOpsWithFallback :: OmegaNormalizeEnv -> [InstanceOp] -> Either OmegaNormalizeError [InstanceOp]
 normalizeInstanceOpsWithFallback env ops0 =
@@ -533,6 +543,14 @@ reorderWeakenWithEnv env ops =
         then Right ops
         else do
             infos <- mapM mkWeakenInfo weakenIndexed
+            let missing =
+                    [ wiBinder info
+                    | info <- infos
+                    , not (IntMap.member (getNodeId (wiBinder info)) (orderKeys env))
+                    ]
+            case missing of
+                [] -> pure ()
+                (nid:_) -> Left (MissingOrderKey nid)
             let groups =
                     IntMap.fromListWith (++)
                         [ (wiAnchor info, [info])
@@ -680,7 +698,11 @@ normalizeInstanceOpsFull env ops0 = do
 
     mergeKeyNode nid =
         case IntMap.lookup (getNodeId (canon nid)) (binderArgs env) of
-            Just arg -> arg
+            Just arg ->
+                let argC = canon arg
+                in if IntMap.member (getNodeId argC) (orderKeys env)
+                    then argC
+                    else canon nid
             Nothing -> canon nid
 
     inInterior nid =
@@ -700,7 +722,7 @@ normalizeInstanceOpsFull env ops0 = do
             _ -> Right ()
 
     checkDir n m = do
-        let ord = compareNodesByOrderKey (orderKeys env) (mergeKeyNode m) (mergeKeyNode n)
+        ord <- compareNodesByOrderKeyM env (mergeKeyNode m) (mergeKeyNode n)
         case ord of
             LT -> Right ()
             _ -> Left (MergeDirectionInvalid (canon n) (canon m))

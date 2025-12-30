@@ -5,6 +5,7 @@ import Data.List (nub)
 import Data.Maybe (catMaybes)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
+import qualified Data.Set as Set
 import Test.Hspec
 
 import MLF.Binding.Tree (boundFlexChildren, checkBindingTree)
@@ -16,12 +17,15 @@ import MLF.Frontend.ConstraintGen (AnnExpr (..))
 import MyLib hiding (normalize)
 import SpecUtil (expectRight, lookupNode, requireRight)
 
+inferConstraintGraphDefault :: Expr -> Either ConstraintError ConstraintResult
+inferConstraintGraphDefault = inferConstraintGraph Set.empty
+
 spec :: Spec
 spec = describe "Phase 1 — Constraint generation" $ do
     describe "Literals" $ do
         it "creates a single base node for integer literals" $ do
             let expr = ELit (LInt 42)
-            expectRight (inferConstraintGraph expr) $ \result -> do
+            expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let constraint = crConstraint result
                     nodes = cNodes constraint
                 IntMap.size nodes `shouldBe` 2
@@ -32,9 +36,15 @@ spec = describe "Phase 1 — Constraint generation" $ do
                     Just TyBase { tnBase = BaseTy name } -> name `shouldBe` "Int"
                     _ -> expectationFailure "Root does not point to literal node"
 
+        it "records polymorphic base symbols in the constraint" $ do
+            let expr = ELit (LInt 1)
+                polySyms = Set.fromList [BaseTy "Int"]
+            expectRight (inferConstraintGraph polySyms expr) $ \result -> do
+                cPolySyms (crConstraint result) `shouldBe` polySyms
+
         it "creates a single base node for boolean literals" $ do
             let expr = ELit (LBool True)
-            expectRight (inferConstraintGraph expr) $ \result -> do
+            expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let nodes = cNodes (crConstraint result)
                 IntMap.size nodes `shouldBe` 2
                 case [name | TyBase { tnBase = BaseTy name } <- IntMap.elems nodes] of
@@ -43,7 +53,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
 
         it "creates a single base node for string literals" $ do
             let expr = ELit (LString "hi")
-            expectRight (inferConstraintGraph expr) $ \result -> do
+            expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let nodes = cNodes (crConstraint result)
                 IntMap.size nodes `shouldBe` 2
                 case [name | TyBase { tnBase = BaseTy name } <- IntMap.elems nodes] of
@@ -53,7 +63,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
     describe "Variables and scope" $ do
         it "reuses the let scheme node when referencing a binding" $ do
             let expr = ELet "x" (ELit (LInt 0)) (EVar "x")
-            expectRight (inferConstraintGraph expr) $ \result -> do
+            expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let constraint = crConstraint result
                     nodes = cNodes constraint
                 case IntMap.lookup (getNodeId (crRoot result)) nodes of
@@ -80,7 +90,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
             let expr =
                     ELet "x" (ELit (LInt 0))
                         (ELet "x" (ELit (LBool True)) (EVar "x"))
-            expectRight (inferConstraintGraph expr) $ \result -> do
+            expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let constraint = crConstraint result
                     nodes = cNodes constraint
                 case IntMap.lookup (getNodeId (crRoot result)) nodes of
@@ -97,16 +107,16 @@ spec = describe "Phase 1 — Constraint generation" $ do
                     other -> expectationFailure $ "Root is not an expansion node: " ++ show other
 
         it "reports unknown variables" $ do
-            inferConstraintGraph (EVar "free") `shouldBe` Left (UnknownVariable "free")
+            inferConstraintGraphDefault (EVar "free") `shouldBe` Left (UnknownVariable "free")
 
         it "reports unknown variables that appear inside let RHS" $ do
             let expr = ELet "x" (EVar "ghost") (ELit (LInt 0))
-            inferConstraintGraph expr `shouldBe` Left (UnknownVariable "ghost")
+            inferConstraintGraphDefault expr `shouldBe` Left (UnknownVariable "ghost")
 
     describe "Applications" $ do
         it "emits instantiation edges for both function and argument" $ do
             let expr = EApp (ELam "x" (EVar "x")) (ELit (LInt 1))
-            expectRight (inferConstraintGraph expr) $ \result -> do
+            expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let constraint = crConstraint result
                     instEdges = cInstEdges constraint
                 length instEdges `shouldBe` 2
@@ -124,7 +134,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
             -- λ(x:Int). x  ≜  λ(x). let x = (x : Int) in x
             let ann = STBase "Int"
                 expr = ELamAnn "x" ann (EVar "x")
-            expectRight (inferConstraintGraph expr) $ \result -> do
+            expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let constraint = crConstraint result
                     nodes = cNodes constraint
                     instEdges = cInstEdges constraint
@@ -150,7 +160,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
             -- let id : ∀α. α → α = λx. x in id
             let scheme = SrcScheme [("a", Nothing)] (STArrow (STVar "a") (STVar "a"))
                 expr = ELetAnn "id" scheme (ELam "x" (EVar "x")) (EVar "id")
-            expectRight (inferConstraintGraph expr) $ \result -> do
+            expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let nodes = cNodes (crConstraint result)
                 -- The result should be the body (id), which refers to the expansion of the scheme
                 case IntMap.lookup (getNodeId (crRoot result)) nodes of
@@ -171,7 +181,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
             -- (1 : Int)
             let ann = STBase "Int"
                 expr = EAnn (ELit (LInt 1)) ann
-            expectRight (inferConstraintGraph expr) $ \result -> do
+            expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let nodes = cNodes (crConstraint result)
                 case IntMap.lookup (getNodeId (crRoot result)) nodes of
                     Just TyBase { tnBase = BaseTy name } -> name `shouldBe` "Int"
@@ -182,7 +192,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
             -- This checks internalizeBinders with a bound
             let scheme = SrcScheme [("a", Just (STBase "Int"))] (STArrow (STVar "a") (STVar "a"))
                 expr = ELetAnn "f" scheme (ELam "x" (EVar "x")) (EVar "f")
-            expectRight (inferConstraintGraph expr) $ \result -> do
+            expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let constraint = crConstraint result
                     nodes = cNodes constraint
                 -- We verify that the 'a' variable has an instantiation edge to 'Int'
@@ -220,7 +230,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
             -- which exercises internalizeSrcType STForall with a bound.
             let ann = STForall "a" (Just (STBase "Int")) (STVar "a")
                 expr = ELamAnn "x" ann (EVar "x")
-            expectRight (inferConstraintGraph expr) $ \result -> do
+            expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let constraint = crConstraint result
                     nodes = cNodes constraint
                     instEdges = cInstEdges constraint
@@ -248,7 +258,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
             -- exercises internalizeSrcType STBottom.
             let ann = STBottom
                 expr = ELamAnn "x" ann (EVar "x")
-            expectRight (inferConstraintGraph expr) $ \result -> do
+            expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let constraint = crConstraint result
                     nodes = cNodes constraint
                     instEdges = cInstEdges constraint
@@ -267,7 +277,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
             -- This checks STVar with Nothing lookup result
             let ann = STVar "a"
                 expr = EAnn (ELit (LInt 1)) ann
-            expectRight (inferConstraintGraph expr) $ \result -> do
+            expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let nodes = cNodes (crConstraint result)
                 case IntMap.lookup (getNodeId (crRoot result)) nodes of
                     Just TyVar {} -> pure ()
@@ -276,7 +286,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
         it "produces valid AnnExpr structure" $ do
              -- let x = 1 in x
              let expr = ELet "x" (ELit (LInt 1)) (EVar "x")
-             expectRight (inferConstraintGraph expr) $ \result -> do
+             expectRight (inferConstraintGraphDefault expr) $ \result -> do
                  let ann = crAnnotated result
                  case ann of
                      ALet name schemeNode _ scopeRoot rhsAnn bodyAnn _resNode -> do
@@ -297,7 +307,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
         -- variable in the graphic type.
         it "builds a shared parameter node when translating lambdas" $ do
             let expr = ELam "x" (EVar "x")
-            expectRight (inferConstraintGraph expr) $ \result -> do
+            expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let nodes = IntMap.elems (cNodes (crConstraint result))
                     arrowNodes = [n | n@TyArrow {} <- nodes]
                     varNodes = [n | n@TyVar {} <- nodes]
@@ -321,7 +331,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
             let expr =
                     ELet "f" (ELam "x" (EVar "x"))
                         (EApp (EVar "f") (ELit (LInt 1)))
-            expectRight (inferConstraintGraph expr) $ \result -> do
+            expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let constraint = crConstraint result
                     nodes = cNodes constraint
                     insts = cInstEdges constraint
@@ -368,7 +378,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
 
         it "connects lambda applications directly to arrow nodes" $ do
             let expr = EApp (ELam "x" (EVar "x")) (ELit (LInt 0))
-            expectRight (inferConstraintGraph expr) $ \result -> do
+            expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let constraint = crConstraint result
                     nodes = cNodes constraint
                 case cInstEdges constraint of
@@ -398,7 +408,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
                                 (EApp (EVar "f") (ELit (LBool True)))
                         )
                         (ELam "x" (EVar "x"))
-            expectRight (inferConstraintGraph expr) $ \result -> do
+            expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let constraint = crConstraint result
                     nodes = cNodes constraint
                     insts = cInstEdges constraint
@@ -440,12 +450,12 @@ spec = describe "Phase 1 — Constraint generation" $ do
             let expr =
                     ELet "f" (ELam "x" (EVar "x"))
                         (ELit (LInt 0))
-            expectRight (inferConstraintGraph expr) $ \result -> do
+            expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 cInstEdges (crConstraint result) `shouldBe` []
 
         it "binds let RHS nodes to the let-introduced TyForall" $ do
             let expr = ELet "id" (ELam "x" (EVar "x")) (ELit (LInt 0))
-            expectRight (inferConstraintGraph expr) $ \result -> do
+            expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let constraint = crConstraint result
                     nodes = cNodes constraint
                     bindParents = cBindParents constraint
@@ -468,7 +478,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
                     ELet "x"
                         (ELet "y" (ELit (LInt 0)) (EVar "y"))
                         (EVar "x")
-            expectRight (inferConstraintGraph expr) $ \result -> do
+            expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let constraint = crConstraint result
                     nodes = cNodes constraint
                     bindParents = cBindParents constraint
@@ -487,7 +497,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
         it "binds explicit forall variables to their TyForall" $ do
             let ann = STForall "a" Nothing (STBase "Int")
                 expr = EAnn (ELit (LInt 1)) ann
-            expectRight (inferConstraintGraph expr) $ \result -> do
+            expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let constraint = crConstraint result
                     nodes = cNodes constraint
                     bindParents = cBindParents constraint
@@ -511,7 +521,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
             let expr =
                     ELet "id" (ELam "x" (EVar "x"))
                         (EApp (EVar "id") (ELit (LInt 1)))
-            expectRight (inferConstraintGraph expr) $ \result ->
+            expectRight (inferConstraintGraphDefault expr) $ \result ->
                 checkBindingTree (crConstraint result) `shouldBe` Right ()
 
         it "elimination rewrite removes eliminated binders from Q(n)" $ do
@@ -529,7 +539,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
 
                 runToPresolution :: Expr -> Either String PresolutionResult
                 runToPresolution e = do
-                    ConstraintResult { crConstraint = c0 } <- firstShow (inferConstraintGraph e)
+                    ConstraintResult { crConstraint = c0 } <- firstShow (inferConstraintGraphDefault e)
                     let c1 = normalize c0
                     acyc <- firstShow (checkAcyclicity c1)
                     firstShow (computePresolution acyc c1)
@@ -569,7 +579,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
                         ELet "tmp"
                             (EApp (EVar "f") (ELit (LInt 1)))
                             (EApp (EVar "f") (ELit (LBool True)))
-            expectRight (inferConstraintGraph expr) $ \result -> do
+            expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let constraint = crConstraint result
                     insts = cInstEdges constraint
                     nodes = cNodes constraint
@@ -598,7 +608,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
             let expr =
                     ELet "f" (ELam "x" (EVar "x")) $
                         ELet "g" (ELam "y" (EVar "y")) (EVar "g")
-            expectRight (inferConstraintGraph expr) $ \result -> do
+            expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 -- We look for TyForall nodes now, as they represent the let bindings
                 let forallNodes = [n | n@TyForall {} <- IntMap.elems (cNodes (crConstraint result))]
                 -- One for 'f', one for 'g'.
@@ -621,7 +631,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
                         ELet "a" (EApp (EVar "f") (ELit (LInt 1))) $
                             ELet "b" (EApp (EVar "f") (ELit (LBool True)))
                                 (EApp (EVar "f") (ELit (LString "ok")))
-            expectRight (inferConstraintGraph expr) $ \result -> do
+            expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let constraint = crConstraint result
                     insts = cInstEdges constraint
                     nodes = cNodes constraint
@@ -646,7 +656,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
     describe "Higher-order structure" $ do
         it "creates nested arrow nodes and one instantiation for higher-order lambdas" $ do
             let expr = ELam "x" (ELam "y" (EApp (EVar "x") (EVar "y")))
-            expectRight (inferConstraintGraph expr) $ \result -> do
+            expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let constraint = crConstraint result
                     nodes = IntMap.elems (cNodes constraint)
                     arrowNodes = [n | n@TyArrow {} <- nodes]

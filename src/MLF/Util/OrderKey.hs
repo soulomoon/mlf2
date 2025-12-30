@@ -4,7 +4,7 @@ Description : Pure leftmost-lowermost ordering keys (paper ≺)
 
 This module contains the *pure* algorithm for computing the paper’s
 “leftmost-lowermost” ordering key over nodes reachable from a root in the term
-DAG.
+DAG (Definition 15.2.7).
 
 It is split out from `MLF.Util.Order` so lower-level modules (notably
 `MLF.Binding.Tree`) can use the ordering logic without introducing dependency
@@ -13,6 +13,7 @@ cycles through Solve.
 module MLF.Util.OrderKey (
     OrderKey(..),
     compareOrderKey,
+    orderKeysFromRootWithExtra,
     orderKeysFromRootWith,
     compareNodesByOrderKey
 ) where
@@ -50,13 +51,14 @@ comparePaths (i:is) (j:js) =
 --
 -- If an allowed-node set is provided, traversal is restricted to that set
 -- (with @root@ always treated as allowed).
-orderKeysFromRootWith
+orderKeysFromRootWithExtra
     :: (NodeId -> NodeId)
     -> IntMap TyNode
+    -> (NodeId -> [NodeId])
     -> NodeId
     -> Maybe IntSet.IntSet
     -> IntMap OrderKey
-orderKeysFromRootWith canonical nodes root0 mbAllowed =
+orderKeysFromRootWithExtra canonical nodes extraChildren root0 mbAllowed =
     go IntMap.empty [(canonical root0, 0, [])]
   where
     root = canonical root0
@@ -93,12 +95,30 @@ orderKeysFromRootWith canonical nodes root0 mbAllowed =
         case IntMap.lookup (getNodeId nid) nodes of
             Nothing -> []
             Just n ->
-                [ (canonical child, depth, path ++ [idx])
-                | (idx, child) <- zip [0 ..] (structuralChildren n)
-                ]
+                let structural = structuralChildren n
+                    extras = extraChildren nid
+                    allChildren = structural ++ extras
+                in [ (childC, depth, path ++ [idx])
+                   | (idx, child) <- zip [0 ..] allChildren
+                   , let childC = canonical child
+                   , childC /= nid
+                   ]
 
--- | Compare two nodes by their best order keys (falling back to NodeId order
--- when a key is missing).
+-- | Compute best order keys for nodes reachable from @root@ using only
+-- structural children.
+orderKeysFromRootWith
+    :: (NodeId -> NodeId)
+    -> IntMap TyNode
+    -> NodeId
+    -> Maybe IntSet.IntSet
+    -> IntMap OrderKey
+orderKeysFromRootWith canonical nodes root0 mbAllowed =
+    orderKeysFromRootWithExtra canonical nodes (const []) root0 mbAllowed
+
+-- | Compare two nodes by their best order keys.
+--
+-- Missing keys indicate a bug at the call site: all compared nodes must be
+-- reachable from the root used to compute the keys.
 compareNodesByOrderKey :: IntMap OrderKey -> NodeId -> NodeId -> Ordering
 compareNodesByOrderKey m a b =
     case (IntMap.lookup (getNodeId a) m, IntMap.lookup (getNodeId b) m) of
@@ -106,6 +126,7 @@ compareNodesByOrderKey m a b =
             case compareOrderKey ka kb of
                 EQ -> compare a b
                 other -> other
-        (Just _, Nothing) -> LT
-        (Nothing, Just _) -> GT
-        (Nothing, Nothing) -> compare a b
+        (Nothing, _) ->
+            error ("compareNodesByOrderKey: missing order key for " ++ show a)
+        (_, Nothing) ->
+            error ("compareNodesByOrderKey: missing order key for " ++ show b)

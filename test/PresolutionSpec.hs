@@ -6,6 +6,7 @@ import Data.List (findIndex)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.List.NonEmpty as NE
+import qualified Data.Set as Set
 
 import MLF.Constraint.Types
 import MLF.Constraint.Presolution
@@ -60,7 +61,6 @@ mkNormalizeEnv c root interior =
     OmegaNormalizeEnv
         { oneRoot = root
         , interior = interior
-        , inertLocked = IntSet.empty
         , weakened = IntSet.empty
         , orderKeys = Order.orderKeysFromRootWith id (cNodes c) root Nothing
         , canonical = id
@@ -1250,17 +1250,6 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 ops0 = [OpGraft arg b, OpWeaken b, OpMerge b a]
             normalizeInstanceOpsFull env ops0 `shouldBe` Right ops0
 
-        it "drops ops that target inert-locked nodes" $ do
-            let c = mkNormalizeConstraint
-                root = NodeId 0
-                n = NodeId 2
-                arg = NodeId 10
-                env =
-                    (mkNormalizeEnv c root (IntSet.fromList [getNodeId n]))
-                        { inertLocked = IntSet.fromList [getNodeId n] }
-                ops0 = [OpGraft arg n, OpWeaken n]
-            normalizeInstanceOpsFull env ops0 `shouldBe` Right []
-
         it "drops ops that only touch nodes outside the interior" $ do
             let c = mkNormalizeConstraint
                 root = NodeId 0
@@ -1586,6 +1575,59 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 case Inert.inertLockedNodes c of
                     Left err -> expectationFailure ("inertLockedNodes failed: " ++ show err)
                     Right s -> IntSet.member (getNodeId n) s `shouldBe` True
+
+            it "treats polymorphic base symbols as inert anchors" $ do
+                let root = NodeId 0
+                    mid = NodeId 1
+                    base = NodeId 2
+                    nodes =
+                        IntMap.fromList
+                            [ (getNodeId root, TyRoot root [mid])
+                            , (getNodeId mid, TyArrow mid base base)
+                            , (getNodeId base, TyBase base (BaseTy "Poly"))
+                            ]
+                    bindParents =
+                        IntMap.fromList
+                            [ (getNodeId mid, (root, BindFlex))
+                            , (getNodeId base, (mid, BindFlex))
+                            ]
+                    c =
+                        emptyConstraint
+                            { cNodes = nodes
+                            , cBindParents = bindParents
+                            , cPolySyms = Set.fromList [BaseTy "Poly"]
+                            }
+                case Inert.inertNodes c of
+                    Left err -> expectationFailure ("inertNodes failed: " ++ show err)
+                    Right s -> IntSet.member (getNodeId mid) s `shouldBe` False
+
+            it "weakens inert-locked nodes to rigid bindings" $ do
+                let root = NodeId 0
+                    mid = NodeId 1
+                    n = NodeId 2
+                    v = NodeId 3
+                    base = NodeId 4
+                    nodes =
+                        IntMap.fromList
+                            [ (getNodeId root, TyRoot root [mid])
+                            , (getNodeId mid, TyArrow mid n base)
+                            , (getNodeId n, TyArrow n v base)
+                            , (getNodeId v, TyVar v)
+                            , (getNodeId base, TyBase base (BaseTy "int"))
+                            ]
+                    bindParents =
+                        IntMap.fromList
+                            [ (getNodeId mid, (root, BindRigid))
+                            , (getNodeId n, (mid, BindFlex))
+                            , (getNodeId v, (n, BindRigid))
+                            , (getNodeId base, (n, BindFlex))
+                            ]
+                    c = emptyConstraint { cNodes = nodes, cBindParents = bindParents }
+                case Inert.weakenInertLockedNodes c of
+                    Left err -> expectationFailure ("weakenInertLockedNodes failed: " ++ show err)
+                    Right c' -> do
+                        Inert.inertLockedNodes c' `shouldBe` Right IntSet.empty
+                        Binding.lookupBindParent c' n `shouldBe` Just (mid, BindRigid)
 
     describe "decideMinimalExpansion" $ do
         it "returns ExpIdentity for matching monomorphic types" $ do
@@ -2012,7 +2054,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
 
                     case Binding.orderedBinders id c1 forallId of
                         Left err -> expectationFailure $ "orderedBinders failed: " ++ show err
-                        Right bs -> bs `shouldBe` [domVarId, codVarId]
+                        Right bs -> bs `shouldBe` [codVarId, domVarId]
         it "handles multiple edges correctly" $ do
             let varId = NodeId 0
                 forallId = NodeId 1

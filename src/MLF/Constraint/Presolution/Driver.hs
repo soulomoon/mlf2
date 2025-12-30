@@ -398,21 +398,26 @@ rewriteConstraint mapping = do
     return fullRedirects
 
 -- | Weaken inert-locked nodes to obtain a translatable presolution.
+--
+-- Thesis alignment: Corollary 15.2.5 removes inert-locked nodes, and
+-- Definition 15.2.10 (condition 1) requires none remain.
 weakenInertLockedNodesM :: PresolutionM ()
 weakenInertLockedNodesM = do
     c0 <- gets psConstraint
     case Inert.weakenInertLockedNodes c0 of
         Left err -> throwError (BindingTreeError err)
-        Right c1 -> modify' $ \st -> st { psConstraint = c1 }
+        Right c1 -> do
+            case Inert.inertLockedNodes c1 of
+                Left err -> throwError (BindingTreeError err)
+                Right locked ->
+                    if IntSet.null locked
+                        then modify' $ \st -> st { psConstraint = c1 }
+                        else throwError (InternalError "weakenInertLockedNodesM: inert-locked nodes remain after weakening")
 
 -- | Normalize edge witnesses against the finalized presolution constraint.
 normalizeEdgeWitnessesM :: PresolutionM ()
 normalizeEdgeWitnessesM = do
     c0 <- gets psConstraint
-    let nodes = cNodes c0
-    inertLocked <- case Inert.inertLockedNodes c0 of
-        Left err -> throwError (BindingTreeError err)
-        Right s -> pure s
     traces <- gets psEdgeTraces
     witnesses0 <- gets psEdgeWitnesses
     let rewriteNodeWith copyMap nid =
@@ -472,12 +477,11 @@ normalizeEdgeWitnessesM = do
             Left err -> throwError (BindingTreeError err)
             Right s -> pure s
         let steps0 = map rewriteStep (ewSteps w0)
-            orderKeys = Order.orderKeysFromRootWith id nodes edgeRoot (Just interior)
+            orderKeys = Order.orderKeysFromConstraintWith id c0 interiorRoot Nothing
             env =
                 OmegaNormalizeEnv
                     { oneRoot = edgeRoot
                     , interior = interior
-                    , inertLocked = inertLocked
                     , weakened = weakened
                     , orderKeys = orderKeys
                     , canonical = id

@@ -1,13 +1,13 @@
 {- |
 Module      : MLF.Constraint.Inert
-Description : Inert and inert-locked node classification (thesis §5.2/§15.2)
+Description : Inert and inert-locked node classification (thesis §5.2.2, §15.2.2)
 
 This module provides helpers for computing inert nodes (nodes that do not
 expose polymorphism through flexible binding paths) and inert-locked nodes
 (inert nodes that are flexibly bound but have a rigid ancestor).
 
-Paper anchor: `papers/these-finale-english.txt` §5.2.4 (inert nodes) and §15.2.3
-inert-locked nodes.
+Paper anchor: `papers/these-finale-english.txt` Definition 5.2.2 (inert nodes)
+and Definition 15.2.2 (inert-locked nodes).
 -}
 module MLF.Constraint.Inert (
     inertNodes,
@@ -28,8 +28,8 @@ import MLF.Constraint.Types (BindFlag(..), BindingError, Constraint(..), NodeId(
 -- | True for nodes that count as "intrinsically polymorphic" anchors when
 -- computing inertness.
 --
--- Thesis note: polymorphic symbols include ⊥ (§5.2.1), and may include other
--- type constructors in Poly (stored on the constraint).
+-- Thesis note: Definition 5.2.2 (inert nodes) uses intrinsically polymorphic
+-- symbols (⊥ and Poly; see §5.2.1 for the symbol set).
 isPolymorphicAnchor :: Constraint -> TyNode -> Bool
 isPolymorphicAnchor _ TyBottom{} = True
 isPolymorphicAnchor c TyBase{ tnBase = b } = Set.member b (cPolySyms c)
@@ -37,8 +37,7 @@ isPolymorphicAnchor _ _ = False
 
 -- | Compute the set of inert nodes.
 --
--- A node is inert if there is no flex-only binding path from a polymorphic
--- anchor (⊥ / Poly constructors) to that node.
+-- Definition 5.2.2 (Inert nodes).
 inertNodes :: Constraint -> Either BindingError IntSet.IntSet
 inertNodes c = do
     let nodes = cNodes c
@@ -69,7 +68,7 @@ collectFlexAncestors c anchors =
                     else go (IntSet.insert pid visited) (parent : rest)
 
 -- | Compute inert-locked nodes: inert nodes that are flexibly bound and have a
--- rigid ancestor (thesis §15.2.2).
+-- rigid ancestor (Definition 15.2.2).
 inertLockedNodes :: Constraint -> Either BindingError IntSet.IntSet
 inertLockedNodes c = do
     inert <- inertNodes c
@@ -87,8 +86,9 @@ inertLockedNodes c = do
 
 -- | Weaken inert-locked nodes (flip their binding edge to rigid when flexible).
 --
--- Thesis alignment (§15.2.3.2): weakening inert-locked nodes yields an
--- inert-equivalent presolution without inert-locked nodes.
+-- Thesis alignment: Lemma 15.2.4 + Corollary 15.2.5 (§15.2.3.2) show we can
+-- weaken inert-locked nodes to obtain an inert-equivalent presolution without
+-- inert-locked nodes.
 weakenInertLockedNodes :: Constraint -> Either BindingError Constraint
 weakenInertLockedNodes c0 = go c0
   where
@@ -108,8 +108,9 @@ weakenInertLockedNodes c0 = go c0
 
 -- | Weaken all inert nodes (flip their binding edge to rigid when flexible).
 --
--- Thesis alignment (§15.2.3.2): weakening inert nodes yields an inert-equivalent
--- presolution without inert-locked nodes.
+-- Thesis alignment: §15.2.8 applies weakening to all inert nodes; Corollary
+-- 15.2.5 ensures the result is still a presolution inert-equivalent to the
+-- original.
 weakenInertNodes :: Constraint -> Either BindingError Constraint
 weakenInertNodes c0 = do
     inert <- inertNodes c0

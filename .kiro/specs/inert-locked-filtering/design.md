@@ -3,9 +3,9 @@
 ## Overview
 Thesis section 15.2.3 requires that propagation witnesses never transform
 inert-locked nodes. These nodes cannot be represented in xMLF translation,
-so we must either rewrite the presolution (by weakening inert nodes) or reject
-witnesses that touch them. This spec implements detection, presolution
-weakening, and witness filtering.
+so we rewrite the presolution by weakening inert-locked nodes (Lemma 15.2.4)
+and reject any presolution where inert-locked nodes remain. Witness filtering
+is not part of the thesis-aligned approach once weakening succeeds.
 
 ## Architecture
 - **Inert classification**
@@ -19,11 +19,9 @@ weakening, and witness filtering.
     presolution.
   - Record a structured error if the rewrite cannot produce a translatable
     presolution.
-- **Witness filtering**
-  - Extend `OmegaNormalizeEnv` with an `inertLocked` set and filter any
-    operations that target inert-locked nodes before validation/translation.
-  - Ensure `normalizeInstanceStepsFull` and Phi translation only see filtered
-    witnesses.
+- **Witness handling**
+  - Do not filter witnesses; rely on the post-weaken check that inert-locked
+    nodes are absent (Lemma 15.2.6).
 
 ## Components and Interfaces
 - New helper module: `src/MLF/Constraint/Inert.hs` (proposed)
@@ -33,14 +31,12 @@ weakening, and witness filtering.
   - `src/MLF/Constraint/Presolution/Driver.hs` or `src/MLF/Constraint/Solve.hs`
     to run the inert-locked weakening pass before witness translation.
 - Witness normalization:
-  - `src/MLF/Constraint/Presolution/Witness.hs` to drop ops touching
-    inert-locked nodes.
+  - No inert-locked filtering; normalization only enforces conditions (1)–(5)
+    and interior stripping.
 
 ## Data Models
-- Add an `inertLocked :: IntSet` field to `OmegaNormalizeEnv` (or a separate
-  environment record) so normalization and translation can filter operations.
-- Add a new `PresolutionError` or `ElabError` constructor for inert-locked
-  violations if rewriting fails.
+- No new witness environment fields required; inert-locked handling is covered
+  by presolution rewriting and a post-weaken validation.
 
 ## Error Handling
 - If inert-locked nodes remain after rewriting, return a structured error and
@@ -50,9 +46,7 @@ weakening, and witness filtering.
 
 ## Testing Strategy
 - **Regression test**: construct a constraint with an inert-locked node and
-  verify that operations targeting it are removed or rejected.
-- **Property test**: for any normalized witness, no op target is in the
-  inert-locked set.
+  verify that the weakening pass removes it (no inert-locked nodes remain).
 - **Integration test**: translation succeeds for a case that previously
   contained inert-locked operations after the rewrite pass.
 

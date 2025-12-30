@@ -5,7 +5,7 @@ module MLF.Elab.Phi (
     phiFromEdgeWitnessWithTrace
 ) where
 
-import Control.Monad (when)
+import Control.Monad (unless, when)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Map.Strict as Map
@@ -24,7 +24,6 @@ import MLF.Constraint.Solve hiding (BindingTreeError, MissingNode)
 import qualified MLF.Constraint.Solve as Solve (frWith)
 import MLF.Constraint.Presolution (EdgeTrace(..))
 import MLF.Binding.Tree (checkBindingTree, bindingPathToRoot, lookupBindParent)
-import qualified MLF.Constraint.Inert as Inert
 
 -- | Compute an instantiation-context path from a root node to a target node.
 --
@@ -85,14 +84,24 @@ contextToNodeBoundWithOrderKeys canonical keys c root target = do
 
                 rawChildren = foldl addChild IntMap.empty (IntMap.toList (cBindParents c))
 
-                childrenOf p =
+                childrenOf p = do
                     let xs0 = IntMap.findWithDefault [] (getNodeId p) rawChildren
-                        -- Deduplicate while preserving ordering.
-                        xs =
-                            nubSortBy
-                                (Order.compareNodesByOrderKey keys)
-                                xs0
-                    in xs
+                        missing =
+                            [ nid
+                            | nid <- xs0
+                            , not (IntMap.member (getNodeId nid) keys)
+                            ]
+                    if null missing
+                        then do
+                            let xs =
+                                    nubSortBy
+                                        (Order.compareNodesByOrderKey keys)
+                                        xs0
+                            pure xs
+                        else
+                            Left $
+                                InstantiationError $
+                                    "contextToNodeBound: missing order keys for " ++ show missing
 
                 nubSortBy :: Eq a => (a -> a -> Ordering) -> [a] -> [a]
                 nubSortBy cmp = nub . sortBy cmp
@@ -104,7 +113,7 @@ contextToNodeBoundWithOrderKeys canonical keys c root target = do
                     case ns of
                         (_only : []) -> Right acc
                         (parent : child : rest) -> do
-                            let siblings = childrenOf parent
+                            siblings <- childrenOf parent
                             idx <- case elemIndex child siblings of
                                 Just i -> Right i
                                 Nothing ->
@@ -132,16 +141,14 @@ phiFromEdgeWitness res mSchemeInfo ew =
 phiFromEdgeWitnessWithTrace :: SolveResult -> Maybe SchemeInfo -> Maybe EdgeTrace -> EdgeWitness -> Either ElabError Instantiation
 phiFromEdgeWitnessWithTrace res mSchemeInfo mTrace ew = do
     requireValidBindingTree
-    inertLocked <- bindingToElab (Inert.inertLockedNodes (srConstraint res))
     let InstanceWitness ops = ewWitness ew
         steps0 =
             case ewSteps ew of
                 [] -> map StepOmega ops
                 xs -> xs
-        steps = filterInertLocked inertLocked steps0
     case mSchemeInfo of
-        Nothing -> phiFromType steps
-        Just si -> phiWithScheme si steps
+        Nothing -> phiFromType steps0
+        Just si -> phiWithScheme si steps0
   where
     requireValidBindingTree :: Either ElabError ()
     requireValidBindingTree =
@@ -151,27 +158,6 @@ phiFromEdgeWitnessWithTrace res mSchemeInfo mTrace ew = do
 
     canonicalNode :: NodeId -> NodeId
     canonicalNode = Solve.frWith (srUnionFind res)
-
-    filterInertLocked :: IntSet.IntSet -> [InstanceStep] -> [InstanceStep]
-    filterInertLocked locked =
-        filter keepStep
-      where
-        keepStep = \case
-            StepIntro -> True
-            StepOmega op -> not (touchesLocked op)
-
-        touchesLocked op = any isLocked (opTargets op)
-
-        isLocked nid =
-            IntSet.member (getNodeId (canonicalNode nid)) locked
-
-        opTargets op =
-            case op of
-                OpGraft _ n -> [n]
-                OpWeaken n -> [n]
-                OpMerge n m -> [n, m]
-                OpRaise n -> [n]
-                OpRaiseMerge n m -> [n, m]
 
     orderRoot :: NodeId
     -- Paper root `r` for Φ/Σ is the expansion root (TyExp body), not the TyExp
@@ -252,6 +238,15 @@ phiFromEdgeWitnessWithTrace res mSchemeInfo mTrace ew = do
             else if length qs < 2
                 then Right (InstId, ty, ids)
                 else do
+                    let missing =
+                            [ nid
+                            | Just nid <- ids
+                            , not (IntMap.member (getNodeId (canonicalNode nid)) orderKeys)
+                            ]
+                    unless (null missing) $
+                        Left $
+                            InstantiationError $
+                                "reorderBindersByPrec: missing order keys for " ++ show missing
                     let knownKeyCount =
                             length
                                 [ ()

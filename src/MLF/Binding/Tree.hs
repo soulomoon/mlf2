@@ -222,7 +222,26 @@ orderedBinders canonical c0 binder0 = do
     binders <- boundFlexChildrenUnder canonical c0 binderC
     let bindersReachable =
             filter (\nid -> IntSet.member (getNodeId nid) reachable) binders
-        orderKeys = OrderKey.orderKeysFromRootWith canonical nodes orderRoot Nothing
+        boundChildren =
+            IntMap.fromListWith (flip (++))
+                [ (getNodeId vC, [bC])
+                | (vid, Just bnd) <- IntMap.toList (cVarBounds c0)
+                , let vC = canonical (NodeId vid)
+                , let bC = canonical bnd
+                , vC /= bC
+                ]
+        extraChildren nid =
+            IntMap.findWithDefault [] (getNodeId (canonical nid)) boundChildren
+        orderKeys = OrderKey.orderKeysFromRootWithExtra canonical nodes extraChildren orderRoot Nothing
+        missing =
+            [ nid
+            | nid <- bindersReachable
+            , not (IntMap.member (getNodeId nid) orderKeys)
+            ]
+    unless (null missing) $
+        Left $
+            InvalidBindingTree $
+                "orderedBinders: missing order keys for " ++ show missing
     pure (sortBy (OrderKey.compareNodesByOrderKey orderKeys) bindersReachable)
 
 -- | Compute a ForallSpec (binder count + bounds) for a forall node.

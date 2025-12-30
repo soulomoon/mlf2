@@ -4,6 +4,7 @@ module MLF.Frontend.ConstraintGen.State (
     ConstraintM,
     runConstraintM,
     mkInitialState,
+    mkInitialStateWithPolySyms,
     buildConstraint
 ) where
 
@@ -39,7 +40,10 @@ runConstraintM :: ConstraintM a -> BuildState -> Either ConstraintError (a, Buil
 runConstraintM action st = runExcept (runStateT action st)
 
 mkInitialState :: BuildState
-mkInitialState = BuildState
+mkInitialState = mkInitialStateWithPolySyms Set.empty
+
+mkInitialStateWithPolySyms :: PolySyms -> BuildState
+mkInitialStateWithPolySyms polySyms = BuildState
     { bsNextNode = 0
     , bsNextExpVar = 0
     , bsNextEdge = 0
@@ -48,7 +52,7 @@ mkInitialState = BuildState
     , bsUnifyEdges = []
     , bsBindParents = IntMap.empty
     , bsVarBounds = IntMap.empty
-    , bsPolySyms = Set.empty
+    , bsPolySyms = polySyms
     , bsScopes = [ScopeFrame IntSet.empty]
     }
 

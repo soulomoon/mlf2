@@ -8,7 +8,7 @@ module MLF.Frontend.ConstraintGen (
 import qualified MLF.Constraint.Root as ConstraintRoot
 import MLF.Frontend.Syntax (Expr)
 import MLF.Frontend.Desugar (desugarCoercions)
-import MLF.Constraint.Types (NodeId(..))
+import MLF.Constraint.Types (NodeId(..), PolySyms)
 import MLF.Frontend.ConstraintGen.Types
 import MLF.Frontend.ConstraintGen.State
 import MLF.Frontend.ConstraintGen.Translate (buildRootExpr)
@@ -87,10 +87,10 @@ Paper references:
     discusses the design choice of annotation-free let-polymorphism
 -}
 
-generateConstraints :: Expr -> Either ConstraintError ConstraintResult
-generateConstraints expr = do
+generateConstraints :: PolySyms -> Expr -> Either ConstraintError ConstraintResult
+generateConstraints polySyms expr = do
     let expr' = desugarCoercions expr
-    let initialState = mkInitialState
+    let initialState = mkInitialStateWithPolySyms polySyms
     let topScopeRoot = NodeId (-1)
     ((_rootBinder, rootNode, annRoot), finalState) <-
         runConstraintM (buildRootExpr topScopeRoot expr') initialState

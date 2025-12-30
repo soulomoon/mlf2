@@ -3,6 +3,7 @@ module PipelineSpec (spec) where
 import Data.List (isInfixOf)
 import Data.Bifunctor (first)
 import qualified Data.IntMap.Strict as IntMap
+import qualified Data.Set as Set
 import Test.Hspec
 
 import MLF.Elab.Pipeline (generalizeAt, applyRedirectsToAnn, ElabScheme(..), ElabType(..))
@@ -172,7 +173,8 @@ spec = describe "Pipeline (Phases 1-5)" $ do
 -- Helpers
 runPipelineWithInternals :: Expr -> Either String (SolveResult, AnnExpr)
 runPipelineWithInternals expr = do
-    ConstraintResult{ crConstraint = c0, crRoot = _root, crAnnotated = ann } <- first show (generateConstraints expr)
+    ConstraintResult{ crConstraint = c0, crRoot = _root, crAnnotated = ann } <-
+        first show (generateConstraints defaultPolySyms expr)
     let c1 = normalize c0
     acyc <- first show (checkAcyclicity c1)
     pres <- first show (computePresolution acyc c1)
@@ -185,7 +187,8 @@ runPipelineWithInternals expr = do
 
 runPipeline :: Expr -> Either String (SolveResult, NodeId)
 runPipeline expr = do
-    ConstraintResult{ crConstraint = c0, crRoot = root } <- first show (generateConstraints expr)
+    ConstraintResult{ crConstraint = c0, crRoot = root } <-
+        first show (generateConstraints defaultPolySyms expr)
     let c1 = normalize c0
     acyc <- first show (checkAcyclicity c1)
     PresolutionResult{ prConstraint = c4, prRedirects = redirects } <- first show (computePresolution acyc c1)
@@ -213,6 +216,9 @@ validateStrict res =
     case validateSolvedGraphStrict res of
         [] -> pure ()
         vs -> expectationFailure ("validateSolvedGraph failed:\n" ++ unlines vs)
+
+defaultPolySyms :: PolySyms
+defaultPolySyms = Set.empty
 
 noExpNodes :: IntMap.IntMap TyNode -> Expectation
 noExpNodes nodes =

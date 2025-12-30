@@ -13,7 +13,7 @@ import qualified MLF.Util.Order as Order
 import MLF.Constraint.Types (BaseTy(..), BindingError(..), NodeId(..), EdgeId(..), TyNode(..), Constraint(..), InstanceOp(..), InstanceStep(..), InstanceWitness(..), EdgeWitness(..), BindFlag(..), getNodeId)
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.Root as ConstraintRoot
-import MLF.Frontend.ConstraintGen (ConstraintResult(..), generateConstraints)
+import MLF.Frontend.ConstraintGen (ConstraintError, ConstraintResult(..), generateConstraints)
 import MLF.Constraint.Normalize (normalize)
 import MLF.Constraint.Acyclicity (checkAcyclicity)
 import MLF.Constraint.Presolution (PresolutionResult(..), EdgeTrace(..), computePresolution)
@@ -22,7 +22,10 @@ import qualified MLF.Constraint.Solve as Solve (frWith)
 import SpecUtil (emptyConstraint, inferBindParents, requireRight)
 
 requirePipeline :: Expr -> IO (Elab.ElabTerm, Elab.ElabType)
-requirePipeline = requireRight . Elab.runPipelineElab
+requirePipeline = requireRight . Elab.runPipelineElab Set.empty
+
+generateConstraintsDefault :: Expr -> Either ConstraintError ConstraintResult
+generateConstraintsDefault = generateConstraints Set.empty
 
 fInstantiations :: String -> [String]
 fInstantiations = go
@@ -209,7 +212,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
             runSolvedWithScope :: Expr -> Either String (SolveResult, NodeId, NodeId)
             runSolvedWithScope e = do
-                ConstraintResult { crConstraint = c0, crRoot = root } <- firstShow (generateConstraints e)
+                ConstraintResult { crConstraint = c0, crRoot = root } <- firstShow (generateConstraintsDefault e)
                 let c1 = normalize c0
                 acyc <- firstShow (checkAcyclicity c1)
                 pres <- firstShow (computePresolution acyc c1)
@@ -754,7 +757,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
         describe "Φ translation soundness" $ do
             let runToSolved :: Expr -> Either String (SolveResult, IntMap.IntMap EdgeWitness, IntMap.IntMap EdgeTrace)
                 runToSolved e = do
-                    ConstraintResult { crConstraint = c0 } <- firstShow (generateConstraints e)
+                    ConstraintResult { crConstraint = c0 } <- firstShow (generateConstraintsDefault e)
                     let c1 = normalize c0
                     acyc <- firstShow (checkAcyclicity c1)
                     pres <- firstShow (computePresolution acyc c1)
@@ -763,7 +766,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
                 runSolvedWithRoot :: Expr -> Either String (SolveResult, NodeId)
                 runSolvedWithRoot e = do
-                    ConstraintResult { crConstraint = c0, crRoot = root } <- firstShow (generateConstraints e)
+                    ConstraintResult { crConstraint = c0, crRoot = root } <- firstShow (generateConstraintsDefault e)
                     let c1 = normalize c0
                     acyc <- firstShow (checkAcyclicity c1)
                     pres <- firstShow (computePresolution acyc c1)
@@ -867,22 +870,43 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 canonType out `shouldBe` canonType expected
 
             it "scheme-aware Φ can translate Raise (raise a binder to the front)" $ do
-                (solved, _intNode) <- requireRight (runSolvedWithRoot (ELit (LInt 1)))
-
                 let scheme =
                         Elab.Forall [("a", Nothing), ("b", Nothing)]
                             (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))
                     subst = IntMap.fromList [(1, "a"), (2, "b")]
                     si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = subst }
+                    root = NodeId 100
+                    aN = NodeId 1
+                    bN = NodeId 2
+                    c =
+                        Constraint
+                            { cVarBounds = IntMap.empty
+                            , cEliminatedVars = IntSet.empty
+                            , cNodes =
+                                IntMap.fromList
+                                    [ (getNodeId root, TyArrow root aN bN)
+                                    , (getNodeId aN, TyVar aN)
+                                    , (getNodeId bN, TyVar bN)
+                                    ]
+                            , cInstEdges = []
+                            , cUnifyEdges = []
+                            , cBindParents =
+                                IntMap.fromList
+                                    [ (getNodeId aN, (root, BindFlex))
+                                    , (getNodeId bN, (root, BindFlex))
+                                    ]
+                            , cPolySyms = Set.empty
+                            }
+                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 
                     -- Raise binder “b” outward by introducing a fresh front binder and
                     -- aliasing/eliminating the old one (paper Fig. 10 Raise).
                     ops = [OpRaise (NodeId 2)]
                     ew = EdgeWitness
                         { ewEdgeId = EdgeId 0
-                        , ewLeft = NodeId 0
-                        , ewRight = NodeId 0
-                        , ewRoot = NodeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
                         , ewSteps = map StepOmega ops
                         , ewWitness = InstanceWitness ops
                         }
@@ -896,8 +920,6 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 canonType out `shouldBe` canonType expected
 
             it "scheme-aware Φ places Raise after bound dependencies (well-scoped bound)" $ do
-                (solved, _intNode) <- requireRight (runSolvedWithRoot (ELit (LInt 1)))
-
                 let scheme =
                         Elab.Forall
                             [ ("a", Nothing)
@@ -907,13 +929,42 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             (Elab.TArrow (Elab.TVar "a") (Elab.TArrow (Elab.TVar "c") (Elab.TVar "b")))
                     subst = IntMap.fromList [(1, "a"), (2, "b"), (3, "c")]
                     si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = subst }
+                    root = NodeId 100
+                    aN = NodeId 1
+                    bN = NodeId 2
+                    cN = NodeId 3
+                    inner = NodeId 101
+                    c =
+                        Constraint
+                            { cVarBounds = IntMap.fromList [(getNodeId cN, Just aN)]
+                            , cEliminatedVars = IntSet.empty
+                            , cNodes =
+                                IntMap.fromList
+                                    [ (getNodeId root, TyArrow root aN inner)
+                                    , (getNodeId inner, TyArrow inner cN bN)
+                                    , (getNodeId aN, TyVar aN)
+                                    , (getNodeId bN, TyVar bN)
+                                    , (getNodeId cN, TyVar cN)
+                                    ]
+                            , cInstEdges = []
+                            , cUnifyEdges = []
+                            , cBindParents =
+                                IntMap.fromList
+                                    [ (getNodeId aN, (root, BindFlex))
+                                    , (getNodeId bN, (root, BindFlex))
+                                    , (getNodeId cN, (root, BindFlex))
+                                    , (getNodeId inner, (root, BindFlex))
+                                    ]
+                            , cPolySyms = Set.empty
+                            }
+                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 
                     ops = [OpRaise (NodeId 3)]
                     ew = EdgeWitness
                         { ewEdgeId = EdgeId 0
-                        , ewLeft = NodeId 0
-                        , ewRight = NodeId 0
-                        , ewRoot = NodeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
                         , ewSteps = map StepOmega ops
                         , ewWitness = InstanceWitness ops
                         }
@@ -933,6 +984,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     aN = NodeId 1
                     bN = NodeId 2
                     cN = NodeId 3
+                    inner = NodeId 101
 
                     c = Constraint
                         { cVarBounds =
@@ -944,7 +996,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , cEliminatedVars = IntSet.empty
                         , cNodes =
                             IntMap.fromList
-                                [ (100, TyArrow root bN aN)
+                                [ (100, TyArrow root bN inner)
+                                , (getNodeId inner, TyArrow inner cN aN)
                                 , (1, TyVar aN)
                                 , (2, TyVar bN)
                                 , (3, TyVar cN)
@@ -955,6 +1008,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             IntMap.fromList
                                 [ (getNodeId aN, (root, BindFlex))
                                 , (getNodeId bN, (root, BindFlex))
+                                , (getNodeId cN, (root, BindFlex))
+                                , (getNodeId inner, (root, BindFlex))
                                 ]
                         , cPolySyms = Set.empty
                         }
@@ -966,7 +1021,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             , ("b", Nothing)
                             , ("c", Just (Elab.TVar "b"))
                             ]
-                            (Elab.TArrow (Elab.TVar "b") (Elab.TVar "a"))
+                            (Elab.TArrow (Elab.TVar "b") (Elab.TArrow (Elab.TVar "c") (Elab.TVar "a")))
                     subst = IntMap.fromList [(1, "a"), (2, "b"), (3, "c")]
                     si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = subst }
 
@@ -995,7 +1050,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         Elab.TForall "b" Nothing
                             (Elab.TForall "u0" (Just (Elab.TVar "b"))
                                 (Elab.TForall "a" Nothing
-                                    (Elab.TArrow (Elab.TVar "b") (Elab.TVar "a"))))
+                                    (Elab.TArrow (Elab.TVar "b") (Elab.TArrow (Elab.TVar "u0") (Elab.TVar "a")))))
                 canonType out `shouldBe` canonType expected
 
             it "witness instantiation matches solved edge types (id @ Int)" $ do
@@ -1172,7 +1227,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
             let runToPresolutionWitnesses :: Expr -> Either String (IntMap.IntMap EdgeWitness)
                 runToPresolutionWitnesses e = do
-                    ConstraintResult { crConstraint = c0 } <- firstShow (generateConstraints e)
+                    ConstraintResult { crConstraint = c0 } <- firstShow (generateConstraintsDefault e)
                     let c1 = normalize c0
                     acyc <- firstShow (checkAcyclicity c1)
                     pres <- firstShow (computePresolution acyc c1)
@@ -1269,7 +1324,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         (STArrow (STVar "a") (STArrow (STVar "a") (STVar "a")))
                 expr = ELetAnn "c" scheme rhs (EAnn (EVar "c") ann)
 
-            case Elab.runPipelineElab expr of
+            case Elab.runPipelineElab Set.empty expr of
                 Left err ->
                     expectationFailure ("Expected this to typecheck per xmlf.txt, but got: " ++ err)
                 Right (_term, ty) -> do

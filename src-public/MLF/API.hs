@@ -2,6 +2,8 @@ module MLF.API
     ( module MLF.Frontend.Syntax
     , ConstraintResult (..)
     , ConstraintError (..)
+    , BaseTy (..)
+    , PolySyms
     , inferConstraintGraph
     , ElabType (..)
     , ElabScheme (..)
@@ -19,6 +21,7 @@ module MLF.API
     ) where
 
 import MLF.Frontend.Syntax
+import MLF.Constraint.Types (BaseTy (..), PolySyms)
 import MLF.Frontend.ConstraintGen (ConstraintError (..), ConstraintResult (..))
 import MLF.Elab.Pipeline
     ( ElabError (..)

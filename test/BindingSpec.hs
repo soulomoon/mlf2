@@ -4,6 +4,7 @@ module BindingSpec (spec) where
 import Control.Monad (forM, forM_)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
+import qualified Data.Set as Set
 import Test.Hspec
 import Test.QuickCheck
 
@@ -14,8 +15,11 @@ import qualified MLF.Binding.GraphOps as GraphOps
 import qualified MLF.Constraint.Root as ConstraintRoot
 import qualified MLF.Util.Order as Order
 import MLF.Frontend.Syntax (Expr(..), Lit(..), SrcType(..), SrcScheme(..))
-import MLF.Frontend.ConstraintGen (generateConstraints, ConstraintResult(..))
+import MLF.Frontend.ConstraintGen (ConstraintError, ConstraintResult(..), generateConstraints)
 import SpecUtil (emptyConstraint)
+
+generateConstraintsDefault :: Expr -> Either ConstraintError ConstraintResult
+generateConstraintsDefault = generateConstraints Set.empty
 
 -- | Generate a valid binding tree with n nodes.
 -- The tree is structured as a chain of TyForall nodes: node 0 -> node 1 -> ... -> node (n-1)
@@ -46,6 +50,7 @@ genValidBindingTree n
             , cUnifyEdges = []
             , cBindParents = bindParents
             , cVarBounds = IntMap.empty
+            , cPolySyms = Set.empty
             , cEliminatedVars = IntSet.empty
             }
 
@@ -236,7 +241,7 @@ bindingTreeSpec = describe "MLF.Binding.Tree" $ do
                         , cVarBounds = IntMap.singleton 1 (Just (NodeId 2))
                         }
             forallSpecFromForall id c (NodeId 0)
-                `shouldBe` Right (ForallSpec 2 [Just (BoundBinder 1), Nothing])
+                `shouldBe` Right (ForallSpec 2 [Nothing, Just (BoundBinder 0)])
 
     describe "Order keys (<P)" $ do
         it "prefers leftmost paths when branches diverge" $ do
@@ -733,7 +738,7 @@ bindingTreeSpec = describe "MLF.Binding.Tree" $ do
                     , ("nested forall annotation", EAnn (ELam "x" (EVar "x")) (STForall "a" Nothing (STForall "b" Nothing (STArrow (STVar "a") (STVar "b")))))
                     ]
             forM_ testExprs $ \(name, expr) -> do
-                case generateConstraints expr of
+                case generateConstraintsDefault expr of
                     Left err -> expectationFailure $ name ++ ": Constraint generation failed: " ++ show err
                     Right result -> do
                         let c = crConstraint result

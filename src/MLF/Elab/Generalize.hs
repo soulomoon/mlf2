@@ -2,7 +2,7 @@ module MLF.Elab.Generalize (
     generalizeAt
 ) where
 
-import Control.Monad (foldM)
+import Control.Monad (foldM, unless)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Set as Set
@@ -39,19 +39,14 @@ generalizeAt res scopeRoot targetNode = do
                         else (bodyRoot, target0)
                 _ -> (target0, target0)
 
-    let reachableWithRigidBounds root0 = go IntSet.empty [root0]
+    let reachableWithBounds root0 = go IntSet.empty [root0]
           where
             lookupNode nid = IntMap.lookup (getNodeId nid) nodes
-            rigidBoundChildren nid = do
+            boundChildren nid =
                 case lookupNode nid of
                     Just TyVar{} ->
-                        do
-                            mbParent <- bindingToElab (Binding.lookupBindParentUnder canonical constraint nid)
-                            case mbParent of
-                                Just (_, BindRigid) ->
-                                    pure (maybe [] (: []) (VarStore.lookupVarBound constraint nid))
-                                _ -> pure []
-                    _ -> pure []
+                        maybe [] (: []) (VarStore.lookupVarBound constraint nid)
+                    _ -> []
 
             go visited [] = Right visited
             go visited (nid0 : rest) = do
@@ -65,11 +60,11 @@ generalizeAt res scopeRoot targetNode = do
                                 case lookupNode nid of
                                     Nothing -> []
                                     Just node -> map canonical (structuralChildren node)
-                        boundChildren <- rigidBoundChildren nid
-                        go visited' (children ++ map canonical boundChildren ++ rest)
+                            extras = map canonical (boundChildren nid)
+                        go visited' (children ++ extras ++ rest)
 
-    reachable <- reachableWithRigidBounds orderRoot
-    reachableType <- reachableWithRigidBounds typeRoot
+    reachable <- reachableWithBounds orderRoot
+    reachableType <- reachableWithBounds typeRoot
 
     let isBinderNode nid =
             case IntMap.lookup (getNodeId nid) nodes of
@@ -139,7 +134,7 @@ generalizeAt res scopeRoot targetNode = do
                 | v <- bindersCanon
                 ]
 
-    ordered <- orderBinderCandidates orderRoot grouped
+    ordered <- orderBinderCandidates canonical constraint orderRoot grouped
     let names = zipWith alphaName [0..] ordered
         subst = IntMap.fromList (zip ordered names)
         binderSet = IntSet.fromList ordered
@@ -172,11 +167,21 @@ generalizeAt res scopeRoot targetNode = do
         bindings' = filter (\(name, _) -> Set.member name usedNames) bindings
     pure (Forall bindings' ty, subst)
   where
-    orderBinderCandidates :: NodeId -> IntMap.IntMap (NodeId, Maybe NodeId) -> Either ElabError [Int]
-    orderBinderCandidates root grouped = do
-        let keys = Order.orderKeysFromRoot res root
+    orderBinderCandidates
+        :: (NodeId -> NodeId)
+        -> Constraint
+        -> NodeId
+        -> IntMap.IntMap (NodeId, Maybe NodeId)
+        -> Either ElabError [Int]
+    orderBinderCandidates canonical' constraint' root grouped = do
+        let keys = Order.orderKeysFromConstraintWith canonical' constraint' root Nothing
             candidates = IntMap.keys grouped
             candidateSet = IntSet.fromList candidates
+            missing =
+                [ k
+                | k <- candidates
+                , not (IntMap.member k keys)
+                ]
             depsFor k =
                 case snd (grouped IntMap.! k) of
                     Nothing -> []
@@ -190,6 +195,11 @@ generalizeAt res scopeRoot targetNode = do
                 case Order.compareNodesByOrderKey keys (NodeId a) (NodeId b) of
                     EQ -> compare a b
                     other -> other
+
+        unless (null missing) $
+            Left $
+                InstantiationError $
+                    "generalizeAt: missing order keys for " ++ show (map NodeId missing)
 
         topoSortBy
             "generalizeAt: cycle in binder bound dependencies"
