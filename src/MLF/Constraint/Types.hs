@@ -11,7 +11,6 @@ module MLF.Constraint.Types (
     Constraint (..),
     maxNodeIdKeyOr0,
     -- * Variable bounds + elimination stores (scope-model retirement)
-    VarBounds,
     EliminatedVars,
     PolySyms,
     BoundRef(..),
@@ -49,11 +48,6 @@ data BindFlag = BindFlex | BindRigid
 -- This represents the paper's binding tree explicitly. Every non-root node
 -- has exactly one binding parent. Roots are nodes that do not appear as keys.
 type BindParents = IntMap (NodeId, BindFlag)
-
--- | Dedicated variable-bound store.
---
--- Missing keys are treated as `Nothing` (⊥).
-type VarBounds = IntMap (Maybe NodeId)
 
 -- | Persistent marker for variables eliminated during ω execution / presolution.
 type EliminatedVars = IntSet
@@ -156,6 +150,7 @@ The rest of this file documents the invariants that those phases rely on.
 data TyNode
     = TyVar
         { tnId :: NodeId
+        , tnBound :: Maybe NodeId
         }
     -- | Bottom type node (⊥).
     --
@@ -215,6 +210,9 @@ data TyNode
 -- Traversal order is stable and sometimes significant:
 -- arrow domain before codomain; single-child constructors yield a singleton
 -- list; roots preserve their stored child order.
+--
+-- Note: instance bounds are not structural children; ≺ ordering accounts for
+-- them separately when needed.
 structuralChildren :: TyNode -> [NodeId]
 structuralChildren TyVar{} = []
 structuralChildren TyBottom{} = []
@@ -303,7 +301,7 @@ binding edges in `Constraint.cBindParents`.
 
 Quantifier binders (paper Q(n)) are represented by the direct flexibly-bound
 `TyVar` children of a binder node (`TyForall`), optionally carrying instance
-bounds in `Constraint.cVarBounds`.
+bounds on the `TyVar` itself.
 -}
 
 -- | Instantiation edge (Tₗ ≤ Tᵣ) connecting a polymorphic binding to the
@@ -404,10 +402,6 @@ data Constraint = Constraint
             --   - Determining which nodes are "instantiable" vs "locked"
             --
             --   See Note [Binding Tree] in MLF.Binding.Tree for details.
-        , cVarBounds :: VarBounds
-            -- ^ Variable instance bounds (paper: ∀(α ⩾ τ). …).
-            --
-            -- Missing keys are treated as ⊥ (`Nothing`).
         , cPolySyms :: PolySyms
             -- ^ Polymorphic symbols (paper Poly set), used when computing inert nodes.
         , cEliminatedVars :: EliminatedVars

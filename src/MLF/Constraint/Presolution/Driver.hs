@@ -180,7 +180,7 @@ rewriteConstraint mapping = do
         rewriteNode n =
             let nid' = canonical (tnId n)
                 node' = case n of
-                    TyVar {} -> TyVar nid'
+                    TyVar { tnBound = mb } -> TyVar { tnId = nid', tnBound = fmap canonical mb }
                     TyBottom {} -> TyBottom nid'
                     TyArrow { tnDom = d, tnCod = cod } -> TyArrow nid' (canonical d) (canonical cod)
                     TyBase { tnBase = b } -> TyBase nid' b
@@ -191,7 +191,6 @@ rewriteConstraint mapping = do
         -- traceCanonical n = let c = canonical n in trace ("Canonical " ++ show n ++ " -> " ++ show c) c
 
         newNodes = IntMap.fromListWith Canonicalize.chooseRepNode (mapMaybe rewriteNode (IntMap.elems (cNodes c)))
-        varBounds' = rewriteVarBounds canonical newNodes (cVarBounds c)
         eliminated' = rewriteEliminated canonical newNodes (cEliminatedVars c)
 
         -- Canonicalize edge expansions
@@ -264,12 +263,12 @@ rewriteConstraint mapping = do
                         (IntSet.singleton (getNodeId parent))
                         m
 
-                addNode m node = case node of
-                    TyArrow{ tnId = p, tnDom = d, tnCod = cod } ->
-                        addOne p cod (addOne p d m)
-                    TyForall{ tnId = p, tnBody = b } ->
-                        addOne p b m
-                    _ -> m
+                addNode m node =
+                    let parent = tnId node
+                        addChild acc child
+                            | child == parent = acc
+                            | otherwise = addOne parent child acc
+                    in foldl' addChild m (structuralChildren node)
             in IntMap.foldl' addNode IntMap.empty newNodes
 
         -- Canonicalize redirects (values in the map)
@@ -378,7 +377,6 @@ rewriteConstraint mapping = do
             , cInstEdges = []
             , cUnifyEdges = Canonicalize.rewriteUnifyEdges canonical (cUnifyEdges c)
             , cBindParents = newBindParents
-            , cVarBounds = varBounds'
             , cEliminatedVars = eliminated'
             }
         -- Keep the synthetic constraint root total after rewriting/canonicalization.
@@ -496,22 +494,6 @@ normalizeEdgeWitnessesM = do
             ops = [op | StepOmega op <- stepsFinal]
         pure (eid, w0 { ewSteps = stepsFinal, ewWitness = InstanceWitness ops })
     modify' $ \st -> st { psEdgeWitnesses = IntMap.fromList witnesses }
-
-rewriteVarBounds :: (NodeId -> NodeId) -> IntMap TyNode -> VarBounds -> VarBounds
-rewriteVarBounds canon nodes0 vb0 =
-    IntMap.fromListWith mergeBounds
-        [ (getNodeId vC, fmap canon mb)
-        | (vid, mb) <- IntMap.toList vb0
-        , let vC = canon (NodeId vid)
-        , IntMap.member (getNodeId vC) nodes0
-        ]
-  where
-    mergeBounds new old =
-        case (old, new) of
-            (Just _, Nothing) -> old
-            (Nothing, Just _) -> new
-            (Just _, Just _) -> old
-            (Nothing, Nothing) -> Nothing
 
 rewriteEliminated :: (NodeId -> NodeId) -> IntMap TyNode -> EliminatedVars -> EliminatedVars
 rewriteEliminated canon nodes0 elims0 =

@@ -22,7 +22,6 @@ emptyConstraint = Constraint
     , cInstEdges = []
     , cUnifyEdges = []
     , cBindParents = IntMap.empty
-    , cVarBounds = IntMap.empty
     , cPolySyms = Set.empty
     , cEliminatedVars = IntSet.empty
     }

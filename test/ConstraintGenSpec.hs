@@ -153,7 +153,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
                                             TyBase{ tnBase = BaseTy name } -> name `shouldBe` "Int"
                                             other -> expectationFailure $ "Expected Int annotation node, saw " ++ show other
                                     other -> expectationFailure $ "Expected exactly 1 inst edge, saw " ++ show other
-                            other -> expectationFailure $ "Expected TyVar parameter, saw " ++ show other
+                            other -> expectationFailure $ "Expected TyVar { tnId = parameter, tnBound = Nothing }, saw " ++ show other
                     other -> expectationFailure $ "Root is not an arrow: " ++ show other
 
         it "respects polymorphic let annotations" $ do
@@ -205,22 +205,20 @@ spec = describe "Phase 1 — Constraint generation" $ do
                                 arrow <- lookupNode nodes arrowBody
                                 case arrow of
                                     TyArrow { tnDom = domId } -> do
-                                        -- domId is 'a'. Its bound is recorded in `Constraint.cVarBounds`.
+                                        -- domId is 'a'. Its bound is recorded on the TyVar node.
                                         domNode <- lookupNode nodes domId
                                         case domNode of
-                                            TyVar{} -> do
-                                                case IntMap.lookup (getNodeId domId) (cVarBounds constraint) of
-                                                    Just (Just boundId) -> do
+                                            TyVar{ tnBound = mb } -> do
+                                                case mb of
+                                                    Just boundId -> do
                                                         rhs <- lookupNode nodes boundId
                                                         case rhs of
                                                             TyBase { tnBase = BaseTy name } -> name `shouldBe` "Int"
                                                             other -> expectationFailure $ "Expected bound Int, saw " ++ show other
-                                                    Just Nothing ->
-                                                        expectationFailure "Expected bound for variable, saw Nothing"
                                                     Nothing ->
-                                                        expectationFailure "Expected bound entry for variable, saw missing key"
+                                                        expectationFailure "Expected bound for variable, saw Nothing"
                                             other ->
-                                                expectationFailure $ "Expected TyVar for domain, saw " ++ show other
+                                                expectationFailure $ "Expected TyVar { tnId = for, tnBound = Nothing } domain, saw " ++ show other
                                     other -> expectationFailure $ "Expected Arrow body, saw " ++ show other
                             other -> expectationFailure $ "Expected Scheme Forall, saw " ++ show other
                     other -> expectationFailure $ "Root is not an expansion: " ++ show other
@@ -239,17 +237,18 @@ spec = describe "Phase 1 — Constraint generation" $ do
                         annNode <- lookupNode nodes annId
                         case annNode of
                             TyForall { tnBody = bodyId } -> do
-                                -- bodyId is 'a'. Its bound is recorded in `Constraint.cVarBounds`.
-                                case IntMap.lookup (getNodeId bodyId) (cVarBounds constraint) of
-                                    Just (Just boundId) -> do
+                                -- bodyId is 'a'. Its bound is recorded on the TyVar node.
+                                bodyNode <- lookupNode nodes bodyId
+                                case bodyNode of
+                                    TyVar{ tnBound = Just boundId } -> do
                                         rhs <- lookupNode nodes boundId
                                         case rhs of
                                             TyBase { tnBase = BaseTy name } -> name `shouldBe` "Int"
                                             other -> expectationFailure $ "Expected bound Int, saw " ++ show other
-                                    Just Nothing ->
+                                    TyVar{ tnBound = Nothing } ->
                                         expectationFailure "Expected bound for variable, saw Nothing"
-                                    Nothing ->
-                                        expectationFailure "Expected bound entry for variable, saw missing key"
+                                    other ->
+                                        expectationFailure $ "Expected TyVar { tnId = for, tnBound = Nothing } body, saw " ++ show other
                             other -> expectationFailure $ "Expected TyForall annotation node, saw " ++ show other
                     other -> expectationFailure $ "Expected exactly 1 inst edge, saw " ++ show other
 
@@ -268,7 +267,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
                         case annNode of
                             -- Bottom is internalized as a fresh TyVar.
                             TyVar {} -> pure ()
-                            other -> expectationFailure $ "Expected TyVar for Bottom, saw " ++ show other
+                            other -> expectationFailure $ "Expected TyVar { tnId = for, tnBound = Nothing } Bottom, saw " ++ show other
                     other -> expectationFailure $ "Expected exactly 1 inst edge, saw " ++ show other
 
     describe "Annotation Edge Cases" $ do
@@ -281,7 +280,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 let nodes = cNodes (crConstraint result)
                 case IntMap.lookup (getNodeId (crRoot result)) nodes of
                     Just TyVar {} -> pure ()
-                    other -> expectationFailure $ "Expected TyVar for free var, saw " ++ show other
+                    other -> expectationFailure $ "Expected TyVar { tnId = for, tnBound = Nothing } free var, saw " ++ show other
 
         it "produces valid AnnExpr structure" $ do
              -- let x = 1 in x

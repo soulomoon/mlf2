@@ -124,7 +124,15 @@ compareNodesByOrderKey m a b =
     case (IntMap.lookup (getNodeId a) m, IntMap.lookup (getNodeId b) m) of
         (Just ka, Just kb) ->
             case compareOrderKey ka kb of
-                EQ -> compare a b
+                EQ ->
+                    if a == b
+                        then EQ
+                        else
+                            error $
+                                "compareNodesByOrderKey: equal order keys for distinct nodes "
+                                    ++ show a
+                                    ++ " and "
+                                    ++ show b
                 other -> other
         (Nothing, _) ->
             error ("compareNodesByOrderKey: missing order key for " ++ show a)

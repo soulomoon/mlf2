@@ -71,7 +71,7 @@ MLF CAN express this type, but cannot INFER it without help because:
   3. Inference would require "guessing" where to place ∀ quantifiers
 
 This is why our implementation:
-  - ELam: allocates a plain TyVar for the parameter (monomorphic)
+  - ELam: allocates a plain TyVar { tnId = for, tnBound = Nothing } the parameter (monomorphic)
   - ELet: wraps the RHS in a TyExp expansion node (polymorphic)
 
 Future extensions could support explicit type annotations like:

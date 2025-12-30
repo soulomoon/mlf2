@@ -12,7 +12,7 @@ spec :: Spec
 spec = describe "Phase 5 -- Solve" $ do
     describe "Variables and structure" $ do
         it "merges a variable with a base type and rewrites to the canonical node" $ do
-            let var = TyVar (NodeId 0)
+            let var = TyVar { tnId = NodeId 0, tnBound = Nothing }
                 base = TyBase (NodeId 1) (BaseTy "Int")
                 nodes = IntMap.fromList [(0, var), (1, base)]
                 constraint = emptyConstraint
@@ -30,8 +30,8 @@ spec = describe "Phase 5 -- Solve" $ do
                     IntMap.size (cNodes sc) `shouldBe` 1
 
         it "merges two variables and drains the queue" $ do
-            let v0 = TyVar (NodeId 0)
-                v1 = TyVar (NodeId 1)
+            let v0 = TyVar { tnId = NodeId 0, tnBound = Nothing }
+                v1 = TyVar { tnId = NodeId 1, tnBound = Nothing }
                 nodes = IntMap.fromList [(0, v0), (1, v1)]
                 constraintVV = emptyConstraint
                     { cNodes = nodes
@@ -52,8 +52,8 @@ spec = describe "Phase 5 -- Solve" $ do
                 inner = NodeId 2
                 root = NodeId 3
 
-                nodeInner = TyVar vInner
-                nodeOuter = TyVar vOuter
+                nodeInner = TyVar { tnId = vInner, tnBound = Nothing }
+                nodeOuter = TyVar { tnId = vOuter, tnBound = Nothing }
                 nodeInnerArrow = TyArrow inner vInner vOuter
                 nodeRoot = TyArrow root inner vOuter
                 constraint =
@@ -84,7 +84,7 @@ spec = describe "Phase 5 -- Solve" $ do
             let dom = TyBase (NodeId 2) (BaseTy "Int")
                 cod = TyBase (NodeId 3) (BaseTy "Bool")
                 arrow = TyArrow (NodeId 1) (tnId dom) (tnId cod)
-                var = TyVar (NodeId 0)
+                var = TyVar { tnId = NodeId 0, tnBound = Nothing }
                 nodes =
                     IntMap.fromList
                         [ (0, var)
@@ -107,7 +107,7 @@ spec = describe "Phase 5 -- Solve" $ do
             let dom = TyBase (NodeId 2) (BaseTy "Int")
                 cod = TyBase (NodeId 3) (BaseTy "Bool")
                 arrow = TyArrow (NodeId 1) (tnId dom) (tnId cod)
-                var = TyVar (NodeId 0)
+                var = TyVar { tnId = NodeId 0, tnBound = Nothing }
                 nodes =
                     IntMap.fromList
                         [ (0, var)
@@ -128,7 +128,7 @@ spec = describe "Phase 5 -- Solve" $ do
 
     describe "Occurs-check" $ do
         it "fails occurs-check when a variable appears inside the structure it unifies with" $ do
-            let var = TyVar (NodeId 0)
+            let var = TyVar { tnId = NodeId 0, tnBound = Nothing }
                 base = TyBase (NodeId 2) (BaseTy "Int")
                 arrow = TyArrow (NodeId 1) (NodeId 0) (NodeId 2)
                 nodes = IntMap.fromList [(0, var), (1, arrow), (2, base)]
@@ -142,8 +142,8 @@ spec = describe "Phase 5 -- Solve" $ do
         it "fails occurs-check even after earlier variable unions" $ do
             let base = TyBase (NodeId 3) (BaseTy "Int")
                 arrow = TyArrow (NodeId 2) (NodeId 0) (tnId base)  -- dom refers to var0
-                var0 = TyVar (NodeId 0)
-                var1 = TyVar (NodeId 1)
+                var0 = TyVar { tnId = NodeId 0, tnBound = Nothing }
+                var1 = TyVar { tnId = NodeId 1, tnBound = Nothing }
                 nodes =
                     IntMap.fromList
                         [ (0, var0)
@@ -162,8 +162,8 @@ spec = describe "Phase 5 -- Solve" $ do
 
     describe "Constructor clashes" $ do
         it "detects constructor clashes (arrow vs base)" $ do
-            let dom = TyVar (NodeId 1)
-                cod = TyVar (NodeId 2)
+            let dom = TyVar { tnId = NodeId 1, tnBound = Nothing }
+                cod = TyVar { tnId = NodeId 2, tnBound = Nothing }
                 arrow = TyArrow (NodeId 0) (tnId dom) (tnId cod)
                 base = TyBase (NodeId 3) (BaseTy "Bool")
                 nodes =
@@ -229,11 +229,11 @@ spec = describe "Phase 5 -- Solve" $ do
 
     describe "Forall handling" $ do
         it "fails when forall nodes have mismatched binder arity" $ do
-            let alpha = TyVar (NodeId 2)
+            let alpha = TyVar { tnId = NodeId 2, tnBound = Nothing }
                 forall1 = TyForall (NodeId 0) (tnId alpha)
 
-                beta = TyVar (NodeId 3)
-                gamma = TyVar (NodeId 4)
+                beta = TyVar { tnId = NodeId 3, tnBound = Nothing }
+                gamma = TyVar { tnId = NodeId 4, tnBound = Nothing }
                 body2 = TyArrow (NodeId 5) (tnId beta) (tnId gamma)
                 forall2 = TyForall (NodeId 1) (tnId body2)
 
@@ -324,7 +324,7 @@ spec = describe "Phase 5 -- Solve" $ do
 
     describe "Rewriting and errors" $ do
         it "rewrites inst edges to canonical representatives" $ do
-            let var = TyVar (NodeId 0)
+            let var = TyVar { tnId = NodeId 0, tnBound = Nothing }
                 base = TyBase (NodeId 1) (BaseTy "Int")
                 instEdge = InstEdge (EdgeId 0) (NodeId 0) (NodeId 0)
                 constraint = emptyConstraint
@@ -339,7 +339,7 @@ spec = describe "Phase 5 -- Solve" $ do
                     cInstEdges sc `shouldBe` [InstEdge (EdgeId 0) (NodeId 1) (NodeId 1)]
 
         it "rewrites structured children through UF (arrow dom/cod)" $ do
-            let domVar = TyVar (NodeId 2)
+            let domVar = TyVar { tnId = NodeId 2, tnBound = Nothing }
                 codBase = TyBase (NodeId 3) (BaseTy "Bool")
                 arrow = TyArrow (NodeId 1) (tnId domVar) (tnId codBase)
                 base = TyBase (NodeId 4) (BaseTy "Int")
@@ -366,7 +366,7 @@ spec = describe "Phase 5 -- Solve" $ do
                         other -> expectationFailure $ "Expected rewritten arrow, got " ++ show other
 
         it "surfaces MissingNode when unify edge targets absent id" $ do
-            let var = TyVar (NodeId 0)
+            let var = TyVar { tnId = NodeId 0, tnBound = Nothing }
                 constraint = emptyConstraint
                     { cNodes = IntMap.fromList [(0, var)]
                     , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 99)]
@@ -442,7 +442,7 @@ spec = describe "Phase 5 -- Solve" $ do
             -- Arrow child 1 is not canonical (should be 2)
             msgs `shouldSatisfy` any ("Non-canonical child id" `isPrefixOf`)
         it "accepts a solved graph" $ do
-            let var = TyVar (NodeId 0)
+            let var = TyVar { tnId = NodeId 0, tnBound = Nothing }
                 base = TyBase (NodeId 1) (BaseTy "Int")
                 constraint = emptyConstraint
                     { cNodes = IntMap.fromList [(0, var), (1, base)]
@@ -456,7 +456,7 @@ spec = describe "Phase 5 -- Solve" $ do
         it "reports residual inst edges" $ do
             let base0 = TyBase (NodeId 0) (BaseTy "Int")
                 base1 = TyBase (NodeId 1) (BaseTy "Int")
-                strayVar = TyVar (NodeId 2)
+                strayVar = TyVar { tnId = NodeId 2, tnBound = Nothing }
                 inst = InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)
                 constraint = emptyConstraint
                     { cNodes = IntMap.fromList

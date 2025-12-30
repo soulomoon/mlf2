@@ -354,8 +354,8 @@ applyExpansionTraced expansion expNode = case (expansion, expNode) of
 -- so that Ω operations (Graft/Weaken/Merge) can be executed as graph transformations.
 --
 -- In particular, `ExpInstantiate` copies the body by substituting binders with
--- fresh binder-meta variables, and copies their instance bounds into
--- `Constraint.cVarBounds` (via `MLF.Constraint.VarStore`).
+-- fresh binder-meta variables, and copies their instance bounds onto the
+-- fresh TyVar nodes (via `MLF.Constraint.VarStore`).
 applyExpansionEdgeTraced :: Expansion -> TyNode -> PresolutionM (NodeId, (CopyMap, InteriorSet))
 applyExpansionEdgeTraced expansion expNode = case (expansion, expNode) of
     (ExpIdentity, TyExp { tnBody = b }) -> pure (b, emptyTrace)

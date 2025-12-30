@@ -331,14 +331,12 @@ applyUFConstraint uf c =
                 canonical
                 (\childC -> IntMap.member (getNodeId childC) nodes')
                 bindParents0
-        varBounds' = rewriteVarBounds canonical nodes' (cVarBounds c)
         eliminated' = rewriteEliminated canonical nodes' (cEliminatedVars c)
     in c
         { cNodes = nodes'
         , cInstEdges = Canonicalize.rewriteInstEdges canonical (cInstEdges c)
         , cUnifyEdges = Canonicalize.rewriteUnifyEdges canonical (cUnifyEdges c)
         , cBindParents = bindParents'
-        , cVarBounds = varBounds'
         , cEliminatedVars = eliminated'
         }
   where
@@ -346,7 +344,7 @@ applyUFConstraint uf c =
     rewriteNode n =
         let nid' = frWith uf (tnId n)
         in (getNodeId nid', case n of
-            TyVar{} -> TyVar nid'
+            TyVar{ tnBound = mb } -> TyVar { tnId = nid', tnBound = fmap (frWith uf) mb }
             TyBottom{} -> TyBottom nid'
             TyArrow { tnDom = d, tnCod = cod } -> TyArrow nid' (frWith uf d) (frWith uf cod)
             TyBase { tnBase = b } -> TyBase nid' b
@@ -354,22 +352,6 @@ applyUFConstraint uf c =
             TyExp { tnExpVar = s, tnBody = b } -> TyExp nid' s (frWith uf b)
             TyRoot { tnChildren = cs } -> TyRoot nid' (map (frWith uf) cs)
             )
-
-    rewriteVarBounds :: (NodeId -> NodeId) -> IntMap TyNode -> VarBounds -> VarBounds
-    rewriteVarBounds canon nodes0 vb0 =
-        IntMap.fromListWith mergeBounds
-            [ (getNodeId vC, fmap canon mb)
-            | (vid, mb) <- IntMap.toList vb0
-            , let vC = canon (NodeId vid)
-            , IntMap.member (getNodeId vC) nodes0
-            ]
-      where
-        mergeBounds new old =
-            case (old, new) of
-                (Just _, Nothing) -> old
-                (Nothing, Just _) -> new
-                (Just _, Just _) -> old
-                (Nothing, Nothing) -> Nothing
 
     rewriteEliminated :: (NodeId -> NodeId) -> IntMap TyNode -> EliminatedVars -> EliminatedVars
     rewriteEliminated canon nodes0 elims0 =
@@ -386,7 +368,6 @@ rewriteEliminatedBinders c0
     | otherwise = do
         let nodes0 = cNodes c0
             bindParents0 = cBindParents c0
-            varBounds0 = cVarBounds c0
             maxId = maxNodeIdKeyOr0 c0
             elimList = IntSet.toList elims0
 
@@ -440,7 +421,16 @@ rewriteEliminatedBinders c0
             substNode nid = IntMap.findWithDefault nid (getNodeId nid) subst
 
             rewriteNode node = case node of
-                TyVar{} -> node
+                TyVar{ tnId = nid, tnBound = mb } ->
+                    let mb' =
+                            case mb of
+                                Nothing -> Nothing
+                                Just b ->
+                                    let b' = substNode b
+                                    in if IntSet.member (getNodeId b') bottomSet
+                                        then Nothing
+                                        else Just b'
+                    in TyVar { tnId = nid, tnBound = mb' }
                 TyBottom{} -> node
                 TyArrow { tnId = nid, tnDom = d, tnCod = cod } ->
                     TyArrow nid (substNode d) (substNode cod)
@@ -491,28 +481,6 @@ rewriteEliminatedBinders c0
                 ]
             bindParents' = IntMap.fromList (mapMaybe id bindEntries ++ bottomParents)
 
-            varBounds' =
-                IntMap.fromListWith mergeBounds
-                    [ (vid, mb')
-                    | (vid, mb) <- IntMap.toList varBounds0
-                    , IntMap.member vid nodes'
-                    , let mb' =
-                            case mb of
-                                Nothing -> Nothing
-                                Just b ->
-                                    let b' = substNode b
-                                    in if IntSet.member (getNodeId b') bottomSet
-                                        then Nothing
-                                        else Just b'
-                    ]
-              where
-                mergeBounds new old =
-                    case (old, new) of
-                        (Just _, Nothing) -> old
-                        (Nothing, Just _) -> new
-                        (Just _, Just _) -> old
-                        (Nothing, Nothing) -> Nothing
-
             instEdges' =
                 [ InstEdge eid (substNode l) (substNode r)
                 | InstEdge eid l r <- cInstEdges c0
@@ -525,7 +493,6 @@ rewriteEliminatedBinders c0
         pure c0
             { cNodes = nodes'
             , cBindParents = bindParents'
-            , cVarBounds = varBounds'
             , cInstEdges = instEdges'
             , cUnifyEdges = unifyEdges'
             , cEliminatedVars = IntSet.empty

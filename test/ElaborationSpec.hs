@@ -126,7 +126,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 nodes = IntMap.fromList
                     [ (getNodeId root, TyRoot root [arrow])
                     , (getNodeId arrow, TyArrow { tnId = arrow, tnDom = var, tnCod = var })
-                    , (getNodeId var, TyVar { tnId = var })
+                    , (getNodeId var, TyVar { tnId = var, tnBound = Nothing })
                     ]
                 bindParents = IntMap.fromList
                     [ (getNodeId arrow, (root, BindFlex))
@@ -370,7 +370,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     Constraint
                         { cNodes =
                             IntMap.fromList
-                                [ (getNodeId v, TyVar v)
+                                [ (getNodeId v, TyVar { tnId = v, tnBound = Nothing })
                                 , (getNodeId arrow, TyArrow arrow v v)
                                 , (getNodeId forallNode, TyForall forallNode arrow)
                                 ]
@@ -381,7 +381,6 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 [ (getNodeId arrow, (forallNode, BindFlex))
                                 , (getNodeId v, (forallNode, BindFlex))
                                 ]
-                        , cVarBounds = IntMap.empty
                         , cPolySyms = Set.empty
                         , cEliminatedVars = IntSet.singleton (getNodeId v)
                         }
@@ -399,8 +398,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     Constraint
                         { cNodes =
                             IntMap.fromList
-                                [ (getNodeId v, TyVar v)
-                                , (getNodeId b, TyVar b)
+                                [ (getNodeId v, TyVar { tnId = v, tnBound = Just b })
+                                , (getNodeId b, TyVar { tnId = b, tnBound = Nothing })
                                 , (getNodeId arrow, TyArrow arrow v b)
                                 , (getNodeId forallNode, TyForall forallNode arrow)
                                 ]
@@ -412,7 +411,6 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 , (getNodeId v, (forallNode, BindFlex))
                                 , (getNodeId b, (forallNode, BindFlex))
                                 ]
-                        , cVarBounds = IntMap.fromList [(getNodeId v, Just b)]
                         , cPolySyms = Set.empty
                         , cEliminatedVars = IntSet.singleton (getNodeId v)
                         }
@@ -599,8 +597,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     Constraint
                         { cNodes =
                             IntMap.fromList
-                                [ (getNodeId vLeft, TyVar vLeft)
-                                , (getNodeId vRight, TyVar vRight)
+                                [ (getNodeId vLeft, TyVar { tnId = vLeft, tnBound = Nothing })
+                                , (getNodeId vRight, TyVar { tnId = vRight, tnBound = Nothing })
                                 , (getNodeId arrow, TyArrow arrow vLeft vRight)
                                 , (getNodeId forallNode, TyForall forallNode arrow)
                                 ]
@@ -611,7 +609,6 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 [ (getNodeId vLeft, (forallNode, BindFlex))
                                 , (getNodeId vRight, (forallNode, BindFlex))
                                 ]
-                        , cVarBounds = IntMap.empty
                         , cPolySyms = Set.empty
                         , cEliminatedVars = IntSet.empty
                         }
@@ -634,8 +631,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     Constraint
                         { cNodes =
                             IntMap.fromList
-                                [ (getNodeId vShallow, TyVar vShallow)
-                                , (getNodeId vDeep, TyVar vDeep)
+                                [ (getNodeId vShallow, TyVar { tnId = vShallow, tnBound = Nothing })
+                                , (getNodeId vDeep, TyVar { tnId = vDeep, tnBound = Nothing })
                                 , (getNodeId nInt, TyBase nInt (BaseTy "Int"))
                                 , (getNodeId nInner, TyArrow nInner nInt vDeep)
                                 , (getNodeId nOuter, TyArrow nOuter vShallow nInner)
@@ -648,7 +645,6 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 [ (getNodeId vShallow, (forallNode, BindFlex))
                                 , (getNodeId vDeep, (forallNode, BindFlex))
                                 ]
-                        , cVarBounds = IntMap.empty
                         , cPolySyms = Set.empty
                         , cEliminatedVars = IntSet.empty
                         }
@@ -666,16 +662,11 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
                 c =
                     Constraint
-                        { cVarBounds =
-                            IntMap.fromList
-                                [ (getNodeId vA, Nothing)
-                                , (getNodeId vB, Just vA)
-                                ]
-                        , cEliminatedVars = IntSet.empty
+                        { cEliminatedVars = IntSet.empty
                         , cNodes =
                             IntMap.fromList
-                                [ (getNodeId vA, TyVar vA)
-                                , (getNodeId vB, TyVar vB)
+                                [ (getNodeId vA, TyVar { tnId = vA, tnBound = Nothing })
+                                , (getNodeId vB, TyVar { tnId = vB, tnBound = Just vA })
                                 , (getNodeId arrow, TyArrow arrow vB vA)
                                 , (getNodeId forallNode, TyForall forallNode arrow)
                                 ]
@@ -815,7 +806,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     nodes =
                         IntMap.fromList
                             [ (getNodeId root, TyForall root binder)
-                            , (getNodeId binder, TyVar binder)
+                            , (getNodeId binder, TyVar { tnId = binder, tnBound = Nothing })
                             ]
                     constraint =
                         emptyConstraint
@@ -880,13 +871,12 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     bN = NodeId 2
                     c =
                         Constraint
-                            { cVarBounds = IntMap.empty
-                            , cEliminatedVars = IntSet.empty
+                            { cEliminatedVars = IntSet.empty
                             , cNodes =
                                 IntMap.fromList
                                     [ (getNodeId root, TyArrow root aN bN)
-                                    , (getNodeId aN, TyVar aN)
-                                    , (getNodeId bN, TyVar bN)
+                                    , (getNodeId aN, TyVar { tnId = aN, tnBound = Nothing })
+                                    , (getNodeId bN, TyVar { tnId = bN, tnBound = Nothing })
                                     ]
                             , cInstEdges = []
                             , cUnifyEdges = []
@@ -936,15 +926,14 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     inner = NodeId 101
                     c =
                         Constraint
-                            { cVarBounds = IntMap.fromList [(getNodeId cN, Just aN)]
-                            , cEliminatedVars = IntSet.empty
+                            { cEliminatedVars = IntSet.empty
                             , cNodes =
                                 IntMap.fromList
                                     [ (getNodeId root, TyArrow root aN inner)
                                     , (getNodeId inner, TyArrow inner cN bN)
-                                    , (getNodeId aN, TyVar aN)
-                                    , (getNodeId bN, TyVar bN)
-                                    , (getNodeId cN, TyVar cN)
+                                    , (getNodeId aN, TyVar { tnId = aN, tnBound = Nothing })
+                                    , (getNodeId bN, TyVar { tnId = bN, tnBound = Nothing })
+                                    , (getNodeId cN, TyVar { tnId = cN, tnBound = Just aN })
                                     ]
                             , cInstEdges = []
                             , cUnifyEdges = []
@@ -987,20 +976,14 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     inner = NodeId 101
 
                     c = Constraint
-                        { cVarBounds =
-                            IntMap.fromList
-                                [ (getNodeId aN, Nothing)
-                                , (getNodeId bN, Nothing)
-                                , (getNodeId cN, Just bN)
-                                ]
-                        , cEliminatedVars = IntSet.empty
+                        { cEliminatedVars = IntSet.empty
                         , cNodes =
                             IntMap.fromList
                                 [ (100, TyArrow root bN inner)
                                 , (getNodeId inner, TyArrow inner cN aN)
-                                , (1, TyVar aN)
-                                , (2, TyVar bN)
-                                , (3, TyVar cN)
+                                , (1, TyVar { tnId = aN, tnBound = Nothing })
+                                , (2, TyVar { tnId = bN, tnBound = Nothing })
+                                , (3, TyVar { tnId = cN, tnBound = Just bN })
                                 ]
                         , cInstEdges = []
                         , cUnifyEdges = []
@@ -1101,7 +1084,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         { cNodes =
                             IntMap.fromList
                                 [ (getNodeId root, TyArrow root aN mN)
-                                , (getNodeId aN, TyVar aN)
+                                , (getNodeId aN, TyVar { tnId = aN, tnBound = Nothing })
                                 , (getNodeId mN, TyArrow mN nN aN)
                                 , (getNodeId nN, TyArrow nN aN aN)
                                 ]
@@ -1112,7 +1095,6 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             , (getNodeId mN, (root, BindFlex))
                             , (getNodeId nN, (mN, BindFlex))
                             ]
-                        , cVarBounds = IntMap.empty
                         , cPolySyms = Set.empty
                         , cEliminatedVars = IntSet.empty
                         }
@@ -1156,7 +1138,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         { cNodes =
                             IntMap.fromList
                                 [ (getNodeId root, TyArrow root aN mN)
-                                , (getNodeId aN, TyVar aN)
+                                , (getNodeId aN, TyVar { tnId = aN, tnBound = Nothing })
                                 , (getNodeId mN, TyArrow mN nN aN)
                                 , (getNodeId nN, TyArrow nN aN aN)
                                 ]
@@ -1167,7 +1149,6 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             , (getNodeId mN, (root, BindFlex))
                             , (getNodeId nN, (mN, BindFlex))
                             ]
-                        , cVarBounds = IntMap.empty
                         , cPolySyms = Set.empty
                         , cEliminatedVars = IntSet.empty
                         }
@@ -1271,8 +1252,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             IntMap.fromList
                                 [ (getNodeId root, TyRoot root [arrow])
                                 , (getNodeId arrow, TyArrow arrow rigidVar rigidVar)
-                                , (getNodeId rigidVar, TyVar rigidVar)
-                                , (getNodeId flexVar, TyVar flexVar)
+                                , (getNodeId rigidVar, TyVar { tnId = rigidVar, tnBound = Just flexVar })
+                                , (getNodeId flexVar, TyVar { tnId = flexVar, tnBound = Nothing })
                                 ]
                         , cInstEdges = []
                         , cUnifyEdges = []
@@ -1281,10 +1262,6 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 [ (getNodeId arrow, (root, BindRigid))
                                 , (getNodeId rigidVar, (arrow, BindRigid))
                                 , (getNodeId flexVar, (root, BindFlex))
-                                ]
-                        , cVarBounds =
-                            IntMap.fromList
-                                [ (getNodeId rigidVar, Just flexVar)
                                 ]
                         , cPolySyms = Set.empty
                         , cEliminatedVars = IntSet.empty

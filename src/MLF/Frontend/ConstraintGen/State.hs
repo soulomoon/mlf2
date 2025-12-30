@@ -29,7 +29,6 @@ data BuildState = BuildState
     , bsInstEdges :: ![InstEdge]   -- ^ Instantiation edges (accumulated in reverse)
     , bsUnifyEdges :: ![UnifyEdge] -- ^ Unification edges (accumulated in reverse)
     , bsBindParents :: !BindParents -- ^ Binding edges: child -> (parent, flag)
-    , bsVarBounds :: !(IntMap.IntMap (Maybe NodeId)) -- ^ Dedicated variable-bound store
     , bsPolySyms :: !PolySyms -- ^ Polymorphic type constructors (paper Poly)
     , bsScopes :: ![ScopeFrame]    -- ^ Stack of scopes tracking newly created nodes
     }
@@ -51,7 +50,6 @@ mkInitialStateWithPolySyms polySyms = BuildState
     , bsInstEdges = []
     , bsUnifyEdges = []
     , bsBindParents = IntMap.empty
-    , bsVarBounds = IntMap.empty
     , bsPolySyms = polySyms
     , bsScopes = [ScopeFrame IntSet.empty]
     }
@@ -62,7 +60,6 @@ buildConstraint st = Constraint
     , cInstEdges = reverse (bsInstEdges st)
     , cUnifyEdges = reverse (bsUnifyEdges st)
     , cBindParents = bsBindParents st
-    , cVarBounds = bsVarBounds st
     , cPolySyms = bsPolySyms st
     , cEliminatedVars = IntSet.empty
     }

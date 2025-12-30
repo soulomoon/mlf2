@@ -45,8 +45,8 @@ mkNormalizeConstraint =
             IntMap.fromList
                 [ (getNodeId root, TyForall root arrow)
                 , (getNodeId arrow, TyArrow arrow dom cod)
-                , (getNodeId dom, TyVar dom)
-                , (getNodeId cod, TyVar cod)
+                , (getNodeId dom, TyVar { tnId = dom, tnBound = Nothing })
+                , (getNodeId cod, TyVar { tnId = cod, tnBound = Nothing })
                 ]
         , cBindParents =
             IntMap.fromList
@@ -88,9 +88,9 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 body = NodeId 2
                 fresh = NodeId 10
                 nodes = IntMap.fromList
-                    [ (1, TyVar bound)
+                    [ (1, TyVar { tnId = bound, tnBound = Nothing })
                     , (2, TyArrow body bound bound)
-                    , (10, TyVar fresh) -- fresh binder image
+                    , (10, TyVar { tnId = fresh, tnBound = Nothing }) -- fresh binder image
                     ]
                 constraint =
                     emptyConstraint
@@ -117,11 +117,11 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 outerArrow = NodeId 4
                 fresh = NodeId 10
                 nodes = IntMap.fromList
-                    [ (1, TyVar bound)
+                    [ (1, TyVar { tnId = bound, tnBound = Nothing })
                     , (2, TyArrow body bound outer)
-                    , (3, TyVar outer)
+                    , (3, TyVar { tnId = outer, tnBound = Nothing })
                     , (4, TyArrow outerArrow outer outer)
-                    , (10, TyVar fresh)
+                    , (10, TyVar { tnId = fresh, tnBound = Nothing })
                     ]
                 constraint =
                     emptyConstraint
@@ -157,13 +157,13 @@ spec = describe "Phase 4 — Principal Presolution" $ do
 
                 nodes =
                     IntMap.fromList
-                        [ (getNodeId b, TyVar b)
-                        , (getNodeId y, TyVar y)
+                        [ (getNodeId b, TyVar { tnId = b, tnBound = Nothing })
+                        , (getNodeId y, TyVar { tnId = y, tnBound = Nothing })
                         , (getNodeId outerArrow, TyArrow outerArrow y y)
                         , (getNodeId bodyArrow, TyArrow bodyArrow outerArrow b)
                         , (getNodeId forallNode, TyForall forallNode bodyArrow)
                         , (getNodeId expNode, TyExp expNode (ExpVarId 0) forallNode)
-                        , (getNodeId meta, TyVar meta)
+                        , (getNodeId meta, TyVar { tnId = meta, tnBound = Nothing })
                         ]
 
                 -- Binding edges:
@@ -218,8 +218,8 @@ spec = describe "Phase 4 — Principal Presolution" $ do
 
                 nodes =
                     IntMap.fromList
-                        [ (getNodeId y, TyVar y)
-                        , (getNodeId b, TyVar b)
+                        [ (getNodeId y, TyVar { tnId = y, tnBound = Nothing })
+                        , (getNodeId b, TyVar { tnId = b, tnBound = Nothing })
                         , (getNodeId outerArrow, TyArrow outerArrow y y)
                         , (getNodeId bodyArrow, TyArrow bodyArrow y b)
                         ]
@@ -270,10 +270,10 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 body = NodeId 6
                 fresh = NodeId 10
                 nodes = IntMap.fromList
-                    [ (1, TyVar bound)
+                    [ (1, TyVar { tnId = bound, tnBound = Nothing })
                     , (5, TyArrow shared bound bound)    -- shared substructure
                     , (6, TyArrow body shared shared)    -- uses shared twice
-                    , (10, TyVar fresh)
+                    , (10, TyVar { tnId = fresh, tnBound = Nothing })
                     ]
                 constraint =
                     emptyConstraint
@@ -306,10 +306,10 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 body = NodeId 3
                 fresh = NodeId 10
                 nodes = IntMap.fromList
-                    [ (1, TyVar bound)
+                    [ (1, TyVar { tnId = bound, tnBound = Nothing })
                     , (2, TyBase base (BaseTy "int"))
                     , (3, TyArrow body base base)
-                    , (10, TyVar fresh)
+                    , (10, TyVar { tnId = fresh, tnBound = Nothing })
                     ]
                 constraint =
                     emptyConstraint
@@ -335,13 +335,13 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 freshOuter = NodeId 10
                 freshInner = NodeId 11
                 nodes = IntMap.fromList
-                    [ (1, TyVar outer)
-                    , (2, TyVar innerVar)
+                    [ (1, TyVar { tnId = outer, tnBound = Nothing })
+                    , (2, TyVar { tnId = innerVar, tnBound = Nothing })
                     , (3, TyArrow innerBody innerVar outer)
                     , (4, TyForall innerForall innerBody)
                     , (5, TyArrow topBody innerForall innerForall)
-                    , (10, TyVar freshOuter)
-                    , (11, TyVar freshInner)
+                    , (10, TyVar { tnId = freshOuter, tnBound = Nothing })
+                    , (11, TyVar { tnId = freshInner, tnBound = Nothing })
                     ]
                 constraint =
                     emptyConstraint
@@ -381,12 +381,12 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 outerBody = NodeId 5
                 fresh = NodeId 10
                 nodes = IntMap.fromList
-                    [ (1, TyVar bound)
+                    [ (1, TyVar { tnId = bound, tnBound = Nothing })
                     , (2, TyArrow forallBody bound bound)
                     , (3, TyForall forallNode forallBody)
                     , (4, TyExp expNode (ExpVarId 9) forallNode)
                     , (5, TyArrow outerBody expNode expNode)
-                    , (10, TyVar fresh)
+                    , (10, TyVar { tnId = fresh, tnBound = Nothing })
                     ]
                 constraint =
                     emptyConstraint
@@ -430,8 +430,8 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 body = NodeId 99  -- missing
                 fresh = NodeId 10
                 nodes = IntMap.fromList
-                    [ (1, TyVar bound)
-                    , (10, TyVar fresh)
+                    [ (1, TyVar { tnId = bound, tnBound = Nothing })
+                    , (10, TyVar { tnId = fresh, tnBound = Nothing })
                     ]
                 constraint = emptyConstraint { cNodes = nodes }
                 st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntSet.empty IntMap.empty IntMap.empty IntMap.empty
@@ -453,7 +453,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
 
                 nodes =
                     IntMap.fromList
-                        [ (0, TyVar a)
+                        [ (0, TyVar { tnId = a, tnBound = Nothing })
                         , (1, TyArrow arrow a a)
                         , (2, TyForall forallNode arrow)
                         , (3, TyExp expNode (ExpVarId 0) forallNode)
@@ -524,7 +524,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
 
                 nodes =
                     IntMap.fromList
-                        [ (0, TyVar a)
+                        [ (0, TyVar { tnId = a, tnBound = Nothing })
                         , (1, TyArrow arrow a a)
                         , (2, TyForall forallNode arrow)
                         , (3, TyExp expNode (ExpVarId 0) forallNode)
@@ -605,7 +605,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
 
                 nodes =
                     IntMap.fromList
-                        [ (0, TyVar a)
+                        [ (0, TyVar { tnId = a, tnBound = Nothing })
                         , (1, TyArrow arrow a a)
                         , (2, TyForall forallNode arrow)
                         , (3, TyExp expNode (ExpVarId 0) forallNode)
@@ -684,7 +684,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
 
                 nodes =
                     IntMap.fromList
-                        [ (getNodeId a, TyVar a)
+                        [ (getNodeId a, TyVar { tnId = a, tnBound = Nothing })
                         , (getNodeId arrow, TyArrow arrow a a)
                         , (getNodeId forallNode, TyForall forallNode arrow)
                         , (getNodeId expNode, TyExp expNode (ExpVarId 0) forallNode)
@@ -748,13 +748,13 @@ spec = describe "Phase 4 — Principal Presolution" $ do
 
                 nodes =
                     IntMap.fromList
-                        [ (0, TyVar a)
-                        , (1, TyVar b)
+                        [ (0, TyVar { tnId = a, tnBound = Nothing })
+                        , (1, TyVar { tnId = b, tnBound = Nothing })
                         , (2, TyArrow arrow2 b a) -- b -> a
                         , (3, TyArrow arrow1 a arrow2) -- a -> (b -> a)
                         , (4, TyForall forallNode arrow1)
                         , (5, TyExp expNode (ExpVarId 0) forallNode)
-                        , (6, TyVar t)
+                        , (6, TyVar { tnId = t, tnBound = Nothing })
                         , (7, TyArrow targetArrow2 t t) -- t -> t
                         , (8, TyArrow targetArrow1 t targetArrow2) -- t -> (t -> t)
                         ]
@@ -832,9 +832,9 @@ spec = describe "Phase 4 — Principal Presolution" $ do
 
                 nodes =
                     IntMap.fromList
-                        [ (getNodeId t, TyVar t)
-                        , (getNodeId a, TyVar a)
-                        , (getNodeId b, TyVar b)
+                        [ (getNodeId t, TyVar { tnId = t, tnBound = Nothing })
+                        , (getNodeId a, TyVar { tnId = a, tnBound = Nothing })
+                        , (getNodeId b, TyVar { tnId = b, tnBound = Nothing })
                         , (getNodeId arrow, TyArrow arrow a b)
                         , (getNodeId forallNode, TyForall forallNode arrow)
                         , (getNodeId expNode, TyExp expNode (ExpVarId 0) forallNode)
@@ -896,12 +896,12 @@ spec = describe "Phase 4 — Principal Presolution" $ do
 
                 nodes =
                     IntMap.fromList
-                        [ (0, TyVar x)
-                        , (1, TyVar b)
+                        [ (0, TyVar { tnId = x, tnBound = Nothing })
+                        , (1, TyVar { tnId = b, tnBound = Just x })
                         , (2, TyArrow arrow1 b b)
                         , (3, TyForall forallNode arrow1)
                         , (4, TyExp expNode (ExpVarId 0) forallNode)
-                        , (5, TyVar y)
+                        , (5, TyVar { tnId = y, tnBound = Nothing })
                         , (6, TyArrow targetArrow y y)
                         , (7, TyArrow rootArrow expNode targetArrow)
                         ]
@@ -917,7 +917,6 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         { cNodes = nodes
                         , cInstEdges = [edge]
                         , cBindParents = bindParents
-                        , cVarBounds = IntMap.fromList [(getNodeId b, Just x)]
                         }
                 acyclicityRes = AcyclicityResult { arSortedEdges = [edge], arDepGraph = undefined }
 
@@ -964,11 +963,11 @@ spec = describe "Phase 4 — Principal Presolution" $ do
 
                 nodes =
                     IntMap.fromList
-                        [ (1, TyVar b)
+                        [ (1, TyVar { tnId = b, tnBound = Nothing })
                         , (2, TyArrow arrow1 b b)
                         , (3, TyForall forallNode arrow1)
                         , (4, TyExp expNode (ExpVarId 0) forallNode)
-                        , (5, TyVar y)
+                        , (5, TyVar { tnId = y, tnBound = Nothing })
                         , (6, TyArrow targetArrow y y)
                         ]
 
@@ -1034,15 +1033,15 @@ spec = describe "Phase 4 — Principal Presolution" $ do
 
                 nodes =
                     IntMap.fromList
-                        [ (1, TyVar b)
+                        [ (1, TyVar { tnId = b, tnBound = Nothing })
                         , (2, TyArrow arrow1 b b)
                         , (3, TyForall forallNode arrow1)
                         , (4, TyExp expNode (ExpVarId 0) forallNode)
-                        , (5, TyVar y)
+                        , (5, TyVar { tnId = y, tnBound = Nothing })
                         , (6, TyArrow targetArrow y y)
                         ]
 
-                -- Binding edges model scope: the binder TyVar is flexibly bound
+                -- Binding edges model scope: the binder TyVar { tnId = is, tnBound = Nothing } flexibly bound
                 -- directly to its `TyForall` node (paper Q(n)).
                 bindParents =
                     IntMap.fromList
@@ -1109,8 +1108,8 @@ spec = describe "Phase 4 — Principal Presolution" $ do
 
                 nodes =
                     IntMap.fromList
-                        [ (getNodeId a, TyVar a)
-                        , (getNodeId b, TyVar b)
+                        [ (getNodeId a, TyVar { tnId = a, tnBound = Nothing })
+                        , (getNodeId b, TyVar { tnId = b, tnBound = Just a })
                         , (getNodeId arrow, TyArrow arrow a b)
                         , (getNodeId forallNode, TyForall forallNode arrow)
                         , (getNodeId expNode, TyExp expNode (ExpVarId 0) forallNode)
@@ -1131,7 +1130,6 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         { cNodes = nodes
                         , cInstEdges = [edge]
                         , cBindParents = bindParents
-                        , cVarBounds = IntMap.fromList [(getNodeId b, Just a)]
                         }
                 st0 =
                     PresolutionState
@@ -1180,7 +1178,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 nodes = IntMap.fromList
                     [ (0, TyExp expNodeId (ExpVarId 0) forallId)
                     , (1, TyForall forallId binderId)
-                    , (2, TyVar binderId)
+                    , (2, TyVar { tnId = binderId, tnBound = Nothing })
                     ]
                 constraint =
                     emptyConstraint
@@ -1206,7 +1204,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 bodyId = NodeId 1
                 nodes = IntMap.fromList
                     [ (0, TyExp expNodeId (ExpVarId 0) bodyId)
-                    , (1, TyVar bodyId)
+                    , (1, TyVar { tnId = bodyId, tnBound = Nothing })
                     ]
                 constraint =
                     emptyConstraint
@@ -1271,8 +1269,8 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                     IntMap.fromList
                         [ (getNodeId root, TyRoot root [parent, arg])
                         , (getNodeId parent, TyArrow parent child child)
-                        , (getNodeId child, TyVar child)
-                        , (getNodeId arg, TyVar arg)
+                        , (getNodeId child, TyVar { tnId = child, tnBound = Nothing })
+                        , (getNodeId arg, TyVar { tnId = arg, tnBound = Nothing })
                         ]
                 bindParents =
                     IntMap.fromList
@@ -1382,8 +1380,8 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                     IntMap.fromList
                         [ (getNodeId root, TyForall root parent)
                         , (getNodeId parent, TyForall parent child)
-                        , (getNodeId child, TyVar child)
-                        , (getNodeId sibling, TyVar sibling)
+                        , (getNodeId child, TyVar { tnId = child, tnBound = Nothing })
+                        , (getNodeId sibling, TyVar { tnId = sibling, tnBound = Nothing })
                         ]
                 bindParents =
                     IntMap.fromList
@@ -1489,7 +1487,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         IntMap.fromList
                             [ (getNodeId root, TyForall root parent)
                             , (getNodeId parent, TyForall parent child)
-                            , (getNodeId child, TyVar child)
+                            , (getNodeId child, TyVar { tnId = child, tnBound = Nothing })
                             ]
                     bindParents =
                         IntMap.fromList
@@ -1510,7 +1508,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         IntMap.fromList
                             [ (getNodeId root, TyForall root parent)
                             , (getNodeId parent, TyForall parent child)
-                            , (getNodeId child, TyVar child)
+                            , (getNodeId child, TyVar { tnId = child, tnBound = Nothing })
                             ]
                     bindParents =
                         IntMap.fromList
@@ -1561,7 +1559,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                             [ (getNodeId root, TyRoot root [mid])
                             , (getNodeId mid, TyArrow mid n base)
                             , (getNodeId n, TyArrow n v base)
-                            , (getNodeId v, TyVar v)
+                            , (getNodeId v, TyVar { tnId = v, tnBound = Nothing })
                             , (getNodeId base, TyBase base (BaseTy "int"))
                             ]
                     bindParents =
@@ -1612,7 +1610,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                             [ (getNodeId root, TyRoot root [mid])
                             , (getNodeId mid, TyArrow mid n base)
                             , (getNodeId n, TyArrow n v base)
-                            , (getNodeId v, TyVar v)
+                            , (getNodeId v, TyVar { tnId = v, tnBound = Nothing })
                             , (getNodeId base, TyBase base (BaseTy "int"))
                             ]
                     bindParents =
@@ -1674,7 +1672,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 rootId = NodeId 7
                 nodes =
                     IntMap.fromList
-                        [ (0, TyVar varId)
+                        [ (0, TyVar { tnId = varId, tnBound = Nothing })
                         , (1, TyArrow arrowId varId varId)
                         , (2, TyForall forallId arrowId)
                         , (3, TyBase targetDomId (BaseTy "int"))
@@ -1685,7 +1683,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         ]
                 edge = InstEdge (EdgeId 0) expNodeId targetArrowId
                 -- Make the forall non-vacuous under binding-edge binder enumeration:
-                -- bind the TyVar directly to the forall node (flex).
+                -- bind the TyVar { tnId = directly, tnBound = Nothing } to the forall node (flex).
                 bindParents0 = inferBindParents nodes
                 bindParents =
                     IntMap.insert (getNodeId varId) (forallId, BindFlex) bindParents0
@@ -1726,10 +1724,10 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 expNodeId = NodeId 6
 
                 nodes = IntMap.fromList
-                    [ (0, TyVar srcVarId)
+                    [ (0, TyVar { tnId = srcVarId, tnBound = Nothing })
                     , (1, TyForall srcForallId srcVarId)
-                    , (2, TyVar tgtDomId)
-                    , (3, TyVar tgtCodId)
+                    , (2, TyVar { tnId = tgtDomId, tnBound = Nothing })
+                    , (3, TyVar { tnId = tgtCodId, tnBound = Nothing })
                     , (4, TyArrow tgtArrowId tgtDomId tgtCodId)
                     , (5, TyForall tgtForallId tgtArrowId)
                     , (6, TyExp expNodeId (ExpVarId 0) srcForallId)
@@ -1771,9 +1769,9 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 rootId = NodeId 5
                 nodes =
                     IntMap.fromList
-                        [ (0, TyVar srcVarId)
+                        [ (0, TyVar { tnId = srcVarId, tnBound = Nothing })
                         , (1, TyForall srcForallId srcVarId)
-                        , (2, TyVar tgtVarId)
+                        , (2, TyVar { tnId = tgtVarId, tnBound = Nothing })
                         , (3, TyForall tgtForallId tgtVarId)
                         , (4, TyExp expNodeId (ExpVarId 0) srcForallId)
                         , (5, TyArrow rootId expNodeId tgtForallId)
@@ -1817,10 +1815,10 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 tgtForallId = NodeId 5
 
                 nodes = IntMap.fromList
-                    [ (getNodeId boundVarId, TyVar boundVarId)
+                    [ (getNodeId boundVarId, TyVar { tnId = boundVarId, tnBound = Nothing })
                     , (getNodeId srcForallId, TyForall srcForallId boundVarId)
                     , (getNodeId srcExpId, TyExp srcExpId (ExpVarId 0) srcForallId)
-                    , (getNodeId tgtBinderId, TyVar tgtBinderId)
+                    , (getNodeId tgtBinderId, TyVar { tnId = tgtBinderId, tnBound = Nothing })
                     , (getNodeId tgtBodyId, TyArrow tgtBodyId tgtBinderId srcExpId)
                     , (getNodeId tgtForallId, TyForall tgtForallId tgtBodyId)
                     ]
@@ -1893,9 +1891,9 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 expNodeId = NodeId 4
 
                 nodes = IntMap.fromList
-                    [ (0, TyVar srcVarId)
+                    [ (0, TyVar { tnId = srcVarId, tnBound = Nothing })
                     , (1, TyForall srcForallId srcVarId)
-                    , (2, TyVar tgtVarId)
+                    , (2, TyVar { tnId = tgtVarId, tnBound = Nothing })
                     , (3, TyForall tgtForallId tgtVarId)
                     , (4, TyExp expNodeId (ExpVarId 0) srcForallId)
                     ]
@@ -1955,7 +1953,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 nodes = IntMap.fromList
                     [ (0, TyExp expNodeId (ExpVarId 0) forallId)
                     , (1, TyForall forallId boundId)
-                    , (2, TyVar boundId)
+                    , (2, TyVar { tnId = boundId, tnBound = Nothing })
                     ]
                 constraint =
                     emptyConstraint
@@ -2002,8 +2000,8 @@ spec = describe "Phase 4 — Principal Presolution" $ do
 
                 nodes =
                     IntMap.fromList
-                        [ (0, TyVar domVarId)
-                        , (1, TyVar codVarId)
+                        [ (0, TyVar { tnId = domVarId, tnBound = Nothing })
+                        , (1, TyVar { tnId = codVarId, tnBound = Nothing })
                         , (2, TyArrow arrowId domVarId codVarId)
                         , (3, TyExp expNodeId (ExpVarId 0) arrowId)
                         , (4, TyBase bndId (BaseTy "int"))
@@ -2040,7 +2038,10 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                     let c1 = psConstraint st1
                         nodes1 = cNodes c1
                         bp1 = cBindParents c1
-                        vb1 = cVarBounds c1
+                        boundOf nid =
+                            case IntMap.lookup (getNodeId nid) nodes1 of
+                                Just TyVar{ tnBound = mb } -> mb
+                                _ -> Nothing
 
                     forallNode <- expectForall nodes1 forallId
                     tnBody forallNode `shouldBe` arrowId
@@ -2049,8 +2050,8 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                     IntMap.lookup (getNodeId domVarId) bp1 `shouldBe` Just (forallId, BindFlex)
                     IntMap.lookup (getNodeId codVarId) bp1 `shouldBe` Just (forallId, BindFlex)
 
-                    IntMap.lookup (getNodeId domVarId) vb1 `shouldBe` Just (Just codVarId)
-                    IntMap.lookup (getNodeId codVarId) vb1 `shouldBe` Just (Just bndId)
+                    boundOf domVarId `shouldBe` Just codVarId
+                    boundOf codVarId `shouldBe` Just bndId
 
                     case Binding.orderedBinders id c1 forallId of
                         Left err -> expectationFailure $ "orderedBinders failed: " ++ show err
@@ -2067,7 +2068,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 rootId = NodeId 8
                 nodes =
                     IntMap.fromList
-                        [ (0, TyVar varId)
+                        [ (0, TyVar { tnId = varId, tnBound = Nothing })
                         , (1, TyForall forallId varId)
                         , (2, TyBase target1Id (BaseTy "int"))
                         , (3, TyBase target2Id (BaseTy "bool"))
@@ -2107,7 +2108,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 rootId = NodeId 4
                 nodes =
                     IntMap.fromList
-                        [ (0, TyVar boundId)
+                        [ (0, TyVar { tnId = boundId, tnBound = Nothing })
                         , (1, TyForall forallId boundId)
                         , (2, TyExp expNodeId (ExpVarId 0) forallId)
                         , (3, TyBase targetId (BaseTy "int"))
@@ -2140,7 +2141,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 rootId = NodeId 4
                 nodes =
                     IntMap.fromList
-                        [ (0, TyVar bound)
+                        [ (0, TyVar { tnId = bound, tnBound = Nothing })
                         , (1, TyForall forallId bound)
                         , (2, TyExp expId (ExpVarId 0) forallId)
                         , (3, TyBase targetId (BaseTy "int"))
@@ -2175,8 +2176,8 @@ spec = describe "Phase 4 — Principal Presolution" $ do
 
                 nodes =
                     IntMap.fromList
-                        [ (getNodeId n, TyVar n)
-                        , (getNodeId m, TyVar m)
+                        [ (getNodeId n, TyVar { tnId = n, tnBound = Nothing })
+                        , (getNodeId m, TyVar { tnId = m, tnBound = Nothing })
                         , (getNodeId binder, TyForall binder n)
                         , (getNodeId rootArrow, TyArrow rootArrow binder m)
                         ]
@@ -2230,10 +2231,10 @@ spec = describe "Phase 4 — Principal Presolution" $ do
 
                 nodes =
                     IntMap.fromList
-                        [ (getNodeId a, TyVar a)
+                        [ (getNodeId a, TyVar { tnId = a, tnBound = Nothing })
                         -- b is a term-dag root (unbound) but is unioned into a's class.
-                        , (getNodeId b, TyVar b)
-                        , (getNodeId c, TyVar c)
+                        , (getNodeId b, TyVar { tnId = b, tnBound = Nothing })
+                        , (getNodeId c, TyVar { tnId = c, tnBound = Nothing })
                         , (getNodeId forallNode, TyForall forallNode a)
                         , (getNodeId rootArrow, TyArrow rootArrow forallNode c)
                         ]
@@ -2287,11 +2288,11 @@ spec = describe "Phase 4 — Principal Presolution" $ do
 
                 nodes =
                     IntMap.fromList
-                        [ (1, TyVar b)
+                        [ (1, TyVar { tnId = b, tnBound = Nothing })
                         , (2, TyArrow arrow1 b b)
                         , (3, TyForall forallNode arrow1)
                         , (4, TyExp expNode (ExpVarId 0) forallNode)
-                        , (5, TyVar y)
+                        , (5, TyVar { tnId = y, tnBound = Nothing })
                         , (6, TyArrow targetArrow y y)
                         ]
 
@@ -2334,11 +2335,11 @@ spec = describe "Phase 4 — Principal Presolution" $ do
 
                 nodes =
                     IntMap.fromList
-                        [ (1, TyVar b)
+                        [ (1, TyVar { tnId = b, tnBound = Nothing })
                         , (2, TyArrow arrow1 b b)
                         , (3, TyForall forallNode arrow1)
                         , (4, TyExp expNode (ExpVarId 0) forallNode)
-                        , (5, TyVar y)
+                        , (5, TyVar { tnId = y, tnBound = Nothing })
                         , (6, TyArrow targetArrow y y)
                         ]
 
@@ -2399,12 +2400,12 @@ spec = describe "Phase 4 — Principal Presolution" $ do
 
                 nodes =
                     IntMap.fromList
-                        [ (0, TyVar a)
+                        [ (0, TyVar { tnId = a, tnBound = Nothing })
                         , (1, TyBase intNode (BaseTy "Int"))
                         , (2, TyArrow innerArrow a intNode)
                         , (3, TyForall forallNode innerArrow)
                         , (4, TyExp expNode (ExpVarId 0) forallNode)
-                        , (5, TyVar y)
+                        , (5, TyVar { tnId = y, tnBound = Nothing })
                         , (6, TyArrow targetArrow y intNode)
                         ]
 
@@ -2470,12 +2471,12 @@ spec = describe "Phase 4 — Principal Presolution" $ do
 
                 nodes =
                     IntMap.fromList
-                        [ (getNodeId bv, TyVar bv)
+                        [ (getNodeId bv, TyVar { tnId = bv, tnBound = Nothing })
                         , (getNodeId innerArrow, TyArrow innerArrow bv bv)
                         , (getNodeId outerArrow, TyArrow outerArrow innerArrow bv)
                         , (getNodeId forallNode, TyForall forallNode outerArrow)
                         , (getNodeId expNode, TyExp expNode (ExpVarId 0) forallNode)
-                        , (getNodeId y, TyVar y)
+                        , (getNodeId y, TyVar { tnId = y, tnBound = Nothing })
                         , (getNodeId targetInnerArrow, TyArrow targetInnerArrow y y)
                         , (getNodeId targetOuterArrow, TyArrow targetOuterArrow targetInnerArrow y)
                         , (getNodeId rootArrow, TyArrow rootArrow expNode targetOuterArrow)
@@ -2549,8 +2550,8 @@ spec = describe "Phase 4 — Principal Presolution" $ do
 
                 nodes =
                     IntMap.fromList
-                        [ (getNodeId a, TyVar a)
-                        , (getNodeId b, TyVar b)
+                        [ (getNodeId a, TyVar { tnId = a, tnBound = Nothing })
+                        , (getNodeId b, TyVar { tnId = b, tnBound = Nothing })
                         , (getNodeId p1, TyForall p1 a)
                         , (getNodeId p2, TyForall p2 b)
                         , (getNodeId r, TyArrow r p1 p2)
@@ -2613,12 +2614,12 @@ spec = describe "Phase 4 — Principal Presolution" $ do
 
                 nodes =
                     IntMap.fromList
-                        [ (0, TyVar a)
+                        [ (0, TyVar { tnId = a, tnBound = Nothing })
                         , (1, TyBase intNode (BaseTy "Int"))
                         , (2, TyArrow arrow a intNode)
                         , (3, TyForall forallNode arrow)
                         , (4, TyExp expNode (ExpVarId 0) forallNode)
-                        , (5, TyVar y)
+                        , (5, TyVar { tnId = y, tnBound = Nothing })
                         , (6, TyArrow targetArrow y intNode)
                         ]
 
@@ -2684,8 +2685,8 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                                 ]
                                     ++ leftForalls
                                     ++ rightForalls
-                                    ++ [ (leftVarId, TyVar (NodeId leftVarId))
-                                       , (rightVarId, TyVar (NodeId rightVarId))
+                                    ++ [ (leftVarId, TyVar { tnId = NodeId leftVarId, tnBound = Nothing })
+                                       , (rightVarId, TyVar { tnId = NodeId rightVarId, tnBound = Nothing })
                                        ]
 
                         bindParents =

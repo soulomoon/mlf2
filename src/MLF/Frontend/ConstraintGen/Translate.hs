@@ -183,9 +183,9 @@ Example:
   λx. λy. x y
 
   Generates (under binding node g₀):
-    - α : TyVar bound under g₀ (for x)
-    - β : TyVar bound under g₀ (for y)
-    - γ : TyVar bound under g₀ (result of application)
+    - α : TyVar { tnId = bound, tnBound = Nothing } under g₀ (for x)
+    - β : TyVar { tnId = bound, tnBound = Nothing } under g₀ (for y)
+    - γ : TyVar { tnId = bound, tnBound = Nothing } under g₀ (result of application)
     - (β → γ) : TyArrow
     - InstEdge: α ≤ (β → γ)
     - (α → (β → γ)) : TyArrow (final type)

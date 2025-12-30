@@ -17,8 +17,8 @@ spec = describe "Phase 3 — Acyclicity Check" $ do
 
         it "single InstEdge is acyclic" $ do
             let nodes = IntMap.fromList
-                    [ (0, TyVar (NodeId 0))
-                    , (1, TyVar (NodeId 1))
+                    [ (0, TyVar { tnId = NodeId 0, tnBound = Nothing })
+                    , (1, TyVar { tnId = NodeId 1, tnBound = Nothing })
                     ]
                 edge = InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)
                 constraint = emptyConstraint
@@ -36,10 +36,10 @@ spec = describe "Phase 3 — Acyclicity Check" $ do
         it "two edges on disjoint nodes are acyclic" $ do
             -- α ≤ β and γ ≤ δ share no nodes
             let nodes = IntMap.fromList
-                    [ (0, TyVar (NodeId 0))
-                    , (1, TyVar (NodeId 1))
-                    , (2, TyVar (NodeId 2))
-                    , (3, TyVar (NodeId 3))
+                    [ (0, TyVar { tnId = NodeId 0, tnBound = Nothing })
+                    , (1, TyVar { tnId = NodeId 1, tnBound = Nothing })
+                    , (2, TyVar { tnId = NodeId 2, tnBound = Nothing })
+                    , (3, TyVar { tnId = NodeId 3, tnBound = Nothing })
                     ]
                 edges =
                     [ InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)  -- α ≤ β
@@ -56,7 +56,7 @@ spec = describe "Phase 3 — Acyclicity Check" $ do
 
         it "three independent edges return all in sorted order" $ do
             let nodes = IntMap.fromList
-                    [ (i, TyVar (NodeId i)) | i <- [0..5]
+                    [ (i, TyVar { tnId = NodeId i, tnBound = Nothing }) | i <- [0..5]
                     ]
                 edges =
                     [ InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)
@@ -78,9 +78,9 @@ spec = describe "Phase 3 — Acyclicity Check" $ do
             -- e₁ depends on e₂ (e₂'s left ∩ e₁'s right = {β})
             -- Order should be: e₂ before e₁
             let nodes = IntMap.fromList
-                    [ (0, TyVar (NodeId 0))  -- α
-                    , (1, TyVar (NodeId 1))  -- β
-                    , (2, TyVar (NodeId 2))  -- γ
+                    [ (0, TyVar { tnId = NodeId 0, tnBound = Nothing })  -- α
+                    , (1, TyVar { tnId = NodeId 1, tnBound = Nothing })  -- β
+                    , (2, TyVar { tnId = NodeId 2, tnBound = Nothing })  -- γ
                     ]
                 e1 = InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)  -- α ≤ β
                 e2 = InstEdge (EdgeId 1) (NodeId 1) (NodeId 2)  -- β ≤ γ
@@ -107,7 +107,7 @@ spec = describe "Phase 3 — Acyclicity Check" $ do
 
         it "longer chain α ≤ β ≤ γ ≤ δ is acyclic" $ do
             let nodes = IntMap.fromList
-                    [ (i, TyVar (NodeId i)) | i <- [0..3]
+                    [ (i, TyVar { tnId = NodeId i, tnBound = Nothing }) | i <- [0..3]
                     ]
                 edges =
                     [ InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)  -- α ≤ β
@@ -130,9 +130,9 @@ spec = describe "Phase 3 — Acyclicity Check" $ do
             -- Why? Solving e₂ may modify β, which e₁'s RHS references.
             -- Therefore e₂ must be processed first.
             let nodes = IntMap.fromList
-                    [ (0, TyVar (NodeId 0))  -- α
-                    , (1, TyVar (NodeId 1))  -- β
-                    , (2, TyVar (NodeId 2))  -- γ
+                    [ (0, TyVar { tnId = NodeId 0, tnBound = Nothing })  -- α
+                    , (1, TyVar { tnId = NodeId 1, tnBound = Nothing })  -- β
+                    , (2, TyVar { tnId = NodeId 2, tnBound = Nothing })  -- γ
                     , (3, TyBase (NodeId 3) (BaseTy "Int"))
                     , (4, TyArrow (NodeId 4) (NodeId 1) (NodeId 3))  -- β → Int
                     ]
@@ -155,9 +155,9 @@ spec = describe "Phase 3 — Acyclicity Check" $ do
             -- e₁: α ≤ (Int → β)  (right side reaches β)
             -- e₂: β ≤ γ          (left side is β)
             let nodes = IntMap.fromList
-                    [ (0, TyVar (NodeId 0))  -- α
-                    , (1, TyVar (NodeId 1))  -- β
-                    , (2, TyVar (NodeId 2))  -- γ
+                    [ (0, TyVar { tnId = NodeId 0, tnBound = Nothing })  -- α
+                    , (1, TyVar { tnId = NodeId 1, tnBound = Nothing })  -- β
+                    , (2, TyVar { tnId = NodeId 2, tnBound = Nothing })  -- γ
                     , (3, TyBase (NodeId 3) (BaseTy "Int"))
                     , (4, TyArrow (NodeId 4) (NodeId 3) (NodeId 1))  -- Int → β
                     ]
@@ -170,9 +170,9 @@ spec = describe "Phase 3 — Acyclicity Check" $ do
             -- α ≤ ((β → Int) → Bool)
             -- β ≤ γ
             let nodes = IntMap.fromList
-                    [ (0, TyVar (NodeId 0))  -- α
-                    , (1, TyVar (NodeId 1))  -- β
-                    , (2, TyVar (NodeId 2))  -- γ
+                    [ (0, TyVar { tnId = NodeId 0, tnBound = Nothing })  -- α
+                    , (1, TyVar { tnId = NodeId 1, tnBound = Nothing })  -- β
+                    , (2, TyVar { tnId = NodeId 2, tnBound = Nothing })  -- γ
                     , (3, TyBase (NodeId 3) (BaseTy "Int"))
                     , (4, TyBase (NodeId 4) (BaseTy "Bool"))
                     , (5, TyArrow (NodeId 5) (NodeId 1) (NodeId 3))  -- β → Int
@@ -191,8 +191,8 @@ spec = describe "Phase 3 — Acyclicity Check" $ do
             -- e₂ depends on e₁ (e₁.left = α, e₂.right = α → intersection)
             -- This is a cycle!
             let nodes = IntMap.fromList
-                    [ (0, TyVar (NodeId 0))  -- α
-                    , (1, TyVar (NodeId 1))  -- β
+                    [ (0, TyVar { tnId = NodeId 0, tnBound = Nothing })  -- α
+                    , (1, TyVar { tnId = NodeId 1, tnBound = Nothing })  -- β
                     ]
                 e1 = InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)  -- α ≤ β
                 e2 = InstEdge (EdgeId 1) (NodeId 1) (NodeId 0)  -- β ≤ α
@@ -203,9 +203,9 @@ spec = describe "Phase 3 — Acyclicity Check" $ do
             -- e₁: α ≤ β, e₂: β ≤ γ, e₃: γ ≤ α
             -- Forms a cycle: e₁ → e₂ → e₃ → e₁
             let nodes = IntMap.fromList
-                    [ (0, TyVar (NodeId 0))  -- α
-                    , (1, TyVar (NodeId 1))  -- β
-                    , (2, TyVar (NodeId 2))  -- γ
+                    [ (0, TyVar { tnId = NodeId 0, tnBound = Nothing })  -- α
+                    , (1, TyVar { tnId = NodeId 1, tnBound = Nothing })  -- β
+                    , (2, TyVar { tnId = NodeId 2, tnBound = Nothing })  -- γ
                     ]
                 e1 = InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)  -- α ≤ β
                 e2 = InstEdge (EdgeId 1) (NodeId 1) (NodeId 2)  -- β ≤ γ
@@ -215,8 +215,8 @@ spec = describe "Phase 3 — Acyclicity Check" $ do
 
         it "returns cycle edges in error" $ do
             let nodes = IntMap.fromList
-                    [ (0, TyVar (NodeId 0))
-                    , (1, TyVar (NodeId 1))
+                    [ (0, TyVar { tnId = NodeId 0, tnBound = Nothing })
+                    , (1, TyVar { tnId = NodeId 1, tnBound = Nothing })
                     ]
                 e1 = InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)
                 e2 = InstEdge (EdgeId 1) (NodeId 1) (NodeId 0)
@@ -233,8 +233,8 @@ spec = describe "Phase 3 — Acyclicity Check" $ do
             -- Cycle because e₁.right reaches β and e₂.left is β,
             -- and e₂.right reaches α and e₁.left is α
             let nodes = IntMap.fromList
-                    [ (0, TyVar (NodeId 0))  -- α
-                    , (1, TyVar (NodeId 1))  -- β
+                    [ (0, TyVar { tnId = NodeId 0, tnBound = Nothing })  -- α
+                    , (1, TyVar { tnId = NodeId 1, tnBound = Nothing })  -- β
                     , (2, TyBase (NodeId 2) (BaseTy "Int"))
                     , (3, TyArrow (NodeId 3) (NodeId 1) (NodeId 2))  -- β → Int
                     , (4, TyArrow (NodeId 4) (NodeId 0) (NodeId 2))  -- α → Int
@@ -249,10 +249,10 @@ spec = describe "Phase 3 — Acyclicity Check" $ do
             -- Independent: γ ≤ δ (no cycle)
             -- Cycle: α ≤ β, β ≤ α
             let nodes = IntMap.fromList
-                    [ (0, TyVar (NodeId 0))  -- α
-                    , (1, TyVar (NodeId 1))  -- β
-                    , (2, TyVar (NodeId 2))  -- γ
-                    , (3, TyVar (NodeId 3))  -- δ
+                    [ (0, TyVar { tnId = NodeId 0, tnBound = Nothing })  -- α
+                    , (1, TyVar { tnId = NodeId 1, tnBound = Nothing })  -- β
+                    , (2, TyVar { tnId = NodeId 2, tnBound = Nothing })  -- γ
+                    , (3, TyVar { tnId = NodeId 3, tnBound = Nothing })  -- δ
                     ]
                 edges =
                     [ InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)  -- α ≤ β (cycle)
@@ -268,9 +268,9 @@ spec = describe "Phase 3 — Acyclicity Check" $ do
             -- e₂: β ≤ γ      (left side is β)
             -- e₁ depends on e₂
             let nodes = IntMap.fromList
-                    [ (0, TyVar (NodeId 0))  -- α
-                    , (1, TyVar (NodeId 1))  -- β (at inner level)
-                    , (2, TyVar (NodeId 2))  -- γ
+                    [ (0, TyVar { tnId = NodeId 0, tnBound = Nothing })  -- α
+                    , (1, TyVar { tnId = NodeId 1, tnBound = Nothing })  -- β (at inner level)
+                    , (2, TyVar { tnId = NodeId 2, tnBound = Nothing })  -- γ
                     , (3, TyForall (NodeId 3) (NodeId 1))  -- ∀g.β
                     ]
                 e1 = InstEdge (EdgeId 0) (NodeId 0) (NodeId 3)  -- α ≤ ∀g.β
@@ -292,8 +292,8 @@ spec = describe "Phase 3 — Acyclicity Check" $ do
             -- e₂: β ≤ ∀g.α  (reaches α)
             -- Cycle!
             let nodes = IntMap.fromList
-                    [ (0, TyVar (NodeId 0))  -- α
-                    , (1, TyVar (NodeId 1))  -- β
+                    [ (0, TyVar { tnId = NodeId 0, tnBound = Nothing })  -- α
+                    , (1, TyVar { tnId = NodeId 1, tnBound = Nothing })  -- β
                     , (2, TyForall (NodeId 2) (NodeId 1))  -- ∀g.β
                     , (3, TyForall (NodeId 3) (NodeId 0))  -- ∀g.α
                     ]
@@ -308,9 +308,9 @@ spec = describe "Phase 3 — Acyclicity Check" $ do
             -- e₂: β ≤ γ        (left side is β)
             -- e₁ depends on e₂
             let nodes = IntMap.fromList
-                    [ (0, TyVar (NodeId 0))  -- α
-                    , (1, TyVar (NodeId 1))  -- β
-                    , (2, TyVar (NodeId 2))  -- γ
+                    [ (0, TyVar { tnId = NodeId 0, tnBound = Nothing })  -- α
+                    , (1, TyVar { tnId = NodeId 1, tnBound = Nothing })  -- β
+                    , (2, TyVar { tnId = NodeId 2, tnBound = Nothing })  -- γ
                     , (3, TyExp (NodeId 3) (ExpVarId 0) (NodeId 1))  -- s · β
                     ]
                 e1 = InstEdge (EdgeId 0) (NodeId 0) (NodeId 3)  -- α ≤ (s · β)
@@ -332,8 +332,8 @@ spec = describe "Phase 3 — Acyclicity Check" $ do
             -- e₂: β ≤ (s · α)
             -- Cycle!
             let nodes = IntMap.fromList
-                    [ (0, TyVar (NodeId 0))  -- α
-                    , (1, TyVar (NodeId 1))  -- β
+                    [ (0, TyVar { tnId = NodeId 0, tnBound = Nothing })  -- α
+                    , (1, TyVar { tnId = NodeId 1, tnBound = Nothing })  -- β
                     , (2, TyExp (NodeId 2) (ExpVarId 0) (NodeId 1))  -- s · β
                     , (3, TyExp (NodeId 3) (ExpVarId 0) (NodeId 0))  -- s · α
                     ]
@@ -350,10 +350,10 @@ spec = describe "Phase 3 — Acyclicity Check" $ do
             -- e₄: γ ≤ δ
             -- Multiple paths to δ but no cycle
             let nodes = IntMap.fromList
-                    [ (0, TyVar (NodeId 0))  -- α
-                    , (1, TyVar (NodeId 1))  -- β
-                    , (2, TyVar (NodeId 2))  -- γ
-                    , (3, TyVar (NodeId 3))  -- δ
+                    [ (0, TyVar { tnId = NodeId 0, tnBound = Nothing })  -- α
+                    , (1, TyVar { tnId = NodeId 1, tnBound = Nothing })  -- β
+                    , (2, TyVar { tnId = NodeId 2, tnBound = Nothing })  -- γ
+                    , (3, TyVar { tnId = NodeId 3, tnBound = Nothing })  -- δ
                     ]
                 edges =
                     [ InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)  -- α ≤ β
@@ -370,10 +370,10 @@ spec = describe "Phase 3 — Acyclicity Check" $ do
         it "diamond with additional back edge creates cycle" $ do
             -- Same as above but add δ ≤ α creating cycle
             let nodes = IntMap.fromList
-                    [ (0, TyVar (NodeId 0))  -- α
-                    , (1, TyVar (NodeId 1))  -- β
-                    , (2, TyVar (NodeId 2))  -- γ
-                    , (3, TyVar (NodeId 3))  -- δ
+                    [ (0, TyVar { tnId = NodeId 0, tnBound = Nothing })  -- α
+                    , (1, TyVar { tnId = NodeId 1, tnBound = Nothing })  -- β
+                    , (2, TyVar { tnId = NodeId 2, tnBound = Nothing })  -- γ
+                    , (3, TyVar { tnId = NodeId 3, tnBound = Nothing })  -- δ
                     ]
                 edges =
                     [ InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)  -- α ≤ β
@@ -391,9 +391,9 @@ spec = describe "Phase 3 — Acyclicity Check" $ do
             -- e₂: γ ≤ β
             -- Both share β on right, but neither modifies the other's input
             let nodes = IntMap.fromList
-                    [ (0, TyVar (NodeId 0))  -- α
-                    , (1, TyVar (NodeId 1))  -- β
-                    , (2, TyVar (NodeId 2))  -- γ
+                    [ (0, TyVar { tnId = NodeId 0, tnBound = Nothing })  -- α
+                    , (1, TyVar { tnId = NodeId 1, tnBound = Nothing })  -- β
+                    , (2, TyVar { tnId = NodeId 2, tnBound = Nothing })  -- γ
                     ]
                 e1 = InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)  -- α ≤ β
                 e2 = InstEdge (EdgeId 1) (NodeId 2) (NodeId 1)  -- γ ≤ β
@@ -416,9 +416,9 @@ spec = describe "Phase 3 — Acyclicity Check" $ do
             -- e₂.right=γ, e₁.left=α → no dep
             -- Actually no cycle! They're independent.
             let nodes = IntMap.fromList
-                    [ (0, TyVar (NodeId 0))  -- α
-                    , (1, TyVar (NodeId 1))  -- β
-                    , (2, TyVar (NodeId 2))  -- γ
+                    [ (0, TyVar { tnId = NodeId 0, tnBound = Nothing })  -- α
+                    , (1, TyVar { tnId = NodeId 1, tnBound = Nothing })  -- β
+                    , (2, TyVar { tnId = NodeId 2, tnBound = Nothing })  -- γ
                     ]
                 e1 = InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)  -- α ≤ β
                 e2 = InstEdge (EdgeId 1) (NodeId 0) (NodeId 2)  -- α ≤ γ
@@ -430,7 +430,7 @@ spec = describe "Phase 3 — Acyclicity Check" $ do
             -- α ≤ α: left=α, right=α
             -- Dependency check: e.left ∩ e.right = {α} ≠ ∅
             -- But we filter out self-loops in dependency graph construction
-            let nodes = IntMap.singleton 0 (TyVar (NodeId 0))
+            let nodes = IntMap.singleton 0 (TyVar { tnId = NodeId 0, tnBound = Nothing })
                 edge = InstEdge (EdgeId 0) (NodeId 0) (NodeId 0)  -- α ≤ α
                 constraint = emptyConstraint { cNodes = nodes, cInstEdges = [edge] }
             checkAcyclicity constraint `shouldSatisfy` isRight
@@ -438,7 +438,7 @@ spec = describe "Phase 3 — Acyclicity Check" $ do
     describe "Edge cases" $ do
         it "missing node in IntMap is handled gracefully" $ do
             -- InstEdge references NodeId 99 which doesn't exist
-            let nodes = IntMap.singleton 0 (TyVar (NodeId 0))
+            let nodes = IntMap.singleton 0 (TyVar { tnId = NodeId 0, tnBound = Nothing })
                 edge = InstEdge (EdgeId 0) (NodeId 0) (NodeId 99)  -- 99 doesn't exist
                 constraint = emptyConstraint { cNodes = nodes, cInstEdges = [edge] }
             -- Should still be acyclic (missing node has no children)
@@ -448,7 +448,7 @@ spec = describe "Phase 3 — Acyclicity Check" $ do
             -- e₁: α ≤ β, e₂: β ≤ γ, e₃: γ ≤ δ
             -- Order should be: e₃, e₂, e₁ (dependencies first)
             let nodes = IntMap.fromList
-                    [ (i, TyVar (NodeId i)) | i <- [0..3]
+                    [ (i, TyVar { tnId = NodeId i, tnBound = Nothing }) | i <- [0..3]
                     ]
                 e1 = InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)  -- α ≤ β
                 e2 = InstEdge (EdgeId 1) (NodeId 1) (NodeId 2)  -- β ≤ γ
@@ -474,7 +474,7 @@ spec = describe "Phase 3 — Acyclicity Check" $ do
             collectReachableNodes nodes (NodeId 0) `shouldBe` intSetFromList [0]
 
         it "returns singleton for isolated variable" $ do
-            let nodes = IntMap.singleton 0 (TyVar (NodeId 0))
+            let nodes = IntMap.singleton 0 (TyVar { tnId = NodeId 0, tnBound = Nothing })
             collectReachableNodes nodes (NodeId 0) `shouldBe` intSetFromList [0]
 
         it "traverses arrow domain and codomain" $ do
@@ -491,7 +491,7 @@ spec = describe "Phase 3 — Acyclicity Check" $ do
                     , (1, TyArrow (NodeId 1) (NodeId 3) (NodeId 4))  -- inner in domain
                     , (2, TyBase (NodeId 2) (BaseTy "Bool"))
                     , (3, TyBase (NodeId 3) (BaseTy "Int"))
-                    , (4, TyVar (NodeId 4))
+                    , (4, TyVar { tnId = NodeId 4, tnBound = Nothing })
                     ]
             collectReachableNodes nodes (NodeId 0) `shouldBe` intSetFromList [0, 1, 2, 3, 4]
 
@@ -500,7 +500,7 @@ spec = describe "Phase 3 — Acyclicity Check" $ do
                     [ (0, TyForall (NodeId 0) (NodeId 1))  -- ∀g.body
                     , (1, TyArrow (NodeId 1) (NodeId 2) (NodeId 3))    -- body = Int → β
                     , (2, TyBase (NodeId 2) (BaseTy "Int"))
-                    , (3, TyVar (NodeId 3))                -- β
+                    , (3, TyVar { tnId = NodeId 3, tnBound = Nothing })                -- β
                     ]
             collectReachableNodes nodes (NodeId 0) `shouldBe` intSetFromList [0, 1, 2, 3]
 
@@ -508,13 +508,13 @@ spec = describe "Phase 3 — Acyclicity Check" $ do
             let nodes = IntMap.fromList
                     [ (0, TyExp (NodeId 0) (ExpVarId 0) (NodeId 1))  -- s · body
                     , (1, TyArrow (NodeId 1) (NodeId 2) (NodeId 3))  -- body = α → β
-                    , (2, TyVar (NodeId 2))              -- α
-                    , (3, TyVar (NodeId 3))              -- β
+                    , (2, TyVar { tnId = NodeId 2, tnBound = Nothing })              -- α
+                    , (3, TyVar { tnId = NodeId 3, tnBound = Nothing })              -- β
                     ]
             collectReachableNodes nodes (NodeId 0) `shouldBe` intSetFromList [0, 1, 2, 3]
 
         it "handles missing node gracefully" $ do
-            let nodes = IntMap.singleton 0 (TyVar (NodeId 0))
+            let nodes = IntMap.singleton 0 (TyVar { tnId = NodeId 0, tnBound = Nothing })
             -- NodeId 99 doesn't exist, should just return {99}
             collectReachableNodes nodes (NodeId 99) `shouldBe` intSetFromList [99]
 
@@ -525,8 +525,8 @@ spec = describe "Phase 3 — Acyclicity Check" $ do
 
         it "builds graph with correct vertices" $ do
             let nodes = IntMap.fromList
-                    [ (0, TyVar (NodeId 0))
-                    , (1, TyVar (NodeId 1))
+                    [ (0, TyVar { tnId = NodeId 0, tnBound = Nothing })
+                    , (1, TyVar { tnId = NodeId 1, tnBound = Nothing })
                     ]
                 edges = [InstEdge (EdgeId 42) (NodeId 0) (NodeId 1)]
                 constraint = emptyConstraint { cNodes = nodes, cInstEdges = edges }
@@ -537,9 +537,9 @@ spec = describe "Phase 3 — Acyclicity Check" $ do
             -- e₁: α ≤ β, e₂: β ≤ γ
             -- e₁ depends on e₂ (e₂.left = β intersects e₁.right = β)
             let nodes = IntMap.fromList
-                    [ (0, TyVar (NodeId 0))
-                    , (1, TyVar (NodeId 1))
-                    , (2, TyVar (NodeId 2))
+                    [ (0, TyVar { tnId = NodeId 0, tnBound = Nothing })
+                    , (1, TyVar { tnId = NodeId 1, tnBound = Nothing })
+                    , (2, TyVar { tnId = NodeId 2, tnBound = Nothing })
                     ]
                 e1 = InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)
                 e2 = InstEdge (EdgeId 1) (NodeId 1) (NodeId 2)

@@ -39,29 +39,29 @@ generalizeAt res scopeRoot targetNode = do
                         else (bodyRoot, target0)
                 _ -> (target0, target0)
 
-    let reachableWithBounds root0 = go IntSet.empty [root0]
-          where
-            lookupNode nid = IntMap.lookup (getNodeId nid) nodes
-            boundChildren nid =
-                case lookupNode nid of
-                    Just TyVar{} ->
-                        maybe [] (: []) (VarStore.lookupVarBound constraint nid)
-                    _ -> []
+    let reachableWithBounds root0 =
+            Right (reachableFromWithBounds root0)
 
-            go visited [] = Right visited
-            go visited (nid0 : rest) = do
-                let nid = canonical nid0
-                    key = getNodeId nid
-                if IntSet.member key visited
-                    then go visited rest
-                    else do
-                        let visited' = IntSet.insert key visited
-                            children =
-                                case lookupNode nid of
-                                    Nothing -> []
-                                    Just node -> map canonical (structuralChildren node)
-                            extras = map canonical (boundChildren nid)
-                        go visited' (children ++ extras ++ rest)
+        reachableFromWithBounds root0 =
+            let go visited [] = visited
+                go visited (nid0:rest) =
+                    let nid = canonical nid0
+                        key = getNodeId nid
+                    in if IntSet.member key visited
+                        then go visited rest
+                        else
+                            let visited' = IntSet.insert key visited
+                                kids =
+                                    case IntMap.lookup key nodes of
+                                        Nothing -> []
+                                        Just node ->
+                                            let boundKids =
+                                                    case node of
+                                                        TyVar{ tnBound = Just bnd } -> [bnd]
+                                                        _ -> []
+                                            in map canonical (structuralChildren node ++ boundKids)
+                            in go visited' (kids ++ rest)
+            in go IntSet.empty [canonical root0]
 
     reachable <- reachableWithBounds orderRoot
     reachableType <- reachableWithBounds typeRoot

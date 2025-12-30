@@ -28,10 +28,16 @@ chooseRepNode :: TyNode -> TyNode -> TyNode
 chooseRepNode new old = case (isVar old, isVar new) of
     (True, False) -> new
     (False, True) -> old
+    (True, True) -> mergeVarBounds old new
     _ -> old
   where
     isVar TyVar{} = True
     isVar _ = False
+    mergeVarBounds a b = case (a, b) of
+        (TyVar{ tnBound = Just _ }, _) -> a
+        (TyVar{ tnBound = Nothing }, TyVar{ tnBound = Just mb }) ->
+            a { tnBound = Just mb }
+        _ -> a
 
 rewriteInstEdges :: (NodeId -> NodeId) -> [InstEdge] -> [InstEdge]
 rewriteInstEdges canonical = map rewrite

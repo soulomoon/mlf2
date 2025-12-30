@@ -387,7 +387,7 @@ occursIn nodes uf var target =
 freshVar :: NormalizeM NodeId
 freshVar = do
     nid <- freshNodeId
-    let node = TyVar { tnId = nid }
+    let node = TyVar { tnId = nid, tnBound = Nothing }
     insertNode node
     -- Note: binding parent is set by the caller when needed.
     pure nid

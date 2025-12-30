@@ -97,7 +97,7 @@ lookupVarBound bv = do
 createFreshVar :: PresolutionM NodeId
 createFreshVar = do
     nid <- createFreshNodeId
-    let node = TyVar nid
+    let node = TyVar { tnId = nid, tnBound = Nothing }
     registerNode nid node
     pure nid
 
@@ -129,4 +129,3 @@ dropVarBind vid = do
                     c1 = VarStore.markEliminatedVar vid c0
                 in st { psConstraint = c1 }
         _ -> pure ()
-

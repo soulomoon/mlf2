@@ -221,8 +221,8 @@ instantiateSchemeWithTrace bodyId substList = do
                                                         TyArrow freshId d c
                                                     TyForall { tnBody = b } ->
                                                         TyForall freshId b
-                                                    TyVar {} ->
-                                                        TyVar freshId
+                                                    TyVar { tnBound = mb } ->
+                                                        TyVar { tnId = freshId, tnBound = mb }
                                                     TyBottom {} ->
                                                         TyBottom freshId
                                                     TyBase { tnBase = b } ->
@@ -240,8 +240,9 @@ instantiateSchemeWithTrace bodyId substList = do
                                             TyForall { tnBody = b } -> do
                                                 b' <- copyNode copyInterior canonical subst b
                                                 return $ TyForall freshId b'
-                                            TyVar {} ->
-                                                pure $ TyVar freshId
+                                            TyVar { tnBound = mb } -> do
+                                                mb' <- traverse (copyNode copyInterior canonical subst) mb
+                                                pure $ TyVar { tnId = freshId, tnBound = mb' }
                                             TyBottom {} ->
                                                 pure $ TyBottom freshId
                                             TyBase { tnBase = b } -> do

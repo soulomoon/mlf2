@@ -39,6 +39,7 @@ allocVar = do
     nid <- freshNodeId
     let node = TyVar
             { tnId = nid
+            , tnBound = Nothing
             }
     insertNode node
     -- Binding parent will be set by the caller
@@ -96,7 +97,12 @@ allocExpNode bodyNode = do
 
 setVarBound :: NodeId -> Maybe NodeId -> ConstraintM ()
 setVarBound varNode bound = modify' $ \st ->
-    st { bsVarBounds = IntMap.insert (intFromNode varNode) bound (bsVarBounds st) }
+    let nodes0 = bsNodes st
+        key = intFromNode varNode
+    in case IntMap.lookup key nodes0 of
+        Just tv@TyVar{} ->
+            st { bsNodes = IntMap.insert key tv{ tnBound = bound } nodes0 }
+        _ -> st
 
 addInstEdge :: NodeId -> NodeId -> ConstraintM EdgeId
 addInstEdge left right = do

@@ -140,7 +140,7 @@ removeBindParent :: NodeId -> Constraint -> Constraint
 removeBindParent (NodeId child) c =
     c { cBindParents = IntMap.delete child (cBindParents c) }
 
--- | Direct flexibly-bound TyVar children of a binder node.
+-- | Direct flexibly-bound TyVar { tnId = children, tnBound = Nothing } of a binder node.
 --
 -- This corresponds to Q(n) in the paper, restricted to variable nodes.
 boundFlexChildren :: Constraint -> NodeId -> Either BindingError [NodeId]
@@ -222,16 +222,10 @@ orderedBinders canonical c0 binder0 = do
     binders <- boundFlexChildrenUnder canonical c0 binderC
     let bindersReachable =
             filter (\nid -> IntSet.member (getNodeId nid) reachable) binders
-        boundChildren =
-            IntMap.fromListWith (flip (++))
-                [ (getNodeId vC, [bC])
-                | (vid, Just bnd) <- IntMap.toList (cVarBounds c0)
-                , let vC = canonical (NodeId vid)
-                , let bC = canonical bnd
-                , vC /= bC
-                ]
         extraChildren nid =
-            IntMap.findWithDefault [] (getNodeId (canonical nid)) boundChildren
+            case IntMap.lookup (getNodeId nid) nodes of
+                Just TyVar{ tnBound = Just bnd } -> [bnd]
+                _ -> []
         orderKeys = OrderKey.orderKeysFromRootWithExtra canonical nodes extraChildren orderRoot Nothing
         missing =
             [ nid

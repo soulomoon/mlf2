@@ -26,7 +26,7 @@ import qualified Data.IntSet as IntSet
 
 import qualified MLF.Constraint.Solve as Solve (frWith)
 import MLF.Constraint.Solve (SolveResult(..))
-import MLF.Constraint.Types (Constraint(..), NodeId(..), VarBounds)
+import MLF.Constraint.Types (Constraint(..), NodeId(..), TyNode(..))
 import MLF.Util.OrderKey (OrderKey(..), compareOrderKey, orderKeysFromRootWith, orderKeysFromRootWithExtra, compareNodesByOrderKey)
 
 -- | Compute best order keys for all nodes reachable from @root@, using the
@@ -39,12 +39,8 @@ orderKeysFromRootRestricted :: SolveResult -> NodeId -> IntSet.IntSet -> IntMap 
 orderKeysFromRootRestricted res root0 allowed =
     orderKeysFromConstraintWith (Solve.frWith (srUnionFind res)) (srConstraint res) root0 (Just allowed)
 
--- | Compute order keys from a raw constraint.
---
--- Paper alignment: ordering is based on term-DAG paths. Our constraint model
--- stores variable bounds separately, so we thread bounds as extra structural
--- children (they are part of the type syntax), but we do not incorporate
--- binding edges.
+-- | Compute order keys from a raw constraint using term-DAG structure plus
+-- instance-bound dependencies.
 orderKeysFromConstraintWith
     :: (NodeId -> NodeId)
     -> Constraint
@@ -52,18 +48,9 @@ orderKeysFromConstraintWith
     -> Maybe IntSet.IntSet
     -> IntMap OrderKey
 orderKeysFromConstraintWith canonical constraint root0 mbAllowed =
-    let extraChildren = extraChildrenFromBounds canonical (cVarBounds constraint)
-    in orderKeysFromRootWithExtra canonical (cNodes constraint) extraChildren root0 mbAllowed
-
-extraChildrenFromBounds :: (NodeId -> NodeId) -> VarBounds -> (NodeId -> [NodeId])
-extraChildrenFromBounds canonical varBounds =
-    let boundMap =
-            IntMap.fromListWith (flip (++))
-                [ (getNodeId vC, [bC])
-                | (vid, Just bnd) <- IntMap.toList varBounds
-                , let vC = canonical (NodeId vid)
-                , let bC = canonical bnd
-                , vC /= bC
-                ]
-    in \parent ->
-        IntMap.findWithDefault [] (getNodeId (canonical parent)) boundMap
+    let nodes = cNodes constraint
+        extraChildren nid =
+            case IntMap.lookup (getNodeId nid) nodes of
+                Just TyVar{ tnBound = Just bnd } -> [bnd]
+                _ -> []
+    in orderKeysFromRootWithExtra canonical nodes extraChildren root0 mbAllowed
