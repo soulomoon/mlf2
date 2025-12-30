@@ -2,20 +2,18 @@ module MLF.Elab.Generalize (
     generalizeAt
 ) where
 
-import Control.Monad (foldM, unless)
+import Control.Monad (unless)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import qualified Data.Set as Set
 
 import qualified MLF.Util.Order as Order
 import MLF.Constraint.Types
 import MLF.Elab.Types
 import MLF.Elab.Util (topoSortBy)
-import MLF.Elab.Reify (freeVars, reifyTypeWithNames)
+import MLF.Elab.Reify (freeVars, reifyBoundWithNames, reifyTypeWithNames)
 import MLF.Constraint.Solve hiding (BindingTreeError, MissingNode)
 import qualified MLF.Constraint.Solve as Solve (frWith)
 import qualified MLF.Binding.Tree as Binding
-import qualified MLF.Constraint.VarStore as VarStore
 
 -- | Generalize a node at the given binding site into a polymorphic scheme.
 -- For xMLF, quantified variables can have bounds.
@@ -64,61 +62,13 @@ generalizeAt res scopeRoot targetNode = do
             in go IntSet.empty [canonical root0]
 
     reachable <- reachableWithBounds orderRoot
-    reachableType <- reachableWithBounds typeRoot
 
-    let isBinderNode nid =
-            case IntMap.lookup (getNodeId nid) nodes of
-                Just TyForall{} -> True
-                Just TyRoot{} -> True
-                _ -> False
-        boundAtScope v0 = go True IntSet.empty (canonical v0)
-          where
-            go isFirst visited nid =
-                let key = getNodeId nid
-                in if IntSet.member key visited
-                    then Left $
-                        BindingTreeError $
-                            InvalidBindingTree "generalizeAt: cycle in binding path"
-                    else do
-                        mbParent <- bindingToElab (Binding.lookupBindParentUnder canonical constraint nid)
-                        case mbParent of
-                            Nothing -> Right False
-                            Just (parent, flag) ->
-                                if isFirst && flag == BindRigid
-                                    then Right False
-                                    else if isBinderNode parent
-                                        then case IntMap.lookup (getNodeId parent) nodes of
-                                            Just TyRoot{} ->
-                                                Right (canonical parent == scopeRootC)
-                                            Just TyForall{} ->
-                                                if IntSet.member (getNodeId (canonical parent)) reachableType
-                                                    then Right (canonical parent == scopeRootC)
-                                                    else go False (IntSet.insert key visited) (canonical parent)
-                                            _ ->
-                                                Right False
-                                        else go False (IntSet.insert key visited) (canonical parent)
-    let scopeIsForall =
-            case IntMap.lookup (getNodeId scopeRootC) nodes of
-                Just TyForall{} -> True
-                _ -> False
-    binders0 <-
-        if scopeIsForall
-            then bindingToElab (Binding.boundFlexChildrenUnder canonical constraint scopeRootC)
-            else do
-                let varCandidates =
-                        [ NodeId nid
-                        | (nid, TyVar{}) <- IntMap.toList nodes
-                        ]
-                foldM
-                    (\acc v -> do
-                        ok <- boundAtScope v
-                        pure (if ok then v : acc else acc)
-                    )
-                    []
-                    varCandidates
-    let binders =
+    binders0 <- bindingToElab (Binding.boundFlexChildrenAllUnder canonical constraint scopeRootC)
+    let eliminated = cEliminatedVars constraint
+        binders =
             [ canonical v
             | v <- binders0
+            , not (IntSet.member (getNodeId (canonical v)) eliminated)
             , IntSet.member (getNodeId (canonical v)) reachable
             ]
         bindersCanon =
@@ -128,54 +78,32 @@ generalizeAt res scopeRoot targetNode = do
                     | v <- binders
                     ]
 
-    let grouped =
-            IntMap.fromList
-                [ (getNodeId v, (v, fmap canonical (VarStore.lookupVarBound constraint v)))
-                | v <- bindersCanon
-                ]
+    let binderIds = map getNodeId bindersCanon
 
-    ordered <- orderBinderCandidates canonical constraint orderRoot grouped
+    ordered <- orderBinderCandidates canonical constraint orderRoot binderIds
     let names = zipWith alphaName [0..] ordered
         subst = IntMap.fromList (zip ordered names)
-        binderSet = IntSet.fromList ordered
 
-    bindings <- mapM (\(name, nidInt) -> do
-            let (_, mbBoundNode) = grouped IntMap.! nidInt
-            boundTy <- case mbBoundNode of
-                Nothing -> pure Nothing
-                Just bNode -> do
-                    bNodeC <- pure (canonical bNode)
-                    -- Reification nicety: omit “v ⩾ ⊥” bounds. In our constraint
-                    -- graph, ⊥ is often represented by an unconstrained fresh `TyVar`
-                    -- that is not itself quantified at this site; printing it as a
-                    -- bound produces spurious `∀(a ⩾ tN)` in simple programs (e.g. `id id`).
-                    if IntSet.member (getNodeId bNodeC) binderSet
-                        then Just <$> reifyTypeWithNames res subst bNodeC
-                        else case IntMap.lookup (getNodeId bNodeC) nodes of
-                            Just TyVar{} ->
-                                case VarStore.lookupVarBound constraint bNodeC of
-                                    Nothing -> pure Nothing
-                                    Just _ -> Just <$> reifyTypeWithNames res subst bNodeC
-                            _ ->
-                                Just <$> reifyTypeWithNames res subst bNodeC
-            pure (name, boundTy)
-        ) (zip names ordered)
+    bindings <- mapM
+        (\(name, nidInt) -> do
+            let bNodeC = canonical (NodeId nidInt)
+            boundTy <- reifyBoundWithNames res subst bNodeC
+            let mbBound = if boundTy == TBottom then Nothing else Just boundTy
+            pure (name, mbBound)
+        )
+        (zip names ordered)
 
     ty0 <- reifyTypeWithNames res subst typeRoot
-    let ty = stripVacuousForalls ty0
-        usedNames = usedBinderNames bindings ty
-        bindings' = filter (\(name, _) -> Set.member name usedNames) bindings
-    pure (Forall bindings' ty, subst)
+    pure (Forall bindings ty0, subst)
   where
     orderBinderCandidates
         :: (NodeId -> NodeId)
         -> Constraint
         -> NodeId
-        -> IntMap.IntMap (NodeId, Maybe NodeId)
+        -> [Int]
         -> Either ElabError [Int]
-    orderBinderCandidates canonical' constraint' root grouped = do
+    orderBinderCandidates canonical' constraint' root candidates = do
         let keys = Order.orderKeysFromConstraintWith canonical' constraint' root Nothing
-            candidates = IntMap.keys grouped
             candidateSet = IntSet.fromList candidates
             missing =
                 [ k
@@ -183,14 +111,11 @@ generalizeAt res scopeRoot targetNode = do
                 , not (IntMap.member k keys)
                 ]
             depsFor k =
-                case snd (grouped IntMap.! k) of
-                    Nothing -> []
-                    Just bnd ->
-                        [ d
-                        | d <- IntSet.toList (freeVars res bnd IntSet.empty)
-                        , IntSet.member d candidateSet
-                        , d /= k
-                        ]
+                [ d
+                | d <- IntSet.toList (freeVars res (NodeId k) IntSet.empty)
+                , IntSet.member d candidateSet
+                , d /= k
+                ]
             cmpReady a b =
                 case Order.compareNodesByOrderKey keys (NodeId a) (NodeId b) of
                     EQ -> compare a b
@@ -206,50 +131,6 @@ generalizeAt res scopeRoot targetNode = do
             cmpReady
             depsFor
             candidates
-
-    usedBinderNames :: [(String, Maybe ElabType)] -> ElabType -> Set.Set String
-    usedBinderNames binds body =
-        let needed0 = freeTypeVars body
-            depsFor name =
-                case lookup name binds of
-                    Nothing -> Set.empty
-                    Just Nothing -> Set.empty
-                    Just (Just bnd) -> freeTypeVars bnd
-            close s =
-                let s' = foldl'
-                        (\acc name -> Set.union acc (depsFor name))
-                        s
-                        (Set.toList s)
-                in if s' == s then s else close s'
-        in close needed0
-
-    freeTypeVars :: ElabType -> Set.Set String
-    freeTypeVars = go Set.empty
-      where
-        go bound ty0 = case ty0 of
-            TVar v -> if Set.member v bound then Set.empty else Set.singleton v
-            TArrow a b -> go bound a `Set.union` go bound b
-            TBase _ -> Set.empty
-            TBottom -> Set.empty
-            TForall v mb body ->
-                let fvBound = maybe Set.empty (go bound) mb
-                    fvBody = go (Set.insert v bound) body
-                in fvBound `Set.union` fvBody
-
-    stripVacuousForalls :: ElabType -> ElabType
-    stripVacuousForalls ty0 = case ty0 of
-        TArrow a b -> TArrow (stripVacuousForalls a) (stripVacuousForalls b)
-        TForall v mb body ->
-            let mb' = fmap stripVacuousForalls mb
-                body' = stripVacuousForalls body
-                appearsInBody = Set.member v (freeTypeVars body')
-                appearsInBound = maybe False (Set.member v . freeTypeVars) mb'
-            in if appearsInBody || appearsInBound
-                then TForall v mb' body'
-                else body'
-        TVar{} -> ty0
-        TBase{} -> ty0
-        TBottom -> ty0
 
 alphaName :: Int -> Int -> String
 alphaName idx _ = letters !! (idx `mod` length letters) ++ suffix

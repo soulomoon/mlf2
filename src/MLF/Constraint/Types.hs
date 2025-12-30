@@ -177,7 +177,7 @@ data TyNode
     -- | Explicit quantifier node (∀).
     --
     -- Quantifier binders are represented by binding edges (`Constraint.cBindParents`):
-    -- the direct flexibly-bound `TyVar` children of this node (paper Q(n)).
+    -- the direct flexibly-bound children of this node (paper Q(n)).
     | TyForall
         { tnId :: NodeId
         , tnBody :: NodeId

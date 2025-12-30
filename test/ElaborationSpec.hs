@@ -42,9 +42,10 @@ fInstantiations = go
                 in inst : go next
             Nothing -> go (drop 1 s)
 
-stripForalls :: Elab.ElabType -> Elab.ElabType
-stripForalls (Elab.TForall _ _ t) = stripForalls t
-stripForalls t = t
+stripBoundWrapper :: Elab.ElabType -> Elab.ElabType
+stripBoundWrapper (Elab.TForall v (Just bound) (Elab.TVar v'))
+    | v == v' = stripBoundWrapper bound
+stripBoundWrapper t = t
 
 -- | Canonicalize binder names in a type to compare up to α-equivalence.
 canonType :: Elab.ElabType -> Elab.ElabType
@@ -78,24 +79,24 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             let expr = ELit (LInt 1)
             (term, ty) <- requirePipeline expr
             Elab.pretty term `shouldBe` "1"
-            Elab.pretty ty `shouldBe` "Int"
+            Elab.pretty ty `shouldBe` "∀(a ⩾ Int). a"
 
         it "elaborates boolean literal" $ do
             let expr = ELit (LBool True)
             (term, ty) <- requirePipeline expr
             Elab.pretty term `shouldBe` "true"
-            Elab.pretty ty `shouldBe` "Bool"
+            Elab.pretty ty `shouldBe` "∀(a ⩾ Bool). a"
 
         it "elaborates lambda" $ do
             let expr = ELam "x" (EVar "x")
             (_, ty) <- requirePipeline expr
             -- Result is generalized at top level
-            Elab.pretty ty `shouldBe` "∀a. a -> a"
+            Elab.pretty ty `shouldBe` "∀a. ∀(b ⩾ a -> a). b"
 
         it "elaborates application" $ do
             let expr = EApp (ELam "x" (EVar "x")) (ELit (LInt 42))
             (_, ty) <- requirePipeline expr
-            Elab.pretty ty `shouldBe` "Int"
+            Elab.pretty ty `shouldBe` "∀(a ⩾ Int). a"
 
     describe "Polymorphism and Generalization" $ do
         it "elaborates polymorphic let-binding" $ do
@@ -103,13 +104,14 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             let expr = ELet "id" (ELam "x" (EVar "x")) (EVar "id")
             (term, ty) <- requirePipeline expr
 
-            -- Term should look like: let id : ∀a. a -> a = Λa. λx:a. x in id
-            Elab.pretty term `shouldBe` "let id : ∀a. a -> a = Λa. λx:a. x in id"
+            -- Term should look like: let id : ∀a (b ⩾ a -> a). b = Λa. Λ(b ⩾ a -> a). λx:a. x in id
+            Elab.pretty term `shouldBe` "let id : ∀a (b ⩾ a -> a). b = Λa. Λ(b ⩾ a -> a). λx:a. x in id"
 
             -- Type is polymorphic (compare up to α-equivalence).
             let expected =
                     Elab.TForall "a" Nothing
-                        (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+                        (Elab.TForall "b" (Just (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
+                            (Elab.TVar "b"))
             ty `shouldAlphaEqType` expected
 
         it "elaborates polymorphic instantiation" $ do
@@ -117,7 +119,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             let expr = ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (ELit (LInt 1)))
             (term, ty) <- requirePipeline expr
             Elab.pretty ty `shouldBe` "Int"
-            Elab.pretty term `shouldBe` "let id : ∀a. a -> a = Λa. λx:a. x in (id [⟨Int⟩]) 1"
+            Elab.pretty term `shouldBe` "let id : ∀a (b ⩾ a -> a). b = Λa. Λ(b ⩾ a -> a). λx:a. x in (id [⟨Int⟩]) 1"
 
         it "generalizeAt quantifies vars bound under the scope root" $ do
             let root = NodeId 0
@@ -142,8 +144,15 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     }
 
             (Elab.Forall binds ty, _subst) <- requireRight (Elab.generalizeAt solved root arrow)
-            binds `shouldBe` [("a", Nothing)]
-            ty `shouldBe` Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")
+            case binds of
+                [("a", Just boundTy)] -> do
+                    let expectedBound =
+                            Elab.TForall "t" Nothing
+                                (Elab.TArrow (Elab.TVar "t") (Elab.TVar "t"))
+                    boundTy `shouldAlphaEqType` expectedBound
+                other ->
+                    expectationFailure $ "Expected one bound binder, got " ++ show other
+            ty `shouldBe` Elab.TVar "a"
 
         it "elaborates dual instantiation in application" $ do
             -- let id = \x. x in id id
@@ -183,8 +192,12 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             let expr = ELet "x" (ELit (LInt 1)) (ELet "y" (EVar "x") (EVar "y"))
             (term, ty) <- requirePipeline expr
 
-            -- Allow vacuous quantification, but require the body to be Int.
-            stripForalls ty `shouldBe` Elab.TBase (BaseTy "Int")
+            let expected =
+                    let intTy = Elab.TBase (BaseTy "Int")
+                        intBound = Elab.TForall "b" (Just intTy) (Elab.TVar "b")
+                    in Elab.TForall "a" (Just intBound)
+                        (Elab.TVar "a")
+            ty `shouldAlphaEqType` expected
 
             Elab.pretty term `shouldSatisfy` ("let x" `isInfixOf`)
             Elab.pretty term `shouldSatisfy` ("let y" `isInfixOf`)
@@ -196,7 +209,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             (_term, ty) <- requirePipeline expr
             let expected =
                     Elab.TForall "a" Nothing
-                        (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+                        (Elab.TForall "b" (Just (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
+                            (Elab.TVar "b"))
             ty `shouldAlphaEqType` expected
 
         it "elaborates term annotations" $ do
@@ -204,7 +218,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             let ann = STArrow (STBase "Int") (STBase "Int")
                 expr = EAnn (ELam "x" (EVar "x")) ann
             (_term, ty) <- requirePipeline expr
-            Elab.pretty ty `shouldBe` "Int -> Int"
+            Elab.pretty ty `shouldBe` "∀(a ⩾ Int). ∀(b ⩾ a -> a). b"
 
     describe "Binding tree coverage" $ do
         let firstShow :: Show err => Either err a -> Either String a
@@ -324,13 +338,21 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 expr = ELetAnn "f" scheme (ELam "x" (EVar "x")) (EVar "f")
 
             (term, ty) <- requirePipeline expr
-            Elab.pretty term `shouldSatisfy` (\s -> "let f : ∀(a ⩾ Int -> Int). a -> a" `isInfixOf` s)
+            let termStr = Elab.pretty term
+            termStr `shouldSatisfy` ("let f : ∀" `isInfixOf`)
+            termStr `shouldSatisfy` ("b ⩾ a -> a" `isInfixOf`)
+            termStr `shouldSatisfy` ("λx:a. x" `isInfixOf`)
 
             let expectedBound =
-                    Elab.TArrow (Elab.TBase (BaseTy "Int")) (Elab.TBase (BaseTy "Int"))
+                    let intTy = Elab.TBase (BaseTy "Int")
+                    in Elab.TForall "t1" (Just intTy)
+                        (Elab.TForall "t2" (Just intTy)
+                            (Elab.TArrow (Elab.TVar "t1") (Elab.TVar "t2")))
                 expectedTy =
                     Elab.TForall "a" (Just expectedBound)
-                        (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+                        (Elab.TForall "b" (Just expectedBound)
+                            (Elab.TForall "c" (Just (Elab.TArrow (Elab.TVar "b") (Elab.TVar "b")))
+                                (Elab.TVar "c")))
             ty `shouldAlphaEqType` expectedTy
 
         it "elaborates annotated let with polymorphic bound (Rank-2ish)" $ do
@@ -341,11 +363,14 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
             (_term, ty) <- requirePipeline expr
             let expectedInner =
-                    Elab.TForall "b" Nothing
-                        (Elab.TArrow (Elab.TVar "b") (Elab.TVar "b"))
+                    Elab.TForall "x" Nothing
+                        (Elab.TForall "y" (Just (Elab.TArrow (Elab.TVar "x") (Elab.TVar "x")))
+                            (Elab.TVar "y"))
                 expectedTy =
                     Elab.TForall "a" (Just expectedInner)
-                        (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+                        (Elab.TForall "b" (Just expectedInner)
+                            (Elab.TForall "c" (Just (Elab.TArrow (Elab.TVar "b") (Elab.TVar "b")))
+                                (Elab.TVar "c")))
             ty `shouldAlphaEqType` expectedTy
 
         it "elaborates lambda with rank-2 argument" $ do
@@ -356,9 +381,13 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
             (_term, ty) <- requirePipeline expr
             let expected =
-                    Elab.TArrow
-                        (Elab.TForall "a" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
-                        (Elab.TBase (BaseTy "Int"))
+                    let idScheme =
+                            Elab.TForall "x" Nothing
+                                (Elab.TForall "y" (Just (Elab.TArrow (Elab.TVar "x") (Elab.TVar "x")))
+                                    (Elab.TVar "y"))
+                    in Elab.TForall "a" (Just idScheme)
+                        (Elab.TForall "b" (Just (Elab.TArrow (Elab.TVar "a") (Elab.TBase (BaseTy "Int"))))
+                            (Elab.TVar "b"))
             ty `shouldAlphaEqType` expected
 
     describe "Elaboration bookkeeping (eliminated vars)" $ do
@@ -387,7 +416,12 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
             solved <- requireRight (solveUnify c)
             (sch, _subst) <- requireRight (Elab.generalizeAt solved forallNode forallNode)
-            sch `shouldBe` Elab.Forall [] (Elab.TArrow Elab.TBottom Elab.TBottom)
+            sch `shouldBe`
+                Elab.Forall
+                    [ ("a", Nothing)
+                    , ("b", Just (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
+                    ]
+                    (Elab.TVar "b")
 
         it "generalizeAt drops eliminated binders with bounds" $ do
             let v = NodeId 1
@@ -417,7 +451,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
             solved <- requireRight (solveUnify c)
             (sch, _subst) <- requireRight (Elab.generalizeAt solved forallNode forallNode)
-            Elab.pretty sch `shouldBe` "∀a. a -> a"
+            Elab.pretty sch `shouldBe` "∀a (b ⩾ a -> a). b"
 
     describe "xMLF types (instance bounds)" $ do
         it "pretty prints unbounded forall" $ do
@@ -1049,7 +1083,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 mTrace = IntMap.lookup eid traces
                             phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace solved Nothing mTrace ew)
                             out <- requireRight (Elab.applyInstantiation srcTy phi)
-                            canonType out `shouldBe` canonType tgtTy
+                            canonType (stripBoundWrapper out) `shouldBe` canonType (stripBoundWrapper tgtTy)
 
             it "witness instantiation matches solved edge types (two instantiations)" $ do
                 let expr =
@@ -1068,40 +1102,84 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 mTrace = IntMap.lookup eid traces
                             phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace solved Nothing mTrace ew)
                             out <- requireRight (Elab.applyInstantiation srcTy phi)
-                            canonType out `shouldBe` canonType tgtTy
+                            canonType (stripBoundWrapper out) `shouldBe` canonType (stripBoundWrapper tgtTy)
 
-            it "contextToNodeBound computes quantifier-only contexts (context)" $ do
-                -- Binding tree:
-                --   root binds a and m
-                --   m binds n
-                -- Context to reach n from root must go under a, then inside m's bound.
+            it "contextToNodeBound computes inside-bound contexts (context)" $ do
+                -- root binds a and b; b's bound contains binder c.
+                -- Context to reach c must go under a, then inside b's bound.
                 let root = NodeId 100
+                    body = NodeId 101
                     aN = NodeId 1
-                    mN = NodeId 2
-                    nN = NodeId 3
+                    bN = NodeId 2
+                    boundRoot = NodeId 200
+                    boundBody = NodeId 201
+                    cN = NodeId 3
 
                     c = Constraint
                         { cNodes =
                             IntMap.fromList
-                                [ (getNodeId root, TyArrow root aN mN)
+                                [ (getNodeId root, TyForall root body)
+                                , (getNodeId body, TyArrow body aN bN)
                                 , (getNodeId aN, TyVar { tnId = aN, tnBound = Nothing })
-                                , (getNodeId mN, TyArrow mN nN aN)
-                                , (getNodeId nN, TyArrow nN aN aN)
+                                , (getNodeId bN, TyVar { tnId = bN, tnBound = Just boundRoot })
+                                , (getNodeId boundRoot, TyForall boundRoot boundBody)
+                                , (getNodeId boundBody, TyArrow boundBody cN cN)
+                                , (getNodeId cN, TyVar { tnId = cN, tnBound = Nothing })
                                 ]
                         , cInstEdges = []
                         , cUnifyEdges = []
                         , cBindParents = IntMap.fromList
                             [ (getNodeId aN, (root, BindFlex))
-                            , (getNodeId mN, (root, BindFlex))
-                            , (getNodeId nN, (mN, BindFlex))
+                            , (getNodeId bN, (root, BindFlex))
+                            , (getNodeId body, (root, BindFlex))
+                            , (getNodeId cN, (boundRoot, BindFlex))
+                            , (getNodeId boundBody, (boundRoot, BindFlex))
                             ]
                         , cPolySyms = Set.empty
                         , cEliminatedVars = IntSet.empty
                         }
                     solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 
-                steps <- requireRight (Elab.contextToNodeBound solved root nN)
+                steps <- requireRight (Elab.contextToNodeBound solved root cN)
                 steps `shouldBe` Just [Elab.StepUnder "t1", Elab.StepInside]
+
+            it "contextToNodeBound computes under-quantifier contexts (context)" $ do
+                -- Same graph as above: binder b is after a at the root.
+                let root = NodeId 100
+                    body = NodeId 101
+                    aN = NodeId 1
+                    bN = NodeId 2
+                    boundRoot = NodeId 200
+                    boundBody = NodeId 201
+                    cN = NodeId 3
+
+                    c = Constraint
+                        { cNodes =
+                            IntMap.fromList
+                                [ (getNodeId root, TyForall root body)
+                                , (getNodeId body, TyArrow body aN bN)
+                                , (getNodeId aN, TyVar { tnId = aN, tnBound = Nothing })
+                                , (getNodeId bN, TyVar { tnId = bN, tnBound = Just boundRoot })
+                                , (getNodeId boundRoot, TyForall boundRoot boundBody)
+                                , (getNodeId boundBody, TyArrow boundBody cN cN)
+                                , (getNodeId cN, TyVar { tnId = cN, tnBound = Nothing })
+                                ]
+                        , cInstEdges = []
+                        , cUnifyEdges = []
+                        , cBindParents = IntMap.fromList
+                            [ (getNodeId aN, (root, BindFlex))
+                            , (getNodeId bN, (root, BindFlex))
+                            , (getNodeId body, (root, BindFlex))
+                            , (getNodeId cN, (boundRoot, BindFlex))
+                            , (getNodeId boundBody, (boundRoot, BindFlex))
+                            ]
+                        , cPolySyms = Set.empty
+                        , cEliminatedVars = IntSet.empty
+                        }
+                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+
+                steps <- requireRight (Elab.contextToNodeBound solved root bN)
+                steps `shouldBe` Just [Elab.StepUnder "t1"]
 
             it "selectMinPrecInsertionIndex implements m = min≺ selection (min≺)" $ do
                 -- Keys are ordered by <P (lexicographic with empty path greatest).
@@ -1279,7 +1357,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             (_term, ty) <- requirePipeline expr
             let expected =
                     Elab.TForall "a" Nothing
-                        (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+                        (Elab.TForall "b" (Just (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
+                            (Elab.TVar "b"))
             ty `shouldAlphaEqType` expected
 
         it "bounded aliasing (b ⩾ a) coerces to ∀a. a -> a -> a (needs Merge/RaiseMerge)" $ do
@@ -1307,8 +1386,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 Right (_term, ty) -> do
                     let expected =
                             Elab.TForall "a" Nothing
-                                (Elab.TArrow (Elab.TVar "a")
-                                    (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
+                                (Elab.TForall "b" (Just (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
+                                    (Elab.TForall "c" (Just (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b")))
+                                        (Elab.TVar "c")))
                     ty `shouldAlphaEqType` expected
 
         it "term annotation can instantiate a polymorphic result" $ do
@@ -1327,10 +1407,13 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         ann
 
             (_term, ty) <- requirePipeline expr
-            ty `shouldBe`
-                Elab.TArrow
-                    (Elab.TBase (BaseTy "Int"))
-                    (Elab.TArrow (Elab.TBase (BaseTy "Int")) (Elab.TBase (BaseTy "Int")))
+            let expected =
+                    Elab.TForall "a" (Just (Elab.TBase (BaseTy "Int")))
+                        (Elab.TForall "b"
+                            (Just (Elab.TArrow (Elab.TBase (BaseTy "Int")) (Elab.TBase (BaseTy "Int"))))
+                            (Elab.TForall "c" (Just (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b")))
+                                (Elab.TVar "c")))
+            ty `shouldAlphaEqType` expected
 
         it "annotated lambda parameter should accept a polymorphic argument via κσ" $ do
             -- λ(f : Int -> Int). f 1   applied to polymorphic id

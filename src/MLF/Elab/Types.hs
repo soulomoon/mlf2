@@ -174,8 +174,8 @@ bindingToElab = either (Left . BindingTreeError) Right
 
 -- | Context steps for reaching a node in the type structure.
 --
--- Paper reference: @papers/xmlf.txt@ Figure 10 uses instantiation contexts
--- C{·} to reach interior nodes. A context is a sequence of steps:
+-- Paper reference: computation/instantiation contexts (Ch. 15.3, Fig. 10).
+-- A context is a sequence of steps:
 --   - StepUnder: go under a quantifier (∀(α ⩾) ·)
 --   - StepInside: go inside a bound (∀(⩾ ·))
 data ContextStep

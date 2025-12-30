@@ -32,6 +32,7 @@ module MLF.Binding.Tree (
     removeBindParent,
     -- * Binder enumeration (paper Q(n))
     boundFlexChildren,
+    boundFlexChildrenAllUnder,
     boundFlexChildrenUnder,
     orderedBinders,
     forallSpecFromForall,
@@ -188,6 +189,34 @@ boundFlexChildrenUnder canonical c0 binder0 = do
                         Left $
                             InvalidBindingTree $
                                 "boundFlexChildrenUnder: child " ++ show childId ++ " not in cNodes"
+        )
+        []
+        (IntMap.toList bindParents)
+
+-- | Direct flexibly-bound children (any node type) of a binder node, under a
+-- canonicalization function.
+boundFlexChildrenAllUnder
+    :: (NodeId -> NodeId)
+    -> Constraint
+    -> NodeId
+    -> Either BindingError [NodeId]
+boundFlexChildrenAllUnder canonical c0 binder0 = do
+    let binderC = canonical binder0
+    (allRoots, bindParents) <- quotientBindParentsUnder canonical c0
+    unless (IntSet.member (getNodeId binderC) allRoots) $
+        Left $
+            InvalidBindingTree $
+                "boundFlexChildrenAllUnder: binder " ++ show (getNodeId binderC) ++ " not in cNodes"
+    reverse <$> foldM
+        (\acc (childId, (parent, flag)) ->
+            if parent /= binderC || flag /= BindFlex
+                then pure acc
+                else case IntMap.lookup childId (cNodes c0) of
+                    Just _ -> pure (NodeId childId : acc)
+                    Nothing ->
+                        Left $
+                            InvalidBindingTree $
+                                "boundFlexChildrenAllUnder: child " ++ show childId ++ " not in cNodes"
         )
         []
         (IntMap.toList bindParents)

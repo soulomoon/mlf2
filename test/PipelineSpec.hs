@@ -29,10 +29,10 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     case generalizeAt res root root of
                         Right (Forall binds _ty, _subst) ->
                             case binds of
-                                [(_, Just (TBase (BaseTy "Int")))] -> pure ()
-                                -- Allow missing bounds while reification is still evolving.
-                                [(_, Nothing)] -> pure ()
-                                other -> expectationFailure $ "Expected one bound binder, got " ++ show other
+                                [ ("a", Just (TBase (BaseTy "Int")))
+                                    , ("b", Just (TArrow (TVar "a") (TVar "a")))
+                                    ] -> pure ()
+                                other -> expectationFailure $ "Expected Int + arrow binders, got " ++ show other
                         Left err -> expectationFailure $ "Generalize error: " ++ show err
                 Left err -> expectationFailure err
 
