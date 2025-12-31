@@ -33,7 +33,7 @@ prepares the pipeline for thesis-exact scoping and context computation.
 1. Add explicit gen-node structures in the constraint (transitional compatibility).
 2. Introduce `NodeRef` binding edges and migrate binding-tree operations.
 3. Remove synthetic root insertion; enforce rootedness at constraint generation.
-4. Migrate elaboration and Φ/Σ translation to use gen nodes as the source of
+4. Migrate elaboration and Phi/Sigma translation to use gen nodes as the source of
    named nodes and contexts.
 5. Remove legacy reliance on `TyForall`/`TyRoot` as gen nodes.
 
@@ -45,8 +45,8 @@ prepares the pipeline for thesis-exact scoping and context computation.
 ## Testing Strategy
 - Unit tests for gen-node invariants (rootedness, binding constraints).
 - Regression tests for named-node enumeration using gen nodes only.
-- End-to-end tests to ensure elaboration and Φ still match thesis examples.
+- End-to-end tests to ensure elaboration and Phi still match thesis examples.
 
 ## References
 - `papers/these-finale-english.txt` (gen nodes, rooted constraints, contexts)
-- `papers/xmlf.txt` (binding tree, Φ translation)
+- `papers/xmlf.txt` (binding tree, Phi translation)
