@@ -17,7 +17,7 @@ import qualified MLF.Constraint.Root as ConstraintRoot
 import qualified MLF.Util.Order as Order
 import MLF.Frontend.Syntax (Expr(..), Lit(..), SrcType(..), SrcScheme(..))
 import MLF.Frontend.ConstraintGen (ConstraintError, ConstraintResult(..), generateConstraints)
-import SpecUtil (emptyConstraint)
+import SpecUtil (emptyConstraint, genNodeMap)
 
 generateConstraintsDefault :: Expr -> Either ConstraintError ConstraintResult
 generateConstraintsDefault = generateConstraints Set.empty
@@ -45,7 +45,7 @@ genValidBindingTree n
         let bindParents = IntMap.fromList
                 [(i, (NodeId (i-1), flag)) | (i, flag) <- zip [1..n-1] flags]
         
-        let genNodes = IntSet.fromList [i | i <- [0..n-2]]
+        let genNodes = genNodeMap (map NodeId [0..n-2])
         return Constraint
             { cNodes = nodes
             , cInstEdges = []

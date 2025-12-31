@@ -257,9 +257,10 @@ namedNodes res = do
     let constraint = srConstraint res
         canonical = Solve.frWith (srUnionFind res)
         genNodes = cGenNodes constraint
+        genSet = IntSet.fromList (IntMap.keys genNodes)
         eliminated = cEliminatedVars constraint
     bindParents <- bindingToElab (canonicalizeBindParentsUnder canonical constraint)
-    let isGenNode nid = IntSet.member (getNodeId (canonical nid)) genNodes
+    let isGenNode nid = IntSet.member (getNodeId (canonical nid)) genSet
         isEliminated nid = IntSet.member (getNodeId nid) eliminated
         named =
             [ getNodeId child

@@ -1,5 +1,6 @@
 module SpecUtil (
     emptyConstraint,
+    genNodeMap,
     expectRight,
     requireRight,
     inferBindParents,
@@ -14,7 +15,7 @@ import qualified Data.Set as Set
 import GHC.Stack (HasCallStack)
 import Test.Hspec (Expectation, expectationFailure)
 
-import MLF.Constraint.Types (BindFlag(..), BindParents, Constraint(..), NodeId(..), TyNode(..), structuralChildren)
+import MLF.Constraint.Types (BindFlag(..), BindParents, Constraint(..), GenNode(..), GenNodeId(..), NodeId(..), TyNode(..), structuralChildren)
 
 emptyConstraint :: Constraint
 emptyConstraint = Constraint
@@ -24,8 +25,15 @@ emptyConstraint = Constraint
     , cBindParents = IntMap.empty
     , cPolySyms = Set.empty
     , cEliminatedVars = IntSet.empty
-    , cGenNodes = IntSet.empty
+    , cGenNodes = IntMap.empty
     }
+
+genNodeMap :: [NodeId] -> IntMap.IntMap GenNode
+genNodeMap ids =
+    IntMap.fromList
+        [ (getNodeId nid, GenNode (GenNodeId (getNodeId nid)) [nid])
+        | nid <- ids
+        ]
 
 expectRight :: Show e => Either e a -> (a -> Expectation) -> Expectation
 expectRight value k =

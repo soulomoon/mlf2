@@ -14,7 +14,6 @@ module MLF.Frontend.ConstraintGen.Emit (
 import Control.Monad (when)
 import Control.Monad.State.Strict (gets, modify')
 import qualified Data.IntMap.Strict as IntMap
-import qualified Data.IntSet as IntSet
 
 import MLF.Constraint.Types
 import MLF.Frontend.ConstraintGen.State (BuildState(..), ConstraintM)
@@ -136,10 +135,9 @@ insertNode node = do
     modify' $ \st ->
         let nodes' = IntMap.insert (intFromNode (tnId node)) node (bsNodes st)
             genNodes' =
-                case node of
-                    TyForall{} -> IntSet.insert (intFromNode (tnId node)) (bsGenNodes st)
-                    TyRoot{} -> IntSet.insert (intFromNode (tnId node)) (bsGenNodes st)
-                    _ -> bsGenNodes st
+                case mkGenNodeFromTypeNode node of
+                    Nothing -> bsGenNodes st
+                    Just g -> IntMap.insert (genNodeKey (gnId g)) g (bsGenNodes st)
         in st { bsNodes = nodes', bsGenNodes = genNodes' }
     Scope.registerScopeNode (tnId node)
 

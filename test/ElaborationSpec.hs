@@ -19,7 +19,7 @@ import MLF.Constraint.Acyclicity (checkAcyclicity)
 import MLF.Constraint.Presolution (PresolutionResult(..), EdgeTrace(..), computePresolution)
 import MLF.Constraint.Solve (SolveResult(..), solveUnify)
 import qualified MLF.Constraint.Solve as Solve (frWith)
-import SpecUtil (emptyConstraint, inferBindParents, requireRight)
+import SpecUtil (emptyConstraint, genNodeMap, inferBindParents, requireRight)
 
 requirePipeline :: Expr -> IO (Elab.ElabTerm, Elab.ElabType)
 requirePipeline = requireRight . Elab.runPipelineElab Set.empty
@@ -137,7 +137,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 constraint = emptyConstraint
                     { cNodes = nodes
                     , cBindParents = bindParents
-                    , cGenNodes = IntSet.fromList [getNodeId root]
+                    , cGenNodes = genNodeMap [root]
                     }
                 solved = SolveResult
                     { srConstraint = constraint
@@ -413,7 +413,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 ]
                         , cPolySyms = Set.empty
                         , cEliminatedVars = IntSet.singleton (getNodeId v)
-                        , cGenNodes = IntSet.fromList [getNodeId forallNode]
+                        , cGenNodes = genNodeMap [forallNode]
                         }
 
             solved <- requireRight (solveUnify c)
@@ -449,7 +449,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 ]
                         , cPolySyms = Set.empty
                         , cEliminatedVars = IntSet.singleton (getNodeId v)
-                        , cGenNodes = IntSet.fromList [getNodeId forallNode]
+                        , cGenNodes = genNodeMap [forallNode]
                         }
 
             solved <- requireRight (solveUnify c)
@@ -648,7 +648,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 ]
                         , cPolySyms = Set.empty
                         , cEliminatedVars = IntSet.empty
-                        , cGenNodes = IntSet.fromList [getNodeId forallNode]
+                        , cGenNodes = genNodeMap [forallNode]
                         }
 
                 solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
@@ -685,7 +685,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 ]
                         , cPolySyms = Set.empty
                         , cEliminatedVars = IntSet.empty
-                        , cGenNodes = IntSet.fromList [getNodeId forallNode]
+                        , cGenNodes = genNodeMap [forallNode]
                         }
 
                 solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
@@ -717,7 +717,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 , (getNodeId vB, (forallNode, BindFlex))
                                 ]
                         , cPolySyms = Set.empty
-                        , cGenNodes = IntSet.fromList [getNodeId forallNode]
+                        , cGenNodes = genNodeMap [forallNode]
                         }
 
                 solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
@@ -928,7 +928,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                     , (getNodeId bN, (root, BindFlex))
                                     ]
                             , cPolySyms = Set.empty
-                            , cGenNodes = IntSet.empty
+                            , cGenNodes = genNodeMap []
                             }
                     solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 
@@ -988,7 +988,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                     , (getNodeId inner, (root, BindFlex))
                                     ]
                             , cPolySyms = Set.empty
-                            , cGenNodes = IntSet.empty
+                            , cGenNodes = genNodeMap []
                             }
                     solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 
@@ -1039,7 +1039,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 , (getNodeId inner, (root, BindFlex))
                                 ]
                         , cPolySyms = Set.empty
-                        , cGenNodes = IntSet.empty
+                        , cGenNodes = genNodeMap []
                         }
                     solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 
@@ -1180,7 +1180,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             ]
                         , cPolySyms = Set.empty
                         , cEliminatedVars = IntSet.empty
-                        , cGenNodes = IntSet.fromList [getNodeId root, getNodeId boundRoot]
+                        , cGenNodes = genNodeMap [root, boundRoot]
                         }
                     solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 
@@ -1219,7 +1219,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             ]
                         , cPolySyms = Set.empty
                         , cEliminatedVars = IntSet.empty
-                        , cGenNodes = IntSet.fromList [getNodeId root, getNodeId boundRoot]
+                        , cGenNodes = genNodeMap [root, boundRoot]
                         }
                     solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 
@@ -1254,7 +1254,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             ]
                         , cPolySyms = Set.empty
                         , cEliminatedVars = IntSet.empty
-                        , cGenNodes = IntSet.fromList [getNodeId root]
+                        , cGenNodes = genNodeMap [root]
                         }
                     solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 
@@ -1288,7 +1288,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             ]
                         , cPolySyms = Set.empty
                         , cEliminatedVars = IntSet.empty
-                        , cGenNodes = IntSet.fromList [getNodeId root]
+                        , cGenNodes = genNodeMap [root]
                         }
                     solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 
@@ -1343,7 +1343,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             ]
                         , cPolySyms = Set.empty
                         , cEliminatedVars = IntSet.empty
-                        , cGenNodes = IntSet.empty
+                        , cGenNodes = genNodeMap []
                         }
                     solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 
@@ -1458,7 +1458,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 ]
                         , cPolySyms = Set.empty
                         , cEliminatedVars = IntSet.empty
-                        , cGenNodes = IntSet.fromList [getNodeId root]
+                        , cGenNodes = genNodeMap [root]
                         }
                 solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 

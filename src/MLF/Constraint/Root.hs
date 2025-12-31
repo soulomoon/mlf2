@@ -54,10 +54,15 @@ ensureConstraintRoot c0 =
                 else
                     let rootId = freshNodeId c0
                         roots = map NodeId (IntSet.toList roots0)
+                        rootNode = TyRoot rootId roots
+                        rootGen =
+                            case mkGenNodeFromTypeNode rootNode of
+                                Nothing -> cGenNodes c0
+                                Just g -> IntMap.insert (genNodeKey (gnId g)) g (cGenNodes c0)
                         c1 =
                             c0
-                                { cNodes = IntMap.insert (getNodeId rootId) (TyRoot rootId roots) (cNodes c0)
-                                , cGenNodes = IntSet.insert (getNodeId rootId) (cGenNodes c0)
+                                { cNodes = IntMap.insert (getNodeId rootId) rootNode (cNodes c0)
+                                , cGenNodes = rootGen
                                 }
                         c2 =
                             foldr

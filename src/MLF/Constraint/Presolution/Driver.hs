@@ -506,14 +506,19 @@ rewriteEliminated canon nodes0 elims0 =
         , IntMap.member (getNodeId vC) nodes0
         ]
 
-rewriteGenNodes :: (NodeId -> NodeId) -> IntMap TyNode -> IntSet.IntSet -> IntSet.IntSet
+rewriteGenNodes :: (NodeId -> NodeId) -> IntMap TyNode -> IntMap.IntMap GenNode -> IntMap.IntMap GenNode
 rewriteGenNodes canon nodes0 gen0 =
-    IntSet.fromList
-        [ getNodeId gC
-        | gid <- IntSet.toList gen0
-        , let gC = canon (NodeId gid)
-        , IntMap.member (getNodeId gC) nodes0
-        ]
+    let rewriteOne g =
+            let gidC = canon (NodeId (genNodeKey (gnId g)))
+                gid = getNodeId gidC
+                schemes' =
+                    [ canon s
+                    | s <- gnSchemes g
+                    , IntMap.member (getNodeId (canon s)) nodes0
+                    ]
+                g' = g { gnId = GenNodeId gid, gnSchemes = schemes' }
+            in (gid, g')
+    in IntMap.fromListWith (\a _ -> a) (map rewriteOne (IntMap.elems gen0))
 
 -- | Read-only chase like Solve.frWith
 frWith :: IntMap NodeId -> NodeId -> NodeId

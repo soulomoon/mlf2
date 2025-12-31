@@ -10,6 +10,11 @@ module MLF.Constraint.Types (
     UnifyEdge (..),
     Constraint (..),
     maxNodeIdKeyOr0,
+    GenNodeId (..),
+    GenNode (..),
+    genNodeIdFromNodeId,
+    genNodeKey,
+    mkGenNodeFromTypeNode,
     -- * Variable bounds + elimination stores (scope-model retirement)
     EliminatedVars,
     PolySyms,
@@ -95,6 +100,27 @@ data BindingError
 -- key used for `Constraint.cNodes`.
 newtype NodeId = NodeId { getNodeId :: Int }
     deriving (Eq, Ord, Show)
+
+-- | Identifier for a gen node (paper G constructor).
+--
+-- This is a distinct sort from type nodes in the thesis.
+newtype GenNodeId = GenNodeId { getGenNodeId :: Int }
+    deriving (Eq, Ord, Show)
+
+-- | Gen node record (paper G constructor).
+--
+-- A gen node introduces one or more schemes, each rooted at a type node.
+data GenNode = GenNode
+    { gnId :: GenNodeId
+    , gnSchemes :: [NodeId]
+    }
+    deriving (Eq, Show)
+
+genNodeIdFromNodeId :: NodeId -> GenNodeId
+genNodeIdFromNodeId (NodeId i) = GenNodeId i
+
+genNodeKey :: GenNodeId -> Int
+genNodeKey = getGenNodeId
 
 -- | Identifier for an expansion variable (paper: the expansion parameter `s`).
 --
@@ -221,6 +247,24 @@ structuralChildren TyArrow{ tnDom = d, tnCod = c } = [d, c]
 structuralChildren TyForall{ tnBody = b } = [b]
 structuralChildren TyExp{ tnBody = b } = [b]
 structuralChildren TyRoot{ tnChildren = cs } = cs
+
+-- | Reify a TyNode into a gen node when it plays the gen-node role.
+--
+-- Transitional mapping: `TyForall` and `TyRoot` currently act as gen nodes.
+mkGenNodeFromTypeNode :: TyNode -> Maybe GenNode
+mkGenNodeFromTypeNode node =
+    case node of
+        TyForall{ tnId = nid } ->
+            Just GenNode
+                { gnId = genNodeIdFromNodeId nid
+                , gnSchemes = [nid]
+                }
+        TyRoot{ tnId = nid, tnChildren = cs } ->
+            Just GenNode
+                { gnId = genNodeIdFromNodeId nid
+                , gnSchemes = cs
+                }
+        _ -> Nothing
 
 -- | Lookup a node by `NodeId` in the constraint node map.
 lookupNodeIn :: IntMap a -> NodeId -> Maybe a
@@ -408,12 +452,11 @@ data Constraint = Constraint
             -- ^ Variables eliminated during presolution/ω execution.
             --
             -- Elaboration ignores eliminated vars when reifying quantifiers.
-        , cGenNodes :: IntSet
-            -- ^ Explicit set of gen nodes (paper G constructors).
+        , cGenNodes :: IntMap GenNode
+            -- ^ Gen node map (paper G constructors).
             --
-            -- Tracked separately from the term-DAG so elaboration can follow
-            -- the thesis definition of "named nodes" (nodes bound on gen nodes)
-            -- without inferring gen nodes from the term shape.
+            -- This is separate from the term-DAG so we can follow the thesis
+            -- notion of gen nodes as a distinct sort.
         }
     deriving (Eq, Show)
 
