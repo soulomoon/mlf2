@@ -8,6 +8,8 @@ module MLF.Elab.Pipeline (
     Pretty(..),
     elaborate,
     reifyType,
+    reifyTypeWithNames,
+    reifyTypeWithNamedSet,
     generalizeAt,
     expansionToInst,
     schemeToType,
@@ -23,6 +25,7 @@ module MLF.Elab.Pipeline (
     chaseRedirects,
     SchemeInfo(..),
     Env(..),
+    namedNodes,
     -- * Context representation for non-spine Raise (paper Fig. 10)
     ContextStep(..),
     contextToNodeBound,
@@ -43,7 +46,7 @@ import MLF.Elab.Inst (applyInstantiation, schemeToType)
 import MLF.Elab.TypeCheck (Env(..), checkInstantiation, typeCheck, typeCheckWithEnv)
 import MLF.Elab.Reduce (isValue, normalize, step)
 import MLF.Elab.Phi (contextToNodeBound, phiFromEdgeWitness, phiFromEdgeWitnessWithTrace)
-import MLF.Elab.Reify (reifyType)
+import MLF.Elab.Reify (namedNodes, reifyType, reifyTypeWithNamedSet, reifyTypeWithNames)
 import MLF.Elab.Run (applyRedirectsToAnn, chaseRedirects, runPipelineElab, runPipelineElabChecked)
 import MLF.Elab.Sigma (sigmaReorder)
 

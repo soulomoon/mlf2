@@ -45,6 +45,7 @@ genValidBindingTree n
         let bindParents = IntMap.fromList
                 [(i, (NodeId (i-1), flag)) | (i, flag) <- zip [1..n-1] flags]
         
+        let genNodes = IntSet.fromList [i | i <- [0..n-2]]
         return Constraint
             { cNodes = nodes
             , cInstEdges = []
@@ -52,6 +53,7 @@ genValidBindingTree n
             , cBindParents = bindParents
             , cPolySyms = Set.empty
             , cEliminatedVars = IntSet.empty
+            , cGenNodes = genNodes
             }
 
 -- | Generate a tree-shaped binding structure (not just a chain).

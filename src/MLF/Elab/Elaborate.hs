@@ -14,7 +14,7 @@ import MLF.Constraint.Solve (SolveResult(..))
 import MLF.Elab.Types
 import MLF.Elab.Generalize (generalizeAt)
 import MLF.Elab.Phi (phiFromEdgeWitnessWithTrace)
-import MLF.Elab.Reify (reifyType)
+import MLF.Elab.Reify (reifyTypeWithNames)
 import qualified MLF.Constraint.Solve as Solve (frWith)
 import MLF.Constraint.Presolution (EdgeTrace)
 import MLF.Frontend.ConstraintGen.Types (AnnExpr(..))
@@ -51,7 +51,7 @@ expansionToInst :: SolveResult -> Expansion -> Either ElabError Instantiation
 expansionToInst res expn = case expn of
     ExpIdentity -> Right InstId
     ExpInstantiate args -> do
-        tys <- mapM (reifyType res) args
+        tys <- mapM (reifyTypeWithNames res IntMap.empty) args
         -- Build a sequence of type applications.
         -- In xMLF, simple application is usually sufficient.
         -- If we needed explicit N, we'd need to know the source type schema.
@@ -77,7 +77,7 @@ elaborate res edgeWitnesses edgeTraces ann = go Map.empty ann
         AVar v _ -> maybe (Left (EnvLookup v)) (const (Right (EVar v))) (Map.lookup v env)
         ALit lit _ -> Right (ELit lit)
         ALam v n _ body _ -> do
-            ty <- reifyType res n
+            ty <- reifyTypeWithNames res IntMap.empty n
             -- Add lambda parameter to env with a monomorphic "scheme"
             let paramScheme = SchemeInfo { siScheme = Forall [] ty, siSubst = IntMap.empty }
                 env' = Map.insert v paramScheme env

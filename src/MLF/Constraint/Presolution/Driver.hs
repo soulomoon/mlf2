@@ -192,6 +192,7 @@ rewriteConstraint mapping = do
 
         newNodes = IntMap.fromListWith Canonicalize.chooseRepNode (mapMaybe rewriteNode (IntMap.elems (cNodes c)))
         eliminated' = rewriteEliminated canonical newNodes (cEliminatedVars c)
+        genNodes' = rewriteGenNodes canonical newNodes (cGenNodes c)
 
         -- Canonicalize edge expansions
         canonicalizeExp ExpIdentity = ExpIdentity
@@ -378,6 +379,7 @@ rewriteConstraint mapping = do
             , cUnifyEdges = Canonicalize.rewriteUnifyEdges canonical (cUnifyEdges c)
             , cBindParents = newBindParents
             , cEliminatedVars = eliminated'
+            , cGenNodes = genNodes'
             }
         -- Keep the synthetic constraint root total after rewriting/canonicalization.
         c' = ConstraintRoot.ensureConstraintRoot c0'
@@ -502,6 +504,15 @@ rewriteEliminated canon nodes0 elims0 =
         | vid <- IntSet.toList elims0
         , let vC = canon (NodeId vid)
         , IntMap.member (getNodeId vC) nodes0
+        ]
+
+rewriteGenNodes :: (NodeId -> NodeId) -> IntMap TyNode -> IntSet.IntSet -> IntSet.IntSet
+rewriteGenNodes canon nodes0 gen0 =
+    IntSet.fromList
+        [ getNodeId gC
+        | gid <- IntSet.toList gen0
+        , let gC = canon (NodeId gid)
+        , IntMap.member (getNodeId gC) nodes0
         ]
 
 -- | Read-only chase like Solve.frWith

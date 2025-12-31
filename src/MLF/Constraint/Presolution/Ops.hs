@@ -25,6 +25,7 @@ module MLF.Constraint.Presolution.Ops (
 import Control.Monad.State (get, gets, modify', put)
 import Control.Monad.Except (throwError)
 import qualified Data.IntMap.Strict as IntMap
+import qualified Data.IntSet as IntSet
 
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.VarStore as VarStore
@@ -46,7 +47,12 @@ registerNode nid node =
     modify' $ \st ->
         let c0 = psConstraint st
             nodes' = IntMap.insert (getNodeId nid) node (cNodes c0)
-        in st { psConstraint = c0 { cNodes = nodes' } }
+            genNodes' =
+                case node of
+                    TyForall{} -> IntSet.insert (getNodeId nid) (cGenNodes c0)
+                    TyRoot{} -> IntSet.insert (getNodeId nid) (cGenNodes c0)
+                    _ -> cGenNodes c0
+        in st { psConstraint = c0 { cNodes = nodes', cGenNodes = genNodes' } }
 
 -- | Set a binding parent for a node in the constraint.
 --

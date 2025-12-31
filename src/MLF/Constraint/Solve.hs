@@ -332,12 +332,14 @@ applyUFConstraint uf c =
                 (\childC -> IntMap.member (getNodeId childC) nodes')
                 bindParents0
         eliminated' = rewriteEliminated canonical nodes' (cEliminatedVars c)
+        genNodes' = rewriteGenNodes canonical nodes' (cGenNodes c)
     in c
         { cNodes = nodes'
         , cInstEdges = Canonicalize.rewriteInstEdges canonical (cInstEdges c)
         , cUnifyEdges = Canonicalize.rewriteUnifyEdges canonical (cUnifyEdges c)
         , cBindParents = bindParents'
         , cEliminatedVars = eliminated'
+        , cGenNodes = genNodes'
         }
   where
     rewriteNode :: TyNode -> (Int, TyNode)
@@ -360,6 +362,15 @@ applyUFConstraint uf c =
             | vid <- IntSet.toList elims0
             , let vC = canon (NodeId vid)
             , IntMap.member (getNodeId vC) nodes0
+            ]
+
+    rewriteGenNodes :: (NodeId -> NodeId) -> IntMap TyNode -> IntSet.IntSet -> IntSet.IntSet
+    rewriteGenNodes canon nodes0 gen0 =
+        IntSet.fromList
+            [ getNodeId gC
+            | gid <- IntSet.toList gen0
+            , let gC = canon (NodeId gid)
+            , IntMap.member (getNodeId gC) nodes0
             ]
 
 rewriteEliminatedBinders :: Constraint -> Either BindingError Constraint

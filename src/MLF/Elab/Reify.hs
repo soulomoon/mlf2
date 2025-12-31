@@ -1,8 +1,10 @@
 module MLF.Elab.Reify (
     reifyType,
     reifyTypeWithNames,
+    reifyTypeWithNamedSet,
     reifyBoundWithNames,
-    freeVars
+    freeVars,
+    namedNodes
 ) where
 
 import Control.Monad (unless)
@@ -15,13 +17,36 @@ import MLF.Elab.Types
 import MLF.Elab.Util (topoSortBy)
 import MLF.Constraint.Solve hiding (BindingTreeError, MissingNode)
 import qualified MLF.Constraint.Solve as Solve (frWith)
-import MLF.Binding.Tree (boundFlexChildrenAllUnder, lookupBindParent, lookupBindParentUnder)
+import MLF.Binding.Tree (boundFlexChildrenAllUnder, canonicalizeBindParentsUnder, lookupBindParent, lookupBindParentUnder)
 import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Constraint.Traversal as Traversal
 
 data ReifyRoot
     = RootType
     | RootBound
+
+data ReifyMode
+    = ModeType
+    | ModeBound
+    deriving (Eq)
+
+data ReifyCache = ReifyCache
+    { cacheType :: IntMap.IntMap ElabType
+    , cacheBound :: IntMap.IntMap ElabType
+    }
+
+emptyCache :: ReifyCache
+emptyCache = ReifyCache IntMap.empty IntMap.empty
+
+cacheLookup :: ReifyMode -> ReifyCache -> Int -> Maybe ElabType
+cacheLookup mode cache key = case mode of
+    ModeType -> IntMap.lookup key (cacheType cache)
+    ModeBound -> IntMap.lookup key (cacheBound cache)
+
+cacheInsert :: ReifyMode -> Int -> ElabType -> ReifyCache -> ReifyCache
+cacheInsert mode key ty cache = case mode of
+    ModeType -> cache { cacheType = IntMap.insert key ty (cacheType cache) }
+    ModeBound -> cache { cacheBound = IntMap.insert key ty (cacheBound cache) }
 
 reifyWith
     :: String
@@ -33,9 +58,9 @@ reifyWith
     -> Either ElabError ElabType
 reifyWith contextLabel res nameForVar isNamed rootMode nid =
     let start = case rootMode of
-            RootType -> goNamed
+            RootType -> goType
             RootBound -> goBound
-    in snd <$> start IntMap.empty (canonical nid)
+    in snd <$> start emptyCache (canonical nid)
   where
     constraint = srConstraint res
     nodes = cNodes constraint
@@ -47,37 +72,51 @@ reifyWith contextLabel res nameForVar isNamed rootMode nid =
     varName n = nameForVar (canonical n)
     varFor n = TVar (varName n)
 
-    goNamed cache n
-        | isNamed (canonical n) = Right (cache, varFor n)
-        | otherwise = goFull cache n
+    goType cache n = goFull cache ModeType n
 
-    goFull cache n = case IntMap.lookup (getNodeId n) cache of
-        Just t -> Right (cache, t)
-        Nothing -> do
-            node <- lookupNode n
-            binders <- orderedFlexChildren n
-            (cache', core) <- case node of
-                TyVar{} ->
-                    if VarStore.isEliminatedVar constraint n
-                        then pure (cache, TBottom)
-                        else pure (cache, varFor n)
-                TyBase{ tnBase = b } -> pure (cache, TBase b)
-                TyBottom{} -> pure (cache, TBottom)
-                TyArrow{ tnDom = d, tnCod = c } -> do
-                    (cache1, d') <- vChild cache (canonical d)
-                    (cache2, c') <- vChild cache1 (canonical c)
-                    pure (cache2, TArrow d' c')
-                TyForall{ tnBody = b } ->
-                    vChild cache (canonical b)
-                TyExp{ tnBody = b } ->
-                    goFull cache (canonical b)
-                TyRoot{} ->
-                    Left $
-                        InstantiationError $
-                            contextLabel ++ ": unexpected TyRoot at " ++ show (getNodeId n)
-            (cache'', t) <- wrapBinders cache' core binders
-            let cacheFinal = IntMap.insert (getNodeId n) t cache''
-            pure (cacheFinal, t)
+    goFull cache mode n0 =
+        let n = canonical n0
+            key = getNodeId n
+        in case cacheLookup mode cache key of
+            Just t -> Right (cache, t)
+            Nothing -> do
+                node <- lookupNode n
+                case node of
+                    TyVar{} ->
+                        if VarStore.isEliminatedVar constraint n
+                            then
+                                let t = TBottom
+                                    cache' = cacheInsert mode key t cache
+                                in pure (cache', t)
+                            else
+                                let t = varFor n
+                                    cache' = cacheInsert mode key t cache
+                                in pure (cache', t)
+                    _
+                        | mode == ModeType && isNamed (canonical n) ->
+                            let t = varFor n
+                                cache' = cacheInsert mode key t cache
+                            in pure (cache', t)
+                        | otherwise -> do
+                            binders <- orderedFlexChildren n
+                            (cache', core) <- case node of
+                                TyBase{ tnBase = b } -> pure (cache, TBase b)
+                                TyBottom{} -> pure (cache, TBottom)
+                                TyArrow{ tnDom = d, tnCod = c } -> do
+                                    (cache1, d') <- vChild cache (canonical d)
+                                    (cache2, c') <- vChild cache1 (canonical c)
+                                    pure (cache2, TArrow d' c')
+                                TyForall{ tnBody = b } ->
+                                    vChild cache (canonical b)
+                                TyExp{ tnBody = b } ->
+                                    goFull cache mode (canonical b)
+                                TyRoot{} ->
+                                    Left $
+                                        InstantiationError $
+                                            contextLabel ++ ": unexpected TyRoot at " ++ show (getNodeId n)
+                            (cache'', t) <- wrapBinders cache' core binders
+                            let cacheFinal = cacheInsert mode key t cache''
+                            pure (cacheFinal, t)
 
     goBound cache n = do
         node <- lookupNode n
@@ -91,8 +130,8 @@ reifyWith contextLabel res nameForVar isNamed rootMode nid =
                             let bndC = canonical bnd
                             in if bndC == n
                                 then pure (cache, TBottom)
-                                else goFull cache bndC
-            _ -> goFull cache n
+                                else goFull cache ModeBound bndC
+            _ -> goFull cache ModeBound n
 
     vChild cache child = do
         mbParent <- bindingToElab (lookupBindParentUnder canonical constraint child)
@@ -175,14 +214,19 @@ reifyType res nid =
   where
     nameFor (NodeId i) = "t" ++ show i
 
--- | Reify with an explicit name substitution for vars.
+-- | Reify with an explicit name substitution for vars (Sχ′: named nodes become variables).
 reifyTypeWithNames :: SolveResult -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
-reifyTypeWithNames res subst nid =
+reifyTypeWithNames res subst nid = do
+    namedSet <- namedNodes res
+    reifyTypeWithNamedSet res subst namedSet nid
+
+-- | Reify with an explicit named-node set (Sχ′).
+reifyTypeWithNamedSet :: SolveResult -> IntMap.IntMap String -> IntSet.IntSet -> NodeId -> Either ElabError ElabType
+reifyTypeWithNamedSet res subst namedSet nid =
     reifyWith "reifyTypeWithNames" res varNameFor isNamed RootType nid
   where
     uf = srUnionFind res
     canonical = Solve.frWith uf
-    namedSet = IntSet.fromList (IntMap.keys subst)
 
     nameFor (NodeId i) = "t" ++ show i
 
@@ -193,14 +237,13 @@ reifyTypeWithNames res subst nid =
 
     isNamed nodeId = IntSet.member (getNodeId (canonical nodeId)) namedSet
 
--- | Reify a node for use as a binder bound (T(n) in the paper).
+-- | Reify a node for use as a binder bound (T(n) in the paper, Sχp).
 reifyBoundWithNames :: SolveResult -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
 reifyBoundWithNames res subst nid =
-    reifyWith "reifyBoundWithNames" res varNameFor isNamed RootBound nid
+    reifyWith "reifyBoundWithNames" res varNameFor (const False) RootBound nid
   where
     uf = srUnionFind res
     canonical = Solve.frWith uf
-    namedSet = IntSet.fromList (IntMap.keys subst)
 
     nameFor (NodeId i) = "t" ++ show i
 
@@ -209,7 +252,26 @@ reifyBoundWithNames res subst nid =
         let cv = canonical v
         in maybe (nameFor cv) id (IntMap.lookup (getNodeId cv) subst)
 
-    isNamed nodeId = IntSet.member (getNodeId (canonical nodeId)) namedSet
+namedNodes :: SolveResult -> Either ElabError IntSet.IntSet
+namedNodes res = do
+    let constraint = srConstraint res
+        canonical = Solve.frWith (srUnionFind res)
+        genNodes = cGenNodes constraint
+        eliminated = cEliminatedVars constraint
+    bindParents <- bindingToElab (canonicalizeBindParentsUnder canonical constraint)
+    let isGenNode nid = IntSet.member (getNodeId (canonical nid)) genNodes
+        isEliminated nid = IntSet.member (getNodeId nid) eliminated
+        named =
+            [ getNodeId child
+            | (childId, (parent, flag)) <- IntMap.toList bindParents
+            , let child = canonical (NodeId childId)
+            , let parentC = canonical parent
+            , flag == BindFlex
+            , isGenNode parentC
+            , not (isGenNode child)
+            , not (isEliminated child)
+            ]
+    pure (IntSet.fromList named)
 
 -- | Collect free variables by NodeId, skipping vars under TyForall.
 freeVars :: SolveResult -> NodeId -> IntSet.IntSet -> IntSet.IntSet

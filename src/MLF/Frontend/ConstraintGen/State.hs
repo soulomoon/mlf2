@@ -29,6 +29,7 @@ data BuildState = BuildState
     , bsInstEdges :: ![InstEdge]   -- ^ Instantiation edges (accumulated in reverse)
     , bsUnifyEdges :: ![UnifyEdge] -- ^ Unification edges (accumulated in reverse)
     , bsBindParents :: !BindParents -- ^ Binding edges: child -> (parent, flag)
+    , bsGenNodes :: !IntSet.IntSet -- ^ Explicit gen nodes (TyForall/TyRoot)
     , bsPolySyms :: !PolySyms -- ^ Polymorphic type constructors (paper Poly)
     , bsScopes :: ![ScopeFrame]    -- ^ Stack of scopes tracking newly created nodes
     }
@@ -50,6 +51,7 @@ mkInitialStateWithPolySyms polySyms = BuildState
     , bsInstEdges = []
     , bsUnifyEdges = []
     , bsBindParents = IntMap.empty
+    , bsGenNodes = IntSet.empty
     , bsPolySyms = polySyms
     , bsScopes = [ScopeFrame IntSet.empty]
     }
@@ -62,4 +64,5 @@ buildConstraint st = Constraint
     , cBindParents = bsBindParents st
     , cPolySyms = bsPolySyms st
     , cEliminatedVars = IntSet.empty
+    , cGenNodes = bsGenNodes st
     }

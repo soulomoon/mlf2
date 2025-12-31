@@ -17,7 +17,7 @@ import qualified MLF.Util.Order as Order
 import MLF.Constraint.Types
 import MLF.Elab.Types
 import MLF.Elab.Inst (applyInstantiation, composeInst, instMany, schemeToType, splitForalls)
-import MLF.Elab.Reify (reifyType, reifyTypeWithNames)
+import MLF.Elab.Reify (namedNodes, reifyBoundWithNames, reifyTypeWithNamedSet)
 import MLF.Elab.Sigma (bubbleReorderTo)
 import MLF.Elab.Util (topoSortBy)
 import MLF.Constraint.Solve hiding (BindingTreeError, MissingNode)
@@ -51,16 +51,18 @@ contextToNodeBound res root target = do
         then pure (Just [])
         else do
             let keys = Order.orderKeysFromRoot res rootC
-            contextToNodeBoundWithOrderKeys canonical keys c rootC targetC
+            namedSet <- namedNodes res
+            contextToNodeBoundWithOrderKeys canonical keys c namedSet rootC targetC
 
 contextToNodeBoundWithOrderKeys
     :: (NodeId -> NodeId)
     -> IntMap.IntMap Order.OrderKey
     -> Constraint
+    -> IntSet.IntSet
     -> NodeId
     -> NodeId
     -> Either ElabError (Maybe [ContextStep])
-contextToNodeBoundWithOrderKeys canonical keys c root target = do
+contextToNodeBoundWithOrderKeys canonical keys c namedSet root target = do
     let rootC = canonical root
         targetC = canonical target
 
@@ -72,7 +74,7 @@ contextToNodeBoundWithOrderKeys canonical keys c root target = do
                         Just TyVar{ tnBound = Just bnd } -> canonical bnd
                         Just TyVar{} -> rootC
                         _ -> rootC
-            go IntSet.empty start
+            snd <$> go IntSet.empty IntMap.empty start
   where
     nameFor nid = "t" ++ show (getNodeId nid)
 
@@ -93,8 +95,13 @@ contextToNodeBoundWithOrderKeys canonical keys c root target = do
                     canonical
                     (\nid -> IntMap.lookup (getNodeId nid) (cNodes c))
                     orderRoot
+            bindersNamed =
+                [ canonical b
+                | b <- binders0
+                , IntSet.member (getNodeId (canonical b)) namedSet
+                ]
             bindersReachable =
-                filter (\nid -> IntSet.member (getNodeId nid) reachable) (dedupeById (map canonical binders0))
+                filter (\nid -> IntSet.member (getNodeId nid) reachable) (dedupeById bindersNamed)
             missing =
                 [ nid
                 | nid <- bindersReachable
@@ -106,80 +113,105 @@ contextToNodeBoundWithOrderKeys canonical keys c root target = do
                     "contextToNodeBound: missing order keys for " ++ show missing
         pure (sortBy (Order.compareNodesByOrderKey keys) bindersReachable)
 
-    go :: IntSet.IntSet -> NodeId -> Either ElabError (Maybe [ContextStep])
-    go visited nid0 = do
+    go
+        :: IntSet.IntSet
+        -> IntMap.IntMap (Maybe [ContextStep])
+        -> NodeId
+        -> Either ElabError (IntMap.IntMap (Maybe [ContextStep]), Maybe [ContextStep])
+    go visiting memo nid0 = do
         let nid = canonical nid0
             key = getNodeId nid
             targetC = canonical target
         if nid == targetC
-            then Right (Just [])
-            else if IntSet.member key visited
-                then
-                    Left $
-                        InstantiationError $
-                            "contextToNodeBound: cycle detected at " ++ show nid
-                else
-                    case IntMap.lookup key (cNodes c) of
-                        Nothing -> Left (MissingNode nid)
-                        Just node ->
-                            let visited' = IntSet.insert key visited
-                            in case node of
-                                TyForall{ tnBody = body } ->
-                                    goForall visited' nid body
-                                TyArrow{ tnDom = dom, tnCod = cod } ->
-                                    goChildren visited' [dom, cod]
-                                TyExp{ tnBody = body } ->
-                                    go visited' body
-                                TyRoot{ tnChildren = children } ->
-                                    goChildren visited' children
-                                TyVar{} ->
-                                    Right Nothing
-                                TyBase{} ->
-                                    Right Nothing
-                                TyBottom{} ->
-                                    Right Nothing
+            then
+                let res = Just []
+                in Right (IntMap.insert key res memo, res)
+            else case IntMap.lookup key memo of
+                Just res -> Right (memo, res)
+                Nothing ->
+                    if IntSet.member key visiting
+                        then
+                            Left $
+                                InstantiationError $
+                                    "contextToNodeBound: cycle detected at " ++ show nid
+                        else
+                            case IntMap.lookup key (cNodes c) of
+                                Nothing -> Left (MissingNode nid)
+                                Just node ->
+                                    let visiting' = IntSet.insert key visiting
+                                        finish res memo' =
+                                            let memo'' = IntMap.insert key res memo'
+                                            in Right (memo'', res)
+                                    in case node of
+                                        TyForall{ tnBody = body } -> do
+                                            (memo', res) <- goForall visiting' memo nid body
+                                            finish res memo'
+                                        TyArrow{ tnDom = dom, tnCod = cod } -> do
+                                            (memo', res) <- goChildren visiting' memo [dom, cod]
+                                            finish res memo'
+                                        TyExp{ tnBody = body } -> do
+                                            (memo', res) <- go visiting' memo body
+                                            finish res memo'
+                                        TyRoot{ tnChildren = children } -> do
+                                            (memo', res) <- goChildren visiting' memo children
+                                            finish res memo'
+                                        TyVar{} ->
+                                            finish Nothing memo
+                                        TyBase{} ->
+                                            finish Nothing memo
+                                        TyBottom{} ->
+                                            finish Nothing memo
 
-    goChildren :: IntSet.IntSet -> [NodeId] -> Either ElabError (Maybe [ContextStep])
-    goChildren _ [] = Right Nothing
-    goChildren visited (child:rest) = do
-        res <- go visited child
+    goChildren
+        :: IntSet.IntSet
+        -> IntMap.IntMap (Maybe [ContextStep])
+        -> [NodeId]
+        -> Either ElabError (IntMap.IntMap (Maybe [ContextStep]), Maybe [ContextStep])
+    goChildren _ memo [] = Right (memo, Nothing)
+    goChildren visiting memo (child:rest) = do
+        (memo', res) <- go visiting memo child
         case res of
-            Just _ -> pure res
-            Nothing -> goChildren visited rest
+            Just _ -> pure (memo', res)
+            Nothing -> goChildren visiting memo' rest
 
-    goForall :: IntSet.IntSet -> NodeId -> NodeId -> Either ElabError (Maybe [ContextStep])
-    goForall visited forallId body0 = do
+    goForall
+        :: IntSet.IntSet
+        -> IntMap.IntMap (Maybe [ContextStep])
+        -> NodeId
+        -> NodeId
+        -> Either ElabError (IntMap.IntMap (Maybe [ContextStep]), Maybe [ContextStep])
+    goForall visiting memo forallId body0 = do
         binders <- orderedBindersAt forallId
         let targetC = canonical target
         case elemIndex targetC binders of
             Just i -> do
                 let before = take i binders
                     steps = map (StepUnder . nameFor) before
-                pure (Just steps)
+                pure (memo, Just steps)
             Nothing -> do
-                let tryBound [] = Right Nothing
-                    tryBound (b : bs) =
+                let tryBound memoAcc [] = Right (memoAcc, Nothing)
+                    tryBound memoAcc (b : bs) =
                         case IntMap.lookup (getNodeId b) (cNodes c) of
                             Just TyVar{ tnBound = Just bnd } -> do
                                 let bndC = canonical bnd
-                                res <- go visited bndC
+                                (memo', res) <- go visiting memoAcc bndC
                                 case res of
                                     Just ctx ->
                                         let before = takeWhile (/= b) binders
                                             steps = map (StepUnder . nameFor) before ++ [StepInside] ++ ctx
-                                        in pure (Just steps)
-                                    Nothing -> tryBound bs
-                            _ -> tryBound bs
-                boundRes <- tryBound binders
+                                        in pure (memo', Just steps)
+                                    Nothing -> tryBound memo' bs
+                            _ -> tryBound memoAcc bs
+                (memo', boundRes) <- tryBound memo binders
                 case boundRes of
-                    Just _ -> pure boundRes
+                    Just _ -> pure (memo', boundRes)
                     Nothing -> do
-                        res <- go visited (canonical body0)
+                        (memo'', res) <- go visiting memo' (canonical body0)
                         case res of
                             Just ctx ->
                                 let steps = map (StepUnder . nameFor) binders ++ ctx
-                                in pure (Just steps)
-                            Nothing -> pure Nothing
+                                in pure (memo'', Just steps)
+                            Nothing -> pure (memo'', Nothing)
 
 -- | Translate a recorded per-edge graph witness to an xMLF instantiation.
 phiFromEdgeWitness :: SolveResult -> Maybe SchemeInfo -> EdgeWitness -> Either ElabError Instantiation
@@ -189,14 +221,32 @@ phiFromEdgeWitness res mSchemeInfo ew =
 phiFromEdgeWitnessWithTrace :: SolveResult -> Maybe SchemeInfo -> Maybe EdgeTrace -> EdgeWitness -> Either ElabError Instantiation
 phiFromEdgeWitnessWithTrace res mSchemeInfo mTrace ew = do
     requireValidBindingTree
+    namedSet0 <- namedNodes res
+    let copied =
+            case mTrace of
+                Nothing -> IntSet.empty
+                Just tr ->
+                    IntSet.fromList
+                        [ getNodeId (canonicalNode nid)
+                        | nid <- IntMap.elems (etCopyMap tr)
+                        ]
+        interior =
+            case mTrace of
+                Nothing -> IntSet.empty
+                Just tr -> etInterior tr
+        namedSet1 = IntSet.difference namedSet0 copied
+        namedSet =
+            if IntSet.null interior
+                then namedSet1
+                else IntSet.intersection namedSet1 interior
     let InstanceWitness ops = ewWitness ew
         steps0 =
             case ewSteps ew of
                 [] -> map StepOmega ops
                 xs -> xs
     case mSchemeInfo of
-        Nothing -> phiFromType steps0
-        Just si -> phiWithScheme si steps0
+        Nothing -> phiFromType namedSet steps0
+        Just si -> phiWithScheme namedSet si steps0
   where
     requireValidBindingTree :: Either ElabError ()
     requireValidBindingTree =
@@ -222,9 +272,21 @@ phiFromEdgeWitnessWithTrace res mSchemeInfo mTrace ew = do
             _ ->
                 Order.orderKeysFromRoot res orderRoot
 
-    phiFromType :: [InstanceStep] -> Either ElabError Instantiation
-    phiFromType steps = do
-        ty0 <- reifyType res (ewRoot ew)
+    substForTypes :: IntMap.IntMap String
+    substForTypes =
+        case mSchemeInfo of
+            Just si -> siSubst si
+            Nothing -> IntMap.empty
+
+    reifyTypeArg :: IntSet.IntSet -> NodeId -> Either ElabError ElabType
+    reifyTypeArg namedSet = reifyTypeWithNamedSet res substForTypes namedSet
+
+    reifyBoundType :: NodeId -> Either ElabError ElabType
+    reifyBoundType = reifyBoundWithNames res substForTypes
+
+    phiFromType :: IntSet.IntSet -> [InstanceStep] -> Either ElabError Instantiation
+    phiFromType namedSet steps = do
+        ty0 <- reifyTypeWithNamedSet res IntMap.empty namedSet (ewRoot ew)
         let ids0 = idsFromType ty0
             lookupBinder nid = Just ("t" ++ show (getNodeId nid))
             omegaOps = [op | StepOmega op <- steps]
@@ -232,11 +294,11 @@ phiFromEdgeWitnessWithTrace res mSchemeInfo mTrace ew = do
             if needsPrec omegaOps
                 then reorderBindersByPrec ty0 ids0
                 else Right (InstId, ty0, ids0)
-        (_, _, phiOps) <- goSteps ty1 ids1 InstId steps lookupBinder
+        (_, _, phiOps) <- goSteps namedSet ty1 ids1 InstId steps lookupBinder
         pure (instMany [sigma, phiOps])
 
-    phiWithScheme :: SchemeInfo -> [InstanceStep] -> Either ElabError Instantiation
-    phiWithScheme si steps = do
+    phiWithScheme :: IntSet.IntSet -> SchemeInfo -> [InstanceStep] -> Either ElabError Instantiation
+    phiWithScheme namedSet si steps = do
         let ty0 = schemeToType (siScheme si)
             subst = siSubst si
             lookupBinder (NodeId i) = IntMap.lookup i subst
@@ -246,7 +308,7 @@ phiFromEdgeWitnessWithTrace res mSchemeInfo mTrace ew = do
             if needsPrec omegaOps
                 then reorderBindersByPrec ty0 ids0
                 else Right (InstId, ty0, ids0)
-        (_, _, phiOps) <- goSteps ty1 ids1 InstId steps lookupBinder
+        (_, _, phiOps) <- goSteps namedSet ty1 ids1 InstId steps lookupBinder
         pure (instMany [sigma, phiOps])
 
     needsPrec :: [InstanceOp] -> Bool
@@ -255,24 +317,25 @@ phiFromEdgeWitnessWithTrace res mSchemeInfo mTrace ew = do
         _ -> False
 
     goSteps
-        :: ElabType
+        :: IntSet.IntSet
+        -> ElabType
         -> [Maybe NodeId]
         -> Instantiation
         -> [InstanceStep]
         -> (NodeId -> Maybe String)
         -> Either ElabError (ElabType, [Maybe NodeId], Instantiation)
-    goSteps ty ids phi steps lookupBinder = case steps of
+    goSteps namedSet ty ids phi steps lookupBinder = case steps of
         [] -> Right (ty, ids, phi)
         StepIntro : rest -> do
             ty' <- applyInstantiation ty InstIntro
             let ids' = Nothing : ids
-            goSteps ty' ids' (composeInst phi InstIntro) rest lookupBinder
+            goSteps namedSet ty' ids' (composeInst phi InstIntro) rest lookupBinder
         _ ->
             let (segment, rest) = span isOmega steps
                 ops = [op | StepOmega op <- segment]
             in do
-                (ty', ids', phi') <- go ty ids phi ops lookupBinder
-                goSteps ty' ids' phi' rest lookupBinder
+                (ty', ids', phi') <- go namedSet ty ids phi ops lookupBinder
+                goSteps namedSet ty' ids' phi' rest lookupBinder
       where
         isOmega = \case
             StepOmega{} -> True
@@ -364,32 +427,32 @@ phiFromEdgeWitnessWithTrace res mSchemeInfo mTrace ew = do
                     Nothing -> arg
                     Just meta -> meta
 
-    go :: ElabType -> [Maybe NodeId] -> Instantiation -> [InstanceOp] -> (NodeId -> Maybe String)
+    go :: IntSet.IntSet -> ElabType -> [Maybe NodeId] -> Instantiation -> [InstanceOp] -> (NodeId -> Maybe String)
        -> Either ElabError (ElabType, [Maybe NodeId], Instantiation)
-    go ty ids phi ops lookupBinder = case ops of
+    go namedSet ty ids phi ops lookupBinder = case ops of
         [] -> Right (ty, ids, phi)
 
         (OpGraft arg bv : OpWeaken bv' : rest)
             | bv == bv' -> do
                 (inst, ids1) <- atBinder ids ty bv $ do
-                    argTy <- reifyType res (graftArgFor arg bv)
+                    argTy <- reifyTypeArg namedSet (graftArgFor arg bv)
                     pure (InstApp argTy)
                 ty' <- applyInstantiation ty inst
-                go ty' ids1 (composeInst phi inst) rest lookupBinder
+                go namedSet ty' ids1 (composeInst phi inst) rest lookupBinder
             | otherwise ->
                 Left (InstantiationError "witness op mismatch: OpGraft/OpWeaken refer to different nodes")
 
         (OpGraft arg bv : rest) -> do
             (inst, ids1) <- atBinderKeep ids ty bv $ do
-                argTy <- reifyType res arg
+                argTy <- reifyTypeArg namedSet arg
                 pure (InstInside (InstBot argTy))
             ty' <- applyInstantiation ty inst
-            go ty' ids1 (composeInst phi inst) rest lookupBinder
+            go namedSet ty' ids1 (composeInst phi inst) rest lookupBinder
 
         (OpWeaken bv : rest) -> do
             (inst, ids1) <- atBinder ids ty bv (pure InstElim)
             ty' <- applyInstantiation ty inst
-            go ty' ids1 (composeInst phi inst) rest lookupBinder
+            go namedSet ty' ids1 (composeInst phi inst) rest lookupBinder
 
         (OpRaise n : rest) -> do
             -- Paper Fig. 10: operations on rigid nodes translate to the identity
@@ -398,7 +461,7 @@ phiFromEdgeWitnessWithTrace res mSchemeInfo mTrace ew = do
             -- binding-tree harmonization, so treat them as no-ops here.
             case lookupBindParent (srConstraint res) (canonicalNode n) of
                 Just (_, BindRigid) ->
-                    go ty ids phi rest lookupBinder
+                    go namedSet ty ids phi rest lookupBinder
                 _ ->
                     -- Paper Fig. 10: Raise(n) introduces a fresh quantifier one level higher,
                     -- bounds it by Tξ(n), then aliases/eliminates the old binder.
@@ -444,7 +507,7 @@ phiFromEdgeWitnessWithTrace res mSchemeInfo mTrace ew = do
 
                             idsNoN <- deleteAt i ids
                             ids1 <- insertAt insertIndex (Just n) idsNoN
-                            go ty' ids1 (composeInst phi inst) rest lookupBinder
+                            go namedSet ty' ids1 (composeInst phi inst) rest lookupBinder
 
                         Nothing -> do
                             -- Non-spine node case: select an insertion point `m = min≺{...}` (Fig. 10)
@@ -457,9 +520,7 @@ phiFromEdgeWitnessWithTrace res mSchemeInfo mTrace ew = do
                             -- where `m = min≺{…}`.
 
                             nodeTy <-
-                                case mSchemeInfo of
-                                    Just si -> reifyTypeWithNames res (siSubst si) n
-                                    Nothing -> reifyType res n
+                                reifyBoundType n
 
                             let (qs, _) = splitForalls ty
                                 names = map fst qs
@@ -487,6 +548,7 @@ phiFromEdgeWitnessWithTrace res mSchemeInfo mTrace ew = do
                                                     canonicalNode
                                                     orderKeys
                                                     (srConstraint res)
+                                                    namedSet
                                                     (canonicalNode mNode)
                                                     nC
                                             case ctxOrErr of
@@ -515,17 +577,17 @@ phiFromEdgeWitnessWithTrace res mSchemeInfo mTrace ew = do
 
                                     ty' <- applyInstantiation ty inst
                                     ids1 <- insertAt insertIdx (Just n) ids
-                                    go ty' ids1 (composeInst phi inst) rest lookupBinder
+                                    go namedSet ty' ids1 (composeInst phi inst) rest lookupBinder
 
         (OpMerge n m : rest)
             | canonicalNode n == canonicalNode m ->
-                go ty ids phi rest lookupBinder
+                go namedSet ty ids phi rest lookupBinder
             | otherwise -> do
                 mName <- binderNameFor ty ids m lookupBinder
                 let hAbs = InstSeq (InstInside (InstAbstr mName)) InstElim
                 (inst, ids1) <- atBinder ids ty n (pure hAbs)
                 ty' <- applyInstantiation ty inst
-                go ty' ids1 (composeInst phi inst) rest lookupBinder
+                go namedSet ty' ids1 (composeInst phi inst) rest lookupBinder
 
         (OpRaiseMerge n m : rest) -> do
             -- Paper Fig. 10 special-cases RaiseMerge(r, m) at the (flexible) expansion
@@ -537,7 +599,7 @@ phiFromEdgeWitnessWithTrace res mSchemeInfo mTrace ew = do
                 then do
                     mName <- binderNameFor ty ids m lookupBinder
                     ty' <- applyInstantiation ty (InstAbstr mName)
-                    go ty' [] (composeInst phi (InstAbstr mName)) rest lookupBinder
+                    go namedSet ty' [] (composeInst phi (InstAbstr mName)) rest lookupBinder
                 else do
                     -- Non-root RaiseMerge behaves like Merge inside the context of n.
                     case elemIndex (Just n) ids of
@@ -548,7 +610,7 @@ phiFromEdgeWitnessWithTrace res mSchemeInfo mTrace ew = do
                             let hAbs = InstSeq (InstInside (InstAbstr mName)) InstElim
                             (inst, ids1) <- atBinder ids ty n (pure hAbs)
                             ty' <- applyInstantiation ty inst
-                            go ty' ids1 (composeInst phi inst) rest lookupBinder
+                            go namedSet ty' ids1 (composeInst phi inst) rest lookupBinder
 
     idsForStartType :: SchemeInfo -> ElabType -> [Maybe NodeId]
     idsForStartType si ty =

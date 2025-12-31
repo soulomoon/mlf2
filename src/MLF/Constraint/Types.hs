@@ -408,6 +408,12 @@ data Constraint = Constraint
             -- ^ Variables eliminated during presolution/ω execution.
             --
             -- Elaboration ignores eliminated vars when reifying quantifiers.
+        , cGenNodes :: IntSet
+            -- ^ Explicit set of gen nodes (paper G constructors).
+            --
+            -- Tracked separately from the term-DAG so elaboration can follow
+            -- the thesis definition of "named nodes" (nodes bound on gen nodes)
+            -- without inferring gen nodes from the term shape.
         }
     deriving (Eq, Show)
 

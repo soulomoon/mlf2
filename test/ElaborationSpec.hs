@@ -137,6 +137,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 constraint = emptyConstraint
                     { cNodes = nodes
                     , cBindParents = bindParents
+                    , cGenNodes = IntSet.fromList [getNodeId root]
                     }
                 solved = SolveResult
                     { srConstraint = constraint
@@ -412,6 +413,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 ]
                         , cPolySyms = Set.empty
                         , cEliminatedVars = IntSet.singleton (getNodeId v)
+                        , cGenNodes = IntSet.fromList [getNodeId forallNode]
                         }
 
             solved <- requireRight (solveUnify c)
@@ -447,6 +449,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 ]
                         , cPolySyms = Set.empty
                         , cEliminatedVars = IntSet.singleton (getNodeId v)
+                        , cGenNodes = IntSet.fromList [getNodeId forallNode]
                         }
 
             solved <- requireRight (solveUnify c)
@@ -645,6 +648,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 ]
                         , cPolySyms = Set.empty
                         , cEliminatedVars = IntSet.empty
+                        , cGenNodes = IntSet.fromList [getNodeId forallNode]
                         }
 
                 solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
@@ -681,6 +685,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 ]
                         , cPolySyms = Set.empty
                         , cEliminatedVars = IntSet.empty
+                        , cGenNodes = IntSet.fromList [getNodeId forallNode]
                         }
 
                 solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
@@ -712,6 +717,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 , (getNodeId vB, (forallNode, BindFlex))
                                 ]
                         , cPolySyms = Set.empty
+                        , cGenNodes = IntSet.fromList [getNodeId forallNode]
                         }
 
                 solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
@@ -829,9 +835,11 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 phi `shouldNotBe` Elab.InstApp (Elab.TBase (BaseTy "Int"))
 
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
+                namedSet <- requireRight (Elab.namedNodes solved)
+                argTy <- requireRight (Elab.reifyTypeWithNamedSet solved IntMap.empty namedSet intNode)
                 let expected =
                         Elab.TForall "a" Nothing
-                            (Elab.TArrow (Elab.TVar "a") (Elab.TBase (BaseTy "Int")))
+                            (Elab.TArrow (Elab.TVar "a") argTy)
                 canonType out `shouldBe` canonType expected
 
             it "interleaves StepIntro with Omega ops in Φ translation" $ do
@@ -920,6 +928,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                     , (getNodeId bN, (root, BindFlex))
                                     ]
                             , cPolySyms = Set.empty
+                            , cGenNodes = IntSet.empty
                             }
                     solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 
@@ -979,6 +988,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                     , (getNodeId inner, (root, BindFlex))
                                     ]
                             , cPolySyms = Set.empty
+                            , cGenNodes = IntSet.empty
                             }
                     solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 
@@ -1029,6 +1039,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 , (getNodeId inner, (root, BindFlex))
                                 ]
                         , cPolySyms = Set.empty
+                        , cGenNodes = IntSet.empty
                         }
                     solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 
@@ -1077,10 +1088,26 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     Right (solved, ews, traces) -> do
                         IntMap.size ews `shouldSatisfy` (> 0)
                         forM_ (IntMap.elems ews) $ \ew -> do
-                            srcTy <- requireRight (Elab.reifyType solved (ewRoot ew))
-                            tgtTy <- requireRight (Elab.reifyType solved (ewRight ew))
                             let EdgeId eid = ewEdgeId ew
                                 mTrace = IntMap.lookup eid traces
+                                canonical = Solve.frWith (srUnionFind solved)
+                            named0 <- requireRight (Elab.namedNodes solved)
+                            let namedSet =
+                                    case mTrace of
+                                        Nothing -> named0
+                                        Just tr ->
+                                            let copied =
+                                                    IntSet.fromList
+                                                        [ getNodeId (canonical nid)
+                                                        | nid <- IntMap.elems (etCopyMap tr)
+                                                        ]
+                                                named1 = IntSet.difference named0 copied
+                                                interior = etInterior tr
+                                            in if IntSet.null interior
+                                                then named1
+                                                else IntSet.intersection named1 interior
+                            srcTy <- requireRight (Elab.reifyTypeWithNamedSet solved IntMap.empty namedSet (ewRoot ew))
+                            tgtTy <- requireRight (Elab.reifyTypeWithNamedSet solved IntMap.empty namedSet (ewRight ew))
                             phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace solved Nothing mTrace ew)
                             out <- requireRight (Elab.applyInstantiation srcTy phi)
                             canonType (stripBoundWrapper out) `shouldBe` canonType (stripBoundWrapper tgtTy)
@@ -1096,10 +1123,26 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         -- Each application emits two instantiation edges (fun + arg).
                         IntMap.size ews `shouldBe` 4
                         forM_ (IntMap.elems ews) $ \ew -> do
-                            srcTy <- requireRight (Elab.reifyType solved (ewRoot ew))
-                            tgtTy <- requireRight (Elab.reifyType solved (ewRight ew))
                             let EdgeId eid = ewEdgeId ew
                                 mTrace = IntMap.lookup eid traces
+                                canonical = Solve.frWith (srUnionFind solved)
+                            named0 <- requireRight (Elab.namedNodes solved)
+                            let namedSet =
+                                    case mTrace of
+                                        Nothing -> named0
+                                        Just tr ->
+                                            let copied =
+                                                    IntSet.fromList
+                                                        [ getNodeId (canonical nid)
+                                                        | nid <- IntMap.elems (etCopyMap tr)
+                                                        ]
+                                                named1 = IntSet.difference named0 copied
+                                                interior = etInterior tr
+                                            in if IntSet.null interior
+                                                then named1
+                                                else IntSet.intersection named1 interior
+                            srcTy <- requireRight (Elab.reifyTypeWithNamedSet solved IntMap.empty namedSet (ewRoot ew))
+                            tgtTy <- requireRight (Elab.reifyTypeWithNamedSet solved IntMap.empty namedSet (ewRight ew))
                             phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace solved Nothing mTrace ew)
                             out <- requireRight (Elab.applyInstantiation srcTy phi)
                             canonType (stripBoundWrapper out) `shouldBe` canonType (stripBoundWrapper tgtTy)
@@ -1137,6 +1180,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             ]
                         , cPolySyms = Set.empty
                         , cEliminatedVars = IntSet.empty
+                        , cGenNodes = IntSet.fromList [getNodeId root, getNodeId boundRoot]
                         }
                     solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 
@@ -1175,11 +1219,81 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             ]
                         , cPolySyms = Set.empty
                         , cEliminatedVars = IntSet.empty
+                        , cGenNodes = IntSet.fromList [getNodeId root, getNodeId boundRoot]
                         }
                     solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 
                 steps <- requireRight (Elab.contextToNodeBound solved root bN)
                 steps `shouldBe` Just [Elab.StepUnder "t1"]
+
+            it "contextToNodeBound handles shared bound subgraphs (context dag)" $ do
+                -- The bound of b is the same node that also appears in the body.
+                -- The context should still be computed without treating sharing as a cycle.
+                let root = NodeId 100
+                    body = NodeId 101
+                    bN = NodeId 2
+                    shared = NodeId 200
+                    xN = NodeId 3
+
+                    c = Constraint
+                        { cNodes =
+                            IntMap.fromList
+                                [ (getNodeId root, TyForall root body)
+                                , (getNodeId body, TyArrow body bN shared)
+                                , (getNodeId bN, TyVar { tnId = bN, tnBound = Just shared })
+                                , (getNodeId shared, TyArrow shared xN xN)
+                                , (getNodeId xN, TyVar { tnId = xN, tnBound = Nothing })
+                                ]
+                        , cInstEdges = []
+                        , cUnifyEdges = []
+                        , cBindParents = IntMap.fromList
+                            [ (getNodeId body, (root, BindRigid))
+                            , (getNodeId bN, (root, BindFlex))
+                            , (getNodeId shared, (body, BindFlex))
+                            , (getNodeId xN, (shared, BindFlex))
+                            ]
+                        , cPolySyms = Set.empty
+                        , cEliminatedVars = IntSet.empty
+                        , cGenNodes = IntSet.fromList [getNodeId root]
+                        }
+                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+
+                steps <- requireRight (Elab.contextToNodeBound solved root xN)
+                steps `shouldBe` Just [Elab.StepInside]
+
+            it "contextToNodeBound ignores non-variable binder bounds (context non-var)" $ do
+                -- Binder b is an arrow node; only structural traversal applies.
+                let root = NodeId 100
+                    body = NodeId 101
+                    bN = NodeId 2
+                    domN = NodeId 3
+                    codN = NodeId 4
+
+                    c = Constraint
+                        { cNodes =
+                            IntMap.fromList
+                                [ (getNodeId root, TyForall root body)
+                                , (getNodeId body, TyArrow body bN bN)
+                                , (getNodeId bN, TyArrow bN domN codN)
+                                , (getNodeId domN, TyVar { tnId = domN, tnBound = Nothing })
+                                , (getNodeId codN, TyVar { tnId = codN, tnBound = Nothing })
+                                ]
+                        , cInstEdges = []
+                        , cUnifyEdges = []
+                        , cBindParents = IntMap.fromList
+                            [ (getNodeId body, (root, BindFlex))
+                            , (getNodeId bN, (root, BindFlex))
+                            , (getNodeId domN, (bN, BindFlex))
+                            , (getNodeId codN, (bN, BindFlex))
+                            ]
+                        , cPolySyms = Set.empty
+                        , cEliminatedVars = IntSet.empty
+                        , cGenNodes = IntSet.fromList [getNodeId root]
+                        }
+                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+
+                steps <- requireRight (Elab.contextToNodeBound solved root domN)
+                steps `shouldBe` Just [Elab.StepUnder "t2", Elab.StepUnder "t101"]
 
             it "selectMinPrecInsertionIndex implements m = min≺ selection (min≺)" $ do
                 -- Keys are ordered by <P (lexicographic with empty path greatest).
@@ -1229,6 +1343,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             ]
                         , cPolySyms = Set.empty
                         , cEliminatedVars = IntSet.empty
+                        , cGenNodes = IntSet.empty
                         }
                     solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 
@@ -1343,6 +1458,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 ]
                         , cPolySyms = Set.empty
                         , cEliminatedVars = IntSet.empty
+                        , cGenNodes = IntSet.fromList [getNodeId root]
                         }
                 solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 

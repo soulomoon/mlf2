@@ -24,6 +24,7 @@ emptyConstraint = Constraint
     , cBindParents = IntMap.empty
     , cPolySyms = Set.empty
     , cEliminatedVars = IntSet.empty
+    , cGenNodes = IntSet.empty
     }
 
 expectRight :: Show e => Either e a -> (a -> Expectation) -> Expectation

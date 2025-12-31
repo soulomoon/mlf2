@@ -57,6 +57,7 @@ ensureConstraintRoot c0 =
                         c1 =
                             c0
                                 { cNodes = IntMap.insert (getNodeId rootId) (TyRoot rootId roots) (cNodes c0)
+                                , cGenNodes = IntSet.insert (getNodeId rootId) (cGenNodes c0)
                                 }
                         c2 =
                             foldr
