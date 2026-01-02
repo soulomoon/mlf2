@@ -40,7 +40,7 @@ import MLF.Constraint.Presolution.Base (
     PresolutionState(..),
     emptyTrace,
     forallSpecM,
-    orderedBindersM,
+    instantiationBindersM,
     unionTrace
     )
 import MLF.Constraint.Presolution.Copy (
@@ -56,6 +56,7 @@ import MLF.Constraint.Presolution.Ops (
     lookupVarBound,
     setVarBound
     )
+import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Types
 import MLF.Constraint.Presolution.Unify (unifyAcyclic)
 
@@ -154,58 +155,51 @@ level. The sequence preserves sharing outside the binder and remains the least
 expansion that satisfies the edge (principality argument in §5).
 -}
 decideMinimalExpansion :: TyNode -> TyNode -> PresolutionM (Expansion, [(NodeId, NodeId)])
-decideMinimalExpansion expNode@(TyExp { tnBody = bodyId }) targetNode = do
-    body <- getCanonicalNode bodyId
-    case body of
-        TyForall { tnId = forallId, tnBody = forallBody } -> do
-            boundVars <- orderedBindersM forallId
-            -- A TyForall node can be "vacuous" in our constraint graph: it marks a
-            -- generalization boundary even when there are no binders at that level.
-            -- In that case it should behave transparently for expansion decisions
-            -- (otherwise we may unify a non-vacuous ∀ against structure and lose
-            -- instantiation opportunities; see xmlf.txt §3.1 desugaring cases).
-            if null boundVars then
-                decideMinimalExpansion expNode { tnBody = forallBody } targetNode
-            else case targetNode of
-                TyForall { tnId = targetForallId, tnBody = targetBody } -> do
-                    targetSpec <- forallSpecM targetForallId
-                    if length boundVars == fsBinderCount targetSpec
-                        then
-                            -- Note [Minimal Expansion Decision] case 1 (∀≤∀ matching arity)
-                            return (ExpIdentity, [(forallBody, targetBody)])
-                        else do
-                            -- Note [Minimal Expansion Decision] case 1 (∀≤∀ arity mismatch)
-                            freshNodes <- mapM (const createFreshVar) boundVars
-                            let expn =
-                                    ExpCompose
-                                        (ExpInstantiate freshNodes NE.<| (ExpForall (targetSpec NE.:| []) NE.:| []))
-                            return (expn, [])
-                _ -> do
-                    -- target is not a forall → instantiate to expose structure
-                    -- Note [Minimal Expansion Decision] case 2 (∀≤structure, with binders)
-                    freshNodes <- mapM (const createFreshVar) boundVars
-                    return (ExpInstantiate freshNodes, [])
+decideMinimalExpansion (TyExp { tnBody = bodyId }) targetNode = do
+    (bodyRoot, boundVars) <- instantiationBindersM bodyId
+    if not (null boundVars)
+        then case targetNode of
+            TyForall { tnId = targetForallId, tnBody = targetBody } -> do
+                targetSpec <- forallSpecM targetForallId
+                if length boundVars == fsBinderCount targetSpec
+                    then
+                        -- Note [Minimal Expansion Decision] case 1 (∀≤∀ matching arity)
+                        return (ExpIdentity, [(bodyRoot, targetBody)])
+                    else do
+                        -- Note [Minimal Expansion Decision] case 1 (∀≤∀ arity mismatch)
+                        freshNodes <- mapM (const createFreshVar) boundVars
+                        let expn =
+                                ExpCompose
+                                    (ExpInstantiate freshNodes NE.<| (ExpForall (targetSpec NE.:| []) NE.:| []))
+                        return (expn, [])
+            _ -> do
+                -- target is not a forall → instantiate to expose structure
+                -- Note [Minimal Expansion Decision] case 2 (∀≤structure, with binders)
+                freshNodes <- mapM (const createFreshVar) boundVars
+                return (ExpInstantiate freshNodes, [])
+        else do
+            bodyNode <- getCanonicalNode bodyRoot
+            case bodyNode of
+                TyArrow { tnDom = bDom, tnCod = bCod } -> do
+                    case targetNode of
+                        TyArrow { tnDom = tDom, tnCod = tCod } ->
+                            -- Note [Minimal Expansion Decision] case 4 (structure≤structure, arrow)
+                            return (ExpIdentity, [(bDom, tDom), (bCod, tCod)])
+                        TyForall { tnBody = targetBody } -> do
+                            -- need to generalize to meet target forall
+                            -- Note [Minimal Expansion Decision] case 3 (structure≤∀)
+                            targetSpec <- forallSpecM (tnId targetNode)
+                            let expn = ExpForall (targetSpec NE.:| [])
+                            return (expn, [(bodyRoot, targetBody)])
+                        _ -> return (ExpIdentity, [(bodyRoot, tnId targetNode)])
 
-        TyArrow { tnDom = bDom, tnCod = bCod } -> do
-            case targetNode of
-                TyArrow { tnDom = tDom, tnCod = tCod } ->
-                    -- Note [Minimal Expansion Decision] case 4 (structure≤structure, arrow)
-                    return (ExpIdentity, [(bDom, tDom), (bCod, tCod)])
-                TyForall { tnBody = targetBody } -> do
-                    -- need to generalize to meet target forall
-                    -- Note [Minimal Expansion Decision] case 3 (structure≤∀)
-                    targetSpec <- forallSpecM (tnId targetNode)
-                    let expn = ExpForall (targetSpec NE.:| [])
-                    return (expn, [(bodyId, targetBody)])
-                _ -> return (ExpIdentity, [(bodyId, tnId targetNode)])
-
-        _ -> case targetNode of
-            TyForall { tnBody = targetBody } -> do
-                -- Note [Minimal Expansion Decision] case 3 (structure≤∀)
-                targetSpec <- forallSpecM (tnId targetNode)
-                let expn = ExpForall (targetSpec NE.:| [])
-                return (expn, [(bodyId, targetBody)])
-            _ -> return (ExpIdentity, [(bodyId, tnId targetNode)])
+                _ -> case targetNode of
+                    TyForall { tnBody = targetBody } -> do
+                        -- Note [Minimal Expansion Decision] case 3 (structure≤∀)
+                        targetSpec <- forallSpecM (tnId targetNode)
+                        let expn = ExpForall (targetSpec NE.:| [])
+                        return (expn, [(bodyRoot, targetBody)])
+                    _ -> return (ExpIdentity, [(bodyRoot, tnId targetNode)])
 
 decideMinimalExpansion _ _ = return (ExpIdentity, [])
 
@@ -218,20 +212,15 @@ decideMinimalExpansion _ _ = return (ExpIdentity, [])
 applyExpansion :: Expansion -> TyNode -> PresolutionM NodeId
 applyExpansion expansion expNode = case (expansion, expNode) of
     (ExpIdentity, TyExp { tnBody = b }) -> return b
-    (ExpInstantiate args, expNode'@TyExp { tnBody = b }) -> do
-        body <- getCanonicalNode b
-        case body of
-            TyForall { tnId = forallId, tnBody = innerBody } -> do
-                boundVars <- orderedBindersM forallId
-                if null boundVars then
-                    -- Vacuous ∀: skip it and instantiate the first non-vacuous one underneath.
-                    if null args
-                        then pure innerBody
-                        else applyExpansion (ExpInstantiate args) expNode' { tnBody = innerBody }
-                else if length boundVars /= length args
-                    then throwError $ ArityMismatch "applyExpansion" (length boundVars) (length args)
-                    else instantiateScheme innerBody (zip boundVars args)
-            _ -> throwError $ InstantiateOnNonForall (tnId body)
+    (ExpInstantiate args, TyExp { tnBody = b }) -> do
+        (bodyRoot, boundVars) <- instantiationBindersM b
+        if null boundVars then
+            if null args
+                then pure bodyRoot
+                else throwError $ InstantiateOnNonForall bodyRoot
+        else if length boundVars /= length args
+            then throwError $ ArityMismatch "applyExpansion" (length boundVars) (length args)
+            else instantiateScheme bodyRoot (zip boundVars args)
     (ExpForall specs, TyExp { tnBody = b }) -> do
         wrapForall (NE.toList specs) b
     (ExpCompose exps, TyExp { tnBody = b }) -> do
@@ -265,18 +254,15 @@ applyExpansion expansion expNode = case (expansion, expNode) of
     applyExpansionOverNode (ExpInstantiate args) node _ =
         case node of
             TyExp{} -> throwError $ InstantiateOnNonForall (tnId node)
-            TyForall { tnId = forallId, tnBody = innerBody } -> do
-                boundVars <- orderedBindersM forallId
+            _ -> do
+                (bodyRoot, boundVars) <- instantiationBindersM (tnId node)
                 if null boundVars then
                     if null args
-                        then pure innerBody
-                        else do
-                            innerNode <- getCanonicalNode innerBody
-                            applyExpansionOverNode (ExpInstantiate args) innerNode innerBody
+                        then pure bodyRoot
+                        else throwError $ InstantiateOnNonForall bodyRoot
                 else if length boundVars /= length args
                     then throwError $ ArityMismatch "applyExpansionOverNode" (length boundVars) (length args)
-                    else instantiateScheme innerBody (zip boundVars args)
-            _ -> throwError $ InstantiateOnNonForall (tnId node)
+                    else instantiateScheme bodyRoot (zip boundVars args)
 
 -- | Apply an expansion like 'applyExpansion', but also return a (coarse) trace
 -- of the expansion interior I(r): instantiation args, copied nodes, and any
@@ -284,22 +270,17 @@ applyExpansion expansion expNode = case (expansion, expNode) of
 applyExpansionTraced :: Expansion -> TyNode -> PresolutionM (NodeId, (CopyMap, InteriorSet))
 applyExpansionTraced expansion expNode = case (expansion, expNode) of
     (ExpIdentity, TyExp { tnBody = b }) -> pure (b, emptyTrace)
-    (ExpInstantiate args, expNode'@TyExp { tnBody = b }) -> do
-        body <- getCanonicalNode b
-        case body of
-            TyForall { tnId = forallId, tnBody = innerBody } -> do
-                boundVars <- orderedBindersM forallId
-                if null boundVars then
-                    -- Vacuous ∀: skip it and instantiate the first non-vacuous one underneath.
-                    if null args
-                        then pure (innerBody, emptyTrace)
-                        else applyExpansionTraced (ExpInstantiate args) expNode' { tnBody = innerBody }
-                else if length boundVars /= length args
-                        then throwError $ ArityMismatch "applyExpansionTraced" (length boundVars) (length args)
-                    else do
-                        (root, cmap, interior) <- instantiateSchemeWithTrace innerBody (zip boundVars args)
-                        pure (root, (cmap, interior))
-            _ -> throwError $ InstantiateOnNonForall (tnId body)
+    (ExpInstantiate args, TyExp { tnBody = b }) -> do
+        (bodyRoot, boundVars) <- instantiationBindersM b
+        if null boundVars then
+            if null args
+                then pure (bodyRoot, emptyTrace)
+                else throwError $ InstantiateOnNonForall bodyRoot
+        else if length boundVars /= length args
+            then throwError $ ArityMismatch "applyExpansionTraced" (length boundVars) (length args)
+            else do
+                (root, cmap, interior) <- instantiateSchemeWithTrace bodyRoot (zip boundVars args)
+                pure (root, (cmap, interior))
     (ExpForall specs, TyExp { tnBody = b }) -> do
         wrapForallTraced (NE.toList specs) b
     (ExpCompose exps, TyExp { tnBody = b }) -> do
@@ -335,20 +316,17 @@ applyExpansionTraced expansion expNode = case (expansion, expNode) of
     applyExpansionOverNodeTraced (ExpInstantiate args) node _ =
         case node of
             TyExp{} -> throwError $ InstantiateOnNonForall (tnId node)
-            TyForall { tnId = forallId, tnBody = innerBody } -> do
-                boundVars <- orderedBindersM forallId
+            _ -> do
+                (bodyRoot, boundVars) <- instantiationBindersM (tnId node)
                 if null boundVars then
                     if null args
-                        then pure (innerBody, emptyTrace)
-                        else do
-                            innerNode <- getCanonicalNode innerBody
-                            applyExpansionOverNodeTraced (ExpInstantiate args) innerNode innerBody
+                        then pure (bodyRoot, emptyTrace)
+                        else throwError $ InstantiateOnNonForall bodyRoot
                 else if length boundVars /= length args
                     then throwError $ ArityMismatch "applyExpansionOverNodeTraced" (length boundVars) (length args)
                     else do
-                        (root, cmap, interior) <- instantiateSchemeWithTrace innerBody (zip boundVars args)
+                        (root, cmap, interior) <- instantiateSchemeWithTrace bodyRoot (zip boundVars args)
                         pure (root, (cmap, interior))
-            _ -> throwError $ InstantiateOnNonForall (tnId node)
 
 -- | Like 'applyExpansionTraced', but for edge processing: construct χe-style copies
 -- so that Ω operations (Graft/Weaken/Merge) can be executed as graph transformations.
@@ -359,23 +337,19 @@ applyExpansionTraced expansion expNode = case (expansion, expNode) of
 applyExpansionEdgeTraced :: Expansion -> TyNode -> PresolutionM (NodeId, (CopyMap, InteriorSet))
 applyExpansionEdgeTraced expansion expNode = case (expansion, expNode) of
     (ExpIdentity, TyExp { tnBody = b }) -> pure (b, emptyTrace)
-    (ExpInstantiate args, expNode'@TyExp { tnBody = b }) -> do
-        body <- getCanonicalNode b
-        case body of
-            TyForall { tnId = forallId, tnBody = innerBody } -> do
-                boundVars <- orderedBindersM forallId
-                if null boundVars then
-                    if null args
-                        then pure (innerBody, emptyTrace)
-                        else applyExpansionEdgeTraced (ExpInstantiate args) expNode' { tnBody = innerBody }
-                else if length boundVars /= length args
-                    then throwError $ ArityMismatch "applyExpansionEdgeTraced" (length boundVars) (length args)
-                    else do
-                        metas <- zipWithM binderMetaAt args boundVars
-                        (root, cmap0, interior0) <- instantiateSchemeWithTrace innerBody (zip boundVars metas)
-                        (cmapB, interiorB) <- copyBinderBounds (zip boundVars metas)
-                        pure (root, (IntMap.union cmap0 cmapB, IntSet.union interior0 interiorB))
-            _ -> throwError $ InstantiateOnNonForall (tnId body)
+    (ExpInstantiate args, TyExp { tnBody = b }) -> do
+        (bodyRoot, boundVars) <- instantiationBindersM b
+        if null boundVars then
+            if null args
+                then pure (bodyRoot, emptyTrace)
+                else throwError $ InstantiateOnNonForall bodyRoot
+        else if length boundVars /= length args
+            then throwError $ ArityMismatch "applyExpansionEdgeTraced" (length boundVars) (length args)
+            else do
+                metas <- zipWithM binderMetaAt args boundVars
+                (root, cmap0, interior0) <- instantiateSchemeWithTrace bodyRoot (zip boundVars metas)
+                (cmapB, interiorB) <- copyBinderBounds (zip boundVars metas)
+                pure (root, (IntMap.union cmap0 cmapB, IntSet.union interior0 interiorB))
     (ExpForall specs, TyExp { tnBody = b }) -> do
         wrapForallTraced (NE.toList specs) b
     (ExpCompose exps, TyExp { tnBody = b }) -> do
@@ -415,22 +389,19 @@ applyExpansionEdgeTraced expansion expNode = case (expansion, expNode) of
     applyExpansionOverNodeEdgeTraced (ExpInstantiate args) node _ =
         case node of
             TyExp{} -> throwError $ InstantiateOnNonForall (tnId node)
-            TyForall { tnId = forallId, tnBody = innerBody } -> do
-                boundVars <- orderedBindersM forallId
+            _ -> do
+                (bodyRoot, boundVars) <- instantiationBindersM (tnId node)
                 if null boundVars then
                     if null args
-                        then pure (innerBody, emptyTrace)
-                        else do
-                            innerNode <- getCanonicalNode innerBody
-                            applyExpansionOverNodeEdgeTraced (ExpInstantiate args) innerNode innerBody
+                        then pure (bodyRoot, emptyTrace)
+                        else throwError $ InstantiateOnNonForall bodyRoot
                 else if length boundVars /= length args
                     then throwError $ ArityMismatch "applyExpansionOverNodeEdgeTraced" (length boundVars) (length args)
                     else do
                         metas <- zipWithM binderMetaAt args boundVars
-                        (root, cmap0, interior0) <- instantiateSchemeWithTrace innerBody (zip boundVars metas)
+                        (root, cmap0, interior0) <- instantiateSchemeWithTrace bodyRoot (zip boundVars metas)
                         (cmapB, interiorB) <- copyBinderBounds (zip boundVars metas)
                         pure (root, (IntMap.union cmap0 cmapB, IntSet.union interior0 interiorB))
-            _ -> throwError $ InstantiateOnNonForall (tnId node)
 
 -- | Copy (and re-bind) instance bounds from original binders onto fresh binder-metas.
 copyBinderBounds :: [(NodeId, NodeId)] -> PresolutionM (CopyMap, InteriorSet)
@@ -449,6 +420,10 @@ copyBinderBounds substList = do
                         Nothing -> do
                             (bndCopy, cmapB, intB) <- instantiateSchemeWithTrace bnd substList
                             setVarBound meta (Just bndCopy)
+                            c0 <- gets psConstraint
+                            case Binding.lookupBindParent c0 (typeRef bndCopy) of
+                                Just _ -> pure ()
+                                Nothing -> bindExpansionRootLikeTarget bndCopy meta
                             pure (IntMap.union cmapAcc cmapB, IntSet.union intAcc intB)
         )
         (IntMap.empty, IntSet.empty)

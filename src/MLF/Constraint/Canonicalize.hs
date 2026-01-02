@@ -17,7 +17,12 @@ module MLF.Constraint.Canonicalize (
 
 import qualified Data.IntMap.Strict as IntMap
 
-import MLF.Constraint.Types (NodeId(..), TyNode(..), InstEdge(..), UnifyEdge(..), BindParents, BindFlag)
+import MLF.Constraint.Types (NodeId(..), NodeRef(..), TyNode(..), InstEdge(..), UnifyEdge(..), BindParents, BindFlag, nodeRefFromKey, nodeRefKey)
+
+canonicalRef :: (NodeId -> NodeId) -> NodeRef -> NodeRef
+canonicalRef canonical ref = case ref of
+    TypeRef nid -> TypeRef (canonical nid)
+    GenRef _ -> ref
 
 -- | Prefer a structured node over a variable when collapsing duplicates.
 --
@@ -58,18 +63,19 @@ rewriteUnifyEdges canonical = map rewrite
 -- conflicts deterministically.
 rewriteBindParentsLenient
     :: (NodeId -> NodeId)
-    -> (NodeId -> Bool)
+    -> (NodeRef -> Bool)
     -> BindParents
     -> BindParents
 rewriteBindParentsLenient canonical keepChild bindParents0 =
     IntMap.fromListWith combine
-        [ (getNodeId childC, (parentC, flag))
-        | (childId, (parent0, flag)) <- IntMap.toList bindParents0
-        , let childC = canonical (NodeId childId)
-        , let parentC = canonical parent0
+        [ (nodeRefKey childC, (parentC, flag))
+        | (childKey, (parent0, flag)) <- IntMap.toList bindParents0
+        , let childRef0 = nodeRefFromKey childKey
+        , let childC = canonicalRef canonical childRef0
+        , let parentC = canonicalRef canonical parent0
         , childC /= parentC
         , keepChild childC
         ]
   where
-    combine :: (NodeId, BindFlag) -> (NodeId, BindFlag) -> (NodeId, BindFlag)
+    combine :: (NodeRef, BindFlag) -> (NodeRef, BindFlag) -> (NodeRef, BindFlag)
     combine (_pNew, fNew) (pOld, fOld) = (pOld, max fNew fOld)

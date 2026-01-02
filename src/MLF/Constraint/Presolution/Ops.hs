@@ -46,17 +46,13 @@ registerNode nid node =
     modify' $ \st ->
         let c0 = psConstraint st
             nodes' = IntMap.insert (getNodeId nid) node (cNodes c0)
-            genNodes' =
-                case mkGenNodeFromTypeNode node of
-                    Nothing -> cGenNodes c0
-                    Just g -> IntMap.insert (genNodeKey (gnId g)) g (cGenNodes c0)
-        in st { psConstraint = c0 { cNodes = nodes', cGenNodes = genNodes' } }
+        in st { psConstraint = c0 { cNodes = nodes' } }
 
 -- | Set a binding parent for a node in the constraint.
 --
 -- Paper alignment (`papers/xmlf.txt` §3.1): this mutates the explicit binding
 -- tree relation `cBindParents`.
-setBindParentM :: NodeId -> (NodeId, BindFlag) -> PresolutionM ()
+setBindParentM :: NodeRef -> (NodeRef, BindFlag) -> PresolutionM ()
 setBindParentM child parentInfo =
     modify' $ \st ->
         let c0 = psConstraint st

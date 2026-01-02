@@ -23,7 +23,7 @@ import qualified Data.Set as Set
 
 import qualified MLF.Binding.GraphOps as GraphOps
 import qualified MLF.Binding.Tree as Binding
-import MLF.Constraint.Types (BindFlag(..), BindingError, Constraint(..), NodeId(..), TyNode(..), getNodeId)
+import MLF.Constraint.Types (BindFlag(..), BindingError, Constraint(..), NodeId(..), NodeRef(..), TyNode(..), getNodeId, typeRef)
 
 -- | True for nodes that count as "intrinsically polymorphic" anchors when
 -- computing inertness.
@@ -58,14 +58,17 @@ collectFlexAncestors c anchors =
 
     go visited [] = visited
     go visited (nid : rest) =
-        case Binding.lookupBindParent c nid of
+        case Binding.lookupBindParent c (typeRef nid) of
             Nothing -> go visited rest
             Just (_, BindRigid) -> go visited rest
             Just (parent, BindFlex) ->
-                let pid = getNodeId parent
-                in if IntSet.member pid visited
-                    then go visited rest
-                    else go (IntSet.insert pid visited) (parent : rest)
+                case parent of
+                    TypeRef parentN ->
+                        let pid = getNodeId parentN
+                        in if IntSet.member pid visited
+                            then go visited rest
+                            else go (IntSet.insert pid visited) (parentN : rest)
+                    GenRef _ -> go visited rest
 
 -- | Compute inert-locked nodes: inert nodes that are flexibly bound and have a
 -- rigid ancestor (Definition 15.2.2).
@@ -76,9 +79,9 @@ inertLockedNodes c = do
   where
     addLocked acc nidInt = do
         let nid = NodeId nidInt
-        case Binding.lookupBindParent c nid of
+        case Binding.lookupBindParent c (typeRef nid) of
             Just (_, BindFlex) -> do
-                locked <- Binding.isUnderRigidBinder c nid
+                locked <- Binding.isUnderRigidBinder c (typeRef nid)
                 pure $ if locked
                     then IntSet.insert nidInt acc
                     else acc
@@ -101,10 +104,10 @@ weakenInertLockedNodes c0 = go c0
                 go c'
     weakenOne c nidInt = do
         let nid = NodeId nidInt
-        case Binding.lookupBindParent c nid of
+        case Binding.lookupBindParent c (typeRef nid) of
             Nothing -> pure c
             Just (_, BindRigid) -> pure c
-            Just _ -> fst <$> GraphOps.applyWeaken nid c
+            Just _ -> fst <$> GraphOps.applyWeaken (typeRef nid) c
 
 -- | Weaken all inert nodes (flip their binding edge to rigid when flexible).
 --
@@ -118,7 +121,7 @@ weakenInertNodes c0 = do
   where
     weakenOne c nidInt = do
         let nid = NodeId nidInt
-        case Binding.lookupBindParent c nid of
+        case Binding.lookupBindParent c (typeRef nid) of
             Nothing -> pure c
             Just (_, BindRigid) -> pure c
-            Just _ -> fst <$> GraphOps.applyWeaken nid c
+            Just _ -> fst <$> GraphOps.applyWeaken (typeRef nid) c

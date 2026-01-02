@@ -13,7 +13,7 @@ module MLF.Constraint.Presolution.Copy (
     bindUnboundCopiedNodes
 ) where
 
-import Control.Monad (forM_, when)
+import Control.Monad (foldM, forM, forM_, when)
 import Control.Monad.Except (throwError)
 import Control.Monad.State
 import Data.IntMap.Strict (IntMap)
@@ -24,8 +24,7 @@ import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Presolution.Base (
     PresolutionError(..),
     PresolutionM,
-    PresolutionState(..),
-    requireValidBindingTree
+    PresolutionState(..)
     )
 import MLF.Constraint.Presolution.Ops (
     createFreshNodeId,
@@ -85,7 +84,6 @@ instantiateScheme bodyId substList = do
 -- at the same binder as the target node.
 instantiateSchemeWithTrace :: NodeId -> [(NodeId, NodeId)] -> PresolutionM (NodeId, IntMap NodeId, IntSet.IntSet)
 instantiateSchemeWithTrace bodyId substList = do
-    requireValidBindingTree
     c0 <- gets psConstraint
     uf0 <- gets psUnionFind
     let canonical = UnionFind.frWith uf0
@@ -102,19 +100,61 @@ instantiateSchemeWithTrace bodyId substList = do
     -- If the root is itself a binding root in the quotient relation (e.g. when
     -- copying a disconnected instance bound), we use it as g.
     copyInterior <- do
-        mbParent <- case Binding.lookupBindParentUnder canonical c0 bodyC of
+        let boundVars = map fst substList
+            pickBinderFromBoundVars = do
+                parents <- forM boundVars $ \bv -> do
+                    mbParent <- case Binding.lookupBindParentUnder canonical c0 (typeRef bv) of
+                        Left err -> throwError (BindingTreeError err)
+                        Right p -> pure p
+                    case mbParent of
+                        Just (parentRef, _flag) -> pure parentRef
+                        Nothing -> pure (typeRef bv)
+                case parents of
+                    [] -> pure Nothing
+                    (p:ps)
+                        | all (== p) ps -> pure (Just p)
+                        | otherwise ->
+                            throwError $
+                                BindingTreeError $
+                                    InvalidBindingTree $
+                                        "instantiateSchemeWithTrace: binders have different parents " ++ show parents
+
+        let pickBinderFromRoot = do
+                boundAtRoot <- case Binding.boundFlexChildrenUnder canonical c0 (typeRef bodyC) of
+                    Left err -> throwError (BindingTreeError err)
+                    Right bs -> pure bs
+                if null boundAtRoot
+                    then do
+                        mbParent <- case Binding.lookupBindParentUnder canonical c0 (typeRef bodyC) of
+                            Left err -> throwError (BindingTreeError err)
+                            Right p -> pure p
+                        pure $
+                            case mbParent of
+                                Nothing -> typeRef bodyC
+                                Just (parentRef, _flag) -> parentRef
+                    else pure (typeRef bodyC)
+
+        mbBinder <- pickBinderFromBoundVars
+        binderRef0 <- case mbBinder of
+            Just binderRef -> pure binderRef
+            Nothing -> pickBinderFromRoot
+        let rootKey = nodeRefKey (typeRef bodyC)
+        binderRef <- do
+            ok <- case Binding.interiorOfUnder canonical c0 binderRef0 of
+                Left err -> throwError (BindingTreeError err)
+                Right s -> pure (IntSet.member rootKey s)
+            if ok
+                then pure binderRef0
+                else pickBinderFromRoot
+        case Binding.interiorOfUnder canonical c0 binderRef of
             Left err -> throwError (BindingTreeError err)
-            Right p -> pure p
-        let g =
-                case mbParent of
-                    Nothing -> bodyC
-                    Just (g', _flag) ->
-                        case IntMap.lookup (getNodeId g') (cNodes c0) of
-                            Just TyRoot{} -> bodyC
-                            _ -> g'
-        case Binding.interiorOfUnder canonical c0 g of
-            Left err -> throwError (BindingTreeError err)
-            Right s -> pure s
+            Right s ->
+                pure $
+                    IntSet.fromList
+                        [ getNodeId nid
+                        | key <- IntSet.toList s
+                        , TypeRef nid <- [nodeRefFromKey key]
+                        ]
 
     let subst = IntMap.fromList [(getNodeId k, v) | (k, v) <- substList]
         initialCopyMap = IntMap.fromList [(getNodeId k, v) | (k, v) <- substList]
@@ -165,17 +205,19 @@ instantiateSchemeWithTrace bodyId substList = do
         c <- lift $ gets psConstraint
         uf <- lift $ gets psUnionFind
         let canonical = UnionFind.frWith uf
-        mbParent <- case Binding.lookupBindParentUnder canonical c srcNid of
+        mbParent <- case Binding.lookupBindParentUnder canonical c (typeRef srcNid) of
             Left err -> lift $ throwError (BindingTreeError err)
             Right p -> pure p
         case mbParent of
             Nothing -> pure ()  -- Source is a root, fresh node remains a root for now
-            Just (parentId, flag) -> do
+            Just (TypeRef parentId, flag) -> do
                 copyMap <- gets csCopyMap
                 let parentC = canonical parentId
                 case IntMap.lookup (getNodeId parentC) copyMap of
-                    Just copiedParent -> lift $ setBindParentM freshId (copiedParent, flag)
+                    Just copiedParent -> lift $ setBindParentM (typeRef freshId) (typeRef copiedParent, flag)
                     Nothing -> pure ()
+            Just (GenRef _, _flag) ->
+                pure ()
 
     copyNode :: IntSet.IntSet -> (NodeId -> NodeId) -> IntMap NodeId -> NodeId -> StateT CopyState PresolutionM NodeId
     copyNode copyInterior canonical subst nid = do
@@ -274,12 +316,51 @@ bindExpansionRootLikeTarget expansionRoot targetNode = do
     c <- gets psConstraint
     uf <- gets psUnionFind
     let canonical = UnionFind.frWith uf
-    mbParentInfo <- case Binding.lookupBindParentUnder canonical c targetNode of
+        expansionRootC = canonical expansionRoot
+        addSchemeRoot :: GenNodeId -> PresolutionM ()
+        addSchemeRoot gid =
+            modify' $ \st ->
+                let c0 = psConstraint st
+                    gens0 = cGenNodes c0
+                    update genNode =
+                        if expansionRootC `elem` gnSchemes genNode
+                            then genNode
+                            else genNode { gnSchemes = gnSchemes genNode ++ [expansionRootC] }
+                    gens' = IntMap.adjust update (getGenNodeId gid) gens0
+                in st { psConstraint = c0 { cGenNodes = gens' } }
+    mbParentInfo <- case Binding.lookupBindParentUnder canonical c (typeRef targetNode) of
         Left err -> throwError (BindingTreeError err)
         Right p -> pure p
     case mbParentInfo of
-        Just parentInfo -> setBindParentM expansionRoot parentInfo
-        Nothing -> pure ()  -- Target is a root, expansion root also becomes a root
+        Just parentInfo@(parentRef, _flag) -> do
+            setBindParentM (typeRef expansionRootC) parentInfo
+            case parentRef of
+                GenRef gid -> addSchemeRoot gid
+                TypeRef _ -> pure ()
+        Nothing -> do
+            -- Target is a root: bind the expansion root under the binding-tree root gen node.
+            let genIds = IntMap.keys (cGenNodes c)
+            rootGen <- foldM
+                (\acc gidInt -> do
+                    case acc of
+                        Just _ -> pure acc
+                        Nothing -> do
+                            let gref = genRef (GenNodeId gidInt)
+                            mbParent <- case Binding.lookupBindParentUnder canonical c gref of
+                                Left err -> throwError (BindingTreeError err)
+                                Right p -> pure p
+                            pure $ case mbParent of
+                                Nothing -> Just gref
+                                Just _ -> Nothing
+                )
+                Nothing
+                genIds
+            case rootGen of
+                Just gref@(GenRef gid) -> do
+                    setBindParentM (typeRef expansionRootC) (gref, BindFlex)
+                    addSchemeRoot gid
+                Just (TypeRef _) -> pure ()
+                Nothing -> pure ()
 
 -- | Bind all copied nodes that don't have binding parents to the expansion root.
 --
@@ -300,33 +381,21 @@ bindUnboundCopiedNodes copyMap interior expansionRoot = do
 
         lookupNode = lookupNodeIn (cNodes c0)
 
-        -- Compute term-dag roots on the UF-quotient structure graph (matching
-        -- `Binding.checkBindingTreeUnder`).
-        termDagRootsUnder :: IntSet.IntSet
-        termDagRootsUnder = Binding.computeTermDagRootsUnder canonical c0
-
         candidateIds =
             Traversal.reachableFromManyUnderLenient
                 canonical
                 lookupNode
                 (map NodeId (IntSet.toList candidateIds0))
 
-    -- Bind any copied/interior nodes that are not term-dag roots, do not already
-    -- have a binding parent, and are not the expansion root itself.
-    --
-    -- Note: in a multi-root constraint graph, expansion copying may reuse nodes
-    -- that were previously term-dag roots (disconnected components). Once a
-    -- freshly-copied node points to such a reused node, it ceases to be a
-    -- term-dag root in the quotient graph and must have a binding parent.
-    --
-    -- We conservatively bind any newly reachable unbound nodes to the expansion
-    -- root to preserve binding-tree invariants.
+    -- Bind any copied/interior nodes that do not already have a binding parent
+    -- to the expansion root (except the expansion root itself). This matches
+    -- the thesis binding-tree invariant: the only root is the gen node, so
+    -- freshly-copied term-DAG roots must be attached under the expansion root.
     forM_ (IntSet.toList candidateIds) $ \nid -> do
         let node0 = NodeId nid
             nodeC = canonical node0
         c' <- gets psConstraint
-        let needsParent = not (IntSet.member (getNodeId nodeC) termDagRootsUnder)
-        when (needsParent && nodeC /= expansionRootC) $
-            case Binding.lookupBindParent c' nodeC of
+        when (nodeC /= expansionRootC) $
+            case Binding.lookupBindParent c' (typeRef nodeC) of
                 Just _ -> pure ()
-                Nothing -> setBindParentM nodeC (expansionRootC, BindFlex)
+                Nothing -> setBindParentM (typeRef nodeC) (typeRef expansionRootC, BindFlex)

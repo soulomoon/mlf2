@@ -40,6 +40,14 @@ import MLF.Constraint.Types
 import MLF.Binding.Tree (isUnderRigidBinder, lookupBindParent, bindingLCA, isBindingRoot)
 import MLF.Binding.GraphOps (applyRaiseStep)
 
+expectTypeRef :: NodeRef -> Either BindingError NodeId
+expectTypeRef ref = case ref of
+    TypeRef nid -> Right nid
+    GenRef _ ->
+        Left $
+            InvalidBindingTree $
+                "binding-tree harmonization expects type nodes, got gen node " ++ show ref
+
 
 -- | Harmonize the binding parents of two nodes by raising them to their LCA.
 --
@@ -57,9 +65,11 @@ import MLF.Binding.GraphOps (applyRaiseStep)
 --
 -- Paper reference: @papers/xmlf.txt@ §3.4
 harmonizeBindParentsWithTrace
-    :: NodeId -> NodeId -> Constraint
+    :: NodeRef -> NodeRef -> Constraint
     -> Either BindingError (Constraint, [NodeId])
 harmonizeBindParentsWithTrace n1 n2 c0 = do
+    _ <- expectTypeRef n1
+    _ <- expectTypeRef n2
     -- Get binding parents for both nodes
     let mbParent1 = lookupBindParent c0 n1
         mbParent2 = lookupBindParent c0 n2
@@ -90,7 +100,7 @@ harmonizeBindParentsWithTrace n1 n2 c0 = do
 -- | Harmonize binding parents without returning the trace.
 --
 -- This is a convenience wrapper around 'harmonizeBindParentsWithTrace'.
-harmonizeBindParents :: NodeId -> NodeId -> Constraint -> Constraint
+harmonizeBindParents :: NodeRef -> NodeRef -> Constraint -> Constraint
 harmonizeBindParents n1 n2 c =
     case harmonizeBindParentsWithTrace n1 n2 c of
         Right (c', _) -> c'
@@ -102,11 +112,12 @@ harmonizeBindParents n1 n2 c =
 -- Returns the updated constraint and the list of nodes that were raised
 -- (with multiplicity).
 raiseToParentWithCount
-    :: NodeId -> NodeId -> Constraint
+    :: NodeRef -> NodeRef -> Constraint
     -> Either BindingError (Constraint, [NodeId])
 raiseToParentWithCount nid target c0 = go c0 []
   where
     go constraint trace = do
+        nidT <- expectTypeRef nid
         -- Check current parent
         case lookupBindParent constraint nid of
             Nothing -> 
@@ -125,23 +136,24 @@ raiseToParentWithCount nid target c0 = go c0 []
                                 result <- applyRaiseStep nid constraint
                                 case result of
                                     (constraint', Just _) -> 
-                                        go constraint' (nid : trace)
+                                        go constraint' (nidT : trace)
                                     (_constraint', Nothing) -> 
                                         -- parent is already a root: cannot reach a non-root target
                                         Left (RaiseNotPossible nid)
 
 -- | Raise a node to the target parent (convenience wrapper).
-raiseToParent :: NodeId -> NodeId -> Constraint -> Constraint
+raiseToParent :: NodeRef -> NodeRef -> Constraint -> Constraint
 raiseToParent nid target c =
     case raiseToParentWithCount nid target c of
         Right (c', _) -> c'
         Left _ -> c
 
 -- | Raise a node until its parent is a root.
-raiseToRoot :: NodeId -> Constraint -> Either BindingError (Constraint, [NodeId])
+raiseToRoot :: NodeRef -> Constraint -> Either BindingError (Constraint, [NodeId])
 raiseToRoot nid c0 = go c0 []
   where
     go constraint trace = do
+        nidT <- expectTypeRef nid
         case lookupBindParent constraint nid of
             Nothing -> 
                 -- Node is already a root
@@ -149,15 +161,15 @@ raiseToRoot nid c0 = go c0 []
             Just (parent, _) ->
                 if isBindingRoot constraint parent
                     then return (constraint, reverse trace)
-                    else do
-                        -- Check if we can raise
-                        locked <- isUnderRigidBinder constraint nid
-                        if locked
-                            then Left (OperationOnLockedNode nid)
-                            else do
-                                result <- applyRaiseStep nid constraint
-                                case result of
-                                    (constraint', Just _) -> 
-                                        go constraint' (nid : trace)
-                                    (_constraint', Nothing) -> 
-                                        Left (RaiseNotPossible nid)
+                else do
+                    -- Check if we can raise
+                    locked <- isUnderRigidBinder constraint nid
+                    if locked
+                        then Left (OperationOnLockedNode nid)
+                        else do
+                            result <- applyRaiseStep nid constraint
+                            case result of
+                                (constraint', Just _) -> 
+                                    go constraint' (nidT : trace)
+                                (_constraint', Nothing) -> 
+                                    Left (RaiseNotPossible nid)

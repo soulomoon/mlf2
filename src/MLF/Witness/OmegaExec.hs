@@ -85,5 +85,6 @@ executeOmegaBaseOpsPost env ops0 = do
             when (not eliminated) $ do
                 meta <- omegaMetaFor env bv
                 omegaWeakenMeta env meta
+                omegaDropVarBind env meta
                 omegaRecordEliminate env bv
         _ -> pure ()

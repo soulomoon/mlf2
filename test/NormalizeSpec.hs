@@ -277,17 +277,17 @@ spec = describe "Phase 2 — Normalization" $ do
                                     ]
                             , cBindParents =
                                 IntMap.fromList
-                                    [ (getNodeId vInner, (inner, BindFlex))
-                                    , (getNodeId inner, (root, BindFlex))
-                                    , (getNodeId vOuter, (root, BindFlex))
+                                    [ (nodeRefKey (typeRef vInner), (typeRef inner, BindFlex))
+                                    , (nodeRefKey (typeRef inner), (typeRef root, BindFlex))
+                                    , (nodeRefKey (typeRef vOuter), (typeRef root, BindFlex))
                                     ]
                             , cUnifyEdges = [edge]
                             }
                     result = normalize constraint
 
                 cUnifyEdges result `shouldBe` []
-                IntMap.lookup (getNodeId vInner) (cBindParents result)
-                    `shouldBe` Just (root, BindFlex)
+                IntMap.lookup (nodeRefKey (typeRef vInner)) (cBindParents result)
+                    `shouldBe` Just (typeRef root, BindFlex)
 
             it "handles chained variable unifications (transitivity)" $ do
                 -- α = β, β = γ: should all be unified
@@ -440,8 +440,8 @@ spec = describe "Phase 2 — Normalization" $ do
                     edge = UnifyEdge (tnId forall1) (tnId forall2)
                     bindParents =
                         IntMap.fromList
-                            [ (getNodeId (tnId var1), (tnId forall1, BindFlex))
-                            , (getNodeId (tnId var2), (tnId forall2, BindFlex))
+                            [ (nodeRefKey (typeRef (tnId var1)), (typeRef (tnId forall1), BindFlex))
+                            , (nodeRefKey (typeRef (tnId var2)), (typeRef (tnId forall2), BindFlex))
                             ]
                     constraint = emptyConstraint
                         { cNodes = IntMap.fromList
@@ -469,9 +469,9 @@ spec = describe "Phase 2 — Normalization" $ do
                     edge = UnifyEdge (tnId forall1) (tnId forall2)
                     bindParents =
                         IntMap.fromList
-                            [ (getNodeId (tnId alpha), (tnId forall1, BindFlex))
-                            , (getNodeId (tnId beta), (tnId forall2, BindFlex))
-                            , (getNodeId (tnId gamma), (tnId forall2, BindFlex))
+                            [ (nodeRefKey (typeRef (tnId alpha)), (typeRef (tnId forall1), BindFlex))
+                            , (nodeRefKey (typeRef (tnId beta)), (typeRef (tnId forall2), BindFlex))
+                            , (nodeRefKey (typeRef (tnId gamma)), (typeRef (tnId forall2), BindFlex))
                             ]
                     constraint = emptyConstraint
                         { cNodes =

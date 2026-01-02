@@ -14,6 +14,7 @@ import MLF.Constraint.Acyclicity
 import MLF.Constraint.Presolution
 import MLF.Constraint.Solve
 import MLF.Constraint.Types
+import qualified MLF.Binding.Tree as Binding
 
 spec :: Spec
 spec = describe "Pipeline (Phases 1-5)" $ do
@@ -26,7 +27,11 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             case runPipeline expr of
                 Right (res, root) -> do
                     -- The root should be f's type: ∀(a ⩾ Int). a -> a
-                    case generalizeAt res root root of
+                    let scopeRoot =
+                            case Binding.bindingRoots (srConstraint res) of
+                                [GenRef gid] -> genRef gid
+                                roots -> error ("PipelineSpec: unexpected binding roots " ++ show roots)
+                    case generalizeAt res scopeRoot root of
                         Right (Forall binds _ty, _subst) ->
                             case binds of
                                 [ ("a", Just (TBase (BaseTy "Int")))
@@ -44,8 +49,8 @@ spec = describe "Pipeline (Phases 1-5)" $ do
              case runPipelineWithInternals expr of
                  Right (res, ann) -> do
                      case ann of
-                         ALet _ schemeNode _ childLevel _ _ _ -> do
-                             case generalizeAt res childLevel schemeNode of
+                         ALet _ schemeGen schemeRoot _ _ _ _ _ -> do
+                             case generalizeAt res (genRef schemeGen) schemeRoot of
                                  Right scheme -> show scheme `shouldSatisfy` ("Forall" `isInfixOf`)
                                  Left err -> expectationFailure $ "Generalize error: " ++ show err
                          _ -> expectationFailure "Expected ALet annotation"

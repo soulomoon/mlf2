@@ -33,8 +33,8 @@ import Data.Maybe (listToMaybe)
 import Data.Ord (Down(..))
 import qualified Data.List.NonEmpty as NE
 
-import MLF.Constraint.Types (BindFlag(..), Constraint, Expansion(..), ForallSpec(..), InstanceOp(..), InstanceStep(..), NodeId, TyNode(..), getNodeId)
-import MLF.Constraint.Presolution.Base (PresolutionM, PresolutionError(..), orderedBindersM)
+import MLF.Constraint.Types (BindFlag(..), Constraint, Expansion(..), ForallSpec(..), InstanceOp(..), InstanceStep(..), NodeId, NodeRef(..), TyNode(..), getNodeId, nodeRefFromKey, typeRef)
+import MLF.Constraint.Presolution.Base (PresolutionM, PresolutionError(..), instantiationBindersM)
 import MLF.Constraint.Presolution.Ops (getCanonicalNode, lookupVarBound)
 import qualified MLF.Binding.Tree as Binding
 import MLF.Util.Order (OrderKey, compareOrderKey, compareNodesByOrderKey)
@@ -135,10 +135,16 @@ validateNormalizedWitness env ops = do
     -- Paper alignment (`papers/xmlf.txt` §3.4, condition (5)): “below n” means
     -- strict binding-tree descendants (exclude n itself).
     descendantsOf nid =
-        case Binding.interiorOf (constraint env) (canon nid) of
+        case Binding.interiorOf (constraint env) (typeRef (canon nid)) of
             Left _ -> Left (OpUnderRigid (canon nid))
             Right s ->
-                Right (IntSet.delete (getNodeId (canon nid)) s)
+                let typeInterior =
+                        IntSet.fromList
+                            [ getNodeId t
+                            | key <- IntSet.toList s
+                            , TypeRef t <- [nodeRefFromKey key]
+                            ]
+                in Right (IntSet.delete (getNodeId (canon nid)) typeInterior)
 
     firstOffender descSet rest =
         listToMaybe
@@ -163,14 +169,10 @@ validateNormalizedWitness env ops = do
 -- For now, this is only defined for instantiation steps at a `TyExp` root.
 binderArgsForFirstNonVacuousForall :: NodeId -> PresolutionM [NodeId]
 binderArgsForFirstNonVacuousForall nid0 = do
-    n <- getCanonicalNode nid0
-    case n of
-        TyForall{ tnId = forallId, tnBody = inner } -> do
-            binders <- orderedBindersM forallId
-            if null binders
-                then binderArgsForFirstNonVacuousForall inner
-                else pure binders
-        _ -> throwError (InstantiateOnNonForall (tnId n))
+    (_bodyRoot, binders) <- instantiationBindersM nid0
+    if null binders
+        then throwError (InstantiateOnNonForall nid0)
+        else pure binders
 
 binderArgsFromExpansion :: TyNode -> Expansion -> PresolutionM [(NodeId, NodeId)]
 binderArgsFromExpansion leftRaw expn = do
@@ -594,10 +596,16 @@ reorderWeakenWithEnv env ops =
             OpRaiseMerge n m -> [n, m]
 
     descendantsOf nid =
-        case Binding.interiorOf (constraint env) (canon nid) of
+        case Binding.interiorOf (constraint env) (typeRef (canon nid)) of
             Left _ -> Left (OpUnderRigid (canon nid))
             Right s ->
-                Right (IntSet.delete (getNodeId (canon nid)) s)
+                let typeInterior =
+                        IntSet.fromList
+                            [ getNodeId t
+                            | key <- IntSet.toList s
+                            , TypeRef t <- [nodeRefFromKey key]
+                            ]
+                in Right (IntSet.delete (getNodeId (canon nid)) typeInterior)
 
     isDescendant descSet nid =
         IntSet.member (getNodeId (canon nid)) descSet
@@ -682,12 +690,14 @@ normalizeInstanceOpsFull env ops0 = do
             OpRaiseMerge n m -> OpRaiseMerge (canon n) (canon m)
 
     checkRigid nid =
-        case Binding.bindingPathToRoot (constraint env) (canon nid) of
+        case Binding.bindingPathToRoot (constraint env) (typeRef (canon nid)) of
             Left _ -> Left (OpUnderRigid (canon nid))
             Right path ->
                 let strictAncestors = drop 1 path
                     softened n =
-                        IntSet.member (getNodeId (canon n)) (weakened env)
+                        case n of
+                            TypeRef nId -> IntSet.member (getNodeId (canon nId)) (weakened env)
+                            GenRef _ -> False
                     rigidAncestor n =
                         case Binding.lookupBindParent (constraint env) n of
                             Just (_, BindRigid) -> not (softened n)

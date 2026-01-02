@@ -11,10 +11,10 @@ import MLF.Frontend.Syntax (Expr)
 import MLF.Frontend.ConstraintGen (AnnExpr(..), ConstraintError, ConstraintResult(..), generateConstraints)
 import MLF.Constraint.Normalize (normalize)
 import MLF.Constraint.Acyclicity (checkAcyclicity)
-import qualified MLF.Constraint.Root as ConstraintRoot
+import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Presolution (computePresolution, PresolutionResult(..))
 import MLF.Constraint.Solve hiding (BindingTreeError, MissingNode)
-import MLF.Constraint.Types (NodeId, PolySyms, getNodeId)
+import MLF.Constraint.Types (BindingError(..), Constraint, NodeId, NodeRef(..), PolySyms, getNodeId, typeRef)
 import MLF.Elab.Elaborate (elaborate)
 import MLF.Elab.Generalize (generalizeAt)
 import MLF.Elab.TypeCheck (typeCheck)
@@ -48,11 +48,8 @@ runPipelineElabWith genConstraints expr = do
             -- Also apply redirects to the root node, as it might have been a TyExp
             let root' = chaseRedirects (prRedirects pres) root
 
-            -- Generalize at the root (top-level generalization).
-            let scopeRoot =
-                    case ConstraintRoot.findConstraintRoot (srConstraint solved) of
-                        Just rootId -> rootId
-                        Nothing -> root'
+            -- Generalize at the nearest gen ancestor of the root node.
+            scopeRoot <- firstShow (bindingScopeRef (srConstraint solved) root')
             (sch, _subst) <- firstShow (generalizeAt solved scopeRoot root')
             let ty = case sch of
                     Forall binds body -> foldr (\(n, b) t -> TForall n b t) body binds
@@ -65,7 +62,7 @@ applyRedirectsToAnn redirects ann = case ann of
     ALit l nid -> ALit l (redir nid)
     AVar v nid -> AVar v (redir nid)
     ALam v pNode x bodyAnn nid ->
-        ALam v (redir pNode) (redir x) (applyRedirectsToAnn redirects bodyAnn) (redir nid)
+        ALam v (redir pNode) x (applyRedirectsToAnn redirects bodyAnn) (redir nid)
     AApp fAnn argAnn funEid argEid nid ->
         AApp
             (applyRedirectsToAnn redirects fAnn)
@@ -73,8 +70,8 @@ applyRedirectsToAnn redirects ann = case ann of
             funEid
             argEid
             (redir nid)
-    ALet v schNode ev childLevel rhsAnn bodyAnn nid ->
-        ALet v (redir schNode) ev (redir childLevel) (applyRedirectsToAnn redirects rhsAnn) (applyRedirectsToAnn redirects bodyAnn) (redir nid)
+    ALet v schemeGen schemeRoot ev rhsGen rhsAnn bodyAnn nid ->
+        ALet v schemeGen (redir schemeRoot) ev rhsGen (applyRedirectsToAnn redirects rhsAnn) (applyRedirectsToAnn redirects bodyAnn) (redir nid)
     AAnn exprAnn nid eid -> AAnn (applyRedirectsToAnn redirects exprAnn) (redir nid) eid
   where
     redir = chaseRedirects redirects
@@ -87,3 +84,16 @@ chaseRedirects redirects nid = case IntMap.lookup (getNodeId nid) redirects of
 
 firstShow :: Show e => Either e a -> Either String a
 firstShow = either (Left . show) Right
+
+bindingScopeRef :: Constraint -> NodeId -> Either BindingError NodeRef
+bindingScopeRef constraint root = do
+    path <- Binding.bindingPathToRoot constraint (typeRef root)
+    case drop 1 path of
+        [] -> Left $ MissingBindParent (typeRef root)
+        rest ->
+            case [gid | GenRef gid <- rest] of
+                (gid:_) -> Right (GenRef gid)
+                [] ->
+                    Left $
+                        InvalidBindingTree $
+                            "bindingScopeRef: missing gen ancestor for " ++ show root

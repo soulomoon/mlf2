@@ -48,16 +48,25 @@ module MLF.Binding.GraphOps (
     getBindFlag,
 ) where
 
+import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
 import MLF.Constraint.Types
-import MLF.Binding.Tree (isUnderRigidBinder, lookupBindParent, setBindParent, bindingPathToRoot, isBindingRoot)
+import MLF.Binding.Tree (isUnderRigidBinder, isUpper, lookupBindParent, setBindParent, bindingPathToRoot, isBindingRoot)
+
+expectTypeRef :: NodeRef -> Either BindingError NodeId
+expectTypeRef ref = case ref of
+    TypeRef nid -> Right nid
+    GenRef _ ->
+        Left $
+            InvalidBindingTree $
+                "binding-tree operation expects a type node, got gen node " ++ show ref
 
 
 -- | Get the binding flag for a node.
 --
 -- Returns 'Nothing' if the node is a binding root.
-getBindFlag :: Constraint -> NodeId -> Maybe BindFlag
+getBindFlag :: Constraint -> NodeRef -> Maybe BindFlag
 getBindFlag c nid = fmap snd (lookupBindParent c nid)
 
 -- | Check if a node is instantiable (can be raised).
@@ -68,7 +77,7 @@ getBindFlag c nid = fmap snd (lookupBindParent c nid)
 --
 -- Paper reference: A node is instantiable if it can be raised without
 -- violating the "locked" constraint.
-isInstantiable :: Constraint -> NodeId -> Either BindingError Bool
+isInstantiable :: Constraint -> NodeRef -> Either BindingError Bool
 isInstantiable c nid = do
     -- Check if it's a root (roots cannot be raised)
     if isBindingRoot c nid
@@ -90,7 +99,7 @@ isInstantiable c nid = do
 -- | Check if a node is locked (cannot be raised).
 --
 -- A node is locked if any edge on its binding path to the root is rigid.
-isLocked :: Constraint -> NodeId -> Either BindingError Bool
+isLocked :: Constraint -> NodeRef -> Either BindingError Bool
 isLocked c nid = do
     instantiable <- isInstantiable c nid
     return (not instantiable)
@@ -106,8 +115,9 @@ isLocked c nid = do
 -- Returns the updated constraint and the operation that was applied.
 --
 -- Paper reference: @papers/xmlf.txt@ §3.1
-applyWeaken :: NodeId -> Constraint -> Either BindingError (Constraint, InstanceOp)
+applyWeaken :: NodeRef -> Constraint -> Either BindingError (Constraint, InstanceOp)
 applyWeaken nid c = do
+    _ <- expectTypeRef nid
     -- Check that the node has a binding parent
     case lookupBindParent c nid of
         Nothing -> Left $ MissingBindParent nid
@@ -115,7 +125,8 @@ applyWeaken nid c = do
         Just (parent, BindFlex) -> do
             -- Change the flag to rigid
             let c' = setBindParent nid (parent, BindRigid) c
-            return (c', OpWeaken nid)
+            nidT <- expectTypeRef nid
+            return (c', OpWeaken nidT)
 
 -- | Apply a single Raise step to a node.
 --
@@ -134,8 +145,9 @@ applyWeaken nid c = do
 --   - Left error if preconditions are violated
 --
 -- Paper reference: @papers/xmlf.txt@ §3.1 "slide over" semantics
-applyRaiseStep :: NodeId -> Constraint -> Either BindingError (Constraint, Maybe InstanceOp)
+applyRaiseStep :: NodeRef -> Constraint -> Either BindingError (Constraint, Maybe InstanceOp)
 applyRaiseStep nid c = do
+    nidT <- expectTypeRef nid
     -- Check that the node has a binding parent
     case lookupBindParent c nid of
         Nothing -> Left $ MissingBindParent nid
@@ -158,7 +170,21 @@ applyRaiseStep nid c = do
                         Just (grandparent, _) -> do
                             -- Move n's binding edge to grandparent, preserving flag
                             let c' = setBindParent nid (grandparent, flag) c
-                            return (c', Just (OpRaise nid))
+                                c'' =
+                                    case grandparent of
+                                        GenRef gid ->
+                                            if isUpper c' grandparent nid
+                                                then c'
+                                                else
+                                                    let gens0 = cGenNodes c'
+                                                        update genNode =
+                                                            if nidT `elem` gnSchemes genNode
+                                                                then genNode
+                                                                else genNode { gnSchemes = gnSchemes genNode ++ [nidT] }
+                                                        gens' = IntMap.adjust update (getGenNodeId gid) gens0
+                                                    in c' { cGenNodes = gens' }
+                                        TypeRef _ -> c'
+                            return (c'', Just (OpRaise nidT))
 
 -- | Raise a node to a specific ancestor binder.
 --
@@ -172,15 +198,15 @@ applyRaiseStep nid c = do
 -- Returns the updated constraint and the list of Raise operations applied.
 --
 -- Paper reference: @papers/xmlf.txt@ §3.1
-applyRaiseTo :: NodeId -> NodeId -> Constraint -> Either BindingError (Constraint, [InstanceOp])
+applyRaiseTo :: NodeRef -> NodeRef -> Constraint -> Either BindingError (Constraint, [InstanceOp])
 applyRaiseTo nid target c = do
     -- Verify target is an ancestor of nid
     path <- bindingPathToRoot c nid
-    let pathSet = IntSet.fromList $ map getNodeId path
-    if not (IntSet.member (getNodeId target) pathSet)
+    let pathSet = IntSet.fromList $ map nodeRefKey path
+    if not (IntSet.member (nodeRefKey target) pathSet)
         then Left $ InvalidBindingTree $ 
-            "Target " ++ show (getNodeId target) ++ 
-            " is not an ancestor of " ++ show (getNodeId nid)
+            "Target " ++ show target ++
+            " is not an ancestor of " ++ show nid
         else go c []
   where
     go constraint ops = do

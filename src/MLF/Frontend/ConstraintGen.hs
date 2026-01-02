@@ -5,10 +5,9 @@ module MLF.Frontend.ConstraintGen (
     generateConstraints
 ) where
 
-import qualified MLF.Constraint.Root as ConstraintRoot
 import MLF.Frontend.Syntax (Expr)
 import MLF.Frontend.Desugar (desugarCoercions)
-import MLF.Constraint.Types (NodeId(..), PolySyms)
+import MLF.Constraint.Types (PolySyms)
 import MLF.Frontend.ConstraintGen.Types
 import MLF.Frontend.ConstraintGen.State
 import MLF.Frontend.ConstraintGen.Translate (buildRootExpr)
@@ -91,10 +90,9 @@ generateConstraints :: PolySyms -> Expr -> Either ConstraintError ConstraintResu
 generateConstraints polySyms expr = do
     let expr' = desugarCoercions expr
     let initialState = mkInitialStateWithPolySyms polySyms
-    let topScopeRoot = NodeId (-1)
-    ((_rootBinder, rootNode, annRoot), finalState) <-
-        runConstraintM (buildRootExpr topScopeRoot expr') initialState
-    let constraint = ConstraintRoot.ensureConstraintRoot (buildConstraint finalState)
+    ((_rootGen, rootNode, annRoot), finalState) <-
+        runConstraintM (buildRootExpr expr') initialState
+    let constraint = buildConstraint finalState
     pure ConstraintResult
         { crConstraint = constraint
         , crRoot = rootNode

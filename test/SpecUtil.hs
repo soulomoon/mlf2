@@ -1,6 +1,8 @@
 module SpecUtil (
     emptyConstraint,
     genNodeMap,
+    rootedConstraint,
+    bindParentsFromPairs,
     expectRight,
     requireRight,
     inferBindParents,
@@ -15,7 +17,8 @@ import qualified Data.Set as Set
 import GHC.Stack (HasCallStack)
 import Test.Hspec (Expectation, expectationFailure)
 
-import MLF.Constraint.Types (BindFlag(..), BindParents, Constraint(..), GenNode(..), GenNodeId(..), NodeId(..), TyNode(..), structuralChildren)
+import qualified MLF.Binding.Tree as Binding
+import MLF.Constraint.Types (BindFlag(..), BindParents, Constraint(..), GenNode(..), GenNodeId(..), NodeId(..), TyNode(..), genRef, nodeRefKey, structuralChildren, typeRef)
 
 emptyConstraint :: Constraint
 emptyConstraint = Constraint
@@ -31,8 +34,37 @@ emptyConstraint = Constraint
 genNodeMap :: [NodeId] -> IntMap.IntMap GenNode
 genNodeMap ids =
     IntMap.fromList
-        [ (getNodeId nid, GenNode (GenNodeId (getNodeId nid)) [nid])
+        [ (getGenNodeId gid, GenNode gid [nid])
         | nid <- ids
+        , let gid = GenNodeId (getNodeId nid)
+        ]
+
+-- | Attach a root gen node and bind term-DAG roots under it (test helper).
+rootedConstraint :: Constraint -> Constraint
+rootedConstraint c0 =
+    let rootId = GenNodeId 0
+        roots =
+            map NodeId $
+                IntSet.toList (Binding.computeTermDagRoots c0)
+        genNode = GenNode rootId roots
+        genNodes' = IntMap.insert (getGenNodeId rootId) genNode (cGenNodes c0)
+        bindParents' =
+            foldr
+                (\nid bp ->
+                    let key = nodeRefKey (typeRef nid)
+                    in if IntMap.member key bp
+                        then bp
+                        else IntMap.insert key (genRef rootId, BindFlex) bp
+                )
+                (cBindParents c0)
+                roots
+    in c0 { cGenNodes = genNodes', cBindParents = bindParents' }
+
+bindParentsFromPairs :: [(NodeId, NodeId, BindFlag)] -> BindParents
+bindParentsFromPairs pairs =
+    IntMap.fromList
+        [ (nodeRefKey (typeRef child), (typeRef parent, flag))
+        | (child, parent, flag) <- pairs
         ]
 
 expectRight :: Show e => Either e a -> (a -> Expectation) -> Expectation
@@ -51,15 +83,19 @@ inferBindParents nodes =
   where
     addEdges bp parentNode =
         let parent = tnId parentNode
-            kids = structuralChildren parentNode
+            boundKids =
+                case parentNode of
+                    TyVar{ tnBound = Just bnd } -> [bnd]
+                    _ -> []
+            kids = structuralChildren parentNode ++ boundKids
 
             addOne m child
                 | child == parent = m
                 | otherwise =
                     IntMap.insertWith
                         (\_ old -> old)
-                        (getNodeId child)
-                        (parent, BindFlex)
+                        (nodeRefKey (typeRef child))
+                        (typeRef parent, BindFlex)
                         m
         in foldl' addOne bp kids
 

@@ -26,6 +26,7 @@ import Control.Monad (foldM, forM, forM_, when)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
+import Data.Maybe (fromMaybe, listToMaybe)
 
 import qualified MLF.Binding.GraphOps as GraphOps
 import qualified MLF.Binding.Tree as Binding
@@ -133,11 +134,11 @@ flushPendingWeakens = do
             c0 <- gets psConstraint
             -- Redundant weakens can arise when multiple edges share the same
             -- expansion variable (merged χe). Treat "already rigid" as a no-op.
-            case Binding.lookupBindParent c0 nid of
+            case Binding.lookupBindParent c0 (typeRef nid) of
                 Nothing -> pure ()
                 Just (_p, BindRigid) -> pure ()
                 Just _ ->
-                    case GraphOps.applyWeaken nid c0 of
+                    case GraphOps.applyWeaken (typeRef nid) c0 of
                         Left err -> throwError (BindingTreeError err)
                         Right (c', _op) ->
                             modify' $ \st -> st { psConstraint = c' }
@@ -161,7 +162,9 @@ unifyAcyclicEdgeNoMerge n1 n2 = do
             bs = IntSet.union bs1 bs2
 
         trace <- lift $ unifyAcyclicRawWithRaiseTrace root1 root2
-        let int1 = IntMap.findWithDefault IntSet.empty r1 (eusInteriorByRoot st0)
+        rep <- lift $ findRoot root2
+        let repId = getNodeId rep
+            int1 = IntMap.findWithDefault IntSet.empty r1 (eusInteriorByRoot st0)
             int2 = IntMap.findWithDefault IntSet.empty r2 (eusInteriorByRoot st0)
             intAll = IntSet.union int1 int2
         recordRaisesFromTrace intAll trace
@@ -169,15 +172,19 @@ unifyAcyclicEdgeNoMerge n1 n2 = do
         modify $ \st ->
             let roots' =
                     if inInt1 || inInt2
-                        then IntSet.insert r2 (IntSet.delete r1 (eusInteriorRoots st))
+                        then IntSet.insert repId (IntSet.delete r2 (IntSet.delete r1 (eusInteriorRoots st)))
                         else eusInteriorRoots st
                 binders' =
                     let m0 = eusBindersByRoot st
-                        m1 = if IntSet.null bs then IntMap.delete r1 m0 else IntMap.insert r2 bs (IntMap.delete r1 m0)
+                        m1 = if IntSet.null bs
+                            then IntMap.delete r2 (IntMap.delete r1 m0)
+                            else IntMap.insert repId bs (IntMap.delete r2 (IntMap.delete r1 m0))
                     in m1
                 interior' =
                     let m0 = eusInteriorByRoot st
-                        m1 = if IntSet.null intAll then IntMap.delete r1 m0 else IntMap.insert r2 intAll (IntMap.delete r1 m0)
+                        m1 = if IntSet.null intAll
+                            then IntMap.delete r2 (IntMap.delete r1 m0)
+                            else IntMap.insert repId intAll (IntMap.delete r2 (IntMap.delete r1 m0))
                     in m1
             in st { eusInteriorRoots = roots', eusBindersByRoot = binders', eusInteriorByRoot = interior' }
 
@@ -206,10 +213,25 @@ initEdgeUnifyState binderArgs interior edgeRoot = do
         IntMap.empty
         (IntSet.toList interior)
     constraint <- gets psConstraint
-    let interiorRoot =
-            case Binding.lookupBindParent constraint edgeRoot of
+    let interiorRootRef =
+            case Binding.lookupBindParent constraint (typeRef edgeRoot) of
                 Just (parent, _) -> parent
-                Nothing -> edgeRoot
+                Nothing -> typeRef edgeRoot
+        interiorRoot =
+            case interiorRootRef of
+                TypeRef nid -> nid
+                GenRef gid ->
+                    case IntMap.lookup (getGenNodeId gid) (cGenNodes constraint) of
+                        Just genNode ->
+                            let schemes = gnSchemes genNode
+                                pick =
+                                    listToMaybe
+                                        [ r
+                                        | r <- schemes
+                                        , Binding.isUpper constraint (typeRef r) (typeRef edgeRoot)
+                                        ]
+                            in fromMaybe edgeRoot pick
+                        Nothing -> edgeRoot
         binderMetaMap = IntMap.fromList [ (getNodeId bv, meta) | (bv, meta) <- binderArgs ]
         -- For edge-local ordering we use the expanded χe ids directly (no UF canonicalization).
         keys = Order.orderKeysFromConstraintWith id constraint interiorRoot Nothing
@@ -255,9 +277,11 @@ checkNodeLocked nid = do
     let canonical = UnionFind.frWith uf
         lookupParent :: NodeId -> EdgeUnifyM (Maybe (NodeId, BindFlag))
         lookupParent n =
-            case Binding.lookupBindParentUnder canonical c n of
+            case Binding.lookupBindParentUnder canonical c (typeRef n) of
                 Left err -> lift $ throwError (BindingTreeError err)
-                Right p -> pure p
+                Right Nothing -> pure Nothing
+                Right (Just (TypeRef parent, flag)) -> pure (Just (parent, flag))
+                Right (Just (GenRef _, _flag)) -> pure Nothing
 
         -- Paper `locked`/“under rigid binder” check: consider only strict ancestors,
         -- so a restricted node (its own edge rigid) is not treated as locked
@@ -350,8 +374,9 @@ unifyAcyclicEdge n1 n2 = do
         -- binding-edge harmonization and record the corresponding `OpRaise`
         -- steps in Ω.
         trace <- lift $ unifyAcyclicRawWithRaiseTrace root1 root2
-
-        let int1 = IntMap.findWithDefault IntSet.empty r1 (eusInteriorByRoot st0)
+        rep <- lift $ findRoot root2
+        let repId = getNodeId rep
+            int1 = IntMap.findWithDefault IntSet.empty r1 (eusInteriorByRoot st0)
             int2 = IntMap.findWithDefault IntSet.empty r2 (eusInteriorByRoot st0)
             intAll = IntSet.union int1 int2
 
@@ -364,16 +389,20 @@ unifyAcyclicEdge n1 n2 = do
         modify $ \st ->
             let roots' =
                     if inInt1 || inInt2
-                        then IntSet.insert r2 (IntSet.delete r1 (eusInteriorRoots st))
+                        then IntSet.insert repId (IntSet.delete r2 (IntSet.delete r1 (eusInteriorRoots st)))
                         else eusInteriorRoots st
                 binders' =
                     let m0 = eusBindersByRoot st
-                        m1 = if IntSet.null bs then IntMap.delete r1 m0 else IntMap.insert r2 bs (IntMap.delete r1 m0)
+                        m1 = if IntSet.null bs
+                            then IntMap.delete r2 (IntMap.delete r1 m0)
+                            else IntMap.insert repId bs (IntMap.delete r2 (IntMap.delete r1 m0))
                     in m1
                 -- Also update interior-by-root map
                 interior' =
                     let m0 = eusInteriorByRoot st
-                        m1 = if IntSet.null intAll then IntMap.delete r1 m0 else IntMap.insert r2 intAll (IntMap.delete r1 m0)
+                        m1 = if IntSet.null intAll
+                            then IntMap.delete r2 (IntMap.delete r1 m0)
+                            else IntMap.insert repId intAll (IntMap.delete r2 (IntMap.delete r1 m0))
                     in m1
             in st { eusInteriorRoots = roots', eusBindersByRoot = binders', eusInteriorByRoot = interior' }
 
@@ -457,13 +486,15 @@ isBoundAboveInBindingTree edgeRoot ext = do
         go seen nid
             | IntSet.member (getNodeId nid) seen = pure seen
             | otherwise = do
-                mbParentInfo <- case Binding.lookupBindParentUnder canonical c0 nid of
+                mbParentInfo <- case Binding.lookupBindParentUnder canonical c0 (typeRef nid) of
                     Left err -> throwError (BindingTreeError err)
                     Right p -> pure p
                 case mbParentInfo of
                     Nothing -> pure (IntSet.insert (getNodeId nid) seen)
-                    Just (p, _flag) ->
+                    Just (TypeRef p, _flag) ->
                         go (IntSet.insert (getNodeId nid) seen) p
+                    Just (GenRef _, _flag) ->
+                        pure (IntSet.insert (getNodeId nid) seen)
 
     anyAncestorInSetUnder
         :: (NodeId -> NodeId)
@@ -477,12 +508,13 @@ isBoundAboveInBindingTree edgeRoot ext = do
         go nid
             | IntSet.member (getNodeId nid) allowed = pure True
             | otherwise = do
-                mbParentInfo <- case Binding.lookupBindParentUnder canonical c0 nid of
+                mbParentInfo <- case Binding.lookupBindParentUnder canonical c0 (typeRef nid) of
                     Left err -> throwError (BindingTreeError err)
                     Right p -> pure p
                 case mbParentInfo of
                     Nothing -> pure False
-                    Just (p, _flag) -> go p
+                    Just (TypeRef p, _flag) -> go p
+                    Just (GenRef _, _flag) -> pure False
 
 unifyStructureEdge :: NodeId -> NodeId -> EdgeUnifyM ()
 unifyStructureEdge n1 n2 = do
@@ -496,6 +528,15 @@ unifyStructureEdge n1 n2 = do
         unifyAcyclicEdge n1 n2
 
         case (node1, node2) of
+            (TyVar { tnBound = mb1 }, TyVar { tnBound = mb2 }) ->
+                case (mb1, mb2) of
+                    (Just b1, Just b2) ->
+                        when (b1 /= b2) (unifyStructureEdge b1 b2)
+                    _ -> pure ()
+            (TyVar { tnBound = Just b1 }, _) ->
+                when (b1 /= tnId node2) (unifyStructureEdge b1 (tnId node2))
+            (_, TyVar { tnBound = Just b2 }) ->
+                when (b2 /= tnId node1) (unifyStructureEdge (tnId node1) b2)
             (TyArrow { tnDom = d1, tnCod = c1 }, TyArrow { tnDom = d2, tnCod = c2 }) -> do
                 unifyStructureEdge d1 d2
                 unifyStructureEdge c1 c2

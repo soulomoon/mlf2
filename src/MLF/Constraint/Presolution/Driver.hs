@@ -21,13 +21,12 @@ module MLF.Constraint.Presolution.Driver (
 
 import Control.Monad.State
 import Control.Monad.Except (throwError)
-import Control.Monad (foldM, forM, forM_)
+import Control.Monad (foldM, forM, forM_, when)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.Maybe (fromMaybe, mapMaybe)
 
-import qualified MLF.Constraint.Root as ConstraintRoot
 import qualified MLF.Util.UnionFind as UnionFind
 import qualified MLF.Util.Order as Order
 import qualified MLF.Binding.Tree as Binding
@@ -40,6 +39,7 @@ import MLF.Constraint.Presolution.Ops (
     findRoot,
     getCanonicalNode,
     getNode,
+    setBindParentM,
     )
 import MLF.Constraint.Presolution.Expansion (
     applyExpansion,
@@ -78,13 +78,12 @@ computePresolution
     -> Constraint
     -> Either PresolutionError PresolutionResult
 computePresolution acyclicityResult constraint = do
-    let constraint' = ConstraintRoot.ensureConstraintRoot constraint
     -- Initialize state
     let initialState = PresolutionState
-            { psConstraint = constraint'
+            { psConstraint = constraint
             , psPresolution = Presolution IntMap.empty
             , psUnionFind = IntMap.empty -- Should initialize from constraint if needed
-            , psNextNodeId = maxNodeIdKeyOr0 constraint' + 1
+            , psNextNodeId = maxNodeIdKeyOr0 constraint + 1
             , psPendingWeakens = IntSet.empty
             , psEdgeExpansions = IntMap.empty
             , psEdgeWitnesses = IntMap.empty
@@ -99,7 +98,8 @@ computePresolution acyclicityResult constraint = do
         mapping <- materializeExpansions
         flushPendingWeakens
         redirects <- rewriteConstraint mapping
-        weakenInertLockedNodesM
+        -- Keep presolutions flexible for principal types; rigidify inert-locked
+        -- nodes later during xMLF translation (paper §15.2.8).
         normalizeEdgeWitnessesM
         pure redirects
 
@@ -250,10 +250,10 @@ rewriteConstraint mapping = do
                 , etCopyMap = canonCopyMap
                 }
 
-        newTraces = IntMap.map canonicalizeTrace (psEdgeTraces st)
+        newTraces0 = IntMap.map canonicalizeTrace (psEdgeTraces st)
 
         bindingEdges0 = cBindParents c
-        cStruct = c { cNodes = newNodes }
+        cStruct = c { cNodes = newNodes, cGenNodes = genNodes' }
 
         incomingParents :: IntMap IntSet.IntSet
         incomingParents =
@@ -281,97 +281,234 @@ rewriteConstraint mapping = do
             ]
 
     newBindParents <- do
-        let constraintRoot = ConstraintRoot.findConstraintRoot cStruct
+        let genNodes0 = cGenNodes c
+            genExists gid = IntMap.member (getGenNodeId gid) genNodes0
+            typeExists nid = IntMap.member (getNodeId nid) newNodes
+            schemeParents =
+                IntMap.fromListWith
+                    (\a _ -> a)
+                    [ (getNodeId root, genRef (gnId g))
+                    | g <- IntMap.elems genNodes'
+                    , root <- gnSchemes g
+                    ]
+
+            canonicalRef ref = case ref of
+                TypeRef nid -> TypeRef (canonical nid)
+                GenRef gid -> GenRef gid
             entries0 =
-                [ (getNodeId child', (parent0, flag))
-                | (childId, (parent0, flag)) <- IntMap.toList bindingEdges0
-                , let child' = canonical (NodeId childId)
-                , IntMap.member (getNodeId child') newNodes
+                [ (childRef, parentRef, flag)
+                | (childKey, (parent0, flag)) <- IntMap.toList bindingEdges0
+                , let childRef0 = nodeRefFromKey childKey
+                      childRef = canonicalRef childRef0
+                      parentRef = canonicalRef parent0
+                , case childRef of
+                    TypeRef nid -> typeExists nid
+                    GenRef gid -> genExists gid
                 ]
 
-            chooseBindParent :: NodeId -> NodeId -> PresolutionM (Maybe NodeId)
-            chooseBindParent child' parent0 = do
-                let inNodes nid = IntMap.member (getNodeId nid) newNodes
-                    upper parent = Binding.isUpper cStruct parent child'
+            chooseBindParent :: NodeRef -> NodeRef -> PresolutionM NodeRef
+            chooseBindParent childRef parent0 =
+                case childRef of
+                    GenRef _ ->
+                        case parent0 of
+                            GenRef gid
+                                | genExists gid -> pure parent0
+                            _ ->
+                                throwError $
+                                    BindingTreeError $
+                                        InvalidBindingTree $
+                                            "rewriteConstraint: gen node has non-gen parent "
+                                                ++ show parent0
+                    TypeRef child' -> do
+                        let inNodes ref = case ref of
+                                TypeRef nid -> typeExists nid
+                                GenRef gid -> genExists gid
+                            upper parent = case parent of
+                                GenRef _ -> True
+                                _ -> Binding.isUpper cStruct parent childRef
 
-                    bindingAncestors :: NodeId -> [NodeId]
-                    bindingAncestors start =
-                        case Binding.bindingPathToRoot c start of
-                            Left _ -> []
-                            Right path -> drop 1 path
+                            bindingAncestors :: NodeRef -> [NodeRef]
+                            bindingAncestors start =
+                                case Binding.bindingPathToRoot c start of
+                                    Left _ -> []
+                                    Right path -> drop 1 path
 
-                    expBody :: NodeId -> Maybe NodeId
-                    expBody nid =
-                        case IntMap.lookup (getNodeId nid) (cNodes c) of
-                            Just TyExp{ tnBody = b } -> Just b
-                            _ -> Nothing
+                            expBody :: NodeRef -> Maybe NodeRef
+                            expBody ref =
+                                case ref of
+                                    TypeRef nid ->
+                                        case IntMap.lookup (getNodeId nid) (cNodes c) of
+                                            Just TyExp{ tnBody = b } -> Just (TypeRef b)
+                                            _ -> Nothing
+                                    GenRef _ -> Nothing
 
-                    structuralParent :: NodeId -> Maybe NodeId
-                    structuralParent nid =
-                        case IntMap.lookup (getNodeId nid) incomingParents of
-                            Nothing -> Nothing
-                            Just ps ->
-                                case IntSet.toList ps of
-                                    [] -> Nothing
-                                    (p:_) -> Just (NodeId p)
+                            structuralParent :: NodeRef -> Maybe NodeRef
+                            structuralParent ref =
+                                case ref of
+                                    GenRef _ -> Nothing
+                                    TypeRef nid ->
+                                        case IntMap.lookup (getNodeId nid) incomingParents of
+                                            Nothing -> Nothing
+                                            Just ps ->
+                                                case IntSet.toList ps of
+                                                    [] -> Nothing
+                                                    (p:_) -> Just (TypeRef (NodeId p))
 
-                    candidates =
-                        map canonical $
-                            [ parent0 ]
-                                ++ mapMaybe expBody [parent0]
-                                ++ bindingAncestors parent0
-                                ++ maybe [] pure (structuralParent child')
-                                ++ maybe [] pure constraintRoot
+                            candidates =
+                                map canonicalRef $
+                                    [ parent0 ]
+                                        ++ maybe [] pure (IntMap.lookup (getNodeId child') schemeParents)
+                                        ++ mapMaybe expBody [parent0]
+                                        ++ bindingAncestors parent0
+                                        ++ maybe [] pure (structuralParent childRef)
 
-                    firstValid = \case
-                        [] -> Nothing
-                        (p:ps) ->
-                            if p == child' || not (inNodes p) || not (upper p)
-                                then firstValid ps
-                                else Just p
+                            firstValid = \case
+                                [] -> Nothing
+                                (p:ps) ->
+                                    if p == childRef || not (inNodes p) || not (upper p)
+                                        then firstValid ps
+                                        else Just p
 
-                case firstValid candidates of
-                    Just p -> pure (Just p)
-                    Nothing ->
-                        if IntMap.member (getNodeId child') incomingParents
-                            then throwError $
-                                BindingTreeError $
-                                    InvalidBindingTree $
-                                        "rewriteConstraint: could not find an upper binding parent for "
-                                            ++ show child'
-                                            ++ " (original parent "
-                                            ++ show parent0
-                                            ++ ")"
-                            else pure Nothing
+                        case firstValid candidates of
+                            Just p -> pure p
+                            Nothing ->
+                                throwError $
+                                    BindingTreeError $
+                                        InvalidBindingTree $
+                                            "rewriteConstraint: could not find a valid binding parent for "
+                                                ++ show child'
+                                                ++ " (original parent "
+                                                ++ show parent0
+                                                ++ ")"
 
-            insertOne :: BindParents -> (Int, (NodeId, BindFlag)) -> PresolutionM BindParents
-            insertOne bp (childId, (parent, flag)) =
-                case IntMap.lookup childId bp of
-                    Nothing -> pure (IntMap.insert childId (parent, flag) bp)
+            insertOne :: BindParents -> (Int, (NodeRef, BindFlag)) -> PresolutionM BindParents
+            insertOne bp (childKey, (parent, flag)) =
+                case IntMap.lookup childKey bp of
+                    Nothing -> pure (IntMap.insert childKey (parent, flag) bp)
                     Just (parent0, flag0)
                         | parent0 == parent ->
                             let flag' = max flag0 flag
-                            in pure (IntMap.insert childId (parent, flag') bp)
+                            in pure (IntMap.insert childKey (parent, flag') bp)
                         | otherwise ->
-                            -- UF canonicalization can transiently create multiple binding
-                            -- parents for the same rewritten node. Resolve this
-                            -- deterministically by keeping the first parent and taking
-                            -- the max flag (matching the UF-rewrite strategy used in
-                            -- Normalize/Solve).
                             let flag' = max flag0 flag
-                            in pure (IntMap.insert childId (parent0, flag') bp)
+                            in pure (IntMap.insert childKey (parent0, flag') bp)
 
-        entries' <- fmap concat $ forM entries0 $ \(childId, (parent0, flag)) -> do
-            let child' = NodeId childId
-            mp <- chooseBindParent child' parent0
-            pure $ case mp of
-                Nothing -> []
-                Just parent ->
-                    if parent == child'
-                        then []
-                        else [(childId, (parent, flag))]
+        entries' <- fmap concat $ forM entries0 $ \(childRef, parent0, flag) -> do
+            parent <- chooseBindParent childRef parent0
+            pure $ case parent == childRef of
+                True -> []
+                False -> [(nodeRefKey childRef, (parent, flag))]
 
-        foldM insertOne IntMap.empty entries'
+        bp0 <- foldM insertOne IntMap.empty entries'
+
+        let rootGen =
+                case IntMap.keys genNodes' of
+                    [] -> Nothing
+                    gids -> Just (GenNodeId (minimum gids))
+
+            addMissing bp nidInt = do
+                let childRef = typeRef (NodeId nidInt)
+                    childKey = nodeRefKey childRef
+                if IntMap.member childKey bp
+                    then pure bp
+                    else do
+                        let structuralParent =
+                                case IntMap.lookup nidInt incomingParents of
+                                    Nothing -> Nothing
+                                    Just ps ->
+                                        case IntSet.toList ps of
+                                            [] -> Nothing
+                                            (p:_) -> Just (typeRef (NodeId p))
+                            parent =
+                                case IntMap.lookup nidInt schemeParents of
+                                    Just gp -> Just gp
+                                    Nothing -> structuralParent
+                            parent' =
+                                case parent of
+                                    Just p -> Just p
+                                    Nothing ->
+                                        case rootGen of
+                                            Nothing -> Nothing
+                                            Just gid -> Just (genRef gid)
+                        case parent' of
+                            Nothing -> pure bp
+                            Just p ->
+                                if p == childRef
+                                    then pure bp
+                                    else pure (IntMap.insert childKey (p, BindFlex) bp)
+
+        foldM addMissing bp0 (IntMap.keys newNodes)
+
+    genNodesFinal <- do
+        let bindParents = newBindParents
+            nodes = newNodes
+            genIds = IntMap.keys genNodes'
+            nearestGen :: NodeRef -> PresolutionM GenNodeId
+            nearestGen start = go IntSet.empty start
+              where
+                go :: IntSet.IntSet -> NodeRef -> PresolutionM GenNodeId
+                go visited ref
+                    | IntSet.member (nodeRefKey ref) visited =
+                        throwError $
+                            BindingTreeError $
+                                InvalidBindingTree $
+                                    "rewriteConstraint: binding cycle while recomputing gen schemes at " ++ show ref
+                    | otherwise =
+                        case IntMap.lookup (nodeRefKey ref) bindParents of
+                            Nothing ->
+                                throwError $
+                                    BindingTreeError $
+                                        MissingBindParent ref
+                            Just (parentRef, _flag) ->
+                                case parentRef of
+                                    GenRef gid -> pure gid
+                                    TypeRef _ ->
+                                        go (IntSet.insert (nodeRefKey ref) visited) parentRef
+
+        scopeNodes <- foldM
+            (\m nidInt -> do
+                let ref = typeRef (NodeId nidInt)
+                gid <- nearestGen ref
+                pure $ IntMap.insertWith IntSet.union (getGenNodeId gid) (IntSet.singleton nidInt) m
+            )
+            IntMap.empty
+            (IntMap.keys nodes)
+
+        let directChildren =
+                IntMap.fromListWith
+                    IntSet.union
+                    [ (getGenNodeId gid, IntSet.singleton nidInt)
+                    | (childKey, (parentRef, _flag)) <- IntMap.toList bindParents
+                    , TypeRef (NodeId nidInt) <- [nodeRefFromKey childKey]
+                    , GenRef gid <- [parentRef]
+                    ]
+
+            boundKids node =
+                case node of
+                    TyVar{ tnBound = Just bnd } -> [bnd]
+                    _ -> []
+
+            rootsForScope gidInt scopeSet =
+                let referenced =
+                        IntSet.fromList
+                            [ getNodeId child
+                            | nidInt <- IntSet.toList scopeSet
+                            , Just node <- [IntMap.lookup nidInt nodes]
+                            , child <- structuralChildren node ++ boundKids node
+                            , IntSet.member (getNodeId child) scopeSet
+                            ]
+                    roots = IntSet.difference scopeSet referenced
+                    direct = IntMap.findWithDefault IntSet.empty gidInt directChildren
+                    roots' = IntSet.union roots direct
+                in map NodeId (IntSet.toList roots')
+
+            rebuildOne gidInt =
+                let gid = GenNodeId gidInt
+                    scopeSet = IntMap.findWithDefault IntSet.empty gidInt scopeNodes
+                    schemes = rootsForScope gidInt scopeSet
+                in (gidInt, GenNode gid schemes)
+
+        pure $ IntMap.fromList (map rebuildOne genIds)
 
     let c0' = c
             { cNodes = newNodes
@@ -379,20 +516,21 @@ rewriteConstraint mapping = do
             , cUnifyEdges = Canonicalize.rewriteUnifyEdges canonical (cUnifyEdges c)
             , cBindParents = newBindParents
             , cEliminatedVars = eliminated'
-            , cGenNodes = genNodes'
+            , cGenNodes = genNodesFinal
             }
-        -- Keep the synthetic constraint root total after rewriting/canonicalization.
-        c' = ConstraintRoot.ensureConstraintRoot c0'
+        c' = c0'
 
     case Binding.checkBindingTree c' of
         Left err -> throwError (BindingTreeError err)
         Right () -> pure ()
 
+    let newTraces' = newTraces0
+
     put st
         { psConstraint = c'
         , psEdgeExpansions = newExps
         , psEdgeWitnesses = newWitnesses
-        , psEdgeTraces = newTraces
+        , psEdgeTraces = newTraces'
         }
 
     return fullRedirects
@@ -430,10 +568,10 @@ normalizeEdgeWitnessesM = do
                 , StepOmega (OpWeaken n) <- ewSteps w0
                 ]
     witnesses <- forM (IntMap.toList witnesses0) $ \(eid, w0) -> do
-        let (edgeRoot, copyMap, binderArgs0) =
+        let (edgeRoot, copyMap, binderArgs0, traceInterior) =
                 case IntMap.lookup eid traces of
-                    Nothing -> (ewRoot w0, IntMap.empty, [])
-                    Just tr -> (etRoot tr, etCopyMap tr, etBinderArgs tr)
+                    Nothing -> (ewRoot w0, IntMap.empty, [], IntSet.empty)
+                    Just tr -> (etRoot tr, etCopyMap tr, etBinderArgs tr, etInterior tr)
             rewriteNode = rewriteNodeWith copyMap
             binderArgs =
                 IntMap.fromList
@@ -469,19 +607,68 @@ normalizeEdgeWitnessesM = do
                 case step of
                     StepOmega op -> StepOmega (restoreOp op)
                     StepIntro -> StepIntro
-        let interiorRoot =
-                case Binding.lookupBindParent c0 edgeRoot of
-                    Just (parent, _) -> parent
-                    Nothing -> edgeRoot
-        interior <- case Binding.interiorOf c0 interiorRoot of
-            Left err -> throwError (BindingTreeError err)
-            Right s -> pure s
+        let interiorRoot = typeRef edgeRoot
+            orderBase = edgeRoot
+            orderRoot = orderBase
+        interiorExact <-
+            if IntSet.null traceInterior
+                then case Binding.interiorOf c0 interiorRoot of
+                    Left err -> throwError (BindingTreeError err)
+                    Right s ->
+                        pure $
+                            IntSet.fromList
+                                [ getNodeId nid
+                                | key <- IntSet.toList s
+                                , TypeRef nid <- [nodeRefFromKey key]
+                                ]
+                else pure traceInterior
+        let interiorNorm =
+                -- Normalize against an expansion-aware interior so ops on copied nodes
+                -- (e.g., escaping binder metas) are retained for Raise/Merge witnesses.
+                IntSet.union interiorExact $
+                    IntSet.fromList (map getNodeId (IntMap.elems copyMap))
         let steps0 = map rewriteStep (ewSteps w0)
-            orderKeys = Order.orderKeysFromConstraintWith id c0 interiorRoot Nothing
+            orderKeys0 = Order.orderKeysFromConstraintWith id c0 orderRoot Nothing
+            opTargets = \case
+                OpGraft sigma n -> [sigma, n]
+                OpWeaken n -> [n]
+                OpMerge n m -> [n, m]
+                OpRaise n -> [n]
+                OpRaiseMerge n m -> [n, m]
+            missingKeys =
+                IntSet.fromList
+                    [ getNodeId n
+                    | StepOmega op <- steps0
+                    , n <- opTargets op
+                    , not (IntMap.member (getNodeId n) orderKeys0)
+                    ]
+            orderKeys =
+                if IntSet.null missingKeys
+                    then orderKeys0
+                    else
+                        -- Defensive: if an op targets a node outside the ≺ traversal,
+                        -- assign a stable ordering key so normalization can proceed.
+                        let existingFirsts =
+                                mapMaybe
+                                    (\k -> case Order.okPath k of
+                                        [] -> Nothing
+                                        (x:_) -> Just x
+                                    )
+                                    (IntMap.elems orderKeys0)
+                            base =
+                                case existingFirsts of
+                                    [] -> 0
+                                    _ -> maximum existingFirsts + 1
+                            extraKeys =
+                                IntMap.fromList
+                                    [ (nidInt, Order.OrderKey { Order.okDepth = 0, Order.okPath = [base, idx] })
+                                    | (idx, nidInt) <- zip [0 ..] (IntSet.toList missingKeys)
+                                    ]
+                        in IntMap.union orderKeys0 extraKeys
             env =
                 OmegaNormalizeEnv
                     { oneRoot = edgeRoot
-                    , interior = interior
+                    , interior = interiorNorm
                     , weakened = weakened
                     , orderKeys = orderKeys
                     , canonical = id
@@ -503,21 +690,20 @@ rewriteEliminated canon nodes0 elims0 =
         [ getNodeId vC
         | vid <- IntSet.toList elims0
         , let vC = canon (NodeId vid)
-        , IntMap.member (getNodeId vC) nodes0
+        , case IntMap.lookup (getNodeId vC) nodes0 of
+            Just TyVar{} -> True
+            _ -> False
         ]
 
 rewriteGenNodes :: (NodeId -> NodeId) -> IntMap TyNode -> IntMap.IntMap GenNode -> IntMap.IntMap GenNode
 rewriteGenNodes canon nodes0 gen0 =
     let rewriteOne g =
-            let gidC = canon (NodeId (genNodeKey (gnId g)))
-                gid = getNodeId gidC
-                schemes' =
+            let schemes' =
                     [ canon s
                     | s <- gnSchemes g
                     , IntMap.member (getNodeId (canon s)) nodes0
                     ]
-                g' = g { gnId = GenNodeId gid, gnSchemes = schemes' }
-            in (gid, g')
+            in (genNodeKey (gnId g), g { gnSchemes = schemes' })
     in IntMap.fromListWith (\a _ -> a) (map rewriteOne (IntMap.elems gen0))
 
 -- | Read-only chase like Solve.frWith
@@ -559,7 +745,7 @@ processInstEdge edge = do
             recordEdgeExpansion edgeId finalExp
 
             -- Perform unifications requested by expansion decision
-            mapM_ (uncurry unifyAcyclic) unifications
+            mapM_ (uncurry unifyStructure) unifications
 
             (edgeRoot, expTrace, extraOps) <- if finalExp == ExpIdentity
                 then do
@@ -586,6 +772,10 @@ processInstEdge edge = do
                     -- Bind all copied nodes that don't have binding parents to the
                     -- expansion root. This ensures the binding tree remains valid.
                     bindUnboundCopiedNodes copyMap0 interior0 resNodeId
+
+                    targetParent <- do
+                        c0 <- gets psConstraint
+                        pure (Binding.lookupBindParent c0 (typeRef (tnId n2)))
                     
                     bas <- binderArgsFromExpansion n1 finalExp
                     binderMetas <- forM bas $ \(bv, _arg) ->
@@ -599,17 +789,23 @@ processInstEdge edge = do
                     (_a, eu1) <- runStateT
                         (do
                             OmegaExec.executeOmegaBaseOpsPre omegaEnv baseOps
+                            lift $ bindExpansionArgs resNodeId bas
                             unifyStructureEdge resNodeId (tnId n2)
                             unifyAcyclicEdge (tnId n1) resNodeId
                             OmegaExec.executeOmegaBaseOpsPost omegaEnv baseOps
                         )
                         eu0
+                    resRoot <- findRoot resNodeId
+                    case targetParent of
+                        Nothing -> pure ()
+                        Just parentInfo -> setBindParentM (typeRef resRoot) parentInfo
                     pure (resNodeId, (copyMap0, interior), eusOps eu1)
 
             tr <- buildEdgeTrace edgeId n1Id n1 finalExp expTrace
             recordEdgeTrace edgeId tr
             w <- buildEdgeWitness edgeId n1Id n2Id n1 finalExp extraOps edgeRoot
             recordEdgeWitness edgeId w
+            canonicalizeEdgeTraceInteriorsM
 
         _ -> do
             n1 <- getCanonicalNode n1Id
@@ -622,6 +818,7 @@ processInstEdge edge = do
             w <- buildEdgeWitness edgeId n1Id n2Id n1Raw ExpIdentity [] edgeRoot
             recordEdgeWitness edgeId w
             unifyStructure (tnId n1) (tnId n2)
+            canonicalizeEdgeTraceInteriorsM
 
 -- | Record a witness for an instantiation edge.
 recordEdgeWitness :: EdgeId -> EdgeWitness -> PresolutionM ()
@@ -631,6 +828,53 @@ recordEdgeWitness (EdgeId eid) w =
 recordEdgeTrace :: EdgeId -> EdgeTrace -> PresolutionM ()
 recordEdgeTrace (EdgeId eid) tr =
     modify $ \st -> st { psEdgeTraces = IntMap.insert eid tr (psEdgeTraces st) }
+
+canonicalizeEdgeTraceInteriorsM :: PresolutionM ()
+canonicalizeEdgeTraceInteriorsM = do
+    uf <- gets psUnionFind
+    let canonical = UnionFind.frWith uf
+        canonInterior tr =
+            let interior' =
+                    IntSet.fromList
+                        [ getNodeId (canonical (NodeId nid))
+                        | nid <- IntSet.toList (etInterior tr)
+                        ]
+            in tr { etInterior = interior' }
+    modify' $ \st -> st { psEdgeTraces = IntMap.map canonInterior (psEdgeTraces st) }
+
+bindExpansionArgs :: NodeId -> [(NodeId, NodeId)] -> PresolutionM ()
+bindExpansionArgs expansionRoot pairs = do
+    uf0 <- gets psUnionFind
+    c0 <- gets psConstraint
+    let canonical = UnionFind.frWith uf0
+        expansionRootC = canonical expansionRoot
+        nodes = cNodes c0
+        reachable =
+            let go visited [] = visited
+                go visited (nid0:rest) =
+                    let nid = canonical nid0
+                        key = getNodeId nid
+                    in if IntSet.member key visited
+                        then go visited rest
+                        else
+                            let visited' = IntSet.insert key visited
+                                kids =
+                                    case IntMap.lookup key nodes of
+                                        Nothing -> []
+                                        Just node ->
+                                            let boundKids =
+                                                    case node of
+                                                        TyVar{ tnBound = Just bnd } -> [bnd]
+                                                        _ -> []
+                                            in structuralChildren node ++ boundKids
+                            in go visited' (kids ++ rest)
+            in go IntSet.empty [expansionRootC]
+    forM_ pairs $ \(_bv, arg) -> do
+        let argC = canonical arg
+        when (IntSet.member (getNodeId argC) reachable) $ do
+            case Binding.lookupBindParent c0 (typeRef argC) of
+                Nothing -> setBindParentM (typeRef argC) (typeRef expansionRootC, BindFlex)
+                Just _ -> pure ()
 
 -- | Build an edge witness from the chosen expansion recipe.
 --
@@ -673,7 +917,24 @@ buildEdgeTrace :: EdgeId -> NodeId -> TyNode -> Expansion -> (CopyMap, InteriorS
 buildEdgeTrace _eid left leftRaw expn (copyMap0, _interior0) = do
     bas <- binderArgsFromExpansion leftRaw expn
     root <- findRoot left
-    interior <- edgeInteriorExact root
+    c0 <- gets psConstraint
+    uf0 <- gets psUnionFind
+    let canonical = UnionFind.frWith uf0
+        canonicalizeInterior s =
+            IntSet.fromList
+                [ getNodeId (canonical (NodeId nid))
+                | nid <- IntSet.toList s
+                ]
+    interiorRaw <- case Binding.interiorOfUnder canonical c0 (typeRef root) of
+        Left err -> throwError (BindingTreeError err)
+        Right s ->
+            pure $
+                IntSet.fromList
+                    [ getNodeId nid
+                    | key <- IntSet.toList s
+                    , TypeRef nid <- [nodeRefFromKey key]
+                    ]
+    let interior = canonicalizeInterior interiorRaw
     pure EdgeTrace { etRoot = root, etBinderArgs = bas, etInterior = interior, etCopyMap = copyMap0 }
 
 unifyStructure :: NodeId -> NodeId -> PresolutionM ()
@@ -693,6 +954,15 @@ unifyStructure n1 n2 = do
 
         -- Recursively unify children if structures match
         case (node1, node2) of
+            (TyVar { tnBound = mb1 }, TyVar { tnBound = mb2 }) ->
+                case (mb1, mb2) of
+                    (Just b1, Just b2) ->
+                        when (b1 /= b2) (unifyStructure b1 b2)
+                    _ -> pure ()
+            (TyVar { tnBound = Just b1 }, _) ->
+                when (b1 /= tnId node2) (unifyStructure b1 (tnId node2))
+            (_, TyVar { tnBound = Just b2 }) ->
+                when (b2 /= tnId node1) (unifyStructure (tnId node1) b2)
             (TyArrow { tnDom = d1, tnCod = c1 }, TyArrow { tnDom = d2, tnCod = c2 }) -> do
                 -- trace "Unifying Arrows" $ return ()
                 unifyStructure d1 d2

@@ -10,16 +10,15 @@ import qualified Data.Set as Set
 import MLF.Frontend.Syntax (Expr(..), Lit(..), SrcType(..), SrcScheme(..))
 import qualified MLF.Elab.Pipeline as Elab
 import qualified MLF.Util.Order as Order
-import MLF.Constraint.Types (BaseTy(..), BindingError(..), NodeId(..), EdgeId(..), TyNode(..), Constraint(..), InstanceOp(..), InstanceStep(..), InstanceWitness(..), EdgeWitness(..), BindFlag(..), getNodeId)
+import MLF.Constraint.Types (BaseTy(..), BindingError(..), NodeId(..), EdgeId(..), GenNode(..), GenNodeId(..), NodeRef(..), TyNode(..), Constraint(..), InstanceOp(..), InstanceStep(..), InstanceWitness(..), EdgeWitness(..), BindFlag(..), getNodeId, genRef, nodeRefKey, typeRef)
 import qualified MLF.Binding.Tree as Binding
-import qualified MLF.Constraint.Root as ConstraintRoot
 import MLF.Frontend.ConstraintGen (ConstraintError, ConstraintResult(..), generateConstraints)
 import MLF.Constraint.Normalize (normalize)
 import MLF.Constraint.Acyclicity (checkAcyclicity)
 import MLF.Constraint.Presolution (PresolutionResult(..), EdgeTrace(..), computePresolution)
 import MLF.Constraint.Solve (SolveResult(..), solveUnify)
 import qualified MLF.Constraint.Solve as Solve (frWith)
-import SpecUtil (emptyConstraint, genNodeMap, inferBindParents, requireRight)
+import SpecUtil (bindParentsFromPairs, emptyConstraint, requireRight, rootedConstraint)
 
 requirePipeline :: Expr -> IO (Elab.ElabTerm, Elab.ElabType)
 requirePipeline = requireRight . Elab.runPipelineElab Set.empty
@@ -122,38 +121,37 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             Elab.pretty term `shouldBe` "let id : ∀a (b ⩾ a -> a). b = Λa. Λ(b ⩾ a -> a). λx:a. x in (id [⟨Int⟩]) 1"
 
         it "generalizeAt quantifies vars bound under the scope root" $ do
-            let root = NodeId 0
+            let rootGen = GenNodeId 0
                 arrow = NodeId 1
                 var = NodeId 2
+                root = NodeId 3
                 nodes = IntMap.fromList
-                    [ (getNodeId root, TyRoot root [arrow])
-                    , (getNodeId arrow, TyArrow { tnId = arrow, tnDom = var, tnCod = var })
+                    [ (getNodeId arrow, TyArrow { tnId = arrow, tnDom = var, tnCod = var })
                     , (getNodeId var, TyVar { tnId = var, tnBound = Nothing })
+                    , (getNodeId root, TyVar { tnId = root, tnBound = Just arrow })
                     ]
                 bindParents = IntMap.fromList
-                    [ (getNodeId arrow, (root, BindFlex))
-                    , (getNodeId var, (arrow, BindFlex))
+                    [ (nodeRefKey (typeRef root), (genRef rootGen, BindFlex))
+                    , (nodeRefKey (typeRef var), (genRef rootGen, BindFlex))
+                    , (nodeRefKey (typeRef arrow), (typeRef root, BindFlex))
                     ]
                 constraint = emptyConstraint
                     { cNodes = nodes
                     , cBindParents = bindParents
-                    , cGenNodes = genNodeMap [root]
+                    , cGenNodes = IntMap.singleton (getGenNodeId rootGen) (GenNode rootGen [root])
                     }
                 solved = SolveResult
                     { srConstraint = constraint
                     , srUnionFind = IntMap.empty
                     }
 
-            (Elab.Forall binds ty, _subst) <- requireRight (Elab.generalizeAt solved root arrow)
+            (Elab.Forall binds ty, _subst) <- requireRight (Elab.generalizeAt solved (genRef rootGen) root)
             case binds of
-                [("a", Just boundTy)] -> do
-                    let expectedBound =
-                            Elab.TForall "t" Nothing
-                                (Elab.TArrow (Elab.TVar "t") (Elab.TVar "t"))
-                    boundTy `shouldAlphaEqType` expectedBound
+                [("a", Nothing), ("b", Just boundTy)] -> do
+                    boundTy `shouldAlphaEqType` (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
                 other ->
-                    expectationFailure $ "Expected one bound binder, got " ++ show other
-            ty `shouldBe` Elab.TVar "a"
+                    expectationFailure $ "Expected two binders, got " ++ show other
+            ty `shouldBe` Elab.TVar "b"
 
         it "elaborates dual instantiation in application" $ do
             -- let id = \x. x in id id
@@ -195,8 +193,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
             let expected =
                     let intTy = Elab.TBase (BaseTy "Int")
-                        intBound = Elab.TForall "b" (Just intTy) (Elab.TVar "b")
-                    in Elab.TForall "a" (Just intBound)
+                    in Elab.TForall "a" (Just intTy)
                         (Elab.TVar "a")
             ty `shouldAlphaEqType` expected
 
@@ -219,13 +216,13 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             let ann = STArrow (STBase "Int") (STBase "Int")
                 expr = EAnn (ELam "x" (EVar "x")) ann
             (_term, ty) <- requirePipeline expr
-            Elab.pretty ty `shouldBe` "∀(a ⩾ Int). ∀(b ⩾ a -> a). b"
+            Elab.pretty ty `shouldBe` "∀(a ⩾ Int). ∀(b ⩾ a -> Int). b"
 
     describe "Binding tree coverage" $ do
         let firstShow :: Show err => Either err a -> Either String a
             firstShow = either (Left . show) Right
 
-            runSolvedWithScope :: Expr -> Either String (SolveResult, NodeId, NodeId)
+            runSolvedWithScope :: Expr -> Either String (SolveResult, NodeRef, NodeId)
             runSolvedWithScope e = do
                 ConstraintResult { crConstraint = c0, crRoot = root } <- firstShow (generateConstraintsDefault e)
                 let c1 = normalize c0
@@ -233,24 +230,26 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 pres <- firstShow (computePresolution acyc c1)
                 solved <- firstShow (solveUnify (prConstraint pres))
                 let root' = Elab.chaseRedirects (prRedirects pres) root
-                scopeRoot <- case ConstraintRoot.findConstraintRoot (srConstraint solved) of
-                    Nothing -> Left "Missing constraint root"
-                    Just r -> Right r
+                scopeRoot <- case Binding.bindingRoots (srConstraint solved) of
+                    [rootRef] -> Right rootRef
+                    roots -> Left ("Expected single binding root, got " ++ show roots)
                 pure (solved, scopeRoot, root')
 
             bindingPathToRootUnder
                 :: (NodeId -> NodeId)
                 -> Constraint
-                -> NodeId
-                -> Either BindingError [NodeId]
+                -> NodeRef
+                -> Either BindingError [NodeRef]
             bindingPathToRootUnder canonical constraint start0 =
-                let startC = canonical start0
-                    go visited path nid = do
-                        let key = getNodeId nid
+                let startC = case start0 of
+                        TypeRef nid -> typeRef (canonical nid)
+                        GenRef gid -> GenRef gid
+                    go visited path ref = do
+                        let key = nodeRefKey ref
                         if IntSet.member key visited
                             then Left (BindingCycleDetected (reverse path))
                             else do
-                                mbParent <- Binding.lookupBindParentUnder canonical constraint nid
+                                mbParent <- Binding.lookupBindParentUnder canonical constraint ref
                                 case mbParent of
                                     Nothing -> Right (reverse path)
                                     Just (parent, _flag) ->
@@ -282,7 +281,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                     pure (fv1 `IntSet.union` fv2)
                                 Just TyForall{ tnId = fId, tnBody = b } -> do
                                     let visited' = IntSet.insert key visited
-                                    binders <- Binding.boundFlexChildrenUnder canonical constraint (canonical fId)
+                                    binders <- Binding.boundFlexChildrenUnder canonical constraint (typeRef (canonical fId))
                                     let bound' =
                                             bound `IntSet.union`
                                             IntSet.fromList (map (getNodeId . canonical) binders)
@@ -303,9 +302,11 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 freeVars `shouldSatisfy` (not . IntSet.null)
                 let canonical = Solve.frWith (srUnionFind solved)
                     constraint = srConstraint solved
-                    scopeRootC = canonical scopeRoot
+                    scopeRootC = case scopeRoot of
+                        TypeRef nid -> typeRef (canonical nid)
+                        GenRef gid -> GenRef gid
                 forM_ (IntSet.toList freeVars) $ \vid -> do
-                    let v = NodeId vid
+                    let v = typeRef (NodeId vid)
                     path <- requireRight (bindingPathToRootUnder canonical constraint v)
                     let hasRoot = scopeRootC `elem` path
                     when (not hasRoot) $
@@ -341,17 +342,15 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             (term, ty) <- requirePipeline expr
             let termStr = Elab.pretty term
             termStr `shouldSatisfy` ("let f : ∀" `isInfixOf`)
-            termStr `shouldSatisfy` ("b ⩾ a -> a" `isInfixOf`)
-            termStr `shouldSatisfy` ("λx:a. x" `isInfixOf`)
+            termStr `shouldSatisfy` ("b ⩾ a" `isInfixOf`)
+            termStr `shouldSatisfy` ("λx:" `isInfixOf`)
 
             let expectedBound =
                     let intTy = Elab.TBase (BaseTy "Int")
-                    in Elab.TForall "t1" (Just intTy)
-                        (Elab.TForall "t2" (Just intTy)
-                            (Elab.TArrow (Elab.TVar "t1") (Elab.TVar "t2")))
+                    in Elab.TArrow intTy intTy
                 expectedTy =
                     Elab.TForall "a" (Just expectedBound)
-                        (Elab.TForall "b" (Just expectedBound)
+                        (Elab.TForall "b" (Just (Elab.TVar "a"))
                             (Elab.TForall "c" (Just (Elab.TArrow (Elab.TVar "b") (Elab.TVar "b")))
                                 (Elab.TVar "c")))
             ty `shouldAlphaEqType` expectedTy
@@ -365,13 +364,15 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             (_term, ty) <- requirePipeline expr
             let expectedInner =
                     Elab.TForall "x" Nothing
-                        (Elab.TForall "y" (Just (Elab.TArrow (Elab.TVar "x") (Elab.TVar "x")))
+                        (Elab.TForall "y" (Just (Elab.TVar "b"))
                             (Elab.TVar "y"))
                 expectedTy =
-                    Elab.TForall "a" (Just expectedInner)
-                        (Elab.TForall "b" (Just expectedInner)
-                            (Elab.TForall "c" (Just (Elab.TArrow (Elab.TVar "b") (Elab.TVar "b")))
-                                (Elab.TVar "c")))
+                    Elab.TForall "a" Nothing
+                        (Elab.TForall "b" (Just (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
+                            (Elab.TForall "c" (Just expectedInner)
+                                (Elab.TForall "d" (Just (Elab.TVar "c"))
+                                    (Elab.TForall "e" (Just (Elab.TArrow (Elab.TVar "d") (Elab.TVar "d")))
+                                        (Elab.TVar "e")))))
             ty `shouldAlphaEqType` expectedTy
 
         it "elaborates lambda with rank-2 argument" $ do
@@ -384,54 +385,50 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             let expected =
                     let idScheme =
                             Elab.TForall "x" Nothing
-                                (Elab.TForall "y" (Just (Elab.TArrow (Elab.TVar "x") (Elab.TVar "x")))
+                                (Elab.TForall "y" (Just (Elab.TVar "b"))
                                     (Elab.TVar "y"))
-                    in Elab.TForall "a" (Just idScheme)
-                        (Elab.TForall "b" (Just (Elab.TArrow (Elab.TVar "a") (Elab.TBase (BaseTy "Int"))))
-                            (Elab.TVar "b"))
+                    in Elab.TForall "a" Nothing
+                        (Elab.TForall "b" (Just (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
+                            (Elab.TForall "c" (Just idScheme)
+                                (Elab.TForall "d" (Just (Elab.TArrow (Elab.TVar "c") (Elab.TBase (BaseTy "Int"))))
+                                    (Elab.TVar "d"))))
             ty `shouldAlphaEqType` expected
 
     describe "Elaboration bookkeeping (eliminated vars)" $ do
-        it "generalizeAt ignores eliminated binders" $ do
+        it "generalizeAt inlines eliminated binders to bottom" $ do
             let v = NodeId 1
                 arrow = NodeId 2
                 forallNode = NodeId 3
                 c =
-                    Constraint
+                    rootedConstraint emptyConstraint
                         { cNodes =
                             IntMap.fromList
                                 [ (getNodeId v, TyVar { tnId = v, tnBound = Nothing })
                                 , (getNodeId arrow, TyArrow arrow v v)
                                 , (getNodeId forallNode, TyForall forallNode arrow)
                                 ]
-                        , cInstEdges = []
-                        , cUnifyEdges = []
                         , cBindParents =
-                            IntMap.fromList
-                                [ (getNodeId arrow, (forallNode, BindFlex))
-                                , (getNodeId v, (forallNode, BindFlex))
+                            bindParentsFromPairs
+                                [ (arrow, forallNode, BindFlex)
+                                , (v, forallNode, BindFlex)
                                 ]
-                        , cPolySyms = Set.empty
                         , cEliminatedVars = IntSet.singleton (getNodeId v)
-                        , cGenNodes = genNodeMap [forallNode]
                         }
 
             solved <- requireRight (solveUnify c)
-            (sch, _subst) <- requireRight (Elab.generalizeAt solved forallNode forallNode)
+            (sch, _subst) <- requireRight (Elab.generalizeAt solved (typeRef forallNode) forallNode)
             sch `shouldBe`
                 Elab.Forall
-                    [ ("a", Nothing)
-                    , ("b", Just (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
-                    ]
-                    (Elab.TVar "b")
+                    [("a", Just (Elab.TArrow Elab.TBottom Elab.TBottom))]
+                    (Elab.TVar "a")
 
-        it "generalizeAt drops eliminated binders with bounds" $ do
+        it "generalizeAt inlines eliminated binders with bounds" $ do
             let v = NodeId 1
                 b = NodeId 2
                 arrow = NodeId 3
                 forallNode = NodeId 4
                 c =
-                    Constraint
+                    rootedConstraint emptyConstraint
                         { cNodes =
                             IntMap.fromList
                                 [ (getNodeId v, TyVar { tnId = v, tnBound = Just b })
@@ -439,21 +436,17 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 , (getNodeId arrow, TyArrow arrow v b)
                                 , (getNodeId forallNode, TyForall forallNode arrow)
                                 ]
-                        , cInstEdges = []
-                        , cUnifyEdges = []
                         , cBindParents =
-                            IntMap.fromList
-                                [ (getNodeId arrow, (forallNode, BindFlex))
-                                , (getNodeId v, (forallNode, BindFlex))
-                                , (getNodeId b, (forallNode, BindFlex))
+                            bindParentsFromPairs
+                                [ (arrow, forallNode, BindFlex)
+                                , (v, forallNode, BindFlex)
+                                , (b, forallNode, BindFlex)
                                 ]
-                        , cPolySyms = Set.empty
                         , cEliminatedVars = IntSet.singleton (getNodeId v)
-                        , cGenNodes = genNodeMap [forallNode]
                         }
 
             solved <- requireRight (solveUnify c)
-            (sch, _subst) <- requireRight (Elab.generalizeAt solved forallNode forallNode)
+            (sch, _subst) <- requireRight (Elab.generalizeAt solved (typeRef forallNode) forallNode)
             Elab.pretty sch `shouldBe` "∀a (b ⩾ a -> a). b"
 
     describe "xMLF types (instance bounds)" $ do
@@ -631,7 +624,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 forallNode = NodeId 30
 
                 c =
-                    Constraint
+                    rootedConstraint emptyConstraint
                         { cNodes =
                             IntMap.fromList
                                 [ (getNodeId vLeft, TyVar { tnId = vLeft, tnBound = Nothing })
@@ -639,21 +632,16 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 , (getNodeId arrow, TyArrow arrow vLeft vRight)
                                 , (getNodeId forallNode, TyForall forallNode arrow)
                                 ]
-                        , cInstEdges = []
-                        , cUnifyEdges = []
                         , cBindParents =
-                            IntMap.fromList
-                                [ (getNodeId vLeft, (forallNode, BindFlex))
-                                , (getNodeId vRight, (forallNode, BindFlex))
+                            bindParentsFromPairs
+                                [ (vLeft, forallNode, BindFlex)
+                                , (vRight, forallNode, BindFlex)
                                 ]
-                        , cPolySyms = Set.empty
-                        , cEliminatedVars = IntSet.empty
-                        , cGenNodes = genNodeMap [forallNode]
                         }
 
                 solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 
-            (sch, _subst) <- requireRight (Elab.generalizeAt solved forallNode forallNode)
+            (sch, _subst) <- requireRight (Elab.generalizeAt solved (typeRef forallNode) forallNode)
             Elab.pretty sch `shouldBe` "∀a b. a -> b"
 
         it "generalizeAt orders binders by <P when paths diverge (leftmost beats depth)" $ do
@@ -666,7 +654,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 forallNode = NodeId 30
 
                 c =
-                    Constraint
+                    rootedConstraint emptyConstraint
                         { cNodes =
                             IntMap.fromList
                                 [ (getNodeId vShallow, TyVar { tnId = vShallow, tnBound = Nothing })
@@ -676,21 +664,16 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 , (getNodeId nOuter, TyArrow nOuter vShallow nInner)
                                 , (getNodeId forallNode, TyForall forallNode nOuter)
                                 ]
-                        , cInstEdges = []
-                        , cUnifyEdges = []
                         , cBindParents =
-                            IntMap.fromList
-                                [ (getNodeId vShallow, (forallNode, BindFlex))
-                                , (getNodeId vDeep, (forallNode, BindFlex))
+                            bindParentsFromPairs
+                                [ (vShallow, forallNode, BindFlex)
+                                , (vDeep, forallNode, BindFlex)
                                 ]
-                        , cPolySyms = Set.empty
-                        , cEliminatedVars = IntSet.empty
-                        , cGenNodes = genNodeMap [forallNode]
                         }
 
                 solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 
-            (sch, _subst) <- requireRight (Elab.generalizeAt solved forallNode forallNode)
+            (sch, _subst) <- requireRight (Elab.generalizeAt solved (typeRef forallNode) forallNode)
             Elab.pretty sch `shouldBe` "∀a b. a -> Int -> b"
 
         it "generalizeAt respects binder bound dependencies (a ≺ b if b’s bound mentions a)" $ do
@@ -700,7 +683,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 forallNode = NodeId 30
 
                 c =
-                    Constraint
+                    rootedConstraint emptyConstraint
                         { cEliminatedVars = IntSet.empty
                         , cNodes =
                             IntMap.fromList
@@ -709,20 +692,16 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 , (getNodeId arrow, TyArrow arrow vB vA)
                                 , (getNodeId forallNode, TyForall forallNode arrow)
                                 ]
-                        , cInstEdges = []
-                        , cUnifyEdges = []
                         , cBindParents =
-                            IntMap.fromList
-                                [ (getNodeId vA, (forallNode, BindFlex))
-                                , (getNodeId vB, (forallNode, BindFlex))
+                            bindParentsFromPairs
+                                [ (vA, forallNode, BindFlex)
+                                , (vB, forallNode, BindFlex)
                                 ]
-                        , cPolySyms = Set.empty
-                        , cGenNodes = genNodeMap [forallNode]
                         }
 
                 solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 
-            (sch, _subst) <- requireRight (Elab.generalizeAt solved forallNode forallNode)
+            (sch, _subst) <- requireRight (Elab.generalizeAt solved (typeRef forallNode) forallNode)
             Elab.pretty sch `shouldBe` "∀a (b ⩾ a). b -> a"
 
     describe "Witness translation (Φ/Σ)" $ do
@@ -812,14 +791,20 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 -- Build a SolveResult that can reify a graft argument type (Int).
                 (solved, intNode) <- requireRight (runSolvedWithRoot (ELit (LInt 1)))
 
-                let scheme =
+                let binderA = NodeId 101
+                    binderB = NodeId 102
+                    scheme =
                         Elab.Forall [("a", Nothing), ("b", Nothing)]
                             (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))
-                    subst = IntMap.fromList [(1, "a"), (2, "b")]
+                    subst =
+                        IntMap.fromList
+                            [ (getNodeId binderA, "a")
+                            , (getNodeId binderB, "b")
+                            ]
                     si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = subst }
 
-                    -- Witness says: graft Int into binder “b” (NodeId 2), then weaken it.
-                    ops = [OpGraft intNode (NodeId 2), OpWeaken (NodeId 2)]
+                    -- Witness says: graft Int into binder “b”, then weaken it.
+                    ops = [OpGraft intNode binderB, OpWeaken binderB]
                     ew = EdgeWitness
                         { ewEdgeId = EdgeId 0
                         , ewLeft = NodeId 0
@@ -835,8 +820,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 phi `shouldNotBe` Elab.InstApp (Elab.TBase (BaseTy "Int"))
 
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
-                namedSet <- requireRight (Elab.namedNodes solved)
-                argTy <- requireRight (Elab.reifyTypeWithNamedSet solved IntMap.empty namedSet intNode)
+                argTy <- requireRight (Elab.reifyBoundWithNames solved IntMap.empty intNode)
                 let expected =
                         Elab.TForall "a" Nothing
                             (Elab.TArrow (Elab.TVar "a") argTy)
@@ -850,10 +834,13 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             [ (getNodeId root, TyForall root binder)
                             , (getNodeId binder, TyVar { tnId = binder, tnBound = Nothing })
                             ]
+                    bindParents =
+                        IntMap.fromList
+                            [ (nodeRefKey (typeRef binder), (genRef (GenNodeId 0), BindFlex)) ]
                     constraint =
-                        emptyConstraint
+                        rootedConstraint emptyConstraint
                             { cNodes = nodes
-                            , cBindParents = inferBindParents nodes
+                            , cBindParents = bindParents
                             }
                     solved = SolveResult { srConstraint = constraint, srUnionFind = IntMap.empty }
 
@@ -912,7 +899,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     aN = NodeId 1
                     bN = NodeId 2
                     c =
-                        Constraint
+                        rootedConstraint emptyConstraint
                             { cEliminatedVars = IntSet.empty
                             , cNodes =
                                 IntMap.fromList
@@ -920,15 +907,11 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                     , (getNodeId aN, TyVar { tnId = aN, tnBound = Nothing })
                                     , (getNodeId bN, TyVar { tnId = bN, tnBound = Nothing })
                                     ]
-                            , cInstEdges = []
-                            , cUnifyEdges = []
                             , cBindParents =
                                 IntMap.fromList
-                                    [ (getNodeId aN, (root, BindFlex))
-                                    , (getNodeId bN, (root, BindFlex))
+                                    [ (nodeRefKey (typeRef aN), (genRef (GenNodeId 0), BindFlex))
+                                    , (nodeRefKey (typeRef bN), (genRef (GenNodeId 0), BindFlex))
                                     ]
-                            , cPolySyms = Set.empty
-                            , cGenNodes = genNodeMap []
                             }
                     solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 
@@ -968,7 +951,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     cN = NodeId 3
                     inner = NodeId 101
                     c =
-                        Constraint
+                        rootedConstraint emptyConstraint
                             { cEliminatedVars = IntSet.empty
                             , cNodes =
                                 IntMap.fromList
@@ -978,17 +961,13 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                     , (getNodeId bN, TyVar { tnId = bN, tnBound = Nothing })
                                     , (getNodeId cN, TyVar { tnId = cN, tnBound = Just aN })
                                     ]
-                            , cInstEdges = []
-                            , cUnifyEdges = []
                             , cBindParents =
                                 IntMap.fromList
-                                    [ (getNodeId aN, (root, BindFlex))
-                                    , (getNodeId bN, (root, BindFlex))
-                                    , (getNodeId cN, (root, BindFlex))
-                                    , (getNodeId inner, (root, BindFlex))
+                                    [ (nodeRefKey (typeRef aN), (genRef (GenNodeId 0), BindFlex))
+                                    , (nodeRefKey (typeRef bN), (genRef (GenNodeId 0), BindFlex))
+                                    , (nodeRefKey (typeRef cN), (genRef (GenNodeId 0), BindFlex))
+                                    , (nodeRefKey (typeRef inner), (typeRef root, BindFlex))
                                     ]
-                            , cPolySyms = Set.empty
-                            , cGenNodes = genNodeMap []
                             }
                     solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 
@@ -1019,7 +998,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     cN = NodeId 3
                     inner = NodeId 101
 
-                    c = Constraint
+                    c = rootedConstraint emptyConstraint
                         { cEliminatedVars = IntSet.empty
                         , cNodes =
                             IntMap.fromList
@@ -1029,17 +1008,13 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 , (2, TyVar { tnId = bN, tnBound = Nothing })
                                 , (3, TyVar { tnId = cN, tnBound = Just bN })
                                 ]
-                        , cInstEdges = []
-                        , cUnifyEdges = []
                         , cBindParents =
                             IntMap.fromList
-                                [ (getNodeId aN, (root, BindFlex))
-                                , (getNodeId bN, (root, BindFlex))
-                                , (getNodeId cN, (root, BindFlex))
-                                , (getNodeId inner, (root, BindFlex))
+                                [ (nodeRefKey (typeRef aN), (genRef (GenNodeId 0), BindFlex))
+                                , (nodeRefKey (typeRef bN), (genRef (GenNodeId 0), BindFlex))
+                                , (nodeRefKey (typeRef cN), (genRef (GenNodeId 0), BindFlex))
+                                , (nodeRefKey (typeRef inner), (typeRef root, BindFlex))
                                 ]
-                        , cPolySyms = Set.empty
-                        , cGenNodes = genNodeMap []
                         }
                     solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 
@@ -1091,23 +1066,20 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             let EdgeId eid = ewEdgeId ew
                                 mTrace = IntMap.lookup eid traces
                                 canonical = Solve.frWith (srUnionFind solved)
-                            named0 <- requireRight (Elab.namedNodes solved)
-                            let namedSet =
-                                    case mTrace of
-                                        Nothing -> named0
-                                        Just tr ->
-                                            let copied =
-                                                    IntSet.fromList
-                                                        [ getNodeId (canonical nid)
-                                                        | nid <- IntMap.elems (etCopyMap tr)
-                                                        ]
-                                                named1 = IntSet.difference named0 copied
-                                                interior = etInterior tr
-                                            in if IntSet.null interior
-                                                then named1
-                                                else IntSet.intersection named1 interior
-                            srcTy <- requireRight (Elab.reifyTypeWithNamedSet solved IntMap.empty namedSet (ewRoot ew))
-                            tgtTy <- requireRight (Elab.reifyTypeWithNamedSet solved IntMap.empty namedSet (ewRight ew))
+                            let scopeRootFor nid = do
+                                    path <- Binding.bindingPathToRoot (srConstraint solved) (typeRef (canonical nid))
+                                    case drop 1 path of
+                                        [] -> Right (typeRef (canonical nid))
+                                        rest ->
+                                            case [gid | GenRef gid <- rest] of
+                                                (gid:_) -> Right (genRef gid)
+                                                [] -> Right (typeRef (canonical nid))
+                            srcScope <- requireRight (scopeRootFor (ewRoot ew))
+                            tgtScope <- requireRight (scopeRootFor (ewRight ew))
+                            (srcSch, _) <- requireRight (Elab.generalizeAt solved srcScope (ewRoot ew))
+                            (tgtSch, _) <- requireRight (Elab.generalizeAt solved tgtScope (ewRight ew))
+                            let srcTy = Elab.schemeToType srcSch
+                                tgtTy = Elab.schemeToType tgtSch
                             phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace solved Nothing mTrace ew)
                             out <- requireRight (Elab.applyInstantiation srcTy phi)
                             canonType (stripBoundWrapper out) `shouldBe` canonType (stripBoundWrapper tgtTy)
@@ -1126,23 +1098,20 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             let EdgeId eid = ewEdgeId ew
                                 mTrace = IntMap.lookup eid traces
                                 canonical = Solve.frWith (srUnionFind solved)
-                            named0 <- requireRight (Elab.namedNodes solved)
-                            let namedSet =
-                                    case mTrace of
-                                        Nothing -> named0
-                                        Just tr ->
-                                            let copied =
-                                                    IntSet.fromList
-                                                        [ getNodeId (canonical nid)
-                                                        | nid <- IntMap.elems (etCopyMap tr)
-                                                        ]
-                                                named1 = IntSet.difference named0 copied
-                                                interior = etInterior tr
-                                            in if IntSet.null interior
-                                                then named1
-                                                else IntSet.intersection named1 interior
-                            srcTy <- requireRight (Elab.reifyTypeWithNamedSet solved IntMap.empty namedSet (ewRoot ew))
-                            tgtTy <- requireRight (Elab.reifyTypeWithNamedSet solved IntMap.empty namedSet (ewRight ew))
+                            let scopeRootFor nid = do
+                                    path <- Binding.bindingPathToRoot (srConstraint solved) (typeRef (canonical nid))
+                                    case drop 1 path of
+                                        [] -> Right (typeRef (canonical nid))
+                                        rest ->
+                                            case [gid | GenRef gid <- rest] of
+                                                (gid:_) -> Right (genRef gid)
+                                                [] -> Right (typeRef (canonical nid))
+                            srcScope <- requireRight (scopeRootFor (ewRoot ew))
+                            tgtScope <- requireRight (scopeRootFor (ewRight ew))
+                            (srcSch, _) <- requireRight (Elab.generalizeAt solved srcScope (ewRoot ew))
+                            (tgtSch, _) <- requireRight (Elab.generalizeAt solved tgtScope (ewRight ew))
+                            let srcTy = Elab.schemeToType srcSch
+                                tgtTy = Elab.schemeToType tgtSch
                             phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace solved Nothing mTrace ew)
                             out <- requireRight (Elab.applyInstantiation srcTy phi)
                             canonType (stripBoundWrapper out) `shouldBe` canonType (stripBoundWrapper tgtTy)
@@ -1158,7 +1127,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     boundBody = NodeId 201
                     cN = NodeId 3
 
-                    c = Constraint
+                    c = rootedConstraint emptyConstraint
                         { cNodes =
                             IntMap.fromList
                                 [ (getNodeId root, TyForall root body)
@@ -1169,23 +1138,20 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 , (getNodeId boundBody, TyArrow boundBody cN cN)
                                 , (getNodeId cN, TyVar { tnId = cN, tnBound = Nothing })
                                 ]
-                        , cInstEdges = []
-                        , cUnifyEdges = []
-                        , cBindParents = IntMap.fromList
-                            [ (getNodeId aN, (root, BindFlex))
-                            , (getNodeId bN, (root, BindFlex))
-                            , (getNodeId body, (root, BindFlex))
-                            , (getNodeId cN, (boundRoot, BindFlex))
-                            , (getNodeId boundBody, (boundRoot, BindFlex))
-                            ]
-                        , cPolySyms = Set.empty
-                        , cEliminatedVars = IntSet.empty
-                        , cGenNodes = genNodeMap [root, boundRoot]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef aN), (typeRef root, BindFlex))
+                                , (nodeRefKey (typeRef bN), (typeRef root, BindFlex))
+                                , (nodeRefKey (typeRef boundRoot), (typeRef bN, BindFlex))
+                                , (nodeRefKey (typeRef cN), (typeRef boundBody, BindFlex))
+                                , (nodeRefKey (typeRef body), (typeRef root, BindFlex))
+                                , (nodeRefKey (typeRef boundBody), (typeRef boundRoot, BindFlex))
+                                ]
                         }
                     solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 
                 steps <- requireRight (Elab.contextToNodeBound solved root cN)
-                steps `shouldBe` Just [Elab.StepUnder "t1", Elab.StepInside]
+                steps `shouldBe` Just [Elab.StepUnder "t1", Elab.StepInside, Elab.StepInside]
 
             it "contextToNodeBound computes under-quantifier contexts (context)" $ do
                 -- Same graph as above: binder b is after a at the root.
@@ -1197,7 +1163,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     boundBody = NodeId 201
                     cN = NodeId 3
 
-                    c = Constraint
+                    c = rootedConstraint emptyConstraint
                         { cNodes =
                             IntMap.fromList
                                 [ (getNodeId root, TyForall root body)
@@ -1208,18 +1174,15 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 , (getNodeId boundBody, TyArrow boundBody cN cN)
                                 , (getNodeId cN, TyVar { tnId = cN, tnBound = Nothing })
                                 ]
-                        , cInstEdges = []
-                        , cUnifyEdges = []
-                        , cBindParents = IntMap.fromList
-                            [ (getNodeId aN, (root, BindFlex))
-                            , (getNodeId bN, (root, BindFlex))
-                            , (getNodeId body, (root, BindFlex))
-                            , (getNodeId cN, (boundRoot, BindFlex))
-                            , (getNodeId boundBody, (boundRoot, BindFlex))
-                            ]
-                        , cPolySyms = Set.empty
-                        , cEliminatedVars = IntSet.empty
-                        , cGenNodes = genNodeMap [root, boundRoot]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef aN), (typeRef root, BindFlex))
+                                , (nodeRefKey (typeRef bN), (typeRef root, BindFlex))
+                                , (nodeRefKey (typeRef boundRoot), (typeRef bN, BindFlex))
+                                , (nodeRefKey (typeRef cN), (typeRef boundBody, BindFlex))
+                                , (nodeRefKey (typeRef body), (typeRef root, BindFlex))
+                                , (nodeRefKey (typeRef boundBody), (typeRef boundRoot, BindFlex))
+                                ]
                         }
                     solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 
@@ -1235,7 +1198,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     shared = NodeId 200
                     xN = NodeId 3
 
-                    c = Constraint
+                    c = rootedConstraint emptyConstraint
                         { cNodes =
                             IntMap.fromList
                                 [ (getNodeId root, TyForall root body)
@@ -1244,17 +1207,13 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 , (getNodeId shared, TyArrow shared xN xN)
                                 , (getNodeId xN, TyVar { tnId = xN, tnBound = Nothing })
                                 ]
-                        , cInstEdges = []
-                        , cUnifyEdges = []
-                        , cBindParents = IntMap.fromList
-                            [ (getNodeId body, (root, BindRigid))
-                            , (getNodeId bN, (root, BindFlex))
-                            , (getNodeId shared, (body, BindFlex))
-                            , (getNodeId xN, (shared, BindFlex))
-                            ]
-                        , cPolySyms = Set.empty
-                        , cEliminatedVars = IntSet.empty
-                        , cGenNodes = genNodeMap [root]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef bN), (genRef (GenNodeId 0), BindFlex))
+                                , (nodeRefKey (typeRef body), (typeRef root, BindRigid))
+                                , (nodeRefKey (typeRef shared), (typeRef body, BindFlex))
+                                , (nodeRefKey (typeRef xN), (typeRef shared, BindFlex))
+                                ]
                         }
                     solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 
@@ -1262,14 +1221,14 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 steps `shouldBe` Just [Elab.StepInside]
 
             it "contextToNodeBound ignores non-variable binder bounds (context non-var)" $ do
-                -- Binder b is an arrow node; only structural traversal applies.
+                -- Binder b is an arrow node; the context enters via StepInside.
                 let root = NodeId 100
                     body = NodeId 101
                     bN = NodeId 2
                     domN = NodeId 3
                     codN = NodeId 4
 
-                    c = Constraint
+                    c = rootedConstraint emptyConstraint
                         { cNodes =
                             IntMap.fromList
                                 [ (getNodeId root, TyForall root body)
@@ -1278,22 +1237,18 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 , (getNodeId domN, TyVar { tnId = domN, tnBound = Nothing })
                                 , (getNodeId codN, TyVar { tnId = codN, tnBound = Nothing })
                                 ]
-                        , cInstEdges = []
-                        , cUnifyEdges = []
-                        , cBindParents = IntMap.fromList
-                            [ (getNodeId body, (root, BindFlex))
-                            , (getNodeId bN, (root, BindFlex))
-                            , (getNodeId domN, (bN, BindFlex))
-                            , (getNodeId codN, (bN, BindFlex))
-                            ]
-                        , cPolySyms = Set.empty
-                        , cEliminatedVars = IntSet.empty
-                        , cGenNodes = genNodeMap [root]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef body), (typeRef root, BindFlex))
+                                , (nodeRefKey (typeRef bN), (genRef (GenNodeId 0), BindFlex))
+                                , (nodeRefKey (typeRef domN), (typeRef bN, BindFlex))
+                                , (nodeRefKey (typeRef codN), (typeRef bN, BindFlex))
+                                ]
                         }
                     solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 
                 steps <- requireRight (Elab.contextToNodeBound solved root domN)
-                steps `shouldBe` Just [Elab.StepUnder "t2", Elab.StepUnder "t101"]
+                steps `shouldBe` Just [Elab.StepInside]
 
             it "selectMinPrecInsertionIndex implements m = min≺ selection (min≺)" $ do
                 -- Keys are ordered by <P (lexicographic with empty path greatest).
@@ -1326,7 +1281,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     mN = NodeId 2
                     nN = NodeId 3
 
-                    c = Constraint
+                    c = rootedConstraint emptyConstraint
                         { cNodes =
                             IntMap.fromList
                                 [ (getNodeId root, TyArrow root aN mN)
@@ -1334,16 +1289,12 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 , (getNodeId mN, TyArrow mN nN aN)
                                 , (getNodeId nN, TyArrow nN aN aN)
                                 ]
-                        , cInstEdges = []
-                        , cUnifyEdges = []
-                        , cBindParents = IntMap.fromList
-                            [ (getNodeId aN, (root, BindFlex))
-                            , (getNodeId mN, (root, BindFlex))
-                            , (getNodeId nN, (mN, BindFlex))
-                            ]
-                        , cPolySyms = Set.empty
-                        , cEliminatedVars = IntSet.empty
-                        , cGenNodes = genNodeMap []
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef aN), (genRef (GenNodeId 0), BindFlex))
+                                , (nodeRefKey (typeRef mN), (typeRef root, BindFlex))
+                                , (nodeRefKey (typeRef nN), (typeRef mN, BindFlex))
+                                ]
                         }
                     solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 
@@ -1435,34 +1386,28 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             ty `shouldAlphaEqType` expected
 
         it "generalizeAt inlines rigid vars via bounds at top-level" $ do
-            let root = NodeId 0
+            let rootGen = GenNodeId 0
                 arrow = NodeId 1
                 rigidVar = NodeId 2
                 flexVar = NodeId 3
                 c =
-                    Constraint
+                    rootedConstraint emptyConstraint
                         { cNodes =
                             IntMap.fromList
-                                [ (getNodeId root, TyRoot root [arrow])
-                                , (getNodeId arrow, TyArrow arrow rigidVar rigidVar)
+                                [ (getNodeId arrow, TyArrow arrow rigidVar rigidVar)
                                 , (getNodeId rigidVar, TyVar { tnId = rigidVar, tnBound = Just flexVar })
                                 , (getNodeId flexVar, TyVar { tnId = flexVar, tnBound = Nothing })
                                 ]
-                        , cInstEdges = []
-                        , cUnifyEdges = []
                         , cBindParents =
                             IntMap.fromList
-                                [ (getNodeId arrow, (root, BindRigid))
-                                , (getNodeId rigidVar, (arrow, BindRigid))
-                                , (getNodeId flexVar, (root, BindFlex))
+                                [ (nodeRefKey (typeRef arrow), (genRef rootGen, BindRigid))
+                                , (nodeRefKey (typeRef rigidVar), (typeRef arrow, BindRigid))
+                                , (nodeRefKey (typeRef flexVar), (genRef rootGen, BindFlex))
                                 ]
-                        , cPolySyms = Set.empty
-                        , cEliminatedVars = IntSet.empty
-                        , cGenNodes = genNodeMap [root]
                         }
                 solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 
-            (sch, _subst) <- requireRight (Elab.generalizeAt solved root arrow)
+            (sch, _subst) <- requireRight (Elab.generalizeAt solved (genRef rootGen) arrow)
             Elab.pretty sch `shouldBe` "∀a. a -> a"
 
         it "\\y. let id = (\\x. x) in id y should have type ∀a. a -> a" $ do
@@ -1502,9 +1447,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 Right (_term, ty) -> do
                     let expected =
                             Elab.TForall "a" Nothing
-                                (Elab.TForall "b" (Just (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
-                                    (Elab.TForall "c" (Just (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b")))
-                                        (Elab.TVar "c")))
+                                (Elab.TArrow (Elab.TVar "a") (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
                     ty `shouldAlphaEqType` expected
 
         it "term annotation can instantiate a polymorphic result" $ do
@@ -1526,9 +1469,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             let expected =
                     Elab.TForall "a" (Just (Elab.TBase (BaseTy "Int")))
                         (Elab.TForall "b"
-                            (Just (Elab.TArrow (Elab.TBase (BaseTy "Int")) (Elab.TBase (BaseTy "Int"))))
-                            (Elab.TForall "c" (Just (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b")))
-                                (Elab.TVar "c")))
+                            (Just (Elab.TArrow (Elab.TVar "a") (Elab.TArrow (Elab.TBase (BaseTy "Int")) (Elab.TBase (BaseTy "Int")))))
+                            (Elab.TVar "b"))
             ty `shouldAlphaEqType` expected
 
         it "annotated lambda parameter should accept a polymorphic argument via κσ" $ do

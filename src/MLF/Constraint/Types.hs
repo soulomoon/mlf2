@@ -12,9 +12,14 @@ module MLF.Constraint.Types (
     maxNodeIdKeyOr0,
     GenNodeId (..),
     GenNode (..),
-    genNodeIdFromNodeId,
+    NodeRef (..),
+    typeRef,
+    genRef,
+    nodeRefKey,
+    nodeRefFromKey,
+    typeRefKey,
+    genRefKey,
     genNodeKey,
-    mkGenNodeFromTypeNode,
     -- * Variable bounds + elimination stores (scope-model retirement)
     EliminatedVars,
     PolySyms,
@@ -48,11 +53,11 @@ import Data.Set (Set)
 data BindFlag = BindFlex | BindRigid
     deriving (Eq, Ord, Show)
 
--- | Binding-edge map: child NodeId -> (parent NodeId, flag).
+-- | Binding-edge map: child NodeRef -> (parent NodeRef, flag).
 --
 -- This represents the paper's binding tree explicitly. Every non-root node
 -- has exactly one binding parent. Roots are nodes that do not appear as keys.
-type BindParents = IntMap (NodeId, BindFlag)
+type BindParents = IntMap (NodeRef, BindFlag)
 
 -- | Persistent marker for variables eliminated during ω execution / presolution.
 type EliminatedVars = IntSet
@@ -77,18 +82,18 @@ data ForallSpec = ForallSpec
 
 -- | Errors that can occur when validating or manipulating the binding tree.
 data BindingError
-    = MissingBindParent NodeId
+    = MissingBindParent NodeRef
         -- ^ A node that should have a binding parent does not have one.
-    | BindingCycleDetected [NodeId]
+    | BindingCycleDetected [NodeRef]
         -- ^ A cycle was detected in the binding-parent chain.
-    | NoCommonAncestor NodeId NodeId
+    | NoCommonAncestor NodeRef NodeRef
         -- ^ Two nodes have no common ancestor in the binding tree.
-    | ParentNotUpper NodeId NodeId
+    | ParentNotUpper NodeRef NodeRef
         -- ^ The parent is not "upper" than the child in the term-DAG.
         -- First NodeId is the child, second is the parent.
-    | OperationOnLockedNode NodeId
+    | OperationOnLockedNode NodeRef
         -- ^ Attempted to raise/weaken a node that is locked (rigidly bound path).
-    | RaiseNotPossible NodeId
+    | RaiseNotPossible NodeRef
         -- ^ Raise step not possible (e.g., parent is already a root).
     | InvalidBindingTree String
         -- ^ Generic binding tree invariant violation with description.
@@ -116,8 +121,33 @@ data GenNode = GenNode
     }
     deriving (Eq, Show)
 
-genNodeIdFromNodeId :: NodeId -> GenNodeId
-genNodeIdFromNodeId (NodeId i) = GenNodeId i
+-- | References to nodes in the binding tree (Type or Gen).
+data NodeRef
+    = TypeRef NodeId
+    | GenRef GenNodeId
+    deriving (Eq, Ord, Show)
+
+typeRef :: NodeId -> NodeRef
+typeRef = TypeRef
+
+genRef :: GenNodeId -> NodeRef
+genRef = GenRef
+
+nodeRefKey :: NodeRef -> Int
+nodeRefKey ref = case ref of
+    TypeRef (NodeId i) -> i * 2
+    GenRef (GenNodeId i) -> i * 2 + 1
+
+nodeRefFromKey :: Int -> NodeRef
+nodeRefFromKey k
+    | even k = TypeRef (NodeId (k `div` 2))
+    | otherwise = GenRef (GenNodeId ((k - 1) `div` 2))
+
+typeRefKey :: NodeId -> Int
+typeRefKey = nodeRefKey . TypeRef
+
+genRefKey :: GenNodeId -> Int
+genRefKey = nodeRefKey . GenRef
 
 genNodeKey :: GenNodeId -> Int
 genNodeKey = getGenNodeId
@@ -247,24 +277,6 @@ structuralChildren TyArrow{ tnDom = d, tnCod = c } = [d, c]
 structuralChildren TyForall{ tnBody = b } = [b]
 structuralChildren TyExp{ tnBody = b } = [b]
 structuralChildren TyRoot{ tnChildren = cs } = cs
-
--- | Reify a TyNode into a gen node when it plays the gen-node role.
---
--- Transitional mapping: `TyForall` and `TyRoot` currently act as gen nodes.
-mkGenNodeFromTypeNode :: TyNode -> Maybe GenNode
-mkGenNodeFromTypeNode node =
-    case node of
-        TyForall{ tnId = nid } ->
-            Just GenNode
-                { gnId = genNodeIdFromNodeId nid
-                , gnSchemes = [nid]
-                }
-        TyRoot{ tnId = nid, tnChildren = cs } ->
-            Just GenNode
-                { gnId = genNodeIdFromNodeId nid
-                , gnSchemes = cs
-                }
-        _ -> Nothing
 
 -- | Lookup a node by `NodeId` in the constraint node map.
 lookupNodeIn :: IntMap a -> NodeId -> Maybe a
@@ -434,7 +446,7 @@ data Constraint = Constraint
             --   Phase 2 may reduce these locally; Phase 5 drains the remainder and
             --   detects inconsistencies.
         , cBindParents :: BindParents
-            -- ^ Paper-style binding edges: child NodeId -> (parent NodeId, BindFlag).
+            -- ^ Paper-style binding edges: child NodeRef -> (parent NodeRef, BindFlag).
             --
             --   This is the explicit representation of the paper's binding tree
             --   (`papers/xmlf.txt` §3.1). Every non-root node has exactly one binding

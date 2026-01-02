@@ -11,7 +11,6 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
 import MLF.Constraint.Types
-import qualified MLF.Constraint.Traversal as Traversal
 import MLF.Frontend.ConstraintGen.State (BuildState(..), ConstraintM, ScopeFrame(..))
 
 pushScope :: ConstraintM ()
@@ -34,35 +33,117 @@ peekScope = do
         [] -> error "peekScope: empty scope stack"
         (frame:_) -> pure frame
 
-registerScopeNode :: NodeId -> ConstraintM ()
-registerScopeNode nid =
+registerScopeNode :: NodeRef -> ConstraintM ()
+registerScopeNode ref =
     modify' $ \st ->
         case bsScopes st of
             [] -> st
             (frame:rest) ->
-                let frame' = frame { sfNodes = IntSet.insert (getNodeId nid) (sfNodes frame) }
+                let frame' = frame { sfNodes = IntSet.insert (nodeRefKey ref) (sfNodes frame) }
                 in st { bsScopes = frame' : rest }
 
-rebindScopeNodes :: NodeId -> NodeId -> ScopeFrame -> ConstraintM ()
+rebindScopeNodes :: NodeRef -> NodeId -> ScopeFrame -> ConstraintM ()
 rebindScopeNodes binder root frame = do
     nodes <- gets bsNodes
-    let reachable =
-            Traversal.reachableFromUnderLenient
-                id
-                (\nid -> IntMap.lookup (getNodeId nid) nodes)
-                root
-        scopeNodes = IntSet.intersection reachable (sfNodes frame)
-        binderId = getNodeId binder
+    let binderIsGen = case binder of
+            GenRef{} -> True
+            TypeRef{} -> False
+        scopeNodes = sfNodes frame
+        scopeTypeKeys = IntSet.filter even scopeNodes
+        reachable =
+            let go visited [] = visited
+                go visited (nid0:rest) =
+                    let key = getNodeId nid0
+                    in if IntSet.member key visited
+                        then go visited rest
+                        else
+                            let visited' = IntSet.insert key visited
+                                kids =
+                                    case IntMap.lookup key nodes of
+                                        Nothing -> []
+                                        Just node ->
+                                            let boundKids =
+                                                    case node of
+                                                        TyVar{ tnBound = Just bnd } -> [bnd]
+                                                        _ -> []
+                                            in structuralChildren node ++ boundKids
+                            in go visited' (kids ++ rest)
+            in go IntSet.empty [root]
+        reachableTypeKeys =
+            IntSet.fromList
+                [ nodeRefKey (TypeRef (NodeId nid))
+                | nid <- IntSet.toList reachable
+                ]
+        targetTypeKeys =
+            if binderIsGen
+                then scopeTypeKeys
+                else IntSet.intersection reachableTypeKeys scopeNodes
+        targetTypeIds =
+            [ nid
+            | key <- IntSet.toList targetTypeKeys
+            , let ref = nodeRefFromKey key
+            , TypeRef nid <- pure ref
+            ]
+        targetTypeSet = IntSet.fromList (map getNodeId targetTypeIds)
+        referenced =
+            IntSet.fromList
+                [ getNodeId child
+                | parentId <- targetTypeIds
+                , Just parent <- pure (IntMap.lookup (getNodeId parentId) nodes)
+                , let boundKids =
+                        case parent of
+                            TyVar{ tnBound = Just bnd } -> [bnd]
+                            _ -> []
+                , child <- structuralChildren parent ++ boundKids
+                , IntSet.member (getNodeId child) targetTypeSet
+                ]
+        scopeRoots =
+            map NodeId $
+                IntSet.toList (IntSet.difference targetTypeSet referenced)
+        scopeRootKeys =
+            IntSet.fromList
+                [ nodeRefKey (TypeRef nid)
+                | nid <- scopeRoots
+                ]
+        genScopeKeys =
+            if binderIsGen
+                then IntSet.filter odd scopeNodes
+                else IntSet.empty
     modify' $ \st ->
-        st
-            { bsBindParents =
-                IntSet.foldl'
-                    (\bp nid ->
-                        if nid == binderId
-                            then bp
-                            else IntMap.insert nid (binder, BindFlex) bp
-                    )
-                    (bsBindParents st)
-                    scopeNodes
-            }
-
+        let parentIsSticky ref = case ref of
+                GenRef _ -> True
+                TypeRef pid ->
+                    case IntMap.lookup (getNodeId pid) nodes of
+                        Just TyVar{} -> True
+                        Just TyForall{} -> True
+                        Just TyExp{} -> True
+                        _ -> False
+            bindGen bp key =
+                let childRef = nodeRefFromKey key
+                in if nodeRefKey childRef == nodeRefKey binder
+                    then bp
+                    else
+                        case IntMap.lookup key bp of
+                            Just (GenRef _, _) -> bp
+                            Just (parent, _) | parentIsSticky parent -> bp
+                            _ -> IntMap.insert key (binder, BindFlex) bp
+            bindType bp key =
+                let childRef = nodeRefFromKey key
+                in if nodeRefKey childRef == nodeRefKey binder
+                    then bp
+                    else
+                        case IntMap.lookup key bp of
+                            Just _ -> bp
+                            Nothing -> IntMap.insert key (binder, BindFlex) bp
+            bp0 = bsBindParents st
+            bp1 =
+                if binderIsGen
+                    then IntSet.foldl' bindGen bp0 scopeTypeKeys
+                    else IntSet.foldl' bindType bp0 scopeRootKeys
+            bp2 = IntSet.foldl' bindGen bp1 genScopeKeys
+            genNodes' = case binder of
+                GenRef gid ->
+                    let gens0 = bsGenNodes st
+                    in IntMap.adjust (\g -> g { gnSchemes = scopeRoots }) (genNodeKey gid) gens0
+                TypeRef _ -> bsGenNodes st
+        in st { bsBindParents = bp2, bsGenNodes = genNodes' }

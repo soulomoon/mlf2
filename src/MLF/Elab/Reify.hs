@@ -1,6 +1,7 @@
 module MLF.Elab.Reify (
     reifyType,
     reifyTypeWithNames,
+    reifyTypeWithNamesNoFallback,
     reifyTypeWithNamedSet,
     reifyBoundWithNames,
     freeVars,
@@ -19,33 +20,37 @@ import MLF.Constraint.Solve hiding (BindingTreeError, MissingNode)
 import qualified MLF.Constraint.Solve as Solve (frWith)
 import MLF.Binding.Tree (boundFlexChildrenAllUnder, canonicalizeBindParentsUnder, lookupBindParent, lookupBindParentUnder)
 import qualified MLF.Constraint.VarStore as VarStore
-import qualified MLF.Constraint.Traversal as Traversal
 
 data ReifyRoot
     = RootType
+    | RootTypeNoFallback
     | RootBound
 
 data ReifyMode
     = ModeType
+    | ModeTypeNoFallback
     | ModeBound
     deriving (Eq)
 
 data ReifyCache = ReifyCache
     { cacheType :: IntMap.IntMap ElabType
+    , cacheTypeNoFallback :: IntMap.IntMap ElabType
     , cacheBound :: IntMap.IntMap ElabType
     }
 
 emptyCache :: ReifyCache
-emptyCache = ReifyCache IntMap.empty IntMap.empty
+emptyCache = ReifyCache IntMap.empty IntMap.empty IntMap.empty
 
 cacheLookup :: ReifyMode -> ReifyCache -> Int -> Maybe ElabType
 cacheLookup mode cache key = case mode of
     ModeType -> IntMap.lookup key (cacheType cache)
+    ModeTypeNoFallback -> IntMap.lookup key (cacheTypeNoFallback cache)
     ModeBound -> IntMap.lookup key (cacheBound cache)
 
 cacheInsert :: ReifyMode -> Int -> ElabType -> ReifyCache -> ReifyCache
 cacheInsert mode key ty cache = case mode of
     ModeType -> cache { cacheType = IntMap.insert key ty (cacheType cache) }
+    ModeTypeNoFallback -> cache { cacheTypeNoFallback = IntMap.insert key ty (cacheTypeNoFallback cache) }
     ModeBound -> cache { cacheBound = IntMap.insert key ty (cacheBound cache) }
 
 reifyWith
@@ -59,6 +64,7 @@ reifyWith
 reifyWith contextLabel res nameForVar isNamed rootMode nid =
     let start = case rootMode of
             RootType -> goType
+            RootTypeNoFallback -> goTypeNoFallback
             RootBound -> goBound
     in snd <$> start emptyCache (canonical nid)
   where
@@ -73,6 +79,7 @@ reifyWith contextLabel res nameForVar isNamed rootMode nid =
     varFor n = TVar (varName n)
 
     goType cache n = goFull cache ModeType n
+    goTypeNoFallback cache n = goFull cache ModeTypeNoFallback n
 
     goFull cache mode n0 =
         let n = canonical n0
@@ -93,21 +100,24 @@ reifyWith contextLabel res nameForVar isNamed rootMode nid =
                                     cache' = cacheInsert mode key t cache
                                 in pure (cache', t)
                     _
-                        | mode == ModeType && isNamed (canonical n) ->
+                        | isNamed (canonical n) ->
                             let t = varFor n
                                 cache' = cacheInsert mode key t cache
                             in pure (cache', t)
                         | otherwise -> do
-                            binders <- orderedFlexChildren n
+                            binders <- orderedFlexChildren mode n
                             (cache', core) <- case node of
                                 TyBase{ tnBase = b } -> pure (cache, TBase b)
                                 TyBottom{} -> pure (cache, TBottom)
                                 TyArrow{ tnDom = d, tnCod = c } -> do
-                                    (cache1, d') <- vChild cache (canonical d)
-                                    (cache2, c') <- vChild cache1 (canonical c)
+                                    (cache1, d') <- vChild cache mode (canonical d)
+                                    (cache2, c') <- vChild cache1 mode (canonical c)
                                     pure (cache2, TArrow d' c')
                                 TyForall{ tnBody = b } ->
-                                    vChild cache (canonical b)
+                                    let bodyC = canonical b
+                                    in if bodyC `elem` binders
+                                        then pure (cache, varFor bodyC)
+                                        else vChild cache mode bodyC
                                 TyExp{ tnBody = b } ->
                                     goFull cache mode (canonical b)
                                 TyRoot{} ->
@@ -133,11 +143,22 @@ reifyWith contextLabel res nameForVar isNamed rootMode nid =
                                 else goFull cache ModeBound bndC
             _ -> goFull cache ModeBound n
 
-    vChild cache child = do
-        mbParent <- bindingToElab (lookupBindParentUnder canonical constraint child)
+    vChild cache mode child = do
+        mbParent <- bindingToElab (lookupBindParentUnder canonical constraint (typeRef child))
         case mbParent of
             Just (_, BindRigid) -> goBound cache child
-            Just (_, BindFlex) -> pure (cache, varFor child)
+            Just (_, BindFlex) ->
+                case mode of
+                    ModeBound ->
+                        case IntMap.lookup (getNodeId (canonical child)) nodes of
+                            Just TyVar{} | VarStore.isEliminatedVar constraint (canonical child) ->
+                                goBound cache child
+                            Just TyVar{} -> pure (cache, varFor child)
+                            _ -> goFull cache mode child
+                    _ ->
+                        case IntMap.lookup (getNodeId (canonical child)) nodes of
+                            Just TyVar{} -> pure (cache, varFor child)
+                            _ -> goFull cache mode child
             Nothing -> goBound cache child
 
     wrapBinders cache inner binders =
@@ -150,7 +171,7 @@ reifyWith contextLabel res nameForVar isNamed rootMode nid =
             (cache, inner)
             binders
 
-    orderedFlexChildren n0 = do
+    orderedFlexChildren mode n0 = do
         let n = canonical n0
         node <- lookupNode n
         let orderRoot =
@@ -158,18 +179,67 @@ reifyWith contextLabel res nameForVar isNamed rootMode nid =
                     TyForall{ tnBody = body } -> canonical body
                     _ -> n
             reachable =
-                Traversal.reachableFromUnderLenient
-                    canonical
-                    (\nodeId -> IntMap.lookup (getNodeId nodeId) nodes)
-                    orderRoot
-        binders0 <- bindingToElab (boundFlexChildrenAllUnder canonical constraint n)
+                let go visited [] = visited
+                    go visited (nid0:rest) =
+                        let nodeId = canonical nid0
+                            key = getNodeId nodeId
+                        in if IntSet.member key visited
+                            then go visited rest
+                            else
+                                let visited' = IntSet.insert key visited
+                                    kids =
+                                        case IntMap.lookup key nodes of
+                                            Nothing -> []
+                                            Just node0 ->
+                                                let boundKids =
+                                                        case node0 of
+                                                            TyVar{ tnBound = Just bnd } -> [bnd]
+                                                            _ -> []
+                                                in structuralChildren node0 ++ boundKids
+                                in go visited' (map canonical kids ++ rest)
+                in go IntSet.empty [orderRoot]
+        binders0 <- directFlexChildren (mode /= ModeType) n
+        immediateGen <- bindingToElab (lookupBindParentUnder canonical constraint (typeRef n))
+        bindersBase <-
+            if null binders0 && not (isForall node) && mode /= ModeTypeNoFallback
+                then case mode of
+                    ModeBound ->
+                        case immediateGen of
+                            Just (GenRef gid, _) ->
+                                bindingToElab (boundFlexChildrenAllUnder canonical constraint (genRef gid))
+                            _ -> pure binders0
+                    _ -> do
+                        mGen <- closestGenAncestor n
+                        case mGen of
+                            Just gid ->
+                                bindingToElab (boundFlexChildrenAllUnder canonical constraint (genRef gid))
+                            Nothing -> do
+                                mForall <- closestForallAncestor n
+                                case mForall of
+                                    Nothing -> pure binders0
+                                    Just fid ->
+                                        bindingToElab (boundFlexChildrenAllUnder canonical constraint (typeRef fid))
+                else pure binders0
         let eliminated = cEliminatedVars constraint
-            bindersReachable =
+            isBinderNode candidate =
+                case IntMap.lookup (getNodeId (canonical candidate)) nodes of
+                    Just TyRoot{} -> False
+                    Just TyExp{} -> False
+                    Just TyBase{} -> False
+                    Just TyBottom{} -> False
+                    Just _ -> True
+                    Nothing -> False
+            bindersReachable0 =
                 [ canonical b
-                | b <- binders0
+                | b <- bindersBase
+                , isBinderNode b
                 , not (IntSet.member (getNodeId (canonical b)) eliminated)
                 , IntSet.member (getNodeId (canonical b)) reachable
                 ]
+            bindersReachable =
+                case mode of
+                    ModeBound -> filter (/= n) bindersReachable0
+                    _ -> bindersReachable0
             binderKeys = map (getNodeId . canonical) bindersReachable
             binderSet = IntSet.fromList binderKeys
             orderKeys = Order.orderKeysFromRoot res orderRoot
@@ -199,6 +269,67 @@ reifyWith contextLabel res nameForVar isNamed rootMode nid =
                 depsFor
                 binderKeys
         pure [ canonical (NodeId k) | k <- orderedKeys ]
+      where
+        directFlexChildren includeAll parentN =
+            if not includeAll
+                then bindingToElab (boundFlexChildrenAllUnder canonical constraint (typeRef parentN))
+                else do
+                    bindParents <- bindingToElab (canonicalizeBindParentsUnder canonical constraint)
+                    let parentRef = typeRef parentN
+                        isChild (_, (parent, flag)) =
+                            parent == parentRef && flag == BindFlex
+                        childNode (childKey, _) =
+                            case nodeRefFromKey childKey of
+                                TypeRef childN -> Just childN
+                                GenRef _ -> Nothing
+                        isBindable child =
+                            case IntMap.lookup (getNodeId child) nodes of
+                                Just TyRoot{} -> False
+                                Just TyExp{} -> False
+                                Just TyBase{} -> False
+                                Just TyBottom{} -> False
+                                Just _ -> True
+                                Nothing -> False
+                    pure
+                        [ canonical child
+                        | entry <- IntMap.toList bindParents
+                        , isChild entry
+                        , Just child <- [childNode entry]
+                        , isBindable child
+                        ]
+
+    isForall :: TyNode -> Bool
+    isForall TyForall{} = True
+    isForall _ = False
+
+    closestGenAncestor :: NodeId -> Either ElabError (Maybe GenNodeId)
+    closestGenAncestor start = go IntSet.empty (typeRef start)
+      where
+        go visited ref
+            | IntSet.member (nodeRefKey ref) visited = Right Nothing
+            | otherwise = do
+                mbParent <- bindingToElab (lookupBindParentUnder canonical constraint ref)
+                case mbParent of
+                    Nothing -> Right Nothing
+                    Just (GenRef gid, _) -> Right (Just gid)
+                    Just (TypeRef parent, _) ->
+                        go (IntSet.insert (nodeRefKey ref) visited) (typeRef (canonical parent))
+
+    closestForallAncestor :: NodeId -> Either ElabError (Maybe NodeId)
+    closestForallAncestor start = go IntSet.empty (typeRef start)
+      where
+        go visited ref
+            | IntSet.member (nodeRefKey ref) visited = Right Nothing
+            | otherwise = do
+                mbParent <- bindingToElab (lookupBindParentUnder canonical constraint ref)
+                case mbParent of
+                    Nothing -> Right Nothing
+                    Just (GenRef _, _) -> Right Nothing
+                    Just (TypeRef parent, _) ->
+                        case IntMap.lookup (getNodeId parent) nodes of
+                            Just TyForall{} -> Right (Just parent)
+                            _ ->
+                                go (IntSet.insert (nodeRefKey ref) visited) (typeRef (canonical parent))
 
     foldrM :: (a -> b -> Either ElabError b) -> b -> [a] -> Either ElabError b
     foldrM _ z [] = Right z
@@ -220,6 +351,22 @@ reifyTypeWithNames res subst nid = do
     namedSet <- namedNodes res
     reifyTypeWithNamedSet res subst namedSet nid
 
+-- | Reify with an explicit name substitution, but without ancestor fallback
+-- quantifiers (used when an outer scheme already quantifies binders).
+reifyTypeWithNamesNoFallback :: SolveResult -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
+reifyTypeWithNamesNoFallback res subst nid =
+    let uf = srUnionFind res
+        canonical = Solve.frWith uf
+
+        nameFor (NodeId i) = "t" ++ show i
+
+        varNameFor v =
+            let cv = canonical v
+            in maybe (nameFor cv) id (IntMap.lookup (getNodeId cv) subst)
+
+        isNamed nodeId = IntMap.member (getNodeId (canonical nodeId)) subst
+    in reifyWith "reifyTypeWithNamesNoFallback" res varNameFor isNamed RootTypeNoFallback nid
+
 -- | Reify with an explicit named-node set (Sχ′).
 reifyTypeWithNamedSet :: SolveResult -> IntMap.IntMap String -> IntSet.IntSet -> NodeId -> Either ElabError ElabType
 reifyTypeWithNamedSet res subst namedSet nid =
@@ -240,10 +387,11 @@ reifyTypeWithNamedSet res subst namedSet nid =
 -- | Reify a node for use as a binder bound (T(n) in the paper, Sχp).
 reifyBoundWithNames :: SolveResult -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
 reifyBoundWithNames res subst nid =
-    reifyWith "reifyBoundWithNames" res varNameFor (const False) RootBound nid
+    reifyWith "reifyBoundWithNames" res varNameFor isNamed RootBound nid
   where
     uf = srUnionFind res
     canonical = Solve.frWith uf
+    selfKey = getNodeId (canonical nid)
 
     nameFor (NodeId i) = "t" ++ show i
 
@@ -252,25 +400,45 @@ reifyBoundWithNames res subst nid =
         let cv = canonical v
         in maybe (nameFor cv) id (IntMap.lookup (getNodeId cv) subst)
 
+    isNamed nodeId =
+        let key = getNodeId (canonical nodeId)
+        in key /= selfKey && IntMap.member key subst
+
 namedNodes :: SolveResult -> Either ElabError IntSet.IntSet
 namedNodes res = do
     let constraint = srConstraint res
         canonical = Solve.frWith (srUnionFind res)
-        genNodes = cGenNodes constraint
-        genSet = IntSet.fromList (IntMap.keys genNodes)
         eliminated = cEliminatedVars constraint
+        nodes = cNodes constraint
+        genSchemes =
+            IntMap.fromList
+                [ (getGenNodeId (gnId gen), IntSet.fromList (map (getNodeId . canonical) (gnSchemes gen)))
+                | gen <- IntMap.elems (cGenNodes constraint)
+                ]
     bindParents <- bindingToElab (canonicalizeBindParentsUnder canonical constraint)
-    let isGenNode nid = IntSet.member (getNodeId (canonical nid)) genSet
-        isEliminated nid = IntSet.member (getNodeId nid) eliminated
+    let isEliminated nid = IntSet.member (getNodeId nid) eliminated
+        isQuantifiable nid =
+            case IntMap.lookup (getNodeId nid) nodes of
+                Just TyRoot{} -> False
+                Just TyExp{} -> False
+                Just TyBase{} -> False
+                Just TyBottom{} -> False
+                Just _ -> True
+                Nothing -> False
+        isSchemeRoot gid nid =
+            case IntMap.lookup (getGenNodeId gid) genSchemes of
+                Nothing -> False
+                Just roots -> IntSet.member (getNodeId (canonical nid)) roots
         named =
-            [ getNodeId child
-            | (childId, (parent, flag)) <- IntMap.toList bindParents
-            , let child = canonical (NodeId childId)
-            , let parentC = canonical parent
+            [ getNodeId childC
+            | (childKey, (parent, flag)) <- IntMap.toList bindParents
             , flag == BindFlex
-            , isGenNode parentC
-            , not (isGenNode child)
-            , not (isEliminated child)
+            , GenRef gid <- [parent]
+            , TypeRef child <- [nodeRefFromKey childKey]
+            , let childC = canonical child
+            , not (isEliminated childC)
+            , isQuantifiable childC
+            , not (isSchemeRoot gid childC)
             ]
     pure (IntSet.fromList named)
 
@@ -305,6 +473,6 @@ freeVars res nid visited
     key = getNodeId (canonical nid)
 
     freeVarsChild visited' child =
-        case lookupBindParent constraint (canonical child) of
+        case lookupBindParent constraint (typeRef (canonical child)) of
             Just (_, BindRigid) -> freeVars res (canonical child) visited'
             _ -> IntSet.singleton (getNodeId (canonical child))

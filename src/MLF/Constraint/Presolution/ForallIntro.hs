@@ -44,11 +44,20 @@ have no binding parent).
 
 introduceForallFromSpec :: ForallSpec -> NodeId -> PresolutionM NodeId
 introduceForallFromSpec spec bodyRoot = do
+    c0 <- gets psConstraint
+    uf0 <- gets psUnionFind
+    let canonical = UnionFind.frWith uf0
+        bodyC = canonical bodyRoot
+        oldParent = Binding.lookupBindParent c0 (typeRef bodyC)
     newId <- createFreshNodeId
     let node = TyForall newId bodyRoot
     registerNode newId node
     -- The body is now inside the binder.
-    setBindParentM bodyRoot (newId, BindFlex)
+    setBindParentM (typeRef bodyRoot) (typeRef newId, BindFlex)
+    -- Preserve the body's former binding parent (if any) on the new binder.
+    case oldParent of
+        Just parentInfo -> setBindParentM (typeRef newId) parentInfo
+        Nothing -> pure ()
     bindForallBindersFromSpec newId bodyRoot spec
     pure newId
 
@@ -95,7 +104,7 @@ bindForallBindersFromSpec forallId bodyRoot ForallSpec{ fsBinderCount = k, fsBou
             , not (IntMap.member (getNodeId nid) orderKeys)
             ]
 
-        parentInfoOf nid = IntMap.lookup (getNodeId nid) bp
+        parentInfoOf nid = IntMap.lookup (nodeRefKey (typeRef nid)) bp
 
         -- Prefer variables whose current binding parent is outside the body
         -- subgraph, i.e. “free wrt bodyRoot”. This matches the common shape in
@@ -104,7 +113,9 @@ bindForallBindersFromSpec forallId bodyRoot ForallSpec{ fsBinderCount = k, fsBou
             case parentInfoOf nid of
                 Nothing -> True
                 Just (p, flag) ->
-                    flag == BindFlex && not (IntSet.member (getNodeId p) reachable)
+                    flag == BindFlex && case p of
+                        TypeRef pN -> not (IntSet.member (getNodeId pN) reachable)
+                        GenRef _ -> True
 
         isFlexBound nid =
             case parentInfoOf nid of
@@ -125,7 +136,7 @@ bindForallBindersFromSpec forallId bodyRoot ForallSpec{ fsBinderCount = k, fsBou
         binderByIndex = IntMap.fromList (zip [0..] binders)
 
     forM_ binders $ \bv ->
-        setBindParentM bv (forallId, BindFlex)
+        setBindParentM (typeRef bv) (typeRef forallId, BindFlex)
 
     forM_ (zip [0..] bounds) $ \(i, mbRef) ->
         case IntMap.lookup i binderByIndex of

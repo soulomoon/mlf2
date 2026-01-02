@@ -3,11 +3,13 @@ module MLF.Frontend.ConstraintGen.Emit (
     allocVar,
     allocBase,
     allocArrow,
-    allocRoot,
+    allocGenNode,
+    setGenNodeSchemes,
     allocExpNode,
     setVarBound,
     addInstEdge,
     setBindParentIfMissing,
+    setBindParentOverride,
     intFromNode
 ) where
 
@@ -31,7 +33,7 @@ allocForall bodyNode = do
     -- but only if it doesn't already have a binding parent.
     -- This ensures all non-root nodes have binding parents while preserving
     -- existing binding structure.
-    setBindParentIfMissing bodyNode nid BindFlex
+    setBindParentIfMissing (typeRef bodyNode) (typeRef nid) BindFlex
     pure nid
 
 allocVar :: ConstraintM NodeId
@@ -67,18 +69,26 @@ allocArrow domNode codNode = do
     -- but only if they don't already have binding parents.
     -- This ensures all non-root nodes have binding parents while preserving
     -- existing binding structure.
-    setBindParentIfMissing domNode nid BindFlex
-    setBindParentIfMissing codNode nid BindFlex
+    setBindParentIfMissing (typeRef domNode) (typeRef nid) BindFlex
+    setBindParentIfMissing (typeRef codNode) (typeRef nid) BindFlex
     pure nid
 
-allocRoot :: [NodeId] -> ConstraintM NodeId
-allocRoot children = do
-    nid <- freshNodeId
-    insertNode TyRoot
-        { tnId = nid
-        , tnChildren = children
-        }
-    pure nid
+allocGenNode :: [NodeId] -> ConstraintM GenNodeId
+allocGenNode schemes = do
+    gid <- freshGenNodeId
+    let genNode = GenNode { gnId = gid, gnSchemes = schemes }
+    modify' $ \st ->
+        let gens = IntMap.insert (genNodeKey gid) genNode (bsGenNodes st)
+        in st { bsGenNodes = gens }
+    Scope.registerScopeNode (genRef gid)
+    pure gid
+
+setGenNodeSchemes :: GenNodeId -> [NodeId] -> ConstraintM ()
+setGenNodeSchemes gid schemes =
+    modify' $ \st ->
+        let gens0 = bsGenNodes st
+            gens' = IntMap.adjust (\g -> g { gnSchemes = schemes }) (genNodeKey gid) gens0
+        in st { bsGenNodes = gens' }
 
 allocExpNode :: NodeId -> ConstraintM (NodeId, ExpVarId)
 allocExpNode bodyNode = do
@@ -92,17 +102,21 @@ allocExpNode bodyNode = do
     -- Set default binding edge for the body to this TyExp node, but only if
     -- the body doesn't already have a binding parent. This is important because
     -- TyExp nodes wrap existing nodes that may already have binding structure.
-    setBindParentIfMissing bodyNode nid BindFlex
+    setBindParentIfMissing (typeRef bodyNode) (typeRef nid) BindFlex
     pure (nid, expVar)
 
 setVarBound :: NodeId -> Maybe NodeId -> ConstraintM ()
-setVarBound varNode bound = modify' $ \st ->
-    let nodes0 = bsNodes st
-        key = intFromNode varNode
-    in case IntMap.lookup key nodes0 of
-        Just tv@TyVar{} ->
-            st { bsNodes = IntMap.insert key tv{ tnBound = bound } nodes0 }
-        _ -> st
+setVarBound varNode bound = do
+    modify' $ \st ->
+        let nodes0 = bsNodes st
+            key = intFromNode varNode
+        in case IntMap.lookup key nodes0 of
+            Just tv@TyVar{} ->
+                st { bsNodes = IntMap.insert key tv{ tnBound = bound } nodes0 }
+            _ -> st
+    case bound of
+        Just bnd -> setBindParentIfMissing (typeRef bnd) (typeRef varNode) BindFlex
+        Nothing -> pure ()
 
 addInstEdge :: NodeId -> NodeId -> ConstraintM EdgeId
 addInstEdge left right = do
@@ -117,6 +131,12 @@ freshNodeId = do
     next <- gets bsNextNode
     modify' $ \st -> st { bsNextNode = next + 1 }
     pure (NodeId next)
+
+freshGenNodeId :: ConstraintM GenNodeId
+freshGenNodeId = do
+    next <- gets bsNextGen
+    modify' $ \st -> st { bsNextGen = next + 1 }
+    pure (GenNodeId next)
 
 freshExpVarId :: ConstraintM ExpVarId
 freshExpVarId = do
@@ -134,24 +154,27 @@ insertNode :: TyNode -> ConstraintM ()
 insertNode node = do
     modify' $ \st ->
         let nodes' = IntMap.insert (intFromNode (tnId node)) node (bsNodes st)
-            genNodes' =
-                case mkGenNodeFromTypeNode node of
-                    Nothing -> bsGenNodes st
-                    Just g -> IntMap.insert (genNodeKey (gnId g)) g (bsGenNodes st)
-        in st { bsNodes = nodes', bsGenNodes = genNodes' }
-    Scope.registerScopeNode (tnId node)
+        in st { bsNodes = nodes' }
+    Scope.registerScopeNode (typeRef (tnId node))
 
 -- | Set the binding parent for a node only if it doesn't already have one.
 -- This is useful for structure allocators that want to set a default binding
 -- parent without overwriting an existing one.
-setBindParentIfMissing :: NodeId -> NodeId -> BindFlag -> ConstraintM ()
+setBindParentIfMissing :: NodeRef -> NodeRef -> BindFlag -> ConstraintM ()
 setBindParentIfMissing child parent flag =
     when (child /= parent) $
         modify' $ \st ->
             let bp = bsBindParents st
-            in if IntMap.member (intFromNode child) bp
+            in if IntMap.member (nodeRefKey child) bp
                then st  -- Already has a parent, don't overwrite
-               else st { bsBindParents = IntMap.insert (intFromNode child) (parent, flag) bp }
+               else st { bsBindParents = IntMap.insert (nodeRefKey child) (parent, flag) bp }
+
+setBindParentOverride :: NodeRef -> NodeRef -> BindFlag -> ConstraintM ()
+setBindParentOverride child parent flag =
+    when (child /= parent) $
+        modify' $ \st ->
+            let bp = bsBindParents st
+            in st { bsBindParents = IntMap.insert (nodeRefKey child) (parent, flag) bp }
 
 intFromNode :: NodeId -> Int
 intFromNode (NodeId x) = x

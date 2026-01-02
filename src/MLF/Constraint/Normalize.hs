@@ -41,7 +41,7 @@ import qualified MLF.Util.UnionFind as UnionFind
 import qualified MLF.Constraint.Canonicalize as Canonicalize
 import qualified MLF.Constraint.Traversal as Traversal
 import qualified MLF.Constraint.Unify.Decompose as UnifyDecompose
-import MLF.Constraint.Types (NodeId(..), TyNode(..), Constraint(..), InstEdge(..), UnifyEdge(..), BindFlag(..), maxNodeIdKeyOr0, lookupNodeIn)
+import MLF.Constraint.Types (NodeId(..), NodeRef(..), TyNode(..), Constraint(..), InstEdge(..), UnifyEdge(..), BindFlag(..), maxNodeIdKeyOr0, lookupNodeIn, nodeRefKey, typeRef)
 
 {- Note [Normalization / Local Transformations]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -325,7 +325,7 @@ graftEdge edge = do
 
     case (leftNode, rightNode) of
         -- Variable ≤ Arrow: graft arrow structure onto the variable node
-        (Just TyVar {}, Just (TyArrow { tnDom = rDom, tnCod = rCod }))
+        (Just TyVar { tnBound = mbBound }, Just (TyArrow { tnDom = rDom, tnCod = rCod }))
           | occursIn nodes uf leftId rightId -> pure Nothing
           | otherwise -> do
             domVar <- freshVar
@@ -335,19 +335,42 @@ graftEdge edge = do
             -- Bind fresh children to the new arrow node.
             setBindParentNorm domVar leftId BindFlex
             setBindParentNorm codVar leftId BindFlex
+            -- Rebind any existing bound under the var to preserve binding-tree validity.
+            case mbBound of
+                Nothing -> pure ()
+                Just bnd -> do
+                    let bp = cBindParents c
+                    case IntMap.lookup (nodeRefKey (typeRef leftId)) bp of
+                        Nothing -> pure ()
+                        Just (parentRef, flag) ->
+                            setBindParentRefNorm (typeRef bnd) parentRef flag
+            let boundEdges =
+                    case mbBound of
+                        Just bnd | bnd /= leftId -> [UnifyEdge bnd leftId]
+                        _ -> []
             pure $
                 Just
-                    [ UnifyEdge domVar (findRoot uf rDom)
-                    , UnifyEdge codVar (findRoot uf rCod)
-                    ]
+                    ( boundEdges
+                        ++ [ UnifyEdge domVar (findRoot uf rDom)
+                           , UnifyEdge codVar (findRoot uf rCod)
+                           ]
+                    )
 
         -- Variable ≤ Base: unify directly
-        (Just TyVar {}, Just TyBase {}) ->
-            pure $ Just [UnifyEdge leftId rightId]
+        (Just TyVar { tnBound = mbBound }, Just TyBase {}) ->
+            let boundEdges =
+                    case mbBound of
+                        Just bnd | bnd /= rightId -> [UnifyEdge bnd rightId]
+                        _ -> []
+            in pure $ Just (UnifyEdge leftId rightId : boundEdges)
 
         -- Variable ≤ Bottom: unify directly
-        (Just TyVar {}, Just TyBottom {}) ->
-            pure $ Just [UnifyEdge leftId rightId]
+        (Just TyVar { tnBound = mbBound }, Just TyBottom {}) ->
+            let boundEdges =
+                    case mbBound of
+                        Just bnd | bnd /= rightId -> [UnifyEdge bnd rightId]
+                        _ -> []
+            in pure $ Just (UnifyEdge leftId rightId : boundEdges)
 
         -- Arrow ≤ Arrow: decompose into unification of components
         (Just (TyArrow { tnDom = lDom, tnCod = lCod }),
@@ -398,9 +421,16 @@ setBindParentNorm child parent flag =
     when (child /= parent) $
         modify' $ \s ->
             let c = nsConstraint s
-                bp = cBindParents c
-                bp' = IntMap.insert (getNodeId child) (parent, flag) bp
-            in s { nsConstraint = c { cBindParents = bp' } }
+                c' = Binding.setBindParent (typeRef child) (typeRef parent, flag) c
+            in s { nsConstraint = c' }
+
+setBindParentRefNorm :: NodeRef -> NodeRef -> BindFlag -> NormalizeM ()
+setBindParentRefNorm child parent flag =
+    when (child /= parent) $
+        modify' $ \s ->
+            let c = nsConstraint s
+                c' = Binding.setBindParent child (parent, flag) c
+            in s { nsConstraint = c' }
 
 -- | Get a fresh NodeId.
 freshNodeId :: NormalizeM NodeId
@@ -544,7 +574,7 @@ processUnifyEdges = foldM processOne []
                     (Just TyVar {}, Just TyVar {}) -> do
                         modify' $ \s ->
                             let c0 = nsConstraint s
-                                c1 = BindingAdjustment.harmonizeBindParents left right c0
+                                c1 = BindingAdjustment.harmonizeBindParents (typeRef left) (typeRef right) c0
                             in s { nsConstraint = c1 }
                         unionNodes left right
                         pure acc
@@ -562,7 +592,7 @@ processUnifyEdges = foldM processOne []
                         c0 <- gets nsConstraint
                         let canonical = findRoot uf
                             arityOf nid =
-                                case Binding.orderedBinders canonical c0 nid of
+                                case Binding.orderedBinders canonical c0 (typeRef nid) of
                                     Right bs -> Just (length bs)
                                     Left _ -> Nothing
                         case (arityOf left, arityOf right) of

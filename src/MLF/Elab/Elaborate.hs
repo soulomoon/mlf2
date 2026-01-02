@@ -68,8 +68,6 @@ type Env = Map.Map VarName SchemeInfo
 elaborate :: SolveResult -> IntMap.IntMap EdgeWitness -> IntMap.IntMap EdgeTrace -> AnnExpr -> Either ElabError ElabTerm
 elaborate res edgeWitnesses edgeTraces ann = go Map.empty ann
   where
-    constraint = srConstraint res
-    nodes = cNodes constraint
     canonical = Solve.frWith (srUnionFind res)
 
     go :: Env -> AnnExpr -> Either ElabError ElabTerm
@@ -95,17 +93,13 @@ elaborate res edgeWitnesses edgeTraces ann = go Map.empty ann
                     InstId -> a'
                     _      -> ETyInst a' argInst
             pure (EApp fApp aApp)
-        ALet v schemeNode _ childLevel rhs body _ -> do
+        ALet v schemeGen schemeRoot _ rhsScopeGen rhs body _ -> do
             rhs' <- go env rhs
-            -- For annotated lets, `schemeNode` can be an explicit TyForall whose
-            -- binders should be preserved in the elaborated scheme. Use the
-            -- scheme node itself as the binder root when available; otherwise
-            -- fall back to the RHS scope root.
             let scopeRoot =
-                    case IntMap.lookup (getNodeId (canonical schemeNode)) nodes of
-                        Just TyForall{} -> canonical schemeNode
-                        _ -> canonical childLevel
-            (sch, subst) <- generalizeAt res scopeRoot schemeNode
+                    if schemeGen /= rhsScopeGen
+                        then typeRef (canonical schemeRoot)
+                        else genRef schemeGen
+            (sch, subst) <- generalizeAt res scopeRoot schemeRoot
             let rhsSubst = substInTerm subst rhs'
             let env' = Map.insert v SchemeInfo { siScheme = sch, siSubst = subst } env
                 rhsAbs = case sch of
@@ -133,7 +127,10 @@ elaborate res edgeWitnesses edgeTraces ann = go Map.empty ann
                 let mSchemeInfo = case funAnn of
                         AVar v _ -> Map.lookup v env
                         _ -> Nothing
-                phiFromEdgeWitnessWithTrace res mSchemeInfo mTrace ew
+                    mSchemeInfo' = case mSchemeInfo of
+                        Just si | IntMap.null (siSubst si) -> Nothing
+                        _ -> mSchemeInfo
+                phiFromEdgeWitnessWithTrace res mSchemeInfo' mTrace ew
 
 -- | Substitute names in a term (and its embedded types)
 substInTerm :: IntMap.IntMap String -> ElabTerm -> ElabTerm

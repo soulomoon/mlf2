@@ -23,13 +23,14 @@ data ScopeFrame = ScopeFrame
 
 data BuildState = BuildState
     { bsNextNode :: !Int           -- ^ Next available NodeId
+    , bsNextGen :: !Int            -- ^ Next available GenNodeId
     , bsNextExpVar :: !Int         -- ^ Next available ExpVarId
     , bsNextEdge :: !Int           -- ^ Next available EdgeId
     , bsNodes :: !(IntMap.IntMap TyNode) -- ^ Map of all allocated type nodes
     , bsInstEdges :: ![InstEdge]   -- ^ Instantiation edges (accumulated in reverse)
     , bsUnifyEdges :: ![UnifyEdge] -- ^ Unification edges (accumulated in reverse)
     , bsBindParents :: !BindParents -- ^ Binding edges: child -> (parent, flag)
-    , bsGenNodes :: !(IntMap.IntMap GenNode) -- ^ Gen nodes (transitional TyForall/TyRoot mapping)
+    , bsGenNodes :: !(IntMap.IntMap GenNode) -- ^ Gen nodes (paper G constructors)
     , bsPolySyms :: !PolySyms -- ^ Polymorphic type constructors (paper Poly)
     , bsScopes :: ![ScopeFrame]    -- ^ Stack of scopes tracking newly created nodes
     }
@@ -45,6 +46,7 @@ mkInitialState = mkInitialStateWithPolySyms Set.empty
 mkInitialStateWithPolySyms :: PolySyms -> BuildState
 mkInitialStateWithPolySyms polySyms = BuildState
     { bsNextNode = 0
+    , bsNextGen = 0
     , bsNextExpVar = 0
     , bsNextEdge = 0
     , bsNodes = IntMap.empty

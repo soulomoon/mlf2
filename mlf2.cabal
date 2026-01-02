@@ -75,7 +75,6 @@ library mlf2-internal
                       MLF.Binding.GraphOps,
                       MLF.Util.Order,
                       MLF.Frontend.Desugar,
-                      MLF.Constraint.Root,
                       MLF.Witness.OmegaExec,
                       MLF.Constraint.VarStore,
                       MLF.Util.UnionFind

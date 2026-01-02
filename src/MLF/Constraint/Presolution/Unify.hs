@@ -19,8 +19,8 @@ import Control.Monad (when)
 import qualified Data.IntMap.Strict as IntMap
 
 import qualified MLF.Binding.Adjustment as BindingAdjustment
-import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.Traversal as Traversal
+import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Constraint.Types
 import MLF.Constraint.Presolution.Base (PresolutionError(..), PresolutionM, PresolutionState(..))
 import MLF.Constraint.Presolution.Ops (findRoot)
@@ -68,31 +68,40 @@ unifyAcyclicRootsWithRaiseTrace root1 root2 = do
     let c0 = psConstraint st0
 
     (c1, trace0) <-
-        case BindingAdjustment.harmonizeBindParentsWithTrace root1 root2 c0 of
+        case BindingAdjustment.harmonizeBindParentsWithTrace (typeRef root1) (typeRef root2) c0 of
             Left err -> throwError (BindingTreeError err)
             Right result -> pure result
 
     put st0 { psConstraint = c1 }
+    let nodes = cNodes c1
+        aElim = VarStore.isEliminatedVar c1 root1
+        bElim = VarStore.isEliminatedVar c1 root2
+        isTyVar nid =
+            case IntMap.lookup (getNodeId nid) nodes of
+                Just TyVar{} -> True
+                _ -> False
+        hasBound nid =
+            case IntMap.lookup (getNodeId nid) nodes of
+                Just TyVar{ tnBound = Just _ } -> True
+                _ -> False
+        (fromRoot0, toRoot0) =
+            case (aElim, bElim) of
+                (False, True) -> (root2, root1)
+                _ -> (root1, root2)
+        (fromRoot, toRoot)
+            | not aElim
+            , not bElim
+            , isTyVar root1
+            , isTyVar root2 =
+                case (hasBound root1, hasBound root2) of
+                    (True, False) -> (root2, root1)
+                    (False, True) -> (root1, root2)
+                    _ -> (fromRoot0, toRoot0)
+            | otherwise = (fromRoot0, toRoot0)
     modify $ \st ->
-        st { psUnionFind = IntMap.insert (getNodeId root1) root2 (psUnionFind st) }
-
-    -- Keep the binding-parent relation representative-canonical after UF merges.
-    -- This avoids “forest LCA” artifacts when two binders become equal via UF but
-    -- `cBindParents` still mentions their pre-merge aliases.
-    canonicalizeBindParentsWithUF
+        st { psUnionFind = IntMap.insert (getNodeId fromRoot) toRoot (psUnionFind st) }
 
     pure trace0
-
-canonicalizeBindParentsWithUF :: PresolutionM ()
-canonicalizeBindParentsWithUF = do
-    st0 <- get
-    let c0 = psConstraint st0
-        uf = psUnionFind st0
-        canonical = UnionFind.frWith uf
-    case Binding.canonicalizeBindParentsUnder canonical c0 of
-        Left err -> throwError (BindingTreeError err)
-        Right bp ->
-            put st0 { psConstraint = c0 { cBindParents = bp } }
 
 unifyAcyclicRawWithRaiseCounts :: NodeId -> NodeId -> PresolutionM (Int, Int)
 unifyAcyclicRawWithRaiseCounts n1 n2 = do
