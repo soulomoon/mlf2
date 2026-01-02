@@ -41,7 +41,7 @@ import qualified MLF.Util.UnionFind as UnionFind
 import qualified MLF.Constraint.Canonicalize as Canonicalize
 import qualified MLF.Constraint.Traversal as Traversal
 import qualified MLF.Constraint.Unify.Decompose as UnifyDecompose
-import MLF.Constraint.Types (NodeId(..), NodeRef(..), TyNode(..), Constraint(..), InstEdge(..), UnifyEdge(..), BindFlag(..), maxNodeIdKeyOr0, lookupNodeIn, nodeRefKey, typeRef)
+import MLF.Constraint.Types (NodeId(..), NodeRef(..), TyNode(..), Constraint(..), InstEdge(..), UnifyEdge(..), BindFlag(..), maxNodeIdKeyOr0, lookupNodeIn, nodeRefFromKey, nodeRefKey, typeRef)
 
 {- Note [Normalization / Local Transformations]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -644,9 +644,42 @@ applyUnionFindToConstraint = do
             instEdges' = Canonicalize.rewriteInstEdges (findRoot uf) (cInstEdges c)
             -- Update unification edges
             unifyEdges' = Canonicalize.rewriteUnifyEdges (findRoot uf) (cUnifyEdges c)
-            -- Canonicalize binding parents through UF reps
+            bindParents0 = cBindParents c
+            -- Rewrite binding parents through UF reps, preserving child keys and
+            -- skipping self-edges by walking to the next ancestor.
             bindParents' =
-                Canonicalize.rewriteBindParentsLenient (findRoot uf) (const True) (cBindParents c)
+                let canonicalRef ref = case ref of
+                        TypeRef nid -> TypeRef (findRoot uf nid)
+                        GenRef gid -> GenRef gid
+                    cStruct = c { cNodes = nodes' }
+                    resolveParent childRef parent0 flag0 =
+                        case childRef of
+                            GenRef _ ->
+                                case parent0 of
+                                    GenRef _ -> Just (parent0, flag0)
+                                    TypeRef _ -> Nothing
+                            TypeRef _ ->
+                                let childC = canonicalRef childRef
+                                    go flag parentRef =
+                                        let parentC = canonicalRef parentRef
+                                            ok = parentC /= childC && Binding.isUpper cStruct parentC childRef
+                                        in if ok
+                                            then Just (parentC, flag)
+                                            else case IntMap.lookup (nodeRefKey parentRef) bindParents0 of
+                                                Nothing -> Nothing
+                                                Just (parent', flag') -> go (max flag flag') parent'
+                                in go flag0 parent0
+                    insertOne bp childKey (parent0, flag0) =
+                        let childRef = nodeRefFromKey childKey
+                        in case resolveParent childRef parent0 flag0 of
+                            Nothing -> bp
+                            Just (parent, flag) ->
+                                IntMap.insertWith
+                                    (\_ old -> old)
+                                    childKey
+                                    (parent, flag)
+                                    bp
+                in IntMap.foldlWithKey' insertOne IntMap.empty bindParents0
         in s { nsConstraint = c
                  { cNodes = nodes'
                  , cInstEdges = instEdges'
@@ -691,7 +724,5 @@ applyToStructure uf node = case node of
         TyForall { tnId = nid, tnBody = findRoot uf body }
     TyExp { tnId = nid, tnExpVar = ev, tnBody = body } ->
         TyExp { tnId = nid, tnExpVar = ev, tnBody = findRoot uf body }
-    TyRoot { tnId = nid, tnChildren = cs } ->
-        TyRoot { tnId = nid, tnChildren = map (findRoot uf) cs }
 
 -- Helper to get NodeId as Int

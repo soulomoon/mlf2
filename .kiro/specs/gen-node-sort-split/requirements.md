@@ -3,7 +3,7 @@
 ## Introduction
 The thesis treats gen nodes (G) as a separate sort from type nodes, with a single
 root gen node and strict binding constraints. Our current encoding conflates gen
-nodes with `TyForall`/`TyRoot` and introduces synthetic roots. This spec restores
+nodes with `TyForall` and introduces synthetic roots. This spec restores
 thesis-exact structure by separating gen nodes and enforcing the invariants.
 
 ## Requirements
@@ -17,6 +17,7 @@ nodes so the constraint matches the thesis structure.
    map keyed by `GenNodeId`.
 2. WHEN traversing binding edges THEN gen nodes SHALL be distinguished from type
    nodes via `NodeRef`.
+3. WHEN recording scheme roots THEN gen nodes SHALL support multiple roots (Gk for any k).
 
 ### Requirement 2
 **User Story:** As a reviewer, I want the constraint to remain thesis-rooted

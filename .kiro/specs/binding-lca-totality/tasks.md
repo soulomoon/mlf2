@@ -7,16 +7,16 @@
   - [x] 1.1 Add a structured “no binding LCA” error
     - Files: `src/MLF/Constraint/Types.hs`, `src/MLF/Binding/Tree.hs`
     - Steps:
-      - Add `NoCommonAncestor NodeId NodeId` to `BindingError`.
+      - Use `NoCommonAncestor NodeRef NodeRef` in `BindingError`.
       - Update `Binding.bindingLCA` to return `Left (NoCommonAncestor n1 n2)` when no common ancestor exists.
-    - **Verification:** `rg -n \"No common ancestor found\" src/MLF/Binding/Tree.hs` returns no matches
+    - **Verification:** `rg -n "No common ancestor" src/MLF/Binding/Tree.hs` returns no matches
     - _Requirements: 1.1_
   - [x] 1.2 Remove the silent no-op fallback from binding-edge harmonization
     - Files: `src/MLF/Binding/Adjustment.hs`
     - Steps:
       - Update `harmonizeBindParentsWithTrace` to propagate `NoCommonAncestor` (no `(c0, [])` success path).
       - Update `harmonizeBindParents` to remove the special-case no-op behavior for missing LCAs.
-    - **Verification:** `rg -n \"No common ancestor\" src/MLF/Binding/Adjustment.hs` returns no matches
+    - **Verification:** `rg -n "No common ancestor" src/MLF/Binding/Adjustment.hs` returns no matches
     - _Requirements: 1.2, 1.3_
   - [x] 1.3 Update the unit test that asserted the old fallback
     - Files: `test/BindingSpec.hs`
@@ -25,75 +25,51 @@
     - **Verification:** `cabal test --test-show-details=direct --test-options='--match /harmonizeBindParentsWithTrace.*no binding LCA/'` passes
     - _Requirements: 2.1_
 
-- [x] 2. Restore the paper’s rooted-constraint assumption with `TyRoot`
-  - [x] 2.1 Add internal `TyRoot` node + core traversals
-    - Files: `src/MLF/Constraint/Types.hs`, plus any structural-child traversals touched by compilation
+- [x] 2. Restore the paper’s rooted-constraint assumption with a root gen node
+  - [x] 2.1 Ensure root gen node exists in constraint generation
+    - Files: `src/MLF/Frontend/ConstraintGen/Translate.hs`, `src/MLF/Frontend/ConstraintGen/Emit.hs`
     - Steps:
-      - Add `TyRoot { tnId, tnChildren }` to `TyNode`.
-      - Treat `TyRoot` children as structure edges in any “structural children” helper used for reachability/root detection.
-    - **Verification:** `rg -n \"\\| TyRoot\" src/MLF/Constraint/Types.hs` returns a match
-    - _Requirements: 3.1_
-  - [x] 2.2 Implement `MLF.Constraint.Root.ensureConstraintRoot`
-    - Files: `src/MLF/Constraint/Root.hs`
+      - Allocate a root gen node and bind term-DAG roots under it (flex).
+      - Record term-DAG roots as schemes in the root gen node.
+    - **Verification:** `rg -n "allocGenNode|setGenNodeSchemes" src/MLF/Frontend/ConstraintGen` returns matches
+    - _Requirements: 3.1, 3.2_
+  - [x] 2.2 Preserve the root gen node across rewrites
+    - Files: `src/MLF/Constraint/Presolution/Driver.hs`, `src/MLF/Constraint/Solve.hs`
     - Steps:
-      - Implement `findConstraintRoot`, `ensureConstraintRoot`, and `attachNodeToConstraintRoot`.
-      - Ensure the pass only mutates `cNodes` (root child list) and `cBindParents` (bind former roots under the root).
-    - **Verification:** `rg -n \"module MLF\\.Constraint\\.Root\" src/MLF/Constraint/Root.hs` returns a match
-    - _Requirements: 3.1, 3.2, 3.3_
-  - [x] 2.3 Wire `ensureConstraintRoot` into phase entry points
-    - Files: `src/MLF/Frontend/ConstraintGen.hs`, `src/MLF/Constraint/Presolution/Driver.hs`
-    - Steps:
-      - Ensure constraint generation runs `ensureConstraintRoot` on the produced constraint.
-      - Ensure presolution runs `ensureConstraintRoot` on its input constraint before initializing state.
-    - **Verification:** `rg -n \"ConstraintRoot\\.ensureConstraintRoot\" src/MLF/Frontend/ConstraintGen.hs src/MLF/Constraint/Presolution/Driver.hs` returns matches
+      - Ensure `cGenNodes` is preserved through canonicalization and elimination rewrites.
+      - Fail fast if `Binding.checkBindingTree` reports missing or multiple roots.
+    - **Verification:** `rg -n "checkBindingTree" src/MLF/Constraint/Presolution/Driver.hs src/MLF/Constraint/Solve.hs` returns matches
     - _Requirements: 3.1, 3.3_
-  - [x] 2.4 Tests: `ensureConstraintRoot` makes LCA total for disconnected components
-    - Files: `test/BindingSpec.hs` (or a new small `test/ConstraintRootSpec.hs` wired into `test/Main.hs` + cabal)
+  - [x] 2.3 Tests: root gen node makes LCA total for disconnected components
+    - Files: `test/BindingSpec.hs`
     - Steps:
-      - Add a regression that builds a constraint with two term-DAG roots and no shared binding ancestor.
-      - Assert `Binding.bindingLCA` fails before `ensureConstraintRoot` and succeeds after.
-    - **Verification:** `cabal test --test-show-details=direct --test-options='--match /ConstraintRoot.*LCA/'` passes
+      - Build a constraint with two term-DAG roots and no shared binding ancestor.
+      - Assert `Binding.bindingLCA` fails before rooting and succeeds once both roots are bound under the gen root.
+    - **Verification:** `cabal test --test-show-details=direct --test-options='--match /bindingLCA/'` passes
     - _Requirements: 3.1, 3.2_
 
-- [x] 3. Make `TyRoot` compile-clean across the remaining pipeline
-  - [x] 3.1 Ensure `MLF.Constraint.Root` is listed in Cabal modules
-    - Files: `mlf2.cabal`
+- [x] 3. Remove synthetic root type-node handling across the pipeline
+  - [x] 3.1 Drop the synthetic root type node from the `TyNode` data model
+    - Files: `src/MLF/Constraint/Types.hs`
     - Steps:
-      - Ensure `MLF.Constraint.Root` appears under `exposed-modules` or `other-modules`.
-    - **Verification:** `rg -n \"MLF\\.Constraint\\.Root\" mlf2.cabal` returns a match
+      - Remove the synthetic root type-node constructor and associated traversal cases.
+    - **Verification:** `rg -n "root type" src/MLF/Constraint/Types.hs` returns no matches
     - _Requirements: 4.1_
-  - [x] 3.2 Handle `TyRoot` in `MLF.Binding` order-key traversal
-    - Files: `src/MLF/Binding/Tree.hs`
+  - [x] 3.2 Purge legacy synthetic-root paths
+    - Files: `src/MLF/Constraint/Normalize.hs`, `src/MLF/Constraint/Solve.hs`,
+      `src/MLF/Constraint/Presolution/Copy.hs`, `src/MLF/Elab/*`, `test/*`
     - Steps:
-      - Update `orderKeysFromRootWith` (and any similar traversal) to treat `TyRoot` as structural and traverse `tnChildren`.
-    - **Verification:** `rg -n \"orderKeysFromRootWith\" src/MLF/Binding/Tree.hs` returns a match
-    - _Requirements: 4.1_
-  - [x] 3.3 Handle `TyRoot` in ordering/acyclicity traversals
-    - Files: `src/MLF/Util/Order.hs` (and any helper it uses for structural children)
-    - Steps:
-      - Update any structural traversal to treat `TyRoot` as structural and traverse `tnChildren`.
-    - **Verification:** `cabal build` succeeds
-    - _Requirements: 4.1_
-  - [x] 3.4 Handle `TyRoot` in UF rewrite + occurs-check in Solve
-    - Files: `src/MLF/Constraint/Solve.hs`
-    - Steps:
-      - Update occurs-check traversal to descend into `TyRoot` children.
-      - Update UF constraint rewriting to rewrite `TyRoot` children through the canonicalizer.
-    - **Verification:** `cabal build` succeeds
-    - _Requirements: 4.1_
-  - [x] 3.5 Compile audit: no missing `TyRoot` cases
-    - Steps:
-      - Ensure `cabal build` is warning-free w.r.t. non-exhaustive `TyNode` matches.
-    - **Verification:** `cabal build` succeeds without warnings about `TyRoot`
+      - Remove synthetic-root cases from structural traversals, reification, and tests.
+    - **Verification:** `rg -n "root type" src test` returns no matches
     - _Requirements: 4.1_
 
-- [x] 4. Guard instantiation/copy logic against the synthetic root
+- [x] 4. Guard instantiation/copy logic against treating the gen root as a binder
   - Files: `src/MLF/Constraint/Presolution/Copy.hs`, `src/MLF/Constraint/Presolution/Expansion.hs`
   - Steps:
-    - Ensure `instantiateSchemeWithTrace` (and any interior selection used by copying) does not treat `TyRoot` as a “real binder root” that would cause copying the entire constraint.
+    - Ensure `instantiateSchemeWithTrace` respects `I(g)` without copying the entire constraint.
   - **Verification:** `cabal test --test-show-details=direct --test-options='--match /instantiateSchemeWithTrace/'` passes
   - _Requirements: 4.1_
 
 - [x] 5. Run the full test suite
-  - **Verification:** `cabal --config-file=.cabal-config test --test-show-details=direct` passes
+  - **Verification:** `cabal test --test-show-details=direct` passes
   - _Requirements: 4.1_

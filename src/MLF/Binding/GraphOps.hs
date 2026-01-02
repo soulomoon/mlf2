@@ -48,11 +48,10 @@ module MLF.Binding.GraphOps (
     getBindFlag,
 ) where
 
-import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
 import MLF.Constraint.Types
-import MLF.Binding.Tree (isUnderRigidBinder, isUpper, lookupBindParent, setBindParent, bindingPathToRoot, isBindingRoot)
+import MLF.Binding.Tree (isUnderRigidBinder, lookupBindParent, setBindParent, bindingPathToRoot, isBindingRoot)
 
 expectTypeRef :: NodeRef -> Either BindingError NodeId
 expectTypeRef ref = case ref of
@@ -170,21 +169,7 @@ applyRaiseStep nid c = do
                         Just (grandparent, _) -> do
                             -- Move n's binding edge to grandparent, preserving flag
                             let c' = setBindParent nid (grandparent, flag) c
-                                c'' =
-                                    case grandparent of
-                                        GenRef gid ->
-                                            if isUpper c' grandparent nid
-                                                then c'
-                                                else
-                                                    let gens0 = cGenNodes c'
-                                                        update genNode =
-                                                            if nidT `elem` gnSchemes genNode
-                                                                then genNode
-                                                                else genNode { gnSchemes = gnSchemes genNode ++ [nidT] }
-                                                        gens' = IntMap.adjust update (getGenNodeId gid) gens0
-                                                    in c' { cGenNodes = gens' }
-                                        TypeRef _ -> c'
-                            return (c'', Just (OpRaise nidT))
+                            return (c', Just (OpRaise nidT))
 
 -- | Raise a node to a specific ancestor binder.
 --

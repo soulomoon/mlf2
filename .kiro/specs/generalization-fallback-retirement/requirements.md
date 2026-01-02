@@ -2,12 +2,12 @@
 
 ## Introduction
 `generalizeAt` must stay paper-faithful (Q(n) from the binding tree) while
-keeping top-level types closed under the constraint root (`TyRoot`). With
+keeping top-level types closed under the root gen node. With
 binding-edge coverage in place, generalization now relies solely on binding
 paths (no free-variable fallback).
 
 ## In Scope
-- Use a synthetic `TyRoot` binding scope for top-level generalization.
+- Use the root gen binding scope for top-level generalization.
 - Enumerate binders via binding-tree paths:
   - `TyForall` scopes use Q(n) (flex children).
   - Non-Forall scopes use binding-path reachability to the scope root.
@@ -17,7 +17,7 @@ paths (no free-variable fallback).
 ## Out of Scope
 - Reworking presolution or solver behavior beyond generalization inputs.
 - Replacing the binding-tree model or reifying explicit source-level binder names.
-- Renaming or removing the synthetic root node once the binding tree is fully paper-faithful.
+- Reworking the root gen-node construction once the binding tree is fully paper-faithful.
 
 ## Requirements
 
@@ -41,8 +41,8 @@ and predictable without hiding explicit quantifiers.
 
 #### Acceptance Criteria
 1. WHEN elaborating a solved constraint, THEN THE SYSTEM SHALL call
-   `generalizeAt` with the constraint root (`TyRoot`) as the scope root (falling
-   back to the expression root only when the root is absent).
+   `generalizeAt` with the root gen node as the scope root (failing if no gen
+   root is present).
 2. WHEN the scope root is non-Forall, THEN THE SYSTEM SHALL not inject
    free-variable fallback binders and SHALL rely on binding edges to close the
    scheme.

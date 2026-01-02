@@ -43,14 +43,15 @@ runPipelineElabWith genConstraints expr = do
     case validateSolvedGraphStrict solved of
         [] -> do
             let ann' = applyRedirectsToAnn (prRedirects pres) ann
-            term <- firstShow (elaborate solved (prEdgeWitnesses pres) (prEdgeTraces pres) ann')
+            term <- firstShow (elaborate solved (prEdgeWitnesses pres) (prEdgeTraces pres) (prEdgeExpansions pres) ann')
 
-            -- Also apply redirects to the root node, as it might have been a TyExp
+            -- Also apply redirects to the root node, as it might have been a TyExp.
             let root' = chaseRedirects (prRedirects pres) root
+                rootC = frWith (srUnionFind solved) root'
 
             -- Generalize at the nearest gen ancestor of the root node.
-            scopeRoot <- firstShow (bindingScopeRef (srConstraint solved) root')
-            (sch, _subst) <- firstShow (generalizeAt solved scopeRoot root')
+            scopeRoot <- firstShow (bindingScopeRef (srConstraint solved) rootC)
+            (sch, _subst) <- firstShow (generalizeAt solved scopeRoot rootC)
             let ty = case sch of
                     Forall binds body -> foldr (\(n, b) t -> TForall n b t) body binds
 

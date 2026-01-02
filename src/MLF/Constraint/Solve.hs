@@ -105,7 +105,7 @@ module MLF.Constraint.Solve (
     frWith
 ) where
 
-import Control.Monad (foldM, forM, forM_, unless, when)
+import Control.Monad (forM, forM_, unless, when)
 import Control.Monad.State.Strict
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
@@ -186,13 +186,14 @@ solveUnify c0 = do
             final <- execStateT loop st
             let uf = suUnionFind final
                 c' = applyUFConstraint uf (suConstraint final) { cUnifyEdges = [] }
-            c'' <- case rewriteEliminatedBinders c' of
+            (c'', elimSubst) <- case rewriteEliminatedBinders c' of
                 Left err -> Left (BindingTreeError err)
                 Right out -> Right out
+            let uf' = applyElimSubstToUF uf elimSubst
             case Binding.checkBindingTree c'' of
                 Left err -> Left (BindingTreeError err)
                 Right () -> do
-                    let res = SolveResult { srConstraint = c'', srUnionFind = uf }
+                    let res = SolveResult { srConstraint = c'', srUnionFind = uf' }
                         violations = validateSolvedGraph res
                     if null violations
                         then pure res
@@ -211,6 +212,16 @@ solveUnify c0 = do
     enqueue :: [UnifyEdge] -> SolveM ()
     enqueue es = modify' $ \s ->
         s { suQueue = es ++ suQueue s }
+
+    applyElimSubstToUF :: IntMap NodeId -> IntMap NodeId -> IntMap NodeId
+    applyElimSubstToUF uf subst =
+        IntMap.foldlWithKey'
+            (\acc elimId rep ->
+                let repC = frWith uf rep
+                in IntMap.insert elimId repC acc
+            )
+            uf
+            subst
 
     -- | Process one equality edge using canonical representatives, decomposing
     -- arrows/foralls as needed and performing occurs-checks for var = structure.
@@ -404,7 +415,6 @@ applyUFConstraint uf c =
             TyBase { tnBase = b } -> TyBase nid' b
             TyForall { tnBody = b } -> TyForall nid' (frWith uf b)
             TyExp { tnExpVar = s, tnBody = b } -> TyExp nid' s (frWith uf b)
-            TyRoot { tnChildren = cs } -> TyRoot nid' (map (frWith uf) cs)
             )
 
     rewriteEliminated :: (NodeId -> NodeId) -> IntMap TyNode -> EliminatedVars -> EliminatedVars
@@ -421,17 +431,26 @@ applyUFConstraint uf c =
     rewriteGenNodes :: (NodeId -> NodeId) -> IntMap TyNode -> IntMap.IntMap GenNode -> IntMap.IntMap GenNode
     rewriteGenNodes canon nodes0 gen0 =
         let rewriteOne g =
-                let schemes' =
-                        [ canon s
-                        | s <- gnSchemes g
-                        , IntMap.member (getNodeId (canon s)) nodes0
-                        ]
+                let (schemesRev, _seen) =
+                        foldl'
+                            (\(acc, seen) s ->
+                                let s' = canon s
+                                    key = getNodeId s'
+                                in if IntMap.member key nodes0 && not (IntSet.member key seen)
+                                    then (s' : acc, IntSet.insert key seen)
+                                    else (acc, seen)
+                            )
+                            ([], IntSet.empty)
+                            (gnSchemes g)
+                    schemes' = reverse schemesRev
                 in (genNodeKey (gnId g), g { gnSchemes = schemes' })
         in IntMap.fromListWith (\a _ -> a) (map rewriteOne (IntMap.elems gen0))
 
-rewriteEliminatedBinders :: Constraint -> Either BindingError Constraint
+rewriteEliminatedBinders :: Constraint -> Either BindingError (Constraint, IntMap NodeId)
 rewriteEliminatedBinders c0
-    | IntSet.null elims0 = Right c0
+    | IntSet.null elims0 = do
+        genNodesFinal <- Binding.rebuildGenNodesFromBinding c0
+        pure (c0 { cGenNodes = genNodesFinal }, IntMap.empty)
     | otherwise = do
         let nodes0 = cNodes c0
             bindParents0 = cBindParents c0
@@ -534,13 +553,12 @@ rewriteEliminatedBinders c0
                     TyForall nid (substNode b)
                 TyExp { tnId = nid, tnExpVar = s, tnBody = b } ->
                     TyExp nid s (substNode b)
-                TyRoot { tnId = nid, tnChildren = cs } ->
-                    TyRoot nid (map substNode cs)
 
             nodes1 =
                 IntMap.fromList
                     [ (getNodeId (tnId n), rewriteNode n)
                     | n <- IntMap.elems nodes0
+                    , not (IntSet.member (getNodeId (tnId n)) elimSet)
                     ]
             nodes' = IntMap.union nodes1 bottomNodes
             inNodesRef ref = case ref of
@@ -622,74 +640,6 @@ rewriteEliminatedBinders c0
                             bindParents0'
                             (IntSet.fromList (IntMap.keys nodes'))
 
-            rebuildGenNodes :: BindParents -> IntMap TyNode -> Either BindingError (IntMap.IntMap GenNode)
-            rebuildGenNodes bindParents nodes =
-                if IntMap.null (cGenNodes c0)
-                    then Right IntMap.empty
-                    else do
-                        let genIds = IntMap.keys (cGenNodes c0)
-                            nearestGen start = go IntSet.empty start
-                              where
-                                go visited ref
-                                    | IntSet.member (nodeRefKey ref) visited =
-                                        Left (BindingCycleDetected [ref])
-                                    | otherwise =
-                                        case IntMap.lookup (nodeRefKey ref) bindParents of
-                                            Nothing -> Left (MissingBindParent ref)
-                                            Just (parentRef, _flag) ->
-                                                case parentRef of
-                                                    GenRef gid -> Right gid
-                                                    TypeRef _ ->
-                                                        go (IntSet.insert (nodeRefKey ref) visited) parentRef
-                        scopeNodes <- foldM
-                            (\m nidInt -> do
-                                gid <- nearestGen (typeRef (NodeId nidInt))
-                                pure $
-                                    IntMap.insertWith
-                                        IntSet.union
-                                        (getGenNodeId gid)
-                                        (IntSet.singleton nidInt)
-                                        m
-                            )
-                            IntMap.empty
-                            (IntMap.keys nodes)
-
-                        let directChildren =
-                                IntMap.fromListWith
-                                    IntSet.union
-                                    [ (getGenNodeId gid, IntSet.singleton nidInt)
-                                    | (childKey, (parentRef, _flag)) <- IntMap.toList bindParents
-                                    , TypeRef (NodeId nidInt) <- [nodeRefFromKey childKey]
-                                    , GenRef gid <- [parentRef]
-                                    ]
-
-                            boundKids node =
-                                case node of
-                                    TyVar{ tnBound = Just bnd } -> [bnd]
-                                    _ -> []
-
-                            rootsForScope gidInt scopeSet =
-                                let referenced =
-                                        IntSet.fromList
-                                            [ getNodeId child
-                                            | nidInt <- IntSet.toList scopeSet
-                                            , Just node <- [IntMap.lookup nidInt nodes]
-                                            , child <- structuralChildren node ++ boundKids node
-                                            , IntSet.member (getNodeId child) scopeSet
-                                            ]
-                                    roots = IntSet.difference scopeSet referenced
-                                    direct = IntMap.findWithDefault IntSet.empty gidInt directChildren
-                                    roots' = IntSet.union roots direct
-                                in map NodeId (IntSet.toList roots')
-
-                            rebuildOne gidInt =
-                                let gid = GenNodeId gidInt
-                                    scopeSet = IntMap.findWithDefault IntSet.empty gidInt scopeNodes
-                                    schemes = rootsForScope gidInt scopeSet
-                                in (gidInt, GenNode gid schemes)
-
-                        pure (IntMap.fromList (map rebuildOne genIds))
-
             instEdges' =
                 [ InstEdge eid (substNode l) (substNode r)
                 | InstEdge eid l r <- cInstEdges c0
@@ -698,17 +648,36 @@ rewriteEliminatedBinders c0
                 [ UnifyEdge (substNode l) (substNode r)
                 | UnifyEdge l r <- cUnifyEdges c0
                 ]
+            genNodesSubst =
+                let rewriteOne g =
+                        let (schemesRev, _seen) =
+                                foldl'
+                                    (\(acc, seen) s ->
+                                        let s' = substNode s
+                                            key = getNodeId s'
+                                        in if IntMap.member key nodes' && not (IntSet.member key seen)
+                                            then (s' : acc, IntSet.insert key seen)
+                                            else (acc, seen)
+                                    )
+                                    ([], IntSet.empty)
+                                    (gnSchemes g)
+                            schemes' = reverse schemesRev
+                        in (genNodeKey (gnId g), g { gnSchemes = schemes' })
+                in IntMap.fromListWith (\a _ -> a) (map rewriteOne (IntMap.elems (cGenNodes c0)))
 
-        genNodesFinal <- rebuildGenNodes bindParents' nodes'
+            c1 =
+                c0
+                    { cNodes = nodes'
+                    , cBindParents = bindParents'
+                    , cInstEdges = instEdges'
+                    , cUnifyEdges = unifyEdges'
+                    , cEliminatedVars = IntSet.empty
+                    , cGenNodes = genNodesSubst
+                    }
 
-        pure c0
-            { cNodes = nodes'
-            , cBindParents = bindParents'
-            , cInstEdges = instEdges'
-            , cUnifyEdges = unifyEdges'
-            , cEliminatedVars = IntSet.empty
-            , cGenNodes = genNodesFinal
-            }
+        genNodesFinal <- Binding.rebuildGenNodesFromBinding c1
+
+        pure (c1 { cGenNodes = genNodesFinal }, subst)
   where
     elims0 = cEliminatedVars c0
 

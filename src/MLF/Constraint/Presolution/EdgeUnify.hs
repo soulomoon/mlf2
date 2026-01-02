@@ -411,22 +411,22 @@ unifyAcyclicEdge n1 n2 = do
 
         -- Record RaiseMerge when a binder-class merges with an exterior TyVar-class.
         when (IntSet.size bs >= 1) $ do
-            repId <- pickRepBinderId bs
-            let rep = NodeId repId
+            repBinderId <- pickRepBinderId bs
+            let repBinder = NodeId repBinderId
             case (IntSet.null bs1, IntSet.null bs2) of
                 (False, True) | inInt1 && not inInt2 -> do
                     node2 <- lift $ getCanonicalNode root2
                     case node2 of
                         TyVar{} -> do
-                            should <- shouldRecordRaiseMerge rep root2
-                            already <- isEliminated rep
+                            should <- shouldRecordRaiseMerge repBinder root2
+                            already <- isEliminated repBinder
                             when (should && not already) $ do
                                 -- Paper-shaped RaiseMerge is a sequence (Raise(n))^k; Merge(n, m).
                                 -- We record it in that explicit form and let `normalizeInstanceOpsFull`
                                 -- coalesce it back to `OpRaiseMerge`.
-                                recordOp (OpRaise rep)
-                                recordOp (OpMerge rep root2)
-                                recordEliminate rep
+                                recordOp (OpRaise repBinder)
+                                recordOp (OpMerge repBinder root2)
+                                recordEliminate repBinder
                         _ -> pure ()
                 (True, False) | inInt2 && not inInt1 -> do
                     node1 <- lift $ getCanonicalNode root1

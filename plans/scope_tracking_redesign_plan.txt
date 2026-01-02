@@ -19,8 +19,8 @@ Current representation (repo)
 -----------------------------
 - Expansion graph: `Constraint` (`Constraint.cNodes` + edges).
 - Binding tree: `Constraint.cBindParents :: BindParents` (child → (parent, flag)).
-- Connectivity: a synthetic `TyRoot` is inserted (`MLF.Constraint.Root`) so LCAs
-  exist for well-formed graphs.
+- Connectivity: constraints are rooted at a single gen node (created during
+  constraint generation), so LCAs exist for well-formed graphs.
 - Bounds/eliminations: `Constraint.cVarBounds` / `Constraint.cEliminatedVars`
   (`MLF.Constraint.VarStore`), keyed by canonical `NodeId`.
 

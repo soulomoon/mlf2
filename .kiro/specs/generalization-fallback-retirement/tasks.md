@@ -1,15 +1,15 @@
 # Implementation Plan
 
-- [x] 1. Introduce a synthetic root scope for top-level generalization
+- [x] 1. Introduce a gen-rooted scope for top-level generalization
   - Steps:
-    - Allocate a `TyRoot` binder at the top-level scope and rebind scope nodes
+    - Allocate a root gen node at the top-level scope and rebind scope nodes
       under it.
-    - Select `ConstraintRoot.findConstraintRoot` in `runPipelineElab` for the
-      generalization scope.
+    - Select the nearest gen ancestor in `runPipelineElab` for the
+      generalization scope (fail if none exists).
   - Files: `src/MLF/Frontend/ConstraintGen/Translate.hs`,
     `src/MLF/Frontend/ConstraintGen/Emit.hs`, `src/MLF/Elab/Run.hs`
   - Tests: constraint generation + pipeline regression
-  - Verification: `rg -n "TyRoot|findConstraintRoot" src/MLF/Elab/Run.hs`
+  - Verification: `rg -n "bindingScopeRef" src/MLF/Elab/Run.hs`
   - _Requirements: 2.1, 2.2_
 
 - [x] 2. Update binder enumeration in `generalizeAt`

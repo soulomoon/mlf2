@@ -1,6 +1,6 @@
 # Implementation Plan
 
-- [ ] 1. Data model split (types + constraint fields)
+- [x] 1. Data model split (types + constraint fields)
   - Steps:
     - Introduce `GenNodeId`, `GenNode`, and `NodeRef` in `MLF.Constraint.Types`.
     - Add `cGenNodes :: IntMap GenNode` to the constraint.
@@ -9,7 +9,7 @@
   - Tests: compile-only
   - _Requirements: 1.1, 1.2_
 
-- [ ] 2. Binding tree migration to `NodeRef`
+- [x] 2. Binding tree migration to `NodeRef`
   - Steps:
     - Update `BindParents` to use `NodeRef` keys and values.
     - Migrate binding-tree operations (`Binding.Tree`, `Binding.Adjustment`, `Binding.GraphOps`).
@@ -18,7 +18,7 @@
   - Tests: binding-tree unit tests
   - _Requirements: 3.1, 3.2_
 
-- [ ] 3. Rootedness enforcement
+- [x] 3. Rootedness enforcement
   - Steps:
     - Create a single root gen node in Phase 1.
     - Remove synthetic root insertion in `Constraint.Root`.
@@ -27,7 +27,7 @@
   - Tests: new rootedness tests
   - _Requirements: 2.1, 2.2, 2.3_
 
-- [ ] 4. Elaboration alignment
+- [x] 4. Elaboration alignment
   - Steps:
     - Recompute named nodes from gen-node bindings only.
     - Update context computation to follow thesis gen-node rules.
@@ -35,9 +35,9 @@
   - Tests: elaboration/context tests
   - _Requirements: 4.1, 4.2_
 
-- [ ] 5. Cleanup legacy encoding
+- [x] 5. Cleanup legacy encoding
   - Steps:
-    - Stop treating `TyForall`/`TyRoot` as gen nodes.
+    - Stop treating `TyForall` as gen nodes; remove synthetic root handling.
     - Remove transitional compatibility fields/helpers.
   - Files: `src/MLF/Constraint/Types.hs`, `src/MLF/Frontend/ConstraintGen/*`
   - Tests: full `cabal test`

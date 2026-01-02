@@ -63,8 +63,8 @@ Bottom line:
     because it instantiates with the solved (reified) types.
   - We are still incomplete vs `xmlf.txt`’s witness machinery:
       * Witness normalization is lightweight, not the full Yakobowski’08 algorithm.
-      * The repo enforces a synthetic `TyRoot` so the binding tree is connected; “no LCA”
-        is treated as a binding-tree error (rather than a silent no-op).
+      * The repo enforces a single gen-rooted binding tree; “no LCA” is treated
+        as a binding-tree error (rather than a silent no-op).
 
 Status (current repo)
 ---------------------

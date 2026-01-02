@@ -19,7 +19,8 @@ prepares the pipeline for thesis-exact scoping and context computation.
   - `GenNodeId`, `TypeNodeId` (or keep `NodeId` as type node id).
   - `NodeRef = GenRef GenNodeId | TypeRef NodeId` for binding edges.
 - New structures:
-  - `GenNode { gnId, gnSchemes :: [NodeId] }` where schemes are type roots.
+  - `GenNode { gnId, gnSchemes :: [NodeId] }` where the list contains the
+    scheme roots introduced by the gen node (possibly empty for degenerate/root-only graphs).
   - `cGenNodes :: IntMap GenNode`.
   - `cBindParents :: BindParents` updated to use `NodeRef`.
 
@@ -35,7 +36,7 @@ prepares the pipeline for thesis-exact scoping and context computation.
 3. Remove synthetic root insertion; enforce rootedness at constraint generation.
 4. Migrate elaboration and Phi/Sigma translation to use gen nodes as the source of
    named nodes and contexts.
-5. Remove legacy reliance on `TyForall`/`TyRoot` as gen nodes.
+5. Remove legacy reliance on `TyForall` as gen nodes.
 
 ## Error Handling
 - If a constraint lacks a root gen node, fail fast with a structured error.

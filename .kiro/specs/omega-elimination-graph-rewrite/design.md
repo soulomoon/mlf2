@@ -13,9 +13,10 @@ tree encode elimination directly.
   - New pass `rewriteEliminatedBinders` applies after omega execution and solve,
     rewriting the constraint graph to inline eliminated binders and remove them
     from the binding tree.
-  - Eliminated binder nodes remain in `cNodes` as detached roots (no binding
-    parent, no structural references) so Φ translation can still reify `Tξ(n)`
-    for witness ops that mention binder ids.
+  - Eliminated binder nodes are removed from `cNodes`; any references are
+    substituted to their bounds (or bottom). The solve-time union-find is
+    extended with the same substitution so witness ops that mention eliminated
+    ids still canonicalize to live nodes.
   - This pass consumes a set of eliminated binders (currently recorded during
     omega execution) and produces a rewritten `Constraint` with no remaining
     elimination markers.

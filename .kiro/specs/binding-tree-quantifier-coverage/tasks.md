@@ -27,7 +27,7 @@
   - Steps:
     - Add a test that compares free vars in the generalized type to the set of
       vars reachable via binding-parent paths from the scope root (top-level
-      `TyRoot`).
+      gen root).
     - Add a non-Forall scope test where missing binding edges would drop a
       quantifier (bounded aliasing or let-polymorphism case).
   - Files: `test/ElaborationSpec.hs` (or new `test/BindingEdgeSpec.hs`),

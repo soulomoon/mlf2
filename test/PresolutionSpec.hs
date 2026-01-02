@@ -1271,7 +1271,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 arg = NodeId 10
                 nodes =
                     IntMap.fromList
-                        [ (getNodeId root, TyRoot root [parent, arg])
+                        [ (getNodeId root, TyArrow root parent arg)
                         , (getNodeId parent, TyArrow parent child child)
                         , (getNodeId child, TyVar { tnId = child, tnBound = Nothing })
                         , (getNodeId arg, TyVar { tnId = arg, tnBound = Nothing })
@@ -1534,7 +1534,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                     base = NodeId 4
                     nodes =
                         IntMap.fromList
-                            [ (getNodeId root, TyRoot root [mid])
+                            [ (getNodeId root, TyArrow root mid mid)
                             , (getNodeId mid, TyArrow mid n base)
                             , (getNodeId n, TyForall n bottom)
                             , (getNodeId bottom, TyBottom bottom)
@@ -1560,7 +1560,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                     base = NodeId 4
                     nodes =
                         IntMap.fromList
-                            [ (getNodeId root, TyRoot root [mid])
+                            [ (getNodeId root, TyArrow root mid mid)
                             , (getNodeId mid, TyArrow mid n base)
                             , (getNodeId n, TyArrow n v base)
                             , (getNodeId v, TyVar { tnId = v, tnBound = Nothing })
@@ -1584,7 +1584,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                     base = NodeId 2
                     nodes =
                         IntMap.fromList
-                            [ (getNodeId root, TyRoot root [mid])
+                            [ (getNodeId root, TyArrow root mid mid)
                             , (getNodeId mid, TyArrow mid base base)
                             , (getNodeId base, TyBase base (BaseTy "Poly"))
                             ]
@@ -1611,7 +1611,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                     base = NodeId 4
                     nodes =
                         IntMap.fromList
-                            [ (getNodeId root, TyRoot root [mid])
+                            [ (getNodeId root, TyArrow root mid mid)
                             , (getNodeId mid, TyArrow mid n base)
                             , (getNodeId n, TyArrow n v base)
                             , (getNodeId v, TyVar { tnId = v, tnBound = Nothing })

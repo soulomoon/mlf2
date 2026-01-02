@@ -32,7 +32,6 @@ import qualified MLF.Util.Order as Order
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Witness.OmegaExec as OmegaExec
 import qualified MLF.Constraint.Canonicalize as Canonicalize
-import qualified MLF.Constraint.Inert as Inert
 import MLF.Constraint.Types
 import MLF.Constraint.Presolution.Base
 import MLF.Constraint.Presolution.Ops (
@@ -185,7 +184,6 @@ rewriteConstraint mapping = do
                     TyArrow { tnDom = d, tnCod = cod } -> TyArrow nid' (canonical d) (canonical cod)
                     TyBase { tnBase = b } -> TyBase nid' b
                     TyForall { tnBody = b } -> TyForall nid' (canonical b)
-                    TyRoot { tnChildren = cs } -> TyRoot nid' (map canonical cs)
             in Just (getNodeId nid', node')
 
         -- traceCanonical n = let c = canonical n in trace ("Canonical " ++ show n ++ " -> " ++ show c) c
@@ -287,9 +285,13 @@ rewriteConstraint mapping = do
             schemeParents =
                 IntMap.fromListWith
                     (\a _ -> a)
-                    [ (getNodeId root, genRef (gnId g))
-                    | g <- IntMap.elems genNodes'
-                    , root <- gnSchemes g
+                    [ (getNodeId child, genRef gid)
+                    | (childKey, (parent0, _flag)) <- IntMap.toList bindingEdges0
+                    , let childRef0 = nodeRefFromKey childKey
+                          childRef = canonicalRef childRef0
+                          parentRef = canonicalRef parent0
+                    , TypeRef child <- [childRef]
+                    , GenRef gid <- [parentRef]
                     ]
 
             canonicalRef ref = case ref of
@@ -401,7 +403,17 @@ rewriteConstraint mapping = do
 
         bp0 <- foldM insertOne IntMap.empty entries'
 
-        let rootGen =
+        let inNodesRef ref =
+                case ref of
+                    TypeRef nid -> typeExists nid
+                    GenRef gid -> genExists gid
+            bp0' =
+                IntMap.filterWithKey
+                    (\childKey (parent, _) ->
+                        inNodesRef (nodeRefFromKey childKey) && inNodesRef parent
+                    )
+                    bp0
+            rootGen =
                 case IntMap.keys genNodes' of
                     [] -> Nothing
                     gids -> Just (GenNodeId (minimum gids))
@@ -437,78 +449,7 @@ rewriteConstraint mapping = do
                                     then pure bp
                                     else pure (IntMap.insert childKey (p, BindFlex) bp)
 
-        foldM addMissing bp0 (IntMap.keys newNodes)
-
-    genNodesFinal <- do
-        let bindParents = newBindParents
-            nodes = newNodes
-            genIds = IntMap.keys genNodes'
-            nearestGen :: NodeRef -> PresolutionM GenNodeId
-            nearestGen start = go IntSet.empty start
-              where
-                go :: IntSet.IntSet -> NodeRef -> PresolutionM GenNodeId
-                go visited ref
-                    | IntSet.member (nodeRefKey ref) visited =
-                        throwError $
-                            BindingTreeError $
-                                InvalidBindingTree $
-                                    "rewriteConstraint: binding cycle while recomputing gen schemes at " ++ show ref
-                    | otherwise =
-                        case IntMap.lookup (nodeRefKey ref) bindParents of
-                            Nothing ->
-                                throwError $
-                                    BindingTreeError $
-                                        MissingBindParent ref
-                            Just (parentRef, _flag) ->
-                                case parentRef of
-                                    GenRef gid -> pure gid
-                                    TypeRef _ ->
-                                        go (IntSet.insert (nodeRefKey ref) visited) parentRef
-
-        scopeNodes <- foldM
-            (\m nidInt -> do
-                let ref = typeRef (NodeId nidInt)
-                gid <- nearestGen ref
-                pure $ IntMap.insertWith IntSet.union (getGenNodeId gid) (IntSet.singleton nidInt) m
-            )
-            IntMap.empty
-            (IntMap.keys nodes)
-
-        let directChildren =
-                IntMap.fromListWith
-                    IntSet.union
-                    [ (getGenNodeId gid, IntSet.singleton nidInt)
-                    | (childKey, (parentRef, _flag)) <- IntMap.toList bindParents
-                    , TypeRef (NodeId nidInt) <- [nodeRefFromKey childKey]
-                    , GenRef gid <- [parentRef]
-                    ]
-
-            boundKids node =
-                case node of
-                    TyVar{ tnBound = Just bnd } -> [bnd]
-                    _ -> []
-
-            rootsForScope gidInt scopeSet =
-                let referenced =
-                        IntSet.fromList
-                            [ getNodeId child
-                            | nidInt <- IntSet.toList scopeSet
-                            , Just node <- [IntMap.lookup nidInt nodes]
-                            , child <- structuralChildren node ++ boundKids node
-                            , IntSet.member (getNodeId child) scopeSet
-                            ]
-                    roots = IntSet.difference scopeSet referenced
-                    direct = IntMap.findWithDefault IntSet.empty gidInt directChildren
-                    roots' = IntSet.union roots direct
-                in map NodeId (IntSet.toList roots')
-
-            rebuildOne gidInt =
-                let gid = GenNodeId gidInt
-                    scopeSet = IntMap.findWithDefault IntSet.empty gidInt scopeNodes
-                    schemes = rootsForScope gidInt scopeSet
-                in (gidInt, GenNode gid schemes)
-
-        pure $ IntMap.fromList (map rebuildOne genIds)
+        foldM addMissing bp0' (IntMap.keys newNodes)
 
     let c0' = c
             { cNodes = newNodes
@@ -516,9 +457,14 @@ rewriteConstraint mapping = do
             , cUnifyEdges = Canonicalize.rewriteUnifyEdges canonical (cUnifyEdges c)
             , cBindParents = newBindParents
             , cEliminatedVars = eliminated'
-            , cGenNodes = genNodesFinal
+            , cGenNodes = genNodes'
             }
-        c' = c0'
+
+    genNodesFinal <- case Binding.rebuildGenNodesFromBinding c0' of
+        Left err -> throwError (BindingTreeError err)
+        Right gens -> pure gens
+
+    let c' = c0' { cGenNodes = genNodesFinal }
 
     case Binding.checkBindingTree c' of
         Left err -> throwError (BindingTreeError err)
@@ -534,23 +480,6 @@ rewriteConstraint mapping = do
         }
 
     return fullRedirects
-
--- | Weaken inert-locked nodes to obtain a translatable presolution.
---
--- Thesis alignment: Corollary 15.2.5 removes inert-locked nodes, and
--- Definition 15.2.10 (condition 1) requires none remain.
-weakenInertLockedNodesM :: PresolutionM ()
-weakenInertLockedNodesM = do
-    c0 <- gets psConstraint
-    case Inert.weakenInertLockedNodes c0 of
-        Left err -> throwError (BindingTreeError err)
-        Right c1 -> do
-            case Inert.inertLockedNodes c1 of
-                Left err -> throwError (BindingTreeError err)
-                Right locked ->
-                    if IntSet.null locked
-                        then modify' $ \st -> st { psConstraint = c1 }
-                        else throwError (InternalError "weakenInertLockedNodesM: inert-locked nodes remain after weakening")
 
 -- | Normalize edge witnesses against the finalized presolution constraint.
 normalizeEdgeWitnessesM :: PresolutionM ()
@@ -698,11 +627,18 @@ rewriteEliminated canon nodes0 elims0 =
 rewriteGenNodes :: (NodeId -> NodeId) -> IntMap TyNode -> IntMap.IntMap GenNode -> IntMap.IntMap GenNode
 rewriteGenNodes canon nodes0 gen0 =
     let rewriteOne g =
-            let schemes' =
-                    [ canon s
-                    | s <- gnSchemes g
-                    , IntMap.member (getNodeId (canon s)) nodes0
-                    ]
+            let (schemesRev, _seen) =
+                    foldl'
+                        (\(acc, seen) s ->
+                            let s' = canon s
+                                key = getNodeId s'
+                            in if IntMap.member key nodes0 && not (IntSet.member key seen)
+                                then (s' : acc, IntSet.insert key seen)
+                                else (acc, seen)
+                        )
+                        ([], IntSet.empty)
+                        (gnSchemes g)
+                schemes' = reverse schemesRev
             in (genNodeKey (gnId g), g { gnSchemes = schemes' })
     in IntMap.fromListWith (\a _ -> a) (map rewriteOne (IntMap.elems gen0))
 

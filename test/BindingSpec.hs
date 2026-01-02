@@ -118,19 +118,15 @@ genOrderKeyDag n
     genNonLeaf :: Int -> NodeId -> Gen TyNode
     genNonLeaf i nid = do
         let pickChild = NodeId <$> choose (0, i - 1)
-        choice <- elements [0 :: Int, 1, 2]
+        choice <- elements [0 :: Int, 1]
         case choice of
             0 -> do
                 dom <- pickChild
                 cod <- pickChild
                 pure $ TyArrow { tnId = nid, tnDom = dom, tnCod = cod }
-            1 -> do
+            _ -> do
                 body <- pickChild
                 pure $ TyForall { tnId = nid, tnBody = body }
-            _ -> do
-                k <- choose (1, min 3 i)
-                children <- vectorOf k pickChild
-                pure $ TyRoot { tnId = nid, tnChildren = children }
 
 mkOrderedBinderConstraint :: Int -> (Constraint, NodeId, NodeId)
 mkOrderedBinderConstraint n =
@@ -586,6 +582,20 @@ bindingTreeSpec = describe "MLF.Binding.Tree" $ do
                     { cNodes = IntMap.singleton 0 (TyVar { tnId = NodeId 0, tnBound = Nothing })
                     }
             checkBindingTree c `shouldBe` Right ()
+
+        it "checkBindingTree succeeds for multiple scheme roots" $ do
+            let c = rootedConstraint emptyConstraint
+                    { cNodes = IntMap.fromList
+                        [ (0, TyVar { tnId = NodeId 0, tnBound = Nothing })
+                        , (1, TyVar { tnId = NodeId 1, tnBound = Nothing })
+                        ]
+                    }
+                schemes =
+                    case IntMap.lookup 0 (cGenNodes c) of
+                        Just genNode -> IntSet.fromList (map getNodeId (gnSchemes genNode))
+                        Nothing -> IntSet.empty
+            checkBindingTree c `shouldBe` Right ()
+            schemes `shouldBe` IntSet.fromList [0, 1]
 
         it "checkBindingTree succeeds for valid chain" $ do
             -- Create a term-DAG chain: forall(0) -> forall(1) -> var(2)

@@ -114,7 +114,7 @@ newtype GenNodeId = GenNodeId { getGenNodeId :: Int }
 
 -- | Gen node record (paper G constructor).
 --
--- A gen node introduces one or more schemes, each rooted at a type node.
+-- Each gen node introduces zero or more scheme roots.
 data GenNode = GenNode
     { gnId :: GenNodeId
     , gnSchemes :: [NodeId]
@@ -250,22 +250,13 @@ data TyNode
         , tnExpVar :: ExpVarId
         , tnBody :: NodeId
         }
-    -- | Synthetic root node used to connect otherwise-disconnected constraint
-    -- components under a single binding-tree root.
-    --
-    -- This node is internal to the solver; it does not correspond to an xMLF
-    -- type constructor.
-    | TyRoot
-        { tnId :: NodeId
-        , tnChildren :: [NodeId]
-        }
     deriving (Eq, Show)
 
 -- | Immediate structural children of a term-DAG node.
 --
 -- Traversal order is stable and sometimes significant:
 -- arrow domain before codomain; single-child constructors yield a singleton
--- list; roots preserve their stored child order.
+-- list.
 --
 -- Note: instance bounds are not structural children; ≺ ordering accounts for
 -- them separately when needed.
@@ -276,7 +267,6 @@ structuralChildren TyBase{} = []
 structuralChildren TyArrow{ tnDom = d, tnCod = c } = [d, c]
 structuralChildren TyForall{ tnBody = b } = [b]
 structuralChildren TyExp{ tnBody = b } = [b]
-structuralChildren TyRoot{ tnChildren = cs } = cs
 
 -- | Lookup a node by `NodeId` in the constraint node map.
 lookupNodeIn :: IntMap a -> NodeId -> Maybe a

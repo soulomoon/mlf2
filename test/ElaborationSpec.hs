@@ -289,10 +289,6 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 Just TyExp{ tnBody = b } -> do
                                     let visited' = IntSet.insert key visited
                                     go bound visited' (canonical b)
-                                Just TyRoot{ tnChildren = cs } -> do
-                                    let visited' = IntSet.insert key visited
-                                    fvs <- mapM (go bound visited' . canonical) cs
-                                    pure (IntSet.unions fvs)
                 in go IntSet.empty IntSet.empty (canonical nid0)
 
             assertBindingCoverage :: Expr -> IO ()
@@ -1123,8 +1119,6 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     body = NodeId 101
                     aN = NodeId 1
                     bN = NodeId 2
-                    boundRoot = NodeId 200
-                    boundBody = NodeId 201
                     cN = NodeId 3
 
                     c = rootedConstraint emptyConstraint
@@ -1133,25 +1127,21 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 [ (getNodeId root, TyForall root body)
                                 , (getNodeId body, TyArrow body aN bN)
                                 , (getNodeId aN, TyVar { tnId = aN, tnBound = Nothing })
-                                , (getNodeId bN, TyVar { tnId = bN, tnBound = Just boundRoot })
-                                , (getNodeId boundRoot, TyForall boundRoot boundBody)
-                                , (getNodeId boundBody, TyArrow boundBody cN cN)
+                                , (getNodeId bN, TyVar { tnId = bN, tnBound = Just cN })
                                 , (getNodeId cN, TyVar { tnId = cN, tnBound = Nothing })
                                 ]
                         , cBindParents =
                             IntMap.fromList
-                                [ (nodeRefKey (typeRef aN), (typeRef root, BindFlex))
-                                , (nodeRefKey (typeRef bN), (typeRef root, BindFlex))
-                                , (nodeRefKey (typeRef boundRoot), (typeRef bN, BindFlex))
-                                , (nodeRefKey (typeRef cN), (typeRef boundBody, BindFlex))
+                                [ (nodeRefKey (typeRef aN), (genRef (GenNodeId 0), BindFlex))
+                                , (nodeRefKey (typeRef bN), (genRef (GenNodeId 0), BindFlex))
+                                , (nodeRefKey (typeRef cN), (genRef (GenNodeId 0), BindFlex))
                                 , (nodeRefKey (typeRef body), (typeRef root, BindFlex))
-                                , (nodeRefKey (typeRef boundBody), (typeRef boundRoot, BindFlex))
                                 ]
                         }
                     solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 
                 steps <- requireRight (Elab.contextToNodeBound solved root cN)
-                steps `shouldBe` Just [Elab.StepUnder "t1", Elab.StepInside, Elab.StepInside]
+                steps `shouldBe` Just [Elab.StepUnder "t1", Elab.StepInside]
 
             it "contextToNodeBound computes under-quantifier contexts (context)" $ do
                 -- Same graph as above: binder b is after a at the root.
@@ -1159,8 +1149,6 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     body = NodeId 101
                     aN = NodeId 1
                     bN = NodeId 2
-                    boundRoot = NodeId 200
-                    boundBody = NodeId 201
                     cN = NodeId 3
 
                     c = rootedConstraint emptyConstraint
@@ -1169,19 +1157,15 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 [ (getNodeId root, TyForall root body)
                                 , (getNodeId body, TyArrow body aN bN)
                                 , (getNodeId aN, TyVar { tnId = aN, tnBound = Nothing })
-                                , (getNodeId bN, TyVar { tnId = bN, tnBound = Just boundRoot })
-                                , (getNodeId boundRoot, TyForall boundRoot boundBody)
-                                , (getNodeId boundBody, TyArrow boundBody cN cN)
+                                , (getNodeId bN, TyVar { tnId = bN, tnBound = Just cN })
                                 , (getNodeId cN, TyVar { tnId = cN, tnBound = Nothing })
                                 ]
                         , cBindParents =
                             IntMap.fromList
-                                [ (nodeRefKey (typeRef aN), (typeRef root, BindFlex))
-                                , (nodeRefKey (typeRef bN), (typeRef root, BindFlex))
-                                , (nodeRefKey (typeRef boundRoot), (typeRef bN, BindFlex))
-                                , (nodeRefKey (typeRef cN), (typeRef boundBody, BindFlex))
+                                [ (nodeRefKey (typeRef aN), (genRef (GenNodeId 0), BindFlex))
+                                , (nodeRefKey (typeRef bN), (genRef (GenNodeId 0), BindFlex))
+                                , (nodeRefKey (typeRef cN), (genRef (GenNodeId 0), BindFlex))
                                 , (nodeRefKey (typeRef body), (typeRef root, BindFlex))
-                                , (nodeRefKey (typeRef boundBody), (typeRef boundRoot, BindFlex))
                                 ]
                         }
                     solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
@@ -1221,7 +1205,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 steps `shouldBe` Just [Elab.StepInside]
 
             it "contextToNodeBound ignores non-variable binder bounds (context non-var)" $ do
-                -- Binder b is an arrow node; the context enters via StepInside.
+                -- Binder b is an arrow node; non-variable bounds are ignored.
                 let root = NodeId 100
                     body = NodeId 101
                     bN = NodeId 2
@@ -1248,7 +1232,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 
                 steps <- requireRight (Elab.contextToNodeBound solved root domN)
-                steps `shouldBe` Just [Elab.StepInside]
+                steps `shouldBe` Nothing
 
             it "selectMinPrecInsertionIndex implements m = min≺ selection (min≺)" $ do
                 -- Keys are ordered by <P (lexicographic with empty path greatest).

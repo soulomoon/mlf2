@@ -9,8 +9,8 @@ relation during unification.
 
 This spec makes binding-edge harmonization paper-faithful by:
 1) removing the last silent “no LCA ⇒ no-op” fallback, and
-2) maintaining a synthetic constraint root so LCA is total on pipeline
-   constraints (matching the paper’s rooted model).
+2) maintaining a gen-rooted constraint so LCA is total on pipeline constraints
+   (matching the paper’s rooted model).
 
 ## Requirements
 
@@ -32,9 +32,9 @@ This spec makes binding-edge harmonization paper-faithful by:
 **User Story:** As a maintainer, I want constraints to be rooted (paper-faithful), so binding LCA exists for any two nodes used by the pipeline.
 
 #### Acceptance Criteria
-1. WHEN a constraint has more than one term-DAG root THEN THE SYSTEM SHALL create a synthetic `TyRoot` node whose structure children are the former roots.
-2. WHEN creating or maintaining the synthetic root THEN THE SYSTEM SHALL bind each former term-DAG root under the `TyRoot` with `BindFlex` (unless it already has a binding parent).
-3. WHEN a constraint already has a `TyRoot` THEN THE SYSTEM SHALL attach any newly-disconnected term-DAG roots as additional root children (and bind them under the root if needed).
+1. WHEN a constraint has more than one term-DAG root THEN THE SYSTEM SHALL record all term-DAG roots in the root gen node’s `gnSchemes`.
+2. WHEN creating or maintaining the root gen node THEN THE SYSTEM SHALL bind each term-DAG root under the gen root with `BindFlex` (unless it already has a binding parent).
+3. WHEN a constraint already has a root gen node THEN THE SYSTEM SHALL attach any newly-disconnected term-DAG roots as additional schemes (and bind them under the gen root if needed).
 
 ### Requirement 4
 **User Story:** As a maintainer, I want all of this to be non-regressing, so paper-faithfulness work does not break the rest of the solver.

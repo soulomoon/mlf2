@@ -46,7 +46,7 @@ Mismatch inventory and target spec names:
   - Primary modules: new `MLF.Elab.TypeCheck`, `MLF.Elab.Reduce` (or similar),
     plus wiring in `MLF.Elab.Pipeline`.
 
-Rooted binding-tree behavior (synthetic `TyRoot`, no-LCA errors) is already
+Rooted binding-tree behavior (single gen root, no-LCA errors) is already
 covered by the existing `binding-lca-totality` spec and is considered
 paper-faithful, so it is not listed as a remaining mismatch.
 

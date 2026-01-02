@@ -269,8 +269,6 @@ instantiateSchemeWithTrace bodyId substList = do
                                                         TyBottom freshId
                                                     TyBase { tnBase = b } ->
                                                         TyBase freshId b
-                                                    TyRoot { tnChildren = cs } ->
-                                                        TyRoot freshId cs
                                         lift $ registerNode freshId placeholder
 
                                         -- Recursively copy children
@@ -289,9 +287,6 @@ instantiateSchemeWithTrace bodyId substList = do
                                                 pure $ TyBottom freshId
                                             TyBase { tnBase = b } -> do
                                                 return $ TyBase freshId b
-                                            TyRoot { tnChildren = cs } -> do
-                                                cs' <- traverse (copyNode copyInterior canonical subst) cs
-                                                pure $ TyRoot freshId cs'
 
                                         -- Register new node in constraint (overwrite placeholder)
                                         lift $ registerNode freshId newNode
@@ -317,26 +312,12 @@ bindExpansionRootLikeTarget expansionRoot targetNode = do
     uf <- gets psUnionFind
     let canonical = UnionFind.frWith uf
         expansionRootC = canonical expansionRoot
-        addSchemeRoot :: GenNodeId -> PresolutionM ()
-        addSchemeRoot gid =
-            modify' $ \st ->
-                let c0 = psConstraint st
-                    gens0 = cGenNodes c0
-                    update genNode =
-                        if expansionRootC `elem` gnSchemes genNode
-                            then genNode
-                            else genNode { gnSchemes = gnSchemes genNode ++ [expansionRootC] }
-                    gens' = IntMap.adjust update (getGenNodeId gid) gens0
-                in st { psConstraint = c0 { cGenNodes = gens' } }
     mbParentInfo <- case Binding.lookupBindParentUnder canonical c (typeRef targetNode) of
         Left err -> throwError (BindingTreeError err)
         Right p -> pure p
     case mbParentInfo of
-        Just parentInfo@(parentRef, _flag) -> do
+        Just parentInfo -> do
             setBindParentM (typeRef expansionRootC) parentInfo
-            case parentRef of
-                GenRef gid -> addSchemeRoot gid
-                TypeRef _ -> pure ()
         Nothing -> do
             -- Target is a root: bind the expansion root under the binding-tree root gen node.
             let genIds = IntMap.keys (cGenNodes c)
@@ -356,9 +337,9 @@ bindExpansionRootLikeTarget expansionRoot targetNode = do
                 Nothing
                 genIds
             case rootGen of
-                Just gref@(GenRef gid) -> do
+                Just gref@(GenRef _) -> do
                     setBindParentM (typeRef expansionRootC) (gref, BindFlex)
-                    addSchemeRoot gid
+                    pure ()
                 Just (TypeRef _) -> pure ()
                 Nothing -> pure ()
 

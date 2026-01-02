@@ -6,6 +6,7 @@ module MLF.Elab.Generalize (
 import Control.Monad (unless)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
+import Data.Maybe (listToMaybe)
 
 import qualified MLF.Util.Order as Order
 import MLF.Constraint.Types
@@ -81,9 +82,39 @@ generalizeAtWith allowDropTarget res scopeRoot targetNode = do
             in go IntSet.empty [canonical root0]
 
     reachable <- reachableWithBounds orderRoot
+    scopeGen <- case scopeRootC of
+        GenRef gid -> pure (Just gid)
+        TypeRef nid -> do
+            path <- bindingToElab (Binding.bindingPathToRoot constraint (TypeRef nid))
+            pure (listToMaybe [gid | GenRef gid <- drop 1 path])
+    bindParents <- bindingToElab (Binding.canonicalizeBindParentsUnder canonical constraint)
+    let scopeTypeKeys =
+            case scopeGen of
+                Nothing -> Nothing
+                Just gid ->
+                    let childrenByParent =
+                            foldl'
+                                (\m (childKey, (parent, _flag)) ->
+                                    let parentKey = nodeRefKey parent
+                                    in IntMap.insertWith IntSet.union parentKey (IntSet.singleton childKey) m
+                                )
+                                IntMap.empty
+                                (IntMap.toList bindParents)
+                        go visited [] = visited
+                        go visited (k:ks) =
+                            let kids = IntSet.toList (IntMap.findWithDefault IntSet.empty k childrenByParent)
+                                typeKids =
+                                    [ kid
+                                    | kid <- kids
+                                    , case nodeRefFromKey kid of
+                                        TypeRef _ -> True
+                                        GenRef _ -> False
+                                    ]
+                                newTypeKids = filter (\kid -> not (IntSet.member kid visited)) typeKids
+                                visited' = foldl' (flip IntSet.insert) visited newTypeKids
+                            in go visited' (newTypeKids ++ ks)
+                    in Just (go IntSet.empty [nodeRefKey (genRef gid)])
     binders0 <- do
-        bindParents <- bindingToElab (Binding.canonicalizeBindParentsUnder canonical constraint)
-        let eliminated = cEliminatedVars constraint
         let childrenByParent =
                 foldl'
                     (\m (childKey, (parent, _flag)) ->
@@ -111,7 +142,6 @@ generalizeAtWith allowDropTarget res scopeRoot targetNode = do
 
             isQuantifiable child =
                 case IntMap.lookup (getNodeId child) nodes of
-                    Just TyRoot{} -> False
                     Just TyExp{} -> False
                     Just TyBase{} -> False
                     Just TyBottom{} -> False
@@ -119,8 +149,7 @@ generalizeAtWith allowDropTarget res scopeRoot targetNode = do
                     Nothing -> False
             isBindable key child =
                 case IntMap.lookup key bindFlags of
-                    Just BindFlex ->
-                        isQuantifiable child && not (IntSet.member (getNodeId child) eliminated)
+                    Just BindFlex -> isQuantifiable child
                     _ -> False
 
         pure
@@ -129,7 +158,30 @@ generalizeAtWith allowDropTarget res scopeRoot targetNode = do
             , TypeRef child <- [nodeRefFromKey key]
             , isBindable key child
             ]
-    let binders0Set = IntSet.fromList (map (getNodeId . canonical) binders0)
+    let scopeSchemeRoots =
+            case scopeGen of
+                Nothing -> IntSet.empty
+                Just gid ->
+                    case IntMap.lookup (getGenNodeId gid) (cGenNodes constraint) of
+                        Nothing -> IntSet.empty
+                        Just gen ->
+                            IntSet.fromList (map (getNodeId . canonical) (gnSchemes gen))
+        schemeRootsToSkip =
+            IntSet.difference
+                (IntSet.fromList
+                    [ getNodeId (canonical root)
+                    | gen <- IntMap.elems (cGenNodes constraint)
+                    , let gid = gnId gen
+                    , Just gid /= scopeGen
+                    , root <- gnSchemes gen
+                    ]
+                )
+                scopeSchemeRoots
+        isNestedSchemeBound v =
+            case IntMap.lookup (getNodeId (canonical v)) nodes of
+                Just TyVar{ tnBound = Just bnd } ->
+                    IntSet.member (getNodeId (canonical bnd)) schemeRootsToSkip
+                _ -> False
         targetBound =
             case IntMap.lookup (getNodeId target0) nodes of
                 Just TyVar{ tnBound = Just bnd } -> Just (canonical bnd)
@@ -144,25 +196,32 @@ generalizeAtWith allowDropTarget res scopeRoot targetNode = do
                                 (getNodeId (canonical bnd))
                                 (IntSet.fromList (map (getNodeId . canonical) (gnSchemes gen)))
                 _ -> False
-        boundIsBaseLike =
+        boundIsVar =
             case targetBound >>= (\bnd -> IntMap.lookup (getNodeId bnd) nodes) of
-                Just TyBase{} -> True
-                Just TyBottom{} -> True
+                Just TyVar{} -> True
                 _ -> False
-    boundParentIsTarget <- case targetBound of
-        Nothing -> pure False
-        Just bnd -> do
-            mbParent <- bindingToElab (Binding.lookupBindParentUnder canonical constraint (typeRef bnd))
-            pure $ case mbParent of
-                Just (TypeRef parent, _) -> canonical parent == canonical target0
-                _ -> False
+        boundIsChild =
+            case targetBound of
+                Just bnd ->
+                    let bndC = canonical bnd
+                        quantifiable =
+                            case IntMap.lookup (getNodeId bndC) nodes of
+                                Just TyExp{} -> False
+                                Just TyBase{} -> False
+                                Just TyBottom{} -> False
+                                Just _ -> True
+                                Nothing -> False
+                    in quantifiable
+                        && case IntMap.lookup (nodeRefKey (typeRef bndC)) bindParents of
+                            Just (parentRef, _) -> parentRef == typeRef target0
+                            Nothing -> False
+                Nothing -> False
     let dropTarget =
             allowDropTarget &&
-            case (scopeRootC, targetBound) of
-                (GenRef _, Just bnd) ->
-                    IntSet.member (getNodeId bnd) binders0Set
-                        || (boundIsBaseLike && not boundParentIsTarget)
-                _ -> False
+            case IntMap.lookup (getNodeId target0) nodes of
+                Just TyVar{} -> boundIsVar || boundIsChild
+                Just _ -> True
+                Nothing -> False
         schemeRoots =
             case scopeRootC of
                 GenRef _ | dropTarget -> IntSet.singleton (getNodeId (canonical target0))
@@ -181,6 +240,11 @@ generalizeAtWith allowDropTarget res scopeRoot targetNode = do
             [ canonical v
             | v <- binders0
             , IntSet.member (getNodeId (canonical v)) reachable
+            , case scopeTypeKeys of
+                Nothing -> True
+                Just keys -> IntSet.member (nodeRefKey (typeRef (canonical v))) keys
+            , not (IntSet.member (getNodeId (canonical v)) schemeRootsToSkip)
+            , not (isNestedSchemeBound v)
             , not (IntSet.member (getNodeId (canonical v)) schemeRoots)
             , not (dropTypeRoot && canonical v == canonical typeRoot)
             ]

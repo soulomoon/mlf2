@@ -31,8 +31,8 @@
 
 ### 3. src/MLF/Constraint/Solve.hs
 - **Binding-edge Raise harmonization**: Phase 5 harmonizes `Constraint.cBindParents` (paper `Raise(n)`) before unioning, keeping scope stable regardless of UF representative choice.
-- **Elimination rewrite**: `solveUnify` now rewrites eliminated binders into their bounds (or explicit `TyBottom` nodes), removes them from the binding tree, and clears `cEliminatedVars` before elaboration.
-  - Eliminated binder nodes remain in `cNodes` as detached roots (no binding parent, no structural references) so Φ translation can still reify `Tξ(n)` for witness ops like Raise/Merge.
+- **Elimination rewrite**: `solveUnify` now rewrites eliminated binders into their bounds (or explicit `TyBottom` nodes), removes them from the graph, and clears `cEliminatedVars` before elaboration.
+  - The solve-time union-find map is extended with the elimination substitution so witness ops that mention eliminated ids still canonicalize to live nodes.
 
 ### 4. src/MLF/Elab/Pipeline.hs + src/MLF/Elab/Types.hs
 - **`generalizeAt`**:
@@ -40,7 +40,7 @@
   - Modified to return the `subst` (renaming map) along with the scheme.
 - **Scope follows the solved graph**:
   - Elaboration enumerates binders from the binding tree (`Constraint.cBindParents`): `TyForall` scopes use Q(n), while non-Forall scopes use binding-parent paths to the scope root.
-  - Presolution rewrite reattaches the synthetic constraint root after canonicalization so new term-DAG roots introduced by expansion/copy stay under `TyRoot`, and binding-edge coverage regressions confirm generalized free vars are reachable via binding-parent paths (enabling fallback removal).
+  - Presolution rewrite preserves the root gen node after canonicalization so new term-DAG roots introduced by expansion/copy stay under the root gen node, and binding-edge coverage regressions confirm generalized free vars are reachable via binding-parent paths (enabling fallback removal).
   - `generalizeAt` now relies solely on binding-tree enumeration (no free-variable fallback).
   - Non-Forall scope enumeration filters rigid binding edges and treats rigid vars as inlined via their bounds (bounds are treated as reachable for binder enumeration).
   - Elaboration no longer consults `cEliminatedVars`; eliminated binders are already rewritten out of the graph. `generalizeAt` still strips vacuous ∀ from reified types to avoid unused binders in schemes.
@@ -52,7 +52,7 @@
   - Implemented explicit quantifier reordering instantiations (`sigmaReorder`) using adjacent swaps per `papers/xmlf.txt` §3.4.
   - Implemented `applyInstantiation` to check/apply xMLF instantiations to xMLF types (xmlf Fig. 3), which is used by tests to validate that `Φ(e)` actually transforms the source type into the target type.
 - **`expansionToInst`**: Kept as a legacy/debug conversion from `Expansion` to `Instantiation` (no longer the main path for elaboration).
-- **`runPipelineElab`**: Generalizes the top-level result using the constraint root (`TyRoot`) when present, falling back to the expression root otherwise.
+- **`runPipelineElab`**: Generalizes the top-level result using the nearest gen ancestor of the expression root (root gen node for top-level).
 
 ## Testing
 - **`test/ElaborationSpec.hs`**: Updated expectations to reflect correct polymorphic behavior and variable naming. Added integration tests for polymorphic instantiation.
@@ -84,7 +84,7 @@ This repo’s design is primarily informed by:
 | `b` | eMLF surface term | `src/MLF/Frontend/Syntax.hs` (`Expr`, plus `SrcType`/`SrcScheme`) |
 | `χ` | constraint graph | `src/MLF/Constraint/Types.hs` (`Constraint`) |
 | `n` | type node in the graph | `NodeId` + `TyNode` in `Constraint.cNodes` |
-| `g` | binding-tree node (generalization site) | `NodeId` (often a `TyForall` node) + `Constraint.cBindParents` |
+| `g` | binding-tree node (generalization site) | `GenNodeId`/`GenNode` + `Constraint.cBindParents` |
 | `≤` edge | instantiation constraint | `InstEdge` (`Constraint.cInstEdges`) |
 | `=` edge | unification constraint | `UnifyEdge` (`Constraint.cUnifyEdges`) |
 | `s·τ` | expansion node / expansion variable | `TyExp{ tnExpVar :: ExpVarId }` + `Expansion` recipes in `Presolution` |

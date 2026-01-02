@@ -51,13 +51,13 @@ Problem: `emptyConstraint`, `expectRight`/`requireRight`, node lookup helpers, a
 Problem: multiple hand-rolled “structural children” functions and ad-hoc case splits.
 
 [x] Add a single canonical helper in `src/MLF/Constraint/Types.hs`:
-  - `structuralChildren :: TyNode -> [NodeId]` (includes `TyRoot` children)
+  - `structuralChildren :: TyNode -> [NodeId]` (arrow/forall/exp children)
 [x] Replace duplicates/ad-hoc logic in:
   - `src/MLF/Binding/Tree.hs` (there are multiple copies today)
   - `src/MLF/Constraint/Normalize.hs`
   - `src/MLF/Constraint/Solve.hs`
   - `src/MLF/Constraint/Presolution/Core.hs` (the “termDagRootsUnder” block)
-[x] Ensure traversal order is preserved where it matters (arrow dom before cod, forall body, exp body, root children).
+[x] Ensure traversal order is preserved where it matters (arrow dom before cod, forall body, exp body).
 
 ### 3) Occurs-check / reachability duplication (medium)
 Problem: 3 different occurs-check implementations across Normalize / Presolution / Solve.

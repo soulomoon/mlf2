@@ -168,28 +168,7 @@ ensureBindingParents = do
                                         then bp
                                         else IntMap.insert childKey (p, BindFlex) bp
                 bp1 = IntSet.foldl' addMissing bp0 allTypeIds
-                gens1 =
-                    case rootGen of
-                        Just rootRef@(GenRef gid) ->
-                            let rootsForGen =
-                                    [ NodeId nidInt
-                                    | nidInt <- IntSet.toList termRoots
-                                    , IntMap.lookup (nodeRefKey (typeRef (NodeId nidInt))) bp1 == Just (rootRef, BindFlex)
-                                    ]
-                                gens0 = cGenNodes c0
-                                update genNode =
-                                    let existing = gnSchemes genNode
-                                        combined = existing ++ rootsForGen
-                                        dedup =
-                                            IntMap.elems $
-                                                IntMap.fromList
-                                                    [ (getNodeId n, n)
-                                                    | n <- combined
-                                                    ]
-                                    in genNode { gnSchemes = dedup }
-                            in IntMap.adjust update (getGenNodeId gid) gens0
-                        _ -> cGenNodes c0
-            put st0 { psConstraint = c0 { cBindParents = bp1, cGenNodes = gens1 } }
+            put st0 { psConstraint = c0 { cBindParents = bp1 } }
 
 edgeInteriorExact :: NodeId -> PresolutionM IntSet.IntSet
 edgeInteriorExact root0 = do

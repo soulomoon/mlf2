@@ -14,6 +14,7 @@ import MLF.Constraint.Solve (SolveResult(..))
 import MLF.Elab.Types
 import MLF.Elab.Generalize (generalizeAt)
 import MLF.Elab.Phi (phiFromEdgeWitnessWithTrace)
+import MLF.Elab.Inst (applyInstantiation, schemeToType)
 import MLF.Elab.Reify (reifyTypeWithNames)
 import qualified MLF.Constraint.Solve as Solve (frWith)
 import MLF.Constraint.Presolution (EdgeTrace)
@@ -65,8 +66,14 @@ expansionToInst res expn = case expn of
 
 type Env = Map.Map VarName SchemeInfo
 
-elaborate :: SolveResult -> IntMap.IntMap EdgeWitness -> IntMap.IntMap EdgeTrace -> AnnExpr -> Either ElabError ElabTerm
-elaborate res edgeWitnesses edgeTraces ann = go Map.empty ann
+elaborate
+    :: SolveResult
+    -> IntMap.IntMap EdgeWitness
+    -> IntMap.IntMap EdgeTrace
+    -> IntMap.IntMap Expansion
+    -> AnnExpr
+    -> Either ElabError ElabTerm
+elaborate res edgeWitnesses edgeTraces edgeExpansions ann = go Map.empty ann
   where
     canonical = Solve.frWith (srUnionFind res)
 
@@ -124,13 +131,39 @@ elaborate res edgeWitnesses edgeTraces ann = go Map.empty ann
             Nothing -> Right InstId
             Just ew -> do
                 let mTrace = IntMap.lookup eid edgeTraces
+                    mExpansion = IntMap.lookup eid edgeExpansions
                 let mSchemeInfo = case funAnn of
                         AVar v _ -> Map.lookup v env
                         _ -> Nothing
                     mSchemeInfo' = case mSchemeInfo of
                         Just si | IntMap.null (siSubst si) -> Nothing
                         _ -> mSchemeInfo
-                phiFromEdgeWitnessWithTrace res mSchemeInfo' mTrace ew
+                phi <- phiFromEdgeWitnessWithTrace res mSchemeInfo' mTrace ew
+                simplifyInstForScheme mSchemeInfo mExpansion phi
+
+    simplifyInstForScheme
+        :: Maybe SchemeInfo
+        -> Maybe Expansion
+        -> Instantiation
+        -> Either ElabError Instantiation
+    simplifyInstForScheme mSchemeInfo mExpansion phi =
+        case (mSchemeInfo, mExpansion) of
+            (Just si, Just (ExpInstantiate args)) -> do
+                let subst = siSubst si
+                    schemeTy = schemeToType (siScheme si)
+                argTys <- mapM (reifyTypeWithNames res subst) args
+                case applyInstantiation schemeTy phi of
+                    Left _ -> Right phi
+                    Right targetTy -> do
+                        let candidates = [instSeqApps (take k argTys) | k <- [0 .. length argTys]]
+                            matches inst =
+                                case applyInstantiation schemeTy inst of
+                                    Right ty -> alphaEqType ty targetTy
+                                    Left _ -> False
+                        pure $ case filter matches candidates of
+                            (inst:_) -> inst
+                            [] -> phi
+            _ -> Right phi
 
 -- | Substitute names in a term (and its embedded types)
 substInTerm :: IntMap.IntMap String -> ElabTerm -> ElabTerm
@@ -176,3 +209,31 @@ substInInst subst i = case i of
     InstUnder v i' -> InstUnder v (substInInst subst i')
     InstInside i' -> InstInside (substInInst subst i')
     InstSeq i1 i2 -> InstSeq (substInInst subst i1) (substInInst subst i2)
+
+instSeqApps :: [ElabType] -> Instantiation
+instSeqApps tys = case map InstApp tys of
+    [] -> InstId
+    [inst] -> inst
+    insts -> foldr1 InstSeq insts
+
+alphaEqType :: ElabType -> ElabType -> Bool
+alphaEqType = go Map.empty Map.empty
+  where
+    go envL envR t1 t2 = case (t1, t2) of
+        (TVar a, TVar b) ->
+            case Map.lookup a envL of
+                Just b' -> b == b'
+                Nothing -> case Map.lookup b envR of
+                    Just a' -> a == a'
+                    Nothing -> a == b
+        (TArrow a1 b1, TArrow a2 b2) ->
+            go envL envR a1 a2 && go envL envR b1 b2
+        (TBase b1, TBase b2) -> b1 == b2
+        (TBottom, TBottom) -> True
+        (TForall v1 mb1 body1, TForall v2 mb2 body2) ->
+            let bound1 = maybe TBottom id mb1
+                bound2 = maybe TBottom id mb2
+                envL' = Map.insert v1 v2 envL
+                envR' = Map.insert v2 v1 envR
+            in go envL envR bound1 bound2 && go envL' envR' body1 body2
+        _ -> False

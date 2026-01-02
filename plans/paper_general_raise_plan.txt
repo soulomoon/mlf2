@@ -46,6 +46,6 @@ Remaining gaps (still true)
 ---------------------------
 - Witness normalization is intentionally lightweight (barrier-aware
   simplifications), not the full Yakobowski’08 normalization algorithm.
-- The solver now enforces a synthetic `TyRoot` (via `MLF.Constraint.Root`) so the
-  binding tree is connected; “no LCA” is treated as a binding-tree error rather
-  than a silent no-op.
+- The solver now enforces a single gen-rooted binding tree so the binding tree
+  is connected; “no LCA” is treated as a binding-tree error rather than a
+  silent no-op.
