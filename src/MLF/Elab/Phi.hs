@@ -763,37 +763,9 @@ phiFromEdgeWitnessWithTrace res mSchemeInfo mTrace ew = do
                                     mbCandidate <- findCandidate [minIdx .. length idsSynced - 1]
                                     case mbCandidate of
                                         Nothing ->
-                                            if minIdx /= 0
-                                                then go binderKeys namedSet ty idsSynced phi rest lookupBinder
-                                                else do
-                                                    ctxOrErr <-
-                                                        contextToNodeBoundWithOrderKeys
-                                                            canonicalNode
-                                                            orderKeys
-                                                            (srConstraint res)
-                                                            namedSet
-                                                            (canonicalNode orderRoot)
-                                                            nC
-                                                    case ctxOrErr of
-                                                        Nothing ->
-                                                            go binderKeys namedSet ty idsSynced phi rest lookupBinder
-                                                        Just ctxMn -> do
-                                                            let hAbsBeta = InstSeq (InstInside (InstAbstr "β")) InstElim
-                                                                aliasOld = applyContext ctxMn hAbsBeta
-
-                                                                local =
-                                                                    instMany
-                                                                        [ InstIntro
-                                                                        , InstInside (InstBot nodeTy)
-                                                                        , InstUnder "β" aliasOld
-                                                                        ]
-
-                                                                inst = local
-
-                                                            ty' <- applyInst "OpRaise(non-spine)" ty inst
-                                                            ids1 <- insertAt 0 (Just n) idsSynced
-                                                            let ids2 = resyncIds ty' ids1
-                                                            go binderKeys namedSet ty' ids2 (composeInst phi inst) rest lookupBinder
+                                            Left $
+                                                InstantiationError $
+                                                    "OpRaise (non-spine): missing context for " ++ show nC
                                         Just (insertIdx, ctxMn) -> do
                                             let prefixBefore = take insertIdx names
                                                 hAbsBeta = InstSeq (InstInside (InstAbstr "β")) InstElim
