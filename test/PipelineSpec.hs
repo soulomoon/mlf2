@@ -6,7 +6,7 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Set as Set
 import Test.Hspec
 
-import MLF.Elab.Pipeline (generalizeAt, applyRedirectsToAnn, ElabScheme(..), ElabType(..))
+import MLF.Elab.Pipeline (generalizeAt, applyRedirectsToAnn, runPipelineElab, ElabScheme(..), Pretty(..))
 import MLF.Frontend.Syntax
 import MLF.Frontend.ConstraintGen
 import MLF.Constraint.Normalize
@@ -15,6 +15,7 @@ import MLF.Constraint.Presolution
 import MLF.Constraint.Solve
 import MLF.Constraint.Types
 import qualified MLF.Binding.Tree as Binding
+import SpecUtil (collectVarNodes)
 
 spec :: Spec
 spec = describe "Pipeline (Phases 1-5)" $ do
@@ -32,12 +33,12 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                                 [GenRef gid] -> genRef gid
                                 roots -> error ("PipelineSpec: unexpected binding roots " ++ show roots)
                     case generalizeAt res scopeRoot root of
-                        Right (Forall binds _ty, _subst) ->
-                            case binds of
-                                [ ("a", Just (TBase (BaseTy "Int")))
-                                    , ("b", Just (TArrow (TVar "a") (TVar "a")))
-                                    ] -> pure ()
-                                other -> expectationFailure $ "Expected Int + arrow binders, got " ++ show other
+                        Right (Forall binds ty, _subst) -> do
+                            binds `shouldBe` []
+                            let tyStr = pretty ty
+                            tyStr `shouldSatisfy` ("∀(" `isInfixOf`)
+                            tyStr `shouldSatisfy` ("⩾ Int" `isInfixOf`)
+                            tyStr `shouldSatisfy` ("->" `isInfixOf`)
                         Left err -> expectationFailure $ "Generalize error: " ++ show err
                 Left err -> expectationFailure err
 
@@ -99,6 +100,27 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 noExpNodes nodes
                 cInstEdges c `shouldBe` []
                 cUnifyEdges c `shouldBe` []
+
+    it "redirected let-use sites keep polymorphic schemes" $ do
+        -- let id = \x. x in id id
+        let expr =
+                ELet "id" (ELam "x" (EVar "x"))
+                    (EApp (EVar "id") (EVar "id"))
+        case runPipelineWithPresolution expr of
+            Left err -> expectationFailure err
+            Right (pres, ann) -> do
+                let redirects = prRedirects pres
+                    varNodes = collectVarNodes "id" ann
+                    redirected =
+                        [ nid
+                        | nid <- varNodes
+                        , chaseRedirects redirects nid /= nid
+                        ]
+                varNodes `shouldSatisfy` (not . null)
+                redirected `shouldSatisfy` (not . null)
+        case runPipelineElab Set.empty expr of
+            Left err -> expectationFailure err
+            Right (_term, ty) -> pretty ty `shouldSatisfy` ("∀" `isInfixOf`)
 
     it "generalizes reused constructors via make const" $ do
         -- let make x = (\z -> x) in let c1 = make 2 in let c2 = make False in c1 True
@@ -190,9 +212,18 @@ runPipelineWithInternals expr = do
             Right (res, ann')
         vs -> Left ("validateSolvedGraph failed:\n" ++ unlines vs)
 
+runPipelineWithPresolution :: Expr -> Either String (PresolutionResult, AnnExpr)
+runPipelineWithPresolution expr = do
+    ConstraintResult{ crConstraint = c0, crAnnotated = ann } <-
+        first show (generateConstraints defaultPolySyms expr)
+    let c1 = normalize c0
+    acyc <- first show (checkAcyclicity c1)
+    pres <- first show (computePresolution acyc c1)
+    pure (pres, ann)
+
 runPipeline :: Expr -> Either String (SolveResult, NodeId)
 runPipeline expr = do
-    ConstraintResult{ crConstraint = c0, crRoot = root } <-
+    ConstraintResult{ crConstraint = c0, crRoot = root, crAnnotated = _ann } <-
         first show (generateConstraints defaultPolySyms expr)
     let c1 = normalize c0
     acyc <- first show (checkAcyclicity c1)
@@ -215,6 +246,7 @@ chaseRedirects :: IntMap.IntMap NodeId -> NodeId -> NodeId
 chaseRedirects redirects nid = case IntMap.lookup (getNodeId nid) redirects of
     Just n' -> if n' == nid then nid else chaseRedirects redirects n'
     Nothing -> nid
+
 
 validateStrict :: SolveResult -> Expectation
 validateStrict res =

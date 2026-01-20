@@ -8,6 +8,7 @@ import qualified Data.Set as Set
 
 import MLF.Elab.Inst (applyInstantiation, schemeToType, splitForalls)
 import MLF.Elab.Types
+import Data.Functor.Foldable (cata)
 
 isValue :: ElabTerm -> Bool
 isValue term = case term of
@@ -72,56 +73,64 @@ boundType :: Maybe ElabType -> ElabType
 boundType = maybe TBottom id
 
 freeTermVars :: ElabTerm -> Set.Set String
-freeTermVars term = case term of
-    EVar v -> Set.singleton v
-    ELit _ -> Set.empty
-    ELam v _ body -> Set.delete v (freeTermVars body)
-    EApp f a -> Set.union (freeTermVars f) (freeTermVars a)
-    ELet v _ rhs body ->
-        Set.union (freeTermVars rhs) (Set.delete v (freeTermVars body))
-    ETyAbs _ _ body -> freeTermVars body
-    ETyInst e _ -> freeTermVars e
+freeTermVars = cata alg
+  where
+    alg term = case term of
+        EVarF v -> Set.singleton v
+        ELitF _ -> Set.empty
+        ELamF v _ body -> Set.delete v body
+        EAppF f a -> Set.union f a
+        ELetF v _ rhs body ->
+            Set.union rhs (Set.delete v body)
+        ETyAbsF _ _ body -> body
+        ETyInstF e _ -> e
 
 freeTypeVarsType :: ElabType -> Set.Set String
-freeTypeVarsType ty = case ty of
-    TVar v -> Set.singleton v
-    TArrow a b -> Set.union (freeTypeVarsType a) (freeTypeVarsType b)
-    TBase _ -> Set.empty
-    TBottom -> Set.empty
-    TForall v mb body ->
-        let boundFv = maybe Set.empty freeTypeVarsType mb
-            bodyFv = Set.delete v (freeTypeVarsType body)
-        in Set.union boundFv bodyFv
+freeTypeVarsType = cata alg
+  where
+    alg ty = case ty of
+        TVarF v -> Set.singleton v
+        TArrowF a b -> Set.union a b
+        TBaseF _ -> Set.empty
+        TBottomF -> Set.empty
+        TForallF v mb body ->
+            let boundFv = maybe Set.empty id mb
+                bodyFv = Set.delete v body
+            in Set.union boundFv bodyFv
 
 freeTypeVarsScheme :: ElabScheme -> Set.Set String
 freeTypeVarsScheme sch = freeTypeVarsType (schemeToType sch)
 
 freeTypeVarsInst :: Instantiation -> Set.Set String
-freeTypeVarsInst inst = case inst of
-    InstId -> Set.empty
-    InstApp t -> freeTypeVarsType t
-    InstBot t -> freeTypeVarsType t
-    InstIntro -> Set.empty
-    InstElim -> Set.empty
-    InstAbstr v -> Set.singleton v
-    InstInside i -> freeTypeVarsInst i
-    InstSeq a b -> Set.union (freeTypeVarsInst a) (freeTypeVarsInst b)
-    InstUnder v i -> Set.delete v (freeTypeVarsInst i)
+freeTypeVarsInst = cata alg
+  where
+    alg inst = case inst of
+        InstIdF -> Set.empty
+        InstAppF t -> freeTypeVarsType t
+        InstBotF t -> freeTypeVarsType t
+        InstIntroF -> Set.empty
+        InstElimF -> Set.empty
+        InstAbstrF v -> Set.singleton v
+        InstInsideF i -> i
+        InstSeqF a b -> Set.union a b
+        InstUnderF v i -> Set.delete v i
 
 freeTypeVarsTerm :: ElabTerm -> Set.Set String
-freeTypeVarsTerm term = case term of
-    EVar _ -> Set.empty
-    ELit _ -> Set.empty
-    ELam _ ty body -> Set.union (freeTypeVarsType ty) (freeTypeVarsTerm body)
-    EApp f a -> Set.union (freeTypeVarsTerm f) (freeTypeVarsTerm a)
-    ELet _ sch rhs body ->
-        Set.unions [freeTypeVarsScheme sch, freeTypeVarsTerm rhs, freeTypeVarsTerm body]
-    ETyAbs v mb body ->
-        let boundFv = maybe Set.empty freeTypeVarsType mb
-            bodyFv = Set.delete v (freeTypeVarsTerm body)
-        in Set.union boundFv bodyFv
-    ETyInst e inst ->
-        Set.union (freeTypeVarsTerm e) (freeTypeVarsInst inst)
+freeTypeVarsTerm = cata alg
+  where
+    alg term = case term of
+        EVarF _ -> Set.empty
+        ELitF _ -> Set.empty
+        ELamF _ ty body -> Set.union (freeTypeVarsType ty) body
+        EAppF f a -> Set.union f a
+        ELetF _ sch rhs body ->
+            Set.unions [freeTypeVarsScheme sch, rhs, body]
+        ETyAbsF v mb body ->
+            let boundFv = maybe Set.empty freeTypeVarsType mb
+                bodyFv = Set.delete v body
+            in Set.union boundFv bodyFv
+        ETyInstF e inst ->
+            Set.union e (freeTypeVarsInst inst)
 
 freshTermNameFrom :: String -> Set.Set String -> String
 freshTermNameFrom base used =

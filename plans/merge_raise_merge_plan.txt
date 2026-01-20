@@ -3,8 +3,8 @@ Emitting Merge/RaiseMerge/Raise from Presolution — Status & Plan
 
 Context
 -------
-In papers/xmlf.txt (Rémy & Yakobowski), solved instantiation edges come with a
-normalized instance-operation witness Ω. Figure 10 translates Ω to an xMLF
+In `papers/these-finale-english.txt` (see also `papers/xmlf.txt`), solved instantiation
+edges come with a normalized instance-operation witness Ω. Figure 10 translates Ω to an xMLF
 instantiation (Φ), and Ω may contain operations like:
   - Graft(σ, n)
   - Weaken(n)
@@ -15,7 +15,7 @@ instantiation (Φ), and Ω may contain operations like:
 In this repo, these are represented as `InstanceOp` constructors in
 `src/MLF/Constraint/Types.hs` (`OpGraft`, `OpWeaken`, `OpMerge`, `OpRaise`, `OpRaiseMerge`),
 while xMLF quantifier-introduction `O` (paper Figure 1) is *not* part of the
-witness language Ω (paper Figure 10).
+witness language Ω (paper Figure 10; see `papers/xmlf.txt` for numbering).
 
 Repo alignment: we store the number of `O` steps demanded by the presolution
 expansion recipe (e.g. `ExpForall`) as `EdgeWitness.ewForallIntros` and append
@@ -61,7 +61,8 @@ Bottom line:
   - This does NOT make the current implementation “invalid”: the solver can be
     sound for the fragment it implements, and elaboration can still be correct
     because it instantiates with the solved (reified) types.
-  - We are still incomplete vs `xmlf.txt`’s witness machinery:
+  - We are still incomplete vs `papers/these-finale-english.txt`’s witness machinery
+    (see `papers/xmlf.txt`):
       * Witness normalization is lightweight, not the full Yakobowski’08 algorithm.
       * The repo enforces a single gen-rooted binding tree; “no LCA” is treated
         as a binding-tree error (rather than a silent no-op).
@@ -109,7 +110,8 @@ Implementation plan (implemented phases)
 
 Goal:
   Preserve the current inference pipeline, while making per-edge witnesses
-  closer to `papers/xmlf.txt` Figure 10 by emitting Merge/RaiseMerge/Raise
+  closer to `papers/these-finale-english.txt` (see `papers/xmlf.txt` Figure 10) by emitting
+  Merge/RaiseMerge/Raise
   operations (and translating them via Φ).
 
 Non-goals (scope):
@@ -168,7 +170,8 @@ Phase 3 — Integrate + normalize ops (implemented)
 
 Phase 4 — Scope via binding-edge Raise + explicit Raise recording (implemented)
   Paper anchor:
-    - `papers/xmlf.txt` uses `Raise(n)` in the witness language Ω (Fig. 10, §3.4)
+    - `papers/these-finale-english.txt` uses `Raise(n)` in the witness language Ω
+      (see `papers/xmlf.txt` Fig. 10, §3.4)
       to mean “raise a binding edge” (extrude a node one level higher).
     - ICFP'08 (§1.2) describes the same graph operation operationally and notes
       the analogy with ML rank adjustment: before merging two vars, raise them
@@ -197,8 +200,9 @@ Phase 4 — Scope via binding-edge Raise + explicit Raise recording (implemented
       LCA and interior computations are well-defined on representatives.
 
   Note:
-    - This aligns with `papers/xmlf.txt` by making `Raise` a real graph transformation
-      (not UF metadata) and recording the same steps in Ω for Φ translation.
+    - This aligns with `papers/these-finale-english.txt` (see `papers/xmlf.txt`) by making
+      `Raise` a real graph transformation (not UF metadata) and recording the same steps in Ω
+      for Φ translation.
 
 Phase 5 — Tests (implemented)
   A. `test/PresolutionSpec.hs` covers:
@@ -212,7 +216,8 @@ Phase 5 — Tests (implemented)
 
 Phase 6 — Make Ω executable on χe (implemented)
   Paper anchor:
-    - `papers/xmlf.txt` §3.1 defines the expansion χe of an instantiation edge as χ
+    - `papers/these-finale-english.txt` (see `papers/xmlf.txt` §3.1) defines the expansion
+      χe of an instantiation edge as χ
       extended with a copy of the type scheme plus a unification edge, and §3.4
       treats Ω as a derivation χe ⊑ χ where ω operations are the *actual graph
       transformations* on χe.
@@ -287,7 +292,7 @@ Phase 8 — Φ placement + paper ≺ (implemented)
   ----------------------------------------------------------------------
 
   Paper anchor
-    - `papers/xmlf.txt` Fig. 10:
+    - `papers/these-finale-english.txt` (see `papers/xmlf.txt` Fig. 10):
         Φξ (Raise(n)) = C^r_m { O; ∀ (⩾ Tξ(n)); ∀ (βn ⩾) C^n_m {h!βn i} }
       where
         m = min≺ { m | n ≻−→≻−→←−≺ m ∧ n ≺ m }.

@@ -34,14 +34,16 @@ import Control.Monad (when, foldM)
 import Control.Monad.State.Strict
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
+import qualified Data.IntSet as IntSet
 
+import qualified Data.Set as Set
 import qualified MLF.Binding.Adjustment as BindingAdjustment
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Util.UnionFind as UnionFind
 import qualified MLF.Constraint.Canonicalize as Canonicalize
 import qualified MLF.Constraint.Traversal as Traversal
 import qualified MLF.Constraint.Unify.Decompose as UnifyDecompose
-import MLF.Constraint.Types (NodeId(..), NodeRef(..), TyNode(..), Constraint(..), InstEdge(..), UnifyEdge(..), BindFlag(..), maxNodeIdKeyOr0, lookupNodeIn, nodeRefFromKey, nodeRefKey, typeRef)
+import MLF.Constraint.Types (GenNode(..), NodeId(..), NodeRef(..), TyNode(..), Constraint(..), InstEdge(..), UnifyEdge(..), BindFlag(..), maxNodeIdKeyOr0, lookupNodeIn, nodeRefFromKey, nodeRefKey, typeRef)
 
 {- Note [Normalization / Local Transformations]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -222,6 +224,7 @@ graftInstEdges = do
 -- presolution decisions. See Note [Grafting Cases].
 partitionGraftable :: [InstEdge] -> IntMap TyNode -> NormalizeM ([InstEdge], [InstEdge])
 partitionGraftable edges nodes = do
+    polySyms <- gets (cPolySyms . nsConstraint)
     uf <- gets nsUnionFind
     let isGraftable edge =
             let leftId = findRoot uf (instLeft edge)
@@ -229,10 +232,10 @@ partitionGraftable edges nodes = do
                 leftNode = IntMap.lookup (getNodeId leftId) nodes
                 rightNode = IntMap.lookup (getNodeId rightId) nodes
             in case (leftNode, rightNode) of
-                -- Variable ≤ Structure: graft the structure
+                -- Variable ≤ Structure: graft arrows; base only if rigid (not Poly)
                 (Just TyVar {}, Just TyArrow {}) -> True
-                (Just TyVar {}, Just TyBase {}) -> True
-                (Just TyVar {}, Just TyBottom {}) -> True
+                (Just TyVar {}, Just TyBase{ tnBase = base }) ->
+                    not (Set.member base polySyms)
                 -- Structure ≤ Structure: decompose or check compatibility
                 (Just TyArrow {}, Just TyArrow {}) -> True
                 (Just TyBase {}, Just TyBase {}) -> True
@@ -263,8 +266,8 @@ Cases handled during normalization (Phase 2):
   Var ≤ Arrow    → Graft: rewrite α into (α₁ → α₂), then unify α₁/α₂ with
                    the arrow's components (core grafting operation).
 
-  Var ≤ Base     → Unify variable with base type directly
-                   (Degenerate case: base types have no substructure.)
+  Var ≤ Base     → Graft if the base is rigid; keep for presolution only when
+                   the base symbol is polymorphic (paper Poly set).
 
   Arrow ≤ Arrow  → Decompose: emit (dom₁ = dom₂) and (cod₁ = cod₂)
                    (Standard unification of constructors with same head.)
@@ -318,6 +321,12 @@ graftEdge edge = do
     c <- gets nsConstraint
     uf <- gets nsUnionFind
     let nodes = cNodes c
+        schemeRoots =
+            IntSet.fromList
+                [ getNodeId root
+                | gen <- IntMap.elems (cGenNodes c)
+                , root <- gnSchemes gen
+                ]
         leftId = findRoot uf (instLeft edge)
         rightId = findRoot uf (instRight edge)
         leftNode = IntMap.lookup (getNodeId leftId) nodes
@@ -346,7 +355,10 @@ graftEdge edge = do
                             setBindParentRefNorm (typeRef bnd) parentRef flag
             let boundEdges =
                     case mbBound of
-                        Just bnd | bnd /= leftId -> [UnifyEdge bnd leftId]
+                        Just bnd
+                            | bnd /= leftId
+                            , not (IntSet.member (getNodeId leftId) schemeRoots) ->
+                                [UnifyEdge bnd leftId]
                         _ -> []
             pure $
                 Just
@@ -360,7 +372,10 @@ graftEdge edge = do
         (Just TyVar { tnBound = mbBound }, Just TyBase {}) ->
             let boundEdges =
                     case mbBound of
-                        Just bnd | bnd /= rightId -> [UnifyEdge bnd rightId]
+                        Just bnd
+                            | bnd /= rightId
+                            , not (IntSet.member (getNodeId leftId) schemeRoots) ->
+                                [UnifyEdge bnd rightId]
                         _ -> []
             in pure $ Just (UnifyEdge leftId rightId : boundEdges)
 
@@ -368,7 +383,10 @@ graftEdge edge = do
         (Just TyVar { tnBound = mbBound }, Just TyBottom {}) ->
             let boundEdges =
                     case mbBound of
-                        Just bnd | bnd /= rightId -> [UnifyEdge bnd rightId]
+                        Just bnd
+                            | bnd /= rightId
+                            , not (IntSet.member (getNodeId leftId) schemeRoots) ->
+                                [UnifyEdge bnd rightId]
                         _ -> []
             in pure $ Just (UnifyEdge leftId rightId : boundEdges)
 

@@ -14,7 +14,7 @@ module MLF.Constraint.Presolution.ForallIntro (
 
 import Control.Monad (forM_, unless, when)
 import Control.Monad.Except (throwError)
-import Control.Monad.State (gets)
+import Control.Monad.State (gets, modify')
 import Data.List (partition, sortBy)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
@@ -34,7 +34,8 @@ When we materialize `ExpForall`, we introduce a fresh `TyForall` wrapper node
 in the term-DAG and update the binding tree + variable-bound store to match the
 `ForallSpec`.
 
-In the paper (`papers/xmlf.txt`), the ω operations act on χe’s binding edges,
+In the paper (`papers/these-finale-english.txt`; see `papers/xmlf.txt`), the ω
+operations act on χe’s binding edges,
 and binder shapes are derived from binding edges (Q(n)). We therefore interpret
 `ForallSpec` as describing which *existing* variables in the body become
 quantified at the new binder, rather than allocating disconnected “fresh”
@@ -50,16 +51,45 @@ introduceForallFromSpec spec bodyRoot = do
         bodyC = canonical bodyRoot
         oldParent = Binding.lookupBindParent c0 (typeRef bodyC)
     newId <- createFreshNodeId
-    let node = TyForall newId bodyRoot
+    let node = TyForall newId bodyC
     registerNode newId node
+    rewireStructuralParents canonical bodyC newId
     -- The body is now inside the binder.
-    setBindParentM (typeRef bodyRoot) (typeRef newId, BindFlex)
+    setBindParentM (typeRef bodyC) (typeRef newId, BindFlex)
     -- Preserve the body's former binding parent (if any) on the new binder.
     case oldParent of
         Just parentInfo -> setBindParentM (typeRef newId) parentInfo
         Nothing -> pure ()
-    bindForallBindersFromSpec newId bodyRoot spec
+    bindForallBindersFromSpec newId bodyC spec
     pure newId
+
+rewireStructuralParents :: (NodeId -> NodeId) -> NodeId -> NodeId -> PresolutionM ()
+rewireStructuralParents canonical old new =
+    modify' $ \st ->
+        let c0 = psConstraint st
+            nodes0 = cNodes c0
+            oldC = canonical old
+            rep nid =
+                if canonical nid == oldC
+                    then new
+                    else nid
+            updateNode node = case node of
+                TyArrow{ tnDom = d, tnCod = c } ->
+                    node { tnDom = rep d, tnCod = rep c }
+                TyForall{ tnBody = b } ->
+                    node { tnBody = rep b }
+                TyExp{} ->
+                    node
+                _ -> node
+            nodes1 =
+                IntMap.mapWithKey
+                    (\k node ->
+                        if k == getNodeId new
+                            then node
+                            else updateNode node
+                    )
+                    nodes0
+        in st { psConstraint = c0 { cNodes = nodes1 } }
 
 bindForallBindersFromSpec :: NodeId -> NodeId -> ForallSpec -> PresolutionM ()
 bindForallBindersFromSpec forallId bodyRoot ForallSpec{ fsBinderCount = k, fsBounds = bounds } = do
@@ -125,7 +155,18 @@ bindForallBindersFromSpec forallId bodyRoot ForallSpec{ fsBinderCount = k, fsBou
         (freeLike0, other0) = partition isFreeLike liveVarsReachable
         freeLike = sortBy (Order.compareNodesByOrderKey orderKeys) freeLike0
         other = sortBy (Order.compareNodesByOrderKey orderKeys) (filter isFlexBound other0)
-        candidates = freeLike ++ other
+        candidates0 = freeLike ++ other
+        bodyIsWrapper =
+            case IntMap.lookup (getNodeId bodyC) nodes0 of
+                Just TyVar{} ->
+                    case VarStore.lookupVarBound c0 bodyC of
+                        Just _ -> True
+                        Nothing -> False
+                _ -> False
+        candidates =
+            if bodyIsWrapper
+                then filter (/= bodyC) candidates0
+                else candidates0
 
     unless (null missing) $
         throwError $

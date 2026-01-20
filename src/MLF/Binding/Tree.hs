@@ -5,7 +5,7 @@ Copyright   : (c) 2024
 License     : BSD-3-Clause
 
 This module implements the binding-tree data model and operations from
-@papers/xmlf.txt@ §3.1. The binding tree is an explicit representation of
+@papers/these-finale-english.txt@ (see @papers/xmlf.txt@ §3.1). The binding tree is an explicit representation of
 which nodes are bound by which other nodes, with flexible/rigid flags.
 
 Note [Binding Tree]
@@ -53,6 +53,9 @@ module MLF.Binding.Tree (
     -- * Invariant checking
     checkBindingTree,
     checkBindingTreeUnder,
+    checkNoGenFallback,
+    checkSchemeClosure,
+    checkSchemeClosureUnder,
     isUpper,
     -- * Node classification (paper §3.1)
     NodeKind(..),
@@ -67,7 +70,7 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.IntSet (IntSet)
 import Data.List (sortBy)
-import Data.Maybe (mapMaybe)
+import Data.Maybe (listToMaybe, mapMaybe)
 
 import qualified MLF.Util.OrderKey as OrderKey
 import qualified MLF.Constraint.VarStore as VarStore
@@ -127,7 +130,7 @@ structuralChildrenRef c ref = case ref of
             Nothing -> []
             Just genNode -> map TypeRef (gnSchemes genNode)
 
--- | Paper node kinds (`papers/xmlf.txt` §3.1).
+-- | Paper node kinds (`papers/these-finale-english.txt`; see `papers/xmlf.txt` §3.1).
 --
 -- These are derived from binding-edge flags along the binding-parent path.
 data NodeKind
@@ -321,6 +324,10 @@ boundFlexChildrenAllUnder canonical c0 binder0 = do
 -- Binders are filtered to those reachable from the binder’s “order root”:
 --   • for a `TyForall`, the body root (paper binding-node translation),
 --   • otherwise, the binder node itself (useful for top-level/generalization).
+--
+-- Note: for `TyForall`, we include both flexibly and rigidly bound TyVar
+-- children. Rigidification can flip binder edges in presolution, but the
+-- quantifier still binds those variables.
 orderedBinders
     :: (NodeId -> NodeId)
     -> Constraint
@@ -343,6 +350,10 @@ orderedBinders canonical c0 binder0 = do
                     case IntMap.lookup (getNodeId binderN) nodes of
                         Just TyForall{ tnBody = body } -> canonical body
                         _ -> binderN
+                includeRigid =
+                    case IntMap.lookup (getNodeId binderN) nodes of
+                        Just TyForall{} -> True
+                        _ -> False
                 reachable =
                     let go visited [] = visited
                         go visited (nid0:rest) =
@@ -363,7 +374,7 @@ orderedBinders canonical c0 binder0 = do
                                                     in structuralChildren node ++ boundKids
                                     in go visited' (map canonical kids ++ rest)
                     in go IntSet.empty [orderRoot]
-            binders <- boundFlexChildrenUnder canonical c0 (TypeRef binderN)
+            binders <- boundChildrenUnder canonical c0 (TypeRef binderN) includeRigid
             let bindersReachable =
                     filter (\nid -> IntSet.member (getNodeId nid) reachable) binders
                 extraChildren nid =
@@ -381,6 +392,46 @@ orderedBinders canonical c0 binder0 = do
                     InvalidBindingTree $
                         "orderedBinders: missing order keys for " ++ show missing
             orderBindersByDeps canonical c0 orderKeys bindersReachable
+  where
+    boundChildrenUnder
+        :: (NodeId -> NodeId)
+        -> Constraint
+        -> NodeRef
+        -> Bool
+        -> Either BindingError [NodeId]
+    boundChildrenUnder canon constraint binderRef includeRigid = do
+        let binderC = canonicalRef canon binderRef
+        (allRoots, bindParents) <- quotientBindParentsUnder canon constraint
+        unless (IntSet.member (nodeRefKey binderC) allRoots) $
+            Left $
+                InvalidBindingTree $
+                    "orderedBinders: binder " ++ show binderC ++ " not in constraint"
+        reverse <$> foldM
+            (\acc (childKey, (parent, flag)) ->
+                let flagOk = flag == BindFlex || (includeRigid && flag == BindRigid)
+                in if parent /= binderC || not flagOk
+                    then pure acc
+                    else
+                        let childRef = nodeRefFromKey childKey
+                        in case childRef of
+                            TypeRef childN ->
+                                case IntMap.lookup (getNodeId childN) (cNodes constraint) of
+                                    Just TyVar{} -> pure (childN : acc)
+                                    Just _ -> pure acc
+                                    Nothing ->
+                                        Left $
+                                            InvalidBindingTree $
+                                                "orderedBinders: child " ++ show childN ++ " not in cNodes"
+                            GenRef gid ->
+                                if IntMap.member (getGenNodeId gid) (cGenNodes constraint)
+                                    then pure acc
+                                    else
+                                        Left $
+                                            InvalidBindingTree $
+                                                "orderedBinders: child " ++ show gid ++ " not in cGenNodes"
+            )
+            []
+            (IntMap.toList bindParents)
 
 orderBindersByDeps
     :: (NodeId -> NodeId)
@@ -515,7 +566,7 @@ bindingLCA c n1 n2 = do
         (lca:_) -> Right lca
 
 -- | Classify a node according to the paper’s instantiable/restricted/locked
--- taxonomy (`papers/xmlf.txt` §3.1).
+-- taxonomy (`papers/these-finale-english.txt`; see `papers/xmlf.txt` §3.1).
 --
 --   - Root: no binding parent.
 --   - Restricted: the node’s own binding edge is rigid.
@@ -538,8 +589,8 @@ nodeKind c nid =
 -- This intentionally does /not/ treat a restricted node as “under rigid” purely
 -- because its own binding edge is rigid: only strict ancestors are considered.
 --
--- Paper anchor (`papers/xmlf.txt` §3.4): normalized witnesses do not perform
--- operations under rigidly bound nodes.
+-- Paper anchor (`papers/these-finale-english.txt`; see `papers/xmlf.txt` §3.4):
+-- normalized witnesses do not perform operations under rigidly bound nodes.
 isUnderRigidBinder :: Constraint -> NodeRef -> Either BindingError Bool
 isUnderRigidBinder c nid = do
     path <- bindingPathToRoot c nid
@@ -646,6 +697,8 @@ quotientBindParentsUnder canonical c0 = do
             , let parentRoot = canonicalRef canonical parent0
             , childRoot /= parentRoot
             , let childRootKey = nodeRefKey childRoot
+            , IntSet.member childRootKey allRoots
+            , IntSet.member (nodeRefKey parentRoot) allRoots
             ]
 
         insertOne :: BindParents -> (Int, (NodeRef, BindFlag)) -> Either BindingError BindParents
@@ -782,6 +835,225 @@ checkBindingTree c = do
                 Left $
                     InvalidBindingTree $
                         "Gen node " ++ show gref ++ " is rigidly bound"
+
+-- | Reject binding trees that would require a gen-ancestor fallback for
+-- type-node binders (Q(n) must be direct children of the type node).
+checkNoGenFallback :: Constraint -> Either BindingError ()
+checkNoGenFallback c = do
+    let nodes = cNodes c
+        reachableFromWithBounds root0 =
+            let go visited [] = visited
+                go visited (nid0:rest) =
+                    let nid = nid0
+                        key = getNodeId nid
+                    in if IntSet.member key visited
+                        then go visited rest
+                        else
+                            let visited' = IntSet.insert key visited
+                                kids =
+                                    case IntMap.lookup key nodes of
+                                        Nothing -> []
+                                        Just node ->
+                                            let boundKids =
+                                                    case node of
+                                                        TyVar{ tnBound = Just bnd } -> [bnd]
+                                                        _ -> []
+                                            in structuralChildren node ++ boundKids
+                            in go visited' (kids ++ rest)
+            in go IntSet.empty [root0]
+
+        firstGenAncestor nid = do
+            path <- bindingPathToRoot c (typeRef nid)
+            pure (listToMaybe [gid | GenRef gid <- drop 1 path])
+
+    forM_ (IntMap.elems nodes) $ \node ->
+        case node of
+            TyForall{} -> do
+                let nid = tnId node
+                direct <- boundFlexChildren c (typeRef nid)
+                when (null direct) $ do
+                    mGen <- firstGenAncestor nid
+                    case mGen of
+                        Nothing -> pure ()
+                        Just gid -> do
+                            genBinders <- boundFlexChildren c (genRef gid)
+                            let orderRoot = tnBody node
+                                reachable = reachableFromWithBounds orderRoot
+                                reachableBinders =
+                                    [ b
+                                    | b <- genBinders
+                                    , IntSet.member (getNodeId b) reachable
+                                    ]
+                            unless (null reachableBinders) $
+                                Left $
+                                    GenFallbackRequired
+                                        { fallbackBinder = nid
+                                        , fallbackGen = gid
+                                        , fallbackBinders = reachableBinders
+                                        }
+            _ -> pure ()
+
+-- | Reject scheme roots that reach named nodes not bound under their gen node.
+checkSchemeClosure :: Constraint -> Either BindingError ()
+checkSchemeClosure = checkSchemeClosureUnder id
+
+-- | Reject scheme roots that reach named nodes not bound under their gen node,
+--   under a canonicalization function.
+checkSchemeClosureUnder :: (NodeId -> NodeId) -> Constraint -> Either BindingError ()
+checkSchemeClosureUnder canonical c0 = do
+    let nodes = cNodes c0
+        isNamedNode nid =
+            case IntMap.lookup (getNodeId nid) nodes of
+                Just TyVar{} -> not (VarStore.isEliminatedVar c0 nid)
+                _ -> False
+    bindParents0 <- canonicalizeBindParentsUnder canonical c0
+    let bindParents = softenBindParents canonical c0 bindParents0
+    let typeEdges = buildTypeEdges nodes
+        schemeRootsByGen =
+            IntMap.map
+                (\gen -> IntSet.fromList (map (getNodeId . canonical) (gnSchemes gen)))
+                (cGenNodes c0)
+        schemeGensByRoot =
+            IntMap.fromListWith
+                IntSet.union
+                [ (getNodeId (canonical root), IntSet.singleton (getGenNodeId (gnId gen)))
+                | gen <- IntMap.elems (cGenNodes c0)
+                , root <- gnSchemes gen
+                ]
+        schemeRootsSet = IntSet.unions (IntMap.elems schemeRootsByGen)
+        namedNodes =
+            [ canonical child
+            | (childKey, (parent, flag)) <- IntMap.toList bindParents
+            , GenRef _ <- [parent]
+            , TypeRef child <- [nodeRefFromKey childKey]
+            , flag == BindFlex
+            , isNamedNode (canonical child)
+            , not (IntSet.member (getNodeId (canonical child)) schemeRootsSet)
+            ]
+        reachableFromWithBounds root0 =
+            let go visited [] = visited
+                go visited (nid0:rest) =
+                    let nid = canonical nid0
+                        key = getNodeId nid
+                    in if IntSet.member key visited
+                        then go visited rest
+                        else
+                            let visited' = IntSet.insert key visited
+                                kids =
+                                    [ NodeId childId
+                                    | childId <- IntSet.toList (IntMap.findWithDefault IntSet.empty key typeEdges)
+                                    ]
+                            in go visited' (kids ++ rest)
+            in go IntSet.empty [canonical root0]
+        firstGenAncestorFor nid =
+            case bindingPathToRootLocal bindParents (typeRef (canonical nid)) of
+                Left _ -> Nothing
+                Right path -> listToMaybe [gid | GenRef gid <- drop 1 path]
+        boundUnderGen allowedGens nid =
+            case firstGenAncestorFor nid of
+                Just gid' -> IntSet.member (getGenNodeId gid') allowedGens
+                Nothing -> True
+
+    let schemeRoots =
+            [ NodeId nid
+            | nid <- IntSet.toList (IntSet.unions (IntMap.elems schemeRootsByGen))
+            ]
+    forM_ schemeRoots $ \root -> do
+        let gid = schemeGenForRoot bindParents root
+        case gid of
+            Nothing -> pure ()
+            Just gid' -> do
+                let reachable = reachableFromWithBounds root
+                    nestedSchemeRoots =
+                        [ r
+                        | r <- schemeRoots
+                        , canonical r /= canonical root
+                        , IntSet.member (getNodeId (canonical r)) reachable
+                        ]
+                    nestedReachable =
+                        IntSet.unions (map reachableFromWithBounds nestedSchemeRoots)
+                    allowedGens =
+                        IntMap.findWithDefault
+                            IntSet.empty
+                            (getNodeId (canonical root))
+                            schemeGensByRoot
+                    ancestorGens =
+                        case bindingPathToRootLocal bindParents (GenRef gid') of
+                            Right path -> IntSet.fromList [ getGenNodeId pathGid | GenRef pathGid <- path ]
+                            Left _ -> IntSet.singleton (getGenNodeId gid')
+                    allowedGens' = IntSet.unions [allowedGens, ancestorGens]
+                    freeNodes0 =
+                        [ n
+                        | n <- namedNodes
+                        , IntSet.member (getNodeId (canonical n)) reachable
+                        , not (IntSet.member (getNodeId (canonical n)) nestedReachable)
+                        , not (boundUnderGen allowedGens' n)
+                        ]
+                unless (null freeNodes0) $
+                    Left $
+                        GenSchemeFreeVars
+                            { schemeRoot = canonical root
+                            , schemeGen = gid'
+                            , freeNodes = freeNodes0
+                            }
+  where
+    buildTypeEdges nodes0 =
+        foldl' addTypeEdges IntMap.empty (IntMap.elems nodes0)
+      where
+        addTypeEdges m node =
+            let parent = canonical (tnId node)
+                boundKids =
+                    case node of
+                        TyVar{ tnBound = Just bnd } -> [bnd]
+                        _ -> []
+                childIds =
+                    IntSet.fromList
+                        [ getNodeId (canonical child)
+                        | child <- structuralChildren node ++ boundKids
+                        ]
+            in if IntSet.null childIds
+                then m
+                else IntMap.insertWith IntSet.union (getNodeId parent) childIds m
+
+    softenBindParents canonical' constraint =
+        let weakened = cWeakenedVars constraint
+            softenOne childKey (parent, flag) =
+                case (flag, nodeRefFromKey childKey) of
+                    (BindRigid, TypeRef childN)
+                        | IntSet.member (getNodeId (canonical' childN)) weakened ->
+                            (parent, BindFlex)
+                    _ -> (parent, flag)
+        in IntMap.mapWithKey softenOne
+
+    schemeGenForRoot bindParents' root0 =
+        let ref0 = typeRef (canonical root0)
+        in firstGenAncestor bindParents' ref0
+
+    firstGenAncestor bindParents' start =
+        go IntSet.empty start
+      where
+        go visited ref
+            | IntSet.member (nodeRefKey ref) visited = Nothing
+            | otherwise =
+                case IntMap.lookup (nodeRefKey ref) bindParents' of
+                    Nothing -> Nothing
+                    Just (parentRef, _) ->
+                        case parentRef of
+                            GenRef gid -> Just gid
+                            TypeRef parentN ->
+                                go (IntSet.insert (nodeRefKey ref) visited) (typeRef (canonical parentN))
+
+    bindingPathToRootLocal bindParents' start =
+        go IntSet.empty [start] (nodeRefKey start)
+      where
+        go visited path key
+            | IntSet.member key visited = Left (BindingCycleDetected (reverse path))
+            | otherwise =
+                case IntMap.lookup key bindParents' of
+                    Nothing -> Right (reverse path)
+                    Just (parentRef, _) ->
+                        go (IntSet.insert key visited) (parentRef : path) (nodeRefKey parentRef)
+
 
 -- | Validate binding-tree invariants on the quotient graph induced by a canonicalization function.
 --
@@ -1008,8 +1280,11 @@ checkBindingTreeUnder canonical c0 = do
                             InvalidBindingTree $
                                 "Gen node bound under type node " ++ show parentRef
             TypeRef _ ->
-                unless (isUpperUnder parentRef childRef) $
-                    Left (ParentNotUpper childRef parentRef)
+                case parentRef of
+                    GenRef _ -> pure ()
+                    _ ->
+                        unless (isUpperUnder parentRef childRef) $
+                            Left (ParentNotUpper childRef parentRef)
 
     -- Root must be a single gen node.
     let roots =

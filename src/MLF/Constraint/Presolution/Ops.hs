@@ -50,8 +50,8 @@ registerNode nid node =
 
 -- | Set a binding parent for a node in the constraint.
 --
--- Paper alignment (`papers/xmlf.txt` §3.1): this mutates the explicit binding
--- tree relation `cBindParents`.
+-- Paper alignment (`papers/these-finale-english.txt`; see `papers/xmlf.txt` §3.1):
+-- this mutates the explicit binding tree relation `cBindParents`.
 setBindParentM :: NodeRef -> (NodeRef, BindFlag) -> PresolutionM ()
 setBindParentM child parentInfo =
     modify' $ \st ->

@@ -9,7 +9,7 @@ Goal
 ----
 Given a solved constraint graph (post-Phase 5) and per-edge witnesses from
 presolution (Phase 4), elaborate an eMLF surface term into an explicitly typed
-xMLF term as in `papers/xmlf.txt` §3:
+xMLF term as in `papers/these-finale-english.txt` (see `papers/xmlf.txt` §3):
 
   - insert type abstractions `Λ(Q(g))` at generalization sites, and
   - insert explicit instantiations `Φ(e)` at instantiation edges.
@@ -37,11 +37,11 @@ Known gaps / future work
   lightweight, ordering-preserving normalization sufficient for current tests.
 - The paper’s application elaboration elaborates both sides; the repo currently
   attaches instantiation to the function position only.
-- Phase 7 (xMLF typechecker + reduction semantics, `papers/xmlf.txt` Fig. 4/5)
+- Phase 7 (xMLF typechecker + reduction semantics, see `papers/these-finale-english.txt`; `papers/xmlf.txt` Fig. 4/5)
   is not implemented.
 
 References
 ----------
 - `roadmap.md` (high-level pipeline)
 - `implementation_notes.md` (paper ↔ repo mapping and alignment notes)
-- `papers/xmlf.txt` §3 (elaboration)
+- `papers/these-finale-english.txt` (elaboration; see `papers/xmlf.txt` §3)

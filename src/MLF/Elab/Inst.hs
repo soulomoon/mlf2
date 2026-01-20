@@ -7,6 +7,7 @@ module MLF.Elab.Inst (
     splitForalls
 ) where
 
+import Data.Functor.Foldable (cata)
 import Data.List (nub)
 
 import MLF.Elab.Types
@@ -51,6 +52,7 @@ applyInstantiation ty inst = snd <$> go 0 ty inst
         -- Bottom instantiation: ⊥ τ = τ
         InstBot tArg -> case t of
             TBottom -> Right (k, tArg)
+            _ | t == tArg -> Right (k, t)
             _ -> Left (InstantiationError ("InstBot expects ⊥, got: " ++ pretty t))
 
         -- Abstract bound: τ (!α) = α (no environment checking here; see xmlf §1.2)
@@ -88,17 +90,17 @@ applyInstantiation ty inst = snd <$> go 0 ty inst
 
     -- free type variables (for freshness)
     ftvType :: ElabType -> [String]
-    ftvType = nub . goF
+    ftvType = nub . cata alg
       where
-        goF ty0 = case ty0 of
-            TVar v -> [v]
-            TArrow a b -> goF a ++ goF b
-            TBase _ -> []
-            TBottom -> []
-            TForall v mb b ->
-                let fvB = goF b
-                    fvBound = maybe [] goF mb
-                in filter (/= v) fvB ++ fvBound
+        alg ty0 = case ty0 of
+            TVarF v -> [v]
+            TArrowF a b -> a ++ b
+            TBaseF _ -> []
+            TBottomF -> []
+            TForallF v mb body ->
+                let fvBound = maybe [] id mb
+                    fvBody = filter (/= v) body
+                in fvBody ++ fvBound
 
     freshName :: Int -> [String] -> (String, Int)
     freshName n used =

@@ -1,12 +1,13 @@
 # Roadmap for Implementing MLF: Inference, Elaboration, and xMLF
 
-> **Foundational Reference:** `papers/xmlf.txt` ("A Church-Style Intermediate Language for MLF", Rémy & Yakobowski, 2009).
-> **Secondary Reference:** ICFP 2008 ("From ML to MLF") for the specific graphic constraint solving algorithm.
-> **Project Goal:** stay paper-faithful to `papers/xmlf.txt` and document/test any intentional deviations.
+> **Foundational Reference:** `papers/these-finale-english.txt` (thesis; more detailed than `papers/xmlf.txt`).
+> **Supplementary Reference:** `papers/xmlf.txt` ("A Church-Style Intermediate Language for MLF", Remy & Yakobowski, 2009).
+> **Supplementary Reference:** ICFP 2008 ("From ML to MLF") for the specific graphic constraint solving algorithm.
+> **Project Goal:** stay paper-faithful to `papers/these-finale-english.txt` and document/test any intentional deviations; use `papers/xmlf.txt` only when the thesis is silent.
 
 **Implementation progress:** See [TODO.md](TODO.md) for the current checklist.
 
-This roadmap outlines the implementation of the full MLF pipeline as described in the foundational 2009 paper. The goal is to take an unannotated ML-like term, infer its principal type using graphic constraints, and **elaborate** it into a fully explicitly typed **xMLF** term. Finally, we implement the xMLF calculus itself to verify type soundness and reduction.
+This roadmap outlines the implementation of the full MLF pipeline as described in the thesis. The goal is to take an unannotated ML-like term, infer its principal type using graphic constraints, and **elaborate** it into a fully explicitly typed **xMLF** term. Finally, we implement the xMLF calculus itself to verify type soundness and reduction.
 
 ⸻
 
@@ -17,7 +18,7 @@ This roadmap outlines the implementation of the full MLF pipeline as described i
 *   **Elaboration (The Core Focus):** Transforms the original term `e` into an **xMLF term** `a` using the presolution `χ_p`. The xMLF term contains explicit type abstractions `Λ(α ≥ τ)` and explicit instantiations `a φ`.
 *   **Target (xMLF):** A Church-style calculus with full type information, suitable for compilation and local type checking.
 
-**Key Paper Sections (from `papers/xmlf.txt`):**
+**Key Paper Sections (see `papers/these-finale-english.txt`; section numbering from `papers/xmlf.txt`):**
 *   **§1 The Calculus:** Syntax of xMLF terms, types, and instantiations.
 *   **§3 Elaboration:** The translation process from eMLF to xMLF based on presolutions.
 *   **§1.4 Reduction:** Small-step reduction semantics for xMLF.
@@ -28,7 +29,7 @@ This roadmap outlines the implementation of the full MLF pipeline as described i
 
 You need two sets of data structures: one for the inference graph (Graphic Types) and one for the target language (xMLF).
 
-### 1. Target Language: xMLF (from `xmlf.txt` §1)
+### 1. Target Language: xMLF (see `papers/these-finale-english.txt`; `papers/xmlf.txt` §1 for numbering)
 *   **Types (`τ`):**
     *   Variables `α`, Arrow `τ → τ`, Bottom `⊥`.
     *   **Flexible Quantification:** `∀(α ≥ τ) τ'` (binds `α` in `τ'`, `α` must be an instance of `τ`).
@@ -49,7 +50,7 @@ You need two sets of data structures: one for the inference graph (Graphic Types
 ⸻
 
 ## Phase 1: Constraint Generation (Inference)
-*(Reference: ICFP 2008 §1, summarized in `xmlf.txt` §3)*
+*(Reference: ICFP 2008 §1, summarized in `papers/these-finale-english.txt`; see also `papers/xmlf.txt` §3)*
 
 Translate the source term `e` into a graphic constraint `χ`.
 *   Maintain a mapping from source AST nodes to graph nodes (crucial for Phase 6).
@@ -60,7 +61,7 @@ Translate the source term `e` into a graphic constraint `χ`.
 ## Phase 2–5: Solving to Principal Presolution
 *(Reference: ICFP 2008 §3–§5)*
 
-These phases implement the constraint solver. While `xmlf.txt` assumes this exists, you must implement the 2008 algorithm to get the **presolution**.
+These phases implement the constraint solver. While `papers/these-finale-english.txt` assumes this exists (see also `papers/xmlf.txt`), you must implement the 2008 algorithm to get the **presolution**.
 
 1.  **Normalize:** Apply local graph rewrites (grafting, merging).
 2.  **Acyclicity Check:** Ensure instantiation dependencies are acyclic.
@@ -78,7 +79,7 @@ These phases implement the constraint solver. While `xmlf.txt` assumes this exis
 ⸻
 
 ## Phase 6: Elaboration to xMLF (UPDATED)
-*(Reference: `papers/xmlf.txt` §3 "Elaboration of eMLF programs into xMLF")*
+*(Reference: `papers/these-finale-english.txt`; see also `papers/xmlf.txt` §3 "Elaboration of eMLF programs into xMLF")*
 
 This is the bridge between the graph and the xMLF calculus. You must implement the translation function `⟦ a ⟧_χp`.
 
@@ -87,7 +88,7 @@ Re-traverse the original AST `a` and transform it into an xMLF term `a'` using t
 
 1.  **Applications (the instantiation sites in this repo)**:
     *   Each application carries an `EdgeId` for the function position.
-    *   Look up the recorded per-edge witness `EdgeWitness` and translate `ewSteps` to an xMLF instantiation `φ = Φ(e)` (Fig. 10), including quantifier reordering `Σ(g)` when needed (`xmlf.txt` “Reordering quantifiers”).
+    *   Look up the recorded per-edge witness `EdgeWitness` and translate `ewSteps` to an xMLF instantiation `φ = Φ(e)` (Fig. 10), including quantifier reordering `Σ(g)` when needed (see `papers/these-finale-english.txt`; `papers/xmlf.txt` “Reordering quantifiers”).
     *   Result shape: `(a1 [φ]) a2` (or just `a1 a2` if `φ` is identity).
 
 2.  **Let-bindings `let x = a1 in a2`:**
@@ -105,21 +106,21 @@ Re-traverse the original AST `a` and transform it into an xMLF term `a'` using t
 ⸻
 
 ## Phase 7: xMLF Execution & Verification (NEW)
-*(Reference: `papers/xmlf.txt` §1 & §2)*
+*(Reference: `papers/these-finale-english.txt`; see also `papers/xmlf.txt` §1 & §2)*
 
 Now that we have an xMLF term, we must treat it as a runnable program.
 
 1.  **Type Checking:**
-    *   Implement the xMLF typing rules (Figure 4 in `xmlf.txt`).
+    *   Implement the xMLF typing rules (see `papers/these-finale-english.txt`; Figure 4 in `papers/xmlf.txt`).
     *   Verify that the elaborated term is well-typed. This confirms the soundness of the inference/elaboration.
     *   *Note:* xMLF type checking is local and deterministic (no unification needed).
 
 2.  **Reduction:**
-    *   Implement the small-step reduction rules (Figure 5 in `xmlf.txt`).
+    *   Implement the small-step reduction rules (see `papers/these-finale-english.txt`; Figure 5 in `papers/xmlf.txt`).
     *   Rules include: `(β)`, `(let)`, and significantly, the **instantiation reductions** (`ι-rules`) like `(Λ(α ≥ τ) a) N ⟶ a{!α ← 1}{α ← τ}`.
     *   These rules allow executing the code and simplifying the type instantiations.
 
-**Status in this repo:** Phase 7 is not implemented yet. We do have a key building block: `MLF.Elab.Pipeline.applyInstantiation` (xmlf Fig. 3) to apply/check instantiations at the type level, which is used by tests to validate Φ/Σ.
+**Status in this repo:** Phase 7 is not implemented yet. We do have a key building block: `MLF.Elab.Pipeline.applyInstantiation` (see `papers/these-finale-english.txt`; `papers/xmlf.txt` Fig. 3) to apply/check instantiations at the type level, which is used by tests to validate Φ/Σ.
 
 ⸻
 
@@ -128,7 +129,7 @@ Now that we have an xMLF term, we must treat it as a runnable program.
 *   **Foundation:** Moved from *just* implementing the solver (2008) to implementing the **full language pipeline** (2009).
 *   **Elaboration:** Explicitly defined as generating xMLF terms with `Λ` and `φ` witnesses (previously vague).
 *   **Target:** Added Phase 7 to implement the xMLF calculus itself (semantics and typing), which was absent in the previous roadmap.
-*   **Terminology:** Adopted `xmlf.txt` notation (Type Instantiation `φ`, Flexible Quantification `∀(α ≥ τ)`).
+*   **Terminology:** Adopted thesis notation, aligning with `papers/xmlf.txt` for xMLF terms (Type Instantiation `φ`, Flexible Quantification `∀(α ≥ τ)`).
 *   **Φ/Σ:** The roadmap now treats `Φ(e)` and `Σ(g)` as explicit deliverables: record per-edge witnesses in presolution and translate them to xMLF instantiations (with reorderings) in elaboration.
 
 ⸻
@@ -145,4 +146,4 @@ This repo’s module-level decomposition:
 6. **`MLF.Constraint.Presolution`**: Phase 4 minimal expansions + per-edge witnesses.
 7. **`MLF.Constraint.Solve`**: Phase 5 unification solve.
 8. **`MLF.Elab.Pipeline`** (+ `MLF.Elab.Types`): Phase 6 elaboration to xMLF (`ElabTerm`, `ElabType`, `Instantiation`, Φ/Σ).
-9. **(Future)**: Phase 7 xMLF typechecker + reduction semantics (xmlf Fig. 4/5).
+9. **(Future)**: Phase 7 xMLF typechecker + reduction semantics (see `papers/these-finale-english.txt`; `papers/xmlf.txt` Fig. 4/5).

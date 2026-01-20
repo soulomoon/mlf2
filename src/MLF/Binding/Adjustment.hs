@@ -7,8 +7,9 @@ License     : BSD-3-Clause
 This module implements binding-edge harmonization (paper Raise(n)) on the
 paper-style binding tree.
 
-Paper reference: @papers/xmlf.txt@ §3.4 describes Raise(n) as a binding-edge
-raising operation. This module provides 'harmonizeBindParentsWithTrace' which
+Paper reference: @papers/these-finale-english.txt@ (see @papers/xmlf.txt@ §3.4)
+describes Raise(n) as a binding-edge raising operation. This module provides
+'harmonizeBindParentsWithTrace' which
 computes the LCA of two nodes' binders and raises each node step-by-step
 until both are bound at that LCA.
 
@@ -48,7 +49,6 @@ expectTypeRef ref = case ref of
             InvalidBindingTree $
                 "binding-tree harmonization expects type nodes, got gen node " ++ show ref
 
-
 -- | Harmonize the binding parents of two nodes by raising them to their LCA.
 --
 -- This is the main entry point for binding-edge harmonization. It:
@@ -63,7 +63,7 @@ expectTypeRef ref = case ref of
 -- Note: we no longer treat an empty `cBindParents` map as a “legacy mode”
 -- signal. An empty map is a valid binding tree for root-only graphs.
 --
--- Paper reference: @papers/xmlf.txt@ §3.4
+-- Paper reference: @papers/these-finale-english.txt@ (see @papers/xmlf.txt@ §3.4)
 harmonizeBindParentsWithTrace
     :: NodeRef -> NodeRef -> Constraint
     -> Either BindingError (Constraint, [NodeId])
@@ -135,9 +135,9 @@ raiseToParentWithCount nid target c0 = go c0 []
                                 -- Apply one raise step
                                 result <- applyRaiseStep nid constraint
                                 case result of
-                                    (constraint', Just _) -> 
+                                    (constraint', Just _) ->
                                         go constraint' (nidT : trace)
-                                    (_constraint', Nothing) -> 
+                                    (_constraint', Nothing) ->
                                         -- parent is already a root: cannot reach a non-root target
                                         Left (RaiseNotPossible nid)
 
@@ -169,7 +169,7 @@ raiseToRoot nid c0 = go c0 []
                         else do
                             result <- applyRaiseStep nid constraint
                             case result of
-                                (constraint', Just _) -> 
+                                (constraint', Just _) ->
                                     go constraint' (nidT : trace)
-                                (_constraint', Nothing) -> 
+                                (_constraint', Nothing) ->
                                     Left (RaiseNotPossible nid)

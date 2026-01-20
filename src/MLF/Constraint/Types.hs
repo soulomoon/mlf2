@@ -22,6 +22,7 @@ module MLF.Constraint.Types (
     genNodeKey,
     -- * Variable bounds + elimination stores (scope-model retirement)
     EliminatedVars,
+    WeakenedVars,
     PolySyms,
     BoundRef(..),
     ForallSpec(..),
@@ -48,7 +49,8 @@ import Data.Set (Set)
 
 -- | Flag indicating whether a binding edge is flexible or rigid.
 --
--- Paper mapping (`papers/xmlf.txt` §3.1): flexible binders can be raised/weakened
+-- Paper mapping (`papers/these-finale-english.txt`; see `papers/xmlf.txt` §3.1):
+-- flexible binders can be raised/weakened
 -- during instantiation; rigid binders are locked and cannot be modified.
 data BindFlag = BindFlex | BindRigid
     deriving (Eq, Ord, Show)
@@ -61,6 +63,9 @@ type BindParents = IntMap (NodeRef, BindFlag)
 
 -- | Persistent marker for variables eliminated during ω execution / presolution.
 type EliminatedVars = IntSet
+
+-- | Variables whose binding edge was weakened by ω (OpWeaken).
+type WeakenedVars = IntSet
 
 -- | Polymorphic type constructor symbols (paper Poly set).
 type PolySyms = Set BaseTy
@@ -95,6 +100,18 @@ data BindingError
         -- ^ Attempted to raise/weaken a node that is locked (rigidly bound path).
     | RaiseNotPossible NodeRef
         -- ^ Raise step not possible (e.g., parent is already a root).
+    | GenFallbackRequired
+        { fallbackBinder :: NodeId
+        , fallbackGen :: GenNodeId
+        , fallbackBinders :: [NodeId]
+        }
+        -- ^ Type-node binder enumeration would require a gen-ancestor fallback.
+    | GenSchemeFreeVars
+        { schemeRoot :: NodeId
+        , schemeGen :: GenNodeId
+        , freeNodes :: [NodeId]
+        }
+        -- ^ A scheme root reaches named nodes not bound under its gen node.
     | InvalidBindingTree String
         -- ^ Generic binding tree invariant violation with description.
     deriving (Eq, Show)
@@ -174,7 +191,8 @@ This module defines the *data model* for the “graphic constraint” pipeline.
 
 Paper context
 -------------
-In `papers/xmlf.txt` (Rémy & Yakobowski), *graphic types* are described as:
+In `papers/these-finale-english.txt` (see also `papers/xmlf.txt`), *graphic types*
+are described as:
 
   - a **term-DAG** for type constructors / sharing (§"Graphic types"), and
   - a **binding tree** encoding scope and which variables may be generalized.
@@ -276,7 +294,8 @@ lookupNodeIn nodes nid = IntMap.lookup (getNodeId nid) nodes
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 Paper link
 ----------
-The xMLF paper (`papers/xmlf.txt`) uses *expansions* and *instantiation
+The thesis (`papers/these-finale-english.txt`; see `papers/xmlf.txt`) uses
+*expansions* and *instantiation
 constraints* to express and solve let-polymorphism and first-class polymorphism.
 An instantiation edge is considered solved when the constraint graph is an
 instance of the expansion graph; the paper then translates a *normalized*
@@ -311,12 +330,13 @@ Shape
   `τ :: NodeId` is the root of the underlying type graph.
 * `Expansion` is the solver’s explicit *recipe* for `s` (chosen in presolution):
   identity, ∀-introduction, instantiation (substitution), and composition.
-  These correspond to the xMLF instantiation constructs in `xmlf.txt`:
+  These correspond to the xMLF instantiation constructs in
+  `papers/these-finale-english.txt` (see `papers/xmlf.txt` for numbering):
     - identity instantiation `1`
     - quantifier introduction (`O` / `InstIntro` in our elaborator)
     - elimination + substitution (paper often abbreviates this as type app ⟨τ⟩)
     - sequential composition `φ; φ′`
-  See §"Instantiations" and Figures 1–3 of `xmlf.txt`.
+  See the thesis section on instantiations and `papers/xmlf.txt` Figures 1–3.
 
 Flow across phases
 ------------------
@@ -337,7 +357,8 @@ Why explicit TyExp + Expansion
 * Keeps sharing explicit (term-DAG), matching the paper’s emphasis that copying
   must preserve sharing outside the expansion interior.
 * Preserves enough provenance to later produce xMLF instantiations from
-  witnesses (Φ/Σ, `xmlf.txt` §3.4, Figure 10).
+  witnesses (Φ/Σ; see `papers/these-finale-english.txt` and
+  `papers/xmlf.txt` §3.4, Figure 10).
 -}
 
 {- Note [Binding tree]
@@ -354,7 +375,8 @@ bounds on the `TyVar` itself.
 -- type shape it must instantiate to; Phase 4 consumes these edges when
 -- computing minimal expansions.
 --
--- Paper mapping (`papers/xmlf.txt`): instantiation edges correspond to the
+-- Paper mapping (`papers/these-finale-english.txt`; see `papers/xmlf.txt`):
+-- instantiation edges correspond to the
 -- *instance* relation (≤) between types; solving an edge yields a witness Ω
 -- that can be translated to an xMLF instantiation Φ (Figure 10, §3.4). In this
 -- codebase, presolution records that information as an `EdgeWitness`.
@@ -439,7 +461,8 @@ data Constraint = Constraint
             -- ^ Paper-style binding edges: child NodeRef -> (parent NodeRef, BindFlag).
             --
             --   This is the explicit representation of the paper's binding tree
-            --   (`papers/xmlf.txt` §3.1). Every non-root node has exactly one binding
+            --   (`papers/these-finale-english.txt`; see `papers/xmlf.txt` §3.1).
+            --   Every non-root node has exactly one binding
             --   parent. Roots are nodes that do not appear as keys in this map.
             --
             --   The binding tree is used for:
@@ -454,6 +477,20 @@ data Constraint = Constraint
             -- ^ Variables eliminated during presolution/ω execution.
             --
             -- Elaboration ignores eliminated vars when reifying quantifiers.
+        , cWeakenedVars :: WeakenedVars
+            -- ^ Variables weakened for translatability (inert-locked / rigidify passes).
+            --
+            -- These are treated as flexible during reification/generalization so
+            -- Theorem 15.2.11 weakening does not change the elaborated type.
+        , cAnnEdges :: IntSet
+            -- ^ Instantiation edges introduced by term annotations (κσ).
+            --
+            -- These edges update bounds but should not eliminate binders.
+        , cLetEdges :: IntSet
+            -- ^ Instantiation edges introduced by let-scoping (body → trivial root).
+            --
+            -- These are internal edges for the alternative let-typing translation
+            -- and should be ignored when translating witnesses.
         , cGenNodes :: IntMap GenNode
             -- ^ Gen node map (paper G constructors).
             --
@@ -477,8 +514,9 @@ data Expansion
 --
 -- These recipes are the bridge between the graphic-constraint world and xMLF:
 -- they encode the *shape* of the instantiation we need (identity / ∀-intro /
--- elimination+substitution / composition). See `papers/xmlf.txt` Figures 1–3
--- for the instantiation grammar and §3.4 + Figure 10 for witness translation.
+-- elimination+substitution / composition). See `papers/these-finale-english.txt`
+-- and `papers/xmlf.txt` Figures 1–3 for the instantiation grammar and §3.4 +
+-- Figure 10 for witness translation.
     = ExpIdentity                    -- ^ Do nothing; reuse the underlying body.
     | ExpForall (NonEmpty ForallSpec)
         -- ^ Introduce one or more ∀ binders around the body (paper Q(n) shape).
@@ -502,7 +540,8 @@ data Expansion
 
 -- | Atomic instance operations used in instantiation witnesses.
 --
--- In `papers/xmlf.txt` §3.4, solved instantiation edges come with a *normalized*
+-- In `papers/these-finale-english.txt` (see `papers/xmlf.txt` §3.4), solved
+-- instantiation edges come with a *normalized*
 -- witness Ω (a sequence of operations such as graft/merge/raise/weaken).
 -- Figure 10 then translates these operations to an xMLF instantiation (Φ),
 -- possibly preceded by a quantifier-reordering instantiation Σ(g).
@@ -516,7 +555,8 @@ data InstanceOp
     | OpMerge NodeId NodeId
     -- | Paper Raise(n): raising a binding edge for an interior node.
     --
-    -- `papers/xmlf.txt` translates this operation to an instantiation that
+    -- `papers/these-finale-english.txt` translates this operation to an
+    -- instantiation that (see `papers/xmlf.txt`)
     -- introduces a fresh quantifier one level higher and aliases/eliminates the
     -- original binder (Fig. 10, §3.4). The current presolution does not emit
     -- arbitrary interior Raise ops yet; it currently records Raise steps for
@@ -530,7 +570,8 @@ data InstanceOp
 
 -- | A (normalized) instance-operation witness: a sequence of atomic operations.
 --
--- Paper mapping (`papers/xmlf.txt` §3.4): this corresponds to an instantiation
+-- Paper mapping (`papers/these-finale-english.txt`; see `papers/xmlf.txt` §3.4):
+-- this corresponds to an instantiation
 -- witness Ω. The paper assumes witnesses can be normalized (Yakobowski 2008)
 -- before translating them with Φ (Figure 10). Our presolution records witnesses
 -- in a form intended to be suitable for that translation.
@@ -548,7 +589,7 @@ data InstanceStep
 -- This is the data that Phase 6 uses to reconstruct an xMLF instantiation for
 -- an application site.
 --
--- Paper mapping (`papers/xmlf.txt` §3.4):
+-- Paper mapping (`papers/these-finale-english.txt`; see `papers/xmlf.txt` §3.4):
 --   - `ewWitness` corresponds to a (normalized) witness Ω.
 --   - `ewRoot` corresponds to the expansion root `r` in χₑ.
 --   - `ewLeft`/`ewRight` are the endpoints of the original instantiation edge.

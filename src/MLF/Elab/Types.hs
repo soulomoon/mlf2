@@ -1,20 +1,31 @@
+{-# LANGUAGE DeriveFoldable #-}
+{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveTraversable #-}
+{-# LANGUAGE TypeFamilies #-}
 module MLF.Elab.Types (
     ElabType(..),
+    ElabTypeF(..),
     ElabScheme(..),
     SchemeInfo(..),
     ElabTerm(..),
+    ElabTermF(..),
     Instantiation(..),
+    InstantiationF(..),
     ElabError(..),
     TypeCheckError(..),
     bindingToElab,
     Pretty(..),
+    PrettyDisplay(..),
     ContextStep(..),
     applyContext,
     selectMinPrecInsertionIndex,
 ) where
 
+import Data.Functor.Foldable (Base, Corecursive (..), Recursive (..), apo, cata, para, zygo)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
+import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 
 import qualified MLF.Util.Order as Order
 import MLF.Constraint.Types (BaseTy(..), BindingError, NodeId(..), getNodeId)
@@ -43,6 +54,32 @@ data ElabType
     | TForall String (Maybe ElabType) ElabType  -- ∀(α ⩾ τ?). σ
     | TBottom                                   -- ⊥ (minimal type)
     deriving (Eq, Show)
+
+data ElabTypeF a
+    = TVarF String
+    | TArrowF a a
+    | TBaseF BaseTy
+    | TForallF String (Maybe a) a
+    | TBottomF
+    deriving (Eq, Show, Functor, Foldable, Traversable)
+
+type instance Base ElabType = ElabTypeF
+
+instance Recursive ElabType where
+    project ty = case ty of
+        TVar v -> TVarF v
+        TArrow a b -> TArrowF a b
+        TBase b -> TBaseF b
+        TForall v mb body -> TForallF v mb body
+        TBottom -> TBottomF
+
+instance Corecursive ElabType where
+    embed ty = case ty of
+        TVarF v -> TVar v
+        TArrowF a b -> TArrow a b
+        TBaseF b -> TBase b
+        TForallF v mb body -> TForall v mb body
+        TBottomF -> TBottom
 
 -- | Polymorphic schemes (multiple quantifiers).
 data ElabScheme = Forall [(String, Maybe ElabType)] ElabType
@@ -75,6 +112,44 @@ data Instantiation
     | InstSeq Instantiation Instantiation   -- φ; φ' (composition)
     deriving (Eq, Show)
 
+data InstantiationF a
+    = InstIdF
+    | InstAppF ElabType
+    | InstBotF ElabType
+    | InstIntroF
+    | InstElimF
+    | InstAbstrF String
+    | InstUnderF String a
+    | InstInsideF a
+    | InstSeqF a a
+    deriving (Eq, Show, Functor, Foldable, Traversable)
+
+type instance Base Instantiation = InstantiationF
+
+instance Recursive Instantiation where
+    project inst = case inst of
+        InstId -> InstIdF
+        InstApp ty -> InstAppF ty
+        InstBot ty -> InstBotF ty
+        InstIntro -> InstIntroF
+        InstElim -> InstElimF
+        InstAbstr v -> InstAbstrF v
+        InstUnder v i -> InstUnderF v i
+        InstInside i -> InstInsideF i
+        InstSeq a b -> InstSeqF a b
+
+instance Corecursive Instantiation where
+    embed inst = case inst of
+        InstIdF -> InstId
+        InstAppF ty -> InstApp ty
+        InstBotF ty -> InstBot ty
+        InstIntroF -> InstIntro
+        InstElimF -> InstElim
+        InstAbstrF v -> InstAbstr v
+        InstUnderF v i -> InstUnder v i
+        InstInsideF i -> InstInside i
+        InstSeqF a b -> InstSeq a b
+
 -- | Explicitly typed terms with type abstractions and instantiations (xMLF).
 data ElabTerm
     = EVar String
@@ -86,9 +161,45 @@ data ElabTerm
     | ETyInst ElabTerm Instantiation           -- e φ (instantiation)
     deriving (Eq, Show)
 
+data ElabTermF a
+    = EVarF String
+    | ELitF Lit
+    | ELamF String ElabType a
+    | EAppF a a
+    | ELetF String ElabScheme a a
+    | ETyAbsF String (Maybe ElabType) a
+    | ETyInstF a Instantiation
+    deriving (Eq, Show, Functor, Foldable, Traversable)
+
+type instance Base ElabTerm = ElabTermF
+
+instance Recursive ElabTerm where
+    project term = case term of
+        EVar v -> EVarF v
+        ELit l -> ELitF l
+        ELam v ty body -> ELamF v ty body
+        EApp f a -> EAppF f a
+        ELet v sch rhs body -> ELetF v sch rhs body
+        ETyAbs v mb body -> ETyAbsF v mb body
+        ETyInst e inst -> ETyInstF e inst
+
+instance Corecursive ElabTerm where
+    embed term = case term of
+        EVarF v -> EVar v
+        ELitF l -> ELit l
+        ELamF v ty body -> ELam v ty body
+        EAppF f a -> EApp f a
+        ELetF v sch rhs body -> ELet v sch rhs body
+        ETyAbsF v mb body -> ETyAbs v mb body
+        ETyInstF e inst -> ETyInst e inst
+
 -- | Simple pretty-printing class for elaborated artifacts.
 class Pretty a where
     pretty :: a -> String
+
+-- | Pretty-printing that applies display-only bound inlining (§8.3.1).
+class PrettyDisplay a where
+    prettyDisplay :: a -> String
 
 instance Pretty ElabType where
     pretty =
@@ -146,6 +257,224 @@ instance Pretty ElabTerm where
         prettyInst InstId = "1"
         prettyInst i = "[" ++ pretty i ++ "]"
 
+data OccInfo = OccInfo
+    { oiFreeVars :: Set.Set String
+    , oiOccMap :: Map.Map String (Int, Int)
+    }
+
+-- | Display-only bound inlining for presentation (§8.3.1).
+inlineBoundsForDisplay :: ElabType -> ElabType
+inlineBoundsForDisplay = go
+  where
+    -- Conservative approximation: inline only single covariant occurrences with base/var bounds.
+    go = cata alg
+      where
+        alg ty = case ty of
+            TArrowF d c -> TArrow d c
+            TForallF v mb body ->
+                let mb' = fmap go mb
+                    body' = go body
+                in simplifyForall v mb' body'
+            TVarF v -> TVar v
+            TBaseF b -> TBase b
+            TBottomF -> TBottom
+
+    simplifyForall v mb body =
+        case mb of
+            Nothing ->
+                if Set.member v (freeVarsType body)
+                    then TForall v Nothing body
+                    else body
+            Just bound ->
+                let freeInBound = Set.member v (freeVarsType bound)
+                    (posCount, negCount) = occurrencesIn body
+                    totalCount = posCount + negCount
+                in if freeInBound
+                    then TForall v (Just bound) body
+                    else if totalCount == 0
+                        then body
+                        else if inlineableBound bound
+                            then go (substType v bound body)
+                            else TForall v (Just bound) body
+      where
+        occurrencesIn = occurrencesVar v
+
+    inlineableBound ty = case ty of
+        TBase{} -> True
+        TBottom -> True
+        TVar{} -> True
+        TArrow{} -> True
+        _ -> False
+
+    occurrencesVar :: String -> ElabType -> (Int, Int)
+    occurrencesVar name = Map.findWithDefault (0, 0) name . oiOccMap . occInfo
+
+    freeVarsType :: ElabType -> Set.Set String
+    freeVarsType = oiFreeVars . occInfo
+
+    emptyOccInfo :: OccInfo
+    emptyOccInfo = OccInfo Set.empty Map.empty
+
+    occInfo :: ElabType -> OccInfo
+    occInfo = zygo freeAlg occAlg
+
+    freeAlg :: ElabTypeF (Set.Set String) -> Set.Set String
+    freeAlg ty = case ty of
+        TVarF v -> Set.singleton v
+        TArrowF d c -> Set.union d c
+        TBaseF _ -> Set.empty
+        TBottomF -> Set.empty
+        TForallF v mb body ->
+            let freeBound = maybe Set.empty id mb
+                freeBody = Set.delete v body
+            in Set.union freeBound freeBody
+
+    occAlg :: ElabTypeF (Set.Set String, OccInfo) -> OccInfo
+    occAlg ty = case ty of
+        TVarF v -> OccInfo (Set.singleton v) (Map.singleton v (1, 0))
+        TArrowF d c ->
+            let freeVars = Set.union (fst d) (fst c)
+                occD = flipOccMap (oiOccMap (snd d))
+                occC = oiOccMap (snd c)
+            in OccInfo freeVars (mergeOccMaps occD occC)
+        TBaseF _ -> emptyOccInfo
+        TBottomF -> emptyOccInfo
+        TForallF v mb body ->
+            let (freeBody, occBody) = body
+                (freeBound, occBound) = maybe (Set.empty, emptyOccInfo) id mb
+                freeVars = Set.union freeBound (Set.delete v freeBody)
+                occBody' = Map.delete v (oiOccMap occBody)
+                occBound' = oiOccMap occBound
+            in OccInfo freeVars (mergeOccMaps occBound' occBody')
+
+    mergeOccMaps = Map.unionWith addCounts
+    addCounts (p1, n1) (p2, n2) = (p1 + p2, n1 + n2)
+    flipOccMap = Map.map (\(p, n) -> (n, p))
+
+    substType :: String -> ElabType -> ElabType -> ElabType
+    substType name replacement = goSub
+      where
+        freeInReplacement = freeVarsType replacement
+
+        goSub ty = case ty of
+            TVar v
+                | v == name -> replacement
+                | otherwise -> TVar v
+            TArrow d c -> TArrow (goSub d) (goSub c)
+            TBase b -> TBase b
+            TBottom -> TBottom
+            TForall v mb body
+                | v == name ->
+                    let mb' = fmap goSub mb
+                    in TForall v mb' body
+                | Set.member v freeInReplacement ->
+                    let used =
+                            Set.unions
+                                [ freeInReplacement
+                                , freeVarsType body
+                                , maybe Set.empty freeVarsType mb
+                                , Set.singleton v
+                                ]
+                        v' = freshNameLike v used
+                        body' = renameVar v v' body
+                    in TForall v' (fmap goSub mb) (goSub body')
+                | otherwise -> TForall v (fmap goSub mb) (goSub body)
+
+    renameVar :: String -> String -> ElabType -> ElabType
+    renameVar old new = goRename
+      where
+        goRename ty = case ty of
+            TVar v
+                | v == old -> TVar new
+                | otherwise -> TVar v
+            TArrow d c -> TArrow (goRename d) (goRename c)
+            TBase b -> TBase b
+            TBottom -> TBottom
+            TForall v mb body
+                | v == old -> TForall v mb body
+                | otherwise -> TForall v (fmap goRename mb) (goRename body)
+
+    freshNameLike :: String -> Set.Set String -> String
+    freshNameLike base used =
+        let go n =
+                let candidate = base ++ show n
+                in if Set.member candidate used
+                    then go (n + 1)
+                    else candidate
+        in if Set.member base used
+            then go (0 :: Int)
+            else base
+
+-- | Pretty-printing with display-only bound inlining.
+instance PrettyDisplay ElabType where
+    prettyDisplay = pretty . inlineBoundsForDisplay
+
+instance PrettyDisplay ElabScheme where
+    prettyDisplay sch =
+        let ty = inlineBoundsForDisplay (schemeToTypeLocal sch)
+            (binds, body) = splitForallsLocal ty
+        in case binds of
+            [] -> prettyDisplay body
+            _ -> "∀" ++ unwords (map prettyBind binds) ++ ". " ++ prettyDisplay body
+      where
+        prettyBind (v, Nothing) = v
+        prettyBind (v, Just bound) = "(" ++ v ++ " ⩾ " ++ prettyDisplay bound ++ ")"
+
+instance PrettyDisplay Instantiation where
+    prettyDisplay inst = case inst of
+        InstId -> "1"
+        InstApp ty -> "⟨" ++ prettyDisplay ty ++ "⟩"
+        InstBot ty -> prettyDisplay ty
+        InstIntro -> "O"
+        InstElim -> "N"
+        InstAbstr v -> "!" ++ v
+        InstUnder v i -> "∀(" ++ v ++ " ⩾) " ++ prettyDisplay i
+        InstInside i -> "∀(⩾ " ++ prettyDisplay i ++ ")"
+        InstSeq i1 i2 -> prettyDisplay i1 ++ "; " ++ prettyDisplay i2
+
+instance PrettyDisplay ElabTerm where
+    prettyDisplay term = case term of
+        EVar v -> v
+        ELit l -> case l of
+            LInt i -> show i
+            LBool b -> if b then "true" else "false"
+            LString s -> show s
+        ELam v ty body -> "λ" ++ v ++ ":" ++ prettyDisplay ty ++ ". " ++ prettyDisplay body
+        EApp f a -> par (prettyDisplay f) ++ " " ++ parArg a
+          where
+            parArg x@EApp{} = par (prettyDisplay x)
+            parArg x@ELam{} = par (prettyDisplay x)
+            parArg x = prettyDisplay x
+        ELet v sch rhs body ->
+            "let " ++ v ++ " : " ++ prettyDisplay sch
+                ++ " = " ++ prettyDisplay rhs
+                ++ " in " ++ prettyDisplay body
+        ETyAbs v Nothing body -> "Λ" ++ v ++ ". " ++ prettyDisplay body
+        ETyAbs v (Just bound) body ->
+            "Λ(" ++ v ++ " ⩾ " ++ prettyDisplay bound ++ "). " ++ prettyDisplay body
+        ETyInst e inst -> prettyDisplay e ++ " " ++ prettyInst inst
+      where
+        par s = "(" ++ s ++ ")"
+        prettyInst InstId = "1"
+        prettyInst i = "[" ++ prettyDisplay i ++ "]"
+
+schemeToTypeLocal :: ElabScheme -> ElabType
+schemeToTypeLocal (Forall binds body) = apo coalg (binds, body)
+  where
+    coalg ([], ty) = fmap Left (project ty)
+    coalg ((n, b) : rest, ty) =
+        TForallF n (fmap Left b) (Right (rest, ty))
+
+splitForallsLocal :: ElabType -> ([(String, Maybe ElabType)], ElabType)
+splitForallsLocal = para alg
+  where
+    alg ty = case ty of
+        TForallF v mb bodyPair ->
+            let mbOrig = fmap fst mb
+                (binds, body) = snd bodyPair
+            in ((v, mbOrig) : binds, body)
+        _ -> ([], embed (fmap fst ty))
+
 -- | Errors that can arise during elaboration or reification.
 data ElabError
     = ResidualTyExp NodeId
@@ -156,6 +485,7 @@ data ElabError
     | BindingTreeError BindingError
     | NameConflict String
     | InstantiationError String
+    | SchemeFreeVars NodeId [String]
     deriving (Eq, Show)
 
 data TypeCheckError

@@ -6,6 +6,7 @@ module MLF.Elab.TypeCheck (
     checkInstantiation
 ) where
 
+import Data.Functor.Foldable (cata)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
@@ -129,15 +130,17 @@ freeTypeVarsEnv env =
         (Set.unions (map freeTypeVarsType (Map.elems (typeEnv env))))
 
 freeTypeVarsType :: ElabType -> Set.Set String
-freeTypeVarsType ty = case ty of
-    TVar v -> Set.singleton v
-    TArrow a b -> Set.union (freeTypeVarsType a) (freeTypeVarsType b)
-    TBase _ -> Set.empty
-    TBottom -> Set.empty
-    TForall v mb body ->
-        let boundFv = maybe Set.empty freeTypeVarsType mb
-            bodyFv = Set.delete v (freeTypeVarsType body)
-        in Set.union boundFv bodyFv
+freeTypeVarsType = cata alg
+  where
+    alg ty = case ty of
+        TVarF v -> Set.singleton v
+        TArrowF a b -> Set.union a b
+        TBaseF _ -> Set.empty
+        TBottomF -> Set.empty
+        TForallF v mb body ->
+            let boundFv = maybe Set.empty id mb
+                bodyFv = Set.delete v body
+            in Set.union boundFv bodyFv
 
 alphaEqType :: ElabType -> ElabType -> Bool
 alphaEqType = go Map.empty Map.empty

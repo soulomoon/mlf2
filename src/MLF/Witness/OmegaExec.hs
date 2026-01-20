@@ -12,7 +12,8 @@ This module centralizes execution of the “base” instance operations induced 
   - `Merge(n, m)`  (recorded as `OpMerge n m`)
   - `Weaken(n)`    (recorded as `OpWeaken n`)
 
-Paper anchor: `papers/xmlf.txt` §3.4 (normalized witnesses, ω operations).
+Paper anchor: `papers/these-finale-english.txt` (see `papers/xmlf.txt` §3.4 for
+numbering) (normalized witnesses, ω operations).
 
 This executor is intentionally parametric in its effects: presolution provides
 callbacks for “set binder bound”, “unify without emitting merge ops”, and the
@@ -31,6 +32,7 @@ import MLF.Constraint.Types
 data OmegaExecEnv m = OmegaExecEnv
     { omegaMetaFor :: NodeId -> m NodeId
     , omegaLookupMeta :: NodeId -> m (Maybe NodeId)
+    , omegaLookupVarBound :: NodeId -> m (Maybe NodeId)
     , omegaSetVarBound :: NodeId -> Maybe NodeId -> m ()
     , omegaDropVarBind :: NodeId -> m ()
     , omegaUnifyNoMerge :: NodeId -> NodeId -> m ()
@@ -42,9 +44,9 @@ data OmegaExecEnv m = OmegaExecEnv
 
 -- | Execute base ω ops in a “pre” phase (before edge-local unification).
 --
--- Paper alignment (`papers/xmlf.txt` §3.4): weakening is delayed until after
--- other operations on nodes below the weakened binder, so this phase executes
--- only graft/merge-like base ops.
+-- Paper alignment (`papers/these-finale-english.txt`; see `papers/xmlf.txt` §3.4):
+-- weakening is delayed until after other operations on nodes below the weakened
+-- binder, so this phase executes only graft/merge-like base ops.
 executeOmegaBaseOpsPre :: Monad m => OmegaExecEnv m -> [InstanceOp] -> m ()
 executeOmegaBaseOpsPre env ops0 = go ops0
   where
@@ -52,7 +54,10 @@ executeOmegaBaseOpsPre env ops0 = go ops0
         [] -> pure ()
         (OpGraft sigma bv : rest) -> do
             meta <- omegaMetaFor env bv
-            omegaSetVarBound env meta (Just sigma)
+            mbBound <- omegaLookupVarBound env meta
+            case mbBound of
+                Nothing -> omegaSetVarBound env meta (Just sigma)
+                Just _ -> pure ()
             go rest
         (OpMerge bv bound : rest) -> do
             meta <- omegaMetaFor env bv
@@ -66,25 +71,25 @@ executeOmegaBaseOpsPre env ops0 = go ops0
 
 -- | Execute base ω ops in a “post” phase (after edge-local unification).
 --
--- This phase performs `Weaken` and also applies binder elimination bookkeeping
--- for binders eliminated by merge-like ops.
+-- This phase performs `Weaken` and applies binder elimination bookkeeping for
+-- binders eliminated by merge-like ops.
 executeOmegaBaseOpsPost :: Monad m => OmegaExecEnv m -> [InstanceOp] -> m ()
 executeOmegaBaseOpsPost env ops0 = do
-    -- Drop binder-metas eliminated by phase-2 merge-like ops, so they won't be
-    -- re-quantified during reification/elaboration.
-    elims <- omegaEliminatedBinders env
-    forM_ elims $ \bid -> do
-        mbMeta <- omegaLookupMeta env bid
-        case mbMeta of
-            Nothing -> pure ()
-            Just meta -> omegaDropVarBind env meta
-
+    -- Apply weakenings and record eliminations so Q(n) stays aligned with the
+    -- paper: weakened binders are removed from later quantification.
     forM_ ops0 $ \case
         OpWeaken bv -> do
             eliminated <- omegaIsEliminated env bv
             when (not eliminated) $ do
                 meta <- omegaMetaFor env bv
                 omegaWeakenMeta env meta
-                omegaDropVarBind env meta
-                omegaRecordEliminate env bv
         _ -> pure ()
+
+    -- Drop binder-metas eliminated by merge-like ops *and* weakenings, so they
+    -- won't be re-quantified during reification/elaboration.
+    elims <- omegaEliminatedBinders env
+    forM_ elims $ \bid -> do
+        mbMeta <- omegaLookupMeta env bid
+        case mbMeta of
+            Nothing -> pure ()
+            Just meta -> omegaDropVarBind env meta

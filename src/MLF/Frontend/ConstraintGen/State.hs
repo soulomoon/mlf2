@@ -33,6 +33,7 @@ data BuildState = BuildState
     , bsGenNodes :: !(IntMap.IntMap GenNode) -- ^ Gen nodes (paper G constructors)
     , bsPolySyms :: !PolySyms -- ^ Polymorphic type constructors (paper Poly)
     , bsScopes :: ![ScopeFrame]    -- ^ Stack of scopes tracking newly created nodes
+    , bsLetEdges :: !IntSet.IntSet -- ^ Let-scope instantiation edges (body → trivial root)
     }
 
 type ConstraintM = StateT BuildState (Except ConstraintError)
@@ -56,6 +57,7 @@ mkInitialStateWithPolySyms polySyms = BuildState
     , bsGenNodes = IntMap.empty
     , bsPolySyms = polySyms
     , bsScopes = [ScopeFrame IntSet.empty]
+    , bsLetEdges = IntSet.empty
     }
 
 buildConstraint :: BuildState -> Constraint
@@ -66,5 +68,8 @@ buildConstraint st = Constraint
     , cBindParents = bsBindParents st
     , cPolySyms = bsPolySyms st
     , cEliminatedVars = IntSet.empty
+    , cWeakenedVars = IntSet.empty
+    , cAnnEdges = IntSet.empty
+    , cLetEdges = bsLetEdges st
     , cGenNodes = bsGenNodes st
     }

@@ -6,6 +6,7 @@ module MLF.Elab.Pipeline (
     ElabError(..),
     TypeCheckError(..),
     Pretty(..),
+    PrettyDisplay(..),
     elaborate,
     reifyType,
     reifyTypeWithNames,

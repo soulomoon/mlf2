@@ -25,18 +25,21 @@ module MLF.Constraint.Presolution.Witness (
 ) where
 
 import Control.Monad (foldM)
+import Control.Monad.State (gets)
 import Control.Monad.Except (throwError)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
+
 import Data.List (mapAccumL, partition, sortBy, sortOn)
 import Data.Maybe (listToMaybe)
 import Data.Ord (Down(..))
 import qualified Data.List.NonEmpty as NE
 
-import MLF.Constraint.Types (BindFlag(..), Constraint, Expansion(..), ForallSpec(..), InstanceOp(..), InstanceStep(..), NodeId, NodeRef(..), TyNode(..), getNodeId, nodeRefFromKey, typeRef)
-import MLF.Constraint.Presolution.Base (PresolutionM, PresolutionError(..), instantiationBindersM)
+import MLF.Constraint.Types (BindFlag(..), Constraint(..), Expansion(..), ForallSpec(..), GenNode(..), InstanceOp(..), InstanceStep(..), NodeId, NodeRef(..), TyNode(..), getNodeId, nodeRefFromKey, typeRef)
+import MLF.Constraint.Presolution.Base (PresolutionM, PresolutionError(..), PresolutionState(..), instantiationBindersM)
 import MLF.Constraint.Presolution.Ops (getCanonicalNode, lookupVarBound)
 import qualified MLF.Binding.Tree as Binding
+import qualified MLF.Util.UnionFind as UnionFind
 import MLF.Util.Order (OrderKey, compareOrderKey, compareNodesByOrderKey)
 
 data OmegaNormalizeEnv = OmegaNormalizeEnv
@@ -132,7 +135,8 @@ validateNormalizedWitness env ops = do
             OpRaise n -> [n]
             OpRaiseMerge n m -> [n, m]
 
-    -- Paper alignment (`papers/xmlf.txt` §3.4, condition (5)): “below n” means
+    -- Paper alignment (`papers/these-finale-english.txt`; see `papers/xmlf.txt` §3.4, condition (5)):
+    -- “below n” means
     -- strict binding-tree descendants (exclude n itself).
     descendantsOf nid =
         case Binding.interiorOf (constraint env) (typeRef (canon nid)) of
@@ -164,18 +168,11 @@ validateNormalizedWitness env ops = do
                     Just offender -> Left (OpUnderRigid offender)
             _ -> checkWeakenOrdering rest
 
--- | Extract binder→argument pairing information from an expansion recipe.
---
--- For now, this is only defined for instantiation steps at a `TyExp` root.
-binderArgsForFirstNonVacuousForall :: NodeId -> PresolutionM [NodeId]
-binderArgsForFirstNonVacuousForall nid0 = do
-    (_bodyRoot, binders) <- instantiationBindersM nid0
-    if null binders
-        then throwError (InstantiateOnNonForall nid0)
-        else pure binders
-
 binderArgsFromExpansion :: TyNode -> Expansion -> PresolutionM [(NodeId, NodeId)]
 binderArgsFromExpansion leftRaw expn = do
+    let instantiationBinders nid = do
+            (_bodyRoot, binders) <- instantiationBindersM nid
+            pure binders
     let go = \case
             ExpIdentity -> pure []
             ExpForall _ -> pure []
@@ -183,11 +180,19 @@ binderArgsFromExpansion leftRaw expn = do
             ExpInstantiate args ->
                 case leftRaw of
                     TyExp{ tnBody = b } -> do
-                        binders <- binderArgsForFirstNonVacuousForall b
-                        if length binders /= length args
+                        binders <- instantiationBinders b
+                        if null binders
+                            then pure []
+                        else if length binders > length args
                             then throwError (ArityMismatch "binderArgsFromExpansion/ExpInstantiate" (length binders) (length args))
-                            else pure (zip binders args)
-                    _ -> pure []
+                            else pure (zip binders (take (length binders) args))
+                    _ -> do
+                        binders <- instantiationBinders (tnId leftRaw)
+                        if null binders
+                            then pure []
+                        else if length binders > length args
+                            then throwError (ArityMismatch "binderArgsFromExpansion/ExpInstantiate" (length binders) (length args))
+                                else pure (zip binders (take (length binders) args))
 
     go expn
 
@@ -218,20 +223,24 @@ witnessFromExpansion _root leftRaw expn = do
         -- that `applyExpansion` uses (binding-edge Q(n) via `orderedBinders`).
         case lr of
             TyExp{ tnBody = b } -> do
-                boundVars <- binderArgsForFirstNonVacuousForall b
-                if length boundVars /= length args
+                (_bodyRoot, boundVars) <- instantiationBindersM b
+                if null boundVars
+                    then pure []
+                else if length boundVars > length args
                     then throwError (ArityMismatch "witnessFromExpansion/ExpInstantiate" (length boundVars) (length args))
-                    else do
-                        let pairs = zip args boundVars
-                        (grafts, merges, weakens) <- foldM (classify suppressWeaken boundVars) ([], [], []) pairs
-                        -- Order:
-                        --   • grafts first (update ⊥ bounds)
-                        --   • then merges (alias + eliminate)
-                        --   • then remaining weakens (eliminate using existing bounds)
-                        --
-                        -- This is closer to `papers/xmlf.txt` Fig. 10, and avoids emitting
-                        -- invalid grafts under non-⊥ bounds (e.g. bounded variables).
-                        pure (map StepOmega (grafts ++ merges ++ weakens))
+                        else do
+                            let args' = take (length boundVars) args
+                                pairs = zip args' boundVars
+                            (grafts, merges, weakens) <- foldM (classify suppressWeaken boundVars) ([], [], []) pairs
+                            -- Order:
+                            --   • grafts first (update ⊥ bounds)
+                            --   • then merges (alias + eliminate)
+                            --   • then remaining weakens (eliminate using existing bounds)
+                            --
+                            -- This is closer to `papers/these-finale-english.txt`
+                            -- (see `papers/xmlf.txt` Fig. 10), and avoids emitting
+                            -- invalid grafts under non-⊥ bounds (e.g. bounded variables).
+                            pure (map StepOmega (grafts ++ merges ++ weakens))
             _ -> do
                 -- Instantiating a non-TyExp is unexpected in current pipeline; treat as empty.
                 pure []
@@ -246,7 +255,11 @@ witnessFromExpansion _root leftRaw expn = do
         -> PresolutionM ([InstanceOp], [InstanceOp], [InstanceOp])
     classify suppressWeaken binders (gAcc, mAcc, wAcc) (arg, bv) = do
         mbBound <- binderBound bv
-        let weakenOp = if suppressWeaken then [] else [OpWeaken bv]
+        argGenBound <- argIsGenBound arg
+        let weakenOp =
+                if suppressWeaken || argGenBound
+                    then []
+                    else [OpWeaken bv]
         case mbBound of
             Nothing ->
                 -- Unbounded binder: graft then eliminate later via weaken.
@@ -256,8 +269,8 @@ witnessFromExpansion _root leftRaw expn = do
                 if isVarBound && bnd `elem` binders
                     -- Bounded by an in-scope variable: alias + eliminate via Merge (Fig. 10).
                     then pure (gAcc, mAcc ++ [OpMerge bv bnd], wAcc)
-                    -- Bounded by structure: eliminate via Weaken (substitute bound).
-                    else pure (gAcc, mAcc, wAcc ++ weakenOp)
+                    -- Bounded by structure: graft then eliminate via Weaken.
+                    else pure (gAcc ++ [OpGraft arg bv], mAcc, wAcc ++ weakenOp)
 
     binderBound :: NodeId -> PresolutionM (Maybe NodeId)
     binderBound bv = do
@@ -273,6 +286,26 @@ witnessFromExpansion _root leftRaw expn = do
         pure $ case n of
             TyVar{} -> True
             _ -> False
+
+    argIsGenBound :: NodeId -> PresolutionM Bool
+    argIsGenBound nid = do
+        uf <- gets psUnionFind
+        c <- gets psConstraint
+        let canon = UnionFind.frWith uf
+            nidC = canon nid
+            schemeParents =
+                IntMap.fromList
+                    [ (getNodeId (canon root), gnId gen)
+                    | gen <- IntMap.elems (cGenNodes c)
+                    , root <- gnSchemes gen
+                    ]
+        case IntMap.lookup (getNodeId nidC) schemeParents of
+            Nothing -> pure False
+            Just gid ->
+                case Binding.lookupBindParentUnder canon c (typeRef nidC) of
+                    Left _err -> pure False
+                    Right (Just (GenRef gid', BindFlex)) -> pure (gid' == gid)
+                    _ -> pure False
 
 forallIntroSuffixCount :: Expansion -> PresolutionM Int
 forallIntroSuffixCount expn =
@@ -657,7 +690,8 @@ reorderWeakenWithEnv env ops =
                         then acc ++ sortBy compareReady remaining
                         else go blocked (acc ++ sortBy compareReady ready)
 
--- | Normalize Ω by enforcing `papers/xmlf.txt` conditions (1)–(5) only.
+-- | Normalize Ω by enforcing `papers/these-finale-english.txt` conditions
+-- (see `papers/xmlf.txt` conditions (1)–(5)) only.
 normalizeInstanceOpsFull :: OmegaNormalizeEnv -> [InstanceOp] -> Either OmegaNormalizeError [InstanceOp]
 normalizeInstanceOpsFull env ops0 = do
     let ops1 = stripExteriorOps env ops0

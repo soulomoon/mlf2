@@ -3,6 +3,7 @@ module SpecUtil (
     genNodeMap,
     rootedConstraint,
     bindParentsFromPairs,
+    collectVarNodes,
     expectRight,
     requireRight,
     inferBindParents,
@@ -19,6 +20,8 @@ import Test.Hspec (Expectation, expectationFailure)
 
 import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Types (BindFlag(..), BindParents, Constraint(..), GenNode(..), GenNodeId(..), NodeId(..), TyNode(..), genRef, nodeRefKey, structuralChildren, typeRef)
+import MLF.Frontend.ConstraintGen (AnnExpr(..))
+import MLF.Frontend.Syntax (VarName)
 
 emptyConstraint :: Constraint
 emptyConstraint = Constraint
@@ -28,6 +31,9 @@ emptyConstraint = Constraint
     , cBindParents = IntMap.empty
     , cPolySyms = Set.empty
     , cEliminatedVars = IntSet.empty
+    , cWeakenedVars = IntSet.empty
+    , cAnnEdges = IntSet.empty
+    , cLetEdges = IntSet.empty
     , cGenNodes = IntMap.empty
     }
 
@@ -112,3 +118,15 @@ lookupNodeIO table nid =
         Nothing -> do
             expectationFailure $ "Missing node: " ++ show nid
             pure (error "unreachable: missing TyNode")
+
+collectVarNodes :: VarName -> AnnExpr -> [NodeId]
+collectVarNodes name = go
+  where
+    go ann = case ann of
+        AVar v nid | v == name -> [nid]
+        AVar _ _ -> []
+        ALit _ _ -> []
+        ALam _ _ _ body _ -> go body
+        AApp fun arg _ _ _ -> go fun ++ go arg
+        ALet _ _ _ _ _ rhs body _ -> go rhs ++ go body
+        AAnn expr _ _ -> go expr

@@ -1,12 +1,18 @@
+{-# LANGUAGE DeriveFoldable #-}
+{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveTraversable #-}
+{-# LANGUAGE TypeFamilies #-}
 module MLF.Frontend.ConstraintGen.Types (
     ConstraintError(..),
     ConstraintResult(..),
     AnnExpr(..),
+    AnnExprF(..),
     Binding(..),
     Env,
     replaceScopeRoot
 ) where
 
+import Data.Functor.Foldable (Base, Corecursive (..), Recursive (..), cata)
 import Data.Map.Strict (Map)
 
 import MLF.Constraint.Types
@@ -42,6 +48,41 @@ data AnnExpr
       -- ^ expression, annotation node
     deriving (Eq, Show)
 
+data AnnExprF a
+    = AVarF VarName NodeId
+    | ALitF Lit NodeId
+    | ALamF VarName NodeId GenNodeId a NodeId
+      -- ^ param name, param node, scope root (gen), body, result node
+    | AAppF a a EdgeId EdgeId NodeId
+      -- ^ fun, arg, fun inst edge id, arg inst edge id, result node
+    | ALetF VarName GenNodeId NodeId ExpVarId GenNodeId a a NodeId
+      -- ^ binder name, scheme gen node, scheme root, expansion var, RHS scope gen, rhs, body, result node
+    | AAnnF a NodeId EdgeId
+      -- ^ expression, annotation node
+    deriving (Eq, Show, Functor, Foldable, Traversable)
+
+type instance Base AnnExpr = AnnExprF
+
+instance Recursive AnnExpr where
+    project expr = case expr of
+        AVar v nid -> AVarF v nid
+        ALit l nid -> ALitF l nid
+        ALam v param scopeRoot body nid -> ALamF v param scopeRoot body nid
+        AApp fun arg funEid argEid nid -> AAppF fun arg funEid argEid nid
+        ALet v schemeGenId schemeRootId expVar scopeRoot rhs body nid ->
+            ALetF v schemeGenId schemeRootId expVar scopeRoot rhs body nid
+        AAnn inner annNode eid -> AAnnF inner annNode eid
+
+instance Corecursive AnnExpr where
+    embed expr = case expr of
+        AVarF v nid -> AVar v nid
+        ALitF l nid -> ALit l nid
+        ALamF v param scopeRoot body nid -> ALam v param scopeRoot body nid
+        AAppF fun arg funEid argEid nid -> AApp fun arg funEid argEid nid
+        ALetF v schemeGenId schemeRootId expVar scopeRoot rhs body nid ->
+            ALet v schemeGenId schemeRootId expVar scopeRoot rhs body nid
+        AAnnF inner annNode eid -> AAnn inner annNode eid
+
 data Binding = Binding
   { bindingNode :: NodeId
   , bindingGen :: Maybe GenNodeId
@@ -50,17 +91,17 @@ data Binding = Binding
 type Env = Map VarName Binding
 
 replaceScopeRoot :: GenNodeId -> GenNodeId -> AnnExpr -> AnnExpr
-replaceScopeRoot from to = go
+replaceScopeRoot from to = cata alg
   where
     repGen gid = if gid == from then to else gid
-    go ann = case ann of
-        AVar v nid -> AVar v nid
-        ALit lit nid -> ALit lit nid
-        ALam v param scopeRoot body nid ->
-            ALam v param (repGen scopeRoot) (go body) nid
-        AApp fun arg funEid argEid nid ->
-            AApp (go fun) (go arg) funEid argEid nid
-        ALet v schemeNode schemeRoot expVar scopeRoot rhs body nid ->
-            ALet v (repGen schemeNode) schemeRoot expVar (repGen scopeRoot) (go rhs) (go body) nid
-        AAnn expr annNode eid ->
-            AAnn (go expr) annNode eid
+    alg ann = case ann of
+        AVarF v nid -> AVar v nid
+        ALitF lit nid -> ALit lit nid
+        ALamF v param scopeRoot body nid ->
+            ALam v param (repGen scopeRoot) body nid
+        AAppF fun arg funEid argEid nid ->
+            AApp fun arg funEid argEid nid
+        ALetF v schemeNode schemeRootId expVar scopeRoot rhs body nid ->
+            ALet v (repGen schemeNode) schemeRootId expVar (repGen scopeRoot) rhs body nid
+        AAnnF expr annNode eid ->
+            AAnn expr annNode eid

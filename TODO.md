@@ -1,6 +1,6 @@
 # MLF Type Inference & Elaboration — TODO
 
-See [roadmap.md](roadmap.md) for the full algorithm description and paper references (especially `papers/xmlf.txt`).
+See [roadmap.md](roadmap.md) for the full algorithm description and paper references (especially `papers/these-finale-english.txt`; see also `papers/xmlf.txt`).
 
 ---
 
@@ -74,7 +74,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ## Phase 6 — Elaboration to xMLF (New Foundation) ⏳
 
-Based on `papers/xmlf.txt` §3.
+Based on `papers/these-finale-english.txt`; see also `papers/xmlf.txt` §3.
 
 - [ ] **Define xMLF AST** (`XMLF.AST`)
     - [ ] Types `τ` (including `∀(α ≥ τ)`)
@@ -93,7 +93,7 @@ Based on `papers/xmlf.txt` §3.
 
 ## Phase 7 — xMLF Execution & Verification ⏳
 
-Based on `papers/xmlf.txt` §1 & §2.
+Based on `papers/these-finale-english.txt`; see also `papers/xmlf.txt` §1 & §2.
 
 - [ ] **Type Checker** (`XMLF.Check`)
     - [ ] Implement `Γ ⊢ a : τ` rules

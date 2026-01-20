@@ -1,14 +1,14 @@
 # Architecture / Repo Layout
 
-This repository implements the MLF → xMLF pipeline described in `papers/xmlf.txt`.
-Goal: keep the implementation paper-faithful to that reference and document any deviations.
+This repository implements the MLF → xMLF pipeline described in `papers/these-finale-english.txt` (see also `papers/xmlf.txt`).
+Goal: keep the implementation paper-faithful to the thesis and document any deviations; use `papers/xmlf.txt` only as supplementary detail when the thesis is silent.
 
 ## Public API (downstream users)
 
 Downstream code should import:
 
-- `MLF.API` — umbrella module (surface syntax + pipeline entry points + xMLF result types)
-- `MLF.Pipeline` — “runner-only” entry points (e.g. Phase 1 constraint generation, Phase 1–6 elaboration)
+- `MLF.API` — umbrella module (surface syntax + pipeline entry points + xMLF result types + xMLF checking/reduction helpers)
+- `MLF.Pipeline` — pipeline entry points + xMLF checking/reduction helpers (e.g. `inferConstraintGraph`, `runPipelineElab`, `typeCheck`, `step`, `normalize`)
 
 `MyLib` remains as a legacy compatibility wrapper that re-exports `MLF.API`.
 
@@ -30,13 +30,18 @@ The code is organized by domain (not by phase) under `src/MLF/`:
 - `MLF.Constraint.*` — constraint graph types + normalize + acyclicity + presolution + solve
 - `MLF.Binding.*` — binding tree queries + executable χe ops + harmonization
 - `MLF.Witness.*` — ω execution helpers (base χe operations)
-- `MLF.Elab.*` — elaboration to xMLF (Φ/Σ translation, reify/generalize)
+- `MLF.Elab.*` — elaboration to xMLF (Φ/Σ translation, reify/generalize, plus xMLF typechecking/reduction)
 - `MLF.Util.*` — shared utilities (order keys, union-find, etc.)
 
 ## Witness Representation (Φ/Σ)
 
 - `EdgeWitness.ewWitness` stores the Ω-only instance operations (Graft/Merge/Raise/Weaken/RaiseMerge).
 - `EdgeWitness.ewSteps` stores the interleaved step stream used for Φ translation, including `StepIntro` (O) in expansion order and `StepOmega` for Ω operations.
+- `EdgeTrace` (per instantiation edge) tracks the expansion root, binder→argument pairs, interior `I(r)`, and copy-map provenance used by `phiFromEdgeWitnessWithTrace`.
+
+## Executable
+
+- `app/Main.hs` builds the `mlf2` binary (demo runner).
 
 ## Tests
 

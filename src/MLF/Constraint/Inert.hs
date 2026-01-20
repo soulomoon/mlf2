@@ -41,14 +41,32 @@ isPolymorphicAnchor _ _ = False
 inertNodes :: Constraint -> Either BindingError IntSet.IntSet
 inertNodes c = do
     let nodes = cNodes c
-        anchors =
+        anchors0 =
             [ NodeId nid
             | (nid, node) <- IntMap.toList nodes
-            , isPolymorphicAnchor c node
+            , isPolymorphicAnchor c node || isImplicitBottomAnchor node
             ]
+        anchorSet0 = IntSet.fromList (map getNodeId anchors0)
+        anchorSet = closeBoundAnchors anchorSet0
+        anchors = map NodeId (IntSet.toList anchorSet)
         nonInert = collectFlexAncestors c anchors
         allNodes = IntSet.fromList (IntMap.keys nodes)
     pure (IntSet.difference allNodes nonInert)
+  where
+    closeBoundAnchors set0 =
+        let addBound acc (nid, node) = case node of
+                TyVar{ tnBound = Just bnd } ->
+                    if IntSet.member (getNodeId bnd) acc
+                        then IntSet.insert nid acc
+                        else acc
+                _ -> acc
+            set1 = foldl' addBound set0 (IntMap.toList (cNodes c))
+        in if set1 == set0 then set0 else closeBoundAnchors set1
+
+isImplicitBottomAnchor :: TyNode -> Bool
+isImplicitBottomAnchor node = case node of
+    TyVar{ tnBound = Nothing } -> True
+    _ -> False
 
 collectFlexAncestors :: Constraint -> [NodeId] -> IntSet.IntSet
 collectFlexAncestors c anchors =
@@ -79,12 +97,13 @@ inertLockedNodes c = do
   where
     addLocked acc nidInt = do
         let nid = NodeId nidInt
-        case Binding.lookupBindParent c (typeRef nid) of
-            Just (_, BindFlex) -> do
+        let checkLocked acc0 = do
                 locked <- Binding.isUnderRigidBinder c (typeRef nid)
                 pure $ if locked
-                    then IntSet.insert nidInt acc
-                    else acc
+                    then IntSet.insert nidInt acc0
+                    else acc0
+        case Binding.lookupBindParent c (typeRef nid) of
+            Just (_, BindFlex) -> checkLocked acc
             _ -> pure acc
 
 -- | Weaken inert-locked nodes (flip their binding edge to rigid when flexible).

@@ -45,9 +45,28 @@ registerScopeNode ref =
 rebindScopeNodes :: NodeRef -> NodeId -> ScopeFrame -> ConstraintM ()
 rebindScopeNodes binder root frame = do
     nodes <- gets bsNodes
+    genNodes <- gets bsGenNodes
     let binderIsGen = case binder of
             GenRef{} -> True
             TypeRef{} -> False
+        schemeRootKeysAll =
+            IntSet.fromList
+                [ nodeRefKey (typeRef rootN)
+                | gen <- IntMap.elems genNodes
+                , rootN <- gnSchemes gen
+                ]
+        schemeRootKeysOwned =
+            case binder of
+                GenRef gid ->
+                    case IntMap.lookup (genNodeKey gid) genNodes of
+                        Nothing -> IntSet.empty
+                        Just gen ->
+                            IntSet.fromList
+                                [ nodeRefKey (typeRef rootN)
+                                | rootN <- gnSchemes gen
+                                ]
+                TypeRef _ -> IntSet.empty
+        stopSchemeRoots = IntSet.difference schemeRootKeysAll schemeRootKeysOwned
         scopeNodes = sfNodes frame
         scopeTypeKeys = IntSet.filter even scopeNodes
         reachable =
@@ -56,18 +75,21 @@ rebindScopeNodes binder root frame = do
                     let key = getNodeId nid0
                     in if IntSet.member key visited
                         then go visited rest
-                        else
-                            let visited' = IntSet.insert key visited
-                                kids =
-                                    case IntMap.lookup key nodes of
-                                        Nothing -> []
-                                        Just node ->
-                                            let boundKids =
-                                                    case node of
-                                                        TyVar{ tnBound = Just bnd } -> [bnd]
-                                                        _ -> []
-                                            in structuralChildren node ++ boundKids
-                            in go visited' (kids ++ rest)
+                        else if IntSet.member (nodeRefKey (typeRef (NodeId key))) stopSchemeRoots
+                            && key /= getNodeId root
+                            then go visited rest
+                            else
+                                let visited' = IntSet.insert key visited
+                                    kids =
+                                        case IntMap.lookup key nodes of
+                                            Nothing -> []
+                                            Just node ->
+                                                let boundKids =
+                                                        case node of
+                                                            TyVar{ tnBound = Just bnd } -> [bnd]
+                                                            _ -> []
+                                                in structuralChildren node ++ boundKids
+                                in go visited' (kids ++ rest)
             in go IntSet.empty [root]
         reachableTypeKeys =
             IntSet.fromList
@@ -98,8 +120,12 @@ rebindScopeNodes binder root frame = do
                 , IntSet.member (getNodeId child) targetTypeSet
                 ]
         scopeRoots =
-            map NodeId $
-                IntSet.toList (IntSet.difference targetTypeSet referenced)
+            [ NodeId nid
+            | nid <- IntSet.toList (IntSet.difference targetTypeSet referenced)
+            , case IntMap.lookup nid nodes of
+                Just TyExp{} -> False
+                _ -> True
+            ]
         scopeRootKeys =
             IntSet.fromList
                 [ nodeRefKey (TypeRef nid)
@@ -109,6 +135,7 @@ rebindScopeNodes binder root frame = do
             if binderIsGen
                 then IntSet.filter odd scopeNodes
                 else IntSet.empty
+        schemeRootKeys = schemeRootKeysOwned
     modify' $ \st ->
         let parentIsSticky ref = case ref of
                 GenRef _ -> True
@@ -116,17 +143,34 @@ rebindScopeNodes binder root frame = do
                     case IntMap.lookup (getNodeId pid) nodes of
                         Just TyVar{} -> True
                         Just TyForall{} -> True
+                        Just TyArrow{} -> True
                         Just TyExp{} -> True
                         _ -> False
+            isSchemeRootParent ref =
+                binderIsGen && IntSet.member (nodeRefKey ref) schemeRootKeys
+                    && case ref of
+                        TypeRef pid ->
+                            case IntMap.lookup (getNodeId pid) nodes of
+                                Just TyVar{} -> True
+                                Just TyForall{} -> True
+                                Just TyExp{} -> True
+                                _ -> False
+                        GenRef _ -> False
+            flagFor _childRef = BindFlex
             bindGen bp key =
                 let childRef = nodeRefFromKey key
                 in if nodeRefKey childRef == nodeRefKey binder
                     then bp
                     else
                         case IntMap.lookup key bp of
-                            Just (GenRef _, _) -> bp
-                            Just (parent, _) | parentIsSticky parent -> bp
-                            _ -> IntMap.insert key (binder, BindFlex) bp
+                            Just (GenRef gid, _)
+                                | GenRef gid == binder -> bp
+                            Just (parent, _)
+                                | parentIsSticky parent
+                                , nodeRefKey parent /= nodeRefKey childRef
+                                , not (isSchemeRootParent parent) ->
+                                    bp
+                            _ -> IntMap.insert key (binder, flagFor childRef) bp
             bindType bp key =
                 let childRef = nodeRefFromKey key
                 in if nodeRefKey childRef == nodeRefKey binder
@@ -138,7 +182,7 @@ rebindScopeNodes binder root frame = do
             bp0 = bsBindParents st
             bp1 =
                 if binderIsGen
-                    then IntSet.foldl' bindGen bp0 scopeTypeKeys
+                    then IntSet.foldl' bindGen bp0 scopeRootKeys
                     else IntSet.foldl' bindType bp0 scopeRootKeys
             bp2 = IntSet.foldl' bindGen bp1 genScopeKeys
             genNodes' = case binder of

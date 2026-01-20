@@ -59,7 +59,7 @@ orderKeysFromRootWithExtra
     -> Maybe IntSet.IntSet
     -> IntMap OrderKey
 orderKeysFromRootWithExtra canonical nodes extraChildren root0 mbAllowed =
-    go IntMap.empty [(canonical root0, 0, [])]
+    go IntMap.empty [(canonical root0, 0, [], IntSet.singleton (getNodeId (canonical root0)))]
   where
     root = canonical root0
 
@@ -72,9 +72,9 @@ orderKeysFromRootWithExtra canonical nodes extraChildren root0 mbAllowed =
     better :: OrderKey -> OrderKey -> Bool
     better new old = compareOrderKey new old == LT
 
-    go :: IntMap OrderKey -> [(NodeId, Int, [Int])] -> IntMap OrderKey
+    go :: IntMap OrderKey -> [(NodeId, Int, [Int], IntSet.IntSet)] -> IntMap OrderKey
     go m [] = m
-    go m ((nid0, depth, path) : rest) =
+    go m ((nid0, depth, path, pathNodes) : rest) =
         let nid = canonical nid0
             key = OrderKey { okDepth = depth, okPath = path }
             (m', enqueueKids) =
@@ -86,22 +86,23 @@ orderKeysFromRootWithExtra canonical nodes extraChildren root0 mbAllowed =
                             else (m, False)
             rest' =
                 if enqueueKids && allowed nid
-                    then rest ++ children nid (depth + 1) path
+                    then rest ++ children nid (depth + 1) path pathNodes
                     else rest
         in go m' rest'
 
-    children :: NodeId -> Int -> [Int] -> [(NodeId, Int, [Int])]
-    children nid depth path =
+    children :: NodeId -> Int -> [Int] -> IntSet.IntSet -> [(NodeId, Int, [Int], IntSet.IntSet)]
+    children nid depth path pathNodes =
         case IntMap.lookup (getNodeId nid) nodes of
             Nothing -> []
             Just n ->
                 let structural = structuralChildren n
                     extras = extraChildren nid
                     allChildren = structural ++ extras
-                in [ (childC, depth, path ++ [idx])
+                in [ (childC, depth, path ++ [idx], IntSet.insert (getNodeId childC) pathNodes)
                    | (idx, child) <- zip [0 ..] allChildren
                    , let childC = canonical child
                    , childC /= nid
+                   , not (IntSet.member (getNodeId childC) pathNodes)
                    ]
 
 -- | Compute best order keys for nodes reachable from @root@ using only

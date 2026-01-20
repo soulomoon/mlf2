@@ -4,11 +4,11 @@ Scope tracking redesign (paper-faithful binding edges + executable Raise)
 Status
 ------
 Implemented. The legacy var-level / level-tree scope model has been retired in
-favor of the paper’s binding-edge story (see `papers/xmlf.txt`).
+favor of the thesis's binding-edge story (see `papers/these-finale-english.txt`; `papers/xmlf.txt` for supplemental detail).
 
 Goal
 ----
-Match `papers/xmlf.txt`’s operational account:
+Match `papers/these-finale-english.txt`’s operational account (see also `papers/xmlf.txt`):
 
   - scope is represented directly in the expansion graph χe via binding edges
     (flex/rigid), and

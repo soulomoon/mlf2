@@ -3,9 +3,9 @@ Paper-General Raise (ω: Raise) — Status
 
 Goal
 ----
-Align the repo with `papers/xmlf.txt` where `Raise(n)` is an *executable* graph
-transformation on the expansion graph χe and is also recorded in the witness
-language Ω for an instantiation edge.
+Align the repo with `papers/these-finale-english.txt` (see also `papers/xmlf.txt`) where
+`Raise(n)` is an *executable* graph transformation on the expansion graph χe and is
+also recorded in the witness language Ω for an instantiation edge.
 
 Current representation (paper-faithful)
 ---------------------------------------

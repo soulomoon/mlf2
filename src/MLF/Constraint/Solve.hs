@@ -120,6 +120,9 @@ import qualified MLF.Constraint.Traversal as Traversal
 import qualified MLF.Constraint.Unify.Decompose as UnifyDecompose
 import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Constraint.Types
+import Debug.Trace (trace)
+import System.Environment (lookupEnv)
+import System.IO.Unsafe (unsafePerformIO)
 
 -- | Errors that can arise during monotype unification.
 data SolveError
@@ -179,10 +182,21 @@ type SolveM = StateT SolveState (Either SolveError)
 -- See Note [Paper alignment: solveUnify] and Note [Algorithm sketch: solveUnify].
 solveUnify :: Constraint -> Either SolveError SolveResult
 solveUnify c0 = do
-    case Binding.checkBindingTree c0 of
+    let c0' = repairNonUpperParents c0
+        probeIds = [NodeId 2, NodeId 3]
+        probeInfo =
+            [ ( pid
+              , IntMap.lookup (getNodeId pid) (cNodes c0')
+              , IntMap.lookup (nodeRefKey (typeRef pid)) (cBindParents c0')
+              )
+            | pid <- probeIds
+            ]
+    case debugSolveBinding ("solveUnify: pre-check probe " ++ show probeInfo) () of
+        () -> pure ()
+    case Binding.checkBindingTree c0' of
         Left err -> Left (BindingTreeError err)
         Right () -> do
-            let st = SolveState { suConstraint = c0, suUnionFind = IntMap.empty, suQueue = cUnifyEdges c0 }
+            let st = SolveState { suConstraint = c0', suUnionFind = IntMap.empty, suQueue = cUnifyEdges c0' }
             final <- execStateT loop st
             let uf = suUnionFind final
                 c' = applyUFConstraint uf (suConstraint final) { cUnifyEdges = [] }
@@ -190,10 +204,20 @@ solveUnify c0 = do
                 Left err -> Left (BindingTreeError err)
                 Right out -> Right out
             let uf' = applyElimSubstToUF uf elimSubst
-            case Binding.checkBindingTree c'' of
+            let c''' = pruneBindParentsToLive (repairNonUpperParents c'')
+                probeInfo' =
+                    [ ( pid
+                      , IntMap.lookup (getNodeId pid) (cNodes c''')
+                      , IntMap.lookup (nodeRefKey (typeRef pid)) (cBindParents c''')
+                      )
+                    | pid <- probeIds
+                    ]
+            case Binding.checkBindingTree c''' of
                 Left err -> Left (BindingTreeError err)
                 Right () -> do
-                    let res = SolveResult { srConstraint = c'', srUnionFind = uf' }
+                    case debugSolveBinding ("solveUnify: post-check probe " ++ show probeInfo') () of
+                        () -> pure ()
+                    let res = SolveResult { srConstraint = c''', srUnionFind = uf' }
                         violations = validateSolvedGraph res
                     if null violations
                         then pure res
@@ -222,6 +246,89 @@ solveUnify c0 = do
             )
             uf
             subst
+
+    repairNonUpperParents :: Constraint -> Constraint
+    repairNonUpperParents c =
+        let bindParents0 = cBindParents c
+            nodes = cNodes c
+            rootGen =
+                let genRefs =
+                        [ genRef (GenNodeId gid)
+                        | gid <- IntMap.keys (cGenNodes c)
+                        ]
+                    isRoot ref = not (IntMap.member (nodeRefKey ref) bindParents0)
+                in case filter isRoot genRefs of
+                    (g:_) -> Just g
+                    [] -> Nothing
+            incomingParents =
+                let addOne parent child m =
+                        IntMap.insertWith
+                            IntSet.union
+                            (getNodeId child)
+                            (IntSet.singleton (getNodeId parent))
+                            m
+                    addNode m node =
+                        let parent = tnId node
+                            boundKids =
+                                case node of
+                                    TyVar{ tnBound = Just bnd } -> [bnd]
+                                    _ -> []
+                            kids = structuralChildren node ++ boundKids
+                        in foldl' (flip (addOne parent)) m kids
+                in IntMap.foldl' addNode IntMap.empty nodes
+            pickUpperParent childN =
+                case IntMap.lookup (getNodeId childN) incomingParents of
+                    Just ps ->
+                        case IntSet.toList ps of
+                            (p:_) -> Just (typeRef (NodeId p))
+                            [] -> rootGen
+                    Nothing -> rootGen
+            fixOne childKey (parentRef, flag) =
+                case nodeRefFromKey childKey of
+                    GenRef _ -> (parentRef, flag)
+                    TypeRef childN ->
+                        case parentRef of
+                            GenRef _ -> (parentRef, flag)
+                            _ ->
+                                if Binding.isUpper c parentRef (typeRef childN)
+                                    then (parentRef, flag)
+                                    else
+                                        case pickUpperParent childN of
+                                            Just pRef ->
+                                                if pRef == typeRef childN
+                                                    then
+                                                        case rootGen of
+                                                            Just gref -> (gref, flag)
+                                                            Nothing -> (parentRef, flag)
+                                                    else (pRef, flag)
+                                            Nothing -> (parentRef, flag)
+            bindParents1 = IntMap.mapWithKey fixOne bindParents0
+        in c { cBindParents = bindParents1 }
+
+    pruneBindParentsToLive :: Constraint -> Constraint
+    pruneBindParentsToLive c =
+        let nodes = cNodes c
+            genNodes = cGenNodes c
+            okRef ref = case ref of
+                TypeRef nid -> IntMap.member (getNodeId nid) nodes
+                GenRef gid -> IntMap.member (getGenNodeId gid) genNodes
+            keep childKey (parentRef, _flag) =
+                okRef (nodeRefFromKey childKey) && okRef parentRef
+            bindParents' = IntMap.filterWithKey keep (cBindParents c)
+        in c { cBindParents = bindParents' }
+
+    debugSolveBinding :: String -> a -> a
+    debugSolveBinding msg value =
+        if debugSolveBindingEnabled
+            then trace msg value
+            else value
+
+    debugSolveBindingEnabled :: Bool
+    debugSolveBindingEnabled =
+        unsafePerformIO $ do
+            enabled <- lookupEnv "MLF_DEBUG_BINDING"
+            pure (enabled /= Nothing)
+    {-# NOINLINE debugSolveBindingEnabled #-}
 
     -- | Process one equality edge using canonical representatives, decomposing
     -- arrows/foralls as needed and performing occurs-checks for var = structure.
@@ -330,6 +437,14 @@ solveUnify c0 = do
                         (False, True) -> (bRoot, aRoot)
                         _ -> (aRoot, bRoot)
                 (fromRoot, toRoot)
+                    | isTyVar aRoot
+                    , not (isTyVar bRoot)
+                    , not aElim
+                    , hasBound aRoot = (bRoot, aRoot)
+                    | not (isTyVar aRoot)
+                    , isTyVar bRoot
+                    , not bElim
+                    , hasBound bRoot = (aRoot, bRoot)
                     | not aElim
                     , not bElim
                     , isTyVar aRoot
@@ -395,6 +510,7 @@ applyUFConstraint uf c =
                 )
                 bindParentsAdjusted
         eliminated' = rewriteEliminated canonical nodes' (cEliminatedVars c)
+        weakened' = rewriteWeakened canonical nodes' (cWeakenedVars c)
         genNodes' = rewriteGenNodes canonical nodes' (cGenNodes c)
     in c
         { cNodes = nodes'
@@ -402,6 +518,7 @@ applyUFConstraint uf c =
         , cUnifyEdges = Canonicalize.rewriteUnifyEdges canonical (cUnifyEdges c)
         , cBindParents = bindParents'
         , cEliminatedVars = eliminated'
+        , cWeakenedVars = weakened'
         , cGenNodes = genNodes'
         }
   where
@@ -428,6 +545,17 @@ applyUFConstraint uf c =
                 _ -> False
             ]
 
+    rewriteWeakened :: (NodeId -> NodeId) -> IntMap TyNode -> WeakenedVars -> WeakenedVars
+    rewriteWeakened canon nodes0 weakened0 =
+        IntSet.fromList
+            [ getNodeId vC
+            | vid <- IntSet.toList weakened0
+            , let vC = canon (NodeId vid)
+            , case IntMap.lookup (getNodeId vC) nodes0 of
+                Just TyVar{} -> True
+                _ -> False
+            ]
+
     rewriteGenNodes :: (NodeId -> NodeId) -> IntMap TyNode -> IntMap.IntMap GenNode -> IntMap.IntMap GenNode
     rewriteGenNodes canon nodes0 gen0 =
         let rewriteOne g =
@@ -448,9 +576,8 @@ applyUFConstraint uf c =
 
 rewriteEliminatedBinders :: Constraint -> Either BindingError (Constraint, IntMap NodeId)
 rewriteEliminatedBinders c0
-    | IntSet.null elims0 = do
-        genNodesFinal <- Binding.rebuildGenNodesFromBinding c0
-        pure (c0 { cGenNodes = genNodesFinal }, IntMap.empty)
+    | IntSet.null elims0 =
+        pure (c0, IntMap.empty)
     | otherwise = do
         let nodes0 = cNodes c0
             bindParents0 = cBindParents c0
@@ -664,6 +791,15 @@ rewriteEliminatedBinders c0
                             schemes' = reverse schemesRev
                         in (genNodeKey (gnId g), g { gnSchemes = schemes' })
                 in IntMap.fromListWith (\a _ -> a) (map rewriteOne (IntMap.elems (cGenNodes c0)))
+            weakened' =
+                IntSet.fromList
+                    [ getNodeId v'
+                    | vid <- IntSet.toList (cWeakenedVars c0)
+                    , let v' = substNode (NodeId vid)
+                    , case IntMap.lookup (getNodeId v') nodes' of
+                        Just TyVar{} -> True
+                        _ -> False
+                    ]
 
             c1 =
                 c0
@@ -672,12 +808,11 @@ rewriteEliminatedBinders c0
                     , cInstEdges = instEdges'
                     , cUnifyEdges = unifyEdges'
                     , cEliminatedVars = IntSet.empty
+                    , cWeakenedVars = weakened'
                     , cGenNodes = genNodesSubst
                     }
 
-        genNodesFinal <- Binding.rebuildGenNodesFromBinding c1
-
-        pure (c1 { cGenNodes = genNodesFinal }, subst)
+        pure (c1, subst)
   where
     elims0 = cEliminatedVars c0
 

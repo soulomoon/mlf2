@@ -8,6 +8,7 @@ module MLF.Frontend.ConstraintGen.Emit (
     allocExpNode,
     setVarBound,
     addInstEdge,
+    recordLetEdge,
     setBindParentIfMissing,
     setBindParentOverride,
     intFromNode
@@ -16,6 +17,7 @@ module MLF.Frontend.ConstraintGen.Emit (
 import Control.Monad (when)
 import Control.Monad.State.Strict (gets, modify')
 import qualified Data.IntMap.Strict as IntMap
+import qualified Data.IntSet as IntSet
 
 import MLF.Constraint.Types
 import MLF.Frontend.ConstraintGen.State (BuildState(..), ConstraintM)
@@ -99,10 +101,11 @@ allocExpNode bodyNode = do
         , tnExpVar = expVar
         , tnBody = bodyNode
         }
-    -- Set default binding edge for the body to this TyExp node, but only if
-    -- the body doesn't already have a binding parent. This is important because
-    -- TyExp nodes wrap existing nodes that may already have binding structure.
-    setBindParentIfMissing (typeRef bodyNode) (typeRef nid) BindFlex
+    -- Keep TyExp on the same binding-parent chain as its body so ga′ is stable.
+    bindParents <- gets bsBindParents
+    case IntMap.lookup (nodeRefKey (typeRef bodyNode)) bindParents of
+        Just (parent, flag) -> setBindParentIfMissing (typeRef nid) parent flag
+        Nothing -> pure ()
     pure (nid, expVar)
 
 setVarBound :: NodeId -> Maybe NodeId -> ConstraintM ()
@@ -115,7 +118,8 @@ setVarBound varNode bound = do
                 st { bsNodes = IntMap.insert key tv{ tnBound = bound } nodes0 }
             _ -> st
     case bound of
-        Just bnd -> setBindParentIfMissing (typeRef bnd) (typeRef varNode) BindFlex
+        Just bnd -> do
+            setBindParentIfMissing (typeRef bnd) (typeRef varNode) BindFlex
         Nothing -> pure ()
 
 addInstEdge :: NodeId -> NodeId -> ConstraintM EdgeId
@@ -125,6 +129,12 @@ addInstEdge left right = do
         edge = InstEdge edgeId left right
     modify' $ \st -> st { bsInstEdges = edge : bsInstEdges st }
     pure edgeId
+
+-- | Record a let-scope instantiation edge so we can drop its witness later.
+recordLetEdge :: EdgeId -> ConstraintM ()
+recordLetEdge (EdgeId eid) =
+    modify' $ \st ->
+        st { bsLetEdges = IntSet.insert eid (bsLetEdges st) }
 
 freshNodeId :: ConstraintM NodeId
 freshNodeId = do

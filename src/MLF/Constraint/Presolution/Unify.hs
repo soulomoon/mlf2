@@ -10,7 +10,8 @@ This module contains the presolution unification helpers that:
 -}
 module MLF.Constraint.Presolution.Unify (
     unifyAcyclic,
-    unifyAcyclicRawWithRaiseTrace
+    unifyAcyclicRawWithRaiseTrace,
+    unifyAcyclicRawWithRaiseTracePrefer
 ) where
 
 import Control.Monad.State (get, modify, put)
@@ -42,22 +43,25 @@ occursIn needle start = do
 -- | Union-Find merge with occurs-check, returning the Raise trace induced by
 -- binding-edge harmonization.
 --
--- Paper anchor (`papers/xmlf.txt`): `Raise(n)` is a binding-edge raising
--- operation (a real χe graph transformation).
+-- Paper anchor (`papers/these-finale-english.txt`; see `papers/xmlf.txt`):
+-- `Raise(n)` is a binding-edge raising operation (a real χe graph transformation).
 --
 -- Returns the exact raised-node trace (with multiplicity) induced by binding-edge
 -- harmonization. Presolution records `OpRaise` based on this trace (filtered to
 -- interior nodes and not under rigid binders).
 unifyAcyclicRawWithRaiseTrace :: NodeId -> NodeId -> PresolutionM [NodeId]
-unifyAcyclicRawWithRaiseTrace n1 n2 = do
+unifyAcyclicRawWithRaiseTrace = unifyAcyclicRawWithRaiseTracePrefer Nothing
+
+unifyAcyclicRawWithRaiseTracePrefer :: Maybe NodeId -> NodeId -> NodeId -> PresolutionM [NodeId]
+unifyAcyclicRawWithRaiseTracePrefer prefer n1 n2 = do
     root1 <- findRoot n1
     root2 <- findRoot n2
     if root1 == root2
         then pure []
-        else unifyAcyclicRootsWithRaiseTrace root1 root2
+        else unifyAcyclicRootsWithRaiseTracePrefer prefer root1 root2
 
-unifyAcyclicRootsWithRaiseTrace :: NodeId -> NodeId -> PresolutionM [NodeId]
-unifyAcyclicRootsWithRaiseTrace root1 root2 = do
+unifyAcyclicRootsWithRaiseTracePrefer :: Maybe NodeId -> NodeId -> NodeId -> PresolutionM [NodeId]
+unifyAcyclicRootsWithRaiseTracePrefer prefer root1 root2 = do
     occurs12 <- occursIn root1 root2
     when occurs12 $ throwError $ OccursCheckPresolution root1 root2
 
@@ -89,6 +93,8 @@ unifyAcyclicRootsWithRaiseTrace root1 root2 = do
                 (False, True) -> (root2, root1)
                 _ -> (root1, root2)
         (fromRoot, toRoot)
+            | isTyVar root1 && not (isTyVar root2) = (root1, root2)
+            | not (isTyVar root1) && isTyVar root2 = (root2, root1)
             | not aElim
             , not bElim
             , isTyVar root1
@@ -98,8 +104,15 @@ unifyAcyclicRootsWithRaiseTrace root1 root2 = do
                     (False, True) -> (root1, root2)
                     _ -> (fromRoot0, toRoot0)
             | otherwise = (fromRoot0, toRoot0)
+        (fromRoot', toRoot') =
+            case prefer of
+                Just p
+                    | p == root1 && not aElim -> (root2, root1)
+                    | p == root2 && not bElim -> (root1, root2)
+                    | otherwise -> (fromRoot, toRoot)
+                Nothing -> (fromRoot, toRoot)
     modify $ \st ->
-        st { psUnionFind = IntMap.insert (getNodeId fromRoot) toRoot (psUnionFind st) }
+        st { psUnionFind = IntMap.insert (getNodeId fromRoot') toRoot' (psUnionFind st) }
 
     pure trace0
 
@@ -110,7 +123,7 @@ unifyAcyclicRawWithRaiseCounts n1 n2 = do
     if root1 == root2
         then pure (0, 0)
         else do
-            trace <- unifyAcyclicRootsWithRaiseTrace root1 root2
+            trace <- unifyAcyclicRootsWithRaiseTracePrefer Nothing root1 root2
             let k1 = length (filter (== root1) trace)
                 k2 = length (filter (== root2) trace)
             pure (k1, k2)

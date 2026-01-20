@@ -81,6 +81,45 @@ orderedPairByPrec c root =
 
 spec :: Spec
 spec = describe "Phase 4 — Principal Presolution" $ do
+    describe "Translatable presolution enforcement" $ do
+        it "rigidifies scheme roots, arrow nodes, and non-interior nodes" $ do
+            let rootGen = GenNodeId 0
+                schemeRoot = NodeId 0
+                dom = NodeId 1
+                cod = NodeId 2
+                arrow = NodeId 3
+                outside = NodeId 4
+                nodes = IntMap.fromList
+                    [ (getNodeId schemeRoot, TyVar { tnId = schemeRoot, tnBound = Just arrow })
+                    , (getNodeId dom, TyVar { tnId = dom, tnBound = Nothing })
+                    , (getNodeId cod, TyVar { tnId = cod, tnBound = Nothing })
+                    , (getNodeId arrow, TyArrow arrow dom cod)
+                    , (getNodeId outside, TyVar { tnId = outside, tnBound = Nothing })
+                    ]
+                bindParents =
+                    IntMap.fromList
+                        [ (nodeRefKey (typeRef schemeRoot), (genRef rootGen, BindFlex))
+                        , (nodeRefKey (typeRef arrow), (typeRef schemeRoot, BindFlex))
+                        , (nodeRefKey (typeRef dom), (typeRef arrow, BindFlex))
+                        , (nodeRefKey (typeRef cod), (typeRef arrow, BindFlex))
+                        , (nodeRefKey (typeRef outside), (genRef rootGen, BindFlex))
+                        ]
+                constraint =
+                    rootedConstraint emptyConstraint
+                        { cNodes = nodes
+                        , cBindParents = bindParents
+                        , cGenNodes = IntMap.singleton (getGenNodeId rootGen) (GenNode rootGen [schemeRoot])
+                        }
+                acyclicityRes = AcyclicityResult { arSortedEdges = [], arDepGraph = undefined }
+
+            case computePresolution acyclicityRes constraint of
+                Left err -> expectationFailure ("computePresolution failed: " ++ show err)
+                Right pr -> do
+                    let bp = cBindParents (prConstraint pr)
+                    IntMap.lookup (nodeRefKey (typeRef schemeRoot)) bp `shouldBe` Just (genRef rootGen, BindRigid)
+                    IntMap.lookup (nodeRefKey (typeRef arrow)) bp `shouldBe` Just (typeRef schemeRoot, BindRigid)
+                    IntMap.lookup (nodeRefKey (typeRef outside)) bp `shouldBe` Just (genRef rootGen, BindRigid)
+
     describe "instantiateScheme" $ do
         it "replaces repeated bound vars with the same fresh node" $ do
             -- Scheme body (a -> a) where `a` is a bound variable to be substituted.
@@ -99,7 +138,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                             , cBindParents = bindParentsFromPairs
                                 [ (bound, body, BindFlex) ]
                             }
-                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntSet.empty IntMap.empty IntMap.empty IntMap.empty
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
 
             case runPresolutionM st0 (instantiateScheme body [(bound, fresh)]) of
                 Left err -> expectationFailure $ "Instantiation failed: " ++ show err
@@ -112,7 +151,8 @@ spec = describe "Phase 4 — Principal Presolution" $ do
 
         it "shares outer-scope variables outside I(g)" $ do
             -- Body uses bound var and an outer var. Outer nodes are shared when they
-            -- are not in the binder’s interior I(g) (paper `xmlf.txt` §3.2).
+            -- are not in the binder’s interior I(g) (paper `papers/these-finale-english.txt`;
+            -- see `papers/xmlf.txt` §3.2).
             let bound = NodeId 1
                 outer = NodeId 3
                 body = NodeId 2
@@ -134,7 +174,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                                 , (NodeId 3, NodeId 4, BindFlex)
                                 ]
                         }
-                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntSet.empty IntMap.empty IntMap.empty IntMap.empty
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
 
             case runPresolutionM st0 (instantiateScheme body [(bound, fresh)]) of
                 Left err -> expectationFailure $ "Instantiation failed: " ++ show err
@@ -145,10 +185,11 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                     d `shouldBe` fresh
                     c `shouldBe` outer -- shared, not copied
 
-        it "instantiateSchemeWithTrace shares non-interior structure nodes (I(g) copy)" $ do
-            -- In binding-edge mode, the paper’s expansion copies only nodes in I(g).
+        it "instantiateSchemeWithTrace replaces frontier nodes with ⊥ (I(g) copy)" $ do
+            -- In binding-edge mode, the paper’s expansion copies nodes in I(g)
+            -- and replaces frontier nodes with ⊥.
             -- Here, `outerArrow` is structurally under the ∀ body, but it is bound
-            -- above the ∀ binder (so it is not in I(g)) and must be shared.
+            -- above the ∀ binder (so it is not in I(g)) and must be frontier-copied.
             let b = NodeId 1
                 y = NodeId 2
                 outerArrow = NodeId 3
@@ -189,30 +230,37 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         , cBindParents = bindParents
                         }
                 st0 =
-                    PresolutionState
-                        constraint
-                        (Presolution IntMap.empty)
+                    PresolutionState constraint (Presolution IntMap.empty)
                         IntMap.empty
                         11
                         IntSet.empty
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
-
+                        IntMap.empty
             case runPresolutionM st0 (instantiateSchemeWithTrace bodyArrow [(b, meta)]) of
                 Left err -> expectationFailure ("instantiateSchemeWithTrace failed: " ++ show err)
-                Right ((root, copyMap, _interior), st1) -> do
+                Right ((root, copyMap, _interior, frontier), st1) -> do
                     arrow <- expectArrow (cNodes (psConstraint st1)) root
-                    tnDom arrow `shouldBe` outerArrow
-                    IntMap.lookup (getNodeId outerArrow) copyMap `shouldBe` Nothing
+                    let dom = tnDom arrow
+                    case lookupNodeMaybe (cNodes (psConstraint st1)) dom of
+                        Just TyBottom{} -> pure ()
+                        other ->
+                            expectationFailure $
+                                "Expected frontier copy to be ⊥, found " ++ show other
+                    tnCod arrow `shouldBe` meta
+                    IntSet.member (getNodeId outerArrow) frontier `shouldBe` True
+                    case IntMap.lookup (getNodeId outerArrow) copyMap of
+                        Nothing -> expectationFailure "Expected outerArrow to be frontier-copied"
+                        Just dom' -> dom' `shouldBe` dom
 
         it "instantiateSchemeWithTrace uses I(g) even when root has no binder (no level fallback)" $ do
             -- When copying a disconnected component (e.g. an instance bound),
             -- the copied root may be a binding root. In that case, we still
             -- decide share/copy purely from binding-edge interior membership.
             --
-            -- Regression: a legacy fallback would copy `y` below even though it
-            -- is not in I(g).
+            -- Regression: a legacy fallback would treat `y` as interior, but it
+            -- is outside I(g) and should become a frontier ⊥ copy.
             let y = NodeId 1
                 b = NodeId 2
                 outerArrow = NodeId 3
@@ -241,21 +289,24 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         , cBindParents = bindParents
                         }
                 st0 =
-                    PresolutionState
-                        constraint
-                        (Presolution IntMap.empty)
+                    PresolutionState constraint (Presolution IntMap.empty)
                         IntMap.empty
                         10
                         IntSet.empty
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
-
+                        IntMap.empty
             case runPresolutionM st0 (instantiateSchemeWithTrace bodyArrow []) of
                 Left err -> expectationFailure ("instantiateSchemeWithTrace failed: " ++ show err)
-                Right ((root, copyMap, _interior), st1) -> do
+                Right ((root, copyMap, _interior, frontier), st1) -> do
                     arrow <- expectArrow (cNodes (psConstraint st1)) root
-                    tnDom arrow `shouldBe` y
+                    let dom = tnDom arrow
+                    case lookupNodeMaybe (cNodes (psConstraint st1)) dom of
+                        Just TyBottom{} -> pure ()
+                        other ->
+                            expectationFailure $
+                                "Expected frontier copy to be ⊥, found " ++ show other
 
                     case IntMap.lookup (getNodeId b) copyMap of
                         Nothing -> expectationFailure "Expected b to be copied (in I(g))"
@@ -263,7 +314,10 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                             b' `shouldNotBe` b
                             tnCod arrow `shouldBe` b'
 
-                    IntMap.lookup (getNodeId y) copyMap `shouldBe` Nothing
+                    IntSet.member (getNodeId y) frontier `shouldBe` True
+                    case IntMap.lookup (getNodeId y) copyMap of
+                        Nothing -> expectationFailure "Expected y to be frontier-copied"
+                        Just dom' -> dom' `shouldBe` dom
 
         it "copies shared substructure only once (cache reuse)" $ do
             -- Body: (a1 -> a1) used twice as dom/cod; copy should reuse the same new node.
@@ -286,7 +340,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                                 , (NodeId 5, NodeId 6, BindFlex)
                                 ]
                         }
-                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntSet.empty IntMap.empty IntMap.empty IntMap.empty
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
 
             case runPresolutionM st0 (instantiateScheme body [(bound, fresh)]) of
                 Left err -> expectationFailure $ "Instantiation failed: " ++ show err
@@ -320,7 +374,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                             , cBindParents = bindParentsFromPairs
                                 [ (base, body, BindFlex) ]
                             }
-                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntSet.empty IntMap.empty IntMap.empty IntMap.empty
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
 
             case runPresolutionM st0 (instantiateScheme body [(bound, fresh)]) of
                 Left err -> expectationFailure $ "Instantiation failed: " ++ show err
@@ -358,7 +412,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                                 , (NodeId 4, NodeId 5, BindFlex)
                                 ]
                         }
-                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 12 IntSet.empty IntMap.empty IntMap.empty IntMap.empty
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 12 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
 
             case runPresolutionM st0 (instantiateScheme topBody [(outer, freshOuter), (innerVar, freshInner)]) of
                 Left err -> expectationFailure $ "Instantiation failed: " ++ show err
@@ -403,7 +457,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                                 , (NodeId 4, NodeId 5, BindFlex)
                                 ]
                         }
-                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntSet.empty IntMap.empty IntMap.empty IntMap.empty
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
 
             case runPresolutionM st0 (instantiateScheme outerBody [(bound, fresh)]) of
                 Left err -> expectationFailure $ "Instantiation failed: " ++ show err
@@ -438,7 +492,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                     , (10, TyVar { tnId = fresh, tnBound = Nothing })
                     ]
                 constraint = rootedConstraint $ emptyConstraint { cNodes = nodes }
-                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntSet.empty IntMap.empty IntMap.empty IntMap.empty
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
 
             case runPresolutionM st0 (instantiateScheme body [(bound, fresh)]) of
                 Left (NodeLookupFailed nid) -> nid `shouldBe` body
@@ -479,16 +533,14 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                                 ]
                         }
                 st0 =
-                    PresolutionState
-                        constraint
-                        (Presolution IntMap.empty)
+                    PresolutionState constraint (Presolution IntMap.empty)
                         IntMap.empty
                         6
                         IntSet.empty
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
-
+                        IntMap.empty
             case runPresolutionM st0 (processInstEdge edge) of
                 Left err -> expectationFailure ("processInstEdge failed: " ++ show err)
                 Right (_, st1) -> do
@@ -551,16 +603,14 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                                 ]
                         }
                 st0 =
-                    PresolutionState
-                        constraint
-                        (Presolution IntMap.empty)
+                    PresolutionState constraint (Presolution IntMap.empty)
                         IntMap.empty
                         8
                         IntSet.empty
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
-
+                        IntMap.empty
             case runPresolutionM st0 (processInstEdge edge0 >> processInstEdge edge1) of
                 Left err -> expectationFailure ("processInstEdge failed: " ++ show err)
                 Right (_, st1) -> do
@@ -584,8 +634,8 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         other -> expectationFailure ("Missing traces: " ++ show other)
 
         it "binds expansion root at the same binder as the edge target (paper §3.2)" $ do
-            -- Paper alignment (`papers/xmlf.txt` §3.2): "the root of the expansion is
-            -- bound at the same binder as the target".
+            -- Paper alignment (`papers/these-finale-english.txt`; see `papers/xmlf.txt` §3.2):
+            -- "the root of the expansion is bound at the same binder as the target".
             --
             -- Setup: TyExp s · (∀@1. a -> a) ≤ (Int -> Int)
             -- where the target arrow has a binding parent.
@@ -628,16 +678,14 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                     , cBindParents = bindParents
                     }
                 st0 =
-                    PresolutionState
-                        constraint
-                        (Presolution IntMap.empty)
+                    PresolutionState constraint (Presolution IntMap.empty)
                         IntMap.empty
                         7
                         IntSet.empty
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
-
+                        IntMap.empty
             case runPresolutionM st0 (processInstEdge edge) of
                 Left err -> expectationFailure ("processInstEdge failed: " ++ show err)
                 Right (_, st1) -> do
@@ -778,16 +826,14 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         , cBindParents = bindParents
                         }
                 st0 =
-                    PresolutionState
-                        constraint
-                        (Presolution IntMap.empty)
+                    PresolutionState constraint (Presolution IntMap.empty)
                         IntMap.empty
                         9
                         IntSet.empty
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
-
+                        IntMap.empty
             case runPresolutionM st0 (processInstEdge edge) of
                 Left err -> expectationFailure ("processInstEdge failed: " ++ show err)
                 Right (_, st1) -> do
@@ -860,16 +906,14 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         , cBindParents = bindParents
                         }
                 st0 =
-                    PresolutionState
-                        constraint
-                        (Presolution IntMap.empty)
+                    PresolutionState constraint (Presolution IntMap.empty)
                         IntMap.empty
                         15
                         IntSet.empty
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
-
+                        IntMap.empty
                 wants op = op == OpMerge b a
 
             case runPresolutionM st0 (processInstEdge edge) of
@@ -988,16 +1032,14 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         , cBindParents = bindParents
                         }
                 st0 =
-                    PresolutionState
-                        constraint
-                        (Presolution IntMap.empty)
+                    PresolutionState constraint (Presolution IntMap.empty)
                         IntMap.empty
                         7
                         IntSet.empty
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
-
+                        IntMap.empty
                 isGraftToBinder op = case op of
                     OpGraft _ n -> n == b
                     _ -> False
@@ -1136,16 +1178,14 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         , cBindParents = bindParents
                         }
                 st0 =
-                    PresolutionState
-                        constraint
-                        (Presolution IntMap.empty)
+                    PresolutionState constraint (Presolution IntMap.empty)
                         IntMap.empty
                         7
                         IntSet.empty
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
-
+                        IntMap.empty
                 isGraftToA op = case op of
                     OpGraft _ n -> n == a
                     _ -> False
@@ -1189,7 +1229,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         { cNodes = nodes
                         , cBindParents = inferBindParents nodes
                         }
-                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 4 IntSet.empty IntMap.empty IntMap.empty IntMap.empty
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 4 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
                 expansion =
                     ExpCompose
                         (ExpForall (ForallSpec 1 [Nothing] NE.:| []) NE.:| [ExpInstantiate [argId]])
@@ -1215,7 +1255,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         { cNodes = nodes
                         , cBindParents = inferBindParents nodes
                         }
-                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 2 IntSet.empty IntMap.empty IntMap.empty IntMap.empty
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 2 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
                 expansion = ExpForall (ForallSpec 2 [Nothing, Nothing] NE.:| [])
 
             case runPresolutionM st0 (witnessFromExpansion expNodeId (nodes IntMap.! 0) expansion) of
@@ -1917,7 +1957,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
 
     describe "Error Conditions" $ do
         it "reports ArityMismatch when merging ExpInstantiate with different lengths" $ do
-            let st0 = PresolutionState emptyConstraint (Presolution IntMap.empty) IntMap.empty 0 IntSet.empty IntMap.empty IntMap.empty IntMap.empty
+            let st0 = PresolutionState emptyConstraint (Presolution IntMap.empty) IntMap.empty 0 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
                 exp1 = ExpInstantiate [NodeId 1]
                 exp2 = ExpInstantiate [NodeId 1, NodeId 2]
 
@@ -1942,7 +1982,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                     , (1, TyBase bodyId (BaseTy "int"))
                     ]
                 constraint = rootedConstraint $ emptyConstraint { cNodes = nodes }
-                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 2 IntSet.empty IntMap.empty IntMap.empty IntMap.empty
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 2 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
                 expansion = ExpInstantiate [NodeId 2] -- dummy arg
 
             case runPresolutionM st0 (applyExpansion expansion (nodes IntMap.! 0)) of
@@ -1964,7 +2004,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         { cNodes = nodes
                         , cBindParents = inferBindParents nodes
                         }
-                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 3 IntSet.empty IntMap.empty IntMap.empty IntMap.empty
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 3 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
                 -- Forall has 1 bound var, but we provide 2 args
                 expansion = ExpInstantiate [NodeId 3, NodeId 4]
 
@@ -1982,7 +2022,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
             let nid = NodeId 0
                 nodes = IntMap.fromList [(0, TyBase nid (BaseTy "int"))]
                 constraint = rootedConstraint $ emptyConstraint { cNodes = nodes }
-                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 1 IntSet.empty IntMap.empty IntMap.empty IntMap.empty
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 1 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
 
                 -- Construct an expansion: ExpCompose [ExpForall [1], ExpIdentity]
                 -- This will trigger the ExpCompose branch in applyExpansionOverNode
@@ -2016,16 +2056,14 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         , cBindParents = inferBindParents nodes
                         }
                 st0 =
-                    PresolutionState
-                        constraint
-                        (Presolution IntMap.empty)
+                    PresolutionState constraint (Presolution IntMap.empty)
                         IntMap.empty
                         5
                         IntSet.empty
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
-
+                        IntMap.empty
                 forallSpec =
                     ForallSpec
                         { fsBinderCount = 2
@@ -2200,16 +2238,14 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         }
 
                 st0 =
-                    PresolutionState
-                        constraint
-                        (Presolution IntMap.empty)
+                    PresolutionState constraint (Presolution IntMap.empty)
                         IntMap.empty
                         6
                         IntSet.empty
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
-
+                        IntMap.empty
             case runPresolutionM st0 (unifyAcyclicRawWithRaiseTrace n m) of
                 Left err ->
                     expectationFailure ("unifyAcyclicRawWithRaiseTrace failed: " ++ show err)
@@ -2261,16 +2297,14 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 uf = IntMap.fromList [(getNodeId b, a)]
 
                 st0 =
-                    PresolutionState
-                        constraint
-                        (Presolution IntMap.empty)
+                    PresolutionState constraint (Presolution IntMap.empty)
                         uf
                         6
                         IntSet.empty
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
-
+                        IntMap.empty
                 interior = IntSet.fromList [getNodeId a, getNodeId b]
 
             case runPresolutionM st0 (runEdgeUnifyForTest rootArrow interior a c) of
@@ -2309,16 +2343,14 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         , cInstEdges = [edge]
                         }
                 st0 =
-                    PresolutionState
-                        constraint
-                        (Presolution IntMap.empty)
+                    PresolutionState constraint (Presolution IntMap.empty)
                         IntMap.empty
                         7
                         IntSet.empty
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
-
+                        IntMap.empty
             case runPresolutionM st0 (processInstEdge edge) of
                 Left (BindingTreeError _) -> pure ()
                 Left err -> expectationFailure ("Expected BindingTreeError, got: " ++ show err)
@@ -2367,16 +2399,14 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         , cBindParents = bindParents
                         }
                 st0 =
-                    PresolutionState
-                        constraint
-                        (Presolution IntMap.empty)
+                    PresolutionState constraint (Presolution IntMap.empty)
                         IntMap.empty
                         7
                         IntSet.empty
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
-
+                        IntMap.empty
             case runPresolutionM st0 (processInstEdge edge) of
                 Left err -> expectationFailure ("processInstEdge failed: " ++ show err)
                 Right (_, st1) -> do
@@ -2433,16 +2463,14 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         , cBindParents = bindParents
                         }
                 st0 =
-                    PresolutionState
-                        constraint
-                        (Presolution IntMap.empty)
+                    PresolutionState constraint (Presolution IntMap.empty)
                         IntMap.empty
                         7
                         IntSet.empty
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
-
+                        IntMap.empty
                 -- Check that no OpRaise targets the rigidly bound innerArrow
                 isRaiseOnRigid op = case op of
                     OpRaise n -> n == innerArrow
@@ -2512,16 +2540,14 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         }
 
                 st0 =
-                    PresolutionState
-                        constraint
-                        (Presolution IntMap.empty)
+                    PresolutionState constraint (Presolution IntMap.empty)
                         IntMap.empty
                         10
                         IntSet.empty
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
-
+                        IntMap.empty
                 isRaiseOn nid op = case op of
                     OpRaise n -> n == nid
                     _ -> False
@@ -2579,16 +2605,14 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         }
 
                 st0 =
-                    PresolutionState
-                        constraint
-                        (Presolution IntMap.empty)
+                    PresolutionState constraint (Presolution IntMap.empty)
                         IntMap.empty
                         5
                         IntSet.empty
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
-
+                        IntMap.empty
                 interior = IntSet.fromList [getNodeId a]
 
             -- Sanity: both sides really do get raised by harmonization.
@@ -2647,16 +2671,14 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         , cBindParents = bindParents
                         }
                 st0 =
-                    PresolutionState
-                        constraint
-                        (Presolution IntMap.empty)
+                    PresolutionState constraint (Presolution IntMap.empty)
                         IntMap.empty
                         7
                         IntSet.empty
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
-
+                        IntMap.empty
             case runPresolutionM st0 (processInstEdge edge) of
                 Left err -> expectationFailure ("processInstEdge failed: " ++ show err)
                 Right (_, st1) -> do
@@ -2724,16 +2746,14 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                                 }
 
                         st0 =
-                            PresolutionState
-                                constraint0
-                                (Presolution IntMap.empty)
+                            PresolutionState constraint0 (Presolution IntMap.empty)
                                 IntMap.empty
                                 (rightVarId + 1)
                                 IntSet.empty
                                 IntMap.empty
                                 IntMap.empty
                                 IntMap.empty
-
+                                IntMap.empty
                         interior = IntSet.fromList [0 .. rightVarId]
 
                         replayRaises :: Constraint -> [InstanceOp] -> Either BindingError Constraint

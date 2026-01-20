@@ -5,9 +5,12 @@ module MLF.Frontend.ConstraintGen (
     generateConstraints
 ) where
 
+import Data.Functor.Foldable (cata)
+import qualified Data.IntSet as IntSet
+
 import MLF.Frontend.Syntax (Expr)
 import MLF.Frontend.Desugar (desugarCoercions)
-import MLF.Constraint.Types (PolySyms)
+import MLF.Constraint.Types (NodeId, PolySyms, cAnnEdges, getEdgeId)
 import MLF.Frontend.ConstraintGen.Types
 import MLF.Frontend.ConstraintGen.State
 import MLF.Frontend.ConstraintGen.Translate (buildRootExpr)
@@ -73,11 +76,10 @@ This is why our implementation:
   - ELam: allocates a plain TyVar { tnId = for, tnBound = Nothing } the parameter (monomorphic)
   - ELet: wraps the RHS in a TyExp expansion node (polymorphic)
 
-Future extensions could support explicit type annotations like:
-  ELamAnnot :: VarName -> Type -> Expr -> Expr
-  -- λ(f : ∀α. α → α). (f 1, f True)
+Explicit lambda annotations (`ELamAnn`) allow the user to request higher-rank
+types where needed, e.g.:
 
-This would allow the user to request higher-rank types where needed.
+  λ(f : ∀α. α → α). (f 1, f True)
 
 Paper references:
   - ICFP 2008, §1 describes the constraint language and type syntax
@@ -92,9 +94,39 @@ generateConstraints polySyms expr = do
     let initialState = mkInitialStateWithPolySyms polySyms
     ((_rootGen, rootNode, annRoot), finalState) <-
         runConstraintM (buildRootExpr expr') initialState
-    let constraint = buildConstraint finalState
+    let annEdges = collectAnnEdges annRoot
+        constraint = (buildConstraint finalState) { cAnnEdges = annEdges }
     pure ConstraintResult
         { crConstraint = constraint
         , crRoot = rootNode
         , crAnnotated = annRoot
         }
+
+data AnnEdges = AnnEdges
+    { aeAll :: IntSet.IntSet
+    , aeNoAnn :: IntSet.IntSet
+    , aeAnnTarget :: Maybe NodeId
+    }
+
+collectAnnEdges :: AnnExpr -> IntSet.IntSet
+collectAnnEdges ann = aeAll (cata alg ann)
+  where
+    emptyEdges = AnnEdges IntSet.empty IntSet.empty Nothing
+
+    alg expr = case expr of
+        AVarF _ _ -> emptyEdges
+        ALitF _ _ -> emptyEdges
+        ALamF _ _ _ body _ -> body
+        AAppF fun arg _ _ _ ->
+            let allEdges = IntSet.union (aeAll fun) (aeAll arg)
+            in AnnEdges allEdges allEdges Nothing
+        ALetF _ _ _ _ _ rhs body trivialRoot ->
+            let bodyEdges =
+                    if aeAnnTarget body == Just trivialRoot
+                        then aeNoAnn body
+                        else aeAll body
+                allEdges = IntSet.union (aeAll rhs) bodyEdges
+            in AnnEdges allEdges allEdges Nothing
+        AAnnF inner target eid ->
+            let allEdges = IntSet.insert (getEdgeId eid) (aeAll inner)
+            in AnnEdges allEdges (aeAll inner) (Just target)

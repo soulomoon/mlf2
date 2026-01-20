@@ -1,0 +1,44 @@
+# Implementation Plan
+
+- [x] 1. Remove free-var closure and add strict generalizeAt check
+  - [x] 1.1 Drop binder insertion for missing free vars
+    - Remove "bindingsClosed/missingNames" logic in `generalizeAt`.
+    - Ensure `subst` only contains explicit binders.
+    - Files: `src/MLF/Elab/Generalize.hs`
+    - Tests: compile + existing generalization tests
+    - _Requirements: 1.1, 1.3_
+    - **Verification:** `rg -n "missingNames|bindingsClosed|free vars" src/MLF/Elab/Generalize.hs`
+  - [x] 1.2 Add `SchemeFreeVars` error on free names
+    - Compute free names after reification and compare to binder set.
+    - Emit `SchemeFreeVars` with scheme root + names.
+    - Files: `src/MLF/Elab/Generalize.hs`, `src/MLF/Elab/Types.hs`
+    - Tests: new negative test (see 3.1)
+    - _Requirements: 1.1, 1.2_
+    - **Verification:** `rg -n "SchemeFreeVars" src/MLF`
+
+- [x] 2. Add binding-structure invariant for scheme closure
+  - [x] 2.1 Implement `checkSchemeClosure` in binding tree
+    - For each scheme root `s` under gen node `g`, ensure all named nodes reachable from `s` are bound under `g`.
+    - Emit `GenSchemeFreeVars { schemeRoot, schemeGen, freeNodes }`.
+    - Files: `src/MLF/Binding/Tree.hs`, `src/MLF/Constraint/Types.hs`
+    - Tests: negative test (see 3.1)
+    - _Requirements: 2.1, 2.2_
+    - **Verification:** `rg -n "SchemeClosure|GenSchemeFreeVars|schemeRoot" src/MLF/Binding/Tree.hs`
+  - [x] 2.2 Wire invariant into elaboration path
+    - Call `checkSchemeClosure` alongside existing binding checks.
+    - Files: `src/MLF/Elab/Phi.hs` (or `src/MLF/Elab/Run.hs` if more appropriate)
+    - Tests: full suite
+    - _Requirements: 2.1, 2.3_
+    - **Verification:** `rg -n "checkSchemeClosure" src/MLF`
+
+- [x] 3. Tests
+  - [x] 3.1 Add regression test for free-var closure
+    - Construct a constraint/elaboration scenario where a scheme root refers to a named node bound outside its gen node.
+    - Expect `SchemeFreeVars` or `GenSchemeFreeVars`.
+    - Files: `test/ElaborationSpec.hs` (or a new spec if more appropriate)
+    - _Requirements: 3.1_
+    - **Verification:** `cabal test --test-show-details=direct`
+  - [x] 3.2 Ensure existing thesis-exact tests remain green
+    - Run full suite and fix any fallout.
+    - _Requirements: 3.2_
+    - **Verification:** `cabal test --test-show-details=direct`

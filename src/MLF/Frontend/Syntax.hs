@@ -1,12 +1,20 @@
+{-# LANGUAGE DeriveFoldable #-}
+{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveTraversable #-}
+{-# LANGUAGE TypeFamilies #-}
 module MLF.Frontend.Syntax (
     VarName,
     Lit (..),
     Expr (..),
+    ExprF (..),
     SrcType (..),
+    SrcTypeF (..),
     SrcScheme (..),
     AnnotatedExpr (..),
     BindingSite (..)
 ) where
+
+import Data.Functor.Foldable (Base, Corecursive (..), Recursive (..))
 
 {- Note [Surface syntax and paper alignment]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -17,7 +25,7 @@ This module defines the *surface language* accepted by the pipeline:
 
 Paper reference
 --------------
-In `papers/xmlf.txt` (§"From λ-terms to typing constraints"), the grammar for
+In `papers/these-finale-english.txt` (see `papers/xmlf.txt` §"From λ-terms to typing constraints"), the grammar for
 eMLF terms is (using the paper’s notation):
 
   b ::= x | λ(x) b | λ(x : σ) b | b b | let x = b in b | (b : σ)
@@ -60,7 +68,8 @@ data Lit
 
 -- | Source-level type syntax for annotations.
 --
--- This corresponds closely to the type language presented in `papers/xmlf.txt`:
+-- This corresponds closely to the type language presented in
+-- `papers/these-finale-english.txt` (see `papers/xmlf.txt`):
 --
 --   - type variables (written !α in the paper; we use names like "a")
 --   - arrows (τ → σ)
@@ -84,6 +93,32 @@ data SrcType
     | STForall String (Maybe SrcType) SrcType   -- ^ Bounded quantification: ∀(α ⩾ τ?). σ
     | STBottom                                  -- ^ Bottom type: ⊥
     deriving (Eq, Show)
+
+data SrcTypeF a
+    = STVarF String
+    | STArrowF a a
+    | STBaseF String
+    | STForallF String (Maybe a) a
+    | STBottomF
+    deriving (Eq, Show, Functor, Foldable, Traversable)
+
+type instance Base SrcType = SrcTypeF
+
+instance Recursive SrcType where
+    project ty = case ty of
+        STVar v -> STVarF v
+        STArrow a b -> STArrowF a b
+        STBase b -> STBaseF b
+        STForall v mb body -> STForallF v mb body
+        STBottom -> STBottomF
+
+instance Corecursive SrcType where
+    embed ty = case ty of
+        STVarF v -> STVar v
+        STArrowF a b -> STArrow a b
+        STBaseF b -> STBase b
+        STForallF v mb body -> STForall v mb body
+        STBottomF -> STBottom
 
 -- | Source-level type scheme (multiple binders) used by `ELetAnn`.
 --
@@ -135,6 +170,44 @@ data Expr
     | EAnn Expr SrcType                         -- ^ (e : τ) (term annotation)
     | ELit Lit
     deriving (Eq, Show)
+
+data ExprF a
+    = EVarF VarName
+    | EVarRawF VarName
+    | ELamF VarName a
+    | ELamAnnF VarName SrcType a
+    | EAppF a a
+    | ELetF VarName a a
+    | ELetAnnF VarName SrcScheme a a
+    | EAnnF a SrcType
+    | ELitF Lit
+    deriving (Eq, Show, Functor, Foldable, Traversable)
+
+type instance Base Expr = ExprF
+
+instance Recursive Expr where
+    project expr = case expr of
+        EVar v -> EVarF v
+        EVarRaw v -> EVarRawF v
+        ELam v body -> ELamF v body
+        ELamAnn v ty body -> ELamAnnF v ty body
+        EApp f a -> EAppF f a
+        ELet v rhs body -> ELetF v rhs body
+        ELetAnn v sch rhs body -> ELetAnnF v sch rhs body
+        EAnn e ty -> EAnnF e ty
+        ELit l -> ELitF l
+
+instance Corecursive Expr where
+    embed expr = case expr of
+        EVarF v -> EVar v
+        EVarRawF v -> EVarRaw v
+        ELamF v body -> ELam v body
+        ELamAnnF v ty body -> ELamAnn v ty body
+        EAppF f a -> EApp f a
+        ELetF v rhs body -> ELet v rhs body
+        ELetAnnF v sch rhs body -> ELetAnn v sch rhs body
+        EAnnF e ty -> EAnn e ty
+        ELitF l -> ELit l
 
 -- | Optional wrapper for attaching binding-site metadata to a surface expression.
 --

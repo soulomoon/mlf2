@@ -8,7 +8,8 @@ This module implements the paper's ω operations (Raise/Weaken) as pure
 transformations on the binding tree. These operations modify only the
 binding-edge structure, not the term-DAG.
 
-Paper reference: @papers/xmlf.txt@ §3.1–§3.4
+Paper reference: @papers/these-finale-english.txt@ (see @papers/xmlf.txt@
+§3.1-§3.4)
 
 Note [Raise and Weaken Operations]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -113,7 +114,7 @@ isLocked c nid = do
 --
 -- Returns the updated constraint and the operation that was applied.
 --
--- Paper reference: @papers/xmlf.txt@ §3.1
+-- Paper reference: @papers/these-finale-english.txt@ (see @papers/xmlf.txt@ §3.1)
 applyWeaken :: NodeRef -> Constraint -> Either BindingError (Constraint, InstanceOp)
 applyWeaken nid c = do
     _ <- expectTypeRef nid
@@ -122,10 +123,11 @@ applyWeaken nid c = do
         Nothing -> Left $ MissingBindParent nid
         Just (_parent, BindRigid) -> Left $ OperationOnLockedNode nid
         Just (parent, BindFlex) -> do
-            -- Change the flag to rigid
+    -- Change the flag to rigid and remember this binder was weakened.
             let c' = setBindParent nid (parent, BindRigid) c
             nidT <- expectTypeRef nid
-            return (c', OpWeaken nidT)
+            let c'' = c' { cWeakenedVars = IntSet.insert (getNodeId nidT) (cWeakenedVars c') }
+            return (c'', OpWeaken nidT)
 
 -- | Apply a single Raise step to a node.
 --
@@ -143,7 +145,8 @@ applyWeaken nid c = do
 --   - Right (c, Nothing) if n's parent is already a root (no-op)
 --   - Left error if preconditions are violated
 --
--- Paper reference: @papers/xmlf.txt@ §3.1 "slide over" semantics
+-- Paper reference: @papers/these-finale-english.txt@ (see @papers/xmlf.txt@ §3.1)
+-- "slide over" semantics
 applyRaiseStep :: NodeRef -> Constraint -> Either BindingError (Constraint, Maybe InstanceOp)
 applyRaiseStep nid c = do
     nidT <- expectTypeRef nid
@@ -151,7 +154,8 @@ applyRaiseStep nid c = do
     case lookupBindParent c nid of
         Nothing -> Left $ MissingBindParent nid
         Just (parent, flag) -> do
-            -- Paper alignment (`papers/xmlf.txt` Fig. 10): operations "under a
+            -- Paper alignment (`papers/these-finale-english.txt`; see `papers/xmlf.txt` Fig. 10):
+            -- operations "under a
             -- rigidly bound node" must be absent from normalized witnesses.
             --
             -- We treat a node as "locked" iff it is *strictly* under a rigid
@@ -182,7 +186,7 @@ applyRaiseStep nid c = do
 --
 -- Returns the updated constraint and the list of Raise operations applied.
 --
--- Paper reference: @papers/xmlf.txt@ §3.1
+-- Paper reference: @papers/these-finale-english.txt@ (see @papers/xmlf.txt@ §3.1)
 applyRaiseTo :: NodeRef -> NodeRef -> Constraint -> Either BindingError (Constraint, [InstanceOp])
 applyRaiseTo nid target c = do
     -- Verify target is an ancestor of nid
