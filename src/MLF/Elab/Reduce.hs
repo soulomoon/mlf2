@@ -5,6 +5,7 @@ module MLF.Elab.Reduce (
 ) where
 
 import qualified Data.Set as Set
+import Data.Functor.Foldable (para)
 
 import MLF.Elab.Inst (applyInstantiation, schemeToType, splitForalls)
 import MLF.Elab.Types
@@ -157,53 +158,58 @@ freshTypeName used =
         [] -> "u0"
 
 substTermVar :: String -> ElabTerm -> ElabTerm -> ElabTerm
-substTermVar x s term = go term
+substTermVar x s = goSub
   where
     freeS = freeTermVars s
-    go t = case t of
-        EVar v | v == x -> s
-        EVar v -> EVar v
-        ELit l -> ELit l
-        ELam v ty body
-            | v == x -> ELam v ty body
-            | v `Set.member` freeS ->
-                let used = Set.unions [freeS, freeTermVars body, Set.singleton x]
-                    v' = freshTermNameFrom v used
-                    body' = substTermVar v (EVar v') body
-                in ELam v' ty (go body')
-            | otherwise -> ELam v ty (go body)
-        EApp f a -> EApp (go f) (go a)
-        ELet v sch rhs body
-            | v == x -> ELet v sch (go rhs) body
-            | v `Set.member` freeS ->
-                let used = Set.unions [freeS, freeTermVars body, Set.singleton x]
-                    v' = freshTermNameFrom v used
-                    body' = substTermVar v (EVar v') body
-                in ELet v' sch (go rhs) (go body')
-            | otherwise -> ELet v sch (go rhs) (go body)
-        ETyAbs v b body -> ETyAbs v b (go body)
-        ETyInst e i -> ETyInst (go e) i
+    goSub = para alg
+      where
+        alg term = case term of
+            EVarF v
+                | v == x -> s
+                | otherwise -> EVar v
+            ELitF l -> ELit l
+            ELamF v ty body
+                | v == x -> ELam v ty (fst body)
+                | v `Set.member` freeS ->
+                    let used = Set.unions [freeS, freeTermVars (fst body), Set.singleton x]
+                        v' = freshTermNameFrom v used
+                        body' = substTermVar v (EVar v') (fst body)
+                    in ELam v' ty (goSub body')
+                | otherwise -> ELam v ty (snd body)
+            EAppF f a -> EApp (snd f) (snd a)
+            ELetF v sch rhs body
+                | v == x -> ELet v sch (snd rhs) (fst body)
+                | v `Set.member` freeS ->
+                    let used = Set.unions [freeS, freeTermVars (fst body), Set.singleton x]
+                        v' = freshTermNameFrom v used
+                        body' = substTermVar v (EVar v') (fst body)
+                    in ELet v' sch (snd rhs) (goSub body')
+                | otherwise -> ELet v sch (snd rhs) (snd body)
+            ETyAbsF v b body -> ETyAbs v b (snd body)
+            ETyInstF e i -> ETyInst (snd e) i
 
 substTypeVarTerm :: String -> ElabType -> ElabTerm -> ElabTerm
-substTypeVarTerm x s term = go term
+substTypeVarTerm x s = goSub
   where
     freeS = freeTypeVarsType s
-    go t = case t of
-        EVar v -> EVar v
-        ELit l -> ELit l
-        ELam v ty body -> ELam v (substTypeVar x s ty) (go body)
-        EApp f a -> EApp (go f) (go a)
-        ELet v sch rhs body ->
-            ELet v (substTypeVarScheme x s sch) (go rhs) (go body)
-        ETyAbs v mb body
-            | v == x -> ETyAbs v (fmap (substTypeVar x s) mb) body
-            | v `Set.member` freeS ->
-                let used = Set.unions [freeS, freeTypeVarsTerm body, Set.singleton x]
-                    v' = freshTermNameFrom v used
-                    body' = substTypeVarTerm v (TVar v') body
-                in ETyAbs v' (fmap (substTypeVar x s) mb) (go body')
-            | otherwise -> ETyAbs v (fmap (substTypeVar x s) mb) (go body)
-        ETyInst e i -> ETyInst (go e) (substTypeVarInst x s i)
+    goSub = para alg
+      where
+        alg term = case term of
+            EVarF v -> EVar v
+            ELitF l -> ELit l
+            ELamF v ty body -> ELam v (substTypeVar x s ty) (snd body)
+            EAppF f a -> EApp (snd f) (snd a)
+            ELetF v sch rhs body ->
+                ELet v (substTypeVarScheme x s sch) (snd rhs) (snd body)
+            ETyAbsF v mb body
+                | v == x -> ETyAbs v (fmap (substTypeVar x s) mb) (fst body)
+                | v `Set.member` freeS ->
+                    let used = Set.unions [freeS, freeTypeVarsTerm (fst body), Set.singleton x]
+                        v' = freshTermNameFrom v used
+                        body' = substTypeVarTerm v (TVar v') (fst body)
+                    in ETyAbs v' (fmap (substTypeVar x s) mb) (goSub body')
+                | otherwise -> ETyAbs v (fmap (substTypeVar x s) mb) (snd body)
+            ETyInstF e i -> ETyInst (snd e) (substTypeVarInst x s i)
 
 substTypeVarScheme :: String -> ElabType -> ElabScheme -> ElabScheme
 substTypeVarScheme x s sch =
@@ -213,78 +219,95 @@ substTypeVarScheme x s sch =
     in Forall binds body
 
 substTypeVarInst :: String -> ElabType -> Instantiation -> Instantiation
-substTypeVarInst x s inst = case inst of
-    InstId -> InstId
-    InstApp t -> InstApp (substTypeVar x s t)
-    InstBot t -> InstBot (substTypeVar x s t)
-    InstIntro -> InstIntro
-    InstElim -> InstElim
-    InstAbstr v -> InstAbstr v
-    InstInside i -> InstInside (substTypeVarInst x s i)
-    InstSeq a b -> InstSeq (substTypeVarInst x s a) (substTypeVarInst x s b)
-    InstUnder v i
-        | v == x -> InstUnder v i
-        | otherwise -> InstUnder v (substTypeVarInst x s i)
+substTypeVarInst x s = para alg
+  where
+    alg inst = case inst of
+        InstIdF -> InstId
+        InstAppF t -> InstApp (substTypeVar x s t)
+        InstBotF t -> InstBot (substTypeVar x s t)
+        InstIntroF -> InstIntro
+        InstElimF -> InstElim
+        InstAbstrF v -> InstAbstr v
+        InstInsideF i -> InstInside (snd i)
+        InstSeqF a b -> InstSeq (snd a) (snd b)
+        InstUnderF v i
+            | v == x -> InstUnder v (fst i)
+            | otherwise -> InstUnder v (snd i)
 
 substTypeVar :: String -> ElabType -> ElabType -> ElabType
-substTypeVar x s ty = case ty of
-    TVar v | v == x -> s
-    TVar v -> TVar v
-    TArrow a b -> TArrow (substTypeVar x s a) (substTypeVar x s b)
-    TBase b -> TBase b
-    TBottom -> TBottom
-    TForall v mb body
-        | v == x -> TForall v (fmap (substTypeVar x s) mb) body
-        | v `Set.member` freeS ->
-            let v' = freshTermNameFrom v (Set.unions [freeS, freeTypeVarsType body, maybe Set.empty freeTypeVarsType mb])
-                body' = substTypeVar v (TVar v') body
-            in TForall v' (fmap (substTypeVar x s) mb) (substTypeVar x s body')
-        | otherwise -> TForall v (fmap (substTypeVar x s) mb) (substTypeVar x s body)
+substTypeVar x s = goSub
   where
     freeS = freeTypeVarsType s
+    goSub = para alg
+      where
+        alg ty = case ty of
+            TVarF v
+                | v == x -> s
+                | otherwise -> TVar v
+            TArrowF d c -> TArrow (snd d) (snd c)
+            TBaseF b -> TBase b
+            TBottomF -> TBottom
+            TForallF v mb body
+                | v == x ->
+                    let mb' = fmap snd mb
+                    in TForall v mb' (fst body)
+                | v `Set.member` freeS ->
+                    let used =
+                            Set.unions
+                                [ freeS
+                                , freeTypeVarsType (fst body)
+                                , maybe Set.empty (freeTypeVarsType . fst) mb
+                                ]
+                        v' = freshTermNameFrom v used
+                        body' = substTypeVar v (TVar v') (fst body)
+                    in TForall v' (fmap snd mb) (goSub body')
+                | otherwise ->
+                    TForall v (fmap snd mb) (snd body)
 
 replaceAbstrInTerm :: String -> Instantiation -> ElabTerm -> ElabTerm
-replaceAbstrInTerm target replacement term = go term
+replaceAbstrInTerm target replacement = para alg
   where
-    go t = case t of
-        EVar v -> EVar v
-        ELit l -> ELit l
-        ELam v ty body -> ELam v ty (go body)
-        EApp f a -> EApp (go f) (go a)
-        ELet v sch rhs body -> ELet v sch (go rhs) (go body)
-        ETyAbs v mb body
-            | v == target -> ETyAbs v mb body
-            | otherwise -> ETyAbs v mb (go body)
-        ETyInst e inst -> ETyInst (go e) (replaceAbstrInInst target replacement inst)
+    alg term = case term of
+        EVarF v -> EVar v
+        ELitF l -> ELit l
+        ELamF v ty body -> ELam v ty (snd body)
+        EAppF f a -> EApp (snd f) (snd a)
+        ELetF v sch rhs body -> ELet v sch (snd rhs) (snd body)
+        ETyAbsF v mb body
+            | v == target -> ETyAbs v mb (fst body)
+            | otherwise -> ETyAbs v mb (snd body)
+        ETyInstF e inst -> ETyInst (snd e) (replaceAbstrInInst target replacement inst)
 
 replaceAbstrInInst :: String -> Instantiation -> Instantiation -> Instantiation
-replaceAbstrInInst target replacement inst = case inst of
-    InstId -> InstId
-    InstApp t -> InstApp t
-    InstBot t -> InstBot t
-    InstIntro -> InstIntro
-    InstElim -> InstElim
-    InstAbstr v
-        | v == target -> replacement
-        | otherwise -> InstAbstr v
-    InstInside i -> InstInside (replaceAbstrInInst target replacement i)
-    InstSeq a b -> InstSeq (replaceAbstrInInst target replacement a) (replaceAbstrInInst target replacement b)
-    InstUnder v i
-        | v == target -> InstUnder v i
-        | otherwise -> InstUnder v (replaceAbstrInInst target replacement i)
+replaceAbstrInInst target replacement = para alg
+  where
+    alg inst = case inst of
+        InstIdF -> InstId
+        InstAppF t -> InstApp t
+        InstBotF t -> InstBot t
+        InstIntroF -> InstIntro
+        InstElimF -> InstElim
+        InstAbstrF v
+            | v == target -> replacement
+            | otherwise -> InstAbstr v
+        InstInsideF i -> InstInside (snd i)
+        InstSeqF a b -> InstSeq (snd a) (snd b)
+        InstUnderF v i
+            | v == target -> InstUnder v (fst i)
+            | otherwise -> InstUnder v (snd i)
 
 renameInstBound :: String -> String -> Instantiation -> Instantiation
-renameInstBound old new = goR
+renameInstBound old new = para alg
   where
-    goR inst0 = case inst0 of
-        InstId -> InstId
-        InstApp t -> InstApp t
-        InstBot t -> InstBot t
-        InstIntro -> InstIntro
-        InstElim -> InstElim
-        InstAbstr v -> InstAbstr (if v == old then new else v)
-        InstInside i -> InstInside (goR i)
-        InstSeq a b -> InstSeq (goR a) (goR b)
-        InstUnder v i
-            | v == old -> InstUnder v i
-            | otherwise -> InstUnder v (goR i)
+    alg inst = case inst of
+        InstIdF -> InstId
+        InstAppF t -> InstApp t
+        InstBotF t -> InstBot t
+        InstIntroF -> InstIntro
+        InstElimF -> InstElim
+        InstAbstrF v -> InstAbstr (if v == old then new else v)
+        InstInsideF i -> InstInside (snd i)
+        InstSeqF a b -> InstSeq (snd a) (snd b)
+        InstUnderF v i
+            | v == old -> InstUnder v (fst i)
+            | otherwise -> InstUnder v (snd i)

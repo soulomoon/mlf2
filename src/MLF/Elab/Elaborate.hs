@@ -494,38 +494,45 @@ elaborateWithScope resPhi resReify resGen gaParents edgeWitnesses edgeTraces edg
             _ -> Left (InstantiationError "matchType: structure mismatch")
 
     replaceInstApps :: [ElabType] -> Instantiation -> (Instantiation, [ElabType])
-    replaceInstApps args inst0 = case inst0 of
-        InstId -> (InstId, args)
-        InstSeq a b ->
-            let (a', args1) = replaceInstApps args a
-                (b', args2) = replaceInstApps args1 b
-            in (InstSeq a' b', args2)
-        InstApp _ ->
-            case args of
-                (t:rest) -> (InstApp t, rest)
-                [] -> (inst0, [])
-        InstBot t -> (InstBot t, args)
-        InstAbstr v -> (InstAbstr v, args)
-        InstIntro -> (InstIntro, args)
-        InstElim -> (InstElim, args)
-        InstInside phi ->
-            let (phi', rest) = replaceInstApps args phi
-            in (InstInside phi', rest)
-        InstUnder v phi ->
-            let (phi', rest) = replaceInstApps args phi
-            in (InstUnder v phi', rest)
+    replaceInstApps args0 inst0 = (cata alg inst0) args0
+      where
+        alg inst = case inst of
+            InstIdF -> \args -> (InstId, args)
+            InstSeqF a b ->
+                \args ->
+                    let (a', args1) = a args
+                        (b', args2) = b args1
+                    in (InstSeq a' b', args2)
+            InstAppF t ->
+                \args -> case args of
+                    (t':rest) -> (InstApp t', rest)
+                    [] -> (InstApp t, [])
+            InstBotF t -> \args -> (InstBot t, args)
+            InstAbstrF v -> \args -> (InstAbstr v, args)
+            InstIntroF -> \args -> (InstIntro, args)
+            InstElimF -> \args -> (InstElim, args)
+            InstInsideF phi ->
+                \args ->
+                    let (phi', rest) = phi args
+                    in (InstInside phi', rest)
+            InstUnderF v phi ->
+                \args ->
+                    let (phi', rest) = phi args
+                    in (InstUnder v phi', rest)
 
     countInstApps :: Instantiation -> Int
-    countInstApps inst0 = case inst0 of
-        InstId -> 0
-        InstSeq a b -> countInstApps a + countInstApps b
-        InstApp _ -> 1
-        InstBot _ -> 0
-        InstAbstr _ -> 0
-        InstIntro -> 0
-        InstElim -> 0
-        InstInside phi -> countInstApps phi
-        InstUnder _ phi -> countInstApps phi
+    countInstApps = cata alg
+      where
+        alg inst0 = case inst0 of
+            InstIdF -> 0
+            InstSeqF a b -> a + b
+            InstAppF _ -> 1
+            InstBotF _ -> 0
+            InstAbstrF _ -> 0
+            InstIntroF -> 0
+            InstElimF -> 0
+            InstInsideF phi -> phi
+            InstUnderF _ phi -> phi
 
 debugElabGeneralize :: String -> a -> a
 debugElabGeneralize msg value =
@@ -542,23 +549,27 @@ debugElabGeneralizeEnabled =
 
 -- | Substitute names in a term (and its embedded types)
 substInTerm :: IntMap.IntMap String -> ElabTerm -> ElabTerm
-substInTerm subst term = case term of
-    EVar v -> EVar v
-    ELit l -> ELit l
-    ELam v ty body -> ELam v (substInType subst ty) (substInTerm subst body)
-    EApp f a -> EApp (substInTerm subst f) (substInTerm subst a)
-    ELet v sch rhs body -> ELet v (substInScheme subst sch) (substInTerm subst rhs) (substInTerm subst body)
-    ETyAbs v b body -> ETyAbs v (fmap (substInType subst) b) (substInTerm subst body)
-    ETyInst e i -> ETyInst (substInTerm subst e) (substInInst subst i)
+substInTerm subst = cata alg
+  where
+    alg term = case term of
+        EVarF v -> EVar v
+        ELitF l -> ELit l
+        ELamF v ty body -> ELam v (substInType subst ty) body
+        EAppF f a -> EApp f a
+        ELetF v sch rhs body -> ELet v (substInScheme subst sch) rhs body
+        ETyAbsF v b body -> ETyAbs v (fmap (substInType subst) b) body
+        ETyInstF e i -> ETyInst e (substInInst subst i)
 
 substInType :: IntMap.IntMap String -> ElabType -> ElabType
-substInType subst t = case t of
-    TVar v -> TVar (applySubst v)
-    TArrow d c -> TArrow (substInType subst d) (substInType subst c)
-    TBase b -> TBase b
-    TForall v b t' -> TForall v (fmap (substInType subst) b) (substInType subst t')
-    TBottom -> TBottom
+substInType subst = cata alg
   where
+    alg ty = case ty of
+        TVarF v -> TVar (applySubst v)
+        TArrowF d c -> TArrow d c
+        TBaseF b -> TBase b
+        TForallF v b t' -> TForall v b t'
+        TBottomF -> TBottom
+
     applySubst name =
         case parseName name of
             Just nid -> case IntMap.lookup nid subst of
@@ -574,16 +585,18 @@ substInScheme subst (Forall binds ty) =
     Forall (map (\(n, b) -> (n, fmap (substInType subst) b)) binds) (substInType subst ty)
 
 substInInst :: IntMap.IntMap String -> Instantiation -> Instantiation
-substInInst subst i = case i of
-    InstId -> InstId
-    InstApp t -> InstApp (substInType subst t)
-    InstBot t -> InstBot (substInType subst t)
-    InstIntro -> InstIntro
-    InstElim -> InstElim
-    InstAbstr v -> InstAbstr v
-    InstUnder v i' -> InstUnder v (substInInst subst i')
-    InstInside i' -> InstInside (substInInst subst i')
-    InstSeq i1 i2 -> InstSeq (substInInst subst i1) (substInInst subst i2)
+substInInst subst = cata alg
+  where
+    alg inst = case inst of
+        InstIdF -> InstId
+        InstAppF t -> InstApp (substInType subst t)
+        InstBotF t -> InstBot (substInType subst t)
+        InstIntroF -> InstIntro
+        InstElimF -> InstElim
+        InstAbstrF v -> InstAbstr v
+        InstUnderF v i' -> InstUnder v i'
+        InstInsideF i' -> InstInside i'
+        InstSeqF i1 i2 -> InstSeq i1 i2
 
 instSeqApps :: [ElabType] -> Instantiation
 instSeqApps tys = case map InstApp tys of

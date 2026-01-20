@@ -701,20 +701,24 @@ phiFromEdgeWitnessWithTrace res mbGaParents mSchemeInfo mTrace ew = do
             _ -> Left (InstantiationError "matchType: structure mismatch")
 
     applyInferredArgs :: ElabType -> ElabType
-    applyInferredArgs = goApply Set.empty
+    applyInferredArgs ty0 = (cata alg ty0) Set.empty
       where
-        goApply bound ty0 = case ty0 of
-            TVar v
-                | Set.member v bound -> TVar v
-                | Just instTy <- Map.lookup v inferredArgMap -> instTy
-                | otherwise -> TVar v
-            TArrow a b -> TArrow (goApply bound a) (goApply bound b)
-            TBase _ -> ty0
-            TBottom -> ty0
-            TForall v mb body ->
-                let bound' = Set.insert v bound
-                    mb' = fmap (goApply bound) mb
-                in TForall v mb' (goApply bound' body)
+        alg ty = case ty of
+            TVarF v ->
+                \bound ->
+                    if Set.member v bound
+                        then TVar v
+                        else case Map.lookup v inferredArgMap of
+                            Just instTy -> instTy
+                            Nothing -> TVar v
+            TArrowF a b -> \bound -> TArrow (a bound) (b bound)
+            TBaseF b -> const (TBase b)
+            TBottomF -> const TBottom
+            TForallF v mb body ->
+                \bound ->
+                    let bound' = Set.insert v bound
+                        mb' = fmap ($ bound) mb
+                    in TForall v mb' (body bound')
 
     alphaEqType :: ElabType -> ElabType -> Bool
     alphaEqType = goEq Map.empty Map.empty

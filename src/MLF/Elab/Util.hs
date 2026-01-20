@@ -1,9 +1,12 @@
 module MLF.Elab.Util (
-    topoSortBy
+    topoSortBy,
+    reachableFrom,
+    reachableFromStop
 ) where
 
 import Data.List (sortBy)
 import qualified Data.IntMap.Strict as IntMap
+import qualified Data.IntSet as IntSet
 
 import MLF.Elab.Types (ElabError(..))
 
@@ -58,3 +61,40 @@ topoSortBy errLabel cmp depsFor nodes =
                             outs
                     queue' = sortBy cmp (rest ++ newlyZero)
                 in step (acc ++ [k]) indeg' queue'
+
+-- | Reachability over a graph with an explicit stop predicate.
+-- Stops expansion at nodes that satisfy @shouldStop@, except for the start node.
+reachableFromStop
+    :: (a -> Int)         -- ^ Key for visited/acc sets.
+    -> (a -> a)           -- ^ Canonicalization for nodes.
+    -> (a -> [a])         -- ^ Successors for a node.
+    -> (a -> Bool)        -- ^ Stop expansion at a node (except start).
+    -> a                  -- ^ Start node.
+    -> IntSet.IntSet
+reachableFromStop keyOf canonical successors shouldStop start =
+    let startC = canonical start
+        startKey = keyOf startC
+        go _ acc [] = acc
+        go visited acc (n:rest) =
+            let nC = canonical n
+                key = keyOf nC
+            in if IntSet.member key visited
+                then go visited acc rest
+                else
+                    let visited' = IntSet.insert key visited
+                    in if key /= startKey && shouldStop nC
+                        then go visited' acc rest
+                        else
+                            let acc' = IntSet.insert key acc
+                                kids = map canonical (successors nC)
+                            in go visited' acc' (kids ++ rest)
+    in go IntSet.empty IntSet.empty [startC]
+
+reachableFrom
+    :: (a -> Int)         -- ^ Key for visited/acc sets.
+    -> (a -> a)           -- ^ Canonicalization for nodes.
+    -> (a -> [a])         -- ^ Successors for a node.
+    -> a                  -- ^ Start node.
+    -> IntSet.IntSet
+reachableFrom keyOf canonical successors start =
+    reachableFromStop keyOf canonical successors (const False) start

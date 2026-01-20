@@ -38,6 +38,7 @@ import MLF.Elab.Reify (reifyType, reifyTypeWithNamesNoFallbackOnConstraint)
 import MLF.Elab.Phi (phiFromEdgeWitnessWithTrace)
 import MLF.Elab.TypeCheck (typeCheck)
 import MLF.Elab.Types
+import MLF.Elab.Util (reachableFromStop)
 
 -- | Run the full pipeline (Phases 1–5) then elaborate.
 runPipelineElab :: PolySyms -> Expr -> Either String (ElabTerm, ElabType)
@@ -1452,10 +1453,10 @@ inferInstAppArgsFromScheme binds body targetTy =
         binderSet = Set.fromList binderNames
         targetCore = stripForallsType targetTy
         targetForallNames =
-            let go ty = case ty of
-                    TForall v _ body' -> v : go body'
+            let alg ty = case ty of
+                    TForallF v _ body' -> v : body'
                     _ -> []
-            in go targetTy
+            in cata alg targetTy
         argsAreIdentity names args =
             and
                 [ case arg of
@@ -2190,32 +2191,18 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
             IntSet.fromList
                 (IntMap.keys schemeRootOwnersBase)
         reachableFromWithBoundsStop start =
-            let startC = canonical start
-                startKey = getNodeId startC
-                stopSet = allSchemeRoots
-                go _ acc [] = acc
-                go visited acc (nid0:rest) =
-                    let nid = canonical nid0
-                        key = getNodeId nid
-                    in if IntSet.member key visited
-                        then go visited acc rest
-                        else
-                            let visited' = IntSet.insert key visited
-                            in if key /= startKey && IntSet.member key stopSet
-                                then go visited' acc rest
-                                else
-                                    let acc' = IntSet.insert key acc
-                                        kids =
-                                            case IntMap.lookup key nodesSolved of
-                                                Nothing -> []
-                                                Just node ->
-                                                    let boundKids =
-                                                            case node of
-                                                                TyVar{ tnBound = Just bnd } -> [bnd]
-                                                                _ -> []
-                                                    in structuralChildren node ++ boundKids
-                                    in go visited' acc' (map canonical kids ++ rest)
-            in go IntSet.empty IntSet.empty [startC]
+            let stopSet = allSchemeRoots
+                shouldStop nid = IntSet.member (getNodeId nid) stopSet
+                children nid =
+                    case IntMap.lookup (getNodeId nid) nodesSolved of
+                        Nothing -> []
+                        Just node ->
+                            let boundKids =
+                                    case node of
+                                        TyVar{ tnBound = Just bnd } -> [bnd]
+                                        _ -> []
+                            in structuralChildren node ++ boundKids
+            in reachableFromStop getNodeId canonical children shouldStop start
         reachableFromWithBoundsBaseStop start =
             let baseNodes = cNodes base
                 stopSet = schemeRootsBaseSet

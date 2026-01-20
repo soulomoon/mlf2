@@ -22,7 +22,7 @@ import System.IO.Unsafe (unsafePerformIO)
 import qualified MLF.Util.Order as Order
 import MLF.Constraint.Types
 import MLF.Elab.Types
-import MLF.Elab.Util (topoSortBy)
+import MLF.Elab.Util (reachableFrom, reachableFromStop, topoSortBy)
 import MLF.Elab.Reify
     ( reifyBoundWithNames
     , reifyBoundWithNamesOnConstraint
@@ -104,6 +104,21 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
         nodes = cNodes constraint
         uf = srUnionFind res
         canonical = Solve.frWith uf
+        canonKey nid = getNodeId (canonical nid)
+        lookupNode key = IntMap.lookup key nodes
+        isTyVarNode node = case node of
+            TyVar{} -> True
+            _ -> False
+        isTyForallNode node = case node of
+            TyForall{} -> True
+            _ -> False
+        isBaseLikeNode node = case node of
+            TyBase{} -> True
+            TyBottom{} -> True
+            _ -> False
+        isTyVarKey key = maybe False isTyVarNode (lookupNode key)
+        isTyForallKey key = maybe False isTyForallNode (lookupNode key)
+        isBaseLikeKey key = maybe False isBaseLikeNode (lookupNode key)
         scopeRoot0 = case scopeRoot of
             TypeRef nid -> TypeRef (canonical nid)
             GenRef gid -> GenRef gid
@@ -123,50 +138,56 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                                 ++ show (IntMap.size (gaSolvedToBase ga))
                 )
                 ()
-    let target0 =
-            case IntMap.lookup (getNodeId (canonical targetNode)) nodes of
+    -- Phase 1: canonicalize roots/targets and choose order roots.
+    let resolveTarget node =
+            case lookupNode (canonKey node) of
                 Just TyExp{ tnBody = b } -> canonical b
-                _ -> canonical targetNode
-        targetBase =
+                _ -> canonical node
+        resolveTargetBase target =
             case mbBindParentsGa of
-                Nothing -> target0
+                Nothing -> target
                 Just ga ->
-                    IntMap.findWithDefault target0 (getNodeId target0) (gaSolvedToBase ga)
-        scopeRootC =
-            case (scopeRoot0, mbBindParentsGa) of
+                    IntMap.findWithDefault target (getNodeId target) (gaSolvedToBase ga)
+        resolveScopeRoot root =
+            case (root, mbBindParentsGa) of
                 (TypeRef nid, Just ga) ->
                     case IntMap.lookup (getNodeId nid) (gaSolvedToBase ga) of
-                        Nothing -> scopeRoot0
+                        Nothing -> root
                         Just baseN ->
                             case bindingPathToRootLocal (gaBindParentsBase ga) (typeRef baseN) of
-                                Left _ -> scopeRoot0
+                                Left _ -> root
                                 Right path ->
                                     case listToMaybe [gid | GenRef gid <- drop 1 path] of
                                         Just gid -> GenRef gid
-                                        Nothing -> scopeRoot0
-                _ -> scopeRoot0
-    let (orderRoot, typeRoot0) =
-            case scopeRootC of
+                                        Nothing -> root
+                _ -> root
+        resolveOrderRoots root target =
+            case root of
                 GenRef _ ->
-                    case IntMap.lookup (getNodeId target0) nodes of
+                    case lookupNode (canonKey target) of
                         Just TyForall{ tnBody = b } ->
                             let bodyRoot = canonical b
-                            in (bodyRoot, target0)
-                        _ -> (target0, target0)
+                            in (bodyRoot, target)
+                        _ -> (target, target)
                 TypeRef _ ->
-                    case IntMap.lookup (getNodeId target0) nodes of
+                    case lookupNode (canonKey target) of
                         Just TyForall{ tnBody = b } ->
                             let bodyRoot = canonical b
-                            in (bodyRoot, target0)
-                        _ -> (target0, target0)
-        orderRootBase =
+                            in (bodyRoot, target)
+                        _ -> (target, target)
+        resolveOrderRootBase target =
             case mbBindParentsGa of
                 Nothing -> orderRoot
                 Just ga ->
                     let baseNodes = cNodes (gaBaseConstraint ga)
-                    in case IntMap.lookup (getNodeId targetBase) baseNodes of
+                    in case IntMap.lookup (getNodeId target) baseNodes of
                         Just TyForall{ tnBody = b } -> b
-                        _ -> targetBase
+                        _ -> target
+        target0 = resolveTarget targetNode
+        targetBase = resolveTargetBase target0
+        scopeRootC = resolveScopeRoot scopeRoot0
+        (orderRoot, typeRoot0) = resolveOrderRoots scopeRootC target0
+        orderRootBase = resolveOrderRootBase targetBase
     case debugGeneralize
         ("generalizeAt: scopeRootC=" ++ show scopeRootC
             ++ " target0=" ++ show target0
@@ -178,22 +199,26 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
         )
         () of
         () -> pure ()
-    scopeGen <- case scopeRootC of
-        GenRef gid -> pure (Just gid)
-        TypeRef nid ->
-            case mbBindParentsGa of
-                Just ga ->
-                    case IntMap.lookup (getNodeId nid) (gaSolvedToBase ga) of
-                        Just baseNid ->
-                            pure (firstGenAncestor (gaBindParentsBase ga) (TypeRef baseNid))
+    -- Phase 2: discover the scope's owning gen node (if any).
+    let resolveScopeGen root =
+            case root of
+                GenRef gid -> pure (Just gid)
+                TypeRef nid ->
+                    case mbBindParentsGa of
+                        Just ga ->
+                            case IntMap.lookup (getNodeId nid) (gaSolvedToBase ga) of
+                                Just baseNid ->
+                                    pure (firstGenAncestor (gaBindParentsBase ga) (TypeRef baseNid))
+                                Nothing -> do
+                                    path <- bindingToElab (Binding.bindingPathToRoot constraint (TypeRef nid))
+                                    pure (listToMaybe [gid | GenRef gid <- drop 1 path])
                         Nothing -> do
                             path <- bindingToElab (Binding.bindingPathToRoot constraint (TypeRef nid))
                             pure (listToMaybe [gid | GenRef gid <- drop 1 path])
-                Nothing -> do
-                    path <- bindingToElab (Binding.bindingPathToRoot constraint (TypeRef nid))
-                    pure (listToMaybe [gid | GenRef gid <- drop 1 path])
-    let bindParents =
-            case (mbBindParentsGa, scopeGen) of
+    scopeGen <- resolveScopeGen scopeRootC
+    -- Phase 3: merge binding parents (base + solved) into a single view.
+    let resolveBindParents scopeGen' =
+            case (mbBindParentsGa, scopeGen') of
                 (Just ga, Just gidScope) ->
                     let baseParents = gaBindParentsBase ga
                         baseToSolved = gaBaseToSolved ga
@@ -268,9 +293,9 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                                 baseParents
                     in IntMap.union bindParentsGaFix bindParentsSoft
                 _ -> bindParentsSoft
-        firstGenAncestorGa =
+        resolveFirstGenAncestor bindParents' =
             case mbBindParentsGa of
-                Nothing -> firstGenAncestor bindParents
+                Nothing -> firstGenAncestor bindParents'
                 Just ga ->
                     \ref ->
                         case ref of
@@ -285,39 +310,91 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                                         if IntMap.member key (cNodes baseConstraint)
                                             then firstGenAncestor (gaBindParentsBase ga) (TypeRef (NodeId key))
                                             else Nothing
+        bindParents = resolveBindParents scopeGen
+        firstGenAncestorGa = resolveFirstGenAncestor bindParents
         constraintForReify = constraint { cBindParents = bindParents }
         resForReify = res { srConstraint = constraintForReify }
-    let schemeRootSetRaw =
-            IntSet.fromList
-                [ getNodeId root
-                | gen <- IntMap.elems (cGenNodes constraint)
-                , root <- gnSchemes gen
-                ]
+    -- Phase 4: scheme-root metadata and bound traversal policy.
+    let schemeRootsWithGen =
+            [ (gnId gen, root)
+            | gen <- IntMap.elems (cGenNodes constraint)
+            , root <- gnSchemes gen
+            ]
+        schemeRootSetRaw =
+            IntSet.fromList [ getNodeId root | (_gid, root) <- schemeRootsWithGen ]
         schemeRootOwner =
             IntMap.fromList
-                [ (getNodeId (canonical root), gnId gen)
-                | gen <- IntMap.elems (cGenNodes constraint)
-                , root <- gnSchemes gen
+                [ (getNodeId (canonical root), gid)
+                | (gid, root) <- schemeRootsWithGen
                 ]
         schemeRootSet =
             IntSet.union schemeRootSetRaw $
                 IntSet.fromList
                     [ getNodeId (canonical root)
-                    | gen <- IntMap.elems (cGenNodes constraint)
-                    , root <- gnSchemes gen
+                    | (_gid, root) <- schemeRootsWithGen
                     ]
         schemeRootByBody =
             IntMap.fromListWith
                 (\a _ -> a)
                 [ (getNodeId (canonical bnd), root)
-                | gen <- IntMap.elems (cGenNodes constraint)
-                , root <- gnSchemes gen
+                | (_gid, root) <- schemeRootsWithGen
                 , Just bnd <- [VarStore.lookupVarBound constraint root]
                 , case IntMap.lookup (getNodeId (canonical bnd)) nodes of
                     Just TyBase{} -> False
                     Just TyBottom{} -> False
                     _ -> True
                 ]
+        lookupSchemeRootOwner bnd =
+            let bndC = canonical bnd
+                key = getNodeId bndC
+            in case IntMap.lookup key schemeRootOwner of
+                Just gid -> Just gid
+                Nothing ->
+                    case IntMap.lookup key schemeRootByBody of
+                        Just root ->
+                            IntMap.lookup (getNodeId (canonical root)) schemeRootOwner
+                        Nothing -> Nothing
+        isSchemeRootBody bnd =
+            case IntMap.lookup (getNodeId (canonical bnd)) schemeRootByBody of
+                Just root -> Just root
+                Nothing -> Nothing
+        parseNameId name =
+            case name of
+                ('t':rest) ->
+                    case reads rest of
+                        [(n, "")] -> Just n
+                        _ -> Nothing
+                _ -> Nothing
+        boundRootWith keyOf canon lookupNodeByKey lookupBound lookupSchemeRoot followForall start =
+            let walkBoundRoot visited nid0 =
+                    let nid = canon nid0
+                        key = keyOf nid
+                    in if IntSet.member key visited
+                        then nid
+                        else
+                            case lookupSchemeRoot key of
+                                Just root -> canon root
+                                Nothing ->
+                                    case lookupNodeByKey key of
+                                        Just TyForall{ tnBody = b }
+                                            | followForall -> canon b
+                                        Just TyExp{ tnBody = b } ->
+                                            walkBoundRoot (IntSet.insert key visited) b
+                                        Just TyVar{ tnBound = Just bnd } ->
+                                            let bndC = canon bnd
+                                            in if bndC /= nid
+                                                then walkBoundRoot (IntSet.insert key visited) bnd
+                                                else nid
+                                        _ ->
+                                            case lookupBound nid of
+                                                Just bnd' | canon bnd' /= nid ->
+                                                    walkBoundRoot (IntSet.insert key visited) bnd'
+                                                _ -> nid
+            in walkBoundRoot IntSet.empty start
+        bindingScopeFor ref =
+            case Binding.bindingPathToRoot constraint ref of
+                Right path -> listToMaybe [gid | GenRef gid <- drop 1 path]
+                Left _ -> Nothing
         typeRootFromBoundVar =
             case scopeGen of
                 Just gid ->
@@ -326,35 +403,41 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                         | (childKey, (parentRef, _flag)) <- IntMap.toList bindParents
                         , parentRef == GenRef gid
                         , TypeRef child <- [nodeRefFromKey childKey]
-                        , case IntMap.lookup (getNodeId (canonical child)) nodes of
-                            Just TyVar{} -> True
-                            _ -> False
+                        , isTyVarKey (canonKey child)
                         , case VarStore.lookupVarBound constraint (canonical child) of
                             Just bnd -> canonical bnd == canonical target0
                             Nothing -> False
                         ]
                 Nothing -> Nothing
-        boundHasForallForVar v =
-            let go visited nid0 =
+        containsForallFrom treatAsForall start =
+            let walkForall visited nid0 =
                     let nid = canonical nid0
                         key = getNodeId nid
                     in if IntSet.member key visited
                         then False
                         else
-                            if IntSet.member key schemeRootSet || IntMap.member key schemeRootByBody
+                            if treatAsForall key
                                 then True
                                 else case IntMap.lookup key nodes of
                                     Just TyForall{} -> True
                                     Just TyVar{ tnBound = Just bnd } ->
-                                        go (IntSet.insert key visited) bnd
+                                        walkForall (IntSet.insert key visited) bnd
                                     Just TyExp{ tnBody = b } ->
-                                        go (IntSet.insert key visited) b
+                                        walkForall (IntSet.insert key visited) b
                                     Just node ->
                                         let visited' = IntSet.insert key visited
-                                        in any (go visited') (structuralChildren node)
+                                        in any (walkForall visited') (structuralChildren node)
                                     Nothing -> False
+            in walkForall IntSet.empty start
+        containsForallForTarget bnd =
+            containsForallFrom
+                (\key -> IntSet.member key schemeRootSet || IntMap.member key schemeRootByBody)
+                bnd
+        boundHasForallForVar v =
+            let treatAsForall key =
+                    IntSet.member key schemeRootSet || IntMap.member key schemeRootByBody
             in case VarStore.lookupVarBound constraint (canonical v) of
-                Just bnd -> go IntSet.empty bnd
+                Just bnd -> containsForallFrom treatAsForall bnd
                 Nothing -> False
         (schemeRootOwnerBase, schemeRootByBodyBase) =
             case mbBindParentsGa of
@@ -362,7 +445,7 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                     let baseConstraint = gaBaseConstraint ga
                         baseNodes = cNodes baseConstraint
                         baseParents = gaBindParentsBase ga
-                        schemeRootsBase =
+                        baseSchemeRoots =
                             [ root
                             | gen <- IntMap.elems (cGenNodes baseConstraint)
                             , root <- gnSchemes gen
@@ -371,13 +454,13 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                             firstGenAncestor baseParents (TypeRef root)
                     in ( IntMap.fromList
                             [ (getNodeId root, gid)
-                            | root <- schemeRootsBase
+                            | root <- baseSchemeRoots
                             , Just gid <- [ownerFromBinding root]
                             ]
                        , IntMap.fromListWith
                             (\a _ -> a)
                             [ (getNodeId bnd, root)
-                            | root <- schemeRootsBase
+                            | root <- baseSchemeRoots
                             , Just bnd <- [VarStore.lookupVarBound baseConstraint root]
                             , case IntMap.lookup (getNodeId bnd) baseNodes of
                                 Just TyBase{} -> False
@@ -402,64 +485,37 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                     in case IntMap.lookup (getNodeId orderRootForBinders) (gaSolvedToBase ga) of
                         Just baseN -> useSchemeBody baseN
                         Nothing -> orderRootBase
-        boundSchemeOwner bnd =
-            let bndC = canonical bnd
-            in case IntMap.lookup (getNodeId bndC) schemeRootOwner of
-                Just gid -> Just gid
-                Nothing ->
-                    case IntMap.lookup (getNodeId bndC) schemeRootByBody of
-                        Just root ->
-                            IntMap.lookup (getNodeId (canonical root)) schemeRootOwner
-                        Nothing -> Nothing
         boundIsTargetSchemeBody bnd =
-            case IntMap.lookup (getNodeId (canonical bnd)) schemeRootByBody of
+            case isSchemeRootBody bnd of
                 Just root -> canonical root == canonical target0
                 Nothing -> False
         allowBoundTraversal bnd =
-            case boundSchemeOwner bnd of
+            case lookupSchemeRootOwner bnd of
                 Nothing -> True
                 Just gid ->
                     case scopeGen of
                         Just scopeGid -> gid == scopeGid || boundIsTargetSchemeBody bnd
                         Nothing -> False
 
+        childrenWithBounds nid =
+            case IntMap.lookup (getNodeId nid) nodes of
+                Nothing -> []
+                Just node ->
+                    let boundKids =
+                            case node of
+                                TyVar{ tnBound = Just bnd }
+                                    | allowBoundTraversal bnd -> [bnd]
+                                _ -> []
+                    in structuralChildren node ++ boundKids
         reachableFromWithBounds root0 =
-            let go visited [] = visited
-                go visited (nid0:rest) =
-                    let nid = canonical nid0
-                        key = getNodeId nid
-                    in if IntSet.member key visited
-                        then go visited rest
-                        else
-                            let visited' = IntSet.insert key visited
-                                kids =
-                                    case IntMap.lookup key nodes of
-                                        Nothing -> []
-                                        Just node ->
-                                            let boundKids =
-                                                    case node of
-                                                        TyVar{ tnBound = Just bnd }
-                                                            | allowBoundTraversal bnd -> [bnd]
-                                                        _ -> []
-                                            in map canonical (structuralChildren node ++ boundKids)
-                            in go visited' (kids ++ rest)
-            in go IntSet.empty [canonical root0]
+            reachableFrom getNodeId canonical childrenWithBounds root0
 
+        childrenStructural nid =
+            case IntMap.lookup (getNodeId nid) nodes of
+                Nothing -> []
+                Just node -> structuralChildren node
         reachableFromStructural root0 =
-            let go visited [] = visited
-                go visited (nid0:rest) =
-                    let nid = canonical nid0
-                        key = getNodeId nid
-                    in if IntSet.member key visited
-                        then go visited rest
-                        else
-                            let visited' = IntSet.insert key visited
-                                kids =
-                                    case IntMap.lookup key nodes of
-                                        Nothing -> []
-                                        Just node -> map canonical (structuralChildren node)
-                            in go visited' (kids ++ rest)
-            in go IntSet.empty [canonical root0]
+            reachableFrom getNodeId canonical childrenStructural root0
 
     reachable <- Right (reachableFromWithBounds orderRoot)
     let reachableForBinders0 =
@@ -485,25 +541,17 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                                         Just scopeGid -> gid == scopeGid
                                         Nothing -> False
                         reachableFromWithBoundsBase root0 =
-                            let go visited [] = visited
-                                go visited (nid0:rest) =
-                                    let key = getNodeId nid0
-                                    in if IntSet.member key visited
-                                        then go visited rest
-                                        else
-                                            let visited' = IntSet.insert key visited
-                                                kids =
-                                                    case IntMap.lookup key baseNodes of
-                                                        Nothing -> []
-                                                        Just node ->
-                                                            let boundKids =
-                                                                    case node of
-                                                                        TyVar{ tnBound = Just bnd }
-                                                                            | allowBoundTraversalBase bnd -> [bnd]
-                                                                        _ -> []
-                                                            in structuralChildren node ++ boundKids
-                                            in go visited' (kids ++ rest)
-                            in go IntSet.empty [root0]
+                            let children nid =
+                                    case IntMap.lookup (getNodeId nid) baseNodes of
+                                        Nothing -> []
+                                        Just node ->
+                                            let boundKids =
+                                                    case node of
+                                                        TyVar{ tnBound = Just bnd }
+                                                            | allowBoundTraversalBase bnd -> [bnd]
+                                                        _ -> []
+                                            in structuralChildren node ++ boundKids
+                            in reachableFrom getNodeId id children root0
                         reachableBase = reachableFromWithBoundsBase orderRootBaseForBinders
                         reachableBaseSolved =
                             IntSet.fromList
@@ -528,6 +576,7 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
         ("generalizeAt: schemeRootByBodyKeys=" ++ show (IntMap.keys schemeRootByBody))
         () of
         () -> pure ()
+    -- Phase 5: binder selection helpers and candidates.
     let scopeSchemeRoots =
             case scopeGen of
                 Nothing -> IntSet.empty
@@ -542,41 +591,21 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                                     Just (GenRef gid', _) | gid' == gid -> True
                                     _ -> False
                                 ]
-    let isQuantifiable child =
-            case IntMap.lookup (getNodeId child) nodes of
-                Just TyVar{} ->
-                    not (VarStore.isEliminatedVar constraint (canonical child))
-                _ -> False
+        isQuantifiable child =
+            if isTyVarKey (getNodeId child)
+                then not (VarStore.isEliminatedVar constraint (canonical child))
+                else False
         bindFlags =
             IntMap.fromList
                 [ (childKey, flag)
                 | (childKey, (_parent, flag)) <- IntMap.toList bindParents
                 ]
-        bindFlags0 = bindFlags
-        hasForallFrom =
-            let go visited nid0 =
-                    let nid = canonical nid0
-                        key = getNodeId nid
-                    in if IntSet.member key visited
-                        then False
-                        else
-                            case IntMap.lookup key nodes of
-                                Just TyForall{} -> True
-                                Just TyVar{ tnBound = Just bnd } ->
-                                    go (IntSet.insert key visited) bnd
-                                Just TyExp{ tnBody = b } ->
-                                    go (IntSet.insert key visited) b
-                                Just node ->
-                                    let visited' = IntSet.insert key visited
-                                    in any (go visited') (structuralChildren node)
-                                Nothing -> False
-            in go IntSet.empty
         boundContainsForall v =
             case VarStore.lookupVarBound constraint (canonical v) of
-                Just bnd -> hasForallFrom bnd
+                Just bnd -> containsForallFrom (const False) bnd
                 Nothing -> False
         isScopeSchemeRoot child =
-            IntSet.member (getNodeId (canonical child)) scopeSchemeRoots
+            IntSet.member (canonKey child) scopeSchemeRoots
         isBindable key child =
             case IntMap.lookup key bindFlags of
                 Just BindFlex -> isQuantifiable child
@@ -584,50 +613,50 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                     | allowRigidBinders || isScopeSchemeRoot child || boundContainsForall child ->
                         isQuantifiable child
                 _ -> False
-    let scopeHasStructuralScheme =
+        scopeHasStructuralScheme =
             case scopeRootC of
                 GenRef gid ->
                     case IntMap.lookup (genNodeKey gid) (cGenNodes constraint) of
                         Just gen ->
                             any
                                 (\root ->
-                                    case IntMap.lookup (getNodeId (canonical root)) nodes of
-                                        Just TyVar{} -> False
-                                        _ -> True
+                                    not (isTyVarKey (canonKey root))
                                 )
                                 (gnSchemes gen)
                         Nothing -> False
                 _ -> False
-        baseBoundTargets =
-            IntSet.fromList
-                [ getNodeId bndC
-                | (vidKey, node) <- IntMap.toList nodes
-                , TyVar{} <- [node]
-                , Just bnd <- [VarStore.lookupVarBound constraint (NodeId vidKey)]
-                , let bndC = canonical bnd
-                , case IntMap.lookup (getNodeId bndC) nodes of
-                    Just TyBase{} -> True
-                    Just TyBottom{} -> True
-                    _ -> False
-                ]
-        aliasBinderBases =
-            case scopeRootC of
+        aliasBinderInfo =
+            let baseBoundTargets =
+                    IntSet.fromList
+                        [ getNodeId bndC
+                        | (vidKey, node) <- IntMap.toList nodes
+                        , TyVar{} <- [node]
+                        , Just bnd <- [VarStore.lookupVarBound constraint (NodeId vidKey)]
+                        , let bndC = canonical bnd
+                        , case IntMap.lookup (getNodeId bndC) nodes of
+                            Just TyBase{} -> True
+                            Just TyBottom{} -> True
+                            _ -> False
+                        ]
+            in case scopeRootC of
                 GenRef gid
                     | scopeHasStructuralScheme ->
-                        IntSet.fromList
-                            [ key
-                            | (childKey, (parent, _flag)) <- IntMap.toList bindParents
-                            , parent == GenRef gid
-                            , TypeRef child <- [nodeRefFromKey childKey]
-                            , let key = getNodeId child
-                            , IntSet.member key baseBoundTargets
-                            , case IntMap.lookup key nodes of
-                                Just TyBase{} -> True
-                                Just TyBottom{} -> True
-                                _ -> False
-                            ]
-                _ -> IntSet.empty
-        aliasBinderNodes = [ NodeId key | key <- IntSet.toList aliasBinderBases ]
+                        let bases =
+                                IntSet.fromList
+                                    [ key
+                                    | (childKey, (parent, _flag)) <- IntMap.toList bindParents
+                                    , parent == GenRef gid
+                                    , TypeRef child <- [nodeRefFromKey childKey]
+                                    , let key = getNodeId child
+                                    , IntSet.member key baseBoundTargets
+                                    , case IntMap.lookup key nodes of
+                                        Just TyBase{} -> True
+                                        Just TyBottom{} -> True
+                                        _ -> False
+                                    ]
+                        in (bases, [ NodeId key | key <- IntSet.toList bases ])
+                _ -> (IntSet.empty, [])
+        (aliasBinderBases, aliasBinderNodes) = aliasBinderInfo
     case debugGeneralize
         ("generalizeAt: aliasBinderBases="
             ++ show (IntSet.toList aliasBinderBases)
@@ -651,19 +680,15 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
             , TypeRef child <- [nodeRefFromKey childKey]
             , isBindable childKey child
             ]
-        bindingScopeGen child =
-            case Binding.bindingPathToRoot constraint (typeRef child) of
-                Right path -> listToMaybe [gid | GenRef gid <- drop 1 path]
-                Left _ -> Nothing
-    let hasExplicitBound v =
+        bindingScopeGen child = bindingScopeFor (typeRef child)
+        hasExplicitBound v =
             case IntMap.lookup (getNodeId (canonical v)) nodes of
                 Just TyVar{} ->
                     case VarStore.lookupVarBound constraint (canonical v) of
                         Nothing -> False
                         Just _ -> True
                 _ -> False
-    binders0 <- case scopeRootC of
-        GenRef gid -> do
+        bindersForGen gid = do
             let allChildren =
                     [ (child, flag)
                     | (childKey, (parent, flag)) <- IntMap.toList bindParents
@@ -691,18 +716,20 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                     , TyVar{} <- [node]
                     , let child = NodeId childKey
                     , isBindable childKey child
-                    , bindingScopeGen child == Just gid
+                    , bindingScopeFor (typeRef child) == Just gid
                     ]
-            let candidates = bindableChildrenUnder (GenRef gid) ++ aliasBinderNodes ++ bindableByScope
-            pure candidates
-        TypeRef scopeRootN -> do
+            pure (bindableChildrenUnder (GenRef gid) ++ aliasBinderNodes ++ bindableByScope)
+        bindersForType scopeRootN = do
             let direct = boundFlexChildrenUnder (typeRef scopeRootN)
             case IntMap.lookup (getNodeId scopeRootN) nodes of
                 Just TyForall{} -> pure direct
                 _ ->
-                    if IntSet.member (getNodeId (canonical scopeRootN)) scopeSchemeRoots
+                    if IntSet.member (canonKey scopeRootN) scopeSchemeRoots
                         then pure direct
                         else pure [ v | v <- direct, not (hasExplicitBound v) ]
+    binders0 <- case scopeRootC of
+        GenRef gid -> bindersForGen gid
+        TypeRef scopeRootN -> bindersForType scopeRootN
     case debugGeneralize
         ("generalizeAt: scopeRoot=" ++ show scopeRootC
             ++ " scopeGen=" ++ show scopeGen
@@ -726,43 +753,19 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
             IntSet.fromList
                 [ bodyKey
                 | (bodyKey, root) <- IntMap.toList schemeRootByBody
-                , IntSet.member (getNodeId (canonical root)) schemeRootsToSkip
+                , IntSet.member (canonKey root) schemeRootsToSkip
                 ]
         reachableFromWithBoundsStop root0 =
-            let startN = canonical root0
-                startKey = getNodeId startN
-                stopSet = schemeRootSet
-                go _ acc [] = acc
-                go visited acc (nid0:rest) =
-                    let nid = canonical nid0
-                        key = getNodeId nid
-                    in if IntSet.member key visited
-                        then go visited acc rest
-                        else
-                            let visited' = IntSet.insert key visited
-                            in if key /= startKey && IntSet.member key stopSet
-                                then go visited' acc rest
-                                else
-                                    let acc' = IntSet.insert key acc
-                                        kids =
-                                            case IntMap.lookup key nodes of
-                                                Nothing -> []
-                                                Just node ->
-                                                    let boundKids =
-                                                            case node of
-                                                                TyVar{ tnBound = Just bnd }
-                                                                    | allowBoundTraversal bnd -> [bnd]
-                                                                _ -> []
-                                                    in map canonical (structuralChildren node ++ boundKids)
-                                    in go visited' acc' (kids ++ rest)
-            in go IntSet.empty IntSet.empty [startN]
+            let stopSet = schemeRootSet
+                shouldStop nid = IntSet.member (getNodeId nid) stopSet
+            in reachableFromStop getNodeId canonical childrenWithBounds shouldStop root0
         nestedSchemeInteriorSet =
             IntSet.unions
                 [ reachableFromWithBoundsStop (NodeId rootKey)
                 | rootKey <- IntSet.toList schemeRootsToSkip
                 ]
         isNestedSchemeBound v =
-            case IntMap.lookup (getNodeId (canonical v)) nodes of
+            case IntMap.lookup (canonKey v) nodes of
                 Just TyVar{ tnBound = Just bnd } ->
                     let bndC = canonical bnd
                     in (IntSet.member (getNodeId bndC) schemeRootsToSkip
@@ -770,7 +773,7 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                         && not (IntSet.member (getNodeId bndC) reachable)
                 _ -> False
         boundIsSchemeRootVar v =
-            let go visited nid =
+            let walkBoundChain visited nid =
                     let nidC = canonical nid
                         key = getNodeId nidC
                     in if IntSet.member key visited
@@ -783,10 +786,11 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                                         then True
                                         else
                                             case IntMap.lookup (getNodeId bndC) nodes of
-                                                Just TyVar{} -> go (IntSet.insert key visited) bndC
+                                                Just TyVar{} ->
+                                                    walkBoundChain (IntSet.insert key visited) bndC
                                                 _ -> False
                                 Nothing -> False
-            in go IntSet.empty v
+            in walkBoundChain IntSet.empty v
         schemeRootsAll = schemeRootsToSkip
         boundIsSchemeRootAll v =
             case VarStore.lookupVarBound constraint (canonical v) of
@@ -842,7 +846,7 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
     case debugGeneralize
         ("generalizeAt: targetBoundOwner="
             ++ case targetBound of
-                Just bnd -> show (boundSchemeOwner bnd)
+                Just bnd -> show (lookupSchemeRootOwner bnd)
                 Nothing -> "None"
             ++ " scopeGen="
             ++ show scopeGen
@@ -923,7 +927,7 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                 Nothing -> False
                 Just bnd ->
                     let targetC = canonical target0
-                        go visited nid0 =
+                        walkMentions visited nid0 =
                             let nid = canonical nid0
                                 key = getNodeId nid
                             in if nid == targetC
@@ -940,28 +944,10 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                                                             TyVar{ tnBound = Just bnd' } -> [bnd']
                                                             _ -> []
                                                     kids = structuralChildren node ++ boundKids
-                                                in any (go visited') kids
-                    in go IntSet.empty bnd
+                                                in any (walkMentions visited') kids
+                    in walkMentions IntSet.empty bnd
         boundHasForall =
-            let go visited nid0 =
-                    let nid = canonical nid0
-                        key = getNodeId nid
-                    in if IntSet.member key visited
-                        then False
-                        else
-                            if IntSet.member key schemeRootSet || IntMap.member key schemeRootByBody
-                                then True
-                                else case IntMap.lookup key nodes of
-                                    Just TyForall{} -> True
-                                    Just TyVar{ tnBound = Just bnd } ->
-                                        go (IntSet.insert key visited) bnd
-                                    Just TyExp{ tnBody = b } ->
-                                        go (IntSet.insert key visited) b
-                                    Just node ->
-                                        let visited' = IntSet.insert key visited
-                                        in any (go visited') (structuralChildren node)
-                                    Nothing -> False
-                boundHasForallBase =
+            let boundHasForallBase =
                     case (mbBindParentsGa, targetBound) of
                         (Just ga, Just bnd) ->
                             case IntMap.lookup (getNodeId (canonical bnd)) (gaSolvedToBase ga) of
@@ -972,7 +958,7 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                         _ -> False
             in case targetBound of
                 Nothing -> False
-                Just bnd -> go IntSet.empty bnd || boundHasForallBase
+                Just bnd -> containsForallForTarget bnd || boundHasForallBase
         boundHasNestedGen =
             case (targetBound, scopeGen) of
                 (Just bnd, Just gid) ->
@@ -987,15 +973,15 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                     in any isNested (IntSet.toList reachableBound)
                 _ -> False
         targetRigid =
-            case IntMap.lookup (nodeRefKey (typeRef target0)) bindFlags0 of
+            case IntMap.lookup (nodeRefKey (typeRef target0)) bindFlags of
                 Just BindRigid -> True
                 _ -> False
         targetIsSchemeRoot =
-            IntSet.member (getNodeId (canonical target0)) schemeRootSet
+            IntSet.member (canonKey target0) schemeRootSet
         targetIsSchemeRootForScope =
             case (scopeGen, mbBindParentsGa) of
                 (Just gid, Just ga) ->
-                    case IntMap.lookup (getNodeId (canonical target0)) (gaSolvedToBase ga) of
+                    case IntMap.lookup (canonKey target0) (gaSolvedToBase ga) of
                         Just baseN ->
                             case IntMap.lookup (getNodeId baseN) schemeRootOwnerBase of
                                 Just ownerGid -> ownerGid == gid
@@ -1006,10 +992,7 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                         Just gen -> any (\root -> canonical root == canonical target0) (gnSchemes gen)
                         Nothing -> False
                 _ -> False
-        targetIsTyVar =
-            case IntMap.lookup (getNodeId (canonical target0)) nodes of
-                Just TyVar{} -> True
-                _ -> False
+        targetIsTyVar = isTyVarKey (canonKey target0)
         namedUnderGaRaw =
             case scopeGen of
                 Just gid ->
@@ -1062,24 +1045,31 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                                 [ rootKey
                                 | rootKey <- IntMap.keys schemeRootOwnerBase
                                 ]
-                        firstSchemeRootAncestorBase baseKey =
-                            let go visited ref =
+                        firstSchemeRootAncestorWith parentOf keyOfRef isSchemeRootKey startKey =
+                            let startRef = TypeRef (NodeId startKey)
+                                walkParents visited ref =
                                     case ref of
                                         GenRef _ -> Nothing
-                                        TypeRef parentN ->
-                                            let parentKey = getNodeId parentN
+                                        TypeRef _ ->
+                                            let parentKey = keyOfRef ref
                                             in if IntSet.member parentKey visited
                                                 then Nothing
-                                                else if IntSet.member parentKey baseSchemeRootSetLocal
+                                                else if isSchemeRootKey parentKey
                                                     then Just parentKey
                                                     else
-                                                        case IntMap.lookup parentKey (gaBindParentsBase ga) of
-                                                            Just (parentRef', _) ->
-                                                                go (IntSet.insert parentKey visited) parentRef'
+                                                        case parentOf ref of
+                                                            Just parentRef' ->
+                                                                walkParents (IntSet.insert parentKey visited) parentRef'
                                                             Nothing -> Nothing
-                            in case IntMap.lookup baseKey (gaBindParentsBase ga) of
-                                Just (parentRef, _) -> go (IntSet.singleton baseKey) parentRef
+                            in case parentOf startRef of
+                                Just parentRef -> walkParents (IntSet.singleton (keyOfRef startRef)) parentRef
                                 Nothing -> Nothing
+                        firstSchemeRootAncestorBase baseKey =
+                            let parentOf ref =
+                                    fmap fst (IntMap.lookup (nodeRefKey ref) (gaBindParentsBase ga))
+                                keyOfRef ref = nodeRefKey ref
+                                isSchemeRootKey = (`IntSet.member` baseSchemeRootSetLocal)
+                            in firstSchemeRootAncestorWith parentOf keyOfRef isSchemeRootKey baseKey
                         keepBaseGamma baseKey =
                             case firstSchemeRootAncestorBase baseKey of
                                 Nothing -> True
@@ -1098,23 +1088,14 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                         baseGammaSetLocal =
                             IntSet.union baseGammaSetLocal0 baseGammaDirect
                         firstSchemeRootAncestorSolved solvedKey =
-                            let go visited ref =
+                            let parentOf ref =
+                                    fmap fst (IntMap.lookup (nodeRefKey ref) bindParents)
+                                keyOfRef ref =
                                     case ref of
-                                        GenRef _ -> Nothing
-                                        TypeRef parentN ->
-                                            let parentKey = getNodeId (canonical parentN)
-                                            in if IntSet.member parentKey visited
-                                                then Nothing
-                                                else if IntSet.member parentKey schemeRootSet
-                                                    then Just parentKey
-                                                    else
-                                                        case IntMap.lookup (nodeRefKey (TypeRef parentN)) bindParents of
-                                                            Just (parentRef', _) ->
-                                                                go (IntSet.insert parentKey visited) parentRef'
-                                                            Nothing -> Nothing
-                            in case IntMap.lookup solvedKey bindParents of
-                                Just (parentRef, _) -> go (IntSet.singleton solvedKey) parentRef
-                                Nothing -> Nothing
+                                        GenRef gidRef -> genNodeKey gidRef
+                                        TypeRef nid -> canonKey nid
+                                isSchemeRootKey = (`IntSet.member` schemeRootSet)
+                            in firstSchemeRootAncestorWith parentOf keyOfRef isSchemeRootKey solvedKey
                         keepSolvedGamma solvedKey =
                             case firstSchemeRootAncestorSolved solvedKey of
                                 Nothing -> True
@@ -1227,10 +1208,6 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                                                     case IntMap.lookup baseKey solvedByBasePref of
                                                         Just solvedKeys ->
                                                             let underScopeKeys = filter solvedUnderScope solvedKeys
-                                                                isTyVarKey k =
-                                                                    case IntMap.lookup k nodes of
-                                                                        Just TyVar{} -> True
-                                                                        _ -> False
                                                                 pickFrom keys =
                                                                     case filter isTyVarKey keys of
                                                                         (k:_) -> Just k
@@ -1255,10 +1232,6 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                                             case IntMap.lookup baseKey solvedByBasePref of
                                                 Just solvedKeys ->
                                                     let underScopeKeys = filter solvedUnderScope solvedKeys
-                                                        isTyVarKey k =
-                                                            case IntMap.lookup k nodes of
-                                                                Just TyVar{} -> True
-                                                                _ -> False
                                                         pickFrom keys =
                                                             case filter isTyVarKey keys of
                                                                 (k:_) -> Just k
@@ -1533,17 +1506,17 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                 Nothing -> False
         schemeRoots =
             case scopeRootC of
-                GenRef _ | dropTarget -> IntSet.singleton (getNodeId (canonical target0))
+                GenRef _ | dropTarget -> IntSet.singleton (canonKey target0)
                 _ -> IntSet.empty
         liftToForall bnd0 =
-            let go cur =
+            let climbToForall cur =
                     case IntMap.lookup (nodeRefKey (typeRef (canonical cur))) bindParents of
                         Just (TypeRef parent, _) ->
-                            case IntMap.lookup (getNodeId (canonical parent)) nodes of
-                                Just TyForall{} -> go (canonical parent)
+                            case IntMap.lookup (canonKey parent) nodes of
+                                Just TyForall{} -> climbToForall (canonical parent)
                                 _ -> cur
                         _ -> cur
-            in go bnd0
+            in climbToForall bnd0
         useBoundTypeRoot =
             not targetIsSchemeRoot &&
             case targetBound of
@@ -1559,12 +1532,9 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                 Nothing -> typeRoot0
         useSchemeBodyForScope = False
         targetInGamma =
-            IntSet.member (getNodeId (canonical target0)) namedUnderGaSet
+            IntSet.member (canonKey target0) namedUnderGaSet
         targetIsBaseLike =
-            case IntMap.lookup (getNodeId (canonical target0)) nodes of
-                Just TyBase{} -> True
-                Just TyBottom{} -> True
-                _ -> False
+            isBaseLikeKey (canonKey target0)
         schemeBodyChildUnderGen =
             case scopeRootC of
                 GenRef gid | targetIsSchemeRootForScope && targetIsTyVar ->
@@ -1573,30 +1543,21 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                             | (childKey, (parentRef, _flag)) <- IntMap.toList bindParents
                             , parentRef == GenRef gid
                             , TypeRef child <- [nodeRefFromKey childKey]
-                            , case IntMap.lookup (getNodeId (canonical child)) nodes of
-                                Just TyVar{} -> False
-                                _ -> True
+                            , not (isTyVarKey (canonKey child))
                             ]
                     in case children of
                         [child] -> Just child
                         _ -> Nothing
                 _ -> Nothing
         boundRootForType bnd0 =
-            let go visited nid0 =
-                    let nid = canonical nid0
-                        key = getNodeId nid
-                    in if IntSet.member key visited
-                        then nid
-                        else
-                            case IntMap.lookup key nodes of
-                                Just TyForall{ tnBody = b } -> canonical b
-                                Just TyExp{ tnBody = b } ->
-                                    go (IntSet.insert key visited) b
-                                Just TyVar{ tnBound = Just bnd }
-                                    | canonical bnd /= nid ->
-                                        go (IntSet.insert key visited) bnd
-                                _ -> nid
-            in go IntSet.empty bnd0
+            boundRootWith
+                getNodeId
+                canonical
+                (`IntMap.lookup` nodes)
+                (VarStore.lookupVarBound constraint)
+                (const Nothing)
+                True
+                bnd0
         typeRootFromTargetBound =
             case (allowDropTarget, scopeGen, targetIsTyVar, targetBound) of
                 (True, Just _, True, Just bnd) ->
@@ -1653,41 +1614,35 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                                                     | typeRootHasNamedOutsideGamma -> v
                                                 _ -> typeRoot0
         typeRoot =
-            case IntMap.lookup (getNodeId (canonical typeRoot0')) nodes of
+            case lookupNode (canonKey typeRoot0') of
                 Just TyForall{ tnBody = b }
                     | targetIsTyVar
                     , targetIsSchemeRootForScope
                     , Just gid <- scopeGen
-                    , Just gidOwner <- IntMap.lookup (getNodeId (canonical typeRoot0')) schemeRootOwner
+                    , Just gidOwner <- IntMap.lookup (canonKey typeRoot0') schemeRootOwner
                     , gid == gidOwner ->
                         canonical b
                 _ -> typeRoot0'
     let dropTypeRoot =
             dropTarget &&
             boundIsSchemeRoot &&
-            case IntMap.lookup (getNodeId (canonical typeRoot)) nodes of
-                Just TyVar{} -> False
-                _ -> True
+            not (isTyVarKey (canonKey typeRoot))
     reachableType <- Right (reachableFromWithBounds typeRoot)
     reachableTypeStructural <- Right (reachableFromStructural typeRoot)
     let typeRootIsForall =
-            case IntMap.lookup (getNodeId (canonical typeRoot)) nodes of
-                Just TyForall{} -> True
-                _ -> False
+            isTyForallKey (canonKey typeRoot)
     let forallBoundBinders =
             IntSet.fromList
-                [ getNodeId (canonical child)
+                [ canonKey child
                 | (childKey, (parentRef, _flag)) <- IntMap.toList bindParents
                 , TypeRef parent <- [parentRef]
-                , IntSet.member (getNodeId (canonical parent)) reachableType
-                , case IntMap.lookup (getNodeId (canonical parent)) nodes of
+                , IntSet.member (canonKey parent) reachableType
+                , case IntMap.lookup (canonKey parent) nodes of
                     Just TyForall{} -> True
                     _ -> False
-                , IntSet.member (getNodeId (canonical parent)) schemeRootSet
+                , IntSet.member (canonKey parent) schemeRootSet
                 , TypeRef child <- [nodeRefFromKey childKey]
-                , case IntMap.lookup (getNodeId (canonical child)) nodes of
-                    Just TyVar{} -> True
-                    _ -> False
+                , isTyVarKey (canonKey child)
                 ]
     let binders0Adjusted =
             let freeVarsFromBound =
@@ -1704,7 +1659,7 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                 activeBinders =
                     [ v
                     | v <- binders0
-                    , IntSet.member (getNodeId (canonical v)) reachableForBinders
+                    , IntSet.member (canonKey v) reachableForBinders
                     ]
                 onlyTarget = case activeBinders of
                     [] -> True
@@ -1826,25 +1781,17 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                                             Just scopeGid -> gid == scopeGid
                                             Nothing -> False
                             reachableFromWithBoundsBase root0 =
-                                let go visited [] = visited
-                                    go visited (nid0:rest) =
-                                        let key = getNodeId nid0
-                                        in if IntSet.member key visited
-                                            then go visited rest
-                                            else
-                                                let visited' = IntSet.insert key visited
-                                                    kids =
-                                                        case IntMap.lookup key baseNodes of
-                                                            Nothing -> []
-                                                            Just node ->
-                                                                let boundKids =
-                                                                        case node of
-                                                                            TyVar{ tnBound = Just bnd }
-                                                                                | allowBoundTraversalBase bnd -> [bnd]
-                                                                            _ -> []
-                                                                in structuralChildren node ++ boundKids
-                                                in go visited' (kids ++ rest)
-                                in go IntSet.empty [root0]
+                                let children nid =
+                                        case IntMap.lookup (getNodeId nid) baseNodes of
+                                            Nothing -> []
+                                            Just node ->
+                                                let boundKids =
+                                                        case node of
+                                                            TyVar{ tnBound = Just bnd }
+                                                                | allowBoundTraversalBase bnd -> [bnd]
+                                                            _ -> []
+                                                in structuralChildren node ++ boundKids
+                                in reachableFrom getNodeId id children root0
                             isNamedOutsideBase nidInt =
                                 case IntMap.lookup nidInt baseNodes of
                                     Just TyVar{} ->
@@ -1940,18 +1887,18 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                 && (boundUnderOtherGen || not (boundHasNamedOutsideGammaFor v))
                 && not (boundMentionsSelfAlias v)
     let binderCandidateKeys =
-            IntSet.fromList [ getNodeId (canonical v) | v <- bindersCandidatesCanonical ]
+            IntSet.fromList [ canonKey v | v <- bindersCandidatesCanonical ]
     let binders =
             [ canonical v
             | v <- bindersCandidatesCanonical
-            , let vKey = getNodeId (canonical v)
+            , let vKey = canonKey v
             , let gammaKey =
                     case IntMap.lookup vKey gammaAlias of
                         Just repKey -> repKey
                         Nothing -> vKey
             , let keepTypeRootBinder =
                     case typeRootFromBoundVar of
-                        Just v0 -> getNodeId (canonical v0) == vKey
+                        Just v0 -> canonKey v0 == vKey
                         Nothing -> False
             , let inGamma =
                     case mbBindParentsGa of
@@ -1990,7 +1937,7 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                                         Nothing -> True
                                 Nothing -> True
                 Nothing -> True
-            , not (IntSet.member (getNodeId (canonical v)) nestedSchemeInteriorSet
+            , not (IntSet.member (canonKey v) nestedSchemeInteriorSet
                 && not (isTargetSchemeBinder v)
                 && not (IntSet.member vKey aliasBinderBases))
             , not (isNestedSchemeBound v && not inGamma && not (isTargetSchemeBinder v))
@@ -1998,7 +1945,7 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
             , not (boundIsSchemeRootAll v
                 && not (isTargetSchemeBinder v)
                 && not (boundHasNamedOutsideGammaFor v)
-                && not (IntSet.member (getNodeId (canonical v)) reachableForBinders)
+                && not (IntSet.member (canonKey v) reachableForBinders)
                 )
             , not (isSchemeRootAlias v
                 && not (isTargetSchemeBinder v)
@@ -2022,14 +1969,14 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                 && targetBoundIsTypeRootAlias
                 && dropTarget)
             , not (dropTargetAliasBinder v inGamma)
-            , not (IntSet.member (getNodeId (canonical v)) schemeRoots && not inGamma)
+            , not (IntSet.member (canonKey v) schemeRoots && not inGamma)
             , not (dropTypeRoot && canonical v == canonical typeRoot)
-            , not (IntSet.member (getNodeId (canonical v)) forallBoundBinders && not typeRootIsForall)
+            , not (IntSet.member (canonKey v) forallBoundBinders && not typeRootIsForall)
             ]
     case debugGeneralize
         ("generalizeAt: binder filters="
             ++ show
-                [ let vKey = getNodeId (canonical v)
+                [ let vKey = canonKey v
                       gammaKey =
                           case IntMap.lookup vKey gammaAlias of
                               Just repKey -> repKey
@@ -2085,6 +2032,7 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                     [ (getNodeId v, v)
                     | v <- binders'
                     ]
+    -- Phase 6: dependency analysis and binder ordering.
     let binderIds = map getNodeId bindersCanon
         candidateSet = IntSet.fromList binderIds
         nameForDep k = "t" ++ show k
@@ -2103,13 +2051,7 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                         , Just baseN <- [IntMap.lookup k solvedToBasePref]
                         ]
                 Nothing -> IntMap.empty
-        nameToId name =
-            case name of
-                ('t':rest) ->
-                    case reads rest of
-                        [(n, "")] -> Just n
-                        _ -> Nothing
-                _ -> Nothing
+        nameToId = parseNameId
         substDepsFor k =
             IntMap.union substDeps $
                 IntMap.fromList
@@ -2119,25 +2061,15 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                     , binderKey /= k
                     ]
         boundRootForDeps bnd0 =
-            let go visited nid0 =
-                    let nid = canonical nid0
-                        key = getNodeId nid
-                    in if IntSet.member key visited
-                        then nid
-                        else
-                            case IntMap.lookup key schemeRootByBody of
-                                Just root -> canonical root
-                                Nothing ->
-                                    case IntMap.lookup key nodes of
-                                        Just TyExp{ tnBody = b } ->
-                                            go (IntSet.insert key visited) b
-                                        _ ->
-                                            case VarStore.lookupVarBound constraint nid of
-                                                Just bnd' | canonical bnd' /= nid ->
-                                                    go (IntSet.insert key visited) bnd'
-                                                _ -> nid
-            in go IntSet.empty bnd0
-        boundDepsFromReify k =
+            boundRootWith
+                getNodeId
+                canonical
+                (`IntMap.lookup` nodes)
+                (VarStore.lookupVarBound constraint)
+                (`IntMap.lookup` schemeRootByBody)
+                False
+                bnd0
+        boundDepsForCandidate k =
             let isBaseRep =
                     case IntMap.lookup k solvedToBasePref of
                         Just baseK ->
@@ -2152,23 +2084,14 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                         let baseConstraint = gaBaseConstraint ga
                             baseNodes = cNodes baseConstraint
                             boundRootForDepsBase bnd0 =
-                                let go visited nid0 =
-                                        let key = getNodeId nid0
-                                        in if IntSet.member key visited
-                                            then nid0
-                                            else
-                                                case IntMap.lookup key schemeRootByBodyBase of
-                                                    Just root -> root
-                                                    Nothing ->
-                                                        case IntMap.lookup key baseNodes of
-                                                            Just TyExp{ tnBody = b } ->
-                                                                go (IntSet.insert key visited) b
-                                                            _ ->
-                                                                case VarStore.lookupVarBound baseConstraint nid0 of
-                                                                    Just bnd' | bnd' /= nid0 ->
-                                                                        go (IntSet.insert key visited) bnd'
-                                                                    _ -> nid0
-                                in go IntSet.empty bnd0
+                                boundRootWith
+                                    getNodeId
+                                    id
+                                    (`IntMap.lookup` baseNodes)
+                                    (VarStore.lookupVarBound baseConstraint)
+                                    (`IntMap.lookup` schemeRootByBodyBase)
+                                    False
+                                    bnd0
                         in case VarStore.lookupVarBound baseConstraint baseK of
                             Nothing -> do
                                 let boundTy = TVar (nameForDep k)
@@ -2245,22 +2168,30 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                                     , IntSet.member dep candidateSet
                                     ]
                             case debugGeneralize
-                                ("generalizeAt: boundDeps k="
-                                    ++ show k
-                                    ++ " bndRoot="
-                                    ++ show bndRoot
-                                    ++ " boundTy="
+                                    ("generalizeAt: boundDeps k="
+                                        ++ show k
+                                        ++ " bndRoot="
+                                        ++ show bndRoot
+                                        ++ " boundTy="
                                     ++ show boundTy
                                     ++ " freeNames="
                                     ++ show freeNames
                                     ++ " deps="
                                     ++ show deps
                                 )
-                                () of
-                                () -> pure ()
+                                    () of
+                                    () -> pure ()
                             pure deps
+        orderBinders candidates =
+            orderBinderCandidates
+                canonical
+                constraint
+                orderRootForBinders
+                orderRootBaseForBinders
+                candidates
+                boundDepsForCandidate
 
-    ordered0 <- orderBinderCandidates canonical constraint orderRootForBinders orderRootBaseForBinders binderIds boundDepsFromReify
+    ordered0 <- orderBinders binderIds
     case debugGeneralize
         ("generalizeAt: binderIds=" ++ show binderIds
             ++ " ordered0=" ++ show ordered0
@@ -2269,7 +2200,6 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
         () -> pure ()
     let names = zipWith alphaName [0..] ordered0
         subst0 = IntMap.fromList (zip ordered0 names)
-        subst0' = subst0
 
     let extraCandidates =
             case scopeRootC of
@@ -2285,16 +2215,11 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                             , not (IntMap.member (getNodeId (canonical child)) subst0)
                             ]
                         _ -> []
-    orderedExtra <- orderBinderCandidates
-        canonical
-        constraint
-        orderRootForBinders
-        orderRootBaseForBinders
-        (map getNodeId extraCandidates)
-        boundDepsFromReify
+    orderedExtra <- orderBinders (map getNodeId extraCandidates)
+    -- Phase 7: substitution maps (base, aliases, and bound-specific views).
     let extraNames = zipWith alphaName [length names ..] orderedExtra
         substExtra = IntMap.fromList (zip orderedExtra extraNames)
-    let substBase = IntMap.unions [subst0', substExtra]
+        substBase = IntMap.unions [subst0, substExtra]
         substAliases =
             IntMap.fromList
                 [ (aliasKey, name)
@@ -2388,8 +2313,7 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                 [nm] -> Just nm
                 _ -> Nothing
     let binderSet = IntSet.fromList ordered0
-    bindings <- mapM
-        (\(name, nidInt) -> do
+        bindingFor (name, nidInt) = do
             let bNodeC = canonical (NodeId nidInt)
                 binderIsNamed = IntSet.member (getNodeId bNodeC) namedUnderGaSet
                 binderKey = getNodeId bNodeC
@@ -2643,9 +2567,10 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                             then Nothing
                             else Just boundTy
             pure (name, mbBound)
-        )
-        (zip names ordered0)
+    -- Phase 8: construct per-binder bounds.
+    bindings <- mapM bindingFor (zip names ordered0)
 
+    -- Phase 9: scheme ownership and type reification.
     let typeRootC = canonical typeRoot
         schemeOwnerFromBodySolved =
             case IntMap.lookup (getNodeId typeRootC) schemeRootByBody of
@@ -2678,10 +2603,8 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
             maybe ownersByRoot (\gid -> gid : ownersByRoot) schemeOwnerFromBody
     typeInScope <-
         case scopeRootC of
-            GenRef _ ->
-                case bindingToElab (Binding.bindingPathToRoot constraint (typeRef typeRootC)) of
-                    Right path -> pure (scopeRootC `elem` path)
-                    Left _ -> pure False
+            GenRef gid ->
+                pure (bindingScopeFor (typeRef typeRootC) == Just gid)
             _ -> pure False
     let typeInScopeAdjusted =
             case (scopeGen, schemeOwnerFromBody) of
@@ -2716,85 +2639,89 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                                 (baseN, substBaseByKey)
                         _ -> (typeRoot, subst)
                 Nothing -> (typeRoot, subst)
-    ty0Raw <-
-        if useSchemeTypeAdjusted
-            then do
-                let reachableVars =
-                        [ NodeId nid
-                        | nid <- IntSet.toList reachableType
-                        , nid /= getNodeId typeRootC
-                        , case IntMap.lookup nid nodes of
-                            Just TyVar{} -> True
-                            _ -> False
-                        ]
-                    hasReachableBinder gid =
-                        any
-                            (\nid -> firstGenAncestorGa (typeRef nid) == Just gid)
-                            reachableVars
-                    schemeOwnerCandidates = filter hasReachableBinder schemeOwners
-                    schemeScope =
-                        case schemeOwnerFromBody of
-                            Just gid
-                                | schemeOwnerFromBodyIsAlias
-                                , (owner:_) <- ownersByRoot ->
-                                    genRef owner
-                                | otherwise -> genRef gid
-                            Nothing ->
-                                case schemeOwnerCandidates of
-                                    (gid:_) -> genRef gid
-                                    [] ->
-                                        case schemeOwners of
-                                            (gid:_) -> genRef gid
-                                            [] -> typeRef typeRootC
-                if schemeScope == scopeRootC
-                    then do
-                        case debugGeneralize
-                            ("generalizeAt: schemeScope equals scopeRootC; skipping recursive scheme-type fallback"
-                                ++ " scopeRootC=" ++ show scopeRootC
-                                ++ " typeRootC=" ++ show typeRootC
-                            )
-                            () of
-                            () -> pure ()
-                        reifyTypeWithNamesNoFallback resForReify substForReify typeRootForReify
-                    else do
-                        (sch, _substScheme) <-
-                            generalizeAtWith False True mbBindParentsGa res schemeScope typeRootC
-                        pure $
-                            case sch of
-                                Forall binds body ->
-                                    foldr (\(n, b) t -> TForall n b t) body binds
-            else
-                case mbBindParentsGa of
-                    Just ga ->
-                        case IntMap.lookup (getNodeId (canonical typeRoot)) solvedToBasePref of
-                            Just baseN -> do
-                                tyBase <-
-                                    reifyTypeWithNamesNoFallbackOnConstraint
-                                        (gaBaseConstraint ga)
-                                        substBaseByKey
-                                        baseN
-                                let freeBase = freeNamesFrom Set.empty tyBase
-                                    allowedBase = Set.fromList (IntMap.elems substBaseByKey)
-                                if Set.isSubsetOf freeBase allowedBase
-                                    then pure tyBase
-                                    else reifyTypeWithNamesNoFallback resForReify substForReify typeRootForReify
-                            Nothing ->
-                                reifyTypeWithNamesNoFallback resForReify substForReify typeRootForReify
-                    Nothing ->
-                        reifyTypeWithNamesNoFallback resForReify substForReify typeRootForReify
-    let ty0RawAdjusted =
-            case (bindings, ty0Raw) of
-                ((v, mb):_, TForall v' mb' body)
-                    | v == v' && mb == mb' -> body
-                _ -> ty0Raw
-    case debugGeneralize
-        ("generalizeAt: ty0Raw=" ++ show ty0RawAdjusted
-            ++ " subst=" ++ show subst
-            ++ " bindings=" ++ show bindings
-        )
-        () of
-        () -> pure ()
-    let nameForId k = "t" ++ show k
+    let reifySchemeType =
+            if useSchemeTypeAdjusted
+                then do
+                    let reachableVars =
+                            [ NodeId nid
+                            | nid <- IntSet.toList reachableType
+                            , nid /= getNodeId typeRootC
+                            , case IntMap.lookup nid nodes of
+                                Just TyVar{} -> True
+                                _ -> False
+                            ]
+                        hasReachableBinder gid =
+                            any
+                                (\nid -> firstGenAncestorGa (typeRef nid) == Just gid)
+                                reachableVars
+                        schemeOwnerCandidates = filter hasReachableBinder schemeOwners
+                        schemeScope =
+                            case schemeOwnerFromBody of
+                                Just gid
+                                    | schemeOwnerFromBodyIsAlias
+                                    , (owner:_) <- ownersByRoot ->
+                                        genRef owner
+                                    | otherwise -> genRef gid
+                                Nothing ->
+                                    case schemeOwnerCandidates of
+                                        (gid:_) -> genRef gid
+                                        [] ->
+                                            case schemeOwners of
+                                                (gid:_) -> genRef gid
+                                                [] -> typeRef typeRootC
+                    if schemeScope == scopeRootC
+                        then do
+                            case debugGeneralize
+                                ("generalizeAt: schemeScope equals scopeRootC; skipping recursive scheme-type fallback"
+                                    ++ " scopeRootC=" ++ show scopeRootC
+                                    ++ " typeRootC=" ++ show typeRootC
+                                )
+                                () of
+                                () -> pure ()
+                            reifyTypeWithNamesNoFallback resForReify substForReify typeRootForReify
+                        else do
+                            (sch, _substScheme) <-
+                                generalizeAtWith False True mbBindParentsGa res schemeScope typeRootC
+                            pure $
+                                case sch of
+                                    Forall binds body ->
+                                        foldr (\(n, b) t -> TForall n b t) body binds
+                else
+                    case mbBindParentsGa of
+                        Just ga ->
+                            case IntMap.lookup (getNodeId (canonical typeRoot)) solvedToBasePref of
+                                Just baseN -> do
+                                    tyBase <-
+                                        reifyTypeWithNamesNoFallbackOnConstraint
+                                            (gaBaseConstraint ga)
+                                            substBaseByKey
+                                            baseN
+                                    let freeBase = freeNamesFrom Set.empty tyBase
+                                        allowedBase = Set.fromList (IntMap.elems substBaseByKey)
+                                    if Set.isSubsetOf freeBase allowedBase
+                                        then pure tyBase
+                                        else reifyTypeWithNamesNoFallback resForReify substForReify typeRootForReify
+                                Nothing ->
+                                    reifyTypeWithNamesNoFallback resForReify substForReify typeRootForReify
+                        Nothing ->
+                            reifyTypeWithNamesNoFallback resForReify substForReify typeRootForReify
+    ty0Raw <- reifySchemeType
+    -- Phase 10: normalize, rename, and prune bindings + type.
+    let normalizeScheme tyRaw binds =
+            let tyAdjusted =
+                    case (binds, tyRaw) of
+                        ((v, mb):_, TForall v' mb' body)
+                            | v == v' && mb == mb' -> body
+                        _ -> tyRaw
+            in case debugGeneralize
+                ("generalizeAt: ty0Raw=" ++ show tyAdjusted
+                    ++ " subst=" ++ show subst
+                    ++ " bindings=" ++ show binds
+                )
+                () of
+                () -> (tyAdjusted, binds)
+        (ty0RawAdjusted, bindingsAdjusted) = normalizeScheme ty0Raw bindings
+        nameForId k = "t" ++ show k
         substNames =
             [ (nameForId k, name)
             | (k, name) <- IntMap.toList subst
@@ -2806,7 +2733,7 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                     | (nidInt, name) <- IntMap.toList subst
                     , IntSet.member nidInt namedUnderGaSet
                     ])
-                (Set.fromList [ name | (name, Just _) <- bindings ])
+                (Set.fromList [ name | (name, Just _) <- bindingsAdjusted ])
         renameVars = cata alg
           where
             renameFromSubst v = case lookup v substNames of
@@ -2823,7 +2750,7 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
         ty0 = renameVars ty0RawAdjusted
         inlineBaseBounds = False
         (bindingsNorm0, tyNorm0) =
-            simplifySchemeBindings inlineBaseBounds namedBinderNames bindings ty0
+            simplifySchemeBindings inlineBaseBounds namedBinderNames bindingsAdjusted ty0
         (bindingsNorm, tyNorm) = promoteArrowAlias bindingsNorm0 tyNorm0
         usedNames =
             Set.unions
@@ -2888,109 +2815,104 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
         allowedNames = Set.fromList (map fst bindingsRenamed)
         missingNamesRaw = Set.toList (Set.difference usedNamesRenamed boundNames)
         aliasAllowed name =
-            case name of
-                ('t':rest) ->
-                    case reads rest of
-                        [(nid, "")] ->
-                            let keyC = getNodeId (canonical (NodeId nid))
-                                aliasKey = case IntMap.lookup keyC gammaAlias of
-                                    Just repKey -> repKey
-                                    Nothing -> keyC
-                            in case IntMap.lookup aliasKey subst of
-                                Just nm -> Set.member (renameName nm) boundNames
-                                Nothing -> False
-                        _ -> False
-                _ -> False
+            case parseNameId name of
+                Just nid ->
+                    let keyC = getNodeId (canonical (NodeId nid))
+                        aliasKey = case IntMap.lookup keyC gammaAlias of
+                            Just repKey -> repKey
+                            Nothing -> keyC
+                    in case IntMap.lookup aliasKey subst of
+                        Just nm -> Set.member (renameName nm) boundNames
+                        Nothing -> False
+                Nothing -> False
         missingNamesRaw' = filter (not . aliasAllowed) missingNamesRaw
         missingNames =
             case scopeGen of
                 Nothing -> missingNamesRaw'
                 Just gid ->
                     let underScope name =
-                            case name of
-                                ('t':rest) ->
-                                    case reads rest of
-                                        [(nid, "")] ->
-                                            let nidRef = NodeId nid
-                                                underSolved =
-                                                    firstGenAncestorGa (typeRef nidRef) == Just gid
-                                                underBase =
-                                                    case mbBindParentsGa of
-                                                        Just ga ->
-                                                            case IntMap.lookup nid solvedToBasePref of
-                                                                Just baseN ->
-                                                                    firstGenAncestor (gaBindParentsBase ga) (TypeRef baseN) == Just gid
-                                                                Nothing -> underSolved
+                            case parseNameId name of
+                                Just nid ->
+                                    let nidRef = NodeId nid
+                                        underSolved =
+                                            firstGenAncestorGa (typeRef nidRef) == Just gid
+                                        underBase =
+                                            case mbBindParentsGa of
+                                                Just ga ->
+                                                    case IntMap.lookup nid solvedToBasePref of
+                                                        Just baseN ->
+                                                            firstGenAncestor (gaBindParentsBase ga) (TypeRef baseN) == Just gid
                                                         Nothing -> underSolved
-                                            in underBase
-                                        _ -> True
-                                _ -> True
+                                                Nothing -> underSolved
+                                    in underBase
+                                Nothing -> True
                     in filter underScope missingNamesRaw'
         keepNames = map fst bindingsRenamed
         subst' = IntMap.filter (`elem` keepNames) (IntMap.map renameName subst)
-    if null missingNames
-        then pure (Forall bindingsRenamed tyRenamed, subst')
-        else
-            case debugGeneralize
-                ("generalizeAt: SchemeFreeVars typeRoot="
-                    ++ show typeRootC
-                    ++ " scopeRoot="
-                    ++ show scopeRootC
-                    ++ " scopeGen="
-                    ++ show scopeGen
-                    ++ " missing="
-                    ++ show missingNames
-                    ++ " bindingsFinal="
-                    ++ show bindingsFinal
-                    ++ " usedNames="
-                    ++ show (Set.toList usedNames)
-                    ++ " boundNames="
-                    ++ show (Set.toList boundNames)
-                    ++ " allowedNames="
-                    ++ show (Set.toList (allowedNames :: Set.Set String))
-                    ++ " bindParentsMissing="
-                    ++ show
-                        [ (name, IntMap.lookup (nodeRefKey (typeRef (NodeId nid))) bindParents)
-                        | name <- missingNames
-                        , ('t':rest) <- [name]
-                        , [(nid, "")] <- [reads rest]
-                        ]
-                    ++ " missingBasePaths="
-                    ++ show
-                        [ ( name
-                          , NodeId nid
-                          , mbBase
-                          , mbBasePref
-                          , case mbBase of
-                                Nothing -> []
-                                Just baseN ->
-                                    case bindingPathToRootLocal (gaBindParentsBase ga) (TypeRef baseN) of
-                                        Right path -> path
-                                        Left _ -> []
-                          , case mbBasePref of
-                                Nothing -> []
-                                Just baseN ->
-                                    case bindingPathToRootLocal (gaBindParentsBase ga) (TypeRef baseN) of
-                                        Right path -> path
-                                        Left _ -> []
-                          , case mbBasePref of
-                                Nothing -> Nothing
-                                Just baseN -> firstGenAncestor (gaBindParentsBase ga) (TypeRef baseN)
-                          , case mbBase of
-                                Nothing -> Nothing
-                                Just baseN ->
-                                    IntMap.lookup (nodeRefKey (typeRef baseN)) (gaBindParentsBase ga)
-                          )
-                        | name <- missingNames
-                        , ('t':rest) <- [name]
-                        , [(nid, "")] <- [reads rest]
-                        , Just ga <- [mbBindParentsGa]
-                        , let mbBase = IntMap.lookup nid (gaSolvedToBase ga)
-                        , let mbBasePref = IntMap.lookup nid solvedToBasePref
-                        ]
-                )
-                () of
-                () -> Left $ SchemeFreeVars typeRootC missingNames
+        finalizeScheme missing =
+            if null missing
+                then pure (Forall bindingsRenamed tyRenamed, subst')
+                else
+                    case debugGeneralize
+                        ("generalizeAt: SchemeFreeVars typeRoot="
+                            ++ show typeRootC
+                            ++ " scopeRoot="
+                            ++ show scopeRootC
+                            ++ " scopeGen="
+                            ++ show scopeGen
+                            ++ " missing="
+                            ++ show missing
+                            ++ " bindingsFinal="
+                            ++ show bindingsFinal
+                            ++ " usedNames="
+                            ++ show (Set.toList usedNames)
+                            ++ " boundNames="
+                            ++ show (Set.toList boundNames)
+                            ++ " allowedNames="
+                            ++ show (Set.toList (allowedNames :: Set.Set String))
+                            ++ " bindParentsMissing="
+                            ++ show
+                                [ (name, IntMap.lookup (nodeRefKey (typeRef (NodeId nid))) bindParents)
+                                | name <- missing
+                                , Just nid <- [parseNameId name]
+                                ]
+                            ++ " missingBasePaths="
+                            ++ show
+                                [ ( name
+                                  , NodeId nid
+                                  , mbBase
+                                  , mbBasePref
+                                  , case mbBase of
+                                        Nothing -> []
+                                        Just baseN ->
+                                            case bindingPathToRootLocal (gaBindParentsBase ga) (TypeRef baseN) of
+                                                Right path -> path
+                                                Left _ -> []
+                                  , case mbBasePref of
+                                        Nothing -> []
+                                        Just baseN ->
+                                            case bindingPathToRootLocal (gaBindParentsBase ga) (TypeRef baseN) of
+                                                Right path -> path
+                                                Left _ -> []
+                                  , case mbBasePref of
+                                        Nothing -> Nothing
+                                        Just baseN -> firstGenAncestor (gaBindParentsBase ga) (TypeRef baseN)
+                                  , case mbBase of
+                                        Nothing -> Nothing
+                                        Just baseN ->
+                                            IntMap.lookup (nodeRefKey (typeRef baseN)) (gaBindParentsBase ga)
+                                  )
+                                | name <- missing
+                                , Just nid <- [parseNameId name]
+                                , Just ga <- [mbBindParentsGa]
+                                , let mbBase = IntMap.lookup nid (gaSolvedToBase ga)
+                                , let mbBasePref = IntMap.lookup nid solvedToBasePref
+                                ]
+                        )
+                        () of
+                        () -> Left $ SchemeFreeVars typeRootC missing
+    -- Phase 11: final validation (SchemeFreeVars).
+    finalizeScheme missingNames
   where
     orderBinderCandidates
         :: (NodeId -> NodeId)
@@ -3088,15 +3010,19 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
             Right path -> listToMaybe [gid | GenRef gid <- drop 1 path]
 
     bindingPathToRootLocal bindParents' start =
-        go IntSet.empty [start] (nodeRefKey start)
-      where
-        go visited path key
-            | IntSet.member key visited = Left (BindingTreeError (BindingCycleDetected (reverse path)))
-            | otherwise =
-                case IntMap.lookup key bindParents' of
-                    Nothing -> Right (reverse path)
-                    Just (parentRef, _) ->
-                        go (IntSet.insert key visited) (parentRef : path) (nodeRefKey parentRef)
+        walkBindingParents bindParents' IntSet.empty [start] (nodeRefKey start)
+
+    walkBindingParents bindParents' visited path key
+        | IntSet.member key visited = Left (BindingTreeError (BindingCycleDetected (reverse path)))
+        | otherwise =
+            case IntMap.lookup key bindParents' of
+                Nothing -> Right (reverse path)
+                Just (parentRef, _) ->
+                    walkBindingParents
+                        bindParents'
+                        (IntSet.insert key visited)
+                        (parentRef : path)
+                        (nodeRefKey parentRef)
 
 
     freeNamesOf :: ElabType -> Set.Set String
@@ -3141,14 +3067,14 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
         -> ([(String, Maybe ElabType)], ElabType)
     simplifySchemeBindings inlineBaseBounds namedBinders binds ty =
         let binders = Set.fromList (map fst binds)
-        in go binders binds ty
+        in simplify binders binds ty
       where
-        go _ [] body = ([], body)
-        go binders ((v, mbBound):rest) body =
+        simplify _ [] body = ([], body)
+        simplify binders ((v, mbBound):rest) body =
             let isNamedBinder = Set.member v namedBinders
             in case mbBound of
                 Nothing ->
-                    let (rest', body') = go binders rest body
+                    let (rest', body') = simplify binders rest body
                     in ((v, Nothing) : rest', body')
                 Just bound ->
                     case body of
@@ -3182,9 +3108,9 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                                             [ (name, fmap (substType v bound) mb)
                                             | (name, mb) <- rest
                                             ]
-                                    in go (Set.delete v binders) restSub body'
+                                    in simplify (Set.delete v binders) restSub body'
                                 else
-                                    let (rest', body') = go binders rest body
+                                    let (rest', body') = simplify binders rest body
                                     in ((v, Just bound) : rest', body')
                         _ ->
                             let freeBound = freeNamesFrom Set.empty bound
@@ -3229,9 +3155,9 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                                             [ (name, fmap (substType v replacement) mb)
                                             | (name, mb) <- rest
                                             ]
-                                    in go binders restSub bodySub
+                                    in simplify binders restSub bodySub
                                 else
-                                    let (rest', body') = go binders rest body
+                                    let (rest', body') = simplify binders rest body
                                     in ((v, Just bound) : rest', body')
 
     promoteArrowAlias :: [(String, Maybe ElabType)] -> ElabType -> ([(String, Maybe ElabType)], ElabType)

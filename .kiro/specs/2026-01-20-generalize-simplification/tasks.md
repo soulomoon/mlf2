@@ -1,0 +1,21 @@
+# Implementation Plan
+
+- [x] 1. Add/extend shared helpers for reachability and canonical/key reuse
+    - Create or extend helpers in src/MLF/Elab/Util.hs (or a dedicated util module) to handle stop-predicate reachability and commonly repeated key/canonical logic.
+    - Update exports and imports as needed.
+    - Requirements: 1.1, 1.2
+    - Verification: rg -n "reachableFromStop" src/MLF/Elab/Util.hs
+- [x] 2. Refactor Generalize reachability and path helpers to use shared utilities
+    - Replace local reachableFromWithBoundsStop implementations with reachableFromStop.
+    - Normalize canonical/key naming in the refactored helpers.
+    - Requirements: 1.1, 2.1, 2.2
+    - Verification: rg -n "reachableFromStop" src/MLF/Elab/Generalize.hs
+- [x] 3. Convert remaining structural ElabType traversals in Generalize to recursion-schemes
+    - Identify any remaining purely structural traversals and refactor to cata/para.
+    - Leave graph traversals explicit or via shared helper.
+    - Requirements: 3.1, 3.2
+    - Verification: rg -n "cata|para" src/MLF/Elab/Generalize.hs
+- [x] 4. Build and test
+    - Run full test suite to confirm no behavior changes.
+    - Requirements: 4.1
+    - Verification: cabal test
