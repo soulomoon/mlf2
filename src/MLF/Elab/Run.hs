@@ -5,7 +5,7 @@ module MLF.Elab.Run (
     chaseRedirects
 ) where
 
-import Data.Functor.Foldable (Recursive (..), cata)
+import Data.Functor.Foldable (Recursive (..), cata, para)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.List (intercalate)
@@ -1286,13 +1286,17 @@ simplifyAnnotationType = go
         TForall{} ->
             normalizeForalls (stripForalls ty)
 
-    stripForalls = goStrip
+    stripForalls = para alg
       where
-        goStrip ty = case ty of
-            TForall v mb body ->
-                let (binds, inner) = goStrip body
-                in ((v, mb) : binds, inner)
-            _ -> ([], ty)
+        alg ty = case ty of
+            TForallF v mb bodyPair ->
+                let mbOrig = fmap fst mb
+                    (binds, inner) = snd bodyPair
+                in ((v, mbOrig) : binds, inner)
+            TVarF v -> ([], TVar v)
+            TArrowF d c -> ([], TArrow (fst d) (fst c))
+            TBaseF b -> ([], TBase b)
+            TBottomF -> ([], TBottom)
 
     normalizeForalls (binds0, body0) =
         let binds1 =
@@ -1388,41 +1392,50 @@ simplifyAnnotationType = go
         let mb' = fmap (substType v replacement) mb
         in (name, mb')
 
-    substVar v v0 ty = case ty of
-        TVar name
-            | name == v -> TVar v0
-            | otherwise -> TVar name
-        TArrow a b -> TArrow (substVar v v0 a) (substVar v v0 b)
-        TBase _ -> ty
-        TBottom -> ty
-        TForall name mb body
-            | name == v -> TForall name mb body
-            | otherwise -> TForall name (fmap (substVar v v0) mb) (substVar v v0 body)
+    substVar v v0 = para alg
+      where
+        alg ty = case ty of
+            TVarF name
+                | name == v -> TVar v0
+                | otherwise -> TVar name
+            TArrowF d c -> TArrow (snd d) (snd c)
+            TBaseF b -> TBase b
+            TBottomF -> TBottom
+            TForallF name mb body
+                | name == v -> TForall name (fmap fst mb) (fst body)
+                | otherwise -> TForall name (fmap snd mb) (snd body)
 
-    substType v replacement ty = case ty of
-        TVar name
-            | name == v -> replacement
-            | otherwise -> TVar name
-        TArrow a b -> TArrow (substType v replacement a) (substType v replacement b)
-        TBase _ -> ty
-        TBottom -> ty
-        TForall name mb body
-            | name == v -> TForall name mb body
-            | otherwise -> TForall name (fmap (substType v replacement) mb) (substType v replacement body)
+    substType v replacement = para alg
+      where
+        alg ty = case ty of
+            TVarF name
+                | name == v -> replacement
+                | otherwise -> TVar name
+            TArrowF d c -> TArrow (snd d) (snd c)
+            TBaseF b -> TBase b
+            TBottomF -> TBottom
+            TForallF name mb body
+                | name == v -> TForall name (fmap fst mb) (fst body)
+                | otherwise -> TForall name (fmap snd mb) (snd body)
 
     freeVarsType = freeVarsFrom Set.empty
       where
-        freeVarsFrom bound ty = case ty of
-            TVar v ->
-                if Set.member v bound then Set.empty else Set.singleton v
-            TArrow a b ->
-                Set.union (freeVarsFrom bound a) (freeVarsFrom bound b)
-            TBase _ -> Set.empty
-            TBottom -> Set.empty
-            TForall v mb body ->
-                let freeBound = maybe Set.empty (freeVarsFrom bound) mb
-                    freeBody = freeVarsFrom (Set.insert v bound) body
-                in Set.union freeBound freeBody
+        freeVarsFrom bound ty = (cata alg ty) bound
+        alg ty = case ty of
+            TVarF v ->
+                \bound' ->
+                    if Set.member v bound'
+                        then Set.empty
+                        else Set.singleton v
+            TArrowF a b -> \bound' -> Set.union (a bound') (b bound')
+            TBaseF _ -> const Set.empty
+            TBottomF -> const Set.empty
+            TForallF v mb body ->
+                \bound' ->
+                    let bound'' = Set.insert v bound'
+                        freeBound = maybe Set.empty ($ bound'') mb
+                        freeBody = body bound''
+                    in Set.union freeBound freeBody
 
 parseName :: String -> Maybe NodeId
 parseName name =
@@ -1514,22 +1527,25 @@ varsInType = cata alg
             in Set.union varsBound body
 
 substTypeSelective :: Set.Set String -> Map.Map String ElabType -> ElabType -> ElabType
-substTypeSelective binderSet subst = go Set.empty
+substTypeSelective binderSet subst ty0 = (cata alg ty0) Set.empty
   where
-    go bound ty = case ty of
-        TVar v
-            | Set.member v bound -> TVar v
-            | Set.member v binderSet -> TVar v
-            | otherwise ->
-                case Map.lookup v subst of
-                    Just ty' -> ty'
-                    Nothing -> TVar v
-        TArrow a b -> TArrow (go bound a) (go bound b)
-        TBase _ -> ty
-        TBottom -> ty
-        TForall v mb body ->
-            let bound' = Set.insert v bound
-            in TForall v (fmap (go bound') mb) (go bound' body)
+    alg ty = case ty of
+        TVarF v ->
+            \bound ->
+                if Set.member v bound || Set.member v binderSet
+                    then TVar v
+                    else case Map.lookup v subst of
+                        Just ty' -> ty'
+                        Nothing -> TVar v
+        TArrowF a b -> \bound -> TArrow (a bound) (b bound)
+        TBaseF b -> const (TBase b)
+        TBottomF -> const TBottom
+        TForallF v mb body ->
+            \bound ->
+                let bound' = Set.insert v bound
+                    mb' = fmap ($ bound') mb
+                    body' = body bound'
+                in TForall v mb' body'
 
 instInsideFromArgsWithBounds :: [(String, Maybe ElabType)] -> [ElabType] -> Instantiation
 instInsideFromArgsWithBounds binds args = case (binds, args) of
@@ -1554,11 +1570,14 @@ containsForallType = cata alg
         _ -> False
 
 stripForallsType :: ElabType -> ElabType
-stripForallsType = go
+stripForallsType = para alg
   where
-    go ty = case project ty of
-        TForallF _ _ body -> go body
-        _ -> ty
+    alg ty = case ty of
+        TForallF _ _ body -> snd body
+        TVarF v -> TVar v
+        TArrowF (d, _) (c, _) -> TArrow d c
+        TBaseF b -> TBase b
+        TBottomF -> TBottom
 
 matchType
     :: Set.Set String

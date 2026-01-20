@@ -7,7 +7,7 @@ module MLF.Elab.Inst (
     splitForalls
 ) where
 
-import Data.Functor.Foldable (cata)
+import Data.Functor.Foldable (cata, para)
 import Data.List (nub)
 
 import MLF.Elab.Types
@@ -26,9 +26,17 @@ instMany :: [Instantiation] -> Instantiation
 instMany = foldr composeInst InstId
 
 splitForalls :: ElabType -> ([(String, Maybe ElabType)], ElabType)
-splitForalls = \case
-    TForall v b t -> let (qs, body) = splitForalls t in ((v, b) : qs, body)
-    t -> ([], t)
+splitForalls = para alg
+  where
+    alg ty = case ty of
+        TForallF v mb bodyPair ->
+            let mbOrig = fmap fst mb
+                (binds, body) = snd bodyPair
+            in ((v, mbOrig) : binds, body)
+        TVarF v -> ([], TVar v)
+        TArrowF (d, _) (c, _) -> ([], TArrow d c)
+        TBaseF b -> ([], TBase b)
+        TBottomF -> ([], TBottom)
 
 -- | Apply an xMLF instantiation to an xMLF type (xmlf Fig. 3).
 --
@@ -109,20 +117,33 @@ applyInstantiation ty inst = snd <$> go 0 ty inst
 
     -- Capture-avoiding substitution [x ↦ s]t (only for types).
     substType :: String -> ElabType -> ElabType -> ElabType
-    substType x s t0 = case t0 of
-        TVar v | v == x -> s
-        TVar v -> TVar v
-        TArrow a b -> TArrow (substType x s a) (substType x s b)
-        TBase b -> TBase b
-        TBottom -> TBottom
-        TForall v mb body
-            | v == x -> TForall v (fmap (substType x s) mb) body
-            | v `elem` ftvType s ->
-                let v' = pickFresh v (ftvType s ++ ftvType body ++ maybe [] ftvType mb)
-                    body' = substType v (TVar v') body
-                in TForall v' (fmap (substType x s) mb) (substType x s body')
-            | otherwise ->
-                TForall v (fmap (substType x s) mb) (substType x s body)
+    substType x s = goSub
+      where
+        freeS = ftvType s
+
+        goSub = para alg
+          where
+            alg node = case node of
+                TVarF v
+                    | v == x -> s
+                    | otherwise -> TVar v
+                TArrowF d c -> TArrow (snd d) (snd c)
+                TBaseF b -> TBase b
+                TBottomF -> TBottom
+                TForallF v mb body
+                    | v == x ->
+                        let mb' = fmap snd mb
+                        in TForall v mb' (fst body)
+                    | v `elem` freeS ->
+                        let used =
+                                freeS
+                                    ++ ftvType (fst body)
+                                    ++ maybe [] (ftvType . fst) mb
+                            v' = pickFresh v used
+                            body' = substType v (TVar v') (fst body)
+                        in TForall v' (fmap snd mb) (goSub body')
+                    | otherwise ->
+                        TForall v (fmap snd mb) (snd body)
 
     pickFresh :: String -> [String] -> String
     pickFresh base used =
@@ -135,17 +156,17 @@ applyInstantiation ty inst = snd <$> go 0 ty inst
     -- This is α-renaming of the instantiation’s binder: occurrences of `old`
     -- are renamed to `new`, except under a nested `∀(old ⩾)` which re-binds it.
     renameInstBound :: String -> String -> Instantiation -> Instantiation
-    renameInstBound old new = goR
+    renameInstBound old new = para alg
       where
-        goR inst0 = case inst0 of
-            InstId -> InstId
-            InstApp t -> InstApp t
-            InstBot t -> InstBot t
-            InstIntro -> InstIntro
-            InstElim -> InstElim
-            InstAbstr v -> InstAbstr (if v == old then new else v)
-            InstInside i -> InstInside (goR i)
-            InstSeq a b -> InstSeq (goR a) (goR b)
-            InstUnder v i
-                | v == old -> InstUnder v i  -- shadowing: stop renaming under this binder
-                | otherwise -> InstUnder v (goR i)
+        alg inst0 = case inst0 of
+            InstIdF -> InstId
+            InstAppF t -> InstApp t
+            InstBotF t -> InstBot t
+            InstIntroF -> InstIntro
+            InstElimF -> InstElim
+            InstAbstrF v -> InstAbstr (if v == old then new else v)
+            InstInsideF i -> InstInside (snd i)
+            InstSeqF a b -> InstSeq (snd a) (snd b)
+            InstUnderF v i
+                | v == old -> InstUnder v (fst i)  -- shadowing: stop renaming under this binder
+                | otherwise -> InstUnder v (snd i)

@@ -6,7 +6,7 @@ module MLF.Elab.TypeCheck (
     checkInstantiation
 ) where
 
-import Data.Functor.Foldable (cata)
+import Data.Functor.Foldable (cata, para)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
@@ -172,22 +172,36 @@ freshName n used =
         else (candidate, n + 1)
 
 substType :: String -> ElabType -> ElabType -> ElabType
-substType x s t0 = case t0 of
-    TVar v | v == x -> s
-    TVar v -> TVar v
-    TArrow a b -> TArrow (substType x s a) (substType x s b)
-    TBase b -> TBase b
-    TBottom -> TBottom
-    TForall v mb body
-        | v == x -> TForall v (fmap (substType x s) mb) body
-        | v `Set.member` freeS ->
-            let v' = pickFresh v (Set.unions [freeS, freeTypeVarsType body, maybe Set.empty freeTypeVarsType mb])
-                body' = substType v (TVar v') body
-            in TForall v' (fmap (substType x s) mb) (substType x s body')
-        | otherwise ->
-            TForall v (fmap (substType x s) mb) (substType x s body)
+substType x s = goSub
   where
     freeS = freeTypeVarsType s
+
+    goSub = para alg
+      where
+        alg ty = case ty of
+            TVarF v
+                | v == x -> s
+                | otherwise -> TVar v
+            TArrowF d c -> TArrow (snd d) (snd c)
+            TBaseF b -> TBase b
+            TBottomF -> TBottom
+            TForallF v mb body
+                | v == x ->
+                    let mb' = fmap snd mb
+                    in TForall v mb' (fst body)
+                | v `Set.member` freeS ->
+                    let used =
+                            Set.unions
+                                [ freeS
+                                , freeTypeVarsType (fst body)
+                                , maybe Set.empty (freeTypeVarsType . fst) mb
+                                , Set.singleton v
+                                ]
+                        v' = pickFresh v used
+                        body' = substType v (TVar v') (fst body)
+                    in TForall v' (fmap snd mb) (goSub body')
+                | otherwise ->
+                    TForall v (fmap snd mb) (snd body)
 
 pickFresh :: String -> Set.Set String -> String
 pickFresh base used =
@@ -197,17 +211,17 @@ pickFresh base used =
         [] -> base
 
 renameInstBound :: String -> String -> Instantiation -> Instantiation
-renameInstBound old new = goR
+renameInstBound old new = para alg
   where
-    goR inst0 = case inst0 of
-        InstId -> InstId
-        InstApp t -> InstApp t
-        InstBot t -> InstBot t
-        InstIntro -> InstIntro
-        InstElim -> InstElim
-        InstAbstr v -> InstAbstr (if v == old then new else v)
-        InstInside i -> InstInside (goR i)
-        InstSeq a b -> InstSeq (goR a) (goR b)
-        InstUnder v i
-            | v == old -> InstUnder v i
-            | otherwise -> InstUnder v (goR i)
+    alg inst0 = case inst0 of
+        InstIdF -> InstId
+        InstAppF t -> InstApp t
+        InstBotF t -> InstBot t
+        InstIntroF -> InstIntro
+        InstElimF -> InstElim
+        InstAbstrF v -> InstAbstr (if v == old then new else v)
+        InstInsideF i -> InstInside (snd i)
+        InstSeqF a b -> InstSeq (snd a) (snd b)
+        InstUnderF v i
+            | v == old -> InstUnder v (fst i)
+            | otherwise -> InstUnder v (snd i)

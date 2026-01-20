@@ -19,7 +19,6 @@ import Text.Read (readMaybe)
 
 import MLF.Frontend.Syntax (VarName)
 import MLF.Constraint.Types
-import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Solve (SolveResult(..))
 import MLF.Elab.Types
 import MLF.Elab.Generalize
@@ -177,14 +176,14 @@ elaborateWithScope resPhi resReify resGen gaParents edgeWitnesses edgeTraces edg
   where
     canonical = Solve.frWith (srUnionFind resReify)
     bindingPathToRootLocal bindParents' start =
-        let go visited path key
+        let goPath visited path key
                 | IntSet.member key visited = Left (BindingTreeError (BindingCycleDetected (reverse path)))
                 | otherwise =
                     case IntMap.lookup key bindParents' of
                         Nothing -> Right (reverse path)
                         Just (parentRef, _) ->
-                            go (IntSet.insert key visited) (parentRef : path) (nodeRefKey parentRef)
-        in go IntSet.empty [start] (nodeRefKey start)
+                            goPath (IntSet.insert key visited) (parentRef : path) (nodeRefKey parentRef)
+        in goPath IntSet.empty [start] (nodeRefKey start)
     scopeRootFromBase root =
         case IntMap.lookup (getNodeId (canonical root)) (gaSolvedToBase gaParents) of
             Nothing -> typeRef root
@@ -527,13 +526,6 @@ elaborateWithScope resPhi resReify resGen gaParents edgeWitnesses edgeTraces edg
         InstElim -> 0
         InstInside phi -> countInstApps phi
         InstUnder _ phi -> countInstApps phi
-
-bindingScopeRef :: Constraint -> NodeId -> Either BindingError NodeRef
-bindingScopeRef constraint root = do
-    path <- Binding.bindingPathToRoot constraint (typeRef root)
-    case listToMaybe [gid | GenRef gid <- drop 1 path] of
-        Just gid -> Right (GenRef gid)
-        Nothing -> Right (TypeRef root)
 
 debugElabGeneralize :: String -> a -> a
 debugElabGeneralize msg value =

@@ -202,19 +202,24 @@ class PrettyDisplay a where
     prettyDisplay :: a -> String
 
 instance Pretty ElabType where
-    pretty =
-        let go t = case t of
-                TVar v -> v
-                TBase (BaseTy b) -> b
-                TArrow a b -> p a ++ " -> " ++ pretty b
-                TForall v Nothing body -> "∀" ++ v ++ ". " ++ pretty body
-                TForall v (Just bound) body ->
-                    "∀(" ++ v ++ " ⩾ " ++ pretty bound ++ "). " ++ pretty body
-                TBottom -> "⊥"
-            p x@TArrow{} = "(" ++ pretty x ++ ")"
-            p x@TForall{} = "(" ++ pretty x ++ ")"
-            p x = pretty x
-        in go
+    pretty = zygo complexAlg prettyAlg
+      where
+        complexAlg ty = case ty of
+            TArrowF _ _ -> True
+            TForallF _ _ _ -> True
+            _ -> False
+
+        prettyAlg ty = case ty of
+            TVarF v -> v
+            TBaseF (BaseTy b) -> b
+            TArrowF (isComplex, l) (_, r) ->
+                let left = if isComplex then "(" ++ l ++ ")" else l
+                in left ++ " -> " ++ r
+            TForallF v mb body ->
+                case fmap snd mb of
+                    Nothing -> "∀" ++ v ++ ". " ++ snd body
+                    Just bound -> "∀(" ++ v ++ " ⩾ " ++ bound ++ "). " ++ snd body
+            TBottomF -> "⊥"
 
 instance Pretty ElabScheme where
     pretty (Forall [] ty) = pretty ty
@@ -224,38 +229,64 @@ instance Pretty ElabScheme where
         prettyBind (v, Just bound) = "(" ++ v ++ " ⩾ " ++ pretty bound ++ ")"
 
 instance Pretty Instantiation where
-    pretty inst = case inst of
-        InstId -> "1"
-        InstApp ty -> "⟨" ++ pretty ty ++ "⟩"
-        InstBot ty -> pretty ty
-        InstIntro -> "O"
-        InstElim -> "N"
-        InstAbstr v -> "!" ++ v
-        InstUnder v i -> "∀(" ++ v ++ " ⩾) " ++ pretty i
-        InstInside i -> "∀(⩾ " ++ pretty i ++ ")"
-        InstSeq i1 i2 -> pretty i1 ++ "; " ++ pretty i2
+    pretty = prettyInstWith pretty
 
 instance Pretty ElabTerm where
-    pretty term = case term of
-        EVar v -> v
-        ELit l -> case l of
+    pretty = prettyTermWith pretty pretty pretty
+
+prettyInstWith :: (ElabType -> String) -> Instantiation -> String
+prettyInstWith prettyTy = cata alg
+  where
+    alg inst = case inst of
+        InstIdF -> "1"
+        InstAppF ty -> "⟨" ++ prettyTy ty ++ "⟩"
+        InstBotF ty -> prettyTy ty
+        InstIntroF -> "O"
+        InstElimF -> "N"
+        InstAbstrF v -> "!" ++ v
+        InstUnderF v i -> "∀(" ++ v ++ " ⩾) " ++ i
+        InstInsideF i -> "∀(⩾ " ++ i ++ ")"
+        InstSeqF i1 i2 -> i1 ++ "; " ++ i2
+
+prettyTermWith
+    :: (ElabType -> String)
+    -> (ElabScheme -> String)
+    -> (Instantiation -> String)
+    -> ElabTerm
+    -> String
+prettyTermWith prettyTy prettyScheme prettyInst = zygo needsParensAlg prettyAlg
+  where
+    needsParensAlg term = case term of
+        EAppF _ _ -> True
+        ELamF _ _ _ -> True
+        _ -> False
+
+    prettyAlg term = case term of
+        EVarF v -> v
+        ELitF l -> case l of
             LInt i -> show i
             LBool b -> if b then "true" else "false"
             LString s -> show s
-        ELam v ty body -> "λ" ++ v ++ ":" ++ pretty ty ++ ". " ++ pretty body
-        EApp f a -> par (pretty f) ++ " " ++ parArg a
-          where
-            parArg x@EApp{} = par (pretty x)
-            parArg x@ELam{} = par (pretty x)
-            parArg x = pretty x
-        ELet v sch rhs body -> "let " ++ v ++ " : " ++ pretty sch ++ " = " ++ pretty rhs ++ " in " ++ pretty body
-        ETyAbs v Nothing body -> "Λ" ++ v ++ ". " ++ pretty body
-        ETyAbs v (Just bound) body -> "Λ(" ++ v ++ " ⩾ " ++ pretty bound ++ "). " ++ pretty body
-        ETyInst e inst -> pretty e ++ " " ++ prettyInst inst
-      where
-        par s = "(" ++ s ++ ")"
-        prettyInst InstId = "1"
-        prettyInst i = "[" ++ pretty i ++ "]"
+        ELamF v ty body -> "λ" ++ v ++ ":" ++ prettyTy ty ++ ". " ++ snd body
+        EAppF f a ->
+            let par s = "(" ++ s ++ ")"
+                arg =
+                    if fst a
+                        then par (snd a)
+                        else snd a
+            in par (snd f) ++ " " ++ arg
+        ELetF v sch rhs body ->
+            "let " ++ v ++ " : " ++ prettyScheme sch
+                ++ " = " ++ snd rhs
+                ++ " in " ++ snd body
+        ETyAbsF v Nothing body -> "Λ" ++ v ++ ". " ++ snd body
+        ETyAbsF v (Just bound) body ->
+            "Λ(" ++ v ++ " ⩾ " ++ prettyTy bound ++ "). " ++ snd body
+        ETyInstF e inst ->
+            let instStr = case inst of
+                    InstId -> "1"
+                    _ -> "[" ++ prettyInst inst ++ "]"
+            in snd e ++ " " ++ instStr
 
 data OccInfo = OccInfo
     { oiFreeVars :: Set.Set String
@@ -344,7 +375,7 @@ inlineBoundsForDisplay = go
                 (freeBound, occBound) = maybe (Set.empty, emptyOccInfo) id mb
                 freeVars = Set.union freeBound (Set.delete v freeBody)
                 occBody' = Map.delete v (oiOccMap occBody)
-                occBound' = oiOccMap occBound
+                occBound' = Map.delete v (oiOccMap occBound)
             in OccInfo freeVars (mergeOccMaps occBound' occBody')
 
     mergeOccMaps = Map.unionWith addCounts
@@ -356,53 +387,56 @@ inlineBoundsForDisplay = go
       where
         freeInReplacement = freeVarsType replacement
 
-        goSub ty = case ty of
-            TVar v
-                | v == name -> replacement
-                | otherwise -> TVar v
-            TArrow d c -> TArrow (goSub d) (goSub c)
-            TBase b -> TBase b
-            TBottom -> TBottom
-            TForall v mb body
-                | v == name ->
-                    let mb' = fmap goSub mb
-                    in TForall v mb' body
-                | Set.member v freeInReplacement ->
-                    let used =
-                            Set.unions
-                                [ freeInReplacement
-                                , freeVarsType body
-                                , maybe Set.empty freeVarsType mb
-                                , Set.singleton v
-                                ]
-                        v' = freshNameLike v used
-                        body' = renameVar v v' body
-                    in TForall v' (fmap goSub mb) (goSub body')
-                | otherwise -> TForall v (fmap goSub mb) (goSub body)
+        goSub = para alg
+          where
+            alg ty = case ty of
+                TVarF v
+                    | v == name -> replacement
+                    | otherwise -> TVar v
+                TArrowF d c -> TArrow (snd d) (snd c)
+                TBaseF b -> TBase b
+                TBottomF -> TBottom
+                TForallF v mb body
+                    | v == name ->
+                        let mb' = fmap snd mb
+                        in TForall v mb' (fst body)
+                    | Set.member v freeInReplacement ->
+                        let used =
+                                Set.unions
+                                    [ freeInReplacement
+                                    , freeVarsType (fst body)
+                                    , maybe Set.empty (freeVarsType . fst) mb
+                                    , Set.singleton v
+                                    ]
+                            v' = freshNameLike v used
+                            body' = renameVar v v' (fst body)
+                        in TForall v' (fmap snd mb) (goSub body')
+                    | otherwise ->
+                        TForall v (fmap snd mb) (snd body)
 
     renameVar :: String -> String -> ElabType -> ElabType
-    renameVar old new = goRename
+    renameVar old new = para alg
       where
-        goRename ty = case ty of
-            TVar v
+        alg ty = case ty of
+            TVarF v
                 | v == old -> TVar new
                 | otherwise -> TVar v
-            TArrow d c -> TArrow (goRename d) (goRename c)
-            TBase b -> TBase b
-            TBottom -> TBottom
-            TForall v mb body
-                | v == old -> TForall v mb body
-                | otherwise -> TForall v (fmap goRename mb) (goRename body)
+            TArrowF d c -> TArrow (snd d) (snd c)
+            TBaseF b -> TBase b
+            TBottomF -> TBottom
+            TForallF v mb body
+                | v == old -> TForall v (fmap fst mb) (fst body)
+                | otherwise -> TForall v (fmap snd mb) (snd body)
 
     freshNameLike :: String -> Set.Set String -> String
     freshNameLike base used =
-        let go n =
+        let goFresh n =
                 let candidate = base ++ show n
                 in if Set.member candidate used
-                    then go (n + 1)
+                    then goFresh (n + 1)
                     else candidate
         in if Set.member base used
-            then go (0 :: Int)
+            then goFresh (0 :: Int)
             else base
 
 -- | Pretty-printing with display-only bound inlining.
@@ -421,42 +455,10 @@ instance PrettyDisplay ElabScheme where
         prettyBind (v, Just bound) = "(" ++ v ++ " ⩾ " ++ prettyDisplay bound ++ ")"
 
 instance PrettyDisplay Instantiation where
-    prettyDisplay inst = case inst of
-        InstId -> "1"
-        InstApp ty -> "⟨" ++ prettyDisplay ty ++ "⟩"
-        InstBot ty -> prettyDisplay ty
-        InstIntro -> "O"
-        InstElim -> "N"
-        InstAbstr v -> "!" ++ v
-        InstUnder v i -> "∀(" ++ v ++ " ⩾) " ++ prettyDisplay i
-        InstInside i -> "∀(⩾ " ++ prettyDisplay i ++ ")"
-        InstSeq i1 i2 -> prettyDisplay i1 ++ "; " ++ prettyDisplay i2
+    prettyDisplay = prettyInstWith prettyDisplay
 
 instance PrettyDisplay ElabTerm where
-    prettyDisplay term = case term of
-        EVar v -> v
-        ELit l -> case l of
-            LInt i -> show i
-            LBool b -> if b then "true" else "false"
-            LString s -> show s
-        ELam v ty body -> "λ" ++ v ++ ":" ++ prettyDisplay ty ++ ". " ++ prettyDisplay body
-        EApp f a -> par (prettyDisplay f) ++ " " ++ parArg a
-          where
-            parArg x@EApp{} = par (prettyDisplay x)
-            parArg x@ELam{} = par (prettyDisplay x)
-            parArg x = prettyDisplay x
-        ELet v sch rhs body ->
-            "let " ++ v ++ " : " ++ prettyDisplay sch
-                ++ " = " ++ prettyDisplay rhs
-                ++ " in " ++ prettyDisplay body
-        ETyAbs v Nothing body -> "Λ" ++ v ++ ". " ++ prettyDisplay body
-        ETyAbs v (Just bound) body ->
-            "Λ(" ++ v ++ " ⩾ " ++ prettyDisplay bound ++ "). " ++ prettyDisplay body
-        ETyInst e inst -> prettyDisplay e ++ " " ++ prettyInst inst
-      where
-        par s = "(" ++ s ++ ")"
-        prettyInst InstId = "1"
-        prettyInst i = "[" ++ prettyDisplay i ++ "]"
+    prettyDisplay = prettyTermWith prettyDisplay prettyDisplay prettyDisplay
 
 schemeToTypeLocal :: ElabScheme -> ElabType
 schemeToTypeLocal (Forall binds body) = apo coalg (binds, body)

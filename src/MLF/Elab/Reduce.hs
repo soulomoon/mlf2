@@ -8,7 +8,7 @@ import qualified Data.Set as Set
 
 import MLF.Elab.Inst (applyInstantiation, schemeToType, splitForalls)
 import MLF.Elab.Types
-import Data.Functor.Foldable (cata)
+import MLF.Util.RecursionSchemes (cataMaybe, foldElabTerm, foldElabType, foldInstantiation)
 
 isValue :: ElabTerm -> Bool
 isValue term = case term of
@@ -40,40 +40,50 @@ normalize term = case step term of
     Just term' -> normalize term'
 
 reduceInst :: ElabTerm -> Instantiation -> Maybe ElabTerm
-reduceInst v inst = case inst of
-    InstId -> Just v
-    InstSeq i1 i2 -> Just (ETyInst (ETyInst v i1) i2)
-    InstApp ty ->
-        Just (ETyInst v (InstSeq (InstInside (InstBot ty)) InstElim))
-    InstIntro ->
-        let fresh = freshTypeName (freeTypeVarsTerm v)
-        in Just (ETyAbs fresh Nothing v)
-    InstElim -> case v of
-        ETyAbs name mbBound body ->
-            let bound = boundType mbBound
-                body' = replaceAbstrInTerm name InstId body
-            in Just (substTypeVarTerm name bound body')
-        _ -> Nothing
-    InstUnder vParam phi -> case v of
-        ETyAbs name mbBound body ->
-            let phi' = renameInstBound vParam name phi
-            in Just (ETyAbs name mbBound (ETyInst body phi'))
-        _ -> Nothing
-    InstInside phi -> case v of
-        ETyAbs name mbBound body -> do
-            let bound0 = boundType mbBound
-            bound1 <- either (const Nothing) Just (applyInstantiation bound0 phi)
-            let mb' = if bound1 == TBottom then Nothing else Just bound1
-                body' = replaceAbstrInTerm name (InstSeq phi (InstAbstr name)) body
-            Just (ETyAbs name mb' body')
-        _ -> Nothing
-    _ -> Nothing
+reduceInst v inst = do
+    (_inst, applyTo) <- cataMaybe alg inst
+    applyTo v
+  where
+    alg node = case node of
+        InstIdF -> Just (InstId, Just)
+        InstSeqF (i1, _) (i2, _) ->
+            Just (InstSeq i1 i2, \term -> Just (ETyInst (ETyInst term i1) i2))
+        InstAppF ty ->
+            Just (InstApp ty, \term -> Just (ETyInst term (InstSeq (InstInside (InstBot ty)) InstElim)))
+        InstIntroF ->
+            Just (InstIntro, \term ->
+                let fresh = freshTypeName (freeTypeVarsTerm term)
+                in Just (ETyAbs fresh Nothing term))
+        InstElimF ->
+            Just (InstElim, \term -> case term of
+                ETyAbs name mbBound body ->
+                    let bound = boundType mbBound
+                        body' = replaceAbstrInTerm name InstId body
+                    in Just (substTypeVarTerm name bound body')
+                _ -> Nothing)
+        InstUnderF vParam (phi, _) ->
+            Just (InstUnder vParam phi, \term -> case term of
+                ETyAbs name mbBound body ->
+                    let phi' = renameInstBound vParam name phi
+                    in Just (ETyAbs name mbBound (ETyInst body phi'))
+                _ -> Nothing)
+        InstInsideF (phi, _) ->
+            Just (InstInside phi, \term -> case term of
+                ETyAbs name mbBound body -> do
+                    let bound0 = boundType mbBound
+                    bound1 <- either (const Nothing) Just (applyInstantiation bound0 phi)
+                    let mb' = if bound1 == TBottom then Nothing else Just bound1
+                        body' = replaceAbstrInTerm name (InstSeq phi (InstAbstr name)) body
+                    Just (ETyAbs name mb' body')
+                _ -> Nothing)
+        InstBotF ty -> Just (InstBot ty, const Nothing)
+        InstAbstrF vParam -> Just (InstAbstr vParam, const Nothing)
 
 boundType :: Maybe ElabType -> ElabType
 boundType = maybe TBottom id
 
 freeTermVars :: ElabTerm -> Set.Set String
-freeTermVars = cata alg
+freeTermVars = foldElabTerm alg
   where
     alg term = case term of
         EVarF v -> Set.singleton v
@@ -86,7 +96,7 @@ freeTermVars = cata alg
         ETyInstF e _ -> e
 
 freeTypeVarsType :: ElabType -> Set.Set String
-freeTypeVarsType = cata alg
+freeTypeVarsType = foldElabType alg
   where
     alg ty = case ty of
         TVarF v -> Set.singleton v
@@ -102,7 +112,7 @@ freeTypeVarsScheme :: ElabScheme -> Set.Set String
 freeTypeVarsScheme sch = freeTypeVarsType (schemeToType sch)
 
 freeTypeVarsInst :: Instantiation -> Set.Set String
-freeTypeVarsInst = cata alg
+freeTypeVarsInst = foldInstantiation alg
   where
     alg inst = case inst of
         InstIdF -> Set.empty
@@ -116,7 +126,7 @@ freeTypeVarsInst = cata alg
         InstUnderF v i -> Set.delete v i
 
 freeTypeVarsTerm :: ElabTerm -> Set.Set String
-freeTypeVarsTerm = cata alg
+freeTypeVarsTerm = foldElabTerm alg
   where
     alg term = case term of
         EVarF _ -> Set.empty

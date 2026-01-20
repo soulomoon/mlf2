@@ -8,7 +8,7 @@ module MLF.Elab.Generalize (
     generalizeAtKeepTargetAllowRigidWithBindParents
 ) where
 
-import Data.Functor.Foldable (cata)
+import Data.Functor.Foldable (cata, para)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Map.Strict as Map
@@ -2365,15 +2365,17 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                         ]
                 Nothing -> IntMap.empty
         substForBoundBase _binderKey = filterAliasKeys substBaseByKey
-        freeTypeVarsType ty = case ty of
-            TVar v -> Set.singleton v
-            TArrow a b -> Set.union (freeTypeVarsType a) (freeTypeVarsType b)
-            TBase _ -> Set.empty
-            TBottom -> Set.empty
-            TForall v mb body ->
-                let boundFv = maybe Set.empty freeTypeVarsType mb
-                    bodyFv = Set.delete v (freeTypeVarsType body)
-                in Set.union boundFv bodyFv
+        freeTypeVarsType = cata alg
+          where
+            alg ty = case ty of
+                TVarF v -> Set.singleton v
+                TArrowF a b -> Set.union a b
+                TBaseF _ -> Set.empty
+                TBottomF -> Set.empty
+                TForallF v mb body ->
+                    let boundFv = maybe Set.empty id mb
+                        bodyFv = Set.delete v body
+                    in Set.union boundFv bodyFv
     let unboundedBinderNames =
             [ name
             | (name, nidInt) <- zip names ordered0
@@ -2805,21 +2807,19 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                     , IntSet.member nidInt namedUnderGaSet
                     ])
                 (Set.fromList [ name | (name, Just _) <- bindings ])
-        renameVars ty = case ty of
-            TVar v ->
-                case lookup v substNames of
-                    Just v' -> TVar v'
-                    Nothing -> TVar v
-            TArrow a b -> TArrow (renameVars a) (renameVars b)
-            TBase _ -> ty
-            TBottom -> ty
-            TForall v mb body ->
-                let mb' = fmap renameVars mb
-                    body' = renameVars body
-                    v' = case lookup v substNames of
-                        Just vNew -> vNew
-                        Nothing -> v
-                in TForall v' mb' body'
+        renameVars = cata alg
+          where
+            renameFromSubst v = case lookup v substNames of
+                Just v' -> v'
+                Nothing -> v
+            alg ty = case ty of
+                TVarF v -> TVar (renameFromSubst v)
+                TArrowF a b -> TArrow a b
+                TBaseF b -> TBase b
+                TBottomF -> TBottom
+                TForallF v mb body ->
+                    let v' = renameFromSubst v
+                    in TForall v' mb body
         ty0 = renameVars ty0RawAdjusted
         inlineBaseBounds = False
         (bindingsNorm0, tyNorm0) =
@@ -2848,19 +2848,17 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
                                 boundIsBody = bnd == tyNorm
                             in not boundMentionsSelf && (boundIsSimple || boundIsBody)
             in filter (not . dropRedundant) bindingsFinal
-        renameTypeVars ty = case ty of
-            TVar v ->
-                case Map.lookup v renameMap of
-                    Just v' -> TVar v'
-                    Nothing -> TVar v
-            TArrow a b -> TArrow (renameTypeVars a) (renameTypeVars b)
-            TBase _ -> ty
-            TBottom -> ty
-            TForall v mb body ->
-                let v' = Map.findWithDefault v v renameMap
-                    mb' = fmap renameTypeVars mb
-                    body' = renameTypeVars body
-                in TForall v' mb' body'
+        renameTypeVars = cata alg
+          where
+            renameFromMap v = Map.findWithDefault v v renameMap
+            alg ty = case ty of
+                TVarF v -> TVar (renameFromMap v)
+                TArrowF a b -> TArrow a b
+                TBaseF b -> TBase b
+                TBottomF -> TBottom
+                TForallF v mb body ->
+                    let v' = renameFromMap v
+                    in TForall v' mb body
         renameMap =
             Map.fromList
                 [ (old, alphaName idx 0)
@@ -3105,32 +3103,35 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
     freeNamesOf = freeNamesFrom Set.empty
 
     freeNamesFrom :: Set.Set String -> ElabType -> Set.Set String
-    freeNamesFrom bound ty = case ty of
-        TVar v ->
-            if Set.member v bound then Set.empty else Set.singleton v
-        TArrow d c ->
-            Set.union (freeNamesFrom bound d) (freeNamesFrom bound c)
-        TBase _ -> Set.empty
-        TBottom -> Set.empty
-        TForall v mb t' ->
-            let bound' = Set.insert v bound
-                freeBound = maybe Set.empty (freeNamesFrom bound') mb
-                freeBody = freeNamesFrom bound' t'
-            in Set.union freeBound freeBody
+    freeNamesFrom bound0 ty = (cata alg ty) bound0
+      where
+        alg node = case node of
+            TVarF v ->
+                \boundSet ->
+                    if Set.member v boundSet then Set.empty else Set.singleton v
+            TArrowF d c -> \boundSet -> Set.union (d boundSet) (c boundSet)
+            TBaseF _ -> const Set.empty
+            TBottomF -> const Set.empty
+            TForallF v mb t' ->
+                \boundSet ->
+                    let bound' = Set.insert v boundSet
+                        freeBound = maybe Set.empty ($ bound') mb
+                        freeBody = t' bound'
+                    in Set.union freeBound freeBody
 
     substType :: String -> ElabType -> ElabType -> ElabType
-    substType name replacement = go
+    substType name replacement = para alg
       where
-        go ty = case ty of
-            TVar v
+        alg ty = case ty of
+            TVarF v
                 | v == name -> replacement
                 | otherwise -> TVar v
-            TArrow d c -> TArrow (go d) (go c)
-            TBase b -> TBase b
-            TBottom -> TBottom
-            TForall v mb t'
-                | v == name -> TForall v mb t'
-                | otherwise -> TForall v (fmap go mb) (go t')
+            TArrowF d c -> TArrow (snd d) (snd c)
+            TBaseF b -> TBase b
+            TBottomF -> TBottom
+            TForallF v mb t'
+                | v == name -> TForall v (fmap fst mb) (fst t')
+                | otherwise -> TForall v (fmap snd mb) (snd t')
 
     simplifySchemeBindings
         :: Bool
