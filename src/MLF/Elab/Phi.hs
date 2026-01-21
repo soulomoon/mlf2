@@ -20,6 +20,7 @@ import qualified MLF.Util.Order as Order
 import qualified MLF.Util.OrderKey as OrderKey
 import MLF.Constraint.Types
 import MLF.Elab.Types
+import MLF.Elab.TypeOps (inlineBaseBoundsType, matchType)
 import MLF.Elab.Inst (applyInstantiation, composeInst, instMany, schemeToType, splitForalls)
 import MLF.Elab.Generalize (GaBindParents(..), generalizeAtAllowRigid, generalizeAtAllowRigidWithBindParents)
 import MLF.Elab.Reify (namedNodes, reifyBoundWithNames, reifyType)
@@ -611,94 +612,21 @@ phiFromEdgeWitnessWithTrace res mbGaParents mSchemeInfo mTrace ew = do
         pure (inlineBaseBounds ty)
 
     inlineBaseBounds :: ElabType -> ElabType
-    inlineBaseBounds = cata alg
-      where
-        alg ty = case ty of
-            TVarF v ->
-                case parseName v of
-                    Just nid ->
-                        case resolveBaseBound (canonicalNode (NodeId nid)) of
-                            Just baseN ->
-                                case IntMap.lookup (getNodeId baseN) (cNodes (srConstraint res)) of
-                                    Just TyBase{ tnBase = b } -> TBase b
-                                    Just TyBottom{} -> TBottom
-                                    _ -> TVar v
-                            Nothing -> TVar v
-                    Nothing -> TVar v
-            TArrowF a b -> TArrow a b
-            TForallF v mb body -> TForall v mb body
-            TBaseF b -> TBase b
-            TBottomF -> TBottom
-
-    resolveBaseBound :: NodeId -> Maybe NodeId
-    resolveBaseBound start =
-        let canonical = Solve.frWith (srUnionFind res)
-            nodes = cNodes (srConstraint res)
-            goResolve visited nid0 =
-                let nid = canonical nid0
-                    key = getNodeId nid
-                in if IntSet.member key visited
-                    then Nothing
-                    else
-                        case IntMap.lookup key nodes of
-                            Just TyBase{} -> Just nid
-                            Just TyBottom{} -> Just nid
-                            Just TyVar{} ->
-                                case VarStore.lookupVarBound (srConstraint res) nid of
-                                    Just bnd -> goResolve (IntSet.insert key visited) bnd
-                                    Nothing -> Nothing
-                            _ -> Nothing
-        in goResolve IntSet.empty start
-
-    parseName :: String -> Maybe Int
-    parseName ('t':rest) = readMaybe rest
-    parseName _ = Nothing
+    inlineBaseBounds =
+        inlineBaseBoundsType
+            (srConstraint res)
+            canonicalNode
 
     inferInstAppArgs :: ElabScheme -> ElabType -> Maybe [ElabType]
     inferInstAppArgs scheme targetTy =
         let (binds, body) = splitForalls (schemeToType scheme)
             binderNames = map fst binds
-        in case matchType binderNames body targetTy of
+        in case matchType (Set.fromList binderNames) body targetTy of
             Left _ -> Nothing
             Right subst ->
                 if all (`Map.member` subst) binderNames
                     then Just [ty | name <- binderNames, Just ty <- [Map.lookup name subst]]
                     else Nothing
-
-    matchType
-        :: [String]
-        -> ElabType
-        -> ElabType
-        -> Either ElabError (Map.Map String ElabType)
-    matchType binderNames = goMatch Map.empty Map.empty
-      where
-        binderSet = Set.fromList binderNames
-        goMatch env subst tyP tyT = case (tyP, tyT) of
-            (TVar v, _) | Set.member v binderSet ->
-                case Map.lookup v subst of
-                    Nothing -> Right (Map.insert v tyT subst)
-                    Just ty0 ->
-                        if alphaEqType ty0 tyT
-                            then Right subst
-                            else Left (InstantiationError "matchType: binder mismatch")
-            (TVar v, TVar v')
-                | Just v'' <- Map.lookup v env ->
-                    if v' == v'' then Right subst else Left (InstantiationError "matchType: bound var mismatch")
-            (TVar v, TVar v')
-                | v == v' -> Right subst
-            (TArrow a b, TArrow a' b') -> do
-                subst1 <- goMatch env subst a a'
-                goMatch env subst1 b b'
-            (TBase b0, TBase b1)
-                | b0 == b1 -> Right subst
-            (TBottom, TBottom) -> Right subst
-            (TForall v mb b, TForall v' mb' b') -> do
-                subst1 <- case (mb, mb') of
-                    (Nothing, Nothing) -> Right subst
-                    (Just x, Just y) -> goMatch env subst x y
-                    _ -> Left (InstantiationError "matchType: forall bound mismatch")
-                goMatch (Map.insert v v' env) subst1 b b'
-            _ -> Left (InstantiationError "matchType: structure mismatch")
 
     applyInferredArgs :: ElabType -> ElabType
     applyInferredArgs ty0 = (cata alg ty0) Set.empty
@@ -719,29 +647,6 @@ phiFromEdgeWitnessWithTrace res mbGaParents mSchemeInfo mTrace ew = do
                     let bound' = Set.insert v bound
                         mb' = fmap ($ bound) mb
                     in TForall v mb' (body bound')
-
-    alphaEqType :: ElabType -> ElabType -> Bool
-    alphaEqType = goEq Map.empty Map.empty
-      where
-        goEq envL envR t1 t2 = case (t1, t2) of
-            (TVar a, TVar b) ->
-                case (Map.lookup a envL, Map.lookup b envR) of
-                    (Just a', Just b') -> a' == b'
-                    (Nothing, Nothing) -> a == b
-                    _ -> False
-            (TArrow a b, TArrow a' b') -> goEq envL envR a a' && goEq envL envR b b'
-            (TBase b0, TBase b1) -> b0 == b1
-            (TBottom, TBottom) -> True
-            (TForall v mb b, TForall v' mb' b') ->
-                let envL' = Map.insert v v' envL
-                    envR' = Map.insert v' v envR
-                in maybeEq envL envR mb mb' && goEq envL' envR' b b'
-            _ -> False
-
-        maybeEq envL envR a b = case (a, b) of
-            (Nothing, Nothing) -> True
-            (Just x, Just y) -> goEq envL envR x y
-            _ -> False
 
     phiWithScheme :: IntSet.IntSet -> IntSet.IntSet -> SchemeInfo -> [InstanceStep] -> Either ElabError Instantiation
     phiWithScheme namedSet keepBinderKeys si steps = do

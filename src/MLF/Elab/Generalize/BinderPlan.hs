@@ -213,13 +213,22 @@ buildBinderPlan BinderPlanInput{..} = do
                         _ -> True
                     ]
         bindersCandidates = binders0Adjusted ++ extraReachable ++ namedUnderGa
-        canonicalizeBinder v =
+        canonicalBinder v =
             let vC = canonical v
+            in case IntMap.lookup (getNodeId vC) nodes of
+                Just TyVar{} -> vC
+                _ ->
+                    case IntMap.lookup (getNodeId v) nodes of
+                        Just TyVar{} -> v
+                        _ -> vC
+        canonicalizeBinder v =
+            let vC = canonicalBinder v
                 vKey = getNodeId vC
             in case IntMap.lookup vKey gammaAlias of
                 Just repKey
                     | IntSet.member vKey baseGammaRepSet -> vC
-                    | otherwise -> canonical (NodeId repKey)
+                    | otherwise ->
+                        canonicalBinder (NodeId repKey)
                 Nothing -> vC
         normalizedBinders =
             [ canonicalizeBinder v
@@ -415,7 +424,7 @@ buildBinderPlan BinderPlanInput{..} = do
     let binderCandidateKeys =
             IntSet.fromList [ canonKey v | v <- bindersCandidatesCanonical ]
     let binders =
-            [ canonical v
+            [ canonicalBinder v
             | v <- bindersCandidatesCanonical
             , let vKey = canonKey v
             , let gammaKey =

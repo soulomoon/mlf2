@@ -8,25 +8,15 @@ module MLF.Elab.Generalize.Normalize (
     containsArrow
 ) where
 
-import Data.Functor.Foldable (cata, para)
+import Data.Functor.Foldable (cata)
 import qualified Data.Set as Set
 
 import MLF.Elab.FreeNames (freeNamesFrom)
 import MLF.Elab.Types
+import MLF.Elab.TypeOps (substTypeSimple)
 
 substType :: String -> ElabType -> ElabType -> ElabType
-substType name replacement = para alg
-  where
-    alg ty = case ty of
-        TVarF v
-            | v == name -> replacement
-            | otherwise -> TVar v
-        TArrowF d c -> TArrow (snd d) (snd c)
-        TBaseF b -> TBase b
-        TBottomF -> TBottom
-        TForallF v mb t'
-            | v == name -> TForall v (fmap fst mb) (fst t')
-            | otherwise -> TForall v (fmap snd mb) (snd t')
+substType = substTypeSimple
 
 simplifySchemeBindings
     :: Bool

@@ -7,10 +7,11 @@ module MLF.Elab.Inst (
     splitForalls
 ) where
 
-import Data.Functor.Foldable (cata, para)
-import Data.List (nub)
+import Data.Functor.Foldable (para)
 
 import MLF.Elab.Types
+import MLF.Elab.TypeOps (freeTypeVarsType, freshTypeNameFromCounter, substTypeCapture)
+import MLF.Elab.TypeOps (splitForalls)
 
 -- | Turn a scheme into its corresponding type (nested `∀`).
 schemeToType :: ElabScheme -> ElabType
@@ -24,19 +25,6 @@ composeInst i1 i2 = InstSeq i1 i2
 
 instMany :: [Instantiation] -> Instantiation
 instMany = foldr composeInst InstId
-
-splitForalls :: ElabType -> ([(String, Maybe ElabType)], ElabType)
-splitForalls = para alg
-  where
-    alg ty = case ty of
-        TForallF v mb bodyPair ->
-            let mbOrig = fmap fst mb
-                (binds, body) = snd bodyPair
-            in ((v, mbOrig) : binds, body)
-        TVarF v -> ([], TVar v)
-        TArrowF (d, _) (c, _) -> ([], TArrow d c)
-        TBaseF b -> ([], TBase b)
-        TBottomF -> ([], TBottom)
 
 -- | Apply an xMLF instantiation to an xMLF type (xmlf Fig. 3).
 --
@@ -68,15 +56,15 @@ applyInstantiation ty inst = snd <$> go 0 ty inst
 
         -- Quantifier intro: τ O = ∀(α ⩾ ⊥). τ   (α fresh)
         InstIntro -> do
-            let used = ftvType t
-                (fresh, k') = freshName k used
+            let used = freeTypeVarsType t
+                (fresh, k') = freshTypeNameFromCounter k used
             Right (k', TForall fresh Nothing t)
 
         -- Quantifier elim: (∀(α ⩾ τ) τ') N = τ'{α ← τ}
         InstElim -> case t of
             TForall v mbBound body -> do
                 let bTy = maybe TBottom id mbBound
-                Right (k, substType v bTy body)
+                Right (k, substTypeCapture v bTy body)
             _ -> Left (InstantiationError ("InstElim expects ∀, got: " ++ pretty t))
 
         -- Inside: (∀(α ⩾ τ) τ') (∀(⩾ φ)) = ∀(α ⩾ (τ φ)) τ'
@@ -97,61 +85,6 @@ applyInstantiation ty inst = snd <$> go 0 ty inst
             _ -> Left (InstantiationError ("InstUnder expects ∀, got: " ++ pretty t))
 
     -- free type variables (for freshness)
-    ftvType :: ElabType -> [String]
-    ftvType = nub . cata alg
-      where
-        alg ty0 = case ty0 of
-            TVarF v -> [v]
-            TArrowF a b -> a ++ b
-            TBaseF _ -> []
-            TBottomF -> []
-            TForallF v mb body ->
-                let fvBound = maybe [] id mb
-                    fvBody = filter (/= v) body
-                in fvBody ++ fvBound
-
-    freshName :: Int -> [String] -> (String, Int)
-    freshName n used =
-        let candidate = "u" ++ show n
-        in if candidate `elem` used then freshName (n + 1) used else (candidate, n + 1)
-
-    -- Capture-avoiding substitution [x ↦ s]t (only for types).
-    substType :: String -> ElabType -> ElabType -> ElabType
-    substType x s = goSub
-      where
-        freeS = ftvType s
-
-        goSub = para alg
-          where
-            alg node = case node of
-                TVarF v
-                    | v == x -> s
-                    | otherwise -> TVar v
-                TArrowF d c -> TArrow (snd d) (snd c)
-                TBaseF b -> TBase b
-                TBottomF -> TBottom
-                TForallF v mb body
-                    | v == x ->
-                        let mb' = fmap snd mb
-                        in TForall v mb' (fst body)
-                    | v `elem` freeS ->
-                        let used =
-                                freeS
-                                    ++ ftvType (fst body)
-                                    ++ maybe [] (ftvType . fst) mb
-                            v' = pickFresh v used
-                            body' = substType v (TVar v') (fst body)
-                        in TForall v' (fmap snd mb) (goSub body')
-                    | otherwise ->
-                        TForall v (fmap snd mb) (snd body)
-
-    pickFresh :: String -> [String] -> String
-    pickFresh base used =
-        let cands = base : [base ++ show i | i <- [(1::Int)..]]
-        in case filter (`notElem` used) cands of
-            (x:_) -> x
-            [] -> base  -- unreachable (cands is infinite)
-
     -- Rename bound variable occurrences inside an instantiation body.
     -- This is α-renaming of the instantiation’s binder: occurrences of `old`
     -- are renamed to `new`, except under a nested `∀(old ⩾)` which re-binds it.

@@ -114,6 +114,7 @@ library mlf2-internal
                       MLF.Elab.Reduce,
                       MLF.Elab.Run,
                       MLF.Elab.Sigma,
+                      MLF.Elab.TypeOps,
                       MLF.Elab.TypeCheck,
                       MLF.Elab.Util,
                       MLF.Frontend.ConstraintGen.Types,

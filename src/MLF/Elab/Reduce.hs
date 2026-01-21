@@ -8,8 +8,9 @@ import qualified Data.Set as Set
 import Data.Functor.Foldable (para)
 
 import MLF.Elab.Inst (applyInstantiation, schemeToType, splitForalls)
+import MLF.Elab.TypeOps (freeTypeVarsType, freshTypeName, substTypeCapture)
 import MLF.Elab.Types
-import MLF.Util.RecursionSchemes (cataMaybe, foldElabTerm, foldElabType, foldInstantiation)
+import MLF.Util.RecursionSchemes (cataMaybe, foldElabTerm, foldInstantiation)
 
 isValue :: ElabTerm -> Bool
 isValue term = case term of
@@ -96,19 +97,6 @@ freeTermVars = foldElabTerm alg
         ETyAbsF _ _ body -> body
         ETyInstF e _ -> e
 
-freeTypeVarsType :: ElabType -> Set.Set String
-freeTypeVarsType = foldElabType alg
-  where
-    alg ty = case ty of
-        TVarF v -> Set.singleton v
-        TArrowF a b -> Set.union a b
-        TBaseF _ -> Set.empty
-        TBottomF -> Set.empty
-        TForallF v mb body ->
-            let boundFv = maybe Set.empty id mb
-                bodyFv = Set.delete v body
-            in Set.union boundFv bodyFv
-
 freeTypeVarsScheme :: ElabScheme -> Set.Set String
 freeTypeVarsScheme sch = freeTypeVarsType (schemeToType sch)
 
@@ -149,13 +137,6 @@ freshTermNameFrom base used =
     in case filter (`Set.notMember` used) candidates of
         (x:_) -> x
         [] -> base
-
-freshTypeName :: Set.Set String -> String
-freshTypeName used =
-    let candidates = ["u" ++ show i | i <- [(0::Int)..]]
-    in case filter (`Set.notMember` used) candidates of
-        (x:_) -> x
-        [] -> "u0"
 
 substTermVar :: String -> ElabTerm -> ElabTerm -> ElabTerm
 substTermVar x s = goSub
@@ -235,34 +216,7 @@ substTypeVarInst x s = para alg
             | otherwise -> InstUnder v (snd i)
 
 substTypeVar :: String -> ElabType -> ElabType -> ElabType
-substTypeVar x s = goSub
-  where
-    freeS = freeTypeVarsType s
-    goSub = para alg
-      where
-        alg ty = case ty of
-            TVarF v
-                | v == x -> s
-                | otherwise -> TVar v
-            TArrowF d c -> TArrow (snd d) (snd c)
-            TBaseF b -> TBase b
-            TBottomF -> TBottom
-            TForallF v mb body
-                | v == x ->
-                    let mb' = fmap snd mb
-                    in TForall v mb' (fst body)
-                | v `Set.member` freeS ->
-                    let used =
-                            Set.unions
-                                [ freeS
-                                , freeTypeVarsType (fst body)
-                                , maybe Set.empty (freeTypeVarsType . fst) mb
-                                ]
-                        v' = freshTermNameFrom v used
-                        body' = substTypeVar v (TVar v') (fst body)
-                    in TForall v' (fmap snd mb) (goSub body')
-                | otherwise ->
-                    TForall v (fmap snd mb) (snd body)
+substTypeVar = substTypeCapture
 
 replaceAbstrInTerm :: String -> Instantiation -> ElabTerm -> ElabTerm
 replaceAbstrInTerm target replacement = para alg

@@ -9,7 +9,6 @@ module MLF.Elab.Generalize.ReifyPlan (
     freeTypeVarsType
 ) where
 
-import Data.Functor.Foldable (cata)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.List (sort)
@@ -22,6 +21,7 @@ import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Binding.Tree as Binding
 import MLF.Elab.Generalize.BinderPlan (GaBindParentsInfo(..))
 import MLF.Elab.Generalize.Names (alphaName)
+import MLF.Elab.TypeOps (freeTypeVarsType)
 import MLF.Elab.Reify
     ( reifyBoundWithNames
     , reifyBoundWithNamesOnConstraint
@@ -216,7 +216,15 @@ bindingFor env plan (name, nidInt) = do
             , rpSubstForBound = substForBound
             , rpSubstForBoundBase = substForBoundBase
             } = plan
-        bNodeC = canonical (NodeId nidInt)
+        canonicalBinder v =
+            let vC = canonical v
+            in case IntMap.lookup (getNodeId vC) nodes of
+                Just TyVar{} -> vC
+                _ ->
+                    case IntMap.lookup (getNodeId v) nodes of
+                        Just TyVar{} -> v
+                        _ -> vC
+        bNodeC = canonicalBinder (NodeId nidInt)
         binderIsNamed = IntSet.member (getNodeId bNodeC) namedUnderGaSet
         binderKey = getNodeId bNodeC
         substForBound' = substForBound binderKey
@@ -463,16 +471,3 @@ bindingFor env plan (name, nidInt) = do
                     then Nothing
                     else Just boundTy
     pure (name, mbBound)
-
-freeTypeVarsType :: ElabType -> Set.Set String
-freeTypeVarsType = cata alg
-  where
-    alg ty = case ty of
-        TVarF v -> Set.singleton v
-        TArrowF a b -> Set.union a b
-        TBaseF _ -> Set.empty
-        TBottomF -> Set.empty
-        TForallF v mb body ->
-            let boundFv = maybe Set.empty id mb
-                bodyFv = Set.delete v body
-            in Set.union boundFv bodyFv

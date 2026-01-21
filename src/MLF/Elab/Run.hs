@@ -33,11 +33,19 @@ import MLF.Elab.Generalize
     , generalizeAtAllowRigidWithBindParents
     , generalizeAtKeepTargetAllowRigidWithBindParents
     )
+import MLF.Elab.Generalize.Names (parseNameId)
 import MLF.Elab.Inst (applyInstantiation, schemeToType)
 import MLF.Elab.Reify (reifyType, reifyTypeWithNamesNoFallbackOnConstraint)
 import MLF.Elab.Phi (phiFromEdgeWitnessWithTrace)
 import MLF.Elab.TypeCheck (typeCheck)
 import MLF.Elab.Types
+import MLF.Elab.TypeOps
+    ( inlineBaseBoundsType
+    , matchType
+    , resolveBaseBoundForInstConstraint
+    , substTypeSimple
+    , stripForallsType
+    )
 import MLF.Elab.Util (reachableFromStop)
 
 -- | Run the full pipeline (Phases 1–5) then elaborate.
@@ -335,22 +343,24 @@ runPipelineElabWith genConstraints expr = do
                                     TVar v
                                         | Set.member v boundNames -> TVar v
                                         | otherwise ->
-                                            case parseName v of
-                                                Just nid
-                                                    | IntSet.member (getNodeId (toBase nid)) seen -> TVar v
-                                                    | otherwise ->
-                                                        case VarStore.lookupVarBound baseConstraint (toBase nid) of
-                                                            Just bnd ->
-                                                                case reifyTypeWithNamesNoFallbackOnConstraint
-                                                                        baseConstraint
-                                                                        IntMap.empty
-                                                                        bnd of
-                                                                    Right ty' ->
-                                                                        go boundNames
-                                                                            (IntSet.insert (getNodeId (toBase nid)) seen)
-                                                                            ty'
-                                                                    Left _ -> TVar v
-                                                            Nothing -> TVar v
+                                            case parseNameId v of
+                                                Just nidInt ->
+                                                    let nid = NodeId nidInt
+                                                    in if IntSet.member (getNodeId (toBase nid)) seen
+                                                        then TVar v
+                                                        else
+                                                            case VarStore.lookupVarBound baseConstraint (toBase nid) of
+                                                                Just bnd ->
+                                                                    case reifyTypeWithNamesNoFallbackOnConstraint
+                                                                            baseConstraint
+                                                                            IntMap.empty
+                                                                            bnd of
+                                                                        Right ty' ->
+                                                                            go boundNames
+                                                                                (IntSet.insert (getNodeId (toBase nid)) seen)
+                                                                                ty'
+                                                                        Left _ -> TVar v
+                                                                Nothing -> TVar v
                                                 Nothing -> TVar v
                                     TArrow a b -> TArrow (go boundNames seen a) (go boundNames seen b)
                                     TForall v mb body ->
@@ -659,7 +669,7 @@ runPipelineElabWith genConstraints expr = do
                                         Nothing -> IntSet.empty
                                 rootArgBaseBounds =
                                     let argBounds arg = do
-                                            baseC <- resolveBaseBoundForInst constraint canonical arg
+                                            baseC <- resolveBaseBoundForInstConstraint constraint canonical arg
                                             case IntMap.lookup (getNodeId baseC) nodes of
                                                 Just TyBase{} -> Just baseC
                                                 Just TyBottom{} -> Just baseC
@@ -686,13 +696,13 @@ runPipelineElabWith genConstraints expr = do
                                                 else if not (IntSet.null fromArgEdge)
                                                     then fromArgEdge
                                                     else
-                                                        case resolveBaseBoundForInst constraint canonical (annNode arg) of
+                                                        case resolveBaseBoundForInstConstraint constraint canonical (annNode arg) of
                                                             Just baseC -> IntSet.singleton (getNodeId baseC)
                                                             Nothing -> IntSet.empty
                                         _ -> IntSet.empty
                                 instArgBaseBounds =
                                     let argBounds arg = do
-                                            baseC <- resolveBaseBoundForInst constraint canonical arg
+                                            baseC <- resolveBaseBoundForInstConstraint constraint canonical arg
                                             case IntMap.lookup (getNodeId baseC) nodes of
                                                 Just TyBase{} -> Just baseC
                                                 Just TyBottom{} -> Just baseC
@@ -735,7 +745,7 @@ runPipelineElabWith genConstraints expr = do
                                         edgeBaseBounds
                                 (rootBounds, instArgRootMultiBase) =
                                     let argBounds arg = do
-                                            baseC <- resolveBaseBoundForInst constraint canonical arg
+                                            baseC <- resolveBaseBoundForInstConstraint constraint canonical arg
                                             case IntMap.lookup (getNodeId baseC) nodes of
                                                 Just TyBase{} -> Just baseC
                                                 Just TyBottom{} -> Just baseC
@@ -772,7 +782,7 @@ runPipelineElabWith genConstraints expr = do
                             let baseTarget =
                                     case IntMap.lookup (getNodeId rootC) nodes of
                                         Just TyVar{} ->
-                                            case resolveBaseBoundForInst constraint canonical rootC of
+                                            case resolveBaseBoundForInstConstraint constraint canonical rootC of
                                                 Just baseC
                                                     | IntSet.size rootBoundCandidates == 1
                                                         && IntSet.member (getNodeId baseC) rootBoundCandidates
@@ -823,7 +833,7 @@ runPipelineElabWith genConstraints expr = do
                                         then
                                             let showBase tr =
                                                     let bases =
-                                                            [ resolveBaseBoundForInst constraint canonical argNode
+                                                            [ resolveBaseBoundForInstConstraint constraint canonical argNode
                                                             | (binder, arg) <- etBinderArgs tr
                                                             , let argNode =
                                                                     case IntMap.lookup (getNodeId binder) (etCopyMap tr) of
@@ -833,7 +843,7 @@ runPipelineElabWith genConstraints expr = do
                                                     in (etRoot tr, bases)
                                                 perEdge = map showBase (IntMap.elems edgeTraces)
                                                 edgeRightBases =
-                                                    [ (EdgeId eid, ewRight ew, resolveBaseBoundForInst constraint canonical (ewRight ew))
+                                                    [ (EdgeId eid, ewRight ew, resolveBaseBoundForInstConstraint constraint canonical (ewRight ew))
                                                     | (eid, ew) <- IntMap.toList edgeWitnesses
                                                     ]
                                                 edgeExpansionsList =
@@ -1201,45 +1211,6 @@ pruneBindParentsConstraint c =
                 (cBindParents c)
     in c { cBindParents = bindParents' }
 
-resolveBaseBoundForInst :: Constraint -> (NodeId -> NodeId) -> NodeId -> Maybe NodeId
-resolveBaseBoundForInst constraint canonical start =
-    let nodes = cNodes constraint
-        go visited nid0 =
-            let nid = canonical nid0
-                key = getNodeId nid
-            in if IntSet.member key visited
-                then Nothing
-                else
-                    case IntMap.lookup key nodes of
-                        Just TyBase{} -> Just nid
-                        Just TyBottom{} -> Just nid
-                        Just TyVar{} ->
-                            case VarStore.lookupVarBound constraint nid of
-                                Just bnd -> go (IntSet.insert key visited) bnd
-                                Nothing -> Nothing
-                        _ -> Nothing
-    in go IntSet.empty start
-
-inlineBaseBoundsType :: Constraint -> (NodeId -> NodeId) -> ElabType -> ElabType
-inlineBaseBoundsType constraint canonical = cata alg
-  where
-    alg ty = case ty of
-        TVarF v ->
-            case parseName v of
-                Just nid ->
-                    case resolveBaseBoundForInst constraint canonical nid of
-                        Just baseN ->
-                            case IntMap.lookup (getNodeId baseN) (cNodes constraint) of
-                                Just TyBase{ tnBase = b } -> TBase b
-                                Just TyBottom{} -> TBottom
-                                _ -> TVar v
-                        Nothing -> TVar v
-                Nothing -> TVar v
-        TArrowF a b -> TArrow a b
-        TForallF v mb body -> TForall v mb body
-        TBaseF b -> TBase b
-        TBottomF -> TBottom
-
 inlineBoundVarsType :: SolveResult -> ElabType -> ElabType
 inlineBoundVarsType res = go IntSet.empty
   where
@@ -1255,9 +1226,9 @@ inlineBoundVarsType res = go IntSet.empty
                 Nothing -> nid
     go seen ty = case ty of
         TVar v ->
-            case parseName v of
-                Just nid ->
-                    let nidC = canonical nid
+            case parseNameId v of
+                Just nidInt ->
+                    let nidC = canonical (NodeId nidInt)
                         key = getNodeId nidC
                     in if IntSet.member key seen
                         then ty
@@ -1340,7 +1311,7 @@ simplifyAnnotationType = go
                                                 in goMerge seen rest' body''
                                             else
                                                 let rest' = map (substBindType v (baseFromKey key)) rest
-                                                    body'' = substType v (baseFromKey key) body'
+                                                    body'' = substTypeSimple v (baseFromKey key) body'
                                                 in goMerge seen rest' body''
                                     else
                                         let rest' = map (substBind v rep) rest
@@ -1390,7 +1361,7 @@ simplifyAnnotationType = go
         in (name, mb')
 
     substBindType v replacement (name, mb) =
-        let mb' = fmap (substType v replacement) mb
+        let mb' = fmap (substTypeSimple v replacement) mb
         in (name, mb')
 
     substVar v v0 = para alg
@@ -1398,19 +1369,6 @@ simplifyAnnotationType = go
         alg ty = case ty of
             TVarF name
                 | name == v -> TVar v0
-                | otherwise -> TVar name
-            TArrowF d c -> TArrow (snd d) (snd c)
-            TBaseF b -> TBase b
-            TBottomF -> TBottom
-            TForallF name mb body
-                | name == v -> TForall name (fmap fst mb) (fst body)
-                | otherwise -> TForall name (fmap snd mb) (snd body)
-
-    substType v replacement = para alg
-      where
-        alg ty = case ty of
-            TVarF name
-                | name == v -> replacement
                 | otherwise -> TVar name
             TArrowF d c -> TArrow (snd d) (snd c)
             TBaseF b -> TBase b
@@ -1437,15 +1395,6 @@ simplifyAnnotationType = go
                         freeBound = maybe Set.empty ($ bound'') mb
                         freeBody = body bound''
                     in Set.union freeBound freeBody
-
-parseName :: String -> Maybe NodeId
-parseName name =
-    case name of
-        ('t':rest) ->
-            case reads rest of
-                [(n, "")] -> Just (NodeId n)
-                _ -> Nothing
-        _ -> Nothing
 
 inferInstAppArgsFromScheme :: [(String, Maybe ElabType)] -> ElabType -> ElabType -> Maybe [ElabType]
 inferInstAppArgsFromScheme binds body targetTy =
@@ -1568,74 +1517,6 @@ containsForallType = cata alg
     alg ty = case ty of
         TForallF _ _ _ -> True
         TArrowF a b -> a || b
-        _ -> False
-
-stripForallsType :: ElabType -> ElabType
-stripForallsType = para alg
-  where
-    alg ty = case ty of
-        TForallF _ _ body -> snd body
-        TVarF v -> TVar v
-        TArrowF (d, _) (c, _) -> TArrow d c
-        TBaseF b -> TBase b
-        TBottomF -> TBottom
-
-matchType
-    :: Set.Set String
-    -> ElabType
-    -> ElabType
-    -> Either ElabError (Map.Map String ElabType)
-matchType binderSet = goMatch Map.empty Map.empty
-  where
-    goMatch env subst tyP tyT = case (tyP, tyT) of
-        (TVar a, _) ->
-            if a `Set.member` binderSet
-                then case Map.lookup a subst of
-                    Just ty -> if alphaEqType ty tyT then Right subst else Left (InstantiationError "matchType: mismatch")
-                    Nothing -> Right (Map.insert a tyT subst)
-                else
-                    if alphaEqType tyP tyT
-                        then Right subst
-                        else Left (InstantiationError "matchType: mismatch")
-        (TArrow a b, TArrow a' b') -> do
-            subst1 <- goMatch env subst a a'
-            goMatch env subst1 b b'
-        (TBase b0, TBase b1)
-            | b0 == b1 -> Right subst
-            | otherwise -> Left (InstantiationError "matchType: base mismatch")
-        (TBottom, TBottom) -> Right subst
-        (TForall v mb body, TForall v' mb' body') -> do
-            subst1 <- maybeMatch env subst mb mb'
-            let env' = Map.insert v v' env
-            goMatch env' subst1 body body'
-        _ -> Left (InstantiationError "matchType: constructor mismatch")
-
-    maybeMatch env subst a b = case (a, b) of
-        (Nothing, Nothing) -> Right subst
-        (Just x, Just y) -> goMatch env subst x y
-        _ -> Left (InstantiationError "matchType: bound mismatch")
-
-alphaEqType :: ElabType -> ElabType -> Bool
-alphaEqType = goEq Map.empty Map.empty
-  where
-    goEq envL envR t1 t2 = case (t1, t2) of
-        (TVar a, TVar b) ->
-            case (Map.lookup a envL, Map.lookup b envR) of
-                (Just a', Just b') -> a' == b'
-                (Nothing, Nothing) -> a == b
-                _ -> False
-        (TArrow a b, TArrow a' b') -> goEq envL envR a a' && goEq envL envR b b'
-        (TBase b0, TBase b1) -> b0 == b1
-        (TBottom, TBottom) -> True
-        (TForall v mb b, TForall v' mb' b') ->
-            let envL' = Map.insert v v' envL
-                envR' = Map.insert v' v envR
-            in maybeEq envL envR mb mb' && goEq envL' envR' b b'
-        _ -> False
-
-    maybeEq envL envR a b = case (a, b) of
-        (Nothing, Nothing) -> True
-        (Just x, Just y) -> goEq envL envR x y
         _ -> False
 
 -- | Chase redirects through the map until stable or missing

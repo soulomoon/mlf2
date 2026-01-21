@@ -6,13 +6,19 @@ module MLF.Elab.TypeCheck (
     checkInstantiation
 ) where
 
-import Data.Functor.Foldable (cata, para)
+import Data.Functor.Foldable (para)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
 import MLF.Constraint.Types (BaseTy(..))
 import MLF.Elab.Inst (schemeToType)
 import MLF.Elab.Types
+import MLF.Elab.TypeOps
+    ( alphaEqType
+    , freeTypeVarsType
+    , freshTypeNameFromCounter
+    , substTypeCapture
+    )
 import MLF.Frontend.Syntax (Lit(..))
 
 data Env = Env
@@ -91,12 +97,12 @@ checkInstantiation env ty inst = snd <$> go 0 env ty inst
                         else Left (TCInstantiationError i t ("InstAbstr expects bound " ++ pretty bound))
         InstIntro -> do
             let used = freeTypeVarsType t
-                (fresh, k') = freshName k used
+                (fresh, k') = freshTypeNameFromCounter k used
             Right (k', TForall fresh Nothing t)
         InstElim -> case t of
             TForall v mbBound body -> do
                 let bound = boundType mbBound
-                Right (k, substType v bound body)
+                Right (k, substTypeCapture v bound body)
             _ -> Left (TCInstantiationError i t ("InstElim expects forall, got " ++ pretty t))
         InstInside phi -> case t of
             TForall v mbBound body -> do
@@ -128,87 +134,6 @@ freeTypeVarsEnv env =
     Set.union
         (Set.unions (map freeTypeVarsType (Map.elems (termEnv env))))
         (Set.unions (map freeTypeVarsType (Map.elems (typeEnv env))))
-
-freeTypeVarsType :: ElabType -> Set.Set String
-freeTypeVarsType = cata alg
-  where
-    alg ty = case ty of
-        TVarF v -> Set.singleton v
-        TArrowF a b -> Set.union a b
-        TBaseF _ -> Set.empty
-        TBottomF -> Set.empty
-        TForallF v mb body ->
-            let boundFv = maybe Set.empty id mb
-                bodyFv = Set.delete v body
-            in Set.union boundFv bodyFv
-
-alphaEqType :: ElabType -> ElabType -> Bool
-alphaEqType = go Map.empty Map.empty
-  where
-    go envL envR t1 t2 = case (t1, t2) of
-        (TVar a, TVar b) ->
-            case Map.lookup a envL of
-                Just b' -> b == b'
-                Nothing -> case Map.lookup b envR of
-                    Just a' -> a == a'
-                    Nothing -> a == b
-        (TArrow a1 b1, TArrow a2 b2) ->
-            go envL envR a1 a2 && go envL envR b1 b2
-        (TBase b1, TBase b2) -> b1 == b2
-        (TBottom, TBottom) -> True
-        (TForall v1 mb1 body1, TForall v2 mb2 body2) ->
-            let bound1 = boundType mb1
-                bound2 = boundType mb2
-                envL' = Map.insert v1 v2 envL
-                envR' = Map.insert v2 v1 envR
-            in go envL envR bound1 bound2 && go envL' envR' body1 body2
-        _ -> False
-
-freshName :: Int -> Set.Set String -> (String, Int)
-freshName n used =
-    let candidate = "u" ++ show n
-    in if candidate `Set.member` used
-        then freshName (n + 1) used
-        else (candidate, n + 1)
-
-substType :: String -> ElabType -> ElabType -> ElabType
-substType x s = goSub
-  where
-    freeS = freeTypeVarsType s
-
-    goSub = para alg
-      where
-        alg ty = case ty of
-            TVarF v
-                | v == x -> s
-                | otherwise -> TVar v
-            TArrowF d c -> TArrow (snd d) (snd c)
-            TBaseF b -> TBase b
-            TBottomF -> TBottom
-            TForallF v mb body
-                | v == x ->
-                    let mb' = fmap snd mb
-                    in TForall v mb' (fst body)
-                | v `Set.member` freeS ->
-                    let used =
-                            Set.unions
-                                [ freeS
-                                , freeTypeVarsType (fst body)
-                                , maybe Set.empty (freeTypeVarsType . fst) mb
-                                , Set.singleton v
-                                ]
-                        v' = pickFresh v used
-                        body' = substType v (TVar v') (fst body)
-                    in TForall v' (fmap snd mb) (goSub body')
-                | otherwise ->
-                    TForall v (fmap snd mb) (snd body)
-
-pickFresh :: String -> Set.Set String -> String
-pickFresh base used =
-    let candidates = base : [base ++ show i | i <- [(1::Int)..]]
-    in case filter (`Set.notMember` used) candidates of
-        (x:_) -> x
-        [] -> base
 
 renameInstBound :: String -> String -> Instantiation -> Instantiation
 renameInstBound old new = para alg
