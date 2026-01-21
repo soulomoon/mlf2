@@ -46,31 +46,35 @@ simplifySchemeBindings inlineBaseBounds namedBinders binds ty =
                 let (rest', body') = simplify binders rest body
                 in ((v, Nothing) : rest', body')
             Just bound ->
-                case body of
+                let bodyUsesV = Set.member v (freeNamesFrom Set.empty body)
+                    restUsesV =
+                        Set.member v $
+                            Set.unions
+                                [ freeNamesFrom Set.empty b
+                                | (_, Just b) <- rest
+                                ]
+                in if not bodyUsesV && not restUsesV
+                    then simplify (Set.delete v binders) rest body
+                    else case body of
                     TVar v' | v' == v ->
                         let freeBound = freeNamesFrom Set.empty bound
                             boundMentionsSelf = Set.member v freeBound
                             boundDeps = Set.delete v freeBound
                             boundIsBase = isBaseBound bound
+                            boundIsVar = isVarBound bound
                             boundMentionsNamed =
                                 not (Set.null (Set.intersection freeBound namedBinders))
-                            boundIsAliasToBinder =
-                                case bound of
-                                    TVar v2 ->
-                                        v2 /= v
-                                            && Set.member v2 binders
-                                            && not isNamedBinder
-                                    _ -> False
-                            canInlineAlias =
+                            canInlineAliasSimple =
                                 Set.null boundDeps
                                     && (not boundIsBase || inlineBaseBounds)
                                     && not isNamedBinder
                                     && not boundMentionsNamed
-                                    || boundIsAliasToBinder
+                            canInlineStructured =
+                                not boundIsBase
+                                    && not boundIsVar
+                                    && not isNamedBinder
                         in if not boundMentionsSelf
-                            && canInlineAlias
-                            && not (containsForall bound)
-                            && not (containsArrow bound)
+                            && (canInlineAliasSimple || canInlineStructured)
                             then
                                 let body' = bound
                                     restSub =
@@ -96,12 +100,6 @@ simplifySchemeBindings inlineBaseBounds namedBinders binds ty =
                                             && Set.member v2 binders
                                             && not isNamedBinder
                                     _ -> False
-                            restUsesV =
-                                Set.member v $
-                                    Set.unions
-                                        [ freeNamesFrom Set.empty b
-                                        | (_, Just b) <- rest
-                                        ]
                             canInlineBase =
                                 inlineBaseBounds
                                     && not dependsOnBinders

@@ -114,6 +114,11 @@ reifyWith _contextLabel res nameForVar isNamed rootMode nid =
                 | gen <- IntMap.elems (cGenNodes constraint)
                 , root <- gnSchemes gen
                 ]
+    schemeGenSet =
+        IntSet.fromList
+            [ getGenNodeId gid
+            | gid <- IntMap.elems schemeGenByRoot
+            ]
 
     lookupNode k = maybe (Left (MissingNode k)) Right (IntMap.lookup (getNodeId k) nodes)
 
@@ -332,8 +337,12 @@ reifyWith _contextLabel res nameForVar isNamed rootMode nid =
                                                                     else do
                                                                         (cache', t) <- goBound cache0' namedExtra n
                                                                         pure (markDone cache', t)
-                                                    Just (GenRef _, BindRigid) ->
-                                                        if isNamedLocal namedExtra (canonical n) || boundIsPoly n
+                                                    Just (GenRef gid, BindRigid) ->
+                                                        let isSchemeBinder =
+                                                                IntSet.member (getGenNodeId gid) schemeGenSet
+                                                        in if isNamedLocal namedExtra (canonical n)
+                                                            || boundIsPoly n
+                                                            || isSchemeBinder
                                                             then
                                                                 let t = varFor n
                                                                     cache' = cacheInsertLocal mode key t cache0' namedExtra

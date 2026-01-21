@@ -1,0 +1,270 @@
+# Code Simplification Plan (mlf4)
+
+This is a repo-specific plan to apply the general refactoring ideas in
+`docs/simplifyCode.md` to `mlf4` (MLF → xMLF pipeline), while staying
+paper-faithful to `papers/these-finale-english.txt`.
+
+## Goals
+
+- Reduce “cognitive load” by shrinking mega-modules, tightening module
+  boundaries, and centralizing cross-cutting concerns (debugging, errors,
+  canonicalization helpers).
+- Make phase invariants more explicit in types and APIs, so misuse becomes
+  harder and call sites get simpler.
+- Keep behavior paper-faithful; document and test any intentional deviations.
+- Keep the build warning-free (`-Wall`) and keep tests as the primary safety
+  net during refactors.
+
+Non-goals (for this effort):
+
+- Changing algorithms/semantics (unless explicitly called out + documented).
+- Large-scale performance tuning (only opportunistic improvements).
+
+## Quick repo observations (targets for simplification)
+
+1) A few very large modules dominate complexity:
+
+- `src/MLF/Elab/Run.hs` (~3100 LOC): end-to-end pipeline orchestration plus a
+  lot of “glue” logic (redirect chasing, copy-map reconstruction, debug hooks).
+- `src/MLF/Elab/Generalize.hs` (~2000 LOC): mixed concerns (context resolution,
+  binder planning, scheme-root handling, reify plan, special cases).
+- `src/MLF/Constraint/Presolution/Driver.hs` (~1600 LOC): presolution loop +
+  finalization + trace/witness concerns + debug wiring.
+- `src/MLF/Binding/Tree.hs` (~1500 LOC): core binding-tree ops, invariant checks,
+  binder enumeration, interior computations all in one file.
+- `src/MLF/Elab/Phi.hs` (~1300 LOC): Φ/witness translation and related helpers.
+
+2) Debug gating is duplicated across multiple modules via
+`lookupEnv` + `unsafePerformIO` + `trace` (e.g. presolution, solve, elab).
+This is both noisy and “infects” otherwise-pure modules.
+
+3) There are still a few partial/invariant-violating failure points (`error`)
+in core code (e.g. scope stack helpers, internal “should not happen” checks).
+
+4) The pipeline passes the same `Constraint` type through multiple phases that
+rely on phase-specific invariants. Call sites must “just know” what’s valid.
+
+5) There is already a solid Hspec suite; the safest simplification path is
+small, mechanical refactors with frequent `cabal test`.
+
+## Execution strategy
+
+Prefer a “many small PRs” approach:
+
+- Each PR keeps behavior identical (or explicitly documented as a deviation).
+- Each PR moves one concern at a time (debug wiring, module split, API wrapper).
+- Each PR adds/extends tests where an extraction creates a new pure helper.
+
+For every step below, the default verification is:
+
+    cabal build
+    cabal test
+    cabal test --test-show-details=direct
+
+## Workstreams and steps
+
+### 0) Establish guardrails (prep)
+
+0.1 Add a short “refactor checklist” doc (or section in this file):
+
+- “Run `cabal test` before/after”
+- “No change in pretty-printed types/terms for existing golden examples”
+- “Update `implementation_notes.md` when behavior changes”
+- “Keep paper mapping notes intact”
+
+0.2 Add a tiny script to standardize local verification:
+
+- `scripts/check.sh` running `cabal build` + `cabal test`.
+- Optional: `scripts/clean-ghc-artifacts.sh` to remove stray `*.o`/`*.hi`
+  from `src/` when they appear (they’re ignored, but confusing in-tree).
+
+### 1) Centralize debugging (low risk, high payoff)
+
+Goal: remove repetitive `unsafePerformIO`/`lookupEnv` patterns from many modules.
+
+1.1 Add `src/MLF/Util/Debug.hs`:
+
+- `debugEnabled :: String -> Bool` (env var presence check; cached; `NOINLINE`)
+- `traceIf :: Bool -> String -> a -> a`
+- `traceEnv :: String -> String -> a -> a` (combines the above)
+
+1.2 Replace per-module `debug*Enabled` / `debug*` helpers with `MLF.Util.Debug`.
+Targets include (at least):
+
+- `src/MLF/Constraint/Presolution/Base.hs`
+- `src/MLF/Constraint/Presolution/Expansion.hs`
+- `src/MLF/Constraint/Presolution/EdgeUnify.hs`
+- `src/MLF/Constraint/Presolution/Driver.hs`
+- `src/MLF/Constraint/Solve.hs`
+- `src/MLF/Elab/Generalize.hs`
+- `src/MLF/Elab/Phi.hs`
+- `src/MLF/Elab/Elaborate.hs`
+- `src/MLF/Elab/Run.hs`
+
+1.3 (Optional, follow-up) Push debug flags into explicit “env” records
+instead of environment variables, but only if it simplifies call sites.
+
+### 2) Normalize error handling and invariants (low/medium risk)
+
+Goal: make “expected” failure modes explicit, and isolate “this is a bug”
+failures behind a single API.
+
+2.1 Introduce `MLF.Util.Panic` (or similar) for internal invariants:
+
+- `panic :: String -> a` (still partial, but centralized and searchable)
+- `assert :: Bool -> String -> a -> a`
+
+Then replace scattered `error "…"` used for “should never happen” invariants
+with `panic`, so we can later audit/upgrade them systematically.
+
+2.2 For truly reachable runtime errors, prefer `Either`/`ExceptT`:
+
+- Example candidate: `src/MLF/Frontend/ConstraintGen/Scope.hs`’s empty scope
+  stack cases (`popScope`, `peekScope`).
+- Keep the surface API stable by converting to the existing phase error type.
+
+2.3 Consolidate tiny repeated helpers:
+
+- Move `firstShow :: Show e => Either e a -> Either String a` out of
+  `src/MLF/Elab/Run.hs` into a small util module (or stop using `String` in the
+  internal pipeline and keep typed errors).
+
+### 3) Make phase boundaries explicit (medium risk, big long-term simplifier)
+
+Goal: simplify the pipeline by encoding invariants in types and reducing
+“ambient knowledge” at call sites.
+
+3.1 Add lightweight wrappers for phase outputs:
+
+- `newtype Normalized = Normalized Constraint`
+- `newtype Acyclic = Acyclic (AcyclicityResult, Constraint)` (or a record)
+- `newtype Presolved = Presolved PresolutionResult`
+- `newtype Solved = Solved SolveResult`
+
+Expose minimal “unwrapping” helpers internally; keep public API unchanged.
+
+3.2 Update phase entry points to consume/produce these wrappers internally:
+
+- `normalize :: Constraint -> Normalized`
+- `checkAcyclicity :: Normalized -> Either … Acyclic`
+- `computePresolution :: Acyclic -> Either … Presolved`
+- `solveUnify :: Presolved -> Either … Solved`
+
+This reduces accidental misuse and makes `MLF.Elab.Run` read like the paper’s
+pipeline.
+
+### 4) Split mega-modules into cohesive submodules (medium/high effort)
+
+The primary simplification is structural: move cohesive clusters of functions
+into smaller modules with clear responsibilities, keeping re-export “front”
+modules to avoid churn.
+
+4.1 Split `src/MLF/Elab/Run.hs`
+
+Suggested target modules:
+
+- `MLF.Elab.Run.Pipeline`:
+  orchestration of phases + high-level “run pipeline” functions.
+- `MLF.Elab.Run.Redirects`:
+  redirect chasing, applying redirects to annotations, copy-map reconstruction.
+- `MLF.Elab.Run.Debug`:
+  any debug-only helpers and “explain this edge” tooling.
+- `MLF.Elab.Run.Types` (only if needed):
+  small local records currently living in `Run.hs`.
+
+Verification additions:
+
+- Add unit tests for extracted pure helpers (e.g. redirect chasing) so future
+  edits don’t require end-to-end pipeline debugging.
+
+4.2 Split `src/MLF/Constraint/Presolution/Driver.hs`
+
+Suggested target modules:
+
+- `MLF.Constraint.Presolution.Loop`:
+  the topological edge-processing loop (`processInstEdge` etc).
+- `MLF.Constraint.Presolution.Finalize`:
+  materialization, rewrites, witness normalization, validation.
+- `MLF.Constraint.Presolution.Trace`:
+  building `EdgeTrace` and related bookkeeping.
+
+Keep `MLF.Constraint.Presolution.Driver` as a thin façade exporting
+`computePresolution` and `processInstEdge`.
+
+4.3 Split `src/MLF/Binding/Tree.hs`
+
+Suggested target modules:
+
+- `MLF.Binding.Tree.Core`: lookup/update + basic path ops.
+- `MLF.Binding.Tree.Binders`: binder enumeration (`Q(n)`-style helpers).
+- `MLF.Binding.Tree.Interior`: `interiorOf` and related queries.
+- `MLF.Binding.Tree.Check`: invariants / validation (`checkBindingTree*`).
+
+Keep `MLF.Binding.Tree` as a re-export of the stable API.
+
+4.4 Split `src/MLF/Elab/Generalize.hs` and `src/MLF/Elab/Phi.hs`
+
+Suggested approach:
+
+- Identify one “spine” entry function per module.
+- Extract pure “planning” steps (records like `TargetPlan`, `DropPlan`, etc.)
+  into `MLF.Elab.Generalize.Plan` and test them directly.
+- Extract naming/scheme-root special cases into their own modules, keeping
+  `Generalize` and `Phi` as orchestration layers.
+
+### 5) Reduce duplication in graph traversal and canonicalization (medium)
+
+Goal: fewer bespoke DFS/BFS implementations and fewer ad-hoc canonicalization
+wrappers.
+
+5.1 Identify repeated traversal patterns (reachable nodes, interior, stop-sets)
+and consolidate into a small set of well-tested utilities under `MLF.Util.*`
+or `MLF.Constraint.Traversal`.
+
+5.2 Standardize “canonicalization” helpers:
+
+- Prefer one canonicalization function per phase (`UnionFind.frWith`/`Solve.frWith`)
+  and avoid re-defining local aliases unless needed for clarity.
+
+### 6) Tooling: formatting + linting (optional but recommended)
+
+Goal: make code motion “cheap” and diffs smaller during module splits.
+
+6.1 Pick a formatter (Ormolu or Fourmolu) and add:
+
+- a repo config file
+- a `scripts/format.sh` wrapper
+
+6.2 Add HLint to CI/local workflow:
+
+- a `.hlint.yaml` tuned to this codebase
+- a `scripts/lint.sh`
+
+These should be introduced after (or alongside) module-splitting so future work
+doesn’t reintroduce inconsistency.
+
+## Milestones (suggested)
+
+M1 (1–2 PRs):
+- Centralized debugging (`MLF.Util.Debug`), remove duplicated `unsafePerformIO`.
+- Add `scripts/check.sh`.
+
+M2 (2–4 PRs):
+- Split `MLF.Elab.Run` and `MLF.Constraint.Presolution.Driver` into cohesive
+  submodules with no behavior change.
+
+M3 (2–4 PRs):
+- Split `MLF.Binding.Tree` and start extracting/test-driving pure helpers from
+  `MLF.Elab.Generalize`/`MLF.Elab.Phi`.
+
+M4 (follow-up):
+- Phase wrapper types and (optional) tooling (format/lint).
+
+## Definition of done
+
+- The largest modules are significantly smaller, and each has a single
+  “reason to change”.
+- Debug wiring lives in one place; domain logic isn’t cluttered with env checks.
+- Pipeline call sites read like the paper phases and have fewer ad-hoc helpers.
+- `cabal build` and `cabal test` stay green throughout the refactor series.
+

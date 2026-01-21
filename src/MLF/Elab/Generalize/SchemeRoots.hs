@@ -3,6 +3,7 @@ module MLF.Elab.Generalize.SchemeRoots (
     SchemeRootsPlan(..),
     buildSchemeRootsPlan,
     schemeOwnerFromBody,
+    preferredBaseRoot,
     allowBoundTraversalFor
 ) where
 
@@ -202,6 +203,21 @@ schemeOwnerFromBody plan solvedToBasePref typeRootC =
                 Nothing -> schemeOwnerFromBodySolved
         ownerIsAlias = IntMap.member key schemeRootByBody
     in (owner, ownerIsAlias)
+
+preferredBaseRoot
+    :: (NodeId -> NodeId)
+    -> Maybe GaBindParentsInfo
+    -> IntMap.IntMap NodeId
+    -> NodeId
+    -> Maybe NodeId
+preferredBaseRoot canonical mbBindParentsGa solvedToBasePref typeRoot =
+    case mbBindParentsGa of
+        Just _ ->
+            case IntMap.lookup (getNodeId (canonical typeRoot)) solvedToBasePref of
+                Just baseN
+                    | canonical baseN /= canonical typeRoot -> Just baseN
+                _ -> Nothing
+        Nothing -> Nothing
 
 allowBoundTraversalFor
     :: SchemeRootsPlan
