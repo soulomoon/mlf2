@@ -95,6 +95,7 @@ library mlf2-internal
                       MLF.Util.RecursionSchemes,
                       MLF.Elab.Inst,
                       MLF.Elab.Elaborate,
+                      MLF.Elab.Generalize.Util,
                       MLF.Elab.Generalize,
                       MLF.Elab.Phi,
                       MLF.Elab.Reify,
