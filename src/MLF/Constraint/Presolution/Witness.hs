@@ -27,6 +27,7 @@ module MLF.Constraint.Presolution.Witness (
 import Control.Monad (foldM)
 import Control.Monad.State (gets)
 import Control.Monad.Except (throwError)
+import Data.Functor.Foldable (cata)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
@@ -35,12 +36,13 @@ import Data.Maybe (listToMaybe)
 import Data.Ord (Down(..))
 import qualified Data.List.NonEmpty as NE
 
-import MLF.Constraint.Types (BindFlag(..), Constraint(..), Expansion(..), ForallSpec(..), GenNode(..), InstanceOp(..), InstanceStep(..), NodeId, NodeRef(..), TyNode(..), getNodeId, nodeRefFromKey, typeRef)
+import MLF.Constraint.Types (BindFlag(..), Constraint(..), Expansion(..), ExpansionF(..), ForallSpec(..), GenNode(..), InstanceOp(..), InstanceStep(..), NodeId, NodeRef(..), TyNode(..), getNodeId, nodeRefFromKey, typeRef)
 import MLF.Constraint.Presolution.Base (PresolutionM, PresolutionError(..), PresolutionState(..), instantiationBindersM)
 import MLF.Constraint.Presolution.Ops (getCanonicalNode, lookupVarBound)
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Util.UnionFind as UnionFind
 import MLF.Util.Order (OrderKey, compareOrderKey, compareNodesByOrderKey)
+import MLF.Util.RecursionSchemes (cataM)
 
 data OmegaNormalizeEnv = OmegaNormalizeEnv
     { oneRoot :: NodeId
@@ -173,11 +175,11 @@ binderArgsFromExpansion leftRaw expn = do
     let instantiationBinders nid = do
             (_bodyRoot, binders) <- instantiationBindersM nid
             pure binders
-    let go = \case
-            ExpIdentity -> pure []
-            ExpForall _ -> pure []
-            ExpCompose es -> concat <$> mapM go (NE.toList es)
-            ExpInstantiate args ->
+    let alg layer = case layer of
+            ExpIdentityF -> pure []
+            ExpForallF _ -> pure []
+            ExpComposeF es -> pure (concat (NE.toList es))
+            ExpInstantiateF args ->
                 case leftRaw of
                     TyExp{ tnBody = b } -> do
                         binders <- instantiationBinders b
@@ -192,9 +194,8 @@ binderArgsFromExpansion leftRaw expn = do
                             then pure []
                         else if length binders > length args
                             then throwError (ArityMismatch "binderArgsFromExpansion/ExpInstantiate" (length binders) (length args))
-                                else pure (zip binders (take (length binders) args))
-
-    go expn
+                            else pure (zip binders (take (length binders) args))
+    cataM alg expn
 
 -- | Convert a presolution expansion recipe into interleaved witness steps.
 witnessFromExpansion :: NodeId -> TyNode -> Expansion -> PresolutionM [InstanceStep]
@@ -210,8 +211,13 @@ witnessFromExpansion _root leftRaw expn = do
     isForall (ExpForall _) = True
     isForall _ = False
 
-    flatten (ExpCompose es) = concatMap flatten (NE.toList es)
-    flatten other = [other]
+    flatten = cata alg
+      where
+        alg layer = case layer of
+            ExpComposeF es -> concat (NE.toList es)
+            ExpIdentityF -> [ExpIdentity]
+            ExpForallF specs -> [ExpForall specs]
+            ExpInstantiateF args -> [ExpInstantiate args]
 
     go :: TyNode -> Bool -> Expansion -> PresolutionM [InstanceStep]
     go _ _ ExpIdentity = pure []

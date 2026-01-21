@@ -1,3 +1,7 @@
+{-# LANGUAGE DeriveFoldable #-}
+{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveTraversable #-}
+{-# LANGUAGE TypeFamilies #-}
 module MLF.Constraint.Types (
     NodeId (..),
     ExpVarId (..),
@@ -27,6 +31,7 @@ module MLF.Constraint.Types (
     BoundRef(..),
     ForallSpec(..),
     Expansion (..),
+    ExpansionF (..),
     InstanceOp(..),
     InstanceStep(..),
     InstanceWitness(..),
@@ -46,6 +51,8 @@ import qualified Data.IntMap.Strict as IntMap
 import Data.List.NonEmpty (NonEmpty)
 import Data.IntSet (IntSet)
 import Data.Set (Set)
+
+import Data.Functor.Foldable (Base, Corecursive(..), Recursive(..))
 
 -- | Flag indicating whether a binding edge is flexible or rigid.
 --
@@ -537,6 +544,29 @@ data Expansion
         -- ^ Sequential composition of steps.
         -- Intended correspondence: `φ; φ′`.
     deriving (Eq, Show)
+
+data ExpansionF a
+    = ExpIdentityF
+    | ExpForallF (NonEmpty ForallSpec)
+    | ExpInstantiateF [NodeId]
+    | ExpComposeF (NonEmpty a)
+    deriving (Eq, Show, Functor, Foldable, Traversable)
+
+type instance Base Expansion = ExpansionF
+
+instance Recursive Expansion where
+    project expn = case expn of
+        ExpIdentity -> ExpIdentityF
+        ExpForall specs -> ExpForallF specs
+        ExpInstantiate args -> ExpInstantiateF args
+        ExpCompose es -> ExpComposeF es
+
+instance Corecursive Expansion where
+    embed expn = case expn of
+        ExpIdentityF -> ExpIdentity
+        ExpForallF specs -> ExpForall specs
+        ExpInstantiateF args -> ExpInstantiate args
+        ExpComposeF es -> ExpCompose es
 
 -- | Atomic instance operations used in instantiation witnesses.
 --
