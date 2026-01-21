@@ -15,6 +15,10 @@
     - Leave graph traversals explicit or via shared helper.
     - Requirements: 3.1, 3.2
     - Verification: rg -n "cata|para" src/MLF/Elab/Generalize.hs
+- [x] 3.1 Consolidate Generalize Phase 1–4 into context + scheme-roots builder
+    - Move scheme-root plan construction into resolveContext and expose via GeneralizeCtx.
+    - Remove redundant scheme-root construction from generalizeAtWith.
+    - Verification: rg -n "gcSchemeRootsPlan" src/MLF/Elab/Generalize/Context.hs
 - [x] 4. Build and test
     - Run full test suite to confirm no behavior changes.
     - Requirements: 4.1

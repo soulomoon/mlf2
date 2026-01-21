@@ -211,6 +211,11 @@ Suggested approach:
   into `MLF.Elab.Generalize.Plan` and test them directly.
 - Extract naming/scheme-root special cases into their own modules, keeping
   `Generalize` and `Phi` as orchestration layers.
+  
+Progress (done):
+
+- Consolidated Generalize Phase 1–4 into a single context + scheme-roots builder
+  (`resolveContext` now returns scheme-roots metadata).
 
 ### 5) Reduce duplication in graph traversal and canonicalization (medium)
 
@@ -267,4 +272,3 @@ M4 (follow-up):
 - Debug wiring lives in one place; domain logic isn’t cluttered with env checks.
 - Pipeline call sites read like the paper phases and have fewer ad-hoc helpers.
 - `cabal build` and `cabal test` stay green throughout the refactor series.
-

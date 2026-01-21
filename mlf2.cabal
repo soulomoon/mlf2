@@ -104,6 +104,7 @@ library mlf2-internal
                       MLF.Elab.Generalize.Helpers,
                       MLF.Elab.Generalize.Names,
                       MLF.Elab.Generalize.Ordering,
+                      MLF.Elab.Generalize.Plan,
                       MLF.Elab.Generalize.ReifyPlan,
                       MLF.Elab.Generalize.SchemeRoots,
                       MLF.Elab.Generalize.Util,

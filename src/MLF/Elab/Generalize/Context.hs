@@ -15,7 +15,9 @@ import Debug.Trace (trace)
 import MLF.Constraint.Types
 import MLF.Constraint.Solve (SolveResult(..))
 import qualified MLF.Binding.Tree as Binding
-import MLF.Elab.Generalize.BindingUtil (bindingPathToRootLocal)
+import MLF.Elab.Generalize.BindingUtil (bindingPathToRootLocal, firstGenAncestorFrom)
+import MLF.Elab.Generalize.BinderPlan (GaBindParentsInfo(..))
+import MLF.Elab.Generalize.SchemeRoots (SchemeRootsPlan, buildSchemeRootsPlan)
 import MLF.Elab.Types (ElabError(..), bindingToElab)
 
 data GaBindParents = GaBindParents
@@ -51,6 +53,8 @@ data GeneralizeCtx = GeneralizeCtx
     , gcFirstGenAncestor :: NodeRef -> Maybe GenNodeId
     , gcConstraintForReify :: Constraint
     , gcResForReify :: SolveResult
+    , gcBindParentsGaInfo :: Maybe GaBindParentsInfo
+    , gcSchemeRootsPlan :: SchemeRootsPlan
     }
 
 data ResolveTarget = ResolveTarget
@@ -86,6 +90,15 @@ resolveContext env bindParentsSoft scopeRootArg targetNodeArg = do
         canonKey = geCanonKey env
         lookupNode = geLookupNode env
         mbBindParentsGa' = geBindParentsGa env
+        mbBindParentsGaInfo =
+            fmap
+                (\ga -> GaBindParentsInfo
+                    { gbiBindParentsBase = gaBindParentsBase ga
+                    , gbiBaseConstraint = gaBaseConstraint ga
+                    , gbiBaseToSolved = gaBaseToSolved ga
+                    , gbiSolvedToBase = gaSolvedToBase ga
+                    })
+                mbBindParentsGa'
         scopeRoot0 = case scopeRootArg of
             TypeRef nid -> TypeRef (canonical nid)
             GenRef gid -> GenRef gid
@@ -299,6 +312,13 @@ resolveContext env bindParentsSoft scopeRootArg targetNodeArg = do
             , rbConstraintForReify = constraintForReify
             , rbResForReify = resForReify
             } = bindsPhase
+        schemeRootsPlan =
+            buildSchemeRootsPlan
+                canonical
+                constraint
+                nodes
+                mbBindParentsGaInfo
+                firstGenAncestorFrom
     pure GeneralizeCtx
         { gcTarget0 = target0
         , gcTargetBase = targetBase
@@ -311,6 +331,8 @@ resolveContext env bindParentsSoft scopeRootArg targetNodeArg = do
         , gcFirstGenAncestor = firstGenAncestorGa
         , gcConstraintForReify = constraintForReify
         , gcResForReify = resForReify
+        , gcBindParentsGaInfo = mbBindParentsGaInfo
+        , gcSchemeRootsPlan = schemeRootsPlan
         }
 
   where
