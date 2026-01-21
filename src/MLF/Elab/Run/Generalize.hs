@@ -6,7 +6,6 @@ module MLF.Elab.Run.Generalize (
 
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import Data.List (foldl')
 import Data.Maybe (listToMaybe)
 
 import qualified MLF.Binding.Tree as Binding

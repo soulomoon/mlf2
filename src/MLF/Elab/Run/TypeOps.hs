@@ -10,7 +10,7 @@ import qualified Data.Set as Set
 
 import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Constraint.Solve (SolveResult, frWith, srConstraint, srUnionFind)
-import MLF.Constraint.Types (NodeId(..), TyNode(..), getNodeId)
+import MLF.Constraint.Types (NodeId(..), getNodeId)
 import MLF.Elab.Generalize.Names (parseNameId)
 import MLF.Elab.Reify (reifyType)
 import MLF.Elab.TypeOps (inlineBaseBoundsType, substTypeSimple)
