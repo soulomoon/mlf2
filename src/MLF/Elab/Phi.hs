@@ -22,7 +22,7 @@ import MLF.Constraint.Types
 import MLF.Elab.Types
 import MLF.Reify.TypeOps (freeTypeVarsList, inlineBaseBoundsType, matchType)
 import MLF.Elab.Inst (applyInstantiation, composeInst, instMany, schemeToType, splitForalls)
-import MLF.Elab.Generalize (GaBindParents(..), generalizeAtAllowRigid, generalizeAtAllowRigidWithBindParents)
+import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Constraint.BindingUtil (bindingPathToRootLocal)
 import MLF.Reify.Core (namedNodes, reifyBoundWithNames, reifyType)
 import MLF.Elab.Sigma (bubbleReorderTo)
@@ -242,12 +242,33 @@ contextToNodeBoundWithOrderKeys canonical keys c _namedSet root target = do
                     Nothing -> pure (memo', Nothing)
 
 -- | Translate a recorded per-edge graph witness to an xMLF instantiation.
-phiFromEdgeWitness :: SolveResult -> Maybe SchemeInfo -> EdgeWitness -> Either ElabError Instantiation
-phiFromEdgeWitness res mSchemeInfo ew =
-    phiFromEdgeWitnessWithTrace res Nothing mSchemeInfo Nothing ew
+type GeneralizeAtWith =
+    Bool
+    -> Bool
+    -> Maybe GaBindParents
+    -> SolveResult
+    -> NodeRef
+    -> NodeId
+    -> Either ElabError (ElabScheme, IntMap.IntMap String)
 
-phiFromEdgeWitnessWithTrace :: SolveResult -> Maybe GaBindParents -> Maybe SchemeInfo -> Maybe EdgeTrace -> EdgeWitness -> Either ElabError Instantiation
-phiFromEdgeWitnessWithTrace res mbGaParents mSchemeInfo mTrace ew = do
+phiFromEdgeWitness
+    :: GeneralizeAtWith
+    -> SolveResult
+    -> Maybe SchemeInfo
+    -> EdgeWitness
+    -> Either ElabError Instantiation
+phiFromEdgeWitness generalizeAtWith res mSchemeInfo ew =
+    phiFromEdgeWitnessWithTrace generalizeAtWith res Nothing mSchemeInfo Nothing ew
+
+phiFromEdgeWitnessWithTrace
+    :: GeneralizeAtWith
+    -> SolveResult
+    -> Maybe GaBindParents
+    -> Maybe SchemeInfo
+    -> Maybe EdgeTrace
+    -> EdgeWitness
+    -> Either ElabError Instantiation
+phiFromEdgeWitnessWithTrace generalizeAtWith res mbGaParents mSchemeInfo mTrace ew = do
     requireValidBindingTree
     namedSet0 <- namedNodes res
     case debugPhi
@@ -397,8 +418,8 @@ phiFromEdgeWitnessWithTrace res mbGaParents mSchemeInfo mTrace ew = do
         scopeRoot <- instScopeRoot root0
         (sch, subst) <-
             case mbGaParents of
-                Nothing -> generalizeAtAllowRigid res scopeRoot root0
-                Just ga -> generalizeAtAllowRigidWithBindParents ga res scopeRoot root0
+                Nothing -> generalizeAtWith True True Nothing res scopeRoot root0
+                Just ga -> generalizeAtWith True True (Just ga) res scopeRoot root0
         pure SchemeInfo { siScheme = sch, siSubst = subst }
 
     instScopeRoot :: NodeId -> Either ElabError NodeRef

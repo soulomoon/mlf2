@@ -1,7 +1,8 @@
 module MLF.Elab.Run.Generalize (
     pruneBindParentsConstraint,
     instantiationCopyNodes,
-    constraintForGeneralization
+    constraintForGeneralization,
+    generalizeAtWithBuilder
 ) where
 
 import qualified Data.IntMap.Strict as IntMap
@@ -9,7 +10,7 @@ import qualified Data.IntSet as IntSet
 
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.Canonicalize as Canonicalize
-import MLF.Constraint.Presolution (EdgeTrace(..))
+import MLF.Constraint.Presolution (EdgeTrace(..), PresolutionPlanBuilder(..))
 import MLF.Constraint.Solve (SolveResult, frWith, srConstraint, srUnionFind)
 import MLF.Constraint.Types
     ( BindFlag(..)
@@ -32,12 +33,14 @@ import MLF.Constraint.Types
     , typeRef
     )
 import qualified MLF.Constraint.VarStore as VarStore
-import MLF.Elab.Generalize (GaBindParents(..))
+import MLF.Elab.Generalize (GaBindParents(..), applyGeneralizePlan)
 import MLF.Constraint.BindingUtil (bindingPathToRootLocal, firstGenAncestorFrom)
 import MLF.Elab.Run.Debug (debugGaScope)
 import MLF.Elab.Run.Util (chaseRedirects)
 import MLF.Util.Graph (reachableFromStop)
 import MLF.Frontend.ConstraintGen (AnnExpr)
+import MLF.Elab.Types (ElabScheme(..))
+import MLF.Util.ElabError (ElabError)
 
 pruneBindParentsConstraint :: Constraint -> Constraint
 pruneBindParentsConstraint c =
@@ -1365,3 +1368,20 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                 , gaSolvedToBase = solvedToBaseAligned
                 }
             )
+
+generalizeAtWithBuilder
+    :: PresolutionPlanBuilder
+    -> Bool
+    -> Bool
+    -> Maybe GaBindParents
+    -> SolveResult
+    -> NodeRef
+    -> NodeId
+    -> Either ElabError (ElabScheme, IntMap.IntMap String)
+generalizeAtWithBuilder planBuilder allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot targetNode =
+    let PresolutionPlanBuilder buildPlans = planBuilder
+        go allowDrop allowRigid mbGa res' scope target = do
+            (genPlan, reifyPlan) <- buildPlans res' allowDrop allowRigid mbGa scope target
+            let fallback scope' target' = fst <$> go False True mbGa res' scope' target'
+            applyGeneralizePlan fallback genPlan reifyPlan
+    in go allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot targetNode

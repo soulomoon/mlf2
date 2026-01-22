@@ -12,7 +12,7 @@ module MLF.Elab.Pipeline (
     reifyTypeWithNames,
     reifyTypeWithNamedSet,
     reifyBoundWithNames,
-    generalizeAt,
+    generalizeAtWithBuilder,
     expansionToInst,
     schemeToType,
     applyInstantiation,
@@ -43,7 +43,7 @@ module MLF.Elab.Pipeline (
 
 import MLF.Elab.Types
 import MLF.Elab.Elaborate (elaborate, expansionToInst)
-import MLF.Elab.Generalize (generalizeAt)
+import MLF.Elab.Run.Generalize (generalizeAtWithBuilder)
 import MLF.Elab.Inst (applyInstantiation, schemeToType)
 import MLF.Elab.TypeCheck (Env(..), checkInstantiation, typeCheck, typeCheckWithEnv)
 import MLF.Elab.Reduce (isValue, normalize, step)

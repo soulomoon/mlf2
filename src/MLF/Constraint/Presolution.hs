@@ -12,6 +12,8 @@ module MLF.Constraint.Presolution (
     -- * Main API
     computePresolution,
     PresolutionResult(..),
+    PresolutionPlanBuilder(..),
+    defaultPlanBuilder,
     PresolutionError(..),
 
     -- * Internal types (exported for testing)
@@ -33,6 +35,7 @@ module MLF.Constraint.Presolution (
 import MLF.Constraint.Presolution.Base (
     EdgeTrace(..),
     PresolutionError(..),
+    PresolutionPlanBuilder(..),
     PresolutionResult(..),
     PresolutionState(..),
     runPresolutionM
@@ -48,3 +51,7 @@ import MLF.Constraint.Presolution.Core (
     runEdgeUnifyForTest,
     unifyAcyclicRawWithRaiseTrace
     )
+import MLF.Constraint.Presolution.Plan (buildGeneralizePlans)
+
+defaultPlanBuilder :: PresolutionPlanBuilder
+defaultPlanBuilder = PresolutionPlanBuilder buildGeneralizePlans

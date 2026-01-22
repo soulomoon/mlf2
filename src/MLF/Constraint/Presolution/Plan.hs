@@ -1,10 +1,7 @@
 module MLF.Constraint.Presolution.Plan (
-    PresolutionEnv(..),
     GeneralizePlan(..),
     ReifyPlan(..),
-    planGeneralize,
-    planGeneralizeAt,
-    planReify
+    buildGeneralizePlans
 ) where
 
 import Data.Maybe (listToMaybe)
@@ -788,6 +785,33 @@ planReify _ plan = do
         , rpTypeRootForReifyAdjusted = typeRootForReifyAdjusted
         , rpSubstForReifyAdjusted = substForReifyAdjusted
         }
+
+buildGeneralizePlans
+    :: SolveResult
+    -> Bool
+    -> Bool
+    -> Maybe GaBindParents
+    -> NodeRef
+    -> NodeId
+    -> Either ElabError (GeneralizePlan, ReifyPlan)
+buildGeneralizePlans res allowDropTarget allowRigidBinders mbBindParentsGa scopeRoot targetNode = do
+    let constraint = srConstraint res
+        canonical = Solve.frWith (srUnionFind res)
+        presEnv =
+            PresolutionEnv
+                { peConstraint = constraint
+                , peSolveResult = res
+                , peCanonical = canonical
+                , peBindParents = cBindParents constraint
+                , peAllowDropTarget = allowDropTarget
+                , peAllowRigidBinders = allowRigidBinders
+                , peBindParentsGa = mbBindParentsGa
+                , peScopeRoot = scopeRoot
+                , peTargetNode = targetNode
+                }
+    genPlan <- planGeneralizeAt presEnv
+    reifyPlan <- planReify presEnv genPlan
+    pure (genPlan, reifyPlan)
 
 mkGeneralizeEnv :: Maybe GaBindParents -> SolveResult -> GeneralizeEnv
 mkGeneralizeEnv mbBindParentsGa res =

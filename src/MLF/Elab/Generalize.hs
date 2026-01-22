@@ -1,11 +1,5 @@
 module MLF.Elab.Generalize (
     GaBindParents(..),
-    generalizeAt,
-    generalizeAtKeepTarget,
-    generalizeAtAllowRigid,
-    generalizeAtKeepTargetAllowRigid,
-    generalizeAtAllowRigidWithBindParents,
-    generalizeAtKeepTargetAllowRigidWithBindParents,
     applyGeneralizePlan
 ) where
 
@@ -15,13 +9,8 @@ import qualified Data.Set as Set
 
 import MLF.Constraint.Presolution.Plan
     ( GeneralizePlan(..)
-    , PresolutionEnv(..)
     , ReifyPlan(..)
-    , planGeneralizeAt
-    , planReify
     )
-import MLF.Constraint.Solve (SolveResult(..))
-import qualified MLF.Constraint.Solve as Solve
 import MLF.Constraint.Types
 import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Constraint.Presolution.Plan.BinderPlan (BinderPlan(..))
@@ -49,77 +38,12 @@ import MLF.Reify.TypeOps (freeTypeVarsFrom)
 import MLF.Elab.Types
 import MLF.Util.Graph (reachableFromStop)
 
--- | Generalize a node at the given binding site into a polymorphic scheme.
--- For xMLF, quantified variables can have bounds.
--- Returns the scheme and the substitution used to rename variables.
-generalizeAt :: SolveResult -> NodeRef -> NodeId -> Either ElabError (ElabScheme, IntMap.IntMap String)
-generalizeAt = generalizeAtWith True False Nothing
-
--- | Variant of 'generalizeAt' that keeps the target binder even when it would
--- normally be dropped as an alias wrapper.
-generalizeAtKeepTarget :: SolveResult -> NodeRef -> NodeId -> Either ElabError (ElabScheme, IntMap.IntMap String)
-generalizeAtKeepTarget = generalizeAtWith False True Nothing
-
--- | Variant of 'generalizeAt' that allows rigid binders to be quantified
--- while still dropping alias targets.
-generalizeAtAllowRigid :: SolveResult -> NodeRef -> NodeId -> Either ElabError (ElabScheme, IntMap.IntMap String)
-generalizeAtAllowRigid = generalizeAtWith True True Nothing
-
--- | Variant of 'generalizeAt' that allows rigid binders while keeping
--- alias targets.
-generalizeAtKeepTargetAllowRigid :: SolveResult -> NodeRef -> NodeId -> Either ElabError (ElabScheme, IntMap.IntMap String)
-generalizeAtKeepTargetAllowRigid = generalizeAtWith False True Nothing
-
-generalizeAtAllowRigidWithBindParents
-    :: GaBindParents
-    -> SolveResult
-    -> NodeRef
-    -> NodeId
-    -> Either ElabError (ElabScheme, IntMap.IntMap String)
-generalizeAtAllowRigidWithBindParents gaParents =
-    generalizeAtWith True True (Just gaParents)
-
-generalizeAtKeepTargetAllowRigidWithBindParents
-    :: GaBindParents
-    -> SolveResult
-    -> NodeRef
-    -> NodeId
-    -> Either ElabError (ElabScheme, IntMap.IntMap String)
-generalizeAtKeepTargetAllowRigidWithBindParents gaParents =
-    generalizeAtWith False True (Just gaParents)
-
-generalizeAtWith
-    :: Bool
-    -> Bool
-    -> Maybe GaBindParents
-    -> SolveResult
-    -> NodeRef
-    -> NodeId
-    -> Either ElabError (ElabScheme, IntMap.IntMap String)
-generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot targetNode = do
-    let constraint = srConstraint res
-        canonical = Solve.frWith (srUnionFind res)
-        presEnv =
-            PresolutionEnv
-                { peConstraint = constraint
-                , peSolveResult = res
-                , peCanonical = canonical
-                , peBindParents = cBindParents constraint
-                , peAllowDropTarget = allowDropTarget
-                , peAllowRigidBinders = allowRigidBinders
-                , peBindParentsGa = mbBindParentsGa
-                , peScopeRoot = scopeRoot
-                , peTargetNode = targetNode
-                }
-    genPlan <- planGeneralizeAt presEnv
-    reifyPlan <- planReify presEnv genPlan
-    applyGeneralizePlan genPlan reifyPlan
-
 applyGeneralizePlan
-    :: GeneralizePlan
+    :: (NodeRef -> NodeId -> Either ElabError ElabScheme)
+    -> GeneralizePlan
     -> ReifyPlan
     -> Either ElabError (ElabScheme, IntMap.IntMap String)
-applyGeneralizePlan plan reifyPlanWrapper = do
+applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
     let GeneralizePlan
             { gpEnv = env
             , gpContext = ctx
@@ -336,8 +260,7 @@ applyGeneralizePlan plan reifyPlanWrapper = do
                                 substForReifyAdjusted
                                 (zip (map NodeId orderedBinders) binderNames)
                         else do
-                            (sch, _substScheme) <-
-                                generalizeAtWith False True mbBindParentsGa res schemeScope typeRootC
+                            sch <- generalizeAtForScheme schemeScope typeRootC
                             pure $
                                 case sch of
                                     Forall binds body ->

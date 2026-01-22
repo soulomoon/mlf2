@@ -38,6 +38,7 @@ import qualified MLF.Witness.OmegaExec as OmegaExec
 import qualified MLF.Constraint.Canonicalize as Canonicalize
 import MLF.Constraint.Types
 import MLF.Constraint.Presolution.Base
+import MLF.Constraint.Presolution.Plan (buildGeneralizePlans)
 import MLF.Constraint.Presolution.Ops (
     findRoot,
     getCanonicalNode,
@@ -126,6 +127,7 @@ computePresolution acyclicityResult constraint = do
         , prEdgeWitnesses = edgeWitnesses
         , prEdgeTraces = edgeTraces
         , prRedirects = redirects
+        , prPlanBuilder = PresolutionPlanBuilder buildGeneralizePlans
         }
 
 validateTranslatablePresolution :: Constraint -> Either PresolutionError ()

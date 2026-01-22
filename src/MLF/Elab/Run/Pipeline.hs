@@ -15,11 +15,11 @@ import MLF.Frontend.ConstraintGen (AnnExpr(..), ConstraintError, ConstraintResul
 import MLF.Constraint.Normalize (normalize)
 import MLF.Constraint.Acyclicity (checkAcyclicity)
 import qualified MLF.Binding.Tree as Binding
-import MLF.Constraint.Presolution (EdgeTrace(..), PresolutionResult(..), computePresolution)
-import MLF.Constraint.Presolution.Plan
-    ( PresolutionEnv(..)
-    , planGeneralizeAt
-    , planReify
+import MLF.Constraint.Presolution
+    ( EdgeTrace(..)
+    , PresolutionPlanBuilder(..)
+    , PresolutionResult(..)
+    , computePresolution
     )
 import MLF.Constraint.Solve hiding (BindingTreeError, MissingNode)
 import qualified MLF.Constraint.Solve as Solve
@@ -59,7 +59,6 @@ import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Elab.Elaborate (elaborateWithScope)
 import MLF.Elab.Generalize
     ( GaBindParents(..)
-    , applyGeneralizePlan
     )
 import MLF.Util.Names (parseNameId)
 import MLF.Elab.Inst (applyInstantiation, schemeToType)
@@ -72,6 +71,7 @@ import MLF.Elab.Run.Annotation (adjustAnnotationInst, annNode, applyRedirectsToA
 import MLF.Elab.Run.Debug (debugGaScope, debugGaScopeEnabled, edgeOrigins)
 import MLF.Elab.Run.Generalize
     ( constraintForGeneralization
+    , generalizeAtWithBuilder
     , instantiationCopyNodes
     , pruneBindParentsConstraint
     )
@@ -96,30 +96,22 @@ runPipelineElabChecked polySyms expr = do
     pure (term, tyChecked)
 
 generalizeWithPlan
-    :: Bool
+    :: PresolutionPlanBuilder
+    -> Bool
     -> GaBindParents
     -> SolveResult
     -> NodeRef
     -> NodeId
     -> Either ElabError (ElabScheme, IntMap.IntMap String)
-generalizeWithPlan allowDropTarget bindParentsGa res scopeRoot targetNode = do
-    let constraint = srConstraint res
-        canonical = Solve.frWith (srUnionFind res)
-        presEnv =
-            PresolutionEnv
-                { peConstraint = constraint
-                , peSolveResult = res
-                , peCanonical = canonical
-                , peBindParents = cBindParents constraint
-                , peAllowDropTarget = allowDropTarget
-                , peAllowRigidBinders = True
-                , peBindParentsGa = Just bindParentsGa
-                , peScopeRoot = scopeRoot
-                , peTargetNode = targetNode
-                }
-    genPlan <- planGeneralizeAt presEnv
-    reifyPlan <- planReify presEnv genPlan
-    applyGeneralizePlan genPlan reifyPlan
+generalizeWithPlan planBuilder allowDropTarget bindParentsGa res scopeRoot targetNode =
+    generalizeAtWithBuilder
+        planBuilder
+        allowDropTarget
+        True
+        (Just bindParentsGa)
+        res
+        scopeRoot
+        targetNode
 
 runPipelineElabWith
     :: (Expr -> Either ConstraintError ConstraintResult)
@@ -157,6 +149,8 @@ runPipelineElabWith genConstraints expr = do
         () -> pure ()
     acyc <- firstShow (checkAcyclicity c1)
     pres <- firstShow (computePresolution acyc c1)
+    let planBuilder = prPlanBuilder pres
+        generalizeAtWith = generalizeAtWithBuilder planBuilder
     solved <- firstShow (solveUnify (prConstraint pres))
     let solvedClean = solved { srConstraint = pruneBindParentsConstraint (srConstraint solved) }
     case validateSolvedGraphStrict solvedClean of
@@ -296,7 +290,7 @@ runPipelineElabWith genConstraints expr = do
                 edgeTraces = IntMap.map canonTrace (prEdgeTraces pres)
                 edgeExpansions = IntMap.map canonExpansion (prEdgeExpansions pres)
             let scopeOverrides = letScopeOverrides c1 (srConstraint solvedForGen) solvedClean (prRedirects pres) annCanon
-            term <- firstShow (elaborateWithScope solvedClean solvedClean solvedForGen bindParentsGa edgeWitnesses edgeTraces edgeExpansions scopeOverrides annCanon)
+            term <- firstShow (elaborateWithScope generalizeAtWith solvedClean solvedClean solvedForGen bindParentsGa edgeWitnesses edgeTraces edgeExpansions scopeOverrides annCanon)
 
             -- Also apply redirects to the root node, as it might have been a TyExp.
             let canonical = frWith (srUnionFind solvedClean)
@@ -375,13 +369,13 @@ runPipelineElabWith genConstraints expr = do
                         scopeRoot = scopeRootPre
                     let allowDropTarget = not keepTarget
                     (sch0, subst0) <- firstShow
-                        (generalizeWithPlan allowDropTarget bindParentsGa solvedForGen scopeRoot targetC)
+                        (generalizeWithPlan planBuilder allowDropTarget bindParentsGa solvedForGen scopeRoot targetC)
                     let sch = sch0
                         subst = subst0
                         srcTy = schemeToType sch
                         schemeInfo = SchemeInfo { siScheme = sch, siSubst = subst }
                     pure ()
-                    phi0 <- firstShow (phiFromEdgeWitnessWithTrace solvedForGen (Just bindParentsGa) (Just schemeInfo) mTrace ew)
+                    phi0 <- firstShow (phiFromEdgeWitnessWithTrace generalizeAtWith solvedForGen (Just bindParentsGa) (Just schemeInfo) mTrace ew)
                     let annBound = VarStore.lookupVarBound (srConstraint solvedForGen) annNodeId
                         annTargetNode0 =
                             case annBound of
@@ -613,7 +607,7 @@ runPipelineElabWith genConstraints expr = do
                                         annScopeRoot = canonicalizeScopeRef solvedForGen (prRedirects pres) annScopeRootBase
                                     let allowDropTargetAnn = not keepTarget
                                     (annSch, _substAnn) <- firstShow
-                                        (generalizeWithPlan allowDropTargetAnn bindParentsGa solvedForGen annScopeRoot annTargetNode)
+                                        (generalizeWithPlan planBuilder allowDropTargetAnn bindParentsGa solvedForGen annScopeRoot annTargetNode)
                                     let annTy = schemeToType annSch
                                     pure (simplifyAnnotationType annTy)
 
@@ -721,7 +715,7 @@ runPipelineElabWith genConstraints expr = do
                                 instAppBasesFromWitness funEid =
                                     case IntMap.lookup (getEdgeId funEid) edgeWitnesses of
                                         Just ew ->
-                                            case phiFromEdgeWitnessWithTrace solved (Just bindParentsGa) Nothing (IntMap.lookup (getEdgeId funEid) edgeTraces) ew of
+                                            case phiFromEdgeWitnessWithTrace generalizeAtWith solved (Just bindParentsGa) Nothing (IntMap.lookup (getEdgeId funEid) edgeTraces) ew of
                                                 Right inst ->
                                                     IntSet.fromList
                                                         [ getNodeId nid
@@ -1188,7 +1182,7 @@ runPipelineElabWith genConstraints expr = do
                                         Nothing -> bindParentsGa
                             let allowDropTargetFinal = not keepTargetFinal
                             (sch, _subst) <- firstShow
-                                (generalizeWithPlan allowDropTargetFinal bindParentsGaFinal resFinalBounded scopeRoot targetC)
+                                (generalizeWithPlan planBuilder allowDropTargetFinal bindParentsGaFinal resFinalBounded scopeRoot targetC)
                             let debugFinal =
                                     if debugGaScopeEnabled
                                         then

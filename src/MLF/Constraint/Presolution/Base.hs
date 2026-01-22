@@ -1,5 +1,6 @@
 module MLF.Constraint.Presolution.Base (
     PresolutionResult(..),
+    PresolutionPlanBuilder(..),
     PresolutionError(..),
     TranslatabilityIssue(..),
     PresolutionState(..),
@@ -39,6 +40,10 @@ import qualified MLF.Util.UnionFind as UnionFind
 import Debug.Trace (trace)
 import System.Environment (lookupEnv)
 import System.IO.Unsafe (unsafePerformIO)
+import MLF.Constraint.Presolution.Plan (GeneralizePlan, ReifyPlan)
+import MLF.Constraint.Presolution.Plan.Context (GaBindParents)
+import MLF.Constraint.Solve (SolveResult)
+import MLF.Util.ElabError (ElabError)
 
 -- | Result of the presolution phase.
 data PresolutionResult = PresolutionResult
@@ -47,7 +52,25 @@ data PresolutionResult = PresolutionResult
     , prEdgeWitnesses :: IntMap EdgeWitness
     , prEdgeTraces :: IntMap EdgeTrace
     , prRedirects :: IntMap NodeId -- ^ Map from old TyExp IDs to their replacement IDs
+    , prPlanBuilder :: PresolutionPlanBuilder
     } deriving (Eq, Show)
+
+newtype PresolutionPlanBuilder = PresolutionPlanBuilder
+    { ppbBuildGeneralizePlans
+        :: SolveResult
+        -> Bool
+        -> Bool
+        -> Maybe GaBindParents
+        -> NodeRef
+        -> NodeId
+        -> Either ElabError (GeneralizePlan, ReifyPlan)
+    }
+
+instance Eq PresolutionPlanBuilder where
+    _ == _ = True
+
+instance Show PresolutionPlanBuilder where
+    show _ = "<PresolutionPlanBuilder>"
 
 -- | Errors that can occur during presolution.
 data PresolutionError
