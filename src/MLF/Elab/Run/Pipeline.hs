@@ -16,7 +16,13 @@ import MLF.Constraint.Normalize (normalize)
 import MLF.Constraint.Acyclicity (checkAcyclicity)
 import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Presolution (EdgeTrace(..), PresolutionResult(..), computePresolution)
+import MLF.Constraint.Presolution.Plan
+    ( PresolutionEnv(..)
+    , planGeneralizeAt
+    , planReify
+    )
 import MLF.Constraint.Solve hiding (BindingTreeError, MissingNode)
+import qualified MLF.Constraint.Solve as Solve
 import MLF.Constraint.Types
     ( BoundRef(..)
     , EdgeId(..)
@@ -53,8 +59,7 @@ import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Elab.Elaborate (elaborateWithScope)
 import MLF.Elab.Generalize
     ( GaBindParents(..)
-    , generalizeAtAllowRigidWithBindParents
-    , generalizeAtKeepTargetAllowRigidWithBindParents
+    , applyGeneralizePlan
     )
 import MLF.Elab.Generalize.Names (parseNameId)
 import MLF.Elab.Inst (applyInstantiation, schemeToType)
@@ -89,6 +94,32 @@ runPipelineElabChecked polySyms expr = do
     (term, _ty) <- runPipelineElab polySyms expr
     tyChecked <- firstShow (typeCheck term)
     pure (term, tyChecked)
+
+generalizeWithPlan
+    :: Bool
+    -> GaBindParents
+    -> SolveResult
+    -> NodeRef
+    -> NodeId
+    -> Either ElabError (ElabScheme, IntMap.IntMap String)
+generalizeWithPlan allowDropTarget bindParentsGa res scopeRoot targetNode = do
+    let constraint = srConstraint res
+        canonical = Solve.frWith (srUnionFind res)
+        presEnv =
+            PresolutionEnv
+                { peConstraint = constraint
+                , peSolveResult = res
+                , peCanonical = canonical
+                , peBindParents = cBindParents constraint
+                , peAllowDropTarget = allowDropTarget
+                , peAllowRigidBinders = True
+                , peBindParentsGa = Just bindParentsGa
+                , peScopeRoot = scopeRoot
+                , peTargetNode = targetNode
+                }
+    genPlan <- planGeneralizeAt presEnv
+    reifyPlan <- planReify presEnv genPlan
+    applyGeneralizePlan genPlan reifyPlan
 
 runPipelineElabWith
     :: (Expr -> Either ConstraintError ConstraintResult)
@@ -342,10 +373,9 @@ runPipelineElabWith genConstraints expr = do
                                         ()
                                 else ()
                         scopeRoot = scopeRootPre
+                    let allowDropTarget = not keepTarget
                     (sch0, subst0) <- firstShow
-                        (if keepTarget
-                            then generalizeAtKeepTargetAllowRigidWithBindParents bindParentsGa solvedForGen scopeRoot targetC
-                            else generalizeAtAllowRigidWithBindParents bindParentsGa solvedForGen scopeRoot targetC)
+                        (generalizeWithPlan allowDropTarget bindParentsGa solvedForGen scopeRoot targetC)
                     let sch = sch0
                         subst = subst0
                         srcTy = schemeToType sch
@@ -581,10 +611,9 @@ runPipelineElabWith genConstraints expr = do
                                     annScopeRoot0 <- firstShow (bindingScopeRef (srConstraint solvedForGen) annTargetNode)
                                     let annScopeRootBase = preferGenScope (srConstraint solvedForGen) annScopeRoot0
                                         annScopeRoot = canonicalizeScopeRef solvedForGen (prRedirects pres) annScopeRootBase
+                                    let allowDropTargetAnn = not keepTarget
                                     (annSch, _substAnn) <- firstShow
-                                        (if keepTarget
-                                            then generalizeAtKeepTargetAllowRigidWithBindParents bindParentsGa solvedForGen annScopeRoot annTargetNode
-                                            else generalizeAtAllowRigidWithBindParents bindParentsGa solvedForGen annScopeRoot annTargetNode)
+                                        (generalizeWithPlan allowDropTargetAnn bindParentsGa solvedForGen annScopeRoot annTargetNode)
                                     let annTy = schemeToType annSch
                                     pure (simplifyAnnotationType annTy)
 
@@ -1157,12 +1186,9 @@ runPipelineElabWith genConstraints expr = do
                                                 baseConstraint' = baseConstraint { cNodes = nodes' }
                                             in bindParentsGa { gaBaseConstraint = baseConstraint' }
                                         Nothing -> bindParentsGa
-                            let generalizeFinal =
-                                    if keepTargetFinal
-                                        then generalizeAtKeepTargetAllowRigidWithBindParents
-                                        else generalizeAtAllowRigidWithBindParents
+                            let allowDropTargetFinal = not keepTargetFinal
                             (sch, _subst) <- firstShow
-                                (generalizeFinal bindParentsGaFinal resFinalBounded scopeRoot targetC)
+                                (generalizeWithPlan allowDropTargetFinal bindParentsGaFinal resFinalBounded scopeRoot targetC)
                             let debugFinal =
                                     if debugGaScopeEnabled
                                         then

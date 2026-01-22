@@ -87,6 +87,7 @@ library mlf2-internal
                       MLF.Constraint.Presolution.Expansion,
                       MLF.Constraint.Presolution.ForallIntro,
                       MLF.Constraint.Presolution.Ops,
+                      MLF.Constraint.Presolution.Plan,
                       MLF.Constraint.Presolution.Unify,
                       MLF.Constraint.Canonicalize,
                       MLF.Constraint.Traversal,
