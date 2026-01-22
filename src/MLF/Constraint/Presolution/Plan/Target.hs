@@ -25,7 +25,7 @@ import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Types
 import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Constraint.Presolution.Plan.BinderPlan (GaBindParentsInfo(..))
-import MLF.Constraint.Presolution.Plan.BindingUtil (firstGenAncestorFrom)
+import MLF.Constraint.BindingUtil (firstGenAncestorFrom)
 import MLF.Constraint.Presolution.Plan.Util (boundRootWith, firstSchemeRootAncestorWith)
 import qualified MLF.Util.Order as Order
 

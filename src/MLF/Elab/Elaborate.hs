@@ -15,7 +15,7 @@ import Data.Maybe (listToMaybe)
 import Debug.Trace (trace)
 import System.Environment (lookupEnv)
 import System.IO.Unsafe (unsafePerformIO)
-import MLF.Constraint.Presolution.Plan.Names (parseNameId)
+import MLF.Util.Names (parseNameId)
 import MLF.Reify.TypeOps (alphaEqType, inlineBaseBoundsType, matchType)
 import MLF.Util.RecursionSchemes (cataM)
 
@@ -28,7 +28,7 @@ import MLF.Elab.Generalize
     , generalizeAtAllowRigidWithBindParents
     , generalizeAtKeepTargetAllowRigidWithBindParents
     )
-import MLF.Constraint.Presolution.Plan.BindingUtil (bindingPathToRootLocal)
+import MLF.Constraint.BindingUtil (bindingPathToRootLocal)
 import MLF.Elab.Phi (phiFromEdgeWitnessWithTrace)
 import MLF.Elab.Inst (applyInstantiation, schemeToType)
 import qualified MLF.Elab.Inst as Inst

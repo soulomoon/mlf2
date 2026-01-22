@@ -23,7 +23,7 @@ import MLF.Elab.Types
 import MLF.Reify.TypeOps (freeTypeVarsList, inlineBaseBoundsType, matchType)
 import MLF.Elab.Inst (applyInstantiation, composeInst, instMany, schemeToType, splitForalls)
 import MLF.Elab.Generalize (GaBindParents(..), generalizeAtAllowRigid, generalizeAtAllowRigidWithBindParents)
-import MLF.Constraint.Presolution.Plan.BindingUtil (bindingPathToRootLocal)
+import MLF.Constraint.BindingUtil (bindingPathToRootLocal)
 import MLF.Reify.Core (namedNodes, reifyBoundWithNames, reifyType)
 import MLF.Elab.Sigma (bubbleReorderTo)
 import MLF.Util.Graph (topoSortBy)

@@ -15,7 +15,7 @@ import Debug.Trace (trace)
 import MLF.Constraint.Types
 import MLF.Constraint.Solve (SolveResult(..))
 import qualified MLF.Binding.Tree as Binding
-import MLF.Constraint.Presolution.Plan.BindingUtil (bindingPathToRootLocal, firstGenAncestorFrom)
+import MLF.Constraint.BindingUtil (bindingPathToRootLocal, firstGenAncestorFrom)
 import MLF.Constraint.Presolution.Plan.BinderPlan (GaBindParentsInfo(..))
 import MLF.Constraint.Presolution.Plan.SchemeRoots (SchemeRootsPlan, buildSchemeRootsPlan)
 import MLF.Util.ElabError (ElabError(..), bindingToElab)

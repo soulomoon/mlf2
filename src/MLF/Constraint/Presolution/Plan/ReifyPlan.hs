@@ -20,10 +20,13 @@ import MLF.Constraint.Types
 import MLF.Constraint.Solve (SolveResult)
 import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Binding.Tree as Binding
-import MLF.Constraint.Presolution.Plan.BindingUtil (bindingScopeFor)
+import MLF.Constraint.Presolution.Plan.BinderHelpers (boundMentionsSelfAliasFor, isTargetSchemeBinderFor)
+import MLF.Constraint.BindingUtil (bindingScopeFor)
 import MLF.Constraint.Presolution.Plan.BinderPlan (GaBindParentsInfo(..))
+import MLF.Constraint.Presolution.Plan.Helpers (bindingScopeGen, hasExplicitBound)
 import MLF.Constraint.Presolution.Plan.Names (alphaName)
 import qualified MLF.Constraint.Presolution.Plan.SchemeRoots as SchemeRoots
+import MLF.Constraint.Presolution.Plan.Normalize (containsForall)
 import MLF.Reify.TypeOps (freeTypeVarsType)
 import MLF.Reify.Core
     ( reifyBoundWithNames
@@ -31,6 +34,7 @@ import MLF.Reify.Core
     )
 import MLF.Types.Elab (ElabType(..))
 import MLF.Util.ElabError (ElabError, bindingToElab)
+import MLF.Util.Names (parseNameId)
 
 data ReifyPlan = ReifyPlan
     { rpSubst :: IntMap.IntMap String
@@ -40,6 +44,12 @@ data ReifyPlan = ReifyPlan
     , rpTypeRootForReify :: NodeId
     , rpSubstForReify :: IntMap.IntMap String
     , rpSchemeTypeChoice :: SchemeTypeChoice
+    , rpBindingScopeGen :: NodeId -> Maybe GenNodeId
+    , rpHasExplicitBound :: NodeId -> Bool
+    , rpIsTargetSchemeBinder :: NodeId -> Bool
+    , rpBoundMentionsSelfAlias :: NodeId -> Bool
+    , rpContainsForall :: ElabType -> Bool
+    , rpParseNameId :: String -> Maybe Int
     }
 
 data SchemeTypeChoice = SchemeTypeChoice
@@ -51,11 +61,15 @@ data SchemeTypeChoice = SchemeTypeChoice
 
 data ReifyPlanInput = ReifyPlanInput
     { rpiConstraint :: Constraint
+    , rpiNodes :: IntMap.IntMap TyNode
     , rpiCanonical :: NodeId -> NodeId
     , rpiScopeRootC :: NodeRef
     , rpiScopeGen :: Maybe GenNodeId
     , rpiSchemeRootsPlan :: SchemeRoots.SchemeRootsPlan
+    , rpiTarget0 :: NodeId
+    , rpiTargetIsBaseLike :: Bool
     , rpiTargetBound :: Maybe NodeId
+    , rpiReachableFromWithBounds :: NodeId -> IntSet.IntSet
     , rpiBindParentsGa :: Maybe GaBindParentsInfo
     , rpiExtraNameStart :: Int
     , rpiOrderedExtra :: [Int]
@@ -231,6 +245,22 @@ buildReifyPlan ReifyPlanInput{..} =
                 , stcSchemeOwnerFromBodyIsAlias = schemeOwnerFromBodyIsAlias
                 , stcSchemeOwners = schemeOwners
                 }
+        bindingScopeGenLocal = bindingScopeGen rpiConstraint
+        hasExplicitBoundLocal = hasExplicitBound rpiCanonical rpiNodes rpiConstraint
+        isTargetSchemeBinderLocal =
+            isTargetSchemeBinderFor
+                rpiCanonical
+                rpiConstraint
+                rpiTarget0
+                rpiTargetIsBaseLike
+        boundMentionsSelfAliasLocal =
+            boundMentionsSelfAliasFor
+                rpiCanonical
+                rpiConstraint
+                rpiNodes
+                rpiGammaAlias
+                rpiNestedSchemeInteriorSet
+                rpiReachableFromWithBounds
     in ReifyPlan
         { rpSubst = substLocal
         , rpSubstBaseByKey = substBaseByKeyLocal
@@ -239,6 +269,12 @@ buildReifyPlan ReifyPlanInput{..} =
         , rpTypeRootForReify = typeRootForReifyLocal
         , rpSubstForReify = substForReifyLocal
         , rpSchemeTypeChoice = schemeTypeChoice
+        , rpBindingScopeGen = bindingScopeGenLocal
+        , rpHasExplicitBound = hasExplicitBoundLocal
+        , rpIsTargetSchemeBinder = isTargetSchemeBinderLocal
+        , rpBoundMentionsSelfAlias = boundMentionsSelfAliasLocal
+        , rpContainsForall = containsForall
+        , rpParseNameId = parseNameId
         }
 
 bindingFor
@@ -265,12 +301,12 @@ bindingFor env plan (name, nidInt) = do
             , rbeUniqueUnboundedName = uniqueUnboundedName
             , rbeResForReify = resForReify
             , rbeBindParentsGa = mbBindParentsGa
-            , rbeBindingScopeGen = bindingScopeGen
-            , rbeHasExplicitBound = hasExplicitBound
+            , rbeBindingScopeGen = bindingScopeGenFn
+            , rbeHasExplicitBound = hasExplicitBoundFn
             , rbeIsTargetSchemeBinder = isTargetSchemeBinder
             , rbeBoundMentionsSelfAlias = boundMentionsSelfAlias
-            , rbeContainsForall = containsForall
-            , rbeParseNameId = parseNameId
+            , rbeContainsForall = containsForallFn
+            , rbeParseNameId = parseNameIdFn
             , rbeFirstGenAncestor = firstGenAncestor
             , rbeTraceM = traceGeneralizeM
             } = env
@@ -388,18 +424,18 @@ bindingFor env plan (name, nidInt) = do
                 reifyBoundWithNamesOnConstraint (gbiBaseConstraint ga) (substForBoundBase binderKey) baseRoot
             _ -> reifyBoundWithNames resForReify substForBoundFiltered boundRoot
     let fallbackAliasFor nm =
-            case (uniqueUnboundedName, parseNameId nm) of
+            case (uniqueUnboundedName, parseNameIdFn nm) of
                 (Just fallbackName, Just k)
                     | boundIsLocalSchemeBody
                         && not (Set.member nm substNameSetForBound) ->
                         let nid = canonical (NodeId k)
-                        in case bindingScopeGen nid of
+                        in case bindingScopeGenFn nid of
                             Just gid | Just gid /= scopeGen -> Just fallbackName
                             Nothing | isNothing scopeGen -> Just fallbackName
                             _ -> Nothing
                 _ -> Nothing
         aliasNameFor nm =
-            case parseNameId nm of
+            case parseNameIdFn nm of
                 Just k ->
                     let keyC = getNodeId (canonical (NodeId k))
                         repKey = IntMap.findWithDefault keyC keyC gammaAlias
@@ -443,7 +479,7 @@ bindingFor env plan (name, nidInt) = do
         boundTy0Aliased = substAliasTy Set.empty boundTy0''
         extraBoundNames =
             let isAliasBound nm =
-                    case parseNameId nm of
+                    case parseNameIdFn nm of
                         Just k ->
                             let keyC = getNodeId (canonical (NodeId k))
                                 repKey = IntMap.findWithDefault keyC keyC gammaAlias
@@ -468,7 +504,7 @@ bindingFor env plan (name, nidInt) = do
             ++ " extraInfo="
             ++ show
                 [ ( nm
-                  , do nid <- parseNameId nm
+                  , do nid <- parseNameIdFn nm
                        let keyC = getNodeId (canonical (NodeId nid))
                        let baseM = IntMap.lookup keyC solvedToBasePref
                        let aliasM = IntMap.lookup keyC gammaAlias
@@ -517,13 +553,13 @@ bindingFor env plan (name, nidInt) = do
             else if boundIsLocalSchemeRoot || boundIsLocalSchemeBody
                 then isTargetSchemeBinder bNodeC
                 else
-                    hasExplicitBound bNodeC
+                    hasExplicitBoundFn bNodeC
                         || boundParentIsBinder
                         || boundIsSchemeRootNode
                         || case mbBoundNode of
                             Just bnd -> IntSet.member (getNodeId (canonical bnd)) binderSet
                             Nothing -> False
-                        || containsForall boundTy
+                        || containsForallFn boundTy
         mbBound =
             if IntSet.member (getNodeId bNodeC) aliasBinderBases
                 then

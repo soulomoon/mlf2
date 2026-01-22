@@ -25,22 +25,13 @@ import qualified MLF.Constraint.Solve as Solve
 import MLF.Constraint.Types
 import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Constraint.Presolution.Plan.BinderPlan (BinderPlan(..))
-import MLF.Constraint.Presolution.Plan.BinderHelpers
-    ( boundMentionsSelfAliasFor
-    , isTargetSchemeBinderFor
-    )
 import MLF.Constraint.Presolution.Plan.Context
     ( GaBindParents(..)
     , GeneralizeEnv(..)
     , GeneralizeCtx(..)
     , traceGeneralizeM
     )
-import MLF.Constraint.Presolution.Plan.Helpers
-    ( bindingScopeGen
-    , hasExplicitBound
-    )
-import MLF.Constraint.Presolution.Plan.Names (alphaName, parseNameId)
-import MLF.Constraint.Presolution.Plan.Normalize (containsForall)
+import MLF.Util.Names (alphaName)
 import MLF.Constraint.Presolution.Plan.Target (TypeRootPlan(..))
 import MLF.Constraint.Presolution.Plan.Finalize (FinalizeInput(..), finalizeScheme)
 import qualified MLF.Constraint.Presolution.Plan.ReifyPlan as Reify
@@ -165,14 +156,12 @@ applyGeneralizePlan plan reifyPlanWrapper = do
             , sriRootByBody = schemeRootByBody
             } = schemeRootInfo
         TypeRootPlan
-            { trTargetIsBaseLike = targetIsBaseLike
-            , trTypeRoot = typeRoot
+            { trTypeRoot = typeRoot
             } = typeRootPlan
         BinderPlan
             { bpBinderNames = binderNames
             , bpOrderedBinderIds = orderedBinders
             , bpGammaAlias = gammaAliasPlan
-            , bpNestedSchemeInteriorSet = nestedSchemeInteriorSetPlan
             , bpNamedUnderGaSet = namedUnderGaSetPlan
             , bpSolvedToBasePref = solvedToBasePrefPlan
             , bpAliasBinderBases = aliasBinderBasesPlan
@@ -186,6 +175,12 @@ applyGeneralizePlan plan reifyPlanWrapper = do
             { Reify.rpSubst = subst
             , Reify.rpSubstBaseByKey = substBaseByKey
             , Reify.rpSchemeTypeChoice = schemeTypeChoice
+            , Reify.rpBindingScopeGen = bindingScopeGenPlan
+            , Reify.rpHasExplicitBound = hasExplicitBoundPlan
+            , Reify.rpIsTargetSchemeBinder = isTargetSchemeBinderPlan
+            , Reify.rpBoundMentionsSelfAlias = boundMentionsSelfAliasPlan
+            , Reify.rpContainsForall = containsForallPlan
+            , Reify.rpParseNameId = parseNameIdPlan
             } = reifyPlan
         allowBoundTraversal =
             allowBoundTraversalFor schemeRootsPlan canonical scopeGen target0
@@ -210,18 +205,6 @@ applyGeneralizePlan plan reifyPlanWrapper = do
                 [nm] -> Just nm
                 _ -> Nothing
     let binderSet = IntSet.fromList orderedBinders
-        isTargetSchemeBinder =
-            isTargetSchemeBinderFor canonical constraint target0 targetIsBaseLike
-        boundMentionsSelfAlias =
-            boundMentionsSelfAliasFor
-                canonical
-                constraint
-                nodes
-                gammaAliasPlan
-                nestedSchemeInteriorSetPlan
-                reachableFromWithBounds
-        bindingScopeGen' = bindingScopeGen constraint
-        hasExplicitBound' = hasExplicitBound canonical nodes constraint
         bindingEnv =
             Reify.ReifyBindingEnv
                 { Reify.rbeConstraint = constraint
@@ -241,12 +224,12 @@ applyGeneralizePlan plan reifyPlanWrapper = do
                 , Reify.rbeUniqueUnboundedName = uniqueUnboundedName
                 , Reify.rbeResForReify = resForReify
                 , Reify.rbeBindParentsGa = mbBindParentsGaInfo
-                , Reify.rbeBindingScopeGen = bindingScopeGen'
-                , Reify.rbeHasExplicitBound = hasExplicitBound'
-                , Reify.rbeIsTargetSchemeBinder = isTargetSchemeBinder
-                , Reify.rbeBoundMentionsSelfAlias = boundMentionsSelfAlias
-                , Reify.rbeContainsForall = containsForall
-                , Reify.rbeParseNameId = parseNameId
+                , Reify.rbeBindingScopeGen = bindingScopeGenPlan
+                , Reify.rbeHasExplicitBound = hasExplicitBoundPlan
+                , Reify.rbeIsTargetSchemeBinder = isTargetSchemeBinderPlan
+                , Reify.rbeBoundMentionsSelfAlias = boundMentionsSelfAliasPlan
+                , Reify.rbeContainsForall = containsForallPlan
+                , Reify.rbeParseNameId = parseNameIdPlan
                 , Reify.rbeFirstGenAncestor = firstGenAncestorGa
                 , Reify.rbeTraceM = traceGeneralizeM env
                 }

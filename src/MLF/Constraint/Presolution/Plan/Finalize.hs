@@ -13,7 +13,7 @@ import qualified Data.Set as Set
 
 import MLF.Constraint.Types
 import qualified MLF.Constraint.VarStore as VarStore
-import MLF.Constraint.Presolution.Plan.BindingUtil
+import MLF.Constraint.BindingUtil
     ( bindingPathToRootLocal
     , firstGenAncestorFrom
     )

@@ -694,6 +694,7 @@ planReify _ plan = do
             , gpBindParents = bindParents
             , gpTargetPlan = targetPlan
             , gpSchemeRootsPlan = schemeRootsPlan
+            , gpReachableFromWithBounds = reachableFromWithBounds
             } = plan
         GeneralizeEnv
             { geConstraint = constraint
@@ -704,6 +705,7 @@ planReify _ plan = do
         GeneralizeCtx
             { gcScopeRootC = scopeRootC
             , gcScopeGen = scopeGen
+            , gcTarget0 = target0
             , gcBindParentsGaInfo = mbBindParentsGaInfo
             } = ctx
         TargetPlan
@@ -711,6 +713,7 @@ planReify _ plan = do
             } = targetPlan
         TypeRootPlan
             { trTypeRoot = typeRoot
+            , trTargetIsBaseLike = targetIsBaseLike
             } = typeRootPlan
         GammaPlan
             { gpSolvedToBasePref = solvedToBasePrefPlan
@@ -744,11 +747,15 @@ planReify _ plan = do
             Reify.buildReifyPlan
                 Reify.ReifyPlanInput
                     { Reify.rpiConstraint = constraint
+                    , Reify.rpiNodes = nodes
                     , Reify.rpiCanonical = canonical
                     , Reify.rpiScopeRootC = scopeRootC
                     , Reify.rpiScopeGen = scopeGen
                     , Reify.rpiSchemeRootsPlan = schemeRootsPlan
+                    , Reify.rpiTarget0 = target0
+                    , Reify.rpiTargetIsBaseLike = targetIsBaseLike
                     , Reify.rpiTargetBound = targetBound
+                    , Reify.rpiReachableFromWithBounds = reachableFromWithBounds
                     , Reify.rpiBindParentsGa = mbBindParentsGaInfo
                     , Reify.rpiExtraNameStart = length binderNames
                     , Reify.rpiOrderedExtra = orderedExtra

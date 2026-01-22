@@ -1,4 +1,4 @@
-module MLF.Constraint.Presolution.Plan.BindingUtil (
+module MLF.Constraint.BindingUtil (
     bindingScopeFor,
     bindingPathToRootLocal,
     firstGenAncestorFrom

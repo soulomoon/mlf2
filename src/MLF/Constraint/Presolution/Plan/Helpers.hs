@@ -18,7 +18,7 @@ import qualified Data.IntSet as IntSet
 
 import MLF.Constraint.Types
 import qualified MLF.Constraint.VarStore as VarStore
-import MLF.Constraint.Presolution.Plan.BindingUtil (bindingScopeFor)
+import MLF.Constraint.BindingUtil (bindingScopeFor)
 import MLF.Util.ElabError (ElabError)
 
 boundFlexChildrenUnder
