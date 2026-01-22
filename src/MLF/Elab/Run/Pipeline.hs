@@ -17,12 +17,14 @@ import MLF.Constraint.Acyclicity (checkAcyclicity)
 import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Presolution
     ( EdgeTrace(..)
+    , GeneralizePolicy
+    , policyAllowRigid
+    , policyKeepTargetAllowRigid
     , PresolutionPlanBuilder(..)
     , PresolutionResult(..)
     , computePresolution
     )
 import MLF.Constraint.Solve hiding (BindingTreeError, MissingNode)
-import qualified MLF.Constraint.Solve as Solve
 import MLF.Constraint.Types
     ( BoundRef(..)
     , EdgeId(..)
@@ -97,17 +99,16 @@ runPipelineElabChecked polySyms expr = do
 
 generalizeWithPlan
     :: PresolutionPlanBuilder
-    -> Bool
+    -> GeneralizePolicy
     -> GaBindParents
     -> SolveResult
     -> NodeRef
     -> NodeId
     -> Either ElabError (ElabScheme, IntMap.IntMap String)
-generalizeWithPlan planBuilder allowDropTarget bindParentsGa res scopeRoot targetNode =
+generalizeWithPlan planBuilder policy bindParentsGa res scopeRoot targetNode =
     generalizeAtWithBuilder
         planBuilder
-        allowDropTarget
-        True
+        policy
         (Just bindParentsGa)
         res
         scopeRoot
@@ -367,9 +368,12 @@ runPipelineElabWith genConstraints expr = do
                                         ()
                                 else ()
                         scopeRoot = scopeRootPre
-                    let allowDropTarget = not keepTarget
+                    let policy =
+                            if keepTarget
+                                then policyKeepTargetAllowRigid
+                                else policyAllowRigid
                     (sch0, subst0) <- firstShow
-                        (generalizeWithPlan planBuilder allowDropTarget bindParentsGa solvedForGen scopeRoot targetC)
+                        (generalizeWithPlan planBuilder policy bindParentsGa solvedForGen scopeRoot targetC)
                     let sch = sch0
                         subst = subst0
                         srcTy = schemeToType sch
@@ -605,9 +609,12 @@ runPipelineElabWith genConstraints expr = do
                                     annScopeRoot0 <- firstShow (bindingScopeRef (srConstraint solvedForGen) annTargetNode)
                                     let annScopeRootBase = preferGenScope (srConstraint solvedForGen) annScopeRoot0
                                         annScopeRoot = canonicalizeScopeRef solvedForGen (prRedirects pres) annScopeRootBase
-                                    let allowDropTargetAnn = not keepTarget
+                                    let policyAnn =
+                                            if keepTarget
+                                                then policyKeepTargetAllowRigid
+                                                else policyAllowRigid
                                     (annSch, _substAnn) <- firstShow
-                                        (generalizeWithPlan planBuilder allowDropTargetAnn bindParentsGa solvedForGen annScopeRoot annTargetNode)
+                                        (generalizeWithPlan planBuilder policyAnn bindParentsGa solvedForGen annScopeRoot annTargetNode)
                                     let annTy = schemeToType annSch
                                     pure (simplifyAnnotationType annTy)
 
@@ -1180,9 +1187,12 @@ runPipelineElabWith genConstraints expr = do
                                                 baseConstraint' = baseConstraint { cNodes = nodes' }
                                             in bindParentsGa { gaBaseConstraint = baseConstraint' }
                                         Nothing -> bindParentsGa
-                            let allowDropTargetFinal = not keepTargetFinal
+                            let policy =
+                                    if keepTargetFinal
+                                        then policyKeepTargetAllowRigid
+                                        else policyAllowRigid
                             (sch, _subst) <- firstShow
-                                (generalizeWithPlan planBuilder allowDropTargetFinal bindParentsGaFinal resFinalBounded scopeRoot targetC)
+                                (generalizeWithPlan planBuilder policy bindParentsGaFinal resFinalBounded scopeRoot targetC)
                             let debugFinal =
                                     if debugGaScopeEnabled
                                         then

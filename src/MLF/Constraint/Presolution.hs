@@ -13,8 +13,13 @@ module MLF.Constraint.Presolution (
     computePresolution,
     PresolutionResult(..),
     PresolutionPlanBuilder(..),
+    GeneralizePolicy(..),
+    policyDefault,
+    policyAllowRigid,
+    policyKeepTargetAllowRigid,
     defaultPlanBuilder,
     PresolutionError(..),
+    GaBindParents(..),
 
     -- * Internal types (exported for testing)
     PresolutionState(..),
@@ -51,7 +56,14 @@ import MLF.Constraint.Presolution.Core (
     runEdgeUnifyForTest,
     unifyAcyclicRawWithRaiseTrace
     )
-import MLF.Constraint.Presolution.Plan (buildGeneralizePlans)
+import MLF.Constraint.Presolution.Plan
+    ( GeneralizePolicy(..)
+    , policyDefault
+    , policyAllowRigid
+    , policyKeepTargetAllowRigid
+    , buildGeneralizePlans
+    )
+import MLF.Constraint.Presolution.Plan.Context (GaBindParents(..))
 
 defaultPlanBuilder :: PresolutionPlanBuilder
 defaultPlanBuilder = PresolutionPlanBuilder buildGeneralizePlans

@@ -30,6 +30,7 @@ import MLF.Util.Graph (topoSortBy)
 import MLF.Constraint.Solve hiding (BindingTreeError, MissingNode)
 import qualified MLF.Constraint.Solve as Solve (frWith)
 import MLF.Constraint.Presolution (EdgeTrace(..))
+import MLF.Constraint.Presolution (GeneralizePolicy, policyAllowRigid)
 import qualified MLF.Binding.Tree as Binding
 import MLF.Binding.Tree (checkBindingTree, checkNoGenFallback, checkSchemeClosureUnder, lookupBindParent)
 import qualified MLF.Constraint.VarStore as VarStore
@@ -243,8 +244,7 @@ contextToNodeBoundWithOrderKeys canonical keys c _namedSet root target = do
 
 -- | Translate a recorded per-edge graph witness to an xMLF instantiation.
 type GeneralizeAtWith =
-    Bool
-    -> Bool
+    GeneralizePolicy
     -> Maybe GaBindParents
     -> SolveResult
     -> NodeRef
@@ -418,8 +418,8 @@ phiFromEdgeWitnessWithTrace generalizeAtWith res mbGaParents mSchemeInfo mTrace 
         scopeRoot <- instScopeRoot root0
         (sch, subst) <-
             case mbGaParents of
-                Nothing -> generalizeAtWith True True Nothing res scopeRoot root0
-                Just ga -> generalizeAtWith True True (Just ga) res scopeRoot root0
+                Nothing -> generalizeAtWith policyAllowRigid Nothing res scopeRoot root0
+                Just ga -> generalizeAtWith policyAllowRigid (Just ga) res scopeRoot root0
         pure SchemeInfo { siScheme = sch, siSubst = subst }
 
     instScopeRoot :: NodeId -> Either ElabError NodeRef

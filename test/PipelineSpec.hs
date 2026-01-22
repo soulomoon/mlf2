@@ -32,8 +32,8 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                             case Binding.bindingRoots (srConstraint res) of
                                 [GenRef gid] -> genRef gid
                                 roots -> error ("PipelineSpec: unexpected binding roots " ++ show roots)
-                    let generalizeAt = generalizeAtWithBuilder defaultPlanBuilder True False Nothing
-                    in case generalizeAt res scopeRoot root of
+                    let generalizeAt = generalizeAtWithBuilder defaultPlanBuilder policyDefault Nothing
+                    case generalizeAt res scopeRoot root of
                         Right (Forall binds ty, _subst) -> do
                             binds `shouldBe` []
                             let tyStr = pretty ty
@@ -52,8 +52,8 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                  Right (res, ann) -> do
                      case ann of
                          ALet _ schemeGen schemeRoot _ _ _ _ _ -> do
-                             let generalizeAt = generalizeAtWithBuilder defaultPlanBuilder True False Nothing
-                             in case generalizeAt res (genRef schemeGen) schemeRoot of
+                             let generalizeAt = generalizeAtWithBuilder defaultPlanBuilder policyDefault Nothing
+                             case generalizeAt res (genRef schemeGen) schemeRoot of
                                  Right scheme -> show scheme `shouldSatisfy` ("Forall" `isInfixOf`)
                                  Left err -> expectationFailure $ "Generalize error: " ++ show err
                          _ -> expectationFailure "Expected ALet annotation"

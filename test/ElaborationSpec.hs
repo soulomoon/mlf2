@@ -15,14 +15,34 @@ import qualified MLF.Binding.Tree as Binding
 import MLF.Frontend.ConstraintGen (ConstraintError, ConstraintResult(..), generateConstraints)
 import MLF.Constraint.Normalize (normalize)
 import MLF.Constraint.Acyclicity (checkAcyclicity)
-import MLF.Constraint.Presolution (PresolutionResult(..), EdgeTrace(..), computePresolution, defaultPlanBuilder)
+import MLF.Constraint.Presolution
+    ( PresolutionResult(..)
+    , EdgeTrace(..)
+    , GeneralizePolicy
+    , GaBindParents
+    , computePresolution
+    , defaultPlanBuilder
+    , policyDefault
+    )
 import MLF.Constraint.Solve (SolveResult(..), solveUnify)
 import qualified MLF.Constraint.Solve as Solve (frWith)
 import SpecUtil (bindParentsFromPairs, collectVarNodes, emptyConstraint, requireRight, rootedConstraint)
 
+generalizeAtWith
+    :: GeneralizePolicy
+    -> Maybe GaBindParents
+    -> SolveResult
+    -> NodeRef
+    -> NodeId
+    -> Either Elab.ElabError (Elab.ElabScheme, IntMap.IntMap String)
 generalizeAtWith = Elab.generalizeAtWithBuilder defaultPlanBuilder
 
-generalizeAt = generalizeAtWith True False Nothing
+generalizeAt
+    :: SolveResult
+    -> NodeRef
+    -> NodeId
+    -> Either Elab.ElabError (Elab.ElabScheme, IntMap.IntMap String)
+generalizeAt = generalizeAtWith policyDefault Nothing
 
 requirePipeline :: Expr -> IO (Elab.ElabTerm, Elab.ElabType)
 requirePipeline = requireRight . Elab.runPipelineElab Set.empty

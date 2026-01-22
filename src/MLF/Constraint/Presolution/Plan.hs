@@ -1,4 +1,8 @@
 module MLF.Constraint.Presolution.Plan (
+    GeneralizePolicy(..),
+    policyDefault,
+    policyAllowRigid,
+    policyKeepTargetAllowRigid,
     GeneralizePlan(..),
     ReifyPlan(..),
     buildGeneralizePlans
@@ -64,13 +68,38 @@ import MLF.Util.ElabError (ElabError(..), bindingToElab)
 import MLF.Util.Graph (reachableFrom, reachableFromStop)
 import MLF.Frontend.ConstraintGen (AnnExpr)
 
+data GeneralizePolicy = GeneralizePolicy
+    { gpInlineAliasTarget :: Bool
+    , gpIncludeRigidBinders :: Bool
+    } deriving (Eq, Show)
+
+policyDefault :: GeneralizePolicy
+policyDefault =
+    GeneralizePolicy
+        { gpInlineAliasTarget = True
+        , gpIncludeRigidBinders = False
+        }
+
+policyAllowRigid :: GeneralizePolicy
+policyAllowRigid =
+    GeneralizePolicy
+        { gpInlineAliasTarget = True
+        , gpIncludeRigidBinders = True
+        }
+
+policyKeepTargetAllowRigid :: GeneralizePolicy
+policyKeepTargetAllowRigid =
+    GeneralizePolicy
+        { gpInlineAliasTarget = False
+        , gpIncludeRigidBinders = True
+        }
+
 data PresolutionEnv = PresolutionEnv
     { peConstraint :: Constraint
     , peSolveResult :: SolveResult
     , peCanonical :: NodeId -> NodeId
     , peBindParents :: BindParents
-    , peAllowDropTarget :: Bool
-    , peAllowRigidBinders :: Bool
+    , pePolicy :: GeneralizePolicy
     , peBindParentsGa :: Maybe GaBindParents
     , peScopeRoot :: NodeRef
     , peTargetNode :: NodeId
@@ -85,8 +114,6 @@ data GeneralizePlan = GeneralizePlan
     , gpDropPlan :: DropPlan
     , gpTypeRootPlan :: TypeRootPlan
     , gpBinderPlan :: BinderPlan
-    , gpAllowDropTarget :: Bool
-    , gpAllowRigidBinders :: Bool
     , gpScopeSchemeRoots :: IntSet.IntSet
     , gpScopeHasStructuralScheme :: Bool
     , gpBinders0 :: [NodeId]
@@ -107,8 +134,7 @@ planGeneralize env _ann = planGeneralizeAt env
 planGeneralizeAt :: PresolutionEnv -> Either ElabError GeneralizePlan
 planGeneralizeAt PresolutionEnv
     { peSolveResult = res
-    , peAllowDropTarget = allowDropTarget
-    , peAllowRigidBinders = allowRigidBinders
+    , pePolicy = policy
     , peBindParentsGa = mbBindParentsGa
     , peScopeRoot = scopeRoot
     , peTargetNode = targetNode
@@ -121,6 +147,8 @@ planGeneralizeAt PresolutionEnv
         isTyVarKey = geIsTyVarKey env
         isTyForallKey = geIsTyForallKey env
         isBaseLikeKey = geIsBaseLikeKey env
+        allowDropTarget = gpInlineAliasTarget policy
+        allowRigidBinders = gpIncludeRigidBinders policy
     bindParents0 <- bindingToElab (Binding.canonicalizeBindParentsUnder canonical constraint)
     let bindParentsSoft = softenBindParents canonical constraint bindParents0
     let _ =
@@ -670,8 +698,6 @@ planGeneralizeAt PresolutionEnv
         , gpDropPlan = dropPlan
         , gpTypeRootPlan = typeRootPlan
         , gpBinderPlan = binderPlan
-        , gpAllowDropTarget = allowDropTarget
-        , gpAllowRigidBinders = allowRigidBinders
         , gpScopeSchemeRoots = scopeSchemeRoots
         , gpScopeHasStructuralScheme = scopeHasStructuralScheme
         , gpBinders0 = binders0
@@ -788,13 +814,12 @@ planReify _ plan = do
 
 buildGeneralizePlans
     :: SolveResult
-    -> Bool
-    -> Bool
+    -> GeneralizePolicy
     -> Maybe GaBindParents
     -> NodeRef
     -> NodeId
     -> Either ElabError (GeneralizePlan, ReifyPlan)
-buildGeneralizePlans res allowDropTarget allowRigidBinders mbBindParentsGa scopeRoot targetNode = do
+buildGeneralizePlans res policy mbBindParentsGa scopeRoot targetNode = do
     let constraint = srConstraint res
         canonical = Solve.frWith (srUnionFind res)
         presEnv =
@@ -803,8 +828,7 @@ buildGeneralizePlans res allowDropTarget allowRigidBinders mbBindParentsGa scope
                 , peSolveResult = res
                 , peCanonical = canonical
                 , peBindParents = cBindParents constraint
-                , peAllowDropTarget = allowDropTarget
-                , peAllowRigidBinders = allowRigidBinders
+                , pePolicy = policy
                 , peBindParentsGa = mbBindParentsGa
                 , peScopeRoot = scopeRoot
                 , peTargetNode = targetNode

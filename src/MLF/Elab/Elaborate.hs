@@ -31,12 +31,17 @@ import qualified MLF.Elab.Inst as Inst
 import MLF.Reify.Core (reifyBoundWithNames, reifyType, reifyTypeWithNames, reifyTypeWithNamesNoFallback)
 import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Constraint.Solve as Solve (frWith)
-import MLF.Constraint.Presolution (EdgeTrace, etBinderArgs)
+import MLF.Constraint.Presolution
+    ( EdgeTrace
+    , GeneralizePolicy
+    , policyAllowRigid
+    , policyKeepTargetAllowRigid
+    , etBinderArgs
+    )
 import MLF.Frontend.ConstraintGen.Types (AnnExpr(..), AnnExprF(..))
 
 type GeneralizeAtWith =
-    Bool
-    -> Bool
+    GeneralizePolicy
     -> Maybe GaBindParents
     -> SolveResult
     -> NodeRef
@@ -290,7 +295,7 @@ elaborateWithScope generalizeAtWith resPhi resReify resGen gaParents edgeWitness
                             ()
                     let targetC = schemeBodyTarget resGen schemeRootId
                     (sch0, subst0) <-
-                        generalizeAtWith True True (Just gaParents) resGen scopeRoot targetC
+                        generalizeAtWith policyAllowRigid (Just gaParents) resGen scopeRoot targetC
                     case debugElabGeneralize
                         ("elaborate let: scheme0=" ++ show sch0
                             ++ " subst0=" ++ show subst0
@@ -317,7 +322,7 @@ elaborateWithScope generalizeAtWith resPhi resReify resGen gaParents edgeWitness
                                 _ -> False
                     (sch, subst) <-
                         if needsRetry
-                            then generalizeAtWith False True (Just gaParents) resGen scopeRoot targetC
+                            then generalizeAtWith policyKeepTargetAllowRigid (Just gaParents) resGen scopeRoot targetC
                             else pure (sch0, subst0)
                     case debugElabGeneralize
                         ("elaborate let: scheme=" ++ show sch

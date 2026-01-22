@@ -11,6 +11,7 @@ import MLF.Constraint.Presolution.Plan
     ( GeneralizePlan(..)
     , ReifyPlan(..)
     )
+import MLF.Constraint.Solve (SolveResult(..))
 import MLF.Constraint.Types
 import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Constraint.Presolution.Plan.BinderPlan (BinderPlan(..))
@@ -60,7 +61,6 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
             , geNodes = nodes
             , geCanonical = canonical
             , geBindParentsGa = mbBindParentsGa
-            , geRes = res
             } = env
         GeneralizeCtx
             { gcTarget0 = target0

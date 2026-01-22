@@ -10,7 +10,12 @@ import qualified Data.IntSet as IntSet
 
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.Canonicalize as Canonicalize
-import MLF.Constraint.Presolution (EdgeTrace(..), PresolutionPlanBuilder(..))
+import MLF.Constraint.Presolution
+    ( EdgeTrace(..)
+    , PresolutionPlanBuilder(..)
+    , GeneralizePolicy
+    , policyKeepTargetAllowRigid
+    )
 import MLF.Constraint.Solve (SolveResult, frWith, srConstraint, srUnionFind)
 import MLF.Constraint.Types
     ( BindFlag(..)
@@ -1371,17 +1376,16 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
 
 generalizeAtWithBuilder
     :: PresolutionPlanBuilder
-    -> Bool
-    -> Bool
+    -> GeneralizePolicy
     -> Maybe GaBindParents
     -> SolveResult
     -> NodeRef
     -> NodeId
     -> Either ElabError (ElabScheme, IntMap.IntMap String)
-generalizeAtWithBuilder planBuilder allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot targetNode =
+generalizeAtWithBuilder planBuilder policy mbBindParentsGa res scopeRoot targetNode =
     let PresolutionPlanBuilder buildPlans = planBuilder
-        go allowDrop allowRigid mbGa res' scope target = do
-            (genPlan, reifyPlan) <- buildPlans res' allowDrop allowRigid mbGa scope target
-            let fallback scope' target' = fst <$> go False True mbGa res' scope' target'
+        go policy' mbGa res' scope target = do
+            (genPlan, reifyPlan) <- buildPlans res' policy' mbGa scope target
+            let fallback scope' target' = fst <$> go policyKeepTargetAllowRigid mbGa res' scope' target'
             applyGeneralizePlan fallback genPlan reifyPlan
-    in go allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot targetNode
+    in go policy mbBindParentsGa res scopeRoot targetNode
