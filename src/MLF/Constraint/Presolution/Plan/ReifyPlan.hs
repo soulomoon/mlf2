@@ -1,7 +1,8 @@
 {-# LANGUAGE RecordWildCards #-}
 
-module MLF.Elab.Generalize.ReifyPlan (
+module MLF.Constraint.Presolution.Plan.ReifyPlan (
     ReifyPlan(..),
+    SchemeTypeChoice(..),
     ReifyPlanInput(..),
     buildReifyPlan,
     ReifyBindingEnv(..),
@@ -19,14 +20,17 @@ import MLF.Constraint.Types
 import MLF.Constraint.Solve (SolveResult)
 import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Binding.Tree as Binding
-import MLF.Elab.Generalize.BinderPlan (GaBindParentsInfo(..))
-import MLF.Elab.Generalize.Names (alphaName)
-import MLF.Elab.TypeOps (freeTypeVarsType)
-import MLF.Elab.Reify
+import MLF.Constraint.Presolution.Plan.BindingUtil (bindingScopeFor)
+import MLF.Constraint.Presolution.Plan.BinderPlan (GaBindParentsInfo(..))
+import MLF.Constraint.Presolution.Plan.Names (alphaName)
+import qualified MLF.Constraint.Presolution.Plan.SchemeRoots as SchemeRoots
+import MLF.Reify.TypeOps (freeTypeVarsType)
+import MLF.Reify.Core
     ( reifyBoundWithNames
     , reifyBoundWithNamesOnConstraint
     )
-import MLF.Elab.Types
+import MLF.Types.Elab (ElabType(..))
+import MLF.Util.ElabError (ElabError, bindingToElab)
 
 data ReifyPlan = ReifyPlan
     { rpSubst :: IntMap.IntMap String
@@ -35,10 +39,23 @@ data ReifyPlan = ReifyPlan
     , rpSubstForBoundBase :: Int -> IntMap.IntMap String
     , rpTypeRootForReify :: NodeId
     , rpSubstForReify :: IntMap.IntMap String
+    , rpSchemeTypeChoice :: SchemeTypeChoice
+    }
+
+data SchemeTypeChoice = SchemeTypeChoice
+    { stcUseSchemeType :: Bool
+    , stcSchemeOwnerFromBody :: Maybe GenNodeId
+    , stcSchemeOwnerFromBodyIsAlias :: Bool
+    , stcSchemeOwners :: [GenNodeId]
     }
 
 data ReifyPlanInput = ReifyPlanInput
-    { rpiCanonical :: NodeId -> NodeId
+    { rpiConstraint :: Constraint
+    , rpiCanonical :: NodeId -> NodeId
+    , rpiScopeRootC :: NodeRef
+    , rpiScopeGen :: Maybe GenNodeId
+    , rpiSchemeRootsPlan :: SchemeRoots.SchemeRootsPlan
+    , rpiTargetBound :: Maybe NodeId
     , rpiBindParentsGa :: Maybe GaBindParentsInfo
     , rpiExtraNameStart :: Int
     , rpiOrderedExtra :: [Int]
@@ -169,6 +186,51 @@ buildReifyPlan ReifyPlanInput{..} =
                                 (baseN, substBaseByKeyLocal)
                         _ -> (rpiTypeRoot, substLocal)
                 Nothing -> (rpiTypeRoot, substLocal)
+        typeRootC = rpiCanonical rpiTypeRoot
+        (schemeOwnerFromBody, schemeOwnerFromBodyIsAlias) =
+            SchemeRoots.schemeOwnerFromBody rpiSchemeRootsPlan rpiSolvedToBasePref typeRootC
+        ownersByRoot =
+            [ gnId gen
+            | gen <- IntMap.elems (cGenNodes rpiConstraint)
+            , any (\root -> rpiCanonical root == typeRootC) (gnSchemes gen)
+            ]
+        schemeOwners =
+            maybe ownersByRoot (\gid -> gid : ownersByRoot) schemeOwnerFromBody
+        typeInScope =
+            case rpiScopeRootC of
+                GenRef gid ->
+                    bindingScopeFor rpiConstraint (typeRef typeRootC) == Just gid
+                _ -> False
+        typeInScopeAdjusted =
+            case (rpiScopeGen, schemeOwnerFromBody) of
+                (Just gid, Just owner)
+                    | owner /= gid -> False
+                _ -> typeInScope
+        useSchemeType =
+            case (rpiScopeRootC, rpiScopeGen, schemeOwnerFromBody) of
+                (GenRef _, Just gid, Just owner)
+                    | owner /= gid -> True
+                (GenRef _, Just gid, _) ->
+                    not typeInScopeAdjusted
+                        && not (null schemeOwners)
+                        && not (gid `elem` schemeOwners)
+                _ -> False
+        typeRootIsTargetBound =
+            case rpiTargetBound of
+                Just bnd -> rpiCanonical bnd == typeRootC
+                Nothing -> False
+        useSchemeTypeAdjusted =
+            case (schemeOwnerFromBody, rpiScopeGen) of
+                (Just owner, Just gid)
+                    | owner /= gid && not typeRootIsTargetBound -> False
+                _ -> useSchemeType
+        schemeTypeChoice =
+            SchemeTypeChoice
+                { stcUseSchemeType = useSchemeTypeAdjusted
+                , stcSchemeOwnerFromBody = schemeOwnerFromBody
+                , stcSchemeOwnerFromBodyIsAlias = schemeOwnerFromBodyIsAlias
+                , stcSchemeOwners = schemeOwners
+                }
     in ReifyPlan
         { rpSubst = substLocal
         , rpSubstBaseByKey = substBaseByKeyLocal
@@ -176,6 +238,7 @@ buildReifyPlan ReifyPlanInput{..} =
         , rpSubstForBoundBase = substForBoundBaseLocal
         , rpTypeRootForReify = typeRootForReifyLocal
         , rpSubstForReify = substForReifyLocal
+        , rpSchemeTypeChoice = schemeTypeChoice
         }
 
 bindingFor

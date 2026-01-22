@@ -61,7 +61,7 @@ import MLF.Elab.Generalize
     ( GaBindParents(..)
     , applyGeneralizePlan
     )
-import MLF.Elab.Generalize.Names (parseNameId)
+import MLF.Constraint.Presolution.Plan.Names (parseNameId)
 import MLF.Elab.Inst (applyInstantiation, schemeToType)
 import MLF.Elab.Reify (reifyType, reifyTypeWithNamesNoFallbackOnConstraint)
 import MLF.Elab.Phi (phiFromEdgeWitnessWithTrace)

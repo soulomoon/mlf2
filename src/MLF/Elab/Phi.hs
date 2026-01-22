@@ -12,7 +12,7 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
-import Data.List (elemIndex, findIndex, nub, sortBy)
+import Data.List (elemIndex, findIndex, sortBy)
 import Data.Maybe (listToMaybe, mapMaybe)
 import Text.Read (readMaybe)
 
@@ -23,7 +23,7 @@ import MLF.Elab.Types
 import MLF.Elab.TypeOps (freeTypeVarsList, inlineBaseBoundsType, matchType)
 import MLF.Elab.Inst (applyInstantiation, composeInst, instMany, schemeToType, splitForalls)
 import MLF.Elab.Generalize (GaBindParents(..), generalizeAtAllowRigid, generalizeAtAllowRigidWithBindParents)
-import MLF.Elab.Generalize.BindingUtil (bindingPathToRootLocal)
+import MLF.Constraint.Presolution.Plan.BindingUtil (bindingPathToRootLocal)
 import MLF.Elab.Reify (namedNodes, reifyBoundWithNames, reifyType)
 import MLF.Elab.Sigma (bubbleReorderTo)
 import MLF.Elab.Util (topoSortBy)

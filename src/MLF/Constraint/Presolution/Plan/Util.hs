@@ -1,4 +1,4 @@
-module MLF.Elab.Generalize.Util (
+module MLF.Constraint.Presolution.Plan.Util (
     boundRootWith,
     firstSchemeRootAncestorWith
 ) where

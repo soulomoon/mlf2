@@ -1,6 +1,6 @@
 {-# LANGUAGE RecordWildCards #-}
 
-module MLF.Elab.Generalize.BinderPlan (
+module MLF.Constraint.Presolution.Plan.BinderPlan (
     GaBindParentsInfo(..),
     BinderPlanInput(..),
     BinderPlan(..),
@@ -13,12 +13,13 @@ import qualified Data.Set as Set
 import Debug.Trace (trace)
 
 import MLF.Constraint.Types
-import MLF.Elab.Types
-import MLF.Elab.Generalize.Util (boundRootWith)
-import MLF.Elab.Generalize.Names (alphaName)
-import MLF.Elab.FreeNames (freeNamesFrom)
-import MLF.Elab.Reify (reifyBoundWithNames, reifyBoundWithNamesOnConstraint)
-import MLF.Elab.Util (reachableFrom)
+import MLF.Types.Elab (ElabType(..))
+import MLF.Util.ElabError (ElabError)
+import MLF.Constraint.Presolution.Plan.Util (boundRootWith)
+import MLF.Constraint.Presolution.Plan.Names (alphaName)
+import MLF.Reify.Core (reifyBoundWithNames, reifyBoundWithNamesOnConstraint)
+import MLF.Reify.TypeOps (freeTypeVarsFrom)
+import MLF.Util.Graph (reachableFrom)
 import MLF.Constraint.Solve (SolveResult)
 import qualified MLF.Constraint.VarStore as VarStore
 
@@ -627,7 +628,7 @@ buildBinderPlan BinderPlanInput{..} = do
                         in case VarStore.lookupVarBound baseConstraint baseK of
                             Nothing -> do
                                 let boundTy = TVar (nameForDep k)
-                                    freeNames = Set.toList (freeNamesFrom Set.empty boundTy)
+                                    freeNames = Set.toList (freeTypeVarsFrom Set.empty boundTy)
                                     deps =
                                         [ dep
                                         | name <- freeNames
@@ -640,7 +641,7 @@ buildBinderPlan BinderPlanInput{..} = do
                                 let bndRoot = boundRootForDepsBase bnd
                                 boundTy <- reifyBoundWithNamesOnConstraint baseConstraint substDepsBase bndRoot
                                 let bndRootKey = getNodeId bndRoot
-                                    freeNames0 = Set.toList (freeNamesFrom Set.empty boundTy)
+                                    freeNames0 = Set.toList (freeTypeVarsFrom Set.empty boundTy)
                                     freeNames =
                                         case (boundTy, IntMap.lookup bndRootKey baseNodes, VarStore.lookupVarBound baseConstraint bndRoot) of
                                             (TBottom, Just TyVar{}, Nothing) ->
@@ -671,7 +672,7 @@ buildBinderPlan BinderPlanInput{..} = do
                     case VarStore.lookupVarBound constraint (canonical (NodeId k)) of
                         Nothing -> do
                             let boundTy = TVar (nameForDep k)
-                                freeNames = Set.toList (freeNamesFrom Set.empty boundTy)
+                                freeNames = Set.toList (freeTypeVarsFrom Set.empty boundTy)
                                 deps =
                                     [ dep
                                     | name <- freeNames
@@ -685,7 +686,7 @@ buildBinderPlan BinderPlanInput{..} = do
                             boundTy <- reifyBoundWithNames resForReify subst bndRoot
                             let bndRootC = canonical bndRoot
                                 bndRootKey = getNodeId bndRootC
-                                freeNames0 = Set.toList (freeNamesFrom Set.empty boundTy)
+                                freeNames0 = Set.toList (freeTypeVarsFrom Set.empty boundTy)
                                 freeNames =
                                     case (boundTy, IntMap.lookup bndRootKey nodes, VarStore.lookupVarBound constraint bndRootC) of
                                         (TBottom, Just TyVar{}, Nothing) ->

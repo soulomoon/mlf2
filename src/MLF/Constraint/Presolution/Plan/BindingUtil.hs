@@ -1,4 +1,4 @@
-module MLF.Elab.Generalize.BindingUtil (
+module MLF.Constraint.Presolution.Plan.BindingUtil (
     bindingScopeFor,
     bindingPathToRootLocal,
     firstGenAncestorFrom
@@ -8,7 +8,7 @@ import Data.Maybe (listToMaybe)
 
 import MLF.Constraint.Types
 import qualified MLF.Binding.Tree as Binding
-import MLF.Elab.Types (ElabError(..))
+import MLF.Util.ElabError (ElabError(..))
 
 bindingScopeFor :: Constraint -> NodeRef -> Maybe GenNodeId
 bindingScopeFor constraint ref =

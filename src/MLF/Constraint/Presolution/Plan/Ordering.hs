@@ -1,4 +1,4 @@
-module MLF.Elab.Generalize.Ordering (
+module MLF.Constraint.Presolution.Plan.Ordering (
     orderBinderCandidates
 ) where
 
@@ -7,9 +7,9 @@ import qualified Data.IntSet as IntSet
 import Debug.Trace (trace)
 
 import MLF.Constraint.Types
-import MLF.Elab.Types (ElabError)
-import MLF.Elab.Generalize.BinderPlan (GaBindParentsInfo(..))
-import MLF.Elab.Util (topoSortBy)
+import MLF.Util.ElabError (ElabError)
+import MLF.Constraint.Presolution.Plan.BinderPlan (GaBindParentsInfo(..))
+import MLF.Util.Graph (topoSortBy)
 import qualified MLF.Util.Order as Order
 
 traceOrderingEnabledM :: Bool -> String -> Either ElabError ()

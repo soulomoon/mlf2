@@ -1,4 +1,4 @@
-module MLF.Elab.Generalize.Normalize (
+module MLF.Constraint.Presolution.Plan.Normalize (
     substType,
     simplifySchemeBindings,
     promoteArrowAlias,
@@ -11,9 +11,8 @@ module MLF.Elab.Generalize.Normalize (
 import Data.Functor.Foldable (cata)
 import qualified Data.Set as Set
 
-import MLF.Elab.FreeNames (freeNamesFrom)
-import MLF.Elab.Types
-import MLF.Elab.TypeOps (substTypeSimple)
+import MLF.Reify.TypeOps (freeTypeVarsFrom, substTypeSimple)
+import MLF.Types.Elab (ElabType(..), ElabTypeF(..))
 
 substType :: String -> ElabType -> ElabType -> ElabType
 substType = substTypeSimple
@@ -36,18 +35,18 @@ simplifySchemeBindings inlineBaseBounds namedBinders binds ty =
                 let (rest', body') = simplify binders rest body
                 in ((v, Nothing) : rest', body')
             Just bound ->
-                let bodyUsesV = Set.member v (freeNamesFrom Set.empty body)
+                let bodyUsesV = Set.member v (freeTypeVarsFrom Set.empty body)
                     restUsesV =
                         Set.member v $
                             Set.unions
-                                [ freeNamesFrom Set.empty b
+                                [ freeTypeVarsFrom Set.empty b
                                 | (_, Just b) <- rest
                                 ]
                 in if not bodyUsesV && not restUsesV
                     then simplify (Set.delete v binders) rest body
                     else case body of
                     TVar v' | v' == v ->
-                        let freeBound = freeNamesFrom Set.empty bound
+                        let freeBound = freeTypeVarsFrom Set.empty bound
                             boundMentionsSelf = Set.member v freeBound
                             boundDeps = Set.delete v freeBound
                             boundIsBase = isBaseBound bound
@@ -76,7 +75,7 @@ simplifySchemeBindings inlineBaseBounds namedBinders binds ty =
                                 let (rest', body') = simplify binders rest body
                                 in ((v, Just bound) : rest', body')
                     _ ->
-                        let freeBound = freeNamesFrom Set.empty bound
+                        let freeBound = freeTypeVarsFrom Set.empty bound
                             boundMentionsSelf = Set.member v freeBound
                             boundDeps = Set.delete v freeBound
                             dependsOnBinders =

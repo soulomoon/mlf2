@@ -6,7 +6,6 @@ module MLF.Elab.Run.Generalize (
 
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import Data.Maybe (listToMaybe)
 
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.Canonicalize as Canonicalize
@@ -14,7 +13,6 @@ import MLF.Constraint.Presolution (EdgeTrace(..))
 import MLF.Constraint.Solve (SolveResult, frWith, srConstraint, srUnionFind)
 import MLF.Constraint.Types
     ( BindFlag(..)
-    , BindingError(..)
     , Constraint
     , GenNode(..)
     , GenNodeId(..)
@@ -35,10 +33,9 @@ import MLF.Constraint.Types
     )
 import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Elab.Generalize (GaBindParents(..))
-import MLF.Elab.Generalize.BindingUtil (bindingPathToRootLocal, firstGenAncestorFrom)
+import MLF.Constraint.Presolution.Plan.BindingUtil (bindingPathToRootLocal, firstGenAncestorFrom)
 import MLF.Elab.Run.Debug (debugGaScope)
 import MLF.Elab.Run.Util (chaseRedirects)
-import MLF.Elab.Types (ElabError(..))
 import MLF.Elab.Util (reachableFromStop)
 import MLF.Frontend.ConstraintGen (AnnExpr)
 

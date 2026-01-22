@@ -23,6 +23,17 @@ This roadmap outlines the implementation of the full MLF pipeline as described i
 *   **§3 Elaboration:** The translation process from eMLF to xMLF based on presolutions.
 *   **§1.4 Reduction:** Small-step reduction semantics for xMLF.
 
+### Thesis-faithful pipeline structure (target)
+
+1. **Frontend (syntax → constraints)**: parse/desugar/annotate; generate constraints (expansion vars, scopes, binding info).
+2. **Constraint normalization (graph form)**: normalize constraints; compute structural metadata (binding edges, ordering edges, interiors).
+3. **Solving / presolution (choose expansions + witnesses)**: solve constraints, pick expansions, and decide **generalization/binders, dependency order, alias policies**; extract Ω/Φ witnesses and expansion recipes.
+4. **Reify / apply (elaboration)**: apply presolution artifacts to the annotated term/type; convert expansions to instantiations; apply Ω/Φ steps; **no new solving decisions**.
+
+This roadmap assumes (and future refactors target) a *thin* Elab layer that consumes explicit plans from presolution rather than recomputing them.
+
+**Current vs target:** The current codebase already matches the Frontend/Normalize/Solve structure and records presolution witnesses, but generalization planning (binder selection, ordering, alias policy, scheme-root policy) still lives in `MLF.Elab.Generalize`. The target structure moves that planning into presolution (e.g., `MLF.Constraint.Presolution.Plan`) so Elab only applies precomputed plans.
+
 ⸻
 
 ## Phase 0: Core Definitions (xMLF & Graphic Constraints)
@@ -68,6 +79,7 @@ These phases implement the constraint solver. While `papers/these-finale-english
 3.  **Compute Presolution (`ρ`):**
     *   Topologically sort instantiation edges.
     *   For each edge, determine the **minimal expansion** (either `Inst` or `∀` introduction) required to satisfy the constraint.
+    *   Decide **generalization plan** metadata (binder selection, ordering dependencies, alias policy) so elaboration can apply it without new decisions.
     *   **Output (in this repo):**
         * `MLF.Constraint.Presolution.PresolutionResult.prEdgeExpansions` (per-edge expansion decisions), and
         * `MLF.Constraint.Presolution.PresolutionResult.prEdgeWitnesses` (per-edge witnesses:
@@ -92,7 +104,7 @@ Re-traverse the original AST `a` and transform it into an xMLF term `a'` using t
     *   Result shape: `(a1 [φ]) a2` (or just `a1 a2` if `φ` is identity).
 
 2.  **Let-bindings `let x = a1 in a2`:**
-    *   Compute a polymorphic scheme for the binder via `generalizeAt` using the solved graph’s binding tree and instance bounds.
+    *   Apply the **presolution generalization plan** (binder selection + ordering + alias policy) to compute the scheme.
     *   Wrap the RHS in explicit type abstractions `Λ(α ≥ τ)` for the scheme binders.
     *   Result shape: `let x : σ = (Λ... a1') in a2'`.
 
@@ -101,7 +113,7 @@ Re-traverse the original AST `a` and transform it into an xMLF term `a'` using t
     *   Result: `λ(x : τ) a'`.
 
 **Key Deliverable (in this repo):**
-`MLF.Elab.Pipeline.elaborate` takes the solved graph plus `prEdgeWitnesses` and produces `MLF.Elab.Pipeline.ElabTerm`. `MLF.Elab.Pipeline.runPipelineElab` runs Phases 1–6 end-to-end.
+`MLF.Elab.Pipeline.elaborate` consumes the solved graph plus presolution witnesses (and, as refactors complete, explicit planning records) and produces `MLF.Elab.Pipeline.ElabTerm`. `MLF.Elab.Pipeline.runPipelineElab` runs Phases 1–6 end-to-end.
 
 ⸻
 
@@ -145,5 +157,6 @@ This repo’s module-level decomposition:
 5. **`MLF.Constraint.Acyclicity`**: Phase 3 dependency ordering.
 6. **`MLF.Constraint.Presolution`**: Phase 4 minimal expansions + per-edge witnesses.
 7. **`MLF.Constraint.Solve`**: Phase 5 unification solve.
-8. **`MLF.Elab.Pipeline`** (+ `MLF.Elab.Types`): Phase 6 elaboration to xMLF (`ElabTerm`, `ElabType`, `Instantiation`, Φ/Σ).
-9. **(Future)**: Phase 7 xMLF typechecker + reduction semantics (see `papers/these-finale-english.txt`; `papers/xmlf.txt` Fig. 4/5).
+8. **`MLF.Elab.Pipeline`** (+ `MLF.Elab.Types`): Phase 6 elaboration to xMLF (`ElabTerm`, `ElabType`, `Instantiation`, Φ/Σ). Target structure keeps Elab thin and plan-driven.
+9. **(Planned)**: `MLF.Constraint.Presolution.Plan` (explicit generalization/reify plans), consumed by Elab.
+10. **(Future)**: Phase 7 xMLF typechecker + reduction semantics (see `papers/these-finale-english.txt`; `papers/xmlf.txt` Fig. 4/5).

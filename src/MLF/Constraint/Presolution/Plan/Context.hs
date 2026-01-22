@@ -1,4 +1,4 @@
-module MLF.Elab.Generalize.Context (
+module MLF.Constraint.Presolution.Plan.Context (
     GaBindParents(..),
     GeneralizeEnv(..),
     GeneralizeCtx(..),
@@ -15,10 +15,10 @@ import Debug.Trace (trace)
 import MLF.Constraint.Types
 import MLF.Constraint.Solve (SolveResult(..))
 import qualified MLF.Binding.Tree as Binding
-import MLF.Elab.Generalize.BindingUtil (bindingPathToRootLocal, firstGenAncestorFrom)
-import MLF.Elab.Generalize.BinderPlan (GaBindParentsInfo(..))
-import MLF.Elab.Generalize.SchemeRoots (SchemeRootsPlan, buildSchemeRootsPlan)
-import MLF.Elab.Types (ElabError(..), bindingToElab)
+import MLF.Constraint.Presolution.Plan.BindingUtil (bindingPathToRootLocal, firstGenAncestorFrom)
+import MLF.Constraint.Presolution.Plan.BinderPlan (GaBindParentsInfo(..))
+import MLF.Constraint.Presolution.Plan.SchemeRoots (SchemeRootsPlan, buildSchemeRootsPlan)
+import MLF.Util.ElabError (ElabError(..), bindingToElab)
 
 data GaBindParents = GaBindParents
     { gaBindParentsBase :: BindParents

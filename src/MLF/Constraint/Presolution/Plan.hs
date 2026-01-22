@@ -18,12 +18,12 @@ import MLF.Constraint.Solve (SolveResult(..))
 import qualified MLF.Constraint.Solve as Solve
 import MLF.Constraint.Types
 import qualified MLF.Constraint.VarStore as VarStore
-import MLF.Elab.Generalize.BinderPlan
+import MLF.Constraint.Presolution.Plan.BinderPlan
     ( BinderPlan(..)
     , BinderPlanInput(..)
     , buildBinderPlan
     )
-import MLF.Elab.Generalize.Context
+import MLF.Constraint.Presolution.Plan.Context
     ( GaBindParents(..)
     , GeneralizeEnv(..)
     , GeneralizeCtx(..)
@@ -31,7 +31,7 @@ import MLF.Elab.Generalize.Context
     , traceGeneralize
     , traceGeneralizeM
     )
-import MLF.Elab.Generalize.Helpers
+import MLF.Constraint.Presolution.Plan.Helpers
     ( bindableChildrenUnder
     , boundContainsForall
     , computeAliasBinders
@@ -41,9 +41,9 @@ import MLF.Elab.Generalize.Helpers
     , mkIsBindable
     , selectBinders
     )
-import MLF.Elab.Generalize.Names (parseNameId)
-import MLF.Elab.Generalize.Ordering (orderBinderCandidates)
-import MLF.Elab.Generalize.Plan
+import MLF.Constraint.Presolution.Plan.Names (parseNameId)
+import MLF.Constraint.Presolution.Plan.Ordering (orderBinderCandidates)
+import MLF.Constraint.Presolution.Plan.Target
     ( TargetPlanInput(..)
     , TargetPlan(..)
     , buildTargetPlan
@@ -57,14 +57,14 @@ import MLF.Elab.Generalize.Plan
     , TypeRootPlan(..)
     , buildTypeRootPlan
     )
-import MLF.Elab.Generalize.SchemeRoots
+import MLF.Constraint.Presolution.Plan.SchemeRoots
     ( SchemeRootInfo(..)
     , SchemeRootsPlan(..)
     , allowBoundTraversalFor
     )
-import qualified MLF.Elab.Generalize.ReifyPlan as Reify
-import MLF.Elab.Types (ElabError(..), bindingToElab)
-import MLF.Elab.Util (reachableFrom, reachableFromStop)
+import qualified MLF.Constraint.Presolution.Plan.ReifyPlan as Reify
+import MLF.Util.ElabError (ElabError(..), bindingToElab)
+import MLF.Util.Graph (reachableFrom, reachableFromStop)
 import MLF.Frontend.ConstraintGen (AnnExpr)
 
 data PresolutionEnv = PresolutionEnv
@@ -692,6 +692,8 @@ planReify _ plan = do
             , gpGammaPlan = gammaPlan
             , gpTypeRootPlan = typeRootPlan
             , gpBindParents = bindParents
+            , gpTargetPlan = targetPlan
+            , gpSchemeRootsPlan = schemeRootsPlan
             } = plan
         GeneralizeEnv
             { geConstraint = constraint
@@ -701,8 +703,12 @@ planReify _ plan = do
             } = env
         GeneralizeCtx
             { gcScopeRootC = scopeRootC
+            , gcScopeGen = scopeGen
             , gcBindParentsGaInfo = mbBindParentsGaInfo
             } = ctx
+        TargetPlan
+            { tpTargetBound = targetBound
+            } = targetPlan
         TypeRootPlan
             { trTypeRoot = typeRoot
             } = typeRootPlan
@@ -737,7 +743,12 @@ planReify _ plan = do
     let reifyPlan =
             Reify.buildReifyPlan
                 Reify.ReifyPlanInput
-                    { Reify.rpiCanonical = canonical
+                    { Reify.rpiConstraint = constraint
+                    , Reify.rpiCanonical = canonical
+                    , Reify.rpiScopeRootC = scopeRootC
+                    , Reify.rpiScopeGen = scopeGen
+                    , Reify.rpiSchemeRootsPlan = schemeRootsPlan
+                    , Reify.rpiTargetBound = targetBound
                     , Reify.rpiBindParentsGa = mbBindParentsGaInfo
                     , Reify.rpiExtraNameStart = length binderNames
                     , Reify.rpiOrderedExtra = orderedExtra

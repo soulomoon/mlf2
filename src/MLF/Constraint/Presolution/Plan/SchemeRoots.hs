@@ -1,4 +1,4 @@
-module MLF.Elab.Generalize.SchemeRoots (
+module MLF.Constraint.Presolution.Plan.SchemeRoots (
     SchemeRootInfo(..),
     SchemeRootsPlan(..),
     buildSchemeRootsPlan,
@@ -12,7 +12,7 @@ import qualified Data.IntSet as IntSet
 
 import MLF.Constraint.Types
 import qualified MLF.Constraint.VarStore as VarStore
-import MLF.Elab.Generalize.BinderPlan (GaBindParentsInfo(..))
+import MLF.Constraint.Presolution.Plan.BinderPlan (GaBindParentsInfo(..))
 
 data SchemeRootInfo = SchemeRootInfo
     { sriRootsWithGen :: [(GenNodeId, NodeId)]

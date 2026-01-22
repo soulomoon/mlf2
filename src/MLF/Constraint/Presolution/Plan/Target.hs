@@ -1,6 +1,6 @@
 {-# LANGUAGE RecordWildCards #-}
 
-module MLF.Elab.Generalize.Plan (
+module MLF.Constraint.Presolution.Plan.Target (
     TargetPlanInput(..),
     TargetPlan(..),
     buildTargetPlan,
@@ -24,9 +24,9 @@ import Debug.Trace (trace)
 import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Types
 import qualified MLF.Constraint.VarStore as VarStore
-import MLF.Elab.Generalize.BinderPlan (GaBindParentsInfo(..))
-import MLF.Elab.Generalize.BindingUtil (firstGenAncestorFrom)
-import MLF.Elab.Generalize.Util (boundRootWith, firstSchemeRootAncestorWith)
+import MLF.Constraint.Presolution.Plan.BinderPlan (GaBindParentsInfo(..))
+import MLF.Constraint.Presolution.Plan.BindingUtil (firstGenAncestorFrom)
+import MLF.Constraint.Presolution.Plan.Util (boundRootWith, firstSchemeRootAncestorWith)
 import qualified MLF.Util.Order as Order
 
 data TargetPlanInput = TargetPlanInput

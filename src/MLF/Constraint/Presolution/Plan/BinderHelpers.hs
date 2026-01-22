@@ -1,4 +1,4 @@
-module MLF.Elab.Generalize.BinderHelpers (
+module MLF.Constraint.Presolution.Plan.BinderHelpers (
     isTargetSchemeBinderFor,
     boundMentionsSelfAliasFor
 ) where

@@ -1,4 +1,4 @@
-module MLF.Elab.Generalize.Helpers (
+module MLF.Constraint.Presolution.Plan.Helpers (
     boundFlexChildrenUnder,
     bindableChildrenUnder,
     isQuantifiable,
@@ -18,8 +18,8 @@ import qualified Data.IntSet as IntSet
 
 import MLF.Constraint.Types
 import qualified MLF.Constraint.VarStore as VarStore
-import MLF.Elab.Generalize.BindingUtil (bindingScopeFor)
-import MLF.Elab.Types (ElabError)
+import MLF.Constraint.Presolution.Plan.BindingUtil (bindingScopeFor)
+import MLF.Util.ElabError (ElabError)
 
 boundFlexChildrenUnder
     :: (NodeId -> NodeId)

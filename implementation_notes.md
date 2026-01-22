@@ -2,6 +2,8 @@
 
 ## Summary of Changes
 
+**Current vs target:** The current pipeline already records presolution witnesses and keeps Elab largely structural, but generalization planning (binder selection, ordering, alias policy, scheme-root policy) still lives in `MLF.Elab.Generalize`. The target structure moves that planning into presolution (e.g., `MLF.Constraint.Presolution.Plan`) so Elab only applies explicit plans.
+
 ### 1. src/MLF/Constraint/Presolution/Driver.hs (+ EdgeUnify/Witness)
 - **`unifyStructure` / `unifyStructureEdge`**: Recursively unify structural children (TyArrow, TyForall, plus TyVar bounds) so `Arrow A B ~ Arrow C D` propagates `A~C` and `B~D` (Driver for global merges; EdgeUnify for edge-local χe execution).
 - **`processInstEdge`**:
@@ -33,7 +35,10 @@
 - **Elimination rewrite**: `solveUnify` now rewrites eliminated binders into their bounds (or explicit `TyBottom` nodes), removes them from the graph, and clears `cEliminatedVars` before elaboration.
   - The solve-time union-find map is extended with the elimination substitution so witness ops that mention eliminated ids still canonicalize to live nodes.
 
-### 4. src/MLF/Elab/Generalize.hs + src/MLF/Elab/Elaborate.hs + src/MLF/Elab/Run.hs (reexported via `MLF.Elab.Pipeline`)
+### 4. src/MLF/Elab/Generalize.hs + src/MLF/Elab/Generalize/* + src/MLF/Elab/Elaborate.hs + src/MLF/Elab/Run.hs (reexported via `MLF.Elab.Pipeline`)
+- **Generalize is now an orchestrator**:
+  - Phase-oriented logic moved into focused modules: `Generalize/Plan`, `SchemeRoots`, `BinderPlan`, `Ordering`, `ReifyPlan`, `Normalize`, and `Helpers`.
+  - The top-level `generalizeAt`/`generalizeAtWith` functions now read as a linear pipeline of plan → binders → ordering → reify → normalize, with local helpers split by concern.
 - **`generalizeAt`**:
   - Optimized to handle structural `TyForall` nodes (avoiding double quantification).
   - Returns the `subst` (renaming map) alongside the scheme.
