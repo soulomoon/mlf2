@@ -1,8 +1,7 @@
 module MLF.Constraint.Presolution.Plan (
     GeneralizePolicy(..),
     policyDefault,
-    policyAllowRigid,
-    policyKeepTargetAllowRigid,
+    policyKeepTarget,
     GeneralizePlan(..),
     ReifyPlan(..),
     buildGeneralizePlans
@@ -34,11 +33,9 @@ import MLF.Constraint.Presolution.Plan.Context
     )
 import MLF.Constraint.Presolution.Plan.Helpers
     ( bindableChildrenUnder
-    , boundContainsForall
     , computeAliasBinders
     , hasExplicitBound
     , isQuantifiable
-    , isScopeSchemeRoot
     , mkIsBindable
     , selectBinders
     )
@@ -66,32 +63,21 @@ import MLF.Constraint.Presolution.Plan.SchemeRoots
 import qualified MLF.Constraint.Presolution.Plan.ReifyPlan as Reify
 import MLF.Util.ElabError (ElabError(..), bindingToElab)
 import MLF.Util.Graph (reachableFrom, reachableFromStop)
-import MLF.Frontend.ConstraintGen (AnnExpr)
 
 data GeneralizePolicy = GeneralizePolicy
     { gpInlineAliasTarget :: Bool
-    , gpIncludeRigidBinders :: Bool
     } deriving (Eq, Show)
 
 policyDefault :: GeneralizePolicy
 policyDefault =
     GeneralizePolicy
         { gpInlineAliasTarget = True
-        , gpIncludeRigidBinders = False
         }
 
-policyAllowRigid :: GeneralizePolicy
-policyAllowRigid =
-    GeneralizePolicy
-        { gpInlineAliasTarget = True
-        , gpIncludeRigidBinders = True
-        }
-
-policyKeepTargetAllowRigid :: GeneralizePolicy
-policyKeepTargetAllowRigid =
+policyKeepTarget :: GeneralizePolicy
+policyKeepTarget =
     GeneralizePolicy
         { gpInlineAliasTarget = False
-        , gpIncludeRigidBinders = True
         }
 
 data PresolutionEnv = PresolutionEnv
@@ -128,9 +114,6 @@ data ReifyPlan = ReifyPlan
     , rpSubstForReifyAdjusted :: IntMap.IntMap String
     }
 
-planGeneralize :: PresolutionEnv -> AnnExpr -> Either ElabError GeneralizePlan
-planGeneralize env _ann = planGeneralizeAt env
-
 planGeneralizeAt :: PresolutionEnv -> Either ElabError GeneralizePlan
 planGeneralizeAt PresolutionEnv
     { peSolveResult = res
@@ -148,7 +131,6 @@ planGeneralizeAt PresolutionEnv
         isTyForallKey = geIsTyForallKey env
         isBaseLikeKey = geIsBaseLikeKey env
         allowDropTarget = gpInlineAliasTarget policy
-        allowRigidBinders = gpIncludeRigidBinders policy
     bindParents0 <- bindingToElab (Binding.canonicalizeBindParentsUnder canonical constraint)
     let bindParentsSoft = softenBindParents canonical constraint bindParents0
     let _ =
@@ -185,7 +167,6 @@ planGeneralizeAt PresolutionEnv
             , srSchemeRootOwnerBase = schemeRootOwnerBase
             , srSchemeRootByBodyBase = schemeRootByBodyBase
             , srLookupSchemeRootOwner = lookupSchemeRootOwner
-            , srContainsForallFrom = containsForallFrom
             , srContainsForallForTarget = containsForallForTarget
             , srBoundHasForallForVar = boundHasForallForVar
             } = schemeRootsPlan
@@ -330,16 +311,10 @@ planGeneralizeAt PresolutionEnv
                 [ (childKey, flag)
                 | (childKey, (_parent, flag)) <- IntMap.toList bindParents
                 ]
-        boundContainsForall' =
-            boundContainsForall canonical constraint (containsForallFrom (const False))
-        isScopeSchemeRoot' = isScopeSchemeRoot canonKey scopeSchemeRoots
         isBindable =
             mkIsBindable
-                allowRigidBinders
                 bindFlags
                 isQuantifiable'
-                isScopeSchemeRoot'
-                boundContainsForall'
     (aliasBinderBases, aliasBinderNodes) <-
         computeAliasBinders
             canonical
@@ -443,7 +418,6 @@ planGeneralizeAt PresolutionEnv
                     , tpiCanonical = canonical
                     , tpiCanonKey = canonKey
                     , tpiIsTyVarKey = isTyVarKey
-                    , tpiBindFlags = bindFlags
                     , tpiScopeGen = scopeGen
                     , tpiScopeRootC = scopeRootC
                     , tpiBindParents = bindParents
@@ -462,15 +436,11 @@ planGeneralizeAt PresolutionEnv
             , tpTargetBoundUnderOtherGen = targetBoundUnderOtherGen
             , tpBoundUnderOtherGen = boundUnderOtherGen
             , tpBoundIsSchemeRoot = boundIsSchemeRoot
-            , tpBoundIsVar = boundIsVar
             , tpBoundIsBase = boundIsBase
-            , tpBoundIsStructural = boundIsStructural
-            , tpBoundIsChild = boundIsChild
             , tpBoundIsDirectChild = boundIsDirectChild
             , tpBoundMentionsTarget = boundMentionsTarget
             , tpBoundHasForall = boundHasForall
             , tpBoundHasNestedGen = boundHasNestedGen
-            , tpTargetRigid = targetRigid
             , tpTargetIsSchemeRoot = targetIsSchemeRoot
             , tpTargetIsSchemeRootForScope = targetIsSchemeRootForScope
             , tpTargetIsTyVar = targetIsTyVar
@@ -515,7 +485,6 @@ planGeneralizeAt PresolutionEnv
                     , gpiBindParents = bindParents
                     , gpiBindParentsGa = mbBindParentsGaInfo
                     , gpiScopeGen = scopeGen
-                    , gpiAllowRigidBinders = allowRigidBinders
                     , gpiTarget0 = target0
                     , gpiTargetBound = targetBound
                     , gpiSchemeRootOwnerBase = schemeRootOwnerBase
@@ -554,17 +523,11 @@ planGeneralizeAt PresolutionEnv
                     , dpiNodes = nodes
                     , dpiTarget0 = target0
                     , dpiTargetBound = targetBound
-                    , dpiTargetRigid = targetRigid
                     , dpiBoundIsBase = boundIsBase
-                    , dpiBoundIsStructural = boundIsStructural
-                    , dpiBoundIsVar = boundIsVar
-                    , dpiBoundIsChild = boundIsChild
                     , dpiBoundHasNestedGen = boundHasNestedGen
                     , dpiBoundHasNamedOutsideGamma = boundHasNamedOutsideGamma
                     , dpiBoundMentionsTarget = boundMentionsTarget
                     , dpiBoundHasForall = boundHasForall
-                    , dpiBoundIsSchemeRootAll = boundIsSchemeRootAll
-                    , dpiHasExplicitBound = hasExplicitBound'
                     , dpiScopeRootC = scopeRootC
                     , dpiCanonKey = canonKey
                     }

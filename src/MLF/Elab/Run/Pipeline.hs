@@ -18,8 +18,8 @@ import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Presolution
     ( EdgeTrace(..)
     , GeneralizePolicy
-    , policyAllowRigid
-    , policyKeepTargetAllowRigid
+    , policyDefault
+    , policyKeepTarget
     , PresolutionPlanBuilder(..)
     , PresolutionResult(..)
     , computePresolution
@@ -370,8 +370,8 @@ runPipelineElabWith genConstraints expr = do
                         scopeRoot = scopeRootPre
                     let policy =
                             if keepTarget
-                                then policyKeepTargetAllowRigid
-                                else policyAllowRigid
+                                then policyKeepTarget
+                                else policyDefault
                     (sch0, subst0) <- firstShow
                         (generalizeWithPlan planBuilder policy bindParentsGa solvedForGen scopeRoot targetC)
                     let sch = sch0
@@ -611,8 +611,8 @@ runPipelineElabWith genConstraints expr = do
                                         annScopeRoot = canonicalizeScopeRef solvedForGen (prRedirects pres) annScopeRootBase
                                     let policyAnn =
                                             if keepTarget
-                                                then policyKeepTargetAllowRigid
-                                                else policyAllowRigid
+                                                then policyKeepTarget
+                                                else policyDefault
                                     (annSch, _substAnn) <- firstShow
                                         (generalizeWithPlan planBuilder policyAnn bindParentsGa solvedForGen annScopeRoot annTargetNode)
                                     let annTy = schemeToType annSch
@@ -1189,8 +1189,8 @@ runPipelineElabWith genConstraints expr = do
                                         Nothing -> bindParentsGa
                             let policy =
                                     if keepTargetFinal
-                                        then policyKeepTargetAllowRigid
-                                        else policyAllowRigid
+                                        then policyKeepTarget
+                                        else policyDefault
                             (sch, _subst) <- firstShow
                                 (generalizeWithPlan planBuilder policy bindParentsGaFinal resFinalBounded scopeRoot targetC)
                             let debugFinal =

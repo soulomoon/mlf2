@@ -1,3 +1,4 @@
+{-# LANGUAGE PatternSynonyms #-}
 module MLF.API
     ( module MLF.Frontend.Syntax
     , ConstraintResult (..)
@@ -6,12 +7,14 @@ module MLF.API
     , PolySyms
     , inferConstraintGraph
     , ElabType (..)
-    , ElabScheme (..)
+    , ElabScheme
+    , pattern Forall
     , ElabTerm
     , Instantiation (..)
     , ElabError (..)
     , TypeCheckError (..)
     , Pretty (..)
+    , schemeFromType
     , runPipelineElab
     , runPipelineElabChecked
     , typeCheck
@@ -25,7 +28,8 @@ import MLF.Constraint.Types (BaseTy (..), PolySyms)
 import MLF.Frontend.ConstraintGen (ConstraintError (..), ConstraintResult (..))
 import MLF.Elab.Pipeline
     ( ElabError (..)
-    , ElabScheme (..)
+    , ElabScheme
+    , pattern Forall
     , ElabTerm
     , ElabType (..)
     , Instantiation (..)
@@ -35,6 +39,7 @@ import MLF.Elab.Pipeline
     , normalize
     , runPipelineElab
     , runPipelineElabChecked
+    , schemeFromType
     , step
     , typeCheck
     )

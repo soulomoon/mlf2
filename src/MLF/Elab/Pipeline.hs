@@ -1,6 +1,8 @@
+{-# LANGUAGE PatternSynonyms #-}
 module MLF.Elab.Pipeline (
     ElabType(..),
-    ElabScheme(..),
+    ElabScheme,
+    pattern Forall,
     ElabTerm(..),
     Instantiation(..),
     ElabError(..),
@@ -16,6 +18,7 @@ module MLF.Elab.Pipeline (
     expansionToInst,
     schemeToType,
     applyInstantiation,
+    schemeFromType,
     sigmaReorder,
     -- * Witness translation (for tests/debugging)
     phiFromEdgeWitness,

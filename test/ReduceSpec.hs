@@ -4,7 +4,7 @@ import Control.Monad (forM_)
 import Test.Hspec
 
 import MLF.Constraint.Types (BaseTy(..))
-import MLF.Elab.Pipeline (ElabScheme(..), ElabTerm(..), ElabType(..), Instantiation(..), normalize, step, typeCheck)
+import MLF.Elab.Pipeline (ElabTerm(..), ElabType(..), Instantiation(..), normalize, schemeFromType, step, typeCheck)
 import MLF.Frontend.Syntax (Lit(..))
 import SpecUtil (requireRight)
 
@@ -20,7 +20,7 @@ spec = do
             step term `shouldBe` Just (ELit (LInt 1))
 
         it "reduces let bindings when the rhs is a value" $ do
-            let term = ELet "x" (Forall [] intTy) (ELit (LInt 1)) (EVar "x")
+            let term = ELet "x" (schemeFromType intTy) (ELit (LInt 1)) (EVar "x")
             step term `shouldBe` Just (ELit (LInt 1))
 
         it "reduces instantiation elimination" $ do
@@ -35,7 +35,7 @@ spec = do
     describe "Phase 7 preservation (sanity)" $ do
         it "preserves types across normalization for a fixed set of terms" $ do
             let term1 = EApp idLam (ELit (LInt 1))
-                term2 = ELet "x" (Forall [] intTy) (ELit (LInt 1)) (EApp idLam (EVar "x"))
+                term2 = ELet "x" (schemeFromType intTy) (ELit (LInt 1)) (EApp idLam (EVar "x"))
                 term3 = ETyInst (ETyAbs "a" Nothing polyLam) InstElim
                 terms = [term1, term2, term3]
             forM_ terms $ \term -> do

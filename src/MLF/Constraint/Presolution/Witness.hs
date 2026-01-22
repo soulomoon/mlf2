@@ -245,7 +245,7 @@ witnessFromExpansion _root leftRaw expn = do
                 childHas = map fst children
                 hasForall = or childHas
             in (hasForall, \rightHasForall -> do
-                let suffixFlags = tail (scanr (||) rightHasForall childHas)
+                let suffixFlags = drop 1 (scanr (||) rightHasForall childHas)
                 steps <- zipWithM (\flag (_, childStep) -> childStep flag) suffixFlags children
                 pure (concat steps))
 
@@ -474,8 +474,8 @@ integratePhase2Steps steps extraOps =
         StepIntro -> True
         _ -> False
 
-    integrateSegments steps =
-        let stepper = cata integrateAlg steps
+    integrateSegments segmentSteps =
+        let stepper = cata integrateAlg segmentSteps
         in stepper []
       where
         integrateAlg = \case

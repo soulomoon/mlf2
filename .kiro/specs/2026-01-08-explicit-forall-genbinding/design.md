@@ -82,9 +82,9 @@ Refactor explicit `forall` representation so binders are gen-bound named nodes. 
 Matches thesis intent:
 - Explicit foralls are represented as gen-node schemes (named-node alignment with §9.1.3/§15.3.1).
 - Reify avoids inlining explicit-forall binders under gen nodes so rank-2 bounds are preserved where present (`src/MLF/Elab/Reify.hs:236`).
+- `bindingScopeRef` now picks the nearest gen ancestor (`ga′`) from the binding-parent chain (`src/MLF/Elab/Run/Scope.hs:32-37`).
 
 Deviations / heuristics to document:
-- `bindingScopeRef` selects gen scopes using reachable-binder and nearest-gen heuristics (`src/MLF/Elab/Run.hs`) instead of the thesis rule that scope is exactly `ga′` (nearest gen ancestor of the subterm root).
 - Expansion copying widens the interior with reachable scheme interiors to keep explicit-forall binders inside instantiation copies (`src/MLF/Constraint/Presolution/Copy.hs:122`). This is a preservation measure not stated in the thesis text.
 - Redirected/canonicalized nodes currently drop binding-parent chains; until projected, `ga′` selection can diverge from thesis when TyExp nodes are eliminated.
 - Let-bound generalization can become monomorphic after redirects; investigate scope projection and solve result usage for instantiation.

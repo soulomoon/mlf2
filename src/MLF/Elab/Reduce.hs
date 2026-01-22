@@ -7,7 +7,7 @@ module MLF.Elab.Reduce (
 import qualified Data.Set as Set
 import Data.Functor.Foldable (para)
 
-import MLF.Elab.Inst (applyInstantiation, renameInstBound, schemeToType, splitForalls)
+import MLF.Elab.Inst (applyInstantiation, renameInstBound, schemeToType)
 import MLF.Reify.TypeOps (freeTypeVarsType, freshTypeName, substTypeCapture)
 import MLF.Elab.Types
 import MLF.Util.RecursionSchemes (cataMaybe, foldElabTerm, foldInstantiation)
@@ -196,8 +196,7 @@ substTypeVarScheme :: String -> ElabType -> ElabScheme -> ElabScheme
 substTypeVarScheme x s sch =
     let ty = schemeToType sch
         ty' = substTypeVar x s ty
-        (binds, body) = splitForalls ty'
-    in Forall binds body
+    in schemeFromType ty'
 
 substTypeVarInst :: String -> ElabType -> Instantiation -> Instantiation
 substTypeVarInst x s = para alg

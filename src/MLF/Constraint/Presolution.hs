@@ -15,8 +15,7 @@ module MLF.Constraint.Presolution (
     PresolutionPlanBuilder(..),
     GeneralizePolicy(..),
     policyDefault,
-    policyAllowRigid,
-    policyKeepTargetAllowRigid,
+    policyKeepTarget,
     defaultPlanBuilder,
     PresolutionError(..),
     GaBindParents(..),
@@ -59,8 +58,7 @@ import MLF.Constraint.Presolution.Core (
 import MLF.Constraint.Presolution.Plan
     ( GeneralizePolicy(..)
     , policyDefault
-    , policyAllowRigid
-    , policyKeepTargetAllowRigid
+    , policyKeepTarget
     , buildGeneralizePlans
     )
 import MLF.Constraint.Presolution.Plan.Context (GaBindParents(..))

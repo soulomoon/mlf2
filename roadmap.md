@@ -30,9 +30,11 @@ This roadmap outlines the implementation of the full MLF pipeline as described i
 3. **Solving / presolution (choose expansions + witnesses)**: solve constraints, pick expansions, and decide **generalization/binders, dependency order, alias policies**; extract Ω/Φ witnesses and expansion recipes.
 4. **Reify / apply (elaboration)**: apply presolution artifacts to the annotated term/type; convert expansions to instantiations; apply Ω/Φ steps; **no new solving decisions**.
 
-This roadmap assumes (and future refactors target) a *thin* Elab layer that consumes explicit plans from presolution rather than recomputing them.
+This roadmap now matches the implementation: Elab is *thin* and consumes explicit plans from presolution rather than recomputing them.
 
-**Current vs target:** The current codebase already matches the Frontend/Normalize/Solve structure and records presolution witnesses, but generalization planning (binder selection, ordering, alias policy, scheme-root policy) still lives in `MLF.Elab.Generalize`. The target structure moves that planning into presolution (e.g., `MLF.Constraint.Presolution.Plan`) so Elab only applies precomputed plans.
+**Current vs target:** The current codebase matches the Frontend/Normalize/Solve structure and records presolution witnesses, and generalization planning (binder selection, ordering, alias policy, scheme-root policy) now lives in presolution (`MLF.Constraint.Presolution.Plan`). Elab consumes `GeneralizePlan`/`ReifyPlan` outputs and applies them without new solving decisions.
+
+**Known deviations (tracked):** See `.kiro/specs/2026-01-08-explicit-forall-genbinding/` and `.kiro/specs/thesis-exact-scheme-closure-audit/` for scope/explicit-forall alignment and scheme-closure edge cases that still require verification against the thesis.
 
 ⸻
 
@@ -113,7 +115,7 @@ Re-traverse the original AST `a` and transform it into an xMLF term `a'` using t
     *   Result: `λ(x : τ) a'`.
 
 **Key Deliverable (in this repo):**
-`MLF.Elab.Pipeline.elaborate` consumes the solved graph plus presolution witnesses (and, as refactors complete, explicit planning records) and produces `MLF.Elab.Pipeline.ElabTerm`. `MLF.Elab.Pipeline.runPipelineElab` runs Phases 1–6 end-to-end.
+`MLF.Elab.Pipeline.elaborate` consumes the solved graph plus presolution witnesses and explicit planning records, and produces `MLF.Elab.Pipeline.ElabTerm`. `MLF.Elab.Pipeline.runPipelineElab` runs Phases 1–6 end-to-end.
 
 ⸻
 
@@ -132,7 +134,7 @@ Now that we have an xMLF term, we must treat it as a runnable program.
     *   Rules include: `(β)`, `(let)`, and significantly, the **instantiation reductions** (`ι-rules`) like `(Λ(α ≥ τ) a) N ⟶ a{!α ← 1}{α ← τ}`.
     *   These rules allow executing the code and simplifying the type instantiations.
 
-**Status in this repo:** Phase 7 is not implemented yet. We do have a key building block: `MLF.Elab.Pipeline.applyInstantiation` (see `papers/these-finale-english.txt`; `papers/xmlf.txt` Fig. 3) to apply/check instantiations at the type level, which is used by tests to validate Φ/Σ.
+**Status in this repo:** Phase 7 is implemented. See `MLF.Elab.TypeCheck` (typing rules) and `MLF.Elab.Reduce` (small-step semantics), with regression coverage in the Phase 7 test sections.
 
 ⸻
 
@@ -157,6 +159,6 @@ This repo’s module-level decomposition:
 5. **`MLF.Constraint.Acyclicity`**: Phase 3 dependency ordering.
 6. **`MLF.Constraint.Presolution`**: Phase 4 minimal expansions + per-edge witnesses.
 7. **`MLF.Constraint.Solve`**: Phase 5 unification solve.
-8. **`MLF.Elab.Pipeline`** (+ `MLF.Elab.Types`): Phase 6 elaboration to xMLF (`ElabTerm`, `ElabType`, `Instantiation`, Φ/Σ). Target structure keeps Elab thin and plan-driven.
-9. **(Planned)**: `MLF.Constraint.Presolution.Plan` (explicit generalization/reify plans), consumed by Elab.
-10. **(Future)**: Phase 7 xMLF typechecker + reduction semantics (see `papers/these-finale-english.txt`; `papers/xmlf.txt` Fig. 4/5).
+8. **`MLF.Elab.Pipeline`** (+ `MLF.Elab.Types`): Phase 6 elaboration to xMLF (`ElabTerm`, `ElabType`, `Instantiation`, Φ/Σ). Elab is thin and plan-driven.
+9. **`MLF.Constraint.Presolution.Plan`**: explicit generalization/reify plans, consumed by Elab.
+10. **Phase 7**: xMLF typechecker + reduction semantics (`MLF.Elab.TypeCheck`, `MLF.Elab.Reduce`).

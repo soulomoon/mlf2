@@ -26,7 +26,7 @@ import MLF.Constraint.Presolution.Plan.Normalize
     , isVarBound
     )
 import MLF.Reify.TypeOps (freeTypeVarsFrom, stripForallsType)
-import MLF.Types.Elab (ElabScheme(..), ElabType(..), ElabTypeF(..))
+import MLF.Types.Elab (ElabScheme, ElabType(..), ElabTypeF(..), mkElabScheme)
 import MLF.Util.ElabError (ElabError(..))
 
 -- | Inputs needed to finalize a generalized scheme.
@@ -302,7 +302,7 @@ finalizeScheme FinalizeInput{..} =
         subst' = IntMap.filter (`elem` keepNames) (IntMap.map renameName subst)
         finalize missing =
             if null missing
-                then pure (Forall bindingsRenamed tyRenamed, subst')
+                then pure (mkElabScheme bindingsRenamed tyRenamed, subst')
                 else
                     traceGeneralize env
                         ("generalizeAt: SchemeFreeVars typeRoot="

@@ -1,11 +1,21 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveTraversable #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE ViewPatterns #-}
 module MLF.Types.Elab (
     ElabType(..),
     ElabTypeF(..),
-    ElabScheme(..),
+    ElabScheme,
+    pattern Forall,
+    mkElabScheme,
+    schemeBindings,
+    schemeBody,
     SchemeInfo(..),
     ElabTerm(..),
     ElabTermF(..),
@@ -16,7 +26,7 @@ module MLF.Types.Elab (
 import Data.Functor.Foldable (Base, Corecursive(..), Recursive(..))
 import Data.IntMap.Strict (IntMap)
 
-import MLF.Constraint.Types (BaseTy(..))
+import MLF.Constraint.Types (BaseTy(..), BindFlag(..))
 import MLF.Frontend.Syntax (Lit(..))
 
 -- | Explicitly typed types for elaboration (xMLF).
@@ -69,9 +79,45 @@ instance Corecursive ElabType where
         TForallF v mb body -> TForall v mb body
         TBottomF -> TBottom
 
--- | Polymorphic schemes (multiple quantifiers).
-data ElabScheme = Forall [(String, Maybe ElabType)] ElabType
-    deriving (Eq, Show)
+data Binder (k :: BindFlag) where
+    FlexBinder :: String -> Maybe ElabType -> Binder 'BindFlex
+
+data Scheme (k :: BindFlag) where
+    Scheme :: [Binder k] -> ElabType -> Scheme k
+
+type ElabScheme = Scheme 'BindFlex
+
+bindersToPairs :: [Binder 'BindFlex] -> [(String, Maybe ElabType)]
+bindersToPairs = map (\(FlexBinder v mb) -> (v, mb))
+
+schemeToPairs :: ElabScheme -> ([(String, Maybe ElabType)], ElabType)
+schemeToPairs (Scheme binds body) = (bindersToPairs binds, body)
+
+pattern Forall :: [(String, Maybe ElabType)] -> ElabType -> ElabScheme
+pattern Forall binds body <- (schemeToPairs -> (binds, body))
+  where
+    Forall binds body = mkElabScheme binds body
+{-# COMPLETE Forall #-}
+
+mkElabScheme :: [(String, Maybe ElabType)] -> ElabType -> ElabScheme
+mkElabScheme binds body = Scheme (map (uncurry FlexBinder) binds) body
+
+schemeBindings :: ElabScheme -> [(String, Maybe ElabType)]
+schemeBindings = fst . schemeToPairs
+
+schemeBody :: ElabScheme -> ElabType
+schemeBody = snd . schemeToPairs
+
+instance Eq (Scheme 'BindFlex) where
+    s1 == s2 =
+        let (b1, t1) = schemeToPairs s1
+            (b2, t2) = schemeToPairs s2
+        in b1 == b2 && t1 == t2
+
+instance Show (Scheme 'BindFlex) where
+    show s =
+        let (binds, body) = schemeToPairs s
+        in "Forall " ++ show binds ++ " " ++ show body
 
 -- | Environment entry for elaboration (let-generalized schemes only).
 data SchemeInfo = SchemeInfo

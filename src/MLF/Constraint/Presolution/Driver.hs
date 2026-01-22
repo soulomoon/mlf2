@@ -688,14 +688,14 @@ rewriteConstraint mapping = do
                                     else pure (IntMap.insert childKey (p, BindFlex) bp)
 
         bp1 <- foldM addMissing bp0' (IntMap.keys newNodes)
-        let rootGenRef = fmap genRef rootGen
+        let rootGenRefLocal = fmap genRef rootGen
             pickUpperParent childN =
                 case IntMap.lookup (getNodeId childN) incomingParents of
                     Just ps ->
                         case IntSet.toList ps of
                             (p:_) -> Just (typeRef (NodeId p))
-                            [] -> rootGenRef
-                    Nothing -> rootGenRef
+                            [] -> rootGenRefLocal
+                    Nothing -> rootGenRefLocal
             fixUpper bp =
                 IntMap.mapWithKey
                     (\childKey (parentRef, flag) ->
@@ -712,7 +712,7 @@ rewriteConstraint mapping = do
                                                     Just pRef ->
                                                         if pRef == typeRef childN
                                                             then
-                                                                case rootGenRef of
+                                                                case rootGenRefLocal of
                                                                     Just gref -> (gref, flag)
                                                                     Nothing -> (parentRef, flag)
                                                             else (pRef, flag)
@@ -1210,23 +1210,6 @@ bindExpansionArgs expansionRoot pairs = do
     c0 <- gets psConstraint
     let canonical = UnionFind.frWith uf0
         expansionRootC = canonical expansionRoot
-        nodes = cNodes c0
-        reachable =
-            let go visited [] = visited
-                go visited (nid0:rest) =
-                    let nid = canonical nid0
-                        key = getNodeId nid
-                    in if IntSet.member key visited
-                        then go visited rest
-                        else
-                            let visited' = IntSet.insert key visited
-                                kids =
-                                    case IntMap.lookup key nodes of
-                                        Nothing -> []
-                                        Just node ->
-                                            structuralChildren node
-                                    in go visited' (kids ++ rest)
-            in go IntSet.empty [expansionRootC]
         rootGen =
             let genIds = IntMap.keys (cGenNodes c0)
                 pickRoot acc gidInt =
@@ -1289,22 +1272,6 @@ dropWeakenSteps = filter (not . isWeakenStep)
     isWeakenStep step = case step of
         StepOmega OpWeaken{} -> True
         _ -> False
-
-recordGenSchemeRootM :: GenNodeId -> NodeId -> PresolutionM ()
-recordGenSchemeRootM gid nid =
-    modify' $ \st ->
-        let c0 = psConstraint st
-            genNodes = cGenNodes c0
-            genNode = IntMap.findWithDefault (GenNode gid []) (genNodeKey gid) genNodes
-            schemes = gnSchemes genNode
-            nidC = UnionFind.frWith (psUnionFind st) nid
-            schemes' =
-                if any (\s -> UnionFind.frWith (psUnionFind st) s == nidC) schemes
-                    then schemes
-                    else schemes ++ [nidC]
-            genNode' = genNode { gnSchemes = schemes' }
-            genNodes' = IntMap.insert (genNodeKey gid) genNode' genNodes
-        in st { psConstraint = c0 { cGenNodes = genNodes' } }
 
 -- | Build an edge trace.
 --

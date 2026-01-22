@@ -169,13 +169,13 @@ unifyAcyclicEdgeNoMerge n1 n2 = do
             bs = IntSet.union bs1 bs2
         
         prefer <- preferBinderMetaRoot root1 root2
-        trace <- lift $ unifyAcyclicRawWithRaiseTracePrefer prefer root1 root2
+        raiseTrace <- lift $ unifyAcyclicRawWithRaiseTracePrefer prefer root1 root2
         rep <- lift $ findRoot root2
         let repId = getNodeId rep
             int1 = IntMap.findWithDefault IntSet.empty r1 (eusInteriorByRoot st0)
             int2 = IntMap.findWithDefault IntSet.empty r2 (eusInteriorByRoot st0)
             intAll = IntSet.union int1 int2
-        recordRaisesFromTrace intAll trace
+        recordRaisesFromTrace intAll raiseTrace
 
         modify $ \st ->
             let roots' =
@@ -268,8 +268,8 @@ isEliminated :: NodeId -> EdgeUnifyM Bool
 isEliminated bv = gets (IntSet.member (getNodeId bv) . eusEliminatedBinders)
 
 recordRaisesFromTrace :: IntSet.IntSet -> [NodeId] -> EdgeUnifyM ()
-recordRaisesFromTrace interiorNodes trace =
-    forM_ trace $ \nid ->
+recordRaisesFromTrace interiorNodes raiseTrace =
+    forM_ raiseTrace $ \nid ->
         when (IntSet.member (getNodeId nid) interiorNodes) $ do
             already <- isEliminated nid
             isLocked <- checkNodeLocked nid
@@ -400,7 +400,7 @@ unifyAcyclicEdge n1 n2 = do
         -- binding-edge harmonization and record the corresponding `OpRaise`
         -- steps in Ω.
         prefer <- preferBinderMetaRoot root1 root2
-        trace <- lift $ unifyAcyclicRawWithRaiseTracePrefer prefer root1 root2
+        raiseTrace <- lift $ unifyAcyclicRawWithRaiseTracePrefer prefer root1 root2
         rep <- lift $ findRoot root2
         let repId = getNodeId rep
             int1 = IntMap.findWithDefault IntSet.empty r1 (eusInteriorByRoot st0)
@@ -411,7 +411,7 @@ unifyAcyclicEdge n1 n2 = do
         -- record Raise(n) for exactly the node(s)
         -- that were raised by binding-edge harmonization, restricted to I(r) and
         -- eliding operations under rigid binders.
-        recordRaisesFromTrace intAll trace
+        recordRaisesFromTrace intAll raiseTrace
 
         -- Update which UF roots correspond to classes containing interior nodes.
         modify $ \st ->

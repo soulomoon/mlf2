@@ -1,11 +1,15 @@
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveTraversable #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeSynonymInstances #-}
 module MLF.Elab.Types (
     ElabType(..),
     ElabTypeF(..),
-    ElabScheme(..),
+    ElabScheme,
+    pattern Forall,
     SchemeInfo(..),
     ElabTerm(..),
     ElabTermF(..),
@@ -20,6 +24,7 @@ module MLF.Elab.Types (
     applyContext,
     freshNameLike,
     buildForalls,
+    schemeFromType,
     splitForallsLocal,
     substTypeCaptureLocal,
     substTypeSimpleLocal,
@@ -319,6 +324,11 @@ schemeToTypeLocal (Forall binds body) = buildForalls binds body
 
 buildForalls :: [(String, Maybe ElabType)] -> ElabType -> ElabType
 buildForalls binds body = foldr (\(v, b) t -> TForall v b t) body binds
+
+schemeFromType :: ElabType -> ElabScheme
+schemeFromType ty =
+    let (binds, body) = splitForallsLocal ty
+    in mkElabScheme binds body
 
 splitForallsLocal :: ElabType -> ([(String, Maybe ElabType)], ElabType)
 splitForallsLocal = para alg

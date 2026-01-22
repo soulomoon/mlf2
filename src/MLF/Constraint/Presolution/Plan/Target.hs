@@ -35,7 +35,6 @@ data TargetPlanInput = TargetPlanInput
     , tpiCanonical :: NodeId -> NodeId
     , tpiCanonKey :: NodeId -> Int
     , tpiIsTyVarKey :: Int -> Bool
-    , tpiBindFlags :: IntMap.IntMap BindFlag
     , tpiScopeGen :: Maybe GenNodeId
     , tpiScopeRootC :: NodeRef
     , tpiBindParents :: BindParents
@@ -63,7 +62,6 @@ data TargetPlan = TargetPlan
     , tpBoundMentionsTarget :: Bool
     , tpBoundHasForall :: Bool
     , tpBoundHasNestedGen :: Bool
-    , tpTargetRigid :: Bool
     , tpTargetIsSchemeRoot :: Bool
     , tpTargetIsSchemeRootForScope :: Bool
     , tpTargetIsTyVar :: Bool
@@ -76,7 +74,6 @@ buildTargetPlan TargetPlanInput{..} =
         canonical = tpiCanonical
         canonKey = tpiCanonKey
         isTyVarKey = tpiIsTyVarKey
-        bindFlags = tpiBindFlags
         scopeGen = tpiScopeGen
         scopeRootC = tpiScopeRootC
         bindParents = tpiBindParents
@@ -221,10 +218,6 @@ buildTargetPlan TargetPlanInput{..} =
                                 _ -> False
                     in any isNested (IntSet.toList reachableBound)
                 _ -> False
-        targetRigidLocal =
-            case IntMap.lookup (nodeRefKey (typeRef target0)) bindFlags of
-                Just BindRigid -> True
-                _ -> False
         targetIsSchemeRootLocal =
             IntSet.member (canonKey target0) schemeRootKeySet
         targetIsSchemeRootForScopeLocal =
@@ -255,7 +248,6 @@ buildTargetPlan TargetPlanInput{..} =
         , tpBoundMentionsTarget = boundMentionsTargetLocal
         , tpBoundHasForall = boundHasForallLocal
         , tpBoundHasNestedGen = boundHasNestedGenLocal
-        , tpTargetRigid = targetRigidLocal
         , tpTargetIsSchemeRoot = targetIsSchemeRootLocal
         , tpTargetIsSchemeRootForScope = targetIsSchemeRootForScopeLocal
         , tpTargetIsTyVar = targetIsTyVarLocal
@@ -271,7 +263,6 @@ data GammaPlanInput = GammaPlanInput
     , gpiBindParents :: BindParents
     , gpiBindParentsGa :: Maybe GaBindParentsInfo
     , gpiScopeGen :: Maybe GenNodeId
-    , gpiAllowRigidBinders :: Bool
     , gpiTarget0 :: NodeId
     , gpiTargetBound :: Maybe NodeId
     , gpiSchemeRootOwnerBase :: IntMap.IntMap GenNodeId
@@ -321,7 +312,6 @@ buildGammaPlan GammaPlanInput{..} =
         bindParents = gpiBindParents
         mbBindParentsGa = gpiBindParentsGa
         scopeGen = gpiScopeGen
-        allowRigidBinders = gpiAllowRigidBinders
         target0 = gpiTarget0
         targetBound = gpiTargetBound
         schemeRootOwnerBase = gpiSchemeRootOwnerBase
@@ -354,7 +344,7 @@ buildGammaPlan GammaPlanInput{..} =
                                     [ canonical solvedNid
                                     | (childKey, (parent, flag)) <- IntMap.toList (gbiBindParentsBase ga)
                                     , parent == GenRef gid
-                                    , flag == BindFlex || (allowRigidBinders && flag == BindRigid)
+                                    , flag == BindFlex
                                     , case IntMap.lookup childKey (cNodes (gbiBaseConstraint ga)) of
                                         Just TyVar{} -> True
                                         _ -> False
@@ -379,7 +369,7 @@ buildGammaPlan GammaPlanInput{..} =
                                 [ childKey
                                 | (childKey, (parent, flag)) <- IntMap.toList (gbiBindParentsBase ga)
                                 , parent == GenRef gid
-                                , flag == BindFlex || (allowRigidBinders && flag == BindRigid)
+                                , flag == BindFlex
                                 , case IntMap.lookup childKey baseNodes of
                                     Just TyVar{} -> True
                                     _ -> False
@@ -823,17 +813,11 @@ data DropPlanInput = DropPlanInput
     , dpiNodes :: IntMap.IntMap TyNode
     , dpiTarget0 :: NodeId
     , dpiTargetBound :: Maybe NodeId
-    , dpiTargetRigid :: Bool
     , dpiBoundIsBase :: Bool
-    , dpiBoundIsStructural :: Bool
-    , dpiBoundIsVar :: Bool
-    , dpiBoundIsChild :: Bool
     , dpiBoundHasNestedGen :: Bool
     , dpiBoundHasNamedOutsideGamma :: Bool
     , dpiBoundMentionsTarget :: Bool
     , dpiBoundHasForall :: Bool
-    , dpiBoundIsSchemeRootAll :: NodeId -> Bool
-    , dpiHasExplicitBound :: NodeId -> Bool
     , dpiScopeRootC :: NodeRef
     , dpiCanonKey :: NodeId -> Int
     }
@@ -850,17 +834,11 @@ buildDropPlan DropPlanInput{..} =
         nodes = dpiNodes
         target0 = dpiTarget0
         targetBound = dpiTargetBound
-        targetRigid = dpiTargetRigid
         boundIsBase = dpiBoundIsBase
-        boundIsStructural = dpiBoundIsStructural
-        boundIsVar = dpiBoundIsVar
-        boundIsChild = dpiBoundIsChild
         boundHasNestedGen = dpiBoundHasNestedGen
         boundHasNamedOutsideGamma = dpiBoundHasNamedOutsideGamma
         boundMentionsTarget = dpiBoundMentionsTarget
         boundHasForall = dpiBoundHasForall
-        boundIsSchemeRootAll = dpiBoundIsSchemeRootAll
-        hasExplicitBound' = dpiHasExplicitBound
         scopeRootC = dpiScopeRootC
         canonKey = dpiCanonKey
         dropTargetLocal =
@@ -868,17 +846,7 @@ buildDropPlan DropPlanInput{..} =
             case IntMap.lookup (getNodeId target0) nodes of
                 Just TyVar{} ->
                     case targetBound >>= (\bnd -> IntMap.lookup (getNodeId bnd) nodes) of
-                        Just TyVar{} ->
-                            allowDropTarget &&
-                                targetRigid &&
-                                (boundIsBase || boundIsStructural) &&
-                                (boundIsVar || boundIsChild) &&
-                                not boundHasNestedGen &&
-                                not (boundIsSchemeRootAll target0) &&
-                                not boundHasNamedOutsideGamma &&
-                                case targetBound of
-                                    Just bndVar -> not (hasExplicitBound' bndVar)
-                                    Nothing -> False
+                        Just TyVar{} -> False
                         Just _ ->
                             allowDropTarget &&
                                 boundIsBase &&

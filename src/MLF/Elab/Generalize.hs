@@ -5,6 +5,7 @@ module MLF.Elab.Generalize (
 
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
+import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
 import MLF.Constraint.Presolution.Plan
@@ -34,6 +35,7 @@ import MLF.Reify.Core
     ( reifyTypeWithNamesNoFallback
     , reifyTypeWithNamesNoFallbackOnConstraint
     , reifyBoundWithNames
+    , reifyBoundWithNamesOnConstraint
     )
 import MLF.Reify.TypeOps (freeTypeVarsFrom)
 import MLF.Elab.Types
@@ -174,6 +176,22 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
             | gen <- IntMap.elems (cGenNodes constraint)
             , any (\root -> canonical root == typeRootC) (gnSchemes gen)
             ]
+    -- Thesis §15.2.5: rigid quantification is always inlined (no abstractions for rigid nodes).
+    let rigidNameFor key = "__rigid" ++ show key
+        inlineRigidTypes rigidBounds = go Set.empty
+          where
+            go seen ty = case ty of
+                TVar v ->
+                    case Map.lookup v rigidBounds of
+                        Just bound
+                            | Set.member v seen -> TVar v
+                            | otherwise -> go (Set.insert v seen) bound
+                        Nothing -> TVar v
+                TBase b -> TBase b
+                TBottom -> TBottom
+                TArrow a b -> TArrow (go seen a) (go seen b)
+                TForall v mb body ->
+                    TForall v (fmap (go seen) mb) (go seen body)
     let reifyTypeWithAliases bodyRoot substBase binderPairs = do
             let bodyRootC = canonical bodyRoot
                 useConstraintReify =
@@ -187,6 +205,28 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
                     if useConstraintReify
                         then reifyTypeWithNamesNoFallbackOnConstraint constraintArg substMap substRoot
                         else reifyTypeWithNamesNoFallback resArg substMap substRoot
+                reifyBoundWith substMap constraintArg resArg bndRoot =
+                    if useConstraintReify
+                        then reifyBoundWithNamesOnConstraint constraintArg substMap bndRoot
+                        else reifyBoundWithNames resArg substMap bndRoot
+                rigidNodeKeys =
+                    IntSet.toList $
+                        IntSet.fromList
+                            [ getNodeId (canonical nid)
+                            | (childKey, (_parent, flag)) <- IntMap.toList bindParents
+                            , flag == BindRigid
+                            , TypeRef nid <- [nodeRefFromKey childKey]
+                            , case IntMap.lookup (getNodeId (canonical nid)) nodes of
+                                Just TyVar{} -> True
+                                _ -> False
+                            , IntSet.member (getNodeId (canonical nid)) (reachableFromWithBounds bodyRoot)
+                            , not (IntSet.member (getNodeId (canonical nid)) binderSet)
+                            ]
+                rigidSubstMap =
+                    IntMap.fromList
+                        [ (key, rigidNameFor key)
+                        | key <- rigidNodeKeys
+                        ]
             let reachableWithoutBound bnd =
                     let stopSet = IntSet.singleton (getNodeId (canonical bnd))
                         shouldStop nid = IntSet.member (getNodeId nid) stopSet
@@ -203,8 +243,29 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
                     , canonical bnd /= bodyRootC
                     , not (IntSet.member (getNodeId (canonical b)) (reachableWithoutBound bnd))
                     ]
+                substBaseRigid = IntMap.union rigidSubstMap substBase
+                inlineRigid substMap constraintArg resArg ty =
+                    if null rigidNodeKeys
+                        then pure ty
+                        else do
+                            rigidBounds <-
+                                mapM
+                                    (\key -> do
+                                        let nid = NodeId key
+                                            name = rigidNameFor key
+                                        case VarStore.lookupVarBound constraintArg (canonical nid) of
+                                            Nothing -> pure (name, TBottom)
+                                            Just bnd -> do
+                                                bndTy <- reifyBoundWith substMap constraintArg resArg (canonical bnd)
+                                                pure (name, bndTy)
+                                    )
+                                    rigidNodeKeys
+                            let rigidMap = Map.fromList rigidBounds
+                            pure (inlineRigidTypes rigidMap ty)
             if null aliasEntries
-                then reifyWith bodyRoot substBase constraint resForReify
+                then do
+                    ty <- reifyWith bodyRoot substBaseRigid constraint resForReify
+                    inlineRigid substBaseRigid constraint resForReify ty
                 else do
                     let aliasNodes =
                             IntMap.fromList
@@ -214,9 +275,10 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
                         constraintAlias =
                             constraint { cNodes = IntMap.union aliasNodes nodes }
                         substAlias =
-                            IntMap.union (IntMap.fromList aliasEntries) substBase
+                            IntMap.union (IntMap.fromList aliasEntries) substBaseRigid
                     let resAlias = resForReify { srConstraint = constraintAlias }
-                    reifyWith bodyRoot substAlias constraintAlias resAlias
+                    ty <- reifyWith bodyRoot substAlias constraintAlias resAlias
+                    inlineRigid substAlias constraintAlias resAlias ty
 
     let reifySchemeType =
             if useSchemeTypeAdjusted

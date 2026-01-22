@@ -34,8 +34,8 @@ import qualified MLF.Constraint.Solve as Solve (frWith)
 import MLF.Constraint.Presolution
     ( EdgeTrace
     , GeneralizePolicy
-    , policyAllowRigid
-    , policyKeepTargetAllowRigid
+    , policyDefault
+    , policyKeepTarget
     , etBinderArgs
     )
 import MLF.Frontend.ConstraintGen.Types (AnnExpr(..), AnnExprF(..))
@@ -221,8 +221,7 @@ elaborateWithScope generalizeAtWith resPhi resReify resGen gaParents edgeWitness
                     ty <- reifyTypeWithNames resReify IntMap.empty n
                     -- Add lambda parameter to env as a scheme derived from the annotated type,
                     -- so κσ can reorder/instantiate quantified parameters when present.
-                    let (binds, bodyTy) = Inst.splitForalls ty
-                        paramScheme = SchemeInfo { siScheme = Forall binds bodyTy, siSubst = IntMap.empty }
+                    let paramScheme = SchemeInfo { siScheme = schemeFromType ty, siSubst = IntMap.empty }
                         env' = Map.insert v paramScheme env
                     body' <- elabTerm bodyOut env'
                     pure (ELam v ty body')
@@ -295,7 +294,7 @@ elaborateWithScope generalizeAtWith resPhi resReify resGen gaParents edgeWitness
                             ()
                     let targetC = schemeBodyTarget resGen schemeRootId
                     (sch0, subst0) <-
-                        generalizeAtWith policyAllowRigid (Just gaParents) resGen scopeRoot targetC
+                        generalizeAtWith policyDefault (Just gaParents) resGen scopeRoot targetC
                     case debugElabGeneralize
                         ("elaborate let: scheme0=" ++ show sch0
                             ++ " subst0=" ++ show subst0
@@ -322,7 +321,7 @@ elaborateWithScope generalizeAtWith resPhi resReify resGen gaParents edgeWitness
                                 _ -> False
                     (sch, subst) <-
                         if needsRetry
-                            then generalizeAtWith policyKeepTargetAllowRigid (Just gaParents) resGen scopeRoot targetC
+                            then generalizeAtWith policyKeepTarget (Just gaParents) resGen scopeRoot targetC
                             else pure (sch0, subst0)
                     case debugElabGeneralize
                         ("elaborate let: scheme=" ++ show sch
@@ -572,8 +571,8 @@ substInType subst = cata alg
             Nothing -> name
 
 substInScheme :: IntMap.IntMap String -> ElabScheme -> ElabScheme
-substInScheme subst (Forall binds ty) =
-    Forall (map (\(n, b) -> (n, fmap (substInType subst) b)) binds) (substInType subst ty)
+substInScheme subst scheme =
+    schemeFromType (substInType subst (schemeToType scheme))
 
 substInInst :: IntMap.IntMap String -> Instantiation -> Instantiation
 substInInst subst = cata alg

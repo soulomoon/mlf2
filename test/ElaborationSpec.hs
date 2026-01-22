@@ -457,7 +457,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             solved <- requireRight (solveUnify c)
             (sch, _subst) <- requireRight (generalizeAt solved (typeRef forallNode) forallNode)
             sch `shouldBe`
-                Elab.Forall [] (Elab.TArrow Elab.TBottom Elab.TBottom)
+                Elab.schemeFromType (Elab.TArrow Elab.TBottom Elab.TBottom)
 
         it "generalizeAt inlines eliminated binders with bounds" $ do
             let v = NodeId 1
@@ -603,7 +603,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             Elab.pretty term `shouldBe` "f [⟨Int⟩]"
 
         it "pretty prints let with scheme" $ do
-            let scheme = Elab.Forall [("a", Nothing)] (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+            let scheme = Elab.schemeFromType (Elab.TForall "a" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
                 term = Elab.ELet "id" scheme (Elab.ETyAbs "a" Nothing (Elab.ELam "x" (Elab.TVar "a") (Elab.EVar "x"))) (Elab.EVar "id")
             Elab.pretty term `shouldBe` "let id : ∀a. a -> a = Λa. λx:a. x in id"
 
@@ -834,8 +834,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 let binderA = NodeId 101
                     binderB = NodeId 102
                     scheme =
-                        Elab.Forall [("a", Nothing), ("b", Nothing)]
-                            (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))
+                        Elab.schemeFromType
+                            (Elab.TForall "a" Nothing (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))))
                     subst =
                         IntMap.fromList
                             [ (getNodeId binderA, "a")
@@ -884,7 +884,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             }
                     solved = SolveResult { srConstraint = constraint, srUnionFind = IntMap.empty }
 
-                    scheme = Elab.Forall [("a", Nothing)] (Elab.TVar "a")
+                    scheme = Elab.schemeFromType (Elab.TForall "a" Nothing (Elab.TVar "a"))
                     subst = IntMap.fromList [(getNodeId binder, "a")]
                     si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = subst }
 
@@ -906,8 +906,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 (solved, _intNode) <- requireRight (runSolvedWithRoot (ELit (LInt 1)))
 
                 let scheme =
-                        Elab.Forall [("a", Nothing), ("b", Nothing)]
-                            (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))
+                        Elab.schemeFromType
+                            (Elab.TForall "a" Nothing (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))))
                     subst = IntMap.fromList [(1, "a"), (2, "b")]
                     si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = subst }
 
@@ -931,8 +931,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
             it "scheme-aware Φ can translate Raise (raise a binder to the front)" $ do
                 let scheme =
-                        Elab.Forall [("a", Nothing), ("b", Nothing)]
-                            (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))
+                        Elab.schemeFromType
+                            (Elab.TForall "a" Nothing (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))))
                     subst = IntMap.fromList [(1, "a"), (2, "b")]
                     si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = subst }
                     root = NodeId 100
@@ -977,12 +977,11 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
             it "scheme-aware Φ places Raise after bound dependencies (well-scoped bound)" $ do
                 let scheme =
-                        Elab.Forall
-                            [ ("a", Nothing)
-                            , ("b", Nothing)
-                            , ("c", Just (Elab.TVar "a"))
-                            ]
-                            (Elab.TArrow (Elab.TVar "a") (Elab.TArrow (Elab.TVar "c") (Elab.TVar "b")))
+                        Elab.schemeFromType
+                            (Elab.TForall "a" Nothing
+                                (Elab.TForall "b" Nothing
+                                    (Elab.TForall "c" (Just (Elab.TVar "a"))
+                                        (Elab.TArrow (Elab.TVar "a") (Elab.TArrow (Elab.TVar "c") (Elab.TVar "b"))))))
                     subst = IntMap.fromList [(1, "a"), (2, "b"), (3, "c")]
                     si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = subst }
                     root = NodeId 100
@@ -1059,12 +1058,11 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 
                     scheme =
-                        Elab.Forall
-                            [ ("a", Nothing)
-                            , ("b", Nothing)
-                            , ("c", Just (Elab.TVar "b"))
-                            ]
-                            (Elab.TArrow (Elab.TVar "b") (Elab.TArrow (Elab.TVar "c") (Elab.TVar "a")))
+                        Elab.schemeFromType
+                            (Elab.TForall "a" Nothing
+                                (Elab.TForall "b" Nothing
+                                    (Elab.TForall "c" (Just (Elab.TVar "b"))
+                                        (Elab.TArrow (Elab.TVar "b") (Elab.TArrow (Elab.TVar "c") (Elab.TVar "a"))))))
                     subst = IntMap.fromList [(1, "a"), (2, "b"), (3, "c")]
                     si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = subst }
 
@@ -1389,11 +1387,10 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
                     nTy = Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")
                     scheme =
-                        Elab.Forall
-                            [ ("a", Nothing)
-                            , ("m", Just (Elab.TForall "c" (Just nTy) (Elab.TVar "c")))
-                            ]
-                            (Elab.TVar "m")
+                        Elab.schemeFromType
+                            (Elab.TForall "a" Nothing
+                                (Elab.TForall "m" (Just (Elab.TForall "c" (Just nTy) (Elab.TVar "c")))
+                                    (Elab.TVar "m")))
                     subst = IntMap.fromList [(getNodeId aN, "a"), (getNodeId mN, "m")]
                     si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = subst }
 
@@ -1523,6 +1520,41 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
             (sch, _subst) <- requireRight (generalizeAt solved (genRef rootGen) arrow)
             Elab.prettyDisplay sch `shouldBe` "∀a. a -> a"
+
+        it "generalizeAt inlines rigid vars with structured bounds" $ do
+            let rootGen = GenNodeId 0
+                arrow = NodeId 1
+                rigidVar = NodeId 2
+                flexVar = NodeId 3
+                rigidBound = NodeId 4
+                c =
+                    rootedConstraint emptyConstraint
+                        { cNodes =
+                            IntMap.fromList
+                                [ (getNodeId arrow, TyArrow arrow rigidVar rigidVar)
+                                , (getNodeId rigidVar, TyVar { tnId = rigidVar, tnBound = Just rigidBound })
+                                , (getNodeId flexVar, TyVar { tnId = flexVar, tnBound = Nothing })
+                                , (getNodeId rigidBound, TyArrow rigidBound flexVar flexVar)
+                                ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef arrow), (genRef rootGen, BindRigid))
+                                , (nodeRefKey (typeRef rigidVar), (typeRef arrow, BindRigid))
+                                , (nodeRefKey (typeRef rigidBound), (typeRef arrow, BindRigid))
+                                , (nodeRefKey (typeRef flexVar), (genRef rootGen, BindFlex))
+                                ]
+                        }
+                solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+
+            (sch, _subst) <- requireRight (generalizeAt solved (genRef rootGen) arrow)
+            let ty = Elab.schemeToType sch
+                expected =
+                    Elab.TForall "a" Nothing
+                        (Elab.TArrow
+                            (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+                            (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+                        )
+            ty `shouldAlphaEqType` expected
 
         it "\\y. let id = (\\x. x) in id y should have type ∀a. a -> a" $ do
             let expr =

@@ -3,7 +3,7 @@ module TypeCheckSpec (spec) where
 import Test.Hspec
 
 import MLF.Constraint.Types (BaseTy(..))
-import MLF.Elab.Pipeline (ElabScheme(..), ElabTerm(..), ElabType(..), Instantiation(..), TypeCheckError(..), typeCheck)
+import MLF.Elab.Pipeline (ElabTerm(..), ElabType(..), Instantiation(..), TypeCheckError(..), schemeFromType, typeCheck)
 import MLF.Frontend.Syntax (Lit(..))
 
 spec :: Spec
@@ -24,7 +24,7 @@ spec = describe "Phase 7 typecheck" $ do
         typeCheck term `shouldBe` Right intTy
 
     it "typechecks let bindings" $ do
-        let term = ELet "x" (Forall [] intTy) (ELit (LInt 1)) (EVar "x")
+        let term = ELet "x" (schemeFromType intTy) (ELit (LInt 1)) (EVar "x")
         typeCheck term `shouldBe` Right intTy
 
     it "typechecks type abstractions" $ do

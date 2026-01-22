@@ -14,7 +14,7 @@ import MLF.Constraint.Presolution
     ( EdgeTrace(..)
     , PresolutionPlanBuilder(..)
     , GeneralizePolicy
-    , policyKeepTargetAllowRigid
+    , policyKeepTarget
     )
 import MLF.Constraint.Solve (SolveResult, frWith, srConstraint, srUnionFind)
 import MLF.Constraint.Types
@@ -44,7 +44,7 @@ import MLF.Elab.Run.Debug (debugGaScope)
 import MLF.Elab.Run.Util (chaseRedirects)
 import MLF.Util.Graph (reachableFromStop)
 import MLF.Frontend.ConstraintGen (AnnExpr)
-import MLF.Elab.Types (ElabScheme(..))
+import MLF.Elab.Types (ElabScheme)
 import MLF.Util.ElabError (ElabError)
 
 pruneBindParentsConstraint :: Constraint -> Constraint
@@ -1386,6 +1386,6 @@ generalizeAtWithBuilder planBuilder policy mbBindParentsGa res scopeRoot targetN
     let PresolutionPlanBuilder buildPlans = planBuilder
         go policy' mbGa res' scope target = do
             (genPlan, reifyPlan) <- buildPlans res' policy' mbGa scope target
-            let fallback scope' target' = fst <$> go policyKeepTargetAllowRigid mbGa res' scope' target'
+            let fallback scope' target' = fst <$> go policyKeepTarget mbGa res' scope' target'
             applyGeneralizePlan fallback genPlan reifyPlan
     in go policy mbBindParentsGa res scopeRoot targetNode

@@ -93,19 +93,13 @@ hasExplicitBound canonical nodes constraint v =
         _ -> False
 
 mkIsBindable
-    :: Bool
-    -> IntMap.IntMap BindFlag
-    -> (NodeId -> Bool)
-    -> (NodeId -> Bool)
+    :: IntMap.IntMap BindFlag
     -> (NodeId -> Bool)
     -> (Int -> NodeId -> Bool)
-mkIsBindable allowRigidBinders bindFlags isQuantifiableP isScopeSchemeRootP boundContainsForallP =
+mkIsBindable bindFlags isQuantifiableP =
     \key child ->
         case IntMap.lookup key bindFlags of
             Just BindFlex -> isQuantifiableP child
-            Just BindRigid
-                | allowRigidBinders || isScopeSchemeRootP child || boundContainsForallP child ->
-                    isQuantifiableP child
             _ -> False
 
 bindersForGen

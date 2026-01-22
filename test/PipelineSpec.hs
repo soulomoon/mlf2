@@ -1,3 +1,4 @@
+{-# LANGUAGE PatternSynonyms #-}
 module PipelineSpec (spec) where
 
 import Data.List (isInfixOf)
@@ -6,7 +7,7 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Set as Set
 import Test.Hspec
 
-import MLF.Elab.Pipeline (generalizeAtWithBuilder, applyRedirectsToAnn, runPipelineElab, ElabScheme(..), Pretty(..))
+import MLF.Elab.Pipeline (generalizeAtWithBuilder, applyRedirectsToAnn, runPipelineElab, pattern Forall, Pretty(..))
 import MLF.Frontend.Syntax
 import MLF.Frontend.ConstraintGen
 import MLF.Constraint.Normalize
