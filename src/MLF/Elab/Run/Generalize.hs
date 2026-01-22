@@ -34,6 +34,7 @@ import MLF.Constraint.Types
     )
 import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Elab.Generalize (GaBindParents(..))
+import MLF.Elab.Generalize.BindingUtil (bindingPathToRootLocal, firstGenAncestorFrom)
 import MLF.Elab.Run.Debug (debugGaScope)
 import MLF.Elab.Run.Util (chaseRedirects)
 import MLF.Elab.Types (ElabError(..))
@@ -676,18 +677,7 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                                                 (typeRef parentN)
             in go IntSet.empty baseRef
         firstGenAncestorWith bindParents0 ref0 =
-            case bindingPathToRootLocal bindParents0 ref0 of
-                Left _ -> Nothing
-                Right path -> listToMaybe [gid | GenRef gid <- drop 1 path]
-        bindingPathToRootLocal bindParents0 start =
-            let go visited path key
-                    | IntSet.member key visited = Left (BindingTreeError (BindingCycleDetected (reverse path)))
-                    | otherwise =
-                        case IntMap.lookup key bindParents0 of
-                            Nothing -> Right (reverse path)
-                            Just (parentRef, _) ->
-                                go (IntSet.insert key visited) (parentRef : path) (nodeRefKey parentRef)
-            in go IntSet.empty [start] (nodeRefKey start)
+            firstGenAncestorFrom bindParents0 ref0
         dropSelfParents bp =
             IntMap.filterWithKey
                 (\childKey (parentRef, _flag) ->

@@ -45,6 +45,7 @@ module MLF.Binding.Tree (
     rebuildGenNodesFromBinding,
     -- * Path operations
     bindingPathToRoot,
+    bindingPathToRootLocal,
     bindingLCA,
     canonicalizeBindParentsUnder,
     -- * Interior computation
@@ -551,6 +552,19 @@ bindingPathToRoot c start = go IntSet.empty [start] start
                 Just (parent, _flag) ->
                     go (IntSet.insert (nodeRefKey ref) visited) (parent : path) parent
 
+bindingPathToRootLocal :: BindParents -> NodeRef -> Either BindingError [NodeRef]
+bindingPathToRootLocal bindParents start =
+    go IntSet.empty [start] (nodeRefKey start)
+  where
+    go visited path key
+        | IntSet.member key visited =
+            Left $ BindingCycleDetected (reverse path)
+        | otherwise =
+            case IntMap.lookup key bindParents of
+                Nothing -> Right (reverse path)
+                Just (parentRef, _flag) ->
+                    go (IntSet.insert key visited) (parentRef : path) (nodeRefKey parentRef)
+
 -- | Compute the lowest common ancestor of two nodes in the binding tree.
 --
 -- Returns an error if either node has a cycle in its binding path.
@@ -1042,18 +1056,6 @@ checkSchemeClosureUnder canonical c0 = do
                             GenRef gid -> Just gid
                             TypeRef parentN ->
                                 go (IntSet.insert (nodeRefKey ref) visited) (typeRef (canonical parentN))
-
-    bindingPathToRootLocal bindParents' start =
-        go IntSet.empty [start] (nodeRefKey start)
-      where
-        go visited path key
-            | IntSet.member key visited = Left (BindingCycleDetected (reverse path))
-            | otherwise =
-                case IntMap.lookup key bindParents' of
-                    Nothing -> Right (reverse path)
-                    Just (parentRef, _) ->
-                        go (IntSet.insert key visited) (parentRef : path) (nodeRefKey parentRef)
-
 
 -- | Validate binding-tree invariants on the quotient graph induced by a canonicalization function.
 --

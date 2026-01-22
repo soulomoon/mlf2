@@ -23,6 +23,7 @@ import MLF.Elab.Types
 import MLF.Elab.TypeOps (inlineBaseBoundsType, matchType)
 import MLF.Elab.Inst (applyInstantiation, composeInst, instMany, schemeToType, splitForalls)
 import MLF.Elab.Generalize (GaBindParents(..), generalizeAtAllowRigid, generalizeAtAllowRigidWithBindParents)
+import MLF.Elab.Generalize.BindingUtil (bindingPathToRootLocal)
 import MLF.Elab.Reify (namedNodes, reifyBoundWithNames, reifyType)
 import MLF.Elab.Sigma (bubbleReorderTo)
 import MLF.Elab.Util (topoSortBy)
@@ -449,16 +450,6 @@ phiFromEdgeWitnessWithTrace res mbGaParents mSchemeInfo mTrace ew = do
                     Just (GenRef gid, _) -> Right (genRef gid)
                     Just (TypeRef parent, _) ->
                         goScope (IntSet.insert (nodeRefKey ref) visited) (typeRef (canonicalNode parent))
-        bindingPathToRootLocal bindParents' start =
-            let goPath visited path key
-                    | IntSet.member key visited = Left (BindingTreeError (BindingCycleDetected (reverse path)))
-                    | otherwise =
-                        case IntMap.lookup key bindParents' of
-                            Nothing -> Right (reverse path)
-                            Just (parentRef, _) ->
-                                goPath (IntSet.insert key visited) (parentRef : path) (nodeRefKey parentRef)
-            in goPath IntSet.empty [start] (nodeRefKey start)
-
     debugPhi :: String -> a -> a
     debugPhi msg value =
         if debugPhiEnabled
@@ -1239,18 +1230,23 @@ phiFromEdgeWitnessWithTrace res mbGaParents mSchemeInfo mTrace ew = do
             in Right (pre ++ (x : rest))
 
     normalizeInst :: Instantiation -> Instantiation
-    normalizeInst inst = case inst of
-        InstSeq a b ->
-            let a' = normalizeInst a
-                b' = normalizeInst b
-            in case (a', b') of
-                (InstInside (InstBot t), InstElim) -> InstApp t
-                (InstId, x) -> x
-                (x, InstId) -> x
-                _ -> InstSeq a' b'
-        InstInside a -> InstInside (normalizeInst a)
-        InstUnder v a -> InstUnder v (normalizeInst a)
-        _ -> inst
+    normalizeInst = cata alg
+      where
+        alg inst = case inst of
+            InstSeqF a b ->
+                case (a, b) of
+                    (InstInside (InstBot t), InstElim) -> InstApp t
+                    (InstId, x) -> x
+                    (x, InstId) -> x
+                    _ -> InstSeq a b
+            InstInsideF a -> InstInside a
+            InstUnderF v a -> InstUnder v a
+            InstAppF t -> InstApp t
+            InstBotF t -> InstBot t
+            InstAbstrF v -> InstAbstr v
+            InstIntroF -> InstIntro
+            InstElimF -> InstElim
+            InstIdF -> InstId
 
     freeTypeVars :: ElabType -> [String]
     freeTypeVars = nub . cata alg

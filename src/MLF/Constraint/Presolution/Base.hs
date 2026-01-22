@@ -11,6 +11,7 @@ module MLF.Constraint.Presolution.Base (
     unionTrace,
     PresolutionM,
     runPresolutionM,
+    bindingPathToRootUnderM,
     requireValidBindingTree,
     edgeInteriorExact,
     orderedBindersM,
@@ -111,6 +112,26 @@ type PresolutionM = StateT PresolutionState (Either PresolutionError)
 -- | Run a PresolutionM action with an initial state (testing helper).
 runPresolutionM :: PresolutionState -> PresolutionM a -> Either PresolutionError (a, PresolutionState)
 runPresolutionM st action = runStateT action st
+
+bindingPathToRootUnderM
+    :: (NodeId -> NodeId)
+    -> Constraint
+    -> NodeRef
+    -> PresolutionM [NodeRef]
+bindingPathToRootUnderM canonical c start = go IntSet.empty [start] start
+  where
+    go :: IntSet.IntSet -> [NodeRef] -> NodeRef -> PresolutionM [NodeRef]
+    go visited path ref
+        | IntSet.member (nodeRefKey ref) visited =
+            throwError (BindingTreeError (BindingCycleDetected (reverse path)))
+        | otherwise = do
+            mbParentInfo <- case Binding.lookupBindParentUnder canonical c ref of
+                Left err -> throwError (BindingTreeError err)
+                Right p -> pure p
+            case mbParentInfo of
+                Nothing -> pure (reverse path)
+                Just (parent, _flag) ->
+                    go (IntSet.insert (nodeRefKey ref) visited) (parent : path) parent
 
 requireValidBindingTree :: PresolutionM ()
 requireValidBindingTree = do
@@ -398,7 +419,7 @@ implicitBindersM canonical c0 root0 = do
                     )
                     (gnSchemes gen)
                 ]
-    path <- bindingPathToRootUnder c0 (typeRef root)
+    path <- bindingPathToRootUnderM canonical c0 (typeRef root)
     case schemeOwner <|> schemeOwnerByBody <|> listToMaybe [gid | GenRef gid <- path] of
         Nothing -> pure []
         Just gid -> do
@@ -518,25 +539,6 @@ implicitBindersM canonical c0 root0 = do
                                         in map canonical (structuralChildren node ++ boundKids)
                         in go visited' (kids ++ rest)
         in go IntSet.empty [root]
-
-    bindingPathToRootUnder
-        :: Constraint
-        -> NodeRef
-        -> PresolutionM [NodeRef]
-    bindingPathToRootUnder c start = go IntSet.empty [start] start
-      where
-        go :: IntSet.IntSet -> [NodeRef] -> NodeRef -> PresolutionM [NodeRef]
-        go visited path ref
-            | IntSet.member (nodeRefKey ref) visited =
-                throwError (BindingTreeError (BindingCycleDetected (reverse path)))
-            | otherwise = do
-                mbParentInfo <- case Binding.lookupBindParentUnder canonical c ref of
-                    Left err -> throwError (BindingTreeError err)
-                    Right p -> pure p
-                case mbParentInfo of
-                    Nothing -> pure (reverse path)
-                    Just (parent, _flag) ->
-                        go (IntSet.insert (nodeRefKey ref) visited) (parent : path) parent
 
 forallSpecM :: NodeId -> PresolutionM ForallSpec
 forallSpecM binder0 = do

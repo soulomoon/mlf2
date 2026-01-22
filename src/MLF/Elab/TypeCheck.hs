@@ -6,18 +6,15 @@ module MLF.Elab.TypeCheck (
     checkInstantiation
 ) where
 
-import Data.Functor.Foldable (para)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
 import MLF.Constraint.Types (BaseTy(..))
-import MLF.Elab.Inst (schemeToType)
+import MLF.Elab.Inst (InstEvalSpec(..), evalInstantiationWith, renameInstBound, schemeToType)
 import MLF.Elab.Types
 import MLF.Elab.TypeOps
     ( alphaEqType
     , freeTypeVarsType
-    , freshTypeNameFromCounter
-    , substTypeCapture
     )
 import MLF.Frontend.Syntax (Lit(..))
 
@@ -75,50 +72,30 @@ typeCheckWithEnv env term = case term of
         checkInstantiation env ty inst
 
 checkInstantiation :: Env -> ElabType -> Instantiation -> Either TypeCheckError ElabType
-checkInstantiation env ty inst = snd <$> go 0 env ty inst
+checkInstantiation env ty inst = snd <$> evalInstantiationWith spec inst (0, env, ty)
   where
-    go :: Int -> Env -> ElabType -> Instantiation -> Either TypeCheckError (Int, ElabType)
-    go k env' t i = case i of
-        InstId -> Right (k, t)
-        InstSeq i1 i2 -> do
-            (k1, t1) <- go k env' t i1
-            go k1 env' t1 i2
-        InstApp argTy ->
-            go k env' t (InstSeq (InstInside (InstBot argTy)) InstElim)
-        InstBot tArg -> case t of
+    spec :: InstEvalSpec Env TypeCheckError
+    spec = InstEvalSpec
+        { instBot = \tArg (k, _env', t) -> case t of
             TBottom -> Right (k, tArg)
-            _ -> Left (TCInstantiationError i t ("InstBot expects TBottom, got " ++ pretty t))
-        InstAbstr v ->
+            _ -> Left (TCInstantiationError (InstBot tArg) t ("InstBot expects TBottom, got " ++ pretty t))
+        , instAbstr = \v (k, env', t) ->
             case Map.lookup v (typeEnv env') of
                 Nothing -> Left (TCUnboundTypeVar v)
                 Just bound ->
                     if alphaEqType t bound
                         then Right (k, TVar v)
-                        else Left (TCInstantiationError i t ("InstAbstr expects bound " ++ pretty bound))
-        InstIntro -> do
-            let used = freeTypeVarsType t
-                (fresh, k') = freshTypeNameFromCounter k used
-            Right (k', TForall fresh Nothing t)
-        InstElim -> case t of
-            TForall v mbBound body -> do
-                let bound = boundType mbBound
-                Right (k, substTypeCapture v bound body)
-            _ -> Left (TCInstantiationError i t ("InstElim expects forall, got " ++ pretty t))
-        InstInside phi -> case t of
-            TForall v mbBound body -> do
-                let bound0 = boundType mbBound
-                (k1, bound1) <- go k env' bound0 phi
-                let mb' = if bound1 == TBottom then Nothing else Just bound1
-                Right (k1, TForall v mb' body)
-            _ -> Left (TCInstantiationError i t ("InstInside expects forall, got " ++ pretty t))
-        InstUnder vParam phi -> case t of
-            TForall v mbBound body -> do
-                let bound0 = boundType mbBound
-                    phi' = renameInstBound vParam v phi
-                    env'' = env' { typeEnv = Map.insert v bound0 (typeEnv env') }
-                (k1, body') <- go k env'' body phi'
-                Right (k1, TForall v mbBound body')
-            _ -> Left (TCInstantiationError i t ("InstUnder expects forall, got " ++ pretty t))
+                        else Left (TCInstantiationError (InstAbstr v) t ("InstAbstr expects bound " ++ pretty bound))
+        , instElimError = \inst0 t ->
+            TCInstantiationError inst0 t ("InstElim expects forall, got " ++ pretty t)
+        , instInsideError = \_inst0 t ->
+            TCInstantiationError InstId t ("InstInside expects forall, got " ++ pretty t)
+        , instUnderError = \phiInst t ->
+            TCInstantiationError phiInst t ("InstUnder expects forall, got " ++ pretty t)
+        , instUnderEnv = \v bound env' ->
+            env' { typeEnv = Map.insert v bound (typeEnv env') }
+        , renameBound = renameInstBound
+        }
 
 litType :: Lit -> ElabType
 litType lit = case lit of
@@ -134,19 +111,3 @@ freeTypeVarsEnv env =
     Set.union
         (Set.unions (map freeTypeVarsType (Map.elems (termEnv env))))
         (Set.unions (map freeTypeVarsType (Map.elems (typeEnv env))))
-
-renameInstBound :: String -> String -> Instantiation -> Instantiation
-renameInstBound old new = para alg
-  where
-    alg inst0 = case inst0 of
-        InstIdF -> InstId
-        InstAppF t -> InstApp t
-        InstBotF t -> InstBot t
-        InstIntroF -> InstIntro
-        InstElimF -> InstElim
-        InstAbstrF v -> InstAbstr (if v == old then new else v)
-        InstInsideF i -> InstInside (snd i)
-        InstSeqF a b -> InstSeq (snd a) (snd b)
-        InstUnderF v i
-            | v == old -> InstUnder v (fst i)
-            | otherwise -> InstUnder v (snd i)

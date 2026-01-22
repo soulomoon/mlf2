@@ -24,10 +24,10 @@ module MLF.Constraint.Presolution.Witness (
     OmegaNormalizeError(..)
 ) where
 
-import Control.Monad (foldM)
+import Control.Monad (foldM, zipWithM)
 import Control.Monad.State (gets)
 import Control.Monad.Except (throwError)
-import Data.Functor.Foldable (cata)
+import Data.Functor.Foldable (ListF(..), ana, cata)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
@@ -200,58 +200,54 @@ binderArgsFromExpansion leftRaw expn = do
 -- | Convert a presolution expansion recipe into interleaved witness steps.
 witnessFromExpansion :: NodeId -> TyNode -> Expansion -> PresolutionM [InstanceStep]
 witnessFromExpansion _root leftRaw expn = do
-    let parts = flatten expn
-        suffix = scanr (\e acc -> isForall e || acc) False parts
-        flags = case suffix of
-            [] -> []
-            (_:rest) -> rest
-    steps <- mapM (uncurry (go leftRaw)) (zip flags parts)
-    pure (concat steps)
+    let (_hasForall, stepper) = cata (witnessAlg leftRaw) expn
+    stepper False
   where
-    isForall (ExpForall _) = True
-    isForall _ = False
-
-    flatten = cata alg
-      where
-        alg layer = case layer of
-            ExpComposeF es -> concat (NE.toList es)
-            ExpIdentityF -> [ExpIdentity]
-            ExpForallF specs -> [ExpForall specs]
-            ExpInstantiateF args -> [ExpInstantiate args]
-
-    go :: TyNode -> Bool -> Expansion -> PresolutionM [InstanceStep]
-    go _ _ ExpIdentity = pure []
-    go _ _ (ExpForall ls) =
-        let count = sum (map fsBinderCount (NE.toList ls))
-        in pure (replicate count StepIntro)
-    go lr suppressWeaken (ExpInstantiate args) = do
-        -- If the TyExp body is a forall, instantiate its binders in the same order
-        -- that `applyExpansion` uses (binding-edge Q(n) via `orderedBinders`).
-        case lr of
-            TyExp{ tnBody = b } -> do
-                (_bodyRoot, boundVars) <- instantiationBindersM b
-                if null boundVars
-                    then pure []
-                else if length boundVars > length args
-                    then throwError (ArityMismatch "witnessFromExpansion/ExpInstantiate" (length boundVars) (length args))
-                        else do
-                            let args' = take (length boundVars) args
-                                pairs = zip args' boundVars
-                            (grafts, merges, weakens) <- foldM (classify suppressWeaken boundVars) ([], [], []) pairs
-                            -- Order:
-                            --   • grafts first (update ⊥ bounds)
-                            --   • then merges (alias + eliminate)
-                            --   • then remaining weakens (eliminate using existing bounds)
-                            --
-                            -- This is closer to `papers/these-finale-english.txt`
-                            -- (see `papers/xmlf.txt` Fig. 10), and avoids emitting
-                            -- invalid grafts under non-⊥ bounds (e.g. bounded variables).
-                            pure (map StepOmega (grafts ++ merges ++ weakens))
-            _ -> do
-                -- Instantiating a non-TyExp is unexpected in current pipeline; treat as empty.
-                pure []
-    go lr suppressWeaken (ExpCompose es) =
-        concat <$> mapM (go lr suppressWeaken) (NE.toList es)
+    witnessAlg
+        :: TyNode
+        -> ExpansionF (Bool, Bool -> PresolutionM [InstanceStep])
+        -> (Bool, Bool -> PresolutionM [InstanceStep])
+    witnessAlg lr layer = case layer of
+        ExpIdentityF ->
+            (False, \_ -> pure [])
+        ExpForallF ls ->
+            let count = sum (map fsBinderCount (NE.toList ls))
+            in (True, \_ -> pure (replicate count StepIntro))
+        ExpInstantiateF args ->
+            (False, \suppressWeaken -> do
+                -- If the TyExp body is a forall, instantiate its binders in the same order
+                -- that `applyExpansion` uses (binding-edge Q(n) via `orderedBinders`).
+                case lr of
+                    TyExp{ tnBody = b } -> do
+                        (_bodyRoot, boundVars) <- instantiationBindersM b
+                        if null boundVars
+                            then pure []
+                        else if length boundVars > length args
+                            then throwError (ArityMismatch "witnessFromExpansion/ExpInstantiate" (length boundVars) (length args))
+                            else do
+                                let args' = take (length boundVars) args
+                                    pairs = zip args' boundVars
+                                (grafts, merges, weakens) <- foldM (classify suppressWeaken boundVars) ([], [], []) pairs
+                                -- Order:
+                                --   • grafts first (update ⊥ bounds)
+                                --   • then merges (alias + eliminate)
+                                --   • then remaining weakens (eliminate using existing bounds)
+                                --
+                                -- This is closer to `papers/these-finale-english.txt`
+                                -- (see `papers/xmlf.txt` Fig. 10), and avoids emitting
+                                -- invalid grafts under non-⊥ bounds (e.g. bounded variables).
+                                pure (map StepOmega (grafts ++ merges ++ weakens))
+                    _ -> do
+                        -- Instantiating a non-TyExp is unexpected in current pipeline; treat as empty.
+                        pure [])
+        ExpComposeF es ->
+            let children = NE.toList es
+                childHas = map fst children
+                hasForall = or childHas
+            in (hasForall, \rightHasForall -> do
+                let suffixFlags = tail (scanr (||) rightHasForall childHas)
+                steps <- zipWithM (\flag (_, childStep) -> childStep flag) suffixFlags children
+                pure (concat steps))
 
     classify
         :: Bool
@@ -329,9 +325,13 @@ forallIntroSuffixCount expn =
         ExpForall ls -> length (NE.toList ls)
         _ -> 0
 
-    flatten = \case
-        ExpCompose es -> concatMap flatten (NE.toList es)
-        other -> [other]
+    flatten = cata alg
+      where
+        alg layer = case layer of
+            ExpComposeF es -> concat (NE.toList es)
+            ExpIdentityF -> [ExpIdentity]
+            ExpForallF specs -> [ExpForall specs]
+            ExpInstantiateF args -> [ExpInstantiate args]
 
     splitTrailing p xs =
         let (sufRev, preRev) = span p (reverse xs)
@@ -458,23 +458,32 @@ integratePhase2Steps steps extraOps =
             Nothing -> ([], xs)
             Just idx -> splitAt (idx + 1) xs
 
-    findLastIndex p = go 0 Nothing
+    findLastIndex p = cata alg
       where
-        go _ acc [] = acc
-        go i acc (y:ys) =
-            let acc' = if p y then Just i else acc
-            in go (i + 1) acc' ys
+        alg = \case
+            Nil -> Nothing
+            Cons y mbTail ->
+                case mbTail of
+                    Just i -> Just (i + 1)
+                    Nothing ->
+                        if p y
+                            then Just 0
+                            else Nothing
 
     isIntro = \case
         StepIntro -> True
         _ -> False
 
-    integrateSegments = go []
+    integrateSegments steps =
+        let stepper = cata integrateAlg steps
+        in stepper []
       where
-        go acc [] = flush acc
-        go acc (step : rest) = case step of
-            StepOmega op -> go (op : acc) rest
-            StepIntro -> flush acc ++ [StepIntro] ++ go [] rest
+        integrateAlg = \case
+            Nil -> flush
+            Cons step restFn ->
+                case step of
+                    StepOmega op -> \acc -> restFn (op : acc)
+                    StepIntro -> \acc -> flush acc ++ [StepIntro] ++ restFn []
 
         flush opsRev =
             if null opsRev
@@ -521,23 +530,33 @@ normalizeInstanceOpsWithFallback env ops0 =
         Left err -> Left err
 
 normalizeInstanceStepsFull :: OmegaNormalizeEnv -> [InstanceStep] -> Either OmegaNormalizeError [InstanceStep]
-normalizeInstanceStepsFull env = go []
+normalizeInstanceStepsFull env steps =
+    let stepper = cata (normalizeAlg env) steps
+    in stepper []
   where
-    go acc [] = flush acc
-    go acc (step : rest) = case step of
-        StepOmega op -> go (op : acc) rest
-        StepIntro -> do
-            ops <- flush acc
-            rest' <- go [] rest
-            pure (ops ++ [StepIntro] ++ rest')
+    normalizeAlg
+        :: OmegaNormalizeEnv
+        -> ListF InstanceStep ([InstanceOp] -> Either OmegaNormalizeError [InstanceStep])
+        -> ([InstanceOp] -> Either OmegaNormalizeError [InstanceStep])
+    normalizeAlg env' = \case
+        Nil -> flush env'
+        Cons step restFn ->
+            case step of
+                StepOmega op -> \acc -> restFn (op : acc)
+                StepIntro -> \acc -> do
+                    ops <- flush env' acc
+                    rest' <- restFn []
+                    pure (ops ++ [StepIntro] ++ rest')
 
-    flush opsRev =
+    flush env' opsRev =
         if null opsRev
             then Right []
-            else map StepOmega <$> normalizeInstanceOpsWithFallback env (reverse opsRev)
+            else map StepOmega <$> normalizeInstanceOpsWithFallback env' (reverse opsRev)
 
 coalesceRaiseMergeWithEnv :: OmegaNormalizeEnv -> [InstanceOp] -> Either OmegaNormalizeError [InstanceOp]
-coalesceRaiseMergeWithEnv env = go
+coalesceRaiseMergeWithEnv env ops =
+    let stepper = cata (coalesceAlg env) ops
+    in stepper Nothing
   where
     canon = canonical env
 
@@ -546,29 +565,50 @@ coalesceRaiseMergeWithEnv env = go
     inInterior nid =
         IntSet.member (getNodeId (canon nid)) (interior env)
 
-    isSameRaise n = \case
-        OpRaise n' -> sameBinder n n'
-        _ -> False
+    flushPending = \case
+        Nothing -> Right []
+        Just (_n, opsRev) -> Right (reverse opsRev)
 
-    go = \case
-        [] -> Right []
-        (OpRaise n : rest) ->
-            let (moreRaises, rest1) = span (isSameRaise n) rest
-                raises = OpRaise n : moreRaises
-            in case rest1 of
-                (OpMerge n' m : rest2) | sameBinder n n' ->
-                    if inInterior m
-                        then do
-                            rest' <- go rest1
-                            pure (raises ++ rest')
-                        else do
-                            rest' <- go rest2
-                            pure (OpRaiseMerge n m : rest')
-                _ -> (OpRaise n :) <$> go rest
-        (OpMerge n m : rest)
-            | inInterior n && not (inInterior m) -> Left (MalformedRaiseMerge [OpMerge n m])
-            | otherwise -> (OpMerge n m :) <$> go rest
-        (op : rest) -> (op :) <$> go rest
+    coalesceAlg
+        :: OmegaNormalizeEnv
+        -> ListF InstanceOp (Maybe (NodeId, [InstanceOp]) -> Either OmegaNormalizeError [InstanceOp])
+        -> (Maybe (NodeId, [InstanceOp]) -> Either OmegaNormalizeError [InstanceOp])
+    coalesceAlg _ = \case
+        Nil -> flushPending
+        Cons op restFn ->
+            case op of
+                OpRaise n ->
+                    \pending -> case pending of
+                        Just (n', opsRev)
+                            | sameBinder n n' -> restFn (Just (n', OpRaise n : opsRev))
+                        _ -> do
+                            prefix <- flushPending pending
+                            rest <- restFn (Just (n, [OpRaise n]))
+                            pure (prefix ++ rest)
+                OpMerge n m ->
+                    \pending ->
+                        case pending of
+                            Just (n', _opsRev)
+                                | sameBinder n n' ->
+                                    if inInterior m
+                                        then emitMerge pending
+                                        else do
+                                            rest <- restFn Nothing
+                                            pure (OpRaiseMerge n m : rest)
+                            _ -> emitMerge pending
+                  where
+                    emitMerge pending = do
+                        if inInterior n && not (inInterior m)
+                            then Left (MalformedRaiseMerge [OpMerge n m])
+                            else do
+                                prefix <- flushPending pending
+                                rest <- restFn Nothing
+                                pure (prefix ++ [OpMerge n m] ++ rest)
+                _ ->
+                    \pending -> do
+                        prefix <- flushPending pending
+                        rest <- restFn Nothing
+                        pure (prefix ++ [op] ++ rest)
 
 data WeakenInfo = WeakenInfo
     { wiOp :: InstanceOp
@@ -671,7 +711,7 @@ reorderWeakenWithEnv env ops =
                 , wiDesc = descSet
                 }
 
-    orderWeakenGroup infos0 = map wiOp (go infos0 [])
+    orderWeakenGroup infos0 = map wiOp (ana orderAlg ([], infos0))
       where
         compareReady a b =
             case compareNodesByOrderKey (orderKeys env) (wiBinder a) (wiBinder b) of
@@ -687,14 +727,20 @@ reorderWeakenWithEnv env ops =
                 )
                 remaining
 
-        go remaining acc =
-            case remaining of
-                [] -> acc
-                _ ->
-                    let (ready, blocked) = partition (not . hasDescendant remaining) remaining
-                    in if null ready
-                        then acc ++ sortBy compareReady remaining
-                        else go blocked (acc ++ sortBy compareReady ready)
+        orderAlg (queue, remaining) =
+            case queue of
+                (q:qs) -> Cons q (qs, remaining)
+                [] ->
+                    case remaining of
+                        [] -> Nil
+                        _ ->
+                            let (ready, blocked) = partition (not . hasDescendant remaining) remaining
+                            in if null ready
+                                then emitQueue (sortBy compareReady remaining) []
+                                else emitQueue (sortBy compareReady ready) blocked
+
+        emitQueue [] _ = Nil
+        emitQueue (q:qs) remaining = Cons q (qs, remaining)
 
 -- | Normalize Ω by enforcing `papers/these-finale-english.txt` conditions
 -- (see `papers/xmlf.txt` conditions (1)–(5)) only.

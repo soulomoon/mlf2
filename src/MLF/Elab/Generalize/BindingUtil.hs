@@ -4,8 +4,6 @@ module MLF.Elab.Generalize.BindingUtil (
     firstGenAncestorFrom
 ) where
 
-import qualified Data.IntMap.Strict as IntMap
-import qualified Data.IntSet as IntSet
 import Data.Maybe (listToMaybe)
 
 import MLF.Constraint.Types
@@ -20,21 +18,9 @@ bindingScopeFor constraint ref =
 
 bindingPathToRootLocal :: BindParents -> NodeRef -> Either ElabError [NodeRef]
 bindingPathToRootLocal bindParents start =
-    walkBindingParents bindParents IntSet.empty [start] (nodeRefKey start)
-
-walkBindingParents :: BindParents -> IntSet.IntSet -> [NodeRef] -> Int -> Either ElabError [NodeRef]
-walkBindingParents bindParents visited path key
-    | IntSet.member key visited =
-        Left (BindingTreeError (BindingCycleDetected (reverse path)))
-    | otherwise =
-        case IntMap.lookup key bindParents of
-            Nothing -> Right (reverse path)
-            Just (parentRef, _) ->
-                walkBindingParents
-                    bindParents
-                    (IntSet.insert key visited)
-                    (parentRef : path)
-                    (nodeRefKey parentRef)
+    case Binding.bindingPathToRootLocal bindParents start of
+        Left err -> Left (BindingTreeError err)
+        Right path -> Right path
 
 firstGenAncestorFrom :: BindParents -> NodeRef -> Maybe GenNodeId
 firstGenAncestorFrom bindParents start =

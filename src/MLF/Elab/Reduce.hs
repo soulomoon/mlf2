@@ -7,7 +7,7 @@ module MLF.Elab.Reduce (
 import qualified Data.Set as Set
 import Data.Functor.Foldable (para)
 
-import MLF.Elab.Inst (applyInstantiation, schemeToType, splitForalls)
+import MLF.Elab.Inst (applyInstantiation, renameInstBound, schemeToType, splitForalls)
 import MLF.Elab.TypeOps (freeTypeVarsType, freshTypeName, substTypeCapture)
 import MLF.Elab.Types
 import MLF.Util.RecursionSchemes (cataMaybe, foldElabTerm, foldInstantiation)
@@ -248,20 +248,4 @@ replaceAbstrInInst target replacement = para alg
         InstSeqF a b -> InstSeq (snd a) (snd b)
         InstUnderF v i
             | v == target -> InstUnder v (fst i)
-            | otherwise -> InstUnder v (snd i)
-
-renameInstBound :: String -> String -> Instantiation -> Instantiation
-renameInstBound old new = para alg
-  where
-    alg inst = case inst of
-        InstIdF -> InstId
-        InstAppF t -> InstApp t
-        InstBotF t -> InstBot t
-        InstIntroF -> InstIntro
-        InstElimF -> InstElim
-        InstAbstrF v -> InstAbstr (if v == old then new else v)
-        InstInsideF i -> InstInside (snd i)
-        InstSeqF a b -> InstSeq (snd a) (snd b)
-        InstUnderF v i
-            | v == old -> InstUnder v (fst i)
             | otherwise -> InstUnder v (snd i)

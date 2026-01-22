@@ -22,6 +22,7 @@ module MLF.Constraint.Presolution.Driver (
 import Control.Monad.State
 import Control.Monad.Except (throwError)
 import Control.Monad (foldM, forM, forM_, when)
+import Data.Functor.Foldable (cata)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
@@ -406,10 +407,13 @@ rewriteConstraint mapping = do
         genNodes' = rewriteGenNodes canonical newNodes (cGenNodes c)
 
         -- Canonicalize edge expansions
-        canonicalizeExp ExpIdentity = ExpIdentity
-        canonicalizeExp (ExpInstantiate args) = ExpInstantiate (map canonical args)
-        canonicalizeExp (ExpForall levels) = ExpForall levels
-        canonicalizeExp (ExpCompose exps) = ExpCompose (fmap canonicalizeExp exps)
+        canonicalizeExp = cata alg
+          where
+            alg layer = case layer of
+                ExpIdentityF -> ExpIdentity
+                ExpInstantiateF args -> ExpInstantiate (map canonical args)
+                ExpForallF levels -> ExpForall levels
+                ExpComposeF exps -> ExpCompose exps
 
         newExps = IntMap.map canonicalizeExp (psEdgeExpansions st)
 

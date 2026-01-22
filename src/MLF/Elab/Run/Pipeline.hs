@@ -3,6 +3,7 @@ module MLF.Elab.Run.Pipeline (
     runPipelineElabChecked
 ) where
 
+import Data.Functor.Foldable (cata)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.List.NonEmpty as NE
@@ -671,12 +672,14 @@ runPipelineElabWith genConstraints expr = do
                                     any
                                         (\root -> IntMap.findWithDefault 0 (getNodeId root) edgeTraceCounts > 1)
                                         rootInstRoots
-                                collectInstApps inst0 = case inst0 of
-                                    InstApp ty -> [ty]
-                                    InstSeq a b -> collectInstApps a ++ collectInstApps b
-                                    InstInside phi -> collectInstApps phi
-                                    InstUnder _ phi -> collectInstApps phi
-                                    _ -> []
+                                collectInstApps = cata alg
+                                  where
+                                    alg inst0 = case inst0 of
+                                        InstAppF ty -> [ty]
+                                        InstSeqF a b -> a ++ b
+                                        InstInsideF phi -> phi
+                                        InstUnderF _ phi -> phi
+                                        _ -> []
                                 baseNodeForTy ty =
                                     case ty of
                                         TBase base ->

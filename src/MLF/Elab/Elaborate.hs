@@ -5,7 +5,7 @@ module MLF.Elab.Elaborate (
     elaborateWithScope
 ) where
 
-import Data.Functor.Foldable (cata)
+import Data.Functor.Foldable (cata, para)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.List.NonEmpty as NE
@@ -17,6 +17,7 @@ import System.Environment (lookupEnv)
 import System.IO.Unsafe (unsafePerformIO)
 import MLF.Elab.Generalize.Names (parseNameId)
 import MLF.Elab.TypeOps (alphaEqType, inlineBaseBoundsType, matchType)
+import MLF.Util.RecursionSchemes (cataM)
 
 import MLF.Frontend.Syntax (VarName)
 import MLF.Constraint.Types
@@ -27,6 +28,7 @@ import MLF.Elab.Generalize
     , generalizeAtAllowRigidWithBindParents
     , generalizeAtKeepTargetAllowRigidWithBindParents
     )
+import MLF.Elab.Generalize.BindingUtil (bindingPathToRootLocal)
 import MLF.Elab.Phi (phiFromEdgeWitnessWithTrace)
 import MLF.Elab.Inst (applyInstantiation, schemeToType)
 import qualified MLF.Elab.Inst as Inst
@@ -34,7 +36,7 @@ import MLF.Elab.Reify (reifyBoundWithNames, reifyType, reifyTypeWithNames, reify
 import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Constraint.Solve as Solve (frWith)
 import MLF.Constraint.Presolution (EdgeTrace, etBinderArgs)
-import MLF.Frontend.ConstraintGen.Types (AnnExpr(..))
+import MLF.Frontend.ConstraintGen.Types (AnnExpr(..), AnnExprF(..))
 
 -- | Convert an Expansion to an Instantiation witness.
 -- This translates the presolution expansion recipe into an xMLF instantiation.
@@ -65,46 +67,51 @@ import MLF.Frontend.ConstraintGen.Types (AnnExpr(..))
 --     For now: ExpInstantiate [t] -> ⟨t⟩.
 --
 expansionToInst :: SolveResult -> Expansion -> Either ElabError Instantiation
-expansionToInst res expn = case expn of
-    ExpIdentity -> Right InstId
-    ExpInstantiate args -> do
-        let constraint = srConstraint res
-            nodes = cNodes constraint
-            canonical = Solve.frWith (srUnionFind res)
-            resolveBaseBound start =
-                let go visited nid =
-                        let nidC = canonical nid
-                            key = getNodeId nidC
-                        in if IntSet.member key visited
-                            then Nothing
-                            else
-                                case IntMap.lookup key nodes of
-                                    Just TyBase{} -> Just nidC
-                                    Just TyBottom{} -> Just nidC
-                                    Just TyVar{} ->
-                                        case VarStore.lookupVarBound constraint nidC of
-                                            Just bnd -> go (IntSet.insert key visited) bnd
-                                            Nothing -> Nothing
-                                    _ -> Nothing
-                in go IntSet.empty start
-            reifyArg arg =
-                let argC = canonical arg
-                in case resolveBaseBound argC of
-                    Just baseC -> reifyTypeWithNamesNoFallback res IntMap.empty baseC
-                    Nothing -> reifyTypeWithNamesNoFallback res IntMap.empty argC
-        tys <- mapM reifyArg args
-        -- Build a sequence of type applications.
-        -- In xMLF, simple application is usually sufficient.
-        -- If we needed explicit N, we'd need to know the source type schema.
-        if null tys
-            then Right InstId
-            else Right $ foldr1 InstSeq (map InstApp tys)
-    ExpForall _ -> Right InstIntro
-    ExpCompose exps -> do
-        insts <- mapM (expansionToInst res) (NE.toList exps)
-        Right $ foldr1 InstSeq insts
+expansionToInst res = cataM alg
+  where
+    constraint = srConstraint res
+    nodes = cNodes constraint
+    canonical = Solve.frWith (srUnionFind res)
+    resolveBaseBound start =
+        let go visited nid =
+                let nidC = canonical nid
+                    key = getNodeId nidC
+                in if IntSet.member key visited
+                    then Nothing
+                    else
+                        case IntMap.lookup key nodes of
+                            Just TyBase{} -> Just nidC
+                            Just TyBottom{} -> Just nidC
+                            Just TyVar{} ->
+                                case VarStore.lookupVarBound constraint nidC of
+                                    Just bnd -> go (IntSet.insert key visited) bnd
+                                    Nothing -> Nothing
+                            _ -> Nothing
+        in go IntSet.empty start
+    reifyArg arg =
+        let argC = canonical arg
+        in case resolveBaseBound argC of
+            Just baseC -> reifyTypeWithNamesNoFallback res IntMap.empty baseC
+            Nothing -> reifyTypeWithNamesNoFallback res IntMap.empty argC
+    alg layer = case layer of
+        ExpIdentityF -> Right InstId
+        ExpInstantiateF args -> do
+            tys <- mapM reifyArg args
+            -- Build a sequence of type applications.
+            -- In xMLF, simple application is usually sufficient.
+            -- If we needed explicit N, we'd need to know the source type schema.
+            if null tys
+                then Right InstId
+                else Right $ foldr1 InstSeq (map InstApp tys)
+        ExpForallF _ -> Right InstIntro
+        ExpComposeF exps -> Right $ foldr1 InstSeq (NE.toList exps)
 
 type Env = Map.Map VarName SchemeInfo
+
+data ElabOut = ElabOut
+    { elabTerm :: Env -> Either ElabError ElabTerm
+    , elabStripped :: Env -> Either ElabError ElabTerm
+    }
 
 schemeBodyTarget :: SolveResult -> NodeId -> NodeId
 schemeBodyTarget res target =
@@ -173,18 +180,10 @@ elaborateWithScope
     -> AnnExpr
     -> Either ElabError ElabTerm
 elaborateWithScope resPhi resReify resGen gaParents edgeWitnesses edgeTraces edgeExpansions scopeOverrides ann =
-    go Map.empty ann
+    let ElabOut { elabTerm = runElab } = para elabAlg ann
+    in runElab Map.empty
   where
     canonical = Solve.frWith (srUnionFind resReify)
-    bindingPathToRootLocal bindParents' start =
-        let goPath visited path key
-                | IntSet.member key visited = Left (BindingTreeError (BindingCycleDetected (reverse path)))
-                | otherwise =
-                    case IntMap.lookup key bindParents' of
-                        Nothing -> Right (reverse path)
-                        Just (parentRef, _) ->
-                            goPath (IntSet.insert key visited) (parentRef : path) (nodeRefKey parentRef)
-        in goPath IntSet.empty [start] (nodeRefKey start)
     scopeRootFromBase root =
         case IntMap.lookup (getNodeId (canonical root)) (gaSolvedToBase gaParents) of
             Nothing -> typeRef root
@@ -196,134 +195,150 @@ elaborateWithScope resPhi resReify resGen gaParents edgeWitnesses edgeTraces edg
                             Just gid -> GenRef gid
                             Nothing -> typeRef root
 
-    go :: Env -> AnnExpr -> Either ElabError ElabTerm
-    go env ae = case ae of
-        AVar v _ -> maybe (Left (EnvLookup v)) (const (Right (EVar v))) (Map.lookup v env)
-        ALit lit _ -> Right (ELit lit)
-        ALam v n _ body _ -> do
-            ty <- reifyTypeWithNames resReify IntMap.empty n
-            -- Add lambda parameter to env as a scheme derived from the annotated type,
-            -- so κσ can reorder/instantiate quantified parameters when present.
-            let (binds, bodyTy) = Inst.splitForalls ty
-                paramScheme = SchemeInfo { siScheme = Forall binds bodyTy, siSubst = IntMap.empty }
-                env' = Map.insert v paramScheme env
-            body' <- go env' body
-            pure (ELam v ty body')
-        AApp f a funEid argEid _ -> do
-            f' <- go env f
-            a' <- go env a
-            funInst0 <- reifyInst env f funEid
-            let argNode = annNode a
-                argType = case VarStore.lookupVarBound (srConstraint resPhi) argNode of
-                    Just bnd -> reifyTypeForInstArg resPhi bnd
-                    Nothing -> reifyTypeForInstArg resPhi argNode
-            let funInst =
-                    let baseInst =
-                            case (funInst0, IntMap.lookup (getEdgeId funEid) edgeExpansions) of
-                                (InstId, Just (ExpInstantiate args))
-                                    | not (null args) ->
-                                        case argType of
-                                            Right argTy -> InstApp argTy
-                                            Left _ -> funInst0
-                                (InstApp TBottom, Just (ExpInstantiate args))
-                                    | not (null args) ->
-                                        case argType of
-                                            Right argTy | argTy /= TBottom -> InstApp argTy
-                                            _ -> funInst0
-                                _ -> funInst0
-                    in case (argType, baseInst) of
-                        (Right argTy, InstApp _) -> InstApp argTy
-                        (Right argTy, _)
-                            | countInstApps baseInst == 1 ->
-                                let (inst', _rest) = replaceInstApps [argTy] baseInst
-                                in inst'
-                        _ -> baseInst
-            argInst <- reifyInst env a argEid
-            let argIsPoly =
-                    case a of
-                        AVar v _ ->
-                            case Map.lookup v env of
-                                Just SchemeInfo{ siScheme = Forall binds _ } -> not (null binds)
+    mkOut :: (Env -> Either ElabError ElabTerm) -> ElabOut
+    mkOut f = ElabOut f f
+
+    elabAlg :: AnnExprF (AnnExpr, ElabOut) -> ElabOut
+    elabAlg layer = case layer of
+        AVarF v _ -> mkOut $ \env ->
+            maybe (Left (EnvLookup v)) (const (Right (EVar v))) (Map.lookup v env)
+        ALitF lit _ -> mkOut $ \_ -> Right (ELit lit)
+        ALamF v n _ (_bodyAnn, bodyOut) _ ->
+            let f env = do
+                    ty <- reifyTypeWithNames resReify IntMap.empty n
+                    -- Add lambda parameter to env as a scheme derived from the annotated type,
+                    -- so κσ can reorder/instantiate quantified parameters when present.
+                    let (binds, bodyTy) = Inst.splitForalls ty
+                        paramScheme = SchemeInfo { siScheme = Forall binds bodyTy, siSubst = IntMap.empty }
+                        env' = Map.insert v paramScheme env
+                    body' <- elabTerm bodyOut env'
+                    pure (ELam v ty body')
+            in mkOut f
+        AAppF (fAnn, fOut) (aAnn, aOut) funEid argEid _ ->
+            let f env = do
+                    f' <- elabTerm fOut env
+                    a' <- elabTerm aOut env
+                    funInst0 <- reifyInst env fAnn funEid
+                    let argNode = annNode aAnn
+                        argType = case VarStore.lookupVarBound (srConstraint resPhi) argNode of
+                            Just bnd -> reifyTypeForInstArg resPhi bnd
+                            Nothing -> reifyTypeForInstArg resPhi argNode
+                    let funInst =
+                            let baseInst =
+                                    case (funInst0, IntMap.lookup (getEdgeId funEid) edgeExpansions) of
+                                        (InstId, Just (ExpInstantiate args))
+                                            | not (null args) ->
+                                                case argType of
+                                                    Right argTy -> InstApp argTy
+                                                    Left _ -> funInst0
+                                        (InstApp TBottom, Just (ExpInstantiate args))
+                                            | not (null args) ->
+                                                case argType of
+                                                    Right argTy | argTy /= TBottom -> InstApp argTy
+                                                    _ -> funInst0
+                                        _ -> funInst0
+                            in case (argType, baseInst) of
+                                (Right argTy, InstApp _) -> InstApp argTy
+                                (Right argTy, _)
+                                    | countInstApps baseInst == 1 ->
+                                        let (inst', _rest) = replaceInstApps [argTy] baseInst
+                                        in inst'
+                                _ -> baseInst
+                    argInst <- reifyInst env aAnn argEid
+                    let argIsPoly =
+                            case aAnn of
+                                AVar v _ ->
+                                    case Map.lookup v env of
+                                        Just SchemeInfo{ siScheme = Forall binds _ } -> not (null binds)
+                                        Nothing -> False
+                                _ -> False
+                    let argInst' =
+                            if argIsPoly
+                                then case (argInst, funInst) of
+                                    (InstId, InstApp ty) -> InstApp ty
+                                    _ -> argInst
+                                else argInst
+                    let fApp = case funInst of
+                            InstId -> f'
+                            _      -> ETyInst f' funInst
+                        aApp = case argInst' of
+                            InstId -> a'
+                            _      -> ETyInst a' argInst'
+                    pure (EApp fApp aApp)
+            in mkOut f
+        ALetF v schemeGenId schemeRootId _ _rhsScopeGen (_rhsAnn, rhsOut) (bodyAnn, bodyOut) trivialRoot ->
+            let f env = do
+                    rhs' <- elabTerm rhsOut env
+                    let scopeRoot =
+                            case IntMap.lookup (getNodeId (canonical schemeRootId)) scopeOverrides of
+                                Just ref -> ref
+                                Nothing -> scopeRootFromBase schemeRootId
+                    _ <- pure $
+                        debugElabGeneralize
+                            ("elaborate let: schemeGenId=" ++ show schemeGenId
+                                ++ " schemeRootId=" ++ show schemeRootId
+                                ++ " scopeRoot=" ++ show scopeRoot
+                            )
+                            ()
+                    let targetC = schemeBodyTarget resGen schemeRootId
+                    (sch0, subst0) <-
+                        generalizeAtAllowRigidWithBindParents gaParents resGen scopeRoot targetC
+                    case debugElabGeneralize
+                        ("elaborate let: scheme0=" ++ show sch0
+                            ++ " subst0=" ++ show subst0
+                        )
+                        () of
+                        () -> pure ()
+                    let nodesGen = cNodes (srConstraint resGen)
+                        canonicalGen = Solve.frWith (srUnionFind resGen)
+                        targetCGen = canonicalGen targetC
+                        boundNode = VarStore.lookupVarBound (srConstraint resGen) targetCGen
+                        boundIsVar =
+                            case boundNode of
+                                Just bnd ->
+                                    case IntMap.lookup (getNodeId (canonicalGen bnd)) nodesGen of
+                                        Just TyVar{} -> True
+                                        _ -> False
                                 Nothing -> False
-                        _ -> False
-            let argInst' =
-                    if argIsPoly
-                        then case (argInst, funInst) of
-                            (InstId, InstApp ty) -> InstApp ty
-                            _ -> argInst
-                        else argInst
-            let fApp = case funInst of
-                    InstId -> f'
-                    _      -> ETyInst f' funInst
-                aApp = case argInst' of
-                    InstId -> a'
-                    _      -> ETyInst a' argInst'
-            pure (EApp fApp aApp)
-        ALet v schemeGenId schemeRootId _ _rhsScopeGen rhs body trivialRoot -> do
-            rhs' <- go env rhs
-            let scopeRoot =
-                    case IntMap.lookup (getNodeId (canonical schemeRootId)) scopeOverrides of
-                        Just ref -> ref
-                        Nothing -> scopeRootFromBase schemeRootId
-            _ <- pure $
-                debugElabGeneralize
-                    ("elaborate let: schemeGenId=" ++ show schemeGenId
-                        ++ " schemeRootId=" ++ show schemeRootId
-                        ++ " scopeRoot=" ++ show scopeRoot
-                    )
-                    ()
-            let targetC = schemeBodyTarget resGen schemeRootId
-            (sch0, subst0) <-
-                generalizeAtAllowRigidWithBindParents gaParents resGen scopeRoot targetC
-            case debugElabGeneralize
-                ("elaborate let: scheme0=" ++ show sch0
-                    ++ " subst0=" ++ show subst0
-                )
-                () of
-                () -> pure ()
-            let nodesGen = cNodes (srConstraint resGen)
-                canonicalGen = Solve.frWith (srUnionFind resGen)
-                targetCGen = canonicalGen targetC
-                boundNode = VarStore.lookupVarBound (srConstraint resGen) targetCGen
-                boundIsVar =
-                    case boundNode of
-                        Just bnd ->
-                            case IntMap.lookup (getNodeId (canonicalGen bnd)) nodesGen of
-                                Just TyVar{} -> True
+                        needsRetry =
+                            case sch0 of
+                                Forall [] _ ->
+                                    case IntMap.lookup (getNodeId targetCGen) nodesGen of
+                                        Just TyVar{} -> boundNode == Nothing || boundIsVar
+                                        _ -> False
                                 _ -> False
-                        Nothing -> False
-                needsRetry =
-                    case sch0 of
-                        Forall [] _ ->
-                            case IntMap.lookup (getNodeId targetCGen) nodesGen of
-                                Just TyVar{} -> boundNode == Nothing || boundIsVar
-                                _ -> False
-                        _ -> False
-            (sch, subst) <-
-                if needsRetry
-                    then generalizeAtKeepTargetAllowRigidWithBindParents gaParents resGen scopeRoot targetC
-                    else pure (sch0, subst0)
-            case debugElabGeneralize
-                ("elaborate let: scheme=" ++ show sch
-                    ++ " subst=" ++ show subst
-                )
-                () of
-                () -> pure ()
-            let rhsSubst = substInTerm subst rhs'
-            let env' = Map.insert v SchemeInfo { siScheme = sch, siSubst = subst } env
-                rhsAbs = case sch of
-                    Forall binds _ -> foldr (\(name, bound) e -> ETyAbs name bound e) rhsSubst binds
-            let bodyAnn = case body of
-                    AAnn inner target _ | canonical target == canonical trivialRoot -> inner
-                    _ -> body
-            body' <- go env' bodyAnn
-            pure (ELet v sch rhsAbs body')
-        AAnn expr _ eid -> do
-            expr' <- go env expr
-            inst <- reifyInst env expr eid
-            pure $ case inst of
-                InstId -> expr'
-                _      -> ETyInst expr' inst
+                    (sch, subst) <-
+                        if needsRetry
+                            then generalizeAtKeepTargetAllowRigidWithBindParents gaParents resGen scopeRoot targetC
+                            else pure (sch0, subst0)
+                    case debugElabGeneralize
+                        ("elaborate let: scheme=" ++ show sch
+                            ++ " subst=" ++ show subst
+                        )
+                        () of
+                        () -> pure ()
+                    let rhsSubst = substInTerm subst rhs'
+                    let env' = Map.insert v SchemeInfo { siScheme = sch, siSubst = subst } env
+                        rhsAbs = case sch of
+                            Forall binds _ -> foldr (\(name, bound) e -> ETyAbs name bound e) rhsSubst binds
+                    let bodyElab =
+                            case bodyAnn of
+                                AAnn _ target _ | canonical target == canonical trivialRoot ->
+                                    elabStripped bodyOut
+                                _ -> elabTerm bodyOut
+                    body' <- bodyElab env'
+                    pure (ELet v sch rhsAbs body')
+            in mkOut f
+        AAnnF (exprAnn, exprOut) _ eid ->
+            ElabOut
+                { elabTerm = \env -> do
+                    expr' <- elabTerm exprOut env
+                    inst <- reifyInst env exprAnn eid
+                    pure $ case inst of
+                        InstId -> expr'
+                        _      -> ETyInst expr' inst
+                , elabStripped = \env -> elabTerm exprOut env
+                }
 
     -- | Convert an edge witness to an xMLF instantiation witness.
     --

@@ -57,13 +57,6 @@ freeTypeVarsType = cata alg
                 bodyFv = Set.delete v body
             in Set.union boundFv bodyFv
 
-freshNameLike :: String -> Set.Set String -> String
-freshNameLike base used =
-    let candidates = base : [base ++ show i | i <- [(1::Int)..]]
-    in case filter (`Set.notMember` used) candidates of
-        (x:_) -> x
-        [] -> base
-
 freshTypeName :: Set.Set String -> String
 freshTypeName used =
     let candidates = ["u" ++ show i | i <- [(0::Int)..]]

@@ -18,6 +18,7 @@ module MLF.Elab.Types (
     PrettyDisplay(..),
     ContextStep(..),
     applyContext,
+    freshNameLike,
     selectMinPrecInsertionIndex,
 ) where
 
@@ -428,16 +429,12 @@ inlineBoundsForDisplay = go
                 | v == old -> TForall v (fmap fst mb) (fst body)
                 | otherwise -> TForall v (fmap snd mb) (snd body)
 
-    freshNameLike :: String -> Set.Set String -> String
-    freshNameLike base used =
-        let goFresh n =
-                let candidate = base ++ show n
-                in if Set.member candidate used
-                    then goFresh (n + 1)
-                    else candidate
-        in if Set.member base used
-            then goFresh (0 :: Int)
-            else base
+freshNameLike :: String -> Set.Set String -> String
+freshNameLike base used =
+    let candidates = base : [base ++ show i | i <- [(1::Int)..]]
+    in case filter (`Set.notMember` used) candidates of
+        (x:_) -> x
+        [] -> base
 
 -- | Pretty-printing with display-only bound inlining.
 instance PrettyDisplay ElabType where

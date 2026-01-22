@@ -26,6 +26,7 @@ import MLF.Constraint.Presolution.Base (
     PresolutionError(..),
     PresolutionM,
     PresolutionState(..),
+    bindingPathToRootUnderM,
     instantiationBindersM
     )
 import MLF.Constraint.Presolution.Ops (
@@ -205,26 +206,6 @@ expansionCopySetsM bodyId = do
                 , IntSet.member (typeRefKey (NodeId nid)) reachFromSKeys
                 ]
     pure (gid, interiorTypeSet, frontierTypeSet)
-
-bindingPathToRootUnderM
-    :: (NodeId -> NodeId)
-    -> Constraint
-    -> NodeRef
-    -> PresolutionM [NodeRef]
-bindingPathToRootUnderM canonical c start = go IntSet.empty [start] start
-  where
-    go :: IntSet.IntSet -> [NodeRef] -> NodeRef -> PresolutionM [NodeRef]
-    go visited path ref
-        | IntSet.member (nodeRefKey ref) visited =
-            throwError (BindingTreeError (BindingCycleDetected (reverse path)))
-        | otherwise = do
-            mbParentInfo <- case Binding.lookupBindParentUnder canonical c ref of
-                Left err -> throwError (BindingTreeError err)
-                Right p -> pure p
-            case mbParentInfo of
-                Nothing -> pure (reverse path)
-                Just (parent, _flag) ->
-                    go (IntSet.insert (nodeRefKey ref) visited) (parent : path) parent
 
 {- Note [instantiateScheme]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
