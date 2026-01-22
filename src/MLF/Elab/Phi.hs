@@ -20,7 +20,7 @@ import qualified MLF.Util.Order as Order
 import qualified MLF.Util.OrderKey as OrderKey
 import MLF.Constraint.Types
 import MLF.Elab.Types
-import MLF.Elab.TypeOps (inlineBaseBoundsType, matchType)
+import MLF.Elab.TypeOps (freeTypeVarsList, inlineBaseBoundsType, matchType)
 import MLF.Elab.Inst (applyInstantiation, composeInst, instMany, schemeToType, splitForalls)
 import MLF.Elab.Generalize (GaBindParents(..), generalizeAtAllowRigid, generalizeAtAllowRigidWithBindParents)
 import MLF.Elab.Generalize.BindingUtil (bindingPathToRootLocal)
@@ -745,7 +745,7 @@ phiFromEdgeWitnessWithTrace res mbGaParents mSchemeInfo mTrace ew = do
                     Nothing -> []
                     Just bnd ->
                         [ j
-                        | v <- freeTypeVars bnd
+                        | v <- freeTypeVarsList bnd
                         , v /= names !! i
                         , Just j <- [nameIndex v]
                         ]
@@ -910,7 +910,7 @@ phiFromEdgeWitnessWithTrace res mbGaParents mSchemeInfo mTrace ew = do
                                             boundTy = maybe TBottom id mbBound
                                             boundName = names !! i
 
-                                            deps = filter (/= boundName) (freeTypeVars boundTy)
+                                            deps = filter (/= boundName) (freeTypeVarsList boundTy)
                                             depIdxs = mapMaybe (`elemIndex` names) deps
                                             cutoff = if null depIdxs then (-1) else maximum depIdxs
                                             insertIndex = cutoff + 1
@@ -978,7 +978,7 @@ phiFromEdgeWitnessWithTrace res mbGaParents mSchemeInfo mTrace ew = do
 
                                         -- Compute dependency cutoff: the new binder must be inserted after any
                                         -- binder that appears free in `Tξ(n)`.
-                                        let deps = freeTypeVars nodeTy
+                                        let deps = freeTypeVarsList nodeTy
                                             depIdxs = mapMaybe (`elemIndex` names) deps
                                             cutoff = if null depIdxs then (-1) else maximum depIdxs
                                             minIdx = min (cutoff + 1) (length ids)
@@ -1247,16 +1247,3 @@ phiFromEdgeWitnessWithTrace res mbGaParents mSchemeInfo mTrace ew = do
             InstIntroF -> InstIntro
             InstElimF -> InstElim
             InstIdF -> InstId
-
-    freeTypeVars :: ElabType -> [String]
-    freeTypeVars = nub . cata alg
-      where
-        alg ty0 = case ty0 of
-            TVarF v -> [v]
-            TArrowF a b -> a ++ b
-            TBaseF _ -> []
-            TBottomF -> []
-            TForallF v mb body ->
-                let fvBound = maybe [] id mb
-                    fvBody = filter (/= v) body
-                in fvBound ++ fvBody

@@ -19,7 +19,7 @@ import MLF.Elab.TypeOps (splitForalls)
 -- | Turn a scheme into its corresponding type (nested `∀`).
 schemeToType :: ElabScheme -> ElabType
 schemeToType (Forall binds body) =
-    foldr (\(v, b) t -> TForall v b t) body binds
+    buildForalls binds body
 
 composeInst :: Instantiation -> Instantiation -> Instantiation
 composeInst InstId i = i

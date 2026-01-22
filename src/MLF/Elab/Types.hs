@@ -19,10 +19,14 @@ module MLF.Elab.Types (
     ContextStep(..),
     applyContext,
     freshNameLike,
+    buildForalls,
+    splitForallsLocal,
+    substTypeCaptureLocal,
+    substTypeSimpleLocal,
     selectMinPrecInsertionIndex,
 ) where
 
-import Data.Functor.Foldable (Base, Corecursive (..), Recursive (..), apo, cata, para, zygo)
+import Data.Functor.Foldable (Base, Corecursive (..), Recursive (..), cata, para, zygo)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Map.Strict as Map
@@ -326,7 +330,7 @@ inlineBoundsForDisplay = go
                     else if totalCount == 0
                         then body
                         else if inlineableBound bound
-                            then go (substType v bound body)
+                            then go (substTypeCaptureLocal v bound body)
                             else TForall v (Just bound) body
       where
         occurrencesIn = occurrencesVar v
@@ -383,51 +387,64 @@ inlineBoundsForDisplay = go
     addCounts (p1, n1) (p2, n2) = (p1 + p2, n1 + n2)
     flipOccMap = Map.map (\(p, n) -> (n, p))
 
-    substType :: String -> ElabType -> ElabType -> ElabType
-    substType name replacement = goSub
+substTypeCaptureLocal :: String -> ElabType -> ElabType -> ElabType
+substTypeCaptureLocal x s = goSub
+  where
+    freeTypeVarsTypeLocal :: ElabType -> Set.Set String
+    freeTypeVarsTypeLocal = cata freeAlg
       where
-        freeInReplacement = freeVarsType replacement
+        freeAlg node = case node of
+            TVarF v -> Set.singleton v
+            TArrowF d c -> Set.union d c
+            TBaseF _ -> Set.empty
+            TBottomF -> Set.empty
+            TForallF v mb body ->
+                let freeBound = maybe Set.empty id mb
+                    freeBody = Set.delete v body
+                in Set.union freeBound freeBody
 
-        goSub = para alg
-          where
-            alg ty = case ty of
-                TVarF v
-                    | v == name -> replacement
-                    | otherwise -> TVar v
-                TArrowF d c -> TArrow (snd d) (snd c)
-                TBaseF b -> TBase b
-                TBottomF -> TBottom
-                TForallF v mb body
-                    | v == name ->
-                        let mb' = fmap snd mb
-                        in TForall v mb' (fst body)
-                    | Set.member v freeInReplacement ->
-                        let used =
-                                Set.unions
-                                    [ freeInReplacement
-                                    , freeVarsType (fst body)
-                                    , maybe Set.empty (freeVarsType . fst) mb
-                                    , Set.singleton v
-                                    ]
-                            v' = freshNameLike v used
-                            body' = renameVar v v' (fst body)
-                        in TForall v' (fmap snd mb) (goSub body')
-                    | otherwise ->
-                        TForall v (fmap snd mb) (snd body)
+    freeS = freeTypeVarsTypeLocal s
 
-    renameVar :: String -> String -> ElabType -> ElabType
-    renameVar old new = para alg
+    goSub = para alg
       where
         alg ty = case ty of
             TVarF v
-                | v == old -> TVar new
+                | v == x -> s
                 | otherwise -> TVar v
             TArrowF d c -> TArrow (snd d) (snd c)
             TBaseF b -> TBase b
             TBottomF -> TBottom
             TForallF v mb body
-                | v == old -> TForall v (fmap fst mb) (fst body)
-                | otherwise -> TForall v (fmap snd mb) (snd body)
+                | v == x ->
+                    let mb' = fmap snd mb
+                    in TForall v mb' (fst body)
+                | v `Set.member` freeS ->
+                    let used =
+                            Set.unions
+                                [ freeS
+                                , freeTypeVarsTypeLocal (fst body)
+                                , maybe Set.empty (freeTypeVarsTypeLocal . fst) mb
+                                , Set.singleton v
+                                ]
+                        v' = freshNameLike v used
+                        body' = substTypeCaptureLocal v (TVar v') (fst body)
+                    in TForall v' (fmap snd mb) (goSub body')
+                | otherwise ->
+                    TForall v (fmap snd mb) (snd body)
+
+substTypeSimpleLocal :: String -> ElabType -> ElabType -> ElabType
+substTypeSimpleLocal name replacement = para alg
+  where
+    alg ty = case ty of
+        TVarF v
+            | v == name -> replacement
+            | otherwise -> TVar v
+        TArrowF d c -> TArrow (snd d) (snd c)
+        TBaseF b -> TBase b
+        TBottomF -> TBottom
+        TForallF v mb body
+            | v == name -> TForall v (fmap fst mb) (fst body)
+            | otherwise -> TForall v (fmap snd mb) (snd body)
 
 freshNameLike :: String -> Set.Set String -> String
 freshNameLike base used =
@@ -458,11 +475,10 @@ instance PrettyDisplay ElabTerm where
     prettyDisplay = prettyTermWith prettyDisplay prettyDisplay prettyDisplay
 
 schemeToTypeLocal :: ElabScheme -> ElabType
-schemeToTypeLocal (Forall binds body) = apo coalg (binds, body)
-  where
-    coalg ([], ty) = fmap Left (project ty)
-    coalg ((n, b) : rest, ty) =
-        TForallF n (fmap Left b) (Right (rest, ty))
+schemeToTypeLocal (Forall binds body) = buildForalls binds body
+
+buildForalls :: [(String, Maybe ElabType)] -> ElabType -> ElabType
+buildForalls binds body = foldr (\(v, b) t -> TForall v b t) body binds
 
 splitForallsLocal :: ElabType -> ([(String, Maybe ElabType)], ElabType)
 splitForallsLocal = para alg

@@ -1,9 +1,12 @@
 module MLF.Elab.TypeOps (
     splitForalls,
     stripForallsType,
+    freeTypeVarsFrom,
     freeTypeVarsType,
+    freeTypeVarsList,
     substTypeCapture,
     substTypeSimple,
+    renameTypeVar,
     freshNameLike,
     freshTypeName,
     freshTypeNameFromCounter,
@@ -15,7 +18,7 @@ module MLF.Elab.TypeOps (
     inlineBaseBoundsType
 ) where
 
-import Data.Functor.Foldable (cata, para)
+import Data.Functor.Foldable (cata)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Map.Strict as Map
@@ -29,33 +32,39 @@ import MLF.Elab.Generalize.Names (parseNameId)
 import MLF.Elab.Types
 
 splitForalls :: ElabType -> ([(String, Maybe ElabType)], ElabType)
-splitForalls = para alg
-  where
-    alg ty = case ty of
-        TForallF v mb bodyPair ->
-            let mbOrig = fmap fst mb
-                (binds, body) = snd bodyPair
-            in ((v, mbOrig) : binds, body)
-        TVarF v -> ([], TVar v)
-        TArrowF (d, _) (c, _) -> ([], TArrow d c)
-        TBaseF b -> ([], TBase b)
-        TBottomF -> ([], TBottom)
+splitForalls = splitForallsLocal
 
 stripForallsType :: ElabType -> ElabType
 stripForallsType = snd . splitForalls
 
 freeTypeVarsType :: ElabType -> Set.Set String
-freeTypeVarsType = cata alg
+freeTypeVarsType = freeTypeVarsFromWith False Set.empty
+
+freeTypeVarsFrom :: Set.Set String -> ElabType -> Set.Set String
+freeTypeVarsFrom = freeTypeVarsFromWith True
+
+freeTypeVarsList :: ElabType -> [String]
+freeTypeVarsList = Set.toList . freeTypeVarsType
+
+freeTypeVarsFromWith :: Bool -> Set.Set String -> ElabType -> Set.Set String
+freeTypeVarsFromWith bindInBound bound0 ty = (cata alg ty) bound0
   where
-    alg ty = case ty of
-        TVarF v -> Set.singleton v
-        TArrowF a b -> Set.union a b
-        TBaseF _ -> Set.empty
-        TBottomF -> Set.empty
+    alg node = case node of
+        TVarF v ->
+            \boundSet ->
+                if Set.member v boundSet
+                    then Set.empty
+                    else Set.singleton v
+        TArrowF d c -> \boundSet -> Set.union (d boundSet) (c boundSet)
+        TBaseF _ -> const Set.empty
+        TBottomF -> const Set.empty
         TForallF v mb body ->
-            let boundFv = maybe Set.empty id mb
-                bodyFv = Set.delete v body
-            in Set.union boundFv bodyFv
+            \boundSet ->
+                let boundBody = Set.insert v boundSet
+                    boundBound = if bindInBound then boundBody else boundSet
+                    freeBound = maybe Set.empty ($ boundBound) mb
+                    freeBody = body boundBody
+                in Set.union freeBound freeBody
 
 freshTypeName :: Set.Set String -> String
 freshTypeName used =
@@ -72,50 +81,13 @@ freshTypeNameFromCounter n used =
         else (candidate, n + 1)
 
 substTypeCapture :: String -> ElabType -> ElabType -> ElabType
-substTypeCapture x s = goSub
-  where
-    freeS = freeTypeVarsType s
-
-    goSub = para alg
-      where
-        alg ty = case ty of
-            TVarF v
-                | v == x -> s
-                | otherwise -> TVar v
-            TArrowF d c -> TArrow (snd d) (snd c)
-            TBaseF b -> TBase b
-            TBottomF -> TBottom
-            TForallF v mb body
-                | v == x ->
-                    let mb' = fmap snd mb
-                    in TForall v mb' (fst body)
-                | v `Set.member` freeS ->
-                    let used =
-                            Set.unions
-                                [ freeS
-                                , freeTypeVarsType (fst body)
-                                , maybe Set.empty (freeTypeVarsType . fst) mb
-                                , Set.singleton v
-                                ]
-                        v' = freshNameLike v used
-                        body' = substTypeCapture v (TVar v') (fst body)
-                    in TForall v' (fmap snd mb) (goSub body')
-                | otherwise ->
-                    TForall v (fmap snd mb) (snd body)
+substTypeCapture = substTypeCaptureLocal
 
 substTypeSimple :: String -> ElabType -> ElabType -> ElabType
-substTypeSimple name replacement = para alg
-  where
-    alg ty = case ty of
-        TVarF v
-            | v == name -> replacement
-            | otherwise -> TVar v
-        TArrowF d c -> TArrow (snd d) (snd c)
-        TBaseF b -> TBase b
-        TBottomF -> TBottom
-        TForallF v mb t'
-            | v == name -> TForall v (fmap fst mb) (fst t')
-            | otherwise -> TForall v (fmap snd mb) (snd t')
+substTypeSimple = substTypeSimpleLocal
+
+renameTypeVar :: String -> String -> ElabType -> ElabType
+renameTypeVar old new = substTypeSimple old (TVar new)
 
 alphaEqType :: ElabType -> ElabType -> Bool
 alphaEqType = go Map.empty Map.empty

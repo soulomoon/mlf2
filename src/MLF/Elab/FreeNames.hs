@@ -3,27 +3,13 @@ module MLF.Elab.FreeNames (
     freeNamesFrom
 ) where
 
-import Data.Functor.Foldable (cata)
 import qualified Data.Set as Set
 
-import MLF.Elab.Types
+import MLF.Elab.TypeOps (freeTypeVarsFrom)
+import MLF.Elab.Types (ElabType)
 
 freeNamesOf :: ElabType -> Set.Set String
-freeNamesOf = freeNamesFrom Set.empty
+freeNamesOf = freeTypeVarsFrom Set.empty
 
 freeNamesFrom :: Set.Set String -> ElabType -> Set.Set String
-freeNamesFrom bound0 ty = (cata alg ty) bound0
-  where
-    alg node = case node of
-        TVarF v ->
-            \boundSet ->
-                if Set.member v boundSet then Set.empty else Set.singleton v
-        TArrowF d c -> \boundSet -> Set.union (d boundSet) (c boundSet)
-        TBaseF _ -> const Set.empty
-        TBottomF -> const Set.empty
-        TForallF v mb t' ->
-            \boundSet ->
-                let bound' = Set.insert v boundSet
-                    freeBound = maybe Set.empty ($ bound') mb
-                    freeBody = t' bound'
-                in Set.union freeBound freeBody
+freeNamesFrom = freeTypeVarsFrom
