@@ -252,28 +252,12 @@ rigidifyTranslatablePresolutionM = do
 
 structuralInterior :: IntMap TyNode -> [NodeId] -> IntSet.IntSet
 structuralInterior nodes roots =
-    foldl' IntSet.union IntSet.empty (map (reachableFrom nodes) roots)
-
-reachableFrom :: IntMap TyNode -> NodeId -> IntSet.IntSet
-reachableFrom nodes root =
-    let go visited [] = visited
-        go visited (nid:rest) =
-            let key = getNodeId nid
-            in if IntSet.member key visited
-                then go visited rest
-                else
-                    let visited' = IntSet.insert key visited
-                        kids =
-                            case IntMap.lookup key nodes of
-                                Nothing -> []
-                                Just node ->
-                                    let boundKids =
-                                            case node of
-                                                TyVar{ tnBound = Just bnd } -> [bnd]
-                                                _ -> []
-                                    in structuralChildren node ++ boundKids
-                    in go visited' (kids ++ rest)
-    in go IntSet.empty [root]
+    Traversal.reachableFromNodes id children roots
+  where
+    children nid =
+        case IntMap.lookup (getNodeId nid) nodes of
+            Nothing -> []
+            Just node -> structuralChildrenWithBounds node
 
 translatableWeakenedNodes :: Constraint -> IntSet.IntSet
 translatableWeakenedNodes c0 =
@@ -485,14 +469,10 @@ rewriteConstraint mapping = do
 
                 addNode m node =
                     let parent = tnId node
-                        boundKids =
-                            case node of
-                                TyVar{ tnBound = Just bnd } -> [bnd]
-                                _ -> []
                         addChild acc child
                             | child == parent = acc
                             | otherwise = addOne parent child acc
-                    in foldl' addChild m (structuralChildren node ++ boundKids)
+                    in foldl' addChild m (structuralChildrenWithBounds node)
             in IntMap.foldl' addNode IntMap.empty newNodes
 
         -- Canonicalize redirects (values in the map)
@@ -519,9 +499,7 @@ rewriteConstraint mapping = do
                     , GenRef gid <- [parentRef]
                     ]
 
-            canonicalRef ref = case ref of
-                TypeRef nid -> TypeRef (canonical nid)
-                GenRef gid -> GenRef gid
+            canonicalRef = Canonicalize.canonicalRef canonical
             entries0 =
                 [ (childRef, parentRef, flag)
                 | (childKey, (parent0, flag)) <- IntMap.toList bindingEdges0

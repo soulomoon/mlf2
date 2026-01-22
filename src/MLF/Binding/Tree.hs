@@ -74,8 +74,10 @@ import Data.List (sortBy)
 import Data.Maybe (listToMaybe, mapMaybe)
 
 import qualified MLF.Util.OrderKey as OrderKey
+import qualified MLF.Constraint.Canonicalize as Canonicalize
 import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Constraint.Types
+import qualified MLF.Constraint.Traversal as Traversal
 
 allNodeRefs :: Constraint -> [NodeRef]
 allNodeRefs c =
@@ -112,9 +114,7 @@ nodeRefExists c ref = case ref of
     GenRef gid -> IntMap.member (getGenNodeId gid) (cGenNodes c)
 
 canonicalRef :: (NodeId -> NodeId) -> NodeRef -> NodeRef
-canonicalRef canonical ref = case ref of
-    TypeRef nid -> TypeRef (canonical nid)
-    GenRef _ -> ref
+canonicalRef = Canonicalize.canonicalRef
 
 structuralChildrenRef :: Constraint -> NodeRef -> [NodeRef]
 structuralChildrenRef c ref = case ref of
@@ -122,10 +122,7 @@ structuralChildrenRef c ref = case ref of
         case IntMap.lookup (getNodeId nid) (cNodes c) of
             Nothing -> []
             Just node ->
-                let boundKids = case node of
-                        TyVar{ tnBound = Just bnd } -> [bnd]
-                        _ -> []
-                in map TypeRef (structuralChildren node ++ boundKids)
+                map TypeRef (structuralChildrenWithBounds node)
     GenRef gid ->
         case IntMap.lookup (getGenNodeId gid) (cGenNodes c) of
             Nothing -> []
@@ -368,11 +365,7 @@ orderedBinders canonical c0 binder0 = do
                                             case IntMap.lookup key nodes of
                                                 Nothing -> []
                                                 Just node ->
-                                                    let boundKids =
-                                                            case node of
-                                                                TyVar{ tnBound = Just bnd } -> [bnd]
-                                                                _ -> []
-                                                    in structuralChildren node ++ boundKids
+                                                    structuralChildrenWithBounds node
                                     in go visited' (map canonical kids ++ rest)
                     in go IntSet.empty [orderRoot]
             binders <- boundChildrenUnder canonical c0 (TypeRef binderN) includeRigid
@@ -476,25 +469,12 @@ orderBindersByDeps canonical c0 orderKeys binders =
   where
     reachableFromWithBounds :: IntMap.IntMap TyNode -> NodeId -> IntSet.IntSet
     reachableFromWithBounds nodes0 root0 =
-        let go visited [] = visited
-            go visited (nid0:rest) =
-                let nid = canonical nid0
-                    key = getNodeId nid
-                in if IntSet.member key visited
-                    then go visited rest
-                    else
-                        let visited' = IntSet.insert key visited
-                            kids =
-                                case IntMap.lookup key nodes0 of
-                                    Nothing -> []
-                                    Just node ->
-                                        let boundKids =
-                                                case node of
-                                                    TyVar{ tnBound = Just bnd } -> [bnd]
-                                                    _ -> []
-                                        in structuralChildren node ++ boundKids
-                        in go visited' (map canonical kids ++ rest)
-        in go IntSet.empty [canonical root0]
+        Traversal.reachableFromNodes canonical children [root0]
+      where
+        children nid =
+            case IntMap.lookup (getNodeId nid) nodes0 of
+                Nothing -> []
+                Just node -> structuralChildrenWithBounds node
 
 
 -- | Compute a ForallSpec (binder count + bounds) for a forall node.
@@ -868,11 +848,7 @@ checkNoGenFallback c = do
                                     case IntMap.lookup key nodes of
                                         Nothing -> []
                                         Just node ->
-                                            let boundKids =
-                                                    case node of
-                                                        TyVar{ tnBound = Just bnd } -> [bnd]
-                                                        _ -> []
-                                            in structuralChildren node ++ boundKids
+                                            structuralChildrenWithBounds node
                             in go visited' (kids ++ rest)
             in go IntSet.empty [root0]
 
@@ -1016,14 +992,10 @@ checkSchemeClosureUnder canonical c0 = do
       where
         addTypeEdges m node =
             let parent = canonical (tnId node)
-                boundKids =
-                    case node of
-                        TyVar{ tnBound = Just bnd } -> [bnd]
-                        _ -> []
                 childIds =
                     IntSet.fromList
                         [ getNodeId (canonical child)
-                        | child <- structuralChildren node ++ boundKids
+                        | child <- structuralChildrenWithBounds node
                         ]
             in if IntSet.null childIds
                 then m
@@ -1085,14 +1057,10 @@ checkBindingTreeUnder canonical c0 = do
     let addTypeEdges :: IntMap.IntMap IntSet -> TyNode -> IntMap.IntMap IntSet
         addTypeEdges m node =
             let parentKey = nodeRefKey (TypeRef (canonical (tnId node)))
-                boundKids =
-                    case node of
-                        TyVar{ tnBound = Just bnd } -> [bnd]
-                        _ -> []
                 childKeys0 =
                     IntSet.fromList
                         [ nodeRefKey (TypeRef (canonical child))
-                        | child <- structuralChildren node ++ boundKids
+                        | child <- structuralChildrenWithBounds node
                         ]
                 childKeys = IntSet.delete parentKey childKeys0
             in if IntSet.null childKeys
@@ -1338,14 +1306,10 @@ rebuildGenNodesFromBinding c0
     | otherwise = do
         scopeNodes <- buildScopeNodes
         let addTypeEdges m node =
-                let boundKids =
-                        case node of
-                            TyVar{ tnBound = Just bnd } -> [bnd]
-                            _ -> []
-                    childIds =
+                let childIds =
                         IntSet.fromList
                             [ getNodeId child
-                            | child <- structuralChildren node ++ boundKids
+                            | child <- structuralChildrenWithBounds node
                             ]
                 in if IntSet.null childIds
                     then m
@@ -1410,11 +1374,7 @@ computeTermDagRoots c =
             IntSet.fromList
                 [ getNodeId child
                 | node <- IntMap.elems nodes
-                , let boundKids =
-                        case node of
-                            TyVar{ tnBound = Just bnd } -> [bnd]
-                            _ -> []
-                , child <- structuralChildren node ++ boundKids
+                , child <- structuralChildrenWithBounds node
                 ]
         -- Term-DAG roots are nodes that are NOT referenced by any structure edge
     in IntSet.difference allNodeIds' referencedNodes
@@ -1433,11 +1393,7 @@ computeTermDagRootsUnder canonical c =
                 [ childRoot
                 | node <- IntMap.elems nodes
                 , let parentRoot = rootIdOf (tnId node)
-                      boundKids =
-                        case node of
-                            TyVar{ tnBound = Just bnd } -> [bnd]
-                            _ -> []
-                , child <- structuralChildren node ++ boundKids
+                , child <- structuralChildrenWithBounds node
                 , let childRoot = rootIdOf child
                 , childRoot /= parentRoot
                 ]

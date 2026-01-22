@@ -9,6 +9,7 @@ module MLF.Constraint.Types (
     BaseTy (..),
     TyNode (..),
     structuralChildren,
+    structuralChildrenWithBounds,
     lookupNodeIn,
     InstEdge (..),
     UnifyEdge (..),
@@ -292,6 +293,13 @@ structuralChildren TyBase{} = []
 structuralChildren TyArrow{ tnDom = d, tnCod = c } = [d, c]
 structuralChildren TyForall{ tnBody = b } = [b]
 structuralChildren TyExp{ tnBody = b } = [b]
+
+-- | Structural children plus the bound child for TyVar nodes (when present).
+structuralChildrenWithBounds :: TyNode -> [NodeId]
+structuralChildrenWithBounds node =
+    case node of
+        TyVar{ tnBound = Just bnd } -> structuralChildren node ++ [bnd]
+        _ -> structuralChildren node
 
 -- | Lookup a node by `NodeId` in the constraint node map.
 lookupNodeIn :: IntMap a -> NodeId -> Maybe a

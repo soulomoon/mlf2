@@ -192,11 +192,7 @@ buildTargetPlan TargetPlanInput{..} =
                                             Nothing -> False
                                             Just node ->
                                                 let visited' = IntSet.insert key visited
-                                                    boundKids =
-                                                        case node of
-                                                            TyVar{ tnBound = Just bnd' } -> [bnd']
-                                                            _ -> []
-                                                    kids = structuralChildren node ++ boundKids
+                                                    kids = structuralChildrenWithBounds node
                                                 in any (walkMentions visited') kids
                     in walkMentions IntSet.empty bnd
         boundHasForallLocal =

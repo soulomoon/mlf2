@@ -9,6 +9,7 @@ import qualified Data.IntSet as IntSet
 import Data.Maybe (listToMaybe)
 
 import qualified MLF.Binding.Tree as Binding
+import qualified MLF.Constraint.Canonicalize as Canonicalize
 import MLF.Constraint.Presolution (EdgeTrace(..))
 import MLF.Constraint.Solve (SolveResult, frWith, srConstraint, srUnionFind)
 import MLF.Constraint.Types
@@ -29,7 +30,7 @@ import MLF.Constraint.Types
     , gnSchemes
     , nodeRefFromKey
     , nodeRefKey
-    , structuralChildren
+    , structuralChildrenWithBounds
     , typeRef
     )
 import qualified MLF.Constraint.VarStore as VarStore
@@ -200,11 +201,7 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                                                     case IntMap.lookup key baseNodes of
                                                         Nothing -> []
                                                         Just node ->
-                                                            let boundKids =
-                                                                    case node of
-                                                                        TyVar{ tnBound = Just bnd } -> [bnd]
-                                                                        _ -> []
-                                                            in structuralChildren node ++ boundKids
+                                                            structuralChildrenWithBounds node
                                             in go visited' (kids ++ rest)
                             in go IntSet.empty [start]
                         schemeInteriorsBase =
@@ -272,10 +269,7 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
             case ref of
                 TypeRef nid -> TypeRef (chaseRedirects redirects nid)
                 GenRef gid -> GenRef gid
-        canonicalRef ref =
-            case ref of
-                TypeRef nid -> TypeRef (canonical nid)
-                GenRef gid -> GenRef gid
+        canonicalRef = Canonicalize.canonicalRef canonical
         adoptRef = canonicalRef . applyRedirectsToRef
         okRef ref =
             case ref of
@@ -405,11 +399,7 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                                             case IntMap.lookup key baseNodes of
                                                 Nothing -> []
                                                 Just node ->
-                                                    let boundKids =
-                                                            case node of
-                                                                TyVar{ tnBound = Just bnd } -> [bnd]
-                                                                _ -> []
-                                                    in structuralChildren node ++ boundKids
+                                                    structuralChildrenWithBounds node
                                     in go visited' (kids ++ rest)
                     in go IntSet.empty [start]
                 schemeInteriorKeys =
@@ -528,11 +518,7 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                     case IntMap.lookup (getNodeId nid) nodesSolved of
                         Nothing -> []
                         Just node ->
-                            let boundKids =
-                                    case node of
-                                        TyVar{ tnBound = Just bnd } -> [bnd]
-                                        _ -> []
-                            in structuralChildren node ++ boundKids
+                            structuralChildrenWithBounds node
             in reachableFromStop getNodeId canonical children shouldStop start
         reachableFromWithBoundsBaseStop start =
             let baseNodes = cNodes base
@@ -557,11 +543,7 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                                             case IntMap.lookup key baseNodes of
                                                 Nothing -> []
                                                 Just node ->
-                                                    let boundKids =
-                                                            case node of
-                                                                TyVar{ tnBound = Just bnd } -> [bnd]
-                                                                _ -> []
-                                                    in structuralChildren node ++ boundKids
+                                                    structuralChildrenWithBounds node
                                     in go visited' acc' (kids ++ rest)
             in go IntSet.empty IntSet.empty [start]
         boundSchemeRoots =

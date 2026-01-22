@@ -30,8 +30,10 @@ import Data.List (sortBy)
 import Data.Maybe (listToMaybe)
 
 import qualified MLF.Binding.Tree as Binding
+import qualified MLF.Constraint.Canonicalize as Canonicalize
 import MLF.Constraint.Types
 import qualified MLF.Constraint.VarStore as VarStore
+import qualified MLF.Constraint.Traversal as Traversal
 import qualified MLF.Util.Order as Order
 import qualified MLF.Util.UnionFind as UnionFind
 import Debug.Trace (trace)
@@ -176,27 +178,17 @@ ensureBindingParents = do
                                 m
                         addNode m node =
                             let parent = canonical (tnId node)
-                                boundKids =
-                                    case node of
-                                        TyVar{ tnBound = Just bnd } -> [bnd]
-                                        _ -> []
-                                kids = map canonical (structuralChildren node ++ boundKids)
+                                kids = map canonical (structuralChildrenWithBounds node)
                             in foldl' (flip (addOne parent)) m kids
                     in IntMap.foldl' addNode IntMap.empty nodes
                 termRoots = Binding.computeTermDagRootsUnder canonical c0
-                canonicalRef ref = case ref of
-                    TypeRef nid -> TypeRef (canonical nid)
-                    GenRef _ -> ref
+                canonicalRef = Canonicalize.canonicalRef canonical
                 addTypeEdges m node =
                     let parentKey = nodeRefKey (TypeRef (canonical (tnId node)))
-                        boundKids =
-                            case node of
-                                TyVar{ tnBound = Just bnd } -> [bnd]
-                                _ -> []
                         childKeys =
                             IntSet.fromList
                                 [ nodeRefKey (TypeRef (canonical child))
-                                | child <- structuralChildren node ++ boundKids
+                                | child <- structuralChildrenWithBounds node
                                 , canonical child /= canonical (tnId node)
                                 ]
                     in if IntSet.null childKeys
@@ -520,25 +512,12 @@ implicitBindersM canonical c0 root0 = do
         -> NodeId
         -> IntSet.IntSet
     reachableFromWithBounds nodes root =
-        let go visited [] = visited
-            go visited (nid0:rest) =
-                let nid = canonical nid0
-                    key = getNodeId nid
-                in if IntSet.member key visited
-                    then go visited rest
-                    else
-                        let visited' = IntSet.insert key visited
-                            kids =
-                                case IntMap.lookup key nodes of
-                                    Nothing -> []
-                                    Just node ->
-                                        let boundKids =
-                                                case node of
-                                                    TyVar{ tnBound = Just bnd } -> [bnd]
-                                                    _ -> []
-                                        in map canonical (structuralChildren node ++ boundKids)
-                        in go visited' (kids ++ rest)
-        in go IntSet.empty [root]
+        Traversal.reachableFromNodes canonical children [root]
+      where
+        children nid =
+            case IntMap.lookup (getNodeId nid) nodes of
+                Nothing -> []
+                Just node -> structuralChildrenWithBounds node
 
 forallSpecM :: NodeId -> PresolutionM ForallSpec
 forallSpecM binder0 = do

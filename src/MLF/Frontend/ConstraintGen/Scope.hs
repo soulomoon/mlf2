@@ -84,11 +84,7 @@ rebindScopeNodes binder root frame = do
                                         case IntMap.lookup key nodes of
                                             Nothing -> []
                                             Just node ->
-                                                let boundKids =
-                                                        case node of
-                                                            TyVar{ tnBound = Just bnd } -> [bnd]
-                                                            _ -> []
-                                                in structuralChildren node ++ boundKids
+                                                structuralChildrenWithBounds node
                                 in go visited' (kids ++ rest)
             in go IntSet.empty [root]
         reachableTypeKeys =
@@ -112,11 +108,7 @@ rebindScopeNodes binder root frame = do
                 [ getNodeId child
                 | parentId <- targetTypeIds
                 , Just parent <- pure (IntMap.lookup (getNodeId parentId) nodes)
-                , let boundKids =
-                        case parent of
-                            TyVar{ tnBound = Just bnd } -> [bnd]
-                            _ -> []
-                , child <- structuralChildren parent ++ boundKids
+                , child <- structuralChildrenWithBounds parent
                 , IntSet.member (getNodeId child) targetTypeSet
                 ]
         scopeRoots =

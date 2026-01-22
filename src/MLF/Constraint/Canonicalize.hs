@@ -9,6 +9,7 @@ share the same behavior without coupling higher-level responsibilities
 (grafting, presolution trace handling, etc.).
 -}
 module MLF.Constraint.Canonicalize (
+    canonicalRef,
     chooseRepNode,
     rewriteInstEdges,
     rewriteUnifyEdges,

@@ -35,6 +35,7 @@ import MLF.Constraint.Presolution.Ops (
     registerNode,
     setBindParentM
     )
+import qualified MLF.Constraint.Canonicalize as Canonicalize
 import qualified MLF.Constraint.Traversal as Traversal
 import MLF.Constraint.Types
 import qualified MLF.Util.UnionFind as UnionFind
@@ -46,9 +47,7 @@ data CopyState = CopyState
     }
 
 canonicalRef :: (NodeId -> NodeId) -> NodeRef -> NodeRef
-canonicalRef canonical ref = case ref of
-    TypeRef nid -> TypeRef (canonical nid)
-    GenRef gid -> GenRef gid
+canonicalRef = Canonicalize.canonicalRef
 
 findSchemeIntroducerM :: (NodeId -> NodeId) -> Constraint -> NodeId -> PresolutionM GenNodeId
 findSchemeIntroducerM canonical c0 root0 = do
@@ -68,40 +67,20 @@ expansionCopySetsM bodyId = do
     let canonical = UnionFind.frWith uf0
         bodyC = canonical bodyId
         lookupNode = lookupNodeIn (cNodes c0)
+        children :: NodeId -> [NodeId]
+        children nid =
+            case lookupNode nid of
+                Nothing -> []
+                Just node -> structuralChildrenWithBounds node
         childrenRef :: NodeRef -> [NodeRef]
         childrenRef ref = case ref of
             TypeRef nid ->
                 case lookupNode nid of
                     Nothing -> []
                     Just node ->
-                        let boundKids =
-                                case node of
-                                    TyVar{ tnBound = Just bnd } -> [TypeRef bnd]
-                                    _ -> []
-                        in map TypeRef (structuralChildren node) ++ boundKids
+                        map TypeRef (structuralChildrenWithBounds node)
             GenRef _ ->
                 []
-        reachableFromMany :: [NodeId] -> IntSet.IntSet
-        reachableFromMany roots0 =
-            let go visited [] = visited
-                go visited (nid0:rest) =
-                    let nid = canonical nid0
-                        key = getNodeId nid
-                    in if IntSet.member key visited
-                        then go visited rest
-                        else
-                            let visited' = IntSet.insert key visited
-                                kids =
-                                    case lookupNode nid of
-                                        Nothing -> []
-                                        Just node ->
-                                            let boundKids =
-                                                    case node of
-                                                        TyVar{ tnBound = Just bnd } -> [bnd]
-                                                        _ -> []
-                                            in map canonical (structuralChildren node ++ boundKids)
-                            in go visited' (kids ++ rest)
-            in go IntSet.empty (map canonical roots0)
     gid <- findSchemeIntroducerM canonical c0 bodyC
     let binderRef =
             case Binding.lookupBindParentUnder canonical c0 (typeRef bodyC) of
@@ -137,7 +116,7 @@ expansionCopySetsM bodyId = do
                 ]
         interiorAll0' = IntSet.union interiorAll0 binderKeysGen
     let reachFromS =
-            reachableFromMany [bodyC]
+            Traversal.reachableFromNodes canonical children [bodyC]
         reachFromSKeys =
             IntSet.fromList [typeRefKey (NodeId nid) | nid <- IntSet.toList reachFromS]
     pathRefs <- bindingPathToRootUnderM canonical c0 (typeRef bodyC)
@@ -177,7 +156,7 @@ expansionCopySetsM bodyId = do
             foldl'
                 (\acc key ->
                     let ref = nodeRefFromKey key
-                        children = childrenRef ref
+                        childRefs = childrenRef ref
                     in foldl'
                         (\acc0 child ->
                             let childC = canonicalRef canonical child
@@ -189,7 +168,7 @@ expansionCopySetsM bodyId = do
                                     GenRef _ -> acc0
                         )
                         acc
-                        children
+                        childRefs
                 )
                 IntSet.empty
                 (IntSet.toList interiorStructRefs)

@@ -666,9 +666,7 @@ applyUnionFindToConstraint = do
             -- Rewrite binding parents through UF reps, preserving child keys and
             -- skipping self-edges by walking to the next ancestor.
             bindParents' =
-                let canonicalRef ref = case ref of
-                        TypeRef nid -> TypeRef (findRoot uf nid)
-                        GenRef gid -> GenRef gid
+                let canonicalRef = Canonicalize.canonicalRef (findRoot uf)
                     cStruct = c { cNodes = nodes' }
                     resolveParent childRef parent0 flag0 =
                         case childRef of

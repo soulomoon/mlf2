@@ -10,6 +10,7 @@ reachability.
 module MLF.Constraint.Traversal (
     TraversalError(..),
     occursInUnder,
+    reachableFromNodes,
     reachableFromUnderLenient,
     reachableFromManyUnderLenient
 ) where
@@ -84,6 +85,19 @@ reachableFromManyUnderLenient
     -> [NodeId]
     -> IntSet
 reachableFromManyUnderLenient canonical lookupNode roots0 =
+    reachableFromNodes canonical children roots0
+  where
+    children nid =
+        case lookupNode nid of
+            Nothing -> []
+            Just node -> structuralChildren node
+
+reachableFromNodes
+    :: (NodeId -> NodeId)
+    -> (NodeId -> [NodeId])
+    -> [NodeId]
+    -> IntSet
+reachableFromNodes canonical childrenOf roots0 =
     go IntSet.empty (map canonical roots0)
   where
     go :: IntSet -> [NodeId] -> IntSet
@@ -95,8 +109,5 @@ reachableFromManyUnderLenient canonical lookupNode roots0 =
             then go visited rest
             else
                 let visited' = IntSet.insert key visited
-                    children =
-                        case lookupNode nid of
-                            Nothing -> []
-                            Just node -> map canonical (structuralChildren node)
+                    children = map canonical (childrenOf nid)
                 in go visited' (children ++ rest)

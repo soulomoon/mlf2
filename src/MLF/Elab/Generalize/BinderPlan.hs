@@ -307,12 +307,12 @@ buildBinderPlan BinderPlanInput{..} = do
                                         case IntMap.lookup (getNodeId nid) baseNodes of
                                             Nothing -> []
                                             Just node ->
-                                                let boundKids =
-                                                        case node of
-                                                            TyVar{ tnBound = Just bnd }
-                                                                | allowBoundTraversalBase bnd -> [bnd]
-                                                            _ -> []
-                                                in structuralChildren node ++ boundKids
+                                                case node of
+                                                    TyVar{ tnBound = Just bnd }
+                                                        | allowBoundTraversalBase bnd ->
+                                                            structuralChildrenWithBounds node
+                                                    _ ->
+                                                        structuralChildren node
                                 in reachableFrom getNodeId id children root0
                             isNamedOutsideBase nidInt =
                                 case IntMap.lookup nidInt baseNodes of

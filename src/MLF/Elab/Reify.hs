@@ -15,6 +15,7 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
 import qualified MLF.Util.Order as Order
+import qualified MLF.Constraint.Canonicalize as Canonicalize
 import MLF.Constraint.Types
 import MLF.Elab.Types
 import MLF.Elab.Util (topoSortBy)
@@ -154,9 +155,7 @@ reifyWith _contextLabel res nameForVar isNamed rootMode nid =
             Nothing -> False
             Just bnd -> boundIsSimple bnd
 
-    canonicalRef ref = case ref of
-        TypeRef nid0 -> TypeRef (canonical nid0)
-        GenRef gid -> GenRef gid
+    canonicalRef = Canonicalize.canonicalRef canonical
 
     nodeRefExists ref = case ref of
         TypeRef nid0 -> IntMap.member (getNodeId nid0) nodes
@@ -534,11 +533,7 @@ reifyWith _contextLabel res nameForVar isNamed rootMode nid =
                                         case IntMap.lookup key nodes of
                                             Nothing -> []
                                             Just node0 ->
-                                                let boundKids =
-                                                        case node0 of
-                                                            TyVar{ tnBound = Just bnd } -> [bnd]
-                                                            _ -> []
-                                                in structuralChildren node0 ++ boundKids
+                                                structuralChildrenWithBounds node0
                                 in go visited' (map canonical kids ++ rest)
                 in go IntSet.empty [orderRoot]
         let includeRigid =

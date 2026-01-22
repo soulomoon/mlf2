@@ -269,11 +269,7 @@ solveUnify c0 = do
                             m
                     addNode m node =
                         let parent = tnId node
-                            boundKids =
-                                case node of
-                                    TyVar{ tnBound = Just bnd } -> [bnd]
-                                    _ -> []
-                            kids = structuralChildren node ++ boundKids
+                            kids = structuralChildrenWithBounds node
                         in foldl' (flip (addOne parent)) m kids
                 in IntMap.foldl' addNode IntMap.empty nodes
             pickUpperParent childN =

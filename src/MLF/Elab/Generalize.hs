@@ -286,12 +286,12 @@ generalizeAtWith allowDropTarget allowRigidBinders mbBindParentsGa res scopeRoot
             case IntMap.lookup (getNodeId nid) nodes' of
                 Nothing -> []
                 Just node ->
-                    let boundKids =
-                            case node of
-                                TyVar{ tnBound = Just bnd }
-                                    | allowBoundTraversal' bnd -> [bnd]
-                                _ -> []
-                    in structuralChildren node ++ boundKids
+                    case node of
+                        TyVar{ tnBound = Just bnd }
+                            | allowBoundTraversal' bnd ->
+                                structuralChildrenWithBounds node
+                        _ ->
+                            structuralChildren node
         reachableFromWithBoundsWith canonical' nodes' allowBoundTraversal' =
             reachableFrom getNodeId canonical' (childrenWithBoundsWith nodes' allowBoundTraversal')
         childrenWithBounds =
