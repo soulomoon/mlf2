@@ -11,8 +11,8 @@ import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Constraint.Solve (SolveResult, frWith, srConstraint, srUnionFind)
 import MLF.Constraint.Types (NodeId(..), getNodeId)
 import MLF.Constraint.Presolution.Plan.Names (parseNameId)
-import MLF.Elab.Reify (reifyType)
-import MLF.Elab.TypeOps (
+import MLF.Reify.Core (reifyType)
+import MLF.Reify.TypeOps (
     freeTypeVarsFrom,
     inlineBaseBoundsType,
     renameTypeVar,

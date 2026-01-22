@@ -13,8 +13,7 @@ module MLF.Elab.Inst (
 import Data.Functor.Foldable (para)
 
 import MLF.Elab.Types
-import MLF.Elab.TypeOps (freeTypeVarsType, freshTypeNameFromCounter, substTypeCapture)
-import MLF.Elab.TypeOps (splitForalls)
+import MLF.Reify.TypeOps (freeTypeVarsType, freshTypeNameFromCounter, substTypeCapture, splitForalls)
 
 -- | Turn a scheme into its corresponding type (nested `∀`).
 schemeToType :: ElabScheme -> ElabType

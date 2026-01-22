@@ -16,7 +16,7 @@ import Debug.Trace (trace)
 import System.Environment (lookupEnv)
 import System.IO.Unsafe (unsafePerformIO)
 import MLF.Constraint.Presolution.Plan.Names (parseNameId)
-import MLF.Elab.TypeOps (alphaEqType, inlineBaseBoundsType, matchType)
+import MLF.Reify.TypeOps (alphaEqType, inlineBaseBoundsType, matchType)
 import MLF.Util.RecursionSchemes (cataM)
 
 import MLF.Frontend.Syntax (VarName)
@@ -32,7 +32,7 @@ import MLF.Constraint.Presolution.Plan.BindingUtil (bindingPathToRootLocal)
 import MLF.Elab.Phi (phiFromEdgeWitnessWithTrace)
 import MLF.Elab.Inst (applyInstantiation, schemeToType)
 import qualified MLF.Elab.Inst as Inst
-import MLF.Elab.Reify (reifyBoundWithNames, reifyType, reifyTypeWithNames, reifyTypeWithNamesNoFallback)
+import MLF.Reify.Core (reifyBoundWithNames, reifyType, reifyTypeWithNames, reifyTypeWithNamesNoFallback)
 import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Constraint.Solve as Solve (frWith)
 import MLF.Constraint.Presolution (EdgeTrace, etBinderArgs)

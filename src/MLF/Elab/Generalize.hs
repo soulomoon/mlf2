@@ -24,7 +24,6 @@ import MLF.Constraint.Solve (SolveResult(..))
 import qualified MLF.Constraint.Solve as Solve
 import MLF.Constraint.Types
 import qualified MLF.Constraint.VarStore as VarStore
-import MLF.Elab.FreeNames (freeNamesFrom)
 import MLF.Constraint.Presolution.Plan.BinderPlan (BinderPlan(..))
 import MLF.Constraint.Presolution.Plan.BinderHelpers
     ( boundMentionsSelfAliasFor
@@ -50,13 +49,14 @@ import MLF.Constraint.Presolution.Plan.SchemeRoots
     , SchemeRootsPlan(..)
     , allowBoundTraversalFor
     )
-import MLF.Elab.Reify
+import MLF.Reify.Core
     ( reifyTypeWithNamesNoFallback
     , reifyTypeWithNamesNoFallbackOnConstraint
     , reifyBoundWithNames
     )
+import MLF.Reify.TypeOps (freeTypeVarsFrom)
 import MLF.Elab.Types
-import MLF.Elab.Util (reachableFromStop)
+import MLF.Util.Graph (reachableFromStop)
 
 -- | Generalize a node at the given binding site into a polymorphic scheme.
 -- For xMLF, quantified variables can have bounds.
@@ -437,7 +437,7 @@ applyGeneralizePlan plan reifyPlanWrapper = do
                                                                 (gaBaseConstraint ga)
                                                                 substBaseByKey
                                                                 baseN
-                                                        let freeBase = freeNamesFrom Set.empty tyBase
+                                                        let freeBase = freeTypeVarsFrom Set.empty tyBase
                                                             allowedBase = Set.fromList (IntMap.elems substBaseByKey)
                                                         if Set.isSubsetOf freeBase allowedBase
                                                             then pure tyBase

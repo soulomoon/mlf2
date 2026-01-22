@@ -12,7 +12,7 @@ import qualified Data.Set as Set
 import MLF.Constraint.Types (BaseTy(..))
 import MLF.Elab.Inst (InstEvalSpec(..), evalInstantiationWith, renameInstBound, schemeToType)
 import MLF.Elab.Types
-import MLF.Elab.TypeOps
+import MLF.Reify.TypeOps
     ( alphaEqType
     , freeTypeVarsType
     )

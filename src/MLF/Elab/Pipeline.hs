@@ -48,7 +48,7 @@ import MLF.Elab.Inst (applyInstantiation, schemeToType)
 import MLF.Elab.TypeCheck (Env(..), checkInstantiation, typeCheck, typeCheckWithEnv)
 import MLF.Elab.Reduce (isValue, normalize, step)
 import MLF.Elab.Phi (contextToNodeBound, phiFromEdgeWitness, phiFromEdgeWitnessWithTrace)
-import MLF.Elab.Reify (namedNodes, reifyBoundWithNames, reifyType, reifyTypeWithNamedSet, reifyTypeWithNames)
+import MLF.Reify.Core (namedNodes, reifyBoundWithNames, reifyType, reifyTypeWithNamedSet, reifyTypeWithNames)
 import MLF.Elab.Run (applyRedirectsToAnn, chaseRedirects, runPipelineElab, runPipelineElabChecked)
 import MLF.Elab.Sigma (sigmaReorder)
 

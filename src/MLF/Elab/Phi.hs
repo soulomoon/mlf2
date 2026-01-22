@@ -20,13 +20,13 @@ import qualified MLF.Util.Order as Order
 import qualified MLF.Util.OrderKey as OrderKey
 import MLF.Constraint.Types
 import MLF.Elab.Types
-import MLF.Elab.TypeOps (freeTypeVarsList, inlineBaseBoundsType, matchType)
+import MLF.Reify.TypeOps (freeTypeVarsList, inlineBaseBoundsType, matchType)
 import MLF.Elab.Inst (applyInstantiation, composeInst, instMany, schemeToType, splitForalls)
 import MLF.Elab.Generalize (GaBindParents(..), generalizeAtAllowRigid, generalizeAtAllowRigidWithBindParents)
 import MLF.Constraint.Presolution.Plan.BindingUtil (bindingPathToRootLocal)
-import MLF.Elab.Reify (namedNodes, reifyBoundWithNames, reifyType)
+import MLF.Reify.Core (namedNodes, reifyBoundWithNames, reifyType)
 import MLF.Elab.Sigma (bubbleReorderTo)
-import MLF.Elab.Util (topoSortBy)
+import MLF.Util.Graph (topoSortBy)
 import MLF.Constraint.Solve hiding (BindingTreeError, MissingNode)
 import qualified MLF.Constraint.Solve as Solve (frWith)
 import MLF.Constraint.Presolution (EdgeTrace(..))

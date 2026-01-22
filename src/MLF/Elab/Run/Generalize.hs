@@ -36,7 +36,7 @@ import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Constraint.Presolution.Plan.BindingUtil (bindingPathToRootLocal, firstGenAncestorFrom)
 import MLF.Elab.Run.Debug (debugGaScope)
 import MLF.Elab.Run.Util (chaseRedirects)
-import MLF.Elab.Util (reachableFromStop)
+import MLF.Util.Graph (reachableFromStop)
 import MLF.Frontend.ConstraintGen (AnnExpr)
 
 pruneBindParentsConstraint :: Constraint -> Constraint

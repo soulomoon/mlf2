@@ -8,7 +8,7 @@ import qualified Data.Set as Set
 import Data.Functor.Foldable (para)
 
 import MLF.Elab.Inst (applyInstantiation, renameInstBound, schemeToType, splitForalls)
-import MLF.Elab.TypeOps (freeTypeVarsType, freshTypeName, substTypeCapture)
+import MLF.Reify.TypeOps (freeTypeVarsType, freshTypeName, substTypeCapture)
 import MLF.Elab.Types
 import MLF.Util.RecursionSchemes (cataMaybe, foldElabTerm, foldInstantiation)
 

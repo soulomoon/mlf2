@@ -63,11 +63,11 @@ import MLF.Elab.Generalize
     )
 import MLF.Constraint.Presolution.Plan.Names (parseNameId)
 import MLF.Elab.Inst (applyInstantiation, schemeToType)
-import MLF.Elab.Reify (reifyType, reifyTypeWithNamesNoFallbackOnConstraint)
+import MLF.Reify.Core (reifyType, reifyTypeWithNamesNoFallbackOnConstraint)
 import MLF.Elab.Phi (phiFromEdgeWitnessWithTrace)
 import MLF.Elab.TypeCheck (typeCheck)
 import MLF.Elab.Types
-import MLF.Elab.TypeOps (inlineBaseBoundsType, resolveBaseBoundForInstConstraint)
+import MLF.Reify.TypeOps (inlineBaseBoundsType, resolveBaseBoundForInstConstraint)
 import MLF.Elab.Run.Annotation (adjustAnnotationInst, annNode, applyRedirectsToAnn, canonicalizeAnn)
 import MLF.Elab.Run.Debug (debugGaScope, debugGaScopeEnabled, edgeOrigins)
 import MLF.Elab.Run.Generalize

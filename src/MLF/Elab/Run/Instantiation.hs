@@ -10,7 +10,7 @@ import Data.Functor.Foldable (cata)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
-import MLF.Elab.TypeOps (matchType, stripForallsType)
+import MLF.Reify.TypeOps (matchType, stripForallsType)
 import MLF.Elab.Types
 
 inferInstAppArgsFromScheme :: [(String, Maybe ElabType)] -> ElabType -> ElabType -> Maybe [ElabType]
