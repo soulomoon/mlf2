@@ -46,9 +46,6 @@ data BinderPlanInput = BinderPlanInput
     , bpiTargetIsSchemeRoot :: Bool
     , bpiTargetIsBaseLike :: Bool
     , bpiBoundUnderOtherGen :: Bool
-    , bpiDropTarget :: Bool
-    , bpiDropTypeRoot :: Bool
-    , bpiSchemeRoots :: IntSet.IntSet
     , bpiBinders0 :: [NodeId]
     , bpiNamedUnderGa :: [NodeId]
     , bpiGammaAlias :: IntMap.IntMap Int
@@ -125,9 +122,6 @@ buildBinderPlan BinderPlanInput{..} = do
         targetIsSchemeRoot = bpiTargetIsSchemeRoot
         targetIsBaseLike = bpiTargetIsBaseLike
         boundUnderOtherGen = bpiBoundUnderOtherGen
-        dropTarget = bpiDropTarget
-        dropTypeRoot = bpiDropTypeRoot
-        schemeRoots = bpiSchemeRoots
         binders0 = bpiBinders0
         namedUnderGa = bpiNamedUnderGa
         gammaAlias = bpiGammaAlias
@@ -274,12 +268,6 @@ buildBinderPlan BinderPlanInput{..} = do
                     let bndC = canonical bnd
                     in bndC == canonical typeRoot || bndC == canonical typeRootForScheme
                 Nothing -> False
-        targetBoundIsTypeRootAlias =
-            case targetBound of
-                Just bnd ->
-                    let bndC = canonical bnd
-                    in bndC == canonical typeRoot || bndC == canonical typeRootForScheme
-                Nothing -> False
         boundHasNamedOutsideGammaFor v =
             case mbBindParentsGa of
                 Just ga
@@ -401,14 +389,6 @@ buildBinderPlan BinderPlanInput{..} = do
                 && not (IntSet.member (getNodeId (canonical v)) reachableType)
                 && (not inGamma || boundIsTypeRootAlias v)
                 && not (boundIsSchemeBodyAlias v)
-        dropTargetAliasBinder v inGamma =
-            dropTarget
-                && not inGamma
-                && canonical target0 == canonical v
-                && canonical typeRoot /= canonical target0
-                && targetBoundIsTypeRootAlias
-                && (boundUnderOtherGen || not (boundHasNamedOutsideGammaFor v))
-                && not (boundMentionsSelfAlias v)
     let forallBoundBinders =
             IntSet.fromList
                 [ canonKey child
@@ -500,13 +480,6 @@ buildBinderPlan BinderPlanInput{..} = do
             , not (aliasBoundIsBottomOrNone v && not inGamma)
             , not (aliasBinderIsTrivial v)
             , not (aliasBinderIsRedundant v inGamma)
-            , not (boundUnderOtherGen
-                && canonical v == canonical target0
-                && targetBoundIsTypeRootAlias
-                && dropTarget)
-            , not (dropTargetAliasBinder v inGamma)
-            , not (IntSet.member (canonKey v) schemeRoots && not inGamma)
-            , not (dropTypeRoot && canonical v == canonical typeRoot)
             , not (IntSet.member (canonKey v) forallBoundBinders && not typeRootIsForall)
             ]
     traceGeneralizeM
@@ -538,8 +511,6 @@ buildBinderPlan BinderPlanInput{..} = do
                      , boundIsSchemeRootAll v
                      , boundIsTypeRootAlias v
                      , boundUnderOtherGen
-                     , IntSet.member vKey schemeRoots
-                     , dropTypeRoot && canonical v == canonical typeRoot
                      , IntSet.member vKey forallBoundBinders
                      , inGammaDbg
                      , IntMap.lookup (nodeRefKey (typeRef (canonical v))) bindParents
@@ -555,8 +526,6 @@ buildBinderPlan BinderPlanInput{..} = do
             traceGeneralize
                 ("generalizeAt: bindersFiltered=" ++ show binders
                     ++ " requiredGammaBinders=" ++ show requiredGammaBinders
-                    ++ " dropTarget=" ++ show dropTarget
-                    ++ " dropTypeRoot=" ++ show dropTypeRoot
                     ++ " typeRoot=" ++ show typeRoot
                 )
                 bindersWithRequired

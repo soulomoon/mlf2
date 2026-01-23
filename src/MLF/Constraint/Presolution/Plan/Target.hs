@@ -7,9 +7,6 @@ module MLF.Constraint.Presolution.Plan.Target (
     GammaPlanInput(..),
     GammaPlan(..),
     buildGammaPlan,
-    DropPlanInput(..),
-    DropPlan(..),
-    buildDropPlan,
     TypeRootPlanInput(..),
     TypeRootPlan(..),
     buildTypeRootPlan
@@ -26,7 +23,7 @@ import MLF.Constraint.Types
 import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Constraint.Presolution.Plan.BinderPlan (GaBindParentsInfo(..))
 import MLF.Constraint.BindingUtil (firstGenAncestorFrom)
-import MLF.Constraint.Presolution.Plan.Util (boundRootWith, firstSchemeRootAncestorWith)
+import MLF.Constraint.Presolution.Plan.Util (firstSchemeRootAncestorWith)
 import qualified MLF.Util.Order as Order
 
 data TargetPlanInput = TargetPlanInput
@@ -807,69 +804,9 @@ buildGammaPlan GammaPlanInput{..} =
         }
 
 
-data DropPlanInput = DropPlanInput
-    { dpiAllowDropTarget :: Bool
-    , dpiTargetIsSchemeRoot :: Bool
-    , dpiNodes :: IntMap.IntMap TyNode
-    , dpiTarget0 :: NodeId
-    , dpiTargetBound :: Maybe NodeId
-    , dpiBoundIsBase :: Bool
-    , dpiBoundHasNestedGen :: Bool
-    , dpiBoundHasNamedOutsideGamma :: Bool
-    , dpiBoundMentionsTarget :: Bool
-    , dpiBoundHasForall :: Bool
-    , dpiScopeRootC :: NodeRef
-    , dpiCanonKey :: NodeId -> Int
-    }
-
-data DropPlan = DropPlan
-    { dpDropTarget :: Bool
-    , dpSchemeRoots :: IntSet.IntSet
-    }
-
-buildDropPlan :: DropPlanInput -> DropPlan
-buildDropPlan DropPlanInput{..} =
-    let allowDropTarget = dpiAllowDropTarget
-        targetIsSchemeRoot = dpiTargetIsSchemeRoot
-        nodes = dpiNodes
-        target0 = dpiTarget0
-        targetBound = dpiTargetBound
-        boundIsBase = dpiBoundIsBase
-        boundHasNestedGen = dpiBoundHasNestedGen
-        boundHasNamedOutsideGamma = dpiBoundHasNamedOutsideGamma
-        boundMentionsTarget = dpiBoundMentionsTarget
-        boundHasForall = dpiBoundHasForall
-        scopeRootC = dpiScopeRootC
-        canonKey = dpiCanonKey
-        dropTargetLocal =
-            not targetIsSchemeRoot &&
-            case IntMap.lookup (getNodeId target0) nodes of
-                Just TyVar{} ->
-                    case targetBound >>= (\bnd -> IntMap.lookup (getNodeId bnd) nodes) of
-                        Just TyVar{} -> False
-                        Just _ ->
-                            allowDropTarget &&
-                                boundIsBase &&
-                                not boundMentionsTarget &&
-                                not boundHasForall &&
-                                not boundHasNestedGen &&
-                                not boundHasNamedOutsideGamma
-                        Nothing -> False
-                Just _ -> False
-                Nothing -> False
-        schemeRootsLocal =
-            case scopeRootC of
-                GenRef _ | dropTargetLocal -> IntSet.singleton (canonKey target0)
-                _ -> IntSet.empty
-    in DropPlan
-        { dpDropTarget = dropTargetLocal
-        , dpSchemeRoots = schemeRootsLocal
-        }
-
 
 data TypeRootPlanInput = TypeRootPlanInput
-    { trpiConstraint :: Constraint
-    , trpiNodes :: IntMap.IntMap TyNode
+    { trpiNodes :: IntMap.IntMap TyNode
     , trpiCanonical :: NodeId -> NodeId
     , trpiCanonKey :: NodeId -> Int
     , trpiIsTyVarKey :: Int -> Bool
@@ -883,16 +820,11 @@ data TypeRootPlanInput = TypeRootPlanInput
     , trpiTargetIsSchemeRootForScope :: Bool
     , trpiTargetIsTyVar :: Bool
     , trpiTargetBoundUnderOtherGen :: Bool
-    , trpiBoundUnderOtherGen :: Bool
-    , trpiBoundIsDirectChild :: Bool
     , trpiNamedUnderGaSet :: IntSet.IntSet
     , trpiTypeRoot0 :: NodeId
     , trpiTypeRootFromBoundVar :: Maybe NodeId
     , trpiTypeRootHasNamedOutsideGamma :: Bool
     , trpiBoundHasForallForVar :: NodeId -> Bool
-    , trpiAllowDropTarget :: Bool
-    , trpiDropTarget :: Bool
-    , trpiSchemeRootKeySet :: IntSet.IntSet
     , trpiSchemeRootByBody :: IntMap.IntMap NodeId
     , trpiSchemeRootOwner :: IntMap.IntMap GenNodeId
     , trpiLiftToForall :: NodeId -> NodeId
@@ -910,8 +842,7 @@ data TypeRootPlan = TypeRootPlan
 
 buildTypeRootPlan :: TypeRootPlanInput -> TypeRootPlan
 buildTypeRootPlan TypeRootPlanInput{..} =
-    let constraint = trpiConstraint
-        nodes = trpiNodes
+    let nodes = trpiNodes
         canonical = trpiCanonical
         canonKey = trpiCanonKey
         isTyVarKey = trpiIsTyVarKey
@@ -925,20 +856,14 @@ buildTypeRootPlan TypeRootPlanInput{..} =
         targetIsSchemeRootForScope = trpiTargetIsSchemeRootForScope
         targetIsTyVar = trpiTargetIsTyVar
         targetBoundUnderOtherGen = trpiTargetBoundUnderOtherGen
-        boundUnderOtherGen = trpiBoundUnderOtherGen
-        boundIsDirectChild = trpiBoundIsDirectChild
         namedUnderGaSet = trpiNamedUnderGaSet
         typeRoot0 = trpiTypeRoot0
         typeRootFromBoundVar = trpiTypeRootFromBoundVar
         typeRootHasNamedOutsideGamma = trpiTypeRootHasNamedOutsideGamma
         boundHasForallForVar = trpiBoundHasForallForVar
-        allowDropTarget = trpiAllowDropTarget
-        dropTarget = trpiDropTarget
-        schemeRootKeySet = trpiSchemeRootKeySet
         schemeRootByBody = trpiSchemeRootByBody
         schemeRootOwner = trpiSchemeRootOwner
         liftToForall = trpiLiftToForall
-        useSchemeBodyForScope = False
         useBoundTypeRootLocal =
             not targetIsSchemeRoot &&
             case targetBound of
@@ -970,66 +895,31 @@ buildTypeRootPlan TypeRootPlanInput{..} =
                         [child] -> Just child
                         _ -> Nothing
                 _ -> Nothing
-        boundRootForTypeLocal bnd0 =
-            boundRootWith
-                getNodeId
-                canonical
-                (`IntMap.lookup` nodes)
-                (VarStore.lookupVarBound constraint)
-                (\key -> IntMap.lookup key schemeRootByBody)
-                True
-                bnd0
-        typeRootFromTargetBoundLocal =
-            case (allowDropTarget, scopeGen, targetIsTyVar, targetBound) of
-                (True, Just _, True, Just bnd) ->
-                    let targetUnderScope =
-                            case (scopeGen, IntMap.lookup (nodeRefKey (typeRef target0)) bindParents) of
-                                (Just gid, Just (GenRef gid', _)) -> gid' == gid
-                                _ -> False
-                        targetIsSchemeRootAlias =
-                            let bndC = canonical bnd
-                                bndKey = getNodeId bndC
-                            in (IntSet.member bndKey schemeRootKeySet
-                                || IntMap.member bndKey schemeRootByBody)
-                                && not targetIsSchemeRootForScope
-                        root = boundRootForTypeLocal bnd
-                        useBoundRoot =
-                            not targetUnderScope
-                                || targetIsSchemeRootAlias
-                                || boundUnderOtherGen
-                                || (boundIsDirectChild && not targetIsSchemeRootForScope && not targetInGammaLocal)
-                    in if useBoundRoot
-                            && canonical root /= canonical target0
-                        then Just root
-                        else Nothing
-                _ -> Nothing
+        typeRootFromTargetBoundLocal = Nothing
         typeRoot0Local =
-            if useSchemeBodyForScope
-                then schemeBodyRootLocal
-                else
-                    case (scopeRootC, targetIsSchemeRootForScope, targetIsTyVar, targetBound) of
-                        (GenRef _, True, True, Nothing) ->
-                            case schemeBodyChildUnderGenLocal of
-                                Just child -> child
-                                Nothing -> schemeBodyRootLocal
+            case (scopeRootC, targetIsSchemeRootForScope, targetIsTyVar, targetBound) of
+                (GenRef _, True, True, Nothing) ->
+                    case schemeBodyChildUnderGenLocal of
+                        Just child -> child
+                        Nothing -> schemeBodyRootLocal
+                _ ->
+                    case (useBoundTypeRootLocal, targetBound) of
+                        (True, Just bnd) -> liftToForall bnd
                         _ ->
-                            case (dropTarget || useBoundTypeRootLocal, targetBound) of
-                                (True, Just bnd) -> liftToForall bnd
-                                _ ->
-                                    case typeRootFromTargetBoundLocal of
-                                        Just v -> v
-                                        Nothing ->
-                                            case typeRootFromBoundVar of
-                                                Just v
-                                                    | targetIsTyVar
-                                                        && not (boundHasForallForVar v) -> v
-                                                Just v
-                                                    | targetIsTyVar
-                                                        && targetBoundUnderOtherGen -> v
-                                                Just v
-                                                    | targetIsTyVar
-                                                        && typeRootHasNamedOutsideGamma -> v
-                                                _ -> typeRoot0
+                            case typeRootFromTargetBoundLocal of
+                                Just v -> v
+                                Nothing ->
+                                    case typeRootFromBoundVar of
+                                        Just v
+                                            | targetIsTyVar
+                                                && not (boundHasForallForVar v) -> v
+                                        Just v
+                                            | targetIsTyVar
+                                                && targetBoundUnderOtherGen -> v
+                                        Just v
+                                            | targetIsTyVar
+                                                && typeRootHasNamedOutsideGamma -> v
+                                        _ -> typeRoot0
         typeRootLocal =
             case IntMap.lookup (canonKey typeRoot0Local) nodes of
                 Just TyForall{ tnBody = b }

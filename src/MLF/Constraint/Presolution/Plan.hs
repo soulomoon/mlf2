@@ -45,9 +45,6 @@ import MLF.Constraint.Presolution.Plan.Target
     , GammaPlanInput(..)
     , GammaPlan(..)
     , buildGammaPlan
-    , DropPlanInput(..)
-    , DropPlan(..)
-    , buildDropPlan
     , TypeRootPlanInput(..)
     , TypeRootPlan(..)
     , buildTypeRootPlan
@@ -77,7 +74,6 @@ data GeneralizePlan = GeneralizePlan
     , gpSchemeRootsPlan :: SchemeRootsPlan
     , gpTargetPlan :: TargetPlan
     , gpGammaPlan :: GammaPlan
-    , gpDropPlan :: DropPlan
     , gpTypeRootPlan :: TypeRootPlan
     , gpBinderPlan :: BinderPlan
     , gpScopeSchemeRoots :: IntSet.IntSet
@@ -109,7 +105,6 @@ planGeneralizeAt PresolutionEnv
         isTyVarKey = geIsTyVarKey env
         isTyForallKey = geIsTyForallKey env
         isBaseLikeKey = geIsBaseLikeKey env
-        allowDropTarget = False
     bindParents0 <- bindingToElab (Binding.canonicalizeBindParentsUnder canonical constraint)
     let bindParentsSoft = softenBindParents canonical constraint bindParents0
     let _ =
@@ -414,12 +409,6 @@ planGeneralizeAt PresolutionEnv
             { tpTargetBound = targetBound
             , tpTargetBoundUnderOtherGen = targetBoundUnderOtherGen
             , tpBoundUnderOtherGen = boundUnderOtherGen
-            , tpBoundIsSchemeRoot = boundIsSchemeRoot
-            , tpBoundIsBase = boundIsBase
-            , tpBoundIsDirectChild = boundIsDirectChild
-            , tpBoundMentionsTarget = boundMentionsTarget
-            , tpBoundHasForall = boundHasForall
-            , tpBoundHasNestedGen = boundHasNestedGen
             , tpTargetIsSchemeRoot = targetIsSchemeRoot
             , tpTargetIsSchemeRootForScope = targetIsSchemeRootForScope
             , tpTargetIsTyVar = targetIsTyVar
@@ -491,30 +480,9 @@ planGeneralizeAt PresolutionEnv
             , gpReachableForBinders = reachableForBinders
             , gpGammaKeyFor = gammaKeyFor
             , gpNamedUnderGa = namedUnderGa
-            , gpBoundHasNamedOutsideGamma = boundHasNamedOutsideGamma
             , gpTypeRootHasNamedOutsideGamma = typeRootHasNamedOutsideGamma
             } = gammaPlan
-    let dropPlan =
-            buildDropPlan
-                DropPlanInput
-                    { dpiAllowDropTarget = allowDropTarget
-                    , dpiTargetIsSchemeRoot = targetIsSchemeRoot
-                    , dpiNodes = nodes
-                    , dpiTarget0 = target0
-                    , dpiTargetBound = targetBound
-                    , dpiBoundIsBase = boundIsBase
-                    , dpiBoundHasNestedGen = boundHasNestedGen
-                    , dpiBoundHasNamedOutsideGamma = boundHasNamedOutsideGamma
-                    , dpiBoundMentionsTarget = boundMentionsTarget
-                    , dpiBoundHasForall = boundHasForall
-                    , dpiScopeRootC = scopeRootC
-                    , dpiCanonKey = canonKey
-                    }
-        DropPlan
-            { dpDropTarget = dropTarget
-            , dpSchemeRoots = schemeRoots
-            } = dropPlan
-        liftToForall bnd0 =
+    let liftToForall bnd0 =
             case IntMap.lookup (getNodeId (canonical bnd0)) schemeRootByBody of
                 Just root -> canonical root
                 Nothing ->
@@ -529,8 +497,7 @@ planGeneralizeAt PresolutionEnv
         typeRootPlan =
             buildTypeRootPlan
                 TypeRootPlanInput
-                    { trpiConstraint = constraint
-                    , trpiNodes = nodes
+                    { trpiNodes = nodes
                     , trpiCanonical = canonical
                     , trpiCanonKey = canonKey
                     , trpiIsTyVarKey = isTyVarKey
@@ -544,16 +511,11 @@ planGeneralizeAt PresolutionEnv
                     , trpiTargetIsSchemeRootForScope = targetIsSchemeRootForScope
                     , trpiTargetIsTyVar = targetIsTyVar
                     , trpiTargetBoundUnderOtherGen = targetBoundUnderOtherGen
-                    , trpiBoundUnderOtherGen = boundUnderOtherGen
-                    , trpiBoundIsDirectChild = boundIsDirectChild
                     , trpiNamedUnderGaSet = namedUnderGaSet
                     , trpiTypeRoot0 = typeRoot0
                     , trpiTypeRootFromBoundVar = typeRootFromBoundVar
                     , trpiTypeRootHasNamedOutsideGamma = typeRootHasNamedOutsideGamma
                     , trpiBoundHasForallForVar = boundHasForallForVar
-                    , trpiAllowDropTarget = allowDropTarget
-                    , trpiDropTarget = dropTarget
-                    , trpiSchemeRootKeySet = schemeRootKeySet
                     , trpiSchemeRootByBody = schemeRootByBody
                     , trpiSchemeRootOwner = schemeRootOwner
                     , trpiLiftToForall = liftToForall
@@ -562,10 +524,6 @@ planGeneralizeAt PresolutionEnv
             { trTargetIsBaseLike = targetIsBaseLike
             , trTypeRoot = typeRoot
             } = typeRootPlan
-    let dropTypeRoot =
-            dropTarget &&
-            boundIsSchemeRoot &&
-            not (isTyVarKey (canonKey typeRoot))
     reachableType <- Right (reachableFromWithBounds typeRoot)
     reachableTypeStructural <- Right (reachableFromStructural typeRoot)
     let typeRootIsForall =
@@ -596,9 +554,6 @@ planGeneralizeAt PresolutionEnv
                 , bpiTargetIsSchemeRoot = targetIsSchemeRoot
                 , bpiTargetIsBaseLike = targetIsBaseLike
                 , bpiBoundUnderOtherGen = boundUnderOtherGen
-                , bpiDropTarget = dropTarget
-                , bpiDropTypeRoot = dropTypeRoot
-                , bpiSchemeRoots = schemeRoots
                 , bpiBinders0 = binders0
                 , bpiNamedUnderGa = namedUnderGa
                 , bpiGammaAlias = gammaAlias
@@ -637,7 +592,6 @@ planGeneralizeAt PresolutionEnv
         , gpSchemeRootsPlan = schemeRootsPlan
         , gpTargetPlan = targetPlan
         , gpGammaPlan = gammaPlan
-        , gpDropPlan = dropPlan
         , gpTypeRootPlan = typeRootPlan
         , gpBinderPlan = binderPlan
         , gpScopeSchemeRoots = scopeSchemeRoots
