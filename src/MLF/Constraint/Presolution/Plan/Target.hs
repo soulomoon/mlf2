@@ -895,7 +895,6 @@ buildTypeRootPlan TypeRootPlanInput{..} =
                         [child] -> Just child
                         _ -> Nothing
                 _ -> Nothing
-        typeRootFromTargetBoundLocal = Nothing
         typeRoot0Local =
             case (scopeRootC, targetIsSchemeRootForScope, targetIsTyVar, targetBound) of
                 (GenRef _, True, True, Nothing) ->
@@ -906,20 +905,17 @@ buildTypeRootPlan TypeRootPlanInput{..} =
                     case (useBoundTypeRootLocal, targetBound) of
                         (True, Just bnd) -> liftToForall bnd
                         _ ->
-                            case typeRootFromTargetBoundLocal of
-                                Just v -> v
-                                Nothing ->
-                                    case typeRootFromBoundVar of
-                                        Just v
-                                            | targetIsTyVar
-                                                && not (boundHasForallForVar v) -> v
-                                        Just v
-                                            | targetIsTyVar
-                                                && targetBoundUnderOtherGen -> v
-                                        Just v
-                                            | targetIsTyVar
-                                                && typeRootHasNamedOutsideGamma -> v
-                                        _ -> typeRoot0
+                            case typeRootFromBoundVar of
+                                Just v
+                                    | targetIsTyVar
+                                        && not (boundHasForallForVar v) -> v
+                                Just v
+                                    | targetIsTyVar
+                                        && targetBoundUnderOtherGen -> v
+                                Just v
+                                    | targetIsTyVar
+                                        && typeRootHasNamedOutsideGamma -> v
+                                _ -> typeRoot0
         typeRootLocal =
             case IntMap.lookup (canonKey typeRoot0Local) nodes of
                 Just TyForall{ tnBody = b }
