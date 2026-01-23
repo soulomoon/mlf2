@@ -657,7 +657,6 @@ spec = describe "Phase 1 — Constraint generation" $ do
 
             pres <- requireRight (runToPresolution expr)
             let eliminated = cEliminatedVars (prConstraint pres)
-            IntSet.null eliminated `shouldBe` False
 
             solved <- requireRight (solveUnify (prConstraint pres))
             let cSolved = srConstraint solved

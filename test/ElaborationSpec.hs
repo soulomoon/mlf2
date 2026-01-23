@@ -483,7 +483,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             (sch, _subst) <- requireRight (generalizeAt solved (typeRef forallNode) forallNode)
             Elab.prettyDisplay sch `shouldBe` "∀a. a -> a"
 
-        it "generalizeAt inlines alias bounds (no ∀(b ⩾ a))" $ do
+        it "generalizeAt rejects alias bounds (no ∀(b ⩾ a))" $ do
             let a = NodeId 1
                 b = NodeId 2
                 arrow = NodeId 3
@@ -506,8 +506,11 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         }
 
             solved <- requireRight (solveUnify c)
-            (sch, _subst) <- requireRight (generalizeAt solved (typeRef forallNode) forallNode)
-            Elab.prettyDisplay sch `shouldBe` "∀a. a -> a"
+            case generalizeAt solved (typeRef forallNode) forallNode of
+                Left err ->
+                    show err `shouldSatisfy` isInfixOf "alias bounds survived"
+                Right _ ->
+                    expectationFailure "Expected alias bounds to be rejected"
 
     describe "xMLF types (instance bounds)" $ do
         it "pretty prints unbounded forall" $ do
@@ -1450,7 +1453,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 out `shouldAlphaEqType` expected
 
     describe "Presolution witness ops (paper alignment)" $ do
-        it "emits Merge for bounded aliasing (b ⩾ a)" $ do
+        it "does not require Merge for bounded aliasing (b ⩾ a)" $ do
             let rhs = ELam "x" (ELam "y" (EVar "x"))
                 scheme =
                     SrcScheme
@@ -1485,7 +1488,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 isMerge op = case op of
                     OpMerge{} -> True
                     _ -> False
-            ops `shouldSatisfy` any isMerge
+            ops `shouldSatisfy` (not . any isMerge)
 
     describe "Paper alignment baselines" $ do
         it "let id = (\\x. x) in id id should have type ∀a. a -> a" $ do

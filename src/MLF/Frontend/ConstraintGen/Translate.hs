@@ -457,44 +457,54 @@ internalizeSrcTypeWith wrap currentGen tyEnv srcType = case srcType of
                 pure varNode
             else pure baseNode
 
-    STForall var mBound body -> do
-        Scope.pushScope
-        schemeGenId <- allocGenNode []
-        setBindParentIfMissing (genRef schemeGenId) (genRef currentGen) BindFlex
-        -- Allocate a type variable for the bound variable
-        varNode <- allocVar
-        -- Extend the environment with this binding
-        let tyEnv' = Map.insert var varNode tyEnv
-        -- Process the bound if present (for instance bounds)
-        mbBoundNode <- case mBound of
-            Nothing -> pure Nothing
-            Just bound -> do
+    STForall var mBound body ->
+        case mBound of
+            Just (STVar alias) | alias /= var -> do
+                aliasNode <- case Map.lookup alias tyEnv of
+                    Just nid -> pure nid
+                    Nothing -> allocVar
+                let tyEnv' = Map.insert var aliasNode tyEnv
+                internalizeSrcTypeWith False currentGen tyEnv' body
+            Just (STVar _) ->
+                internalizeSrcTypeWith wrap currentGen tyEnv (STForall var Nothing body)
+            _ -> do
                 Scope.pushScope
-                boundNode <- internalizeSrcTypeBound schemeGenId tyEnv' bound
-                boundScope <- Scope.popScope
-                mbBoundOwner <- lookupSchemeOwnerForRoot boundNode
-                case mbBoundOwner of
-                    Just gid -> do
-                        Scope.rebindScopeNodes (genRef gid) boundNode boundScope
-                        setGenNodeSchemes gid [boundNode]
-                    Nothing -> Scope.rebindScopeNodes (typeRef varNode) boundNode boundScope
-                case mbBoundOwner of
-                    Nothing -> setBindParentOverride (typeRef boundNode) (typeRef varNode) BindFlex
-                    Just gid -> setBindParentOverride (typeRef boundNode) (genRef gid) BindFlex
-                pure (Just boundNode)
+                schemeGenId <- allocGenNode []
+                setBindParentIfMissing (genRef schemeGenId) (genRef currentGen) BindFlex
+                -- Allocate a type variable for the bound variable
+                varNode <- allocVar
+                -- Extend the environment with this binding
+                let tyEnv' = Map.insert var varNode tyEnv
+                -- Process the bound if present (for instance bounds)
+                mbBoundNode <- case mBound of
+                    Nothing -> pure Nothing
+                    Just bound -> do
+                        Scope.pushScope
+                        boundNode <- internalizeSrcTypeBound schemeGenId tyEnv' bound
+                        boundScope <- Scope.popScope
+                        mbBoundOwner <- lookupSchemeOwnerForRoot boundNode
+                        case mbBoundOwner of
+                            Just gid -> do
+                                Scope.rebindScopeNodes (genRef gid) boundNode boundScope
+                                setGenNodeSchemes gid [boundNode]
+                            Nothing -> Scope.rebindScopeNodes (typeRef varNode) boundNode boundScope
+                        case mbBoundOwner of
+                            Nothing -> setBindParentOverride (typeRef boundNode) (typeRef varNode) BindFlex
+                            Just gid -> setBindParentOverride (typeRef boundNode) (genRef gid) BindFlex
+                        pure (Just boundNode)
 
-        -- Record the bound on the variable
-        setVarBound varNode mbBoundNode
+                -- Record the bound on the variable
+                setVarBound varNode mbBoundNode
 
-        -- Internalize the body with the extended environment
-        bodyNode <- internalizeSrcTypeWith False schemeGenId tyEnv' body
-        scopeFrame <- Scope.popScope
-        -- Represent explicit forall via a fresh gen node (named binders).
-        Scope.rebindScopeNodes (genRef schemeGenId) bodyNode scopeFrame
-        setBindParentOverride (typeRef varNode) (genRef schemeGenId) BindFlex
-        setBindParentOverride (typeRef bodyNode) (genRef schemeGenId) BindFlex
-        setGenNodeSchemes schemeGenId [bodyNode]
-        pure bodyNode
+                -- Internalize the body with the extended environment
+                bodyNode <- internalizeSrcTypeWith False schemeGenId tyEnv' body
+                scopeFrame <- Scope.popScope
+                -- Represent explicit forall via a fresh gen node (named binders).
+                Scope.rebindScopeNodes (genRef schemeGenId) bodyNode scopeFrame
+                setBindParentOverride (typeRef varNode) (genRef schemeGenId) BindFlex
+                setBindParentOverride (typeRef bodyNode) (genRef schemeGenId) BindFlex
+                setGenNodeSchemes schemeGenId [bodyNode]
+                pure bodyNode
 
     STBottom -> do
         -- Bottom is the minimal type, represented as a fresh variable
@@ -508,32 +518,43 @@ internalizeBinders :: GenNodeId -> [(String, Maybe SrcType)] -> ConstraintM (TyE
 internalizeBinders currentGen bindings = go Map.empty [] bindings
   where
     go tyEnv acc [] = pure (tyEnv, reverse acc)
-    go tyEnv acc ((name, mBound):rest) = do
-        -- Allocate a type variable for this binding
-        varNode <- allocVar
-        let tyEnv' = Map.insert name varNode tyEnv
-        -- Process the bound if present
-        mbBoundNode <- case mBound of
-            Nothing -> pure Nothing
-            Just bound -> do
-                Scope.pushScope
-                boundNode <- internalizeSrcTypeBound currentGen tyEnv' bound
-                boundScope <- Scope.popScope
-                mbBoundOwner <- lookupSchemeOwnerForRoot boundNode
-                case mbBoundOwner of
-                    Just gid -> do
-                        Scope.rebindScopeNodes (genRef gid) boundNode boundScope
-                        setGenNodeSchemes gid [boundNode]
-                    Nothing -> Scope.rebindScopeNodes (typeRef varNode) boundNode boundScope
-                case mbBoundOwner of
-                    Nothing -> setBindParentOverride (typeRef boundNode) (typeRef varNode) BindFlex
-                    Just gid -> setBindParentOverride (typeRef boundNode) (genRef gid) BindFlex
-                pure (Just boundNode)
+    go tyEnv acc ((name, mBound):rest) =
+        case mBound of
+            Just (STVar alias) | alias /= name -> do
+                aliasNode <- case Map.lookup alias tyEnv of
+                    Just nid -> pure nid
+                    Nothing -> allocVar
+                let tyEnv' = Map.insert name aliasNode tyEnv
+                go tyEnv' acc rest
+            _ -> do
+                -- Allocate a type variable for this binding
+                varNode <- allocVar
+                let tyEnv' = Map.insert name varNode tyEnv
+                let mBound' = case mBound of
+                        Just (STVar v) | v == name -> Nothing
+                        _ -> mBound
+                -- Process the bound if present
+                mbBoundNode <- case mBound' of
+                    Nothing -> pure Nothing
+                    Just bound -> do
+                        Scope.pushScope
+                        boundNode <- internalizeSrcTypeBound currentGen tyEnv' bound
+                        boundScope <- Scope.popScope
+                        mbBoundOwner <- lookupSchemeOwnerForRoot boundNode
+                        case mbBoundOwner of
+                            Just gid -> do
+                                Scope.rebindScopeNodes (genRef gid) boundNode boundScope
+                                setGenNodeSchemes gid [boundNode]
+                            Nothing -> Scope.rebindScopeNodes (typeRef varNode) boundNode boundScope
+                        case mbBoundOwner of
+                            Nothing -> setBindParentOverride (typeRef boundNode) (typeRef varNode) BindFlex
+                            Just gid -> setBindParentOverride (typeRef boundNode) (genRef gid) BindFlex
+                        pure (Just boundNode)
 
-        -- Set the bound
-        setVarBound varNode mbBoundNode
+                -- Set the bound
+                setVarBound varNode mbBoundNode
 
-        go tyEnv' (varNode:acc) rest
+                go tyEnv' (varNode:acc) rest
 
 baseFor :: Lit -> BaseTy
 baseFor lit = BaseTy $ case lit of

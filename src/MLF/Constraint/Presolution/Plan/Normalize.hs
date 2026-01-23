@@ -82,13 +82,6 @@ simplifySchemeBindings inlineBaseBounds namedBinders binds ty =
                                 not (Set.null (Set.intersection boundDeps (Set.delete v binders)))
                             boundMentionsNamed =
                                 not (Set.null (Set.intersection freeBound namedBinders))
-                            boundIsAliasToBinder =
-                                case bound of
-                                    TVar v2 ->
-                                        v2 /= v
-                                            && Set.member v2 binders
-                                            && not isNamedBinder
-                                    _ -> False
                             canInlineBase =
                                 inlineBaseBounds
                                     && not dependsOnBinders
@@ -101,7 +94,6 @@ simplifySchemeBindings inlineBaseBounds namedBinders binds ty =
                                     && isVarBound bound
                                     && not isNamedBinder
                                     && not boundMentionsNamed
-                                    || boundIsAliasToBinder
                         in if not boundMentionsSelf
                             && (canInlineBase || canInlineNonBase)
                             then

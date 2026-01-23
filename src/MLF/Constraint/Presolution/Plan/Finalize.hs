@@ -21,7 +21,6 @@ import MLF.Constraint.Presolution.Plan.Context (GaBindParents(..), GeneralizeEnv
 import MLF.Constraint.Presolution.Plan.Names (alphaName, parseNameId)
 import MLF.Constraint.Presolution.Plan.Normalize
     ( simplifySchemeBindings
-    , substType
     , promoteArrowAlias
     , isBaseBound
     , isVarBound
@@ -204,27 +203,7 @@ finalizeScheme FinalizeInput{..} =
         (bindingsNorm0, tyNorm0) =
             simplifySchemeBindings inlineBaseBounds namedBinderNames bindingsAdjusted ty0
         (bindingsNorm1, tyNorm1) = promoteArrowAlias bindingsNorm0 tyNorm0
-        inlineAliasBounds binds body = go binds body
-          where
-            go [] ty = ([], ty)
-            go ((v, mb):rest) ty =
-                case mb of
-                    Just (TVar v2)
-                        | v == v2 ->
-                            let (rest', ty') = go rest ty
-                            in ((v, Nothing) : rest', ty')
-                        | otherwise ->
-                            let replacement = TVar v2
-                                ty' = substType v replacement ty
-                                rest' =
-                                    [ (name, fmap (substType v replacement) mb')
-                                    | (name, mb') <- rest
-                                    ]
-                            in go rest' ty'
-                    _ ->
-                        let (rest', ty') = go rest ty
-                        in ((v, mb) : rest', ty')
-        (bindingsNorm, tyNorm) = inlineAliasBounds bindingsNorm1 tyNorm1
+        (bindingsNorm, tyNorm) = (bindingsNorm1, tyNorm1)
         usedNames =
             Set.unions
                 ( freeTypeVarsFrom Set.empty tyNorm
