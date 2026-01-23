@@ -1,7 +1,4 @@
 module MLF.Constraint.Presolution.Plan (
-    GeneralizePolicy(..),
-    policyDefault,
-    policyKeepTarget,
     GeneralizePlan(..),
     ReifyPlan(..),
     buildGeneralizePlans
@@ -64,28 +61,11 @@ import qualified MLF.Constraint.Presolution.Plan.ReifyPlan as Reify
 import MLF.Util.ElabError (ElabError(..), bindingToElab)
 import MLF.Util.Graph (reachableFrom, reachableFromStop)
 
-data GeneralizePolicy = GeneralizePolicy
-    { gpInlineAliasTarget :: Bool
-    } deriving (Eq, Show)
-
-policyDefault :: GeneralizePolicy
-policyDefault =
-    GeneralizePolicy
-        { gpInlineAliasTarget = True
-        }
-
-policyKeepTarget :: GeneralizePolicy
-policyKeepTarget =
-    GeneralizePolicy
-        { gpInlineAliasTarget = False
-        }
-
 data PresolutionEnv = PresolutionEnv
     { peConstraint :: Constraint
     , peSolveResult :: SolveResult
     , peCanonical :: NodeId -> NodeId
     , peBindParents :: BindParents
-    , pePolicy :: GeneralizePolicy
     , peBindParentsGa :: Maybe GaBindParents
     , peScopeRoot :: NodeRef
     , peTargetNode :: NodeId
@@ -117,7 +97,6 @@ data ReifyPlan = ReifyPlan
 planGeneralizeAt :: PresolutionEnv -> Either ElabError GeneralizePlan
 planGeneralizeAt PresolutionEnv
     { peSolveResult = res
-    , pePolicy = policy
     , peBindParentsGa = mbBindParentsGa
     , peScopeRoot = scopeRoot
     , peTargetNode = targetNode
@@ -130,7 +109,7 @@ planGeneralizeAt PresolutionEnv
         isTyVarKey = geIsTyVarKey env
         isTyForallKey = geIsTyForallKey env
         isBaseLikeKey = geIsBaseLikeKey env
-        allowDropTarget = gpInlineAliasTarget policy
+        allowDropTarget = False
     bindParents0 <- bindingToElab (Binding.canonicalizeBindParentsUnder canonical constraint)
     let bindParentsSoft = softenBindParents canonical constraint bindParents0
     let _ =
@@ -777,12 +756,11 @@ planReify _ plan = do
 
 buildGeneralizePlans
     :: SolveResult
-    -> GeneralizePolicy
     -> Maybe GaBindParents
     -> NodeRef
     -> NodeId
     -> Either ElabError (GeneralizePlan, ReifyPlan)
-buildGeneralizePlans res policy mbBindParentsGa scopeRoot targetNode = do
+buildGeneralizePlans res mbBindParentsGa scopeRoot targetNode = do
     let constraint = srConstraint res
         canonical = Solve.frWith (srUnionFind res)
         presEnv =
@@ -791,7 +769,6 @@ buildGeneralizePlans res policy mbBindParentsGa scopeRoot targetNode = do
                 , peSolveResult = res
                 , peCanonical = canonical
                 , peBindParents = cBindParents constraint
-                , pePolicy = policy
                 , peBindParentsGa = mbBindParentsGa
                 , peScopeRoot = scopeRoot
                 , peTargetNode = targetNode

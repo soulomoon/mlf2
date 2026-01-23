@@ -13,8 +13,6 @@ import qualified MLF.Constraint.Canonicalize as Canonicalize
 import MLF.Constraint.Presolution
     ( EdgeTrace(..)
     , PresolutionPlanBuilder(..)
-    , GeneralizePolicy
-    , policyKeepTarget
     )
 import MLF.Constraint.Solve (SolveResult, frWith, srConstraint, srUnionFind)
 import MLF.Constraint.Types
@@ -1376,16 +1374,15 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
 
 generalizeAtWithBuilder
     :: PresolutionPlanBuilder
-    -> GeneralizePolicy
     -> Maybe GaBindParents
     -> SolveResult
     -> NodeRef
     -> NodeId
     -> Either ElabError (ElabScheme, IntMap.IntMap String)
-generalizeAtWithBuilder planBuilder policy mbBindParentsGa res scopeRoot targetNode =
+generalizeAtWithBuilder planBuilder mbBindParentsGa res scopeRoot targetNode =
     let PresolutionPlanBuilder buildPlans = planBuilder
-        go policy' mbGa res' scope target = do
-            (genPlan, reifyPlan) <- buildPlans res' policy' mbGa scope target
-            let fallback scope' target' = fst <$> go policyKeepTarget mbGa res' scope' target'
+        go mbGa res' scope target = do
+            (genPlan, reifyPlan) <- buildPlans res' mbGa scope target
+            let fallback scope' target' = fst <$> go mbGa res' scope' target'
             applyGeneralizePlan fallback genPlan reifyPlan
-    in go policy mbBindParentsGa res scopeRoot targetNode
+    in go mbBindParentsGa res scopeRoot targetNode

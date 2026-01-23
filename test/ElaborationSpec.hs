@@ -18,19 +18,16 @@ import MLF.Constraint.Acyclicity (checkAcyclicity)
 import MLF.Constraint.Presolution
     ( PresolutionResult(..)
     , EdgeTrace(..)
-    , GeneralizePolicy
     , GaBindParents
     , computePresolution
     , defaultPlanBuilder
-    , policyDefault
     )
 import MLF.Constraint.Solve (SolveResult(..), solveUnify)
 import qualified MLF.Constraint.Solve as Solve (frWith)
 import SpecUtil (bindParentsFromPairs, collectVarNodes, emptyConstraint, requireRight, rootedConstraint)
 
 generalizeAtWith
-    :: GeneralizePolicy
-    -> Maybe GaBindParents
+    :: Maybe GaBindParents
     -> SolveResult
     -> NodeRef
     -> NodeId
@@ -42,7 +39,7 @@ generalizeAt
     -> NodeRef
     -> NodeId
     -> Either Elab.ElabError (Elab.ElabScheme, IntMap.IntMap String)
-generalizeAt = generalizeAtWith policyDefault Nothing
+generalizeAt = generalizeAtWith Nothing
 
 requirePipeline :: Expr -> IO (Elab.ElabTerm, Elab.ElabType)
 requirePipeline = requireRight . Elab.runPipelineElab Set.empty
@@ -486,6 +483,32 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             (sch, _subst) <- requireRight (generalizeAt solved (typeRef forallNode) forallNode)
             Elab.prettyDisplay sch `shouldBe` "∀a. a -> a"
 
+        it "generalizeAt inlines alias bounds (no ∀(b ⩾ a))" $ do
+            let a = NodeId 1
+                b = NodeId 2
+                arrow = NodeId 3
+                forallNode = NodeId 4
+                c =
+                    rootedConstraint emptyConstraint
+                        { cNodes =
+                            IntMap.fromList
+                                [ (getNodeId a, TyVar { tnId = a, tnBound = Nothing })
+                                , (getNodeId b, TyVar { tnId = b, tnBound = Just a })
+                                , (getNodeId arrow, TyArrow arrow b b)
+                                , (getNodeId forallNode, TyForall forallNode arrow)
+                                ]
+                        , cBindParents =
+                            bindParentsFromPairs
+                                [ (arrow, forallNode, BindFlex)
+                                , (a, forallNode, BindFlex)
+                                , (b, forallNode, BindFlex)
+                                ]
+                        }
+
+            solved <- requireRight (solveUnify c)
+            (sch, _subst) <- requireRight (generalizeAt solved (typeRef forallNode) forallNode)
+            Elab.prettyDisplay sch `shouldBe` "∀a. a -> a"
+
     describe "xMLF types (instance bounds)" $ do
         it "pretty prints unbounded forall" $ do
             let ty = Elab.TForall "a" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
@@ -719,6 +742,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             let rootGen = GenNodeId 0
                 vA = NodeId 10
                 vB = NodeId 5
+                bnd = NodeId 15
                 arrow = NodeId 20
                 forallNode = NodeId 30
 
@@ -728,7 +752,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , cNodes =
                             IntMap.fromList
                                 [ (getNodeId vA, TyVar { tnId = vA, tnBound = Nothing })
-                                , (getNodeId vB, TyVar { tnId = vB, tnBound = Just vA })
+                                , (getNodeId vB, TyVar { tnId = vB, tnBound = Just bnd })
+                                , (getNodeId bnd, TyArrow bnd vA vA)
                                 , (getNodeId arrow, TyArrow arrow vB vA)
                                 , (getNodeId forallNode, TyForall forallNode arrow)
                                 ]
@@ -736,13 +761,15 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             IntMap.fromList
                                 [ (nodeRefKey (typeRef vA), (genRef rootGen, BindFlex))
                                 , (nodeRefKey (typeRef vB), (genRef rootGen, BindFlex))
+                                , (nodeRefKey (typeRef bnd), (genRef rootGen, BindFlex))
+                                , (nodeRefKey (typeRef arrow), (genRef rootGen, BindFlex))
                                 ]
                         }
 
                 solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 
             (sch, _subst) <- requireRight (generalizeAt solved (genRef rootGen) forallNode)
-            Elab.pretty sch `shouldBe` "∀a (b ⩾ a). b -> a"
+            Elab.pretty sch `shouldBe` "∀a (b ⩾ a -> a). b -> a"
 
     describe "Witness translation (Φ/Σ)" $ do
         describe "Σ(g) quantifier reordering" $ do

@@ -13,9 +13,6 @@ module MLF.Constraint.Presolution (
     computePresolution,
     PresolutionResult(..),
     PresolutionPlanBuilder(..),
-    GeneralizePolicy(..),
-    policyDefault,
-    policyKeepTarget,
     defaultPlanBuilder,
     PresolutionError(..),
     GaBindParents(..),
@@ -55,12 +52,7 @@ import MLF.Constraint.Presolution.Core (
     runEdgeUnifyForTest,
     unifyAcyclicRawWithRaiseTrace
     )
-import MLF.Constraint.Presolution.Plan
-    ( GeneralizePolicy(..)
-    , policyDefault
-    , policyKeepTarget
-    , buildGeneralizePlans
-    )
+import MLF.Constraint.Presolution.Plan (buildGeneralizePlans)
 import MLF.Constraint.Presolution.Plan.Context (GaBindParents(..))
 
 defaultPlanBuilder :: PresolutionPlanBuilder

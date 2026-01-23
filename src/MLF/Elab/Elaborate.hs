@@ -33,16 +33,12 @@ import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Constraint.Solve as Solve (frWith)
 import MLF.Constraint.Presolution
     ( EdgeTrace
-    , GeneralizePolicy
-    , policyDefault
-    , policyKeepTarget
     , etBinderArgs
     )
 import MLF.Frontend.ConstraintGen.Types (AnnExpr(..), AnnExprF(..))
 
 type GeneralizeAtWith =
-    GeneralizePolicy
-    -> Maybe GaBindParents
+    Maybe GaBindParents
     -> SolveResult
     -> NodeRef
     -> NodeId
@@ -293,36 +289,8 @@ elaborateWithScope generalizeAtWith resPhi resReify resGen gaParents edgeWitness
                             )
                             ()
                     let targetC = schemeBodyTarget resGen schemeRootId
-                    (sch0, subst0) <-
-                        generalizeAtWith policyDefault (Just gaParents) resGen scopeRoot targetC
-                    case debugElabGeneralize
-                        ("elaborate let: scheme0=" ++ show sch0
-                            ++ " subst0=" ++ show subst0
-                        )
-                        () of
-                        () -> pure ()
-                    let nodesGen = cNodes (srConstraint resGen)
-                        canonicalGen = Solve.frWith (srUnionFind resGen)
-                        targetCGen = canonicalGen targetC
-                        boundNode = VarStore.lookupVarBound (srConstraint resGen) targetCGen
-                        boundIsVar =
-                            case boundNode of
-                                Just bnd ->
-                                    case IntMap.lookup (getNodeId (canonicalGen bnd)) nodesGen of
-                                        Just TyVar{} -> True
-                                        _ -> False
-                                Nothing -> False
-                        needsRetry =
-                            case sch0 of
-                                Forall [] _ ->
-                                    case IntMap.lookup (getNodeId targetCGen) nodesGen of
-                                        Just TyVar{} -> boundNode == Nothing || boundIsVar
-                                        _ -> False
-                                _ -> False
                     (sch, subst) <-
-                        if needsRetry
-                            then generalizeAtWith policyKeepTarget (Just gaParents) resGen scopeRoot targetC
-                            else pure (sch0, subst0)
+                        generalizeAtWith (Just gaParents) resGen scopeRoot targetC
                     case debugElabGeneralize
                         ("elaborate let: scheme=" ++ show sch
                             ++ " subst=" ++ show subst

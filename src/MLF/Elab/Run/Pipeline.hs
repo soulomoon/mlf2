@@ -17,9 +17,6 @@ import MLF.Constraint.Acyclicity (checkAcyclicity)
 import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Presolution
     ( EdgeTrace(..)
-    , GeneralizePolicy
-    , policyDefault
-    , policyKeepTarget
     , PresolutionPlanBuilder(..)
     , PresolutionResult(..)
     , computePresolution
@@ -54,7 +51,6 @@ import MLF.Constraint.Types
     , instLeft
     , instRight
     , nodeRefFromKey
-    , structuralChildren
     , typeRef
     )
 import qualified MLF.Constraint.VarStore as VarStore
@@ -99,16 +95,14 @@ runPipelineElabChecked polySyms expr = do
 
 generalizeWithPlan
     :: PresolutionPlanBuilder
-    -> GeneralizePolicy
     -> GaBindParents
     -> SolveResult
     -> NodeRef
     -> NodeId
     -> Either ElabError (ElabScheme, IntMap.IntMap String)
-generalizeWithPlan planBuilder policy bindParentsGa res scopeRoot targetNode =
+generalizeWithPlan planBuilder bindParentsGa res scopeRoot targetNode =
     generalizeAtWithBuilder
         planBuilder
-        policy
         (Just bindParentsGa)
         res
         scopeRoot
@@ -302,43 +296,6 @@ runPipelineElabWith genConstraints expr = do
                         Nothing -> Left "missing edge witness for annotation"
                         Just ew' -> Right ew'
                     let mTrace = IntMap.lookup (getEdgeId eid) edgeTraces
-                        constraintGen = srConstraint solvedForGen
-                        schemeRootSet =
-                            IntSet.fromList
-                                [ getNodeId (canonical root)
-                                | gen <- IntMap.elems (cGenNodes constraintGen)
-                                , root <- gnSchemes gen
-                                ]
-                        boundHasForallNode nid0 =
-                            let go visited nid1 =
-                                    let nid = canonical nid1
-                                        key = getNodeId nid
-                                    in if IntSet.member key visited
-                                        then False
-                                        else if IntSet.member key schemeRootSet
-                                            then True
-                                            else
-                                                case IntMap.lookup key (cNodes constraintGen) of
-                                                    Just TyForall{} -> True
-                                                    Just TyVar{ tnBound = Just bnd } ->
-                                                        go (IntSet.insert key visited) bnd
-                                                    Just TyExp{ tnBody = b } ->
-                                                        go (IntSet.insert key visited) b
-                                                    Just node ->
-                                                        let visited' = IntSet.insert key visited
-                                                        in any (go visited') (structuralChildren node)
-                                                    Nothing -> False
-                            in go IntSet.empty nid0
-                        keepTarget =
-                            let traceKeep =
-                                    case mTrace of
-                                        Just tr -> length (etBinderArgs tr) > 1
-                                        Nothing -> False
-                                boundKeep =
-                                    case IntMap.lookup (getNodeId rootC) (cNodes constraintGen) of
-                                        Just TyVar{ tnBound = Just bnd } -> boundHasForallNode bnd
-                                        _ -> False
-                            in traceKeep || boundKeep
                     let targetC = schemeBodyTarget solvedForGen rootC
                         scopeRootNodePre0 = annNode innerPre
                         scopeRootNodePre =
@@ -368,12 +325,8 @@ runPipelineElabWith genConstraints expr = do
                                         ()
                                 else ()
                         scopeRoot = scopeRootPre
-                    let policy =
-                            if keepTarget
-                                then policyKeepTarget
-                                else policyDefault
                     (sch0, subst0) <- firstShow
-                        (generalizeWithPlan planBuilder policy bindParentsGa solvedForGen scopeRoot targetC)
+                        (generalizeWithPlan planBuilder bindParentsGa solvedForGen scopeRoot targetC)
                     let sch = sch0
                         subst = subst0
                         srcTy = schemeToType sch
@@ -609,12 +562,8 @@ runPipelineElabWith genConstraints expr = do
                                     annScopeRoot0 <- firstShow (bindingScopeRef (srConstraint solvedForGen) annTargetNode)
                                     let annScopeRootBase = preferGenScope (srConstraint solvedForGen) annScopeRoot0
                                         annScopeRoot = canonicalizeScopeRef solvedForGen (prRedirects pres) annScopeRootBase
-                                    let policyAnn =
-                                            if keepTarget
-                                                then policyKeepTarget
-                                                else policyDefault
                                     (annSch, _substAnn) <- firstShow
-                                        (generalizeWithPlan planBuilder policyAnn bindParentsGa solvedForGen annScopeRoot annTargetNode)
+                                        (generalizeWithPlan planBuilder bindParentsGa solvedForGen annScopeRoot annTargetNode)
                                     let annTy = schemeToType annSch
                                     pure (simplifyAnnotationType annTy)
 
@@ -1187,12 +1136,8 @@ runPipelineElabWith genConstraints expr = do
                                                 baseConstraint' = baseConstraint { cNodes = nodes' }
                                             in bindParentsGa { gaBaseConstraint = baseConstraint' }
                                         Nothing -> bindParentsGa
-                            let policy =
-                                    if keepTargetFinal
-                                        then policyKeepTarget
-                                        else policyDefault
                             (sch, _subst) <- firstShow
-                                (generalizeWithPlan planBuilder policy bindParentsGaFinal resFinalBounded scopeRoot targetC)
+                                (generalizeWithPlan planBuilder bindParentsGaFinal resFinalBounded scopeRoot targetC)
                             let debugFinal =
                                     if debugGaScopeEnabled
                                         then

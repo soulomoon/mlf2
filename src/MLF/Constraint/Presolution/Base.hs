@@ -40,7 +40,7 @@ import qualified MLF.Util.UnionFind as UnionFind
 import Debug.Trace (trace)
 import System.Environment (lookupEnv)
 import System.IO.Unsafe (unsafePerformIO)
-import MLF.Constraint.Presolution.Plan (GeneralizePlan, GeneralizePolicy, ReifyPlan)
+import MLF.Constraint.Presolution.Plan (GeneralizePlan, ReifyPlan)
 import MLF.Constraint.Presolution.Plan.Context (GaBindParents)
 import MLF.Constraint.Solve (SolveResult)
 import MLF.Util.ElabError (ElabError)
@@ -58,7 +58,6 @@ data PresolutionResult = PresolutionResult
 newtype PresolutionPlanBuilder = PresolutionPlanBuilder
     { ppbBuildGeneralizePlans
         :: SolveResult
-        -> GeneralizePolicy
         -> Maybe GaBindParents
         -> NodeRef
         -> NodeId
