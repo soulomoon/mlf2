@@ -1,3 +1,4 @@
+{-# LANGUAGE GADTs #-}
 module MLF.Elab.Generalize (
     GaBindParents(..),
     applyGeneralizePlan
@@ -191,7 +192,13 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
                 TBottom -> TBottom
                 TArrow a b -> TArrow (go seen a) (go seen b)
                 TForall v mb body ->
-                    TForall v (fmap (go seen) mb) (go seen body)
+                    TForall v (fmap (goBound seen) mb) (go seen body)
+            goBound seen bound = case bound of
+                TArrow a b -> TArrow (go seen a) (go seen b)
+                TBase b -> TBase b
+                TBottom -> TBottom
+                TForall v mb body ->
+                    TForall v (fmap (goBound seen) mb) (go seen body)
     let reifyTypeWithAliases bodyRoot substBase binderPairs = do
             let bodyRootC = canonical bodyRoot
                 useConstraintReify =
@@ -374,7 +381,7 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
                                                                 mbBound =
                                                                     if bndTy == TBottom || selfBound
                                                                         then Nothing
-                                                                        else Just bndTy
+                                                                        else Just (elabToBound bndTy)
                                                             pure (name, mbBound)
                                                 )
                                                 (zip binders names)

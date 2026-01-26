@@ -1,3 +1,4 @@
+{-# LANGUAGE GADTs #-}
 module MLF.Elab.Run.TypeOps (
     inlineBoundVarsType,
     simplifyAnnotationType
@@ -20,6 +21,18 @@ import MLF.Reify.TypeOps (
     substTypeSimple
     )
 import MLF.Elab.Types
+
+freeVarsType :: ElabType -> Set.Set String
+freeVarsType = freeTypeVarsFrom Set.empty
+
+mapBound :: (ElabType -> ElabType) -> BoundType -> BoundType
+mapBound f bound = case bound of
+    TArrow a b -> TArrow (f a) (f b)
+    TBase b -> TBase b
+    TBottom -> TBottom
+    TForall v mb body ->
+        let mb' = fmap (mapBound f) mb
+        in TForall v mb' (f body)
 
 inlineBoundVarsType :: SolveResult -> ElabType -> ElabType
 inlineBoundVarsType res = go IntSet.empty
@@ -53,7 +66,8 @@ inlineBoundVarsType res = go IntSet.empty
                             Nothing -> ty
                 Nothing -> ty
         TArrow a b -> TArrow (go seen a) (go seen b)
-        TForall v mb body -> TForall v (fmap (go seen) mb) (go seen body)
+        TForall v mb body ->
+            TForall v (fmap (mapBound (go seen)) mb) (go seen body)
         TBase _ -> ty
         TBottom -> ty
 
@@ -72,7 +86,7 @@ simplifyAnnotationType = go
 
     normalizeForalls (binds0, body0) =
         let binds1 =
-                [ (v, fmap go mb)
+                [ (v, fmap (mapBound go) mb)
                 | (v, mb) <- binds0
                 ]
             body1 = go body0
@@ -88,15 +102,12 @@ simplifyAnnotationType = go
                 _ -> Nothing
             usedInBounds =
                 Set.unions
-                    [ freeVarsType bnd
+                    [ freeTypeVarsTy bnd
                     | (_, Just bnd) <- binds
                     ]
             goMerge _ [] body' = ([], body')
             goMerge seen ((v, mb):rest) body' =
-                let mb' =
-                        case mb of
-                            Just (TVar v') | v' == v -> Nothing
-                            _ -> mb
+                let mb' = mb
                     vUsed = Set.member v usedInBounds
                 in case mb' >>= baseKey of
                     Just key ->
@@ -133,22 +144,26 @@ simplifyAnnotationType = go
         Nothing -> TBottom
 
     dropUnusedBinds binds body =
-        let freeInBound = maybe Set.empty freeVarsType
+        let freeInBound = maybe Set.empty freeTypeVarsTy
             used = Set.union (freeVarsType body)
                 (Set.unions [ freeInBound mb | (_, mb) <- binds ])
-            keep (v, mb) = Set.member v used || maybe False (Set.member v . freeVarsType) mb
+            keep (v, mb) = Set.member v used || maybe False (Set.member v . freeTypeVarsTy) mb
         in (filter keep binds, body)
 
     inlineAlias ty = case ty of
         TForall v mb body ->
-            let mb' = fmap go mb
+            let mb' = fmap (mapBound go) mb
                 body' = go body
                 mb'' = case mb' of
-                    Just (TVar v') | v' == v -> Nothing
+                    Just bound
+                        | TVar v' <- tyToElab bound
+                        , v' == v -> Nothing
                     _ -> mb'
             in case (mb'', body') of
-                (Just bound, TVar v') | v' == v && inlineAliasBound bound ->
-                    bound
+                (Just bound, TVar v')
+                    | v' == v
+                    , inlineAliasBound (tyToElab bound) ->
+                        tyToElab bound
                 _ -> TForall v mb'' body'
         _ -> ty
 
@@ -157,11 +172,9 @@ simplifyAnnotationType = go
         _ -> False
 
     substBind v v0 (name, mb) =
-        let mb' = fmap (renameTypeVar v v0) mb
+        let mb' = fmap (mapBound (renameTypeVar v v0)) mb
         in (name, mb')
 
     substBindType v replacement (name, mb) =
-        let mb' = fmap (substTypeSimple v replacement) mb
+        let mb' = fmap (mapBound (substTypeSimple v replacement)) mb
         in (name, mb')
-
-    freeVarsType = freeTypeVarsFrom Set.empty

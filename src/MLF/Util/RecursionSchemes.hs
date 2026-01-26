@@ -1,4 +1,6 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE RankNTypes #-}
 module MLF.Util.RecursionSchemes (
     cataM,
     cataEither,
@@ -11,7 +13,8 @@ module MLF.Util.RecursionSchemes (
 
 import Data.Functor.Foldable (Base, Recursive, cata)
 
-import MLF.Elab.Types (ElabTerm, ElabTermF, ElabType, ElabTypeF, Instantiation, InstantiationF)
+import MLF.Elab.Types (ElabTerm, ElabTermF, ElabType, Instantiation, InstantiationF, TopVar(..))
+import MLF.Types.Elab (TyIF, cataIx)
 import MLF.Frontend.ConstraintGen.Types (AnnExpr, AnnExprF)
 
 -- read https://hackage.haskell.org/package/recursion-schemes-5.2.3/docs/Data-Functor-Foldable.html
@@ -29,8 +32,8 @@ cataEither = cataM
 cataMaybe :: (Recursive t, Traversable (Base t)) => (Base t a -> Maybe a) -> t -> Maybe a
 cataMaybe = cataM
 
-foldElabType :: (ElabTypeF a -> a) -> ElabType -> a
-foldElabType = cata
+foldElabType :: (forall i. TyIF i a -> a i) -> ElabType -> a 'AllowVar
+foldElabType = cataIx
 
 foldElabTerm :: (ElabTermF a -> a) -> ElabTerm -> a
 foldElabTerm = cata

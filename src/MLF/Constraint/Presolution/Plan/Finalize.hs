@@ -1,11 +1,11 @@
 {-# LANGUAGE RecordWildCards #-}
-
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE GADTs #-}
 module MLF.Constraint.Presolution.Plan.Finalize (
     FinalizeInput(..),
     finalizeScheme
 ) where
 
-import Data.Functor.Foldable (cata)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Map.Strict as Map
@@ -26,8 +26,27 @@ import MLF.Constraint.Presolution.Plan.Normalize
     , isVarBound
     )
 import MLF.Reify.TypeOps (freeTypeVarsFrom, stripForallsType)
-import MLF.Types.Elab (ElabScheme, ElabType(..), ElabTypeF(..), mkElabScheme)
+import MLF.Types.Elab
+    ( BoundType
+    , ElabScheme
+    , ElabType
+    , Ty(..)
+    , TyIF(..)
+    , cataIx
+    , freeTypeVarsTy
+    , mkElabScheme
+    , tyToElab
+    )
 import MLF.Util.ElabError (ElabError(..))
+
+mapBound :: (ElabType -> ElabType) -> BoundType -> BoundType
+mapBound f bound = case bound of
+    TArrow a b -> TArrow (f a) (f b)
+    TBase b -> TBase b
+    TBottom -> TBottom
+    TForall v mb body ->
+        let mb' = fmap (mapBound f) mb
+        in TForall v mb' (f body)
 
 -- | Inputs needed to finalize a generalized scheme.
 data FinalizeInput = FinalizeInput
@@ -46,7 +65,7 @@ data FinalizeInput = FinalizeInput
     , fiNamedUnderGaSet :: IntSet.IntSet
     , fiOrderedBinders :: [Int]
     , fiBinderNames :: [String]
-    , fiBindings :: [(String, Maybe ElabType)]
+    , fiBindings :: [(String, Maybe BoundType)]
     , fiSubst :: IntMap.IntMap String
     , fiTyRaw :: ElabType
     }
@@ -78,6 +97,7 @@ finalizeScheme FinalizeInput{..} =
             , Just bnd <- [VarStore.lookupVarBound constraint (canonical nid)]
             , canonical bnd == canonical typeRoot
             ]
+        inlineAliasBinder :: ElabType -> [(String, Maybe BoundType)] -> (ElabType, [(String, Maybe BoundType)])
         inlineAliasBinder ty binds = case ty of
             TVar v
                 | v `elem` aliasToTypeRootNames ->
@@ -85,7 +105,7 @@ finalizeScheme FinalizeInput{..} =
                         Just (Just bnd)
                             | not (isVarBound bnd)
                             , not (isBaseBound bnd) ->
-                                (bnd, filter (\(n, _) -> n /= v) binds)
+                                (tyToElab bnd, filter (\(n, _) -> n /= v) binds)
                         _ -> (ty, binds)
             _ -> (ty, binds)
         (ty0RawAlias, bindingsAlias) = inlineAliasBinder ty0Raw bindings
@@ -116,7 +136,26 @@ finalizeScheme FinalizeInput{..} =
                             case mb of
                                 Nothing -> (Nothing, freeEnv, n1)
                                 Just bnd ->
-                                    let (bnd', free', n') = go boundEnv freeEnv n1 bnd
+                                    let (bnd', free', n') = goBound boundEnv freeEnv n1 bnd
+                                    in (Just bnd', free', n')
+                        (body', free2, n3) = go ((v, v') : boundEnv) free1 n2 body
+                    in (TForall v' mb' body', free2, n3)
+
+            goBound boundEnv freeEnv n bound = case bound of
+                TArrow a b ->
+                    let (a', free1, n1) = go boundEnv freeEnv n a
+                        (b', free2, n2) = go boundEnv free1 n1 b
+                    in (TArrow a' b', free2, n2)
+                TBase b -> (TBase b, freeEnv, n)
+                TBottom -> (TBottom, freeEnv, n)
+                TForall v mb body ->
+                    let v' = "v" ++ show n
+                        n1 = n + 1
+                        (mb', free1, n2) =
+                            case mb of
+                                Nothing -> (Nothing, freeEnv, n1)
+                                Just bnd ->
+                                    let (bnd', free', n') = goBound boundEnv freeEnv n1 bnd
                                     in (Just bnd', free', n')
                         (body', free2, n3) = go ((v, v') : boundEnv) free1 n2 body
                     in (TForall v' mb' body', free2, n3)
@@ -128,19 +167,27 @@ finalizeScheme FinalizeInput{..} =
                     case ty of
                         TArrow a b -> TArrow (goReplace a) (goReplace b)
                         TForall name mb body ->
-                            TForall name (fmap goReplace mb) (goReplace body)
+                            TForall name (fmap (mapBound goReplace) mb) (goReplace body)
                         _ -> ty
         stripAliasForall ty = case ty of
             TForall v (Just bound) body
                 | TVar v' <- body
                 , v == v' ->
-                    stripAliasForall bound
+                    stripAliasForall (tyToElab bound)
                 | otherwise ->
-                    TForall v (Just (stripAliasForall bound)) (stripAliasForall body)
+                    TForall v (Just (stripAliasForallBound bound)) (stripAliasForall body)
             TForall v Nothing body ->
                 TForall v Nothing (stripAliasForall body)
             TArrow a b -> TArrow (stripAliasForall a) (stripAliasForall b)
             _ -> ty
+        stripAliasForallBound bound = case bound of
+            TArrow a b -> TArrow (stripAliasForall a) (stripAliasForall b)
+            TBase _ -> bound
+            TBottom -> bound
+            TForall v mb body ->
+                let mb' = fmap stripAliasForallBound mb
+                    body' = stripAliasForall body
+                in TForall v mb' body'
         collapseBoundAliases binds ty =
             foldr
                 (\(v, mbBound) acc ->
@@ -185,17 +232,18 @@ finalizeScheme FinalizeInput{..} =
                     , IntSet.member nidInt namedUnderGaSetPlan
                     ])
                 (Set.fromList [ name | (name, Just _) <- bindingsAdjusted ])
-        renameVars = cata alg
+        renameVars = cataIx alg
           where
             renameFromSubst v = case lookup v substNames of
                 Just v' -> v'
                 Nothing -> v
+            alg :: TyIF i Ty -> Ty i
             alg ty = case ty of
-                TVarF v -> TVar (renameFromSubst v)
-                TArrowF a b -> TArrow a b
-                TBaseF b -> TBase b
-                TBottomF -> TBottom
-                TForallF v mb body ->
+                TVarIF v -> TVar (renameFromSubst v)
+                TArrowIF a b -> TArrow a b
+                TBaseIF b -> TBase b
+                TBottomIF -> TBottom
+                TForallIF v mb body ->
                     let v' = renameFromSubst v
                     in TForall v' mb body
         ty0 = renameVars ty0RawAdjusted
@@ -207,7 +255,7 @@ finalizeScheme FinalizeInput{..} =
         usedNames =
             Set.unions
                 ( freeTypeVarsFrom Set.empty tyNorm
-                    : [freeTypeVarsFrom Set.empty b | (_, Just b) <- bindingsNorm]
+                    : [freeTypeVarsTy b | (_, Just b) <- bindingsNorm]
                 )
         bindingsFinal =
             filter
@@ -221,10 +269,10 @@ finalizeScheme FinalizeInput{..} =
                     case mb of
                         Nothing -> True
                         Just bnd ->
-                            let freeBound = freeTypeVarsFrom Set.empty bnd
+                            let freeBound = freeTypeVarsTy bnd
                                 boundMentionsSelf = Set.member name freeBound
                                 boundIsSimple = isVarBound bnd || isBaseBound bnd
-                                boundIsBody = bnd == tyNorm
+                                boundIsBody = tyToElab bnd == tyNorm
                             in not boundMentionsSelf && (boundIsSimple || boundIsBody)
             in filter (not . dropRedundant) bindingsFinal
         aliasBounds =
@@ -232,15 +280,17 @@ finalizeScheme FinalizeInput{..} =
             | (name, Just bound) <- bindingsFinal'
             , isVarBound bound
             ]
-        renameTypeVars = cata alg
+        renameTypeVars :: ElabType -> ElabType
+        renameTypeVars = cataIx alg
           where
             renameFromMap v = Map.findWithDefault v v renameMap
+            alg :: TyIF i Ty -> Ty i
             alg ty = case ty of
-                TVarF v -> TVar (renameFromMap v)
-                TArrowF a b -> TArrow a b
-                TBaseF b -> TBase b
-                TBottomF -> TBottom
-                TForallF v mb body ->
+                TVarIF v -> TVar (renameFromMap v)
+                TArrowIF a b -> TArrow a b
+                TBaseIF b -> TBase b
+                TBottomIF -> TBottom
+                TForallIF v mb body ->
                     let v' = renameFromMap v
                     in TForall v' mb body
         renameMap =
@@ -250,7 +300,7 @@ finalizeScheme FinalizeInput{..} =
                 ]
         renameName name = Map.findWithDefault name name renameMap
         bindingsRenamed =
-            [ (renameName name, fmap renameTypeVars mb)
+            [ (renameName name, fmap (mapBound renameTypeVars) mb)
             | (name, mb) <- bindingsFinal'
             ]
         tyRenamed = renameTypeVars tyNorm
@@ -266,7 +316,7 @@ finalizeScheme FinalizeInput{..} =
         usedNamesRenamed =
             Set.unions
                 ( freeTypeVarsFrom Set.empty tyRenamed
-                    : [freeTypeVarsFrom Set.empty b | (_, Just b) <- bindingsRenamed]
+                    : [freeTypeVarsTy b | (_, Just b) <- bindingsRenamed]
                 )
         boundNames = Set.fromList (map fst bindingsRenamed)
         allowedNames = Set.fromList (map fst bindingsRenamed)

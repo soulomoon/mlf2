@@ -1,3 +1,4 @@
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
 module MLF.Elab.Inst (
     InstEvalSpec(..),
@@ -49,15 +50,17 @@ evalInstantiationWith spec inst = eval inst
 
     instElimFn errInst (k, _env', t) = case t of
         TForall v mbBound body -> do
-            let bTy = maybe TBottom id mbBound
+            let bTy = maybe TBottom tyToElab mbBound
             Right (k, substTypeCapture v bTy body)
         _ -> Left (instElimError spec errInst t)
 
     instInsideFn errInst phiFn (k, env', t) = case t of
         TForall v mbBound body -> do
-            let b0 = maybe TBottom id mbBound
+            let b0 = maybe TBottom tyToElab mbBound
             (k1, b1) <- phiFn (k, env', b0)
-            let mb' = if b1 == TBottom then Nothing else Just b1
+            let mb' = case b1 of
+                    TBottom -> Nothing
+                    _ -> Just (elabToBound b1)
             Right (k1, TForall v mb' body)
         _ -> Left (instInsideError spec errInst t)
 
@@ -67,10 +70,17 @@ evalInstantiationWith spec inst = eval inst
 
     instAlg inst0 = case inst0 of
         InstIdF -> \(k, _env', t) -> Right (k, t)
-        InstSeqF (_, i1) (_, i2) ->
-            \(k, env', t) -> do
-                (k1, t1) <- i1 (k, env', t)
-                i2 (k1, env', t1)
+        InstSeqF (left, i1) (right, i2) ->
+            \(k, env', t) ->
+                case (left, right) of
+                    (InstInside (InstAbstr v), InstElim) ->
+                        case t of
+                            TForall name _mbBound body ->
+                                Right (k, substTypeCapture name (TVar v) body)
+                            _ -> Left (instElimError spec InstElim t)
+                    _ -> do
+                        (k1, t1) <- i1 (k, env', t)
+                        i2 (k1, env', t1)
         InstAppF argTy -> instAppFn argTy
         InstBotF tArg -> instBot spec tArg
         InstAbstrF v -> instAbstr spec v
@@ -84,7 +94,7 @@ evalInstantiationWith spec inst = eval inst
         InstUnderF vParam (phiInst, _phiFn) ->
             \(k, env', t) -> case t of
                 TForall v mbBound body -> do
-                    let b0 = maybe TBottom id mbBound
+                    let b0 = maybe TBottom tyToElab mbBound
                         env'' = instUnderEnv spec v b0 env'
                         phi' = renameBound spec vParam v phiInst
                     (k1, body') <- eval phi' (k, env'', body)

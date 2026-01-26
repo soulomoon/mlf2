@@ -10,14 +10,14 @@ import MLF.Elab.Inst (applyInstantiation, composeInst, instMany, splitForalls)
 
 -- | Generate the (paper) commutation instantiation that swaps the first two
 -- quantifiers of a type ∀(α ⩾ τα). ∀(β ⩾ τβ). τ.
-swapFront :: (String, Maybe ElabType) -> (String, Maybe ElabType) -> Instantiation
+swapFront :: (String, Maybe BoundType) -> (String, Maybe BoundType) -> Instantiation
 swapFront (_a, mbTa) (_b, mbTb) =
     -- xmlf §3.4 “Reordering quantifiers”:
     --   O; ∀(⩾ τα); O; ∀(⩾ τβ); ∀(β ⩾) ∀(α ⩾) h!αi; h!βi
     --
     -- We keep binder names symbolic; `applyInstantiation` α-renames under-binders.
-    let ta = maybe TBottom id mbTa
-        tb = maybe TBottom id mbTb
+    let ta = maybe TBottom tyToElab mbTa
+        tb = maybe TBottom tyToElab mbTb
         hAbs v = InstSeq (InstInside (InstAbstr v)) InstElim
     in instMany
         [ InstIntro

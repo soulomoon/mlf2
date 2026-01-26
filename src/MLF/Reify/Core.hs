@@ -1,11 +1,15 @@
+{-# LANGUAGE GADTs #-}
 module MLF.Reify.Core (
     reifyType,
     reifyTypeWithNames,
     reifyTypeWithNamesNoFallback,
     reifyTypeWithNamesNoFallbackOnConstraint,
     reifyTypeWithNamedSet,
+    reifyWithAs,
     reifyBoundWithNames,
     reifyBoundWithNamesOnConstraint,
+    reifyBoundWithNamesBound,
+    reifyBoundWithNamesOnConstraintBound,
     freeVars,
     namedNodes
 ) where
@@ -508,7 +512,12 @@ reifyWith _contextLabel res nameForVar isNamed rootMode nid =
                         case boundTy of
                             TVar v -> v == varName b
                             _ -> False
-                    mbBound = if boundTy == TBottom || selfBound then Nothing else Just boundTy
+                    mbBound =
+                        case boundTy of
+                            TBottom -> Nothing
+                            TVar{} -> Nothing
+                            _ | selfBound -> Nothing
+                              | otherwise -> Just (elabToBound boundTy)
                 pure (cache', TForall (varName b) mbBound acc)
             )
             (cache, inner)
@@ -642,6 +651,18 @@ reifyWith _contextLabel res nameForVar isNamed rootMode nid =
         z' <- foldrM f z xs
         f x z'
 
+reifyWithAs
+    :: String
+    -> SolveResult
+    -> (NodeId -> String)
+    -> (NodeId -> Bool)
+    -> ReifyRoot
+    -> (ElabType -> Either ElabError a)
+    -> NodeId
+    -> Either ElabError a
+reifyWithAs contextLabel res nameForVar isNamed rootMode convert nid =
+    convert =<< reifyWith contextLabel res nameForVar isNamed rootMode nid
+
 -- | Reify a solved NodeId into an elaborated type.
 -- This version doesn't compute instance bounds (all foralls are unbounded).
 reifyType :: SolveResult -> NodeId -> Either ElabError ElabType
@@ -713,11 +734,32 @@ reifyBoundWithNames res subst nid =
 
     isNamed nodeId = IntMap.member (getNodeId (canonical nodeId)) subst
 
+reifyBoundWithNamesBound :: SolveResult -> IntMap.IntMap String -> NodeId -> Either ElabError BoundType
+reifyBoundWithNamesBound res subst nid =
+    reifyWithAs "reifyBoundWithNamesBound" res varNameFor isNamed RootBound (Right . elabToBound) nid
+  where
+    uf = srUnionFind res
+    canonical = Solve.frWith uf
+
+    nameFor (NodeId i) = "t" ++ show i
+
+    varNameFor :: NodeId -> String
+    varNameFor v =
+        let cv = canonical v
+        in maybe (nameFor cv) id (IntMap.lookup (getNodeId cv) subst)
+
+    isNamed nodeId = IntMap.member (getNodeId (canonical nodeId)) subst
+
 -- | Reify a node for use as a binder bound on an explicit constraint (Sχp on base graphs).
 reifyBoundWithNamesOnConstraint :: Constraint -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
 reifyBoundWithNamesOnConstraint constraint subst nid =
     let resBase = SolveResult { srConstraint = constraint, srUnionFind = IntMap.empty }
     in reifyBoundWithNames resBase subst nid
+
+reifyBoundWithNamesOnConstraintBound :: Constraint -> IntMap.IntMap String -> NodeId -> Either ElabError BoundType
+reifyBoundWithNamesOnConstraintBound constraint subst nid =
+    let resBase = SolveResult { srConstraint = constraint, srUnionFind = IntMap.empty }
+    in reifyBoundWithNamesBound resBase subst nid
 
 namedNodes :: SolveResult -> Either ElabError IntSet.IntSet
 namedNodes res = do

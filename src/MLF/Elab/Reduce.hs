@@ -1,3 +1,4 @@
+{-# LANGUAGE GADTs #-}
 module MLF.Elab.Reduce (
     step,
     normalize,
@@ -74,15 +75,17 @@ reduceInst v inst = do
                 ETyAbs name mbBound body -> do
                     let bound0 = boundType mbBound
                     bound1 <- either (const Nothing) Just (applyInstantiation bound0 phi)
-                    let mb' = if bound1 == TBottom then Nothing else Just bound1
+                    let mb' = case bound1 of
+                            TBottom -> Nothing
+                            _ -> Just (elabToBound bound1)
                         body' = replaceAbstrInTerm name (InstSeq phi (InstAbstr name)) body
                     Just (ETyAbs name mb' body')
                 _ -> Nothing)
         InstBotF ty -> Just (InstBot ty, const Nothing)
         InstAbstrF vParam -> Just (InstAbstr vParam, const Nothing)
 
-boundType :: Maybe ElabType -> ElabType
-boundType = maybe TBottom id
+boundType :: Maybe BoundType -> ElabType
+boundType = maybe TBottom tyToElab
 
 freeTermVars :: ElabTerm -> Set.Set String
 freeTermVars = foldElabTerm alg
@@ -125,7 +128,7 @@ freeTypeVarsTerm = foldElabTerm alg
         ELetF _ sch rhs body ->
             Set.unions [freeTypeVarsScheme sch, rhs, body]
         ETyAbsF v mb body ->
-            let boundFv = maybe Set.empty freeTypeVarsType mb
+            let boundFv = maybe Set.empty freeTypeVarsTy mb
                 bodyFv = Set.delete v body
             in Set.union boundFv bodyFv
         ETyInstF e inst ->
@@ -173,29 +176,30 @@ substTypeVarTerm :: String -> ElabType -> ElabTerm -> ElabTerm
 substTypeVarTerm x s = goSub
   where
     freeS = freeTypeVarsType s
+    substBoundVar = fmap (elabToBound . substTypeCapture x s . tyToElab)
     goSub = para alg
       where
         alg term = case term of
             EVarF v -> EVar v
             ELitF l -> ELit l
-            ELamF v ty body -> ELam v (substTypeVar x s ty) (snd body)
+            ELamF v ty body -> ELam v (substTypeCapture x s ty) (snd body)
             EAppF f a -> EApp (snd f) (snd a)
             ELetF v sch rhs body ->
                 ELet v (substTypeVarScheme x s sch) (snd rhs) (snd body)
             ETyAbsF v mb body
-                | v == x -> ETyAbs v (fmap (substTypeVar x s) mb) (fst body)
+                | v == x -> ETyAbs v (substBoundVar mb) (fst body)
                 | v `Set.member` freeS ->
                     let used = Set.unions [freeS, freeTypeVarsTerm (fst body), Set.singleton x]
                         v' = freshTermNameFrom v used
                         body' = substTypeVarTerm v (TVar v') (fst body)
-                    in ETyAbs v' (fmap (substTypeVar x s) mb) (goSub body')
-                | otherwise -> ETyAbs v (fmap (substTypeVar x s) mb) (snd body)
+                    in ETyAbs v' (substBoundVar mb) (goSub body')
+                | otherwise -> ETyAbs v (substBoundVar mb) (snd body)
             ETyInstF e i -> ETyInst (snd e) (substTypeVarInst x s i)
 
 substTypeVarScheme :: String -> ElabType -> ElabScheme -> ElabScheme
 substTypeVarScheme x s sch =
     let ty = schemeToType sch
-        ty' = substTypeVar x s ty
+        ty' = substTypeCapture x s ty
     in schemeFromType ty'
 
 substTypeVarInst :: String -> ElabType -> Instantiation -> Instantiation
@@ -203,8 +207,8 @@ substTypeVarInst x s = para alg
   where
     alg inst = case inst of
         InstIdF -> InstId
-        InstAppF t -> InstApp (substTypeVar x s t)
-        InstBotF t -> InstBot (substTypeVar x s t)
+        InstAppF t -> InstApp (substTypeCapture x s t)
+        InstBotF t -> InstBot (substTypeCapture x s t)
         InstIntroF -> InstIntro
         InstElimF -> InstElim
         InstAbstrF v -> InstAbstr v
@@ -213,9 +217,6 @@ substTypeVarInst x s = para alg
         InstUnderF v i
             | v == x -> InstUnder v (fst i)
             | otherwise -> InstUnder v (snd i)
-
-substTypeVar :: String -> ElabType -> ElabType -> ElabType
-substTypeVar = substTypeCapture
 
 replaceAbstrInTerm :: String -> Instantiation -> ElabTerm -> ElabTerm
 replaceAbstrInTerm target replacement = para alg

@@ -1,6 +1,8 @@
 {-# LANGUAGE PatternSynonyms #-}
 module MLF.Elab.Pipeline (
-    ElabType(..),
+    ElabType,
+    Ty(..),
+    BoundType,
     ElabScheme,
     pattern Forall,
     ElabTerm(..),

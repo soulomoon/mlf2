@@ -1,3 +1,7 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE RankNTypes #-}
 module MLF.Reify.TypeOps (
     splitForalls,
     stripForallsType,
@@ -18,7 +22,6 @@ module MLF.Reify.TypeOps (
     inlineBaseBoundsType
 ) where
 
-import Data.Functor.Foldable (cata, embed, para)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Map.Strict as Map
@@ -32,99 +35,151 @@ import MLF.Types.Elab
 import MLF.Util.ElabError (ElabError(..))
 import MLF.Util.Names (parseNameId)
 
-splitForalls :: ElabType -> ([(String, Maybe ElabType)], ElabType)
-splitForalls = splitForallsLocal
+newtype BoundFun (i :: TopVar) =
+    BoundFun { runBoundFun :: Set.Set String -> Set.Set String }
 
-stripForallsType :: ElabType -> ElabType
+splitForalls :: Ty v -> ([(String, Maybe BoundType)], ElabType)
+splitForalls = go
+  where
+    go :: forall w. Ty w -> ([(String, Maybe BoundType)], ElabType)
+    go ty = case ty of
+        TForall v mb body ->
+            let (binds, body') = go body
+            in ((v, mb) : binds, body')
+        _ -> ([], tyToElab ty)
+
+stripForallsType :: Ty v -> ElabType
 stripForallsType = snd . splitForalls
 
-freeTypeVarsType :: ElabType -> Set.Set String
+freeTypeVarsType :: Ty v -> Set.Set String
 freeTypeVarsType = freeTypeVarsFromWith False Set.empty
 
-freeTypeVarsFrom :: Set.Set String -> ElabType -> Set.Set String
+freeTypeVarsFrom :: Set.Set String -> Ty v -> Set.Set String
 freeTypeVarsFrom = freeTypeVarsFromWith True
 
-freeTypeVarsList :: ElabType -> [String]
+freeTypeVarsList :: Ty v -> [String]
 freeTypeVarsList = Set.toList . freeTypeVarsType
 
-freeTypeVarsFromWith :: Bool -> Set.Set String -> ElabType -> Set.Set String
-freeTypeVarsFromWith bindInBound bound0 ty = (cata alg ty) bound0
+freeTypeVarsFromWith :: Bool -> Set.Set String -> Ty v -> Set.Set String
+freeTypeVarsFromWith bindInBound bound0 ty =
+    runBoundFun (cataIx alg ty) bound0
   where
+    alg :: TyIF i BoundFun -> BoundFun i
     alg node = case node of
-        TVarF v ->
-            \boundSet ->
+        TVarIF v ->
+            BoundFun $ \boundSet ->
                 if Set.member v boundSet
                     then Set.empty
                     else Set.singleton v
-        TArrowF d c -> \boundSet -> Set.union (d boundSet) (c boundSet)
-        TBaseF _ -> const Set.empty
-        TBottomF -> const Set.empty
-        TForallF v mb body ->
-            \boundSet ->
+        TArrowIF d c ->
+            BoundFun $ \boundSet ->
+                Set.union (runBoundFun d boundSet) (runBoundFun c boundSet)
+        TBaseIF _ -> BoundFun (const Set.empty)
+        TBottomIF -> BoundFun (const Set.empty)
+        TForallIF v mb body ->
+            BoundFun $ \boundSet ->
                 let boundBody = Set.insert v boundSet
                     boundBound = if bindInBound then boundBody else boundSet
-                    freeBound = maybe Set.empty ($ boundBound) mb
-                    freeBody = body boundBody
+                    freeBound = maybe Set.empty (\f -> runBoundFun f boundBound) mb
+                    freeBody = runBoundFun body boundBody
                 in Set.union freeBound freeBody
 
-substTypeCaptureLocal :: String -> ElabType -> ElabType -> ElabType
-substTypeCaptureLocal x s = goSub
+substTypeCapture :: String -> ElabType -> ElabType -> ElabType
+substTypeCapture x s = goSub
   where
     freeTypeVarsTypeLocal :: ElabType -> Set.Set String
-    freeTypeVarsTypeLocal = cata freeAlg
-      where
-        freeAlg node = case node of
-            TVarF v -> Set.singleton v
-            TArrowF d c -> Set.union d c
-            TBaseF _ -> Set.empty
-            TBottomF -> Set.empty
-            TForallF v mb body ->
-                let freeBound = maybe Set.empty id mb
-                    freeBody = Set.delete v body
-                in Set.union freeBound freeBody
+    freeTypeVarsTypeLocal = freeTypeVarsTy
 
     freeS = freeTypeVarsTypeLocal s
 
-    goSub = para alg
+    substBoundCaptureLocal :: String -> ElabType -> BoundType -> BoundType
+    substBoundCaptureLocal name replacement bound = case bound of
+        TArrow a b ->
+            TArrow (substTypeCapture name replacement a) (substTypeCapture name replacement b)
+        TBase b -> TBase b
+        TBottom -> TBottom
+        TForall v mb body
+            | v == name ->
+                let mb' = fmap (substBoundCaptureLocal name replacement) mb
+                in TForall v mb' body
+            | v `Set.member` freeS ->
+                let used =
+                        Set.unions
+                            [ freeS
+                            , freeTypeVarsTypeLocal body
+                            , maybe Set.empty freeTypeVarsTy mb
+                            , Set.singleton v
+                            ]
+                    v' = freshNameLike v used
+                    body' = substTypeCapture v (TVar v') body
+                    mb' = fmap (substBoundCaptureLocal name replacement) mb
+                in TForall v' mb' (substTypeCapture name replacement body')
+            | otherwise ->
+                let mb' = fmap (substBoundCaptureLocal name replacement) mb
+                in TForall v mb' (substTypeCapture name replacement body)
+
+    goSub = paraIx alg
       where
+        alg :: TyIF i (IxPair Ty Ty) -> Ty i
         alg ty = case ty of
-            TVarF v
+            TVarIF v
                 | v == x -> s
                 | otherwise -> TVar v
-            TArrowF d c -> TArrow (snd d) (snd c)
-            TBaseF b -> TBase b
-            TBottomF -> TBottom
-            TForallF v mb body
+            TArrowIF d c -> TArrow (snd (unIxPair d)) (snd (unIxPair c))
+            TBaseIF b -> TBase b
+            TBottomIF -> TBottom
+            TForallIF v mb body
                 | v == x ->
-                    let mb' = fmap snd mb
-                    in TForall v mb' (fst body)
+                    let mb' = fmap (substBoundCaptureLocal x s . fst . unIxPair) mb
+                    in TForall v mb' (fst (unIxPair body))
                 | v `Set.member` freeS ->
                     let used =
                             Set.unions
                                 [ freeS
-                                , freeTypeVarsTypeLocal (fst body)
-                                , maybe Set.empty (freeTypeVarsTypeLocal . fst) mb
+                                , freeTypeVarsTypeLocal (fst (unIxPair body))
+                                , maybe Set.empty (freeTypeVarsTy . fst . unIxPair) mb
                                 , Set.singleton v
                                 ]
                         v' = freshNameLike v used
-                        body' = substTypeCaptureLocal v (TVar v') (fst body)
-                    in TForall v' (fmap snd mb) (goSub body')
+                        body' = substTypeCapture v (TVar v') (fst (unIxPair body))
+                        mb' = fmap (substBoundCaptureLocal x s . fst . unIxPair) mb
+                    in TForall v' mb' (substTypeCapture x s body')
                 | otherwise ->
-                    TForall v (fmap snd mb) (snd body)
+                    let mb' = fmap (substBoundCaptureLocal x s . fst . unIxPair) mb
+                    in TForall v mb' (snd (unIxPair body))
 
-substTypeSimpleLocal :: String -> ElabType -> ElabType -> ElabType
-substTypeSimpleLocal name replacement = para alg
+substTypeSimple :: String -> ElabType -> ElabType -> ElabType
+substTypeSimple name replacement = paraIx alg
   where
+    substBoundSimpleLocal :: String -> ElabType -> BoundType -> BoundType
+    substBoundSimpleLocal name0 replacement0 bound = case bound of
+        TArrow a b ->
+            TArrow (substTypeSimple name0 replacement0 a) (substTypeSimple name0 replacement0 b)
+        TBase b -> TBase b
+        TBottom -> TBottom
+        TForall v mb body
+            | v == name0 ->
+                let mb' = fmap (substBoundSimpleLocal name0 replacement0) mb
+                in TForall v mb' body
+            | otherwise ->
+                let mb' = fmap (substBoundSimpleLocal name0 replacement0) mb
+                in TForall v mb' (substTypeSimple name0 replacement0 body)
+
+    alg :: TyIF i (IxPair Ty Ty) -> Ty i
     alg ty = case ty of
-        TVarF v
+        TVarIF v
             | v == name -> replacement
             | otherwise -> TVar v
-        TArrowF d c -> TArrow (snd d) (snd c)
-        TBaseF b -> TBase b
-        TBottomF -> TBottom
-        TForallF v mb body
-            | v == name -> TForall v (fmap fst mb) (fst body)
-            | otherwise -> TForall v (fmap snd mb) (snd body)
+        TArrowIF d c -> TArrow (snd (unIxPair d)) (snd (unIxPair c))
+        TBaseIF b -> TBase b
+        TBottomIF -> TBottom
+        TForallIF v mb body
+            | v == name ->
+                let mb' = fmap (substBoundSimpleLocal name replacement . fst . unIxPair) mb
+                in TForall v mb' (fst (unIxPair body))
+            | otherwise ->
+                let mb' = fmap (substBoundSimpleLocal name replacement . fst . unIxPair) mb
+                in TForall v mb' (snd (unIxPair body))
 
 freshNameLike :: String -> Set.Set String -> String
 freshNameLike base used =
@@ -132,16 +187,6 @@ freshNameLike base used =
     in case filter (`Set.notMember` used) candidates of
         (x:_) -> x
         [] -> base
-
-splitForallsLocal :: ElabType -> ([(String, Maybe ElabType)], ElabType)
-splitForallsLocal = para alg
-  where
-    alg ty = case ty of
-        TForallF v mb bodyPair ->
-            let mbOrig = fmap fst mb
-                (binds, body) = snd bodyPair
-            in ((v, mbOrig) : binds, body)
-        _ -> ([], embed (fmap fst ty))
 
 freshTypeName :: Set.Set String -> String
 freshTypeName used =
@@ -157,11 +202,6 @@ freshTypeNameFromCounter n used =
         then freshTypeNameFromCounter (n + 1) used
         else (candidate, n + 1)
 
-substTypeCapture :: String -> ElabType -> ElabType -> ElabType
-substTypeCapture = substTypeCaptureLocal
-
-substTypeSimple :: String -> ElabType -> ElabType -> ElabType
-substTypeSimple = substTypeSimpleLocal
 
 renameTypeVar :: String -> String -> ElabType -> ElabType
 renameTypeVar old new = substTypeSimple old (TVar new)
@@ -169,7 +209,6 @@ renameTypeVar old new = substTypeSimple old (TVar new)
 alphaEqType :: ElabType -> ElabType -> Bool
 alphaEqType = go Map.empty Map.empty
   where
-    boundType = maybe TBottom id
     go envL envR t1 t2 = case (t1, t2) of
         (TVar a, TVar b) ->
             case Map.lookup a envL of
@@ -183,11 +222,25 @@ alphaEqType = go Map.empty Map.empty
         (TBase b1, TBase b2) -> b1 == b2
         (TBottom, TBottom) -> True
         (TForall v1 mb1 body1, TForall v2 mb2 body2) ->
-            let bound1 = boundType mb1
-                bound2 = boundType mb2
-                envL' = Map.insert v1 v2 envL
+            let envL' = Map.insert v1 v2 envL
                 envR' = Map.insert v2 v1 envR
-            in go envL envR bound1 bound2 && go envL' envR' body1 body2
+            in alphaEqMaybeBound envL envR mb1 mb2 && go envL' envR' body1 body2
+        _ -> False
+
+    alphaEqMaybeBound envL envR mb1 mb2 = case (mb1, mb2) of
+        (Nothing, Nothing) -> True
+        (Just b1, Just b2) -> alphaEqBound envL envR b1 b2
+        _ -> False
+
+    alphaEqBound envL envR b1 b2 = case (b1, b2) of
+        (TArrow a1 b1', TArrow a2 b2') ->
+            go envL envR a1 a2 && go envL envR b1' b2'
+        (TBase b1', TBase b2') -> b1' == b2'
+        (TBottom, TBottom) -> True
+        (TForall v1 mb1 body1, TForall v2 mb2 body2) ->
+            let envL' = Map.insert v1 v2 envL
+                envR' = Map.insert v2 v1 envR
+            in alphaEqMaybeBound envL envR mb1 mb2 && go envL' envR' body1 body2
         _ -> False
 
 matchType
@@ -219,7 +272,22 @@ matchType binderSet = goMatch Map.empty Map.empty
         (TForall v mb b, TForall v' mb' b') -> do
             subst1 <- case (mb, mb') of
                 (Nothing, Nothing) -> Right subst
-                (Just x, Just y) -> goMatch env subst x y
+                (Just x, Just y) -> matchBound env subst x y
+                _ -> Left (InstantiationError "matchType: forall bound mismatch")
+            goMatch (Map.insert v v' env) subst1 b b'
+        _ -> Left (InstantiationError "matchType: structure mismatch")
+
+    matchBound env subst boundP boundT = case (boundP, boundT) of
+        (TArrow a b, TArrow a' b') -> do
+            subst1 <- goMatch env subst a a'
+            goMatch env subst1 b b'
+        (TBase b0, TBase b1)
+            | b0 == b1 -> Right subst
+        (TBottom, TBottom) -> Right subst
+        (TForall v mb b, TForall v' mb' b') -> do
+            subst1 <- case (mb, mb') of
+                (Nothing, Nothing) -> Right subst
+                (Just x, Just y) -> matchBound env subst x y
                 _ -> Left (InstantiationError "matchType: forall bound mismatch")
             goMatch (Map.insert v v' env) subst1 b b'
         _ -> Left (InstantiationError "matchType: structure mismatch")
@@ -254,10 +322,11 @@ resolveBaseBoundForInstSolved res =
     in resolveBaseBoundForInstConstraint constraint canonical
 
 inlineBaseBoundsType :: Constraint -> (NodeId -> NodeId) -> ElabType -> ElabType
-inlineBaseBoundsType constraint canonical = cata alg
+inlineBaseBoundsType constraint canonical = cataIx alg
   where
+    alg :: TyIF i Ty -> Ty i
     alg ty = case ty of
-        TVarF v ->
+        TVarIF v ->
             case parseNameId v of
                 Just nidInt ->
                     let nid = NodeId nidInt
@@ -269,7 +338,7 @@ inlineBaseBoundsType constraint canonical = cata alg
                                 _ -> TVar v
                         Nothing -> TVar v
                 Nothing -> TVar v
-        TArrowF a b -> TArrow a b
-        TForallF v mb body -> TForall v mb body
-        TBaseF b -> TBase b
-        TBottomF -> TBottom
+        TArrowIF a b -> TArrow a b
+        TForallIF v mb body -> TForall v mb body
+        TBaseIF b -> TBase b
+        TBottomIF -> TBottom

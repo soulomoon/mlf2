@@ -1,3 +1,6 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE KindSignatures #-}
 module MLF.Elab.Run.Instantiation (
     inferInstAppArgsFromScheme,
     varsInType,
@@ -6,23 +9,26 @@ module MLF.Elab.Run.Instantiation (
     containsForallType
 ) where
 
-import Data.Functor.Foldable (cata)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
 import MLF.Reify.TypeOps (matchType, stripForallsType)
 import MLF.Elab.Types
 
-inferInstAppArgsFromScheme :: [(String, Maybe ElabType)] -> ElabType -> ElabType -> Maybe [ElabType]
+newtype SubstFun (i :: TopVar) =
+    SubstFun { runSubstFun :: Set.Set String -> Ty i }
+
+inferInstAppArgsFromScheme :: [(String, Maybe BoundType)] -> ElabType -> ElabType -> Maybe [ElabType]
 inferInstAppArgsFromScheme binds body targetTy =
     let binderNames = map fst binds
         binderSet = Set.fromList binderNames
         targetCore = stripForallsType targetTy
         targetForallNames =
             let alg ty = case ty of
-                    TForallF v _ body' -> v : body'
+                    TForallIF v _ body' -> v : unK body'
                     _ -> []
-            in cata alg targetTy
+            in cataIxConst alg targetTy
+        argsAreIdentity :: [String] -> [ElabType] -> Bool
         argsAreIdentity names args =
             and
                 [ case arg of
@@ -77,44 +83,47 @@ inferInstAppArgsFromScheme binds body targetTy =
     in case body of
         TVar v ->
             case lookup v binds of
-                Just (Just bound) -> inferFromBound v bound
+                Just (Just bound) -> inferFromBound v (tyToElab bound)
                 _ -> fallback
         _ -> fallback
 
 varsInType :: ElabType -> Set.Set String
-varsInType = cata alg
+varsInType = cataIxConst alg
   where
+    alg :: TyIF i (K (Set.Set String)) -> Set.Set String
     alg ty = case ty of
-        TVarF v -> Set.singleton v
-        TArrowF a b -> Set.union a b
-        TBaseF _ -> Set.empty
-        TBottomF -> Set.empty
-        TForallF _ mb body ->
-            let varsBound = maybe Set.empty id mb
-            in Set.union varsBound body
+        TVarIF v -> Set.singleton v
+        TArrowIF a b -> Set.union (unK a) (unK b)
+        TBaseIF _ -> Set.empty
+        TBottomIF -> Set.empty
+        TForallIF _ mb body ->
+            let varsBound = maybe Set.empty unK mb
+            in Set.union varsBound (unK body)
 
 substTypeSelective :: Set.Set String -> Map.Map String ElabType -> ElabType -> ElabType
-substTypeSelective binderSet subst ty0 = (cata alg ty0) Set.empty
+substTypeSelective binderSet subst ty0 = runSubstFun (cataIx alg ty0) Set.empty
   where
+    alg :: TyIF i SubstFun -> SubstFun i
     alg ty = case ty of
-        TVarF v ->
-            \bound ->
+        TVarIF v ->
+            SubstFun $ \bound ->
                 if Set.member v bound || Set.member v binderSet
                     then TVar v
                     else case Map.lookup v subst of
                         Just ty' -> ty'
                         Nothing -> TVar v
-        TArrowF a b -> \bound -> TArrow (a bound) (b bound)
-        TBaseF b -> const (TBase b)
-        TBottomF -> const TBottom
-        TForallF v mb body ->
-            \bound ->
+        TArrowIF a b ->
+            SubstFun $ \bound -> TArrow (runSubstFun a bound) (runSubstFun b bound)
+        TBaseIF b -> SubstFun (const (TBase b))
+        TBottomIF -> SubstFun (const TBottom)
+        TForallIF v mb body ->
+            SubstFun $ \bound ->
                 let bound' = Set.insert v bound
-                    mb' = fmap ($ bound') mb
-                    body' = body bound'
+                    mb' = fmap (\f -> runSubstFun f bound') mb
+                    body' = runSubstFun body bound'
                 in TForall v mb' body'
 
-instInsideFromArgsWithBounds :: [(String, Maybe ElabType)] -> [ElabType] -> Instantiation
+instInsideFromArgsWithBounds :: [(String, Maybe BoundType)] -> [ElabType] -> Instantiation
 instInsideFromArgsWithBounds binds args = case (binds, args) of
     ([], _) -> InstId
     (_, []) -> InstId
@@ -122,16 +131,16 @@ instInsideFromArgsWithBounds binds args = case (binds, args) of
         let rest = instInsideFromArgsWithBounds ns ts
             inst =
                 case mbBound of
-                    Just bound | containsForallType bound -> InstInside (InstApp t)
+                    Just bound | containsForallTy bound -> InstInside (InstApp t)
                     _ -> InstInside (InstBot t)
         in if rest == InstId
             then inst
             else InstSeq inst (InstUnder n rest)
 
 containsForallType :: ElabType -> Bool
-containsForallType = cata alg
+containsForallType = cataIxConst alg
   where
     alg ty = case ty of
-        TForallF _ _ _ -> True
-        TArrowF a b -> a || b
+        TForallIF _ _ _ -> True
+        TArrowIF a b -> unK a || unK b
         _ -> False

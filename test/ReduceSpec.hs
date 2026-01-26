@@ -4,7 +4,7 @@ import Control.Monad (forM_)
 import Test.Hspec
 
 import MLF.Constraint.Types (BaseTy(..))
-import MLF.Elab.Pipeline (ElabTerm(..), ElabType(..), Instantiation(..), normalize, schemeFromType, step, typeCheck)
+import MLF.Elab.Pipeline (ElabTerm(..), Ty(..), Instantiation(..), normalize, schemeFromType, step, typeCheck)
 import MLF.Frontend.Syntax (Lit(..))
 import SpecUtil (requireRight)
 

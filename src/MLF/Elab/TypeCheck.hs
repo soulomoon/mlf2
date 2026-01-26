@@ -103,8 +103,8 @@ litType lit = case lit of
     LBool _ -> TBase (BaseTy "Bool")
     LString _ -> TBase (BaseTy "String")
 
-boundType :: Maybe ElabType -> ElabType
-boundType = maybe TBottom id
+boundType :: Maybe BoundType -> ElabType
+boundType = maybe TBottom tyToElab
 
 freeTypeVarsEnv :: Env -> Set.Set String
 freeTypeVarsEnv env =

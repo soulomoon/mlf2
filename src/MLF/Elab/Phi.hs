@@ -1,4 +1,6 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE GADTs #-}
 module MLF.Elab.Phi (
     contextToNodeBound,
     phiFromEdgeWitness,
@@ -36,6 +38,12 @@ import qualified MLF.Constraint.VarStore as VarStore
 import Debug.Trace (trace)
 import System.Environment (lookupEnv)
 import System.IO.Unsafe (unsafePerformIO)
+
+newtype ApplyFun i =
+    ApplyFun { runApplyFun :: Set.Set String -> Ty i }
+
+freeTypeVarsListBound :: BoundType -> [String]
+freeTypeVarsListBound = freeTypeVarsTyList
 
 -- | Compute an instantiation-context path from a root node to a target node.
 --
@@ -639,24 +647,30 @@ phiFromEdgeWitnessWithTrace generalizeAtWith res mbGaParents mSchemeInfo mTrace 
                     else Nothing
 
     applyInferredArgs :: ElabType -> ElabType
-    applyInferredArgs ty0 = (cata alg ty0) Set.empty
+    applyInferredArgs = applyInferredArgsWith Set.empty
+
+    applyInferredArgsWith :: Set.Set String -> ElabType -> ElabType
+    applyInferredArgsWith bound0 ty0 = runApplyFun (cataIx alg ty0) bound0
       where
+        alg :: TyIF i ApplyFun -> ApplyFun i
         alg ty = case ty of
-            TVarF v ->
-                \bound ->
+            TVarIF v ->
+                ApplyFun $ \bound ->
                     if Set.member v bound
                         then TVar v
                         else case Map.lookup v inferredArgMap of
                             Just instTy -> instTy
                             Nothing -> TVar v
-            TArrowF a b -> \bound -> TArrow (a bound) (b bound)
-            TBaseF b -> const (TBase b)
-            TBottomF -> const TBottom
-            TForallF v mb body ->
-                \bound ->
+            TArrowIF a b ->
+                ApplyFun $ \bound ->
+                    TArrow (runApplyFun a bound) (runApplyFun b bound)
+            TBaseIF b -> ApplyFun (const (TBase b))
+            TBottomIF -> ApplyFun (const TBottom)
+            TForallIF v mb body ->
+                ApplyFun $ \bound ->
                     let bound' = Set.insert v bound
-                        mb' = fmap ($ bound) mb
-                    in TForall v mb' (body bound')
+                        mb' = fmap (\f -> runApplyFun f bound) mb
+                    in TForall v mb' (runApplyFun body bound')
 
     phiWithScheme :: IntSet.IntSet -> IntSet.IntSet -> SchemeInfo -> [InstanceStep] -> Either ElabError Instantiation
     phiWithScheme namedSet keepBinderKeys si steps = do
@@ -764,7 +778,7 @@ phiFromEdgeWitnessWithTrace generalizeAtWith res mbGaParents mSchemeInfo mTrace 
                     Nothing -> []
                     Just bnd ->
                         [ j
-                        | v <- freeTypeVarsList bnd
+                        | v <- freeTypeVarsListBound bnd
                         , v /= names !! i
                         , Just j <- [nameIndex v]
                         ]
@@ -926,7 +940,7 @@ phiFromEdgeWitnessWithTrace generalizeAtWith res mbGaParents mSchemeInfo mTrace 
 
                                         let names = map fst qs
                                             mbBound = snd (qs !! i)
-                                            boundTy = maybe TBottom id mbBound
+                                            boundTy = maybe TBottom tyToElab mbBound
                                             boundName = names !! i
 
                                             deps = filter (/= boundName) (freeTypeVarsList boundTy)
@@ -1036,8 +1050,7 @@ phiFromEdgeWitnessWithTrace generalizeAtWith res mbGaParents mSchemeInfo mTrace 
                                                         "OpRaise (non-spine): missing context for " ++ show nOrig
                                             (Just (insertIdx, ctxMn), _) -> do
                                                 let prefixBefore = take insertIdx names
-                                                    hAbsBeta = InstSeq (InstInside (InstAbstr "β")) InstElim
-                                                    aliasOld = applyContext ctxMn hAbsBeta
+                                                    aliasOld = applyContext ctxMn InstElim
 
                                                     local =
                                                         instMany

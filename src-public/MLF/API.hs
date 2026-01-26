@@ -6,7 +6,8 @@ module MLF.API
     , BaseTy (..)
     , PolySyms
     , inferConstraintGraph
-    , ElabType (..)
+    , ElabType
+    , Ty (..)
     , ElabScheme
     , pattern Forall
     , ElabTerm
@@ -31,7 +32,8 @@ import MLF.Elab.Pipeline
     , ElabScheme
     , pattern Forall
     , ElabTerm
-    , ElabType (..)
+    , ElabType
+    , Ty (..)
     , Instantiation (..)
     , TypeCheckError (..)
     , Pretty (..)

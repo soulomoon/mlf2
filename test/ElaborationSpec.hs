@@ -1,3 +1,4 @@
+{-# LANGUAGE GADTs #-}
 module ElaborationSpec (spec) where
 
 import Test.Hspec
@@ -25,6 +26,22 @@ import MLF.Constraint.Presolution
 import MLF.Constraint.Solve (SolveResult(..), solveUnify)
 import qualified MLF.Constraint.Solve as Solve (frWith)
 import SpecUtil (bindParentsFromPairs, collectVarNodes, emptyConstraint, requireRight, rootedConstraint)
+
+boundToType :: Elab.BoundType -> Elab.ElabType
+boundToType bound = case bound of
+    Elab.TArrow a b -> Elab.TArrow a b
+    Elab.TBase b -> Elab.TBase b
+    Elab.TBottom -> Elab.TBottom
+    Elab.TForall v mb body -> Elab.TForall v mb body
+
+boundFromType :: Elab.ElabType -> Elab.BoundType
+boundFromType ty = case ty of
+    Elab.TVar v ->
+        error ("boundFromType: unexpected variable bound " ++ show v)
+    Elab.TArrow a b -> Elab.TArrow a b
+    Elab.TBase b -> Elab.TBase b
+    Elab.TBottom -> Elab.TBottom
+    Elab.TForall v mb body -> Elab.TForall v mb body
 
 generalizeAtWith
     :: Maybe GaBindParents
@@ -64,7 +81,7 @@ fInstantiations = go
 
 stripBoundWrapper :: Elab.ElabType -> Elab.ElabType
 stripBoundWrapper (Elab.TForall v (Just bound) (Elab.TVar v'))
-    | v == v' = stripBoundWrapper bound
+    | v == v' = stripBoundWrapper (boundToType bound)
 stripBoundWrapper t = t
 
 -- | Canonicalize binder names in a type to compare up to α-equivalence.
@@ -84,7 +101,7 @@ canonType = go [] (0 :: Int)
             let v' = "a" ++ show n
                 env' = (v, v') : env
                 -- binder is not in scope for its bound
-                mb' = fmap (go env n) mb
+                mb' = fmap (boundFromType . go env n . boundToType) mb
                 body' = go env' (n + 1) body
             in Elab.TForall v' mb' body'
 
@@ -174,7 +191,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             (Elab.Forall binds ty, _subst) <- requireRight (generalizeAt solved (genRef rootGen) root)
             case binds of
                 [("a", Nothing), ("b", Just boundTy)] -> do
-                    boundTy `shouldAlphaEqType` (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+                    boundToType boundTy `shouldAlphaEqType` (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
                 other ->
                     expectationFailure $ "Expected two binders, got " ++ show other
             ty `shouldBe` Elab.TVar "b"
@@ -270,11 +287,15 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 expr = EAnn (ELam "x" (EVar "x")) ann
             (_term, ty) <- requirePipeline expr
             case ty of
-                Elab.TForall v (Just (Elab.TBase (BaseTy "Int"))) body ->
-                    case body of
-                        Elab.TArrow (Elab.TVar _) (Elab.TVar v') | v == v' -> pure ()
+                Elab.TForall v (Just bound) body ->
+                    case boundToType bound of
+                        Elab.TBase (BaseTy "Int") ->
+                            case body of
+                                Elab.TArrow (Elab.TVar _) (Elab.TVar v') | v == v' -> pure ()
+                                _ ->
+                                    expectationFailure ("Expected arrow with binder codomain, got " ++ show ty)
                         _ ->
-                            expectationFailure ("Expected arrow with binder codomain, got " ++ show ty)
+                            expectationFailure ("Expected Int bound, got " ++ show ty)
                 _ ->
                     expectationFailure ("Expected bounded forall, got " ++ show ty)
 
@@ -411,7 +432,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             (_term, ty) <- requirePipeline expr
             let expected =
                     Elab.TForall "a"
-                        (Just (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "b") (Elab.TVar "b"))))
+                        (Just (boundFromType (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "b") (Elab.TVar "b")))))
                         (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
             ty `shouldAlphaEqType` expected
 
@@ -424,7 +445,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             (_term, ty) <- requirePipeline expr
             let expected =
                     Elab.TForall "a"
-                        (Just (Elab.TBase (BaseTy "Int")))
+                        (Just (boundFromType (Elab.TBase (BaseTy "Int"))))
                         (Elab.TArrow
                             (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "b") (Elab.TVar "b")))
                             (Elab.TVar "a"))
@@ -514,22 +535,25 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
     describe "xMLF types (instance bounds)" $ do
         it "pretty prints unbounded forall" $ do
-            let ty = Elab.TForall "a" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+            let ty :: Elab.ElabType
+                ty = Elab.TForall "a" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
             Elab.pretty ty `shouldBe` "∀a. a -> a"
 
         it "pretty prints bounded forall" $ do
             let bound = Elab.TArrow (Elab.TBase (BaseTy "Int")) (Elab.TBase (BaseTy "Int"))
-                ty = Elab.TForall "a" (Just bound) (Elab.TVar "a")
+                ty :: Elab.ElabType
+                ty = Elab.TForall "a" (Just (boundFromType bound)) (Elab.TVar "a")
             Elab.pretty ty `shouldBe` "∀(a ⩾ Int -> Int). a"
 
         it "pretty prints nested bounded forall" $ do
             let innerBound = Elab.TArrow (Elab.TVar "b") (Elab.TVar "b")
                 inner = Elab.TForall "b" Nothing innerBound
-                outer = Elab.TForall "a" (Just inner) (Elab.TVar "a")
+                outer :: Elab.ElabType
+                outer = Elab.TForall "a" (Just (boundFromType inner)) (Elab.TVar "a")
             Elab.pretty outer `shouldBe` "∀(a ⩾ ∀b. b -> b). a"
 
         it "pretty prints bottom type" $ do
-            Elab.pretty Elab.TBottom `shouldBe` "⊥"
+            Elab.pretty (Elab.TBottom :: Elab.ElabType) `shouldBe` "⊥"
 
     describe "xMLF instantiation witnesses" $ do
         it "pretty prints identity instantiation" $ do
@@ -571,7 +595,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             out `shouldBe` Elab.TBottom
 
         it "InstElim substitutes the binder with an explicit bound" $ do
-            let ty = Elab.TForall "a" (Just (Elab.TBase (BaseTy "Int"))) (Elab.TVar "a")
+            let ty = Elab.TForall "a" (Just (boundFromType (Elab.TBase (BaseTy "Int")))) (Elab.TVar "a")
             out <- requireRight (Elab.applyInstantiation ty Elab.InstElim)
             out `shouldBe` Elab.TBase (BaseTy "Int")
 
@@ -579,7 +603,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             let ty = Elab.TForall "a" Nothing (Elab.TVar "a")
                 inst = Elab.InstInside (Elab.InstBot (Elab.TBase (BaseTy "Int")))
             out <- requireRight (Elab.applyInstantiation ty inst)
-            out `shouldBe` Elab.TForall "a" (Just (Elab.TBase (BaseTy "Int"))) (Elab.TVar "a")
+            out `shouldBe` Elab.TForall "a" (Just (boundFromType (Elab.TBase (BaseTy "Int")))) (Elab.TVar "a")
 
         it "InstUnder applies to the body and renames the instantiation binder" $ do
             let ty = Elab.TForall "a" Nothing (Elab.TVar "zzz")
@@ -616,7 +640,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
     describe "xMLF terms" $ do
         it "pretty prints type abstraction with bound" $ do
             let bound = Elab.TArrow (Elab.TVar "b") (Elab.TVar "b")
-                term = Elab.ETyAbs "a" (Just bound) (Elab.EVar "x")
+                term = Elab.ETyAbs "a" (Just (boundFromType bound)) (Elab.EVar "x")
             Elab.pretty term `shouldBe` "Λ(a ⩾ b -> b). x"
 
         it "pretty prints unbounded type abstraction" $ do
@@ -795,12 +819,12 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 let intTy = Elab.TBase (BaseTy "Int")
                     boolTy = Elab.TBase (BaseTy "Bool")
                     src =
-                        Elab.TForall "a" (Just intTy)
-                            (Elab.TForall "b" (Just boolTy)
+                        Elab.TForall "a" (Just (boundFromType intTy))
+                            (Elab.TForall "b" (Just (boundFromType boolTy))
                                 (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b")))
                     tgt =
-                        Elab.TForall "b" (Just boolTy)
-                            (Elab.TForall "a" (Just intTy)
+                        Elab.TForall "b" (Just (boundFromType boolTy))
+                            (Elab.TForall "a" (Just (boundFromType intTy))
                                 (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b")))
                 sig <- requireRight (Elab.sigmaReorder src tgt)
                 out <- requireRight (Elab.applyInstantiation src sig)
@@ -1010,7 +1034,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         Elab.schemeFromType
                             (Elab.TForall "a" Nothing
                                 (Elab.TForall "b" Nothing
-                                    (Elab.TForall "c" (Just (Elab.TVar "a"))
+                                    (Elab.TForall "c" (Just (boundFromType (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))))
                                         (Elab.TArrow (Elab.TVar "a") (Elab.TArrow (Elab.TVar "c") (Elab.TVar "b"))))))
                     subst = IntMap.fromList [(1, "a"), (2, "b"), (3, "c")]
                     si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = subst }
@@ -1055,7 +1079,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
                 let expected =
                         Elab.TForall "a" Nothing
-                            (Elab.TForall "u0" (Just (Elab.TVar "a"))
+                            (Elab.TForall "u0" (Just (boundFromType (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))))
                                 (Elab.TForall "b" Nothing
                                     (Elab.TArrow (Elab.TVar "a") (Elab.TArrow (Elab.TVar "u0") (Elab.TVar "b")))))
                 canonType out `shouldBe` canonType expected
@@ -1091,7 +1115,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         Elab.schemeFromType
                             (Elab.TForall "a" Nothing
                                 (Elab.TForall "b" Nothing
-                                    (Elab.TForall "c" (Just (Elab.TVar "b"))
+                                    (Elab.TForall "c" (Just (boundFromType (Elab.TArrow (Elab.TVar "b") (Elab.TVar "b"))))
                                         (Elab.TArrow (Elab.TVar "b") (Elab.TArrow (Elab.TVar "c") (Elab.TVar "a"))))))
                     subst = IntMap.fromList [(1, "a"), (2, "b"), (3, "c")]
                     si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = subst }
@@ -1119,7 +1143,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
                 let expected =
                         Elab.TForall "b" Nothing
-                            (Elab.TForall "u0" (Just (Elab.TVar "b"))
+                            (Elab.TForall "u0" (Just (boundFromType (Elab.TArrow (Elab.TVar "b") (Elab.TVar "b"))))
                                 (Elab.TForall "a" Nothing
                                     (Elab.TArrow (Elab.TVar "b") (Elab.TArrow (Elab.TVar "u0") (Elab.TVar "a")))))
                 canonType out `shouldBe` canonType expected
@@ -1419,7 +1443,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     scheme =
                         Elab.schemeFromType
                             (Elab.TForall "a" Nothing
-                                (Elab.TForall "m" (Just (Elab.TForall "c" (Just nTy) (Elab.TVar "c")))
+                                (Elab.TForall "m" (Just (boundFromType (Elab.TForall "c" (Just (boundFromType nTy)) (Elab.TVar "c"))))
                                     (Elab.TVar "m")))
                     subst = IntMap.fromList [(getNodeId aN, "a"), (getNodeId mN, "m")]
                     si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = subst }
@@ -1447,8 +1471,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
                 let expected =
                         Elab.TForall "a" Nothing
-                            (Elab.TForall "u0" (Just nTy)
-                                (Elab.TForall "m" (Just (Elab.TVar "u0"))
+                            (Elab.TForall "u0" (Just (boundFromType nTy))
+                                (Elab.TForall "m" (Just (boundFromType nTy))
                                     (Elab.TVar "m")))
                 out `shouldAlphaEqType` expected
 
@@ -1594,7 +1618,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             (_term, ty) <- requirePipeline expr
             let expected =
                     Elab.TForall "a" Nothing
-                        (Elab.TForall "b" (Just (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
+                        (Elab.TForall "b" (Just (boundFromType (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))))
                             (Elab.TVar "b"))
             ty `shouldAlphaEqType` expected
 
@@ -1644,9 +1668,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
             (_term, ty) <- requirePipeline expr
             let expected =
-                    Elab.TForall "a" (Just (Elab.TBase (BaseTy "Int")))
+                    Elab.TForall "a" (Just (boundFromType (Elab.TBase (BaseTy "Int"))))
                         (Elab.TForall "b"
-                            (Just (Elab.TArrow (Elab.TVar "a") (Elab.TArrow (Elab.TBase (BaseTy "Int")) (Elab.TBase (BaseTy "Int")))))
+                            (Just (boundFromType (Elab.TArrow (Elab.TVar "a") (Elab.TArrow (Elab.TBase (BaseTy "Int")) (Elab.TBase (BaseTy "Int"))))))
                             (Elab.TVar "b"))
             ty `shouldAlphaEqType` expected
 
@@ -1689,6 +1713,6 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             (_term, ty) <- requirePipeline expr
             let expected =
                     Elab.TForall "a"
-                        (Just (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "b") (Elab.TVar "b"))))
+                        (Just (boundFromType (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "b") (Elab.TVar "b")))))
                         (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
             ty `shouldAlphaEqType` expected

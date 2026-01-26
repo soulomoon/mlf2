@@ -6,11 +6,35 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE InstanceSigs #-}
 module MLF.Types.Elab (
-    ElabType(..),
-    ElabTypeF(..),
+    Ty(..),
+    TopVar(..),
+    ElabType,
+    BoundType,
+    TyIF(..),
+    IxFix(..),
+    IxFunctor(..),
+    IxRecursive(..),
+    IxCorecursive(..),
+    IxPair(..),
+    cataIx,
+    cataIxConst,
+    paraIx,
+    zygoIx,
+    K(..),
+    tyToElab,
+    elabToBound,
+    freeTypeVarsTy,
+    freeTypeVarsTyList,
+    containsForallTy,
+    containsArrowTy,
     ElabScheme,
     pattern Forall,
     mkElabScheme,
@@ -24,10 +48,25 @@ module MLF.Types.Elab (
 ) where
 
 import Data.Functor.Foldable (Base, Corecursive(..), Recursive(..))
+import Data.Kind (Type)
 import Data.IntMap.Strict (IntMap)
+import qualified Data.Set as Set
 
 import MLF.Constraint.Types (BaseTy(..), BindFlag(..))
 import MLF.Frontend.Syntax (Lit(..))
+import Util.IndexedRecursion
+    ( IxFunctor(..)
+    , IxBase
+    , IxRecursive(..)
+    , IxCorecursive(..)
+    , IxPair(..)
+    , IxFix(..)
+    , K(..)
+    , cataIx
+    , cataIxConst
+    , paraIx
+    , zygoIx
+    )
 
 -- | Explicitly typed types for elaboration (xMLF).
 -- Corresponds to Figure 1 in "A Church-Style Intermediate Language for MLF".
@@ -45,64 +84,128 @@ import MLF.Frontend.Syntax (Lit(..))
 --       - Nothing bound implies ⩾ ⊥ (standard System F unbounded quantification)
 --       - Just bound implies explicit instance bound
 --   * TBottom: The bottom type ⊥ (minimal type), used as the default bound.
-data ElabType
-    = TVar String
-    | TArrow ElabType ElabType
-    | TBase BaseTy
-    | TForall String (Maybe ElabType) ElabType  -- ∀(α ⩾ τ?). σ
-    | TBottom                                   -- ⊥ (minimal type)
-    deriving (Eq, Show)
+data TopVar = AllowVar | NoTopVar
 
-data ElabTypeF a
-    = TVarF String
-    | TArrowF a a
-    | TBaseF BaseTy
-    | TForallF String (Maybe a) a
-    | TBottomF
-    deriving (Eq, Show, Functor, Foldable, Traversable)
+data Ty (v :: TopVar) where
+    TVar :: String -> Ty 'AllowVar
+    TArrow :: Ty AllowVar -> Ty AllowVar -> Ty a
+    TBase :: BaseTy -> Ty a
+    TForall :: String -> Maybe (Ty 'NoTopVar) -> Ty AllowVar -> Ty a -- ∀(α ⩾ τ?). σ
+    TBottom :: Ty a
 
-type instance Base ElabType = ElabTypeF
+deriving instance Eq (Ty v)
+deriving instance Show (Ty v)
 
-instance Recursive ElabType where
-    project ty = case ty of
-        TVar v -> TVarF v
-        TArrow a b -> TArrowF a b
-        TBase b -> TBaseF b
-        TForall v mb body -> TForallF v mb body
-        TBottom -> TBottomF
+type ElabType = Ty 'AllowVar
+type BoundType = Ty 'NoTopVar
 
-instance Corecursive ElabType where
-    embed ty = case ty of
-        TVarF v -> TVar v
-        TArrowF a b -> TArrow a b
-        TBaseF b -> TBase b
-        TForallF v mb body -> TForall v mb body
-        TBottomF -> TBottom
+-- | Indexed base functor for Ty. Recursive positions are explicitly indexed.
+data TyIF (v :: TopVar) (r :: TopVar -> Type) where
+    TVarIF :: String -> TyIF 'AllowVar r
+    TArrowIF :: r 'AllowVar -> r 'AllowVar -> TyIF v r
+    TBaseIF :: BaseTy -> TyIF v r
+    TForallIF :: String -> Maybe (r 'NoTopVar) -> r 'AllowVar -> TyIF v r
+    TBottomIF :: TyIF v r
+
+instance IxFunctor TyIF where
+    imap f node = case node of
+        TVarIF v -> TVarIF v
+        TArrowIF a b -> TArrowIF (f a) (f b)
+        TBaseIF b -> TBaseIF b
+        TForallIF v mb body -> TForallIF v (fmap f mb) (f body)
+        TBottomIF -> TBottomIF
+
+type instance IxBase Ty = TyIF
+
+instance IxRecursive Ty where
+    projectIx ty = case ty of
+        TVar v -> TVarIF v
+        TArrow a b -> TArrowIF a b
+        TBase b -> TBaseIF b
+        TForall v mb body -> TForallIF v mb body
+        TBottom -> TBottomIF
+
+instance IxCorecursive Ty where
+    embedIx ty = case ty of
+        TVarIF v -> TVar v
+        TArrowIF a b -> TArrow a b
+        TBaseIF b -> TBase b
+        TForallIF v mb body -> TForall v mb body
+        TBottomIF -> TBottom
+
+tyToElab :: Ty v -> ElabType
+tyToElab ty = case ty of
+    TVar v -> TVar v
+    TArrow a b -> TArrow (tyToElab a) (tyToElab b)
+    TBase b -> TBase b
+    TBottom -> TBottom
+    TForall v mb body -> TForall v mb (tyToElab body)
+
+elabToBound :: ElabType -> BoundType
+elabToBound ty = case ty of
+    TVar v ->
+        error ("elabToBound: unexpected variable bound " ++ show v)
+    TArrow a b -> TArrow a b
+    TBase b -> TBase b
+    TForall v mb body -> TForall v mb body
+    TBottom -> TBottom
+
+freeTypeVarsTy :: Ty v -> Set.Set String
+freeTypeVarsTy = cataIxConst alg
+  where
+    alg node = case node of
+        TVarIF v -> Set.singleton v
+        TArrowIF a b -> Set.union (unK a) (unK b)
+        TBaseIF _ -> Set.empty
+        TBottomIF -> Set.empty
+        TForallIF v mb body ->
+            let freeBound = maybe Set.empty unK mb
+                freeBody = Set.delete v (unK body)
+            in Set.union freeBound freeBody
+
+freeTypeVarsTyList :: Ty v -> [String]
+freeTypeVarsTyList = Set.toList . freeTypeVarsTy
+
+containsForallTy :: Ty v -> Bool
+containsForallTy = cataIxConst alg
+  where
+    alg node = case node of
+        TForallIF _ _ _ -> True
+        TArrowIF a b -> unK a || unK b
+        _ -> False
+
+containsArrowTy :: Ty v -> Bool
+containsArrowTy = cataIxConst alg
+  where
+    alg node = case node of
+        TArrowIF _ _ -> True
+        TForallIF _ mb body -> maybe False unK mb || unK body
+        _ -> False
 
 data Binder (k :: BindFlag) where
-    FlexBinder :: String -> Maybe ElabType -> Binder 'BindFlex
+    FlexBinder :: String -> Maybe BoundType -> Binder 'BindFlex
 
 data Scheme (k :: BindFlag) where
     Scheme :: [Binder k] -> ElabType -> Scheme k
 
 type ElabScheme = Scheme 'BindFlex
 
-bindersToPairs :: [Binder 'BindFlex] -> [(String, Maybe ElabType)]
+bindersToPairs :: [Binder 'BindFlex] -> [(String, Maybe BoundType)]
 bindersToPairs = map (\(FlexBinder v mb) -> (v, mb))
 
-schemeToPairs :: ElabScheme -> ([(String, Maybe ElabType)], ElabType)
+schemeToPairs :: ElabScheme -> ([(String, Maybe BoundType)], ElabType)
 schemeToPairs (Scheme binds body) = (bindersToPairs binds, body)
 
-pattern Forall :: [(String, Maybe ElabType)] -> ElabType -> ElabScheme
+pattern Forall :: [(String, Maybe BoundType)] -> ElabType -> ElabScheme
 pattern Forall binds body <- (schemeToPairs -> (binds, body))
   where
     Forall binds body = mkElabScheme binds body
 {-# COMPLETE Forall #-}
 
-mkElabScheme :: [(String, Maybe ElabType)] -> ElabType -> ElabScheme
+mkElabScheme :: [(String, Maybe BoundType)] -> ElabType -> ElabScheme
 mkElabScheme binds body = Scheme (map (uncurry FlexBinder) binds) body
 
-schemeBindings :: ElabScheme -> [(String, Maybe ElabType)]
+schemeBindings :: ElabScheme -> [(String, Maybe BoundType)]
 schemeBindings = fst . schemeToPairs
 
 schemeBody :: ElabScheme -> ElabType
@@ -191,7 +294,7 @@ data ElabTerm
     | ELam String ElabType ElabTerm
     | EApp ElabTerm ElabTerm
     | ELet String ElabScheme ElabTerm ElabTerm
-    | ETyAbs String (Maybe ElabType) ElabTerm  -- Λ(α ⩾ τ?). e (bounded type abstraction)
+    | ETyAbs String (Maybe BoundType) ElabTerm  -- Λ(α ⩾ τ?). e (bounded type abstraction)
     | ETyInst ElabTerm Instantiation           -- e φ (instantiation)
     deriving (Eq, Show)
 
@@ -201,7 +304,7 @@ data ElabTermF a
     | ELamF String ElabType a
     | EAppF a a
     | ELetF String ElabScheme a a
-    | ETyAbsF String (Maybe ElabType) a
+    | ETyAbsF String (Maybe BoundType) a
     | ETyInstF a Instantiation
     deriving (Eq, Show, Functor, Foldable, Traversable)
 

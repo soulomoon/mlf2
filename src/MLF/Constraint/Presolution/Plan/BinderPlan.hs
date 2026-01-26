@@ -13,7 +13,7 @@ import qualified Data.Set as Set
 import Debug.Trace (trace)
 
 import MLF.Constraint.Types
-import MLF.Types.Elab (ElabType(..))
+import MLF.Types.Elab (Ty(..))
 import MLF.Util.ElabError (ElabError)
 import MLF.Constraint.Presolution.Plan.Util (boundRootWith)
 import MLF.Constraint.Presolution.Plan.Names (alphaName)

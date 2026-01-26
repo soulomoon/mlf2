@@ -1,3 +1,4 @@
+{-# LANGUAGE GADTs #-}
 module MLF.Elab.Run.Pipeline (
     runPipelineElab,
     runPipelineElabChecked
@@ -378,9 +379,15 @@ runPipelineElabWith genConstraints expr = do
                                     TArrow a b -> TArrow (go boundNames seen a) (go boundNames seen b)
                                     TForall v mb body ->
                                         let boundNames' = Set.insert v boundNames
-                                        in TForall v (fmap (go boundNames seen) mb) (go boundNames' seen body)
+                                        in TForall v (fmap (goBound boundNames seen) mb) (go boundNames' seen body)
                                     TBase _ -> ty
                                     TBottom -> ty
+                                goBound boundNames seen bound = case bound of
+                                    TArrow a b -> TArrow (go boundNames seen a) (go boundNames seen b)
+                                    TBase b -> TBase b
+                                    TBottom -> TBottom
+                                    TForall v mb body ->
+                                        TForall v (fmap (goBound boundNames seen) mb) (go boundNames seen body)
                             in go Set.empty IntSet.empty
                         targetTyBaseInlineM =
                             fmap inlineAllBoundsType targetTyRawM
@@ -404,11 +411,17 @@ runPipelineElabWith genConstraints expr = do
                                             Right ty' -> go ty'
                                             Left _ -> ty
                                     TForall v mb body ->
-                                        TForall v (fmap go mb) (go body)
+                                        TForall v (fmap goBound mb) (go body)
                                     TArrow a b -> TArrow (go a) (go b)
                                     TBase _ -> ty
                                     TBottom -> ty
                                     TVar _ -> ty
+                                goBound bound = case bound of
+                                    TArrow a b -> TArrow (go a) (go b)
+                                    TBase b -> TBase b
+                                    TBottom -> TBottom
+                                    TForall v mb body ->
+                                        TForall v (fmap goBound mb) (go body)
                             in go ty0
                         normalizeTarget ty =
                             if annotationExplicit
@@ -471,18 +484,16 @@ runPipelineElabWith genConstraints expr = do
                             else ()
                         of
                         () -> pure ()
-                    let containsAnyForall ty =
+                    let containsBoundForall ty =
                             let go t = case t of
                                     TForall _ mb body ->
-                                        True || maybe False go mb || go body
+                                        maybe False containsAnyForallBound mb || go body
                                     TArrow a b -> go a || go b
                                     _ -> False
-                            in go ty
-                        containsBoundForall ty =
-                            let go t = case t of
-                                    TForall _ mb body ->
-                                        maybe False containsAnyForall mb || go body
+                                containsAnyForallBound bound = case bound of
                                     TArrow a b -> go a || go b
+                                    TForall _ mb body ->
+                                        True || maybe False containsAnyForallBound mb || go body
                                     _ -> False
                             in go ty
                         targetHasBoundForall =

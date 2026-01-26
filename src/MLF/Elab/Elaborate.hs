@@ -1,3 +1,5 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE GADTs #-}
 module MLF.Elab.Elaborate (
     expansionToInst,
     elaborate,
@@ -457,27 +459,24 @@ elaborateWithScope generalizeAtWith resPhi resReify resGen gaParents edgeWitness
     replaceInstApps :: [ElabType] -> Instantiation -> (Instantiation, [ElabType])
     replaceInstApps args0 inst0 = (cata alg inst0) args0
       where
-        alg inst = case inst of
-            InstIdF -> \args -> (InstId, args)
+        alg inst args = case inst of
+            InstIdF -> (InstId, args)
             InstSeqF a b ->
-                \args ->
                     let (a', args1) = a args
                         (b', args2) = b args1
                     in (InstSeq a' b', args2)
             InstAppF t ->
-                \args -> case args of
+                case args of
                     (t':rest) -> (InstApp t', rest)
                     [] -> (InstApp t, [])
-            InstBotF t -> \args -> (InstBot t, args)
-            InstAbstrF v -> \args -> (InstAbstr v, args)
-            InstIntroF -> \args -> (InstIntro, args)
-            InstElimF -> \args -> (InstElim, args)
+            InstBotF t -> (InstBot t, args)
+            InstAbstrF v -> (InstAbstr v, args)
+            InstIntroF -> (InstIntro, args)
+            InstElimF -> (InstElim, args)
             InstInsideF phi ->
-                \args ->
                     let (phi', rest) = phi args
                     in (InstInside phi', rest)
             InstUnderF v phi ->
-                \args ->
                     let (phi', rest) = phi args
                     in (InstUnder v phi', rest)
 
@@ -515,21 +514,22 @@ substInTerm subst = cata alg
     alg term = case term of
         EVarF v -> EVar v
         ELitF l -> ELit l
-        ELamF v ty body -> ELam v (substInType subst ty) body
+        ELamF v ty body -> ELam v (substInTy subst ty) body
         EAppF f a -> EApp f a
         ELetF v sch rhs body -> ELet v (substInScheme subst sch) rhs body
-        ETyAbsF v b body -> ETyAbs v (fmap (substInType subst) b) body
+        ETyAbsF v b body -> ETyAbs v (fmap (substInTy subst) b) body
         ETyInstF e i -> ETyInst e (substInInst subst i)
 
-substInType :: IntMap.IntMap String -> ElabType -> ElabType
-substInType subst = cata alg
+substInTy :: IntMap.IntMap String -> Ty v -> Ty v
+substInTy subst = cataIx alg
   where
-    alg ty = case ty of
-        TVarF v -> TVar (applySubst v)
-        TArrowF d c -> TArrow d c
-        TBaseF b -> TBase b
-        TForallF v b t' -> TForall v b t'
-        TBottomF -> TBottom
+    alg :: TyIF i Ty -> Ty i
+    alg node = case node of
+        TVarIF v -> TVar (applySubst v)
+        TArrowIF d c -> TArrow d c
+        TBaseIF b -> TBase b
+        TForallIF v mb body -> TForall v mb body
+        TBottomIF -> TBottom
 
     applySubst name =
         case parseNameId name of
@@ -540,15 +540,15 @@ substInType subst = cata alg
 
 substInScheme :: IntMap.IntMap String -> ElabScheme -> ElabScheme
 substInScheme subst scheme =
-    schemeFromType (substInType subst (schemeToType scheme))
+    schemeFromType (substInTy subst (schemeToType scheme))
 
 substInInst :: IntMap.IntMap String -> Instantiation -> Instantiation
 substInInst subst = cata alg
   where
     alg inst = case inst of
         InstIdF -> InstId
-        InstAppF t -> InstApp (substInType subst t)
-        InstBotF t -> InstBot (substInType subst t)
+        InstAppF t -> InstApp (substInTy subst t)
+        InstBotF t -> InstBot (substInTy subst t)
         InstIntroF -> InstIntro
         InstElimF -> InstElim
         InstAbstrF v -> InstAbstr v

@@ -1,3 +1,4 @@
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE RecordWildCards #-}
 
 module MLF.Constraint.Presolution.Plan.ReifyPlan (
@@ -32,8 +33,8 @@ import MLF.Reify.Core
     ( reifyBoundWithNames
     , reifyBoundWithNamesOnConstraint
     )
-import MLF.Types.Elab (ElabType(..))
-import MLF.Util.ElabError (ElabError, bindingToElab)
+import MLF.Types.Elab (BoundType, ElabType, Ty(..), elabToBound)
+import MLF.Util.ElabError (ElabError, ElabError(..), bindingToElab)
 import MLF.Util.Names (parseNameId)
 
 data ReifyPlan = ReifyPlan
@@ -281,7 +282,7 @@ bindingFor
     :: ReifyBindingEnv
     -> ReifyPlan
     -> (String, Int)
-    -> Either ElabError (String, Maybe ElabType)
+    -> Either ElabError (String, Maybe BoundType)
 bindingFor env plan (name, nidInt) = do
     let ReifyBindingEnv
             { rbeConstraint = constraint
@@ -454,7 +455,15 @@ bindingFor env plan (name, nidInt) = do
             TBase _ -> ty
             TBottom -> ty
             TForall v mb body ->
-                let mb' = fmap (substAliasTy boundSet) mb
+                let mb' = fmap (substAliasBound boundSet) mb
+                    body' = substAliasTy (Set.insert v boundSet) body
+                in TForall v mb' body'
+        substAliasBound boundSet bound = case bound of
+            TArrow a b -> TArrow (substAliasTy boundSet a) (substAliasTy boundSet b)
+            TBase _ -> bound
+            TBottom -> bound
+            TForall v mb body ->
+                let mb' = fmap (substAliasBound boundSet) mb
                     body' = substAliasTy (Set.insert v boundSet) body
                 in TForall v mb' body'
         boundTy0' =
@@ -569,4 +578,14 @@ bindingFor env plan (name, nidInt) = do
                 else if boundTy == TBottom || boundIsFreeVar' || boundIsSelfVar || not boundAllowed
                     then Nothing
                     else Just boundTy
-    pure (name, mbBound)
+        mbBoundTyped = case mbBound of
+            Just (TVar _) ->
+                Left $
+                    ValidationFailed
+                        [ "alias bounds survived scheme finalization: "
+                            ++ show [name]
+                        ]
+            _ -> Right (fmap elabToBound mbBound)
+    case mbBoundTyped of
+        Left err -> Left err
+        Right typed -> pure (name, typed)
