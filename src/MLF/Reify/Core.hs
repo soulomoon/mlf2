@@ -18,6 +18,7 @@ module MLF.Reify.Core (
 import Control.Monad (foldM, unless)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
+import Data.Maybe (fromMaybe)
 
 import qualified MLF.Util.Order as Order
 import qualified MLF.Constraint.Canonicalize as Canonicalize
@@ -108,7 +109,7 @@ reifyWith _contextLabel res nameForVar isNamed rootMode nid =
                 ]
     schemeGenByRootRaw =
         IntMap.fromListWith
-            (\a _ -> a)
+            const
             [ (getNodeId root, gnId gen)
             | gen <- IntMap.elems (cGenNodes constraint)
             , root <- gnSchemes gen
@@ -116,7 +117,7 @@ reifyWith _contextLabel res nameForVar isNamed rootMode nid =
     schemeGenByRoot =
         IntMap.union schemeGenByRootRaw $
             IntMap.fromListWith
-                (\a _ -> a)
+                const
                 [ (getNodeId (canonical root), gnId gen)
                 | gen <- IntMap.elems (cGenNodes constraint)
                 , root <- gnSchemes gen
@@ -232,9 +233,9 @@ reifyWith _contextLabel res nameForVar isNamed rootMode nid =
             then cacheInsert mode key ty cache
             else cache
 
-    goType cache n = goFull cache IntSet.empty ModeType n
-    goTypeNoFallback cache n = goFull cache IntSet.empty ModeTypeNoFallback n
-    goBoundRoot cache n = goBound cache IntSet.empty n
+    goType cache = goFull cache IntSet.empty ModeType
+    goTypeNoFallback cache = goFull cache IntSet.empty ModeTypeNoFallback
+    goBoundRoot cache = goBound cache IntSet.empty
 
     goFull cache namedExtra mode n0 =
         let n = canonical n0
@@ -541,20 +542,20 @@ reifyWith _contextLabel res nameForVar isNamed rootMode nid =
                             else
                                 let visited' = IntSet.insert key visited
                                     kids =
-                                        case IntMap.lookup key nodes of
-                                            Nothing -> []
-                                            Just node0 ->
-                                                structuralChildrenWithBounds node0
+                                        maybe
+                                            []
+                                            structuralChildrenWithBounds
+                                            (IntMap.lookup key nodes)
                                 in go visited' (map canonical kids ++ rest)
                 in go IntSet.empty [orderRoot]
         let includeRigid =
                 isForall node
                     || mode == ModeBound
                     || IntSet.member (getNodeId n) schemeRootSet
-        schemeOwner <-
-            if IntSet.member (getNodeId n) schemeRootSet
-                then pure (IntMap.lookup (getNodeId n) schemeGenByRoot)
-                else pure Nothing
+        let schemeOwner =
+                if IntSet.member (getNodeId n) schemeRootSet
+                    then IntMap.lookup (getNodeId n) schemeGenByRoot
+                    else Nothing
         let parentRefForBinders =
                 case node of
                     TyForall{} -> typeRef n
@@ -667,8 +668,8 @@ reifyWithAs contextLabel res nameForVar isNamed rootMode convert nid =
 -- | Reify a solved NodeId into an elaborated type.
 -- This version doesn't compute instance bounds (all foralls are unbounded).
 reifyType :: SolveResult -> NodeId -> Either ElabError ElabType
-reifyType res nid =
-    reifyWith "reifyType" res nameFor (const False) RootType nid
+reifyType res =
+    reifyWith "reifyType" res nameFor (const False) RootType
   where
     nameFor (NodeId i) = "t" ++ show i
 
@@ -690,7 +691,7 @@ reifyTypeWithNamesNoFallback res subst nid =
 
         varNameFor v =
             let cv = canonical v
-            in maybe (nameFor cv) id (IntMap.lookup (getNodeId cv) subst)
+            in fromMaybe (nameFor cv) (IntMap.lookup (getNodeId cv) subst)
 
         isNamed nodeId =
             let key = getNodeId (canonical nodeId)
@@ -705,8 +706,8 @@ reifyTypeWithNamesNoFallbackOnConstraint constraint subst nid =
 
 -- | Reify with an explicit named-node set (Sχ′).
 reifyTypeWithNamedSet :: SolveResult -> IntMap.IntMap String -> IntSet.IntSet -> NodeId -> Either ElabError ElabType
-reifyTypeWithNamedSet res subst namedSet nid =
-    reifyWith "reifyTypeWithNames" res varNameFor isNamed RootType nid
+reifyTypeWithNamedSet res subst namedSet =
+    reifyWith "reifyTypeWithNames" res varNameFor isNamed RootType
   where
     uf = srUnionFind res
     canonical = Solve.frWith uf
@@ -716,14 +717,14 @@ reifyTypeWithNamedSet res subst namedSet nid =
     varNameFor :: NodeId -> String
     varNameFor v =
         let cv = canonical v
-        in maybe (nameFor cv) id (IntMap.lookup (getNodeId cv) subst)
+        in fromMaybe (nameFor cv) (IntMap.lookup (getNodeId cv) subst)
 
     isNamed nodeId = IntSet.member (getNodeId (canonical nodeId)) namedSet
 
 -- | Reify with an explicit named-node set, without ancestor fallback quantifiers.
 reifyTypeWithNamedSetNoFallback :: SolveResult -> IntMap.IntMap String -> IntSet.IntSet -> NodeId -> Either ElabError ElabType
-reifyTypeWithNamedSetNoFallback res subst namedSet nid =
-    reifyWith "reifyTypeWithNamedSetNoFallback" res varNameFor isNamed RootTypeNoFallback nid
+reifyTypeWithNamedSetNoFallback res subst namedSet =
+    reifyWith "reifyTypeWithNamedSetNoFallback" res varNameFor isNamed RootTypeNoFallback
   where
     uf = srUnionFind res
     canonical = Solve.frWith uf
@@ -733,14 +734,14 @@ reifyTypeWithNamedSetNoFallback res subst namedSet nid =
     varNameFor :: NodeId -> String
     varNameFor v =
         let cv = canonical v
-        in maybe (nameFor cv) id (IntMap.lookup (getNodeId cv) subst)
+        in fromMaybe (nameFor cv) (IntMap.lookup (getNodeId cv) subst)
 
     isNamed nodeId = IntSet.member (getNodeId (canonical nodeId)) namedSet
 
 -- | Reify a node for use as a binder bound (T(n) in the paper, Sχp).
 reifyBoundWithNames :: SolveResult -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
-reifyBoundWithNames res subst nid =
-    reifyWith "reifyBoundWithNames" res varNameFor isNamed RootBound nid
+reifyBoundWithNames res subst =
+    reifyWith "reifyBoundWithNames" res varNameFor isNamed RootBound
   where
     uf = srUnionFind res
     canonical = Solve.frWith uf
@@ -750,13 +751,13 @@ reifyBoundWithNames res subst nid =
     varNameFor :: NodeId -> String
     varNameFor v =
         let cv = canonical v
-        in maybe (nameFor cv) id (IntMap.lookup (getNodeId cv) subst)
+        in fromMaybe (nameFor cv) (IntMap.lookup (getNodeId cv) subst)
 
     isNamed nodeId = IntMap.member (getNodeId (canonical nodeId)) subst
 
 reifyBoundWithNamesBound :: SolveResult -> IntMap.IntMap String -> NodeId -> Either ElabError BoundType
-reifyBoundWithNamesBound res subst nid =
-    reifyWithAs "reifyBoundWithNamesBound" res varNameFor isNamed RootBound (Right . elabToBound) nid
+reifyBoundWithNamesBound res subst =
+    reifyWithAs "reifyBoundWithNamesBound" res varNameFor isNamed RootBound (Right . elabToBound)
   where
     uf = srUnionFind res
     canonical = Solve.frWith uf
@@ -766,7 +767,7 @@ reifyBoundWithNamesBound res subst nid =
     varNameFor :: NodeId -> String
     varNameFor v =
         let cv = canonical v
-        in maybe (nameFor cv) id (IntMap.lookup (getNodeId cv) subst)
+        in fromMaybe (nameFor cv) (IntMap.lookup (getNodeId cv) subst)
 
     isNamed nodeId = IntMap.member (getNodeId (canonical nodeId)) subst
 

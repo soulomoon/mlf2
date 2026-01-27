@@ -1,5 +1,4 @@
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE RecordWildCards #-}
 {- |
 Module      : MLF.Constraint.Presolution.Driver
 Description : Presolution driver (Phase 4)
@@ -29,7 +28,7 @@ import qualified Data.IntSet as IntSet
 import Debug.Trace (trace)
 import System.Environment (lookupEnv)
 import System.IO.Unsafe (unsafePerformIO)
-import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Maybe (catMaybes, fromMaybe, mapMaybe)
 
 import qualified MLF.Util.UnionFind as UnionFind
 import qualified MLF.Util.Order as Order
@@ -253,13 +252,11 @@ rigidifyTranslatablePresolutionM = do
     modify' $ \st -> st { psConstraint = c3 }
 
 structuralInterior :: IntMap TyNode -> [NodeId] -> IntSet.IntSet
-structuralInterior nodes roots =
-    Traversal.reachableFromNodes id children roots
+structuralInterior nodes =
+    Traversal.reachableFromNodes id children
   where
     children nid =
-        case IntMap.lookup (getNodeId nid) nodes of
-            Nothing -> []
-            Just node -> structuralChildrenWithBounds node
+        maybe [] structuralChildrenWithBounds (IntMap.lookup (getNodeId nid) nodes)
 
 translatableWeakenedNodes :: Constraint -> IntSet.IntSet
 translatableWeakenedNodes c0 =
@@ -358,7 +355,7 @@ rewriteConstraint mapping = do
                     in Just (getNodeId root, tnBody expNode)
                 _ -> Nothing
         let chooseMin a b = min a b
-        pure $ IntMap.fromListWith chooseMin (mapMaybe id pairs)
+        pure $ IntMap.fromListWith chooseMin (catMaybes pairs)
 
     let canonical nid =
             let step n =
@@ -491,7 +488,7 @@ rewriteConstraint mapping = do
             typeExists nid = IntMap.member (getNodeId nid) newNodes
             schemeParents =
                 IntMap.fromListWith
-                    (\a _ -> a)
+                    const
                     [ (getNodeId child, genRef gid)
                     | (childKey, (parent0, _flag)) <- IntMap.toList bindingEdges0
                     , let childRef0 = nodeRefFromKey childKey
@@ -955,7 +952,7 @@ rewriteGenNodes canon nodes0 gen0 =
                         (gnSchemes g)
                 schemes' = reverse schemesRev
             in (genNodeKey (gnId g), g { gnSchemes = schemes' })
-    in IntMap.fromListWith (\a _ -> a) (map rewriteOne (IntMap.elems gen0))
+    in IntMap.fromListWith const (map rewriteOne (IntMap.elems gen0))
 
 -- | Read-only chase like Solve.frWith
 frWith :: IntMap NodeId -> NodeId -> NodeId
@@ -1095,7 +1092,7 @@ processInstEdge edge = do
                     let canonical = UnionFind.frWith uf0
                     let copyMapCanon =
                             IntMap.fromListWith
-                                (\a _ -> a)
+                                const
                                 [ (getNodeId (canonical (NodeId orig)), copy)
                                 | (orig, copy) <- IntMap.toList copyMap0
                                 ]
@@ -1394,7 +1391,7 @@ unifyStructure n1 n2 = do
                 let canonical = UnionFind.frWith uf0
                 let copyMapCanon =
                         IntMap.fromListWith
-                            (\a _ -> a)
+                            const
                             [ (getNodeId (canonical (NodeId orig)), copy)
                             | (orig, copy) <- IntMap.toList copyMap
                             ]

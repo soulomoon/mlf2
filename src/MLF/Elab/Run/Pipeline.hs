@@ -9,7 +9,6 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.List.NonEmpty as NE
 import Data.Maybe (listToMaybe)
-import qualified Data.Set as Set
 
 import MLF.Frontend.Syntax (Expr)
 import MLF.Frontend.ConstraintGen (AnnExpr(..), ConstraintError, ConstraintResult(..), generateConstraints)

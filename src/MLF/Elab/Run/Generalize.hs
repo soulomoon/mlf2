@@ -7,6 +7,7 @@ module MLF.Elab.Run.Generalize (
 
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
+import Data.Maybe (fromMaybe)
 
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.Canonicalize as Canonicalize
@@ -78,10 +79,7 @@ instantiationCopyNodes solved redirects edgeTraces =
                     [ getNodeId (adoptNode node)
                     | node <- IntMap.elems (etCopyMap tr)
                     ]
-                interiorRaw =
-                    [ nid
-                    | nid <- IntSet.toList (etInterior tr)
-                    ]
+                interiorRaw = IntSet.toList (etInterior tr)
                 interiorCanon =
                     [ getNodeId (adoptNode (NodeId nid))
                     | nid <- IntSet.toList (etInterior tr)
@@ -102,28 +100,20 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
             , root <- gnSchemes gen
             ]
         restoreSchemeRoot acc root =
-            let mbBase =
-                    case IntMap.lookup (getNodeId root) (cNodes base) of
-                        Just TyVar{ tnBound = mb } ->
-                            case mb of
-                                Nothing -> Nothing
-                                Just bnd ->
-                                    case adoptRef (typeRef bnd) of
-                                        TypeRef bnd' -> Just bnd'
-                                        GenRef _ -> Nothing
-                        _ -> Nothing
+            let mbBase = do
+                    TyVar{ tnBound = mb } <- IntMap.lookup (getNodeId root) (cNodes base)
+                    bnd <- mb
+                    case adoptRef (typeRef bnd) of
+                        TypeRef bnd' -> Just bnd'
+                        GenRef _ -> Nothing
+                insertRoot bnd' =
+                    IntMap.insert (getNodeId root) (TyVar { tnId = root, tnBound = Just bnd' }) acc
+                fillMissing nid bnd' =
+                    IntMap.insert (getNodeId root) (TyVar { tnId = nid, tnBound = Just bnd' }) acc
             in case IntMap.lookup (getNodeId root) acc of
-                Nothing ->
-                    case mbBase of
-                        Just bnd' ->
-                            let rootNode = TyVar { tnId = root, tnBound = Just bnd' }
-                            in IntMap.insert (getNodeId root) rootNode acc
-                        Nothing -> acc
+                Nothing -> maybe acc insertRoot mbBase
                 Just TyVar{ tnId = nid, tnBound = Nothing } ->
-                    case mbBase of
-                        Just bnd' ->
-                            IntMap.insert (getNodeId root) (TyVar { tnId = nid, tnBound = Just bnd' }) acc
-                        Nothing -> acc
+                    maybe acc (fillMissing nid) mbBase
                 Just _ -> acc
         schemeRootsBaseSet =
             IntSet.fromList (map getNodeId schemeRootsBase)
@@ -201,10 +191,10 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                                         else
                                             let visited' = IntSet.insert key visited
                                                 kids =
-                                                    case IntMap.lookup key baseNodes of
-                                                        Nothing -> []
-                                                        Just node ->
-                                                            structuralChildrenWithBounds node
+                                                    maybe
+                                                        []
+                                                        structuralChildrenWithBounds
+                                                        (IntMap.lookup key baseNodes)
                                             in go visited' (kids ++ rest)
                             in go IntSet.empty [start]
                         schemeInteriorsBase =
@@ -274,6 +264,8 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                 GenRef gid -> GenRef gid
         canonicalRef = Canonicalize.canonicalRef canonical
         adoptRef = canonicalRef . applyRedirectsToRef
+        keepOld _ old = old
+        ownerIsOther gid = maybe False (/= gid)
         okRef ref =
             case ref of
                 TypeRef nid -> IntMap.member (getNodeId nid) nodesSolved
@@ -318,13 +310,12 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                     case parentRef of
                         TypeRef _ -> True
                         GenRef _ -> isUpperRef parentRef' childRef'
-            in if not (okRef childRef' && okRef parentRef')
-                then acc
-            else if nodeRefKey childRef' == nodeRefKey parentRef'
-                then acc
-            else if not allowParent
-                then acc
-            else IntMap.insertWith (\_ old -> old) childKey' (parentRef', flag) acc
+            in case () of
+                _ | not (okRef childRef' && okRef parentRef') -> acc
+                  | nodeRefKey childRef' == nodeRefKey parentRef' -> acc
+                  | not allowParent -> acc
+                  | otherwise ->
+                        IntMap.insertWith keepOld childKey' (parentRef', flag) acc
 
         insertBindParentSolved acc childKey parentRef flag =
             let childRef = nodeRefFromKey childKey
@@ -341,15 +332,7 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                     case existing of
                         Just (parentExisting, _) -> nodeRefKey parentExisting == childKey'
                         Nothing -> False
-            in if not (okRef childRef' && okRef parentRef')
-                then acc
-            else if isSelf
-                then acc
-            else if not (isUpperRef parentRef' childRef')
-                then acc
-            else case existing of
-                Just _ | childIsCopy && not existingSelf -> acc
-                Just _ | childIsCopy ->
+                overrideCopy =
                     debugGaScope
                         ("constraintForGeneralization: bind-parent override copy child="
                             ++ show childRef'
@@ -359,7 +342,7 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                             ++ show (wasRedirected childRef)
                         )
                         (IntMap.insert childKey' (parentRef', flag) acc)
-                Nothing ->
+                fillChild =
                     debugGaScope
                         ("constraintForGeneralization: bind-parent fill child="
                             ++ show childRef'
@@ -369,7 +352,7 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                             ++ show (wasRedirected childRef)
                         )
                         (IntMap.insert childKey' (parentRef', flag) acc)
-                Just _ | existingSelf ->
+                overrideSelf =
                     debugGaScope
                         ("constraintForGeneralization: bind-parent override self-parent child="
                             ++ show childRef'
@@ -379,7 +362,17 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                             ++ show (wasRedirected childRef)
                         )
                         (IntMap.insert childKey' (parentRef', flag) acc)
-                _ -> acc
+            in case () of
+                _ | not (okRef childRef' && okRef parentRef') -> acc
+                  | isSelf -> acc
+                  | not (isUpperRef parentRef' childRef') -> acc
+                  | otherwise ->
+                        case existing of
+                            Just _ | childIsCopy && not existingSelf -> acc
+                            Just _ | childIsCopy -> overrideCopy
+                            Nothing -> fillChild
+                            Just _ | existingSelf -> overrideSelf
+                            _ -> acc
 
         bindParentsBase' =
             IntMap.foldlWithKey'
@@ -399,10 +392,10 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                                 else
                                     let visited' = IntSet.insert key visited
                                         kids =
-                                            case IntMap.lookup key baseNodes of
-                                                Nothing -> []
-                                                Just node ->
-                                                    structuralChildrenWithBounds node
+                                            maybe
+                                                []
+                                                structuralChildrenWithBounds
+                                                (IntMap.lookup key baseNodes)
                                     in go visited' (kids ++ rest)
                     in go IntSet.empty [start]
                 schemeInteriorKeys =
@@ -454,8 +447,8 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                 (\acc baseKey solvedNid ->
                     let solvedKeyC = getNodeId (canonical solvedNid)
                         solvedKeyRaw = getNodeId solvedNid
-                        acc' = IntMap.insertWith (\_ old -> old) solvedKeyC (NodeId baseKey) acc
-                    in IntMap.insertWith (\_ old -> old) solvedKeyRaw (NodeId baseKey) acc'
+                        acc' = IntMap.insertWith keepOld solvedKeyC (NodeId baseKey) acc
+                    in IntMap.insertWith keepOld solvedKeyRaw (NodeId baseKey) acc'
                 )
                 IntMap.empty
                 baseToSolved
@@ -485,11 +478,12 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                     in case IntMap.lookup (nodeRefKey (typeRef baseN)) bindParentsBase of
                         Just (parentRef, flag) ->
                             let parentRef' = adoptRef parentRef
-                            in if not (okRef childRef' && okRef parentRef')
+                                invalid =
+                                    not (okRef childRef' && okRef parentRef')
+                                        || nodeRefKey childRef' == nodeRefKey parentRef'
+                            in if invalid
                                 then acc
-                                else if nodeRefKey childRef' == nodeRefKey parentRef'
-                                    then acc
-                                    else IntMap.insertWith (\_ old -> old) childKey' (parentRef', flag) acc
+                                else IntMap.insertWith keepOld childKey' (parentRef', flag) acc
                         Nothing -> acc
                 )
                 bindParents'
@@ -518,10 +512,10 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
             let stopSet = allSchemeRoots
                 shouldStop nid = IntSet.member (getNodeId nid) stopSet
                 children nid =
-                    case IntMap.lookup (getNodeId nid) nodesSolved of
-                        Nothing -> []
-                        Just node ->
-                            structuralChildrenWithBounds node
+                    maybe
+                        []
+                        structuralChildrenWithBounds
+                        (IntMap.lookup (getNodeId nid) nodesSolved)
             in reachableFromStop getNodeId canonical children shouldStop start
         reachableFromWithBoundsBaseStop start =
             let baseNodes = cNodes base
@@ -543,10 +537,10 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                                 else
                                     let acc' = IntSet.insert (getNodeId (adoptNodeId nid0)) acc
                                         kids =
-                                            case IntMap.lookup key baseNodes of
-                                                Nothing -> []
-                                                Just node ->
-                                                    structuralChildrenWithBounds node
+                                            maybe
+                                                []
+                                                structuralChildrenWithBounds
+                                                (IntMap.lookup key baseNodes)
                                     in go visited' acc' (kids ++ rest)
             in go IntSet.empty IntSet.empty [start]
         boundSchemeRoots =
@@ -560,7 +554,7 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
             IntMap.union schemeRootOwnersFromBase schemeRootOwnersBase
         schemeRootByBodySolved =
             IntMap.fromListWith
-                (\a _ -> a)
+                const
                 [ (getNodeId (canonical bnd), root)
                 | gen <- IntMap.elems genMerged
                 , root <- gnSchemes gen
@@ -572,7 +566,7 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                 ]
         schemeInteriorOwnersFiltered =
             IntMap.fromListWith
-                (\_ old -> old)
+                keepOld
                 [ (nidInt, gid)
                 | (rootKey, gid) <- IntMap.toList schemeRootOwnersFiltered
                 , nidInt <- IntSet.toList (reachableFromWithBoundsStop (NodeId rootKey))
@@ -582,7 +576,7 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                 ]
         schemeInteriorOwnersBase =
             IntMap.fromListWith
-                (\_ old -> old)
+                keepOld
                 [ (getNodeId nid, gid)
                 | (rootKey, gid) <- IntMap.toList schemeRootOwnersFiltered
                 , nid <- map NodeId (IntSet.toList (reachableFromWithBoundsBaseStop (NodeId rootKey)))
@@ -661,14 +655,12 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                                                 (IntSet.insert (nodeRefKey ref) visited)
                                                 (typeRef parentN)
             in go IntSet.empty baseRef
-        firstGenAncestorWith bindParents0 ref0 =
-            firstGenAncestorFrom bindParents0 ref0
-        dropSelfParents bp =
+        firstGenAncestorWith = firstGenAncestorFrom
+        dropSelfParents =
             IntMap.filterWithKey
                 (\childKey (parentRef, _flag) ->
                     nodeRefKey parentRef /= childKey
                 )
-                bp
         mapBaseRef ref =
             case ref of
                 GenRef gid -> Just (GenRef gid)
@@ -705,15 +697,13 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                         Nothing -> acc
             in foldl' attachOne bp0 (IntSet.toList allSchemeRoots)
         preserveBaseGaPrime bp0 =
-            let insertEdge acc childRef parentRef flag =
-                    let childKey = nodeRefKey childRef
-                    in if not (okRef childRef && okRef parentRef)
-                        then acc
-                    else if nodeRefKey childRef == nodeRefKey parentRef
-                        then acc
-                    else if not (isUpperRef parentRef childRef)
-                        then acc
-                    else IntMap.insert childKey (parentRef, flag) acc
+            let insertEdge acc childRef parentRef flag
+                    | not (okRef childRef && okRef parentRef) = acc
+                    | nodeRefKey childRef == nodeRefKey parentRef = acc
+                    | not (isUpperRef parentRef childRef) = acc
+                    | otherwise = IntMap.insert childKey (parentRef, flag) acc
+                  where
+                    childKey = nodeRefKey childRef
                 prefixToGen gid =
                     let go acc [] = reverse acc
                         go acc (ref:rest) =
@@ -849,35 +839,31 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                                 owner = IntMap.lookup nidInt schemeInteriorOwnersFiltered'
                                 baseOwner = baseFirstGenAncestor (typeRef child)
                                 existing = IntMap.lookup childKey acc
-                            in if sticky
+                                ownerMismatch = ownerIsOther gid owner
+                                baseOwnerMismatch = ownerIsOther gid baseOwner
+                                insertOwned flag = IntMap.insert childKey (GenRef gid, flag) acc
+                            in if sticky || IntSet.member nidInt instCopyNodes
                                 then acc
-                                else if IntSet.member nidInt instCopyNodes
-                                then acc
-                                else if IntMap.member childKey acc
-                                then
-                                    case existing of
-                                        Just (parentExisting, flag)
-                                            | nodeRefKey parentExisting == childKey ->
-                                                case owner of
-                                                    Just gid' | gid' /= gid -> acc
-                                                    _ -> IntMap.insert childKey (GenRef gid, flag) acc
-                                        _ -> acc
-                                else if owner /= Nothing && owner /= Just gid
-                                    then acc
-                                else if baseOwner /= Nothing && baseOwner /= Just gid
-                                    then acc
-                                else
-                                    case IntMap.lookup nidInt nodesSolved of
-                                        Just TyVar{} ->
-                                            IntMap.insert childKey (GenRef gid, BindFlex) acc
-                                        _ -> acc
+                                else case existing of
+                                    Just (parentExisting, flag)
+                                        | nodeRefKey parentExisting == childKey ->
+                                            if ownerMismatch
+                                                then acc
+                                                else insertOwned flag
+                                    Just _ -> acc
+                                    Nothing
+                                        | ownerMismatch || baseOwnerMismatch -> acc
+                                        | otherwise ->
+                                            case IntMap.lookup nidInt nodesSolved of
+                                                Just TyVar{} -> insertOwned BindFlex
+                                                _ -> acc
                         )
                         bp
                         interior
             in foldl'
                 (\bp gen ->
                     let gid = gnId gen
-                    in foldl' (\bp' root -> addMissingUnderGen bp' gid root) bp (gnSchemes gen)
+                    in foldl' (`addMissingUnderGen` gid) bp (gnSchemes gen)
                 )
                 (restoreBoundParents (forceSchemeRootParents bindParentsWithParentOwners))
                 (IntMap.elems genMerged)
@@ -917,20 +903,15 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                                                     sticky = IntSet.member baseKey stickyTypeParentsBase
                                                     owner = IntMap.lookup nidInt schemeRootOwnersFiltered
                                                     baseOwner = baseFirstGenAncestor (typeRef child)
-                                                in if sticky
-                                                    || (baseOwner /= Nothing && baseOwner /= Just gid)
+                                                in if sticky || ownerIsOther gid baseOwner || ownerIsOther gid owner
                                                     then acc'
                                                     else
-                                                        (case owner of
-                                                            Just gid' | gid' /= gid -> acc'
-                                                            _ ->
-                                                                    case IntMap.lookup childKey acc' of
-                                                                        Just (parentExisting, flag)
-                                                                            | nodeRefKey parentExisting == childKey ->
-                                                                                IntMap.insert childKey (GenRef gid, flag) acc'
-                                                                            | otherwise -> acc'
-                                                                        Nothing -> IntMap.insert childKey (GenRef gid, BindFlex) acc'
-                                                        )
+                                                        case IntMap.lookup childKey acc' of
+                                                            Just (parentExisting, flag)
+                                                                | nodeRefKey parentExisting == childKey ->
+                                                                    IntMap.insert childKey (GenRef gid, flag) acc'
+                                                                | otherwise -> acc'
+                                                            Nothing -> IntMap.insert childKey (GenRef gid, BindFlex) acc'
                                             _ -> acc'
                             in IntSet.foldl'
                                 step
@@ -951,10 +932,7 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                                 (\acc'' nidInt ->
                                     let isInstCopy = IntSet.member nidInt instCopyNodes
                                         ownerFinal = IntMap.lookup nidInt schemeOwnerMap
-                                        ownerOk =
-                                            case ownerFinal of
-                                                Just gid' -> gid' == gid
-                                                Nothing -> False
+                                        ownerOk = ownerFinal == Just gid
                                     in if isInstCopy && not ownerOk
                                         then acc''
                                         else case IntMap.lookup nidInt nodesSolved of
@@ -984,9 +962,8 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                                                                 case baseOwner of
                                                                     Nothing -> True
                                                                     Just gidBase ->
-                                                                        if gidBase == gid
-                                                                            then True
-                                                                            else case oldOwner of
+                                                                        gidBase == gid
+                                                                            || case oldOwner of
                                                                                 Just gidOld
                                                                                     | gidOld == gid -> True
                                                                                 Just gidOld
@@ -1030,9 +1007,7 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                                 (\acc'' nidInt ->
                                     let isInstCopy = IntSet.member nidInt instCopyNodes
                                         owner = IntMap.lookup nidInt schemeInteriorOwnersFiltered'
-                                        allowInstCopy = case owner of
-                                            Just gid' -> gid' == gid
-                                            Nothing -> False
+                                        allowInstCopy = owner == Just gid
                                     in if isInstCopy && not allowInstCopy
                                         then acc''
                                         else case IntMap.lookup nidInt nodesSolved of
@@ -1057,11 +1032,7 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                                                                         case existing of
                                                                             Just (GenRef gid', _) -> gid' /= gid
                                                                             _ -> False
-                                                in if sticky
-                                                    then acc''
-                                                    else if owner /= Nothing && owner /= Just gid
-                                                    then acc''
-                                                    else if shouldPreserve
+                                                in if sticky || ownerIsOther gid owner || shouldPreserve
                                                     then acc''
                                                     else
                                                         case existing of
@@ -1145,13 +1116,13 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
             let msg =
                     "constraintForGeneralization: scheme interiors="
                         ++ show
-                            [ (gnId gen, root, map (\nid -> (nid, IntMap.lookup (nodeRefKey (typeRef (NodeId nid))) bindParentsFinal))
-                                    [ nidInt
-                                    | nidInt <- IntSet.toList (reachableFromWithBoundsStop (canonical root))
-                                    , case IntMap.lookup nidInt nodesSolved of
-                                        Just TyVar{} -> True
-                                        _ -> False
-                                    ])
+                            [ (gnId gen, root,
+                                [ (nid, IntMap.lookup (nodeRefKey (typeRef (NodeId nid))) bindParentsFinal)
+                                | nid <- IntSet.toList (reachableFromWithBoundsStop (canonical root))
+                                , case IntMap.lookup nid nodesSolved of
+                                    Just TyVar{} -> True
+                                    _ -> False
+                                ])
                             | gen <- IntMap.elems genMerged
                             , root <- gnSchemes gen
                             ]
@@ -1197,7 +1168,7 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                 )
         schemeRootsByGen =
             IntMap.fromListWith
-                (\a b -> a ++ b)
+                (++)
                 [ (genNodeKey gid, [NodeId rootKey])
                 | rootKey <- IntSet.toList allSchemeRootsFiltered
                 , Just (GenRef gid, _) <- [IntMap.lookup (nodeRefKey (typeRef (NodeId rootKey))) bindParentsFinalPreserved]
@@ -1205,10 +1176,7 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
         genMerged' =
             IntMap.mapWithKey
                 (\k gen ->
-                    let roots =
-                            case IntMap.lookup k schemeRootsByGen of
-                                Just rs -> rs
-                                Nothing -> []
+                    let roots = fromMaybe [] (IntMap.lookup k schemeRootsByGen)
                     in gen { gnSchemes = roots }
                 )
                 genMerged
@@ -1220,7 +1188,7 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                 ]
         schemeInteriorOwnersFinal =
             IntMap.fromListWith
-                (\_ old -> old)
+                keepOld
                 [ (nidInt, gid)
                 | (rootKey, gid) <- IntMap.toList schemeRootOwnersFinal
                 , nidInt <- IntSet.toList (reachableFromWithBoundsStop (NodeId rootKey))
@@ -1246,19 +1214,19 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                                     case (mapBaseRef (typeRef childBase), mapBaseRef parentRef) of
                                         (Just childRef', Just parentRef') ->
                                             let childKey' = nodeRefKey childRef'
-                                            in if not (okRef childRef' && okRef parentRef')
+                                                invalid =
+                                                    not (okRef childRef' && okRef parentRef')
+                                                        || nodeRefKey childRef' == nodeRefKey parentRef'
+                                                        || not (isUpperRef parentRef' childRef')
+                                            in if invalid
                                                 then acc'
-                                            else if nodeRefKey childRef' == nodeRefKey parentRef'
-                                                then acc'
-                                            else if not (isUpperRef parentRef' childRef')
-                                                then acc'
-                                            else
-                                                case IntMap.lookup childKey' acc' of
-                                                    Nothing -> IntMap.insert childKey' (parentRef', flag) acc'
-                                                    Just (parentExisting, _flagExisting)
-                                                        | nodeRefKey parentExisting == childKey' ->
-                                                            IntMap.insert childKey' (parentRef', flag) acc'
-                                                        | otherwise -> acc'
+                                                else
+                                                    case IntMap.lookup childKey' acc' of
+                                                        Nothing -> IntMap.insert childKey' (parentRef', flag) acc'
+                                                        Just (parentExisting, _flagExisting)
+                                                            | nodeRefKey parentExisting == childKey' ->
+                                                                IntMap.insert childKey' (parentRef', flag) acc'
+                                                            | otherwise -> acc'
                                         _ -> acc'
                                 _ -> acc'
                         )

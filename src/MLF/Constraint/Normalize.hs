@@ -1,4 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
 {- |
 Module      : MLF.Constraint.Normalize
 Description : Phase 2 - Local constraint transformations

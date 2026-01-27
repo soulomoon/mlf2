@@ -1,5 +1,4 @@
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE LambdaCase #-}
 module MLF.Elab.Inst (
     InstEvalSpec(..),
     applyInstantiation,

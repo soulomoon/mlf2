@@ -1,4 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
 {-|
 Phase 5 — Global unification (Rémy–Yakobowski, TLDI 2007; ICFP 2008 §3/§5)
 
@@ -110,7 +109,8 @@ import Control.Monad.State.Strict
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import Data.Maybe (mapMaybe, listToMaybe)
+import Data.List (find)
+import Data.Maybe (catMaybes, fromMaybe, isJust, isNothing)
 
 import qualified MLF.Binding.Adjustment as BindingAdjustment
 import qualified MLF.Binding.Tree as Binding
@@ -323,7 +323,7 @@ solveUnify c0 = do
     debugSolveBindingEnabled =
         unsafePerformIO $ do
             enabled <- lookupEnv "MLF_DEBUG_BINDING"
-            pure (enabled /= Nothing)
+            pure (isJust enabled)
     {-# NOINLINE debugSolveBindingEnabled #-}
 
     -- | Process one equality edge using canonical representatives, decomposing
@@ -568,7 +568,7 @@ applyUFConstraint uf c =
                             (gnSchemes g)
                     schemes' = reverse schemesRev
                 in (genNodeKey (gnId g), g { gnSchemes = schemes' })
-        in IntMap.fromListWith (\a _ -> a) (map rewriteOne (IntMap.elems gen0))
+        in IntMap.fromListWith const (map rewriteOne (IntMap.elems gen0))
 
 rewriteEliminatedBinders :: Constraint -> Either BindingError (Constraint, IntMap NodeId)
 rewriteEliminatedBinders c0
@@ -593,11 +593,11 @@ rewriteEliminatedBinders c0
                         | gid <- IntMap.keys (cGenNodes c0)
                         ]
                     isRoot ref = not (IntMap.member (nodeRefKey ref) bindParents0)
-                in listToMaybe (filter isRoot genRefs)
+                in find isRoot genRefs
             unbounded =
                 [ vid
                 | vid <- elimList
-                , VarStore.lookupVarBound c0 (NodeId vid) == Nothing
+                , isNothing (VarStore.lookupVarBound c0 (NodeId vid))
                 ]
             findCycle start = go [] start
               where
@@ -715,9 +715,7 @@ rewriteEliminatedBinders c0
                 then pure Nothing
                 else do
                     parentResolved <- resolveParent parent0
-                    let parent' = case parentResolved of
-                            Just ref -> ref
-                            Nothing -> parent0
+                    let parent' = fromMaybe parent0 parentResolved
                         child' = case childRef of
                             TypeRef nid -> TypeRef (substNode nid)
                             GenRef gid -> GenRef gid
@@ -747,7 +745,7 @@ rewriteEliminatedBinders c0
                                 else pure []
 
         let bottomParents = concat bottomParentsList
-            bindParents0' = IntMap.fromList (mapMaybe id bindEntries ++ bottomParents)
+            bindParents0' = IntMap.fromList (catMaybes bindEntries ++ bottomParents)
             bindParents' =
                 case rootGen of
                     Nothing -> bindParents0'
@@ -786,7 +784,7 @@ rewriteEliminatedBinders c0
                                     (gnSchemes g)
                             schemes' = reverse schemesRev
                         in (genNodeKey (gnId g), g { gnSchemes = schemes' })
-                in IntMap.fromListWith (\a _ -> a) (map rewriteOne (IntMap.elems (cGenNodes c0)))
+                in IntMap.fromListWith const (map rewriteOne (IntMap.elems (cGenNodes c0)))
             weakened' =
                 IntSet.fromList
                     [ getNodeId v'

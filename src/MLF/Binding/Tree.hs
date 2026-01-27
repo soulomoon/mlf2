@@ -362,10 +362,10 @@ orderedBinders canonical c0 binder0 = do
                                 else
                                     let visited' = IntSet.insert key visited
                                         kids =
-                                            case IntMap.lookup key nodes of
-                                                Nothing -> []
-                                                Just node ->
-                                                    structuralChildrenWithBounds node
+                                            maybe
+                                                []
+                                                structuralChildrenWithBounds
+                                                (IntMap.lookup key nodes)
                                     in go visited' (map canonical kids ++ rest)
                     in go IntSet.empty [orderRoot]
             binders <- boundChildrenUnder canonical c0 (TypeRef binderN) includeRigid
@@ -472,9 +472,7 @@ orderBindersByDeps canonical c0 orderKeys binders =
         Traversal.reachableFromNodes canonical children [root0]
       where
         children nid =
-            case IntMap.lookup (getNodeId nid) nodes0 of
-                Nothing -> []
-                Just node -> structuralChildrenWithBounds node
+            maybe [] structuralChildrenWithBounds (IntMap.lookup (getNodeId nid) nodes0)
 
 
 -- | Compute a ForallSpec (binder count + bounds) for a forall node.
@@ -845,10 +843,10 @@ checkNoGenFallback c = do
                         else
                             let visited' = IntSet.insert key visited
                                 kids =
-                                    case IntMap.lookup key nodes of
-                                        Nothing -> []
-                                        Just node ->
-                                            structuralChildrenWithBounds node
+                                        maybe
+                                            []
+                                            structuralChildrenWithBounds
+                                            (IntMap.lookup key nodes)
                             in go visited' (kids ++ rest)
             in go IntSet.empty [root0]
 
@@ -901,7 +899,7 @@ checkSchemeClosureUnder canonical c0 = do
     let typeEdges = buildTypeEdges nodes
         schemeRootsByGen =
             IntMap.map
-                (\gen -> IntSet.fromList (map (getNodeId . canonical) (gnSchemes gen)))
+                (IntSet.fromList . map (getNodeId . canonical) . gnSchemes)
                 (cGenNodes c0)
         schemeGensByRoot =
             IntMap.fromListWith
@@ -1015,8 +1013,8 @@ checkSchemeClosureUnder canonical c0 = do
         let ref0 = typeRef (canonical root0)
         in firstGenAncestor bindParents' ref0
 
-    firstGenAncestor bindParents' start =
-        go IntSet.empty start
+    firstGenAncestor bindParents' =
+        go IntSet.empty
       where
         go visited ref
             | IntSet.member (nodeRefKey ref) visited = Nothing
