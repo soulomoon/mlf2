@@ -61,7 +61,11 @@ import MLF.Elab.Generalize
     )
 import MLF.Util.Names (parseNameId)
 import MLF.Elab.Inst (applyInstantiation, schemeToType)
-import MLF.Reify.Core (reifyType, reifyTypeWithNamesNoFallbackOnConstraint)
+import MLF.Reify.Core
+    ( namedNodes
+    , reifyTypeWithNamedSetNoFallback
+    , reifyTypeWithNamesNoFallbackOnConstraint
+    )
 import MLF.Elab.Phi (phiFromEdgeWitnessWithTrace)
 import MLF.Elab.TypeCheck (typeCheck)
 import MLF.Elab.Types
@@ -82,7 +86,11 @@ import MLF.Elab.Run.Scope
     , preferGenScope
     , schemeBodyTarget
     )
-import MLF.Elab.Run.TypeOps (inlineBoundVarsType, simplifyAnnotationType)
+import MLF.Elab.Run.TypeOps
+    ( inlineBoundVarsType
+    , inlineBoundVarsTypeForBound
+    , simplifyAnnotationType
+    )
 import MLF.Elab.Run.Util (chaseRedirects)
 
 runPipelineElab :: PolySyms -> Expr -> Either String (ElabTerm, ElabType)
@@ -334,14 +342,19 @@ runPipelineElabWith genConstraints expr = do
                         schemeInfo = SchemeInfo { siScheme = sch, siSubst = subst }
                     pure ()
                     phi0 <- firstShow (phiFromEdgeWitnessWithTrace generalizeAtWith solvedForGen (Just bindParentsGa) (Just schemeInfo) mTrace ew)
+                    namedSetSolved <- firstShow (namedNodes solvedForGen)
                     let annBound = VarStore.lookupVarBound (srConstraint solvedForGen) annNodeId
                         annTargetNode0 =
                             case annBound of
                                 Just bnd -> bnd
                                 Nothing -> annNodeId
+                        targetTyRawFullM =
+                            case reifyTypeWithNamedSetNoFallback solvedForGen IntMap.empty namedSetSolved annTargetNode0 of
+                                Left _ -> Nothing
+                                Right ty0 -> Just ty0
                         annTargetNode = schemeBodyTarget solvedForGen annTargetNode0
                         targetTyRawM =
-                            case reifyType solvedForGen annTargetNode of
+                            case reifyTypeWithNamedSetNoFallback solvedForGen IntMap.empty namedSetSolved annTargetNode of
                                 Left _ -> Nothing
                                 Right ty0 -> Just ty0
                         targetTyMatchM =
@@ -353,6 +366,8 @@ runPipelineElabWith genConstraints expr = do
                         toBase nid =
                             IntMap.findWithDefault nid (getNodeId nid) solvedToBase
                         inlineAllBoundsType =
+                            -- See Note [Scope-aware bound/alias inlining] in
+                            -- docs/notes/2026-01-27-elab-changes.md.
                             let go boundNames seen ty = case ty of
                                     TVar v
                                         | Set.member v boundNames -> TVar v
@@ -379,7 +394,7 @@ runPipelineElabWith genConstraints expr = do
                                     TArrow a b -> TArrow (go boundNames seen a) (go boundNames seen b)
                                     TForall v mb body ->
                                         let boundNames' = Set.insert v boundNames
-                                        in TForall v (fmap (goBound boundNames seen) mb) (go boundNames' seen body)
+                                        in TForall v (fmap (goBound boundNames' seen) mb) (go boundNames' seen body)
                                     TBase _ -> ty
                                     TBottom -> ty
                                 goBound boundNames seen bound = case bound of
@@ -387,7 +402,8 @@ runPipelineElabWith genConstraints expr = do
                                     TBase b -> TBase b
                                     TBottom -> TBottom
                                     TForall v mb body ->
-                                        TForall v (fmap (goBound boundNames seen) mb) (go boundNames seen body)
+                                        let boundNames' = Set.insert v boundNames
+                                        in TForall v (fmap (goBound boundNames' seen) mb) (go boundNames' seen body)
                             in go Set.empty IntSet.empty
                         targetTyBaseInlineM =
                             fmap inlineAllBoundsType targetTyRawM
@@ -496,10 +512,32 @@ runPipelineElabWith genConstraints expr = do
                                         True || maybe False containsAnyForallBound mb || go body
                                     _ -> False
                             in go ty
+                        instHasBoundForall inst = cata instAlg inst
+                          where
+                            instAlg inst0 = case inst0 of
+                                InstIdF -> False
+                                InstSeqF a b -> a || b
+                                InstAppF ty -> containsForallTy ty
+                                InstBotF ty -> containsForallTy ty
+                                InstInsideF innerInst -> innerInst
+                                InstUnderF _ innerInst -> innerInst
+                                InstIntroF -> False
+                                InstElimF -> False
+                                InstAbstrF _ -> False
+                        -- See Note [Skip target-derived instantiation when bounds include foralls]
+                        -- in docs/notes/2026-01-27-elab-changes.md.
+                        phiHasBoundForall = instHasBoundForall phi0
                         targetHasBoundForall =
-                            case targetTyForMatchM of
-                                Just ty -> containsBoundForall ty
-                                Nothing -> False
+                            let hasForallInBounds ty = containsBoundForall ty
+                                matchHasForall =
+                                    case targetTyForMatchM of
+                                        Just ty -> hasForallInBounds ty
+                                        Nothing -> False
+                                rawHasForall =
+                                    if annotationExplicit
+                                        then maybe False hasForallInBounds targetTyRawFullM
+                                        else False
+                            in matchHasForall || rawHasForall || (annotationExplicit && phiHasBoundForall)
                     let phiFromTargetArgs =
                             case (sch, targetTyForMatchM) of
                                 (Forall binds body, Just targetTy)
@@ -509,7 +547,7 @@ runPipelineElabWith genConstraints expr = do
                         phiFromTarget =
                             case (sch, phiFromTargetArgs) of
                                 (Forall binds _, Just args) ->
-                                    Just (instInsideFromArgsWithBounds binds (map (inlineBoundVarsType solvedForGen) args))
+                                    Just (instInsideFromArgsWithBounds binds (map (inlineBoundVarsTypeForBound solvedForGen) args))
                                 _ -> Nothing
                         phi =
                             if annotationExplicit

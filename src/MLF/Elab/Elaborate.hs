@@ -26,11 +26,17 @@ import MLF.Constraint.Types
 import MLF.Constraint.Solve (SolveResult(..))
 import MLF.Elab.Types
 import MLF.Elab.Generalize (GaBindParents(..))
+import MLF.Elab.Run.TypeOps (inlineBoundVarsTypeForBound)
 import MLF.Constraint.BindingUtil (bindingPathToRootLocal)
 import MLF.Elab.Phi (phiFromEdgeWitnessWithTrace)
 import MLF.Elab.Inst (applyInstantiation, schemeToType)
 import qualified MLF.Elab.Inst as Inst
-import MLF.Reify.Core (reifyBoundWithNames, reifyType, reifyTypeWithNames, reifyTypeWithNamesNoFallback)
+import MLF.Reify.Core
+    ( namedNodes
+    , reifyBoundWithNames
+    , reifyTypeWithNamedSetNoFallback
+    , reifyTypeWithNamesNoFallback
+    )
 import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Constraint.Solve as Solve (frWith)
 import MLF.Constraint.Presolution
@@ -101,16 +107,20 @@ expansionToInst res = cataM alg
         in case resolveBaseBound argC of
             Just baseC -> reifyTypeWithNamesNoFallback res IntMap.empty baseC
             Nothing -> reifyTypeWithNamesNoFallback res IntMap.empty argC
+    -- See Note [Instantiation arg sanitization] in
+    -- docs/notes/2026-01-27-elab-changes.md.
+    sanitizeArg = inlineBoundVarsTypeForBound res
     alg layer = case layer of
         ExpIdentityF -> Right InstId
         ExpInstantiateF args -> do
             tys <- mapM reifyArg args
+            let tys' = map sanitizeArg tys
             -- Build a sequence of type applications.
             -- In xMLF, simple application is usually sufficient.
             -- If we needed explicit N, we'd need to know the source type schema.
-            if null tys
+            if null tys'
                 then Right InstId
-                else Right $ foldr1 InstSeq (map InstApp tys)
+                else Right $ foldr1 InstSeq (map InstApp tys')
         ExpForallF _ -> Right InstIntro
         ExpComposeF exps -> Right $ foldr1 InstSeq (NE.toList exps)
 
@@ -190,9 +200,11 @@ elaborateWithScope
     -> IntMap.IntMap NodeRef
     -> AnnExpr
     -> Either ElabError ElabTerm
-elaborateWithScope generalizeAtWith resPhi resReify resGen gaParents edgeWitnesses edgeTraces edgeExpansions scopeOverrides ann =
-    let ElabOut { elabTerm = runElab } = para elabAlg ann
-    in runElab Map.empty
+elaborateWithScope generalizeAtWith resPhi resReify resGen gaParents edgeWitnesses edgeTraces edgeExpansions scopeOverrides ann = do
+    namedSetPhi <- namedNodes resPhi
+    namedSetReify <- namedNodes resReify
+    let ElabOut { elabTerm = runElab } = para (elabAlg namedSetPhi namedSetReify) ann
+    runElab Map.empty
   where
     canonical = Solve.frWith (srUnionFind resReify)
     scopeRootFromBase root =
@@ -209,14 +221,14 @@ elaborateWithScope generalizeAtWith resPhi resReify resGen gaParents edgeWitness
     mkOut :: (Env -> Either ElabError ElabTerm) -> ElabOut
     mkOut f = ElabOut f f
 
-    elabAlg :: AnnExprF (AnnExpr, ElabOut) -> ElabOut
-    elabAlg layer = case layer of
+    elabAlg :: IntSet.IntSet -> IntSet.IntSet -> AnnExprF (AnnExpr, ElabOut) -> ElabOut
+    elabAlg namedSetPhi namedSetReify layer = case layer of
         AVarF v _ -> mkOut $ \env ->
             maybe (Left (EnvLookup v)) (const (Right (EVar v))) (Map.lookup v env)
         ALitF lit _ -> mkOut $ \_ -> Right (ELit lit)
         ALamF v n _ (_bodyAnn, bodyOut) _ ->
             let f env = do
-                    ty <- reifyTypeWithNames resReify IntMap.empty n
+                    ty <- reifyTypeWithNamedSetNoFallback resReify IntMap.empty namedSetReify n
                     -- Add lambda parameter to env as a scheme derived from the annotated type,
                     -- so κσ can reorder/instantiate quantified parameters when present.
                     let paramScheme = SchemeInfo { siScheme = schemeFromType ty, siSubst = IntMap.empty }
@@ -228,11 +240,11 @@ elaborateWithScope generalizeAtWith resPhi resReify resGen gaParents edgeWitness
             let f env = do
                     f' <- elabTerm fOut env
                     a' <- elabTerm aOut env
-                    funInst0 <- reifyInst env fAnn funEid
+                    funInst0 <- reifyInst namedSetReify env fAnn funEid
                     let argNode = annNode aAnn
                         argType = case VarStore.lookupVarBound (srConstraint resPhi) argNode of
-                            Just bnd -> reifyTypeForInstArg resPhi bnd
-                            Nothing -> reifyTypeForInstArg resPhi argNode
+                            Just bnd -> reifyTypeForInstArg namedSetPhi resPhi bnd
+                            Nothing -> reifyTypeForInstArg namedSetPhi resPhi argNode
                     let funInst =
                             let baseInst =
                                     case (funInst0, IntMap.lookup (getEdgeId funEid) edgeExpansions) of
@@ -254,7 +266,7 @@ elaborateWithScope generalizeAtWith resPhi resReify resGen gaParents edgeWitness
                                         let (inst', _rest) = replaceInstApps [argTy] baseInst
                                         in inst'
                                 _ -> baseInst
-                    argInst <- reifyInst env aAnn argEid
+                    argInst <- reifyInst namedSetReify env aAnn argEid
                     let argIsPoly =
                             case aAnn of
                                 AVar v _ ->
@@ -315,7 +327,7 @@ elaborateWithScope generalizeAtWith resPhi resReify resGen gaParents edgeWitness
             ElabOut
                 { elabTerm = \env -> do
                     expr' <- elabTerm exprOut env
-                    inst <- reifyInst env exprAnn eid
+                    inst <- reifyInst namedSetReify env exprAnn eid
                     pure $ case inst of
                         InstId -> expr'
                         _      -> ETyInst expr' inst
@@ -327,8 +339,8 @@ elaborateWithScope generalizeAtWith resPhi resReify resGen gaParents edgeWitness
     -- If the function position is a variable, we use its generalized scheme
     -- (and the NodeId→name substitution from `generalizeAt`) to support Σ(g)
     -- reordering and targeted instantiation.
-    reifyInst :: Env -> AnnExpr -> EdgeId -> Either ElabError Instantiation
-    reifyInst env funAnn (EdgeId eid) =
+    reifyInst :: IntSet.IntSet -> Env -> AnnExpr -> EdgeId -> Either ElabError Instantiation
+    reifyInst namedSetReify env funAnn (EdgeId eid) =
         let dbg =
                 debugElabGeneralize
                     ("reifyInst: edge=" ++ show eid
@@ -358,7 +370,7 @@ elaborateWithScope generalizeAtWith resPhi resReify resGen gaParents edgeWitness
                                     Nothing
                             _ -> mSchemeInfo
                 phi0 <- phiFromEdgeWitnessWithTrace generalizeAtWith resReify (Just gaParents) mSchemeInfo' mTrace ew
-                let phi = patchInstAppsFromTarget ew mSchemeInfo phi0
+                let phi = patchInstAppsFromTarget namedSetReify ew mSchemeInfo phi0
                 instFromTrace <- case (phi, mExpansion) of
                     (InstId, Just (ExpInstantiate args)) -> do
                         let argNodes =
@@ -369,7 +381,7 @@ elaborateWithScope generalizeAtWith resPhi resReify resGen gaParents edgeWitness
                         let targetArgs =
                                 case mSchemeInfo of
                                     Just si ->
-                                        case reifyTargetType ew si of
+                                        case reifyTargetType namedSetReify ew si of
                                             Right targetTy ->
                                                 case inferInstAppArgs (siScheme si) targetTy of
                                                     Just inferred
@@ -386,22 +398,24 @@ elaborateWithScope generalizeAtWith resPhi resReify resGen gaParents edgeWitness
                             reifyArg arg =
                                 case VarStore.lookupVarBound constraint arg of
                                     Just bnd -> reifyBoundWithNames resReify substForArgs bnd
-                                    Nothing -> reifyType resReify arg
+                                    Nothing -> reifyTypeWithNamedSetNoFallback resReify substForArgs namedSetReify arg
                         argTys <- case targetArgs of
                             Just inferred -> pure inferred
                             Nothing -> mapM reifyArg argNodes
-                        pure (Just (instSeqApps argTys))
+                        let argTys' = map (inlineBoundVarsTypeForBound resReify) argTys
+                        pure (Just (instSeqApps argTys'))
                     _ -> pure Nothing
                 case instFromTrace of
                     Just inst -> Right inst
-                    Nothing -> simplifyInstForScheme mSchemeInfo mExpansion phi
+                    Nothing -> simplifyInstForScheme namedSetReify mSchemeInfo mExpansion phi
 
     simplifyInstForScheme
-        :: Maybe SchemeInfo
+        :: IntSet.IntSet
+        -> Maybe SchemeInfo
         -> Maybe Expansion
         -> Instantiation
         -> Either ElabError Instantiation
-    simplifyInstForScheme mSchemeInfo mExpansion phi =
+    simplifyInstForScheme namedSetReify mSchemeInfo mExpansion phi =
         case (mSchemeInfo, mExpansion) of
             (Just si, Just (ExpInstantiate args)) -> do
                 let subst = siSubst si
@@ -410,12 +424,13 @@ elaborateWithScope generalizeAtWith resPhi resReify resGen gaParents edgeWitness
                     reifyArg arg =
                         case VarStore.lookupVarBound constraint arg of
                             Just bnd -> reifyBoundWithNames resReify subst bnd
-                            Nothing -> reifyType resReify arg
+                            Nothing -> reifyTypeWithNamedSetNoFallback resReify subst namedSetReify arg
                 argTys <- mapM reifyArg args
+                let argTys' = map (inlineBoundVarsTypeForBound resReify) argTys
                 case applyInstantiation schemeTy phi of
                     Left _ -> Right phi
                     Right targetTy -> do
-                        let candidates = [instSeqApps (take k argTys) | k <- [0 .. length argTys]]
+                        let candidates = [instSeqApps (take k argTys') | k <- [0 .. length argTys']]
                             matches inst =
                                 case applyInstantiation schemeTy inst of
                                     Right ty -> alphaEqType ty targetTy
@@ -425,25 +440,27 @@ elaborateWithScope generalizeAtWith resPhi resReify resGen gaParents edgeWitness
                             [] -> phi
             _ -> Right phi
 
-    patchInstAppsFromTarget :: EdgeWitness -> Maybe SchemeInfo -> Instantiation -> Instantiation
-    patchInstAppsFromTarget ew mSchemeInfo inst =
+    patchInstAppsFromTarget :: IntSet.IntSet -> EdgeWitness -> Maybe SchemeInfo -> Instantiation -> Instantiation
+    patchInstAppsFromTarget namedSetReify ew mSchemeInfo inst =
         case mSchemeInfo of
             Nothing -> inst
             Just si ->
-                case reifyTargetType ew si of
+                case reifyTargetType namedSetReify ew si of
                     Left _ -> inst
                     Right targetTy ->
                         case inferInstAppArgs (siScheme si) targetTy of
                             Nothing -> inst
                             Just args ->
-                                let (inst', _unused) = replaceInstApps args inst
+                                let args' = map (inlineBoundVarsTypeForBound resReify) args
+                                    (inst', _unused) = replaceInstApps args' inst
                                 in inst'
 
-    reifyTargetType :: EdgeWitness -> SchemeInfo -> Either ElabError ElabType
-    reifyTargetType ew _si =
-        case VarStore.lookupVarBound (srConstraint resReify) (ewRight ew) of
-            Just bnd -> reifyType resReify bnd
-            Nothing -> reifyType resReify (ewRight ew)
+    reifyTargetType :: IntSet.IntSet -> EdgeWitness -> SchemeInfo -> Either ElabError ElabType
+    reifyTargetType namedSetReify ew si =
+        let subst = siSubst si
+        in case VarStore.lookupVarBound (srConstraint resReify) (ewRight ew) of
+            Just bnd -> reifyTypeWithNamedSetNoFallback resReify subst namedSetReify bnd
+            Nothing -> reifyTypeWithNamedSetNoFallback resReify subst namedSetReify (ewRight ew)
 
     inferInstAppArgs :: ElabScheme -> ElabType -> Maybe [ElabType]
     inferInstAppArgs scheme targetTy =
@@ -562,10 +579,11 @@ instSeqApps tys = case map InstApp tys of
     [inst] -> inst
     insts -> foldr1 InstSeq insts
 
-reifyTypeForInstArg :: SolveResult -> NodeId -> Either ElabError ElabType
-reifyTypeForInstArg res nid = do
-    ty <- reifyType res nid
-    pure (inlineBaseBounds res ty)
+reifyTypeForInstArg :: IntSet.IntSet -> SolveResult -> NodeId -> Either ElabError ElabType
+reifyTypeForInstArg namedSet res nid = do
+    ty <- reifyTypeWithNamedSetNoFallback res IntMap.empty namedSet nid
+    let ty' = inlineBaseBounds res ty
+    pure (inlineBoundVarsTypeForBound res ty')
 
 inlineBaseBounds :: SolveResult -> ElabType -> ElabType
 inlineBaseBounds res =

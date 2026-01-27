@@ -5,6 +5,7 @@ module MLF.Reify.Core (
     reifyTypeWithNamesNoFallback,
     reifyTypeWithNamesNoFallbackOnConstraint,
     reifyTypeWithNamedSet,
+    reifyTypeWithNamedSetNoFallback,
     reifyWithAs,
     reifyBoundWithNames,
     reifyBoundWithNamesOnConstraint,
@@ -679,6 +680,8 @@ reifyTypeWithNames res subst nid = do
 
 -- | Reify with an explicit name substitution, but without ancestor fallback
 -- quantifiers (used when an outer scheme already quantifies binders).
+-- See Note [No-fallback reify preserves explicit bounds] in
+-- docs/notes/2026-01-27-elab-changes.md.
 reifyTypeWithNamesNoFallback :: SolveResult -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
 reifyTypeWithNamesNoFallback res subst nid =
     let uf = srUnionFind res
@@ -704,6 +707,23 @@ reifyTypeWithNamesNoFallbackOnConstraint constraint subst nid =
 reifyTypeWithNamedSet :: SolveResult -> IntMap.IntMap String -> IntSet.IntSet -> NodeId -> Either ElabError ElabType
 reifyTypeWithNamedSet res subst namedSet nid =
     reifyWith "reifyTypeWithNames" res varNameFor isNamed RootType nid
+  where
+    uf = srUnionFind res
+    canonical = Solve.frWith uf
+
+    nameFor (NodeId i) = "t" ++ show i
+
+    varNameFor :: NodeId -> String
+    varNameFor v =
+        let cv = canonical v
+        in maybe (nameFor cv) id (IntMap.lookup (getNodeId cv) subst)
+
+    isNamed nodeId = IntSet.member (getNodeId (canonical nodeId)) namedSet
+
+-- | Reify with an explicit named-node set, without ancestor fallback quantifiers.
+reifyTypeWithNamedSetNoFallback :: SolveResult -> IntMap.IntMap String -> IntSet.IntSet -> NodeId -> Either ElabError ElabType
+reifyTypeWithNamedSetNoFallback res subst namedSet nid =
+    reifyWith "reifyTypeWithNamedSetNoFallback" res varNameFor isNamed RootTypeNoFallback nid
   where
     uf = srUnionFind res
     canonical = Solve.frWith uf

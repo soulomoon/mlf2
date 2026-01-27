@@ -1,3 +1,4 @@
+{-# LANGUAGE GADTs #-}
 module MLF.Elab.Run.Annotation (
     applyRedirectsToAnn,
     canonicalizeAnn,
@@ -12,7 +13,7 @@ import MLF.Frontend.ConstraintGen (AnnExpr(..))
 import MLF.Frontend.ConstraintGen.Types (AnnExprF(..))
 import MLF.Constraint.Types (NodeId(..))
 import MLF.Elab.Run.Util (chaseRedirects)
-import MLF.Elab.Types (Instantiation(..))
+import MLF.Elab.Types (ElabType, Instantiation(..), Ty(..))
 
 applyRedirectsToAnn :: IntMap.IntMap NodeId -> AnnExpr -> AnnExpr
 applyRedirectsToAnn redirects = cata alg
@@ -57,9 +58,11 @@ annNode = cata alg
 -- | Annotation instantiation should preserve quantifiers by updating bounds
 -- rather than eliminating binders. Drop eliminations and treat applications
 -- as inside-bound updates.
+-- See Note [Annotation instantiation preserves foralls] in
+-- docs/notes/2026-01-27-elab-changes.md.
 adjustAnnotationInst :: Instantiation -> Instantiation
 adjustAnnotationInst inst = case inst of
-    InstApp ty -> InstInside (InstBot ty)
+    InstApp ty -> InstInside (InstBot (sanitizeBoundTop ty))
     InstElim -> InstId
     InstSeq a b ->
         let a' = adjustAnnotationInst a
@@ -71,3 +74,10 @@ adjustAnnotationInst inst = case inst of
     InstInside a -> InstInside (adjustAnnotationInst a)
     InstUnder v a -> InstUnder v (adjustAnnotationInst a)
     _ -> inst
+
+-- See Note [Instantiation arg sanitization] in
+-- docs/notes/2026-01-27-elab-changes.md.
+sanitizeBoundTop :: ElabType -> ElabType
+sanitizeBoundTop ty = case ty of
+    TVar _ -> TBottom
+    _ -> ty

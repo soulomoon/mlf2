@@ -19,7 +19,8 @@ module MLF.Reify.TypeOps (
     parseNameId,
     resolveBaseBoundForInstConstraint,
     resolveBaseBoundForInstSolved,
-    inlineBaseBoundsType
+    inlineBaseBoundsType,
+    inlineAliasBoundsWithBy
 ) where
 
 import qualified Data.IntMap.Strict as IntMap
@@ -342,3 +343,61 @@ inlineBaseBoundsType constraint canonical = cataIx alg
         TForallIF v mb body -> TForall v mb body
         TBaseIF b -> TBase b
         TBottomIF -> TBottom
+
+-- | Inline alias/bound nodes in an ElabType using the supplied lookup and reify
+-- functions. This is the shared implementation for scope-aware bound/alias
+-- inlining; callers can wrap it with concrete environment data.
+inlineAliasBoundsWithBy
+    :: Bool
+    -> (NodeId -> NodeId)
+    -> IntMap.IntMap TyNode
+    -> (NodeId -> Maybe NodeId)
+    -> (NodeId -> Either err ElabType)
+    -> ElabType
+    -> ElabType
+inlineAliasBoundsWithBy fallbackToBottom canonical nodes lookupBound reifyBound =
+    goAlias IntSet.empty Set.empty
+  where
+    goAlias seen boundNames ty = case ty of
+        TVar v
+            | Set.member v boundNames -> ty
+            | otherwise ->
+                case parseNameId v of
+                    Just nidInt ->
+                        let nidC = canonical (NodeId nidInt)
+                            key = getNodeId nidC
+                        in if IntSet.member key seen
+                            then ty
+                            else
+                                case IntMap.lookup key nodes of
+                                    Just TyVar{} ->
+                                        case lookupBound nidC of
+                                            Just bnd ->
+                                                case reifyBound (canonical bnd) of
+                                                    Right ty' -> goAlias (IntSet.insert key seen) boundNames ty'
+                                                    Left _ -> ty
+                                            Nothing -> if fallbackToBottom then TBottom else ty
+                                    Just _ ->
+                                        case reifyBound nidC of
+                                            Right ty' -> goAlias (IntSet.insert key seen) boundNames ty'
+                                            Left _ -> ty
+                                    Nothing -> ty
+                    Nothing -> ty
+        TArrow a b -> TArrow (goAlias seen boundNames a) (goAlias seen boundNames b)
+        TForall v mb body ->
+            let boundNames' = Set.insert v boundNames
+                mb' = fmap (goBound seen boundNames') mb
+                body' = goAlias seen boundNames' body
+            in TForall v mb' body'
+        TBase _ -> ty
+        TBottom -> ty
+
+    goBound seen boundNames bound = case bound of
+        TArrow a b -> TArrow (goAlias seen boundNames a) (goAlias seen boundNames b)
+        TBase b -> TBase b
+        TBottom -> TBottom
+        TForall v mb body ->
+            let boundNames' = Set.insert v boundNames
+                mb' = fmap (goBound seen boundNames') mb
+                body' = goAlias seen boundNames' body
+            in TForall v mb' body'

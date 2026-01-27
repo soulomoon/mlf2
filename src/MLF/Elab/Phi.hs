@@ -22,11 +22,11 @@ import qualified MLF.Util.Order as Order
 import qualified MLF.Util.OrderKey as OrderKey
 import MLF.Constraint.Types
 import MLF.Elab.Types
-import MLF.Reify.TypeOps (freeTypeVarsList, inlineBaseBoundsType, matchType)
+import MLF.Reify.TypeOps (freeTypeVarsList, inlineAliasBoundsWithBy, inlineBaseBoundsType, matchType)
 import MLF.Elab.Inst (applyInstantiation, composeInst, instMany, schemeToType, splitForalls)
 import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Constraint.BindingUtil (bindingPathToRootLocal)
-import MLF.Reify.Core (namedNodes, reifyBoundWithNames, reifyType)
+import MLF.Reify.Core (namedNodes, reifyBoundWithNames, reifyType, reifyTypeWithNamedSetNoFallback)
 import MLF.Elab.Sigma (bubbleReorderTo)
 import MLF.Util.Graph (topoSortBy)
 import MLF.Constraint.Solve hiding (BindingTreeError, MissingNode)
@@ -35,6 +35,7 @@ import MLF.Constraint.Presolution (EdgeTrace(..))
 import qualified MLF.Binding.Tree as Binding
 import MLF.Binding.Tree (checkBindingTree, checkNoGenFallback, checkSchemeClosureUnder, lookupBindParent)
 import qualified MLF.Constraint.VarStore as VarStore
+import MLF.Util.Names (parseNameId)
 import Debug.Trace (trace)
 import System.Environment (lookupEnv)
 import System.IO.Unsafe (unsafePerformIO)
@@ -564,8 +565,8 @@ phiFromEdgeWitnessWithTrace generalizeAtWith res mbGaParents mSchemeInfo mTrace 
             Just si -> siSubst si
             Nothing -> IntMap.empty
 
-    traceArgMap :: Map.Map String ElabType
-    traceArgMap =
+    traceArgMap :: IntSet.IntSet -> Map.Map String ElabType
+    traceArgMap namedSet =
         case (mTrace, mSchemeInfo) of
             (Just tr, Just si) ->
                 let subst = siSubst si
@@ -573,7 +574,7 @@ phiFromEdgeWitnessWithTrace generalizeAtWith res mbGaParents mSchemeInfo mTrace 
                     reifyArg arg =
                         case VarStore.lookupVarBound (srConstraint res) (canonicalNode arg) of
                             Just bnd -> reifyBoundWithNames res subst bnd
-                            Nothing -> reifyType res (canonicalNode arg)
+                            Nothing -> reifyTypeWithNamedSetNoFallback res subst namedSet (canonicalNode arg)
                     entries =
                         [ (name, ty)
                         | (binder, arg) <- etBinderArgs tr
@@ -583,14 +584,14 @@ phiFromEdgeWitnessWithTrace generalizeAtWith res mbGaParents mSchemeInfo mTrace 
                 in Map.fromList entries
             _ -> Map.empty
 
-    inferredArgMap :: Map.Map String ElabType
-    inferredArgMap =
+    inferredArgMap :: IntSet.IntSet -> Map.Map String ElabType
+    inferredArgMap namedSet =
         let inferred =
                 case mSchemeInfo of
                     Nothing -> Map.empty
                     Just si ->
                         let inferFrom nid =
-                                case reifyTargetTypeForInst nid of
+                                case reifyTargetTypeForInst namedSet nid of
                                     Left _ -> Nothing
                                     Right targetTy -> inferInstAppArgs (siScheme si) targetTy
                             mbArgs =
@@ -602,38 +603,55 @@ phiFromEdgeWitnessWithTrace generalizeAtWith res mbGaParents mSchemeInfo mTrace 
                                 let (binds, _) = splitForalls (schemeToType (siScheme si))
                                     names = map fst binds
                                 in Map.fromList (zip names args)
-        in Map.union traceArgMap inferred
+        in Map.union (traceArgMap namedSet) inferred
 
-    binderArgType :: NodeId -> Maybe ElabType
-    binderArgType binder = do
+    binderArgType :: IntSet.IntSet -> NodeId -> Maybe ElabType
+    binderArgType namedSet binder = do
         name <- IntMap.lookup (getNodeId (canonicalNode binder)) substForTypes
-        Map.lookup name inferredArgMap
+        Map.lookup name (inferredArgMap namedSet)
 
     reifyTypeArg :: IntSet.IntSet -> Maybe NodeId -> NodeId -> Either ElabError ElabType
-    reifyTypeArg _ mbBinder arg =
-        case mbBinder >>= binderArgType of
+    reifyTypeArg namedSet mbBinder arg =
+        case mbBinder >>= binderArgType namedSet of
             Just ty -> Right ty
             Nothing ->
-                case Map.toList inferredArgMap of
-                    [(_name, ty)] -> Right ty
-                    _ -> reifyBoundWithNames res substForTypes arg
+                case Map.toList (inferredArgMap namedSet) of
+                    [(_name, ty)] -> Right (inlineAliasBounds ty)
+                    _ -> inlineAliasBounds <$> reifyBoundWithNames res substForTypes arg
 
     reifyBoundType :: NodeId -> Either ElabError ElabType
     reifyBoundType = reifyBoundWithNames res substForTypes
 
-    reifyTargetTypeForInst :: NodeId -> Either ElabError ElabType
-    reifyTargetTypeForInst nid = do
+    reifyTargetTypeForInst :: IntSet.IntSet -> NodeId -> Either ElabError ElabType
+    reifyTargetTypeForInst namedSet nid = do
         let nidC = canonicalNode nid
         ty <- case VarStore.lookupVarBound (srConstraint res) nidC of
-            Just bnd -> reifyType res bnd
-            Nothing -> reifyType res nidC
-        pure (inlineBaseBounds ty)
+            Just bnd -> reifyTypeWithNamedSetNoFallback res substForTypes namedSet bnd
+            Nothing -> reifyTypeWithNamedSetNoFallback res substForTypes namedSet nidC
+        pure (inlineBaseBounds (inlineAliasBounds ty))
 
     inlineBaseBounds :: ElabType -> ElabType
     inlineBaseBounds =
         inlineBaseBoundsType
             (srConstraint res)
             canonicalNode
+
+    inlineAliasBounds :: ElabType -> ElabType
+    inlineAliasBounds = inlineAliasBoundsWith False
+
+    inlineAliasBoundsAsBound :: ElabType -> ElabType
+    inlineAliasBoundsAsBound = inlineAliasBoundsWith True
+
+    -- See Note [Scope-aware bound/alias inlining] in
+    -- docs/notes/2026-01-27-elab-changes.md.
+    inlineAliasBoundsWith :: Bool -> ElabType -> ElabType
+    inlineAliasBoundsWith fallbackToBottom =
+        inlineAliasBoundsWithBy
+            fallbackToBottom
+            canonicalNode
+            (cNodes (srConstraint res))
+            (VarStore.lookupVarBound (srConstraint res))
+            (reifyBoundWithNames res substForTypes)
 
     inferInstAppArgs :: ElabScheme -> ElabType -> Maybe [ElabType]
     inferInstAppArgs scheme targetTy =
@@ -646,19 +664,20 @@ phiFromEdgeWitnessWithTrace generalizeAtWith res mbGaParents mSchemeInfo mTrace 
                     then Just [ty | name <- binderNames, Just ty <- [Map.lookup name subst]]
                     else Nothing
 
-    applyInferredArgs :: ElabType -> ElabType
-    applyInferredArgs = applyInferredArgsWith Set.empty
+    applyInferredArgs :: IntSet.IntSet -> ElabType -> ElabType
+    applyInferredArgs namedSet = applyInferredArgsWith namedSet Set.empty
 
-    applyInferredArgsWith :: Set.Set String -> ElabType -> ElabType
-    applyInferredArgsWith bound0 ty0 = runApplyFun (cataIx alg ty0) bound0
+    applyInferredArgsWith :: IntSet.IntSet -> Set.Set String -> ElabType -> ElabType
+    applyInferredArgsWith namedSet bound0 ty0 = runApplyFun (cataIx alg ty0) bound0
       where
+        inferredArgMap' = inferredArgMap namedSet
         alg :: TyIF i ApplyFun -> ApplyFun i
         alg ty = case ty of
             TVarIF v ->
                 ApplyFun $ \bound ->
                     if Set.member v bound
                         then TVar v
-                        else case Map.lookup v inferredArgMap of
+                        else case Map.lookup v inferredArgMap' of
                             Just instTy -> instTy
                             Nothing -> TVar v
             TArrowIF a b ->
@@ -846,7 +865,7 @@ phiFromEdgeWitnessWithTrace generalizeAtWith res mbGaParents mSchemeInfo mTrace 
                                     else do
                                         (inst, ids1) <- atBinder binderKeys ids ty bv $ do
                                             argTy <- reifyTypeArg namedSet (Just bv) (graftArgFor arg bv)
-                                            pure (InstApp argTy)
+                                            pure (InstApp (inlineAliasBoundsAsBound argTy))
                                         ty' <- applyInst "OpGraft+OpWeaken" ty inst
                                         go binderKeys keepBinderKeys namedSet ty' ids1 (composeInst phi inst) rest lookupBinder
             | otherwise ->
@@ -872,7 +891,7 @@ phiFromEdgeWitnessWithTrace generalizeAtWith res mbGaParents mSchemeInfo mTrace 
                                 else do
                                     (inst, ids1) <- atBinderKeep binderKeys ids ty bv $ do
                                         argTy <- reifyTypeArg namedSet (Just bv) arg
-                                        pure (InstInside (InstBot argTy))
+                                        pure (InstInside (InstBot (inlineAliasBoundsAsBound argTy)))
                                     ty' <- applyInst "OpGraft" ty inst
                                     go binderKeys keepBinderKeys namedSet ty' ids1 (composeInst phi inst) rest lookupBinder
 
@@ -940,7 +959,7 @@ phiFromEdgeWitnessWithTrace generalizeAtWith res mbGaParents mSchemeInfo mTrace 
 
                                         let names = map fst qs
                                             mbBound = snd (qs !! i)
-                                            boundTy = maybe TBottom tyToElab mbBound
+                                            boundTy = inlineAliasBoundsAsBound (maybe TBottom tyToElab mbBound)
                                             boundName = names !! i
 
                                             deps = filter (/= boundName) (freeTypeVarsList boundTy)
@@ -984,20 +1003,21 @@ phiFromEdgeWitnessWithTrace generalizeAtWith res mbGaParents mSchemeInfo mTrace 
                                             case lookupBindParent (srConstraint res) (typeRef nC) of
                                                 Just (TypeRef parent, _) ->
                                                     case IntMap.lookup (getNodeId (canonicalNode parent)) (cNodes (srConstraint res)) of
-                                                        Just TyForall{} -> reifyType res nC
+                                                        Just TyForall{} -> reifyTypeWithNamedSetNoFallback res substForTypes namedSet nC
                                                         _ -> reifyBoundType nC
                                                 _ -> reifyBoundType nC
-                                        let nodeTy = applyInferredArgs nodeTy0
+                                        let nodeTy = applyInferredArgs namedSet (inlineAliasBoundsAsBound nodeTy0)
                                         nodeTyBound <-
                                             case VarStore.lookupVarBound (srConstraint res) (canonicalNode nC) of
-                                                Just bnd -> reifyType res bnd
+                                                Just bnd -> reifyTypeWithNamedSetNoFallback res substForTypes namedSet bnd
                                                 Nothing -> pure nodeTy
+                                        let nodeTyBound' = inlineAliasBoundsAsBound nodeTyBound
 
                                         case debugPhi ("OpRaise: nodeTy=" ++ show nodeTy ++ " ty=" ++ show ty) () of
                                             () -> pure ()
                                         case debugPhi ("OpRaise: nodeTyBound=" ++ show nodeTyBound) () of
                                             () -> pure ()
-                                        case debugPhi ("OpRaise: inferredArgMap=" ++ show inferredArgMap) () of
+                                        case debugPhi ("OpRaise: inferredArgMap=" ++ show (inferredArgMap namedSet)) () of
                                             () -> pure ()
                                         case debugPhi ("OpRaise: traceArgs=" ++ show (fmap etBinderArgs mTrace)) () of
                                             () -> pure ()
@@ -1055,7 +1075,7 @@ phiFromEdgeWitnessWithTrace generalizeAtWith res mbGaParents mSchemeInfo mTrace 
                                                     local =
                                                         instMany
                                                             [ InstIntro
-                                                            , InstInside (InstBot nodeTy)
+                                                            , InstInside (InstBot (inlineAliasBoundsAsBound nodeTy))
                                                             , InstUnder "β" aliasOld
                                                             ]
 
@@ -1066,14 +1086,14 @@ phiFromEdgeWitnessWithTrace generalizeAtWith res mbGaParents mSchemeInfo mTrace 
                                                 let ids2 = resyncIds ty' ids1
                                                 go binderKeys keepBinderKeys namedSet ty' ids2 (composeInst phi inst) rest lookupBinder
                                             (Nothing, Just (insertIdx, True)) -> do
-                                                let nodeTyBoundInlined = inlineBaseBounds nodeTyBound
+                                                let nodeTyBoundInlined = inlineBaseBounds nodeTyBound'
                                                     instArgInst =
                                                         case mSchemeInfo of
                                                             Just si ->
                                                                 case inferInstAppArgs (siScheme si) nodeTyBoundInlined of
                                                                     Just args
                                                                         | not (null args) ->
-                                                                            instMany (map InstApp args)
+                                                                            instMany (map (InstApp . inlineAliasBoundsAsBound) args)
                                                                     _ -> InstApp nodeTyBoundInlined
                                                             Nothing -> InstApp nodeTyBoundInlined
                                                     prefixBefore = take insertIdx names
@@ -1085,7 +1105,7 @@ phiFromEdgeWitnessWithTrace generalizeAtWith res mbGaParents mSchemeInfo mTrace 
                                                     local =
                                                         instMany
                                                             [ InstIntro
-                                                            , InstInside (InstBot nodeTy)
+                                                            , InstInside (InstBot (inlineAliasBoundsAsBound nodeTy))
                                                             ]
                                                     inst = underContext prefixBefore local
                                                 ty' <- applyInst "OpRaise(non-spine)" ty inst
