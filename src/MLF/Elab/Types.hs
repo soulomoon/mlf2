@@ -17,8 +17,6 @@ module MLF.Elab.Types (
     K(..),
     tyToElab,
     elabToBound,
-    freeTypeVarsTy,
-    freeTypeVarsTyList,
     containsForallTy,
     containsArrowTy,
     ElabScheme,
@@ -51,7 +49,7 @@ import MLF.Constraint.Types (BaseTy(..), NodeId(..), getNodeId)
 import MLF.Frontend.Syntax (Lit(..))
 import MLF.Util.ElabError (ElabError(..), bindingToElab)
 import MLF.Types.Elab
-import MLF.Reify.TypeOps (splitForalls, substTypeCapture)
+import MLF.Reify.TypeOps (splitForalls, substTypeCapture, freeTypeVarsType)
 
 -- | Simple pretty-printing class for elaborated artifacts.
 class Pretty a where
@@ -187,7 +185,7 @@ inlineBoundsForDisplay = go
                     else body
             Just bound ->
                 let boundTy = tyToElab bound
-                    freeInBound = Set.member v (freeTypeVarsTy bound)
+                    freeInBound = Set.member v (freeTypeVarsType bound)
                     (posCount, negCount) = occurrencesIn body
                     totalCount = posCount + negCount
                 in if freeInBound

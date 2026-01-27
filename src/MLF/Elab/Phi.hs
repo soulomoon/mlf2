@@ -781,7 +781,7 @@ phiFromEdgeWitnessWithTrace generalizeAtWith res mbGaParents mSchemeInfo mTrace 
                     Nothing -> []
                     Just bnd ->
                         [ j
-                        | v <- freeTypeVarsTyList bnd
+                        | v <- freeTypeVarsList bnd
                         , v /= names !! i
                         , Just j <- [nameIndex v]
                         ]

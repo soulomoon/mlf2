@@ -25,7 +25,7 @@ import MLF.Constraint.Presolution.Plan.Normalize
     , isBaseBound
     , isVarBound
     )
-import MLF.Reify.TypeOps (freeTypeVarsFrom, stripForallsType)
+import MLF.Reify.TypeOps (freeTypeVarsFrom, freeTypeVarsType, stripForallsType)
 import MLF.Types.Elab
     ( BoundType
     , ElabScheme
@@ -33,7 +33,6 @@ import MLF.Types.Elab
     , Ty(..)
     , TyIF(..)
     , cataIx
-    , freeTypeVarsTy
     , mkElabScheme
     , tyToElab
     )
@@ -255,7 +254,7 @@ finalizeScheme FinalizeInput{..} =
         usedNames =
             Set.unions
                 ( freeTypeVarsFrom Set.empty tyNorm
-                    : [freeTypeVarsTy b | (_, Just b) <- bindingsNorm]
+                    : [freeTypeVarsType b | (_, Just b) <- bindingsNorm]
                 )
         bindingsFinal =
             filter
@@ -269,7 +268,7 @@ finalizeScheme FinalizeInput{..} =
                     case mb of
                         Nothing -> True
                         Just bnd ->
-                            let freeBound = freeTypeVarsTy bnd
+                            let freeBound = freeTypeVarsType bnd
                                 boundMentionsSelf = Set.member name freeBound
                                 boundIsSimple = isVarBound bnd || isBaseBound bnd
                                 boundIsBody = tyToElab bnd == tyNorm
@@ -316,7 +315,7 @@ finalizeScheme FinalizeInput{..} =
         usedNamesRenamed =
             Set.unions
                 ( freeTypeVarsFrom Set.empty tyRenamed
-                    : [freeTypeVarsTy b | (_, Just b) <- bindingsRenamed]
+                    : [freeTypeVarsType b | (_, Just b) <- bindingsRenamed]
                 )
         boundNames = Set.fromList (map fst bindingsRenamed)
         allowedNames = Set.fromList (map fst bindingsRenamed)

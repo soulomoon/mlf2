@@ -94,7 +94,7 @@ simplifyAnnotationType = go
                 _ -> Nothing
             usedInBounds =
                 Set.unions
-                    [ freeTypeVarsTy bnd
+                    [ freeTypeVarsType bnd
                     | (_, Just bnd) <- binds
                     ]
             goMerge _ [] body' = ([], body')
@@ -136,10 +136,10 @@ simplifyAnnotationType = go
         Nothing -> TBottom
 
     dropUnusedBinds binds body =
-        let freeInBound = maybe Set.empty freeTypeVarsTy
+        let freeInBound = maybe Set.empty freeTypeVarsType
             used = Set.union (freeTypeVarsType body)
                 (Set.unions [ freeInBound mb | (_, mb) <- binds ])
-            keep (v, mb) = Set.member v used || maybe False (Set.member v . freeTypeVarsTy) mb
+            keep (v, mb) = Set.member v used || maybe False (Set.member v . freeTypeVarsType) mb
         in (filter keep binds, body)
 
     inlineAlias ty = case ty of

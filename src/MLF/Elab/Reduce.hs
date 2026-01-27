@@ -9,7 +9,7 @@ import qualified Data.Set as Set
 import Data.Functor.Foldable (para)
 
 import MLF.Elab.Inst (applyInstantiation, renameInstBound, schemeToType)
-import MLF.Reify.TypeOps (freeTypeVarsType, freshTypeName, substTypeCapture)
+import MLF.Reify.TypeOps (freeTypeVarsType, freeTypeVarsList, freshTypeName, substTypeCapture)
 import MLF.Elab.Types
 import MLF.Util.RecursionSchemes (cataMaybe, foldElabTerm, foldInstantiation)
 
@@ -128,7 +128,7 @@ freeTypeVarsTerm = foldElabTerm alg
         ELetF _ sch rhs body ->
             Set.unions [freeTypeVarsScheme sch, rhs, body]
         ETyAbsF v mb body ->
-            let boundFv = maybe Set.empty freeTypeVarsTy mb
+            let boundFv = maybe Set.empty freeTypeVarsType mb
                 bodyFv = Set.delete v body
             in Set.union boundFv bodyFv
         ETyInstF e inst ->

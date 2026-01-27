@@ -11,7 +11,7 @@ module MLF.Constraint.Presolution.Plan.Normalize (
 
 import qualified Data.Set as Set
 
-import MLF.Reify.TypeOps (freeTypeVarsFrom, substTypeSimple)
+import MLF.Reify.TypeOps (freeTypeVarsFrom, freeTypeVarsType, substTypeSimple)
 import MLF.Types.Elab
     ( BoundType
     , ElabType
@@ -19,7 +19,6 @@ import MLF.Types.Elab
     , TyIF(..)
     , K(..)
     , cataIxConst
-    , freeTypeVarsTy
     , tyToElab
     )
 
@@ -54,7 +53,7 @@ simplifySchemeBindings inlineBaseBounds namedBinders binds ty =
                     restUsesV =
                         Set.member v $
                             Set.unions
-                                [ freeTypeVarsTy b
+                                [ freeTypeVarsType b
                                 | (_, Just b) <- rest
                                 ]
                 in if not bodyUsesV && not restUsesV

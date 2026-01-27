@@ -91,10 +91,7 @@ freeTypeVarsFromWith bindInBound bound0 ty =
 substTypeCapture :: String -> ElabType -> ElabType -> ElabType
 substTypeCapture x s = goSub
   where
-    freeTypeVarsTypeLocal :: ElabType -> Set.Set String
-    freeTypeVarsTypeLocal = freeTypeVarsTy
-
-    freeS = freeTypeVarsTypeLocal s
+    freeS = freeTypeVarsType s
 
     substBoundCaptureLocal :: String -> ElabType -> BoundType -> BoundType
     substBoundCaptureLocal name replacement bound = case bound of
@@ -110,8 +107,8 @@ substTypeCapture x s = goSub
                 let used =
                         Set.unions
                             [ freeS
-                            , freeTypeVarsTypeLocal body
-                            , maybe Set.empty freeTypeVarsTy mb
+                            , freeTypeVarsType body
+                            , maybe Set.empty freeTypeVarsType mb
                             , Set.singleton v
                             ]
                     v' = freshNameLike v used
@@ -140,8 +137,8 @@ substTypeCapture x s = goSub
                     let used =
                             Set.unions
                                 [ freeS
-                                , freeTypeVarsTypeLocal (fst (unIxPair body))
-                                , maybe Set.empty (freeTypeVarsTy . fst . unIxPair) mb
+                                , freeTypeVarsType (fst (unIxPair body))
+                                , maybe Set.empty (freeTypeVarsType . fst . unIxPair) mb
                                 , Set.singleton v
                                 ]
                         v' = freshNameLike v used

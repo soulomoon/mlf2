@@ -29,8 +29,6 @@ module MLF.Types.Elab (
     K(..),
     tyToElab,
     elabToBound,
-    freeTypeVarsTy,
-    freeTypeVarsTyList,
     containsForallTy,
     containsArrowTy,
     ElabScheme,
@@ -147,22 +145,6 @@ elabToBound ty = case ty of
     TBase b -> TBase b
     TForall v mb body -> TForall v mb body
     TBottom -> TBottom
-
-freeTypeVarsTy :: Ty v -> Set.Set String
-freeTypeVarsTy = cataIxConst alg
-  where
-    alg node = case node of
-        TVarIF v -> Set.singleton v
-        TArrowIF a b -> Set.union (unK a) (unK b)
-        TBaseIF _ -> Set.empty
-        TBottomIF -> Set.empty
-        TForallIF v mb body ->
-            let freeBound = maybe Set.empty unK mb
-                freeBody = Set.delete v (unK body)
-            in Set.union freeBound freeBody
-
-freeTypeVarsTyList :: Ty v -> [String]
-freeTypeVarsTyList = Set.toList . freeTypeVarsTy
 
 containsForallTy :: Ty v -> Bool
 containsForallTy = cataIxConst alg
