@@ -28,6 +28,7 @@ import MLF.Util.ElabError (ElabError(..), bindingToElab)
 import MLF.Util.Graph (topoSortBy)
 import MLF.Constraint.Solve hiding (BindingTreeError, MissingNode)
 import qualified MLF.Constraint.Solve as Solve (frWith)
+import qualified MLF.Constraint.Traversal as Traversal
 import MLF.Binding.Tree (canonicalizeBindParentsUnder, lookupBindParent)
 import qualified MLF.Constraint.VarStore as VarStore
 
@@ -533,21 +534,10 @@ reifyWith _contextLabel res nameForVar isNamed rootMode nid =
                     TyForall{ tnBody = body } -> canonical body
                     _ -> n
             reachable =
-                let go visited [] = visited
-                    go visited (nid0:rest) =
-                        let nodeId = canonical nid0
-                            key = getNodeId nodeId
-                        in if IntSet.member key visited
-                            then go visited rest
-                            else
-                                let visited' = IntSet.insert key visited
-                                    kids =
-                                        maybe
-                                            []
-                                            structuralChildrenWithBounds
-                                            (IntMap.lookup key nodes)
-                                in go visited' (map canonical kids ++ rest)
-                in go IntSet.empty [orderRoot]
+                Traversal.reachableFromWithBounds
+                    canonical
+                    (\nid -> IntMap.lookup (getNodeId nid) nodes)
+                    orderRoot
         let includeRigid =
                 isForall node
                     || mode == ModeBound

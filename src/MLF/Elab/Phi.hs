@@ -31,6 +31,7 @@ import MLF.Elab.Sigma (bubbleReorderTo)
 import MLF.Util.Graph (topoSortBy)
 import MLF.Constraint.Solve hiding (BindingTreeError, MissingNode)
 import qualified MLF.Constraint.Solve as Solve (frWith)
+import qualified MLF.Constraint.Traversal as Traversal
 import MLF.Constraint.Presolution (EdgeTrace(..))
 import qualified MLF.Binding.Tree as Binding
 import MLF.Binding.Tree (checkBindingTree, checkNoGenFallback, checkSchemeClosureUnder, lookupBindParent)
@@ -42,9 +43,6 @@ import System.IO.Unsafe (unsafePerformIO)
 
 newtype ApplyFun i =
     ApplyFun { runApplyFun :: Set.Set String -> Ty i }
-
-freeTypeVarsListBound :: BoundType -> [String]
-freeTypeVarsListBound = freeTypeVarsTyList
 
 -- | Compute an instantiation-context path from a root node to a target node.
 --
@@ -114,21 +112,7 @@ contextToNodeBoundWithOrderKeys canonical keys c _namedSet root target = do
 
     reachableFromStructural :: NodeId -> IntSet.IntSet
     reachableFromStructural root0 =
-        let walk visited [] = visited
-            walk visited (nid0:rest) =
-                let nid = canonical nid0
-                    key = getNodeId nid
-                in if IntSet.member key visited
-                    then walk visited rest
-                    else
-                        let visited' = IntSet.insert key visited
-                            kids =
-                                case NodeAccess.lookupNode c (NodeId key) of
-                                    Nothing -> []
-                                    Just node ->
-                                        structuralChildren node
-                        in walk visited' (map canonical kids ++ rest)
-        in walk IntSet.empty [root0]
+        Traversal.reachableFromUnderLenient canonical (NodeAccess.lookupNode c) root0
 
     dedupeById :: [NodeId] -> [NodeId]
     dedupeById =
@@ -797,7 +781,7 @@ phiFromEdgeWitnessWithTrace generalizeAtWith res mbGaParents mSchemeInfo mTrace 
                     Nothing -> []
                     Just bnd ->
                         [ j
-                        | v <- freeTypeVarsListBound bnd
+                        | v <- freeTypeVarsTyList bnd
                         , v /= names !! i
                         , Just j <- [nameIndex v]
                         ]

@@ -15,7 +15,7 @@ import MLF.Constraint.Solve (SolveResult, frWith, srConstraint, srUnionFind)
 import MLF.Constraint.Types (TyNode(..), cNodes)
 import MLF.Reify.Core (namedNodes, reifyTypeWithNamedSetNoFallback)
 import MLF.Reify.TypeOps (
-    freeTypeVarsFrom,
+    freeTypeVarsType,
     inlineAliasBoundsWithBySeen,
     inlineBaseBoundsType,
     resolveBoundBodyConstraint,
@@ -24,9 +24,6 @@ import MLF.Reify.TypeOps (
     substTypeSimple
     )
 import MLF.Elab.Types
-
-freeVarsType :: ElabType -> Set.Set String
-freeVarsType = freeTypeVarsFrom Set.empty
 
 mapBound :: (ElabType -> ElabType) -> BoundType -> BoundType
 mapBound f bound = case bound of
@@ -140,7 +137,7 @@ simplifyAnnotationType = go
 
     dropUnusedBinds binds body =
         let freeInBound = maybe Set.empty freeTypeVarsTy
-            used = Set.union (freeVarsType body)
+            used = Set.union (freeTypeVarsType body)
                 (Set.unions [ freeInBound mb | (_, mb) <- binds ])
             keep (v, mb) = Set.member v used || maybe False (Set.member v . freeTypeVarsTy) mb
         in (filter keep binds, body)

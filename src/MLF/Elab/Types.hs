@@ -35,12 +35,8 @@ module MLF.Elab.Types (
     PrettyDisplay(..),
     ContextStep(..),
     applyContext,
-    freshNameLike,
     buildForalls,
     schemeFromType,
-    splitForallsLocal,
-    substTypeCaptureLocal,
-    substTypeSimpleLocal,
     selectMinPrecInsertionIndex,
 ) where
 
@@ -55,6 +51,7 @@ import MLF.Constraint.Types (BaseTy(..), NodeId(..), getNodeId)
 import MLF.Frontend.Syntax (Lit(..))
 import MLF.Util.ElabError (ElabError(..), bindingToElab)
 import MLF.Types.Elab
+import MLF.Reify.TypeOps (splitForalls, substTypeCapture)
 
 -- | Simple pretty-printing class for elaborated artifacts.
 class Pretty a where
@@ -198,7 +195,7 @@ inlineBoundsForDisplay = go
                     else if totalCount == 0
                         then body
                         else if inlineableBound boundTy
-                            then go (substTypeCaptureLocal v boundTy body)
+                            then go (substTypeCapture v boundTy body)
                             else TForall v (Just bound) body
       where
         occurrencesIn = occurrencesVar v
@@ -277,110 +274,6 @@ inlineBoundsForDisplay = go
                 occBound' = Map.delete v (oiOccMap occBound)
             in OccInfo freeVars (mergeOccMaps occBound' occBody')
 
-substTypeCaptureLocal :: String -> ElabType -> ElabType -> ElabType
-substTypeCaptureLocal x s = goSub
-  where
-    freeTypeVarsTypeLocal :: ElabType -> Set.Set String
-    freeTypeVarsTypeLocal = freeTypeVarsTy
-
-    freeS = freeTypeVarsTypeLocal s
-
-    substBoundCaptureLocal :: String -> ElabType -> BoundType -> BoundType
-    substBoundCaptureLocal name replacement bound = case bound of
-        TArrow a b ->
-            TArrow (substTypeCaptureLocal name replacement a) (substTypeCaptureLocal name replacement b)
-        TBase b -> TBase b
-        TBottom -> TBottom
-        TForall v mb body
-            | v == name ->
-                let mb' = fmap (substBoundCaptureLocal name replacement) mb
-                in TForall v mb' body
-            | v `Set.member` freeS ->
-                let used =
-                        Set.unions
-                            [ freeS
-                            , freeTypeVarsTypeLocal body
-                            , maybe Set.empty freeTypeVarsTy mb
-                            , Set.singleton v
-                            ]
-                    v' = freshNameLike v used
-                    body' = substTypeCaptureLocal v (TVar v') body
-                    mb' = fmap (substBoundCaptureLocal name replacement) mb
-                in TForall v' mb' (substTypeCaptureLocal name replacement body')
-            | otherwise ->
-                let mb' = fmap (substBoundCaptureLocal name replacement) mb
-                in TForall v mb' (substTypeCaptureLocal name replacement body)
-
-    goSub = paraIx alg
-      where
-        alg :: TyIF i (IxPair Ty Ty) -> Ty i
-        alg ty = case ty of
-            TVarIF v
-                | v == x -> s
-                | otherwise -> TVar v
-            TArrowIF d c -> TArrow (snd (unIxPair d)) (snd (unIxPair c))
-            TBaseIF b -> TBase b
-            TBottomIF -> TBottom
-            TForallIF v mb body
-                | v == x ->
-                    let mb' = fmap (substBoundCaptureLocal x s . fst . unIxPair) mb
-                    in TForall v mb' (fst (unIxPair body))
-                | v `Set.member` freeS ->
-                    let used =
-                            Set.unions
-                                [ freeS
-                                , freeTypeVarsTypeLocal (fst (unIxPair body))
-                                , maybe Set.empty (freeTypeVarsTy . fst . unIxPair) mb
-                                , Set.singleton v
-                                ]
-                        v' = freshNameLike v used
-                        body' = substTypeCaptureLocal v (TVar v') (fst (unIxPair body))
-                        mb' = fmap (substBoundCaptureLocal x s . fst . unIxPair) mb
-                    in TForall v' mb' (substTypeCaptureLocal x s body')
-                | otherwise ->
-                    let mb' = fmap (substBoundCaptureLocal x s . fst . unIxPair) mb
-                    in TForall v mb' (snd (unIxPair body))
-
-substTypeSimpleLocal :: String -> ElabType -> ElabType -> ElabType
-substTypeSimpleLocal name replacement = paraIx alg
-  where
-    substBoundSimpleLocal :: String -> ElabType -> BoundType -> BoundType
-    substBoundSimpleLocal name0 replacement0 bound = case bound of
-        TArrow a b ->
-            TArrow (substTypeSimpleLocal name0 replacement0 a) (substTypeSimpleLocal name0 replacement0 b)
-        TBase b -> TBase b
-        TBottom -> TBottom
-        TForall v mb body
-            | v == name0 ->
-                let mb' = fmap (substBoundSimpleLocal name0 replacement0) mb
-                in TForall v mb' body
-            | otherwise ->
-                let mb' = fmap (substBoundSimpleLocal name0 replacement0) mb
-                in TForall v mb' (substTypeSimpleLocal name0 replacement0 body)
-
-    alg :: TyIF i (IxPair Ty Ty) -> Ty i
-    alg ty = case ty of
-        TVarIF v
-            | v == name -> replacement
-            | otherwise -> TVar v
-        TArrowIF d c -> TArrow (snd (unIxPair d)) (snd (unIxPair c))
-        TBaseIF b -> TBase b
-        TBottomIF -> TBottom
-        TForallIF v mb body
-            | v == name ->
-                let mb' = fmap (substBoundSimpleLocal name replacement . fst . unIxPair) mb
-                in TForall v mb' (fst (unIxPair body))
-            | otherwise ->
-                let mb' = fmap (substBoundSimpleLocal name replacement . fst . unIxPair) mb
-                in TForall v mb' (snd (unIxPair body))
-
-freshNameLike :: String -> Set.Set String -> String
-freshNameLike base used =
-    let candidates = base : [base ++ show i | i <- [(1::Int)..]]
-    in case filter (`Set.notMember` used) candidates of
-        (x:_) -> x
-        [] -> base
-
 -- | Pretty-printing with display-only bound inlining.
 instance PrettyDisplay ElabType where
     prettyDisplay = pretty . inlineBoundsForDisplay
@@ -388,7 +281,7 @@ instance PrettyDisplay ElabType where
 instance PrettyDisplay ElabScheme where
     prettyDisplay sch =
         let ty = inlineBoundsForDisplay (schemeToTypeLocal sch)
-            (binds, body) = splitForallsLocal ty
+            (binds, body) = splitForalls ty
         in case binds of
             [] -> prettyDisplay body
             _ -> "∀" ++ unwords (map prettyBind binds) ++ ". " ++ prettyDisplay body
@@ -410,17 +303,8 @@ buildForalls binds body = foldr (\(v, b) t -> TForall v b t) body binds
 
 schemeFromType :: ElabType -> ElabScheme
 schemeFromType ty =
-    let (binds, body) = splitForallsLocal ty
+    let (binds, body) = splitForalls ty
     in mkElabScheme binds body
-
-splitForallsLocal :: ElabType -> ([(String, Maybe BoundType)], ElabType)
-splitForallsLocal = go
-  where
-    go ty = case ty of
-        TForall v mb body ->
-            let (binds, body') = go body
-            in ((v, mb) : binds, body')
-        _ -> ([], ty)
 
 data TypeCheckError
     = TCUnboundVar String

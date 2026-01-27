@@ -12,13 +12,14 @@ module MLF.Constraint.Traversal (
     occursInUnder,
     reachableFromNodes,
     reachableFromUnderLenient,
-    reachableFromManyUnderLenient
+    reachableFromManyUnderLenient,
+    reachableFromWithBounds
 ) where
 
 import qualified Data.IntSet as IntSet
 import Data.IntSet (IntSet)
 
-import MLF.Constraint.Types (NodeId(..), TyNode, structuralChildren)
+import MLF.Constraint.Types (NodeId(..), TyNode, structuralChildren, structuralChildrenWithBounds)
 
 data TraversalError
     = MissingNode NodeId
@@ -111,3 +112,22 @@ reachableFromNodes canonical childrenOf roots0 =
                 let visited' = IntSet.insert key visited
                     children = map canonical (childrenOf nid)
                 in go visited' (children ++ rest)
+
+-- | Collect all nodes reachable from @root@ by following both structural
+-- children and instance bounds.
+--
+-- This is a lenient traversal: missing nodes are treated as leafs, and the
+-- returned set always includes @root@ (after canonicalization) even if it is
+-- not present in the node map.
+reachableFromWithBounds
+    :: (NodeId -> NodeId)
+    -> (NodeId -> Maybe TyNode)
+    -> NodeId
+    -> IntSet
+reachableFromWithBounds canonical lookupNode root0 =
+    reachableFromNodes canonical children [root0]
+  where
+    children nid =
+        case lookupNode nid of
+            Nothing -> []
+            Just node -> structuralChildrenWithBounds node
