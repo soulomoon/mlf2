@@ -59,7 +59,6 @@ import MLF.Elab.Elaborate (elaborateWithScope)
 import MLF.Elab.Generalize
     ( GaBindParents(..)
     )
-import MLF.Util.Names (parseNameId)
 import MLF.Elab.Inst (applyInstantiation, schemeToType)
 import MLF.Reify.Core
     ( namedNodes
@@ -69,7 +68,12 @@ import MLF.Reify.Core
 import MLF.Elab.Phi (phiFromEdgeWitnessWithTrace)
 import MLF.Elab.TypeCheck (typeCheck)
 import MLF.Elab.Types
-import MLF.Reify.TypeOps (inlineBaseBoundsType, resolveBaseBoundForInstConstraint)
+import MLF.Reify.TypeOps
+    ( inlineAliasBoundsWithBy
+    , inlineBaseBoundsType
+    , resolveBaseBoundForInstConstraint
+    , resolveBoundBodyConstraint
+    )
 import MLF.Elab.Run.Annotation (adjustAnnotationInst, annNode, applyRedirectsToAnn, canonicalizeAnn)
 import MLF.Elab.Run.Debug (debugGaScope, debugGaScopeEnabled, edgeOrigins)
 import MLF.Elab.Run.Generalize
@@ -365,46 +369,19 @@ runPipelineElabWith genConstraints expr = do
                         solvedToBase = gaSolvedToBase bindParentsGa
                         toBase nid =
                             IntMap.findWithDefault nid (getNodeId nid) solvedToBase
+                        baseNodesVarOnly = IntMap.filter isTyVar (cNodes baseConstraint)
+                        isTyVar node = case node of
+                            TyVar{} -> True
+                            _ -> False
                         inlineAllBoundsType =
                             -- See Note [Scope-aware bound/alias inlining] in
                             -- docs/notes/2026-01-27-elab-changes.md.
-                            let go boundNames seen ty = case ty of
-                                    TVar v
-                                        | Set.member v boundNames -> TVar v
-                                        | otherwise ->
-                                            case parseNameId v of
-                                                Just nidInt ->
-                                                    let nid = NodeId nidInt
-                                                    in if IntSet.member (getNodeId (toBase nid)) seen
-                                                        then TVar v
-                                                        else
-                                                            case VarStore.lookupVarBound baseConstraint (toBase nid) of
-                                                                Just bnd ->
-                                                                    case reifyTypeWithNamesNoFallbackOnConstraint
-                                                                            baseConstraint
-                                                                            IntMap.empty
-                                                                            bnd of
-                                                                        Right ty' ->
-                                                                            go boundNames
-                                                                                (IntSet.insert (getNodeId (toBase nid)) seen)
-                                                                                ty'
-                                                                        Left _ -> TVar v
-                                                                Nothing -> TVar v
-                                                Nothing -> TVar v
-                                    TArrow a b -> TArrow (go boundNames seen a) (go boundNames seen b)
-                                    TForall v mb body ->
-                                        let boundNames' = Set.insert v boundNames
-                                        in TForall v (fmap (goBound boundNames' seen) mb) (go boundNames' seen body)
-                                    TBase _ -> ty
-                                    TBottom -> ty
-                                goBound boundNames seen bound = case bound of
-                                    TArrow a b -> TArrow (go boundNames seen a) (go boundNames seen b)
-                                    TBase b -> TBase b
-                                    TBottom -> TBottom
-                                    TForall v mb body ->
-                                        let boundNames' = Set.insert v boundNames
-                                        in TForall v (fmap (goBound boundNames' seen) mb) (go boundNames' seen body)
-                            in go Set.empty IntSet.empty
+                            inlineAliasBoundsWithBy
+                                False
+                                toBase
+                                baseNodesVarOnly
+                                (VarStore.lookupVarBound baseConstraint)
+                                (reifyTypeWithNamesNoFallbackOnConstraint baseConstraint IntMap.empty)
                         targetTyBaseInlineM =
                             fmap inlineAllBoundsType targetTyRawM
                         annTargetBase =
@@ -455,17 +432,8 @@ runPipelineElabWith genConstraints expr = do
                                                 else Nothing
                             in case baseCandidate of
                                 Just baseN ->
-                                    let resolveBoundBodyBase seen nid0 =
-                                            let key = getNodeId nid0
-                                            in if IntSet.member key seen
-                                                then nid0
-                                                else case VarStore.lookupVarBound baseConstraint nid0 of
-                                                    Just bnd ->
-                                                        resolveBoundBodyBase
-                                                            (IntSet.insert key seen)
-                                                            bnd
-                                                    Nothing -> nid0
-                                        baseRoot = resolveBoundBodyBase IntSet.empty baseN
+                                    let baseRoot =
+                                            resolveBoundBodyConstraint id baseConstraint IntSet.empty baseN
                                     in case reifyTypeWithNamesNoFallbackOnConstraint
                                             baseConstraint
                                             IntMap.empty

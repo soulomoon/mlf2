@@ -18,7 +18,12 @@ import Debug.Trace (trace)
 import System.Environment (lookupEnv)
 import System.IO.Unsafe (unsafePerformIO)
 import MLF.Util.Names (parseNameId)
-import MLF.Reify.TypeOps (alphaEqType, inlineBaseBoundsType, matchType)
+import MLF.Reify.TypeOps
+    ( alphaEqType
+    , inlineBaseBoundsType
+    , matchType
+    , resolveBaseBoundForInstConstraint
+    )
 import MLF.Util.RecursionSchemes (cataM)
 
 import MLF.Frontend.Syntax (VarName)
@@ -84,24 +89,8 @@ expansionToInst :: SolveResult -> Expansion -> Either ElabError Instantiation
 expansionToInst res = cataM alg
   where
     constraint = srConstraint res
-    nodes = cNodes constraint
     canonical = Solve.frWith (srUnionFind res)
-    resolveBaseBound start =
-        let go visited nid =
-                let nidC = canonical nid
-                    key = getNodeId nidC
-                in if IntSet.member key visited
-                    then Nothing
-                    else
-                        case IntMap.lookup key nodes of
-                            Just TyBase{} -> Just nidC
-                            Just TyBottom{} -> Just nidC
-                            Just TyVar{} ->
-                                case VarStore.lookupVarBound constraint nidC of
-                                    Just bnd -> go (IntSet.insert key visited) bnd
-                                    Nothing -> Nothing
-                            _ -> Nothing
-        in go IntSet.empty start
+    resolveBaseBound = resolveBaseBoundForInstConstraint constraint canonical
     reifyArg arg =
         let argC = canonical arg
         in case resolveBaseBound argC of

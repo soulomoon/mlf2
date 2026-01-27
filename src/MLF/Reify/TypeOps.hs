@@ -19,8 +19,10 @@ module MLF.Reify.TypeOps (
     parseNameId,
     resolveBaseBoundForInstConstraint,
     resolveBaseBoundForInstSolved,
+    resolveBoundBodyConstraint,
     inlineBaseBoundsType,
-    inlineAliasBoundsWithBy
+    inlineAliasBoundsWithBy,
+    inlineAliasBoundsWithBySeen
 ) where
 
 import qualified Data.IntMap.Strict as IntMap
@@ -322,6 +324,23 @@ resolveBaseBoundForInstSolved res =
         canonical = Solve.frWith (srUnionFind res)
     in resolveBaseBoundForInstConstraint constraint canonical
 
+resolveBoundBodyConstraint
+    :: (NodeId -> NodeId)
+    -> Constraint
+    -> IntSet.IntSet
+    -> NodeId
+    -> NodeId
+resolveBoundBodyConstraint canonical constraint visited0 start =
+    let go visited nid0 =
+            let nid = canonical nid0
+                key = getNodeId nid
+            in if IntSet.member key visited
+                then nid
+                else case VarStore.lookupVarBound constraint nid of
+                    Just bnd -> go (IntSet.insert key visited) bnd
+                    Nothing -> nid
+    in go visited0 start
+
 inlineBaseBoundsType :: Constraint -> (NodeId -> NodeId) -> ElabType -> ElabType
 inlineBaseBoundsType constraint canonical = cataIx alg
   where
@@ -356,6 +375,22 @@ inlineAliasBoundsWithBy
     -> ElabType
     -> ElabType
 inlineAliasBoundsWithBy fallbackToBottom canonical nodes lookupBound reifyBound =
+    inlineAliasBoundsWithBySeen
+        fallbackToBottom
+        canonical
+        nodes
+        lookupBound
+        (\_ nid -> reifyBound nid)
+
+inlineAliasBoundsWithBySeen
+    :: Bool
+    -> (NodeId -> NodeId)
+    -> IntMap.IntMap TyNode
+    -> (NodeId -> Maybe NodeId)
+    -> (IntSet.IntSet -> NodeId -> Either err ElabType)
+    -> ElabType
+    -> ElabType
+inlineAliasBoundsWithBySeen fallbackToBottom canonical nodes lookupBound reifyBound =
     goAlias IntSet.empty Set.empty
   where
     goAlias seen boundNames ty = case ty of
@@ -366,6 +401,7 @@ inlineAliasBoundsWithBy fallbackToBottom canonical nodes lookupBound reifyBound 
                     Just nidInt ->
                         let nidC = canonical (NodeId nidInt)
                             key = getNodeId nidC
+                            seen' = IntSet.insert key seen
                         in if IntSet.member key seen
                             then ty
                             else
@@ -373,13 +409,13 @@ inlineAliasBoundsWithBy fallbackToBottom canonical nodes lookupBound reifyBound 
                                     Just TyVar{} ->
                                         case lookupBound nidC of
                                             Just bnd ->
-                                                case reifyBound (canonical bnd) of
-                                                    Right ty' -> goAlias (IntSet.insert key seen) boundNames ty'
+                                                case reifyBound seen' (canonical bnd) of
+                                                    Right ty' -> goAlias seen' boundNames ty'
                                                     Left _ -> ty
                                             Nothing -> if fallbackToBottom then TBottom else ty
                                     Just _ ->
-                                        case reifyBound nidC of
-                                            Right ty' -> goAlias (IntSet.insert key seen) boundNames ty'
+                                        case reifyBound seen' nidC of
+                                            Right ty' -> goAlias seen' boundNames ty'
                                             Left _ -> ty
                                     Nothing -> ty
                     Nothing -> ty

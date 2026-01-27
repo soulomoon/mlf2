@@ -12,12 +12,13 @@ import qualified Data.Set as Set
 
 import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Constraint.Solve (SolveResult, frWith, srConstraint, srUnionFind)
-import MLF.Constraint.Types (NodeId(..), getNodeId)
-import MLF.Util.Names (parseNameId)
+import MLF.Constraint.Types (TyNode(..), cNodes)
 import MLF.Reify.Core (namedNodes, reifyTypeWithNamedSetNoFallback)
 import MLF.Reify.TypeOps (
     freeTypeVarsFrom,
+    inlineAliasBoundsWithBySeen,
     inlineBaseBoundsType,
+    resolveBoundBodyConstraint,
     renameTypeVar,
     splitForalls,
     substTypeSimple
@@ -45,53 +46,25 @@ inlineBoundVarsTypeForBound = inlineBoundVarsTypeWith True
 -- See Note [Scope-aware bound/alias inlining] in
 -- docs/notes/2026-01-27-elab-changes.md.
 inlineBoundVarsTypeWith :: Bool -> SolveResult -> ElabType -> ElabType
-inlineBoundVarsTypeWith unboundToBottom res = go Set.empty IntSet.empty
+inlineBoundVarsTypeWith unboundToBottom res =
+    inlineAliasBoundsWithBySeen
+        unboundToBottom
+        canonical
+        nodesVarOnly
+        (VarStore.lookupVarBound constraint)
+        reifyBoundWithSeen
   where
     constraint = srConstraint res
     canonical = frWith (srUnionFind res)
     namedSet = either (const IntSet.empty) id (namedNodes res)
-    resolveBoundBody seen nid0 =
-        let nid = canonical nid0
-            key = getNodeId nid
-        in if IntSet.member key seen
-            then nid
-            else case VarStore.lookupVarBound constraint nid of
-                Just bnd -> resolveBoundBody (IntSet.insert key seen) bnd
-                Nothing -> nid
-    go boundNames seen ty = case ty of
-        TVar v
-            | Set.member v boundNames -> ty
-            | otherwise ->
-                case parseNameId v of
-                    Just nidInt ->
-                        let nidC = canonical (NodeId nidInt)
-                            key = getNodeId nidC
-                        in if IntSet.member key seen
-                            then ty
-                            else case VarStore.lookupVarBound constraint nidC of
-                                Just bnd ->
-                                    let bndRoot = resolveBoundBody (IntSet.insert key seen) bnd
-                                    in case reifyTypeWithNamedSetNoFallback res IntMap.empty namedSet bndRoot of
-                                        Right t0 ->
-                                            let t1 = inlineBaseBoundsType constraint canonical t0
-                                            in go boundNames (IntSet.insert key seen) t1
-                                        Left _ -> ty
-                                Nothing -> if unboundToBottom then TBottom else ty
-                    Nothing -> ty
-        TArrow a b -> TArrow (go boundNames seen a) (go boundNames seen b)
-        TForall v mb body ->
-            let boundNames' = Set.insert v boundNames
-            in TForall v (fmap (goBound boundNames' seen) mb) (go boundNames' seen body)
-        TBase _ -> ty
-        TBottom -> ty
-
-    goBound boundNames seen bound = case bound of
-        TArrow a b -> TArrow (go boundNames seen a) (go boundNames seen b)
-        TBase b -> TBase b
-        TBottom -> TBottom
-        TForall v mb body ->
-            let boundNames' = Set.insert v boundNames
-            in TForall v (fmap (goBound boundNames' seen) mb) (go boundNames' seen body)
+    nodesVarOnly = IntMap.filter isTyVar (cNodes constraint)
+    isTyVar node = case node of
+        TyVar{} -> True
+        _ -> False
+    reifyBoundWithSeen seen bnd = do
+        let bndRoot = resolveBoundBodyConstraint canonical constraint seen bnd
+        t0 <- reifyTypeWithNamedSetNoFallback res IntMap.empty namedSet bndRoot
+        pure (inlineBaseBoundsType constraint canonical t0)
 
 simplifyAnnotationType :: ElabType -> ElabType
 simplifyAnnotationType = go
