@@ -354,21 +354,10 @@ orderedBinders canonical c0 binder0 = do
                         Just TyForall{} -> True
                         _ -> False
                 reachable =
-                    let go visited [] = visited
-                        go visited (nid0:rest) =
-                            let nid = canonical nid0
-                                key = getNodeId nid
-                            in if IntSet.member key visited
-                                then go visited rest
-                                else
-                                    let visited' = IntSet.insert key visited
-                                        kids =
-                                            maybe
-                                                []
-                                                structuralChildrenWithBounds
-                                                (IntMap.lookup key nodes)
-                                    in go visited' (map canonical kids ++ rest)
-                    in go IntSet.empty [orderRoot]
+                    Traversal.reachableFromWithBounds
+                        canonical
+                        (\nid -> IntMap.lookup (getNodeId nid) nodes)
+                        orderRoot
             binders <- boundChildrenUnder canonical c0 (TypeRef binderN) includeRigid
             let bindersReachable =
                     filter (\nid -> IntSet.member (getNodeId nid) reachable) binders
@@ -835,21 +824,10 @@ checkNoGenFallback :: Constraint -> Either BindingError ()
 checkNoGenFallback c = do
     let nodes = cNodes c
         reachableFromWithBounds root0 =
-            let go visited [] = visited
-                go visited (nid0:rest) =
-                    let nid = nid0
-                        key = getNodeId nid
-                    in if IntSet.member key visited
-                        then go visited rest
-                        else
-                            let visited' = IntSet.insert key visited
-                                kids =
-                                        maybe
-                                            []
-                                            structuralChildrenWithBounds
-                                            (IntMap.lookup key nodes)
-                            in go visited' (kids ++ rest)
-            in go IntSet.empty [root0]
+            Traversal.reachableFromWithBounds
+                id
+                (\nid -> IntMap.lookup (getNodeId nid) nodes)
+                root0
 
         firstGenAncestor nid = do
             path <- bindingPathToRoot c (typeRef nid)

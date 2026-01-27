@@ -11,6 +11,7 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
 import MLF.Constraint.Types
+import MLF.Util.Graph (reachableFromStop)
 import MLF.Frontend.ConstraintGen.State (BuildState(..), ConstraintM, ScopeFrame(..))
 
 pushScope :: ConstraintM ()
@@ -70,23 +71,19 @@ rebindScopeNodes binder root frame = do
         scopeNodes = sfNodes frame
         scopeTypeKeys = IntSet.filter even scopeNodes
         reachable =
-            let go visited [] = visited
-                go visited (nid0:rest) =
-                    let key = getNodeId nid0
-                    in if IntSet.member key visited
-                        then go visited rest
-                        else if IntSet.member (nodeRefKey (typeRef (NodeId key))) stopSchemeRoots
-                            && key /= getNodeId root
-                            then go visited rest
-                            else
-                                let visited' = IntSet.insert key visited
-                                    kids =
-                                        case IntMap.lookup key nodes of
-                                            Nothing -> []
-                                            Just node ->
-                                                structuralChildrenWithBounds node
-                                in go visited' (kids ++ rest)
-            in go IntSet.empty [root]
+            let shouldStop nid =
+                    IntSet.member (nodeRefKey (typeRef nid)) stopSchemeRoots
+                        && getNodeId nid /= getNodeId root
+                childrenOf nid =
+                    case IntMap.lookup (getNodeId nid) nodes of
+                        Nothing -> []
+                        Just node -> structuralChildrenWithBounds node
+            in reachableFromStop
+                getNodeId
+                id
+                childrenOf
+                shouldStop
+                root
         reachableTypeKeys =
             IntSet.fromList
                 [ nodeRefKey (TypeRef (NodeId nid))
