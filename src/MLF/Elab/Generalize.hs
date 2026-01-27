@@ -1,4 +1,5 @@
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE LambdaCase #-}
 module MLF.Elab.Generalize (
     GaBindParents(..),
     applyGeneralizePlan
@@ -41,6 +42,37 @@ import MLF.Reify.Core
 import MLF.Reify.TypeOps (freeTypeVarsFrom, inlineAliasBoundsWithBy)
 import MLF.Elab.Types
 import MLF.Util.Graph (reachableFromStop)
+
+-- | Generate a name for a rigid type variable based on its key.
+rigidNameFor :: Int -> String
+rigidNameFor key = "__rigid" ++ show key
+
+-- | Build a forall type from a list of binders and a body type.
+buildForallType :: [(String, Maybe BoundType)] -> ElabType -> ElabType
+buildForallType binds body = foldr (\(n, b) t -> TForall n b t) body binds
+
+-- | Inline rigid type variables by substituting them with their bounds.
+-- Uses cycle detection to prevent infinite loops when bounds reference each other.
+inlineRigidTypes :: Map.Map String ElabType -> ElabType -> ElabType
+inlineRigidTypes rigidBounds = go Set.empty
+  where
+    go seen ty = case ty of
+        TVar v ->
+            case Map.lookup v rigidBounds of
+                Just bound
+                    | Set.member v seen -> TVar v
+                    | otherwise -> go (Set.insert v seen) bound
+                Nothing -> TVar v
+        TBase b -> TBase b
+        TBottom -> TBottom
+        TArrow a b -> TArrow (go seen a) (go seen b)
+        TForall v mb body ->
+            TForall v (fmap (goBound seen) mb) (go seen body)
+    goBound seen = \case
+        TArrow a b -> TArrow (go seen a) (go seen b)
+        TBase b -> TBase b
+        TBottom -> TBottom
+        TForall v mb body -> TForall v (fmap (goBound seen) mb) (go seen body)
 
 applyGeneralizePlan
     :: (NodeRef -> NodeId -> Either ElabError ElabScheme)
@@ -113,24 +145,18 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
             allowBoundTraversalFor schemeRootsPlan canonical scopeGen target0
         childrenWithBounds nid =
             case IntMap.lookup (getNodeId nid) nodes of
+                Just node@TyVar{ tnBound = Just bnd } | allowBoundTraversal bnd ->
+                    structuralChildrenWithBounds node
+                Just node -> structuralChildren node
                 Nothing -> []
-                Just node ->
-                    case node of
-                        TyVar{ tnBound = Just bnd }
-                            | allowBoundTraversal bnd ->
-                                structuralChildrenWithBounds node
-                        _ -> structuralChildren node
-    let unboundedBinderNames =
-            [ name
-            | (name, nidInt) <- zip binderNames orderedBinders
-            , case VarStore.lookupVarBound constraint (canonical (NodeId nidInt)) of
-                Nothing -> True
-                Just _ -> False
-            ]
-        uniqueUnboundedName =
-            case unboundedBinderNames of
+    let uniqueUnboundedName =
+            case [ name
+                 | (name, nidInt) <- zip binderNames orderedBinders
+                 , Nothing <- [lookupCanonicalBound (NodeId nidInt)]
+                 ] of
                 [nm] -> Just nm
                 _ -> Nothing
+        lookupCanonicalBound nid = VarStore.lookupVarBound constraint (canonical nid)
     let binderSet = IntSet.fromList orderedBinders
         bindingEnv =
             Reify.ReifyBindingEnv
@@ -175,104 +201,13 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
         ownersByRoot =
             [ gnId gen
             | gen <- IntMap.elems (cGenNodes constraint)
-            , any (\root -> canonical root == typeRootC) (gnSchemes gen)
+            , root <- gnSchemes gen
+            , canonical root == typeRootC
             ]
     -- Thesis §15.2.5: rigid quantification is always inlined (no abstractions for rigid nodes).
-    let rigidNameFor key = "__rigid" ++ show key
-        inlineRigidTypes rigidBounds = go Set.empty
-          where
-            go seen ty = case ty of
-                TVar v ->
-                    case Map.lookup v rigidBounds of
-                        Just bound
-                            | Set.member v seen -> TVar v
-                            | otherwise -> go (Set.insert v seen) bound
-                        Nothing -> TVar v
-                TBase b -> TBase b
-                TBottom -> TBottom
-                TArrow a b -> TArrow (go seen a) (go seen b)
-                TForall v mb body ->
-                    TForall v (fmap (goBound seen) mb) (go seen body)
-            goBound seen bound = case bound of
-                TArrow a b -> TArrow (go seen a) (go seen b)
-                TBase b -> TBase b
-                TBottom -> TBottom
-                TForall v mb body ->
-                    TForall v (fmap (goBound seen) mb) (go seen body)
-    let reifyTypeWithAliases bodyRoot substBase binderPairs = do
-            let bodyRootC = canonical bodyRoot
-                useConstraintReify =
-                    case IntMap.lookup (getNodeId bodyRootC) nodes of
-                        Just TyVar{} ->
-                            case VarStore.lookupVarBound constraint bodyRootC of
-                                Just bnd -> getNodeId bnd == getNodeId bodyRoot
-                                Nothing -> False
-                        _ -> False
-                reifyWith substRoot substMap constraintArg resArg =
-                    if useConstraintReify
-                        then reifyTypeWithNamesNoFallbackOnConstraint constraintArg substMap substRoot
-                        else reifyTypeWithNamesNoFallback resArg substMap substRoot
-                reifyBoundWith substMap constraintArg resArg bndRoot =
-                    if useConstraintReify
-                        then reifyBoundWithNamesOnConstraint constraintArg substMap bndRoot
-                        else reifyBoundWithNames resArg substMap bndRoot
-                rigidNodeKeys =
-                    IntSet.toList $
-                        IntSet.fromList
-                            [ getNodeId (canonical nid)
-                            | (childKey, (_parent, flag)) <- IntMap.toList bindParents
-                            , flag == BindRigid
-                            , TypeRef nid <- [nodeRefFromKey childKey]
-                            , case IntMap.lookup (getNodeId (canonical nid)) nodes of
-                                Just TyVar{} -> True
-                                _ -> False
-                            , IntSet.member (getNodeId (canonical nid)) (reachableFromWithBounds bodyRoot)
-                            , not (IntSet.member (getNodeId (canonical nid)) binderSet)
-                            ]
-                rigidSubstMap =
-                    IntMap.fromList
-                        [ (key, rigidNameFor key)
-                        | key <- rigidNodeKeys
-                        ]
-            let reachableWithoutBound bnd =
-                    let stopSet = IntSet.singleton (getNodeId (canonical bnd))
-                        shouldStop nid = IntSet.member (getNodeId nid) stopSet
-                    in reachableFromStop
-                        getNodeId
-                        canonical
-                        childrenWithBounds
-                        shouldStop
-                        bodyRoot
-                aliasEntries =
-                    [ (getNodeId (canonical bnd), name)
-                    | (b, name) <- binderPairs
-                    , Just bnd <- [VarStore.lookupVarBound constraint (canonical b)]
-                    , canonical bnd /= bodyRootC
-                    , not (IntSet.member (getNodeId (canonical b)) (reachableWithoutBound bnd))
-                    ]
-                substBaseRigid = IntMap.union rigidSubstMap substBase
-                inlineRigid substMap constraintArg resArg ty =
-                    if null rigidNodeKeys
-                        then pure ty
-                        else do
-                            rigidBounds <-
-                                mapM
-                                    (\key -> do
-                                        let nid = NodeId key
-                                            name = rigidNameFor key
-                                        case VarStore.lookupVarBound constraintArg (canonical nid) of
-                                            Nothing -> pure (name, TBottom)
-                                            Just bnd -> do
-                                                bndTy <- reifyBoundWith substMap constraintArg resArg (canonical bnd)
-                                                pure (name, bndTy)
-                                    )
-                                    rigidNodeKeys
-                            let rigidMap = Map.fromList rigidBounds
-                            pure (inlineRigidTypes rigidMap ty)
+    let reifyTypeWithAliases bodyRoot substBase binderPairs =
             if null aliasEntries
-                then do
-                    ty <- reifyWith bodyRoot substBaseRigid constraint resForReify
-                    inlineRigid substBaseRigid constraint resForReify ty
+                then reifyAndInlineRigid bodyRoot substBaseRigid
                 else do
                     let aliasNodes =
                             IntMap.fromList
@@ -283,9 +218,94 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
                             constraint { cNodes = IntMap.union aliasNodes nodes }
                         substAlias =
                             IntMap.union (IntMap.fromList aliasEntries) substBaseRigid
-                    let resAlias = resForReify { srConstraint = constraintAlias }
+                        resAlias = resForReify { srConstraint = constraintAlias }
                     ty <- reifyWith bodyRoot substAlias constraintAlias resAlias
                     inlineRigid substAlias constraintAlias resAlias ty
+          where
+            -- Basic setup
+            bodyRootC = canonical bodyRoot
+            canonicalKey = getNodeId . canonical
+            lookupBound nid = VarStore.lookupVarBound constraint (canonical nid)
+
+            -- Determine whether to use constraint-based or result-based reification
+            useConstraintReify =
+                case IntMap.lookup (getNodeId bodyRootC) nodes of
+                    Just TyVar{} | Just bnd <- lookupBound bodyRootC ->
+                        getNodeId bnd == getNodeId bodyRoot
+                    _ -> False
+
+            -- Reification helpers
+            reifyWith substRoot substMap constraintArg resArg
+                | useConstraintReify = reifyTypeWithNamesNoFallbackOnConstraint constraintArg substMap substRoot
+                | otherwise = reifyTypeWithNamesNoFallback resArg substMap substRoot
+
+            reifyBoundWith substMap constraintArg resArg bndRoot
+                | useConstraintReify = reifyBoundWithNamesOnConstraint constraintArg substMap bndRoot
+                | otherwise = reifyBoundWithNames resArg substMap bndRoot
+
+            -- Rigid type handling
+            isReachableRigidVar nid =
+                case IntMap.lookup (canonicalKey nid) nodes of
+                    Just TyVar{} ->
+                        let cidKey = canonicalKey nid
+                        in IntSet.member cidKey (reachableFromWithBounds bodyRoot)
+                            && cidKey `IntSet.notMember` binderSet
+                    _ -> False
+
+            rigidNodeKeys =
+                IntSet.toList $ IntSet.fromList
+                    [ canonicalKey nid
+                    | (childKey, (_parent, flag)) <- IntMap.toList bindParents
+                    , flag == BindRigid
+                    , TypeRef nid <- [nodeRefFromKey childKey]
+                    , isReachableRigidVar nid
+                    ]
+
+            rigidSubstMap =
+                IntMap.fromList
+                    [ (key, rigidNameFor key)
+                    | key <- rigidNodeKeys
+                    ]
+
+            -- Alias handling
+            reachableWithoutBound bnd =
+                let shouldStop nid = getNodeId nid == getNodeId (canonical bnd)
+                in reachableFromStop
+                    getNodeId
+                    canonical
+                    childrenWithBounds
+                    shouldStop
+                    bodyRoot
+
+            aliasEntries =
+                [ (getNodeId (canonical bnd), name)
+                | (b, name) <- binderPairs
+                , Just bnd <- [lookupBound b]
+                , canonical bnd /= bodyRootC
+                , canonicalKey b `IntSet.notMember` reachableWithoutBound bnd
+                ]
+
+            substBaseRigid = IntMap.union rigidSubstMap substBase
+
+            -- Main reification logic
+            reifyAndInlineRigid root substMap = do
+                ty <- reifyWith root substMap constraint resForReify
+                inlineRigid substMap constraint resForReify ty
+
+            inlineRigid substMap constraintArg resArg ty
+                | null rigidNodeKeys = pure ty
+                | otherwise = do
+                    let computeRigidBound key = do
+                            let nid = NodeId key
+                                name = rigidNameFor key
+                            case lookupBound nid of
+                                Nothing -> pure (name, TBottom)
+                                Just bnd -> do
+                                    bndTy <- reifyBoundWith substMap constraintArg resArg (canonical bnd)
+                                    pure (name, bndTy)
+                    rigidBounds <- mapM computeRigidBound rigidNodeKeys
+                    let rigidMap = Map.fromList rigidBounds
+                    pure (inlineRigidTypes rigidMap ty)
 
     let orderedBinderPairs = zip (map NodeId orderedBinders) binderNames
         reifyTypeWithOrderedBinders =
@@ -293,146 +313,113 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
                 typeRootForReifyAdjusted
                 substForReifyAdjusted
                 orderedBinderPairs
-    let reifySchemeType =
-            if useSchemeTypeAdjusted
-                then reifySchemeTypeAdjusted
-                else reifySchemeTypeExplicit
-        reifySchemeTypeAdjusted = do
-            let reachableVars =
-                    [ NodeId nid
-                    | nid <- IntSet.toList reachableType
-                    , nid /= getNodeId typeRootC
-                    , case IntMap.lookup nid nodes of
-                        Just TyVar{} -> True
-                        _ -> False
-                    ]
-                hasReachableBinder gid =
-                    any
-                        (\nid -> firstGenAncestorGa (typeRef nid) == Just gid)
-                        reachableVars
-                schemeOwnerCandidates = filter hasReachableBinder schemeOwners
-                schemeScope =
-                    case schemeOwnerFromBody of
-                        Just gid
-                            | schemeOwnerFromBodyIsAlias
-                            , (owner:_) <- ownersByRoot ->
-                                genRef owner
-                            | otherwise -> genRef gid
-                        Nothing ->
-                            case schemeOwnerCandidates of
-                                (gid:_) -> genRef gid
-                                [] ->
-                                    case schemeOwners of
-                                        (gid:_) -> genRef gid
-                                        [] -> typeRef typeRootC
-            if schemeScope == scopeRootC
-                then do
-                    traceGeneralizeM env
-                        ("generalizeAt: schemeScope equals scopeRootC; skipping recursive scheme-type fallback"
-                            ++ " scopeRootC=" ++ show scopeRootC
-                            ++ " typeRootC=" ++ show typeRootC
-                        )
-                    reifyTypeWithOrderedBinders
-                else do
-                    sch <- generalizeAtForScheme schemeScope typeRootC
-                    pure $
-                        case sch of
-                            Forall binds body ->
-                                foldr (\(n, b) t -> TForall n b t) body binds
-        reifySchemeTypeExplicit = do
-            explicitSchemeTy <- explicitStructuralSchemeType
-            case explicitSchemeTy of
-                Just ty -> pure ty
-                Nothing -> fallbackSchemeType
-        explicitStructuralSchemeType =
-            case (null bindings, scopeHasStructuralScheme, binders0) of
-                (True, True, explicitBinders0@(_:_)) ->
+
+    let reifySchemeType
+            | useSchemeTypeAdjusted = reifySchemeTypeAdjusted
+            | otherwise = reifySchemeTypeExplicit
+          where
+            -- Adjusted scheme type: use scheme ownership to determine scope
+            reifySchemeTypeAdjusted = do
+                let reachableVars =
+                        [ NodeId nid
+                        | nid <- IntSet.toList reachableType
+                        , nid /= getNodeId typeRootC
+                        , Just TyVar{} <- [IntMap.lookup nid nodes]
+                        ]
+                    hasReachableBinder gid =
+                        any (\nid -> firstGenAncestorGa (typeRef nid) == Just gid) reachableVars
+                    schemeOwnerCandidates = filter hasReachableBinder schemeOwners
+                    schemeScope = case schemeOwnerFromBody of
+                        Just _ | schemeOwnerFromBodyIsAlias, (owner:_) <- ownersByRoot -> genRef owner
+                        Just gid -> genRef gid
+                        Nothing -> case schemeOwnerCandidates ++ schemeOwners of
+                            (gid:_) -> genRef gid
+                            [] -> typeRef typeRootC
+                if schemeScope == scopeRootC
+                    then do
+                        traceGeneralizeM env
+                            ("generalizeAt: schemeScope equals scopeRootC; skipping recursive scheme-type fallback"
+                                ++ " scopeRootC=" ++ show scopeRootC
+                                ++ " typeRootC=" ++ show typeRootC
+                            )
+                        reifyTypeWithOrderedBinders
+                    else do
+                        sch <- generalizeAtForScheme schemeScope typeRootC
+                        pure $ case sch of
+                            Forall binds body -> buildForallType binds body
+
+            -- Explicit scheme type: use structural scheme if available
+            reifySchemeTypeExplicit = do
+                explicitSchemeTy <- explicitStructuralSchemeType
+                case explicitSchemeTy of
+                    Just ty -> pure ty
+                    Nothing -> fallbackSchemeType
+
+            explicitStructuralSchemeType
+                | null bindings, scopeHasStructuralScheme, explicitBinders0@(_:_) <- binders0 =
                     case explicitSchemePlan explicitBinders0 of
                         Nothing -> pure Nothing
                         Just (binders, names, substExplicit, explicitBodyRoot) -> do
-                            bodyTy <-
-                                reifyTypeWithAliases
-                                    explicitBodyRoot
-                                    substExplicit
-                                    (zip binders names)
+                            bodyTy <- reifyTypeWithAliases explicitBodyRoot substExplicit (zip binders names)
                             bounds <- explicitBounds binders names substExplicit
-                            let tyExplicit =
-                                    foldr
-                                        (\(n, mb) acc -> TForall n mb acc)
-                                        bodyTy
-                                        bounds
-                            pure (Just tyExplicit)
-                _ -> pure Nothing
-        explicitSchemePlan explicitBinders0 =
-            let binderKeys =
-                    IntSet.fromList
-                        [ getNodeId (canonical b)
-                        | b <- explicitBinders0
-                        ]
-                binderKeysList = IntSet.toList binderKeys
-                binders = [ NodeId key | key <- binderKeysList ]
-                names = zipWith alphaName [0..] binderKeysList
-                substExplicit = IntMap.fromList (zip binderKeysList names)
-                explicitBodyRoot =
-                    case IntMap.lookup (getNodeId typeRootC) nodes of
-                        Just TyVar{} ->
-                            case VarStore.lookupVarBound constraint (canonical typeRootC) of
-                                Just bnd -> canonical bnd
-                                Nothing -> typeRootForReifyAdjusted
-                        _ -> typeRootForReifyAdjusted
-            in if null binders
-                then Nothing
-                else Just (binders, names, substExplicit, explicitBodyRoot)
-        explicitBounds binders names substExplicit =
-            let inlineNamedBounds = inlineNamedBoundsFor substExplicit
-            in mapM
-                (\(b, name) ->
-                    case VarStore.lookupVarBound constraint (canonical b) of
-                        Nothing -> pure (name, Nothing)
-                        Just bnd -> do
-                            bndTy <-
-                                reifyBoundWithNames
-                                    resForReify
-                                    substExplicit
-                                    (canonical bnd)
-                            let bndTy' = inlineNamedBounds bndTy
-                                selfBound =
-                                    case bndTy' of
-                                        TVar v -> v == name
-                                        _ -> False
-                                mbBound =
-                                    if bndTy' == TBottom || selfBound
-                                        then Nothing
-                                        else case bndTy' of
-                                            TVar{} -> Nothing
-                                            _ -> Just (elabToBound bndTy')
-                            pure (name, mbBound)
-                )
-                (zip binders names)
-        inlineNamedBoundsFor substExplicit =
-            -- See Note [Scope-aware bound/alias inlining] in
-            -- docs/notes/2026-01-27-elab-changes.md.
-            inlineAliasBoundsWithBy
-                False
-                canonical
-                nodes
-                (VarStore.lookupVarBound constraint)
-                (reifyBoundWithNames resForReify substExplicit)
-        fallbackSchemeType =
-            if scopeHasStructuralScheme && null bindings
-                then
+                            pure (Just (buildForallType bounds bodyTy))
+                | otherwise = pure Nothing
+
+            explicitSchemePlan explicitBinders0 =
+                let binderKeysList = IntSet.toList $ IntSet.fromList
+                        [ getNodeId (canonical b) | b <- explicitBinders0 ]
+                    names = zipWith alphaName [0..] binderKeysList
+                in case binderKeysList of
+                    [] -> Nothing
+                    _ -> Just
+                        ( map NodeId binderKeysList
+                        , names
+                        , IntMap.fromList (zip binderKeysList names)
+                        , case IntMap.lookup (getNodeId typeRootC) nodes of
+                            Just TyVar{} | Just bnd <- lookupCanonicalBound typeRootC ->
+                                canonical bnd
+                            _ -> typeRootForReifyAdjusted
+                        )
+
+            explicitBounds binders names substExplicit =
+                let lookupBound nid = VarStore.lookupVarBound constraint (canonical nid)
+                    inlineNamedBounds = inlineNamedBoundsFor substExplicit
+                    computeBound (b, name) =
+                        case lookupBound b of
+                            Nothing -> pure (name, Nothing)
+                            Just bnd -> do
+                                bndTy <- reifyBoundWithNames resForReify substExplicit (canonical bnd)
+                                let bndTy' = inlineNamedBounds bndTy
+                                    mbBound = case bndTy' of
+                                        TBottom -> Nothing
+                                        TVar v | v == name -> Nothing
+                                        TVar{} -> Nothing
+                                        _ -> Just (elabToBound bndTy')
+                                pure (name, mbBound)
+                in mapM computeBound (zip binders names)
+
+            inlineNamedBoundsFor substExplicit =
+                -- See Note [Scope-aware bound/alias inlining] in
+                -- docs/notes/2026-01-27-elab-changes.md.
+                inlineAliasBoundsWithBy
+                    False
+                    canonical
+                    nodes
+                    (VarStore.lookupVarBound constraint)
+                    (reifyBoundWithNames resForReify substExplicit)
+
+            fallbackSchemeType
+                | scopeHasStructuralScheme && null bindings =
                     reifyTypeWithNamesNoFallbackOnConstraint
                         constraint
                         substForReifyAdjusted
                         typeRootForReifyAdjusted
-                else
-                    case mbBindParentsGa of
-                        Just ga -> reifyWithGaBase ga
-                        Nothing -> reifyTypeWithOrderedBinders
-        reifyWithGaBase ga =
-            case IntMap.lookup (getNodeId (canonical typeRoot)) solvedToBasePrefPlan of
-                Just baseN
-                    | canonical baseN /= canonical typeRoot -> do
+                | Just ga <- mbBindParentsGa = reifyWithGaBase ga
+                | otherwise = reifyTypeWithOrderedBinders
+
+            reifyWithGaBase ga =
+                case IntMap.lookup (getNodeId (canonical typeRoot)) solvedToBasePrefPlan of
+                    Just baseN | canonical baseN /= canonical typeRoot -> do
                         tyBase <-
                             reifyTypeWithNamesNoFallbackOnConstraint
                                 (gaBaseConstraint ga)
@@ -443,7 +430,7 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
                         if Set.isSubsetOf freeBase allowedBase
                             then pure tyBase
                             else reifyTypeWithOrderedBinders
-                _ -> reifyTypeWithOrderedBinders
+                    _ -> reifyTypeWithOrderedBinders
     ty0Raw <- reifySchemeType
     finalizeScheme FinalizeInput
         { fiEnv = env
