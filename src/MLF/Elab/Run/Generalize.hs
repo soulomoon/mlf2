@@ -37,6 +37,7 @@ import MLF.Constraint.Types
     , typeRef
     )
 import qualified MLF.Constraint.VarStore as VarStore
+import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Elab.Generalize (GaBindParents(..), applyGeneralizePlan)
 import MLF.Constraint.BindingUtil (bindingPathToRootLocal, firstGenAncestorFrom)
 import MLF.Elab.Run.Debug (debugGaScope)
@@ -1190,7 +1191,7 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                 probeIds = [NodeId 1, NodeId 2, NodeId 3]
                 probeInfo =
                     [ ( pid
-                      , IntMap.lookup (getNodeId pid) (cNodes constraint1)
+                      , NodeAccess.lookupNode constraint1 pid
                       , IntMap.lookup (nodeRefKey (typeRef pid)) (cBindParents constraint1)
                       )
                     | pid <- probeIds

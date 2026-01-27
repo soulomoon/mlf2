@@ -35,6 +35,7 @@ import MLF.Constraint.Presolution (EdgeTrace(..))
 import qualified MLF.Binding.Tree as Binding
 import MLF.Binding.Tree (checkBindingTree, checkNoGenFallback, checkSchemeClosureUnder, lookupBindParent)
 import qualified MLF.Constraint.VarStore as VarStore
+import qualified MLF.Constraint.NodeAccess as NodeAccess
 import Debug.Trace (trace)
 import System.Environment (lookupEnv)
 import System.IO.Unsafe (unsafePerformIO)
@@ -88,7 +89,7 @@ contextToNodeBoundWithOrderKeys canonical keys c _namedSet root target = do
     if rootC == targetC
         then pure (Just [])
         else do
-            let rootNode = IntMap.lookup (getNodeId rootC) (cNodes c)
+            let rootNode = NodeAccess.lookupNode c rootC
                 needsInsideRoot =
                     case rootNode of
                         Just TyForall{} -> False
@@ -122,7 +123,7 @@ contextToNodeBoundWithOrderKeys canonical keys c _namedSet root target = do
                     else
                         let visited' = IntSet.insert key visited
                             kids =
-                                case IntMap.lookup key (cNodes c) of
+                                case NodeAccess.lookupNode c (NodeId key) of
                                     Nothing -> []
                                     Just node ->
                                         structuralChildren node
@@ -139,7 +140,7 @@ contextToNodeBoundWithOrderKeys canonical keys c _namedSet root target = do
         binders0 <-
             bindingToElab (Binding.boundFlexChildrenUnder canonical c (typeRef binder))
         let orderRoot =
-                case IntMap.lookup (getNodeId binder) (cNodes c) of
+                case NodeAccess.lookupNode c binder of
                     Just TyForall{ tnBody = body } -> canonical body
                     _ -> binder
             reachable = reachableFromStructural orderRoot
@@ -178,7 +179,7 @@ contextToNodeBoundWithOrderKeys canonical keys c _namedSet root target = do
                                 InstantiationError $
                                     "contextToNodeBound: cycle detected at " ++ show nid
                         else
-                            case IntMap.lookup key (cNodes c) of
+                            case NodeAccess.lookupNode c nid of
                                 Nothing -> Left (MissingNode nid)
                                 Just node ->
                                     let visiting' = IntSet.insert key visiting
@@ -231,7 +232,7 @@ contextToNodeBoundWithOrderKeys canonical keys c _namedSet root target = do
             Nothing -> do
                 let tryBound memoAcc [] = Right (memoAcc, Nothing)
                     tryBound memoAcc (b : bs) =
-                        case IntMap.lookup (getNodeId b) (cNodes c) of
+                        case NodeAccess.lookupNode c b of
                             Just TyVar{ tnBound = Just bnd } -> do
                                 let bndC = canonical bnd
                                 (memo', res) <- go visiting memoAcc bndC
@@ -360,7 +361,7 @@ phiFromEdgeWitnessWithTrace generalizeAtWith res mbGaParents mSchemeInfo mTrace 
                                         , parentRef == genRef gid
                                         , flag == BindFlex || flag == BindRigid
                                         , TypeRef childN <- [nodeRefFromKey childKey]
-                                        , case IntMap.lookup (getNodeId childN) (cNodes (srConstraint res)) of
+                                        , case NodeAccess.lookupNode (srConstraint res) childN of
                                             Just TyVar{} -> True
                                             _ -> False
                                         ]
@@ -506,7 +507,7 @@ phiFromEdgeWitnessWithTrace generalizeAtWith res mbGaParents mSchemeInfo mTrace 
     isTyVarNode :: NodeId -> Bool
     isTyVarNode nid =
         let key = getNodeId (canonicalNode nid)
-        in case IntMap.lookup key (cNodes (srConstraint res)) of
+        in case NodeAccess.lookupNode (srConstraint res) (NodeId key) of
             Just TyVar{} -> True
             _ -> False
 
@@ -911,7 +912,7 @@ phiFromEdgeWitnessWithTrace generalizeAtWith res mbGaParents mSchemeInfo mTrace 
             case debugPhi ("OpRaise: nOrig=" ++ show nOrig) () of
                 () -> pure ()
             raiseTarget <-
-                case IntMap.lookup (getNodeId nOrig) (cNodes (srConstraint res)) of
+                case NodeAccess.lookupNode (srConstraint res) nOrig of
                     Just TyForall{ tnBody = body } -> do
                         binders <- bindingToElab (Binding.orderedBinders canonicalNode (srConstraint res) (typeRef nOrig))
                         let bodyC = canonicalNode body
@@ -925,7 +926,7 @@ phiFromEdgeWitnessWithTrace generalizeAtWith res mbGaParents mSchemeInfo mTrace 
             case debugPhi ("OpRaise: parent=" ++ show (lookupBindParent (srConstraint res) (typeRef nC))) () of
                 () -> pure ()
             nContextTarget <-
-                case IntMap.lookup (getNodeId nC) (cNodes (srConstraint res)) of
+                case NodeAccess.lookupNode (srConstraint res) nC of
                     Just TyExp{ tnBody = body } -> pure (canonicalNode body)
                     _ -> pure nC
             if not (IntSet.null interiorSet)
@@ -1001,7 +1002,7 @@ phiFromEdgeWitnessWithTrace generalizeAtWith res mbGaParents mSchemeInfo mTrace 
                                         nodeTy0 <-
                                             case lookupBindParent (srConstraint res) (typeRef nC) of
                                                 Just (TypeRef parent, _) ->
-                                                    case IntMap.lookup (getNodeId (canonicalNode parent)) (cNodes (srConstraint res)) of
+                                                    case NodeAccess.lookupNode (srConstraint res) (canonicalNode parent) of
                                                         Just TyForall{} -> reifyTypeWithNamedSetNoFallback res substForTypes namedSet nC
                                                         _ -> reifyBoundType nC
                                                 _ -> reifyBoundType nC
@@ -1058,7 +1059,7 @@ phiFromEdgeWitnessWithTrace generalizeAtWith res mbGaParents mSchemeInfo mTrace 
                                                 case lookupBindParent (srConstraint res) (typeRef nC) of
                                                     Just (GenRef _, _) -> Just (minIdx, False)
                                                     Just (TypeRef parent, _) ->
-                                                        case IntMap.lookup (getNodeId (canonicalNode parent)) (cNodes (srConstraint res)) of
+                                                        case NodeAccess.lookupNode (srConstraint res) (canonicalNode parent) of
                                                             Just TyForall{} -> Just (minIdx, True)
                                                             _ -> Nothing
                                                     _ -> Nothing

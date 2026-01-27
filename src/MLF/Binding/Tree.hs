@@ -76,6 +76,7 @@ import Data.Maybe (listToMaybe, mapMaybe)
 import qualified MLF.Util.OrderKey as OrderKey
 import qualified MLF.Constraint.Canonicalize as Canonicalize
 import qualified MLF.Constraint.VarStore as VarStore
+import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Types
 import qualified MLF.Constraint.Traversal as Traversal
 
@@ -119,7 +120,7 @@ canonicalRef = Canonicalize.canonicalRef
 structuralChildrenRef :: Constraint -> NodeRef -> [NodeRef]
 structuralChildrenRef c ref = case ref of
     TypeRef nid ->
-        case IntMap.lookup (getNodeId nid) (cNodes c) of
+        case NodeAccess.lookupNode c nid of
             Nothing -> []
             Just node ->
                 map TypeRef (structuralChildrenWithBounds node)
@@ -215,7 +216,7 @@ boundFlexChildren c binder = do
                     let childRef = nodeRefFromKey childKey
                     in case childRef of
                         TypeRef childN ->
-                            case IntMap.lookup (getNodeId childN) (cNodes c) of
+                            case NodeAccess.lookupNode c childN of
                                 Just TyVar{} -> pure (childN : acc)
                                 Just _ -> pure acc
                                 Nothing ->
@@ -254,7 +255,7 @@ boundFlexChildrenUnder canonical c0 binder0 = do
                     let childRef = nodeRefFromKey childKey
                     in case childRef of
                         TypeRef childN ->
-                            case IntMap.lookup (getNodeId childN) (cNodes c0) of
+                            case NodeAccess.lookupNode c0 childN of
                                 Just TyVar{} -> pure (childN : acc)
                                 Just _ -> pure acc
                                 Nothing ->
@@ -297,7 +298,7 @@ boundFlexChildrenAllUnder canonical c0 binder0 = do
                     let childRef = nodeRefFromKey childKey
                     in case childRef of
                         TypeRef childN ->
-                            case IntMap.lookup (getNodeId childN) (cNodes c0) of
+                            case NodeAccess.lookupNode c0 childN of
                                 Just TyExp{} -> pure acc
                                 Just TyBase{} -> pure acc
                                 Just TyBottom{} -> pure acc
@@ -409,7 +410,7 @@ orderedBinders canonical c0 binder0 = do
                         let childRef = nodeRefFromKey childKey
                         in case childRef of
                             TypeRef childN ->
-                                case IntMap.lookup (getNodeId childN) (cNodes constraint) of
+                                case NodeAccess.lookupNode constraint childN of
                                     Just TyVar{} -> pure (childN : acc)
                                     Just _ -> pure acc
                                     Nothing ->

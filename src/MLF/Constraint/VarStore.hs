@@ -9,15 +9,13 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
 import MLF.Constraint.Types
+import qualified MLF.Constraint.NodeAccess as NodeAccess
 
 -- | Look up the instance bound of a variable.
 --
 -- Missing entries are treated as ⊥ (`Nothing`).
 lookupVarBound :: Constraint -> NodeId -> Maybe NodeId
-lookupVarBound c v =
-    case IntMap.lookup (getNodeId v) (cNodes c) of
-        Just TyVar{ tnBound = mb } -> mb
-        _ -> Nothing
+lookupVarBound = NodeAccess.lookupVarBound
 
 -- | Set (or clear) the instance bound of a variable.
 --
@@ -25,7 +23,7 @@ lookupVarBound c v =
 setVarBound :: NodeId -> Maybe NodeId -> Constraint -> Constraint
 setVarBound v mb c =
     let nodes0 = cNodes c
-    in case IntMap.lookup (getNodeId v) nodes0 of
+    in case lookupNodeIn nodes0 v of
         Just tv@TyVar{} ->
             c { cNodes = IntMap.insert (getNodeId v) tv{ tnBound = mb } nodes0 }
         _ -> c

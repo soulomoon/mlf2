@@ -28,6 +28,7 @@ import MLF.Util.RecursionSchemes (cataM)
 
 import MLF.Frontend.Syntax (VarName)
 import MLF.Constraint.Types
+import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Solve (SolveResult(..))
 import MLF.Elab.Types
 import MLF.Elab.Generalize (GaBindParents(..))
@@ -125,9 +126,9 @@ schemeBodyTarget res target =
     let constraint = srConstraint res
         canonical = Solve.frWith (srUnionFind res)
         targetC = canonical target
-    in case IntMap.lookup (getNodeId targetC) (cNodes constraint) of
+    in case NodeAccess.lookupNode constraint targetC of
         Just TyVar{ tnBound = Just bnd } ->
-            case IntMap.lookup (getNodeId (canonical bnd)) (cNodes constraint) of
+            case NodeAccess.lookupNode constraint (canonical bnd) of
                 Just TyForall{ tnBody = body } -> canonical body
                 _ -> canonical bnd
         Just TyForall{ tnBody = body } -> canonical body

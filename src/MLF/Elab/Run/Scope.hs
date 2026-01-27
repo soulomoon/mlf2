@@ -19,12 +19,12 @@ import MLF.Constraint.Types
     , NodeRef(..)
     , TyNode(..)
     , cGenNodes
-    , cNodes
     , getNodeId
     , gnSchemes
     , typeRef
     )
 import qualified MLF.Constraint.VarStore as VarStore
+import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Elab.Run.Util (chaseRedirects)
 import MLF.Frontend.ConstraintGen (AnnExpr(..))
 import MLF.Frontend.ConstraintGen.Types (AnnExprF(..))
@@ -63,18 +63,18 @@ schemeBodyTarget res target =
                 | gen <- IntMap.elems (cGenNodes constraint)
                 , root <- gnSchemes gen
                 , Just bnd <- [VarStore.lookupVarBound constraint root]
-                , case IntMap.lookup (getNodeId (canonical bnd)) (cNodes constraint) of
+                , case NodeAccess.lookupNode constraint (canonical bnd) of
                     Just TyBase{} -> False
                     Just TyBottom{} -> False
                     _ -> True
                 ]
-    in case IntMap.lookup (getNodeId targetC) (cNodes constraint) of
+    in case NodeAccess.lookupNode constraint targetC of
         Just TyVar{ tnBound = Just bnd } ->
             let bndC = canonical bnd
                 boundIsSchemeBody = IntMap.member (getNodeId bndC) schemeRootByBody
             in if isSchemeRoot || boundIsSchemeBody
                 then
-                    case IntMap.lookup (getNodeId bndC) (cNodes constraint) of
+                    case NodeAccess.lookupNode constraint bndC of
                         Just TyForall{ tnBody = body } -> canonical body
                         _ -> bndC
                 else targetC

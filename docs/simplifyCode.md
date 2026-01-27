@@ -28,6 +28,92 @@ As a Haskell project grows, module structure becomes crucial for clarity. Haskel
 
 In summary, a well-structured large Haskell project will have a clear module hierarchy that mirrors the problem domain and separates concerns. Each module should have a focused purpose and expose a clean API. This makes it easier to navigate the codebase and perform refactorings, since changes in one module are less likely to impact distant parts of the system (thanks to limited exports and clear boundaries).
 
+Refactoring Large Functions with Nested Let Bindings
+
+Even within well-organized modules, individual functions can grow unwieldy with deeply nested let bindings and complex local definitions. Here are practical patterns for restructuring such functions:
+
+	•	Extract Pure Utility Functions First: When a large function contains helper definitions that are completely self-contained (no dependencies on the surrounding context), extract them to module-level functions. These are the safest to extract because they have no hidden dependencies. For example, if you have a local function like `let buildResult x y = foldr combine x y` that doesn't reference any variables from the enclosing scope, move it to the top level with proper documentation. This makes the function reusable, testable in isolation, and reduces the cognitive load of the main function. Pure functions with clear type signatures are excellent candidates for extraction.
+
+	•	Prefer Where Clauses Over Deeply Nested Lets: When you have multiple levels of let bindings (let ... in let ... in let ...), consider reorganizing with where clauses instead. The pattern is to put the main computation first, followed by a where clause containing all the helper definitions. This "top-down" reading order is often clearer than "bottom-up" nested lets. For example:
+```haskell
+-- Before: nested lets
+processData input =
+    let step1 = transform input
+        helper x = ...
+    in let step2 = helper step1
+           finalHelper y = ...
+       in finalHelper step2
+
+-- After: where clause
+processData input = finalHelper step2
+  where
+    step1 = transform input
+    step2 = helper step1
+    helper x = ...
+    finalHelper y = ...
+```
+The where clause groups all related definitions together and makes the main logic immediately visible at the top.
+
+	•	Group Helpers by Concern with Section Comments: Within a where clause, organize helper functions into logical groups with comments. This creates a clear structure and makes it easy to find related functionality. For example:
+```haskell
+complexFunction input = mainComputation
+  where
+    -- Basic setup
+    normalizedInput = normalize input
+    config = extractConfig input
+
+    -- Validation helpers
+    isValid x = ...
+    validateAll xs = ...
+
+    -- Main computation logic
+    mainComputation = ...
+    processStep x = ...
+```
+This organization mirrors good module structure at the function level, with clear separation of concerns.
+
+	•	Move Main Logic to the Top: In functions with where clauses, put the primary computation at the top of the function body, not buried in the middle of definitions. Readers should immediately see what the function does, then can dive into the where clause if they need to understand the details. This is the opposite of nested lets, where you must read through all the setup before seeing what actually happens.
+
+	•	Preserve Evaluation Order and Laziness: When converting from let to where, be aware that Haskell's lazy evaluation means the order of definitions doesn't affect semantics (only what's actually used matters). However, if you have strict bindings (using ! or seq), ensure they remain in the correct evaluation order. Generally, where clauses preserve the same semantics as let bindings, but if you're doing something unusual with strictness or recursive definitions, verify the behavior is unchanged.
+
+	•	Extract Monadic Sequences: If a large function contains a sequence of monadic operations with many intermediate let bindings, consider extracting logical phases into separate helper functions in the where clause. For example:
+```haskell
+-- Before: one long do block with many lets
+processRequest req = do
+    let userId = extractUserId req
+    user <- lookupUser userId
+    let permissions = userPermissions user
+    ...
+    (many more lines)
+    ...
+    return result
+
+-- After: extracted phases
+processRequest req = do
+    user <- fetchUserInfo req
+    permissions <- checkPermissions user
+    result <- performOperation permissions
+    return result
+  where
+    fetchUserInfo req = do
+        let userId = extractUserId req
+        lookupUser userId
+
+    checkPermissions user = ...
+    performOperation perms = ...
+```
+This makes the high-level flow clear while keeping implementation details organized.
+
+	•	Iterative Refactoring: Don't try to restructure a 300-line function all at once. Start by extracting the most obvious pure functions to module level. Then reorganize one section at a time, converting nested lets to where clauses and grouping related helpers. After each step, compile and run tests to ensure behavior is preserved. This incremental approach is safer and makes it easier to identify if a change introduces a problem.
+
+Example: In a recent refactoring of a 370-line function with 4-5 levels of nesting, we:
+1. Extracted three pure utility functions (rigidNameFor, buildForallType, inlineRigidTypes) to module level
+2. Reorganized a 80-line nested helper function to use where clauses with sections: "Basic setup", "Reification helpers", "Rigid type handling", "Alias handling", "Main reification logic"
+3. Converted another large section from sequential let bindings to a single definition with organized where clauses
+4. The result: reduced nesting from 4-5 levels to 2-3 maximum, improved readability, and all 393 tests still passed
+
+The key insight is that large functions often grow organically with nested lets because it's the path of least resistance. But once a function becomes hard to understand, investing time to restructure it with where clauses and extracted helpers pays dividends in maintainability. The compiler and tests ensure you don't break anything during the restructuring.
+
 Using Haskell Idioms and Abstractions to Eliminate Redundancy
 
 Haskell’s rich type system and abstraction mechanisms allow you to factor out repetitive patterns and avoid boilerplate. Embracing these idioms leads to simpler and more declarative code:

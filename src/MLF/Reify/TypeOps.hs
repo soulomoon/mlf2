@@ -32,6 +32,7 @@ import qualified Data.Set as Set
 
 import MLF.Constraint.Types
 import qualified MLF.Constraint.VarStore as VarStore
+import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Solve (SolveResult(..))
 import qualified MLF.Constraint.Solve as Solve (frWith)
 import MLF.Types.Elab
@@ -352,7 +353,7 @@ inlineBaseBoundsType constraint canonical = cataIx alg
                     let nid = NodeId nidInt
                     in case resolveBaseBoundForInstConstraint constraint canonical nid of
                         Just baseN ->
-                            case IntMap.lookup (getNodeId baseN) (cNodes constraint) of
+                            case NodeAccess.lookupNode constraint baseN of
                                 Just TyBase{ tnBase = b } -> TBase b
                                 Just TyBottom{} -> TBottom
                                 _ -> TVar v

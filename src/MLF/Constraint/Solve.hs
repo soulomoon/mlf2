@@ -119,6 +119,7 @@ import qualified MLF.Constraint.Canonicalize as Canonicalize
 import qualified MLF.Constraint.Traversal as Traversal
 import qualified MLF.Constraint.Unify.Decompose as UnifyDecompose
 import qualified MLF.Constraint.VarStore as VarStore
+import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Types
 import Debug.Trace (trace)
 import System.Environment (lookupEnv)
@@ -186,7 +187,7 @@ solveUnify c0 = do
         probeIds = [NodeId 2, NodeId 3]
         probeInfo =
             [ ( pid
-              , IntMap.lookup (getNodeId pid) (cNodes c0')
+              , NodeAccess.lookupNode c0' pid
               , IntMap.lookup (nodeRefKey (typeRef pid)) (cBindParents c0')
               )
             | pid <- probeIds
@@ -207,7 +208,7 @@ solveUnify c0 = do
             let c''' = pruneBindParentsToLive (repairNonUpperParents c'')
                 probeInfo' =
                     [ ( pid
-                      , IntMap.lookup (getNodeId pid) (cNodes c''')
+                      , NodeAccess.lookupNode c''' pid
                       , IntMap.lookup (nodeRefKey (typeRef pid)) (cBindParents c''')
                       )
                     | pid <- probeIds
