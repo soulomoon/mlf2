@@ -4,6 +4,7 @@ module MLF.Util.Graph (
     reachableFromStop
 ) where
 
+import Data.Functor.Foldable (ListF(..), hylo)
 import Data.List (sortBy)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
@@ -74,21 +75,27 @@ reachableFromStop
 reachableFromStop keyOf canonical successors shouldStop start =
     let startC = canonical start
         startKey = keyOf startC
-        go _ acc [] = acc
-        go visited acc (n:rest) =
-            let nC = canonical n
-                key = keyOf nC
-            in if IntSet.member key visited
-                then go visited acc rest
-                else
-                    let visited' = IntSet.insert key visited
-                    in if key /= startKey && shouldStop nC
-                        then go visited' acc rest
+        isStop nC = keyOf nC /= startKey && shouldStop nC
+        alg Nil = IntSet.empty
+        alg (Cons nC acc)
+            | isStop nC = acc
+            | otherwise = IntSet.insert (keyOf nC) acc
+        coalg (visited, queue) =
+            case queue of
+                [] -> Nil
+                (n:rest) ->
+                    let nC = canonical n
+                        key = keyOf nC
+                    in if IntSet.member key visited
+                        then Cons nC (visited, rest)
                         else
-                            let acc' = IntSet.insert key acc
-                                kids = map canonical (successors nC)
-                            in go visited' acc' (kids ++ rest)
-    in go IntSet.empty IntSet.empty [startC]
+                            let visited' = IntSet.insert key visited
+                            in if isStop nC
+                                then Cons nC (visited', rest)
+                                else
+                                    let kids = map canonical (successors nC)
+                                    in Cons nC (visited', kids ++ rest)
+    in hylo alg coalg (IntSet.empty, [startC])
 
 reachableFrom
     :: (a -> Int)         -- ^ Key for visited/acc sets.
