@@ -29,12 +29,15 @@ Both operations preserve the binding-tree invariants:
 
 Note [Instantiable vs Locked Nodes]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-A node is "instantiable" (can be raised) if its entire binding path to the
-root consists of flexibly bound edges. A node is "locked" if any edge on
-its path to the root is rigid.
+A node is "instantiable" if its entire binding path to the root (including
+its own edge) consists of flexible edges. A node is "locked" for the purposes
+of `isLocked` if that condition fails, so restricted nodes (their own edge is
+rigid) are treated as locked by this predicate.
 
-The paper requires that Raise only operates on instantiable nodes. Weaken
-can only operate on flexibly bound nodes (to make them rigid).
+For ω operations, the thesis forbids operations *under* rigid edges (i.e. nodes
+with a rigid ancestor). This module therefore uses `isUnderRigidBinder` when
+executing Raise steps, which allows raising restricted nodes but rejects
+operations strictly beneath rigid edges. Weaken still requires a flexible edge.
 -}
 module MLF.Binding.GraphOps (
     -- * Weaken operation
@@ -69,14 +72,14 @@ expectTypeRef ref = case ref of
 getBindFlag :: Constraint -> NodeRef -> Maybe BindFlag
 getBindFlag c nid = fmap snd (lookupBindParent c nid)
 
--- | Check if a node is instantiable (can be raised).
+-- | Check if a node is instantiable (all-flexible binding path).
 --
 -- A node is instantiable if:
 --   1. It is not a binding root (has a parent)
 --   2. Its entire binding path to the root consists of flexible edges
 --
--- Paper reference: A node is instantiable if it can be raised without
--- violating the "locked" constraint.
+-- Paper reference: instantiable nodes have no rigid edges on their binding
+-- path (full-flexible flag path).
 isInstantiable :: Constraint -> NodeRef -> Either BindingError Bool
 isInstantiable c nid = do
     -- Check if it's a root (roots cannot be raised)
@@ -96,9 +99,12 @@ isInstantiable c nid = do
                         Just (_, BindFlex) -> checkFlags rest
             checkFlags path
 
--- | Check if a node is locked (cannot be raised).
+-- | Check if a node is locked (has a rigid edge on its binding path).
 --
 -- A node is locked if any edge on its binding path to the root is rigid.
+-- Note: Raise operations in this module check only *strict* rigid ancestors
+-- via `isUnderRigidBinder`, so a restricted node (own edge rigid) is treated
+-- as locked here but can still be raised.
 isLocked :: Constraint -> NodeRef -> Either BindingError Bool
 isLocked c nid = do
     instantiable <- isInstantiable c nid

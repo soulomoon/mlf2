@@ -619,11 +619,10 @@ data InstanceOp
     -- `papers/these-finale-english.txt` translates this operation to an
     -- instantiation that (see `papers/xmlf.txt`)
     -- introduces a fresh quantifier one level higher and aliases/eliminates the
-    -- original binder (Fig. 10, §3.4). The current presolution does not emit
-    -- arbitrary interior Raise ops yet; it currently records Raise steps for
-    -- binders during instantiation-edge solving via binding-edge harmonization.
-    -- See
-    -- `plans/merge_raise_merge_plan.txt` for alignment details.
+    -- original binder (Fig. 10, §3.4). The current presolution records Raise
+    -- steps during instantiation-edge solving via binding-edge harmonization,
+    -- including interior nodes (not just binders). Remaining alignment notes
+    -- are tracked in `plans/merge_raise_merge_plan.txt`.
     | OpRaise NodeId
     | OpWeaken NodeId
     | OpRaiseMerge NodeId NodeId

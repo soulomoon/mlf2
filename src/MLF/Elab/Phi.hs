@@ -27,7 +27,7 @@ The translation has two main phases:
 This module contains a large function 'phiFromEdgeWitnessWithTrace' (~1000 lines)
 with many local helper functions that share a complex closure. Further splitting
 would require refactoring this function to use explicit parameter passing or a
-reader monad, which is beyond the scope of the current Phase 2 work.
+reader monad; we keep it monolithic to preserve locality.
 -}
 module MLF.Elab.Phi (
     -- * Re-exports from Context
