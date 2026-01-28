@@ -9,9 +9,24 @@ This module implements the principal presolution phase of MLF type inference.
 It processes instantiation edges in topological order to decide minimal
 expansions for expansion variables.
 
-Primary references:
-  * Rémy & Yakobowski, "Graphic Type Constraints and Efficient Type
-    Inference: from ML to MLF" (ICFP 2008) - §5 "Presolution"
+= Architecture
+
+The presolution phase consists of:
+1. Validation and rigidification (see "MLF.Constraint.Presolution.Validation")
+2. Edge processing loop (processes instantiation edges)
+3. Expansion materialization and constraint rewriting
+4. Witness normalization
+
+= Note on Module Structure
+
+This module contains several large, complex functions (materializeExpansions,
+rewriteConstraint, normalizeEdgeWitnessesM) that are tightly coupled to the
+PresolutionM monad state. Further splitting would require significant refactoring
+to extract shared state into explicit parameter passing or reader patterns.
+
+= Paper References
+
+* Rémy & Yakobowski, "Graphic Type Constraints" (ICFP 2008) - §5 "Presolution"
 -}
 module MLF.Constraint.Presolution.Driver (
     computePresolution,
@@ -38,6 +53,14 @@ import qualified MLF.Constraint.Canonicalize as Canonicalize
 import MLF.Constraint.Types
 import MLF.Constraint.Presolution.Base
 import MLF.Constraint.Presolution.Plan (buildGeneralizePlans)
+import MLF.Constraint.Presolution.Validation (
+    validateTranslatablePresolution,
+    rigidifyTranslatablePresolutionM,
+    structuralInterior,
+    translatableWeakenedNodes,
+    bindingToPres,
+    bindingToPresM
+    )
 import MLF.Constraint.Presolution.Ops (
     findRoot,
     getCanonicalNode,
@@ -128,183 +151,6 @@ computePresolution acyclicityResult constraint = do
         , prRedirects = redirects
         , prPlanBuilder = PresolutionPlanBuilder buildGeneralizePlans
         }
-
-validateTranslatablePresolution :: Constraint -> Either PresolutionError ()
-validateTranslatablePresolution c0 = do
-    let nodes = cNodes c0
-        bindParents = cBindParents c0
-        genNodes = cGenNodes c0
-
-    locked <- bindingToPres (Inert.inertLockedNodes c0)
-    let issuesLocked =
-            if IntSet.null locked
-                then []
-                else [InertLockedNodes (map NodeId (IntSet.toList locked))]
-
-    let issuesScheme =
-            [ SchemeRootNotRigid (gnId gen) root
-            | gen <- IntMap.elems genNodes
-            , root <- gnSchemes gen
-            , case IntMap.lookup (nodeRefKey (typeRef root)) bindParents of
-                Just (GenRef gid, BindRigid) | gid == gnId gen -> False
-                Just (GenRef gid, BindFlex) | gid == gnId gen -> True
-                _ -> False
-            ]
-
-    let issuesArrow =
-            [ ArrowNodeNotRigid nid
-            | (k, node) <- IntMap.toList nodes
-            , TyArrow{} <- [node]
-            , let nid = NodeId k
-            , case IntMap.lookup (nodeRefKey (typeRef nid)) bindParents of
-                Just (_, BindRigid) -> False
-                _ -> True
-            ]
-
-    let interiorByGen =
-            IntMap.fromList
-                [ (genNodeKey (gnId gen), structuralInterior nodes (gnSchemes gen))
-                | gen <- IntMap.elems genNodes
-                ]
-
-    let issuesOutside =
-            [ NonInteriorNodeNotRigid gid child
-            | (childKey, (parent, flag)) <- IntMap.toList bindParents
-            , flag == BindFlex
-            , GenRef gid <- [parent]
-            , TypeRef child <- [nodeRefFromKey childKey]
-            , let interior =
-                    IntMap.findWithDefault IntSet.empty (genNodeKey gid) interiorByGen
-            , not (IntSet.member (getNodeId child) interior)
-            ]
-
-    let issues = issuesLocked ++ issuesScheme ++ issuesArrow ++ issuesOutside
-    if null issues
-        then pure ()
-        else Left (NonTranslatablePresolution issues)
-
-bindingToPres :: Either BindingError a -> Either PresolutionError a
-bindingToPres = either (Left . BindingTreeError) Right
-
-bindingToPresM :: Either BindingError a -> PresolutionM a
-bindingToPresM = either (throwError . BindingTreeError) pure
-
-rigidifyTranslatablePresolutionM :: PresolutionM ()
-rigidifyTranslatablePresolutionM = do
-    c0 <- gets psConstraint
-    c1 <- bindingToPresM (Inert.weakenInertLockedNodes c0)
-    let nodes = cNodes c1
-        genNodes = cGenNodes c1
-        bindParents0 = cBindParents c1
-
-        arrowNodes =
-            [ NodeId k
-            | (k, node) <- IntMap.toList nodes
-            , TyArrow{} <- [node]
-            ]
-
-        isNonDegenerateSchemeRoot gen root =
-            case IntMap.lookup (nodeRefKey (typeRef root)) bindParents0 of
-                Just (GenRef gid, _) | gid == gnId gen -> True
-                _ -> False
-
-        schemeRoots =
-            [ root
-            | gen <- IntMap.elems genNodes
-            , root <- gnSchemes gen
-            , isNonDegenerateSchemeRoot gen root
-            ]
-
-        rigidifyKey bp ref =
-            case IntMap.lookup (nodeRefKey ref) bp of
-                Just (parent, BindFlex) -> IntMap.insert (nodeRefKey ref) (parent, BindRigid) bp
-                _ -> bp
-
-        bindParents1 =
-            foldl' rigidifyKey bindParents0 (map typeRef arrowNodes)
-        bindParents2 =
-            foldl' rigidifyKey bindParents1 (map typeRef schemeRoots)
-
-        interiorByGen =
-            IntMap.fromList
-                [ (genNodeKey (gnId gen), structuralInterior nodes (gnSchemes gen))
-                | gen <- IntMap.elems genNodes
-                ]
-
-        bindParents3 =
-            foldl'
-                (\bp (childKey, (parent, flag)) ->
-                    case (flag, parent, nodeRefFromKey childKey) of
-                        (BindFlex, GenRef gid, TypeRef child) ->
-                            let interior =
-                                    IntMap.findWithDefault IntSet.empty (genNodeKey gid) interiorByGen
-                            in if IntSet.member (getNodeId child) interior
-                                then bp
-                                else IntMap.insert childKey (parent, BindRigid) bp
-                        _ -> bp
-                )
-                bindParents2
-                (IntMap.toList bindParents2)
-
-        c2 = c1 { cBindParents = bindParents3 }
-
-    c3 <- bindingToPresM (Inert.weakenInertLockedNodes c2)
-    modify' $ \st -> st { psConstraint = c3 }
-
-structuralInterior :: IntMap TyNode -> [NodeId] -> IntSet.IntSet
-structuralInterior nodes =
-    Traversal.reachableFromNodes id children
-  where
-    children nid =
-        maybe [] structuralChildrenWithBounds (IntMap.lookup (getNodeId nid) nodes)
-
-translatableWeakenedNodes :: Constraint -> IntSet.IntSet
-translatableWeakenedNodes c0 =
-    let nodes = cNodes c0
-        genNodes = cGenNodes c0
-        bindParents = cBindParents c0
-        isRigid key =
-            case IntMap.lookup key bindParents of
-                Just (_, BindRigid) -> True
-                _ -> False
-
-        schemeRoots =
-            [ root
-            | gen <- IntMap.elems genNodes
-            , root <- gnSchemes gen
-            , case IntMap.lookup (nodeRefKey (typeRef root)) bindParents of
-                Just (GenRef gid, _) | gid == gnId gen -> True
-                _ -> False
-            , isRigid (nodeRefKey (typeRef root))
-            ]
-
-        arrowNodes =
-            [ NodeId k
-            | (k, node) <- IntMap.toList nodes
-            , TyArrow{} <- [node]
-            , isRigid (nodeRefKey (typeRef (NodeId k)))
-            ]
-
-        interiorByGen =
-            IntMap.fromList
-                [ (genNodeKey (gnId gen), structuralInterior nodes (gnSchemes gen))
-                | gen <- IntMap.elems genNodes
-                ]
-
-        nonInterior =
-            [ child
-            | (childKey, (parent, flag)) <- IntMap.toList bindParents
-            , flag == BindRigid
-            , GenRef gid <- [parent]
-            , TypeRef child <- [nodeRefFromKey childKey]
-            , let interior =
-                    IntMap.findWithDefault IntSet.empty (genNodeKey gid) interiorByGen
-            , not (IntSet.member (getNodeId child) interior)
-            ]
-
-        toKey = getNodeId
-        inferred = IntSet.fromList (map toKey (schemeRoots ++ arrowNodes ++ nonInterior))
-    in IntSet.union (cWeakenedVars c0) inferred
 
 -- | Finalize presolution by materializing expansions, rewriting TyExp away,
 -- applying union-find canonicalization, and clearing consumed instantiation

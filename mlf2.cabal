@@ -89,6 +89,7 @@ library mlf2-internal
                       MLF.Constraint.Presolution.ForallIntro,
                       MLF.Constraint.Presolution.Ops,
                       MLF.Constraint.Presolution.Plan,
+                      MLF.Constraint.Presolution.Validation,
                       MLF.Constraint.Presolution.Plan.BinderPlan,
                       MLF.Constraint.Presolution.Plan.BinderHelpers,
                       MLF.Constraint.Presolution.Plan.Context,
