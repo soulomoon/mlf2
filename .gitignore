@@ -36,6 +36,9 @@ result
 
 # Cabal local/project files
 cabal.project.local
+.cabal.config
+.cabal-config
+.cabal-logs/
 
 # Nix
 .nix-*
@@ -49,10 +52,19 @@ cabal.project.local
 *.sublime-workspace
 *.sublime-project
 
+# Local tooling / caches
+.claude/
+.cursor/
+.trae/
+.sisyphus/
+.venv/
+.venv-*/
+.cache/
+.xdg-cache/
+
 # Test / coverage / profiling
 *.tix
 *.eventlog
 papers/
 .cabal
 tmp/
-.cabal-logs/build.log

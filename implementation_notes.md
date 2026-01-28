@@ -2,7 +2,7 @@
 
 ## Summary of Changes
 
-**Current vs target:** The current pipeline already records presolution witnesses and keeps Elab largely structural, but generalization planning (binder selection, ordering, alias policy, scheme-root policy) still lives in `MLF.Elab.Generalize`. The target structure moves that planning into presolution (e.g., `MLF.Constraint.Presolution.Plan`) so Elab only applies explicit plans.
+**Current vs target:** The current pipeline records presolution witnesses and produces explicit generalization plans in `MLF.Constraint.Presolution.Plan`; elaboration applies these plans via `MLF.Elab.Generalize` without re-solving. The remaining paper-faithfulness deltas are tracked in `.kiro/specs/paper-faithfulness-remaining-deltas/` (constructor types `Cσ`, ϕR integration beyond Raise-triggered reordering, and stricter translatability validation for Φ).
 
 ### 1. src/MLF/Constraint/Presolution/Driver.hs (+ EdgeUnify/Witness)
 - **`unifyStructure` / `unifyStructureEdge`**: Recursively unify structural children (TyArrow, TyForall, plus TyVar bounds) so `Arrow A B ~ Arrow C D` propagates `A~C` and `B~D` (Driver for global merges; EdgeUnify for edge-local χe execution).
@@ -122,5 +122,4 @@ This repo’s design is primarily informed by:
 - **xMLF Phase 7**: the repo includes type-checking and reduction for xMLF terms/instantiations (`MLF.Elab.TypeCheck`, `MLF.Elab.Reduce`) and uses them in tests, but still lacks a fully formalized/verified connection to the thesis presentation (e.g., proof obligations and full evaluation-context coverage).
 
 ## Kiro spec planning
-- Tracking a meta spec at `.kiro/specs/paper-alignment-spec-orchestrator/` that will generate per-deviation Kiro specs covering expansion/frontier behavior, admissibility checks, simplification rules, xMLF semantics gaps, and witness/phi/sigma refinements.
-- Each generated deviation spec should document intended paper alignment, code touch points, and test expectations.
+- Paper-faithfulness deltas are captured in `.kiro/specs/paper-faithfulness-remaining-deltas/`, including evidence pointers to the thesis and code, plus a concrete implementation plan.

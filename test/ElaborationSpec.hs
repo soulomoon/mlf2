@@ -858,6 +858,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     Left _ -> pure ()
                     Right sig -> expectationFailure ("Expected failure, got: " ++ show sig)
 
+            it "applies Σ reordering even without Raise when Typ/Typexp differ (gap)" $ do
+                pendingWith "Needs Typ vs Typexp mismatch detection + Σ integration in Φ when no Raise ops are present."
+
         describe "Φ translation soundness" $ do
             let runToSolved :: Expr -> Either String (SolveResult, IntMap.IntMap EdgeWitness, IntMap.IntMap EdgeTrace)
                 runToSolved e = do
@@ -967,6 +970,32 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
                     -- Merge binder “b” into binder “a”, i.e. ∀a. ∀b. a -> b  ~~>  ∀a. a -> a
                     ops = [OpMerge (NodeId 2) (NodeId 1)]
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = NodeId 0
+                        , ewRight = NodeId 0
+                        , ewRoot = NodeId 0
+                        , ewSteps = map StepOmega ops
+                        , ewWitness = InstanceWitness ops
+                        }
+
+                phi <- requireRight (Elab.phiFromEdgeWitness generalizeAtWith solved (Just si) ew)
+                out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
+                let expected =
+                        Elab.TForall "a" Nothing
+                            (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+                canonType out `shouldBe` canonType expected
+
+            it "scheme-aware Φ can translate RaiseMerge (alias one binder to another)" $ do
+                (solved, _intNode) <- requireRight (runSolvedWithRoot (ELit (LInt 1)))
+
+                let scheme =
+                        Elab.schemeFromType
+                            (Elab.TForall "a" Nothing (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))))
+                    subst = IntMap.fromList [(1, "a"), (2, "b")]
+                    si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = subst }
+
+                    ops = [OpRaiseMerge (NodeId 2) (NodeId 1)]
                     ew = EdgeWitness
                         { ewEdgeId = EdgeId 0
                         , ewLeft = NodeId 0

@@ -76,18 +76,18 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 Based on `papers/these-finale-english.txt`; see also `papers/xmlf.txt` §3.
 
-- [ ] **Define xMLF AST** (`XMLF.AST`)
-    - [ ] Types `τ` (including `∀(α ≥ τ)`)
-    - [ ] Instantiations `φ` (Witnesses: `!α`, `N`, `O`, `Inside`, `Under`, `Comp`)
-    - [ ] Terms `a` (including `Λ` and `a φ`)
-- [ ] **Implement Elaboration Logic** (`Elaborate.hs`)
-    - [ ] `elaborate :: Expr -> Presolution -> Constraint -> XMLF.Term`
-    - [ ] Generate instantiation witnesses `φ` from graph paths
-    - [ ] Insert `Λ` abstractions based on presolution expansions
-    - [ ] Insert explicit type annotations on lambda arguments
-- [ ] **Tests**
-    - [ ] Verify elaboration of basic terms (id, const)
-    - [ ] Verify elaboration of polymorphic let-bindings
+- [x] **Define xMLF AST** (`src/MLF/Types/Elab.hs`, re-exported via `MLF.Elab.Types`)
+    - [x] Types `τ` (including `∀(α ≥ τ)` and `⊥`)
+    - [x] Instantiations `φ` (Witnesses: `!α`, `N`, `O`, `Inside`, `Under`, `Comp`)
+    - [x] Terms `a` (including `Λ` and `a φ`)
+- [x] **Implement Elaboration Logic** (`src/MLF/Elab/Elaborate.hs`)
+    - [x] `elaborate` + `runPipelineElab`
+    - [x] Generate instantiation witnesses `φ` from per-edge `EdgeWitness` (Φ)
+    - [x] Insert `Λ` abstractions based on presolution plans
+    - [x] Insert explicit type annotations on lambda arguments
+- [x] **Tests**
+    - [x] Elaboration basics (id, const) + let-polymorphism
+    - [x] Φ/Σ unit tests + instantiation-soundness checks
 
 ---
 
@@ -95,12 +95,23 @@ Based on `papers/these-finale-english.txt`; see also `papers/xmlf.txt` §3.
 
 Based on `papers/these-finale-english.txt`; see also `papers/xmlf.txt` §1 & §2.
 
-- [ ] **Type Checker** (`XMLF.Check`)
-    - [ ] Implement `Γ ⊢ a : τ` rules
-    - [ ] Verify elaborated terms are well-typed
-- [ ] **Evaluator** (`XMLF.Eval`)
-    - [ ] Implement small-step reduction `a ⟶ a'`
-    - [ ] Implement instantiation reduction rules (e.g., `(Λ...) N ⟶ ...`)
+- [x] **Type Checker** (`src/MLF/Elab/TypeCheck.hs`)
+    - [x] Implement `Γ ⊢ a : τ` rules
+    - [x] Verify elaborated terms are well-typed
+- [x] **Evaluator** (`src/MLF/Elab/Reduce.hs`)
+    - [x] Implement small-step reduction `a ⟶ a'`
+    - [x] Implement instantiation reduction rules (e.g., `(Λ...) N ⟶ ...`)
+
+---
+
+## Paper-faithfulness deltas (tracked)
+
+- [ ] Add constructor types `Cσ` to the xMLF type AST (Fig. 14.2.1).
+- [ ] Integrate quantifier reordering ϕR when `Typ` vs `Typexp` differ (Def. 15.3.4).
+- [ ] Enforce translatable-presolution invariants for Φ (fail on non-interior ops / missing contexts).
+- [ ] Confirm Ω normalization emits all Fig. 15.3.4 operations (or document deviations).
+
+See `.kiro/specs/paper-faithfulness-remaining-deltas/` for the audit and plan.
 
 ---
 

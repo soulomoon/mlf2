@@ -1,5 +1,30 @@
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE TypeFamilies #-}
+{- |
+Module      : MLF.Constraint.Types
+Description : Core constraint graph types for MLF type inference
+Copyright   : (c) 2024
+License     : BSD-3-Clause
+
+This module defines the core data types for representing MLF type constraints
+as a graph structure. The constraint graph consists of:
+
+* 'TyNode' - Type nodes (variables, arrows, foralls, base types)
+* 'GenNode' - Generalization nodes that own scheme roots
+* 'InstEdge' - Instantiation edges between nodes
+* 'Constraint' - The complete constraint graph
+
+= Paper References
+
+* Rémy & Yakobowski, "From ML to MLF" (ICFP 2008) - Constraint graph model
+* Rémy & Yakobowski, "Graphic Type Constraints" - Binding tree structure
+
+= Key Concepts
+
+The constraint graph uses a /binding tree/ to track the scope of type variables.
+Each node has a binding parent (either a type node or a gen node) and a binding
+flag ('BindFlex' or 'BindRigid') that determines whether it can be generalized.
+-}
 module MLF.Constraint.Types (
     NodeId (..),
     ExpVarId (..),
