@@ -118,6 +118,7 @@ library mlf2-internal
                       MLF.Elab.Elaborate,
                       MLF.Elab.Generalize,
                       MLF.Elab.Phi,
+                      MLF.Elab.Phi.Context,
                       MLF.Elab.Reduce,
                       MLF.Elab.Run,
                       MLF.Elab.Run.Annotation,
