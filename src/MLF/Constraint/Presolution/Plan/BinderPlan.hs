@@ -69,6 +69,7 @@ import MLF.Constraint.Solve (SolveResult)
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Util.Order as Order
+import qualified MLF.Util.IntMapUtils as IntMapUtils
 import MLF.Constraint.BindingUtil (bindingScopeFor)
 
 data GaBindParentsInfo = GaBindParentsInfo
@@ -200,7 +201,7 @@ buildBinderPlan BinderPlanInput{..} = do
         schemeRootByBodyBase = bpiSchemeRootByBodyBase
         parseNameId = bpiParseNameId
         aliasBinderBases = bpiAliasBinderBases
-        orderBinderCandidates = bpiOrderBinderCandidates
+        orderCandidates = bpiOrderBinderCandidates
 
     let binders0Adjusted =
             let freeVarsFromBound =
@@ -729,7 +730,7 @@ buildBinderPlan BinderPlanInput{..} = do
                                 )
                             pure deps
         orderBinders candidates =
-            orderBinderCandidates
+            orderCandidates
                 candidates
                 boundDepsForCandidate
 
@@ -948,10 +949,7 @@ boundFlexChildrenUnder
     -> [NodeId]
 boundFlexChildrenUnder canonical bindParents isBindable parentRef =
     [ canonical child
-    | (childKey, (parent, flag)) <- IntMap.toList bindParents
-    , parent == parentRef
-    , flag == BindFlex
-    , TypeRef child <- [nodeRefFromKey childKey]
+    | (childKey, child) <- IntMapUtils.flexTypeChildrenWithKeyOf bindParents parentRef
     , isBindable childKey child
     ]
 
@@ -963,9 +961,7 @@ bindableChildrenUnder
     -> [NodeId]
 bindableChildrenUnder canonical bindParents isBindable parentRef =
     [ canonical child
-    | (childKey, (parent, _flag)) <- IntMap.toList bindParents
-    , parent == parentRef
-    , TypeRef child <- [nodeRefFromKey childKey]
+    | (childKey, child) <- IntMapUtils.typeChildrenWithKeyOf bindParents parentRef
     , isBindable childKey child
     ]
 
@@ -1027,12 +1023,7 @@ bindersForGen
     -> GenNodeId
     -> Either ElabError [NodeId]
 bindersForGen canonical bindParents nodes constraint isBindable renderAllChildren aliasBinderNodes traceM gid = do
-    let allChildren =
-            [ (child, flag)
-            | (childKey, (parent, flag)) <- IntMap.toList bindParents
-            , parent == GenRef gid
-            , TypeRef child <- [nodeRefFromKey childKey]
-            ]
+    let allChildren = IntMapUtils.typeChildrenWithFlagOf bindParents (GenRef gid)
     traceM
         ("generalizeAt: scopeGen child nodes="
             ++ renderAllChildren
@@ -1163,9 +1154,7 @@ computeAliasBinders canonical canonKey constraint nodes bindParents scopeSchemeR
                         let bases =
                                 IntSet.fromList
                                     [ key
-                                    | (childKey, (parent, _flag)) <- IntMap.toList bindParents
-                                    , parent == GenRef gid
-                                    , TypeRef child <- [nodeRefFromKey childKey]
+                                    | child <- IntMapUtils.typeChildrenOfGen bindParents gid
                                     , let key = getNodeId child
                                     , IntSet.member key baseBoundTargets
                                     , case IntMap.lookup key nodes of

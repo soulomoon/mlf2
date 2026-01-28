@@ -23,6 +23,7 @@ import Data.Maybe (fromMaybe)
 import qualified MLF.Util.Order as Order
 import qualified MLF.Constraint.Canonicalize as Canonicalize
 import MLF.Constraint.Types
+import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Types.Elab
 import MLF.Util.ElabError (ElabError(..), bindingToElab)
 import MLF.Util.Graph (topoSortBy)
@@ -98,21 +99,21 @@ reifyWith _contextLabel res nameForVar isNamed rootMode nid =
     schemeRootSetRaw =
         IntSet.fromList
             [ getNodeId root
-            | gen <- IntMap.elems (cGenNodes constraint)
+            | gen <- NodeAccess.allGenNodes constraint
             , root <- gnSchemes gen
             ]
     schemeRootSet =
         IntSet.union schemeRootSetRaw $
             IntSet.fromList
                 [ getNodeId (canonical root)
-                | gen <- IntMap.elems (cGenNodes constraint)
+                | gen <- NodeAccess.allGenNodes constraint
                 , root <- gnSchemes gen
                 ]
     schemeGenByRootRaw =
         IntMap.fromListWith
             const
             [ (getNodeId root, gnId gen)
-            | gen <- IntMap.elems (cGenNodes constraint)
+            | gen <- NodeAccess.allGenNodes constraint
             , root <- gnSchemes gen
             ]
     schemeGenByRoot =
@@ -120,7 +121,7 @@ reifyWith _contextLabel res nameForVar isNamed rootMode nid =
             IntMap.fromListWith
                 const
                 [ (getNodeId (canonical root), gnId gen)
-                | gen <- IntMap.elems (cGenNodes constraint)
+                | gen <- NodeAccess.allGenNodes constraint
                 , root <- gnSchemes gen
                 ]
     schemeGenSet =

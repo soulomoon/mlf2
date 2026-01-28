@@ -785,7 +785,7 @@ rewriteEliminatedBinders c0
                                     (gnSchemes g)
                             schemes' = reverse schemesRev
                         in (genNodeKey (gnId g), g { gnSchemes = schemes' })
-                in IntMap.fromListWith const (map rewriteOne (IntMap.elems (cGenNodes c0)))
+                in IntMap.fromListWith const (map rewriteOne (NodeAccess.allGenNodes c0))
             weakened' =
                 IntSet.fromList
                     [ getNodeId v'

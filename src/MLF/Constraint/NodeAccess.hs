@@ -66,10 +66,17 @@ module MLF.Constraint.NodeAccess (
     lookupBindParentSafe,
     -- * Batch operations
     lookupNodes,
-    lookupNodesWithDefault
+    lookupNodesWithDefault,
+    -- * Collection accessors
+    allGenNodes,
+    allNodes,
+    allNodeIds,
+    allGenNodeIds
 ) where
 
 import qualified Data.IntMap.Strict as IntMap
+import qualified Data.IntSet as IntSet
+import Data.IntSet (IntSet)
 import Data.Maybe (mapMaybe)
 
 import MLF.Constraint.Types (Constraint(..), NodeId(..), GenNodeId(..), TyNode(..), GenNode, NodeRef, BindFlag, BindingError(..), nodeRefKey, getNodeId, getGenNodeId, structuralChildren, structuralChildrenWithBounds)
@@ -231,3 +238,32 @@ lookupStructuralChildren c nid =
 lookupStructuralChildrenWithBounds :: Constraint -> NodeId -> Maybe [NodeId]
 lookupStructuralChildrenWithBounds c nid =
     structuralChildrenWithBounds <$> lookupNode c nid
+
+-- -----------------------------------------------------------------------------
+-- Collection accessors
+-- -----------------------------------------------------------------------------
+
+-- | Get all gen nodes in the constraint.
+--
+-- This is a common pattern that appears 27+ times across the codebase.
+-- Replaces: @IntMap.elems (cGenNodes c)@
+allGenNodes :: Constraint -> [GenNode]
+allGenNodes c = IntMap.elems (cGenNodes c)
+
+-- | Get all type nodes in the constraint.
+--
+-- Replaces: @IntMap.elems (cNodes c)@
+allNodes :: Constraint -> [TyNode]
+allNodes c = IntMap.elems (cNodes c)
+
+-- | Get all type node IDs as an IntSet.
+--
+-- Replaces: @IntSet.fromList (IntMap.keys (cNodes c))@
+allNodeIds :: Constraint -> IntSet
+allNodeIds c = IntSet.fromList (IntMap.keys (cNodes c))
+
+-- | Get all gen node IDs as an IntSet.
+--
+-- Replaces: @IntSet.fromList (IntMap.keys (cGenNodes c))@
+allGenNodeIds :: Constraint -> IntSet
+allGenNodeIds c = IntSet.fromList (IntMap.keys (cGenNodes c))

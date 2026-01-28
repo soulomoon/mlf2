@@ -35,6 +35,7 @@ import MLF.Constraint.Types
 import MLF.Constraint.Presolution.Base
 import qualified MLF.Constraint.Traversal as Traversal
 import qualified MLF.Constraint.Inert as Inert
+import qualified MLF.Util.IntMapUtils as IntMapUtils
 
 -- | Validate that a constraint is a translatable presolution.
 --
@@ -83,10 +84,7 @@ validateTranslatablePresolution c0 = do
 
     let issuesOutside =
             [ NonInteriorNodeNotRigid gid child
-            | (childKey, (parent, flag)) <- IntMap.toList bindParents
-            , flag == BindFlex
-            , GenRef gid <- [parent]
-            , TypeRef child <- [nodeRefFromKey childKey]
+            | (gid, child) <- IntMapUtils.flexTypeChildrenOfGen bindParents
             , let interior =
                     IntMap.findWithDefault IntSet.empty (genNodeKey gid) interiorByGen
             , not (IntSet.member (getNodeId child) interior)
@@ -228,10 +226,7 @@ translatableWeakenedNodes c0 =
 
         nonInterior =
             [ child
-            | (childKey, (parent, flag)) <- IntMap.toList bindParents
-            , flag == BindRigid
-            , GenRef gid <- [parent]
-            , TypeRef child <- [nodeRefFromKey childKey]
+            | (gid, child) <- IntMapUtils.rigidTypeChildrenOfGen bindParents
             , let interior =
                     IntMap.findWithDefault IntSet.empty (genNodeKey gid) interiorByGen
             , not (IntSet.member (getNodeId child) interior)

@@ -37,6 +37,7 @@ import Data.Ord (Down(..))
 import qualified Data.List.NonEmpty as NE
 
 import MLF.Constraint.Types (BindFlag(..), Constraint(..), Expansion(..), ExpansionF(..), ForallSpec(..), GenNode(..), InstanceOp(..), InstanceStep(..), NodeId, NodeRef(..), TyNode(..), getNodeId, nodeRefFromKey, typeRef)
+import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Presolution.Base (PresolutionM, PresolutionError(..), PresolutionState(..), instantiationBindersM)
 import MLF.Constraint.Presolution.Ops (getCanonicalNode, lookupVarBound)
 import qualified MLF.Binding.Tree as Binding
@@ -298,7 +299,7 @@ witnessFromExpansion _root leftRaw expn = do
             schemeParents =
                 IntMap.fromList
                     [ (getNodeId (canon root), gnId gen)
-                    | gen <- IntMap.elems (cGenNodes c)
+                    | gen <- NodeAccess.allGenNodes c
                     , root <- gnSchemes gen
                     ]
         case IntMap.lookup (getNodeId nidC) schemeParents of

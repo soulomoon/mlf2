@@ -104,6 +104,7 @@ library mlf2-internal
                       MLF.Constraint.BindingUtil,
                       MLF.Util.ElabError,
                       MLF.Util.Graph,
+                      MLF.Util.IntMapUtils,
                       Util.IndexedRecursion,
                       MLF.Util.Names,
                       MLF.Util.OrderKey,

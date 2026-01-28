@@ -54,6 +54,7 @@ import MLF.Constraint.Types
     , typeRef
     )
 import qualified MLF.Constraint.VarStore as VarStore
+import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Elab.Elaborate (elaborateWithScope)
 import MLF.Elab.Generalize
     ( GaBindParents(..)
@@ -609,7 +610,7 @@ runPipelineElabWith genConstraints expr = do
                     let schemeRootSet =
                             IntSet.fromList
                                 [ getNodeId (canonical root)
-                                | gen <- IntMap.elems (cGenNodes (srConstraint solvedForGen))
+                                | gen <- NodeAccess.allGenNodes (srConstraint solvedForGen)
                                 , root <- gnSchemes gen
                                 ]
                         isSchemeRoot nid =
@@ -975,7 +976,7 @@ runPipelineElabWith genConstraints expr = do
                                 rootIsSchemeRoot =
                                     any
                                         (\gen -> any (\root -> canonicalFinal root == rootFinal) (gnSchemes gen))
-                                        (IntMap.elems (cGenNodes (srConstraint resFinalBounded)))
+                                        (NodeAccess.allGenNodes (srConstraint resFinalBounded))
                                 rootIsSchemeAlias =
                                     rootIsSchemeRoot
                                         && maybe False (const True) rootBound
@@ -984,13 +985,13 @@ runPipelineElabWith genConstraints expr = do
                                 schemeRootSetFinal =
                                     IntSet.fromList
                                         [ getNodeId (canonicalFinal root)
-                                        | gen <- IntMap.elems (cGenNodes (srConstraint resFinalBounded))
+                                        | gen <- NodeAccess.allGenNodes (srConstraint resFinalBounded)
                                         , root <- gnSchemes gen
                                         ]
                                 schemeRootOwnerFinal =
                                     IntMap.fromList
                                         [ (getNodeId (canonicalFinal root), gnId gen)
-                                        | gen <- IntMap.elems (cGenNodes (srConstraint resFinalBounded))
+                                        | gen <- NodeAccess.allGenNodes (srConstraint resFinalBounded)
                                         , root <- gnSchemes gen
                                         ]
                                 boundHasForallFrom start0 =

@@ -22,6 +22,7 @@ import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Types
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Constraint.VarStore as VarStore
+import qualified MLF.Util.IntMapUtils as IntMapUtils
 import MLF.Constraint.Presolution.Plan.BinderPlan (GaBindParentsInfo(..), firstSchemeRootAncestorWith)
 import MLF.Constraint.BindingUtil (firstGenAncestorFrom)
 import qualified MLF.Util.Order as Order
@@ -575,10 +576,7 @@ buildGammaPlan GammaPlanInput{..} =
                                 ]
                         solvedBindersUnderScope =
                             [ canonical child
-                            | (childKey, (parentRef, flag)) <- IntMap.toList bindParents
-                            , parentRef == GenRef gid
-                            , flag == BindFlex
-                            , TypeRef child <- [nodeRefFromKey childKey]
+                            | child <- IntMapUtils.typeChildrenOfGenWithFlag bindParents gid BindFlex
                             , case IntMap.lookup (getNodeId (canonical child)) nodes of
                                 Just TyVar{} -> True
                                 _ -> False
@@ -593,7 +591,7 @@ buildGammaPlan GammaPlanInput{..} =
                         baseSchemeRootSet =
                             IntSet.fromList
                                 [ getNodeId root
-                                | gen <- IntMap.elems (cGenNodes baseConstraint)
+                                | gen <- NodeAccess.allGenNodes baseConstraint
                                 , root <- gnSchemes gen
                                 ]
                         isSchemeRootAliasBase baseKey =
@@ -886,9 +884,7 @@ buildTypeRootPlan TypeRootPlanInput{..} =
                 GenRef gid | targetIsSchemeRootForScope && targetIsTyVar ->
                     let children =
                             [ canonical child
-                            | (childKey, (parentRef, _flag)) <- IntMap.toList bindParents
-                            , parentRef == GenRef gid
-                            , TypeRef child <- [nodeRefFromKey childKey]
+                            | child <- IntMapUtils.typeChildrenOfGen bindParents gid
                             , not (isTyVarKey (canonKey child))
                             ]
                     in case children of

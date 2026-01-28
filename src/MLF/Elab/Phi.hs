@@ -66,6 +66,7 @@ import qualified MLF.Binding.Tree as Binding
 import MLF.Binding.Tree (checkBindingTree, checkNoGenFallback, checkSchemeClosureUnder, lookupBindParent)
 import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Constraint.NodeAccess as NodeAccess
+import qualified MLF.Util.IntMapUtils as IntMapUtils
 import MLF.Elab.Phi.Context (contextToNodeBound, contextToNodeBoundWithOrderKeys)
 import Debug.Trace (trace)
 import System.Environment (lookupEnv)
@@ -181,10 +182,7 @@ phiFromEdgeWitnessWithTrace generalizeAtWith res mbGaParents mSchemeInfo mTrace 
                                         Binding.canonicalizeBindParentsUnder canonicalNode (srConstraint res)
                                 let binders =
                                         [ childN
-                                        | (childKey, (parentRef, flag)) <- IntMap.toList bindParents
-                                        , parentRef == genRef gid
-                                        , flag == BindFlex || flag == BindRigid
-                                        , TypeRef childN <- [nodeRefFromKey childKey]
+                                        | childN <- IntMapUtils.typeChildrenOfGen bindParents gid
                                         , case NodeAccess.lookupNode (srConstraint res) childN of
                                             Just TyVar{} -> True
                                             _ -> False
@@ -260,7 +258,7 @@ phiFromEdgeWitnessWithTrace generalizeAtWith res mbGaParents mSchemeInfo mTrace 
                 let rootC = canonicalNode root0
                     owners =
                         [ gnId gen
-                        | gen <- IntMap.elems (cGenNodes (srConstraint res))
+                        | gen <- NodeAccess.allGenNodes (srConstraint res)
                         , any (\root -> canonicalNode root == rootC) (gnSchemes gen)
                         ]
                 in case owners of

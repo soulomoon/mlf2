@@ -42,6 +42,7 @@ import qualified MLF.Util.UnionFind as UnionFind
 import qualified MLF.Constraint.Canonicalize as Canonicalize
 import qualified MLF.Constraint.Traversal as Traversal
 import qualified MLF.Constraint.Unify.Decompose as UnifyDecompose
+import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Types (GenNode(..), NodeId(..), NodeRef(..), TyNode(..), Constraint(..), InstEdge(..), UnifyEdge(..), BindFlag(..), maxNodeIdKeyOr0, lookupNodeIn, nodeRefFromKey, nodeRefKey, typeRef)
 
 {- Note [Normalization / Local Transformations]
@@ -323,7 +324,7 @@ graftEdge edge = do
         schemeRoots =
             IntSet.fromList
                 [ getNodeId root
-                | gen <- IntMap.elems (cGenNodes c)
+                | gen <- NodeAccess.allGenNodes c
                 , root <- gnSchemes gen
                 ]
         leftId = findRoot uf (instLeft edge)

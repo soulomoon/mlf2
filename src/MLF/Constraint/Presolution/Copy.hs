@@ -128,7 +128,7 @@ expansionCopySetsM bodyId = do
                 ]
         reachableSchemeGens =
             [ gnId gen
-            | gen <- IntMap.elems (cGenNodes c0)
+            | gen <- NodeAccess.allGenNodes c0
             , not (IntSet.member (getGenNodeId (gnId gen)) pathGenIds)
             , any
                 (\root -> IntSet.member (typeRefKey (canonical root)) reachFromSKeys)
@@ -273,7 +273,7 @@ instantiateSchemeWithMode replaceFrontier bodyId substList = do
         schemeRoots =
             IntSet.fromList
                 [ getNodeId (canonical r)
-                | gen <- IntMap.elems (cGenNodes c0)
+                | gen <- NodeAccess.allGenNodes c0
                 , r <- gnSchemes gen
                 ]
         isSchemeRootWrapper nid =

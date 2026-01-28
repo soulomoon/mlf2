@@ -862,7 +862,7 @@ checkSchemeClosureUnder canonical c0 = do
             IntMap.fromListWith
                 IntSet.union
                 [ (getNodeId (canonical root), IntSet.singleton (getGenNodeId (gnId gen)))
-                | gen <- IntMap.elems (cGenNodes c0)
+                | gen <- NodeAccess.allGenNodes c0
                 , root <- gnSchemes gen
                 ]
         schemeRootsSet = IntSet.unions (IntMap.elems schemeRootsByGen)

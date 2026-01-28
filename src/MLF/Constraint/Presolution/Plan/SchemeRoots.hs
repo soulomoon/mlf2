@@ -11,6 +11,7 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
 import MLF.Constraint.Types
+import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Constraint.Presolution.Plan.BinderPlan (GaBindParentsInfo(..))
 
@@ -41,7 +42,7 @@ buildSchemeRootInfo
 buildSchemeRootInfo canonical constraint nodes =
     let schemeRootsWithGen =
             [ (gnId gen, root)
-            | gen <- IntMap.elems (cGenNodes constraint)
+            | gen <- NodeAccess.allGenNodes constraint
             , root <- gnSchemes gen
             ]
         schemeRootKeySetRaw =
@@ -142,7 +143,7 @@ buildSchemeRootsPlan canonical constraint nodes mbBindParentsGa firstGenAncestor
                         baseParents = gbiBindParentsBase ga
                         baseSchemeRoots =
                             [ root
-                            | gen <- IntMap.elems (cGenNodes baseConstraint)
+                            | gen <- NodeAccess.allGenNodes baseConstraint
                             , root <- gnSchemes gen
                             ]
                         ownerFromBinding root =

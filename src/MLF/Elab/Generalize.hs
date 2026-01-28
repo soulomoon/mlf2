@@ -35,7 +35,9 @@ import MLF.Constraint.Presolution.Plan
     )
 import MLF.Constraint.Solve (SolveResult(..))
 import MLF.Constraint.Types
+import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Constraint.VarStore as VarStore
+import qualified MLF.Util.IntMapUtils as IntMapUtils
 import MLF.Constraint.Presolution.Plan.BinderPlan (BinderPlan(..))
 import MLF.Constraint.Presolution.Plan.Context
     ( GaBindParents(..)
@@ -219,7 +221,7 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
             } = schemeTypeChoice
         ownersByRoot =
             [ gnId gen
-            | gen <- IntMap.elems (cGenNodes constraint)
+            | gen <- NodeAccess.allGenNodes constraint
             , root <- gnSchemes gen
             , canonical root == typeRootC
             ]
@@ -274,9 +276,7 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
             rigidNodeKeys =
                 IntSet.toList $ IntSet.fromList
                     [ canonicalKey nid
-                    | (childKey, (_parent, flag)) <- IntMap.toList bindParents
-                    , flag == BindRigid
-                    , TypeRef nid <- [nodeRefFromKey childKey]
+                    | nid <- IntMapUtils.rigidTypeChildren bindParents
                     , isReachableRigidVar nid
                     ]
 

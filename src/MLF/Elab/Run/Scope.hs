@@ -55,12 +55,12 @@ schemeBodyTarget res target =
         isSchemeRoot =
             any
                 (\gen -> any (\root -> canonical root == targetC) (gnSchemes gen))
-                (IntMap.elems (cGenNodes constraint))
+                (NodeAccess.allGenNodes constraint)
         schemeRootByBody =
             IntMap.fromListWith
                 (\a _ -> a)
                 [ (getNodeId (canonical bnd), root)
-                | gen <- IntMap.elems (cGenNodes constraint)
+                | gen <- NodeAccess.allGenNodes constraint
                 , root <- gnSchemes gen
                 , Just bnd <- [VarStore.lookupVarBound constraint root]
                 , case NodeAccess.lookupNode constraint (canonical bnd) of

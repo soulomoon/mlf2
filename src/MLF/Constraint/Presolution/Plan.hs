@@ -40,6 +40,7 @@ import qualified MLF.Constraint.Solve as Solve
 import MLF.Constraint.Types
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Constraint.VarStore as VarStore
+import qualified MLF.Util.IntMapUtils as IntMapUtils
 import MLF.Constraint.Presolution.Plan.BinderPlan
     ( BinderPlan(..)
     , BinderPlanInput(..)
@@ -178,9 +179,7 @@ planGeneralizeAt PresolutionEnv
                 Just gid ->
                     listToMaybe
                         [ canonical child
-                        | (childKey, (parentRef, _flag)) <- IntMap.toList bindParents
-                        , parentRef == GenRef gid
-                        , TypeRef child <- [nodeRefFromKey childKey]
+                        | child <- IntMapUtils.typeChildrenOfGen bindParents gid
                         , isTyVarKey (canonKey child)
                         , case VarStore.lookupVarBound constraint (canonical child) of
                             Just bnd -> canonical bnd == canonical target0
@@ -303,11 +302,7 @@ planGeneralizeAt PresolutionEnv
                         Nothing -> False
                 _ -> False
         isQuantifiable' = isQuantifiable canonical constraint isTyVarKey
-        bindFlags =
-            IntMap.fromList
-                [ (childKey, flag)
-                | (childKey, (_parent, flag)) <- IntMap.toList bindParents
-                ]
+        bindFlags = IntMapUtils.allBindFlags bindParents
         isBindable =
             mkIsBindable
                 bindFlags
@@ -677,9 +672,7 @@ planReify _ plan = do
                     case IntMap.lookup (getNodeId (canonical typeRoot)) nodes of
                         Just TyForall{} ->
                             [ canonical child
-                            | (childKey, (parent, _flag)) <- IntMap.toList bindParents
-                            , parent == typeRef (canonical typeRoot)
-                            , TypeRef child <- [nodeRefFromKey childKey]
+                            | child <- IntMapUtils.typeChildrenOf bindParents (typeRef (canonical typeRoot))
                             , isQuantifiable' child
                             , not (IntMap.member (getNodeId (canonical child)) subst0')
                             ]

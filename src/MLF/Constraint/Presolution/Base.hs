@@ -229,7 +229,7 @@ ensureBindingParents = do
                 structEdges =
                     foldl'
                         addTypeEdges
-                        (foldl' addGenEdges IntMap.empty (IntMap.elems (cGenNodes c0)))
+                        (foldl' addGenEdges IntMap.empty (NodeAccess.allGenNodes c0))
                         (IntMap.elems nodes)
                 isUpperUnder parent child =
                     let parentKey = nodeRefKey (canonicalRef parent)
@@ -418,13 +418,13 @@ implicitBindersM canonical c0 root0 = do
         schemeOwner =
             listToMaybe
                 [ gnId gen
-                | gen <- IntMap.elems (cGenNodes c0)
+                | gen <- NodeAccess.allGenNodes c0
                 , any (\r -> canonical r == root) (gnSchemes gen)
                 ]
         schemeOwnerByBody =
             listToMaybe
                 [ gnId gen
-                | gen <- IntMap.elems (cGenNodes c0)
+                | gen <- NodeAccess.allGenNodes c0
                 , any
                     (\r ->
                         case VarStore.lookupVarBound c0 (canonical r) of

@@ -18,6 +18,7 @@ import Data.Maybe (isNothing)
 import qualified Data.Set as Set
 
 import MLF.Constraint.Types
+import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Solve (SolveResult)
 import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Binding.Tree as Binding
@@ -204,7 +205,7 @@ buildReifyPlan ReifyPlanInput{..} =
             SchemeRoots.schemeOwnerFromBody rpiSchemeRootsPlan rpiSolvedToBasePref typeRootC
         ownersByRoot =
             [ gnId gen
-            | gen <- IntMap.elems (cGenNodes rpiConstraint)
+            | gen <- NodeAccess.allGenNodes rpiConstraint
             , any (\root -> rpiCanonical root == typeRootC) (gnSchemes gen)
             ]
         schemeOwners =

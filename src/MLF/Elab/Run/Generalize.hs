@@ -38,6 +38,7 @@ import MLF.Constraint.Types
     )
 import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Constraint.NodeAccess as NodeAccess
+import qualified MLF.Util.IntMapUtils as IntMapUtils
 import MLF.Elab.Generalize (GaBindParents(..), applyGeneralizePlan)
 import MLF.Constraint.BindingUtil (bindingPathToRootLocal, firstGenAncestorFrom)
 import MLF.Elab.Run.Debug (debugGaScope)
@@ -227,7 +228,7 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                         schemeInteriorsBase =
                             IntSet.unions
                                 [ reachableFromWithBoundsBase root
-                                | gen <- IntMap.elems (cGenNodes base)
+                                | gen <- NodeAccess.allGenNodes base
                                 , root <- gnSchemes gen
                                 ]
                         insertVarFromBase acc' key =
@@ -237,15 +238,8 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                     in IntSet.foldl' insertVarFromBase acc schemeInteriorsBase
                 restoreBindParentVars acc =
                     let
-                        parentKeys =
-                            [ getNodeId parent
-                            | (_childKey, (TypeRef parent, _flag)) <- IntMap.toList (cBindParents base)
-                            ]
-                        childKeys =
-                            [ getNodeId child
-                            | (childKey, _parent) <- IntMap.toList (cBindParents base)
-                            , TypeRef child <- [nodeRefFromKey childKey]
-                            ]
+                        parentKeys = map getNodeId (IntMapUtils.typeParentNodes (cBindParents base))
+                        childKeys = map getNodeId (IntMapUtils.typeChildNodes (cBindParents base))
                         keys = IntSet.fromList (parentKeys ++ childKeys)
                         insertVarFromBase =
                             insertBaseVarWith adoptNodeId adoptNodeId
@@ -343,16 +337,12 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
         stickyTypeParentsBase =
             IntSet.fromList
                 [ childKey
-                | (childKey, (parentRef, _flag)) <- IntMap.toList bindParentsBase
-                , case parentRef of
-                    TypeRef _ -> True
-                    _ -> False
+                | (childKey, _parent, _flag) <- IntMapUtils.childrenWithTypeParent bindParentsBase
                 ]
         baseNamedKeys =
             IntSet.fromList
                 [ childKey
-                | (childKey, _parentRef) <- IntMap.toList bindParentsBase
-                , TypeRef child <- [nodeRefFromKey childKey]
+                | (childKey, child) <- IntMapUtils.allTypeChildrenWithKey bindParentsBase
                 , isTyVarAt baseNodes (getNodeId child)
                 ]
         bindParentsSolved = cBindParents solvedConstraint
@@ -443,18 +433,13 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
             let schemeInteriorKeys =
                     IntSet.unions
                         [ reachableFromWithBoundsBase root
-                        | gen <- IntMap.elems (cGenNodes base)
+                        | gen <- NodeAccess.allGenNodes base
                         , root <- gnSchemes gen
                         ]
                 bindParentKeys =
                     IntSet.fromList
-                        ( [ getNodeId child
-                          | (childKey, _parent) <- IntMap.toList bindParentsBase
-                          , TypeRef child <- [nodeRefFromKey childKey]
-                          ]
-                            ++ [ getNodeId parent
-                               | (_childKey, (TypeRef parent, _flag)) <- IntMap.toList bindParentsBase
-                               ]
+                        ( map getNodeId (IntMapUtils.typeChildNodes bindParentsBase)
+                            ++ map getNodeId (IntMapUtils.typeParentNodes bindParentsBase)
                         )
                 baseKeys =
                     IntSet.unions
@@ -1218,7 +1203,7 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                                     (zip solvedBinders baseBinders)
                             _ -> (accSolved, accBase)
                 (qAlignSolvedToBase, qAlignBaseToSolved) =
-                    foldl' alignOne (IntMap.empty, IntMap.empty) (IntMap.elems (cGenNodes base))
+                    foldl' alignOne (IntMap.empty, IntMap.empty) (NodeAccess.allGenNodes base)
                 baseToSolvedAligned = IntMap.union baseToSolved qAlignBaseToSolved
                 solvedToBaseAligned0 =
                     IntMap.foldlWithKey'
