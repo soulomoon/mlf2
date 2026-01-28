@@ -21,9 +21,8 @@ import MLF.Constraint.Types
 import MLF.Constraint.Solve (SolveResult)
 import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Binding.Tree as Binding
-import MLF.Constraint.Presolution.Plan.BinderHelpers (boundMentionsSelfAliasFor, isTargetSchemeBinderFor)
 import MLF.Constraint.BindingUtil (bindingScopeFor)
-import MLF.Constraint.Presolution.Plan.BinderPlan (GaBindParentsInfo(..))
+import MLF.Constraint.Presolution.Plan.BinderPlan (GaBindParentsInfo(..), boundMentionsSelfAliasFor, isTargetSchemeBinderFor)
 import MLF.Constraint.Presolution.Plan.Helpers (bindingScopeGen, hasExplicitBound)
 import MLF.Util.Names (alphaName)
 import qualified MLF.Constraint.Presolution.Plan.SchemeRoots as SchemeRoots

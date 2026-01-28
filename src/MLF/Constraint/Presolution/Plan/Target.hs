@@ -21,9 +21,8 @@ import Debug.Trace (trace)
 import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Types
 import qualified MLF.Constraint.VarStore as VarStore
-import MLF.Constraint.Presolution.Plan.BinderPlan (GaBindParentsInfo(..))
+import MLF.Constraint.Presolution.Plan.BinderPlan (GaBindParentsInfo(..), firstSchemeRootAncestorWith)
 import MLF.Constraint.BindingUtil (firstGenAncestorFrom)
-import MLF.Constraint.Presolution.Plan.Util (firstSchemeRootAncestorWith)
 import qualified MLF.Util.Order as Order
 
 data TargetPlanInput = TargetPlanInput

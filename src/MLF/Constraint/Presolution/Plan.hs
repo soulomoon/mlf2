@@ -19,6 +19,7 @@ import MLF.Constraint.Presolution.Plan.BinderPlan
     ( BinderPlan(..)
     , BinderPlanInput(..)
     , buildBinderPlan
+    , orderBinderCandidates
     )
 import MLF.Constraint.Presolution.Plan.Context
     ( GaBindParents(..)
@@ -37,7 +38,6 @@ import MLF.Constraint.Presolution.Plan.Helpers
     , selectBinders
     )
 import MLF.Util.Names (parseNameId)
-import MLF.Constraint.Presolution.Plan.Ordering (orderBinderCandidates)
 import MLF.Constraint.Presolution.Plan.Target
     ( TargetPlanInput(..)
     , TargetPlan(..)
