@@ -1,5 +1,29 @@
 {-# LANGUAGE RecordWildCards #-}
+{- |
+Module      : MLF.Constraint.Presolution.Plan.BinderPlan
+Description : Plan which variables become quantified binders
+Copyright   : (c) 2024
+License     : BSD-3-Clause
 
+This module determines which type variables should be generalized as explicit
+binders in a polymorphic type scheme. It handles:
+
+* Filtering variables by reachability and scope
+* Detecting scheme roots and alias binders
+* Ordering binders by their bound dependencies
+* Computing binder names (α-conversion)
+
+The binder selection logic is complex because MLF allows variables to have
+bounds, and those bounds may contain other variables. We must order binders
+topologically so that each binder's bound only refers to previously-introduced
+binders.
+
+This module has been consolidated from several smaller modules:
+* BinderHelpers - Checking binder properties
+* Ordering - Topological ordering of binder candidates
+* Util - Bound root computation
+* Helpers - Binder selection helpers
+-}
 module MLF.Constraint.Presolution.Plan.BinderPlan (
     GaBindParentsInfo(..),
     BinderPlanInput(..),

@@ -3,6 +3,28 @@
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeSynonymInstances #-}
+{- |
+Module      : MLF.Elab.Types
+Description : Elaborated types, terms, and error types for MLF
+Copyright   : (c) 2024
+License     : BSD-3-Clause
+
+This module defines the core types used in the elaborated (typed) representation
+of MLF programs. After constraint generation and solving, types are elaborated
+into this form for type checking and code generation.
+
+= Key Types
+
+* 'ElabType' - Fully elaborated types with quantifiers and bounds
+* 'ElabTerm' - Typed terms with explicit type annotations
+* 'ElabScheme' - Polymorphic type schemes with explicit binders
+* 'Instantiation' - Witnesses for type instantiation
+
+= Error Types
+
+* 'ElabError' - Errors that can occur during elaboration
+* 'TypeCheckError' - Specific type checking failures
+-}
 module MLF.Elab.Types (
     ElabType,
     Ty(..),

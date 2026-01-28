@@ -1,5 +1,24 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
+{- |
+Module      : MLF.Elab.Generalize
+Description : Apply generalization plans to produce elaborated types
+Copyright   : (c) 2024
+License     : BSD-3-Clause
+
+This module applies generalization plans (produced by the presolution phase)
+to produce elaborated types with explicit polymorphism. It coordinates the
+binder naming, scheme reification, and finalization steps.
+
+= Process
+
+1. Receive 'GeneralizePlan' from presolution
+2. Build 'BinderPlan' for naming quantified variables
+3. Reify the type using 'ReifyPlan'
+4. Finalize schemes with proper binders
+
+See 'MLF.Constraint.Presolution.Plan' for the plan generation logic.
+-}
 module MLF.Elab.Generalize (
     GaBindParents(..),
     applyGeneralizePlan

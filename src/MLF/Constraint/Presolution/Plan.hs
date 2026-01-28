@@ -1,3 +1,27 @@
+{- |
+Module      : MLF.Constraint.Presolution.Plan
+Description : Build generalization plans from solved constraints
+Copyright   : (c) 2024
+License     : BSD-3-Clause
+
+This module coordinates the generalization planning process, which determines
+how to turn solved constraint graphs into polymorphic type schemes. It builds
+plans that specify:
+
+* Which variables to generalize as binders
+* How to order those binders
+* How to reify the type structure
+* How to handle scheme roots
+
+The planning process is split across submodules:
+
+* 'BinderPlan' - Plan which variables become quantified binders
+* 'Context' - Build the generalization context from scope info
+* 'Target' - Determine the target type and its properties
+* 'SchemeRoots' - Track scheme ownership for polymorphism
+* 'ReifyPlan' - Plan the reification of types with bounds
+* 'Finalize' - Finalize schemes with proper naming
+-}
 module MLF.Constraint.Presolution.Plan (
     GeneralizePlan(..),
     ReifyPlan(..),
