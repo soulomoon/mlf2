@@ -52,6 +52,7 @@ module MLF.Constraint.Presolution.Plan.BinderPlan (
     computeAliasBinders
 ) where
 
+import Control.Monad (forM)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Set as Set
@@ -221,23 +222,20 @@ buildBinderPlan BinderPlanInput{..} = do
                     [] -> True
                     [v] -> canonical v == targetC
                     _ -> False
-                extras =
-                    if targetIsSchemeRoot && onlyTarget && not (boundIsSchemeRootAll target0)
-                        then freeVarsFromBound
-                        else []
+                shouldAddExtras = targetIsSchemeRoot && onlyTarget && not (boundIsSchemeRootAll target0)
+                extras = if shouldAddExtras then freeVarsFromBound else []
             in binders0 ++ extras ++ namedUnderGa
     traceGeneralizeM
         ("generalizeAt: bindersAdjusted=" ++ show binders0Adjusted
             ++ " reachable=" ++ show (IntSet.toList reachableForBinders)
         )
-    let isTargetSchemeBinder v =
-            if targetIsBaseLike
-                then False
-                else
-                    canonical v == canonical target0
-                        || case VarStore.lookupVarBound constraint (canonical v) of
-                            Just bnd -> canonical bnd == canonical target0
-                            Nothing -> False
+    let isTargetSchemeBinder v
+            | targetIsBaseLike = False
+            | canonical v == canonical target0 = True
+            | otherwise =
+                case VarStore.lookupVarBound constraint (canonical v) of
+                    Just bnd -> canonical bnd == canonical target0
+                    Nothing -> False
     let extraReachable =
             case (scopeGen, IntMap.lookup (getNodeId typeRoot0) nodes) of
                 (Just _, _) -> []
@@ -298,16 +296,15 @@ buildBinderPlan BinderPlanInput{..} = do
                 Nothing -> False
         boundIsStructuralAlias v =
             case VarStore.lookupVarBound constraint (canonical v) of
-                Just bnd ->
-                    let bndC = canonical bnd
-                        isStruct =
-                            case IntMap.lookup (getNodeId bndC) nodes of
-                                Just TyArrow{} -> True
-                                Just TyForall{} -> True
-                                Just TyExp{} -> True
-                                _ -> False
-                    in (bndC == canonical typeRoot || bndC == canonical typeRootForScheme) && isStruct
-                Nothing -> False
+                Just bnd | bndC == canonical typeRoot || bndC == canonical typeRootForScheme ->
+                    case IntMap.lookup (getNodeId bndC) nodes of
+                        Just TyArrow{} -> True
+                        Just TyForall{} -> True
+                        Just TyExp{} -> True
+                        _ -> False
+                  where
+                    bndC = canonical bnd
+                _ -> False
         boundIsTypeRootAlias v =
             case VarStore.lookupVarBound constraint (canonical v) of
                 Just bnd ->
@@ -416,25 +413,30 @@ buildBinderPlan BinderPlanInput{..} = do
                     case IntMap.lookup (getNodeId (canonical bnd)) nodes of
                         Just TyVar{} -> True
                         _ -> False
-                Nothing -> False
-        isTypeRootBinder v =
-            case typeRootFromBoundVar of
-                Just v0 -> canonical v == canonical v0
-                Nothing -> False
+                _ -> False
+        isTypeRootBinder v = maybe False (\v0 -> canonical v == canonical v0) typeRootFromBoundVar
         aliasBinderIsTrivial v =
-            not (isTargetSchemeBinder v)
-                && not (isTypeRootBinder v)
-                && boundIsVarAlias v
-                && not (IntSet.member (getNodeId (canonical v)) reachableTypeStructural)
-                && not (boundHasNamedOutsideGammaFor v)
-                && not (boundMentionsSelfAlias v)
+            all ($ v)
+                [ not . isTargetSchemeBinder
+                , not . isTypeRootBinder
+                , boundIsVarAlias
+                , \x -> not (inReachableTypeStructural x)
+                , not . boundHasNamedOutsideGammaFor
+                , not . boundMentionsSelfAlias
+                ]
+          where
+            inReachableTypeStructural x = IntSet.member (getNodeId (canonical x)) reachableTypeStructural
         aliasBinderIsRedundant v inGamma =
-            not (isTargetSchemeBinder v)
-                && not (isTypeRootBinder v)
-                && (isSchemeRootAlias v || boundIsTypeRootAlias v)
-                && not (IntSet.member (getNodeId (canonical v)) reachableType)
-                && (not inGamma || boundIsTypeRootAlias v)
-                && not (boundIsSchemeBodyAlias v)
+            all ($ v)
+                [ not . isTargetSchemeBinder
+                , not . isTypeRootBinder
+                , \x -> isSchemeRootAlias x || boundIsTypeRootAlias x
+                , \x -> not (inReachableType x)
+                , \_ -> not inGamma || boundIsTypeRootAlias v
+                , not . boundIsSchemeBodyAlias
+                ]
+          where
+            inReachableType x = IntSet.member (getNodeId (canonical x)) reachableType
     let forallBoundBinders =
             IntSet.fromList
                 [ canonKey child
@@ -566,15 +568,13 @@ buildBinderPlan BinderPlanInput{..} = do
         )
     let requiredGammaBinders :: [NodeId]
         requiredGammaBinders = []
-        bindersWithRequired =
-            binders
         binders' =
             traceGeneralize
                 ("generalizeAt: bindersFiltered=" ++ show binders
                     ++ " requiredGammaBinders=" ++ show requiredGammaBinders
                     ++ " typeRoot=" ++ show typeRoot
                 )
-                bindersWithRequired
+                binders
         bindersCanon =
             IntMap.elems $
                 IntMap.fromList
@@ -758,11 +758,8 @@ buildBinderPlan BinderPlanInput{..} = do
 
     where
         hasExplicitBound v =
-            case IntMap.lookup (getNodeId (bpiCanonical v)) (bpiNodes) of
-                Just TyVar{} ->
-                    case VarStore.lookupVarBound (bpiConstraint) (bpiCanonical v) of
-                        Nothing -> False
-                        Just _ -> True
+            case IntMap.lookup (getNodeId (bpiCanonical v)) bpiNodes of
+                Just TyVar{} -> VarStore.lookupVarBound bpiConstraint (bpiCanonical v) /= Nothing
                 _ -> False
 
 -- | Check if a variable is a target scheme binder.
@@ -773,14 +770,13 @@ isTargetSchemeBinderFor
     -> Bool
     -> NodeId
     -> Bool
-isTargetSchemeBinderFor canonical constraint target0 targetIsBaseLike v =
-    if targetIsBaseLike
-        then False
-        else
-            canonical v == canonical target0
-                || case VarStore.lookupVarBound constraint (canonical v) of
-                    Just bnd -> canonical bnd == canonical target0
-                    Nothing -> False
+isTargetSchemeBinderFor canonical constraint target0 targetIsBaseLike v
+    | targetIsBaseLike = False
+    | canonical v == canonical target0 = True
+    | otherwise =
+        case VarStore.lookupVarBound constraint (canonical v) of
+            Just bnd -> canonical bnd == canonical target0
+            Nothing -> False
 
 -- | Check if a bound mentions a self-alias.
 boundMentionsSelfAliasFor
@@ -794,21 +790,17 @@ boundMentionsSelfAliasFor
     -> Bool
 boundMentionsSelfAliasFor canonical constraint nodes gammaAlias nestedSchemeInteriorSet reachableFromWithBounds v =
     case VarStore.lookupVarBound constraint (canonical v) of
-        Just bnd ->
-            let reachableBound = reachableFromWithBounds bnd
-                binderKey = getNodeId (canonical v)
-                mentionsSelf nidInt =
-                    let nidC = canonical (NodeId nidInt)
-                        keyC = getNodeId nidC
-                    in if IntSet.member keyC nestedSchemeInteriorSet
-                        then False
-                        else case IntMap.lookup keyC nodes of
-                            Just TyVar{} ->
-                                case IntMap.lookup keyC gammaAlias of
-                                    Just repKey -> repKey == binderKey
-                                    Nothing -> False
-                            _ -> False
-            in any mentionsSelf (IntSet.toList reachableBound)
+        Just bnd -> any mentionsSelf (IntSet.toList (reachableFromWithBounds bnd))
+          where
+            binderKey = getNodeId (canonical v)
+            mentionsSelf nidInt
+                | IntSet.member keyC nestedSchemeInteriorSet = False
+                | Just TyVar{} <- IntMap.lookup keyC nodes
+                , Just repKey <- IntMap.lookup keyC gammaAlias = repKey == binderKey
+                | otherwise = False
+              where
+                nidC = canonical (NodeId nidInt)
+                keyC = getNodeId nidC
         Nothing -> False
 
 -- | Order binder candidates topologically by their bound dependencies.
@@ -832,9 +824,8 @@ orderBinderCandidates debugEnabled mbBindParentsGa canonical constraint root roo
         if enabled then trace msg (Right ()) else Right ()
 
     orderBinderCandidatesSolved keysSolved candidates' depsForE' = do
-        let keys = keysSolved
-            candidateSet = IntSet.fromList candidates'
-            keyMaybe k = IntMap.lookup k keys
+        let candidateSet = IntSet.fromList candidates'
+            keyMaybe k = IntMap.lookup k keysSolved
             cmpReady a b =
                 case (keyMaybe a, keyMaybe b) of
                     (Just ka, Just kb) ->
@@ -842,21 +833,14 @@ orderBinderCandidates debugEnabled mbBindParentsGa canonical constraint root roo
                             EQ -> compare a b
                             other -> other
                     _ -> compare a b
+            filterDeps k deps = filter (\d -> d /= k && IntSet.member d candidateSet) deps
 
-        depsList <- mapM
-            (\k -> do
-                deps <- depsForE' k
-                pure (k, filter (\d -> d /= k && IntSet.member d candidateSet) deps)
-            )
-            candidates'
-        let depsMap = IntMap.fromList depsList
-            depsFor k = IntMap.findWithDefault [] k depsMap
+        depsList <- forM candidates' $ \k -> do
+            deps <- depsForE' k
+            pure (k, filterDeps k deps)
+        let depsFor k = IntMap.findWithDefault [] k (IntMap.fromList depsList)
 
-        topoSortBy
-            "generalizeAt: cycle in binder bound dependencies"
-            cmpReady
-            depsFor
-            candidates'
+        topoSortBy "generalizeAt: cycle in binder bound dependencies" cmpReady depsFor candidates'
 
     orderBinderCandidatesBase ga keysSolved rootBase' candidates' depsForE' = do
         let baseConstraint = gbiBaseConstraint ga
@@ -884,26 +868,19 @@ orderBinderCandidates debugEnabled mbBindParentsGa canonical constraint root roo
                                     EQ -> compare a b
                                     other -> other
                             _ -> compare a b
+            filterDeps k deps = filter (\d -> d /= k && IntSet.member d candidateSet) deps
 
         traceOrderingEnabledM debugEnabled
             ("generalizeAt: missing base order keys (falling back to solved) "
                 ++ show (map NodeId missingKeys)
             )
 
-        depsList <- mapM
-            (\k -> do
-                deps <- depsForE' k
-                pure (k, filter (\d -> d /= k && IntSet.member d candidateSet) deps)
-            )
-            candidates'
-        let depsMap = IntMap.fromList depsList
-            depsFor k = IntMap.findWithDefault [] k depsMap
+        depsList <- forM candidates' $ \k -> do
+            deps <- depsForE' k
+            pure (k, filterDeps k deps)
+        let depsFor k = IntMap.findWithDefault [] k (IntMap.fromList depsList)
 
-        topoSortBy
-            "generalizeAt: cycle in binder bound dependencies"
-            cmpReady
-            depsFor
-            candidates'
+        topoSortBy "generalizeAt: cycle in binder bound dependencies" cmpReady depsFor candidates'
 
 -- | Walk through bounds to find the root of a bound chain.
 boundRootWith
@@ -916,31 +893,24 @@ boundRootWith
     -> NodeId
     -> NodeId
 boundRootWith keyOf canon lookupNodeByKey lookupBound lookupSchemeRoot followForall start =
-    let walkBoundRoot visited nid0 =
-            let nid = canon nid0
-                key = keyOf nid
-            in if IntSet.member key visited
-                then nid
-                else
-                    case lookupSchemeRoot key of
-                        Just root -> canon root
-                        Nothing ->
-                            case lookupNodeByKey key of
-                                Just TyForall{ tnBody = b }
-                                    | followForall -> canon b
-                                Just TyExp{ tnBody = b } ->
-                                    walkBoundRoot (IntSet.insert key visited) b
-                                Just TyVar{ tnBound = Just bnd } ->
-                                    let bndC = canon bnd
-                                    in if bndC /= nid
-                                        then walkBoundRoot (IntSet.insert key visited) bnd
-                                        else nid
-                                _ ->
-                                    case lookupBound nid of
-                                        Just bnd' | canon bnd' /= nid ->
-                                            walkBoundRoot (IntSet.insert key visited) bnd'
-                                        _ -> nid
-    in walkBoundRoot IntSet.empty start
+    walk IntSet.empty start
+  where
+    walk visited nid0
+        | IntSet.member key visited = nid
+        | Just root <- lookupSchemeRoot key = canon root
+        | otherwise = case lookupNodeByKey key of
+            Just TyForall{ tnBody = b } | followForall -> canon b
+            Just TyExp{ tnBody = b } -> walk (insertKey visited) b
+            Just TyVar{ tnBound = Just bnd }
+                | bndC /= nid -> walk (insertKey visited) bnd
+                where bndC = canon bnd
+            _ -> case lookupBound nid of
+                Just bnd' | canon bnd' /= nid -> walk (insertKey visited) bnd'
+                _ -> nid
+      where
+        nid = canon nid0
+        key = keyOf nid
+        insertKey = IntSet.insert key
 
 -- | Find the first scheme root ancestor of a node.
 firstSchemeRootAncestorWith
@@ -950,24 +920,20 @@ firstSchemeRootAncestorWith
     -> Int
     -> Maybe Int
 firstSchemeRootAncestorWith parentOf keyOfRef isSchemeRootKey startKey =
-    let startRef = TypeRef (NodeId startKey)
-        walkParents visited ref =
-            case ref of
-                GenRef _ -> Nothing
-                TypeRef _ ->
-                    let parentKey = keyOfRef ref
-                    in if IntSet.member parentKey visited
-                        then Nothing
-                        else if isSchemeRootKey parentKey
-                            then Just parentKey
-                            else
-                                case parentOf ref of
-                                    Just parentRef' ->
-                                        walkParents (IntSet.insert parentKey visited) parentRef'
-                                    Nothing -> Nothing
-    in case parentOf startRef of
-        Just parentRef -> walkParents (IntSet.singleton (keyOfRef startRef)) parentRef
+    case parentOf startRef of
+        Just parentRef -> walk (IntSet.singleton (keyOfRef startRef)) parentRef
         Nothing -> Nothing
+  where
+    startRef = TypeRef (NodeId startKey)
+    walk visited ref@(TypeRef _) =
+        case () of
+            _ | isSchemeRootKey parentKey -> Just parentKey
+              | IntSet.member parentKey visited -> Nothing
+              | Just parentRef' <- parentOf ref -> walk (IntSet.insert parentKey visited) parentRef'
+              | otherwise -> Nothing
+          where
+            parentKey = keyOfRef ref
+    walk _ (GenRef _) = Nothing
 
 -- -----------------------------------------------------------------------------
 -- Binder selection helpers (merged from Helpers.hs)
@@ -1007,9 +973,7 @@ bindingScopeGen constraint child = bindingScopeFor constraint (typeRef child)
 
 isQuantifiable :: (NodeId -> NodeId) -> Constraint -> (Int -> Bool) -> NodeId -> Bool
 isQuantifiable canonical constraint isTyVarKey child =
-    if isTyVarKey (getNodeId child)
-        then not (VarStore.isEliminatedVar constraint (canonical child))
-        else False
+    isTyVarKey (getNodeId child) && not (VarStore.isEliminatedVar constraint (canonical child))
 
 boundContainsForall
     :: (NodeId -> NodeId)
@@ -1038,21 +1002,17 @@ hasExplicitBoundFor
     -> Bool
 hasExplicitBoundFor canonical nodes constraint v =
     case IntMap.lookup (getNodeId (canonical v)) nodes of
-        Just TyVar{} ->
-            case VarStore.lookupVarBound constraint (canonical v) of
-                Nothing -> False
-                Just _ -> True
+        Just TyVar{} -> VarStore.lookupVarBound constraint (canonical v) /= Nothing
         _ -> False
 
 mkIsBindable
     :: IntMap.IntMap BindFlag
     -> (NodeId -> Bool)
     -> (Int -> NodeId -> Bool)
-mkIsBindable bindFlags isQuantifiableP =
-    \key child ->
-        case IntMap.lookup key bindFlags of
-            Just BindFlex -> isQuantifiableP child
-            _ -> False
+mkIsBindable bindFlags isQuantifiableP key child =
+    case IntMap.lookup key bindFlags of
+        Just BindFlex -> isQuantifiableP child
+        _ -> False
 
 bindersForGen
     :: (NodeId -> NodeId)

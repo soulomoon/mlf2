@@ -585,8 +585,7 @@ rewriteConstraint mapping = do
               )
             | pid <- probeIds
             ]
-    case debugBindParents ("rewriteConstraint: probe nodes " ++ show probeInfo) () of
-        () -> pure ()
+    debugBindParentsM ("rewriteConstraint: probe nodes " ++ show probeInfo)
 
     case Binding.checkBindingTree c' of
         Left err -> throwError (BindingTreeError err)
@@ -927,11 +926,6 @@ processInstEdge edge = do
                         of
                             () -> pure ()
                     targetBinder <- bindExpansionRootLikeTarget resNodeId targetNodeId
-                    let setBindParentIfUpper child parent = do
-                            cBind <- gets psConstraint
-                            if Binding.isUpper cBind parent (typeRef child)
-                                then setBindParentM (typeRef child) (parent, BindFlex)
-                                else pure ()
 
                     -- Flag reset: bind the frontier copies at the target binder.
                     pure ()
@@ -1228,11 +1222,6 @@ unifyStructure n1 n2 = do
             _ -> do
                 (resNodeId, (copyMap, _interior, frontier)) <- applyExpansionEdgeTraced finalExp expNode
                 targetBinder <- bindExpansionRootLikeTarget resNodeId targetId
-                let setBindParentIfUpper child parent = do
-                        cBind <- gets psConstraint
-                        if Binding.isUpper cBind parent (typeRef child)
-                            then setBindParentM (typeRef child) (parent, BindFlex)
-                            else pure ()
                 pure ()
                 uf0 <- gets psUnionFind
                 let canonical = UnionFind.frWith uf0
@@ -1313,59 +1302,83 @@ unifyStructure n1 n2 = do
                     -- Mismatches: handled by Solve or suppressed (Presolution implies compatibility).
                     _ -> return ()
 
+-- | Check if a node is a scheme root (directly under a GenNode).
+isSchemeRootNode :: (NodeId -> NodeId) -> Constraint -> NodeId -> PresolutionM Bool
+isSchemeRootNode canonical c0 nid =
+    case Binding.lookupBindParentUnder canonical c0 (typeRef nid) of
+        Left _ -> pure False
+        Right (Just (GenRef gid, _)) ->
+            case IntMap.lookup (genNodeKey gid) (cGenNodes c0) of
+                Nothing -> pure False
+                Just gen -> pure (nid `elem` map canonical (gnSchemes gen))
+        _ -> pure False
+
+-- | Check binding permission for a node.
+getBindingPermission :: (NodeId -> NodeId) -> Constraint -> NodeId -> PresolutionM (Bool, Maybe GenNodeId)
+getBindingPermission canonical c0 nid =
+    case Binding.lookupBindParentUnder canonical c0 (typeRef nid) of
+        Left err -> throwError (BindingTreeError err)
+        Right (Just (GenRef gid, BindFlex)) -> pure (True, Just gid)
+        Right (Just (GenRef gid, BindRigid)) -> pure (False, Just gid)
+        _ -> pure (False, Nothing)
+
 solveNonExpInstantiation :: NodeId -> NodeId -> PresolutionM ()
 solveNonExpInstantiation lhs rhs = do
     lhsNode <- getCanonicalNode lhs
     rhsNode <- getCanonicalNode rhs
-    case rhsNode of
-        TyVar{ tnBound = Nothing } ->
-            case lhsNode of
-                TyVar{} -> unifyStructure lhs rhs
-                _ -> do
-                    uf <- gets psUnionFind
-                    c0 <- gets psConstraint
-                    let canonical = UnionFind.frWith uf
-                        lhsC = canonical lhs
-                        rhsC = canonical rhs
-                    (allowBound, parentGen) <- case Binding.lookupBindParentUnder canonical c0 (typeRef rhsC) of
-                        Left err -> throwError (BindingTreeError err)
-                        Right (Just (GenRef gid, BindFlex)) -> pure (True, Just gid)
-                        Right (Just (GenRef gid, BindRigid)) -> pure (False, Just gid)
-                        _ -> pure (False, Nothing)
-                    isSchemeRoot <- case parentGen of
-                        Nothing -> pure False
-                        Just gid ->
-                            case IntMap.lookup (genNodeKey gid) (cGenNodes c0) of
-                                Nothing -> pure False
-                                Just gen -> do
-                                    let schemes = map canonical (gnSchemes gen)
-                                    pure (rhsC `elem` schemes)
-                    occurs <- case Traversal.occursInUnder canonical (NodeAccess.lookupNode c0) rhsC lhsC of
-                        Left _ -> pure True
-                        Right ok -> pure ok
-                    if (allowBound || isSchemeRoot) && not occurs
-                        then setVarBound rhsC (Just lhsC)
-                        else unifyStructure lhs rhs
-        TyVar{ tnBound = Just bnd } ->
-            case lhsNode of
-                TyVar{} -> unifyStructure lhs rhs
-                _ -> do
-                    uf <- gets psUnionFind
-                    c0 <- gets psConstraint
-                    let canonical = UnionFind.frWith uf
-                        lhsC = canonical lhs
-                        bndC = canonical bnd
-                    bndNode <- getCanonicalNode bndC
-                    case bndNode of
-                        TyVar{} -> do
-                            occurs <- case Traversal.occursInUnder canonical (NodeAccess.lookupNode c0) bndC lhsC of
-                                Left _ -> pure True
-                                Right ok -> pure ok
-                            if not occurs && bndC /= lhsC
-                                then setVarBound bndC (Just lhsC)
-                                else unifyStructure lhs rhs
-                        _ -> unifyStructure lhs rhs
+    case (lhsNode, rhsNode) of
+        (TyVar{}, TyVar{}) -> unifyStructure lhs rhs
+        (_, TyVar{ tnBound = Nothing }) ->
+            solveUnboundVarInstantiation lhs rhs
+        (_, TyVar{ tnBound = Just bnd }) ->
+            solveBoundVarInstantiation lhs rhs bnd
         _ -> unifyStructure lhs rhs
+
+-- | Handle instantiation where RHS is an unbound variable.
+solveUnboundVarInstantiation :: NodeId -> NodeId -> PresolutionM ()
+solveUnboundVarInstantiation lhs rhs = do
+    uf <- gets psUnionFind
+    c0 <- gets psConstraint
+    let canonical = UnionFind.frWith uf
+        lhsC = canonical lhs
+        rhsC = canonical rhs
+    (allowBound, _parentGen) <- getBindingPermission canonical c0 rhsC
+    isSchemeRoot <- isSchemeRootNode canonical c0 rhsC
+    occurs <- checkOccurs canonical c0 rhsC lhsC
+    if (allowBound || isSchemeRoot) && not occurs
+        then setVarBound rhsC (Just lhsC)
+        else unifyStructure lhs rhs
+
+-- | Handle instantiation where RHS is a bound variable.
+solveBoundVarInstantiation :: NodeId -> NodeId -> NodeId -> PresolutionM ()
+solveBoundVarInstantiation lhs rhs bnd = do
+    uf <- gets psUnionFind
+    c0 <- gets psConstraint
+    let canonical = UnionFind.frWith uf
+        lhsC = canonical lhs
+        bndC = canonical bnd
+    bndNode <- getCanonicalNode bndC
+    case bndNode of
+        TyVar{} -> do
+            occurs <- checkOccurs canonical c0 bndC lhsC
+            if not occurs && bndC /= lhsC
+                then setVarBound bndC (Just lhsC)
+                else unifyStructure lhs rhs
+        _ -> unifyStructure lhs rhs
+
+-- | Check if lhs occurs in rhs.
+checkOccurs :: (NodeId -> NodeId) -> Constraint -> NodeId -> NodeId -> PresolutionM Bool
+checkOccurs canonical c0 rhsC lhsC =
+    case Traversal.occursInUnder canonical (NodeAccess.lookupNode c0) rhsC lhsC of
+        Left _ -> pure True
+        Right ok -> pure ok
+
+-- | Set a binding parent if the parent is upper than the child in the binding tree.
+setBindParentIfUpper :: NodeId -> NodeRef -> PresolutionM ()
+setBindParentIfUpper child parent = do
+    cBind <- gets psConstraint
+    when (Binding.isUpper cBind parent (TypeRef child)) $
+        setBindParentM (TypeRef child) (parent, BindFlex)
 
 -- | Merge two expansions for the same variable.
 -- This may trigger unifications if we merge two Instantiates.
@@ -1376,6 +1389,11 @@ debugBindParents msg value =
     if debugBindParentsEnabled
         then trace msg value
         else value
+
+-- | Monadic version of debugBindParents for use in PresolutionM.
+debugBindParentsM :: String -> PresolutionM ()
+debugBindParentsM msg =
+    when debugBindParentsEnabled (trace msg (pure ()))
 
 nodeTag :: TyNode -> String
 nodeTag node = case node of
