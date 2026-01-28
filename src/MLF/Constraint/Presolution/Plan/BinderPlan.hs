@@ -16,7 +16,7 @@ import MLF.Constraint.Types
 import MLF.Types.Elab (Ty(..))
 import MLF.Util.ElabError (ElabError)
 import MLF.Constraint.Presolution.Plan.Util (boundRootWith)
-import MLF.Constraint.Presolution.Plan.Names (alphaName)
+import MLF.Util.Names (alphaName)
 import MLF.Reify.Core (reifyBoundWithNames, reifyBoundWithNamesOnConstraint)
 import MLF.Reify.TypeOps (freeTypeVarsFrom)
 import MLF.Util.Graph (reachableFrom)

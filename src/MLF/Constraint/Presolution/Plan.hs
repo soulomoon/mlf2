@@ -36,7 +36,7 @@ import MLF.Constraint.Presolution.Plan.Helpers
     , mkIsBindable
     , selectBinders
     )
-import MLF.Constraint.Presolution.Plan.Names (parseNameId)
+import MLF.Util.Names (parseNameId)
 import MLF.Constraint.Presolution.Plan.Ordering (orderBinderCandidates)
 import MLF.Constraint.Presolution.Plan.Target
     ( TargetPlanInput(..)

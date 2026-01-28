@@ -25,7 +25,7 @@ import MLF.Constraint.Presolution.Plan.BinderHelpers (boundMentionsSelfAliasFor,
 import MLF.Constraint.BindingUtil (bindingScopeFor)
 import MLF.Constraint.Presolution.Plan.BinderPlan (GaBindParentsInfo(..))
 import MLF.Constraint.Presolution.Plan.Helpers (bindingScopeGen, hasExplicitBound)
-import MLF.Constraint.Presolution.Plan.Names (alphaName)
+import MLF.Util.Names (alphaName)
 import qualified MLF.Constraint.Presolution.Plan.SchemeRoots as SchemeRoots
 import MLF.Constraint.Presolution.Plan.Normalize (containsForall)
 import MLF.Reify.TypeOps (freeTypeVarsType)

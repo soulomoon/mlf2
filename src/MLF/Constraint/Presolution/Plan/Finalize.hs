@@ -18,7 +18,7 @@ import MLF.Constraint.BindingUtil
     , firstGenAncestorFrom
     )
 import MLF.Constraint.Presolution.Plan.Context (GaBindParents(..), GeneralizeEnv, traceGeneralize)
-import MLF.Constraint.Presolution.Plan.Names (alphaName, parseNameId)
+import MLF.Util.Names (alphaName, parseNameId)
 import MLF.Constraint.Presolution.Plan.Normalize
     ( simplifySchemeBindings
     , promoteArrowAlias
