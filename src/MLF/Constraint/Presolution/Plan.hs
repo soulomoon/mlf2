@@ -20,6 +20,12 @@ import MLF.Constraint.Presolution.Plan.BinderPlan
     , BinderPlanInput(..)
     , buildBinderPlan
     , orderBinderCandidates
+    , bindableChildrenUnder
+    , computeAliasBinders
+    , hasExplicitBoundFor
+    , isQuantifiable
+    , mkIsBindable
+    , selectBinders
     )
 import MLF.Constraint.Presolution.Plan.Context
     ( GaBindParents(..)
@@ -28,14 +34,6 @@ import MLF.Constraint.Presolution.Plan.Context
     , resolveContext
     , traceGeneralize
     , traceGeneralizeM
-    )
-import MLF.Constraint.Presolution.Plan.Helpers
-    ( bindableChildrenUnder
-    , computeAliasBinders
-    , hasExplicitBound
-    , isQuantifiable
-    , mkIsBindable
-    , selectBinders
     )
 import MLF.Util.Names (parseNameId)
 import MLF.Constraint.Presolution.Plan.Target
@@ -301,7 +299,7 @@ planGeneralizeAt PresolutionEnv
             (traceGeneralizeM env)
     let bindableChildrenUnder' =
             bindableChildrenUnder canonical bindParents isBindable
-        hasExplicitBound' = hasExplicitBound canonical nodes constraint
+        hasExplicitBound' = hasExplicitBoundFor canonical nodes constraint
     binders0 <-
         selectBinders
             canonical

@@ -22,8 +22,7 @@ import MLF.Constraint.Solve (SolveResult)
 import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.BindingUtil (bindingScopeFor)
-import MLF.Constraint.Presolution.Plan.BinderPlan (GaBindParentsInfo(..), boundMentionsSelfAliasFor, isTargetSchemeBinderFor)
-import MLF.Constraint.Presolution.Plan.Helpers (bindingScopeGen, hasExplicitBound)
+import MLF.Constraint.Presolution.Plan.BinderPlan (GaBindParentsInfo(..), boundMentionsSelfAliasFor, isTargetSchemeBinderFor, bindingScopeGen, hasExplicitBoundFor)
 import MLF.Util.Names (alphaName)
 import qualified MLF.Constraint.Presolution.Plan.SchemeRoots as SchemeRoots
 import MLF.Constraint.Presolution.Plan.Normalize (containsForall)
@@ -246,7 +245,7 @@ buildReifyPlan ReifyPlanInput{..} =
                 , stcSchemeOwners = schemeOwners
                 }
         bindingScopeGenLocal = bindingScopeGen rpiConstraint
-        hasExplicitBoundLocal = hasExplicitBound rpiCanonical rpiNodes rpiConstraint
+        hasExplicitBoundLocal = hasExplicitBoundFor rpiCanonical rpiNodes rpiConstraint
         isTargetSchemeBinderLocal =
             isTargetSchemeBinderFor
                 rpiCanonical

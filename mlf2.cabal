@@ -93,7 +93,6 @@ library mlf2-internal
                       MLF.Constraint.Presolution.Plan.BinderPlan,
                       MLF.Constraint.Presolution.Plan.Context,
                       MLF.Constraint.Presolution.Plan.Finalize,
-                      MLF.Constraint.Presolution.Plan.Helpers,
                       MLF.Constraint.Presolution.Plan.Normalize,
                       MLF.Constraint.Presolution.Plan.ReifyPlan,
                       MLF.Constraint.Presolution.Plan.SchemeRoots,
