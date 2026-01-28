@@ -33,6 +33,7 @@ import Data.Maybe (listToMaybe)
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.Canonicalize as Canonicalize
 import MLF.Constraint.Types
+import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Constraint.Traversal as Traversal
 import qualified MLF.Util.Order as Order
@@ -444,7 +445,7 @@ implicitBindersM canonical c0 root0 = do
                     IntSet.fromList (map (getNodeId . canonical) schemeRoots)
                 isSchemeRoot = IntSet.member (getNodeId root) schemeRootSet
                 rootIsWrapper =
-                    case IntMap.lookup (getNodeId root) (cNodes c0) of
+                    case NodeAccess.lookupNode c0 root of
                         Just TyVar{ tnBound = Just _ } -> not isSchemeRoot
                         _ -> False
             bindersFromGen <- case Binding.boundFlexChildrenUnder canonical c0 (genRef gid) of

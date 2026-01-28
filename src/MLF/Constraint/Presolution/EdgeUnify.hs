@@ -38,6 +38,7 @@ import System.Environment (lookupEnv)
 import System.IO.Unsafe (unsafePerformIO)
 
 import MLF.Constraint.Types
+import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Presolution.Base (
     CopyMap,
     InteriorSet,
@@ -616,10 +617,9 @@ unifyStructureEdge n1 n2 = do
                 uf <- lift $ gets psUnionFind
                 c0 <- lift $ gets psConstraint
                 let canonical = UnionFind.frWith uf
-                    lookupNode nid = IntMap.lookup (getNodeId nid) (cNodes c0)
                     targetC = canonical target
                     bndC = canonical bnd
-                occurs <- case Traversal.occursInUnder canonical lookupNode targetC bndC of
+                occurs <- case Traversal.occursInUnder canonical (NodeAccess.lookupNode c0) targetC bndC of
                     Left _ -> pure True
                     Right ok -> pure ok
                 if occurs

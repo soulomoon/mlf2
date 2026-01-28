@@ -69,6 +69,7 @@ import MLF.Constraint.Presolution.Ops (
     setVarBound,
     )
 import qualified MLF.Constraint.VarStore as VarStore
+import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Constraint.Traversal as Traversal
 import MLF.Constraint.Presolution.Expansion (
     applyExpansion,
@@ -387,7 +388,7 @@ rewriteConstraint mapping = do
                             expBody ref =
                                 case ref of
                                     TypeRef nid ->
-                                        case IntMap.lookup (getNodeId nid) (cNodes c) of
+                                        case NodeAccess.lookupNode c nid of
                                             Just TyExp{ tnBody = b } -> Just (TypeRef b)
                                             _ -> Nothing
                                     GenRef _ -> Nothing
@@ -579,7 +580,7 @@ rewriteConstraint mapping = do
     let probeIds = [NodeId 2, NodeId 3]
         probeInfo =
             [ ( pid
-              , IntMap.lookup (getNodeId pid) (cNodes c')
+              , NodeAccess.lookupNode c' pid
               , IntMap.lookup (nodeRefKey (typeRef pid)) (cBindParents c')
               )
             | pid <- probeIds
@@ -1265,8 +1266,7 @@ unifyStructure n1 n2 = do
                 let canonical = UnionFind.frWith uf
                     targetC = canonical target
                     bndC = canonical bnd
-                    lookupNode nid = IntMap.lookup (getNodeId nid) (cNodes c0)
-                occurs <- case Traversal.occursInUnder canonical lookupNode targetC bndC of
+                occurs <- case Traversal.occursInUnder canonical (NodeAccess.lookupNode c0) targetC bndC of
                     Left _ -> pure True
                     Right ok -> pure ok
                 if occurs
@@ -1327,7 +1327,6 @@ solveNonExpInstantiation lhs rhs = do
                     let canonical = UnionFind.frWith uf
                         lhsC = canonical lhs
                         rhsC = canonical rhs
-                        lookupNode nid = IntMap.lookup (getNodeId nid) (cNodes c0)
                     (allowBound, parentGen) <- case Binding.lookupBindParentUnder canonical c0 (typeRef rhsC) of
                         Left err -> throwError (BindingTreeError err)
                         Right (Just (GenRef gid, BindFlex)) -> pure (True, Just gid)
@@ -1341,7 +1340,7 @@ solveNonExpInstantiation lhs rhs = do
                                 Just gen -> do
                                     let schemes = map canonical (gnSchemes gen)
                                     pure (rhsC `elem` schemes)
-                    occurs <- case Traversal.occursInUnder canonical lookupNode rhsC lhsC of
+                    occurs <- case Traversal.occursInUnder canonical (NodeAccess.lookupNode c0) rhsC lhsC of
                         Left _ -> pure True
                         Right ok -> pure ok
                     if (allowBound || isSchemeRoot) && not occurs
@@ -1356,11 +1355,10 @@ solveNonExpInstantiation lhs rhs = do
                     let canonical = UnionFind.frWith uf
                         lhsC = canonical lhs
                         bndC = canonical bnd
-                        lookupNode nid = IntMap.lookup (getNodeId nid) (cNodes c0)
                     bndNode <- getCanonicalNode bndC
                     case bndNode of
                         TyVar{} -> do
-                            occurs <- case Traversal.occursInUnder canonical lookupNode bndC lhsC of
+                            occurs <- case Traversal.occursInUnder canonical (NodeAccess.lookupNode c0) bndC lhsC of
                                 Left _ -> pure True
                                 Right ok -> pure ok
                             if not occurs && bndC /= lhsC

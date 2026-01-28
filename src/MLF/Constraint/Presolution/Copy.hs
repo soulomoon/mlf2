@@ -36,6 +36,7 @@ import MLF.Constraint.Presolution.Ops (
     setBindParentM
     )
 import qualified MLF.Constraint.Canonicalize as Canonicalize
+import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Constraint.Traversal as Traversal
 import MLF.Constraint.Types
 import qualified MLF.Util.UnionFind as UnionFind
@@ -88,7 +89,7 @@ expansionCopySetsM bodyId = do
                 Right mbParentInfo ->
                     case mbParentInfo of
                         Just (TypeRef pid, _flag) ->
-                            case IntMap.lookup (getNodeId (canonical pid)) (cNodes c0) of
+                            case NodeAccess.lookupNode c0 (canonical pid) of
                                 Just TyForall{} -> typeRef (canonical pid)
                                 _ -> typeRef bodyC
                         _ -> typeRef bodyC
@@ -96,7 +97,7 @@ expansionCopySetsM bodyId = do
     -- For wrapper scheme roots (TyVar bound to structure), use the scheme gen
     -- interior so binders remain instantiable across higher-order uses.
     let useGenInterior =
-            case IntMap.lookup (getNodeId bodyC) (cNodes c0) of
+            case NodeAccess.lookupNode c0 bodyC of
                 Just TyVar{ tnBound = Just _ } -> True
                 _ -> False
         interiorRoot =
