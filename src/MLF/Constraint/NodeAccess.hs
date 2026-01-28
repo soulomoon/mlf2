@@ -43,6 +43,21 @@ module MLF.Constraint.NodeAccess (
     lookupNodeSafe,
     lookupGenNode,
     lookupGenNodeSafe,
+    -- * Canonicalization-aware lookups
+    lookupNodeCanon,
+    lookupGenNodeCanon,
+    -- * BindingError-returning lookups
+    requireNode,
+    requireGenNode,
+    -- * Node type predicates
+    isVar,
+    isForall,
+    isArrow,
+    isBase,
+    isBottom,
+    -- * Structural access
+    lookupStructuralChildren,
+    lookupStructuralChildrenWithBounds,
     -- * Bound lookup
     lookupVarBound,
     lookupVarBoundSafe,
@@ -57,7 +72,7 @@ module MLF.Constraint.NodeAccess (
 import qualified Data.IntMap.Strict as IntMap
 import Data.Maybe (mapMaybe)
 
-import MLF.Constraint.Types (Constraint(..), NodeId(..), GenNodeId(..), TyNode(..), GenNode, NodeRef, BindFlag, nodeRefKey, getNodeId, getGenNodeId)
+import MLF.Constraint.Types (Constraint(..), NodeId(..), GenNodeId(..), TyNode(..), GenNode, NodeRef, BindFlag, BindingError(..), nodeRefKey, getNodeId, getGenNodeId, structuralChildren, structuralChildrenWithBounds)
 
 -- | Look up a type node in the constraint graph.
 --
@@ -129,3 +144,90 @@ lookupNodes c nids = mapMaybe (lookupNode c) nids
 lookupNodesWithDefault :: Constraint -> TyNode -> [NodeId] -> [TyNode]
 lookupNodesWithDefault c defaultNode nids =
     map (\nid -> maybe defaultNode id (lookupNode c nid)) nids
+
+-- -----------------------------------------------------------------------------
+-- Canonicalization-aware lookups
+-- -----------------------------------------------------------------------------
+
+-- | Look up a type node with canonicalization.
+--
+-- Applies the canonical function to the node ID before looking up.
+-- This is useful for Presolution modules that use union-find.
+lookupNodeCanon :: (NodeId -> NodeId) -> Constraint -> NodeId -> Maybe TyNode
+lookupNodeCanon canonical c nid = lookupNode c (canonical nid)
+
+-- | Look up a gen node with canonicalization.
+lookupGenNodeCanon :: (GenNodeId -> GenNodeId) -> Constraint -> GenNodeId -> Maybe GenNode
+lookupGenNodeCanon canonical c gid = lookupGenNode c (canonical gid)
+
+-- -----------------------------------------------------------------------------
+-- BindingError-returning lookups
+-- -----------------------------------------------------------------------------
+
+-- | Look up a type node, returning a BindingError if not found.
+--
+-- Use this in contexts where missing nodes indicate an invalid binding tree.
+requireNode :: Constraint -> NodeId -> Either BindingError TyNode
+requireNode c nid =
+    case lookupNode c nid of
+        Just node -> Right node
+        Nothing -> Left $ InvalidBindingTree $ "Node not found: " ++ show (getNodeId nid)
+
+-- | Look up a gen node, returning a BindingError if not found.
+requireGenNode :: Constraint -> GenNodeId -> Either BindingError GenNode
+requireGenNode c gid =
+    case lookupGenNode c gid of
+        Just node -> Right node
+        Nothing -> Left $ InvalidBindingTree $ "Gen node not found: " ++ show (getGenNodeId gid)
+
+-- -----------------------------------------------------------------------------
+-- Node type predicates
+-- -----------------------------------------------------------------------------
+
+-- | Check if a node is a type variable.
+isVar :: Constraint -> NodeId -> Bool
+isVar c nid = case lookupNode c nid of
+    Just TyVar{} -> True
+    _ -> False
+
+-- | Check if a node is a forall.
+isForall :: Constraint -> NodeId -> Bool
+isForall c nid = case lookupNode c nid of
+    Just TyForall{} -> True
+    _ -> False
+
+-- | Check if a node is an arrow.
+isArrow :: Constraint -> NodeId -> Bool
+isArrow c nid = case lookupNode c nid of
+    Just TyArrow{} -> True
+    _ -> False
+
+-- | Check if a node is a base type.
+isBase :: Constraint -> NodeId -> Bool
+isBase c nid = case lookupNode c nid of
+    Just TyBase{} -> True
+    _ -> False
+
+-- | Check if a node is bottom.
+isBottom :: Constraint -> NodeId -> Bool
+isBottom c nid = case lookupNode c nid of
+    Just TyBottom{} -> True
+    _ -> False
+
+-- -----------------------------------------------------------------------------
+-- Structural access
+-- -----------------------------------------------------------------------------
+
+-- | Get structural children of a node.
+--
+-- Returns Nothing if the node doesn't exist, or Just the children list.
+lookupStructuralChildren :: Constraint -> NodeId -> Maybe [NodeId]
+lookupStructuralChildren c nid =
+    structuralChildren <$> lookupNode c nid
+
+-- | Get structural children of a node, including bound references.
+--
+-- Returns Nothing if the node doesn't exist, or Just the children list.
+lookupStructuralChildrenWithBounds :: Constraint -> NodeId -> Maybe [NodeId]
+lookupStructuralChildrenWithBounds c nid =
+    structuralChildrenWithBounds <$> lookupNode c nid

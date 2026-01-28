@@ -66,6 +66,7 @@ import MLF.Reify.Core (reifyBoundWithNames, reifyBoundWithNamesOnConstraint)
 import MLF.Reify.TypeOps (freeTypeVarsFrom)
 import MLF.Util.Graph (reachableFrom, topoSortBy)
 import MLF.Constraint.Solve (SolveResult)
+import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Util.Order as Order
 import MLF.Constraint.BindingUtil (bindingScopeFor)
@@ -1134,7 +1135,7 @@ computeAliasBinders canonical canonKey constraint nodes bindParents scopeSchemeR
     let scopeHasStructuralScheme =
             case scopeRootC of
                 GenRef gid ->
-                    case IntMap.lookup (genNodeKey gid) (cGenNodes constraint) of
+                    case NodeAccess.lookupGenNode constraint gid of
                         Just gen ->
                             any
                                 (\root ->

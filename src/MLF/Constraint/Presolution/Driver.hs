@@ -1308,7 +1308,7 @@ isSchemeRootNode canonical c0 nid =
     case Binding.lookupBindParentUnder canonical c0 (typeRef nid) of
         Left _ -> pure False
         Right (Just (GenRef gid, _)) ->
-            case IntMap.lookup (genNodeKey gid) (cGenNodes c0) of
+            case NodeAccess.lookupGenNode c0 gid of
                 Nothing -> pure False
                 Just gen -> pure (nid `elem` map canonical (gnSchemes gen))
         _ -> pure False

@@ -438,7 +438,7 @@ implicitBindersM canonical c0 root0 = do
         Nothing -> pure []
         Just gid -> do
             let schemeRoots =
-                    case IntMap.lookup (genNodeKey gid) (cGenNodes c0) of
+                    case NodeAccess.lookupGenNode c0 gid of
                         Just gen -> map canonical (gnSchemes gen)
                         Nothing -> []
                 schemeRootSet =

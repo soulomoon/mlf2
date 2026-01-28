@@ -20,6 +20,7 @@ import Debug.Trace (trace)
 
 import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Types
+import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Constraint.Presolution.Plan.BinderPlan (GaBindParentsInfo(..), firstSchemeRootAncestorWith)
 import MLF.Constraint.BindingUtil (firstGenAncestorFrom)
@@ -126,7 +127,7 @@ buildTargetPlan TargetPlanInput{..} =
         boundIsSchemeRootLocal =
             case (scopeRootC, targetBoundLocal) of
                 (GenRef gid, Just bnd) ->
-                    case IntMap.lookup (getGenNodeId gid) (cGenNodes constraint) of
+                    case NodeAccess.lookupGenNode constraint gid of
                         Nothing -> False
                         Just gen ->
                             IntSet.member
@@ -226,7 +227,7 @@ buildTargetPlan TargetPlanInput{..} =
                                 Nothing -> False
                         Nothing -> False
                 (Just gid, Nothing) ->
-                    case IntMap.lookup (getGenNodeId gid) (cGenNodes constraint) of
+                    case NodeAccess.lookupGenNode constraint gid of
                         Just gen -> any (\root -> canonical root == canonical target0) (gnSchemes gen)
                         Nothing -> False
                 _ -> False

@@ -230,7 +230,7 @@ initEdgeUnifyState binderArgs binderBounds interior edgeRoot = do
             case interiorRootRef of
                 TypeRef nid -> nid
                 GenRef gid ->
-                    case IntMap.lookup (getGenNodeId gid) (cGenNodes constraint) of
+                    case NodeAccess.lookupGenNode constraint gid of
                         Just genNode ->
                             let schemes = gnSchemes genNode
                                 pick =

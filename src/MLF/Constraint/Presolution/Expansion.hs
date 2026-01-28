@@ -64,6 +64,7 @@ import MLF.Constraint.Presolution.Ops (
     )
 import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Types
+import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Presolution.Unify (unifyAcyclic)
 
 -- | Get the current expansion for an expansion variable.
@@ -248,7 +249,7 @@ decideMinimalExpansion allowTrivial (TyExp { tnBody = bodyId }) targetNode = do
                     let canonical = UnionFind.frWith uf0
                         targetC = canonical targetId
                         schemeRoots =
-                            case IntMap.lookup (genNodeKey gid) (cGenNodes c0) of
+                            case NodeAccess.lookupGenNode c0 gid of
                                 Just gen -> map canonical (gnSchemes gen)
                                 Nothing -> []
                     pure (allowTrivial && targetC `elem` schemeRoots)

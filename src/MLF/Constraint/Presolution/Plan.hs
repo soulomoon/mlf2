@@ -38,6 +38,7 @@ import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Solve (SolveResult(..))
 import qualified MLF.Constraint.Solve as Solve
 import MLF.Constraint.Types
+import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Constraint.Presolution.Plan.BinderPlan
     ( BinderPlan(..)
@@ -274,7 +275,7 @@ planGeneralizeAt PresolutionEnv
         ("generalizeAt: schemeRootByBodyKeys=" ++ show (IntMap.keys schemeRootByBody))
     -- Phase 5: binder selection helpers and candidates.
     let scopeSchemeRootsFor gid =
-            case IntMap.lookup (genNodeKey gid) (cGenNodes constraint) of
+            case NodeAccess.lookupGenNode constraint gid of
                 Just gen ->
                     IntSet.fromList
                         [ getNodeId (canonical root)
@@ -291,7 +292,7 @@ planGeneralizeAt PresolutionEnv
         scopeHasStructuralScheme =
             case scopeRootC of
                 GenRef gid ->
-                    case IntMap.lookup (genNodeKey gid) (cGenNodes constraint) of
+                    case NodeAccess.lookupGenNode constraint gid of
                         Just gen ->
                             let schemeRoots = scopeSchemeRootsFor gid
                             in any
