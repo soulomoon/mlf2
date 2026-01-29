@@ -482,7 +482,7 @@ solveUnify c0 = do
 applyUFConstraint :: IntMap NodeId -> Constraint -> Constraint
 applyUFConstraint uf c =
     let canonical = frWith uf
-        nodes' = IntMap.fromListWith Canonicalize.chooseRepNode (map rewriteNode (IntMap.elems (cNodes c)))
+        nodes' = IntMap.fromListWith Canonicalize.chooseRepNode (map rewriteNode (NodeAccess.allNodes c))
         bindParents0 = cBindParents c
         -- Eliminated binders should not rigidify their replacement after UF merges.
         -- Downgrade eliminated-node edges to flexible before canonicalization so

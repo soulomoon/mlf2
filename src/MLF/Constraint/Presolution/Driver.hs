@@ -193,7 +193,7 @@ rewriteConstraint mapping = do
     -- programs like `\y. let id = (\x. x) in id y` lose the “result = argument”
     -- relationship and get over-generalized types.
     identityRootMap <- do
-        let exps = [ n | n@TyExp{} <- IntMap.elems (cNodes c) ]
+        let exps = [ n | n@TyExp{} <- NodeAccess.allNodes c ]
         pairs <- forM exps $ \expNode -> do
             expn <- getExpansion (tnExpVar expNode)
             pure $ case expn of
@@ -231,7 +231,7 @@ rewriteConstraint mapping = do
 
         -- traceCanonical n = let c = canonical n in trace ("Canonical " ++ show n ++ " -> " ++ show c) c
 
-        newNodes = IntMap.fromListWith Canonicalize.chooseRepNode (mapMaybe rewriteNode (IntMap.elems (cNodes c)))
+        newNodes = IntMap.fromListWith Canonicalize.chooseRepNode (mapMaybe rewriteNode (NodeAccess.allNodes c))
         eliminated' = rewriteEliminated canonical newNodes (cEliminatedVars c)
         weakened' = rewriteWeakened canonical newNodes (cWeakenedVars c)
         genNodes' = rewriteGenNodes canonical newNodes (cGenNodes c)

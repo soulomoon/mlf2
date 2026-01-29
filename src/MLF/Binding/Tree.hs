@@ -105,9 +105,6 @@ nodeRefExists c ref = case ref of
     TypeRef nid -> IntMap.member (getNodeId nid) (cNodes c)
     GenRef gid -> IntMap.member (getGenNodeId gid) (cGenNodes c)
 
-canonicalRef :: (NodeId -> NodeId) -> NodeRef -> NodeRef
-canonicalRef = Canonicalize.canonicalRef
-
 -- | Build type-level structure edges from nodes.
 --
 -- This is a shared helper that builds a map from parent node key to the set
@@ -219,7 +216,7 @@ withQuotientBindParents
     -> (NodeRef -> BindParents -> Either BindingError a)
     -> Either BindingError a
 withQuotientBindParents errCtx canonical c0 ref0 f = do
-    let refC = canonicalRef canonical ref0
+    let refC = Canonicalize.canonicalRef canonical ref0
     (allRoots, bindParents) <- quotientBindParentsUnder canonical c0
     unless (IntSet.member (nodeRefKey refC) allRoots) $
         Left $ InvalidBindingTree $ errCtx ++ ": node " ++ show refC ++ " not in constraint"
@@ -395,7 +392,7 @@ orderedBinders
     -> NodeRef
     -> Either BindingError [NodeId]
 orderedBinders canonical c0 binder0 = do
-    let binderC = canonicalRef canonical binder0
+    let binderC = Canonicalize.canonicalRef canonical binder0
     case binderC of
         GenRef _ ->
             Left $
@@ -651,7 +648,7 @@ quotientBindParentsUnder canonical c0 = do
         allRoots :: IntSet
         allRoots =
             IntSet.fromList
-                [ nodeRefKey (canonicalRef canonical ref)
+                [ nodeRefKey (Canonicalize.canonicalRef canonical ref)
                 | ref <- allNodeRefs c0
                 ]
 
@@ -659,8 +656,8 @@ quotientBindParentsUnder canonical c0 = do
             [ (childRootKey, (parentRoot, flag))
             | (childKey, (parent0, flag)) <- IntMap.toList bindParents0
             , let childRef0 = nodeRefFromKey childKey
-            , let childRoot = canonicalRef canonical childRef0
-            , let parentRoot = canonicalRef canonical parent0
+            , let childRoot = Canonicalize.canonicalRef canonical childRef0
+            , let parentRoot = Canonicalize.canonicalRef canonical parent0
             , childRoot /= parentRoot
             , let childRootKey = nodeRefKey childRoot
             , IntSet.member childRootKey allRoots
@@ -1063,8 +1060,8 @@ checkBindingTreeUnder canonical c0 = do
                 reachableTypeKeys
 
         isUpperUnder parent child =
-            let parentKey = nodeRefKey (canonicalRef canonical parent)
-                childKey = nodeRefKey (canonicalRef canonical child)
+            let parentKey = nodeRefKey (Canonicalize.canonicalRef canonical parent)
+                childKey = nodeRefKey (Canonicalize.canonicalRef canonical child)
             in if parentKey == childKey
                 then True
                 else

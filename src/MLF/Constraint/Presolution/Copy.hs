@@ -47,9 +47,6 @@ data CopyState = CopyState
     , csInterior :: IntSet.IntSet
     }
 
-canonicalRef :: (NodeId -> NodeId) -> NodeRef -> NodeRef
-canonicalRef = Canonicalize.canonicalRef
-
 findSchemeIntroducerM :: (NodeId -> NodeId) -> Constraint -> NodeId -> PresolutionM GenNodeId
 findSchemeIntroducerM canonical c0 root0 = do
     let root = canonical root0
@@ -160,7 +157,7 @@ expansionCopySetsM bodyId = do
                         childRefs = childrenRef ref
                     in foldl'
                         (\acc0 child ->
-                            let childC = canonicalRef canonical child
+                            let childC = Canonicalize.canonicalRef canonical child
                                 childKey = nodeRefKey childC
                             in if IntSet.member childKey interiorStructRefs
                                 then acc0
@@ -360,7 +357,7 @@ instantiateSchemeWithMode replaceFrontier bodyId substList = do
                                     Nothing ->
                                         throwError (BindingTreeError (MissingBindParent (typeRef origC)))
                                     Just (parentRef, flag) -> do
-                                        let parentRefC = canonicalRef canonical parentRef
+                                        let parentRefC = Canonicalize.canonicalRef canonical parentRef
                                         parentFinal0 <- case parentRefC of
                                             GenRef _ ->
                                                 pure rootBinder
