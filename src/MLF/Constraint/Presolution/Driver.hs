@@ -56,9 +56,7 @@ import MLF.Constraint.Presolution.Plan (buildGeneralizePlans)
 import MLF.Constraint.Presolution.Validation (
     validateTranslatablePresolution,
     rigidifyTranslatablePresolutionM,
-    structuralInterior,
     translatableWeakenedNodes,
-    bindingToPres,
     bindingToPresM
     )
 import MLF.Constraint.Presolution.Ops (
@@ -98,7 +96,6 @@ import MLF.Constraint.Presolution.EdgeUnify (
     )
 import MLF.Constraint.Presolution.Unify (unifyAcyclic)
 import MLF.Constraint.Acyclicity (AcyclicityResult(..))
-import qualified MLF.Constraint.Inert as Inert
 -- We will likely need unification logic from Normalize,
 -- but for now we'll implement the structure.
 
@@ -232,8 +229,8 @@ rewriteConstraint mapping = do
         -- traceCanonical n = let c = canonical n in trace ("Canonical " ++ show n ++ " -> " ++ show c) c
 
         newNodes = IntMap.fromListWith Canonicalize.chooseRepNode (mapMaybe rewriteNode (NodeAccess.allNodes c))
-        eliminated' = rewriteEliminated canonical newNodes (cEliminatedVars c)
-        weakened' = rewriteWeakened canonical newNodes (cWeakenedVars c)
+        eliminated' = rewriteVarSet canonical newNodes (cEliminatedVars c)
+        weakened' = rewriteVarSet canonical newNodes (cWeakenedVars c)
         genNodes' = rewriteGenNodes canonical newNodes (cGenNodes c)
 
         -- Canonicalize edge expansions
@@ -760,22 +757,13 @@ dropTrivialSchemeEdges constraint witnesses traces expansions =
         expansions' = IntMap.filterWithKey (\eid _ -> keepEdge eid) expansions
     in (witnesses', traces', expansions')
 
-rewriteEliminated :: (NodeId -> NodeId) -> IntMap TyNode -> EliminatedVars -> EliminatedVars
-rewriteEliminated canon nodes0 elims0 =
+-- | Rewrite a set of variable IDs through canonicalization, keeping only those
+-- that still exist as TyVar nodes in the rewritten node map.
+rewriteVarSet :: (NodeId -> NodeId) -> IntMap TyNode -> IntSet.IntSet -> IntSet.IntSet
+rewriteVarSet canon nodes0 vars0 =
     IntSet.fromList
         [ getNodeId vC
-        | vid <- IntSet.toList elims0
-        , let vC = canon (NodeId vid)
-        , case IntMap.lookup (getNodeId vC) nodes0 of
-            Just TyVar{} -> True
-            _ -> False
-        ]
-
-rewriteWeakened :: (NodeId -> NodeId) -> IntMap TyNode -> WeakenedVars -> WeakenedVars
-rewriteWeakened canon nodes0 weakened0 =
-    IntSet.fromList
-        [ getNodeId vC
-        | vid <- IntSet.toList weakened0
+        | vid <- IntSet.toList vars0
         , let vC = canon (NodeId vid)
         , case IntMap.lookup (getNodeId vC) nodes0 of
             Just TyVar{} -> True
