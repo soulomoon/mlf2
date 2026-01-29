@@ -1,6 +1,8 @@
 module MLF.Elab.Run.Debug (
     debugGaScope,
     debugGaScopeEnabled,
+    debugWhenM,
+    debugWhenCondM,
     edgeOrigins
 ) where
 
@@ -28,6 +30,23 @@ debugGaScopeEnabled =
         enabled <- lookupEnv "MLF_DEBUG_BINDING"
         pure (maybe False (const True) enabled)
 {-# NOINLINE debugGaScopeEnabled #-}
+
+-- | Monadic debug helper that traces a message when debugging is enabled.
+-- Replaces the verbose pattern:
+--   case if debugGaScopeEnabled then debugGaScope msg () else () of () -> pure ()
+debugWhenM :: Applicative m => String -> m ()
+debugWhenM msg =
+    if debugGaScopeEnabled
+        then debugGaScope msg (pure ())
+        else pure ()
+
+-- | Conditional debug helper that only traces when both debugging is enabled
+-- and the condition is true.
+debugWhenCondM :: Applicative m => Bool -> String -> m ()
+debugWhenCondM cond msg =
+    if debugGaScopeEnabled && cond
+        then debugGaScope msg (pure ())
+        else pure ()
 
 edgeOrigins :: AnnExpr -> IntMap.IntMap String
 edgeOrigins = fmap (intercalate " | ") . aoMap . cata alg
