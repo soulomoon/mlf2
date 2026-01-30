@@ -3,6 +3,7 @@ module MLF.Elab.Run.Scope (
     preferGenScope,
     schemeBodyTarget,
     canonicalizeScopeRef,
+    resolveCanonicalScope,
     letScopeOverrides
 ) where
 
@@ -18,7 +19,6 @@ import MLF.Constraint.Types
     , NodeId(..)
     , NodeRef(..)
     , TyNode(..)
-    , cGenNodes
     , getNodeId
     , gnSchemes
     , typeRef
@@ -88,6 +88,12 @@ canonicalizeScopeRef solved redirects scopeRef =
         TypeRef nid ->
             let canonical = frWith (srUnionFind solved)
             in TypeRef (canonical (chaseRedirects redirects nid))
+
+resolveCanonicalScope :: Constraint -> SolveResult -> IntMap.IntMap NodeId -> NodeId -> Either BindingError NodeRef
+resolveCanonicalScope constraint solved redirects scopeRoot = do
+    scope0 <- bindingScopeRef constraint scopeRoot
+    let scopeBase = preferGenScope constraint scope0
+    pure (canonicalizeScopeRef solved redirects scopeBase)
 
 letScopeOverrides :: Constraint -> Constraint -> SolveResult -> IntMap.IntMap NodeId -> AnnExpr -> IntMap.IntMap NodeRef
 letScopeOverrides base solvedForGen solved redirects ann =

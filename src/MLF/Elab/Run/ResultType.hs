@@ -61,7 +61,7 @@ import MLF.Elab.Run.Instantiation (inferInstAppArgsFromScheme, instInsideFromArg
 import MLF.Elab.Run.Scope
     ( bindingScopeRef
     , canonicalizeScopeRef
-    , preferGenScope
+    , resolveCanonicalScope
     , schemeBodyTarget
     )
 import MLF.Elab.Run.TypeOps
@@ -185,9 +185,7 @@ computeResultTypeFromAnn ctx inner innerPre annNodeId eid = do
             let solvedToBase = gaSolvedToBase bindParentsGa
             in IntMap.findWithDefault scopeRootNodePre0 (getNodeId targetC) solvedToBase
         scopeRootNodePost = annNode inner
-    scopeRoot0 <- firstShow (bindingScopeRef c1 scopeRootNodePre)
-    let scopeRootBase = preferGenScope c1 scopeRoot0
-    let scopeRootPre = canonicalizeScopeRef solvedForGen redirects scopeRootBase
+    scopeRootPre <- firstShow (resolveCanonicalScope c1 solvedForGen redirects scopeRootNodePre)
     let scopeRootPost =
             case bindingScopeRef (srConstraint solvedForGen) scopeRootNodePost of
                 Right ref -> canonicalizeScopeRef solvedForGen redirects ref
@@ -375,9 +373,7 @@ computeResultTypeFromAnn ctx inner innerPre annNodeId eid = do
                     ty0 <- firstShow (applyInstantiation srcTy phi)
                     pure (simplifyAnnotationType ty0)
                 else do
-                    annScopeRoot0 <- firstShow (bindingScopeRef (srConstraint solvedForGen) annTargetNode)
-                    let annScopeRootBase = preferGenScope (srConstraint solvedForGen) annScopeRoot0
-                        annScopeRoot = canonicalizeScopeRef solvedForGen redirects annScopeRootBase
+                    annScopeRoot <- firstShow (resolveCanonicalScope (srConstraint solvedForGen) solvedForGen redirects annTargetNode)
                     (annSch, _substAnn) <- firstShow
                         (generalizeWithPlan planBuilder bindParentsGa solvedForGen annScopeRoot annTargetNode)
                     let annTy = schemeToType annSch
@@ -723,9 +719,7 @@ computeResultTypeFallback ctx annCanon ann = do
                                 constraint' = (srConstraint resFinal) { cNodes = nodes' }
                             in resFinal { srConstraint = constraint' }
             let scopeRootNodePre = rootForTypePre
-            scopeRoot0' <- firstShow (bindingScopeRef c1 scopeRootNodePre)
-            let scopeRootBase = preferGenScope c1 scopeRoot0'
-            let scopeRootPre = canonicalizeScopeRef resFinalBounded redirects scopeRootBase
+            scopeRootPre <- firstShow (resolveCanonicalScope c1 resFinalBounded redirects scopeRootNodePre)
             let scopeRootPost =
                     case bindingScopeRef (srConstraint resFinalBounded) rootC of
                         Right ref -> canonicalizeScopeRef resFinalBounded redirects ref

@@ -6,7 +6,6 @@ module MLF.Elab.Run.Pipeline (
 
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import qualified Data.List.NonEmpty as NE
 import Data.Maybe (listToMaybe)
 
 import MLF.Frontend.Syntax (Expr)
@@ -21,15 +20,7 @@ import MLF.Constraint.Presolution
     )
 import MLF.Constraint.Solve hiding (BindingTreeError, MissingNode)
 import MLF.Constraint.Types
-    ( BoundRef(..)
-    , EdgeWitness(..)
-    , Expansion(..)
-    , ForallSpec(..)
-    , InstanceOp(..)
-    , InstanceStep(..)
-    , InstanceWitness(..)
-    , InstEdge(..)
-    , NodeId(..)
+    ( NodeId(..)
     , NodeRef(..)
     , PolySyms
     , TyNode(..)
@@ -38,6 +29,7 @@ import MLF.Constraint.Types
     , cNodes
     , getEdgeId
     , getNodeId
+    , instEdgeId
     , instLeft
     , instRight
     , nodeRefFromKey
@@ -55,7 +47,12 @@ import MLF.Elab.Run.Generalize
     , pruneBindParentsConstraint
     )
 import MLF.Elab.Run.Scope (letScopeOverrides)
-import MLF.Elab.Run.Util (chaseRedirects)
+import MLF.Elab.Run.Util
+    ( canonicalizeExpansion
+    , canonicalizeTrace
+    , canonicalizeWitness
+    , makeCanonicalizer
+    )
 import MLF.Elab.Run.ResultType (ResultTypeContext(..), computeResultTypeFromAnn, computeResultTypeFallback)
 
 runPipelineElab :: PolySyms -> Expr -> Either String (ElabTerm, ElabType)
@@ -102,8 +99,8 @@ runPipelineElabWith genConstraints expr = do
     let solvedClean = solved { srConstraint = pruneBindParentsConstraint (srConstraint solved) }
     case validateSolvedGraphStrict solvedClean of
         [] -> do
-            let canonicalSolved = frWith (srUnionFind solvedClean)
-                adoptNode = canonicalSolved . chaseRedirects (prRedirects pres)
+            let canonNode = makeCanonicalizer (srUnionFind solvedClean) (prRedirects pres)
+                adoptNode = canonNode
                 instCopyNodes =
                     instantiationCopyNodes solvedClean (prRedirects pres) (prEdgeTraces pres)
                 instCopyMapFull =
@@ -177,65 +174,10 @@ runPipelineElabWith genConstraints expr = do
                     constraintForGeneralization solvedClean (prRedirects pres) instCopyNodes instCopyMapFull c1 ann
             let solvedForGen = solvedClean { srConstraint = constraintForGen }
             let ann' = applyRedirectsToAnn (prRedirects pres) ann
-            let canonNode = canonicalSolved . chaseRedirects (prRedirects pres)
-                canonOp op = case op of
-                    OpGraft a b -> OpGraft (canonNode a) (canonNode b)
-                    OpMerge a b -> OpMerge (canonNode a) (canonNode b)
-                    OpRaise n -> OpRaise (canonNode n)
-                    OpWeaken n -> OpWeaken (canonNode n)
-                    OpRaiseMerge a b -> OpRaiseMerge (canonNode a) (canonNode b)
-                canonStep step = case step of
-                    StepOmega op -> StepOmega (canonOp op)
-                    StepIntro -> StepIntro
-                canonWitness w =
-                    let InstanceWitness ops = ewWitness w
-                    in w
-                        { ewLeft = canonNode (ewLeft w)
-                        , ewRight = canonNode (ewRight w)
-                        , ewRoot = canonNode (ewRoot w)
-                        , ewSteps = map canonStep (ewSteps w)
-                        , ewWitness = InstanceWitness (map canonOp ops)
-                        }
-                canonTrace tr =
-                    let canonPair (a, b) = (canonNode a, canonNode b)
-                        canonInterior =
-                            IntSet.fromList
-                                [ getNodeId (canonNode (NodeId i))
-                                | i <- IntSet.toList (etInterior tr)
-                                ]
-                        canonCopyMap =
-                            IntMap.fromListWith min
-                                [ ( getNodeId (canonNode (NodeId k))
-                                  , canonNode v
-                                  )
-                                | (k, v) <- IntMap.toList (etCopyMap tr)
-                                ]
-                    in tr
-                        { etRoot = canonNode (etRoot tr)
-                        , etBinderArgs = map canonPair (etBinderArgs tr)
-                        , etInterior = canonInterior
-                        , etCopyMap = canonCopyMap
-                        }
-                canonExpansion expn = case expn of
-                    ExpIdentity -> ExpIdentity
-                    ExpForall specs ->
-                        let canonBound bnd = case bnd of
-                                BoundNode nid -> BoundNode (canonNode nid)
-                                BoundBinder ix -> BoundBinder ix
-                            canonSpec spec =
-                                spec
-                                    { fsBounds =
-                                        map
-                                            (fmap canonBound)
-                                            (fsBounds spec)
-                                    }
-                        in ExpForall (NE.map canonSpec specs)
-                    ExpInstantiate args -> ExpInstantiate (map canonNode args)
-                    ExpCompose es -> ExpCompose (NE.map canonExpansion es)
             let annCanon = canonicalizeAnn canonNode ann'
-            let edgeWitnesses = IntMap.map canonWitness (prEdgeWitnesses pres)
-                edgeTraces = IntMap.map canonTrace (prEdgeTraces pres)
-                edgeExpansions = IntMap.map canonExpansion (prEdgeExpansions pres)
+            let edgeWitnesses = IntMap.map (canonicalizeWitness canonNode) (prEdgeWitnesses pres)
+                edgeTraces = IntMap.map (canonicalizeTrace canonNode) (prEdgeTraces pres)
+                edgeExpansions = IntMap.map (canonicalizeExpansion canonNode) (prEdgeExpansions pres)
             let scopeOverrides = letScopeOverrides c1 (srConstraint solvedForGen) solvedClean (prRedirects pres) annCanon
             term <- firstShow (elaborateWithScope generalizeAtWith solvedClean solvedClean solvedForGen bindParentsGa edgeWitnesses edgeTraces edgeExpansions scopeOverrides annCanon)
 

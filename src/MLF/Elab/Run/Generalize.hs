@@ -59,16 +59,112 @@ data NodeMapping = NodeMapping
     , mapSolvedToBase :: IntMap.IntMap NodeId
     }
 
-data BindParentPolicy = BindParentPolicy
-    { bppAllow :: NodeRef -> NodeRef -> Bool
-    , bppInsert :: NodeRef -> BindFlag -> NodeKey -> BindParents -> BindParents
+data GeneralizeEnv = GeneralizeEnv
+    { geBaseConstraint :: Constraint
+    , geSolvedConstraint :: Constraint
+    , geRedirects :: IntMap.IntMap NodeId
+    , geInstCopyNodes :: NodeKeySet
+    , geInstCopyMap :: IntMap.IntMap NodeId
+    , geCanonical :: NodeId -> NodeId
+    , geApplyRedirectsToRef :: NodeRef -> NodeRef
+    , geAdoptRef :: NodeRef -> NodeRef
+    , geAdoptNodeId :: NodeId -> NodeId
     }
 
-applyBindParent :: BindParentPolicy -> NodeRef -> NodeRef -> BindFlag -> BindParents -> BindParents
-applyBindParent policy childRef parentRef flag acc
-    | bppAllow policy childRef parentRef =
-        bppInsert policy parentRef flag (nodeRefKey childRef) acc
+data Phase1Result = Phase1Result
+    { p1NodesSolved :: NodeMap
+    , p1SchemeRootsBase :: [NodeId]
+    , p1SchemeRootsBaseSet :: IntSet.IntSet
+    , p1SchemeRootsAllSet :: IntSet.IntSet
+    }
+
+data Phase2Result = Phase2Result
+    { p2GenMerged :: GenMap
+    , p2NodeMapping :: NodeMapping
+    , p2CopyOverrides :: IntMap.IntMap NodeId
+    , p2BindParentsBase :: BindParents
+    , p2BindParentsSolved :: BindParents
+    , p2StickyTypeParentsBase :: IntSet.IntSet
+    , p2BaseNamedKeys :: IntSet.IntSet
+    }
+
+data Phase3Result = Phase3Result
+    { p3BindParentsBaseAdjusted :: BindParents
+    , p3BindParentsWithCopies :: BindParents
+    }
+
+data Phase4Result = Phase4Result
+    { p4BindParentsFinalAligned :: BindParents
+    , p4GenMerged :: GenMap
+    , p4SchemeRootsMerged :: [(GenNodeId, [NodeId])]
+    , p4RootGenIdBase :: GenNodeId
+    }
+
+data InsertMode = KeepOld | Override | SelfOrEmpty
+
+insertBindParent :: InsertMode -> NodeRef -> BindFlag -> NodeKey -> BindParents -> BindParents
+insertBindParent mode parentRef flag childKey acc =
+    let entry = (parentRef, flag)
+        insert = IntMap.insert childKey entry acc
+    in case mode of
+        KeepOld ->
+            IntMap.insertWith
+                (\_ old -> old)
+                childKey
+                entry
+                acc
+        Override ->
+            insert
+        SelfOrEmpty ->
+            case IntMap.lookup childKey acc of
+                Nothing ->
+                    insert
+                Just (parentExisting, _flagExisting)
+                    | nodeRefKey parentExisting == childKey ->
+                        insert
+                    | otherwise -> acc
+
+applyBindParent
+    :: (NodeRef -> NodeRef -> Bool)
+    -> InsertMode
+    -> NodeRef
+    -> NodeRef
+    -> BindFlag
+    -> BindParents
+    -> BindParents
+applyBindParent allow mode childRef parentRef flag acc
+    | allow childRef parentRef =
+        insertBindParent mode parentRef flag (nodeRefKey childRef) acc
     | otherwise = acc
+
+keepOld :: a -> a -> a
+keepOld _ old = old
+
+flagFromExisting :: BindFlag -> NodeKey -> BindParents -> BindFlag
+flagFromExisting defaultFlag childKey acc =
+    case IntMap.lookup childKey acc of
+        Just (_parentExisting, flag) -> flag
+        Nothing -> defaultFlag
+
+-- Common predicate builders
+mkOkRef :: NodeMap -> GenMap -> NodeRef -> Bool
+mkOkRef nodes gens ref =
+    case ref of
+        TypeRef nid -> IntMap.member (getNodeId nid) nodes
+        GenRef gid -> IntMap.member (genNodeKey gid) gens
+
+mkIsUpperRef :: Constraint -> (NodeRef -> NodeRef -> Bool)
+mkIsUpperRef upperConstraint parentRef childRef =
+    case parentRef of
+        TypeRef _ -> Binding.isUpper upperConstraint parentRef childRef
+        GenRef _ -> True
+
+mkAllowBindEdge :: (NodeRef -> Bool) -> (NodeRef -> NodeRef -> Bool) -> NodeRef -> NodeRef -> Bool
+mkAllowBindEdge okRef isUpperRef childRef parentRef =
+    okRef childRef
+        && okRef parentRef
+        && nodeRefKey childRef /= nodeRefKey parentRef
+        && isUpperRef parentRef childRef
 
 schemeRootsOf :: GenMap -> [NodeId]
 schemeRootsOf = foldMap gnSchemes
@@ -80,24 +176,44 @@ childrenFrom nodes key =
         structuralChildrenWithBounds
         (IntMap.lookup key nodes)
 
+reachableFromWithBounds :: NodeMap -> NodeId -> IntSet.IntSet
+reachableFromWithBounds nodes start =
+    let alg Nil = IntSet.empty
+        alg (Cons nid acc) = IntSet.insert (getNodeId nid) acc
+        coalg (visited, queue) =
+            case queue of
+                [] -> Nil
+                (nid0:rest) ->
+                    let key = getNodeId nid0
+                    in if IntSet.member key visited
+                        then Cons nid0 (visited, rest)
+                        else
+                            let visited' = IntSet.insert key visited
+                                kids = childrenFrom nodes key
+                            in Cons nid0 (visited', kids ++ rest)
+    in hylo alg coalg (IntSet.empty, [start])
+
 isTyVarAt :: NodeMap -> NodeKey -> Bool
 isTyVarAt nodes key =
-    case IntMap.lookup key nodes of
-        Just TyVar{} -> True
+    maybe False isTyVarNode (IntMap.lookup key nodes)
+
+isTyVarNode :: TyNode -> Bool
+isTyVarNode node =
+    case node of
+        TyVar{} -> True
         _ -> False
 
 pruneBindParentsConstraint :: Constraint -> Constraint
 pruneBindParentsConstraint c =
     let liveNodes = cNodes c
         liveGens = cGenNodes c
-        liveChild childKey =
-            case nodeRefFromKey childKey of
-                TypeRef nid -> IntMap.member (getNodeId nid) liveNodes
-                GenRef gid -> IntMap.member (genNodeKey gid) liveGens
-        liveParent ref =
+        liveRef ref =
             case ref of
                 TypeRef nid -> IntMap.member (getNodeId nid) liveNodes
                 GenRef gid -> IntMap.member (genNodeKey gid) liveGens
+        liveChild childKey =
+            liveRef (nodeRefFromKey childKey)
+        liveParent = liveRef
         bindParents' =
             IntMap.filterWithKey
                 (\childKey (parentRef, _flag) ->
@@ -131,11 +247,55 @@ instantiationCopyNodes solved redirects edgeTraces =
 
 constraintForGeneralization :: SolveResult -> IntMap.IntMap NodeId -> NodeKeySet -> IntMap.IntMap NodeId -> Constraint -> AnnExpr -> (Constraint, GaBindParents)
 constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann =
+    let env = buildGeneralizeEnv solved redirects instCopyNodes instCopyMap base
+        phase1 = restoreSchemeNodes env
+        phase2 = buildNodeMappings env phase1
+        phase3 = computeBindParentsBase env phase1 phase2
+        phase4 = computeSchemeOwnership env phase1 phase2 phase3
+    in finalizeConstraint env phase1 phase2 phase3 phase4
+
+buildGeneralizeEnv
+    :: SolveResult
+    -> IntMap.IntMap NodeId
+    -> NodeKeySet
+    -> IntMap.IntMap NodeId
+    -> Constraint
+    -> GeneralizeEnv
+buildGeneralizeEnv solved redirects instCopyNodes instCopyMap base =
     let solvedConstraint = srConstraint solved
         canonical = frWith (srUnionFind solved)
-        nodesSolved0 = cNodes solvedConstraint
+        applyRedirectsToRef ref =
+            case ref of
+                TypeRef nid -> TypeRef (chaseRedirects redirects nid)
+                GenRef gid -> GenRef gid
+        canonicalRef = Canonicalize.canonicalRef canonical
+        adoptRef = canonicalRef . applyRedirectsToRef
+        adoptNodeId nid =
+            case adoptRef (typeRef nid) of
+                TypeRef nid' -> nid'
+                GenRef _ -> nid
+    in GeneralizeEnv
+        { geBaseConstraint = base
+        , geSolvedConstraint = solvedConstraint
+        , geRedirects = redirects
+        , geInstCopyNodes = instCopyNodes
+        , geInstCopyMap = instCopyMap
+        , geCanonical = canonical
+        , geApplyRedirectsToRef = applyRedirectsToRef
+        , geAdoptRef = adoptRef
+        , geAdoptNodeId = adoptNodeId
+        }
+
+restoreSchemeNodes :: GeneralizeEnv -> Phase1Result
+restoreSchemeNodes env =
+    let solvedConstraint = geSolvedConstraint env
+        base = geBaseConstraint env
         baseNodes = cNodes base
-        -- Phase 1: scheme roots and node restoration.
+        nodesSolved0 = cNodes solvedConstraint
+        canonical = geCanonical env
+        adoptRef = geAdoptRef env
+        adoptNodeId = geAdoptNodeId env
+        applyRedirectsToRef = geApplyRedirectsToRef env
         schemeRootsBase = schemeRootsOf (cGenNodes base)
         preferBaseVar new old =
             case (new, old) of
@@ -153,21 +313,6 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                         node'
                         acc
                 _ -> acc
-        reachableFromWithBoundsBase start =
-            let alg Nil = IntSet.empty
-                alg (Cons nid acc) = IntSet.insert (getNodeId nid) acc
-                coalg (visited, queue) =
-                    case queue of
-                        [] -> Nil
-                        (nid0:rest) ->
-                            let key = getNodeId nid0
-                            in if IntSet.member key visited
-                                then Cons nid0 (visited, rest)
-                                else
-                                    let visited' = IntSet.insert key visited
-                                        kids = childrenFrom baseNodes key
-                                    in Cons nid0 (visited', kids ++ rest)
-            in hylo alg coalg (IntSet.empty, [start])
         restoreSchemeRoot acc root =
             let mbBase = do
                     TyVar{ tnBound = mb } <- IntMap.lookup (getNodeId root) baseNodes
@@ -227,7 +372,7 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                     let
                         schemeInteriorsBase =
                             IntSet.unions
-                                [ reachableFromWithBoundsBase root
+                                [ reachableFromWithBounds baseNodes root
                                 | gen <- NodeAccess.allGenNodes base
                                 , root <- gnSchemes gen
                                 ]
@@ -245,95 +390,26 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                             insertBaseVarWith adoptNodeId adoptNodeId
                     in IntSet.foldl' insertVarFromBase acc keys
             in restoreBindParentVars (restoreSchemeInteriorVars (restoreNamedVars nodesSolvedBaseAdjusted))
-        -- Phase 2: base/solved mappings and merged gen nodes.
+    in Phase1Result
+        { p1NodesSolved = nodesSolved
+        , p1SchemeRootsBase = schemeRootsBase
+        , p1SchemeRootsBaseSet = schemeRootsBaseSet
+        , p1SchemeRootsAllSet = schemeRootsAllSet
+        }
+
+buildNodeMappings :: GeneralizeEnv -> Phase1Result -> Phase2Result
+buildNodeMappings env phase1 =
+    let solvedConstraint = geSolvedConstraint env
+        base = geBaseConstraint env
+        baseNodes = cNodes base
+        nodesSolved = p1NodesSolved phase1
+        canonical = geCanonical env
+        adoptRef = geAdoptRef env
+        instCopyMap = geInstCopyMap env
         genSolved = cGenNodes solvedConstraint
         genMerged = IntMap.union (cGenNodes base) genSolved
-        applyRedirectsToRef ref =
-            case ref of
-                TypeRef nid -> TypeRef (chaseRedirects redirects nid)
-                GenRef gid -> GenRef gid
-        canonicalRef = Canonicalize.canonicalRef canonical
-        adoptRef = canonicalRef . applyRedirectsToRef
-        adoptNodeId nid =
-            case adoptRef (typeRef nid) of
-                TypeRef nid' -> nid'
-                GenRef _ -> nid
-        keepOld _ old = old
-        chooseRootGenId constraint gens =
-            case [gid | GenRef gid <- Binding.bindingRoots constraint] of
-                [gid] -> gid
-                _ ->
-                    case IntMap.keys gens of
-                        (k:_) -> GenNodeId k
-                        [] -> GenNodeId 0
-        ownerIsOther gid = maybe False (/= gid)
-        insertParentPreserveFlag parentRef childKey acc =
-            case IntMap.lookup childKey acc of
-                Just (_parentExisting, flag) ->
-                    IntMap.insert childKey (parentRef, flag) acc
-                Nothing ->
-                    IntMap.insert childKey (parentRef, BindFlex) acc
-        insertParentIfSelfOrEmpty parentRef childKey acc =
-            case IntMap.lookup childKey acc of
-                Just (parentExisting, flag)
-                    | nodeRefKey parentExisting == childKey ->
-                        IntMap.insert childKey (parentRef, flag) acc
-                    | otherwise -> acc
-                Nothing ->
-                    IntMap.insert childKey (parentRef, BindFlex) acc
-        insertParentIfSelfOrEmptyWith parentRef flag childKey acc =
-            case IntMap.lookup childKey acc of
-                Nothing ->
-                    IntMap.insert childKey (parentRef, flag) acc
-                Just (parentExisting, _flagExisting)
-                    | nodeRefKey parentExisting == childKey ->
-                        IntMap.insert childKey (parentRef, flag) acc
-                    | otherwise -> acc
-        insertGenParentPreserveFlag gid =
-            insertParentPreserveFlag (GenRef gid)
-        insertGenParentIfSelfOrEmpty gid =
-            insertParentIfSelfOrEmpty (GenRef gid)
-        allowBindEdge childRef parentRef =
-            okRef childRef
-                && okRef parentRef
-                && nodeRefKey childRef /= nodeRefKey parentRef
-                && isUpperRef parentRef childRef
-        policyKeepOld =
-            BindParentPolicy
-                { bppAllow = allowBindEdge
-                , bppInsert = \parentRef flag childKey acc ->
-                    IntMap.insertWith keepOld childKey (parentRef, flag) acc
-                }
-        policyInsert =
-            BindParentPolicy
-                { bppAllow = allowBindEdge
-                , bppInsert = \parentRef flag childKey acc ->
-                    IntMap.insert childKey (parentRef, flag) acc
-                }
-        policySelfOrEmpty =
-            BindParentPolicy
-                { bppAllow = allowBindEdge
-                , bppInsert = insertParentIfSelfOrEmptyWith
-                }
-        debug msg = debugGaScope ("constraintForGeneralization: " ++ msg)
-        okRef ref =
-            case ref of
-                TypeRef nid -> IntMap.member (getNodeId nid) nodesSolved
-                GenRef gid -> IntMap.member (genNodeKey gid) genMerged
-        upperConstraint =
-            solvedConstraint { cNodes = nodesSolved }
-        isUpperRef parentRef childRef =
-            case parentRef of
-                TypeRef _ -> Binding.isUpper upperConstraint parentRef childRef
-                GenRef _ -> True
-        wasRedirected ref =
-            case ref of
-                TypeRef nid ->
-                    let ref' = applyRedirectsToRef ref
-                    in nodeRefKey ref' /= nodeRefKey (TypeRef nid)
-                GenRef _ -> False
-        -- Phase 3: bind parents (base, solved, and copies).
         bindParentsBase = cBindParents base
+        bindParentsSolved = cBindParents solvedConstraint
         stickyTypeParentsBase =
             IntSet.fromList
                 [ childKey
@@ -345,83 +421,6 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                 | (childKey, child) <- IntMapUtils.allTypeChildrenWithKey bindParentsBase
                 , isTyVarAt baseNodes (getNodeId child)
                 ]
-        bindParentsSolved = cBindParents solvedConstraint
-        insertBindParentBase acc childKey parentRef flag =
-            let childRef = nodeRefFromKey childKey
-                childRef' = adoptRef childRef
-                parentRef' = adoptRef parentRef
-                allowParent =
-                    case parentRef of
-                        TypeRef _ -> True
-                        GenRef _ -> isUpperRef parentRef' childRef'
-            in if allowParent
-                then applyBindParent policyKeepOld childRef' parentRef' flag acc
-                else acc
-
-        insertBindParentSolved acc childKey parentRef flag =
-            let childRef = nodeRefFromKey childKey
-                childRef' = adoptRef childRef
-                parentRef' = adoptRef parentRef
-                childKey' = nodeRefKey childRef'
-                isSelf = nodeRefKey childRef' == nodeRefKey parentRef'
-                existing = IntMap.lookup childKey' acc
-                childIsCopy =
-                    case childRef' of
-                        TypeRef nid -> IntSet.member (getNodeId nid) instCopyNodes
-                        GenRef _ -> False
-                existingSelf =
-                    case existing of
-                        Just (parentExisting, _) -> nodeRefKey parentExisting == childKey'
-                        Nothing -> False
-                overrideCopy =
-                    debug
-                        ("bind-parent override copy child="
-                            ++ show childRef'
-                            ++ " parent="
-                            ++ show parentRef'
-                            ++ " redirected="
-                            ++ show (wasRedirected childRef)
-                        )
-                        (IntMap.insert childKey' (parentRef', flag) acc)
-                fillChild =
-                    debug
-                        ("bind-parent fill child="
-                            ++ show childRef'
-                            ++ " parent="
-                            ++ show parentRef'
-                            ++ " redirected="
-                            ++ show (wasRedirected childRef)
-                        )
-                        (IntMap.insert childKey' (parentRef', flag) acc)
-                overrideSelf =
-                    debug
-                        ("bind-parent override self-parent child="
-                            ++ show childRef'
-                            ++ " parent="
-                            ++ show parentRef'
-                            ++ " redirected="
-                            ++ show (wasRedirected childRef)
-                        )
-                        (IntMap.insert childKey' (parentRef', flag) acc)
-            in case () of
-                _ | not (okRef childRef' && okRef parentRef') -> acc
-                  | isSelf -> acc
-                  | not (isUpperRef parentRef' childRef') -> acc
-                  | otherwise ->
-                        case existing of
-                            Just _ | childIsCopy && not existingSelf -> acc
-                            Just _ | childIsCopy -> overrideCopy
-                            Nothing -> fillChild
-                            Just _ | existingSelf -> overrideSelf
-                            _ -> acc
-
-        bindParentsBase' =
-            IntMap.foldlWithKey'
-                (\acc childKey (parentRef, flag) ->
-                    insertBindParentBase acc childKey parentRef flag
-                )
-                IntMap.empty
-                bindParentsBase
         copyOverrides =
             IntMap.fromList
                 [ (copyKeyC, baseN)
@@ -432,7 +431,7 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
         (baseToSolved, solvedToBase) =
             let schemeInteriorKeys =
                     IntSet.unions
-                        [ reachableFromWithBoundsBase root
+                        [ reachableFromWithBounds baseNodes root
                         | gen <- NodeAccess.allGenNodes base
                         , root <- gnSchemes gen
                         ]
@@ -483,7 +482,98 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                 solvedToBase1 =
                     IntMap.union copyOverrides solvedToBase0
             in (baseToSolved0, solvedToBase1)
+        nodeMapping = NodeMapping
+            { mapBaseToSolved = baseToSolved
+            , mapSolvedToBase = solvedToBase
+            }
+    in Phase2Result
+        { p2GenMerged = genMerged
+        , p2NodeMapping = nodeMapping
+        , p2CopyOverrides = copyOverrides
+        , p2BindParentsBase = bindParentsBase
+        , p2BindParentsSolved = bindParentsSolved
+        , p2StickyTypeParentsBase = stickyTypeParentsBase
+        , p2BaseNamedKeys = baseNamedKeys
+        }
 
+computeBindParentsBase :: GeneralizeEnv -> Phase1Result -> Phase2Result -> Phase3Result
+computeBindParentsBase env phase1 phase2 =
+    let solvedConstraint = geSolvedConstraint env
+        nodesSolved = p1NodesSolved phase1
+        adoptRef = geAdoptRef env
+        applyRedirectsToRef = geApplyRedirectsToRef env
+        instCopyNodes = geInstCopyNodes env
+        instCopyMap = geInstCopyMap env
+        genMerged = p2GenMerged phase2
+        bindParentsBase = p2BindParentsBase phase2
+        bindParentsSolved = p2BindParentsSolved phase2
+        debug msg = debugGaScope ("constraintForGeneralization: " ++ msg)
+        upperConstraint = solvedConstraint { cNodes = nodesSolved }
+        okRef = mkOkRef nodesSolved genMerged
+        isUpperRef = mkIsUpperRef upperConstraint
+        wasRedirected ref =
+            case ref of
+                TypeRef nid ->
+                    let ref' = applyRedirectsToRef ref
+                    in nodeRefKey ref' /= nodeRefKey (TypeRef nid)
+                GenRef _ -> False
+        allowBindEdge childRef parentRef =
+            okRef childRef
+                && okRef parentRef
+                && nodeRefKey childRef /= nodeRefKey parentRef
+                && isUpperRef parentRef childRef
+        insertBindParentBase acc childKey parentRef flag =
+            let childRef = nodeRefFromKey childKey
+                childRef' = adoptRef childRef
+                parentRef' = adoptRef parentRef
+                allowParent =
+                    case parentRef of
+                        TypeRef _ -> True
+                        GenRef _ -> isUpperRef parentRef' childRef'
+            in if allowParent
+                then applyBindParent allowBindEdge KeepOld childRef' parentRef' flag acc
+                else acc
+
+        insertBindParentSolved acc childKey parentRef flag =
+            let childRef = nodeRefFromKey childKey
+                childRef' = adoptRef childRef
+                parentRef' = adoptRef parentRef
+                childKey' = nodeRefKey childRef'
+                isSelf = nodeRefKey childRef' == nodeRefKey parentRef'
+                existing = IntMap.lookup childKey' acc
+                childIsCopy =
+                    case childRef' of
+                        TypeRef nid -> IntSet.member (getNodeId nid) instCopyNodes
+                        GenRef _ -> False
+                existingSelf =
+                    case existing of
+                        Just (parentExisting, _) -> nodeRefKey parentExisting == childKey'
+                        Nothing -> False
+                wasRed = wasRedirected childRef
+                dbgInsert msg =
+                    debug ("bind-parent " ++ msg ++ " child=" ++ show childRef'
+                           ++ " parent=" ++ show parentRef'
+                           ++ " redirected=" ++ show wasRed)
+                          (IntMap.insert childKey' (parentRef', flag) acc)
+            in case () of
+                _ | not (okRef childRef' && okRef parentRef') -> acc
+                  | isSelf -> acc
+                  | not (isUpperRef parentRef' childRef') -> acc
+                  | otherwise ->
+                        case existing of
+                            Just _ | childIsCopy && not existingSelf -> acc
+                            Just _ | childIsCopy -> dbgInsert "override copy"
+                            Nothing -> dbgInsert "fill"
+                            Just _ | existingSelf -> dbgInsert "override self-parent"
+                            _ -> acc
+
+        bindParentsBase' =
+            IntMap.foldlWithKey'
+                (\acc childKey (parentRef, flag) ->
+                    insertBindParentBase acc childKey parentRef flag
+                )
+                IntMap.empty
+                bindParentsBase
         bindParents' =
             IntMap.foldlWithKey'
                 (\acc childKey (parentRef, flag) ->
@@ -499,12 +589,48 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                     in case IntMap.lookup (nodeRefKey (typeRef baseN)) bindParentsBase of
                         Just (parentRef, flag) ->
                             let parentRef' = adoptRef parentRef
-                            in applyBindParent policyKeepOld childRef' parentRef' flag acc
+                            in applyBindParent allowBindEdge KeepOld childRef' parentRef' flag acc
                         Nothing -> acc
                 )
                 bindParents'
                 instCopyMap
-        -- Phase 4: scheme ownership (roots and interiors).
+    in Phase3Result
+        { p3BindParentsBaseAdjusted = bindParentsBase'
+        , p3BindParentsWithCopies = bindParentsWithCopies
+        }
+
+computeSchemeOwnership :: GeneralizeEnv -> Phase1Result -> Phase2Result -> Phase3Result -> Phase4Result
+computeSchemeOwnership env phase1 phase2 phase3 =
+    let base = geBaseConstraint env
+        solvedConstraint = geSolvedConstraint env
+        baseNodes = cNodes base
+        nodesSolved = p1NodesSolved phase1
+        schemeRootsBase = p1SchemeRootsBase phase1
+        schemeRootsBaseSet = p1SchemeRootsBaseSet phase1
+        schemeRootsAllSet = p1SchemeRootsAllSet phase1
+        genMerged = p2GenMerged phase2
+        bindParentsBase = p2BindParentsBase phase2
+        bindParentsBase' = p3BindParentsBaseAdjusted phase3
+        bindParentsWithCopies = p3BindParentsWithCopies phase3
+        stickyTypeParentsBase = p2StickyTypeParentsBase phase2
+        instCopyNodes = geInstCopyNodes env
+        instCopyMap = geInstCopyMap env
+        NodeMapping { mapBaseToSolved = baseToSolved, mapSolvedToBase = solvedToBase } = p2NodeMapping phase2
+        canonical = geCanonical env
+        adoptNodeId = geAdoptNodeId env
+        debug msg = debugGaScope ("constraintForGeneralization: " ++ msg)
+        upperConstraint = solvedConstraint { cNodes = nodesSolved }
+        okRef = mkOkRef nodesSolved genMerged
+        isUpperRef = mkIsUpperRef upperConstraint
+        allowBindEdge = mkAllowBindEdge okRef isUpperRef
+        ownerIsOther gid = maybe False (/= gid)
+        chooseRootGenId constraint gens =
+            case [gid | GenRef gid <- Binding.bindingRoots constraint] of
+                [gid] -> gid
+                _ ->
+                    case IntMap.keys gens of
+                        (k:_) -> GenNodeId k
+                        [] -> GenNodeId 0
         schemeRootOwners =
             IntMap.fromList
                 [ (getNodeId (canonical root), gnId gen)
@@ -709,8 +835,8 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                         Nothing -> acc
             in foldl' attachOne bp0 (IntSet.toList allSchemeRoots)
         preserveBaseGaPrime bp0 =
-            let insertEdge acc childRef parentRef flag
-                    = applyBindParent policyInsert childRef parentRef flag acc
+            let insertEdge acc childRef parentRef flag =
+                    applyBindParent allowBindEdge Override childRef parentRef flag acc
                 prefixToGen gid =
                     let isTarget ref =
                             case ref of
@@ -783,14 +909,26 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                                                     case IntMap.lookup rootKey acc' of
                                                         Just (parentExisting, _flag)
                                                             | parentExisting == GenRef gid -> acc'
-                                                        _ -> insertGenParentPreserveFlag gid rootKey acc'
+                                                        _ ->
+                                                            insertBindParent
+                                                                Override
+                                                                (GenRef gid)
+                                                                (flagFromExisting BindFlex rootKey acc')
+                                                                rootKey
+                                                                acc'
                                                 else acc'
                                     in case IntMap.lookup (getNodeId rootC) nodesSolved of
                                         Just TyVar{ tnBound = Just bnd } ->
                                             let bndRef = typeRef bnd
                                                 bndKey = nodeRefKey bndRef
                                             in if okRef bndRef
-                                                then insertParentIfSelfOrEmpty rootRef bndKey accWithRoot
+                                                then
+                                                    insertBindParent
+                                                        SelfOrEmpty
+                                                        rootRef
+                                                        (flagFromExisting BindFlex bndKey accWithRoot)
+                                                        bndKey
+                                                        accWithRoot
                                                 else accWithRoot
                                         _ -> accWithRoot
                                 )
@@ -808,7 +946,13 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                                         bndRef = typeRef (canonical bnd)
                                         bndKey = nodeRefKey bndRef
                                     in if okRef varRef && okRef bndRef
-                                        then insertParentIfSelfOrEmpty varRef bndKey acc
+                                        then
+                                            insertBindParent
+                                                SelfOrEmpty
+                                                varRef
+                                                (flagFromExisting BindFlex bndKey acc)
+                                                bndKey
+                                                acc
                                         else acc
                                 _ -> acc
                         )
@@ -838,13 +982,25 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                                         | nodeRefKey parentExisting == childKey ->
                                             if ownerMismatch
                                                 then acc
-                                                else insertGenParentIfSelfOrEmpty gid childKey acc
+                                                else
+                                                    insertBindParent
+                                                        SelfOrEmpty
+                                                        (GenRef gid)
+                                                        (flagFromExisting BindFlex childKey acc)
+                                                        childKey
+                                                        acc
                                     Just _ -> acc
                                     Nothing
                                         | ownerMismatch || baseOwnerMismatch -> acc
                                         | otherwise ->
                                             case IntMap.lookup nidInt nodesSolved of
-                                                Just TyVar{} -> insertGenParentIfSelfOrEmpty gid childKey acc
+                                                Just TyVar{} ->
+                                                    insertBindParent
+                                                        SelfOrEmpty
+                                                        (GenRef gid)
+                                                        (flagFromExisting BindFlex childKey acc)
+                                                        childKey
+                                                        acc
                                                 _ -> acc
                         )
                         bp
@@ -895,7 +1051,12 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                                                 in if sticky || ownerIsOther gid baseOwner || ownerIsOther gid owner
                                                     then acc'
                                                     else
-                                                            insertGenParentIfSelfOrEmpty gid childKey acc'
+                                                        insertBindParent
+                                                            SelfOrEmpty
+                                                            (GenRef gid)
+                                                            (flagFromExisting BindFlex childKey acc')
+                                                            childKey
+                                                            acc'
                                             _ -> acc'
                             in IntSet.foldl'
                                 step
@@ -963,9 +1124,19 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                                         then acc
                                         else if shouldOverride
                                             then
-                                                insertGenParentPreserveFlag gid childKey acc
+                                                insertBindParent
+                                                    Override
+                                                    (GenRef gid)
+                                                    (flagFromExisting BindFlex childKey acc)
+                                                    childKey
+                                                    acc
                                         else
-                                            insertGenParentIfSelfOrEmpty gid childKey acc
+                                            insertBindParent
+                                                SelfOrEmpty
+                                                (GenRef gid)
+                                                (flagFromExisting BindFlex childKey acc)
+                                                childKey
+                                                acc
                         _ -> acc
         bindParentsFinal0' =
             overrideSchemeInteriorParentsWith schemeInteriorOwnersFiltered' genMerged (forceBoundRootParents bindParentsFinal0)
@@ -1001,7 +1172,12 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                             in if sticky || ownerIsOther gid owner || shouldPreserve
                                 then acc
                                 else
-                                    insertGenParentIfSelfOrEmpty gid childKey acc
+                                    insertBindParent
+                                        SelfOrEmpty
+                                        (GenRef gid)
+                                        (flagFromExisting BindFlex childKey acc)
+                                        childKey
+                                        acc
                         _ -> acc
         rebindSchemeBodyAliases bp =
             IntMap.foldlWithKey'
@@ -1055,36 +1231,17 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                 bp
                 roots
         bindParentsFinalRebound = rebindSchemeBodyAliases bindParentsFinal
-        bindParentsFinal' =
-            let msg =
-                    "scheme interiors="
-                        ++ show
-                            [ (gnId gen, root,
-                                [ (nid, IntMap.lookup (nodeRefKey (typeRef (NodeId nid))) bindParentsFinal)
-                                | nid <- IntSet.toList (reachableFromWithBoundsStop (canonical root))
-                                , isTyVarAt nodesSolved nid
-                                ])
-                            | gen <- IntMap.elems genMerged
-                            , root <- gnSchemes gen
-                            ]
-                probeId = NodeId 17
-                probeKey = nodeRefKey (typeRef probeId)
-                probeSolvedParent = IntMap.lookup probeKey bindParentsSolved
-                probeSolvedToBase = IntMap.lookup (getNodeId probeId) solvedToBase
-                probeInstCopy = IntSet.member (getNodeId probeId) instCopyNodes
-                parentInfo = IntMap.lookup (nodeRefKey (typeRef probeId)) bindParentsFinal
-                msgProbe =
-                    "probe bind-parent node="
-                        ++ show probeId
-                        ++ " parent="
-                        ++ show parentInfo
-                        ++ " solvedParent="
-                        ++ show probeSolvedParent
-                        ++ " solvedToBase="
-                        ++ show probeSolvedToBase
-                        ++ " instCopy="
-                        ++ show probeInstCopy
-            in debug msgProbe (debug msg bindParentsFinalRebound)
+        bindParentsFinal' = debug
+            ("scheme interiors=" ++ show
+                [ (gnId gen, root,
+                    [ (nid, IntMap.lookup (nodeRefKey (typeRef (NodeId nid))) bindParentsFinal)
+                    | nid <- IntSet.toList (reachableFromWithBoundsStop (canonical root))
+                    , isTyVarAt nodesSolved nid
+                    ])
+                | gen <- IntMap.elems genMerged
+                , root <- gnSchemes gen
+                ])
+            bindParentsFinalRebound
         bindParentsFinal'' = attachOrphans bindParentsFinal'
         bindParentsFinalClean = dropSelfParents bindParentsFinal''
         restoreSchemeRootParentsFromOwners bp0 =
@@ -1093,7 +1250,13 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                     let rootRef = typeRef (NodeId rootKey)
                         rootKeyRef = nodeRefKey rootRef
                     in if okRef rootRef
-                        then insertGenParentPreserveFlag gid rootKeyRef acc
+                        then
+                            insertBindParent
+                                Override
+                                (GenRef gid)
+                                (flagFromExisting BindFlex rootKeyRef acc)
+                                rootKeyRef
+                                acc
                         else acc
                 )
                 bp0
@@ -1140,7 +1303,43 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
             [ (gnId gen, map canonical (gnSchemes gen))
             | gen <- IntMap.elems genMerged'
             ]
-        -- Phase 5: finalize constraint and align base/solved mappings.
+    in Phase4Result
+        { p4BindParentsFinalAligned = bindParentsFinalAligned
+        , p4GenMerged = genMerged'
+        , p4SchemeRootsMerged = schemeRootsMerged'
+        , p4RootGenIdBase = rootGenIdBase
+        }
+
+finalizeConstraint :: GeneralizeEnv -> Phase1Result -> Phase2Result -> Phase3Result -> Phase4Result -> (Constraint, GaBindParents)
+finalizeConstraint env phase1 phase2 _phase3 phase4 =
+    let base = geBaseConstraint env
+        solvedConstraint = geSolvedConstraint env
+        nodesSolved = p1NodesSolved phase1
+        bindParentsBase = p2BindParentsBase phase2
+        NodeMapping { mapBaseToSolved = baseToSolved } = p2NodeMapping phase2
+        copyOverrides = p2CopyOverrides phase2
+        instCopyMap = geInstCopyMap env
+        canonical = geCanonical env
+        adoptRef = geAdoptRef env
+        bindParentsFinalAligned = p4BindParentsFinalAligned phase4
+        genMerged' = p4GenMerged phase4
+        schemeRootsMerged' = p4SchemeRootsMerged phase4
+        rootGenIdBase = p4RootGenIdBase phase4
+        debug msg = debugGaScope ("constraintForGeneralization: " ++ msg)
+        upperConstraint = solvedConstraint { cNodes = nodesSolved }
+        okRef = mkOkRef nodesSolved genMerged'
+        isUpperRef = mkIsUpperRef upperConstraint
+        allowBindEdge = mkAllowBindEdge okRef isUpperRef
+        mapBaseRef ref =
+            case ref of
+                GenRef gid -> Just (GenRef gid)
+                TypeRef nid ->
+                    case IntMap.lookup (getNodeId nid) baseToSolved of
+                        Just solvedNid -> Just (TypeRef (canonical solvedNid))
+                        Nothing ->
+                            if IntMap.member (getNodeId nid) nodesSolved
+                                then Just (TypeRef (canonical nid))
+                                else Nothing
         constraintForGen =
             let restoreTypeParents acc =
                     IntMap.foldlWithKey'
@@ -1149,7 +1348,7 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                                 (TypeRef childBase, TypeRef _parentBase) ->
                                     case (mapBaseRef (typeRef childBase), mapBaseRef parentRef) of
                                         (Just childRef', Just parentRef') ->
-                                            applyBindParent policySelfOrEmpty childRef' parentRef' flag acc'
+                                            applyBindParent allowBindEdge SelfOrEmpty childRef' parentRef' flag acc'
                                         _ -> acc'
                                 _ -> acc'
                         )
@@ -1172,16 +1371,7 @@ constraintForGeneralization solved redirects instCopyNodes instCopyMap base _ann
                         bindParentsFinalAligned'
                         instCopyMap
                 constraint0 = solvedConstraint { cNodes = nodesSolved, cBindParents = bindParentsFinalAligned'', cGenNodes = genMerged' }
-                constraint1 = pruneBindParentsConstraint constraint0
-                probeIds = [NodeId 1, NodeId 2, NodeId 3]
-                probeInfo =
-                    [ ( pid
-                      , NodeAccess.lookupNode constraint1 pid
-                      , IntMap.lookup (nodeRefKey (typeRef pid)) (cBindParents constraint1)
-                      )
-                    | pid <- probeIds
-                    ]
-            in debug ("probe nodes " ++ show probeInfo) constraint1
+            in pruneBindParentsConstraint constraint0
         alignedMapping =
             let canonicalBase = id
                 alignOne (accSolved, accBase) gen =
