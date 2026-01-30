@@ -26,7 +26,7 @@ module MLF.Constraint.Presolution.Expansion (
 
 import Control.Monad (foldM, zipWithM, zipWithM_)
 import Control.Monad.Except (throwError)
-import Control.Monad.State
+import Control.Monad.State (gets, modify)
 import Data.Functor.Foldable (cata)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
@@ -36,7 +36,6 @@ import Debug.Trace (trace)
 import System.Environment (lookupEnv)
 import System.IO.Unsafe (unsafePerformIO)
 
-import qualified MLF.Util.UnionFind as UnionFind
 import MLF.Constraint.Presolution.Base (
     CopyMap,
     InteriorSet,
@@ -62,7 +61,11 @@ import MLF.Constraint.Presolution.Ops (
     lookupVarBound,
     setVarBound
     )
-import qualified MLF.Binding.Tree as Binding
+import MLF.Constraint.Presolution.StateAccess (
+    getCanonical,
+    getConstraintAndCanonical,
+    lookupBindParentM
+    )
 import MLF.Constraint.Types
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Presolution.Unify (unifyAcyclic)
@@ -178,18 +181,14 @@ expansion that satisfies the edge (principality argument in §5).
 -}
 nearestGenAncestor :: NodeId -> PresolutionM (Maybe GenNodeId)
 nearestGenAncestor nid0 = do
-    c0 <- gets psConstraint
-    uf0 <- gets psUnionFind
-    let canonical = UnionFind.frWith uf0
-        start = typeRef (canonical nid0)
+    canonical <- getCanonical
+    let start = typeRef (canonical nid0)
         go :: IntSet.IntSet -> NodeRef -> PresolutionM (Maybe GenNodeId)
         go visited ref
             | IntSet.member (nodeRefKey ref) visited =
                 pure Nothing
             | otherwise = do
-                mbParent <- case Binding.lookupBindParentUnder canonical c0 ref of
-                    Left err -> throwError (BindingTreeError err)
-                    Right res -> pure res
+                mbParent <- lookupBindParentM ref
                 case mbParent of
                     Nothing -> pure Nothing
                     Just (GenRef gid, _) -> pure (Just gid)
@@ -199,9 +198,8 @@ nearestGenAncestor nid0 = do
 
 forallSpecFromBinders :: [NodeId] -> PresolutionM ForallSpec
 forallSpecFromBinders binders0 = do
-    uf0 <- gets psUnionFind
-    let canonical = UnionFind.frWith uf0
-        binders = map canonical binders0
+    canonical <- getCanonical
+    let binders = map canonical binders0
         binderIndex =
             IntMap.fromList
                 [ (getNodeId b, idx)
@@ -244,10 +242,8 @@ decideMinimalExpansion allowTrivial (TyExp { tnBody = bodyId }) targetNode = do
             case mbGen of
                 Nothing -> pure False
                 Just gid -> do
-                    c0 <- gets psConstraint
-                    uf0 <- gets psUnionFind
-                    let canonical = UnionFind.frWith uf0
-                        targetC = canonical targetId
+                    (c0, canonical) <- getConstraintAndCanonical
+                    let targetC = canonical targetId
                         schemeRoots =
                             case NodeAccess.lookupGenNode c0 gid of
                                 Just gen -> map canonical (gnSchemes gen)

@@ -3,7 +3,8 @@ module MLF.Elab.Run.Util (
     makeCanonicalizer,
     canonicalizeWitness,
     canonicalizeTrace,
-    canonicalizeExpansion
+    canonicalizeExpansion,
+    firstShow
 ) where
 
 import qualified Data.IntMap.Strict as IntMap
@@ -100,3 +101,7 @@ canonicalizeExpansion canon expn = case expn of
         in ExpForall (NE.map canonSpec specs)
     ExpInstantiate args -> ExpInstantiate (map canon args)
     ExpCompose es -> ExpCompose (NE.map (canonicalizeExpansion canon) es)
+
+-- | Convert Either with Showable error to Either String
+firstShow :: Show e => Either e a -> Either String a
+firstShow = either (Left . show) Right

@@ -14,7 +14,7 @@ module MLF.Constraint.Presolution.ForallIntro (
 
 import Control.Monad (forM_, unless, when)
 import Control.Monad.Except (throwError)
-import Control.Monad.State (gets, modify')
+import Control.Monad.State (modify')
 import Data.List (partition, sortBy)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
@@ -23,10 +23,10 @@ import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.Traversal as Traversal
 import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Util.Order as Order
-import qualified MLF.Util.UnionFind as UnionFind
 import MLF.Constraint.Types
 import MLF.Constraint.Presolution.Base (PresolutionM, PresolutionError(..), PresolutionState(..))
 import MLF.Constraint.Presolution.Ops (createFreshNodeId, registerNode, setBindParentM, setVarBound)
+import MLF.Constraint.Presolution.StateAccess (getConstraintAndCanonical, liftBindingError)
 
 {- Note [ExpForall materialization]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -45,10 +45,8 @@ have no binding parent).
 
 introduceForallFromSpec :: ForallSpec -> NodeId -> PresolutionM NodeId
 introduceForallFromSpec spec bodyRoot = do
-    c0 <- gets psConstraint
-    uf0 <- gets psUnionFind
-    let canonical = UnionFind.frWith uf0
-        bodyC = canonical bodyRoot
+    (c0, canonical) <- getConstraintAndCanonical
+    let bodyC = canonical bodyRoot
         oldParent = Binding.lookupBindParent c0 (typeRef bodyC)
     newId <- createFreshNodeId
     let node = TyForall newId bodyC
@@ -99,10 +97,8 @@ bindForallBindersFromSpec forallId bodyRoot ForallSpec{ fsBinderCount = k, fsBou
                 "bindForallBindersFromSpec: fsBounds length mismatch: expected "
                     ++ show k ++ ", got " ++ show (length bounds)
 
-    c0 <- gets psConstraint
-    uf0 <- gets psUnionFind
-    let canonical = UnionFind.frWith uf0
-        nodes0 = cNodes c0
+    (c0, canonical) <- getConstraintAndCanonical
+    let nodes0 = cNodes c0
         bodyC = canonical bodyRoot
 
         reachable =
@@ -112,9 +108,7 @@ bindForallBindersFromSpec forallId bodyRoot ForallSpec{ fsBinderCount = k, fsBou
                 bodyC
         orderKeys = Order.orderKeysFromRootWith canonical nodes0 bodyC Nothing
 
-    bp <- case Binding.canonicalizeBindParentsUnder canonical c0 of
-        Left err -> throwError (BindingTreeError err)
-        Right bp0 -> pure bp0
+    bp <- liftBindingError $ Binding.canonicalizeBindParentsUnder canonical c0
 
     let isLiveVar nid =
             case IntMap.lookup (getNodeId nid) nodes0 of

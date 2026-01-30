@@ -38,6 +38,7 @@ import MLF.Constraint.Types
     )
 import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Constraint.NodeAccess as NodeAccess
+import MLF.Util.IntMapUtils (keepOld)
 import qualified MLF.Util.IntMapUtils as IntMapUtils
 import MLF.Elab.Generalize (GaBindParents(..), applyGeneralizePlan)
 import MLF.Constraint.BindingUtil (bindingPathToRootLocal, firstGenAncestorFrom)
@@ -137,9 +138,6 @@ applyBindParent allow mode childRef parentRef flag acc
         insertBindParent mode parentRef flag (nodeRefKey childRef) acc
     | otherwise = acc
 
-keepOld :: a -> a -> a
-keepOld _ old = old
-
 flagFromExisting :: BindFlag -> NodeKey -> BindParents -> BindFlag
 flagFromExisting defaultFlag childKey acc =
     case IntMap.lookup childKey acc of
@@ -202,6 +200,72 @@ isTyVarNode node =
     case node of
         TyVar{} -> True
         _ -> False
+
+-- | Look up the first gen ancestor of a node in the base constraint's bind parents.
+baseFirstGenAncestorWith
+    :: IntMap.IntMap NodeId  -- ^ solvedToBase mapping
+    -> BindParents           -- ^ base bind parents
+    -> NodeRef               -- ^ starting reference
+    -> Maybe GenNodeId
+baseFirstGenAncestorWith solvedToBase bindParentsBase ref0 =
+    let baseRef =
+            case ref0 of
+                GenRef gid -> GenRef gid
+                TypeRef nid ->
+                    case IntMap.lookup (getNodeId nid) solvedToBase of
+                        Just baseN -> typeRef baseN
+                        Nothing -> typeRef nid
+        alg Nil = Nothing
+        alg (Cons parentRef rest) =
+            case parentRef of
+                GenRef gid -> Just gid
+                _ -> rest
+        coalg (visited, ref, stop) =
+            if stop || IntSet.member (nodeRefKey ref) visited
+                then Nil
+                else
+                    case IntMap.lookup (nodeRefKey ref) bindParentsBase of
+                        Nothing -> Nil
+                        Just (parentRef, _) ->
+                            let visited' = IntSet.insert (nodeRefKey ref) visited
+                                stop' =
+                                    case parentRef of
+                                        GenRef _ -> True
+                                        _ -> False
+                            in Cons parentRef (visited', parentRef, stop')
+    in hylo alg coalg (IntSet.empty, baseRef, False)
+
+-- | Map a base constraint reference to its solved equivalent.
+mapBaseRefWith
+    :: (NodeId -> NodeId)     -- ^ canonical function
+    -> IntMap.IntMap NodeId   -- ^ baseToSolved mapping
+    -> NodeMap                -- ^ nodesSolved
+    -> NodeRef                -- ^ reference to map
+    -> Maybe NodeRef
+mapBaseRefWith canonical baseToSolved nodesSolved ref =
+    case ref of
+        GenRef gid -> Just (GenRef gid)
+        TypeRef nid ->
+            case IntMap.lookup (getNodeId nid) baseToSolved of
+                Just solvedNid -> Just (TypeRef (canonical solvedNid))
+                Nothing ->
+                    if IntMap.member (getNodeId nid) nodesSolved
+                        then Just (TypeRef (canonical nid))
+                        else Nothing
+
+-- | Check if a gen node ID differs from the given one.
+ownerIsOther :: GenNodeId -> Maybe GenNodeId -> Bool
+ownerIsOther gid = maybe False (/= gid)
+
+-- | Choose the root gen node ID from a constraint.
+chooseRootGenId :: Constraint -> GenMap -> GenNodeId
+chooseRootGenId constraint gens =
+    case [gid | GenRef gid <- Binding.bindingRoots constraint] of
+        [gid] -> gid
+        _ ->
+            case IntMap.keys gens of
+                (k:_) -> GenNodeId k
+                [] -> GenNodeId 0
 
 pruneBindParentsConstraint :: Constraint -> Constraint
 pruneBindParentsConstraint c =
@@ -623,14 +687,8 @@ computeSchemeOwnership env phase1 phase2 phase3 =
         okRef = mkOkRef nodesSolved genMerged
         isUpperRef = mkIsUpperRef upperConstraint
         allowBindEdge = mkAllowBindEdge okRef isUpperRef
-        ownerIsOther gid = maybe False (/= gid)
-        chooseRootGenId constraint gens =
-            case [gid | GenRef gid <- Binding.bindingRoots constraint] of
-                [gid] -> gid
-                _ ->
-                    case IntMap.keys gens of
-                        (k:_) -> GenNodeId k
-                        [] -> GenNodeId 0
+        baseFirstGenAncestor = baseFirstGenAncestorWith solvedToBase bindParentsBase
+        mapBaseRef = mapBaseRefWith canonical baseToSolved nodesSolved
         schemeRootOwners =
             IntMap.fromList
                 [ (getNodeId (canonical root), gnId gen)
@@ -766,49 +824,12 @@ computeSchemeOwnership env phase1 phase2 phase3 =
                                 _ -> acc
                         _ -> acc
             in IntMap.foldlWithKey' attachParent bindParentsWithCopies schemeInteriorOwnersFiltered'
-        baseFirstGenAncestor ref0 =
-            let baseRef =
-                    case ref0 of
-                        GenRef gid -> GenRef gid
-                        TypeRef nid ->
-                            case IntMap.lookup (getNodeId nid) solvedToBase of
-                                Just baseN -> typeRef baseN
-                                Nothing -> typeRef nid
-                alg Nil = Nothing
-                alg (Cons parentRef rest) =
-                    case parentRef of
-                        GenRef gid -> Just gid
-                        _ -> rest
-                coalg (visited, ref, stop) =
-                    if stop || IntSet.member (nodeRefKey ref) visited
-                        then Nil
-                        else
-                            case IntMap.lookup (nodeRefKey ref) bindParentsBase of
-                                Nothing -> Nil
-                                Just (parentRef, _) ->
-                                    let visited' = IntSet.insert (nodeRefKey ref) visited
-                                        stop' =
-                                            case parentRef of
-                                                GenRef _ -> True
-                                                _ -> False
-                                    in Cons parentRef (visited', parentRef, stop')
-            in hylo alg coalg (IntSet.empty, baseRef, False)
         firstGenAncestorWith = firstGenAncestorFrom
         dropSelfParents =
             IntMap.filterWithKey
                 (\childKey (parentRef, _flag) ->
                     nodeRefKey parentRef /= childKey
                 )
-        mapBaseRef ref =
-            case ref of
-                GenRef gid -> Just (GenRef gid)
-                TypeRef nid ->
-                    case IntMap.lookup (getNodeId nid) baseToSolved of
-                        Just solvedNid -> Just (TypeRef (canonical solvedNid))
-                        Nothing ->
-                            if IntMap.member (getNodeId nid) nodesSolved
-                                then Just (TypeRef (canonical nid))
-                                else Nothing
         restoreSchemeRootParentsFromBase bp0 =
             let baseRootAncestor root =
                     firstGenAncestorWith bindParentsBase (typeRef root)

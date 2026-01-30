@@ -56,7 +56,8 @@ module MLF.Util.IntMapUtils (
     reverseBindParentsWithFlag,
     -- * Generic IntMap utilities
     filterMapWithKey,
-    collectValues
+    collectValues,
+    keepOld
 ) where
 
 import qualified Data.IntMap.Strict as IntMap
@@ -368,3 +369,14 @@ collectValues f m =
     | (key, value) <- IntMap.toList m
     , Just result <- [f key value]
     ]
+
+-- | Merge strategy for IntMap.union/insertWith that prefers old values.
+--
+-- Use with 'IntMap.unionWith' or 'IntMap.insertWith' when you want to
+-- keep existing values and ignore new ones:
+-- @
+--   IntMap.unionWith keepOld map1 map2
+--   IntMap.insertWith keepOld key value map
+-- @
+keepOld :: a -> a -> a
+keepOld _ old = old

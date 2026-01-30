@@ -56,6 +56,7 @@ import MLF.Reify.TypeOps
     )
 import MLF.Elab.Run.Annotation (adjustAnnotationInst, annNode)
 import MLF.Elab.Run.Debug (debugGaScope, debugGaScopeEnabled, debugWhenCondM, debugWhenM)
+import MLF.Elab.Run.Util (firstShow)
 import MLF.Elab.Run.Generalize (generalizeAtWithBuilder)
 import MLF.Elab.Run.Instantiation (inferInstAppArgsFromScheme, instInsideFromArgsWithBounds)
 import MLF.Elab.Run.Scope
@@ -99,9 +100,6 @@ generalizeWithPlan planBuilder bindParentsGa res scopeRoot targetNode =
         res
         scopeRoot
         targetNode
-
-firstShow :: Show e => Either e a -> Either String a
-firstShow = either (Left . show) Right
 
 -- | Check if a type contains foralls in bounds
 containsBoundForall :: ElabType -> Bool

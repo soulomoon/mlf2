@@ -25,16 +25,14 @@ import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Constraint.Types
 import MLF.Constraint.Presolution.Base (PresolutionError(..), PresolutionM, PresolutionState(..))
 import MLF.Constraint.Presolution.Ops (findRoot)
-import qualified MLF.Util.UnionFind as UnionFind
+import MLF.Constraint.Presolution.StateAccess (getConstraintAndCanonical)
 
 -- | Lightweight reachability to prevent emitting a unification that would
 -- immediately create a self-reference (occurs-check for presolution).
 occursIn :: NodeId -> NodeId -> PresolutionM Bool
 occursIn needle start = do
-    st <- get
-    let uf = psUnionFind st
-        nodes = cNodes (psConstraint st)
-        canonical = UnionFind.frWith uf
+    (c, canonical) <- getConstraintAndCanonical
+    let nodes = cNodes c
         lookupNode = lookupNodeIn nodes
     case Traversal.occursInUnder canonical lookupNode needle start of
         Left (Traversal.MissingNode nid) -> throwError (NodeLookupFailed nid)
