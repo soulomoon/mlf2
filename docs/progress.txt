@@ -1,3 +1,46 @@
+## 2026-02-01 - Task 4.1
+- What was implemented: Defined MonadPresolution typeclass in Base.hs with instance for PresolutionM
+- Files changed:
+  - src/MLF/Constraint/Presolution/Base.hs - Added MonadPresolution typeclass with 6 methods and PresolutionM instance
+  - src/MLF/Constraint/Presolution/StateAccess.hs - Updated getCanonical to delegate to Base.getCanonical
+  - src/MLF/Constraint/Presolution/EdgeProcessing.hs - Removed redundant getCanonical import from StateAccess
+- **Results:**
+  - MonadPresolution class defined with getConstraint, modifyConstraint, getCanonical, getPresolutionState, putPresolutionState, throwPresolutionError
+  - Instance for PresolutionM defined
+  - All 400 tests pass ✓
+- **Learnings for future iterations:**
+  - When adding a typeclass method that conflicts with an existing function name, update the existing function to delegate to the typeclass method
+  - FlexibleInstances extension needed for type synonym instances
+---
+
+## 2026-02-01 - Task 3.3 & 3.4
+- What was implemented: Created Binding/Queries.hs module with common query functions
+- Files changed:
+  - src/MLF/Binding/Queries.hs - New module created (197 lines)
+  - src/MLF/Binding/Tree.hs - Removed extracted functions, added import from Queries.hs (reduced from ~700 to 580 lines)
+  - mlf2.cabal - Added new module to exposed-modules
+- **Results:**
+  - Tree.hs is 580 lines (target was <800 lines) ✓
+  - All 400 tests pass ✓
+  - Phase 3 complete
+- **Learnings for future iterations:**
+  - Query functions (interior, frontier, path operations) form a cohesive group that can be extracted together
+  - Tree.hs re-exports the query functions for external consumers
+---
+
+## 2026-02-01 - Task 3.2
+- What was implemented: Created Binding/Canonicalization.hs module with canonicalizeBindParentsUnder and quotientBindParentsUnder
+- Files changed:
+  - src/MLF/Binding/Canonicalization.hs - New module created (134 lines)
+  - src/MLF/Binding/Tree.hs - Removed duplicated functions, added import from Canonicalization.hs
+  - src/MLF/Binding/Validation.hs - Removed duplicated functions, added import from Canonicalization.hs
+  - mlf2.cabal - Added new module to exposed-modules
+- **Learnings for future iterations:**
+  - The canonicalization functions were duplicated in both Tree.hs and Validation.hs; consolidating them reduces code duplication
+  - Tree.hs re-exports canonicalizeBindParentsUnder for external consumers
+  - withQuotientBindParents is also extracted as it's the shared core for quotient-aware operations
+---
+
 ## 2026-02-01 - Task 3.1
 - What was implemented: Verified Binding/Validation.hs already exists with per-invariant functions
 - Files changed: None (task was already completed in a previous session)
