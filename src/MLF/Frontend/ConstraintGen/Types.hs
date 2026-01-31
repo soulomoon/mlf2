@@ -19,6 +19,7 @@ import MLF.Frontend.Syntax (Lit, VarName)
 -- | Errors that can surface during constraint generation.
 data ConstraintError
     = UnknownVariable VarName
+    | InternalConstraintError String  -- ^ Unexpected internal state
     deriving (Eq, Show)
 
 -- | Successful constraint generation returns the full constraint graph and the

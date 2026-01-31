@@ -6,6 +6,7 @@ module MLF.Frontend.ConstraintGen.Scope (
     rebindScopeNodes
 ) where
 
+import Control.Monad.Except (throwError)
 import Control.Monad.State.Strict (get, gets, modify', put)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
@@ -13,6 +14,7 @@ import qualified Data.IntSet as IntSet
 import MLF.Constraint.Types
 import MLF.Util.Graph (reachableFromStop)
 import MLF.Frontend.ConstraintGen.State (BuildState(..), ConstraintM, ScopeFrame(..))
+import MLF.Frontend.ConstraintGen.Types (ConstraintError(..))
 
 pushScope :: ConstraintM ()
 pushScope =
@@ -22,7 +24,7 @@ popScope :: ConstraintM ScopeFrame
 popScope = do
     st <- get
     case bsScopes st of
-        [] -> error "popScope: empty scope stack"
+        [] -> throwError (InternalConstraintError "popScope: empty scope stack")
         (frame:rest) -> do
             put st { bsScopes = rest }
             pure frame
@@ -31,7 +33,7 @@ peekScope :: ConstraintM ScopeFrame
 peekScope = do
     st <- get
     case bsScopes st of
-        [] -> error "peekScope: empty scope stack"
+        [] -> throwError (InternalConstraintError "peekScope: empty scope stack")
         (frame:_) -> pure frame
 
 registerScopeNode :: NodeRef -> ConstraintM ()

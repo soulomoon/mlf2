@@ -30,7 +30,6 @@ import Data.Functor.Foldable (cata)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import Data.List (foldl')
 import Data.Maybe (mapMaybe)
 
 import qualified MLF.Binding.Tree as Binding
@@ -105,16 +104,21 @@ canonicalizeTrace canonical tr =
 rewriteNode :: (NodeId -> NodeId) -> TyNode -> Maybe (Int, TyNode)
 rewriteNode canonical = \case
     TyExp{} -> Nothing
-    n ->
-        let nid' = canonical (tnId n)
-            node' = case n of
-                TyVar { tnBound = mb } -> TyVar { tnId = nid', tnBound = fmap canonical mb }
-                TyBottom {} -> TyBottom nid'
-                TyArrow { tnDom = d, tnCod = cod } -> TyArrow nid' (canonical d) (canonical cod)
-                TyBase { tnBase = b } -> TyBase nid' b
-                TyForall { tnBody = b } -> TyForall nid' (canonical b)
-                TyExp{} -> error "unreachable: TyExp handled above"
-        in Just (getNodeId nid', node')
+    TyVar { tnId = nid, tnBound = mb } ->
+        let nid' = canonical nid
+        in Just (getNodeId nid', TyVar { tnId = nid', tnBound = fmap canonical mb })
+    TyBottom { tnId = nid } ->
+        let nid' = canonical nid
+        in Just (getNodeId nid', TyBottom nid')
+    TyArrow { tnId = nid, tnDom = d, tnCod = cod } ->
+        let nid' = canonical nid
+        in Just (getNodeId nid', TyArrow nid' (canonical d) (canonical cod))
+    TyBase { tnId = nid, tnBase = b } ->
+        let nid' = canonical nid
+        in Just (getNodeId nid', TyBase nid' b)
+    TyForall { tnId = nid, tnBody = b } ->
+        let nid' = canonical nid
+        in Just (getNodeId nid', TyForall nid' (canonical b))
 
 -- | Rewrite a set of variable IDs through canonicalization, keeping only those
 -- that still exist as TyVar nodes in the rewritten node map.
