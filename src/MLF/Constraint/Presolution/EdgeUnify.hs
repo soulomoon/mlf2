@@ -1,3 +1,5 @@
+{-# LANGUAGE FlexibleInstances #-}
+
 {- |
 Module      : MLF.Constraint.Presolution.EdgeUnify
 Description : Edge-local unification and ω execution helpers
@@ -12,6 +14,7 @@ driver cohesive and to avoid further growth in the main phase module.
 module MLF.Constraint.Presolution.EdgeUnify (
     EdgeUnifyState(..),
     EdgeUnifyM,
+    MonadEdgeUnify(..),
     flushPendingWeakens,
     initEdgeUnifyState,
     mkOmegaExecEnv,
@@ -75,6 +78,41 @@ data EdgeUnifyState = EdgeUnifyState
     }
 
 type EdgeUnifyM = StateT EdgeUnifyState PresolutionM
+
+-- | Typeclass for monads that support edge-local unification operations.
+-- This allows functions to be polymorphic over the concrete monad stack,
+-- reducing the need for explicit lift calls.
+class Monad m => MonadEdgeUnify m where
+    -- | Get the edge unify state.
+    getEdgeUnifyState :: m EdgeUnifyState
+    -- | Put a new edge unify state.
+    putEdgeUnifyState :: EdgeUnifyState -> m ()
+    -- | Modify the edge unify state.
+    modifyEdgeUnifyState :: (EdgeUnifyState -> EdgeUnifyState) -> m ()
+    -- | Get the interior roots set.
+    getInteriorRoots :: m IntSet.IntSet
+    -- | Get the edge root.
+    getEdgeRoot :: m NodeId
+    -- | Get the binder meta map.
+    getBinderMeta :: m (IntMap NodeId)
+    -- | Get the order keys.
+    getOrderKeys :: m (IntMap Order.OrderKey)
+    -- | Record an instance operation.
+    recordInstanceOp :: InstanceOp -> m ()
+    -- | Lift a PresolutionM action.
+    liftPresolution :: PresolutionM a -> m a
+
+-- | Instance for the concrete EdgeUnifyM monad.
+instance MonadEdgeUnify EdgeUnifyM where
+    getEdgeUnifyState = get
+    putEdgeUnifyState = put
+    modifyEdgeUnifyState = modify
+    getInteriorRoots = gets eusInteriorRoots
+    getEdgeRoot = gets eusEdgeRoot
+    getBinderMeta = gets eusBinderMeta
+    getOrderKeys = gets eusOrderKeys
+    recordInstanceOp op = modify $ \st -> st { eusOps = eusOps st ++ [op] }
+    liftPresolution = lift
 
 -- | Testing helper: run a single edge-local unification and return the recorded
 -- instance-operation witness slice.
@@ -261,7 +299,7 @@ initEdgeUnifyState binderArgs binderBounds interior edgeRoot = do
         }
 
 recordOp :: InstanceOp -> EdgeUnifyM ()
-recordOp op = modify $ \st -> st { eusOps = eusOps st ++ [op] }
+recordOp = recordInstanceOp
 
 recordEliminate :: NodeId -> EdgeUnifyM ()
 recordEliminate bv = do
