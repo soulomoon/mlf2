@@ -1,3 +1,16 @@
+## 2026-02-01 - Task 4.3 & 4.4
+- What was implemented: Added MonadPresolution instance for EdgeUnifyM; Copy.hs already uses StateAccess helpers
+- Files changed:
+  - src/MLF/Constraint/Presolution/EdgeUnify.hs - Added MonadPresolution instance for EdgeUnifyM
+- **Results:**
+  - MonadPresolution instance for EdgeUnifyM enables presolution operations without explicit lifts
+  - Copy.hs already uses StateAccess helpers (getConstraintAndCanonical, lookupBindParentM, liftBindingError)
+  - All 400 tests pass ✓
+- **Learnings for future iterations:**
+  - Copy.hs was already well-factored using StateAccess helpers
+  - The MonadPresolution instance for EdgeUnifyM is the key enabler for reducing lifts
+---
+
 ## 2026-02-01 - Task 4.2
 - What was implemented: Defined MonadEdgeUnify typeclass in EdgeUnify.hs with instance for EdgeUnifyM
 - Files changed:

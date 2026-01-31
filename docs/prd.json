@@ -269,7 +269,7 @@
             "Build passes"
           ],
           "depends_on": ["4.1"],
-          "passes": false
+          "passes": true
         },
         {
           "id": "4.4",
@@ -282,7 +282,7 @@
             "Build passes"
           ],
           "depends_on": ["4.1"],
-          "passes": false
+          "passes": true
         },
         {
           "id": "4.5",
@@ -294,7 +294,8 @@
             "All tests pass"
           ],
           "depends_on": ["4.2", "4.3", "4.4"],
-          "passes": false
+          "passes": true,
+          "notes": "MonadPresolution instance for EdgeUnifyM enables lift-free presolution ops. Remaining lifts are for Ops module functions (findRoot, getNode, etc.) not in typeclass."
         }
       ]
     },
