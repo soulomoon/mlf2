@@ -42,6 +42,7 @@ import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Presolution.Base (
     CopyMap,
     InteriorSet,
+    MonadPresolution(..),
     PresolutionError(..),
     PresolutionM,
     PresolutionState(..),
@@ -113,6 +114,16 @@ instance MonadEdgeUnify EdgeUnifyM where
     getOrderKeys = gets eusOrderKeys
     recordInstanceOp op = modify $ \st -> st { eusOps = eusOps st ++ [op] }
     liftPresolution = lift
+
+-- | MonadPresolution instance for EdgeUnifyM, allowing presolution operations
+-- to be called without explicit lift.
+instance MonadPresolution EdgeUnifyM where
+    getConstraint = lift getConstraint
+    modifyConstraint f = lift (modifyConstraint f)
+    getCanonical = lift getCanonical
+    getPresolutionState = lift getPresolutionState
+    putPresolutionState st = lift (putPresolutionState st)
+    throwPresolutionError err = lift (throwPresolutionError err)
 
 -- | Testing helper: run a single edge-local unification and return the recorded
 -- instance-operation witness slice.
