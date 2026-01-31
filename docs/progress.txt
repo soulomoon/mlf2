@@ -1,3 +1,15 @@
+## 2026-02-01 - Task 4.2
+- What was implemented: Defined MonadEdgeUnify typeclass in EdgeUnify.hs with instance for EdgeUnifyM
+- Files changed:
+  - src/MLF/Constraint/Presolution/EdgeUnify.hs - Added MonadEdgeUnify typeclass with 10 methods and EdgeUnifyM instance
+- **Results:**
+  - MonadEdgeUnify class defined with getEdgeUnifyState, putEdgeUnifyState, modifyEdgeUnifyState, getInteriorRoots, getEdgeRoot, getBinderMeta, getOrderKeys, recordInstanceOp, liftPresolution
+  - Instance for EdgeUnifyM defined
+  - All 400 tests pass ✓
+- **Learnings for future iterations:**
+  - recordOp was updated to delegate to the typeclass method recordInstanceOp
+---
+
 ## 2026-02-01 - Task 4.1
 - What was implemented: Defined MonadPresolution typeclass in Base.hs with instance for PresolutionM
 - Files changed:
