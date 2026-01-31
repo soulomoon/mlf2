@@ -1,0 +1,360 @@
+{
+  "name": "MLF Codebase Refactoring",
+  "version": "1.0",
+  "branchName": "master",
+  "description": "Refactor the MLF codebase to improve maintainability, reliability, and testability by replacing unsafe error() calls, extracting large modules, and simplifying monad stacks.",
+  "phases": [
+    {
+      "id": "phase-1",
+      "name": "Replace error() Calls",
+      "priority": "high",
+      "description": "Convert all 5 error() calls to proper error handling with throwError or Left",
+      "tasks": [
+        {
+          "id": "1.1",
+          "name": "Add UnexpectedState variant to PresolutionError",
+          "description": "Add a new error variant to handle unexpected states that currently use error()",
+          "files": ["src/MLF/Constraint/Presolution/Base.hs"],
+          "acceptance": [
+            "UnexpectedState String variant added to PresolutionError",
+            "Build passes"
+          ],
+          "passes": true
+        },
+        {
+          "id": "1.2",
+          "name": "Replace error() in Solve.hs",
+          "description": "Replace validateSolvedGraph error() call with proper error handling",
+          "files": ["src/MLF/Constraint/Solve.hs"],
+          "acceptance": [
+            "error() call at line ~223 replaced with throwError",
+            "Error message preserved with context",
+            "Build passes"
+          ],
+          "depends_on": ["1.1"],
+          "passes": true
+        },
+        {
+          "id": "1.3",
+          "name": "Replace error() in OrderKey.hs",
+          "description": "Add OrderKeyError type and replace error() calls for missing order keys",
+          "files": ["src/MLF/Util/OrderKey.hs"],
+          "acceptance": [
+            "OrderKeyError type defined with MissingOrderKey variant",
+            "error() calls at lines 139-141 replaced",
+            "Build passes"
+          ],
+          "passes": true
+        },
+        {
+          "id": "1.4",
+          "name": "Replace error() in Types/Elab.hs",
+          "description": "Replace unexpected variable bound error() with ElabError variant",
+          "files": ["src/MLF/Types/Elab.hs"],
+          "acceptance": [
+            "ElabError variant added for unexpected variable bound",
+            "error() call at line ~143 replaced",
+            "Build passes"
+          ],
+          "passes": true
+        },
+        {
+          "id": "1.5",
+          "name": "Replace error() in Binding/Adjustment.hs",
+          "description": "Propagate BindingError for harmonize failure instead of error()",
+          "files": ["src/MLF/Binding/Adjustment.hs"],
+          "acceptance": [
+            "error() call at line ~108 replaced with BindingError propagation",
+            "Build passes"
+          ],
+          "passes": true
+        },
+        {
+          "id": "1.6",
+          "name": "Verify all error() calls removed",
+          "description": "Run grep to confirm no error() calls remain in the codebase",
+          "files": [],
+          "acceptance": [
+            "grep 'error \"' returns no matches in src/MLF/",
+            "Build passes with no warnings"
+          ],
+          "depends_on": ["1.2", "1.3", "1.4", "1.5"],
+          "passes": true
+        }
+      ]
+    },
+    {
+      "id": "phase-2",
+      "name": "Extract Presolution Driver Functions",
+      "priority": "high",
+      "description": "Break down Driver.hs (1289 lines) into focused modules",
+      "tasks": [
+        {
+          "id": "2.1",
+          "name": "Create Materialization.hs module",
+          "description": "Extract materializeExpansions and related helpers to new module",
+          "files": [
+            "src/MLF/Constraint/Presolution/Materialization.hs",
+            "src/MLF/Constraint/Presolution/Driver.hs"
+          ],
+          "acceptance": [
+            "Materialization.hs created with materializeExpansions function",
+            "Driver.hs imports from Materialization.hs",
+            "No circular dependencies",
+            "Build passes"
+          ],
+          "passes": true
+        },
+        {
+          "id": "2.2",
+          "name": "Create WitnessNorm.hs module",
+          "description": "Extract witness normalization functions to new module",
+          "files": [
+            "src/MLF/Constraint/Presolution/WitnessNorm.hs",
+            "src/MLF/Constraint/Presolution/Driver.hs"
+          ],
+          "acceptance": [
+            "WitnessNorm.hs created with normalizeEdgeWitnessesM function",
+            "Driver.hs imports from WitnessNorm.hs",
+            "Build passes"
+          ],
+          "passes": true
+        },
+        {
+          "id": "2.3",
+          "name": "Create EdgeProcessing.hs module",
+          "description": "Extract edge loop logic to new module",
+          "files": [
+            "src/MLF/Constraint/Presolution/EdgeProcessing.hs",
+            "src/MLF/Constraint/Presolution/Driver.hs"
+          ],
+          "acceptance": [
+            "EdgeProcessing.hs created with runPresolutionLoop function",
+            "Driver.hs imports from EdgeProcessing.hs",
+            "Build passes"
+          ],
+          "passes": true
+        },
+        {
+          "id": "2.4",
+          "name": "Update cabal file for new modules",
+          "description": "Add new modules to mlf2.cabal exposed-modules",
+          "files": ["mlf2.cabal"],
+          "acceptance": [
+            "Materialization, WitnessNorm, EdgeProcessing added to cabal",
+            "Build passes"
+          ],
+          "depends_on": ["2.1", "2.2", "2.3"],
+          "passes": true
+        },
+        {
+          "id": "2.5",
+          "name": "Verify Driver.hs size reduction",
+          "description": "Confirm Driver.hs is reduced to <500 lines",
+          "files": ["src/MLF/Constraint/Presolution/Driver.hs"],
+          "acceptance": [
+            "Driver.hs is under 500 lines",
+            "All tests pass"
+          ],
+          "depends_on": ["2.4"],
+          "passes": true
+        }
+      ]
+    },
+    {
+      "id": "phase-3",
+      "name": "Centralize Binding Tree Operations",
+      "priority": "medium",
+      "description": "Consolidate scattered binding tree operations into focused modules",
+      "tasks": [
+        {
+          "id": "3.1",
+          "name": "Create Binding/Validation.hs",
+          "description": "Extract invariant checking functions from Tree.hs",
+          "files": [
+            "src/MLF/Binding/Validation.hs",
+            "src/MLF/Binding/Tree.hs"
+          ],
+          "acceptance": [
+            "Validation.hs created with checkBindingTree split into per-invariant functions",
+            "Tree.hs imports from Validation.hs",
+            "Build passes"
+          ],
+          "passes": false
+        },
+        {
+          "id": "3.2",
+          "name": "Create Binding/Canonicalization.hs",
+          "description": "Move canonicalizeBindParentsUnder from Presolution/Base.hs",
+          "files": [
+            "src/MLF/Binding/Canonicalization.hs",
+            "src/MLF/Constraint/Presolution/Base.hs"
+          ],
+          "acceptance": [
+            "Canonicalization.hs created with canonicalizeBindParentsUnder",
+            "Presolution/Base.hs imports from Canonicalization.hs",
+            "Build passes"
+          ],
+          "passes": false
+        },
+        {
+          "id": "3.3",
+          "name": "Create Binding/Queries.hs",
+          "description": "Consolidate common query functions (interior, frontier, path)",
+          "files": [
+            "src/MLF/Binding/Queries.hs",
+            "src/MLF/Binding/Tree.hs"
+          ],
+          "acceptance": [
+            "Queries.hs created with common query functions",
+            "Tree.hs reduced in size",
+            "Build passes"
+          ],
+          "passes": false
+        },
+        {
+          "id": "3.4",
+          "name": "Update cabal and verify",
+          "description": "Add new Binding modules to cabal and verify build",
+          "files": ["mlf2.cabal"],
+          "acceptance": [
+            "New Binding modules added to cabal",
+            "Tree.hs under 800 lines",
+            "All tests pass"
+          ],
+          "depends_on": ["3.1", "3.2", "3.3"],
+          "passes": false
+        }
+      ]
+    },
+    {
+      "id": "phase-4",
+      "name": "Simplify Monad Stacks",
+      "priority": "medium",
+      "description": "Use MTL typeclasses to reduce lift boilerplate",
+      "tasks": [
+        {
+          "id": "4.1",
+          "name": "Define MonadPresolution typeclass",
+          "description": "Create typeclass with core presolution operations in Base.hs",
+          "files": ["src/MLF/Constraint/Presolution/Base.hs"],
+          "acceptance": [
+            "MonadPresolution class defined with getConstraint, modifyConstraint, getCanonical",
+            "Instance for PresolutionM defined",
+            "Build passes"
+          ],
+          "passes": false
+        },
+        {
+          "id": "4.2",
+          "name": "Define MonadEdgeUnify typeclass",
+          "description": "Create typeclass for edge unification operations",
+          "files": ["src/MLF/Constraint/Presolution/EdgeUnify.hs"],
+          "acceptance": [
+            "MonadEdgeUnify class defined",
+            "Instance for EdgeUnifyM defined",
+            "Build passes"
+          ],
+          "depends_on": ["4.1"],
+          "passes": false
+        },
+        {
+          "id": "4.3",
+          "name": "Update Expansion.hs to use typeclasses",
+          "description": "Replace concrete monad types with typeclass constraints",
+          "files": ["src/MLF/Constraint/Presolution/Expansion.hs"],
+          "acceptance": [
+            "Type signatures use MonadPresolution constraints",
+            "Explicit lift calls reduced",
+            "Build passes"
+          ],
+          "depends_on": ["4.1"],
+          "passes": false
+        },
+        {
+          "id": "4.4",
+          "name": "Update Copy.hs to use typeclasses",
+          "description": "Replace concrete monad types with typeclass constraints",
+          "files": ["src/MLF/Constraint/Presolution/Copy.hs"],
+          "acceptance": [
+            "Type signatures use MonadPresolution constraints",
+            "Explicit lift calls reduced",
+            "Build passes"
+          ],
+          "depends_on": ["4.1"],
+          "passes": false
+        },
+        {
+          "id": "4.5",
+          "name": "Verify lift reduction",
+          "description": "Confirm at least 50% reduction in explicit lift calls",
+          "files": [],
+          "acceptance": [
+            "grep 'lift' count reduced by 50%",
+            "All tests pass"
+          ],
+          "depends_on": ["4.2", "4.3", "4.4"],
+          "passes": false
+        }
+      ]
+    },
+    {
+      "id": "phase-5",
+      "name": "Extract Witness Validation",
+      "priority": "low",
+      "description": "Separate witness validation from normalization in Witness.hs",
+      "tasks": [
+        {
+          "id": "5.1",
+          "name": "Create WitnessValidation.hs",
+          "description": "Extract validation functions from Witness.hs",
+          "files": [
+            "src/MLF/Constraint/Presolution/WitnessValidation.hs",
+            "src/MLF/Constraint/Presolution/Witness.hs"
+          ],
+          "acceptance": [
+            "WitnessValidation.hs created with invariant checking functions",
+            "Witness.hs imports from WitnessValidation.hs",
+            "Build passes"
+          ],
+          "passes": false
+        },
+        {
+          "id": "5.2",
+          "name": "Create WitnessCanon.hs",
+          "description": "Extract canonicalization functions from Witness.hs",
+          "files": [
+            "src/MLF/Constraint/Presolution/WitnessCanon.hs",
+            "src/MLF/Constraint/Presolution/Witness.hs"
+          ],
+          "acceptance": [
+            "WitnessCanon.hs created with canonicalization functions",
+            "Witness.hs imports from WitnessCanon.hs",
+            "Build passes"
+          ],
+          "passes": false
+        },
+        {
+          "id": "5.3",
+          "name": "Update cabal and verify",
+          "description": "Add new Witness modules to cabal and verify final state",
+          "files": ["mlf2.cabal"],
+          "acceptance": [
+            "New Witness modules added to cabal",
+            "Witness.hs under 500 lines",
+            "All tests pass"
+          ],
+          "depends_on": ["5.1", "5.2"],
+          "passes": false
+        }
+      ]
+    }
+  ],
+  "success_metrics": {
+    "error_calls": { "current": 0, "target": 0 },
+    "large_modules": { "current": 4, "target": 1 },
+    "lift_calls": { "current": 50, "target": 20 },
+    "avg_module_size": { "current": 347, "target": 300 }
+  },
+  "validation_command": "cabal build all && cabal test"
+}

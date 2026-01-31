@@ -1,0 +1,70 @@
+## 2026-02-01 - Task 2.5
+- What was implemented: Verified Driver.hs size reduction target achieved
+- Files changed: None (verification task)
+- **Results:**
+  - Driver.hs is 490 lines (target was <500 lines)
+  - All 400 tests pass (0 failures, 1 pending)
+- **Learnings for future iterations:**
+  - Phase 2 module extraction successfully reduced Driver.hs from 1289 lines to 490 lines
+  - The extracted modules (Materialization.hs, WitnessNorm.hs, EdgeProcessing.hs) contain the bulk of the presolution logic
+---
+
+## Codebase Patterns
+- Error handling: Use `throwError` with typed error variants instead of `error ""`
+- Pattern matching: Prefer flat case alternatives over nested matches to avoid unreachable branches
+- Imports: Remove unused imports to keep builds warning-free
+- Module extraction: When extracting functions, also extract their helper functions (like `frWith` with `materializeExpansions`)
+- Module extraction: After extracting a function, check for and remove unused imports in both the source and new module
+- Module extraction: Large extractions (like edge processing) require moving many helper functions together; check all local definitions used by the main function
+
+---
+
+## 2026-02-01 - Task 2.3
+- What was implemented: Created EdgeProcessing.hs module with `runPresolutionLoop` and `processInstEdge` functions
+- Files changed:
+  - src/MLF/Constraint/Presolution/EdgeProcessing.hs - New module created (585 lines)
+  - src/MLF/Constraint/Presolution/Driver.hs - Removed extracted functions, updated imports (reduced from 1125 to 515 lines)
+  - mlf2.cabal - Added new module to other-modules
+- **Learnings for future iterations:**
+  - `processInstEdge` has many helper functions that needed to be extracted together: `recordEdgeWitness`, `recordEdgeTrace`, `canonicalizeEdgeTraceInteriorsM`, `bindExpansionArgs`, `buildEdgeWitness`, `dropWeakenSteps`, `buildEdgeTrace`, `unifyStructure`, `isSchemeRootNode`, `getBindingPermission`, `solveNonExpInstantiation`, `solveUnboundVarInstantiation`, `solveBoundVarInstantiation`, `checkOccurs`, `setBindParentIfUpper`, `debugBindParents`, `nodeTag`
+  - After extraction, many imports in Driver.hs became unused (OmegaExec, Traversal, VarStore, most of Ops and Expansion) and were removed
+  - The `debugBindParents` and `debugBindParentsM` helpers are used in both modules; they were duplicated (simple wrappers around `debugBinding`/`debugBindingM`)
+  - Driver.hs is now 515 lines (just above the 500 line target for task 2.5)
+---
+
+## 2026-02-01 - Task 2.2
+- What was implemented: Created WitnessNorm.hs module with `normalizeEdgeWitnessesM` function
+- Files changed:
+  - src/MLF/Constraint/Presolution/WitnessNorm.hs - New module created
+  - src/MLF/Constraint/Presolution/Driver.hs - Removed local definition, added import, removed unused imports
+  - mlf2.cabal - Added new module to other-modules
+- **Learnings for future iterations:**
+  - `normalizeEdgeWitnessesM` depends on `translatableWeakenedNodes` from Validation and `normalizeInstanceStepsFull`/`OmegaNormalizeEnv` from Witness
+  - After extraction, several imports in Driver.hs became unused (`Order`, qualified `Witness`, and parts of the `Witness` import list) and were removed
+  - The new module only needs a subset of the original imports (no `IntMap` type import needed since it's not in the API)
+---
+
+## 2026-02-01 - Task 2.1
+- What was implemented: Created Materialization.hs module with `materializeExpansions` and `frWith` helper
+- Files changed:
+  - src/MLF/Constraint/Presolution/Materialization.hs - New module created
+  - src/MLF/Constraint/Presolution/Driver.hs - Removed local definitions, added import
+  - mlf2.cabal - Added new module to other-modules
+- **Learnings for future iterations:**
+  - `materializeExpansions` depends on `frWith` which wraps `UnionFind.frWith`, so both were extracted together
+  - After extraction, the `UnionFind` import in Driver.hs became unused and was removed
+  - The name shadowing warning for `rewriteNode` in Driver.hs is pre-existing, not introduced by this change
+---
+
+## 2026-02-01 - Task 1.6
+- What was implemented: Removed all `error ""` calls from the MLF codebase
+- Files changed:
+  - src/MLF/Frontend/ConstraintGen/Types.hs - Added InternalConstraintError variant
+  - src/MLF/Frontend/ConstraintGen/Scope.hs - Replaced error() with throwError
+  - src/MLF/Constraint/Presolution/Rewrite.hs - Restructured rewriteNode to avoid unreachable case
+- **Learnings for future iterations:**
+  - The PRD was based on an older codebase state; Tasks 1.1-1.5 were already completed
+  - Only 3 error() calls remained in different files than PRD specified
+  - Nested pattern matches with early returns can create "unreachable" branches that GHC can't prove dead; restructuring to flat alternatives is cleaner
+  - ConstraintM is `StateT BuildState (Except ConstraintError)` so throwError works directly
+---
