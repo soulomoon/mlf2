@@ -85,6 +85,7 @@ library mlf2-internal
                       MLF.Constraint.Presolution.Copy,
                       MLF.Constraint.Presolution.Driver,
                       MLF.Constraint.Presolution.EdgeUnify,
+                      MLF.Constraint.Presolution.EdgeProcessing,
                       MLF.Constraint.Presolution.Expansion,
                       MLF.Constraint.Presolution.ForallIntro,
                       MLF.Constraint.Presolution.Materialization,
