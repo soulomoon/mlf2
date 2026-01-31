@@ -180,7 +180,7 @@
             "Tree.hs imports from Validation.hs",
             "Build passes"
           ],
-          "passes": false
+          "passes": true
         },
         {
           "id": "3.2",

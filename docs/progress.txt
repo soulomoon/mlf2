@@ -1,3 +1,16 @@
+## 2026-02-01 - Task 3.1
+- What was implemented: Verified Binding/Validation.hs already exists with per-invariant functions
+- Files changed: None (task was already completed in a previous session)
+- **Results:**
+  - Validation.hs exists (733 lines) with `checkBindingTree`, `checkBindingTreeUnder`, `checkNoGenFallback`, `checkSchemeClosure`, `checkSchemeClosureUnder`, `isUpper`
+  - Per-invariant helper functions: `validateSingleGenRoot`, `validateGenSchemeRoots`, `validateGenNodesFlexiblyBound`
+  - Tree.hs imports from Validation.hs (lines 82-89)
+  - Module is in mlf2.cabal (line 74)
+  - All 400 tests pass
+- **Learnings for future iterations:**
+  - Some tasks may already be completed from previous work sessions; verify state before implementing
+---
+
 ## 2026-02-01 - Task 2.5
 - What was implemented: Verified Driver.hs size reduction target achieved
 - Files changed: None (verification task)

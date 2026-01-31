@@ -51,7 +51,7 @@ module MLF.Binding.Tree (
     -- * Interior computation
     interiorOf,
     interiorOfUnder,
-    -- * Invariant checking
+    -- * Invariant checking (re-exported from Validation)
     checkBindingTree,
     checkBindingTreeUnder,
     checkNoGenFallback,
@@ -66,12 +66,10 @@ module MLF.Binding.Tree (
     allNodeIds,
 ) where
 
-import Control.Monad (foldM, forM, forM_, unless, when)
+import Control.Monad (foldM, forM, unless, when)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.IntSet (IntSet)
-import Data.List (sortBy)
-import Data.Maybe (listToMaybe, mapMaybe)
 
 import qualified MLF.Util.OrderKey as OrderKey
 import qualified MLF.Constraint.Canonicalize as Canonicalize
@@ -80,25 +78,26 @@ import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Types
 import qualified MLF.Constraint.Traversal as Traversal
 
+-- Re-export validation functions
+import MLF.Binding.Validation (
+    checkBindingTree,
+    checkBindingTreeUnder,
+    checkNoGenFallback,
+    checkSchemeClosure,
+    checkSchemeClosureUnder,
+    isUpper,
+    )
+
+-- Re-export canonicalization functions
+import MLF.Binding.Canonicalization (
+    canonicalizeBindParentsUnder,
+    withQuotientBindParents,
+    )
+
 allNodeRefs :: Constraint -> [NodeRef]
 allNodeRefs c =
     map (TypeRef . NodeId) (IntMap.keys (cNodes c)) ++
     map (GenRef . GenNodeId) (IntMap.keys (cGenNodes c))
-
--- | Node keys that participate in binding-tree invariants.
---
--- With gen-rooted constraints, all type and gen nodes are considered live.
-liveNodeKeys :: Constraint -> IntSet
-liveNodeKeys c =
-    let typeKeys = IntSet.fromList
-            [ nodeRefKey (TypeRef (NodeId nid))
-            | nid <- IntMap.keys (cNodes c)
-            ]
-        genKeys = IntSet.fromList
-            [ nodeRefKey (GenRef (GenNodeId gid))
-            | gid <- IntMap.keys (cGenNodes c)
-            ]
-    in IntSet.union typeKeys genKeys
 
 nodeRefExists :: Constraint -> NodeRef -> Bool
 nodeRefExists c ref = case ref of
@@ -174,19 +173,6 @@ rootsForScope parentKey childKey typeEdges scopeSet =
                 ]
     in IntSet.difference scopeSet referenced
 
--- | Find the first gen ancestor of a node by walking up the binding path.
---
--- Returns the first GenNodeId encountered after the starting node, or Nothing
--- if the node is under no gen node.
-firstGenAncestorFrom
-    :: (NodeRef -> Either BindingError [NodeRef])  -- ^ Binding path lookup
-    -> NodeRef  -- ^ Starting node
-    -> Maybe GenNodeId
-firstGenAncestorFrom pathLookup ref =
-    case pathLookup ref of
-        Left _ -> Nothing
-        Right path -> listToMaybe [gid | GenRef gid <- drop 1 path]
-
 -- | Paper node kinds (`papers/these-finale-english.txt`; see `papers/xmlf.txt` §3.1).
 --
 -- These are derived from binding-edge flags along the binding-parent path.
@@ -202,25 +188,6 @@ data NodeKind
 -- Returns 'Nothing' if the node is a binding root (has no parent).
 lookupBindParent :: Constraint -> NodeRef -> Maybe (NodeRef, BindFlag)
 lookupBindParent c ref = IntMap.lookup (nodeRefKey ref) (cBindParents c)
-
--- | Helper: run an action with canonicalized binding parents and validated node.
---
--- This is the shared core for quotient-aware binding-tree operations.
--- It canonicalizes the node, computes the quotient bind parents, validates
--- that the canonical node exists, and runs the given action.
-withQuotientBindParents
-    :: String  -- ^ Error context for validation failures
-    -> (NodeId -> NodeId)
-    -> Constraint
-    -> NodeRef
-    -> (NodeRef -> BindParents -> Either BindingError a)
-    -> Either BindingError a
-withQuotientBindParents errCtx canonical c0 ref0 f = do
-    let refC = Canonicalize.canonicalRef canonical ref0
-    (allRoots, bindParents) <- quotientBindParentsUnder canonical c0
-    unless (IntSet.member (nodeRefKey refC) allRoots) $
-        Left $ InvalidBindingTree $ errCtx ++ ": node " ++ show refC ++ " not in constraint"
-    f refC bindParents
 
 -- | Look up the binding parent and flag for a node on the quotient binding
 -- graph induced by a canonicalization function.
@@ -239,24 +206,6 @@ lookupBindParentUnder
 lookupBindParentUnder canonical c0 ref0 =
     withQuotientBindParents "lookupBindParentUnder" canonical c0 ref0 $ \refC bindParents ->
         pure (IntMap.lookup (nodeRefKey refC) bindParents)
-
--- | Canonicalize the binding-parent relation under a canonicalization function.
---
--- This drops self-edges (where child and parent canonicalize to the same node),
--- merges duplicate edges by requiring the same parent and taking the max flag,
--- and rejects conflicting parents on the same canonical node.
---
--- This is useful when unification maintains a union-find over nodes: after a
--- merge, the raw `cBindParents` relation may contain edges for multiple aliases
--- of the same canonical representative. Canonicalizing makes subsequent binding
--- operations (like LCA and Raise) well-defined on representatives.
-canonicalizeBindParentsUnder
-    :: (NodeId -> NodeId)
-    -> Constraint
-    -> Either BindingError BindParents
-canonicalizeBindParentsUnder canonical c0 = do
-    (_allRoots, bindParents) <- quotientBindParentsUnder canonical c0
-    pure bindParents
 
 -- | Set the binding parent for a node.
 --
@@ -465,12 +414,14 @@ orderBindersByDeps canonical c0 orderKeys binders =
                         ]
             in case ready of
                 [] -> Left $ InvalidBindingTree "orderedBinders: cycle in bound dependencies"
-                _ ->
-                    let readySorted = sortBy (OrderKey.compareNodesByOrderKey orderKeys) ready
-                        readySet = IntSet.fromList (map getNodeId readySorted)
-                    in topoSort (IntSet.union done readySet)
-                                (filter (\b -> not (IntSet.member (getNodeId b) readySet)) remaining)
-                                (acc ++ readySorted)
+                _ -> case OrderKey.sortByOrderKey orderKeys ready of
+                    Left err ->
+                        Left $ InvalidBindingTree ("orderedBinders: order key error: " ++ show err)
+                    Right readySorted ->
+                        let readySet = IntSet.fromList (map getNodeId readySorted)
+                        in topoSort (IntSet.union done readySet)
+                                    (filter (\b -> not (IntSet.member (getNodeId b) readySet)) remaining)
+                                    (acc ++ readySorted)
     in topoSort IntSet.empty binders []
   where
     reachableFromWithBounds nodes0 root0 =
@@ -632,504 +583,6 @@ interiorOfUnder canonical c0 root0 =
 
         in pure (go (IntSet.singleton (nodeRefKey rootC)) [nodeRefKey rootC])
 
--- | Rewrite `cBindParents` to a canonicalized binding-parent relation (dropping
--- self-edges), merging duplicates by requiring the same parent and taking the
--- max flag.
---
--- This is the shared core used by 'checkBindingTreeUnder', 'interiorOfUnder',
--- and other quotient-aware binding-tree queries.
-quotientBindParentsUnder
-    :: (NodeId -> NodeId)
-    -> Constraint
-    -> Either BindingError (IntSet, BindParents)
-quotientBindParentsUnder canonical c0 = do
-    let bindParents0 = cBindParents c0
-
-        allRoots :: IntSet
-        allRoots =
-            IntSet.fromList
-                [ nodeRefKey (Canonicalize.canonicalRef canonical ref)
-                | ref <- allNodeRefs c0
-                ]
-
-        entries0 =
-            [ (childRootKey, (parentRoot, flag))
-            | (childKey, (parent0, flag)) <- IntMap.toList bindParents0
-            , let childRef0 = nodeRefFromKey childKey
-            , let childRoot = Canonicalize.canonicalRef canonical childRef0
-            , let parentRoot = Canonicalize.canonicalRef canonical parent0
-            , childRoot /= parentRoot
-            , let childRootKey = nodeRefKey childRoot
-            , IntSet.member childRootKey allRoots
-            , IntSet.member (nodeRefKey parentRoot) allRoots
-            ]
-
-        -- Union-find canonicalization can transiently create multiple
-        -- binding parents for the same canonical node. We resolve this
-        -- deterministically by keeping the first parent we saw and
-        -- taking the max flag.
-        insertOne bp (childRootKey, (parentRoot, flag)) =
-            Right $ case IntMap.lookup childRootKey bp of
-                Nothing -> IntMap.insert childRootKey (parentRoot, flag) bp
-                Just (parent0, flag0) ->
-                    IntMap.insert childRootKey (parent0, max flag0 flag) bp
-
-    bindParents <- foldM insertOne IntMap.empty entries0
-
-    -- Sanity: rewritten nodes must correspond to canonical reps of live nodes.
-    forM_ (IntMap.keys bindParents) $ \childRootKey ->
-        unless (IntSet.member childRootKey allRoots) $
-            Left $
-                InvalidBindingTree $
-                    "quotientBindParentsUnder: binding child " ++ show childRootKey ++ " not in constraint"
-
-    forM_ (IntMap.toList bindParents) $ \(childRootKey, (parentRoot, _flag)) -> do
-        let parentRootKey = nodeRefKey parentRoot
-        unless (IntSet.member parentRootKey allRoots) $
-            Left $
-                InvalidBindingTree $
-                    "quotientBindParentsUnder: binding parent " ++ show parentRootKey
-                        ++ " of node " ++ show childRootKey ++ " not in constraint"
-
-    pure (allRoots, bindParents)
-
--- | Validate all binding-tree invariants.
---
--- Checks:
---   1. Every non-root node has exactly one parent (structural by IntMap)
---   2. The parent pointers are acyclic
---   3. Every parent node exists in cNodes
---   4. Every parent is "upper" than its child in the term-DAG (structural reachability)
---   5. Every non-term-dag-root node has a binding parent
---   6. Term-dag roots have no binding parent
---
--- Note: an empty `cBindParents` is a valid binding tree for root-only graphs;
--- emptiness is not a mode signal.
-checkBindingTree :: Constraint -> Either BindingError ()
-checkBindingTree c = do
-    let bindParents = cBindParents c
-        liveKeys = liveNodeKeys c
-        allRefs = allNodeRefs c
-
-    -- Check 1: Parent/child existence.
-    forM_ (IntMap.toList bindParents) $ \(childKey, (parentRef, _flag)) ->
-        when (IntSet.member childKey liveKeys) $
-            unless (IntSet.member (nodeRefKey parentRef) liveKeys) $
-                Left $
-                    InvalidBindingTree $
-                        "Binding parent " ++ show parentRef ++ " of node " ++ show childKey ++ " not in live constraint"
-
-    -- Check 2: No cycles in binding paths.
-    mapM_ (bindingPathToRoot c) allRefs
-
-    -- Check 3: Gen nodes only bind under gen nodes; type nodes must be "upper".
-    let checkUpperInvariant (childKey, (parentRef, _flag))
-            | not (IntSet.member childKey liveKeys) = Nothing
-            | otherwise =
-                let childRef = nodeRefFromKey childKey
-                in case childRef of
-                    GenRef _ ->
-                        case parentRef of
-                            GenRef _ -> Nothing
-                            TypeRef _ ->
-                                Just $
-                                    InvalidBindingTree $
-                                        "Gen node bound under type node " ++ show parentRef
-                    TypeRef _ ->
-                        if isUpper c parentRef childRef
-                            then Nothing
-                            else Just $ ParentNotUpper childRef parentRef
-
-    case mapMaybe checkUpperInvariant (IntMap.toList bindParents) of
-        (err:_) -> Left err
-        [] -> pure ()
-
-    -- Check 4: Exactly one binding root, and it must be a gen node.
-    rootRef <- validateSingleGenRoot (bindingRoots c)
-
-    -- Check 4.5: Gen node scheme roots refer to live type nodes.
-    validateGenSchemeRoots (cGenNodes c) (\nid -> IntMap.member (getNodeId nid) (cNodes c))
-
-    -- Check 5: Every non-root node has a binding parent.
-    let rootKey = nodeRefKey rootRef
-        missingParent =
-            [ ref
-            | ref <- allRefs
-            , nodeRefKey ref /= rootKey
-            , not (IntMap.member (nodeRefKey ref) bindParents)
-            ]
-    case missingParent of
-        (ref:_) -> Left $ MissingBindParent ref
-        [] -> pure ()
-
-    -- Check 6: All gen nodes are flexibly bound (except the root).
-    validateGenNodesFlexiblyBound (cGenNodes c) (lookupBindParent c) rootRef
-
--- | Validate that all gen node scheme roots refer to live type nodes.
-validateGenSchemeRoots
-    :: IntMap.IntMap GenNode
-    -> (NodeId -> Bool)  -- ^ Existence check for type nodes
-    -> Either BindingError ()
-validateGenSchemeRoots genNodes nodeExists =
-    forM_ (IntMap.elems genNodes) $ \genNode ->
-        forM_ (gnSchemes genNode) $ \root ->
-            unless (nodeExists root) $
-                Left $
-                    InvalidBindingTree $
-                        "Gen node scheme root " ++ show root ++ " not in constraint"
-
--- | Validate that all gen nodes (except the root) are flexibly bound.
-validateGenNodesFlexiblyBound
-    :: IntMap.IntMap GenNode
-    -> (NodeRef -> Maybe (NodeRef, BindFlag))
-    -> NodeRef
-    -> Either BindingError ()
-validateGenNodesFlexiblyBound genNodes lookupParent rootRef =
-    forM_ (IntMap.keys genNodes) $ \gidInt -> do
-        let gref = GenRef (GenNodeId gidInt)
-        if gref == rootRef
-            then pure ()
-        else case lookupParent gref of
-            Nothing -> Left $ MissingBindParent gref
-            Just (_parent, BindFlex) -> pure ()
-            Just (_parent, BindRigid) ->
-                Left $
-                    InvalidBindingTree $
-                        "Gen node " ++ show gref ++ " is rigidly bound"
-
--- | Reject binding trees that would require a gen-ancestor fallback for
--- type-node binders (Q(n) must be direct children of the type node).
-checkNoGenFallback :: Constraint -> Either BindingError ()
-checkNoGenFallback c = do
-    let nodes = cNodes c
-        reachableFromWithBounds root0 =
-            Traversal.reachableFromWithBounds
-                id
-                (\nid -> IntMap.lookup (getNodeId nid) nodes)
-                root0
-
-        firstGenAncestor nid = pure (firstGenAncestorFrom (bindingPathToRoot c) (typeRef nid))
-
-    forM_ (IntMap.elems nodes) $ \node ->
-        case node of
-            TyForall{} -> do
-                let nid = tnId node
-                direct <- boundFlexChildren c (typeRef nid)
-                when (null direct) $ do
-                    mGen <- firstGenAncestor nid
-                    forM_ mGen $ \gid -> do
-                        genBinders <- boundFlexChildren c (genRef gid)
-                        let orderRoot = tnBody node
-                            reachable = reachableFromWithBounds orderRoot
-                            reachableBinders =
-                                [ b
-                                | b <- genBinders
-                                , IntSet.member (getNodeId b) reachable
-                                ]
-                        unless (null reachableBinders) $
-                            Left $
-                                GenFallbackRequired
-                                    { fallbackBinder = nid
-                                    , fallbackGen = gid
-                                    , fallbackBinders = reachableBinders
-                                    }
-            _ -> pure ()
-
--- | Reject scheme roots that reach named nodes not bound under their gen node.
-checkSchemeClosure :: Constraint -> Either BindingError ()
-checkSchemeClosure = checkSchemeClosureUnder id
-
--- | Reject scheme roots that reach named nodes not bound under their gen node,
---   under a canonicalization function.
-checkSchemeClosureUnder :: (NodeId -> NodeId) -> Constraint -> Either BindingError ()
-checkSchemeClosureUnder canonical c0 = do
-    let nodes = cNodes c0
-        isNamedNode nid =
-            case IntMap.lookup (getNodeId nid) nodes of
-                Just TyVar{} -> not (VarStore.isEliminatedVar c0 nid)
-                _ -> False
-    bindParents0 <- canonicalizeBindParentsUnder canonical c0
-    let bindParents = softenBindParents canonical c0 bindParents0
-    let typeEdges = buildTypeEdges nodes
-        schemeRootsByGen =
-            IntMap.map
-                (IntSet.fromList . map (getNodeId . canonical) . gnSchemes)
-                (cGenNodes c0)
-        schemeGensByRoot =
-            IntMap.fromListWith
-                IntSet.union
-                [ (getNodeId (canonical root), IntSet.singleton (getGenNodeId (gnId gen)))
-                | gen <- NodeAccess.allGenNodes c0
-                , root <- gnSchemes gen
-                ]
-        schemeRootsSet = IntSet.unions (IntMap.elems schemeRootsByGen)
-        namedNodes =
-            [ canonical child
-            | (childKey, (parent, flag)) <- IntMap.toList bindParents
-            , GenRef _ <- [parent]
-            , TypeRef child <- [nodeRefFromKey childKey]
-            , flag == BindFlex
-            , isNamedNode (canonical child)
-            , not (IntSet.member (getNodeId (canonical child)) schemeRootsSet)
-            ]
-        reachableFromWithBounds root0 =
-            let go visited [] = visited
-                go visited (nid0:rest) =
-                    let nid = canonical nid0
-                        key = getNodeId nid
-                    in if IntSet.member key visited
-                        then go visited rest
-                        else
-                            let visited' = IntSet.insert key visited
-                                kids =
-                                    [ NodeId childId
-                                    | childId <- IntSet.toList (IntMap.findWithDefault IntSet.empty key typeEdges)
-                                    ]
-                            in go visited' (kids ++ rest)
-            in go IntSet.empty [canonical root0]
-        firstGenAncestorFor nid =
-            firstGenAncestorFrom (bindingPathToRootLocal bindParents) (typeRef (canonical nid))
-        boundUnderGen allowedGens nid =
-            case firstGenAncestorFor nid of
-                Just gid' -> IntSet.member (getGenNodeId gid') allowedGens
-                Nothing -> True
-
-    let schemeRoots =
-            [ NodeId nid
-            | nid <- IntSet.toList (IntSet.unions (IntMap.elems schemeRootsByGen))
-            ]
-    forM_ schemeRoots $ \root ->
-        forM_ (schemeGenForRoot bindParents root) $ \gid' -> do
-            let reachable = reachableFromWithBounds root
-                nestedSchemeRoots =
-                    [ r
-                    | r <- schemeRoots
-                    , canonical r /= canonical root
-                    , IntSet.member (getNodeId (canonical r)) reachable
-                    ]
-                nestedReachable =
-                    IntSet.unions (map reachableFromWithBounds nestedSchemeRoots)
-                allowedGens =
-                    IntMap.findWithDefault
-                        IntSet.empty
-                        (getNodeId (canonical root))
-                        schemeGensByRoot
-                ancestorGens =
-                    case bindingPathToRootLocal bindParents (GenRef gid') of
-                        Right path -> IntSet.fromList [ getGenNodeId pathGid | GenRef pathGid <- path ]
-                        Left _ -> IntSet.singleton (getGenNodeId gid')
-                allowedGens' = IntSet.unions [allowedGens, ancestorGens]
-                freeNodes0 =
-                    [ n
-                    | n <- namedNodes
-                    , IntSet.member (getNodeId (canonical n)) reachable
-                    , not (IntSet.member (getNodeId (canonical n)) nestedReachable)
-                    , not (boundUnderGen allowedGens' n)
-                    ]
-            unless (null freeNodes0) $
-                Left $
-                    GenSchemeFreeVars
-                        { schemeRoot = canonical root
-                        , schemeGen = gid'
-                        , freeNodes = freeNodes0
-                        }
-  where
-    buildTypeEdges nodes0 =
-        buildTypeEdgesFrom (getNodeId . canonical) nodes0
-
-    softenBindParents canonical' constraint =
-        let weakened = cWeakenedVars constraint
-            softenOne childKey (parent, flag) =
-                case (flag, nodeRefFromKey childKey) of
-                    (BindRigid, TypeRef childN)
-                        | IntSet.member (getNodeId (canonical' childN)) weakened ->
-                            (parent, BindFlex)
-                    _ -> (parent, flag)
-        in IntMap.mapWithKey softenOne
-
-    schemeGenForRoot bindParents' root0 =
-        firstGenAncestorFrom (bindingPathToRootLocal bindParents') (typeRef (canonical root0))
-
--- | Validate that there is exactly one binding root and it is a gen node.
-validateSingleGenRoot :: [NodeRef] -> Either BindingError NodeRef
-validateSingleGenRoot roots = case roots of
-    [GenRef root] -> pure (GenRef root)
-    [TypeRef _] ->
-        Left $ InvalidBindingTree "Binding root is a type node (expected gen root)"
-    [] ->
-        Left $ InvalidBindingTree "Binding tree has no root"
-    _ ->
-        Left $ InvalidBindingTree ("Binding tree has multiple roots: " ++ show roots)
-
--- | Validate binding-tree invariants on the quotient graph induced by a canonicalization function.
---
--- This is useful during presolution, where we maintain a separate union-find for
--- node equivalences but do not immediately rewrite/collapse the term-DAG.
---
--- The check is performed on:
---   • binding edges rewritten to canonical reps, and
---   • a quotient term-DAG where structure edges are the union of all edges in each UF class.
---
--- Note: unlike older transitional code, this check does not treat an empty
--- `cBindParents` map as “legacy mode”; emptiness is valid for root-only graphs.
-checkBindingTreeUnder :: (NodeId -> NodeId) -> Constraint -> Either BindingError ()
-checkBindingTreeUnder canonical c0 = do
-    let nodes0 = cNodes c0
-        genNodes0 = cGenNodes c0
-
-    validateGenSchemeRoots genNodes0 (\nid -> IntMap.member (getNodeId (canonical nid)) nodes0)
-
-    (_allRoots, bindParents0) <- quotientBindParentsUnder canonical c0
-
-    let typeEdges :: IntMap.IntMap IntSet
-        typeEdges =
-            buildTypeEdgesFrom (nodeRefKey . TypeRef . canonical) nodes0
-
-        genNodesDerived = do
-            let genIds = IntMap.keys genNodes0
-                allTypeIds =
-                    [ getNodeId (canonical (NodeId nid))
-                    | nid <- IntMap.keys nodes0
-                    ]
-                pathLookup = bindingPathToRootWithLookup (\key -> IntMap.lookup key bindParents0)
-
-            scopeNodes <- buildScopeNodesFromPaths pathLookup allTypeIds
-
-            let extractChild childKey = case nodeRefFromKey childKey of
-                    TypeRef child -> Just (getNodeId child)
-                    _ -> Nothing
-
-                rebuildOne gidInt =
-                    let gid = GenNodeId gidInt
-                        scopeSet = IntMap.findWithDefault IntSet.empty gidInt scopeNodes
-                        roots = rootsForScope (nodeRefKey . TypeRef . NodeId) extractChild typeEdges scopeSet
-                    in (gidInt, GenNode gid (map NodeId (IntSet.toList roots)))
-
-            pure (IntMap.fromList (map rebuildOne genIds))
-
-    genNodes1 <- genNodesDerived
-
-    let addGenEdges :: IntMap.IntMap IntSet -> GenNode -> IntMap.IntMap IntSet
-        addGenEdges m genNode =
-            let parentKey = nodeRefKey (GenRef (gnId genNode))
-                childKeys =
-                    IntSet.fromList
-                        [ nodeRefKey (TypeRef (canonical child))
-                        | child <- gnSchemes genNode
-                        ]
-            in if IntSet.null childKeys
-                then m
-                else IntMap.insertWith IntSet.union parentKey childKeys m
-
-        structEdges :: IntMap.IntMap IntSet
-        structEdges =
-            let genEdges = foldl' addGenEdges IntMap.empty (IntMap.elems genNodes1)
-            in IntMap.unionWith IntSet.union typeEdges genEdges
-
-        reachableTypeKeys =
-            let roots0 = concatMap gnSchemes (IntMap.elems genNodes1)
-                rootKeys =
-                    [ nodeRefKey (TypeRef (canonical root))
-                    | root <- roots0
-                    ]
-                allTypeKeys =
-                    IntSet.fromList
-                        [ nodeRefKey (TypeRef (canonical (NodeId nid)))
-                        | nid <- IntMap.keys nodes0
-                        ]
-                go visited [] = visited
-                go visited (key:rest) =
-                    if IntSet.member key visited
-                        then go visited rest
-                        else
-                            let visited' = IntSet.insert key visited
-                                kids = IntSet.toList (IntMap.findWithDefault IntSet.empty key structEdges)
-                            in go visited' (kids ++ rest)
-                reachableKeys =
-                    if IntMap.null genNodes1
-                        then allTypeKeys
-                        else go IntSet.empty rootKeys
-            in IntSet.filter even reachableKeys
-
-        liveKeys =
-            IntSet.union
-                (IntSet.fromList
-                    [ nodeRefKey (GenRef (GenNodeId gid))
-                    | gid <- IntMap.keys genNodes1
-                    ])
-                reachableTypeKeys
-
-        isUpperUnder parent child =
-            let parentKey = nodeRefKey (Canonicalize.canonicalRef canonical parent)
-                childKey = nodeRefKey (Canonicalize.canonicalRef canonical child)
-            in if parentKey == childKey
-                then True
-                else
-                    let go visited nid =
-                            if IntSet.member nid visited
-                                then False
-                                else if nid == childKey
-                                    then True
-                                    else
-                                        let visited' = IntSet.insert nid visited
-                                            kids = IntSet.toList (IntMap.findWithDefault IntSet.empty nid structEdges)
-                                        in any (go visited') kids
-                    in go IntSet.empty parentKey
-
-    let bindParents =
-            IntMap.filterWithKey (\childKey _ -> IntSet.member childKey liveKeys) bindParents0
-
-    -- Child/parent existence (roots must correspond to some live node).
-    forM_ (IntMap.toList bindParents) $ \(childKey, (parentRef, _flag)) -> do
-        unless (IntSet.member childKey liveKeys) $
-            Left $ InvalidBindingTree ("Binding child " ++ show childKey ++ " not in constraint")
-        unless (IntSet.member (nodeRefKey parentRef) liveKeys) $
-            Left $
-                InvalidBindingTree $
-                    "Binding parent " ++ show parentRef
-                        ++ " of node " ++ show childKey ++ " not in constraint"
-
-    -- Cycle check on the canonical binding-parent relation.
-    mapM_ (bindingPathToRootWithLookup (\key -> IntMap.lookup key bindParents) . nodeRefFromKey) (IntMap.keys bindParents)
-
-    -- Upper-than check on the quotient structure graph (gen nodes must bind under gen nodes).
-    forM_ (IntMap.toList bindParents) $ \(childKey, (parentRef, _flag)) -> do
-        let childRef = nodeRefFromKey childKey
-        case childRef of
-            GenRef _ ->
-                case parentRef of
-                    GenRef _ -> pure ()
-                    TypeRef _ ->
-                        Left $
-                            InvalidBindingTree $
-                                "Gen node bound under type node " ++ show parentRef
-            TypeRef _ ->
-                case parentRef of
-                    GenRef _ -> pure ()
-                    _ ->
-                        unless (isUpperUnder parentRef childRef) $
-                            Left (ParentNotUpper childRef parentRef)
-
-    -- Root must be a single gen node.
-    let roots =
-            [ nodeRefFromKey key
-            | key <- IntSet.toList liveKeys
-            , not (IntMap.member key bindParents)
-            ]
-    rootRef <- validateSingleGenRoot roots
-
-    -- Every non-root needs a parent.
-    let rootKey = nodeRefKey rootRef
-    forM_ (IntSet.toList liveKeys) $ \key ->
-        unless (key == rootKey || IntMap.member key bindParents) $
-            Left (MissingBindParent (nodeRefFromKey key))
-
-    -- All gen nodes (except root) must be flexibly bound.
-    let lookupParent ref = IntMap.lookup (nodeRefKey ref) bindParents
-    validateGenNodesFlexiblyBound genNodes0 lookupParent rootRef
-
-    pure ()
-
 -- | Recompute gen-node scheme roots from the binding tree and term structure.
 --
 -- Scheme roots are the structural roots of each gen node's scope as determined
@@ -1197,32 +650,3 @@ computeTermDagRootsUnder canonical c =
 -- | Get all NodeIds in the constraint.
 allNodeIds :: Constraint -> [NodeId]
 allNodeIds c = map NodeId $ IntMap.keys (cNodes c)
-
--- | Check if a node is "upper" than another in the term-DAG.
---
--- A node @parent@ is upper than @child@ if @parent@ can reach @child@ by
--- following term-DAG structure edges (TyArrow dom/cod, TyForall body, TyExp body).
---
--- This is the paper's definition from §3.1: binding edges must point "upward"
--- in the term-DAG structure.
---
--- Note: A node is considered upper than itself (reflexive).
-isUpper :: Constraint -> NodeRef -> NodeRef -> Bool
-isUpper c parent child
-    | parent == child = True  -- Reflexive: a node is upper than itself
-    | otherwise =
-        case parent of
-            GenRef _ -> True
-            _ -> go IntSet.empty parent
-  where
-    go visited ref
-        | IntSet.member (nodeRefKey ref) visited = False  -- Avoid cycles
-        | ref == child = True
-        | otherwise =
-            let visited' = IntSet.insert (nodeRefKey ref) visited
-                children = case ref of
-                    TypeRef nid ->
-                        maybe [] (map TypeRef . structuralChildrenWithBounds) (NodeAccess.lookupNode c nid)
-                    GenRef gid ->
-                        maybe [] (map TypeRef . gnSchemes) (IntMap.lookup (getGenNodeId gid) (cGenNodes c))
-            in any (go visited') children

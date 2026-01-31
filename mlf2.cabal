@@ -71,6 +71,8 @@ library mlf2-internal
                       MLF.Constraint.Solve,
                       MLF.Elab.Pipeline,
                       MLF.Binding.Tree,
+                      MLF.Binding.Validation,
+                      MLF.Binding.Canonicalization,
                       MLF.Binding.Adjustment,
                       MLF.Binding.GraphOps,
                       MLF.Util.Order,
