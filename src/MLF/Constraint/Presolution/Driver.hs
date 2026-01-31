@@ -42,7 +42,6 @@ import qualified Data.IntSet as IntSet
 import MLF.Util.Trace (debugBinding, debugBindingM)
 import Data.Maybe (catMaybes, fromMaybe, mapMaybe)
 
-import qualified MLF.Util.UnionFind as UnionFind
 import qualified MLF.Util.Order as Order
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Witness.OmegaExec as OmegaExec
@@ -80,7 +79,6 @@ import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Constraint.Traversal as Traversal
 import MLF.Constraint.Presolution.Expansion (
-    applyExpansion,
     applyExpansionEdgeTraced,
     bindExpansionRootLikeTarget,
     decideMinimalExpansion,
@@ -88,6 +86,10 @@ import MLF.Constraint.Presolution.Expansion (
     mergeExpansions,
     recordEdgeExpansion,
     setExpansion
+    )
+import MLF.Constraint.Presolution.Materialization (
+    materializeExpansions,
+    frWith
     )
 import MLF.Constraint.Presolution.Witness (
     binderArgsFromExpansion,
@@ -160,31 +162,6 @@ computePresolution acyclicityResult constraint = do
         , prRedirects = redirects
         , prPlanBuilder = PresolutionPlanBuilder buildGeneralizePlans
         }
-
--- | Finalize presolution by materializing expansions, rewriting TyExp away,
--- applying union-find canonicalization, and clearing consumed instantiation
--- edges. This prepares the constraint for Phase 5.
--- | Apply final expansions to all TyExp nodes and record their replacements.
-materializeExpansions :: PresolutionM (IntMap NodeId)
-materializeExpansions = do
-    nodes <- gets (cNodes . psConstraint)
-    let exps = [ n | n@TyExp{} <- IntMap.elems nodes ]
-    uf <- gets psUnionFind
-    fmap IntMap.fromList $ forM exps $ \expNode -> do
-        let eid = tnId expNode
-        expn <- getExpansion (tnExpVar expNode)
-        nid' <- case expn of
-            -- Identity expansions are erased by rewriting the wrapper to its body.
-            ExpIdentity -> applyExpansion expn expNode
-            -- For non-identity expansions, `processInstEdge` should already have
-            -- materialized and unified the `TyExp` with its expansion result. Reuse
-            -- that representative to avoid duplicating fresh nodes here.
-            _ ->
-                let root = frWith uf eid
-                in if root /= eid
-                    then pure root
-                    else applyExpansion expn expNode
-        pure (getNodeId eid, nid')
 
 -- | Rewrite constraint by removing TyExp nodes, applying expansion mapping and
 -- union-find canonicalization, collapsing duplicates (preferring structure over
@@ -700,10 +677,6 @@ dropTrivialSchemeEdges constraint witnesses traces expansions =
         traces' = IntMap.filterWithKey (\eid _ -> keepEdge eid) traces
         expansions' = IntMap.filterWithKey (\eid _ -> keepEdge eid) expansions
     in (witnesses', traces', expansions')
-
--- | Read-only chase like Solve.frWith
-frWith :: IntMap NodeId -> NodeId -> NodeId
-frWith = UnionFind.frWith
 
 -- | The main loop processing sorted instantiation edges.
 runPresolutionLoop :: [InstEdge] -> PresolutionM ()

@@ -87,6 +87,7 @@ library mlf2-internal
                       MLF.Constraint.Presolution.EdgeUnify,
                       MLF.Constraint.Presolution.Expansion,
                       MLF.Constraint.Presolution.ForallIntro,
+                      MLF.Constraint.Presolution.Materialization,
                       MLF.Constraint.Presolution.Ops,
                       MLF.Constraint.Presolution.StateAccess,
                       MLF.Constraint.Presolution.Plan,
