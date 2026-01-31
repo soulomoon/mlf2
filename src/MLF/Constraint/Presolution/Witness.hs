@@ -25,7 +25,6 @@ module MLF.Constraint.Presolution.Witness (
 ) where
 
 import Control.Monad (foldM, zipWithM)
-import Control.Monad.State (gets)
 import Control.Monad.Except (throwError)
 import Data.Functor.Foldable (ListF(..), ana, cata)
 import qualified Data.IntMap.Strict as IntMap
@@ -38,10 +37,10 @@ import qualified Data.List.NonEmpty as NE
 
 import MLF.Constraint.Types (BindFlag(..), Constraint(..), Expansion(..), ExpansionF(..), ForallSpec(..), GenNode(..), InstanceOp(..), InstanceStep(..), NodeId, NodeRef(..), TyNode(..), getNodeId, nodeRefFromKey, typeRef)
 import qualified MLF.Constraint.NodeAccess as NodeAccess
-import MLF.Constraint.Presolution.Base (PresolutionM, PresolutionError(..), PresolutionState(..), instantiationBindersM)
+import MLF.Constraint.Presolution.Base (PresolutionM, PresolutionError(..), instantiationBindersM)
 import MLF.Constraint.Presolution.Ops (getCanonicalNode, lookupVarBound)
+import MLF.Constraint.Presolution.StateAccess (getConstraintAndCanonical)
 import qualified MLF.Binding.Tree as Binding
-import qualified MLF.Util.UnionFind as UnionFind
 import MLF.Util.Order (OrderKey, compareOrderKey, compareNodesByOrderKey)
 import MLF.Util.RecursionSchemes (cataM)
 
@@ -292,10 +291,8 @@ witnessFromExpansion _root leftRaw expn = do
 
     argIsGenBound :: NodeId -> PresolutionM Bool
     argIsGenBound nid = do
-        uf <- gets psUnionFind
-        c <- gets psConstraint
-        let canon = UnionFind.frWith uf
-            nidC = canon nid
+        (c, canon) <- getConstraintAndCanonical
+        let nidC = canon nid
             schemeParents =
                 IntMap.fromList
                     [ (getNodeId (canon root), gnId gen)

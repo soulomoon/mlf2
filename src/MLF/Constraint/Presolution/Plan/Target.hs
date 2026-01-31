@@ -16,7 +16,7 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.List (sort, sortBy)
 import Data.Maybe (listToMaybe)
-import Debug.Trace (trace)
+import MLF.Util.Trace (traceWhen)
 
 import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Types
@@ -294,10 +294,7 @@ data GammaPlan = GammaPlan
     }
 
 tracePlanEnabled :: Bool -> String -> a -> a
-tracePlanEnabled enabled msg value =
-    if enabled
-        then trace msg value
-        else value
+tracePlanEnabled = traceWhen
 
 buildGammaPlan :: GammaPlanInput -> GammaPlan
 buildGammaPlan GammaPlanInput{..} =

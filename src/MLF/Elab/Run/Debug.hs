@@ -9,27 +9,18 @@ module MLF.Elab.Run.Debug (
 import Data.Functor.Foldable (cata)
 import qualified Data.IntMap.Strict as IntMap
 import Data.List (intercalate)
-import Debug.Trace (trace)
-import System.Environment (lookupEnv)
-import System.IO.Unsafe (unsafePerformIO)
 
 import MLF.Frontend.ConstraintGen (AnnExpr(..))
 import MLF.Frontend.ConstraintGen.Types (AnnExprF(..))
 import MLF.Constraint.Types (EdgeId(..), NodeId(..), getEdgeId)
+import MLF.Util.Trace (debugBinding, globalTraceConfig, tcBinding)
 
 
 debugGaScope :: String -> a -> a
-debugGaScope msg value =
-    if debugGaScopeEnabled
-        then trace msg value
-        else value
+debugGaScope = debugBinding
 
 debugGaScopeEnabled :: Bool
-debugGaScopeEnabled =
-    unsafePerformIO $ do
-        enabled <- lookupEnv "MLF_DEBUG_BINDING"
-        pure (maybe False (const True) enabled)
-{-# NOINLINE debugGaScopeEnabled #-}
+debugGaScopeEnabled = tcBinding globalTraceConfig
 
 -- | Monadic debug helper that traces a message when debugging is enabled.
 -- Replaces the verbose pattern:

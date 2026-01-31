@@ -31,11 +31,8 @@ import Data.Maybe (fromMaybe, listToMaybe)
 import qualified MLF.Binding.GraphOps as GraphOps
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Util.Order as Order
-import qualified MLF.Util.UnionFind as UnionFind
 import qualified MLF.Witness.OmegaExec as OmegaExec
-import Debug.Trace (trace)
-import System.Environment (lookupEnv)
-import System.IO.Unsafe (unsafePerformIO)
+import MLF.Util.Trace (debugBinding)
 
 import MLF.Constraint.Types
 import qualified MLF.Constraint.NodeAccess as NodeAccess
@@ -54,6 +51,13 @@ import MLF.Constraint.Presolution.Ops (
     getNode,
     lookupVarBound,
     setVarBound
+    )
+import MLF.Constraint.Presolution.StateAccess (
+    WithCanonicalT,
+    getConstraintAndCanonical,
+    liftBindingError,
+    lookupBindParentR,
+    runWithCanonical
     )
 import MLF.Constraint.Presolution.Unify (unifyAcyclicRawWithRaiseTracePrefer)
 import qualified MLF.Constraint.Traversal as Traversal
@@ -297,22 +301,19 @@ preferBinderMetaRoot root1 root2 = do
 --
 -- Requirements: 5.2
 checkNodeLocked :: NodeId -> EdgeUnifyM Bool
-checkNodeLocked nid = do
-    c <- lift $ gets psConstraint
-    uf <- lift $ gets psUnionFind
-    let canonical = UnionFind.frWith uf
-        lookupParent :: NodeId -> EdgeUnifyM (Maybe (NodeId, BindFlag))
-        lookupParent n =
-            case Binding.lookupBindParentUnder canonical c (typeRef n) of
-                Left err -> lift $ throwError (BindingTreeError err)
-                Right Nothing -> pure Nothing
-                Right (Just (TypeRef parent, flag)) -> pure (Just (parent, flag))
-                Right (Just (GenRef _, _flag)) -> pure Nothing
+checkNodeLocked nid = lift $ runWithCanonical $ do
+    let lookupParent :: NodeId -> WithCanonicalT PresolutionM (Maybe (NodeId, BindFlag))
+        lookupParent n = do
+            mbParent <- lookupBindParentR (typeRef n)
+            pure $ case mbParent of
+                Nothing -> Nothing
+                Just (TypeRef parent, flag) -> Just (parent, flag)
+                Just (GenRef _, _flag) -> Nothing
 
-        -- Paper `locked`/“under rigid binder” check: consider only strict ancestors,
+        -- Paper `locked`/"under rigid binder" check: consider only strict ancestors,
         -- so a restricted node (its own edge rigid) is not treated as locked
         -- solely because of that edge.
-        goStrict :: NodeId -> EdgeUnifyM Bool
+        goStrict :: NodeId -> WithCanonicalT PresolutionM Bool
         goStrict n = do
             mbParent <- lookupParent n
             case mbParent of
@@ -538,17 +539,7 @@ shouldRecordRaiseMerge binder ext = do
         _ -> pure False
 
 debugEdgeUnify :: String -> a -> a
-debugEdgeUnify msg value =
-    if debugEdgeUnifyEnabled
-        then trace msg value
-        else value
-
-debugEdgeUnifyEnabled :: Bool
-debugEdgeUnifyEnabled =
-    unsafePerformIO $ do
-        enabled <- lookupEnv "MLF_DEBUG_BINDING"
-        pure (maybe False (const True) enabled)
-{-# NOINLINE debugEdgeUnifyEnabled #-}
+debugEdgeUnify = debugBinding
 
 -- | True iff @ext@ is bound above @edgeRoot@ in the binding tree.
 --
@@ -556,17 +547,11 @@ debugEdgeUnifyEnabled =
 -- @m ∉ I(r)@ and @m@ is "bound above r".
 isBoundAboveInBindingTree :: NodeId -> NodeId -> PresolutionM Bool
 isBoundAboveInBindingTree edgeRoot ext = do
-    c0 <- gets psConstraint
-    uf0 <- gets psUnionFind
-    let canonical = UnionFind.frWith uf0
-        edgeRootC = canonical edgeRoot
+    (c0, canonical) <- getConstraintAndCanonical
+    let edgeRootC = canonical edgeRoot
         extC = canonical ext
-    pathRoot <- case Binding.bindingPathToRoot c0 (typeRef edgeRootC) of
-        Left err -> throwError (BindingTreeError err)
-        Right p -> pure p
-    pathExt <- case Binding.bindingPathToRoot c0 (typeRef extC) of
-        Left err -> throwError (BindingTreeError err)
-        Right p -> pure p
+    pathRoot <- liftBindingError $ Binding.bindingPathToRoot c0 (typeRef edgeRootC)
+    pathExt <- liftBindingError $ Binding.bindingPathToRoot c0 (typeRef extC)
     let rootAncestors =
             IntSet.fromList
                 [ nodeRefKey ref
@@ -614,10 +599,8 @@ unifyStructureEdge n1 n2 = do
                             _ -> pure ()
                     _ -> pure ()
             trySetBound target bnd = do
-                uf <- lift $ gets psUnionFind
-                c0 <- lift $ gets psConstraint
-                let canonical = UnionFind.frWith uf
-                    targetC = canonical target
+                (c0, canonical) <- lift getConstraintAndCanonical
+                let targetC = canonical target
                     bndC = canonical bnd
                 occurs <- case Traversal.occursInUnder canonical (NodeAccess.lookupNode c0) targetC bndC of
                     Left _ -> pure True

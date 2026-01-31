@@ -110,7 +110,7 @@ import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.List (find)
-import Data.Maybe (catMaybes, fromMaybe, isJust, isNothing)
+import Data.Maybe (catMaybes, fromMaybe, isNothing)
 
 import qualified MLF.Binding.Adjustment as BindingAdjustment
 import qualified MLF.Binding.Tree as Binding
@@ -121,9 +121,7 @@ import qualified MLF.Constraint.Unify.Decompose as UnifyDecompose
 import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Types
-import Debug.Trace (trace)
-import System.Environment (lookupEnv)
-import System.IO.Unsafe (unsafePerformIO)
+import MLF.Util.Trace (debugBinding)
 
 -- | Errors that can arise during monotype unification.
 data SolveError
@@ -315,17 +313,7 @@ solveUnify c0 = do
         in c { cBindParents = bindParents' }
 
     debugSolveBinding :: String -> a -> a
-    debugSolveBinding msg value =
-        if debugSolveBindingEnabled
-            then trace msg value
-            else value
-
-    debugSolveBindingEnabled :: Bool
-    debugSolveBindingEnabled =
-        unsafePerformIO $ do
-            enabled <- lookupEnv "MLF_DEBUG_BINDING"
-            pure (isJust enabled)
-    {-# NOINLINE debugSolveBindingEnabled #-}
+    debugSolveBinding = debugBinding
 
     -- | Process one equality edge using canonical representatives, decomposing
     -- arrows/foralls as needed and performing occurs-checks for var = structure.

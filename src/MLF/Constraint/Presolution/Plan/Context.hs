@@ -10,7 +10,7 @@ module MLF.Constraint.Presolution.Plan.Context (
 
 import qualified Data.IntMap.Strict as IntMap
 import Data.Maybe (listToMaybe, isNothing)
-import Debug.Trace (trace)
+import MLF.Util.Trace (traceWhen)
 
 import MLF.Constraint.Types
 import MLF.Constraint.Solve (SolveResult(..))
@@ -342,10 +342,7 @@ resolveContext env bindParentsSoft scopeRootArg targetNodeArg = do
             Right path -> listToMaybe [gid | GenRef gid <- drop 1 path]
 
 traceGeneralizeEnabled :: Bool -> String -> a -> a
-traceGeneralizeEnabled enabled msg value =
-    if enabled
-        then trace msg value
-        else value
+traceGeneralizeEnabled = traceWhen
 
 traceGeneralize :: GeneralizeEnv -> String -> a -> a
 traceGeneralize env = traceGeneralizeEnabled (geDebugEnabled env)

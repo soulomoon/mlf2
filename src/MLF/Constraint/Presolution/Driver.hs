@@ -36,13 +36,10 @@ module MLF.Constraint.Presolution.Driver (
 import Control.Monad.State
 import Control.Monad.Except (throwError)
 import Control.Monad (foldM, forM, forM_, when)
-import Data.Functor.Foldable (cata)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import Debug.Trace (trace)
-import System.Environment (lookupEnv)
-import System.IO.Unsafe (unsafePerformIO)
+import MLF.Util.Trace (debugBinding, debugBindingM)
 import Data.Maybe (catMaybes, fromMaybe, mapMaybe)
 
 import qualified MLF.Util.UnionFind as UnionFind
@@ -53,6 +50,19 @@ import qualified MLF.Constraint.Canonicalize as Canonicalize
 import MLF.Constraint.Types
 import MLF.Constraint.Presolution.Base
 import MLF.Constraint.Presolution.Plan (buildGeneralizePlans)
+import MLF.Constraint.Presolution.Rewrite (
+    canonicalizeExpansion,
+    canonicalizeTrace,
+    canonicalizeWitness,
+    rewriteGenNodes,
+    rewriteNode,
+    rewriteVarSet,
+    )
+import MLF.Constraint.Presolution.StateAccess (
+    getCanonical,
+    getConstraintAndCanonical,
+    liftBindingError
+    )
 import MLF.Constraint.Presolution.Validation (
     validateTranslatablePresolution,
     rigidifyTranslatablePresolutionM,
@@ -83,9 +93,10 @@ import MLF.Constraint.Presolution.Witness (
     binderArgsFromExpansion,
     integratePhase2Steps,
     normalizeInstanceStepsFull,
-    OmegaNormalizeEnv(..),
+    OmegaNormalizeEnv(OmegaNormalizeEnv, oneRoot),
     witnessFromExpansion
     )
+import qualified MLF.Constraint.Presolution.Witness as Witness
 import MLF.Constraint.Presolution.EdgeUnify (
     EdgeUnifyState(eusOps),
     flushPendingWeakens,
@@ -214,85 +225,18 @@ rewriteConstraint mapping = do
                         else go (IntSet.insert (getNodeId n') seen) n'
             in go IntSet.empty nid
 
-        rewriteNode :: TyNode -> Maybe (Int, TyNode)
-        rewriteNode TyExp{} = Nothing
-        rewriteNode n =
-            let nid' = canonical (tnId n)
-                node' = case n of
-                    TyVar { tnBound = mb } -> TyVar { tnId = nid', tnBound = fmap canonical mb }
-                    TyBottom {} -> TyBottom nid'
-                    TyArrow { tnDom = d, tnCod = cod } -> TyArrow nid' (canonical d) (canonical cod)
-                    TyBase { tnBase = b } -> TyBase nid' b
-                    TyForall { tnBody = b } -> TyForall nid' (canonical b)
-            in Just (getNodeId nid', node')
-
         -- traceCanonical n = let c = canonical n in trace ("Canonical " ++ show n ++ " -> " ++ show c) c
 
-        newNodes = IntMap.fromListWith Canonicalize.chooseRepNode (mapMaybe rewriteNode (NodeAccess.allNodes c))
+        newNodes = IntMap.fromListWith Canonicalize.chooseRepNode (mapMaybe (rewriteNode canonical) (NodeAccess.allNodes c))
         eliminated' = rewriteVarSet canonical newNodes (cEliminatedVars c)
         weakened' = rewriteVarSet canonical newNodes (cWeakenedVars c)
         genNodes' = rewriteGenNodes canonical newNodes (cGenNodes c)
 
-        -- Canonicalize edge expansions
-        canonicalizeExp = cata alg
-          where
-            alg layer = case layer of
-                ExpIdentityF -> ExpIdentity
-                ExpInstantiateF args -> ExpInstantiate (map canonical args)
-                ExpForallF levels -> ExpForall levels
-                ExpComposeF exps -> ExpCompose exps
+        newExps = IntMap.map (canonicalizeExpansion canonical) (psEdgeExpansions st)
 
-        newExps = IntMap.map canonicalizeExp (psEdgeExpansions st)
+        newWitnesses = IntMap.map (canonicalizeWitness canonical) (psEdgeWitnesses st)
 
-        canonicalizeOp :: InstanceOp -> InstanceOp
-        canonicalizeOp op = case op of
-            OpGraft sigma n -> OpGraft (canonical sigma) (canonical n)
-            OpMerge a b -> OpMerge (canonical a) (canonical b)
-            OpRaise n -> OpRaise (canonical n)
-            OpWeaken n -> OpWeaken (canonical n)
-            OpRaiseMerge n m -> OpRaiseMerge (canonical n) (canonical m)
-
-        canonicalizeStep :: InstanceStep -> InstanceStep
-        canonicalizeStep step = case step of
-            StepOmega op -> StepOmega (canonicalizeOp op)
-            StepIntro -> StepIntro
-
-        canonicalizeWitness :: EdgeWitness -> EdgeWitness
-        canonicalizeWitness w =
-            let InstanceWitness ops = ewWitness w
-            in w
-                { ewLeft = canonical (ewLeft w)
-                , ewRight = canonical (ewRight w)
-                , ewRoot = canonical (ewRoot w)
-                , ewSteps = map canonicalizeStep (ewSteps w)
-                , ewWitness = InstanceWitness (map canonicalizeOp ops)
-                }
-
-        newWitnesses = IntMap.map canonicalizeWitness (psEdgeWitnesses st)
-
-        canonicalizeTrace :: EdgeTrace -> EdgeTrace
-        canonicalizeTrace tr =
-            let canonPair (a, b) = (canonical a, canonical b)
-                canonInterior =
-                    IntSet.fromList
-                        [ getNodeId (canonical (NodeId i))
-                        | i <- IntSet.toList (etInterior tr)
-                        ]
-                canonCopyMap =
-                    IntMap.fromListWith min
-                        [ ( getNodeId (canonical (NodeId k))
-                          , canonical v
-                          )
-                        | (k, v) <- IntMap.toList (etCopyMap tr)
-                        ]
-            in tr
-                { etRoot = canonical (etRoot tr)
-                , etBinderArgs = map canonPair (etBinderArgs tr)
-                , etInterior = canonInterior
-                , etCopyMap = canonCopyMap
-                }
-
-        newTraces0 = IntMap.map canonicalizeTrace (psEdgeTraces st)
+        newTraces0 = IntMap.map (canonicalizeTrace canonical) (psEdgeTraces st)
 
         bindingEdges0 = cBindParents c
         cStruct = c { cNodes = newNodes, cGenNodes = genNodes' }
@@ -727,12 +671,12 @@ normalizeEdgeWitnessesM = do
             env =
                 OmegaNormalizeEnv
                     { oneRoot = edgeRoot
-                    , interior = interiorNorm
-                    , weakened = weakened
-                    , orderKeys = orderKeys
-                    , canonical = id
-                    , constraint = c0
-                    , binderArgs = binderArgs
+                    , Witness.interior = interiorNorm
+                    , Witness.weakened = weakened
+                    , Witness.orderKeys = orderKeys
+                    , Witness.canonical = id
+                    , Witness.constraint = c0
+                    , Witness.binderArgs = binderArgs
                     }
         steps <- case normalizeInstanceStepsFull env steps0 of
             Right steps' -> pure steps'
@@ -756,37 +700,6 @@ dropTrivialSchemeEdges constraint witnesses traces expansions =
         traces' = IntMap.filterWithKey (\eid _ -> keepEdge eid) traces
         expansions' = IntMap.filterWithKey (\eid _ -> keepEdge eid) expansions
     in (witnesses', traces', expansions')
-
--- | Rewrite a set of variable IDs through canonicalization, keeping only those
--- that still exist as TyVar nodes in the rewritten node map.
-rewriteVarSet :: (NodeId -> NodeId) -> IntMap TyNode -> IntSet.IntSet -> IntSet.IntSet
-rewriteVarSet canon nodes0 vars0 =
-    IntSet.fromList
-        [ getNodeId vC
-        | vid <- IntSet.toList vars0
-        , let vC = canon (NodeId vid)
-        , case IntMap.lookup (getNodeId vC) nodes0 of
-            Just TyVar{} -> True
-            _ -> False
-        ]
-
-rewriteGenNodes :: (NodeId -> NodeId) -> IntMap TyNode -> IntMap.IntMap GenNode -> IntMap.IntMap GenNode
-rewriteGenNodes canon nodes0 gen0 =
-    let rewriteOne g =
-            let (schemesRev, _seen) =
-                    foldl'
-                        (\(acc, seen) s ->
-                            let s' = canon s
-                                key = getNodeId s'
-                            in if IntMap.member key nodes0 && not (IntSet.member key seen)
-                                then (s' : acc, IntSet.insert key seen)
-                                else (acc, seen)
-                        )
-                        ([], IntSet.empty)
-                        (gnSchemes g)
-                schemes' = reverse schemesRev
-            in (genNodeKey (gnId g), g { gnSchemes = schemes' })
-    in IntMap.fromListWith const (map rewriteOne (IntMap.elems gen0))
 
 -- | Read-only chase like Solve.frWith
 frWith :: IntMap NodeId -> NodeId -> NodeId
@@ -917,8 +830,7 @@ processInstEdge edge = do
 
                     -- Flag reset: bind the frontier copies at the target binder.
                     pure ()
-                    uf0 <- gets psUnionFind
-                    let canonical = UnionFind.frWith uf0
+                    canonical <- getCanonical
                     let copyMapCanon =
                             IntMap.fromListWith
                                 const
@@ -936,14 +848,14 @@ processInstEdge edge = do
                             Just meta -> pure (bv, meta)
                             Nothing ->
                                 throwError (InternalError ("processInstEdge: missing binder-meta copy for " ++ show bv))
-                    ufInterior <- gets psUnionFind
-                    let canonInterior =
+                    canonInterior <- getCanonical
+                    let canonInteriorSet =
                             IntSet.fromList
-                                [ getNodeId (UnionFind.frWith ufInterior (NodeId i))
+                                [ getNodeId (canonInterior (NodeId i))
                                 | i <- IntSet.toList interior0
                                 ]
                     interiorExact <- edgeInteriorExact resNodeId
-                    let interior = IntSet.union canonInterior interiorExact
+                    let interior = IntSet.union canonInteriorSet interiorExact
                     cForBounds <- gets psConstraint
                     let binderBounds =
                             IntMap.fromList
@@ -1019,9 +931,8 @@ recordEdgeTrace (EdgeId eid) tr =
 
 canonicalizeEdgeTraceInteriorsM :: PresolutionM ()
 canonicalizeEdgeTraceInteriorsM = do
-    uf <- gets psUnionFind
-    let canonical = UnionFind.frWith uf
-        canonInterior tr =
+    canonical <- getCanonical
+    let canonInterior tr =
             let interior' =
                     IntSet.fromList
                         [ getNodeId (canonical (NodeId nid))
@@ -1032,10 +943,8 @@ canonicalizeEdgeTraceInteriorsM = do
 
 bindExpansionArgs :: NodeId -> [(NodeId, NodeId)] -> PresolutionM ()
 bindExpansionArgs expansionRoot pairs = do
-    uf0 <- gets psUnionFind
-    c0 <- gets psConstraint
-    let canonical = UnionFind.frWith uf0
-        expansionRootC = canonical expansionRoot
+    (c0, canonical) <- getConstraintAndCanonical
+    let expansionRootC = canonical expansionRoot
         rootGen =
             let genIds = IntMap.keys (cGenNodes c0)
                 pickRoot acc gidInt =
@@ -1111,23 +1020,20 @@ buildEdgeTrace :: EdgeId -> NodeId -> TyNode -> Expansion -> (CopyMap, InteriorS
 buildEdgeTrace _eid left leftRaw expn (copyMap0, _interior0, _frontier0) = do
     bas <- binderArgsFromExpansion leftRaw expn
     root <- findRoot left
-    c0 <- gets psConstraint
-    uf0 <- gets psUnionFind
-    let canonical = UnionFind.frWith uf0
-        canonicalizeInterior s =
+    (c0, canonical) <- getConstraintAndCanonical
+    let canonicalizeInterior s =
             IntSet.fromList
                 [ getNodeId (canonical (NodeId nid))
                 | nid <- IntSet.toList s
                 ]
-    interiorRaw <- case Binding.interiorOfUnder canonical c0 (typeRef root) of
-        Left err -> throwError (BindingTreeError err)
-        Right s ->
-            pure $
-                IntSet.fromList
-                    [ getNodeId nid
-                    | key <- IntSet.toList s
-                    , TypeRef nid <- [nodeRefFromKey key]
-                    ]
+    interiorRaw <- do
+        s <- liftBindingError $ Binding.interiorOfUnder canonical c0 (typeRef root)
+        pure $
+            IntSet.fromList
+                [ getNodeId nid
+                | key <- IntSet.toList s
+                , TypeRef nid <- [nodeRefFromKey key]
+                ]
     let interior = canonicalizeInterior interiorRaw
     pure EdgeTrace { etRoot = root, etBinderArgs = bas, etInterior = interior, etCopyMap = copyMap0 }
 
@@ -1211,8 +1117,7 @@ unifyStructure n1 n2 = do
                 (resNodeId, (copyMap, _interior, frontier)) <- applyExpansionEdgeTraced finalExp expNode
                 targetBinder <- bindExpansionRootLikeTarget resNodeId targetId
                 pure ()
-                uf0 <- gets psUnionFind
-                let canonical = UnionFind.frWith uf0
+                canonical <- getCanonical
                 let copyMapCanon =
                         IntMap.fromListWith
                             const
@@ -1238,10 +1143,8 @@ unifyStructure n1 n2 = do
                 TyVar{} -> True
                 _ -> False
             trySetBound target bnd = do
-                uf <- gets psUnionFind
-                c0 <- gets psConstraint
-                let canonical = UnionFind.frWith uf
-                    targetC = canonical target
+                (c0, canonical) <- getConstraintAndCanonical
+                let targetC = canonical target
                     bndC = canonical bnd
                 occurs <- case Traversal.occursInUnder canonical (NodeAccess.lookupNode c0) targetC bndC of
                     Left _ -> pure True
@@ -1325,10 +1228,8 @@ solveNonExpInstantiation lhs rhs = do
 -- | Handle instantiation where RHS is an unbound variable.
 solveUnboundVarInstantiation :: NodeId -> NodeId -> PresolutionM ()
 solveUnboundVarInstantiation lhs rhs = do
-    uf <- gets psUnionFind
-    c0 <- gets psConstraint
-    let canonical = UnionFind.frWith uf
-        lhsC = canonical lhs
+    (c0, canonical) <- getConstraintAndCanonical
+    let lhsC = canonical lhs
         rhsC = canonical rhs
     (allowBound, _parentGen) <- getBindingPermission canonical c0 rhsC
     isSchemeRoot <- isSchemeRootNode canonical c0 rhsC
@@ -1340,10 +1241,8 @@ solveUnboundVarInstantiation lhs rhs = do
 -- | Handle instantiation where RHS is a bound variable.
 solveBoundVarInstantiation :: NodeId -> NodeId -> NodeId -> PresolutionM ()
 solveBoundVarInstantiation lhs rhs bnd = do
-    uf <- gets psUnionFind
-    c0 <- gets psConstraint
-    let canonical = UnionFind.frWith uf
-        lhsC = canonical lhs
+    (c0, canonical) <- getConstraintAndCanonical
+    let lhsC = canonical lhs
         bndC = canonical bnd
     bndNode <- getCanonicalNode bndC
     case bndNode of
@@ -1372,29 +1271,19 @@ setBindParentIfUpper child parent = do
 -- This may trigger unifications if we merge two Instantiates.
 -- (moved to MLF.Constraint.Presolution.Expansion)
 
+-- | Debug binding operations (uses global trace config).
 debugBindParents :: String -> a -> a
-debugBindParents msg value =
-    if debugBindParentsEnabled
-        then trace msg value
-        else value
+debugBindParents = debugBinding
 
 -- | Monadic version of debugBindParents for use in PresolutionM.
-debugBindParentsM :: String -> PresolutionM ()
-debugBindParentsM msg =
-    when debugBindParentsEnabled (trace msg (pure ()))
+debugBindParentsM :: Monad m => String -> m ()
+debugBindParentsM = debugBindingM
 
 nodeTag :: TyNode -> String
-nodeTag node = case node of
+nodeTag = \case
     TyVar{} -> "TyVar"
     TyBottom{} -> "TyBottom"
     TyArrow{} -> "TyArrow"
     TyBase{} -> "TyBase"
     TyForall{} -> "TyForall"
     TyExp{} -> "TyExp"
-
-debugBindParentsEnabled :: Bool
-debugBindParentsEnabled =
-    unsafePerformIO $ do
-        enabled <- lookupEnv "MLF_DEBUG_BINDING"
-        pure (maybe False (const True) enabled)
-{-# NOINLINE debugBindParentsEnabled #-}

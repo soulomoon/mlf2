@@ -45,7 +45,7 @@ import qualified Data.IntSet as IntSet
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.List (elemIndex, findIndex)
-import Data.Maybe (catMaybes, fromMaybe, isJust, listToMaybe, mapMaybe)
+import Data.Maybe (catMaybes, fromMaybe, listToMaybe, mapMaybe)
 import Text.Read (readMaybe)
 
 import qualified MLF.Util.Order as Order
@@ -68,9 +68,7 @@ import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Util.IntMapUtils as IntMapUtils
 import MLF.Elab.Phi.Context (contextToNodeBound, contextToNodeBoundWithOrderKeys)
-import Debug.Trace (trace)
-import System.Environment (lookupEnv)
-import System.IO.Unsafe (unsafePerformIO)
+import MLF.Util.Trace (debugGeneralize)
 
 newtype ApplyFun i =
     ApplyFun { runApplyFun :: Set.Set String -> Ty i }
@@ -301,11 +299,7 @@ phiFromEdgeWitnessWithTrace generalizeAtWith res mbGaParents mSchemeInfo mTrace 
                     Just (TypeRef parent, _) ->
                         goScope (IntSet.insert (nodeRefKey ref) visited) (typeRef (canonicalNode parent))
     debugPhi :: String -> a -> a
-    debugPhi msg value = if debugPhiEnabled then trace msg value else value
-
-    debugPhiEnabled :: Bool
-    debugPhiEnabled = unsafePerformIO (isJust <$> lookupEnv "MLF_DEBUG_GENERALIZE")
-    {-# NOINLINE debugPhiEnabled #-}
+    debugPhi = debugGeneralize
 
     copyMap :: IntMap.IntMap NodeId
     copyMap =

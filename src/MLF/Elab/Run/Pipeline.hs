@@ -138,7 +138,7 @@ collectBaseNamedKeys c =
 
 -- | Build interior set from edge trace root
 buildInteriorSet :: Constraint -> (NodeId -> NodeId) -> NodeId -> IntSet.IntSet
-buildInteriorSet c adoptNode rootBase =
+buildInteriorSet c _adoptNode rootBase =
     case Binding.interiorOf c (typeRef rootBase) of
         Right s ->
             IntSet.insert

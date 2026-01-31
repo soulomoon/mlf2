@@ -14,10 +14,8 @@ import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Maybe (listToMaybe)
-import Debug.Trace (trace)
-import System.Environment (lookupEnv)
-import System.IO.Unsafe (unsafePerformIO)
 import MLF.Util.Names (parseNameId)
+import MLF.Util.Trace (debugGeneralize)
 import MLF.Reify.TypeOps
     ( alphaEqType
     , inlineBaseBoundsType
@@ -286,7 +284,7 @@ elaborateWithScope generalizeAtWith resPhi resReify resGen gaParents edgeWitness
                                 Just ref -> ref
                                 Nothing -> scopeRootFromBase schemeRootId
                     _ <- pure $
-                        debugElabGeneralize
+                        debugGeneralize
                             ("elaborate let: schemeGenId=" ++ show schemeGenId
                                 ++ " schemeRootId=" ++ show schemeRootId
                                 ++ " scopeRoot=" ++ show scopeRoot
@@ -295,7 +293,7 @@ elaborateWithScope generalizeAtWith resPhi resReify resGen gaParents edgeWitness
                     let targetC = schemeBodyTarget resGen schemeRootId
                     (sch, subst) <-
                         generalizeAtWith (Just gaParents) resGen scopeRoot targetC
-                    case debugElabGeneralize
+                    case debugGeneralize
                         ("elaborate let: scheme=" ++ show sch
                             ++ " subst=" ++ show subst
                         )
@@ -332,7 +330,7 @@ elaborateWithScope generalizeAtWith resPhi resReify resGen gaParents edgeWitness
     reifyInst :: IntSet.IntSet -> Env -> AnnExpr -> EdgeId -> Either ElabError Instantiation
     reifyInst namedSetReify env funAnn (EdgeId eid) =
         let dbg =
-                debugElabGeneralize
+                debugGeneralize
                     ("reifyInst: edge=" ++ show eid
                         ++ " witness=" ++ show (IntMap.member eid edgeWitnesses)
                         ++ " trace=" ++ show (IntMap.member eid edgeTraces)
@@ -342,7 +340,7 @@ elaborateWithScope generalizeAtWith resPhi resReify resGen gaParents edgeWitness
         in dbg `seq`
         case IntMap.lookup eid edgeWitnesses of
             Nothing ->
-                debugElabGeneralize
+                debugGeneralize
                     ("reifyInst: missing witness for edge " ++ show eid)
                     (Right InstId)
             Just ew -> do
@@ -500,19 +498,6 @@ elaborateWithScope generalizeAtWith resPhi resReify resGen gaParents edgeWitness
             InstElimF -> 0
             InstInsideF phi -> phi
             InstUnderF _ phi -> phi
-
-debugElabGeneralize :: String -> a -> a
-debugElabGeneralize msg value =
-    if debugElabGeneralizeEnabled
-        then trace msg value
-        else value
-
-debugElabGeneralizeEnabled :: Bool
-debugElabGeneralizeEnabled =
-    unsafePerformIO $ do
-        enabled <- lookupEnv "MLF_DEBUG_GENERALIZE"
-        pure (maybe False (const True) enabled)
-{-# NOINLINE debugElabGeneralizeEnabled #-}
 
 -- | Substitute names in a term (and its embedded types)
 substInTerm :: IntMap.IntMap String -> ElabTerm -> ElabTerm

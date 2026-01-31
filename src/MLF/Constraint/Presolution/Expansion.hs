@@ -32,9 +32,6 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.Maybe (fromMaybe)
 import qualified Data.List.NonEmpty as NE
-import Debug.Trace (trace)
-import System.Environment (lookupEnv)
-import System.IO.Unsafe (unsafePerformIO)
 
 import MLF.Constraint.Presolution.Base (
     CopyMap,
@@ -69,6 +66,7 @@ import MLF.Constraint.Presolution.StateAccess (
 import MLF.Constraint.Types
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Presolution.Unify (unifyAcyclic)
+import MLF.Util.Trace (debugBinding)
 
 -- | Get the current expansion for an expansion variable.
 getExpansion :: ExpVarId -> PresolutionM Expansion
@@ -327,17 +325,7 @@ decideMinimalExpansion allowTrivial (TyExp { tnBody = bodyId }) targetNode = do
 decideMinimalExpansion _ _ _ = return (ExpIdentity, [])
 
 debugExpansion :: String -> a -> a
-debugExpansion msg value =
-    if debugExpansionEnabled
-        then trace msg value
-        else value
-
-debugExpansionEnabled :: Bool
-debugExpansionEnabled =
-    unsafePerformIO $ do
-        enabled <- lookupEnv "MLF_DEBUG_BINDING"
-        pure (maybe False (const True) enabled)
-{-# NOINLINE debugExpansionEnabled #-}
+debugExpansion = debugBinding
 
 -- | Apply an expansion to a TyExp node.
 -- Note: this helper is used twice for distinct purposes.

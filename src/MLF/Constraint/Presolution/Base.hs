@@ -38,9 +38,7 @@ import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Constraint.Traversal as Traversal
 import qualified MLF.Util.Order as Order
 import qualified MLF.Util.UnionFind as UnionFind
-import Debug.Trace (trace)
-import System.Environment (lookupEnv)
-import System.IO.Unsafe (unsafePerformIO)
+import MLF.Util.Trace (debugBinding)
 import MLF.Constraint.Presolution.Plan (GeneralizePlan, ReifyPlan)
 import MLF.Constraint.Presolution.Plan.Context (GaBindParents)
 import MLF.Constraint.Solve (SolveResult)
@@ -550,15 +548,6 @@ forallSpecM binder0 = do
         Left err -> throwError (BindingTreeError err)
         Right fs -> pure fs
 
+-- | Debug binders using global trace config.
 debugBinders :: String -> a -> a
-debugBinders msg value =
-    if debugBindersEnabled
-        then trace msg value
-        else value
-
-debugBindersEnabled :: Bool
-debugBindersEnabled =
-    unsafePerformIO $ do
-        enabled <- lookupEnv "MLF_DEBUG_BINDING"
-        pure (maybe False (const True) enabled)
-{-# NOINLINE debugBindersEnabled #-}
+debugBinders = debugBinding

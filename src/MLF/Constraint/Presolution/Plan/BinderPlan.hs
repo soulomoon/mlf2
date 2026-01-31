@@ -56,7 +56,7 @@ import Control.Monad (forM)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Set as Set
-import Debug.Trace (trace)
+import MLF.Util.Trace (traceWhen)
 
 import MLF.Constraint.Types
 import MLF.Types.Elab (Ty(..))
@@ -146,8 +146,7 @@ data BinderPlan = BinderPlan
     }
 
 traceBinderPlanEnabled :: Bool -> String -> a -> a
-traceBinderPlanEnabled enabled msg value =
-    if enabled then trace msg value else value
+traceBinderPlanEnabled = traceWhen
 
 traceBinderPlanEnabledM :: Bool -> String -> Either ElabError ()
 traceBinderPlanEnabledM enabled msg =
@@ -823,7 +822,7 @@ orderBinderCandidates debugEnabled mbBindParentsGa canonical constraint root roo
         Just ga -> orderBinderCandidatesBase ga keysSolved rootBase candidates depsForE
   where
     traceOrderingEnabledM enabled msg =
-        if enabled then trace msg (Right ()) else Right ()
+        traceWhen enabled msg (Right ())
 
     orderBinderCandidatesSolved keysSolved candidates' depsForE' = do
         let candidateSet = IntSet.fromList candidates'

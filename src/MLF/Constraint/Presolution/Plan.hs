@@ -31,8 +31,6 @@ module MLF.Constraint.Presolution.Plan (
 import Data.Maybe (listToMaybe)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import System.Environment (lookupEnv)
-import System.IO.Unsafe (unsafePerformIO)
 
 import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Solve (SolveResult(..))
@@ -81,6 +79,7 @@ import MLF.Constraint.Presolution.Plan.SchemeRoots
 import qualified MLF.Constraint.Presolution.Plan.ReifyPlan as Reify
 import MLF.Util.ElabError (ElabError(..), bindingToElab)
 import MLF.Util.Graph (reachableFrom, reachableFromStop)
+import MLF.Util.Trace (globalTraceConfig, tcGeneralize)
 
 data PresolutionEnv = PresolutionEnv
     { peConstraint :: Constraint
@@ -794,8 +793,4 @@ softenBindParents canonical constraint =
     in IntMap.mapWithKey softenOne
 
 debugGeneralizeEnabled :: Bool
-debugGeneralizeEnabled =
-    unsafePerformIO $ do
-        enabled <- lookupEnv "MLF_DEBUG_GENERALIZE"
-        pure (maybe False (const True) enabled)
-{-# NOINLINE debugGeneralizeEnabled #-}
+debugGeneralizeEnabled = tcGeneralize globalTraceConfig
