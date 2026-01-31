@@ -82,6 +82,7 @@ import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Util.UnionFind as UnionFind
 import MLF.Constraint.Types
 import MLF.Constraint.Presolution.Base (PresolutionM, PresolutionError(..), PresolutionState(..))
+import qualified MLF.Constraint.Presolution.Base as Base
 
 -- -----------------------------------------------------------------------------
 -- Reader-based canonical environment
@@ -168,9 +169,7 @@ canonicalize nid = do
 -- let canonical = UnionFind.frWith uf
 -- @
 getCanonical :: PresolutionM (NodeId -> NodeId)
-getCanonical = do
-    uf <- gets psUnionFind
-    pure (UnionFind.frWith uf)
+getCanonical = Base.getCanonical
 
 -- | Get constraint and canonical function together.
 --

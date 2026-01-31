@@ -26,7 +26,6 @@ import qualified MLF.Witness.OmegaExec as OmegaExec
 import MLF.Constraint.Types
 import MLF.Constraint.Presolution.Base
 import MLF.Constraint.Presolution.StateAccess (
-    getCanonical,
     getConstraintAndCanonical,
     liftBindingError
     )

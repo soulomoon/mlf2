@@ -1,3 +1,5 @@
+{-# LANGUAGE FlexibleInstances #-}
+
 module MLF.Constraint.Presolution.Base (
     PresolutionResult(..),
     PresolutionPlanBuilder(..),
@@ -12,12 +14,14 @@ module MLF.Constraint.Presolution.Base (
     unionTrace,
     PresolutionM,
     runPresolutionM,
+    MonadPresolution(..),
     bindingPathToRootUnderM,
     requireValidBindingTree,
     edgeInteriorExact,
     orderedBindersM,
     instantiationBindersM,
-    forallSpecM
+    forallSpecM,
+    dropTrivialSchemeEdges
 ) where
 
 import Control.Applicative ((<|>))
@@ -134,6 +138,34 @@ type PresolutionM = StateT PresolutionState (Either PresolutionError)
 -- | Run a PresolutionM action with an initial state (testing helper).
 runPresolutionM :: PresolutionState -> PresolutionM a -> Either PresolutionError (a, PresolutionState)
 runPresolutionM st action = runStateT action st
+
+-- | Typeclass for monads that support presolution operations.
+-- This allows functions to be polymorphic over the concrete monad stack,
+-- reducing the need for explicit lift calls.
+class Monad m => MonadPresolution m where
+    -- | Get the current constraint.
+    getConstraint :: m Constraint
+    -- | Modify the constraint with a function.
+    modifyConstraint :: (Constraint -> Constraint) -> m ()
+    -- | Get the canonical node ID resolver (union-find lookup).
+    getCanonical :: m (NodeId -> NodeId)
+    -- | Get the full presolution state.
+    getPresolutionState :: m PresolutionState
+    -- | Put a new presolution state.
+    putPresolutionState :: PresolutionState -> m ()
+    -- | Throw a presolution error.
+    throwPresolutionError :: PresolutionError -> m a
+
+-- | Instance for the concrete PresolutionM monad.
+instance MonadPresolution PresolutionM where
+    getConstraint = gets psConstraint
+    modifyConstraint f = modify' $ \st -> st { psConstraint = f (psConstraint st) }
+    getCanonical = do
+        uf <- gets psUnionFind
+        pure (UnionFind.frWith uf)
+    getPresolutionState = get
+    putPresolutionState = put
+    throwPresolutionError = throwError
 
 bindingPathToRootUnderM
     :: (NodeId -> NodeId)
@@ -519,12 +551,15 @@ implicitBindersM canonical c0 root0 = do
                     then
                         throwError $
                             InternalError "implicitBindersM: cycle in bound dependencies"
-                    else
-                        let readySorted = sortBy (Order.compareNodesByOrderKey orderKeys) ready
-                            readySet = IntSet.fromList (map getNodeId readySorted)
-                            done' = IntSet.union done readySet
-                            remaining' = filter (\b -> not (IntSet.member (getNodeId b) readySet)) remaining
-                        in go done' remaining' (acc ++ readySorted)
+                    else case Order.sortByOrderKey orderKeys ready of
+                        Left err ->
+                            throwError $
+                                InternalError ("implicitBindersM: order key error: " ++ show err)
+                        Right readySorted ->
+                            let readySet = IntSet.fromList (map getNodeId readySorted)
+                                done' = IntSet.union done readySet
+                                remaining' = filter (\b -> not (IntSet.member (getNodeId b) readySet)) remaining
+                            in go done' remaining' (acc ++ readySorted)
         in go IntSet.empty binders []
 
     reachableFromWithBounds
@@ -551,3 +586,18 @@ forallSpecM binder0 = do
 -- | Debug binders using global trace config.
 debugBinders :: String -> a -> a
 debugBinders = debugBinding
+
+-- | Drop trivial scheme edges (let edges) from the result maps.
+dropTrivialSchemeEdges
+    :: Constraint
+    -> IntMap EdgeWitness
+    -> IntMap EdgeTrace
+    -> IntMap Expansion
+    -> (IntMap EdgeWitness, IntMap EdgeTrace, IntMap Expansion)
+dropTrivialSchemeEdges constraint witnesses traces expansions =
+    let dropEdgeIds = cLetEdges constraint
+        keepEdge eid = not (IntSet.member eid dropEdgeIds)
+        witnesses' = IntMap.filterWithKey (\eid _ -> keepEdge eid) witnesses
+        traces' = IntMap.filterWithKey (\eid _ -> keepEdge eid) traces
+        expansions' = IntMap.filterWithKey (\eid _ -> keepEdge eid) expansions
+    in (witnesses', traces', expansions')
