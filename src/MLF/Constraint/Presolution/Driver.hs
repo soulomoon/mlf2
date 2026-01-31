@@ -172,8 +172,6 @@ rewriteConstraint mapping = do
                         else go (IntSet.insert (getNodeId n') seen) n'
             in go IntSet.empty nid
 
-        -- traceCanonical n = let c = canonical n in trace ("Canonical " ++ show n ++ " -> " ++ show c) c
-
         newNodes = IntMap.fromListWith Canonicalize.chooseRepNode (mapMaybe (rewriteNode canonical) (NodeAccess.allNodes c))
         eliminated' = rewriteVarSet canonical newNodes (cEliminatedVars c)
         weakened' = rewriteVarSet canonical newNodes (cWeakenedVars c)
@@ -465,16 +463,6 @@ rewriteConstraint mapping = do
 
     let c' = c0'
 
-    let probeIds = [NodeId 2, NodeId 3]
-        probeInfo =
-            [ ( pid
-              , NodeAccess.lookupNode c' pid
-              , IntMap.lookup (nodeRefKey (typeRef pid)) (cBindParents c')
-              )
-            | pid <- probeIds
-            ]
-    debugBindParentsM ("rewriteConstraint: probe nodes " ++ show probeInfo)
-
     case Binding.checkBindingTree c' of
         Left err -> throwError (BindingTreeError err)
         Right () -> pure ()
@@ -500,16 +488,3 @@ rewriteConstraint mapping = do
 
     return fullRedirects
 
-dropTrivialSchemeEdges
-    :: Constraint
-    -> IntMap EdgeWitness
-    -> IntMap EdgeTrace
-    -> IntMap Expansion
-    -> (IntMap EdgeWitness, IntMap EdgeTrace, IntMap Expansion)
-dropTrivialSchemeEdges constraint witnesses traces expansions =
-    let dropEdgeIds = cLetEdges constraint
-        keepEdge eid = not (IntSet.member eid dropEdgeIds)
-        witnesses' = IntMap.filterWithKey (\eid _ -> keepEdge eid) witnesses
-        traces' = IntMap.filterWithKey (\eid _ -> keepEdge eid) traces
-        expansions' = IntMap.filterWithKey (\eid _ -> keepEdge eid) expansions
-    in (witnesses', traces', expansions')
