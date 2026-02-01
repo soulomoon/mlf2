@@ -159,6 +159,8 @@ class Monad m => MonadPresolution m where
     getNode :: NodeId -> m TyNode
     -- | Lookup a node at its canonical representative (throws on missing).
     getCanonicalNode :: NodeId -> m TyNode
+    -- | Lookup the binding parent of a node (returns Nothing if root).
+    lookupBindParent :: NodeRef -> m (Maybe (NodeRef, BindFlag))
 
 -- | Find the canonical representative of a node (with path compression).
 findRoot :: NodeId -> PresolutionM NodeId
@@ -189,6 +191,9 @@ instance MonadPresolution PresolutionM where
         case IntMap.lookup (getNodeId rootId) nodes of
             Just node -> pure node
             Nothing -> throwError $ NodeLookupFailed rootId
+    lookupBindParent ref = do
+        c <- gets psConstraint
+        pure $ Binding.lookupBindParent c ref
 
 bindingPathToRootUnderM
     :: (NodeId -> NodeId)

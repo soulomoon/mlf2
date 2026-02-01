@@ -28,8 +28,8 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed together with US-001"
     },
     {
       "id": "US-003",
@@ -42,8 +42,8 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented lookupBindParent for NodeRef (not NodeId) to match Binding.lookupBindParent signature"
     },
     {
       "id": "US-004",

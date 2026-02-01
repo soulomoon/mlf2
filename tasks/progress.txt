@@ -34,3 +34,19 @@
 - EdgeUnifyM already has MonadPresolution instance, so just need to add the new methods to the instance
 - Removing `lift $` calls is straightforward once the typeclass methods are available
 ---
+
+## 2026-02-01 - US-003
+- Extended MonadPresolution typeclass with lookupBindParent operation
+- Implemented in PresolutionM using Binding.lookupBindParent from the constraint state
+- Implemented in EdgeUnifyM via lift (typeclass method is now available)
+- All tests pass
+
+**Files changed:**
+- src/MLF/Constraint/Presolution/Base.hs: Added lookupBindParent to MonadPresolution typeclass, implemented in PresolutionM instance
+- src/MLF/Constraint/Presolution/EdgeUnify.hs: Added lookupBindParent to MonadPresolution EdgeUnifyM instance
+
+**Learnings for future iterations:**
+- lookupBindParent takes NodeRef (not NodeId) to match Binding.lookupBindParent signature
+- For type nodes, use `lookupBindParent (typeRef nid)` to convert NodeId to NodeRef
+- The pattern is consistent: add to typeclass in Base.hs, implement in PresolutionM, add to EdgeUnifyM via lift
+---

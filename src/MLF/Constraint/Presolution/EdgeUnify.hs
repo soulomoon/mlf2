@@ -124,6 +124,7 @@ instance MonadPresolution EdgeUnifyM where
     throwPresolutionError err = lift (throwPresolutionError err)
     getNode nid = lift (getNode nid)
     getCanonicalNode nid = lift (getCanonicalNode nid)
+    lookupBindParent ref = lift (lookupBindParent ref)
 
 -- | Testing helper: run a single edge-local unification and return the recorded
 -- instance-operation witness slice.
