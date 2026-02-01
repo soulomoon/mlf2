@@ -48,15 +48,10 @@ import MLF.Constraint.Presolution.Base (
     PresolutionState(..),
     requireValidBindingTree
     )
-import MLF.Constraint.Presolution.Ops (
-    dropVarBind,
-    findRoot,
-    lookupVarBound,
-    setVarBound
-    )
+import qualified MLF.Constraint.Presolution.Ops as Ops
+import qualified MLF.Constraint.Presolution.Unify as Unify
 import MLF.Constraint.Presolution.StateAccess (
     WithCanonicalT,
-    getConstraintAndCanonical,
     liftBindingError,
     lookupBindParentR,
     runWithCanonical
@@ -100,6 +95,23 @@ class Monad m => MonadEdgeUnify m where
     recordInstanceOp :: InstanceOp -> m ()
     -- | Lift a PresolutionM action.
     liftPresolution :: PresolutionM a -> m a
+    -- | Find the canonical representative of a node (UF root).
+    findRootM :: NodeId -> m NodeId
+    -- | Unify two nodes with raise trace (for edge-local unification).
+    unifyAcyclicRawWithRaiseTracePreferM :: Maybe NodeId -> NodeId -> NodeId -> m [NodeId]
+    -- | Lookup the instance bound of a variable.
+    lookupVarBoundM :: NodeId -> m (Maybe NodeId)
+    -- | Update the instance bound of a type variable.
+    setVarBoundM :: NodeId -> Maybe NodeId -> m ()
+    -- | Mark a type variable as eliminated.
+    dropVarBindM :: NodeId -> m ()
+    -- | Throw a PresolutionError.
+    throwPresolutionErrorM :: PresolutionError -> m a
+    -- | Check if ext is bound above edgeRoot in the binding tree.
+    -- This corresponds to the paper side-condition for RaiseMerge.
+    isBoundAboveInBindingTreeM :: NodeId -> NodeId -> m Bool
+    -- | Queue a pending weaken operation for a node.
+    queuePendingWeakenM :: NodeId -> m ()
 
 -- | Instance for the concrete EdgeUnifyM monad.
 instance MonadEdgeUnify EdgeUnifyM where
@@ -112,6 +124,14 @@ instance MonadEdgeUnify EdgeUnifyM where
     getOrderKeys = gets eusOrderKeys
     recordInstanceOp op = modify $ \st -> st { eusOps = eusOps st ++ [op] }
     liftPresolution = lift
+    findRootM nid = lift $ Ops.findRoot nid
+    unifyAcyclicRawWithRaiseTracePreferM prefer n1 n2 = lift $ Unify.unifyAcyclicRawWithRaiseTracePrefer prefer n1 n2
+    lookupVarBoundM nid = lift $ Ops.lookupVarBound nid
+    setVarBoundM nid mb = lift $ Ops.setVarBound nid mb
+    dropVarBindM nid = lift $ Ops.dropVarBind nid
+    throwPresolutionErrorM err = lift $ throwError err
+    isBoundAboveInBindingTreeM edgeRoot ext = liftPresolution $ isBoundAboveInBindingTree edgeRoot ext
+    queuePendingWeakenM nid = liftPresolution $ queuePendingWeaken nid
 
 -- | MonadPresolution instance for EdgeUnifyM, allowing presolution operations
 -- to be called without explicit lift.
@@ -126,6 +146,7 @@ instance MonadPresolution EdgeUnifyM where
     getCanonicalNode nid = lift (getCanonicalNode nid)
     lookupBindParent ref = lift (lookupBindParent ref)
     modifyPresolution f = lift (modifyPresolution f)
+    getConstraintAndCanonical = lift getConstraintAndCanonical
 
 -- | Testing helper: run a single edge-local unification and return the recorded
 -- instance-operation witness slice.
@@ -161,9 +182,9 @@ mkOmegaExecEnv copyMap =
     OmegaExec.OmegaExecEnv
         { OmegaExec.omegaMetaFor = metaFor
         , OmegaExec.omegaLookupMeta = \bv -> pure (IntMap.lookup (getNodeId bv) copyMap)
-        , OmegaExec.omegaLookupVarBound = \meta -> lift $ lookupVarBound meta
-        , OmegaExec.omegaSetVarBound = \meta mb -> lift $ setVarBound meta mb
-        , OmegaExec.omegaDropVarBind = \meta -> lift $ dropVarBind meta
+        , OmegaExec.omegaLookupVarBound = \meta -> lookupVarBoundM meta
+        , OmegaExec.omegaSetVarBound = \meta mb -> setVarBoundM meta mb
+        , OmegaExec.omegaDropVarBind = \meta -> dropVarBindM meta
         , OmegaExec.omegaUnifyNoMerge = unifyAcyclicEdgeNoMerge
         , OmegaExec.omegaRecordEliminate = recordEliminate
         , OmegaExec.omegaIsEliminated = isEliminated
@@ -171,8 +192,8 @@ mkOmegaExecEnv copyMap =
             elims <- gets eusEliminatedBinders
             pure (map NodeId (IntSet.toList elims))
         , OmegaExec.omegaWeakenMeta = \meta -> do
-            metaRoot <- lift $ findRoot meta
-            lift $ queuePendingWeaken metaRoot
+            metaRoot <- findRootM meta
+            queuePendingWeakenM metaRoot
         }
   where
     metaFor :: NodeId -> EdgeUnifyM NodeId
@@ -180,7 +201,7 @@ mkOmegaExecEnv copyMap =
         case IntMap.lookup (getNodeId bv) copyMap of
             Just m -> pure m
             Nothing ->
-                lift $ throwError (InternalError ("mkOmegaExecEnv: missing copy for binder " ++ show bv))
+                throwPresolutionErrorM (InternalError ("mkOmegaExecEnv: missing copy for binder " ++ show bv))
 
 queuePendingWeaken :: NodeId -> PresolutionM ()
 queuePendingWeaken nid =
@@ -193,7 +214,7 @@ flushPendingWeakens = do
     when (not (IntSet.null pending)) $
         forM_ (IntSet.toList pending) $ \nidInt -> do
             let nid0 = NodeId nidInt
-            nid <- findRoot nid0
+            nid <- Ops.findRoot nid0
             c0 <- gets psConstraint
             -- Redundant weakens can arise when multiple edges share the same
             -- expansion variable (merged χe). Treat "already rigid" as a no-op.
@@ -212,8 +233,8 @@ flushPendingWeakens = do
 -- recorded in Ω) without accidentally introducing an opposing Phase-2 merge.
 unifyAcyclicEdgeNoMerge :: NodeId -> NodeId -> EdgeUnifyM ()
 unifyAcyclicEdgeNoMerge n1 n2 = do
-    root1 <- lift $ findRoot n1
-    root2 <- lift $ findRoot n2
+    root1 <- findRootM n1
+    root2 <- findRootM n2
     when (root1 /= root2) $ do
         st0 <- get
         let r1 = getNodeId root1
@@ -223,10 +244,10 @@ unifyAcyclicEdgeNoMerge n1 n2 = do
             bs1 = IntMap.findWithDefault IntSet.empty r1 (eusBindersByRoot st0)
             bs2 = IntMap.findWithDefault IntSet.empty r2 (eusBindersByRoot st0)
             bs = IntSet.union bs1 bs2
-        
+
         prefer <- preferBinderMetaRoot root1 root2
-        raiseTrace <- lift $ unifyAcyclicRawWithRaiseTracePrefer prefer root1 root2
-        rep <- lift $ findRoot root2
+        raiseTrace <- unifyAcyclicRawWithRaiseTracePreferM prefer root1 root2
+        rep <- findRootM root2
         let repId = getNodeId rep
             int1 = IntMap.findWithDefault IntSet.empty r1 (eusInteriorByRoot st0)
             int2 = IntMap.findWithDefault IntSet.empty r2 (eusInteriorByRoot st0)
@@ -254,11 +275,11 @@ unifyAcyclicEdgeNoMerge n1 n2 = do
 
 initEdgeUnifyState :: [(NodeId, NodeId)] -> IntMap NodeId -> InteriorSet -> NodeId -> PresolutionM EdgeUnifyState
 initEdgeUnifyState binderArgs binderBounds interior edgeRoot = do
-    roots <- forM (IntSet.toList interior) $ \i -> findRoot (NodeId i)
+    roots <- forM (IntSet.toList interior) $ \i -> Ops.findRoot (NodeId i)
     let interiorRoots = IntSet.fromList (map getNodeId roots)
     bindersByRoot <- foldM
         (\m (bv, arg) -> do
-            r <- findRoot arg
+            r <- Ops.findRoot arg
             let k = getNodeId r
                 v = IntSet.singleton (getNodeId bv)
             pure (IntMap.insertWith IntSet.union k v m)
@@ -269,7 +290,7 @@ initEdgeUnifyState binderArgs binderBounds interior edgeRoot = do
     -- This allows us to record OpRaise for ALL interior nodes, not just binders
     interiorByRoot <- foldM
         (\m i -> do
-            r <- findRoot (NodeId i)
+            r <- Ops.findRoot (NodeId i)
             let k = getNodeId r
                 v = IntSet.singleton i
             pure (IntMap.insertWith IntSet.union k v m)
@@ -316,7 +337,7 @@ recordOp = recordInstanceOp
 
 recordEliminate :: NodeId -> EdgeUnifyM ()
 recordEliminate bv = do
-    lift $ dropVarBind bv
+    dropVarBindM bv
     modify $ \st ->
         st { eusEliminatedBinders = IntSet.insert (getNodeId bv) (eusEliminatedBinders st) }
 
@@ -335,7 +356,7 @@ recordRaisesFromTrace interiorNodes raiseTrace =
 preferBinderMetaRoot :: NodeId -> NodeId -> EdgeUnifyM (Maybe NodeId)
 preferBinderMetaRoot root1 root2 = do
     st <- get
-    metaRoots <- forM (IntMap.elems (eusBinderMeta st)) (lift . findRoot)
+    metaRoots <- forM (IntMap.elems (eusBinderMeta st)) findRootM
     let metaSet = IntSet.fromList (map getNodeId metaRoots)
         r1 = getNodeId root1
         r2 = getNodeId root2
@@ -398,7 +419,7 @@ compareBinderIdsByPrec bid1 bid2 = do
 pickRepBinderId :: IntSet.IntSet -> EdgeUnifyM Int
 pickRepBinderId bs =
     case IntSet.toList bs of
-        [] -> lift $ throwError (InternalError "pickRepBinderId: empty binder set")
+        [] -> throwPresolutionErrorM (InternalError "pickRepBinderId: empty binder set")
         (x:xs) -> foldM pick x xs
   where
     pick best cand = do
@@ -435,8 +456,8 @@ recordMergesIntoRep bs
 
 unifyAcyclicEdge :: NodeId -> NodeId -> EdgeUnifyM ()
 unifyAcyclicEdge n1 n2 = do
-    root1 <- lift $ findRoot n1
-    root2 <- lift $ findRoot n2
+    root1 <- findRootM n1
+    root2 <- findRootM n2
     when (root1 /= root2) $ do
         st0 <- get
         let r1 = getNodeId root1
@@ -449,12 +470,12 @@ unifyAcyclicEdge n1 n2 = do
 
         -- Paper alignment (`papers/these-finale-english.txt`; see `papers/xmlf.txt` §3.4 / Fig. 10):
         -- `Raise(n)` is a real
-        -- transformation of χe’s binding edges. We implement that effect via
+        -- transformation of χe's binding edges. We implement that effect via
         -- binding-edge harmonization and record the corresponding `OpRaise`
         -- steps in Ω.
         prefer <- preferBinderMetaRoot root1 root2
-        raiseTrace <- lift $ unifyAcyclicRawWithRaiseTracePrefer prefer root1 root2
-        rep <- lift $ findRoot root2
+        raiseTrace <- unifyAcyclicRawWithRaiseTracePreferM prefer root1 root2
+        rep <- findRootM root2
         let repId = getNodeId rep
             int1 = IntMap.findWithDefault IntSet.empty r1 (eusInteriorByRoot st0)
             int2 = IntMap.findWithDefault IntSet.empty r2 (eusInteriorByRoot st0)
@@ -544,8 +565,8 @@ shouldRecordRaiseMerge binder ext = do
                     -- Unbounded binder: RaiseMerge is not needed; InstApp is expressible.
                     pure False
                 Just bndOrig -> do
-                    bndRoot <- lift $ findRoot bndOrig
-                    extRoot <- lift $ findRoot ext
+                    bndRoot <- findRootM bndOrig
+                    extRoot <- findRootM ext
                     if bndRoot == extRoot
                         then do
                             case debugEdgeUnify
@@ -564,7 +585,7 @@ shouldRecordRaiseMerge binder ext = do
                                     () -> pure ()
                             pure False
                         else do
-                            above <- lift $ isBoundAboveInBindingTree edgeRoot extRoot
+                            above <- isBoundAboveInBindingTreeM edgeRoot extRoot
                             interiorRoots <- gets eusInteriorRoots
                             let inInterior = IntSet.member (getNodeId extRoot) interiorRoots
                             case debugEdgeUnify
@@ -614,8 +635,8 @@ isBoundAboveInBindingTree edgeRoot ext = do
 
 unifyStructureEdge :: NodeId -> NodeId -> EdgeUnifyM ()
 unifyStructureEdge n1 n2 = do
-    root1 <- lift $ findRoot n1
-    root2 <- lift $ findRoot n2
+    root1 <- findRootM n1
+    root2 <- findRootM n2
     case debugEdgeUnify
         ( "unifyStructureEdge: n1="
             ++ show n1
@@ -650,16 +671,16 @@ unifyStructureEdge n1 n2 = do
                             _ -> pure ()
                     _ -> pure ()
             trySetBound target bnd = do
-                (c0, canonical) <- lift getConstraintAndCanonical
+                (c0, canonical) <- getConstraintAndCanonical
                 let targetC = canonical target
                     bndC = canonical bnd
                 occurs <- case Traversal.occursInUnder canonical (NodeAccess.lookupNode c0) targetC bndC of
                     Left _ -> pure True
                     Right ok -> pure ok
                 if occurs
-                    then lift $ throwError (OccursCheckPresolution targetC bndC)
+                    then throwPresolutionErrorM (OccursCheckPresolution targetC bndC)
                     else if bndC /= targetC
-                        then lift (setVarBound targetC (Just bndC)) >> pure True
+                        then setVarBoundM targetC (Just bndC) >> pure True
                         else pure False
         if isMeta1 || isMeta2
             then
@@ -670,7 +691,7 @@ unifyStructureEdge n1 n2 = do
                     else do
                         let (metaRoot, otherNode) =
                                 if isMeta1 then (root1, node2) else (root2, node1)
-                        mbMetaBound <- lift $ lookupVarBound metaRoot
+                        mbMetaBound <- lookupVarBoundM metaRoot
                         case mbMetaBound of
                             Just bMeta -> do
                                 bMetaNode <- getCanonicalNode bMeta
@@ -709,6 +730,6 @@ unifyStructureEdge n1 n2 = do
 
 isBinderMetaRoot :: NodeId -> EdgeUnifyM Bool
 isBinderMetaRoot root = do
-    metaRoots <- gets eusBinderMeta >>= mapM (lift . findRoot) . IntMap.elems
+    metaRoots <- gets eusBinderMeta >>= mapM findRootM . IntMap.elems
     let metaSet = IntSet.fromList (map getNodeId metaRoots)
     pure (IntSet.member (getNodeId root) metaSet)
