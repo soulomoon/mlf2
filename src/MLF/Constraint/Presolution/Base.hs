@@ -155,6 +155,18 @@ class Monad m => MonadPresolution m where
     putPresolutionState :: PresolutionState -> m ()
     -- | Throw a presolution error.
     throwPresolutionError :: PresolutionError -> m a
+    -- | Lookup a node in the constraint graph (throws on missing).
+    getNode :: NodeId -> m TyNode
+    -- | Lookup a node at its canonical representative (throws on missing).
+    getCanonicalNode :: NodeId -> m TyNode
+
+-- | Find the canonical representative of a node (with path compression).
+findRoot :: NodeId -> PresolutionM NodeId
+findRoot nid = do
+    uf <- gets psUnionFind
+    let (root, uf') = UnionFind.findRootWithCompression uf nid
+    modify' $ \st -> st { psUnionFind = uf' }
+    pure root
 
 -- | Instance for the concrete PresolutionM monad.
 instance MonadPresolution PresolutionM where
@@ -166,6 +178,17 @@ instance MonadPresolution PresolutionM where
     getPresolutionState = get
     putPresolutionState = put
     throwPresolutionError = throwError
+    getNode nid = do
+        nodes <- gets (cNodes . psConstraint)
+        case IntMap.lookup (getNodeId nid) nodes of
+            Just n -> pure n
+            Nothing -> throwError $ NodeLookupFailed nid
+    getCanonicalNode nid = do
+        rootId <- findRoot nid
+        nodes <- gets (cNodes . psConstraint)
+        case IntMap.lookup (getNodeId rootId) nodes of
+            Just node -> pure node
+            Nothing -> throwError $ NodeLookupFailed rootId
 
 bindingPathToRootUnderM
     :: (NodeId -> NodeId)

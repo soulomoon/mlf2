@@ -51,8 +51,6 @@ import MLF.Constraint.Presolution.Base (
 import MLF.Constraint.Presolution.Ops (
     dropVarBind,
     findRoot,
-    getCanonicalNode,
-    getNode,
     lookupVarBound,
     setVarBound
     )
@@ -124,6 +122,8 @@ instance MonadPresolution EdgeUnifyM where
     getPresolutionState = lift getPresolutionState
     putPresolutionState st = lift (putPresolutionState st)
     throwPresolutionError err = lift (throwPresolutionError err)
+    getNode nid = lift (getNode nid)
+    getCanonicalNode nid = lift (getCanonicalNode nid)
 
 -- | Testing helper: run a single edge-local unification and return the recorded
 -- instance-operation witness slice.
@@ -494,7 +494,7 @@ unifyAcyclicEdge n1 n2 = do
             let repBinder = NodeId repBinderId
             case (IntSet.null bs1, IntSet.null bs2) of
                 (False, True) | inInt1 && not inInt2 -> do
-                    node2 <- lift $ getCanonicalNode root2
+                    node2 <- getCanonicalNode root2
                     case node2 of
                         TyVar{} -> do
                             should <- shouldRecordRaiseMerge repBinder root2
@@ -508,7 +508,7 @@ unifyAcyclicEdge n1 n2 = do
                                 recordEliminate repBinder
                         _ -> pure ()
                 (True, False) | inInt2 && not inInt1 -> do
-                    node1 <- lift $ getCanonicalNode root1
+                    node1 <- getCanonicalNode root1
                     case node1 of
                         TyVar{} -> do
                             should <- shouldRecordRaiseMerge rep root1
@@ -524,7 +524,7 @@ shouldRecordRaiseMerge :: NodeId -> NodeId -> EdgeUnifyM Bool
 shouldRecordRaiseMerge binder ext = do
     edgeRoot <- gets eusEdgeRoot
     binderBounds <- gets eusBinderBounds
-    extNode <- lift $ getNode ext
+    extNode <- getNode ext
     case extNode of
         TyVar{} -> do
             case IntMap.lookup (getNodeId binder) binderBounds of
@@ -629,8 +629,8 @@ unifyStructureEdge n1 n2 = do
             () -> pure ()
     if root1 == root2 then pure ()
     else do
-        node1 <- lift $ getCanonicalNode n1
-        node2 <- lift $ getCanonicalNode n2
+        node1 <- getCanonicalNode n1
+        node2 <- getCanonicalNode n2
         isMeta1 <- isBinderMetaRoot root1
         isMeta2 <- isBinderMetaRoot root2
         let isVar1 = case node1 of
@@ -671,7 +671,7 @@ unifyStructureEdge n1 n2 = do
                         mbMetaBound <- lift $ lookupVarBound metaRoot
                         case mbMetaBound of
                             Just bMeta -> do
-                                bMetaNode <- lift $ getCanonicalNode bMeta
+                                bMetaNode <- getCanonicalNode bMeta
                                 case bMetaNode of
                                     TyVar{} -> do
                                         _ <- trySetBound bMeta (tnId otherNode)

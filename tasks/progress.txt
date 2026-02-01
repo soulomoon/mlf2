@@ -6,3 +6,31 @@
 
 ---
 
+## Codebase Patterns
+
+- **Module Import Cycles**: Ops.hs imports Base.hs, so Base cannot import Ops. Implement typeclass methods directly in Base.hs using local definitions.
+- **Typeclass Method Naming**: When adding methods to MonadPresolution that conflict with Ops functions, remove imports from Ops in consuming modules and use the typeclass methods directly.
+- **Lift Removal**: After adding methods to MonadPresolution, remove `lift $` calls before those methods in EdgeUnifyM since they now come from the typeclass instance.
+
+---
+
+## 2026-02-01 - US-001
+- Extended MonadPresolution typeclass with getNode and getCanonicalNode operations
+- Implemented methods in PresolutionM instance using local findRoot and node lookup
+- Implemented methods in EdgeUnifyM instance via liftPresolution
+- Removed getNode and getCanonicalNode imports from Ops in EdgeUnify.hs
+- Removed `lift $` calls before getNode/getCanonicalNode in EdgeUnify.hs (5 occurrences)
+- Removed getNode and getCanonicalNode imports from Ops in EdgeProcessing.hs
+- All tests pass
+
+**Files changed:**
+- src/MLF/Constraint/Presolution/Base.hs: Added getNode and getCanonicalNode to MonadPresolution typeclass, implemented findRoot and instance methods
+- src/MLF/Constraint/Presolution/EdgeUnify.hs: Removed Ops imports, removed lift $ calls
+- src/MLF/Constraint/Presolution/EdgeProcessing.hs: Removed Ops imports
+
+**Learnings for future iterations:**
+- When adding typeclass methods that conflict with existing functions in other modules, need to remove imports from those modules
+- The Ops module imports Base, so Base cannot import Ops - must implement methods directly
+- EdgeUnifyM already has MonadPresolution instance, so just need to add the new methods to the instance
+- Removing `lift $` calls is straightforward once the typeclass methods are available
+---

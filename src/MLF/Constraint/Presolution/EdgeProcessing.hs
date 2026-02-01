@@ -31,8 +31,6 @@ import MLF.Constraint.Presolution.StateAccess (
     )
 import MLF.Constraint.Presolution.Ops (
     findRoot,
-    getCanonicalNode,
-    getNode,
     setBindParentM,
     setVarBound,
     )
