@@ -1,3 +1,5 @@
+{-# LANGUAGE FlexibleInstances #-}
+
 {-|
 Phase 5 — Global unification (Rémy–Yakobowski, TLDI 2007; ICFP 2008 §3/§5)
 
@@ -101,10 +103,13 @@ module MLF.Constraint.Solve (
     solveUnify,
     validateSolvedGraph,
     validateSolvedGraphStrict,
-    frWith
+    frWith,
+    MonadSolve(..),
+    SolveM
 ) where
 
 import Control.Monad (forM, forM_, unless, when)
+import Control.Monad.Except (throwError)
 import Control.Monad.State.Strict
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
@@ -176,6 +181,26 @@ data SolveState = SolveState
     }
 
 type SolveM = StateT SolveState (Either SolveError)
+
+-- | Typeclass for monads that support solve-phase operations.
+-- This allows functions to be polymorphic over the concrete monad stack,
+-- reducing the need for explicit lift calls.
+class Monad m => MonadSolve m where
+    -- | Get the current constraint.
+    getConstraint :: m Constraint
+    -- | Modify the constraint with a function.
+    modifyConstraint :: (Constraint -> Constraint) -> m ()
+    -- | Get the current union-find map.
+    getUnionFind :: m (IntMap NodeId)
+    -- | Throw a solve error.
+    throwSolveError :: SolveError -> m a
+
+-- | Instance for the concrete SolveM monad.
+instance MonadSolve SolveM where
+    getConstraint = gets suConstraint
+    modifyConstraint f = modify' $ \s -> s { suConstraint = f (suConstraint s) }
+    getUnionFind = gets suUnionFind
+    throwSolveError = throwError
 
 -- | Drain all unification edges; assumes instantiation work was already done
 -- by earlier phases. Returns the rewritten constraint and the final UF map.
