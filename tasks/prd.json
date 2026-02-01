@@ -72,8 +72,8 @@
         "All tests pass"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added getConstraintAndCanonical to MonadPresolution, added isBoundAboveInBindingTreeM and queuePendingWeakenM to MonadEdgeUnify. Reduced liftPresolution $ calls from 3 to 0 in user code."
     },
     {
       "id": "US-006",
@@ -85,8 +85,8 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented MonadSolve typeclass with all required methods. Exported MonadSolve(..) and SolveM from module."
     },
     {
       "id": "US-007",
