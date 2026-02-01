@@ -413,7 +413,7 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
                                         TBottom -> Nothing
                                         TVar v | v == name -> Nothing
                                         TVar{} -> Nothing
-                                        _ -> Just (elabToBound bndTy')
+                                        _ -> either (const Nothing) Just (elabToBound bndTy')
                                 pure (name, mbBound)
                 in mapM computeBound (zip binders names)
 

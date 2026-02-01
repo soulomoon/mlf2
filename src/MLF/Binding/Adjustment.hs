@@ -100,12 +100,13 @@ harmonizeBindParentsWithTrace n1 n2 c0 = do
 -- | Harmonize binding parents without returning the trace.
 --
 -- This is a convenience wrapper around 'harmonizeBindParentsWithTrace'.
+-- On error, returns the original constraint unchanged (consistent with
+-- 'raiseToParent' and the normalization pipeline's error-deferral strategy).
 harmonizeBindParents :: NodeRef -> NodeRef -> Constraint -> Constraint
 harmonizeBindParents n1 n2 c =
     case harmonizeBindParentsWithTrace n1 n2 c of
         Right (c', _) -> c'
-        Left err ->
-            error ("harmonizeBindParents: " ++ show err)
+        Left _ -> c
 
 -- | Raise a node until its parent is the target.
 --

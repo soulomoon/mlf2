@@ -12,12 +12,14 @@ quantifier ordering follow the paper’s ≺ convention (see Phase 8B in
 -}
 module MLF.Util.Order (
     OrderKey(..),
+    OrderKeyError(..),
     compareOrderKey,
     orderKeysFromRootWith,
     orderKeysFromConstraintWith,
     orderKeysFromRoot,
     orderKeysFromRootRestricted,
-    compareNodesByOrderKey
+    compareNodesByOrderKey,
+    sortByOrderKey
 ) where
 
 import Data.IntMap.Strict (IntMap)
@@ -27,7 +29,7 @@ import qualified Data.IntSet as IntSet
 import qualified MLF.Constraint.Solve as Solve (frWith)
 import MLF.Constraint.Solve (SolveResult(..))
 import MLF.Constraint.Types (Constraint(..), NodeId(..), TyNode(..))
-import MLF.Util.OrderKey (OrderKey(..), compareOrderKey, orderKeysFromRootWith, orderKeysFromRootWithExtra, compareNodesByOrderKey)
+import MLF.Util.OrderKey (OrderKey(..), OrderKeyError(..), compareOrderKey, orderKeysFromRootWith, orderKeysFromRootWithExtra, compareNodesByOrderKey, sortByOrderKey)
 
 -- | Compute best order keys for all nodes reachable from @root@, using the
 -- solved graph’s union-find canonicalization.

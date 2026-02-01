@@ -12,17 +12,27 @@ cycles through Solve.
  -}
 module MLF.Util.OrderKey (
     OrderKey(..),
+    OrderKeyError(..),
     compareOrderKey,
     orderKeysFromRootWithExtra,
     orderKeysFromRootWith,
-    compareNodesByOrderKey
+    compareNodesByOrderKey,
+    sortByOrderKey
 ) where
 
+import Control.Monad (forM_)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
+import Data.List (sortBy)
 
 import MLF.Constraint.Types (NodeId(..), TyNode, structuralChildren)
+
+-- | Errors that can occur when comparing nodes by order key.
+data OrderKeyError
+    = MissingOrderKey NodeId
+    | EqualKeysDistinctNodes NodeId NodeId
+    deriving (Eq, Show)
 
 -- | A “best occurrence” position key for a node in a (shared) type DAG.
 --
@@ -120,22 +130,42 @@ orderKeysFromRootWith canonical nodes root0 mbAllowed =
 --
 -- Missing keys indicate a bug at the call site: all compared nodes must be
 -- reachable from the root used to compute the keys.
-compareNodesByOrderKey :: IntMap OrderKey -> NodeId -> NodeId -> Ordering
+compareNodesByOrderKey :: IntMap OrderKey -> NodeId -> NodeId -> Either OrderKeyError Ordering
 compareNodesByOrderKey m a b =
     case (IntMap.lookup (getNodeId a) m, IntMap.lookup (getNodeId b) m) of
         (Just ka, Just kb) ->
             case compareOrderKey ka kb of
                 EQ ->
                     if a == b
-                        then EQ
-                        else
-                            error $
-                                "compareNodesByOrderKey: equal order keys for distinct nodes "
-                                    ++ show a
-                                    ++ " and "
-                                    ++ show b
-                other -> other
+                        then Right EQ
+                        else Left (EqualKeysDistinctNodes a b)
+                other -> Right other
         (Nothing, _) ->
-            error ("compareNodesByOrderKey: missing order key for " ++ show a)
+            Left (MissingOrderKey a)
         (_, Nothing) ->
-            error ("compareNodesByOrderKey: missing order key for " ++ show b)
+            Left (MissingOrderKey b)
+
+-- | Sort a list of nodes by their order keys.
+--
+-- Returns Left if any node is missing an order key or if distinct nodes have
+-- equal keys.
+sortByOrderKey :: IntMap OrderKey -> [NodeId] -> Either OrderKeyError [NodeId]
+sortByOrderKey m nodes = do
+    -- Validate all nodes have keys and no duplicates exist
+    forM_ nodes $ \nid ->
+        case IntMap.lookup (getNodeId nid) m of
+            Nothing -> Left (MissingOrderKey nid)
+            Just _ -> Right ()
+    -- Check for equal keys on distinct nodes by comparing all pairs
+    -- (This is O(n^2) but the lists are typically small)
+    let indexed = [(nid, IntMap.lookup (getNodeId nid) m) | nid <- nodes]
+    forM_ [(a, ka, b, kb) | (a, Just ka) <- indexed, (b, Just kb) <- indexed, a /= b] $
+        \(a, ka, b, kb) ->
+            if compareOrderKey ka kb == EQ
+                then Left (EqualKeysDistinctNodes a b)
+                else Right ()
+    -- Safe to use sortBy now since we validated
+    let cmp x y = case compareNodesByOrderKey m x y of
+            Right ord -> ord
+            Left _ -> EQ  -- unreachable after validation
+    Right (sortBy cmp nodes)

@@ -77,7 +77,8 @@ reduceInst v inst = do
                     bound1 <- either (const Nothing) Just (applyInstantiation bound0 phi)
                     let mb' = case bound1 of
                             TBottom -> Nothing
-                            _ -> Just (elabToBound bound1)
+                            TVar{} -> Nothing
+                            _ -> either (const Nothing) Just (elabToBound bound1)
                         body' = replaceAbstrInTerm name (InstSeq phi (InstAbstr name)) body
                     Just (ETyAbs name mb' body')
                 _ -> Nothing)
@@ -176,7 +177,13 @@ substTypeVarTerm :: String -> ElabType -> ElabTerm -> ElabTerm
 substTypeVarTerm x s = goSub
   where
     freeS = freeTypeVarsType s
-    substBoundVar = fmap (elabToBound . substTypeCapture x s . tyToElab)
+    substBoundVar mb = do
+        bnd <- mb
+        let result = substTypeCapture x s (tyToElab bnd)
+        case result of
+            TVar{} -> Nothing
+            TBottom -> Nothing
+            _ -> either (const Nothing) Just (elabToBound result)
     goSub = para alg
       where
         alg term = case term of

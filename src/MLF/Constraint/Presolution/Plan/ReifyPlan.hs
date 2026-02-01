@@ -584,7 +584,10 @@ bindingFor env plan (name, nidInt) = do
                         [ "alias bounds survived scheme finalization: "
                             ++ show [name]
                         ]
-            _ -> Right (fmap elabToBound mbBound)
+            Nothing -> Right Nothing
+            Just bnd -> case elabToBound bnd of
+                Left err -> Left $ ValidationFailed [err]
+                Right typed -> Right (Just typed)
     case mbBoundTyped of
         Left err -> Left err
         Right typed -> pure (name, typed)

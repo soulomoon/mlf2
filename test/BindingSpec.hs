@@ -308,7 +308,7 @@ bindingTreeSpec = describe "MLF.Binding.Tree" $ do
                         , (getNodeId rightLeaf, TyVar { tnId = rightLeaf, tnBound = Nothing })
                         ]
                 keys = Order.orderKeysFromRootWith id nodes root Nothing
-            Order.compareNodesByOrderKey keys left deep `shouldBe` LT
+            Order.compareNodesByOrderKey keys left deep `shouldBe` Right LT
 
         it "selects the leftmost-lowermost path for shared nodes" $ do
             -- Shared node reachable via [0,0] and [1,0]; choose [0,0].
@@ -984,7 +984,7 @@ bindingTreeSpec = describe "MLF.Binding.Tree" $ do
                     isSorted [] = True
                     isSorted [_] = True
                     isSorted (x:y:rest) =
-                        Order.compareNodesByOrderKey orderKeys x y /= GT && isSorted (y:rest)
+                        Order.compareNodesByOrderKey orderKeys x y /= Right GT && isSorted (y:rest)
                 case orderedBinders id c (typeRef binder) of
                     Left err -> expectationFailure ("orderedBinders failed: " ++ show err)
                     Right binders -> isSorted binders `shouldBe` True

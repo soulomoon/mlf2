@@ -105,6 +105,7 @@ library mlf2-internal
                       MLF.Constraint.Presolution.Plan.SchemeRoots,
                       MLF.Constraint.Presolution.Plan.Target,
                       MLF.Constraint.Presolution.Unify,
+                      MLF.Constraint.Presolution.WitnessCanon,
                       MLF.Constraint.Presolution.WitnessNorm,
                       MLF.Constraint.Presolution.WitnessValidation,
                       MLF.Constraint.Canonicalize,

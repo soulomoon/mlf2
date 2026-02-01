@@ -133,7 +133,12 @@ contextToNodeBoundWithOrderKeys canonical keys c _namedSet root target = do
             Left $
                 InstantiationError $
                     "contextToNodeBound: missing order keys for " ++ show missing
-        pure (sortBy (Order.compareNodesByOrderKey keys) bindersReachable)
+        case Order.sortByOrderKey keys bindersReachable of
+            Left err ->
+                Left $
+                    InstantiationError $
+                        "contextToNodeBound: order key error: " ++ show err
+            Right sorted -> pure sorted
 
     go
         :: IntSet.IntSet

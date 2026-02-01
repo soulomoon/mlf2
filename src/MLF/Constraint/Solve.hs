@@ -132,6 +132,7 @@ data SolveError
     | OccursCheckFailed NodeId NodeId   -- ^ (var, target)
     | UnexpectedExpNode NodeId
     | BindingTreeError BindingError
+    | ValidationFailed [String]         -- ^ Post-solve validation failures
     deriving (Eq, Show)
 
 -- | Successful unification result.
@@ -220,7 +221,7 @@ solveUnify c0 = do
                         violations = validateSolvedGraph res
                     if null violations
                         then pure res
-                        else error ("validateSolvedGraph failed: " ++ unlines violations)
+                        else Left (ValidationFailed violations)
   where
     loop :: SolveM ()
     loop = do

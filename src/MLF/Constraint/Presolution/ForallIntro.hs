@@ -147,9 +147,13 @@ bindForallBindersFromSpec forallId bodyRoot ForallSpec{ fsBinderCount = k, fsBou
                 Just (_p, flag) -> flag == BindFlex
 
         (freeLike0, other0) = partition isFreeLike liveVarsReachable
-        freeLike = sortBy (Order.compareNodesByOrderKey orderKeys) freeLike0
-        other = sortBy (Order.compareNodesByOrderKey orderKeys) (filter isFlexBound other0)
-        candidates0 = freeLike ++ other
+    freeLike <- case Order.sortByOrderKey orderKeys freeLike0 of
+        Left err -> throwError $ InternalError ("bindForallBindersFromSpec: order key error: " ++ show err)
+        Right sorted -> pure sorted
+    other <- case Order.sortByOrderKey orderKeys (filter isFlexBound other0) of
+        Left err -> throwError $ InternalError ("bindForallBindersFromSpec: order key error: " ++ show err)
+        Right sorted -> pure sorted
+    let candidates0 = freeLike ++ other
         bodyIsWrapper =
             case IntMap.lookup (getNodeId bodyC) nodes0 of
                 Just TyVar{} ->

@@ -521,7 +521,7 @@ reifyWith _contextLabel res nameForVar isNamed rootMode nid =
                             TBottom -> Nothing
                             TVar{} -> Nothing
                             _ | selfBound -> Nothing
-                              | otherwise -> Just (elabToBound boundTy)
+                              | otherwise -> either (const Nothing) Just (elabToBound boundTy)
                 pure (cache', TForall (varName b) mbBound acc)
             )
             (cache, inner)
@@ -596,8 +596,9 @@ reifyWith _contextLabel res nameForVar isNamed rootMode nid =
                 ]
             cmpReady a b =
                 case Order.compareNodesByOrderKey orderKeys (NodeId a) (NodeId b) of
-                    EQ -> compare a b
-                    other -> other
+                    Right EQ -> compare a b
+                    Right other -> other
+                    Left _ -> compare a b  -- fallback if missing key (validated above)
         unless (null missing) $
             Left $
                 InstantiationError $
@@ -748,7 +749,8 @@ reifyBoundWithNames res subst =
 
 reifyBoundWithNamesBound :: SolveResult -> IntMap.IntMap String -> NodeId -> Either ElabError BoundType
 reifyBoundWithNamesBound res subst =
-    reifyWithAs "reifyBoundWithNamesBound" res varNameFor isNamed RootBound (Right . elabToBound)
+    reifyWithAs "reifyBoundWithNamesBound" res varNameFor isNamed RootBound
+        (\ty -> either (Left . InstantiationError) Right (elabToBound ty))
   where
     uf = srUnionFind res
     canonical = Solve.frWith uf

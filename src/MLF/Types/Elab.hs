@@ -137,14 +137,14 @@ tyToElab ty = case ty of
     TBottom -> TBottom
     TForall v mb body -> TForall v mb (tyToElab body)
 
-elabToBound :: ElabType -> BoundType
+elabToBound :: ElabType -> Either String BoundType
 elabToBound ty = case ty of
     TVar v ->
-        error ("elabToBound: unexpected variable bound " ++ show v)
-    TArrow a b -> TArrow a b
-    TBase b -> TBase b
-    TForall v mb body -> TForall v mb body
-    TBottom -> TBottom
+        Left ("elabToBound: unexpected variable bound " ++ show v)
+    TArrow a b -> Right (TArrow a b)
+    TBase b -> Right (TBase b)
+    TForall v mb body -> Right (TForall v mb body)
+    TBottom -> Right TBottom
 
 containsForallTy :: Ty v -> Bool
 containsForallTy = cataIxConst alg

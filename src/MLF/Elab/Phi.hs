@@ -588,7 +588,9 @@ phiFromEdgeWitnessWithTrace generalizeAtWith res mbGaParents mSchemeInfo mTrace 
                     (Just a, Just b) ->
                         let ca = canonicalNode a
                             cb = canonicalNode b
-                        in Order.compareNodesByOrderKey orderKeys ca cb
+                        in case Order.compareNodesByOrderKey orderKeys ca cb of
+                            Right ord -> ord
+                            Left _ -> compare i j  -- fallback if missing key
                     (Just _, Nothing) -> LT
                     (Nothing, Just _) -> GT
                     (Nothing, Nothing) -> compare i j

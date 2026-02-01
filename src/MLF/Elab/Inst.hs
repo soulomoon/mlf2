@@ -59,7 +59,8 @@ evalInstantiationWith spec inst = eval inst
             (k1, b1) <- phiFn (k, env', b0)
             let mb' = case b1 of
                     TBottom -> Nothing
-                    _ -> Just (elabToBound b1)
+                    TVar{} -> Nothing
+                    _ -> either (const Nothing) Just (elabToBound b1)
             Right (k1, TForall v mb' body)
         _ -> Left (instInsideError spec errInst t)
 
