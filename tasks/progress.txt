@@ -1,0 +1,8 @@
+# Ralph Progress Log
+
+## Project: MLF Monad Stack Simplification
+## Branch: ralph/monad-stack-simplification
+## Started: 2026-02-01
+
+---
+
