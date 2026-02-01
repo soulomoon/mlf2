@@ -26,6 +26,10 @@
 
 - Match existing formatting: 4-space indentation, explicit module export lists, and GHC-style `{- Note [...] -}` blocks for design rationale.
 - Keep builds warning-free (`-Wall` is enabled in `mlf2.cabal`). Prefer total pattern matches and clear error constructors.
+- Many modules import `MLF.Constraint.Types` unqualified; when adding new exports with common names, check for clashes and use `hiding` or explicit imports as needed.
+- Gen-node maps use `GenNodeMap` (`cGenNodes`); prefer `lookupGen`/`insertGen`/`fromListGen` or unwrap with `getGenNodeMap` when an `IntMap` API is required.
+- Presolution.Base defines node-set newtypes (`InteriorNodes`, `FrontierNodes`); prefer these + helpers over raw `IntSet` when plumbing node sets across modules.
+- Presolution traces use `CopyMapping` (`EdgeTrace.etCopyMap`); prefer `lookupCopy`/`insertCopy`/`copiedNodes`/`originalNodes` and unwrap with `getCopyMapping` when an `IntMap` API is required.
 - Naming conventions:
   - Modules: `src/MLF/Foo/Bar.hs` defines `module MLF.Foo.Bar`.
   - Public entry modules: `src-public/MLF/API.hs` defines `module MLF.API` (similarly `MLF.Pipeline`).
@@ -34,6 +38,7 @@
 ## Testing Guidelines
 
 - Framework: Hspec (`hspec`).
+- `mlf2-test` can only import exposed modules; if tests need helpers/types from internal modules, re-export them from an exposed entrypoint (e.g., `MLF.Constraint.Presolution`).
 - When adding a new spec module, wire it into both:
   - `mlf2.cabal` → `test-suite mlf2-test` → `other-modules`
   - `test/Main.hs` (import the module and call `spec`)

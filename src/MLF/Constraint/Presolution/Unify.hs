@@ -22,7 +22,7 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified MLF.Binding.Adjustment as BindingAdjustment
 import qualified MLF.Constraint.Traversal as Traversal
 import qualified MLF.Constraint.VarStore as VarStore
-import MLF.Constraint.Types
+import MLF.Constraint.Types hiding (lookupNode)
 import MLF.Constraint.Presolution.Base (PresolutionError(..), PresolutionM, PresolutionState(..))
 import MLF.Constraint.Presolution.Ops (findRoot)
 import MLF.Constraint.Presolution.StateAccess (getConstraintAndCanonical)
@@ -79,11 +79,11 @@ unifyAcyclicRootsWithRaiseTracePrefer prefer root1 root2 = do
         aElim = VarStore.isEliminatedVar c1 root1
         bElim = VarStore.isEliminatedVar c1 root2
         isTyVar nid =
-            case IntMap.lookup (getNodeId nid) nodes of
+            case lookupNodeIn nodes nid of
                 Just TyVar{} -> True
                 _ -> False
         hasBound nid =
-            case IntMap.lookup (getNodeId nid) nodes of
+            case lookupNodeIn nodes nid of
                 Just TyVar{ tnBound = Just _ } -> True
                 _ -> False
         (fromRoot0, toRoot0) =

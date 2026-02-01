@@ -72,6 +72,9 @@ import qualified MLF.Util.Order as Order
 import qualified MLF.Util.IntMapUtils as IntMapUtils
 import MLF.Constraint.BindingUtil (bindingScopeFor)
 
+lookupNodeInMap :: IntMap.IntMap TyNode -> NodeId -> Maybe TyNode
+lookupNodeInMap nodes nid = IntMap.lookup (getNodeId nid) nodes
+
 data GaBindParentsInfo = GaBindParentsInfo
     { gbiBindParentsBase :: BindParents
     , gbiBaseConstraint :: Constraint
@@ -208,7 +211,7 @@ buildBinderPlan BinderPlanInput{..} = do
                         Just bnd ->
                             [ canonical (NodeId nid)
                             | nid <- IntSet.toList (reachableFromWithBounds bnd)
-                            , case IntMap.lookup nid nodes of
+                            , case lookupNodeInMap nodes (NodeId nid) of
                                 Just TyVar{} -> not (VarStore.isEliminatedVar constraint (NodeId nid))
                                 _ -> False
                             ]
@@ -238,13 +241,13 @@ buildBinderPlan BinderPlanInput{..} = do
                     Just bnd -> canonical bnd == canonical target0
                     Nothing -> False
     let extraReachable =
-            case (scopeGen, IntMap.lookup (getNodeId typeRoot0) nodes) of
+            case (scopeGen, lookupNodeInMap nodes typeRoot0) of
                 (Just _, _) -> []
                 (_, Just TyVar{}) -> []
                 (Nothing, _) ->
                     [ canonical v
                     | nid <- IntSet.toList reachable
-                    , Just TyVar{} <- [IntMap.lookup nid nodes]
+                    , Just TyVar{} <- [lookupNodeInMap nodes (NodeId nid)]
                     , let v = NodeId nid
                     , not (VarStore.isEliminatedVar constraint (canonical v))
                     , not (elem (canonical v) binders0Adjusted)
@@ -255,10 +258,10 @@ buildBinderPlan BinderPlanInput{..} = do
         bindersCandidates = binders0Adjusted ++ extraReachable ++ namedUnderGa
         canonicalBinder v =
             let vC = canonical v
-            in case IntMap.lookup (getNodeId vC) nodes of
+            in case lookupNodeInMap nodes vC of
                 Just TyVar{} -> vC
                 _ ->
-                    case IntMap.lookup (getNodeId v) nodes of
+                    case lookupNodeInMap nodes v of
                         Just TyVar{} -> v
                         _ -> vC
         canonicalizeBinder v =
@@ -298,7 +301,7 @@ buildBinderPlan BinderPlanInput{..} = do
         boundIsStructuralAlias v =
             case VarStore.lookupVarBound constraint (canonical v) of
                 Just bnd | bndC == canonical typeRoot || bndC == canonical typeRootForScheme ->
-                    case IntMap.lookup (getNodeId bndC) nodes of
+                    case lookupNodeInMap nodes bndC of
                         Just TyArrow{} -> True
                         Just TyForall{} -> True
                         Just TyExp{} -> True
@@ -337,7 +340,7 @@ buildBinderPlan BinderPlanInput{..} = do
                                             Nothing -> False
                             reachableFromWithBoundsBase root0 =
                                 let children nid =
-                                        case IntMap.lookup (getNodeId nid) baseNodes of
+                                        case lookupNodeIn baseNodes nid of
                                             Nothing -> []
                                             Just node ->
                                                 case node of
@@ -348,7 +351,7 @@ buildBinderPlan BinderPlanInput{..} = do
                                                         structuralChildren node
                                 in reachableFrom getNodeId id children root0
                             isNamedOutsideBase nidInt =
-                                case IntMap.lookup nidInt baseNodes of
+                                case lookupNodeIn baseNodes (NodeId nidInt) of
                                     Just TyVar{} ->
                                         case IntMap.lookup (nodeRefKey (TypeRef (NodeId nidInt))) baseParents of
                                             Just (GenRef _, _) ->
@@ -368,7 +371,7 @@ buildBinderPlan BinderPlanInput{..} = do
                                 isNamedOutside nidInt =
                                     let nidC = canonical (NodeId nidInt)
                                         keyC = getNodeId nidC
-                                    in case IntMap.lookup keyC nodes of
+                                    in case lookupNodeInMap nodes nidC of
                                         Just TyVar{} ->
                                             if IntSet.member keyC nestedSchemeInteriorSet
                                                 then False
@@ -389,7 +392,7 @@ buildBinderPlan BinderPlanInput{..} = do
                                 keyC = getNodeId nidC
                             in if IntSet.member keyC nestedSchemeInteriorSet
                                 then False
-                                else case IntMap.lookup keyC nodes of
+                                else case lookupNodeInMap nodes nidC of
                                     Just TyVar{} ->
                                         case IntMap.lookup keyC gammaAlias of
                                             Just repKey -> repKey == binderKey
@@ -404,14 +407,14 @@ buildBinderPlan BinderPlanInput{..} = do
                     Nothing -> True
                     Just bnd ->
                         let bndC = canonical bnd
-                        in case (IntMap.lookup (getNodeId bndC) nodes, VarStore.lookupVarBound constraint bndC) of
+                        in case (lookupNodeInMap nodes bndC, VarStore.lookupVarBound constraint bndC) of
                             (Just TyVar{}, Nothing) -> True
                             (Just TyBottom{}, _) -> True
                             _ -> False
         boundIsVarAlias v =
             case VarStore.lookupVarBound constraint (canonical v) of
                 Just bnd ->
-                    case IntMap.lookup (getNodeId (canonical bnd)) nodes of
+                    case lookupNodeInMap nodes (canonical bnd) of
                         Just TyVar{} -> True
                         _ -> False
                 _ -> False
@@ -444,7 +447,7 @@ buildBinderPlan BinderPlanInput{..} = do
                 | (childKey, (parentRef, _flag)) <- IntMap.toList bindParents
                 , TypeRef parent <- [parentRef]
                 , IntSet.member (canonKey parent) reachableType
-                , case IntMap.lookup (canonKey parent) nodes of
+                , case lookupNodeInMap nodes (canonical parent) of
                     Just TyForall{} -> True
                     _ -> False
                 , IntSet.member (canonKey parent) schemeRootKeySet
@@ -636,7 +639,7 @@ buildBinderPlan BinderPlanInput{..} = do
                                 boundRootWith
                                     getNodeId
                                     id
-                                    (`IntMap.lookup` baseNodes)
+                                    (\key -> lookupNodeIn baseNodes (NodeId key))
                                     (VarStore.lookupVarBound baseConstraint)
                                     (`IntMap.lookup` schemeRootByBodyBase)
                                     False
@@ -659,7 +662,7 @@ buildBinderPlan BinderPlanInput{..} = do
                                 let bndRootKey = getNodeId bndRoot
                                     freeNames0 = Set.toList (freeTypeVarsFrom Set.empty boundTy)
                                     freeNames =
-                                        case (boundTy, IntMap.lookup bndRootKey baseNodes, VarStore.lookupVarBound baseConstraint bndRoot) of
+                                        case (boundTy, lookupNodeIn baseNodes bndRoot, VarStore.lookupVarBound baseConstraint bndRoot) of
                                             (TBottom, Just TyVar{}, Nothing) ->
                                                 [nameForDep bndRootKey]
                                             _ -> freeNames0
@@ -704,7 +707,7 @@ buildBinderPlan BinderPlanInput{..} = do
                                 bndRootKey = getNodeId bndRootC
                                 freeNames0 = Set.toList (freeTypeVarsFrom Set.empty boundTy)
                                 freeNames =
-                                    case (boundTy, IntMap.lookup bndRootKey nodes, VarStore.lookupVarBound constraint bndRootC) of
+                                    case (boundTy, lookupNodeInMap nodes bndRootC, VarStore.lookupVarBound constraint bndRootC) of
                                         (TBottom, Just TyVar{}, Nothing) ->
                                             [nameForDep bndRootKey]
                                         _ -> freeNames0
@@ -783,7 +786,7 @@ isTargetSchemeBinderFor canonical constraint target0 targetIsBaseLike v
 boundMentionsSelfAliasFor
     :: (NodeId -> NodeId)
     -> Constraint
-    -> IntMap.IntMap TyNode
+    -> NodeMap TyNode
     -> IntMap.IntMap Int
     -> IntSet.IntSet
     -> (NodeId -> IntSet.IntSet)
@@ -796,7 +799,7 @@ boundMentionsSelfAliasFor canonical constraint nodes gammaAlias nestedSchemeInte
             binderKey = getNodeId (canonical v)
             mentionsSelf nidInt
                 | IntSet.member keyC nestedSchemeInteriorSet = False
-                | Just TyVar{} <- IntMap.lookup keyC nodes
+                | Just TyVar{} <- lookupNodeIn nodes nidC
                 , Just repKey <- IntMap.lookup keyC gammaAlias = repKey == binderKey
                 | otherwise = False
               where
@@ -992,12 +995,12 @@ isScopeSchemeRoot canonKey scopeSchemeRoots child =
 
 hasExplicitBoundFor
     :: (NodeId -> NodeId)
-    -> IntMap.IntMap TyNode
+    -> NodeMap TyNode
     -> Constraint
     -> NodeId
     -> Bool
 hasExplicitBoundFor canonical nodes constraint v =
-    case IntMap.lookup (getNodeId (canonical v)) nodes of
+    case lookupNodeIn nodes (canonical v) of
         Just TyVar{} -> VarStore.lookupVarBound constraint (canonical v) /= Nothing
         _ -> False
 
@@ -1013,7 +1016,7 @@ mkIsBindable bindFlags isQuantifiableP key child =
 bindersForGen
     :: (NodeId -> NodeId)
     -> BindParents
-    -> IntMap.IntMap TyNode
+    -> NodeMap TyNode
     -> Constraint
     -> (Int -> NodeId -> Bool)
     -> ([(NodeId, BindFlag, Maybe TyNode, Bool)] -> String)
@@ -1026,7 +1029,7 @@ bindersForGen canonical bindParents nodes constraint isBindable renderAllChildre
     traceM
         ("generalizeAt: scopeGen child nodes="
             ++ renderAllChildren
-                [ (child, flag, IntMap.lookup (getNodeId child) nodes, VarStore.isEliminatedVar constraint (canonical child))
+                [ (child, flag, lookupNodeIn nodes child, VarStore.isEliminatedVar constraint (canonical child))
                 | (child, flag) <- allChildren
                 ]
         )
@@ -1036,9 +1039,9 @@ bindersForGen canonical bindParents nodes constraint isBindable renderAllChildre
         )
     let bindableByScope =
             [ canonical child
-            | (childKey, node) <- IntMap.toList nodes
+            | (child, node) <- toListNode nodes
             , TyVar{} <- [node]
-            , let child = NodeId childKey
+            , let childKey = getNodeId child
             , isBindable childKey child
             , bindingScopeFor constraint (typeRef child) == Just gid
             ]
@@ -1052,12 +1055,12 @@ bindersForType
     -> (NodeId -> Int)
     -> IntSet.IntSet
     -> (NodeId -> Bool)
-    -> IntMap.IntMap TyNode
+    -> NodeMap TyNode
     -> NodeId
     -> [NodeId]
 bindersForType canonical bindParents isBindable canonKey scopeSchemeRoots hasExplicitBoundP nodes scopeRootN =
     let direct = boundFlexChildrenUnder canonical bindParents isBindable (typeRef scopeRootN)
-    in case IntMap.lookup (getNodeId scopeRootN) nodes of
+    in case lookupNodeIn nodes scopeRootN of
         Just TyForall{} -> direct
         _ ->
             if IntSet.member (canonKey scopeRootN) scopeSchemeRoots
@@ -1067,7 +1070,7 @@ bindersForType canonical bindParents isBindable canonKey scopeSchemeRoots hasExp
 selectBinders
     :: (NodeId -> NodeId)
     -> BindParents
-    -> IntMap.IntMap TyNode
+    -> NodeMap TyNode
     -> Constraint
     -> (Int -> NodeId -> Bool)
     -> (NodeId -> Int)
@@ -1115,7 +1118,7 @@ computeAliasBinders
     :: (NodeId -> NodeId)
     -> (NodeId -> Int)
     -> Constraint
-    -> IntMap.IntMap TyNode
+    -> NodeMap TyNode
     -> BindParents
     -> IntSet.IntSet
     -> NodeRef
@@ -1138,11 +1141,11 @@ computeAliasBinders canonical canonKey constraint nodes bindParents scopeSchemeR
             let baseBoundTargets =
                     IntSet.fromList
                         [ getNodeId bndC
-                        | (vidKey, node) <- IntMap.toList nodes
+                        | (vid, node) <- toListNode nodes
                         , TyVar{} <- [node]
-                        , Just bnd <- [VarStore.lookupVarBound constraint (NodeId vidKey)]
+                        , Just bnd <- [VarStore.lookupVarBound constraint vid]
                         , let bndC = canonical bnd
-                        , case IntMap.lookup (getNodeId bndC) nodes of
+                        , case lookupNodeIn nodes bndC of
                             Just TyBase{} -> True
                             Just TyBottom{} -> True
                             _ -> False
@@ -1156,7 +1159,7 @@ computeAliasBinders canonical canonKey constraint nodes bindParents scopeSchemeR
                                     | child <- IntMapUtils.typeChildrenOfGen bindParents gid
                                     , let key = getNodeId child
                                     , IntSet.member key baseBoundTargets
-                                    , case IntMap.lookup key nodes of
+                                    , case lookupNodeIn nodes (NodeId key) of
                                         Just TyBase{} -> True
                                         Just TyBottom{} -> True
                                         _ -> False

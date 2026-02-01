@@ -178,7 +178,7 @@ processInstEdge edge = do
                             IntMap.fromListWith
                                 const
                                 [ (getNodeId (canonical (NodeId orig)), copy)
-                                | (orig, copy) <- IntMap.toList copyMap0
+                                | (orig, copy) <- IntMap.toList (getCopyMapping copyMap0)
                                 ]
                     forM_ (IntSet.toList frontier0) $ \nidInt -> do
                         case IntMap.lookup nidInt copyMapCanon of
@@ -187,7 +187,7 @@ processInstEdge edge = do
 
                     bas <- binderArgsFromExpansion n1 finalExp
                     binderMetas <- forM bas $ \(bv, _arg) ->
-                        case IntMap.lookup (getNodeId bv) copyMap0 of
+                        case lookupCopy bv copyMap0 of
                             Just meta -> pure (bv, meta)
                             Nothing ->
                                 throwError (InternalError ("processInstEdge: missing binder-meta copy for " ++ show bv))
@@ -271,9 +271,9 @@ canonicalizeEdgeTraceInteriorsM = do
     canonical <- getCanonical
     let canonInterior tr =
             let interior' =
-                    IntSet.fromList
-                        [ getNodeId (canonical (NodeId nid))
-                        | nid <- IntSet.toList (etInterior tr)
+                    fromListInterior
+                        [ canonical nid
+                        | nid <- toListInterior (etInterior tr)
                         ]
             in tr { etInterior = interior' }
     modify' $ \st -> st { psEdgeTraces = IntMap.map canonInterior (psEdgeTraces st) }
@@ -313,20 +313,14 @@ buildEdgeTrace _eid left leftRaw expn (copyMap0, _interior0, _frontier0) = do
     bas <- binderArgsFromExpansion leftRaw expn
     root <- findRoot left
     (c0, canonical) <- getConstraintAndCanonical
-    let canonicalizeInterior s =
-            IntSet.fromList
-                [ getNodeId (canonical (NodeId nid))
-                | nid <- IntSet.toList s
-                ]
     interiorRaw <- do
         s <- liftBindingError $ Binding.interiorOfUnder canonical c0 (typeRef root)
-        pure $
-            IntSet.fromList
-                [ getNodeId nid
-                | key <- IntSet.toList s
-                , TypeRef nid <- [nodeRefFromKey key]
-                ]
-    let interior = canonicalizeInterior interiorRaw
+        pure
+            [ nid
+            | key <- IntSet.toList s
+            , TypeRef nid <- [nodeRefFromKey key]
+            ]
+    let interior = fromListInterior (map canonical interiorRaw)
     pure EdgeTrace { etRoot = root, etBinderArgs = bas, etInterior = interior, etCopyMap = copyMap0 }
 
 unifyStructure :: NodeId -> NodeId -> PresolutionM ()
@@ -413,7 +407,7 @@ unifyStructure n1 n2 = do
                         IntMap.fromListWith
                             const
                             [ (getNodeId (canonical (NodeId orig)), copy)
-                            | (orig, copy) <- IntMap.toList copyMap
+                            | (orig, copy) <- IntMap.toList (getCopyMapping copyMap)
                             ]
                 forM_ (IntSet.toList frontier) $ \nidInt -> do
                     case IntMap.lookup nidInt copyMapCanon of

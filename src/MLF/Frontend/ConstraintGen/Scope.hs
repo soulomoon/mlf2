@@ -55,13 +55,13 @@ rebindScopeNodes binder root frame = do
         schemeRootKeysAll =
             IntSet.fromList
                 [ nodeRefKey (typeRef rootN)
-                | gen <- IntMap.elems genNodes
+                | gen <- IntMap.elems (getGenNodeMap genNodes)
                 , rootN <- gnSchemes gen
                 ]
         schemeRootKeysOwned =
             case binder of
                 GenRef gid ->
-                    case IntMap.lookup (genNodeKey gid) genNodes of
+                    case IntMap.lookup (getGenNodeId gid) (getGenNodeMap genNodes) of
                         Nothing -> IntSet.empty
                         Just gen ->
                             IntSet.fromList
@@ -179,6 +179,11 @@ rebindScopeNodes binder root frame = do
             genNodes' = case binder of
                 GenRef gid ->
                     let gens0 = bsGenNodes st
-                    in IntMap.adjust (\g -> g { gnSchemes = scopeRoots }) (genNodeKey gid) gens0
+                    in GenNodeMap
+                        (IntMap.adjust
+                            (\g -> g { gnSchemes = scopeRoots })
+                            (getGenNodeId gid)
+                            (getGenNodeMap gens0)
+                        )
                 TypeRef _ -> bsGenNodes st
         in st { bsBindParents = bp2, bsGenNodes = genNodes' }

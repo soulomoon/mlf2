@@ -30,7 +30,7 @@ data BuildState = BuildState
     , bsInstEdges :: ![InstEdge]   -- ^ Instantiation edges (accumulated in reverse)
     , bsUnifyEdges :: ![UnifyEdge] -- ^ Unification edges (accumulated in reverse)
     , bsBindParents :: !BindParents -- ^ Binding edges: child -> (parent, flag)
-    , bsGenNodes :: !(IntMap.IntMap GenNode) -- ^ Gen nodes (paper G constructors)
+    , bsGenNodes :: !(GenNodeMap GenNode) -- ^ Gen nodes (paper G constructors)
     , bsPolySyms :: !PolySyms -- ^ Polymorphic type constructors (paper Poly)
     , bsScopes :: ![ScopeFrame]    -- ^ Stack of scopes tracking newly created nodes
     , bsLetEdges :: !IntSet.IntSet -- ^ Let-scope instantiation edges (body → trivial root)
@@ -54,7 +54,7 @@ mkInitialStateWithPolySyms polySyms = BuildState
     , bsInstEdges = []
     , bsUnifyEdges = []
     , bsBindParents = IntMap.empty
-    , bsGenNodes = IntMap.empty
+    , bsGenNodes = fromListGen []
     , bsPolySyms = polySyms
     , bsScopes = [ScopeFrame IntSet.empty]
     , bsLetEdges = IntSet.empty
@@ -62,7 +62,7 @@ mkInitialStateWithPolySyms polySyms = BuildState
 
 buildConstraint :: BuildState -> Constraint
 buildConstraint st = Constraint
-    { cNodes = bsNodes st
+    { cNodes = NodeMap (bsNodes st)
     , cInstEdges = reverse (bsInstEdges st)
     , cUnifyEdges = reverse (bsUnifyEdges st)
     , cBindParents = bsBindParents st

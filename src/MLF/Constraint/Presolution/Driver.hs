@@ -39,7 +39,7 @@ import Control.Monad (foldM, forM)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import MLF.Util.Trace (debugBinding, debugBindingM)
+import MLF.Util.Trace (debugBinding)
 import Data.Maybe (catMaybes, fromMaybe, mapMaybe)
 
 import qualified MLF.Binding.Tree as Binding
@@ -77,10 +77,6 @@ import MLF.Constraint.Acyclicity (AcyclicityResult(..))
 -- | Debug binding operations (uses global trace config).
 debugBindParents :: String -> a -> a
 debugBindParents = debugBinding
-
--- | Monadic version of debugBindParents for use in PresolutionM.
-debugBindParentsM :: Monad m => String -> m ()
-debugBindParentsM = debugBindingM
 
 -- | Main entry point: compute principal presolution.
 computePresolution
@@ -184,9 +180,9 @@ rewriteConstraint mapping = do
         newTraces0 = IntMap.map (canonicalizeTrace canonical) (psEdgeTraces st)
 
         bindingEdges0 = cBindParents c
-        cStruct = c { cNodes = newNodes, cGenNodes = genNodes' }
+        cStruct = c { cNodes = NodeMap newNodes, cGenNodes = genNodes' }
         rootGenRef =
-            case IntMap.keys genNodes' of
+            case IntMap.keys (getGenNodeMap genNodes') of
                 [] -> Nothing
                 gids -> Just (genRef (GenNodeId (minimum gids)))
 
@@ -212,12 +208,13 @@ rewriteConstraint mapping = do
         -- We want to return a map for ALL nodes that were redirected or merged.
         fullRedirects = IntMap.fromList
             [ (nid, canonical (NodeId nid))
-            | nid <- IntMap.keys (cNodes c)
+            | nid <- map (getNodeId . fst) (toListNode (cNodes c))
             ]
 
     newBindParents <- do
         let genNodes0 = cGenNodes c
-            genExists gid = IntMap.member (getGenNodeId gid) genNodes0
+            genExists gid =
+                IntMap.member (getGenNodeId gid) (getGenNodeMap genNodes0)
             typeExists nid = IntMap.member (getNodeId nid) newNodes
             schemeParents =
                 IntMap.fromListWith
@@ -382,7 +379,7 @@ rewriteConstraint mapping = do
                     )
                     bp0
             rootGen =
-                case IntMap.keys genNodes' of
+                case IntMap.keys (getGenNodeMap genNodes') of
                     [] -> Nothing
                     gids -> Just (GenNodeId (minimum gids))
 
@@ -452,7 +449,7 @@ rewriteConstraint mapping = do
         pure (fixUpper bp1)
 
     let c0' = c
-            { cNodes = newNodes
+            { cNodes = NodeMap newNodes
             , cInstEdges = []
             , cUnifyEdges = Canonicalize.rewriteUnifyEdges canonical (cUnifyEdges c)
             , cBindParents = newBindParents
@@ -471,8 +468,8 @@ rewriteConstraint mapping = do
         let updateTrace tr = do
                 interior <- bindingToPresM (Binding.interiorOf c' (typeRef (etRoot tr)))
                 let interiorNodes =
-                        IntSet.fromList
-                            [ getNodeId nid
+                        fromListInterior
+                            [ nid
                             | key <- IntSet.toList interior
                             , TypeRef nid <- [nodeRefFromKey key]
                             ]
@@ -487,4 +484,3 @@ rewriteConstraint mapping = do
         }
 
     return fullRedirects
-

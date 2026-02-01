@@ -6,7 +6,7 @@ import Data.List (isPrefixOf)
 
 import MLF.Constraint.Types
 import MLF.Constraint.Solve
-import SpecUtil (emptyConstraint, inferBindParents, rootedConstraint)
+import SpecUtil (emptyConstraint, inferBindParents, lookupNodeMaybe, nodeMapFromList, nodeMapSize, rootedConstraint)
 
 spec :: Spec
 spec = describe "Phase 5 -- Solve" $ do
@@ -14,7 +14,7 @@ spec = describe "Phase 5 -- Solve" $ do
         it "merges a variable with a base type and rewrites to the canonical node" $ do
             let var = TyVar { tnId = NodeId 0, tnBound = Nothing }
                 base = TyBase (NodeId 1) (BaseTy "Int")
-                nodes = IntMap.fromList [(0, var), (1, base)]
+                nodes = nodeMapFromList [(0, var), (1, base)]
                 constraint = rootedConstraint $ emptyConstraint
                     { cNodes = nodes
                     , cBindParents = inferBindParents nodes
@@ -25,14 +25,14 @@ spec = describe "Phase 5 -- Solve" $ do
                 Right SolveResult{ srConstraint = sc, srUnionFind = uf } -> do
                     cUnifyEdges sc `shouldBe` []
                     IntMap.lookup 0 uf `shouldBe` Just (NodeId 1)
-                    IntMap.lookup 1 (cNodes sc)
+                    lookupNodeMaybe (cNodes sc) (NodeId 1)
                         `shouldBe` Just (TyBase (NodeId 1) (BaseTy "Int"))
-                    IntMap.size (cNodes sc) `shouldBe` 1
+                    nodeMapSize (cNodes sc) `shouldBe` 1
 
         it "merges two variables and drains the queue" $ do
             let v0 = TyVar { tnId = NodeId 0, tnBound = Nothing }
                 v1 = TyVar { tnId = NodeId 1, tnBound = Nothing }
-                nodes = IntMap.fromList [(0, v0), (1, v1)]
+                nodes = nodeMapFromList [(0, v0), (1, v1)]
                 constraintVV = rootedConstraint $ emptyConstraint
                     { cNodes = nodes
                     , cBindParents = inferBindParents nodes
@@ -58,8 +58,7 @@ spec = describe "Phase 5 -- Solve" $ do
                 nodeRoot = TyArrow root inner vOuter
                 constraint =
                     rootedConstraint $ emptyConstraint
-                        { cNodes =
-                            IntMap.fromList
+                        { cNodes = nodeMapFromList
                                 [ (getNodeId vInner, nodeInner)
                                 , (getNodeId vOuter, nodeOuter)
                                 , (getNodeId inner, nodeInnerArrow)
@@ -85,8 +84,7 @@ spec = describe "Phase 5 -- Solve" $ do
                 cod = TyBase (NodeId 3) (BaseTy "Bool")
                 arrow = TyArrow (NodeId 1) (tnId dom) (tnId cod)
                 var = TyVar { tnId = NodeId 0, tnBound = Nothing }
-                nodes =
-                    IntMap.fromList
+                nodes = nodeMapFromList
                         [ (0, var)
                         , (1, arrow)
                         , (2, dom)
@@ -101,15 +99,14 @@ spec = describe "Phase 5 -- Solve" $ do
                 Left err -> expectationFailure $ "Unexpected solve error: " ++ show err
                 Right SolveResult{ srConstraint = sc, srUnionFind = uf } -> do
                     IntMap.lookup 0 uf `shouldBe` Just (NodeId 1)
-                    IntMap.lookup 1 (cNodes sc) `shouldBe` Just arrow
+                    lookupNodeMaybe (cNodes sc) (NodeId 1) `shouldBe` Just arrow
 
         it "prefers structured representative over variable" $ do
             let dom = TyBase (NodeId 2) (BaseTy "Int")
                 cod = TyBase (NodeId 3) (BaseTy "Bool")
                 arrow = TyArrow (NodeId 1) (tnId dom) (tnId cod)
                 var = TyVar { tnId = NodeId 0, tnBound = Nothing }
-                nodes =
-                    IntMap.fromList
+                nodes = nodeMapFromList
                         [ (0, var)
                         , (1, arrow)
                         , (2, dom)
@@ -124,14 +121,14 @@ spec = describe "Phase 5 -- Solve" $ do
                 Left err -> expectationFailure $ "Unexpected solve error: " ++ show err
                 Right SolveResult{ srConstraint = sc, srUnionFind = uf } -> do
                     IntMap.lookup 0 uf `shouldBe` Just (NodeId 1)
-                    IntMap.lookup 1 (cNodes sc) `shouldBe` Just arrow
+                    lookupNodeMaybe (cNodes sc) (NodeId 1) `shouldBe` Just arrow
 
     describe "Occurs-check" $ do
         it "fails occurs-check when a variable appears inside the structure it unifies with" $ do
             let var = TyVar { tnId = NodeId 0, tnBound = Nothing }
                 base = TyBase (NodeId 2) (BaseTy "Int")
                 arrow = TyArrow (NodeId 1) (NodeId 0) (NodeId 2)
-                nodes = IntMap.fromList [(0, var), (1, arrow), (2, base)]
+                nodes = nodeMapFromList [(0, var), (1, arrow), (2, base)]
                 constraint = rootedConstraint $ emptyConstraint
                     { cNodes = nodes
                     , cBindParents = inferBindParents nodes
@@ -144,8 +141,7 @@ spec = describe "Phase 5 -- Solve" $ do
                 arrow = TyArrow (NodeId 2) (NodeId 0) (tnId base)  -- dom refers to var0
                 var0 = TyVar { tnId = NodeId 0, tnBound = Nothing }
                 var1 = TyVar { tnId = NodeId 1, tnBound = Nothing }
-                nodes =
-                    IntMap.fromList
+                nodes = nodeMapFromList
                         [ (0, var0)
                         , (1, var1)
                         , (2, arrow)
@@ -165,8 +161,7 @@ spec = describe "Phase 5 -- Solve" $ do
                 cod = TyVar { tnId = NodeId 2, tnBound = Nothing }
                 arrow = TyArrow (NodeId 0) (tnId dom) (tnId cod)
                 base = TyBase (NodeId 3) (BaseTy "Bool")
-                nodes =
-                    IntMap.fromList
+                nodes = nodeMapFromList
                         [ (0, arrow)
                         , (1, dom)
                         , (2, cod)
@@ -182,8 +177,7 @@ spec = describe "Phase 5 -- Solve" $ do
             let base = TyBase (NodeId 0) (BaseTy "Int")
                 forallNode = TyForall (NodeId 1) (NodeId 2)
                 forallBody = TyBase (NodeId 2) (BaseTy "Int")
-                nodes =
-                    IntMap.fromList
+                nodes = nodeMapFromList
                         [ (0, base)
                         , (1, forallNode)
                         , (2, forallBody)
@@ -199,8 +193,7 @@ spec = describe "Phase 5 -- Solve" $ do
                 cod = TyBase (NodeId 3) (BaseTy "Bool")
                 arrow = TyArrow (NodeId 0) (tnId dom) (tnId cod)
                 forallNode = TyForall (NodeId 1) (tnId dom)
-                nodes =
-                    IntMap.fromList
+                nodes = nodeMapFromList
                         [ (0, arrow)
                         , (1, forallNode)
                         , (2, dom)
@@ -215,7 +208,7 @@ spec = describe "Phase 5 -- Solve" $ do
         it "reports base clash when base constructors differ" $ do
             let bInt = TyBase (NodeId 0) (BaseTy "Int")
                 bBool = TyBase (NodeId 1) (BaseTy "Bool")
-                nodes = IntMap.fromList [(0, bInt), (1, bBool)]
+                nodes = nodeMapFromList [(0, bInt), (1, bBool)]
                 constraint = rootedConstraint $ emptyConstraint                    { cNodes = nodes
                     , cBindParents = inferBindParents nodes
                     , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 1)]
@@ -232,8 +225,7 @@ spec = describe "Phase 5 -- Solve" $ do
                 body2 = TyArrow (NodeId 5) (tnId beta) (tnId gamma)
                 forall2 = TyForall (NodeId 1) (tnId body2)
 
-                nodes =
-                    IntMap.fromList
+                nodes = nodeMapFromList
                         [ (0, forall1)
                         , (1, forall2)
                         , (2, alpha)
@@ -256,8 +248,7 @@ spec = describe "Phase 5 -- Solve" $ do
                 body2 = TyBase (NodeId 3) (BaseTy "Int")
                 forall1 = TyForall (NodeId 0) (tnId body1)
                 forall2 = TyForall (NodeId 1) (tnId body2)
-                nodes =
-                    IntMap.fromList
+                nodes = nodeMapFromList
                         [ (0, forall1)
                         , (1, forall2)
                         , (2, body1)
@@ -277,8 +268,7 @@ spec = describe "Phase 5 -- Solve" $ do
                 body2 = TyBase (NodeId 3) (BaseTy "Bool")
                 forall1 = TyForall (NodeId 0) (tnId body1)
                 forall2 = TyForall (NodeId 1) (tnId body2)
-                nodes =
-                    IntMap.fromList
+                nodes = nodeMapFromList
                         [ (0, forall1)
                         , (1, forall2)
                         , (2, body1)
@@ -299,8 +289,7 @@ spec = describe "Phase 5 -- Solve" $ do
                 b2 = TyArrow (NodeId 3) (tnId d2) (tnId c2)
                 f1 = TyForall (NodeId 0) (tnId b1)
                 f2 = TyForall (NodeId 1) (tnId b2)
-                nodes =
-                    IntMap.fromList
+                nodes = nodeMapFromList
                         [ (0, f1), (1, f2)
                         , (2, b1), (3, b2)
                         , (4, d1), (5, c1), (6, d2), (7, c2)
@@ -319,7 +308,7 @@ spec = describe "Phase 5 -- Solve" $ do
             let var = TyVar { tnId = NodeId 0, tnBound = Nothing }
                 base = TyBase (NodeId 1) (BaseTy "Int")
                 instEdge = InstEdge (EdgeId 0) (NodeId 0) (NodeId 0)
-                constraint = rootedConstraint $ emptyConstraint                    { cNodes = IntMap.fromList [(0, var), (1, base)]
+                constraint = rootedConstraint $ emptyConstraint                    { cNodes = nodeMapFromList [(0, var), (1, base)]
                     , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 1)]
                     , cInstEdges = [instEdge]
                     }
@@ -334,8 +323,7 @@ spec = describe "Phase 5 -- Solve" $ do
                 codBase = TyBase (NodeId 3) (BaseTy "Bool")
                 arrow = TyArrow (NodeId 1) (tnId domVar) (tnId codBase)
                 base = TyBase (NodeId 4) (BaseTy "Int")
-                nodes =
-                    IntMap.fromList
+                nodes = nodeMapFromList
                         [ (1, arrow)
                         , (2, domVar)
                         , (3, codBase)
@@ -349,7 +337,7 @@ spec = describe "Phase 5 -- Solve" $ do
                 Left err -> expectationFailure $ "Unexpected solve error: " ++ show err
                 Right SolveResult{ srConstraint = sc, srUnionFind = uf } -> do
                     IntMap.lookup 2 uf `shouldBe` Just (NodeId 4)
-                    case IntMap.lookup 1 (cNodes sc) of
+                    case lookupNodeMaybe (cNodes sc) (NodeId 1) of
                         Just (TyArrow _ dom' cod') -> do
                             dom' `shouldBe` NodeId 4
                             cod' `shouldBe` NodeId 3
@@ -357,7 +345,7 @@ spec = describe "Phase 5 -- Solve" $ do
 
         it "surfaces MissingNode when unify edge targets absent id" $ do
             let var = TyVar { tnId = NodeId 0, tnBound = Nothing }
-                constraint = rootedConstraint $ emptyConstraint                    { cNodes = IntMap.fromList [(0, var)]
+                constraint = rootedConstraint $ emptyConstraint                    { cNodes = nodeMapFromList [(0, var)]
                     , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 99)]
                     }
             solveUnify constraint `shouldBe` Left (MissingNode (NodeId 99))
@@ -365,8 +353,7 @@ spec = describe "Phase 5 -- Solve" $ do
         it "rejects TyExp nodes reaching the solver" $ do
             let body = TyBase (NodeId 1) (BaseTy "Int")
                 expNode = TyExp (NodeId 0) (ExpVarId 0) (tnId body)
-                nodes =
-                    IntMap.fromList
+                nodes = nodeMapFromList
                         [ (0, expNode)
                         , (1, body)
                         ]
@@ -382,8 +369,7 @@ spec = describe "Phase 5 -- Solve" $ do
                 exp2 = TyExp (NodeId 1) (ExpVarId 1) (NodeId 3)
                 body1 = TyBase (NodeId 2) (BaseTy "Int")
                 body2 = TyBase (NodeId 3) (BaseTy "Int")
-                nodes =
-                    IntMap.fromList
+                nodes = nodeMapFromList
                         [ (0, exp1), (1, exp2), (2, body1), (3, body2) ]
                 constraint = rootedConstraint $ emptyConstraint                    { cNodes = nodes
                     , cBindParents = inferBindParents nodes
@@ -396,7 +382,7 @@ spec = describe "Phase 5 -- Solve" $ do
             let arrow = TyArrow (NodeId 0) (NodeId 1) (NodeId 2)
                 cod = TyBase (NodeId 2) (BaseTy "Int")
                 -- NodeId 1 is missing
-                constraint = rootedConstraint $ emptyConstraint                    { cNodes = IntMap.fromList [(0, arrow), (2, cod)]
+                constraint = rootedConstraint $ emptyConstraint                    { cNodes = nodeMapFromList [(0, arrow), (2, cod)]
                     }
                 res = SolveResult { srConstraint = constraint, srUnionFind = IntMap.empty }
                 msgs = validateSolvedGraphStrict res
@@ -405,7 +391,7 @@ spec = describe "Phase 5 -- Solve" $ do
         it "validates: reports non-canonical node id" $ do
             -- Node stored at key 0 has id 1
             let base = TyBase (NodeId 1) (BaseTy "Int")
-                constraint = rootedConstraint $ emptyConstraint                    { cNodes = IntMap.fromList [(0, base)] -- Mismatch key vs id
+                constraint = rootedConstraint $ emptyConstraint                    { cNodes = nodeMapFromList [(0, base)] -- Mismatch key vs id
                     }
                 res = SolveResult { srConstraint = constraint, srUnionFind = IntMap.empty }
                 msgs = validateSolvedGraphStrict res
@@ -418,7 +404,7 @@ spec = describe "Phase 5 -- Solve" $ do
                 -- Node 1 exists but is aliased to 2 in UF
                 alias = TyBase (NodeId 1) (BaseTy "Int") 
                 
-                constraint = rootedConstraint $ emptyConstraint                    { cNodes = IntMap.fromList [(0, arrow), (1, alias), (2, base)]
+                constraint = rootedConstraint $ emptyConstraint                    { cNodes = nodeMapFromList [(0, arrow), (1, alias), (2, base)]
                     }
                 uf = IntMap.fromList [(1, NodeId 2)]
                 res = SolveResult { srConstraint = constraint, srUnionFind = uf }
@@ -428,7 +414,7 @@ spec = describe "Phase 5 -- Solve" $ do
         it "accepts a solved graph" $ do
             let var = TyVar { tnId = NodeId 0, tnBound = Nothing }
                 base = TyBase (NodeId 1) (BaseTy "Int")
-                constraint = rootedConstraint $ emptyConstraint                    { cNodes = IntMap.fromList [(0, var), (1, base)]
+                constraint = rootedConstraint $ emptyConstraint                    { cNodes = nodeMapFromList [(0, var), (1, base)]
                     , cUnifyEdges = [UnifyEdge (tnId var) (tnId base)]
                     }
             case solveUnify constraint of
@@ -441,7 +427,7 @@ spec = describe "Phase 5 -- Solve" $ do
                 base1 = TyBase (NodeId 1) (BaseTy "Int")
                 strayVar = TyVar { tnId = NodeId 2, tnBound = Nothing }
                 inst = InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)
-                constraint = rootedConstraint $ emptyConstraint                    { cNodes = IntMap.fromList
+                constraint = rootedConstraint $ emptyConstraint                    { cNodes = nodeMapFromList
                         [ (0, base0)
                         , (1, base1)
                         , (2, strayVar)

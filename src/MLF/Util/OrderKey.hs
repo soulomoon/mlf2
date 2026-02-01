@@ -26,7 +26,7 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.List (sortBy)
 
-import MLF.Constraint.Types (NodeId(..), TyNode, structuralChildren)
+import MLF.Constraint.Types (NodeId(..), NodeMap, TyNode, lookupNodeIn, structuralChildren)
 
 -- | Errors that can occur when comparing nodes by order key.
 data OrderKeyError
@@ -63,7 +63,7 @@ comparePaths (i:is) (j:js) =
 -- (with @root@ always treated as allowed).
 orderKeysFromRootWithExtra
     :: (NodeId -> NodeId)
-    -> IntMap TyNode
+    -> NodeMap TyNode
     -> (NodeId -> [NodeId])
     -> NodeId
     -> Maybe IntSet.IntSet
@@ -102,7 +102,7 @@ orderKeysFromRootWithExtra canonical nodes extraChildren root0 mbAllowed =
 
     children :: NodeId -> Int -> [Int] -> IntSet.IntSet -> [(NodeId, Int, [Int], IntSet.IntSet)]
     children nid depth path pathNodes =
-        case IntMap.lookup (getNodeId nid) nodes of
+        case lookupNodeIn nodes nid of
             Nothing -> []
             Just n ->
                 let structural = structuralChildren n
@@ -119,7 +119,7 @@ orderKeysFromRootWithExtra canonical nodes extraChildren root0 mbAllowed =
 -- structural children.
 orderKeysFromRootWith
     :: (NodeId -> NodeId)
-    -> IntMap TyNode
+    -> NodeMap TyNode
     -> NodeId
     -> Maybe IntSet.IntSet
     -> IntMap OrderKey

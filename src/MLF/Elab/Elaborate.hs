@@ -143,7 +143,7 @@ elaborate
     -> Either ElabError ElabTerm
 elaborate generalizeAtWith resPhi resGen edgeWitnesses edgeTraces edgeExpansions ann =
     let constraint = srConstraint resGen
-        keys = IntMap.keys (cNodes constraint)
+        keys = map (getNodeId . fst) (toListNode (cNodes constraint))
         baseToSolved =
             IntMap.fromList
                 [ (k, NodeId k)

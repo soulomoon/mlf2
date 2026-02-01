@@ -27,6 +27,12 @@ flag ('BindFlex' or 'BindRigid') that determines whether it can be generalized.
 -}
 module MLF.Constraint.Types (
     NodeId (..),
+    NodeMap (..),
+    lookupNode,
+    insertNode,
+    deleteNode,
+    fromListNode,
+    toListNode,
     ExpVarId (..),
     EdgeId (..),
     BaseTy (..),
@@ -39,6 +45,12 @@ module MLF.Constraint.Types (
     Constraint (..),
     maxNodeIdKeyOr0,
     GenNodeId (..),
+    GenNodeMap (..),
+    lookupGen,
+    insertGen,
+    deleteGen,
+    fromListGen,
+    toListGen,
     GenNode (..),
     NodeRef (..),
     typeRef,
@@ -154,11 +166,53 @@ data BindingError
 newtype NodeId = NodeId { getNodeId :: Int }
     deriving (Eq, Ord, Show)
 
+-- | Map keyed by `NodeId`s.
+newtype NodeMap a = NodeMap { getNodeMap :: IntMap a }
+    deriving (Eq, Show, Functor, Foldable, Traversable)
+
+lookupNode :: NodeId -> NodeMap a -> Maybe a
+lookupNode nid (NodeMap nodes) = IntMap.lookup (getNodeId nid) nodes
+
+insertNode :: NodeId -> a -> NodeMap a -> NodeMap a
+insertNode nid value (NodeMap nodes) = NodeMap (IntMap.insert (getNodeId nid) value nodes)
+
+deleteNode :: NodeId -> NodeMap a -> NodeMap a
+deleteNode nid (NodeMap nodes) = NodeMap (IntMap.delete (getNodeId nid) nodes)
+
+fromListNode :: [(NodeId, a)] -> NodeMap a
+fromListNode pairs =
+    NodeMap (IntMap.fromList (map (\(NodeId k, v) -> (k, v)) pairs))
+
+toListNode :: NodeMap a -> [(NodeId, a)]
+toListNode (NodeMap nodes) =
+    map (\(k, v) -> (NodeId k, v)) (IntMap.toList nodes)
+
 -- | Identifier for a gen node (paper G constructor).
 --
 -- This is a distinct sort from type nodes in the thesis.
 newtype GenNodeId = GenNodeId { getGenNodeId :: Int }
     deriving (Eq, Ord, Show)
+
+-- | Map keyed by `GenNodeId`s.
+newtype GenNodeMap a = GenNodeMap { getGenNodeMap :: IntMap a }
+    deriving (Eq, Show, Functor, Foldable, Traversable)
+
+lookupGen :: GenNodeId -> GenNodeMap a -> Maybe a
+lookupGen gid (GenNodeMap nodes) = IntMap.lookup (getGenNodeId gid) nodes
+
+insertGen :: GenNodeId -> a -> GenNodeMap a -> GenNodeMap a
+insertGen gid value (GenNodeMap nodes) = GenNodeMap (IntMap.insert (getGenNodeId gid) value nodes)
+
+deleteGen :: GenNodeId -> GenNodeMap a -> GenNodeMap a
+deleteGen gid (GenNodeMap nodes) = GenNodeMap (IntMap.delete (getGenNodeId gid) nodes)
+
+fromListGen :: [(GenNodeId, a)] -> GenNodeMap a
+fromListGen pairs =
+    GenNodeMap (IntMap.fromList (map (\(GenNodeId k, v) -> (k, v)) pairs))
+
+toListGen :: GenNodeMap a -> [(GenNodeId, a)]
+toListGen (GenNodeMap nodes) =
+    map (\(k, v) -> (GenNodeId k, v)) (IntMap.toList nodes)
 
 -- | Gen node record (paper G constructor).
 --
@@ -230,7 +284,7 @@ are described as:
 
 Our implementation keeps that split explicit:
 
-  - The term-DAG is `cNodes :: IntMap TyNode` (nodes referenced by `NodeId`).
+  - The term-DAG is `cNodes :: NodeMap TyNode` (nodes referenced by `NodeId`).
   - The binding tree is `cBindParents :: BindParents` (child → parent + flag).
 
 This separation is intentional: binding structure is not embedded in the
@@ -325,8 +379,8 @@ structuralChildrenWithBounds node =
         _ -> structuralChildren node
 
 -- | Lookup a node by `NodeId` in the constraint node map.
-lookupNodeIn :: IntMap a -> NodeId -> Maybe a
-lookupNodeIn nodes nid = IntMap.lookup (getNodeId nid) nodes
+lookupNodeIn :: NodeMap a -> NodeId -> Maybe a
+lookupNodeIn nodes = flip lookupNode nodes
 
 {- Note [Expansion nodes]
 ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -481,10 +535,10 @@ data UnifyEdge = UnifyEdge
 -- Subsequent elaboration phases also read the same graph to reconstruct typed
 -- terms, so this record is the single source of truth for the constraint state.
 data Constraint = Constraint
-        { cNodes :: IntMap TyNode
+        { cNodes :: NodeMap TyNode
             -- ^ The hash-consed DAG of graphic type nodes. Every structural operation
             --   (unification, grafting, elaboration) needs fast access to the canonical
-            --   representation of each node, so we store them in an IntMap keyed by
+            --   representation of each node, so we store them in a NodeMap keyed by
             --   'NodeId'. This is the core object manipulated by Phases 2–5.
         , cInstEdges :: [InstEdge]
             -- ^ Outstanding instantiation constraints T_left ≤ T_right. Phase 4 consumes
@@ -529,7 +583,7 @@ data Constraint = Constraint
             --
             -- These are internal edges for the alternative let-typing translation
             -- and should be ignored when translating witnesses.
-        , cGenNodes :: IntMap GenNode
+        , cGenNodes :: GenNodeMap GenNode
             -- ^ Gen node map (paper G constructors).
             --
             -- This is separate from the term-DAG so we can follow the thesis
@@ -543,9 +597,13 @@ data Constraint = Constraint
 -- nodes during rewriting (Normalize, Presolution).
 maxNodeIdKeyOr0 :: Constraint -> Int
 maxNodeIdKeyOr0 c =
-    case IntMap.lookupMax (cNodes c) of
+    case lookupMaxNode (cNodes c) of
         Nothing -> 0
-        Just (k, _node) -> k
+        Just (NodeId k, _node) -> k
+
+lookupMaxNode :: NodeMap a -> Maybe (NodeId, a)
+lookupMaxNode (NodeMap nodes) =
+    fmap (\(k, v) -> (NodeId k, v)) (IntMap.lookupMax nodes)
 
 data Expansion
 -- | A presolution “expansion recipe” assigned to an `ExpVarId`.

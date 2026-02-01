@@ -34,11 +34,28 @@ module MLF.Elab.Phi (
     contextToNodeBound,
     -- * Main entry points
     phiFromEdgeWitness,
-    phiFromEdgeWitnessWithTrace
+    phiFromEdgeWitnessWithTrace,
+    -- * Phi environment
+    PhiEnv(..),
+    PhiM,
+    askResult,
+    askCanonical,
+    askCopyMap,
+    askGaParents,
+    askTrace,
+    -- * Extracted helpers (using PhiM)
+    canonicalNodeM,
+    remapSchemeInfoM,
+    isBinderNodeM,
+    lookupBinderIndexM,
+    binderIndexM,
+    binderNameForM
 ) where
 
 import Control.Applicative ((<|>))
 import Control.Monad (when)
+import Control.Monad.Except (MonadError(..))
+import Control.Monad.Reader (ReaderT, asks)
 import Data.Functor.Foldable (cata)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
@@ -62,6 +79,7 @@ import MLF.Util.Graph (topoSortBy)
 import MLF.Constraint.Solve hiding (BindingTreeError, MissingNode)
 import qualified MLF.Constraint.Solve as Solve (frWith)
 import MLF.Constraint.Presolution (EdgeTrace(..))
+import MLF.Constraint.Presolution.Base (CopyMapping(..), InteriorNodes(..), copiedNodes, lookupCopy)
 import qualified MLF.Binding.Tree as Binding
 import MLF.Binding.Tree (checkBindingTree, checkNoGenFallback, checkSchemeClosureUnder, lookupBindParent)
 import qualified MLF.Constraint.VarStore as VarStore
@@ -69,6 +87,148 @@ import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Util.IntMapUtils as IntMapUtils
 import MLF.Elab.Phi.Context (contextToNodeBound, contextToNodeBoundWithOrderKeys)
 import MLF.Util.Trace (debugGeneralize)
+
+-- | Environment for Phi translation operations.
+--
+-- This record holds the shared context needed for translating graph witnesses
+-- to xMLF instantiations. It enables future refactoring of the large
+-- 'phiFromEdgeWitnessWithTrace' function to use explicit parameter passing
+-- via a ReaderT monad.
+--
+-- Fields:
+--   * peResult: The solve result containing the constraint and union-find
+--   * peCanonical: Function to get the canonical node id
+--   * peCopyMap: Copy mapping from edge trace (original -> copied)
+--   * peInvCopyMap: Inverse copy mapping (copied -> original)
+--   * peGaParents: Optional generalized binding parents
+--   * peTrace: Optional edge trace with interior/copy info
+data PhiEnv = PhiEnv
+    { peResult :: SolveResult
+    , peCanonical :: NodeId -> NodeId
+    , peCopyMap :: IntMap.IntMap NodeId
+    , peInvCopyMap :: IntMap.IntMap NodeId
+    , peGaParents :: Maybe GaBindParents
+    , peTrace :: Maybe EdgeTrace
+    }
+
+-- | Monad for Phi translation operations.
+--
+-- PhiM is a ReaderT over Either ElabError, providing access to the PhiEnv
+-- and short-circuiting error handling.
+type PhiM = ReaderT PhiEnv (Either ElabError)
+
+-- | Get the SolveResult from the environment.
+askResult :: PhiM SolveResult
+askResult = asks peResult
+
+-- | Get the canonical node function from the environment.
+askCanonical :: PhiM (NodeId -> NodeId)
+askCanonical = asks peCanonical
+
+-- | Get the copy map from the environment.
+askCopyMap :: PhiM (IntMap.IntMap NodeId)
+askCopyMap = asks peCopyMap
+
+-- | Get the inverse copy map (copied -> original) from the environment.
+askInvCopyMap :: PhiM (IntMap.IntMap NodeId)
+askInvCopyMap = asks peInvCopyMap
+
+-- | Get the optional GaBindParents from the environment.
+askGaParents :: PhiM (Maybe GaBindParents)
+askGaParents = asks peGaParents
+
+-- | Get the optional EdgeTrace from the environment.
+askTrace :: PhiM (Maybe EdgeTrace)
+askTrace = asks peTrace
+
+-- | Canonicalize a node id using the union-find from the solve result.
+canonicalNodeM :: NodeId -> PhiM NodeId
+canonicalNodeM nid = do
+    res <- askResult
+    pure $ Solve.frWith (srUnionFind res) nid
+
+-- | Remap scheme info using the copy mapping from an edge trace.
+remapSchemeInfoM :: EdgeTrace -> SchemeInfo -> PhiM SchemeInfo
+remapSchemeInfoM tr si = do
+    canonical <- askCanonical
+    let traceCopyMap = getCopyMapping (etCopyMap tr)
+        subst' =
+            IntMap.fromList
+                [ (getNodeId (canonical mapped), name)
+                | (k, name) <- IntMap.toList (siSubst si)
+                , let nid = NodeId k
+                      mapped = IntMap.findWithDefault nid k traceCopyMap
+                ]
+    pure $ si { siSubst = subst' }
+
+-- | Check if a node is a binder node (member of binderKeys set).
+isBinderNodeM :: IntSet.IntSet -> NodeId -> PhiM Bool
+isBinderNodeM binderKeys nid = do
+    canonical <- askCanonical
+    let key = getNodeId (canonical nid)
+    pure $ IntSet.member key binderKeys
+
+-- | Look up the index of a binder in the identity list.
+-- Returns Nothing if the node is not a binder or not found.
+lookupBinderIndexM :: IntSet.IntSet -> [Maybe NodeId] -> NodeId -> PhiM (Maybe Int)
+lookupBinderIndexM binderKeys ids nid = do
+    isBinder <- isBinderNodeM binderKeys nid
+    if not isBinder
+        then pure Nothing
+        else do
+            canonical <- askCanonical
+            mbGaParents <- askGaParents
+            copyMap <- askCopyMap
+            invCopyMap <- askInvCopyMap
+            let baseKeyFor n =
+                    let key0 = getNodeId (canonical n)
+                    in case mbGaParents of
+                        Just ga -> maybe key0 getNodeId (IntMap.lookup key0 (gaSolvedToBase ga))
+                        Nothing -> key0
+                nC = canonical nid
+                key = getNodeId nC
+                candidateKeys = IntSet.fromList $
+                    baseKeyFor nid
+                    : catMaybes [ baseKeyFor <$> IntMap.lookup key copyMap
+                                , baseKeyFor <$> IntMap.lookup key invCopyMap
+                                ]
+                matches (Just nid') = IntSet.member (baseKeyFor nid') candidateKeys
+                matches Nothing = False
+            pure $ findIndex matches ids
+
+-- | Get the index of a binder in the identity list.
+-- Returns an error if the binder is not found.
+binderIndexM :: IntSet.IntSet -> [Maybe NodeId] -> NodeId -> PhiM Int
+binderIndexM binderKeys ids nid = do
+    mbIdx <- lookupBinderIndexM binderKeys ids nid
+    case mbIdx of
+        Just i -> pure i
+        Nothing ->
+            throwError $
+                InstantiationError $
+                    "binder " ++ show nid ++ " not found in identity list " ++ show ids
+
+-- | Get the name of a binder.
+binderNameForM
+    :: IntSet.IntSet
+    -> ElabType
+    -> [Maybe NodeId]
+    -> NodeId
+    -> (NodeId -> Maybe String)
+    -> PhiM String
+binderNameForM binderKeys ty ids nid lookupBinder = do
+    mbIdx <- lookupBinderIndexM binderKeys ids nid
+    let (qs, _) = splitForalls ty
+        names = map fst qs
+    case mbIdx of
+        Just i
+            | length names /= length ids ->
+                throwError (InstantiationError "binderNameFor: binder spine / identity list length mismatch")
+            | i >= length names ->
+                throwError (InstantiationError "binderNameFor: index out of range")
+            | otherwise -> pure (names !! i)
+        Nothing ->
+            pure $ fromMaybe ("t" ++ show (getNodeId nid)) (lookupBinder nid)
 
 newtype ApplyFun i =
     ApplyFun { runApplyFun :: Set.Set String -> Ty i }
@@ -120,12 +280,14 @@ phiFromEdgeWitnessWithTrace generalizeAtWith res mbGaParents mSchemeInfo mTrace 
                 Just tr ->
                     IntSet.fromList
                         [ getNodeId (canonicalNode nid)
-                        | nid <- IntMap.elems (etCopyMap tr)
+                        | nid <- copiedNodes (etCopyMap tr)
                         ]
         interior =
             case mTrace of
                 Nothing -> IntSet.empty
-                Just tr -> etInterior tr
+                Just tr ->
+                    case etInterior tr of
+                        InteriorNodes s -> s
         namedSet1 = IntSet.difference namedSet0 copied
         rootKey = getNodeId (canonicalNode (ewRoot ew))
         namedSet =
@@ -230,7 +392,7 @@ phiFromEdgeWitnessWithTrace generalizeAtWith res mbGaParents mSchemeInfo mTrace 
 
     remapSchemeInfo :: EdgeTrace -> SchemeInfo -> SchemeInfo
     remapSchemeInfo tr si =
-        let traceCopyMap = etCopyMap tr
+        let traceCopyMap = getCopyMapping (etCopyMap tr)
             subst' =
                 IntMap.fromList
                     [ (getNodeId (canonicalNode mapped), name)
@@ -268,7 +430,7 @@ phiFromEdgeWitnessWithTrace generalizeAtWith res mbGaParents mSchemeInfo mTrace 
                         case mTrace of
                             Nothing -> Nothing
                             Just tr ->
-                                let traceCopyMap = etCopyMap tr
+                                let traceCopyMap = getCopyMapping (etCopyMap tr)
                                     revMatches =
                                         [ NodeId k
                                         | (k, v) <- IntMap.toList traceCopyMap
@@ -305,7 +467,7 @@ phiFromEdgeWitnessWithTrace generalizeAtWith res mbGaParents mSchemeInfo mTrace 
     copyMap =
         case mTrace of
             Nothing -> IntMap.empty
-            Just tr -> etCopyMap tr
+            Just tr -> getCopyMapping (etCopyMap tr)
 
     invCopyMap :: IntMap.IntMap NodeId
     invCopyMap =
@@ -324,8 +486,12 @@ phiFromEdgeWitnessWithTrace generalizeAtWith res mbGaParents mSchemeInfo mTrace 
     nodeRefExistsLocal :: Constraint -> NodeRef -> Bool
     nodeRefExistsLocal c ref =
         case ref of
-            TypeRef nid -> IntMap.member (getNodeId nid) (cNodes c)
-            GenRef gid -> IntMap.member (getGenNodeId gid) (cGenNodes c)
+            TypeRef nid ->
+                case lookupNodeIn (cNodes c) nid of
+                    Just _ -> True
+                    Nothing -> False
+            GenRef gid ->
+                IntMap.member (getGenNodeId gid) (getGenNodeMap (cGenNodes c))
 
     isBinderNode :: IntSet.IntSet -> NodeId -> Bool
     isBinderNode binderKeys nid =
@@ -336,7 +502,9 @@ phiFromEdgeWitnessWithTrace generalizeAtWith res mbGaParents mSchemeInfo mTrace 
     interiorSet =
         case mTrace of
             Nothing -> IntSet.empty
-            Just tr -> etInterior tr
+            Just tr ->
+                case etInterior tr of
+                    InteriorNodes s -> s
 
     orderRoot :: NodeId
     -- Paper root `r` for Φ/Σ is the expansion root (TyExp body), not the TyExp
@@ -352,7 +520,7 @@ phiFromEdgeWitnessWithTrace generalizeAtWith res mbGaParents mSchemeInfo mTrace 
       where
         nodes = cNodes (srConstraint res)
         extraChildren nid = boundKids nid ++ bindKids nid
-        boundKids nid = case IntMap.lookup (getNodeId nid) nodes of
+        boundKids nid = case lookupNodeIn nodes nid of
             Just TyVar{ tnBound = Just bnd } -> [bnd]
             _ -> []
         bindKids nid =
@@ -615,7 +783,7 @@ phiFromEdgeWitnessWithTrace generalizeAtWith res mbGaParents mSchemeInfo mTrace 
     graftArgFor :: NodeId -> NodeId -> NodeId
     graftArgFor arg bv = fromMaybe arg $ do
         tr <- mTrace
-        IntMap.lookup (getNodeId bv) (etCopyMap tr)
+        lookupCopy bv (etCopyMap tr)
 
     go :: IntSet.IntSet -> IntSet.IntSet -> IntSet.IntSet -> ElabType -> [Maybe NodeId] -> Instantiation -> [InstanceOp] -> (NodeId -> Maybe String)
        -> Either ElabError (ElabType, [Maybe NodeId], Instantiation)

@@ -177,11 +177,11 @@ buildDependencyGraph c =
         }
 
 -- | Collect all NodeIds reachable from a given node by traversing the type graph.
-collectReachableNodes :: IntMap TyNode -> NodeId -> IntSet
+collectReachableNodes :: NodeMap TyNode -> NodeId -> IntSet
 collectReachableNodes nodes start =
     Traversal.reachableFromUnderLenient
         id
-        (\nid -> IntMap.lookup (getNodeId nid) nodes)
+        (lookupNodeIn nodes)
         start
 
 {- Note [Topological Sort and Cycle Detection]

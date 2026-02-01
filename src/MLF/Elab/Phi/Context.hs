@@ -27,7 +27,7 @@ module MLF.Elab.Phi.Context (
 import Control.Monad (unless)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import Data.List (elemIndex, sortBy)
+import Data.List (elemIndex)
 
 import qualified MLF.Util.Order as Order
 import MLF.Constraint.Types

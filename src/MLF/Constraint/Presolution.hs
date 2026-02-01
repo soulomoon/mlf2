@@ -20,6 +20,15 @@ module MLF.Constraint.Presolution (
     -- * Internal types (exported for testing)
     PresolutionState(..),
     EdgeTrace(..),
+    CopyMapping(..),
+    CopyMap,
+    lookupCopy,
+    insertCopy,
+    copiedNodes,
+    originalNodes,
+    InteriorNodes(..),
+    fromListInterior,
+    toListInterior,
     runPresolutionM,
 
     -- * Building blocks (exported for testing)
@@ -34,11 +43,20 @@ module MLF.Constraint.Presolution (
 ) where
 
 import MLF.Constraint.Presolution.Base (
+    CopyMap,
+    CopyMapping(..),
     EdgeTrace(..),
+    InteriorNodes(..),
     PresolutionError(..),
     PresolutionPlanBuilder(..),
     PresolutionResult(..),
     PresolutionState(..),
+    copiedNodes,
+    fromListInterior,
+    insertCopy,
+    lookupCopy,
+    originalNodes,
+    toListInterior,
     runPresolutionM
     )
 import MLF.Constraint.Presolution.Core (

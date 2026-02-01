@@ -14,8 +14,8 @@ import MLF.Constraint.Normalize (normalize)
 import MLF.Constraint.Presolution (PresolutionResult(..), computePresolution)
 import MLF.Constraint.Solve (SolveResult(..), solveUnify)
 import MLF.Frontend.ConstraintGen (AnnExpr (..))
-import MyLib hiding (normalize)
-import SpecUtil (expectRight, lookupNode, requireRight)
+import MyLib hiding (normalize, lookupNode)
+import SpecUtil (expectRight, lookupNode, lookupNodeMaybe, nodeMapElems, nodeMapSize, requireRight)
 
 inferConstraintGraphDefault :: Expr -> Either ConstraintError ConstraintResult
 inferConstraintGraphDefault = inferConstraintGraph Set.empty
@@ -28,11 +28,11 @@ spec = describe "Phase 1 — Constraint generation" $ do
             expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let constraint = crConstraint result
                     nodes = cNodes constraint
-                IntMap.size nodes `shouldBe` 2
-                case [name | TyBase { tnBase = BaseTy name } <- IntMap.elems nodes] of
+                nodeMapSize nodes `shouldBe` 2
+                case [name | TyBase { tnBase = BaseTy name } <- nodeMapElems nodes] of
                     ["Int"] -> pure ()
                     other -> expectationFailure $ "Unexpected nodes: " ++ show other
-                case IntMap.lookup (getNodeId (crRoot result)) nodes of
+                case lookupNodeMaybe nodes (crRoot result) of
                     Just TyVar { tnBound = Just boundId } -> do
                         bound <- lookupNode nodes boundId
                         case bound of
@@ -50,11 +50,11 @@ spec = describe "Phase 1 — Constraint generation" $ do
             let expr = ELit (LBool True)
             expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let nodes = cNodes (crConstraint result)
-                IntMap.size nodes `shouldBe` 2
-                case [name | TyBase { tnBase = BaseTy name } <- IntMap.elems nodes] of
+                nodeMapSize nodes `shouldBe` 2
+                case [name | TyBase { tnBase = BaseTy name } <- nodeMapElems nodes] of
                     ["Bool"] -> pure ()
                     other -> expectationFailure $ "Unexpected nodes: " ++ show other
-                case IntMap.lookup (getNodeId (crRoot result)) nodes of
+                case lookupNodeMaybe nodes (crRoot result) of
                     Just TyVar { tnBound = Just boundId } -> do
                         bound <- lookupNode nodes boundId
                         case bound of
@@ -66,11 +66,11 @@ spec = describe "Phase 1 — Constraint generation" $ do
             let expr = ELit (LString "hi")
             expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let nodes = cNodes (crConstraint result)
-                IntMap.size nodes `shouldBe` 2
-                case [name | TyBase { tnBase = BaseTy name } <- IntMap.elems nodes] of
+                nodeMapSize nodes `shouldBe` 2
+                case [name | TyBase { tnBase = BaseTy name } <- nodeMapElems nodes] of
                     ["String"] -> pure ()
                     other -> expectationFailure $ "Unexpected nodes: " ++ show other
-                case IntMap.lookup (getNodeId (crRoot result)) nodes of
+                case lookupNodeMaybe nodes (crRoot result) of
                     Just TyVar { tnBound = Just boundId } -> do
                         bound <- lookupNode nodes boundId
                         case bound of
@@ -89,13 +89,13 @@ spec = describe "Phase 1 — Constraint generation" $ do
                         pure (schemeRoot', bodyAnn', resNode')
                     other -> expectationFailure ("Expected ALet annotation, saw " ++ show other) >> fail "no schemeRoot"
                 resNode `shouldBe` crRoot result
-                case IntMap.lookup (getNodeId resNode) nodes of
+                case lookupNodeMaybe nodes resNode of
                     Just TyVar{} -> pure ()
                     other -> expectationFailure $ "Root is not the trivial scheme var: " ++ show other
                 case bodyAnn of
                     AAnn (AVar "x" useNode) annNode edgeId -> do
                         annNode `shouldBe` resNode
-                        case IntMap.lookup (getNodeId useNode) nodes of
+                        case lookupNodeMaybe nodes useNode of
                             Just TyExp { tnBody = bodyId } -> bodyId `shouldBe` schemeRoot
                             other -> expectationFailure $ "Expected TyExp use of let-bound x, saw " ++ show other
                         let matchingEdges =
@@ -131,7 +131,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
                     other -> expectationFailure ("Expected nested ALet annotation, saw " ++ show other) >> fail "no schemeRoot"
                 case innerBodyAnn of
                     AAnn (AVar "x" useNode) _ _ -> do
-                        case IntMap.lookup (getNodeId useNode) nodes of
+                        case lookupNodeMaybe nodes useNode of
                             Just TyExp { tnBody = bodyId } -> bodyId `shouldBe` innerSchemeRoot
                             other -> expectationFailure $ "Expected TyExp for inner x, saw " ++ show other
                     other ->
@@ -202,7 +202,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 expr = EAnn (ELit (LInt 1)) ann
             expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let nodes = cNodes (crConstraint result)
-                case IntMap.lookup (getNodeId (crRoot result)) nodes of
+                case lookupNodeMaybe nodes (crRoot result) of
                     Just TyVar { tnBound = Just bnd } -> do
                         bndNode <- lookupNode nodes bnd
                         case bndNode of
@@ -252,7 +252,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
                     ALam _ param _ bodyAnn _ ->
                         case bodyAnn of
                             AVar "x" useNode -> do
-                                case IntMap.lookup (getNodeId useNode) nodes of
+                                case lookupNodeMaybe nodes useNode of
                                     Just TyExp { tnBody = bodyId } -> bodyId `shouldBe` param
                                     other -> expectationFailure $ "Expected TyExp for polymorphic x, saw " ++ show other
                                 annVar <- lookupNode nodes param
@@ -331,7 +331,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 expr = EAnn (ELit (LInt 1)) ann
             expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let nodes = cNodes (crConstraint result)
-                case IntMap.lookup (getNodeId (crRoot result)) nodes of
+                case lookupNodeMaybe nodes (crRoot result) of
                     Just TyVar {} -> pure ()
                     other -> expectationFailure $ "Expected TyVar { tnId = for, tnBound = Nothing } free var, saw " ++ show other
 
@@ -360,7 +360,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
         it "builds a shared parameter node when translating lambdas" $ do
             let expr = ELam "x" (EVar "x")
             expectRight (inferConstraintGraphDefault expr) $ \result -> do
-                let nodes = IntMap.elems (cNodes (crConstraint result))
+                let nodes = nodeMapElems (cNodes (crConstraint result))
                     arrowNodes = [n | n@TyArrow {} <- nodes]
                     varNodes = [n | n@TyVar {} <- nodes]
                     expNodes = [n | n@TyExp {} <- nodes]
@@ -458,9 +458,9 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 case cInstEdges constraint of
                     [edge0, edge1] -> do
                         let (funEdge, _argEdge) =
-                                case IntMap.lookup (getNodeId (instLeft edge0)) nodes of
+                                case lookupNodeMaybe nodes (instLeft edge0) of
                                     Just TyVar{ tnBound = Just boundId } ->
-                                        case IntMap.lookup (getNodeId boundId) nodes of
+                                        case lookupNodeMaybe nodes boundId of
                                             Just TyArrow{} -> (edge0, edge1)
                                             _ -> (edge1, edge0)
                                     _ -> (edge1, edge0)
@@ -494,9 +494,9 @@ spec = describe "Phase 1 — Constraint generation" $ do
                     nodes = cNodes constraint
                     insts = cInstEdges constraint
                 let isArgEdgeForDom dom edge =
-                        instRight edge == dom && case IntMap.lookup (getNodeId (instLeft edge)) nodes of
+                        instRight edge == dom && case lookupNodeMaybe nodes (instLeft edge) of
                             Just TyVar{ tnBound = Just boundId } ->
-                                case IntMap.lookup (getNodeId boundId) nodes of
+                                case lookupNodeMaybe nodes boundId of
                                     Just TyBase{} -> True
                                     _ -> False
                             _ -> False
@@ -604,7 +604,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
                         IntMap.notMember (nodeRefKey (genRef gid)) bindParents
                     schemeGens =
                         [ gnId gen
-                        | gen <- IntMap.elems (cGenNodes constraint)
+                        | gen <- IntMap.elems (getGenNodeMap (cGenNodes constraint))
                         , annNode `elem` gnSchemes gen
                         , not (isRootGen (gnId gen))
                         ]
@@ -662,7 +662,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
             let cSolved = srConstraint solved
                 schemeGens =
                     [ gnId gen
-                    | gen <- IntMap.elems (cGenNodes cSolved)
+                    | gen <- IntMap.elems (getGenNodeMap (cGenNodes cSolved))
                     , not (null (gnSchemes gen))
                     ]
             when (null schemeGens) $
@@ -695,7 +695,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
                     insts = cInstEdges constraint
                     nodes = cNodes constraint
                     isTyExpLeft e =
-                        case IntMap.lookup (getNodeId (instLeft e)) nodes of
+                        case lookupNodeMaybe nodes (instLeft e) of
                             Just TyExp{} -> True
                             _ -> False
                     funEdges = filter isTyExpLeft insts
@@ -721,7 +721,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
                         ELet "g" (ELam "y" (EVar "y")) (EVar "g")
             expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let genNodes = cGenNodes (crConstraint result)
-                IntMap.size genNodes `shouldBe` 7 -- root + (scheme, let, body) for each let
+                IntMap.size (getGenNodeMap genNodes) `shouldBe` 7 -- root + (scheme, let, body) for each let
 
         it "emits one instantiation edge per application" $ do
             let lam = ELam "x" (EVar "x")
@@ -735,7 +735,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
                     insts = cInstEdges constraint
                     nodes = cNodes constraint
                     isTyExpLeft e =
-                        case IntMap.lookup (getNodeId (instLeft e)) nodes of
+                        case lookupNodeMaybe nodes (instLeft e) of
                             Just TyExp{} -> True
                             _ -> False
                     funEdges = filter isTyExpLeft insts
@@ -757,7 +757,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
             let expr = ELam "x" (ELam "y" (EApp (EVar "x") (EVar "y")))
             expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let constraint = crConstraint result
-                    nodes = IntMap.elems (cNodes constraint)
+                    nodes = nodeMapElems (cNodes constraint)
                     arrowNodes = [n | n@TyArrow {} <- nodes]
                 length arrowNodes `shouldSatisfy` (>= 2)
                 cInstEdges constraint `shouldSatisfy` ((== 2) . length)

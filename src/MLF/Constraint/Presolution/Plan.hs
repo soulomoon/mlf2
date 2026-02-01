@@ -35,7 +35,7 @@ import qualified Data.IntSet as IntSet
 import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Solve (SolveResult(..))
 import qualified MLF.Constraint.Solve as Solve
-import MLF.Constraint.Types
+import MLF.Constraint.Types hiding (lookupNode)
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Util.IntMapUtils as IntMapUtils
@@ -80,6 +80,9 @@ import qualified MLF.Constraint.Presolution.Plan.ReifyPlan as Reify
 import MLF.Util.ElabError (ElabError(..), bindingToElab)
 import MLF.Util.Graph (reachableFrom, reachableFromStop)
 import MLF.Util.Trace (globalTraceConfig, tcGeneralize)
+
+lookupNodeInMap :: IntMap.IntMap TyNode -> NodeId -> Maybe TyNode
+lookupNodeInMap nodes nid = IntMap.lookup (getNodeId nid) nodes
 
 data PresolutionEnv = PresolutionEnv
     { peConstraint :: Constraint
@@ -193,7 +196,7 @@ planGeneralizeAt PresolutionEnv
                     let baseConstraint = gaBaseConstraint ga
                         baseNodes = cNodes baseConstraint
                         useSchemeBody baseN =
-                            case IntMap.lookup (getNodeId baseN) baseNodes of
+                            case lookupNodeIn baseNodes baseN of
                                 Just TyVar{ tnBound = Just bnd }
                                     | IntMap.member (getNodeId baseN) schemeRootOwnerBase ->
                                         bnd
@@ -204,7 +207,7 @@ planGeneralizeAt PresolutionEnv
         allowBoundTraversal =
             allowBoundTraversalFor schemeRootsPlan canonical scopeGen target0
         childrenWithBoundsWith nodes' allowBoundTraversal' nid =
-            case IntMap.lookup (getNodeId nid) nodes' of
+            case lookupNodeInMap nodes' nid of
                 Nothing -> []
                 Just node ->
                     case node of
@@ -220,7 +223,7 @@ planGeneralizeAt PresolutionEnv
         reachableFromWithBounds root0 =
             reachableFromWithBoundsWith canonical nodes allowBoundTraversal root0
         childrenStructural nid =
-            case IntMap.lookup (getNodeId nid) nodes of
+            case lookupNodeInMap nodes nid of
                 Nothing -> []
                 Just node -> structuralChildren node
         reachableFromStructural root0 =
@@ -233,6 +236,11 @@ planGeneralizeAt PresolutionEnv
                 Just ga ->
                     let baseConstraint = gaBaseConstraint ga
                         baseNodes = cNodes baseConstraint
+                        baseNodesMap =
+                            IntMap.fromList
+                                [ (getNodeId nid, node)
+                                | (nid, node) <- toListNode baseNodes
+                                ]
                         scopeGenBase = scopeGen
                         boundSchemeOwnerBase bnd =
                             case IntMap.lookup (getNodeId bnd) schemeRootOwnerBase of
@@ -250,7 +258,7 @@ planGeneralizeAt PresolutionEnv
                                         Just scopeGid -> gid == scopeGid
                                         Nothing -> False
                         reachableFromWithBoundsBase root0 =
-                            reachableFromWithBoundsWith id baseNodes allowBoundTraversalBase root0
+                            reachableFromWithBoundsWith id baseNodesMap allowBoundTraversalBase root0
                         reachableBase = reachableFromWithBoundsBase orderRootBaseForBinders
                         reachableBaseSolved =
                             IntSet.fromList
@@ -264,7 +272,7 @@ planGeneralizeAt PresolutionEnv
             ++ show
                 [ (NodeId nid, IntMap.lookup (nodeRefKey (typeRef (NodeId nid))) bindParents)
                 | nid <- IntSet.toList reachable
-                , case IntMap.lookup nid nodes of
+                , case lookupNodeInMap nodes (NodeId nid) of
                     Just TyVar{} -> True
                     _ -> False
                 ]
@@ -306,24 +314,25 @@ planGeneralizeAt PresolutionEnv
             mkIsBindable
                 bindFlags
                 isQuantifiable'
+        nodesMap = NodeMap nodes
     (aliasBinderBases, aliasBinderNodes) <-
         computeAliasBinders
             canonical
             canonKey
             constraint
-            nodes
+            nodesMap
             bindParents
             scopeSchemeRoots
             scopeRootC
             (traceGeneralizeM env)
     let bindableChildrenUnder' =
             bindableChildrenUnder canonical bindParents isBindable
-        hasExplicitBound' = hasExplicitBoundFor canonical nodes constraint
+        hasExplicitBound' = hasExplicitBoundFor canonical nodesMap constraint
     binders0 <-
         selectBinders
             canonical
             bindParents
-            nodes
+            nodesMap
             constraint
             isBindable
             canonKey
@@ -366,7 +375,7 @@ planGeneralizeAt PresolutionEnv
                 | rootKey <- IntSet.toList schemeRootSkipSet
                 ]
         isNestedSchemeBound v =
-            case IntMap.lookup (canonKey v) nodes of
+            case lookupNodeInMap nodes (canonical v) of
                 Just TyVar{ tnBound = Just bnd } ->
                     let bndC = canonical bnd
                         bndKey = getNodeId bndC
@@ -387,7 +396,7 @@ planGeneralizeAt PresolutionEnv
                                     in if schemeRootSkipKey bndKey
                                         then True
                                         else
-                                            case IntMap.lookup bndKey nodes of
+                                            case lookupNodeInMap nodes bndC of
                                                 Just TyVar{} ->
                                                     walkBoundChain (IntSet.insert key visited) bndC
                                                 _ -> False
@@ -453,7 +462,7 @@ planGeneralizeAt PresolutionEnv
         ("generalizeAt: targetBoundNode="
             ++ case targetBound of
                 Just bnd ->
-                    show (IntMap.lookup (getNodeId bnd) nodes)
+                    show (lookupNodeInMap nodes bnd)
                         ++ " boundOfBound="
                         ++ show (VarStore.lookupVarBound constraint bnd)
                 Nothing -> "None"
@@ -506,7 +515,7 @@ planGeneralizeAt PresolutionEnv
                     let climbToForall cur =
                             case IntMap.lookup (nodeRefKey (typeRef (canonical cur))) bindParents of
                                 Just (TypeRef parent, _) ->
-                                    case IntMap.lookup (canonKey parent) nodes of
+                                    case lookupNodeInMap nodes (canonical parent) of
                                         Just TyForall{} -> climbToForall (canonical parent)
                                         _ -> cur
                                 _ -> cur
@@ -668,7 +677,7 @@ planReify _ plan = do
             case scopeRootC of
                 GenRef _ -> []
                 TypeRef _ ->
-                    case IntMap.lookup (getNodeId (canonical typeRoot)) nodes of
+                    case lookupNodeInMap nodes (canonical typeRoot) of
                         Just TyForall{} ->
                             [ canonical child
                             | child <- IntMapUtils.typeChildrenOf bindParents (typeRef (canonical typeRoot))
@@ -707,7 +716,7 @@ planReify _ plan = do
             , Reify.rpSubstForReify = substForReify
             } = reifyPlan
         typeRootForReifyAdjustedPair =
-            case IntMap.lookup (getNodeId (canonical typeRootForReify)) nodes of
+            case lookupNodeInMap nodes (canonical typeRootForReify) of
                 Just TyVar{} ->
                     case VarStore.lookupVarBound constraint (canonical typeRootForReify) of
                         Just bnd
@@ -749,11 +758,15 @@ buildGeneralizePlans res mbBindParentsGa scopeRoot targetNode = do
 mkGeneralizeEnv :: Maybe GaBindParents -> SolveResult -> GeneralizeEnv
 mkGeneralizeEnv mbBindParentsGa res =
     let constraint = srConstraint res
-        nodes = cNodes constraint
+        nodes =
+            IntMap.fromList
+                [ (getNodeId nid, node)
+                | (nid, node) <- toListNode (cNodes constraint)
+                ]
         uf = srUnionFind res
         canonical = Solve.frWith uf
         canonKey nid = getNodeId (canonical nid)
-        lookupNode key = IntMap.lookup key nodes
+        lookupNode key = lookupNodeInMap nodes (NodeId key)
         isTyVarNode node = case node of
             TyVar{} -> True
             _ -> False

@@ -512,7 +512,7 @@ applyExpansionEdgeTraced expansion expNode =
                                                     binderArgs = zip boundVars [arg0]
                                                 (root, cmap0, interior0, frontier0) <- instantiateSchemeWithTrace bodyRoot binderMetas
                                                 (cmapB, interiorB, frontierB) <- copyBinderBounds binderMetas binderArgs
-                                                pure (root, (IntMap.union cmap0 cmapB, IntSet.union interior0 interiorB, IntSet.union frontier0 frontierB))
+                                                pure (root, (cmap0 <> cmapB, IntSet.union interior0 interiorB, IntSet.union frontier0 frontierB))
                                         else throwError $ ArityMismatch "applyExpansionEdgeTraced" (length boundVars) (length args)
                             else do
                                 metas <- zipWithM binderMetaAt args boundVars
@@ -520,7 +520,7 @@ applyExpansionEdgeTraced expansion expNode =
                                     binderArgs = zip boundVars args
                                 (root, cmap0, interior0, frontier0) <- instantiateSchemeWithTrace bodyRoot binderMetas
                                 (cmapB, interiorB, frontierB) <- copyBinderBounds binderMetas binderArgs
-                                pure (root, (IntMap.union cmap0 cmapB, IntSet.union interior0 interiorB, IntSet.union frontier0 frontierB))
+                                pure (root, (cmap0 <> cmapB, IntSet.union interior0 interiorB, IntSet.union frontier0 frontierB))
                         _ -> do
                             (bodyRoot, boundVars) <- instantiationBindersM (tnId node)
                             if null boundVars
@@ -541,7 +541,7 @@ applyExpansionEdgeTraced expansion expNode =
                                                     binderArgs = zip boundVars [arg0]
                                                 (root, cmap0, interior0, frontier0) <- instantiateSchemeWithTrace bodyRoot binderMetas
                                                 (cmapB, interiorB, frontierB) <- copyBinderBounds binderMetas binderArgs
-                                                pure (root, (IntMap.union cmap0 cmapB, IntSet.union interior0 interiorB, IntSet.union frontier0 frontierB))
+                                                pure (root, (cmap0 <> cmapB, IntSet.union interior0 interiorB, IntSet.union frontier0 frontierB))
                                         else throwError $ ArityMismatch "applyExpansionEdgeTraced" (length boundVars) (length args)
                             else do
                                 metas <- zipWithM binderMetaAt args boundVars
@@ -549,7 +549,7 @@ applyExpansionEdgeTraced expansion expNode =
                                     binderArgs = zip boundVars args
                                 (root, cmap0, interior0, frontier0) <- instantiateSchemeWithTrace bodyRoot binderMetas
                                 (cmapB, interiorB, frontierB) <- copyBinderBounds binderMetas binderArgs
-                                pure (root, (IntMap.union cmap0 cmapB, IntSet.union interior0 interiorB, IntSet.union frontier0 frontierB))
+                                pure (root, (cmap0 <> cmapB, IntSet.union interior0 interiorB, IntSet.union frontier0 frontierB))
 
 -- | Copy (and re-bind) instance bounds from original binders onto fresh binder-metas.
 copyBinderBounds :: [(NodeId, NodeId)] -> [(NodeId, NodeId)] -> PresolutionM (CopyMap, InteriorSet, FrontierSet)
@@ -575,9 +575,9 @@ copyBinderBounds binderMetas binderArgs = do
                             case IntMap.lookup (getNodeId bv) binderArgMap of
                                 Just arg -> setVarBound arg (Just bndCopy)
                                 Nothing -> pure ()
-                            pure (IntMap.union cmapAcc cmapB, IntSet.union intAcc intB, IntSet.union frontierAcc frontierB)
+                            pure (cmapAcc <> cmapB, IntSet.union intAcc intB, IntSet.union frontierAcc frontierB)
         )
-        (IntMap.empty, IntSet.empty, IntSet.empty)
+        (mempty, IntSet.empty, IntSet.empty)
         binderMetas
 
 -- Copying helpers (`instantiateScheme*` + binding fixes) live in

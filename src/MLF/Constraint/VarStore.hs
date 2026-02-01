@@ -30,7 +30,6 @@ module MLF.Constraint.VarStore (
     markEliminatedVar,
 ) where
 
-import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
 import MLF.Constraint.Types
@@ -50,7 +49,7 @@ setVarBound v mb c =
     let nodes0 = cNodes c
     in case lookupNodeIn nodes0 v of
         Just tv@TyVar{} ->
-            c { cNodes = IntMap.insert (getNodeId v) tv{ tnBound = mb } nodes0 }
+            c { cNodes = insertNode v tv{ tnBound = mb } nodes0 }
         _ -> c
 
 -- | True iff the variable has been eliminated by presolution/ω execution.

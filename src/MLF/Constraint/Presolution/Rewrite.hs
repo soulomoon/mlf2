@@ -35,7 +35,7 @@ import Data.Maybe (mapMaybe)
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.Canonicalize as Canonicalize
 import MLF.Constraint.Types
-import MLF.Constraint.Presolution.Base (EdgeTrace(..), PresolutionError(..), PresolutionM)
+import MLF.Constraint.Presolution.Base (CopyMapping(..), EdgeTrace(..), PresolutionError(..), PresolutionM, fromListInterior, toListInterior)
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Util.Trace (debugBinding)
 
@@ -81,17 +81,18 @@ canonicalizeTrace :: (NodeId -> NodeId) -> EdgeTrace -> EdgeTrace
 canonicalizeTrace canonical tr =
     let canonPair (a, b) = (canonical a, canonical b)
         canonInterior =
-            IntSet.fromList
-                [ getNodeId (canonical (NodeId i))
-                | i <- IntSet.toList (etInterior tr)
+            fromListInterior
+                [ canonical i
+                | i <- toListInterior (etInterior tr)
                 ]
         canonCopyMap =
-            IntMap.fromListWith min
-                [ ( getNodeId (canonical (NodeId k))
-                  , canonical v
-                  )
-                | (k, v) <- IntMap.toList (etCopyMap tr)
-                ]
+            CopyMapping $
+                IntMap.fromListWith min
+                    [ ( getNodeId (canonical (NodeId k))
+                      , canonical v
+                      )
+                    | (k, v) <- IntMap.toList (getCopyMapping (etCopyMap tr))
+                    ]
     in tr
         { etRoot = canonical (etRoot tr)
         , etBinderArgs = map canonPair (etBinderArgs tr)
@@ -134,7 +135,7 @@ rewriteVarSet canonical nodes0 vars0 =
         ]
 
 -- | Rewrite gen nodes through canonicalization.
-rewriteGenNodes :: (NodeId -> NodeId) -> IntMap TyNode -> IntMap GenNode -> IntMap GenNode
+rewriteGenNodes :: (NodeId -> NodeId) -> IntMap TyNode -> GenNodeMap GenNode -> GenNodeMap GenNode
 rewriteGenNodes canonical nodes0 gen0 =
     let rewriteOne g =
             let (schemesRev, _seen) =
@@ -150,7 +151,8 @@ rewriteGenNodes canonical nodes0 gen0 =
                         (gnSchemes g)
                 schemes' = reverse schemesRev
             in (genNodeKey (gnId g), g { gnSchemes = schemes' })
-    in IntMap.fromListWith const (map rewriteOne (IntMap.elems gen0))
+    in GenNodeMap
+        (IntMap.fromListWith const (map rewriteOne (IntMap.elems (getGenNodeMap gen0))))
 
 -- | Environment for rebuilding bind parents.
 data RebuildBindParentsEnv = RebuildBindParentsEnv
@@ -158,7 +160,7 @@ data RebuildBindParentsEnv = RebuildBindParentsEnv
       -- ^ The original constraint before rewriting
     , rbpNewNodes :: !(IntMap TyNode)
       -- ^ The rewritten nodes (TyExp removed)
-    , rbpGenNodes :: !(IntMap GenNode)
+    , rbpGenNodes :: !(GenNodeMap GenNode)
       -- ^ The rewritten gen nodes
     , rbpCanonical :: !(NodeId -> NodeId)
       -- ^ Canonicalization function
@@ -181,14 +183,15 @@ rebuildBindParents env = do
         canonical = rbpCanonical env
         incomingParents = rbpIncomingParents env
         bindingEdges0 = cBindParents c
-        cStruct = c { cNodes = newNodes, cGenNodes = genNodes' }
+        cStruct = c { cNodes = NodeMap newNodes, cGenNodes = genNodes' }
 
         rootGenRef =
-            case IntMap.keys genNodes' of
+            case IntMap.keys (getGenNodeMap genNodes') of
                 [] -> Nothing
                 gids -> Just (genRef (GenNodeId (minimum gids)))
 
-        genExists gid = IntMap.member (getGenNodeId gid) (cGenNodes c)
+        genExists gid =
+            IntMap.member (getGenNodeId gid) (getGenNodeMap (cGenNodes c))
         typeExists nid = IntMap.member (getNodeId nid) newNodes
 
         -- Build scheme parent map: child -> gen parent
@@ -357,7 +360,7 @@ rebuildBindParents env = do
                 )
                 bp0
         rootGen =
-            case IntMap.keys genNodes' of
+            case IntMap.keys (getGenNodeMap genNodes') of
                 [] -> Nothing
                 gids -> Just (GenNodeId (minimum gids))
 

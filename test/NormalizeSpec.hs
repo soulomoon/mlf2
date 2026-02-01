@@ -5,7 +5,7 @@ import Test.Hspec
 
 import MLF.Constraint.Types
 import MLF.Constraint.Normalize
-import SpecUtil (emptyConstraint)
+import SpecUtil (emptyConstraint, nodeMapFromList, nodeMapSingleton, nodeMapSize)
 
 spec :: Spec
 spec = describe "Phase 2 — Normalization" $ do
@@ -14,7 +14,7 @@ spec = describe "Phase 2 — Normalization" $ do
             let node = TyVar { tnId = NodeId 0, tnBound = Nothing }
                 reflexiveEdge = InstEdge (EdgeId 0) (NodeId 0) (NodeId 0)
                 constraint = emptyConstraint
-                    { cNodes = IntMap.singleton 0 node
+                    { cNodes = nodeMapSingleton 0 node
                     , cInstEdges = [reflexiveEdge]
                     }
             cInstEdges (normalize constraint) `shouldBe` []
@@ -25,7 +25,7 @@ spec = describe "Phase 2 — Normalization" $ do
                 node2 = TyVar { tnId = NodeId 1, tnBound = Nothing }
                 edge = InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)
                 constraint = emptyConstraint
-                    { cNodes = IntMap.fromList [(0, node1), (1, node2)]
+                    { cNodes = nodeMapFromList [(0, node1), (1, node2)]
                     , cInstEdges = [edge]
                     }
             length (cInstEdges (normalize constraint)) `shouldBe` 1
@@ -34,7 +34,7 @@ spec = describe "Phase 2 — Normalization" $ do
             -- α ≤ α (reflexive, drop)
             -- α ≤ β (both vars initially, but after β ≤ Int grafts, becomes α ≤ Int, which grafts)
             -- β ≤ Int (grafts: unifies β with Int)
-            let nodes = IntMap.fromList
+            let nodes = nodeMapFromList
                     [ (0, TyVar { tnId = NodeId 0, tnBound = Nothing })
                     , (1, TyVar { tnId = NodeId 1, tnBound = Nothing })
                     , (2, TyBase (NodeId 2) (BaseTy "Int"))
@@ -61,7 +61,7 @@ spec = describe "Phase 2 — Normalization" $ do
             result `shouldBe` emptyConstraint
 
         it "is idempotent (applying twice gives same result)" $ do
-            let nodes = IntMap.fromList
+            let nodes = nodeMapFromList
                     [ (0, TyVar { tnId = NodeId 0, tnBound = Nothing })
                     , (1, TyVar { tnId = NodeId 1, tnBound = Nothing })
                     ]
@@ -83,7 +83,7 @@ spec = describe "Phase 2 — Normalization" $ do
                 varNode = TyVar { tnId = NodeId 0, tnBound = Nothing }
                 edge = InstEdge (EdgeId 0) (NodeId 0) (NodeId 3)
                 constraint = emptyConstraint
-                    { cNodes = IntMap.fromList
+                    { cNodes = nodeMapFromList
                         [(0, varNode), (1, domNode), (2, codNode), (3, arrowNode)]
                     , cInstEdges = [edge]
                     }
@@ -92,7 +92,7 @@ spec = describe "Phase 2 — Normalization" $ do
             cInstEdges result `shouldBe` []
             -- New arrow node should exist that unifies with α
             -- Check that nodes count increased (fresh arrow + 2 fresh vars)
-            IntMap.size (cNodes result) `shouldSatisfy` (> 4)
+            nodeMapSize (cNodes result) `shouldSatisfy` (> 4)
 
         it "grafts base type onto variable" $ do
             -- α ≤ Int should unify α with Int
@@ -100,7 +100,7 @@ spec = describe "Phase 2 — Normalization" $ do
                 varNode = TyVar { tnId = NodeId 0, tnBound = Nothing }
                 edge = InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)
                 constraint = emptyConstraint
-                    { cNodes = IntMap.fromList [(0, varNode), (1, baseNode)]
+                    { cNodes = nodeMapFromList [(0, varNode), (1, baseNode)]
                     , cInstEdges = [edge]
                     }
                 result = normalize constraint
@@ -115,7 +115,7 @@ spec = describe "Phase 2 — Normalization" $ do
                 arrowNode = TyArrow (NodeId 1) (NodeId 0) (NodeId 2)
                 edge = InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)
                 constraint = emptyConstraint
-                    { cNodes = IntMap.fromList
+                    { cNodes = nodeMapFromList
                         [ (0, varNode)
                         , (1, arrowNode)
                         , (2, baseNode)
@@ -136,7 +136,7 @@ spec = describe "Phase 2 — Normalization" $ do
                 arrowNode = TyArrow (NodeId 3) (NodeId 2) (NodeId 1)
                 edge = InstEdge (EdgeId 0) (NodeId 0) (NodeId 3)
                 constraint = emptyConstraint
-                    { cNodes = IntMap.fromList
+                    { cNodes = nodeMapFromList
                         [ (0, varNode), (1, forallNode), (2, intNode), (3, arrowNode) ]
                     , cInstEdges = [edge]
                     }
@@ -151,7 +151,7 @@ spec = describe "Phase 2 — Normalization" $ do
                  arrowNode = TyArrow (NodeId 3) (NodeId 2) (NodeId 1)
                  edge = InstEdge (EdgeId 0) (NodeId 0) (NodeId 3)
                  constraint = emptyConstraint
-                     { cNodes = IntMap.fromList
+                     { cNodes = nodeMapFromList
                          [ (0, varNode), (1, expNode), (2, intNode), (3, arrowNode) ]
                      , cInstEdges = [edge]
                      }
@@ -168,7 +168,7 @@ spec = describe "Phase 2 — Normalization" $ do
                 arr2 = TyArrow (NodeId 5) (NodeId 3) (NodeId 4)
                 edge = InstEdge (EdgeId 0) (NodeId 2) (NodeId 5)
                 constraint = emptyConstraint
-                    { cNodes = IntMap.fromList
+                    { cNodes = nodeMapFromList
                         [ (0, dom1), (1, cod1), (2, arr1)
                         , (3, dom2), (4, cod2), (5, arr2)
                         ]
@@ -185,7 +185,7 @@ spec = describe "Phase 2 — Normalization" $ do
                 node2 = TyBase (NodeId 1) (BaseTy "Int")
                 edge = InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)
                 constraint = emptyConstraint
-                    { cNodes = IntMap.fromList [(0, node1), (1, node2)]
+                    { cNodes = nodeMapFromList [(0, node1), (1, node2)]
                     , cInstEdges = [edge]
                     }
                 result = normalize constraint
@@ -199,7 +199,7 @@ spec = describe "Phase 2 — Normalization" $ do
                 node2 = TyBase (NodeId 1) (BaseTy "Bool")
                 edge = InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)
                 constraint = emptyConstraint
-                    { cNodes = IntMap.fromList [(0, node1), (1, node2)]
+                    { cNodes = nodeMapFromList [(0, node1), (1, node2)]
                     , cInstEdges = [edge]
                     }
                 result = normalize constraint
@@ -214,7 +214,7 @@ spec = describe "Phase 2 — Normalization" $ do
                 base = TyBase (NodeId 3) (BaseTy "Int")
                 edge = InstEdge (EdgeId 0) (NodeId 2) (NodeId 3)
                 constraint = emptyConstraint
-                    { cNodes = IntMap.fromList [(0, dom), (1, cod), (2, arr), (3, base)]
+                    { cNodes = nodeMapFromList [(0, dom), (1, cod), (2, arr), (3, base)]
                     , cInstEdges = [edge]
                     }
                 result = normalize constraint
@@ -229,7 +229,7 @@ spec = describe "Phase 2 — Normalization" $ do
                 arr = TyArrow (NodeId 3) (NodeId 1) (NodeId 2)
                 edge = InstEdge (EdgeId 0) (NodeId 0) (NodeId 3)
                 constraint = emptyConstraint
-                    { cNodes = IntMap.fromList [(0, base), (1, dom), (2, cod), (3, arr)]
+                    { cNodes = nodeMapFromList [(0, base), (1, dom), (2, cod), (3, arr)]
                     , cInstEdges = [edge]
                     }
                 result = normalize constraint
@@ -245,7 +245,7 @@ spec = describe "Phase 2 — Normalization" $ do
                     node2 = TyVar { tnId = NodeId 1, tnBound = Nothing }
                     edge = UnifyEdge (NodeId 0) (NodeId 1)
                     constraint = emptyConstraint
-                        { cNodes = IntMap.fromList [(0, node1), (1, node2)]
+                        { cNodes = nodeMapFromList [(0, node1), (1, node2)]
                         , cUnifyEdges = [edge]
                         }
                     result = normalize constraint
@@ -268,8 +268,7 @@ spec = describe "Phase 2 — Normalization" $ do
                     edge = UnifyEdge vOuter vInner
                     constraint =
                         emptyConstraint
-                            { cNodes =
-                                IntMap.fromList
+                            { cNodes = nodeMapFromList
                                     [ (getNodeId vInner, nodeInner)
                                     , (getNodeId vOuter, nodeOuter)
                                     , (getNodeId inner, nodeInnerArrow)
@@ -296,7 +295,7 @@ spec = describe "Phase 2 — Normalization" $ do
                     node3 = TyVar { tnId = NodeId 2, tnBound = Nothing }
                     edges = [UnifyEdge (NodeId 0) (NodeId 1), UnifyEdge (NodeId 1) (NodeId 2)]
                     constraint = emptyConstraint
-                        { cNodes = IntMap.fromList [(0, node1), (1, node2), (2, node3)]
+                        { cNodes = nodeMapFromList [(0, node1), (1, node2), (2, node3)]
                         , cUnifyEdges = edges
                         }
                     result = normalize constraint
@@ -312,7 +311,7 @@ spec = describe "Phase 2 — Normalization" $ do
                     arrNode = TyArrow (NodeId 3) (NodeId 1) (NodeId 2)
                     edge = UnifyEdge (NodeId 0) (NodeId 3)
                     constraint = emptyConstraint
-                        { cNodes = IntMap.fromList
+                        { cNodes = nodeMapFromList
                             [(0, varNode), (1, domNode), (2, codNode), (3, arrNode)]
                         , cUnifyEdges = [edge]
                         }
@@ -327,7 +326,7 @@ spec = describe "Phase 2 — Normalization" $ do
                     arrNode = TyArrow (NodeId 3) (NodeId 1) (NodeId 2)
                     edge = UnifyEdge (NodeId 3) (NodeId 0)  -- Arrow on left
                     constraint = emptyConstraint
-                        { cNodes = IntMap.fromList
+                        { cNodes = nodeMapFromList
                             [(0, varNode), (1, domNode), (2, codNode), (3, arrNode)]
                         , cUnifyEdges = [edge]
                         }
@@ -340,7 +339,7 @@ spec = describe "Phase 2 — Normalization" $ do
                     baseNode = TyBase (NodeId 1) (BaseTy "Int")
                     edge = UnifyEdge (NodeId 0) (NodeId 1)
                     constraint = emptyConstraint
-                        { cNodes = IntMap.fromList [(0, varNode), (1, baseNode)]
+                        { cNodes = nodeMapFromList [(0, varNode), (1, baseNode)]
                         , cUnifyEdges = [edge]
                         }
                     result = normalize constraint
@@ -352,7 +351,7 @@ spec = describe "Phase 2 — Normalization" $ do
                     baseNode = TyBase (NodeId 1) (BaseTy "Int")
                     edge = UnifyEdge (NodeId 1) (NodeId 0)  -- Base on left
                     constraint = emptyConstraint
-                        { cNodes = IntMap.fromList [(0, varNode), (1, baseNode)]
+                        { cNodes = nodeMapFromList [(0, varNode), (1, baseNode)]
                         , cUnifyEdges = [edge]
                         }
                     result = normalize constraint
@@ -370,7 +369,7 @@ spec = describe "Phase 2 — Normalization" $ do
                     arr2 = TyArrow (NodeId 5) (NodeId 3) (NodeId 4)
                     edge = UnifyEdge (NodeId 2) (NodeId 5)
                     constraint = emptyConstraint
-                        { cNodes = IntMap.fromList
+                        { cNodes = nodeMapFromList
                             [ (0, dom1), (1, cod1), (2, arr1)
                             , (3, dom2), (4, cod2), (5, arr2)
                             ]
@@ -393,7 +392,7 @@ spec = describe "Phase 2 — Normalization" $ do
                     outer2 = TyArrow (NodeId 9) (NodeId 5) (NodeId 8)
                     edge = UnifyEdge (NodeId 4) (NodeId 9)
                     constraint = emptyConstraint
-                        { cNodes = IntMap.fromList
+                        { cNodes = nodeMapFromList
                             [ (0, alpha), (1, beta), (2, gamma), (3, inner1), (4, outer1)
                             , (5, intNode), (6, boolNode), (7, delta), (8, inner2), (9, outer2)
                             ]
@@ -411,7 +410,7 @@ spec = describe "Phase 2 — Normalization" $ do
                     node2 = TyBase (NodeId 1) (BaseTy "Int")
                     edge = UnifyEdge (NodeId 0) (NodeId 1)
                     constraint = emptyConstraint
-                        { cNodes = IntMap.fromList [(0, node1), (1, node2)]
+                        { cNodes = nodeMapFromList [(0, node1), (1, node2)]
                         , cUnifyEdges = [edge]
                         }
                     result = normalize constraint
@@ -423,7 +422,7 @@ spec = describe "Phase 2 — Normalization" $ do
                     node2 = TyBase (NodeId 1) (BaseTy "Bool")
                     edge = UnifyEdge (NodeId 0) (NodeId 1)
                     constraint = emptyConstraint
-                        { cNodes = IntMap.fromList [(0, node1), (1, node2)]
+                        { cNodes = nodeMapFromList [(0, node1), (1, node2)]
                         , cUnifyEdges = [edge]
                         }
                     result = normalize constraint
@@ -444,7 +443,7 @@ spec = describe "Phase 2 — Normalization" $ do
                             , (nodeRefKey (typeRef (tnId var2)), (typeRef (tnId forall2), BindFlex))
                             ]
                     constraint = emptyConstraint
-                        { cNodes = IntMap.fromList
+                        { cNodes = nodeMapFromList
                             [ (getNodeId (tnId var1), var1)
                             , (getNodeId (tnId forall1), forall1)
                             , (getNodeId (tnId var2), var2)
@@ -474,8 +473,7 @@ spec = describe "Phase 2 — Normalization" $ do
                             , (nodeRefKey (typeRef (tnId gamma)), (typeRef (tnId forall2), BindFlex))
                             ]
                     constraint = emptyConstraint
-                        { cNodes =
-                            IntMap.fromList
+                        { cNodes = nodeMapFromList
                                 [ (getNodeId (tnId forall1), forall1)
                                 , (getNodeId (tnId forall2), forall2)
                                 , (getNodeId (tnId alpha), alpha)
@@ -499,7 +497,7 @@ spec = describe "Phase 2 — Normalization" $ do
                     exp2 = TyExp (NodeId 3) (ExpVarId 0) (NodeId 2)
                     edge = UnifyEdge (NodeId 1) (NodeId 3)
                     constraint = emptyConstraint
-                        { cNodes = IntMap.fromList
+                        { cNodes = nodeMapFromList
                             [ (0, var1), (1, exp1), (2, var2), (3, exp2) ]
                         , cUnifyEdges = [edge]
                         }
@@ -514,7 +512,7 @@ spec = describe "Phase 2 — Normalization" $ do
                     var2 = TyVar { tnId = NodeId 3, tnBound = Nothing }
                     edge = UnifyEdge (NodeId 0) (NodeId 1)
                     constraint = emptyConstraint
-                        { cNodes = IntMap.fromList
+                        { cNodes = nodeMapFromList
                             [ (0, exp1), (1, exp2), (2, var1), (3, var2) ]
                         , cUnifyEdges = [edge]
                         }
@@ -531,7 +529,7 @@ spec = describe "Phase 2 — Normalization" $ do
                     base = TyBase (NodeId 3) (BaseTy "Int")
                     edge = UnifyEdge (NodeId 2) (NodeId 3)
                     constraint = emptyConstraint
-                        { cNodes = IntMap.fromList [(0, dom), (1, cod), (2, arr), (3, base)]
+                        { cNodes = nodeMapFromList [(0, dom), (1, cod), (2, arr), (3, base)]
                         , cUnifyEdges = [edge]
                         }
                     result = normalize constraint
@@ -545,7 +543,7 @@ spec = describe "Phase 2 — Normalization" $ do
                     base = TyBase (NodeId 3) (BaseTy "Int")
                     edge = UnifyEdge (NodeId 3) (NodeId 2)  -- Base on left
                     constraint = emptyConstraint
-                        { cNodes = IntMap.fromList [(0, dom), (1, cod), (2, arr), (3, base)]
+                        { cNodes = nodeMapFromList [(0, dom), (1, cod), (2, arr), (3, base)]
                         , cUnifyEdges = [edge]
                         }
                     result = normalize constraint
@@ -560,7 +558,7 @@ spec = describe "Phase 2 — Normalization" $ do
                     intNode = TyBase (NodeId 2) (BaseTy "Int")
                     edges = [UnifyEdge (NodeId 0) (NodeId 1), UnifyEdge (NodeId 1) (NodeId 2)]
                     constraint = emptyConstraint
-                        { cNodes = IntMap.fromList [(0, alpha), (1, beta), (2, intNode)]
+                        { cNodes = nodeMapFromList [(0, alpha), (1, beta), (2, intNode)]
                         , cUnifyEdges = edges
                         }
                     result = normalize constraint
@@ -573,7 +571,7 @@ spec = describe "Phase 2 — Normalization" $ do
                     int2 = TyBase (NodeId 2) (BaseTy "Int")
                     edges = [UnifyEdge (NodeId 0) (NodeId 1), UnifyEdge (NodeId 0) (NodeId 2)]
                     constraint = emptyConstraint
-                        { cNodes = IntMap.fromList [(0, alpha), (1, int1), (2, int2)]
+                        { cNodes = nodeMapFromList [(0, alpha), (1, int1), (2, int2)]
                         , cUnifyEdges = edges
                         }
                     result = normalize constraint
@@ -586,7 +584,7 @@ spec = describe "Phase 2 — Normalization" $ do
                     boolNode = TyBase (NodeId 2) (BaseTy "Bool")
                     edges = [UnifyEdge (NodeId 0) (NodeId 1), UnifyEdge (NodeId 0) (NodeId 2)]
                     constraint = emptyConstraint
-                        { cNodes = IntMap.fromList [(0, alpha), (1, intNode), (2, boolNode)]
+                        { cNodes = nodeMapFromList [(0, alpha), (1, intNode), (2, boolNode)]
                         , cUnifyEdges = edges
                         }
                     result = normalize constraint
@@ -598,7 +596,7 @@ spec = describe "Phase 2 — Normalization" $ do
                 let alpha = TyVar { tnId = NodeId 0, tnBound = Nothing }
                     edge = UnifyEdge (NodeId 0) (NodeId 0)
                     constraint = emptyConstraint
-                        { cNodes = IntMap.singleton 0 alpha
+                        { cNodes = nodeMapSingleton 0 alpha
                         , cUnifyEdges = [edge]
                         }
                     result = normalize constraint

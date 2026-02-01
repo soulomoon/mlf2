@@ -22,7 +22,7 @@ import Data.Maybe (fromMaybe)
 
 import qualified MLF.Util.Order as Order
 import qualified MLF.Constraint.Canonicalize as Canonicalize
-import MLF.Constraint.Types
+import MLF.Constraint.Types hiding (lookupNode)
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Types.Elab
 import MLF.Util.ElabError (ElabError(..), bindingToElab)
@@ -130,7 +130,7 @@ reifyWith _contextLabel res nameForVar isNamed rootMode nid =
             | gid <- IntMap.elems schemeGenByRoot
             ]
 
-    lookupNode k = maybe (Left (MissingNode k)) Right (IntMap.lookup (getNodeId k) nodes)
+    lookupNode k = maybe (Left (MissingNode k)) Right (lookupNodeIn nodes k)
 
     bindParentsE = do
         bindParents0 <- bindingToElab (canonicalizeBindParentsUnder canonical constraint)
@@ -143,7 +143,7 @@ reifyWith _contextLabel res nameForVar isNamed rootMode nid =
                 in if IntSet.member key visited
                     then True
                     else
-                        case IntMap.lookup key nodes of
+                        case lookupNodeIn nodes nidC of
                             Nothing -> True
                             Just node ->
                                 let visited' = IntSet.insert key visited
@@ -167,8 +167,12 @@ reifyWith _contextLabel res nameForVar isNamed rootMode nid =
     canonicalRef = Canonicalize.canonicalRef canonical
 
     nodeRefExists ref = case ref of
-        TypeRef nid0 -> IntMap.member (getNodeId nid0) nodes
-        GenRef gid -> IntMap.member (getGenNodeId gid) (cGenNodes constraint)
+        TypeRef nid0 ->
+            case lookupNodeIn nodes nid0 of
+                Just _ -> True
+                Nothing -> False
+        GenRef gid ->
+            IntMap.member (getGenNodeId gid) (getGenNodeMap (cGenNodes constraint))
 
     lookupBindParentUnderSoft ref0 = do
         bindParents <- bindParentsE
@@ -196,7 +200,7 @@ reifyWith _contextLabel res nameForVar isNamed rootMode nid =
                         let childRef = nodeRefFromKey childKey
                         in case childRef of
                             TypeRef childN ->
-                                case IntMap.lookup (getNodeId childN) nodes of
+                                case lookupNodeIn nodes childN of
                                     Just TyExp{} -> pure acc
                                     Just TyBase{} -> pure acc
                                     Just TyBottom{} -> pure acc
@@ -207,7 +211,7 @@ reifyWith _contextLabel res nameForVar isNamed rootMode nid =
                                                 InvalidBindingTree $
                                                     "boundFlexChildrenAllUnderSoft: child " ++ show childN ++ " not in cNodes"
                             GenRef gid ->
-                                if IntMap.member (getGenNodeId gid) (cGenNodes constraint)
+                                if IntMap.member (getGenNodeId gid) (getGenNodeMap (cGenNodes constraint))
                                     then pure acc
                                     else
                                         Left $
@@ -292,7 +296,7 @@ reifyWith _contextLabel res nameForVar isNamed rootMode nid =
                                                     case VarStore.lookupVarBound constraint n of
                                                         Nothing -> False
                                                         Just bnd ->
-                                                            case IntMap.lookup (getNodeId (canonical bnd)) nodes of
+                                                            case lookupNodeIn nodes (canonical bnd) of
                                                                 Just TyBase{} -> True
                                                                 Just TyBottom{} -> True
                                                                 _ -> False
@@ -331,7 +335,7 @@ reifyWith _contextLabel res nameForVar isNamed rootMode nid =
                                                     pure (markDone cache', t)
                                                 _ -> case mbParent of
                                                     Just (TypeRef parent, BindRigid) ->
-                                                        case IntMap.lookup (getNodeId (canonical parent)) nodes of
+                                                        case lookupNodeIn nodes (canonical parent) of
                                                             Just TyForall{} ->
                                                                 let t = varFor n
                                                                     cache' = cacheInsertLocal mode key t cache0' namedExtra
@@ -423,7 +427,7 @@ reifyWith _contextLabel res nameForVar isNamed rootMode nid =
                                     let bndRoot =
                                             case mbBoundParent of
                                                 Just (TypeRef parent, _) ->
-                                                    case IntMap.lookup (getNodeId (canonical parent)) nodes of
+                                                    case lookupNodeIn nodes (canonical parent) of
                                                         Just TyForall{} -> canonical parent
                                                         _ -> bndC
                                                 _ -> bndC
@@ -444,7 +448,7 @@ reifyWith _contextLabel res nameForVar isNamed rootMode nid =
             in if IntSet.member key visited
                 then False
                 else
-                    case IntMap.lookup key nodes of
+                    case lookupNodeIn nodes nidC of
                         Just TyForall{} -> True
                         Just TyVar{} ->
                             case VarStore.lookupVarBound constraint nidC of
@@ -462,7 +466,7 @@ reifyWith _contextLabel res nameForVar isNamed rootMode nid =
                 case VarStore.lookupVarBound constraint childC of
                     Nothing -> False
                     Just bnd ->
-                        case IntMap.lookup (getNodeId (canonical bnd)) nodes of
+                        case lookupNodeIn nodes (canonical bnd) of
                             Just TyBase{} -> True
                             Just TyBottom{} -> True
                             _ -> False
@@ -476,7 +480,7 @@ reifyWith _contextLabel res nameForVar isNamed rootMode nid =
                 if boundIsPoly child || isNamedLocal namedExtra (canonical child)
                     then pure (cache, varFor child)
                     else
-                        case (mode, IntMap.lookup (getNodeId parent) nodes) of
+                        case (mode, lookupNodeIn nodes parent) of
                             (ModeTypeNoFallback, Just TyForall{}) -> goFull cache namedExtra mode child
                             _ -> goBound cache namedExtra child
             Just (GenRef _, BindRigid) ->
@@ -486,7 +490,7 @@ reifyWith _contextLabel res nameForVar isNamed rootMode nid =
             Just (_, BindFlex) ->
                 case mode of
                     ModeBound ->
-                        case IntMap.lookup (getNodeId (canonical child)) nodes of
+                        case lookupNodeIn nodes (canonical child) of
                             Just TyVar{} | VarStore.isEliminatedVar constraint (canonical child) ->
                                 goBound cache namedExtra child
                             Just TyVar{} -> pure (cache, varFor child)
@@ -494,7 +498,7 @@ reifyWith _contextLabel res nameForVar isNamed rootMode nid =
                     _ | inlineWeakened ->
                         goBound cache namedExtra child
                     _ ->
-                        case IntMap.lookup (getNodeId (canonical child)) nodes of
+                        case lookupNodeIn nodes (canonical child) of
                             Just TyVar{} ->
                                 let childKey' = getNodeId (canonical child)
                                     isBoundHere = IntSet.member childKey' namedExtra
@@ -537,7 +541,7 @@ reifyWith _contextLabel res nameForVar isNamed rootMode nid =
             reachable =
                 Traversal.reachableFromWithBounds
                     canonical
-                    (\nid -> IntMap.lookup (getNodeId nid) nodes)
+                    (lookupNodeIn nodes)
                     orderRoot
         let includeRigid =
                 isForall node
@@ -558,7 +562,7 @@ reifyWith _contextLabel res nameForVar isNamed rootMode nid =
         let keepNamedForScheme =
                 mode == ModeBound && IntSet.member (getNodeId n) schemeRootSet
         let isBinderNode candidate =
-                case IntMap.lookup (getNodeId (canonical candidate)) nodes of
+                case lookupNodeIn nodes (canonical candidate) of
                     Just TyExp{} -> False
                     Just TyBase{} -> False
                     Just TyBottom{} -> False
@@ -621,7 +625,7 @@ reifyWith _contextLabel res nameForVar isNamed rootMode nid =
                                 TypeRef childN -> Just childN
                                 GenRef _ -> Nothing
                         isBindableNode child =
-                            case IntMap.lookup (getNodeId child) nodes of
+                            case lookupNodeIn nodes child of
                                 Just TyVar{} -> True
                                 _ -> False
                         isBindable flag child = case flag of
@@ -783,7 +787,7 @@ namedNodes res = do
     bindParents0 <- bindingToElab (canonicalizeBindParentsUnder canonical constraint)
     let bindParents = softenBindParents canonical constraint bindParents0
     let isNamedNode nid =
-            case IntMap.lookup (getNodeId nid) nodes of
+            case lookupNodeIn nodes nid of
                 Just TyVar{} -> True
                 _ -> False
         named =
@@ -802,7 +806,7 @@ freeVars res nid visited
     | IntSet.member key visited = IntSet.empty
     | otherwise =
         let visited' = IntSet.insert key visited
-        in case IntMap.lookup key nodes of
+        in case lookupNodeIn nodes (canonical nid) of
             Nothing -> IntSet.empty
             Just TyVar{} ->
                 case VarStore.lookupVarBound constraint (canonical nid) of

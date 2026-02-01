@@ -44,14 +44,18 @@ import MLF.Binding.Canonicalization (
 -- | All node references in a constraint.
 allNodeRefs :: Constraint -> [NodeRef]
 allNodeRefs c =
-    map (TypeRef . NodeId) (IntMap.keys (cNodes c)) ++
-    map (GenRef . GenNodeId) (IntMap.keys (cGenNodes c))
+    map (TypeRef . fst) (toListNode (cNodes c)) ++
+    map (GenRef . GenNodeId) (IntMap.keys (getGenNodeMap (cGenNodes c)))
 
 -- | Check if a node reference exists in the constraint.
 nodeRefExists :: Constraint -> NodeRef -> Bool
 nodeRefExists c ref = case ref of
-    TypeRef nid -> IntMap.member (getNodeId nid) (cNodes c)
-    GenRef gid -> IntMap.member (getGenNodeId gid) (cGenNodes c)
+    TypeRef nid ->
+        case lookupNodeIn (cNodes c) nid of
+            Just _ -> True
+            Nothing -> False
+    GenRef gid ->
+        IntMap.member (getGenNodeId gid) (getGenNodeMap (cGenNodes c))
 
 -- | Look up the binding parent and flag for a node.
 --

@@ -46,7 +46,6 @@ module MLF.Types.Elab (
 import Data.Functor.Foldable (Base, Corecursive(..), Recursive(..))
 import Data.Kind (Type)
 import Data.IntMap.Strict (IntMap)
-import qualified Data.Set as Set
 
 import MLF.Constraint.Types (BaseTy(..), BindFlag(..))
 import MLF.Frontend.Syntax (Lit(..))

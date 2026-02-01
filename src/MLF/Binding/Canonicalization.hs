@@ -31,8 +31,8 @@ import MLF.Constraint.Types
 -- | All node references in a constraint.
 allNodeRefs :: Constraint -> [NodeRef]
 allNodeRefs c =
-    map (TypeRef . NodeId) (IntMap.keys (cNodes c)) ++
-    map (GenRef . GenNodeId) (IntMap.keys (cGenNodes c))
+    map (TypeRef . fst) (toListNode (cNodes c)) ++
+    map (GenRef . GenNodeId) (IntMap.keys (getGenNodeMap (cGenNodes c)))
 
 -- | Canonicalize the binding-parent relation under a canonicalization function.
 --

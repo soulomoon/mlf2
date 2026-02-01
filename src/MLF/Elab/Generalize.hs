@@ -236,7 +236,7 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
                                 | (key, _) <- aliasEntries
                                 ]
                         constraintAlias =
-                            constraint { cNodes = IntMap.union aliasNodes nodes }
+                            constraint { cNodes = NodeMap (IntMap.union aliasNodes nodes) }
                         substAlias =
                             IntMap.union (IntMap.fromList aliasEntries) substBaseRigid
                         resAlias = resForReify { srConstraint = constraintAlias }
@@ -423,7 +423,7 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
                 inlineAliasBoundsWithBy
                     False
                     canonical
-                    nodes
+                    (NodeMap nodes)
                     (VarStore.lookupVarBound constraint)
                     (reifyBoundWithNames resForReify substExplicit)
 

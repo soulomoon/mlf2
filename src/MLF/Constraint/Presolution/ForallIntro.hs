@@ -15,7 +15,7 @@ module MLF.Constraint.Presolution.ForallIntro (
 import Control.Monad (forM_, unless, when)
 import Control.Monad.Except (throwError)
 import Control.Monad.State (modify')
-import Data.List (partition, sortBy)
+import Data.List (partition)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
@@ -80,13 +80,10 @@ rewireStructuralParents canonical old new =
                     node
                 _ -> node
             nodes1 =
-                IntMap.mapWithKey
-                    (\k node ->
-                        if k == getNodeId new
-                            then node
-                            else updateNode node
-                    )
-                    nodes0
+                fromListNode
+                    [ (nid, if nid == new then node else updateNode node)
+                    | (nid, node) <- toListNode nodes0
+                    ]
         in st { psConstraint = c0 { cNodes = nodes1 } }
 
 bindForallBindersFromSpec :: NodeId -> NodeId -> ForallSpec -> PresolutionM ()
@@ -104,14 +101,14 @@ bindForallBindersFromSpec forallId bodyRoot ForallSpec{ fsBinderCount = k, fsBou
         reachable =
             Traversal.reachableFromUnderLenient
                 canonical
-                (\nid -> IntMap.lookup (getNodeId nid) nodes0)
+                (lookupNodeIn nodes0)
                 bodyC
         orderKeys = Order.orderKeysFromRootWith canonical nodes0 bodyC Nothing
 
     bp <- liftBindingError $ Binding.canonicalizeBindParentsUnder canonical c0
 
     let isLiveVar nid =
-            case IntMap.lookup (getNodeId nid) nodes0 of
+            case lookupNodeIn nodes0 nid of
                 Just TyVar{} ->
                     not (VarStore.isEliminatedVar c0 nid)
                 _ -> False
@@ -155,7 +152,7 @@ bindForallBindersFromSpec forallId bodyRoot ForallSpec{ fsBinderCount = k, fsBou
         Right sorted -> pure sorted
     let candidates0 = freeLike ++ other
         bodyIsWrapper =
-            case IntMap.lookup (getNodeId bodyC) nodes0 of
+            case lookupNodeIn nodes0 bodyC of
                 Just TyVar{} ->
                     case VarStore.lookupVarBound c0 bodyC of
                         Just _ -> True

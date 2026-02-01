@@ -43,7 +43,8 @@ import qualified MLF.Constraint.Canonicalize as Canonicalize
 import qualified MLF.Constraint.Traversal as Traversal
 import qualified MLF.Constraint.Unify.Decompose as UnifyDecompose
 import qualified MLF.Constraint.NodeAccess as NodeAccess
-import MLF.Constraint.Types (GenNode(..), NodeId(..), NodeRef(..), TyNode(..), Constraint(..), InstEdge(..), UnifyEdge(..), BindFlag(..), maxNodeIdKeyOr0, lookupNodeIn, nodeRefFromKey, nodeRefKey, typeRef)
+import qualified MLF.Constraint.Types as Types
+import MLF.Constraint.Types (BindFlag(..), Constraint(..), GenNode(..), InstEdge(..), NodeId(..), NodeMap, NodeRef(..), TyNode(..), UnifyEdge(..), lookupNodeIn, maxNodeIdKeyOr0, nodeRefFromKey, nodeRefKey, typeRef)
 
 {- Note [Normalization / Local Transformations]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -222,15 +223,15 @@ graftInstEdges = do
 -- | Partition edges into (graftable, non-graftable).
 -- An edge is graftable if we can structurally transform it without needing
 -- presolution decisions. See Note [Grafting Cases].
-partitionGraftable :: [InstEdge] -> IntMap TyNode -> NormalizeM ([InstEdge], [InstEdge])
+partitionGraftable :: [InstEdge] -> NodeMap TyNode -> NormalizeM ([InstEdge], [InstEdge])
 partitionGraftable edges nodes = do
     polySyms <- gets (cPolySyms . nsConstraint)
     uf <- gets nsUnionFind
     let isGraftable edge =
             let leftId = findRoot uf (instLeft edge)
                 rightId = findRoot uf (instRight edge)
-                leftNode = IntMap.lookup (getNodeId leftId) nodes
-                rightNode = IntMap.lookup (getNodeId rightId) nodes
+                leftNode = lookupNodeIn nodes leftId
+                rightNode = lookupNodeIn nodes rightId
             in case (leftNode, rightNode) of
                 -- Variable ≤ Structure: graft arrows; base only if rigid (not Poly)
                 (Just TyVar {}, Just TyArrow {}) -> True
@@ -329,8 +330,8 @@ graftEdge edge = do
                 ]
         leftId = findRoot uf (instLeft edge)
         rightId = findRoot uf (instRight edge)
-        leftNode = IntMap.lookup (getNodeId leftId) nodes
-        rightNode = IntMap.lookup (getNodeId rightId) nodes
+        leftNode = lookupNodeIn nodes leftId
+        rightNode = lookupNodeIn nodes rightId
 
     case (leftNode, rightNode) of
         -- Variable ≤ Arrow: graft arrow structure onto the variable node
@@ -418,7 +419,7 @@ graftEdge edge = do
         _ -> pure $ Just []
 
 -- | Check whether target (under UF reps) contains the variable.
-occursIn :: IntMap TyNode -> IntMap NodeId -> NodeId -> NodeId -> Bool
+occursIn :: NodeMap TyNode -> IntMap NodeId -> NodeId -> NodeId -> Bool
 occursIn nodes uf var target =
     case Traversal.occursInUnder (findRoot uf) (lookupNodeIn nodes) var target of
         Left _ -> False
@@ -461,7 +462,7 @@ freshNodeId = do
 insertNode :: TyNode -> NormalizeM ()
 insertNode node = modify' $ \s ->
     let c = nsConstraint s
-        nodes' = IntMap.insert (getNodeId (tnId node)) node (cNodes c)
+        nodes' = Types.insertNode (tnId node) node (cNodes c)
     in s { nsConstraint = c { cNodes = nodes' } }
 
 {- Note [Merging]
@@ -559,8 +560,8 @@ processUnifyEdges = foldM processOne []
         if left == right
             then pure acc  -- Already unified
             else do
-                let leftNode = IntMap.lookup (getNodeId left) nodes
-                    rightNode = IntMap.lookup (getNodeId right) nodes
+                let leftNode = lookupNodeIn nodes left
+                    rightNode = lookupNodeIn nodes right
                 case (leftNode, rightNode) of
                     -- TyExp vs TyVar:
                     --
@@ -657,7 +658,7 @@ applyUnionFindToConstraint = do
     when (not (IntMap.null uf)) $ modify' $ \s ->
         let c = nsConstraint s
             -- Update nodes: dereference variables to their canonical structure
-            nodes' = IntMap.map (applyToNode uf (cNodes c)) (cNodes c)
+            nodes' = fmap (applyToNode uf (cNodes c)) (cNodes c)
             -- Update instantiation edges
             instEdges' = Canonicalize.rewriteInstEdges (findRoot uf) (cInstEdges c)
             -- Update unification edges
@@ -707,14 +708,14 @@ applyUnionFindToConstraint = do
 -- | Apply union-find to a node.
 -- If the node is a variable that has been unified with a structure,
 -- we replace the variable with that structure (preserving the variable's ID).
-applyToNode :: IntMap NodeId -> IntMap TyNode -> TyNode -> TyNode
+applyToNode :: IntMap NodeId -> NodeMap TyNode -> TyNode -> TyNode
 applyToNode uf nodes node =
     let nid = tnId node
         rootId = findRoot uf nid
     in if nid /= rootId
         then
             -- Node has been merged. Check if the root has structure we should copy.
-            case IntMap.lookup (getNodeId rootId) nodes of
+            case lookupNodeIn nodes rootId of
                 Just rootNode ->
                     -- If root is structure (not Var), copy it to this node ID.
                     -- If root is also Var, we keep this node as Var (but canonicalized?).

@@ -73,7 +73,6 @@ module MLF.Constraint.Presolution.StateAccess (
 import Control.Monad.State (gets)
 import Control.Monad.Except (throwError)
 import Control.Monad.Reader (ReaderT, runReaderT, asks)
-import Control.Monad.Trans (lift)
 import qualified Data.IntSet as IntSet
 import Data.IntSet (IntSet)
 

@@ -36,7 +36,7 @@ import MLF.Constraint.Presolution.Expansion (
 materializeExpansions :: PresolutionM (IntMap NodeId)
 materializeExpansions = do
     nodes <- gets (cNodes . psConstraint)
-    let exps = [ n | n@TyExp{} <- IntMap.elems nodes ]
+    let exps = [ n | (_, n@TyExp{}) <- toListNode nodes ]
     uf <- gets psUnionFind
     fmap IntMap.fromList $ forM exps $ \expNode -> do
         let eid = tnId expNode

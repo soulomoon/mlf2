@@ -111,8 +111,12 @@ import MLF.Binding.Queries (
 
 nodeRefExists :: Constraint -> NodeRef -> Bool
 nodeRefExists c ref = case ref of
-    TypeRef nid -> IntMap.member (getNodeId nid) (cNodes c)
-    GenRef gid -> IntMap.member (getGenNodeId gid) (cGenNodes c)
+    TypeRef nid ->
+        case lookupNodeIn (cNodes c) nid of
+            Just _ -> True
+            Nothing -> False
+    GenRef gid ->
+        IntMap.member (getGenNodeId gid) (getGenNodeMap (cGenNodes c))
 
 -- | Build type-level structure edges from nodes.
 --
@@ -121,10 +125,10 @@ nodeRefExists c ref = case ref of
 -- Self-edges are automatically removed.
 buildTypeEdgesFrom
     :: (NodeId -> Int)  -- ^ Key mapping function (e.g., getNodeId or nodeRefKey . TypeRef)
-    -> IntMap.IntMap TyNode
+    -> NodeMap TyNode
     -> IntMap.IntMap IntSet
 buildTypeEdgesFrom toKey nodes =
-    foldl' addOne IntMap.empty (IntMap.elems nodes)
+    foldl' addOne IntMap.empty (map snd (toListNode nodes))
   where
     addOne m node =
         let parentKey = toKey (tnId node)
@@ -257,7 +261,7 @@ collectBoundChildrenWithFlag childFilter flagOk c bindParents binder errCtx =
                                 Just _ ->
                                     maybe (pure acc) (\nid -> pure (nid : acc)) (childFilter (TypeRef childN))
                         GenRef gid ->
-                            if IntMap.member (getGenNodeId gid) (cGenNodes c)
+                            if IntMap.member (getGenNodeId gid) (getGenNodeMap (cGenNodes c))
                                 then pure acc
                                 else
                                     Left $
@@ -352,25 +356,28 @@ orderedBinders canonical c0 binder0 = do
                 InvalidBindingTree $
                     "orderedBinders: gen-node binder " ++ show binderC ++ " not supported"
         TypeRef binderN -> do
-            unless (IntMap.member (getNodeId binderN) (cNodes c0)) $
+            unless (case lookupNodeIn (cNodes c0) binderN of
+                Just _ -> True
+                Nothing -> False
+                ) $
                 Left $
                     InvalidBindingTree $
                         "orderedBinders: binder " ++ show binderN ++ " not in cNodes"
             let nodes = cNodes c0
-                binderNode = IntMap.lookup (getNodeId binderN) nodes
+                binderNode = lookupNodeIn nodes binderN
                 (orderRoot, includeRigid) = case binderNode of
                     Just TyForall{ tnBody = body } -> (canonical body, True)
                     _ -> (binderN, False)
                 reachable =
                     Traversal.reachableFromWithBounds
                         canonical
-                        (\nid -> IntMap.lookup (getNodeId nid) nodes)
+                        (lookupNodeIn nodes)
                         orderRoot
             binders <- boundChildrenUnder canonical c0 (TypeRef binderN) includeRigid
             let bindersReachable =
                     filter (\nid -> IntSet.member (getNodeId nid) reachable) binders
                 extraChildren nid =
-                    case IntMap.lookup (getNodeId nid) nodes of
+                    case lookupNodeIn nodes nid of
                         Just TyVar{ tnBound = Just bnd } -> [bnd]
                         _ -> []
                 orderKeys = OrderKey.orderKeysFromRootWithExtra canonical nodes extraChildren orderRoot Nothing
@@ -431,7 +438,7 @@ orderBindersByDeps canonical c0 orderKeys binders =
     reachableFromWithBounds nodes0 root0 =
         Traversal.reachableFromNodes canonical children [root0]
       where
-        children nid = maybe [] structuralChildrenWithBounds (IntMap.lookup (getNodeId nid) nodes0)
+        children nid = maybe [] structuralChildrenWithBounds (lookupNodeIn nodes0 nid)
 
 
 -- | Compute a ForallSpec (binder count + bounds) for a forall node.
@@ -515,15 +522,17 @@ forallSpecFromForall canonical c0 binder0 = do
 --
 -- Scheme roots are the structural roots of each gen node's scope as determined
 -- by the binding tree. Root-only graphs keep empty schemes.
-rebuildGenNodesFromBinding :: Constraint -> Either BindingError (IntMap.IntMap GenNode)
+rebuildGenNodesFromBinding :: Constraint -> Either BindingError (GenNodeMap GenNode)
 rebuildGenNodesFromBinding c0
-    | IntMap.null nodes0 =
+    | null (toListNode nodes0) =
         pure $
-            IntMap.map
-                (\g -> g { gnSchemes = [] })
-                genNodes0
+            GenNodeMap
+                (IntMap.map
+                    (\g -> g { gnSchemes = [] })
+                    (getGenNodeMap genNodes0)
+                )
     | otherwise = do
-        let allTypeIds = IntMap.keys nodes0
+        let allTypeIds = map (getNodeId . fst) (toListNode nodes0)
         scopeNodes <- buildScopeNodesFromPaths (bindingPathToRoot c0) allTypeIds
         let typeEdges = buildTypeEdgesFrom getNodeId nodes0
             extractChild cid = Just cid
@@ -535,7 +544,7 @@ rebuildGenNodesFromBinding c0
                     schemes' = map NodeId (IntSet.toList roots)
                 in g { gnSchemes = schemes' }
 
-        pure (IntMap.map rebuildOne genNodes0)
+        pure (GenNodeMap (IntMap.map rebuildOne (getGenNodeMap genNodes0)))
   where
     nodes0 = cNodes c0
     genNodes0 = cGenNodes c0
@@ -550,10 +559,10 @@ computeTermDagRoots c =
         referencedNodes =
             IntSet.fromList
                 [ getNodeId child
-                | node <- IntMap.elems nodes
+                | node <- map snd (toListNode nodes)
                 , child <- structuralChildrenWithBounds node
                 ]
-    in IntSet.difference (IntSet.fromList $ IntMap.keys nodes) referencedNodes
+    in IntSet.difference (IntSet.fromList (map (getNodeId . fst) (toListNode nodes))) referencedNodes
 
 -- | Compute term-DAG roots under a canonicalization function.
 --
@@ -563,11 +572,11 @@ computeTermDagRootsUnder :: (NodeId -> NodeId) -> Constraint -> IntSet
 computeTermDagRootsUnder canonical c =
     let nodes = cNodes c
         rootIdOf = getNodeId . canonical
-        allRoots = IntSet.fromList [rootIdOf (NodeId nid) | nid <- IntMap.keys nodes]
+        allRoots = IntSet.fromList [rootIdOf nid | (nid, _node) <- toListNode nodes]
         referencedRoots =
             IntSet.fromList
                 [ childRoot
-                | node <- IntMap.elems nodes
+                | node <- map snd (toListNode nodes)
                 , let parentRoot = rootIdOf (tnId node)
                 , child <- structuralChildrenWithBounds node
                 , let childRoot = rootIdOf child
@@ -577,4 +586,4 @@ computeTermDagRootsUnder canonical c =
 
 -- | Get all NodeIds in the constraint.
 allNodeIds :: Constraint -> [NodeId]
-allNodeIds c = map NodeId $ IntMap.keys (cNodes c)
+allNodeIds c = map fst (toListNode (cNodes c))

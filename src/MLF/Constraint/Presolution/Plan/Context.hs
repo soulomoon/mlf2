@@ -12,7 +12,7 @@ import qualified Data.IntMap.Strict as IntMap
 import Data.Maybe (listToMaybe, isNothing)
 import MLF.Util.Trace (traceWhen)
 
-import MLF.Constraint.Types
+import MLF.Constraint.Types hiding (lookupNode)
 import MLF.Constraint.Solve (SolveResult(..))
 import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.BindingUtil (bindingPathToRootLocal, firstGenAncestorFrom)
@@ -144,7 +144,7 @@ resolveContext env bindParentsSoft scopeRootArg targetNodeArg = do
                 Nothing -> root
                 Just ga ->
                     let baseNodes = cNodes (gaBaseConstraint ga)
-                    in case IntMap.lookup (getNodeId target) baseNodes of
+                    in case lookupNodeIn baseNodes target of
                         Just TyForall{ tnBody = b } -> b
                         _ -> target
         resolveTargetPhase root node =
@@ -291,9 +291,10 @@ resolveContext env bindParentsSoft scopeRootArg targetNodeArg = do
                                     Just baseNid ->
                                         firstGenAncestor (gaBindParentsBase ga) (TypeRef baseNid)
                                     Nothing ->
-                                        if IntMap.member key (cNodes baseConstraint)
-                                            then firstGenAncestor (gaBindParentsBase ga) (TypeRef (NodeId key))
-                                            else Nothing
+                                        case lookupNodeIn (cNodes baseConstraint) (NodeId key) of
+                                            Just _ ->
+                                                firstGenAncestor (gaBindParentsBase ga) (TypeRef (NodeId key))
+                                            Nothing -> Nothing
         resolveBindsPhase scopeGen' =
             let bindParents = resolveBindParents scopeGen'
                 firstGenAncestorGa = resolveFirstGenAncestor bindParents

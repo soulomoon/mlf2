@@ -246,7 +246,8 @@ buildReifyPlan ReifyPlanInput{..} =
                 , stcSchemeOwners = schemeOwners
                 }
         bindingScopeGenLocal = bindingScopeGen rpiConstraint
-        hasExplicitBoundLocal = hasExplicitBoundFor rpiCanonical rpiNodes rpiConstraint
+        nodesMap = NodeMap rpiNodes
+        hasExplicitBoundLocal = hasExplicitBoundFor rpiCanonical nodesMap rpiConstraint
         isTargetSchemeBinderLocal =
             isTargetSchemeBinderFor
                 rpiCanonical
@@ -257,7 +258,7 @@ buildReifyPlan ReifyPlanInput{..} =
             boundMentionsSelfAliasFor
                 rpiCanonical
                 rpiConstraint
-                rpiNodes
+                nodesMap
                 rpiGammaAlias
                 rpiNestedSchemeInteriorSet
                 rpiReachableFromWithBounds

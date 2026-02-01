@@ -19,7 +19,7 @@ import Control.Monad.State.Strict (gets, modify')
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
-import MLF.Constraint.Types
+import MLF.Constraint.Types hiding (insertNode)
 import MLF.Frontend.ConstraintGen.State (BuildState(..), ConstraintM)
 import qualified MLF.Frontend.ConstraintGen.Scope as Scope
 
@@ -80,7 +80,7 @@ allocGenNode schemes = do
     gid <- freshGenNodeId
     let genNode = GenNode { gnId = gid, gnSchemes = schemes }
     modify' $ \st ->
-        let gens = IntMap.insert (genNodeKey gid) genNode (bsGenNodes st)
+        let gens = insertGen gid genNode (bsGenNodes st)
         in st { bsGenNodes = gens }
     Scope.registerScopeNode (genRef gid)
     pure gid
@@ -89,7 +89,13 @@ setGenNodeSchemes :: GenNodeId -> [NodeId] -> ConstraintM ()
 setGenNodeSchemes gid schemes =
     modify' $ \st ->
         let gens0 = bsGenNodes st
-            gens' = IntMap.adjust (\g -> g { gnSchemes = schemes }) (genNodeKey gid) gens0
+            gens' =
+                GenNodeMap
+                    (IntMap.adjust
+                        (\g -> g { gnSchemes = schemes })
+                        (getGenNodeId gid)
+                        (getGenNodeMap gens0)
+                    )
         in st { bsGenNodes = gens' }
 
 allocExpNode :: NodeId -> ConstraintM (NodeId, ExpVarId)

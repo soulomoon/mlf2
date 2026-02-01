@@ -260,11 +260,11 @@ validateStrict res =
 defaultPolySyms :: PolySyms
 defaultPolySyms = Set.empty
 
-noExpNodes :: IntMap.IntMap TyNode -> Expectation
+noExpNodes :: NodeMap TyNode -> Expectation
 noExpNodes nodes =
-    case [ nid | TyExp { tnId = nid } <- IntMap.elems nodes ] of
+    case [ nid | TyExp { tnId = nid } <- map snd (toListNode nodes) ] of
         [] -> pure ()
         bad -> expectationFailure ("Unexpected TyExp nodes: " ++ show bad)
 
-baseNames :: IntMap.IntMap TyNode -> [BaseTy]
-baseNames nodes = [ b | TyBase _ b <- IntMap.elems nodes ]
+baseNames :: NodeMap TyNode -> [BaseTy]
+baseNames nodes = [ b | TyBase _ b <- map snd (toListNode nodes) ]

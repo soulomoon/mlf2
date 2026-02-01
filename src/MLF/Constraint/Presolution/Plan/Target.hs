@@ -340,7 +340,7 @@ buildGammaPlan GammaPlanInput{..} =
                                     | (childKey, (parent, flag)) <- IntMap.toList (gbiBindParentsBase ga)
                                     , parent == GenRef gid
                                     , flag == BindFlex
-                                    , case IntMap.lookup childKey (cNodes (gbiBaseConstraint ga)) of
+                                    , case lookupNodeIn (cNodes (gbiBaseConstraint ga)) (NodeId childKey) of
                                         Just TyVar{} -> True
                                         _ -> False
                                     , Just solvedNid <- [IntMap.lookup childKey (gbiBaseToSolved ga)]
@@ -365,7 +365,7 @@ buildGammaPlan GammaPlanInput{..} =
                                 | (childKey, (parent, flag)) <- IntMap.toList (gbiBindParentsBase ga)
                                 , parent == GenRef gid
                                 , flag == BindFlex
-                                , case IntMap.lookup childKey baseNodes of
+                                , case lookupNodeIn baseNodes (NodeId childKey) of
                                     Just TyVar{} -> True
                                     _ -> False
                                 ]
@@ -592,7 +592,7 @@ buildGammaPlan GammaPlanInput{..} =
                                 , root <- gnSchemes gen
                                 ]
                         isSchemeRootAliasBase baseKey =
-                            case IntMap.lookup baseKey baseNodes of
+                            case lookupNodeIn baseNodes (NodeId baseKey) of
                                 Just TyVar{ tnBound = Just bnd } ->
                                     IntSet.member (getNodeId bnd) baseSchemeRootSet
                                 _ -> False

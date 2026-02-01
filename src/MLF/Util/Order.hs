@@ -23,12 +23,11 @@ module MLF.Util.Order (
 ) where
 
 import Data.IntMap.Strict (IntMap)
-import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
 import qualified MLF.Constraint.Solve as Solve (frWith)
 import MLF.Constraint.Solve (SolveResult(..))
-import MLF.Constraint.Types (Constraint(..), NodeId(..), TyNode(..))
+import MLF.Constraint.Types (Constraint(..), NodeId(..), TyNode(..), lookupNodeIn)
 import MLF.Util.OrderKey (OrderKey(..), OrderKeyError(..), compareOrderKey, orderKeysFromRootWith, orderKeysFromRootWithExtra, compareNodesByOrderKey, sortByOrderKey)
 
 -- | Compute best order keys for all nodes reachable from @root@, using the
@@ -52,7 +51,7 @@ orderKeysFromConstraintWith
 orderKeysFromConstraintWith canonical constraint root0 mbAllowed =
     let nodes = cNodes constraint
         extraChildren nid =
-            case IntMap.lookup (getNodeId nid) nodes of
+            case lookupNodeIn nodes nid of
                 Just TyVar{ tnBound = Just bnd } -> [bnd]
                 _ -> []
     in orderKeysFromRootWithExtra canonical nodes extraChildren root0 mbAllowed

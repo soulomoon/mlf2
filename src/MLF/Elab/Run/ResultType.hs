@@ -15,6 +15,7 @@ import MLF.Constraint.Presolution
     ( EdgeTrace(..)
     , PresolutionPlanBuilder(..)
     )
+import MLF.Constraint.Presolution.Base (CopyMapping(..), lookupCopy)
 import MLF.Constraint.Solve (SolveResult(..), frWith)
 import MLF.Constraint.Types
     ( Constraint
@@ -30,12 +31,15 @@ import MLF.Constraint.Types
     , cLetEdges
     , cNodes
     , ewRight
-    , genNodeKey
+    , fromListNode
     , getEdgeId
     , getNodeId
+    , lookupNodeIn
+    , lookupGen
     , gnId
     , gnSchemes
     , nodeRefFromKey
+    , toListNode
     )
 import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Constraint.NodeAccess as NodeAccess
@@ -229,7 +233,12 @@ computeResultTypeFromAnn ctx inner innerPre annNodeId eid = do
         solvedToBase = gaSolvedToBase bindParentsGa
         toBase nid =
             IntMap.findWithDefault nid (getNodeId nid) solvedToBase
-        baseNodesVarOnly = IntMap.filter isTyVar (cNodes baseConstraint)
+        baseNodesVarOnly =
+            fromListNode
+                [ (nid, node)
+                | (nid, node) <- toListNode (cNodes baseConstraint)
+                , isTyVar node
+                ]
         isTyVar node = case node of
             TyVar{} -> True
             _ -> False
@@ -254,7 +263,7 @@ computeResultTypeFromAnn ctx inner innerPre annNodeId eid = do
             case annGenMaybe of
                 Nothing -> False
                 Just annGen ->
-                    case IntMap.lookup (genNodeKey annGen) (cGenNodes c1) of
+                    case lookupGen annGen (cGenNodes c1) of
                         Just gen -> not (null (gnSchemes gen))
                         Nothing -> False
         normalizeTarget ty =
@@ -268,9 +277,9 @@ computeResultTypeFromAnn ctx inner innerPre annNodeId eid = do
                     case IntMap.lookup (getNodeId annTargetNode) solvedToBase of
                         Just baseN -> Just baseN
                         Nothing ->
-                            if IntMap.member (getNodeId annTargetNode) (cNodes baseConstraint)
-                                then Just annTargetNode
-                                else Nothing
+                            case lookupNodeIn (cNodes baseConstraint) annTargetNode of
+                                Just _ -> Just annTargetNode
+                                Nothing -> Nothing
             in case baseCandidate of
                 Just baseN ->
                     let baseRoot =
@@ -472,6 +481,7 @@ computeResultTypeFallback ctx annCanon ann = do
             let rootC = canonical rootForType
                 constraint = srConstraint solved
                 nodes = cNodes constraint
+                nodeList = map snd (toListNode nodes)
                 rootInstRoots =
                     [ etRoot tr
                     | EdgeId eid <- collectEdges rootForTypeAnn
@@ -494,7 +504,7 @@ computeResultTypeFallback ctx annCanon ann = do
                         TBase base ->
                             listToMaybe
                                 [ tnId node
-                                | node@TyBase{} <- IntMap.elems nodes
+                                | node@TyBase{} <- nodeList
                                 , tnBase node == base
                                 ]
                         _ -> Nothing
@@ -512,12 +522,12 @@ computeResultTypeFallback ctx annCanon ann = do
                         Nothing -> IntSet.empty
                 argBounds arg = do
                     baseC <- resolveBaseBoundForInstConstraint constraint canonical arg
-                    case IntMap.lookup (getNodeId baseC) nodes of
+                    case lookupNodeIn nodes baseC of
                         Just TyBase{} -> Just baseC
                         Just TyBottom{} -> Just baseC
                         _ -> Nothing
                 instArgNode tr binder arg =
-                    case IntMap.lookup (getNodeId binder) (etCopyMap tr) of
+                    case lookupCopy binder (etCopyMap tr) of
                         Just copyN -> copyN
                         Nothing -> arg
                 edgeBaseBounds =
@@ -560,7 +570,7 @@ computeResultTypeFallback ctx annCanon ann = do
                                         IntMap.fromListWith
                                             min
                                             [ (getNodeId copyN, getNodeId origN)
-                                            | (origKey, copyN) <- IntMap.toList (etCopyMap tr)
+                                            | (origKey, copyN) <- IntMap.toList (getCopyMapping (etCopyMap tr))
                                             , let origN = NodeId origKey
                                             ]
                                 , (binder, arg) <- etBinderArgs tr
@@ -599,7 +609,7 @@ computeResultTypeFallback ctx annCanon ann = do
                         then rootArgBaseBounds
                         else rootBaseBounds
             let baseTarget =
-                    case IntMap.lookup (getNodeId rootC) nodes of
+                    case lookupNodeIn nodes rootC of
                         Just TyVar{} ->
                             case resolveBaseBoundForInstConstraint constraint canonical rootC of
                                 Just baseC
@@ -624,7 +634,7 @@ computeResultTypeFallback ctx annCanon ann = do
                                             [baseKey]
                                                 | not rootHasMultiInst
                                                     && not instArgRootMultiBase ->
-                                                    case IntMap.lookup baseKey nodes of
+                                                    case lookupNodeIn nodes (NodeId baseKey) of
                                                         Just TyBase{} -> Just (NodeId baseKey)
                                                         Just TyBottom{} -> Just (NodeId baseKey)
                                                         _ -> Nothing
@@ -634,14 +644,14 @@ computeResultTypeFallback ctx annCanon ann = do
                                         [baseKey]
                                             | not rootHasMultiInst
                                                 && not instArgRootMultiBase ->
-                                                case IntMap.lookup baseKey nodes of
+                                                case lookupNodeIn nodes (NodeId baseKey) of
                                                     Just TyBase{} -> Just (NodeId baseKey)
                                                     Just TyBottom{} -> Just (NodeId baseKey)
                                                     _ -> Nothing
                                         _ -> Nothing
                         _ -> Nothing
             let boundTarget =
-                    case (baseTarget, IntMap.lookup (getNodeId rootC) nodes) of
+                    case (baseTarget, lookupNodeIn nodes rootC) of
                         (Nothing, Just TyVar{ tnBound = Nothing }) ->
                             case IntSet.toList rootBoundCandidates of
                                 [baseKey] -> Just (NodeId baseKey)
@@ -653,7 +663,7 @@ computeResultTypeFallback ctx annCanon ann = do
                                 [ resolveBaseBoundForInstConstraint constraint canonical argNode
                                 | (binder, arg) <- etBinderArgs tr
                                 , let argNode =
-                                        case IntMap.lookup (getNodeId binder) (etCopyMap tr) of
+                                        case lookupCopy binder (etCopyMap tr) of
                                             Just copyN -> copyN
                                             Nothing -> arg
                                 ]
@@ -687,7 +697,7 @@ computeResultTypeFallback ctx annCanon ann = do
                         ++ " baseNames="
                         ++ show
                             [ tnBase node
-                            | node@TyBase{} <- IntMap.elems nodes
+                            | node@TyBase{} <- map snd (toListNode nodes)
                             ]
                         ++ " perEdgeBases="
                         ++ show perEdge
@@ -704,16 +714,17 @@ computeResultTypeFallback ctx annCanon ann = do
                     case boundTarget of
                         Nothing -> resFinal
                         Just baseN ->
-                            let nodes' =
-                                    IntMap.adjust
-                                        (\node ->
-                                            case node of
-                                                TyVar{ tnId = nid, tnBound = Nothing } ->
-                                                    TyVar{ tnId = nid, tnBound = Just (canonical baseN) }
-                                                _ -> node
-                                        )
-                                        (getNodeId rootC)
-                                        (cNodes (srConstraint resFinal))
+                            let nodes0 = cNodes (srConstraint resFinal)
+                                adjustNode node =
+                                    case node of
+                                        TyVar{ tnId = nid, tnBound = Nothing } ->
+                                            TyVar{ tnId = nid, tnBound = Just (canonical baseN) }
+                                        _ -> node
+                                nodes' =
+                                    fromListNode
+                                        [ (nid, if nid == rootC then adjustNode node else node)
+                                        | (nid, node) <- toListNode nodes0
+                                        ]
                                 constraint' = (srConstraint resFinal) { cNodes = nodes' }
                             in resFinal { srConstraint = constraint' }
             let scopeRootNodePre = rootForTypePre
@@ -737,13 +748,13 @@ computeResultTypeFallback ctx annCanon ann = do
                 rootFinal = canonicalFinal rootC
                 nodesFinal = cNodes (srConstraint resFinalBounded)
                 rootBound =
-                    case IntMap.lookup (getNodeId rootFinal) nodesFinal of
+                    case lookupNodeIn nodesFinal rootFinal of
                         Just TyVar{ tnBound = Just bnd } -> Just (canonicalFinal bnd)
                         _ -> Nothing
                 rootBoundIsBase =
                     case rootBound of
                         Just bnd ->
-                            case IntMap.lookup (getNodeId bnd) nodesFinal of
+                            case lookupNodeIn nodesFinal bnd of
                                 Just TyBase{} -> True
                                 Just TyBottom{} -> True
                                 _ -> False
@@ -785,7 +796,7 @@ computeResultTypeFallback ctx annCanon ann = do
                                         then
                                             let owner = IntMap.lookup key schemeRootOwnerFinal
                                                 nodeTag =
-                                                    case IntMap.lookup key nodesFinal of
+                                                    case lookupNodeIn nodesFinal (NodeId key) of
                                                         Just TyVar{} -> "var"
                                                         Just TyArrow{} -> "arrow"
                                                         Just TyForall{} -> "forall"
@@ -811,7 +822,7 @@ computeResultTypeFallback ctx annCanon ann = do
                                 then False
                                 else if IntSet.member key schemeRootSetFinal
                                     then
-                                        case IntMap.lookup key nodesFinal of
+                                        case lookupNodeIn nodesFinal (NodeId key) of
                                             Just TyVar{ tnBound = Just bnd } ->
                                                 go (IntSet.insert key visited) bnd
                                             _ ->
@@ -820,7 +831,7 @@ computeResultTypeFallback ctx annCanon ann = do
                                                         () -> True
                                                     else False
                                 else
-                                    case IntMap.lookup key nodesFinal of
+                                    case lookupNodeIn nodesFinal (NodeId key) of
                                         Just TyForall{} ->
                                             case reportHit "TyForall" of
                                                 () -> True
@@ -836,7 +847,7 @@ computeResultTypeFallback ctx annCanon ann = do
                                                         Nothing -> False
                                             in if IntSet.member bndKey schemeRootSetFinal
                                                 then
-                                                    case IntMap.lookup bndKey nodesFinal of
+                                                    case lookupNodeIn nodesFinal bndC of
                                                         Just TyVar{ tnBound = Just bndInner } ->
                                                             go (IntSet.insert key visited) bndInner
                                                         _ ->
@@ -900,7 +911,7 @@ computeResultTypeFallback ctx annCanon ann = do
                         Nothing ->
                             if keepTargetFinal
                                 then
-                                    case IntMap.lookup (getNodeId rootFinal) nodesFinal of
+                                    case lookupNodeIn nodesFinal rootFinal of
                                         Just TyVar{} -> rootFinal
                                         _ ->
                                             case boundVarTarget of
@@ -915,16 +926,17 @@ computeResultTypeFallback ctx annCanon ann = do
                                     IntMap.findWithDefault rootC
                                         (getNodeId rootC)
                                         (gaSolvedToBase bindParentsGa)
+                                nodes0 = cNodes baseConstraint
+                                adjustNode node =
+                                    case node of
+                                        TyVar{ tnId = nid, tnBound = Nothing } ->
+                                            TyVar{ tnId = nid, tnBound = Just baseN }
+                                        _ -> node
                                 nodes' =
-                                    IntMap.adjust
-                                        (\node ->
-                                            case node of
-                                                TyVar{ tnId = nid, tnBound = Nothing } ->
-                                                    TyVar{ tnId = nid, tnBound = Just baseN }
-                                                _ -> node
-                                        )
-                                        (getNodeId baseRoot)
-                                        (cNodes baseConstraint)
+                                    fromListNode
+                                        [ (nid, if nid == baseRoot then adjustNode node else node)
+                                        | (nid, node) <- toListNode nodes0
+                                        ]
                                 baseConstraint' = baseConstraint { cNodes = nodes' }
                             in bindParentsGa { gaBaseConstraint = baseConstraint' }
                         Nothing -> bindParentsGa

@@ -17,13 +17,12 @@ module MLF.Constraint.Inert (
 ) where
 
 import Control.Monad (foldM)
-import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Set as Set
 
 import qualified MLF.Binding.GraphOps as GraphOps
 import qualified MLF.Binding.Tree as Binding
-import MLF.Constraint.Types (BindFlag(..), BindingError, Constraint(..), NodeId(..), NodeRef(..), TyNode(..), getNodeId, typeRef)
+import MLF.Constraint.Types (BindFlag(..), BindingError, Constraint(..), NodeId(..), NodeRef(..), TyNode(..), getNodeId, toListNode, typeRef)
 
 -- | True for nodes that count as "intrinsically polymorphic" anchors when
 -- computing inertness.
@@ -42,25 +41,25 @@ inertNodes :: Constraint -> Either BindingError IntSet.IntSet
 inertNodes c = do
     let nodes = cNodes c
         anchors0 =
-            [ NodeId nid
-            | (nid, node) <- IntMap.toList nodes
+            [ nid
+            | (nid, node) <- toListNode nodes
             , isPolymorphicAnchor c node || isImplicitBottomAnchor node
             ]
         anchorSet0 = IntSet.fromList (map getNodeId anchors0)
         anchorSet = closeBoundAnchors anchorSet0
         anchors = map NodeId (IntSet.toList anchorSet)
         nonInert = collectFlexAncestors c anchors
-        allNodes = IntSet.fromList (IntMap.keys nodes)
+        allNodes = IntSet.fromList (map (getNodeId . fst) (toListNode nodes))
     pure (IntSet.difference allNodes nonInert)
   where
     closeBoundAnchors set0 =
         let addBound acc (nid, node) = case node of
                 TyVar{ tnBound = Just bnd } ->
                     if IntSet.member (getNodeId bnd) acc
-                        then IntSet.insert nid acc
+                        then IntSet.insert (getNodeId nid) acc
                         else acc
                 _ -> acc
-            set1 = foldl' addBound set0 (IntMap.toList (cNodes c))
+            set1 = foldl' addBound set0 (toListNode (cNodes c))
         in if set1 == set0 then set0 else closeBoundAnchors set1
 
 isImplicitBottomAnchor :: TyNode -> Bool

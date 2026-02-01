@@ -9,7 +9,7 @@ import Test.QuickCheck
 import MLF.Constraint.Types
 import MLF.Binding.Tree
 import MLF.Binding.GraphOps
-import SpecUtil (emptyConstraint)
+import SpecUtil (emptyConstraint, nodeMapFromList, nodeMapSingleton)
 
 rootGenId :: GenNodeId
 rootGenId = GenNodeId 0
@@ -29,7 +29,7 @@ attachRootGen rootNode c =
                 then bp0
                 else IntMap.insert rootKey (rootGenRef, BindFlex) bp0
     in c
-        { cGenNodes = IntMap.singleton (getGenNodeId rootGenId) (rootGenNode rootNode)
+        { cGenNodes = fromListGen [(rootGenId, rootGenNode rootNode)]
         , cBindParents = bp'
         }
 
@@ -42,13 +42,13 @@ bp child parent flag = (nodeRefKey (typeRef child), (typeRef parent, flag))
 -- the next via its body pointer, satisfying the "parent is upper" invariant.
 genFlexChain :: Int -> Gen Constraint
 genFlexChain n
-    | n <= 0 = return emptyConstraint { cGenNodes = IntMap.singleton (getGenNodeId rootGenId) (GenNode rootGenId []) }
+    | n <= 0 = return emptyConstraint { cGenNodes = fromListGen [(rootGenId, GenNode rootGenId [])] }
     | n == 1 = return $ attachRootGen (NodeId 0) emptyConstraint
-        { cNodes = IntMap.singleton 0 (TyVar { tnId = NodeId 0, tnBound = Nothing })
+        { cNodes = nodeMapSingleton 0 (TyVar { tnId = NodeId 0, tnBound = Nothing })
         }
     | otherwise = do
         -- Create a chain: forall(0) -> forall(1) -> ... -> var(n-1)
-        let nodes = IntMap.fromList $
+        let nodes = nodeMapFromList $
                 [(i, TyForall (NodeId i) (NodeId (i + 1))) | i <- [0..n-2]]
                 ++ [(n-1, TyVar { tnId = NodeId (n - 1), tnBound = Nothing })]
             bindParents = IntMap.fromList
@@ -65,13 +65,13 @@ genFlexChain n
 -- can point to any ancestor, satisfying the "parent is upper" invariant.
 genAllFlexTree :: Int -> Gen Constraint
 genAllFlexTree n
-    | n <= 0 = return emptyConstraint { cGenNodes = IntMap.singleton (getGenNodeId rootGenId) (GenNode rootGenId []) }
+    | n <= 0 = return emptyConstraint { cGenNodes = fromListGen [(rootGenId, GenNode rootGenId [])] }
     | n == 1 = return $ attachRootGen (NodeId 0) emptyConstraint
-        { cNodes = IntMap.singleton 0 (TyVar { tnId = NodeId 0, tnBound = Nothing })
+        { cNodes = nodeMapSingleton 0 (TyVar { tnId = NodeId 0, tnBound = Nothing })
         }
     | otherwise = do
         -- Create a chain: forall(0) -> forall(1) -> ... -> var(n-1)
-        let nodes = IntMap.fromList $
+        let nodes = nodeMapFromList $
                 [(i, TyForall (NodeId i) (NodeId (i + 1))) | i <- [0..n-2]]
                 ++ [(n-1, TyVar { tnId = NodeId (n - 1), tnBound = Nothing })]
         -- Each node i > 0 can have any ancestor [0..i-1] as binding parent
@@ -88,13 +88,13 @@ spec = describe "MLF.Binding.GraphOps" $ do
     describe "Basic operations" $ do
         it "getBindFlag returns Nothing for root nodes" $ do
             let c = emptyConstraint
-                    { cNodes = IntMap.singleton 0 (TyVar { tnId = NodeId 0, tnBound = Nothing })
+                    { cNodes = nodeMapSingleton 0 (TyVar { tnId = NodeId 0, tnBound = Nothing })
                     }
             getBindFlag c (typeRef (NodeId 0)) `shouldBe` Nothing
 
         it "getBindFlag returns the flag for non-root nodes" $ do
             let c = emptyConstraint
-                    { cNodes = IntMap.fromList
+                    { cNodes = nodeMapFromList
                         [ (0, TyVar { tnId = NodeId 0, tnBound = Nothing })
                         , (1, TyVar { tnId = NodeId 1, tnBound = Nothing })
                         ]
@@ -105,13 +105,13 @@ spec = describe "MLF.Binding.GraphOps" $ do
     describe "isInstantiable" $ do
         it "returns False for root nodes" $ do
             let c = emptyConstraint
-                    { cNodes = IntMap.singleton 0 (TyVar { tnId = NodeId 0, tnBound = Nothing })
+                    { cNodes = nodeMapSingleton 0 (TyVar { tnId = NodeId 0, tnBound = Nothing })
                     }
             isInstantiable c (typeRef (NodeId 0)) `shouldBe` Right False
 
         it "returns True for flexibly bound nodes with all-flex path" $ do
             let c = emptyConstraint
-                    { cNodes = IntMap.fromList
+                    { cNodes = nodeMapFromList
                         [ (0, TyVar { tnId = NodeId 0, tnBound = Nothing })
                         , (1, TyVar { tnId = NodeId 1, tnBound = Nothing })
                         , (2, TyVar { tnId = NodeId 2, tnBound = Nothing })
@@ -126,7 +126,7 @@ spec = describe "MLF.Binding.GraphOps" $ do
 
         it "returns False for nodes with rigid edge in path" $ do
             let c = emptyConstraint
-                    { cNodes = IntMap.fromList
+                    { cNodes = nodeMapFromList
                         [ (0, TyVar { tnId = NodeId 0, tnBound = Nothing })
                         , (1, TyVar { tnId = NodeId 1, tnBound = Nothing })
                         , (2, TyVar { tnId = NodeId 2, tnBound = Nothing })
@@ -142,7 +142,7 @@ spec = describe "MLF.Binding.GraphOps" $ do
     describe "applyWeaken" $ do
         it "changes flexible to rigid" $ do
             let c = emptyConstraint
-                    { cNodes = IntMap.fromList
+                    { cNodes = nodeMapFromList
                         [ (0, TyVar { tnId = NodeId 0, tnBound = Nothing })
                         , (1, TyVar { tnId = NodeId 1, tnBound = Nothing })
                         ]
@@ -156,7 +156,7 @@ spec = describe "MLF.Binding.GraphOps" $ do
 
         it "fails on root nodes" $ do
             let c = emptyConstraint
-                    { cNodes = IntMap.singleton 0 (TyVar { tnId = NodeId 0, tnBound = Nothing })
+                    { cNodes = nodeMapSingleton 0 (TyVar { tnId = NodeId 0, tnBound = Nothing })
                     }
             case applyWeaken (typeRef (NodeId 0)) c of
                 Left (MissingBindParent _) -> return ()
@@ -164,7 +164,7 @@ spec = describe "MLF.Binding.GraphOps" $ do
 
         it "fails on already rigid nodes" $ do
             let c = emptyConstraint
-                    { cNodes = IntMap.fromList
+                    { cNodes = nodeMapFromList
                         [ (0, TyVar { tnId = NodeId 0, tnBound = Nothing })
                         , (1, TyVar { tnId = NodeId 1, tnBound = Nothing })
                         ]
@@ -178,7 +178,7 @@ spec = describe "MLF.Binding.GraphOps" $ do
         it "moves binding edge one step toward root" $ do
             -- Chain: 0 <- 1 <- 2
             let c = emptyConstraint
-                    { cNodes = IntMap.fromList
+                    { cNodes = nodeMapFromList
                         [ (0, TyVar { tnId = NodeId 0, tnBound = Nothing })
                         , (1, TyVar { tnId = NodeId 1, tnBound = Nothing })
                         , (2, TyVar { tnId = NodeId 2, tnBound = Nothing })
@@ -199,7 +199,7 @@ spec = describe "MLF.Binding.GraphOps" $ do
         it "returns Nothing when parent is already root" $ do
             -- Chain: 0 <- 1
             let c = emptyConstraint
-                    { cNodes = IntMap.fromList
+                    { cNodes = nodeMapFromList
                         [ (0, TyVar { tnId = NodeId 0, tnBound = Nothing })
                         , (1, TyVar { tnId = NodeId 1, tnBound = Nothing })
                         ]
@@ -215,7 +215,7 @@ spec = describe "MLF.Binding.GraphOps" $ do
         it "fails on locked nodes" $ do
             -- Chain: 0 <- 1 (rigid) <- 2
             let c = emptyConstraint
-                    { cNodes = IntMap.fromList
+                    { cNodes = nodeMapFromList
                         [ (0, TyVar { tnId = NodeId 0, tnBound = Nothing })
                         , (1, TyVar { tnId = NodeId 1, tnBound = Nothing })
                         , (2, TyVar { tnId = NodeId 2, tnBound = Nothing })
@@ -232,7 +232,7 @@ spec = describe "MLF.Binding.GraphOps" $ do
         it "preserves the binding flag" $ do
             -- Chain: 0 <- 1 <- 2 (all flex)
             let c = emptyConstraint
-                    { cNodes = IntMap.fromList
+                    { cNodes = nodeMapFromList
                         [ (0, TyVar { tnId = NodeId 0, tnBound = Nothing })
                         , (1, TyVar { tnId = NodeId 1, tnBound = Nothing })
                         , (2, TyVar { tnId = NodeId 2, tnBound = Nothing })
@@ -252,7 +252,7 @@ spec = describe "MLF.Binding.GraphOps" $ do
         it "raises node to target ancestor" $ do
             -- Chain: 0 <- 1 <- 2 <- 3
             let c = emptyConstraint
-                    { cNodes = IntMap.fromList
+                    { cNodes = nodeMapFromList
                         [ (0, TyVar { tnId = NodeId 0, tnBound = Nothing })
                         , (1, TyVar { tnId = NodeId 1, tnBound = Nothing })
                         , (2, TyVar { tnId = NodeId 2, tnBound = Nothing })
@@ -275,7 +275,7 @@ spec = describe "MLF.Binding.GraphOps" $ do
         it "returns empty list when already at target" $ do
             -- Chain: 0 <- 1
             let c = emptyConstraint
-                    { cNodes = IntMap.fromList
+                    { cNodes = nodeMapFromList
                         [ (0, TyVar { tnId = NodeId 0, tnBound = Nothing })
                         , (1, TyVar { tnId = NodeId 1, tnBound = Nothing })
                         ]
@@ -292,7 +292,7 @@ spec = describe "MLF.Binding.GraphOps" $ do
             --        / \
             --       1   2
             let c = emptyConstraint
-                    { cNodes = IntMap.fromList
+                    { cNodes = nodeMapFromList
                         [ (0, TyVar { tnId = NodeId 0, tnBound = Nothing })
                         , (1, TyVar { tnId = NodeId 1, tnBound = Nothing })
                         , (2, TyVar { tnId = NodeId 2, tnBound = Nothing })

@@ -15,6 +15,7 @@ import MLF.Constraint.Presolution
     ( EdgeTrace(..)
     , PresolutionPlanBuilder(..)
     )
+import MLF.Constraint.Presolution.Base (InteriorNodes(..), copiedNodes)
 import MLF.Constraint.Solve (SolveResult, frWith, srConstraint, srUnionFind)
 import MLF.Constraint.Types
     ( BindFlag(..)
@@ -38,6 +39,7 @@ import MLF.Constraint.Types
     )
 import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Constraint.NodeAccess as NodeAccess
+import qualified MLF.Constraint.Types as Types
 import MLF.Util.IntMapUtils (keepOld)
 import qualified MLF.Util.IntMapUtils as IntMapUtils
 import MLF.Elab.Generalize (GaBindParents(..), applyGeneralizePlan)
@@ -54,6 +56,13 @@ type NodeKeySet = IntSet.IntSet
 type NodeMap = IntMap.IntMap TyNode
 type GenMap = IntMap.IntMap GenNode
 type BindParents = IntMap.IntMap (NodeRef, BindFlag)
+
+nodeMapToIntMap :: Types.NodeMap a -> IntMap.IntMap a
+nodeMapToIntMap nodes =
+    IntMap.fromList
+        [ (getNodeId nid, node)
+        | (nid, node) <- Types.toListNode nodes
+        ]
 
 data NodeMapping = NodeMapping
     { mapBaseToSolved :: IntMap.IntMap NodeId
@@ -269,8 +278,8 @@ chooseRootGenId constraint gens =
 
 pruneBindParentsConstraint :: Constraint -> Constraint
 pruneBindParentsConstraint c =
-    let liveNodes = cNodes c
-        liveGens = cGenNodes c
+    let liveNodes = nodeMapToIntMap (cNodes c)
+        liveGens = Types.getGenNodeMap (cGenNodes c)
         liveRef ref =
             case ref of
                 TypeRef nid -> IntMap.member (getNodeId nid) liveNodes
@@ -291,18 +300,19 @@ instantiationCopyNodes solved redirects edgeTraces =
     let canonical = frWith (srUnionFind solved)
         adoptNode nid = canonical (chaseRedirects redirects nid)
         collectTrace tr =
-            let copyRaw =
+            let InteriorNodes interiorKeys = etInterior tr
+                copyRaw =
                     [ getNodeId node
-                    | node <- IntMap.elems (etCopyMap tr)
+                    | node <- copiedNodes (etCopyMap tr)
                     ]
                 copyCanon =
                     [ getNodeId (adoptNode node)
-                    | node <- IntMap.elems (etCopyMap tr)
+                    | node <- copiedNodes (etCopyMap tr)
                     ]
-                interiorRaw = IntSet.toList (etInterior tr)
+                interiorRaw = IntSet.toList interiorKeys
                 interiorCanon =
                     [ getNodeId (adoptNode (NodeId nid))
-                    | nid <- IntSet.toList (etInterior tr)
+                    | nid <- IntSet.toList interiorKeys
                     ]
                 rootRaw = getNodeId (etRoot tr)
                 rootCanon = getNodeId (adoptNode (etRoot tr))
@@ -354,13 +364,13 @@ restoreSchemeNodes :: GeneralizeEnv -> Phase1Result
 restoreSchemeNodes env =
     let solvedConstraint = geSolvedConstraint env
         base = geBaseConstraint env
-        baseNodes = cNodes base
-        nodesSolved0 = cNodes solvedConstraint
+        baseNodes = nodeMapToIntMap (cNodes base)
+        nodesSolved0 = nodeMapToIntMap (cNodes solvedConstraint)
         canonical = geCanonical env
         adoptRef = geAdoptRef env
         adoptNodeId = geAdoptNodeId env
         applyRedirectsToRef = geApplyRedirectsToRef env
-        schemeRootsBase = schemeRootsOf (cGenNodes base)
+        schemeRootsBase = schemeRootsOf (Types.getGenNodeMap (cGenNodes base))
         preferBaseVar new old =
             case (new, old) of
                 (TyVar{ tnBound = Nothing }, TyVar{ tnBound = Just _ }) -> old
@@ -394,7 +404,7 @@ restoreSchemeNodes env =
                     maybe acc (fillMissing nid) mbBase
                 Just _ -> acc
         (schemeRootsBaseSet, schemeRootsAllSet) =
-            let rootsSolved = schemeRootsOf (cGenNodes solvedConstraint)
+            let rootsSolved = schemeRootsOf (Types.getGenNodeMap (cGenNodes solvedConstraint))
                 baseSet = IntSet.fromList (map getNodeId schemeRootsBase)
                 solvedSet = IntSet.fromList (map (getNodeId . canonical) rootsSolved)
             in (baseSet, IntSet.union baseSet solvedSet)
@@ -465,13 +475,13 @@ buildNodeMappings :: GeneralizeEnv -> Phase1Result -> Phase2Result
 buildNodeMappings env phase1 =
     let solvedConstraint = geSolvedConstraint env
         base = geBaseConstraint env
-        baseNodes = cNodes base
+        baseNodes = nodeMapToIntMap (cNodes base)
         nodesSolved = p1NodesSolved phase1
         canonical = geCanonical env
         adoptRef = geAdoptRef env
         instCopyMap = geInstCopyMap env
-        genSolved = cGenNodes solvedConstraint
-        genMerged = IntMap.union (cGenNodes base) genSolved
+        genSolved = Types.getGenNodeMap (cGenNodes solvedConstraint)
+        genMerged = IntMap.union (Types.getGenNodeMap (cGenNodes base)) genSolved
         bindParentsBase = cBindParents base
         bindParentsSolved = cBindParents solvedConstraint
         stickyTypeParentsBase =
@@ -572,7 +582,7 @@ computeBindParentsBase env phase1 phase2 =
         bindParentsBase = p2BindParentsBase phase2
         bindParentsSolved = p2BindParentsSolved phase2
         debug msg = debugGaScope ("constraintForGeneralization: " ++ msg)
-        upperConstraint = solvedConstraint { cNodes = nodesSolved }
+        upperConstraint = solvedConstraint { cNodes = Types.NodeMap nodesSolved }
         okRef = mkOkRef nodesSolved genMerged
         isUpperRef = mkIsUpperRef upperConstraint
         wasRedirected ref =
@@ -667,7 +677,7 @@ computeSchemeOwnership :: GeneralizeEnv -> Phase1Result -> Phase2Result -> Phase
 computeSchemeOwnership env phase1 phase2 phase3 =
     let base = geBaseConstraint env
         solvedConstraint = geSolvedConstraint env
-        baseNodes = cNodes base
+        baseNodes = nodeMapToIntMap (cNodes base)
         nodesSolved = p1NodesSolved phase1
         schemeRootsBase = p1SchemeRootsBase phase1
         schemeRootsBaseSet = p1SchemeRootsBaseSet phase1
@@ -683,7 +693,7 @@ computeSchemeOwnership env phase1 phase2 phase3 =
         canonical = geCanonical env
         adoptNodeId = geAdoptNodeId env
         debug msg = debugGaScope ("constraintForGeneralization: " ++ msg)
-        upperConstraint = solvedConstraint { cNodes = nodesSolved }
+        upperConstraint = solvedConstraint { cNodes = Types.NodeMap nodesSolved }
         okRef = mkOkRef nodesSolved genMerged
         isUpperRef = mkIsUpperRef upperConstraint
         allowBindEdge = mkAllowBindEdge okRef isUpperRef
@@ -1229,8 +1239,8 @@ computeSchemeOwnership env phase1 phase2 phase3 =
         attachOrphans bp =
             let constraint0 =
                     solvedConstraint
-                        { cNodes = nodesSolved
-                        , cGenNodes = genMerged
+                        { cNodes = Types.NodeMap nodesSolved
+                        , cGenNodes = Types.GenNodeMap genMerged
                         , cBindParents = bp
                         }
                 roots = Binding.bindingRoots constraint0
@@ -1347,7 +1357,7 @@ finalizeConstraint env phase1 phase2 _phase3 phase4 =
         schemeRootsMerged' = p4SchemeRootsMerged phase4
         rootGenIdBase = p4RootGenIdBase phase4
         debug msg = debugGaScope ("constraintForGeneralization: " ++ msg)
-        upperConstraint = solvedConstraint { cNodes = nodesSolved }
+        upperConstraint = solvedConstraint { cNodes = Types.NodeMap nodesSolved }
         okRef = mkOkRef nodesSolved genMerged'
         isUpperRef = mkIsUpperRef upperConstraint
         allowBindEdge = mkAllowBindEdge okRef isUpperRef
@@ -1391,7 +1401,11 @@ finalizeConstraint env phase1 phase2 _phase3 phase4 =
                         )
                         bindParentsFinalAligned'
                         instCopyMap
-                constraint0 = solvedConstraint { cNodes = nodesSolved, cBindParents = bindParentsFinalAligned'', cGenNodes = genMerged' }
+                constraint0 = solvedConstraint
+                    { cNodes = Types.NodeMap nodesSolved
+                    , cBindParents = bindParentsFinalAligned''
+                    , cGenNodes = Types.GenNodeMap genMerged'
+                    }
             in pruneBindParentsConstraint constraint0
         alignedMapping =
             let canonicalBase = id

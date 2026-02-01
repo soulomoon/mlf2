@@ -37,12 +37,12 @@ normalizeEdgeWitnessesM = do
     traces <- gets psEdgeTraces
     witnesses0 <- gets psEdgeWitnesses
     let rewriteNodeWith copyMap nid =
-            IntMap.findWithDefault nid (getNodeId nid) copyMap
+            IntMap.findWithDefault nid (getNodeId nid) (getCopyMapping copyMap)
         weakenedOps =
             IntSet.fromList
                 [ getNodeId (rewriteNodeWith copyMap n)
                 | (eid, w0) <- IntMap.toList witnesses0
-                , let copyMap = maybe IntMap.empty etCopyMap (IntMap.lookup eid traces)
+                , let copyMap = maybe mempty etCopyMap (IntMap.lookup eid traces)
                 , StepOmega (OpWeaken n) <- ewSteps w0
                 ]
         weakened =
@@ -50,7 +50,7 @@ normalizeEdgeWitnessesM = do
     witnesses <- forM (IntMap.toList witnesses0) $ \(eid, w0) -> do
         let (edgeRoot, copyMap, binderArgs0, traceInterior) =
                 case IntMap.lookup eid traces of
-                    Nothing -> (ewRoot w0, IntMap.empty, [], IntSet.empty)
+                    Nothing -> (ewRoot w0, mempty, [], mempty)
                     Just tr -> (etRoot tr, etCopyMap tr, etBinderArgs tr, etInterior tr)
             rewriteNode = rewriteNodeWith copyMap
             binderArgs =
@@ -61,7 +61,7 @@ normalizeEdgeWitnessesM = do
             copyToOriginal =
                 IntMap.fromListWith min
                     [ (getNodeId copy, NodeId orig)
-                    | (orig, copy) <- IntMap.toList copyMap
+                    | (orig, copy) <- IntMap.toList (getCopyMapping copyMap)
                     ]
             restoreNode nid =
                 IntMap.findWithDefault nid (getNodeId nid) copyToOriginal
@@ -90,8 +90,11 @@ normalizeEdgeWitnessesM = do
         let interiorRoot = typeRef edgeRoot
             orderBase = edgeRoot
             orderRoot = orderBase
+            traceInteriorKeys =
+                case traceInterior of
+                    InteriorNodes s -> s
         interiorExact <-
-            if IntSet.null traceInterior
+            if IntSet.null traceInteriorKeys
                 then case Binding.interiorOf c0 interiorRoot of
                     Left err -> throwError (BindingTreeError err)
                     Right s ->
@@ -101,12 +104,12 @@ normalizeEdgeWitnessesM = do
                                 | key <- IntSet.toList s
                                 , TypeRef nid <- [nodeRefFromKey key]
                                 ]
-                else pure traceInterior
+                else pure traceInteriorKeys
         let interiorNorm =
                 -- Normalize against an expansion-aware interior so ops on copied nodes
                 -- (e.g., escaping binder metas) are retained for Raise/Merge witnesses.
                 IntSet.union interiorExact $
-                    IntSet.fromList (map getNodeId (IntMap.elems copyMap))
+                    IntSet.fromList (map getNodeId (copiedNodes copyMap))
         let steps0 = map rewriteStep (ewSteps w0)
             orderKeys0 = Order.orderKeysFromConstraintWith id c0 orderRoot Nothing
             opTargets = \case

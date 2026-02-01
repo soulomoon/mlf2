@@ -1,5 +1,11 @@
 module SpecUtil (
     emptyConstraint,
+    nodeMapFromList,
+    nodeMapSingleton,
+    nodeMapElems,
+    nodeMapKeys,
+    nodeMapSize,
+    nodeMapMember,
     genNodeMap,
     rootedConstraint,
     bindParentsFromPairs,
@@ -19,13 +25,14 @@ import GHC.Stack (HasCallStack)
 import Test.Hspec (Expectation, expectationFailure)
 
 import qualified MLF.Binding.Tree as Binding
-import MLF.Constraint.Types (BindFlag(..), BindParents, Constraint(..), GenNode(..), GenNodeId(..), NodeId(..), TyNode(..), genRef, nodeRefKey, structuralChildren, typeRef)
+import MLF.Constraint.Types (BindFlag(..), BindParents, Constraint(..), GenNode(..), GenNodeId(..), GenNodeMap, NodeId(..), NodeMap(..), TyNode(..), fromListGen, fromListNode, genRef, getNodeId, insertGen, nodeRefKey, structuralChildren, toListNode, typeRef)
+import qualified MLF.Constraint.Types as Types
 import MLF.Frontend.ConstraintGen (AnnExpr(..))
 import MLF.Frontend.Syntax (VarName)
 
 emptyConstraint :: Constraint
 emptyConstraint = Constraint
-    { cNodes = IntMap.empty
+    { cNodes = fromListNode []
     , cInstEdges = []
     , cUnifyEdges = []
     , cBindParents = IntMap.empty
@@ -34,13 +41,34 @@ emptyConstraint = Constraint
     , cWeakenedVars = IntSet.empty
     , cAnnEdges = IntSet.empty
     , cLetEdges = IntSet.empty
-    , cGenNodes = IntMap.empty
+    , cGenNodes = fromListGen []
     }
 
-genNodeMap :: [NodeId] -> IntMap.IntMap GenNode
+nodeMapFromList :: [(Int, TyNode)] -> NodeMap TyNode
+nodeMapFromList pairs = NodeMap (IntMap.fromList pairs)
+
+nodeMapSingleton :: Int -> TyNode -> NodeMap TyNode
+nodeMapSingleton key value = NodeMap (IntMap.singleton key value)
+
+nodeMapElems :: NodeMap a -> [a]
+nodeMapElems = map snd . toListNode
+
+nodeMapKeys :: NodeMap a -> [Int]
+nodeMapKeys = map (getNodeId . fst) . toListNode
+
+nodeMapSize :: NodeMap a -> Int
+nodeMapSize = length . toListNode
+
+nodeMapMember :: NodeId -> NodeMap a -> Bool
+nodeMapMember nid nodes =
+    case Types.lookupNode nid nodes of
+        Just _ -> True
+        Nothing -> False
+
+genNodeMap :: [NodeId] -> GenNodeMap GenNode
 genNodeMap ids =
-    IntMap.fromList
-        [ (getGenNodeId gid, GenNode gid [nid])
+    fromListGen
+        [ (gid, GenNode gid [nid])
         | nid <- ids
         , let gid = GenNodeId (getNodeId nid)
         ]
@@ -53,7 +81,7 @@ rootedConstraint c0 =
             map NodeId $
                 IntSet.toList (Binding.computeTermDagRoots c0)
         genNode = GenNode rootId roots
-        genNodes' = IntMap.insert (getGenNodeId rootId) genNode (cGenNodes c0)
+        genNodes' = insertGen rootId genNode (cGenNodes c0)
         bindParents' =
             foldr
                 (\nid bp ->
@@ -82,10 +110,10 @@ expectRight value k =
 requireRight :: Show e => Either e a -> IO a
 requireRight = either (\e -> expectationFailure (show e) >> fail "requireRight") pure
 
-inferBindParents :: IntMap.IntMap TyNode -> BindParents
+inferBindParents :: NodeMap TyNode -> BindParents
 inferBindParents nodes =
     -- Follow term structure edges (child → structural parent).
-    foldl' addEdges IntMap.empty (IntMap.elems nodes)
+    foldl' addEdges IntMap.empty (nodeMapElems nodes)
   where
     addEdges bp parentNode =
         let parent = tnId parentNode
@@ -105,13 +133,13 @@ inferBindParents nodes =
                         m
         in foldl' addOne bp kids
 
-lookupNodeMaybe :: IntMap.IntMap TyNode -> NodeId -> Maybe TyNode
-lookupNodeMaybe table nid = IntMap.lookup (getNodeId nid) table
+lookupNodeMaybe :: NodeMap TyNode -> NodeId -> Maybe TyNode
+lookupNodeMaybe nodes nid = Types.lookupNode nid nodes
 
-lookupNode :: HasCallStack => IntMap.IntMap TyNode -> NodeId -> IO TyNode
+lookupNode :: HasCallStack => NodeMap TyNode -> NodeId -> IO TyNode
 lookupNode = lookupNodeIO
 
-lookupNodeIO :: HasCallStack => IntMap.IntMap TyNode -> NodeId -> IO TyNode
+lookupNodeIO :: HasCallStack => NodeMap TyNode -> NodeId -> IO TyNode
 lookupNodeIO table nid =
     case lookupNodeMaybe table nid of
         Just node -> pure node

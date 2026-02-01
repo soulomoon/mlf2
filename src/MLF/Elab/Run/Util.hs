@@ -12,6 +12,7 @@ import qualified Data.IntSet as IntSet
 import qualified Data.List.NonEmpty as NE
 
 import MLF.Constraint.Presolution (EdgeTrace(..))
+import MLF.Constraint.Presolution.Base (CopyMapping(..), fromListInterior, toListInterior)
 import MLF.Constraint.Types
     ( BoundRef(..)
     , EdgeWitness(..)
@@ -66,17 +67,18 @@ canonicalizeTrace :: (NodeId -> NodeId) -> EdgeTrace -> EdgeTrace
 canonicalizeTrace canon tr =
     let canonPair (a, b) = (canon a, canon b)
         canonInterior =
-            IntSet.fromList
-                [ getNodeId (canon (NodeId i))
-                | i <- IntSet.toList (etInterior tr)
+            fromListInterior
+                [ canon i
+                | i <- toListInterior (etInterior tr)
                 ]
         canonCopyMap =
-            IntMap.fromListWith min
-                [ ( getNodeId (canon (NodeId k))
-                  , canon v
-                  )
-                | (k, v) <- IntMap.toList (etCopyMap tr)
-                ]
+            CopyMapping $
+                IntMap.fromListWith min
+                    [ ( getNodeId (canon (NodeId k))
+                      , canon v
+                      )
+                    | (k, v) <- IntMap.toList (getCopyMapping (etCopyMap tr))
+                    ]
     in tr
         { etRoot = canon (etRoot tr)
         , etBinderArgs = map canonPair (etBinderArgs tr)

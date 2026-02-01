@@ -158,7 +158,7 @@ buildSchemeRootsPlan canonical constraint nodes mbBindParentsGa firstGenAncestor
                             [ (getNodeId bnd, root)
                             | root <- baseSchemeRoots
                             , Just bnd <- [VarStore.lookupVarBound baseConstraint root]
-                            , case IntMap.lookup (getNodeId bnd) baseNodes of
+                            , case lookupNodeIn baseNodes bnd of
                                 Just TyBase{} -> False
                                 Just TyBottom{} -> False
                                 _ -> True

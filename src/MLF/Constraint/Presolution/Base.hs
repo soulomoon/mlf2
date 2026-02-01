@@ -7,9 +7,22 @@ module MLF.Constraint.Presolution.Base (
     TranslatabilityIssue(..),
     PresolutionState(..),
     EdgeTrace(..),
+    CopyMapping(..),
     CopyMap,
+    lookupCopy,
+    insertCopy,
+    copiedNodes,
+    originalNodes,
+    InteriorNodes(..),
+    FrontierNodes(..),
     InteriorSet,
     FrontierSet,
+    memberInterior,
+    memberFrontier,
+    toListInterior,
+    toListFrontier,
+    fromListInterior,
+    fromListFrontier,
     emptyTrace,
     unionTrace,
     PresolutionM,
@@ -32,12 +45,12 @@ import Control.Monad (forM_, unless, when)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import Data.List (sortBy)
 import Data.Maybe (listToMaybe)
 
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.Canonicalize as Canonicalize
-import MLF.Constraint.Types
+import MLF.Constraint.Types hiding (lookupNode)
+import qualified MLF.Constraint.Types as Types
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Constraint.Traversal as Traversal
@@ -117,21 +130,78 @@ data PresolutionState = PresolutionState
 data EdgeTrace = EdgeTrace
     { etRoot :: NodeId
     , etBinderArgs :: [(NodeId, NodeId)] -- ^ (binder node, instantiation argument node)
-    , etInterior :: IntSet.IntSet -- ^ Nodes in I(r) (exact, from the binding tree).
-    , etCopyMap :: IntMap NodeId -- ^ Provenance: original node -> copied/replaced node
+    , etInterior :: InteriorNodes -- ^ Nodes in I(r) (exact, from the binding tree).
+    , etCopyMap :: CopyMapping -- ^ Provenance: original node -> copied/replaced node
     }
     deriving (Eq, Show)
 
-type CopyMap = IntMap NodeId
+newtype CopyMapping = CopyMapping { getCopyMapping :: IntMap NodeId }
+    deriving (Eq, Show)
+
+instance Semigroup CopyMapping where
+    CopyMapping a <> CopyMapping b = CopyMapping (IntMap.union a b)
+
+instance Monoid CopyMapping where
+    mempty = CopyMapping IntMap.empty
+
+lookupCopy :: NodeId -> CopyMapping -> Maybe NodeId
+lookupCopy nid (CopyMapping m) = IntMap.lookup (getNodeId nid) m
+
+insertCopy :: NodeId -> NodeId -> CopyMapping -> CopyMapping
+insertCopy src dst (CopyMapping m) = CopyMapping (IntMap.insert (getNodeId src) dst m)
+
+originalNodes :: CopyMapping -> [NodeId]
+originalNodes (CopyMapping m) = map NodeId (IntMap.keys m)
+
+copiedNodes :: CopyMapping -> [NodeId]
+copiedNodes (CopyMapping m) = IntMap.elems m
+
+type CopyMap = CopyMapping
 type InteriorSet = IntSet.IntSet
 type FrontierSet = IntSet.IntSet
 
+newtype InteriorNodes = InteriorNodes IntSet.IntSet
+    deriving (Eq, Show)
+
+instance Semigroup InteriorNodes where
+    InteriorNodes a <> InteriorNodes b = InteriorNodes (IntSet.union a b)
+
+instance Monoid InteriorNodes where
+    mempty = InteriorNodes IntSet.empty
+
+newtype FrontierNodes = FrontierNodes IntSet.IntSet
+    deriving (Eq, Show)
+
+instance Semigroup FrontierNodes where
+    FrontierNodes a <> FrontierNodes b = FrontierNodes (IntSet.union a b)
+
+instance Monoid FrontierNodes where
+    mempty = FrontierNodes IntSet.empty
+
+memberInterior :: NodeId -> InteriorNodes -> Bool
+memberInterior nid (InteriorNodes s) = IntSet.member (getNodeId nid) s
+
+memberFrontier :: NodeId -> FrontierNodes -> Bool
+memberFrontier nid (FrontierNodes s) = IntSet.member (getNodeId nid) s
+
+toListInterior :: InteriorNodes -> [NodeId]
+toListInterior (InteriorNodes s) = map NodeId (IntSet.toList s)
+
+toListFrontier :: FrontierNodes -> [NodeId]
+toListFrontier (FrontierNodes s) = map NodeId (IntSet.toList s)
+
+fromListInterior :: [NodeId] -> InteriorNodes
+fromListInterior = InteriorNodes . IntSet.fromList . map getNodeId
+
+fromListFrontier :: [NodeId] -> FrontierNodes
+fromListFrontier = FrontierNodes . IntSet.fromList . map getNodeId
+
 emptyTrace :: (CopyMap, InteriorSet, FrontierSet)
-emptyTrace = (IntMap.empty, IntSet.empty, IntSet.empty)
+emptyTrace = (mempty, IntSet.empty, IntSet.empty)
 
 unionTrace :: (CopyMap, InteriorSet, FrontierSet) -> (CopyMap, InteriorSet, FrontierSet) -> (CopyMap, InteriorSet, FrontierSet)
 unionTrace (m1, s1, f1) (m2, s2, f2) =
-    (IntMap.union m1 m2, IntSet.union s1 s2, IntSet.union f1 f2)
+    (m1 <> m2, IntSet.union s1 s2, IntSet.union f1 f2)
 
 -- | The Presolution monad.
 type PresolutionM = StateT PresolutionState (Either PresolutionError)
@@ -193,13 +263,13 @@ instance MonadPresolution PresolutionM where
     throwPresolutionError = throwError
     getNode nid = do
         nodes <- gets (cNodes . psConstraint)
-        case IntMap.lookup (getNodeId nid) nodes of
+        case Types.lookupNode nid nodes of
             Just n -> pure n
             Nothing -> throwError $ NodeLookupFailed nid
     getCanonicalNode nid = do
         rootId <- findRoot nid
         nodes <- gets (cNodes . psConstraint)
-        case IntMap.lookup (getNodeId rootId) nodes of
+        case Types.lookupNode rootId nodes of
             Just node -> pure node
             Nothing -> throwError $ NodeLookupFailed rootId
     lookupBindParent ref = do
@@ -213,13 +283,13 @@ instance MonadPresolution PresolutionM where
     registerNode nid node =
         modify' $ \st ->
             let c0 = psConstraint st
-                nodes' = IntMap.insert (getNodeId nid) node (cNodes c0)
+                nodes' = Types.insertNode nid node (cNodes c0)
             in st { psConstraint = c0 { cNodes = nodes' } }
     bindExpansionArgs expansionRoot pairs = do
         (c0, canonical) <- getConstraintAndCanonical
         let expansionRootC = canonical expansionRoot
             rootGen =
-                let genIds = IntMap.keys (cGenNodes c0)
+                let genIds = IntMap.keys (getGenNodeMap (cGenNodes c0))
                     pickRoot acc gidInt =
                         case acc of
                             Just _ -> acc
@@ -283,15 +353,17 @@ ensureBindingParents = do
         Left err -> throwError (BindingTreeError err)
         Right bp0 -> do
             let nodes = cNodes c0
+                nodeIds = map fst (toListNode nodes)
+                nodeValues = map snd (toListNode nodes)
                 allTypeIds =
                     IntSet.fromList
-                        [ getNodeId (canonical (NodeId nid))
-                        | nid <- IntMap.keys nodes
+                        [ getNodeId (canonical nid)
+                        | nid <- nodeIds
                         ]
                 rootGen =
                     let genRefs =
                             [ genRef (GenNodeId gid)
-                            | gid <- IntMap.keys (cGenNodes c0)
+                            | gid <- IntMap.keys (getGenNodeMap (cGenNodes c0))
                             ]
                         isRoot ref = not (IntMap.member (nodeRefKey ref) bp0)
                     in case filter isRoot genRefs of
@@ -308,7 +380,7 @@ ensureBindingParents = do
                             let parent = canonical (tnId node)
                                 kids = map canonical (structuralChildrenWithBounds node)
                             in foldl' (flip (addOne parent)) m kids
-                    in IntMap.foldl' addNode IntMap.empty nodes
+                    in foldl' addNode IntMap.empty nodeValues
                 termRoots = Binding.computeTermDagRootsUnder canonical c0
                 canonicalRef = Canonicalize.canonicalRef canonical
                 addTypeEdges m node =
@@ -336,7 +408,7 @@ ensureBindingParents = do
                     foldl'
                         addTypeEdges
                         (foldl' addGenEdges IntMap.empty (NodeAccess.allGenNodes c0))
-                        (IntMap.elems nodes)
+                        nodeValues
                 isUpperUnder parent child =
                     let parentKey = nodeRefKey (canonicalRef parent)
                         childKey = nodeRefKey (canonicalRef child)
@@ -450,7 +522,7 @@ instantiationBindersM nid0 = do
         nid = canonical nid0
         cache0 = psBinderCache st
         nodes = cNodes c0
-        lookupNode = IntMap.lookup (getNodeId nid) nodes
+        lookupNode = Types.lookupNode nid nodes
     case IntMap.lookup (getNodeId nid) cache0 of
         Just binders ->
             if null binders
@@ -639,14 +711,14 @@ implicitBindersM canonical c0 root0 = do
         in go IntSet.empty binders []
 
     reachableFromWithBounds
-        :: IntMap TyNode
+        :: NodeMap TyNode
         -> NodeId
         -> IntSet.IntSet
     reachableFromWithBounds nodes root =
         Traversal.reachableFromNodes canonical children [root]
       where
         children nid =
-            case IntMap.lookup (getNodeId nid) nodes of
+            case Types.lookupNode nid nodes of
                 Nothing -> []
                 Just node -> structuralChildrenWithBounds node
 

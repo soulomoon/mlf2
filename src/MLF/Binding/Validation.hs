@@ -44,19 +44,19 @@ import MLF.Binding.Canonicalization (
 liveNodeKeys :: Constraint -> IntSet
 liveNodeKeys c =
     let typeKeys = IntSet.fromList
-            [ nodeRefKey (TypeRef (NodeId nid))
-            | nid <- IntMap.keys (cNodes c)
+            [ nodeRefKey (TypeRef nid)
+            | (nid, _node) <- toListNode (cNodes c)
             ]
         genKeys = IntSet.fromList
             [ nodeRefKey (GenRef (GenNodeId gid))
-            | gid <- IntMap.keys (cGenNodes c)
+            | gid <- IntMap.keys (getGenNodeMap (cGenNodes c))
             ]
     in IntSet.union typeKeys genKeys
 
 allNodeRefs :: Constraint -> [NodeRef]
 allNodeRefs c =
-    map (TypeRef . NodeId) (IntMap.keys (cNodes c)) ++
-    map (GenRef . GenNodeId) (IntMap.keys (cGenNodes c))
+    map (TypeRef . fst) (toListNode (cNodes c)) ++
+    map (GenRef . GenNodeId) (IntMap.keys (getGenNodeMap (cGenNodes c)))
 
 -- | Validate all binding-tree invariants.
 checkBindingTree :: Constraint -> Either BindingError ()
@@ -102,7 +102,12 @@ checkBindingTree c = do
     rootRef <- validateSingleGenRoot (bindingRoots c)
 
     -- Check 4.5: Gen node scheme roots refer to live type nodes.
-    validateGenSchemeRoots (cGenNodes c) (\nid -> IntMap.member (getNodeId nid) (cNodes c))
+    validateGenSchemeRoots
+        (cGenNodes c)
+        (\nid -> case lookupNodeIn (cNodes c) nid of
+            Just _ -> True
+            Nothing -> False
+        )
 
     -- Check 5: Every non-root node has a binding parent.
     let rootKey = nodeRefKey rootRef
@@ -134,11 +139,11 @@ validateSingleGenRoot roots = case roots of
 
 -- | Validate that all gen node scheme roots refer to live type nodes.
 validateGenSchemeRoots
-    :: IntMap.IntMap GenNode
+    :: GenNodeMap GenNode
     -> (NodeId -> Bool)
     -> Either BindingError ()
 validateGenSchemeRoots genNodes nodeExists =
-    forM_ (IntMap.elems genNodes) $ \genNode ->
+    forM_ (IntMap.elems (getGenNodeMap genNodes)) $ \genNode ->
         forM_ (gnSchemes genNode) $ \root ->
             unless (nodeExists root) $
                 Left $
@@ -147,12 +152,12 @@ validateGenSchemeRoots genNodes nodeExists =
 
 -- | Validate that all gen nodes (except the root) are flexibly bound.
 validateGenNodesFlexiblyBound
-    :: IntMap.IntMap GenNode
+    :: GenNodeMap GenNode
     -> (NodeRef -> Maybe (NodeRef, BindFlag))
     -> NodeRef
     -> Either BindingError ()
 validateGenNodesFlexiblyBound genNodes lookupParent rootRef =
-    forM_ (IntMap.keys genNodes) $ \gidInt -> do
+    forM_ (IntMap.keys (getGenNodeMap genNodes)) $ \gidInt -> do
         let gref = GenRef (GenNodeId gidInt)
         if gref == rootRef
             then pure ()
@@ -171,12 +176,12 @@ checkNoGenFallback c = do
         reachableFromWithBounds root0 =
             Traversal.reachableFromWithBounds
                 id
-                (\nid -> IntMap.lookup (getNodeId nid) nodes)
+                (lookupNodeIn nodes)
                 root0
 
         firstGenAncestor nid = pure (firstGenAncestorFrom (bindingPathToRoot c) (typeRef nid))
 
-    forM_ (IntMap.elems nodes) $ \node ->
+    forM_ (map snd (toListNode nodes)) $ \node ->
         case node of
             TyForall{} -> do
                 let nid = tnId node
@@ -211,7 +216,7 @@ checkSchemeClosureUnder :: (NodeId -> NodeId) -> Constraint -> Either BindingErr
 checkSchemeClosureUnder canonical c0 = do
     let nodes = cNodes c0
         isNamedNode nid =
-            case IntMap.lookup (getNodeId nid) nodes of
+            case lookupNodeIn nodes nid of
                 Just TyVar{} -> not (VarStore.isEliminatedVar c0 nid)
                 _ -> False
     bindParents0 <- canonicalizeBindParentsUnder canonical c0
@@ -220,7 +225,7 @@ checkSchemeClosureUnder canonical c0 = do
         schemeRootsByGen =
             IntMap.map
                 (IntSet.fromList . map (getNodeId . canonical) . gnSchemes)
-                (cGenNodes c0)
+                (getGenNodeMap (cGenNodes c0))
         schemeGensByRoot =
             IntMap.fromListWith
                 IntSet.union
@@ -334,7 +339,8 @@ isUpper c parent child
                     TypeRef nid ->
                         maybe [] (map TypeRef . structuralChildrenWithBounds) (NodeAccess.lookupNode c nid)
                     GenRef gid ->
-                        maybe [] (map TypeRef . gnSchemes) (IntMap.lookup (getGenNodeId gid) (cGenNodes c))
+                        maybe [] (map TypeRef . gnSchemes)
+                            (IntMap.lookup (getGenNodeId gid) (getGenNodeMap (cGenNodes c)))
             in any (go visited') children
 
 -- Helper functions imported from Tree.hs logic (duplicated here to avoid circular deps)
@@ -394,8 +400,12 @@ boundFlexChildren c binder = do
 
 nodeRefExists :: Constraint -> NodeRef -> Bool
 nodeRefExists c ref = case ref of
-    TypeRef nid -> IntMap.member (getNodeId nid) (cNodes c)
-    GenRef gid -> IntMap.member (getGenNodeId gid) (cGenNodes c)
+    TypeRef nid ->
+        case lookupNodeIn (cNodes c) nid of
+            Just _ -> True
+            Nothing -> False
+    GenRef gid ->
+        IntMap.member (getGenNodeId gid) (getGenNodeMap (cGenNodes c))
 
 tyVarChildFilter :: Constraint -> NodeRef -> Maybe NodeId
 tyVarChildFilter c ref = case ref of
@@ -440,7 +450,7 @@ collectBoundChildrenWithFlag childFilter flagOk c bindParents binder errCtx =
                                 Just _ ->
                                     maybe (pure acc) (\nid -> pure (nid : acc)) (childFilter (TypeRef childN))
                         GenRef gid ->
-                            if IntMap.member (getGenNodeId gid) (cGenNodes c)
+                            if IntMap.member (getGenNodeId gid) (getGenNodeMap (cGenNodes c))
                                 then pure acc
                                 else
                                     Left $
@@ -457,10 +467,10 @@ collectBoundChildrenWithFlag childFilter flagOk c bindParents binder errCtx =
 
 buildTypeEdgesFrom
     :: (NodeId -> Int)
-    -> IntMap.IntMap TyNode
+    -> NodeMap TyNode
     -> IntMap.IntMap IntSet
 buildTypeEdgesFrom toKey nodes =
-    foldl' addOne IntMap.empty (IntMap.elems nodes)
+    foldl' addOne IntMap.empty (map snd (toListNode nodes))
   where
     addOne m node =
         let parentKey = toKey (tnId node)
@@ -524,7 +534,12 @@ checkBindingTreeUnder canonical c0 = do
     let nodes0 = cNodes c0
         genNodes0 = cGenNodes c0
 
-    validateGenSchemeRoots genNodes0 (\nid -> IntMap.member (getNodeId (canonical nid)) nodes0)
+    validateGenSchemeRoots
+        genNodes0
+        (\nid -> case lookupNodeIn nodes0 (canonical nid) of
+            Just _ -> True
+            Nothing -> False
+        )
 
     (_allRoots, bindParents0) <- quotientBindParentsUnder canonical c0
 
@@ -533,10 +548,10 @@ checkBindingTreeUnder canonical c0 = do
             buildTypeEdgesFrom (nodeRefKey . TypeRef . canonical) nodes0
 
         genNodesDerived = do
-            let genIds = IntMap.keys genNodes0
+            let genIds = IntMap.keys (getGenNodeMap genNodes0)
                 allTypeIds =
-                    [ getNodeId (canonical (NodeId nid))
-                    | nid <- IntMap.keys nodes0
+                    [ getNodeId (canonical nid)
+                    | (nid, _node) <- toListNode nodes0
                     ]
                 pathLookup = bindingPathToRootWithLookup (\key -> IntMap.lookup key bindParents0)
 
@@ -581,8 +596,8 @@ checkBindingTreeUnder canonical c0 = do
                     ]
                 allTypeKeys =
                     IntSet.fromList
-                        [ nodeRefKey (TypeRef (canonical (NodeId nid)))
-                        | nid <- IntMap.keys nodes0
+                        [ nodeRefKey (TypeRef (canonical nid))
+                        | (nid, _node) <- toListNode nodes0
                         ]
                 go visited [] = visited
                 go visited (key:rest) =

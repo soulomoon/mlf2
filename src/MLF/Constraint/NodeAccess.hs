@@ -79,13 +79,30 @@ import qualified Data.IntSet as IntSet
 import Data.IntSet (IntSet)
 import Data.Maybe (mapMaybe)
 
-import MLF.Constraint.Types (Constraint(..), NodeId(..), GenNodeId(..), TyNode(..), GenNode, NodeRef, BindFlag, BindingError(..), nodeRefKey, getNodeId, getGenNodeId, structuralChildren, structuralChildrenWithBounds)
+import qualified MLF.Constraint.Types as Types
+import MLF.Constraint.Types
+    ( BindingError(..)
+    , BindFlag
+    , Constraint(..)
+    , GenNode
+    , GenNodeId(..)
+    , NodeId(..)
+    , NodeRef
+    , TyNode(..)
+    , getGenNodeId
+    , getNodeId
+    , nodeRefKey
+    , structuralChildren
+    , structuralChildrenWithBounds
+    , toListGen
+    , toListNode
+    )
 
 -- | Look up a type node in the constraint graph.
 --
 -- Returns 'Nothing' if the node is not present.
 lookupNode :: Constraint -> NodeId -> Maybe TyNode
-lookupNode c nid = IntMap.lookup (getNodeId nid) (cNodes c)
+lookupNode c nid = Types.lookupNode nid (cNodes c)
 
 -- | Look up a type node, returning an error if not found.
 --
@@ -100,7 +117,7 @@ lookupNodeSafe c nid =
 --
 -- Returns 'Nothing' if the gen node is not present.
 lookupGenNode :: Constraint -> GenNodeId -> Maybe GenNode
-lookupGenNode c gid = IntMap.lookup (getGenNodeId gid) (cGenNodes c)
+lookupGenNode c gid = Types.lookupGen gid (cGenNodes c)
 
 -- | Look up a gen node, returning an error if not found.
 lookupGenNodeSafe :: Constraint -> GenNodeId -> Either String GenNode
@@ -248,22 +265,24 @@ lookupStructuralChildrenWithBounds c nid =
 -- This is a common pattern that appears 27+ times across the codebase.
 -- Replaces: @IntMap.elems (cGenNodes c)@
 allGenNodes :: Constraint -> [GenNode]
-allGenNodes c = IntMap.elems (cGenNodes c)
+allGenNodes c = map snd (toListGen (cGenNodes c))
 
 -- | Get all type nodes in the constraint.
 --
 -- Replaces: @IntMap.elems (cNodes c)@
 allNodes :: Constraint -> [TyNode]
-allNodes c = IntMap.elems (cNodes c)
+allNodes c = map snd (toListNode (cNodes c))
 
 -- | Get all type node IDs as an IntSet.
 --
 -- Replaces: @IntSet.fromList (IntMap.keys (cNodes c))@
 allNodeIds :: Constraint -> IntSet
-allNodeIds c = IntSet.fromList (IntMap.keys (cNodes c))
+allNodeIds c =
+    IntSet.fromList (map (getNodeId . fst) (toListNode (cNodes c)))
 
 -- | Get all gen node IDs as an IntSet.
 --
 -- Replaces: @IntSet.fromList (IntMap.keys (cGenNodes c))@
 allGenNodeIds :: Constraint -> IntSet
-allGenNodeIds c = IntSet.fromList (IntMap.keys (cGenNodes c))
+allGenNodeIds c =
+    IntSet.fromList (map (getGenNodeId . fst) (toListGen (cGenNodes c)))

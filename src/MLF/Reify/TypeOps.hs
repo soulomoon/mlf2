@@ -25,7 +25,6 @@ module MLF.Reify.TypeOps (
     inlineAliasBoundsWithBySeen
 ) where
 
-import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -306,7 +305,7 @@ resolveBaseBoundForInstConstraint constraint canonical start =
             in if IntSet.member key visited
                 then Nothing
                 else
-                    case IntMap.lookup key nodes of
+                    case lookupNodeIn nodes nid of
                         Just TyBase{} -> Just nid
                         Just TyBottom{} -> Just nid
                         Just TyVar{} ->
@@ -367,7 +366,7 @@ inlineBaseBoundsType constraint canonical = cataIx alg
 inlineAliasBoundsWithBy
     :: Bool
     -> (NodeId -> NodeId)
-    -> IntMap.IntMap TyNode
+    -> NodeMap TyNode
     -> (NodeId -> Maybe NodeId)
     -> (NodeId -> Either err ElabType)
     -> ElabType
@@ -383,7 +382,7 @@ inlineAliasBoundsWithBy fallbackToBottom canonical nodes lookupBound reifyBound 
 inlineAliasBoundsWithBySeen
     :: Bool
     -> (NodeId -> NodeId)
-    -> IntMap.IntMap TyNode
+    -> NodeMap TyNode
     -> (NodeId -> Maybe NodeId)
     -> (IntSet.IntSet -> NodeId -> Either err ElabType)
     -> ElabType
@@ -403,7 +402,7 @@ inlineAliasBoundsWithBySeen fallbackToBottom canonical nodes lookupBound reifyBo
                         in if IntSet.member key seen
                             then ty
                             else
-                                case IntMap.lookup key nodes of
+                                case lookupNodeIn nodes nidC of
                                     Just TyVar{} ->
                                         case lookupBound nidC of
                                             Just bnd ->

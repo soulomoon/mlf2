@@ -11,7 +11,7 @@ import qualified Data.Set as Set
 import MLF.Frontend.Syntax (Expr(..), Lit(..), SrcType(..), SrcScheme(..))
 import qualified MLF.Elab.Pipeline as Elab
 import qualified MLF.Util.Order as Order
-import MLF.Constraint.Types (BaseTy(..), BindingError(..), NodeId(..), EdgeId(..), GenNode(..), GenNodeId(..), NodeRef(..), TyNode(..), Constraint(..), InstanceOp(..), InstanceStep(..), InstanceWitness(..), EdgeWitness(..), BindFlag(..), getNodeId, genRef, nodeRefKey, typeRef)
+import MLF.Constraint.Types (BaseTy(..), BindingError(..), NodeId(..), EdgeId(..), GenNode(..), GenNodeId(..), NodeRef(..), TyNode(..), Constraint(..), InstanceOp(..), InstanceStep(..), InstanceWitness(..), EdgeWitness(..), BindFlag(..), fromListGen, getNodeId, genRef, lookupNodeIn, nodeRefKey, typeRef)
 import qualified MLF.Binding.Tree as Binding
 import MLF.Frontend.ConstraintGen (ConstraintError, ConstraintResult(..), generateConstraints)
 import MLF.Constraint.Normalize (normalize)
@@ -22,10 +22,11 @@ import MLF.Constraint.Presolution
     , GaBindParents
     , computePresolution
     , defaultPlanBuilder
+    , fromListInterior
     )
 import MLF.Constraint.Solve (SolveResult(..), solveUnify)
 import qualified MLF.Constraint.Solve as Solve (frWith)
-import SpecUtil (bindParentsFromPairs, collectVarNodes, emptyConstraint, requireRight, rootedConstraint)
+import SpecUtil (bindParentsFromPairs, collectVarNodes, emptyConstraint, nodeMapFromList, requireRight, rootedConstraint)
 
 boundToType :: Elab.BoundType -> Elab.ElabType
 boundToType bound = case bound of
@@ -168,7 +169,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 arrow = NodeId 1
                 var = NodeId 2
                 root = NodeId 3
-                nodes = IntMap.fromList
+                nodes = nodeMapFromList
                     [ (getNodeId arrow, TyArrow { tnId = arrow, tnDom = var, tnCod = var })
                     , (getNodeId var, TyVar { tnId = var, tnBound = Nothing })
                     , (getNodeId root, TyVar { tnId = root, tnBound = Just arrow })
@@ -181,7 +182,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 constraint = emptyConstraint
                     { cNodes = nodes
                     , cBindParents = bindParents
-                    , cGenNodes = IntMap.singleton (getGenNodeId rootGen) (GenNode rootGen [root])
+                    , cGenNodes = fromListGen [(rootGen, GenNode rootGen [root])]
                     }
                 solved = SolveResult
                     { srConstraint = constraint
@@ -202,7 +203,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 body = NodeId 11
                 direct = NodeId 12
                 interior = NodeId 13
-                nodes = IntMap.fromList
+                nodes = nodeMapFromList
                     [ (getNodeId root, TyForall { tnId = root, tnBody = body })
                     , (getNodeId body, TyArrow { tnId = body, tnDom = direct, tnCod = interior })
                     , (getNodeId direct, TyVar { tnId = direct, tnBound = Nothing })
@@ -217,7 +218,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 constraint = emptyConstraint
                     { cNodes = nodes
                     , cBindParents = bindParents
-                    , cGenNodes = IntMap.singleton (getGenNodeId rootGen) (GenNode rootGen [root])
+                    , cGenNodes = fromListGen [(rootGen, GenNode rootGen [root])]
                     }
                 solved = SolveResult
                     { srConstraint = constraint
@@ -346,7 +347,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         let key = getNodeId nid
                         in if IntSet.member key visited
                             then Right IntSet.empty
-                            else case IntMap.lookup key nodes of
+                            else case lookupNodeIn nodes nid of
                                 Nothing ->
                                     Left (InvalidBindingTree ("freeVarsUnder: missing node " ++ show nid))
                                 Just TyVar{} ->
@@ -458,8 +459,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 forallNode = NodeId 3
                 c =
                     rootedConstraint emptyConstraint
-                        { cNodes =
-                            IntMap.fromList
+                        { cNodes = nodeMapFromList
                                 [ (getNodeId v, TyVar { tnId = v, tnBound = Nothing })
                                 , (getNodeId arrow, TyArrow arrow v v)
                                 , (getNodeId forallNode, TyForall forallNode arrow)
@@ -484,8 +484,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 forallNode = NodeId 4
                 c =
                     rootedConstraint emptyConstraint
-                        { cNodes =
-                            IntMap.fromList
+                        { cNodes = nodeMapFromList
                                 [ (getNodeId v, TyVar { tnId = v, tnBound = Just b })
                                 , (getNodeId b, TyVar { tnId = b, tnBound = Nothing })
                                 , (getNodeId arrow, TyArrow arrow v b)
@@ -511,8 +510,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 forallNode = NodeId 4
                 c =
                     rootedConstraint emptyConstraint
-                        { cNodes =
-                            IntMap.fromList
+                        { cNodes = nodeMapFromList
                                 [ (getNodeId a, TyVar { tnId = a, tnBound = Nothing })
                                 , (getNodeId b, TyVar { tnId = b, tnBound = Just a })
                                 , (getNodeId arrow, TyArrow arrow b b)
@@ -713,8 +711,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
                 c =
                     rootedConstraint emptyConstraint
-                        { cNodes =
-                            IntMap.fromList
+                        { cNodes = nodeMapFromList
                                 [ (getNodeId vLeft, TyVar { tnId = vLeft, tnBound = Nothing })
                                 , (getNodeId vRight, TyVar { tnId = vRight, tnBound = Nothing })
                                 , (getNodeId arrow, TyArrow arrow vLeft vRight)
@@ -744,8 +741,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
                 c =
                     rootedConstraint emptyConstraint
-                        { cNodes =
-                            IntMap.fromList
+                        { cNodes = nodeMapFromList
                                 [ (getNodeId vShallow, TyVar { tnId = vShallow, tnBound = Nothing })
                                 , (getNodeId vDeep, TyVar { tnId = vDeep, tnBound = Nothing })
                                 , (getNodeId nInt, TyBase nInt (BaseTy "Int"))
@@ -776,8 +772,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 c =
                     rootedConstraint emptyConstraint
                         { cEliminatedVars = IntSet.empty
-                        , cNodes =
-                            IntMap.fromList
+                        , cNodes = nodeMapFromList
                                 [ (getNodeId vA, TyVar { tnId = vA, tnBound = Nothing })
                                 , (getNodeId vB, TyVar { tnId = vB, tnBound = Just bnd })
                                 , (getNodeId bnd, TyArrow bnd vA vA)
@@ -926,8 +921,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             it "interleaves StepIntro with Omega ops in Φ translation" $ do
                 let root = NodeId 0
                     binder = NodeId 1
-                    nodes =
-                        IntMap.fromList
+                    nodes = nodeMapFromList
                             [ (getNodeId root, TyForall root binder)
                             , (getNodeId binder, TyVar { tnId = binder, tnBound = Nothing })
                             ]
@@ -1024,8 +1018,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     c =
                         rootedConstraint emptyConstraint
                             { cEliminatedVars = IntSet.empty
-                            , cNodes =
-                                IntMap.fromList
+                            , cNodes = nodeMapFromList
                                     [ (getNodeId root, TyArrow root aN bN)
                                     , (getNodeId aN, TyVar { tnId = aN, tnBound = Nothing })
                                     , (getNodeId bN, TyVar { tnId = bN, tnBound = Nothing })
@@ -1075,8 +1068,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     c =
                         rootedConstraint emptyConstraint
                             { cEliminatedVars = IntSet.empty
-                            , cNodes =
-                                IntMap.fromList
+                            , cNodes = nodeMapFromList
                                     [ (getNodeId root, TyArrow root aN inner)
                                     , (getNodeId inner, TyArrow inner cN bN)
                                     , (getNodeId aN, TyVar { tnId = aN, tnBound = Nothing })
@@ -1122,8 +1114,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
                     c = rootedConstraint emptyConstraint
                         { cEliminatedVars = IntSet.empty
-                        , cNodes =
-                            IntMap.fromList
+                        , cNodes = nodeMapFromList
                                 [ (100, TyArrow root bN inner)
                                 , (getNodeId inner, TyArrow inner cN aN)
                                 , (1, TyVar { tnId = aN, tnBound = Nothing })
@@ -1153,8 +1144,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         EdgeTrace
                             { etRoot = root
                             , etBinderArgs = []
-                            , etInterior = IntSet.empty
-                            , etCopyMap = IntMap.empty
+                            , etInterior = mempty
+                            , etCopyMap = mempty
                             }
 
                     ops = [OpRaise cN]
@@ -1247,8 +1238,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     cN = NodeId 3
 
                     c = rootedConstraint emptyConstraint
-                        { cNodes =
-                            IntMap.fromList
+                        { cNodes = nodeMapFromList
                                 [ (getNodeId root, TyForall root body)
                                 , (getNodeId body, TyArrow body aN bN)
                                 , (getNodeId aN, TyVar { tnId = aN, tnBound = Nothing })
@@ -1277,8 +1267,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     cN = NodeId 3
 
                     c = rootedConstraint emptyConstraint
-                        { cNodes =
-                            IntMap.fromList
+                        { cNodes = nodeMapFromList
                                 [ (getNodeId root, TyForall root body)
                                 , (getNodeId body, TyArrow body aN bN)
                                 , (getNodeId aN, TyVar { tnId = aN, tnBound = Nothing })
@@ -1308,8 +1297,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     xN = NodeId 3
 
                     c = rootedConstraint emptyConstraint
-                        { cNodes =
-                            IntMap.fromList
+                        { cNodes = nodeMapFromList
                                 [ (getNodeId root, TyForall root body)
                                 , (getNodeId body, TyArrow body bN shared)
                                 , (getNodeId bN, TyVar { tnId = bN, tnBound = Just shared })
@@ -1338,8 +1326,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     codN = NodeId 4
 
                     c = rootedConstraint emptyConstraint
-                        { cNodes =
-                            IntMap.fromList
+                        { cNodes = nodeMapFromList
                                 [ (getNodeId root, TyForall root body)
                                 , (getNodeId body, TyArrow body bN bN)
                                 , (getNodeId bN, TyArrow bN domN codN)
@@ -1363,7 +1350,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 let rootGen = GenNodeId 0
                     root = NodeId 100
                     aN = NodeId 1
-                    nodes = IntMap.fromList
+                    nodes = nodeMapFromList
                         [ (getNodeId root, TyForall root aN)
                         , (getNodeId aN, TyVar { tnId = aN, tnBound = Nothing })
                         ]
@@ -1374,7 +1361,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     constraint = emptyConstraint
                         { cNodes = nodes
                         , cBindParents = bindParents
-                        , cGenNodes = IntMap.singleton (getGenNodeId rootGen) (GenNode rootGen [root])
+                        , cGenNodes = fromListGen [(rootGen, GenNode rootGen [root])]
                         }
 
                 case Binding.checkNoGenFallback constraint of
@@ -1392,7 +1379,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     innerGen = GenNodeId 1
                     root = NodeId 100
                     vN = NodeId 1
-                    nodes = IntMap.fromList
+                    nodes = nodeMapFromList
                         [ (getNodeId root, TyForall root vN)
                         , (getNodeId vN, TyVar { tnId = vN, tnBound = Nothing })
                         ]
@@ -1404,9 +1391,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     constraint = emptyConstraint
                         { cNodes = nodes
                         , cBindParents = bindParents
-                        , cGenNodes = IntMap.fromList
-                            [ (getGenNodeId rootGen, GenNode rootGen [root])
-                            , (getGenNodeId innerGen, GenNode innerGen [])
+                        , cGenNodes = fromListGen
+                            [ (rootGen, GenNode rootGen [root])
+                            , (innerGen, GenNode innerGen [])
                             ]
                         }
 
@@ -1452,8 +1439,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     nN = NodeId 3
 
                     c = rootedConstraint emptyConstraint
-                        { cNodes =
-                            IntMap.fromList
+                        { cNodes = nodeMapFromList
                                 [ (getNodeId root, TyArrow root aN mN)
                                 , (getNodeId aN, TyVar { tnId = aN, tnBound = Nothing })
                                 , (getNodeId mN, TyArrow mN nN aN)
@@ -1481,8 +1467,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         EdgeTrace
                             { etRoot = root
                             , etBinderArgs = []
-                            , etInterior = IntSet.fromList [getNodeId root, getNodeId aN, getNodeId mN, getNodeId nN]
-                            , etCopyMap = IntMap.empty
+                            , etInterior = fromListInterior [root, aN, mN, nN]
+                            , etCopyMap = mempty
                             }
 
                     ops = [OpRaise nN]
@@ -1586,8 +1572,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 flexVar = NodeId 3
                 c =
                     rootedConstraint emptyConstraint
-                        { cNodes =
-                            IntMap.fromList
+                        { cNodes = nodeMapFromList
                                 [ (getNodeId arrow, TyArrow arrow rigidVar rigidVar)
                                 , (getNodeId rigidVar, TyVar { tnId = rigidVar, tnBound = Just flexVar })
                                 , (getNodeId flexVar, TyVar { tnId = flexVar, tnBound = Nothing })
@@ -1612,8 +1597,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 rigidBound = NodeId 4
                 c =
                     rootedConstraint emptyConstraint
-                        { cNodes =
-                            IntMap.fromList
+                        { cNodes = nodeMapFromList
                                 [ (getNodeId arrow, TyArrow arrow rigidVar rigidVar)
                                 , (getNodeId rigidVar, TyVar { tnId = rigidVar, tnBound = Just rigidBound })
                                 , (getNodeId flexVar, TyVar { tnId = flexVar, tnBound = Nothing })

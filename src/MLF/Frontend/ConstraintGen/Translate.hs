@@ -411,7 +411,7 @@ lookupSchemeOwnerForRoot root = do
     genNodes <- gets bsGenNodes
     pure $ listToMaybe
         [ gnId gen
-        | gen <- IntMap.elems genNodes
+        | gen <- IntMap.elems (getGenNodeMap genNodes)
         , root `elem` gnSchemes gen
         ]
 

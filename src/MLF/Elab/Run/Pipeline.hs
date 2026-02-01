@@ -17,6 +17,7 @@ import MLF.Constraint.Presolution
     , PresolutionResult(..)
     , computePresolution
     )
+import MLF.Constraint.Presolution.Base (CopyMapping(..), toListInterior)
 import MLF.Constraint.Solve hiding (BindingTreeError, MissingNode)
 import MLF.Constraint.Types
     ( Constraint
@@ -27,6 +28,7 @@ import MLF.Constraint.Types
     , cBindParents
     , cNodes
     , getNodeId
+    , lookupNodeIn
     , nodeRefFromKey
     , typeRef
     )
@@ -131,7 +133,7 @@ collectBaseNamedKeys c =
             GenRef _ -> True
             _ -> False
         , TypeRef child <- [nodeRefFromKey childKey]
-        , case IntMap.lookup (getNodeId child) baseNodes of
+        , case lookupNodeIn baseNodes child of
             Just TyVar{} -> True
             _ -> False
         ]
@@ -159,7 +161,7 @@ buildTraceCopyMap
     -> EdgeTrace
     -> IntMap.IntMap NodeId
 buildTraceCopyMap c baseNamedKeysAll adoptNode tr =
-    let copyMap0 = etCopyMap tr
+    let copyMap0 = getCopyMapping (etCopyMap tr)
         rootBase = etRoot tr
         baseNodes = cNodes c
         baseInteriorSet = buildInteriorSet c adoptNode rootBase
@@ -184,16 +186,18 @@ buildTraceCopyMap c baseNamedKeysAll adoptNode tr =
         ensureRoot acc =
             let rootCopyKey = getNodeId (adoptNode rootBase)
             in IntMap.insertWith (\_ old -> old) rootCopyKey rootBase acc
-        addInterior acc nidInt =
-            let baseN = NodeId nidInt
+        addInterior acc baseN =
+            let baseKey = getNodeId baseN
                 copyKey = getNodeId (adoptNode baseN)
             in if IntMap.member copyKey acc
                 then acc
-                else if IntMap.member nidInt baseNodes
-                    && IntSet.member nidInt baseInteriorSet
+                else if case lookupNodeIn baseNodes baseN of
+                        Just _ -> True
+                        Nothing -> False
+                    && IntSet.member baseKey baseInteriorSet
                     then IntMap.insert copyKey baseN acc
                 else IntMap.insert copyKey rootBase acc
     in foldl'
             addInterior
             (ensureRoot (IntMap.union binderMetaOverrides (IntMap.union binderCopyOverrides invMap)))
-            (IntSet.toList (etInterior tr))
+            (toListInterior (etInterior tr))

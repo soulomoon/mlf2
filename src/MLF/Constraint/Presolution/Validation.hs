@@ -27,7 +27,6 @@ module MLF.Constraint.Presolution.Validation (
 
 import Control.Monad.State
 import Control.Monad.Except (throwError)
-import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
@@ -58,7 +57,7 @@ validateTranslatablePresolution c0 = do
 
     let issuesScheme =
             [ SchemeRootNotRigid (gnId gen) root
-            | gen <- IntMap.elems genNodes
+            | gen <- IntMap.elems (getGenNodeMap genNodes)
             , root <- gnSchemes gen
             , case IntMap.lookup (nodeRefKey (typeRef root)) bindParents of
                 Just (GenRef gid, BindRigid) | gid == gnId gen -> False
@@ -68,9 +67,8 @@ validateTranslatablePresolution c0 = do
 
     let issuesArrow =
             [ ArrowNodeNotRigid nid
-            | (k, node) <- IntMap.toList nodes
+            | (nid, node) <- toListNode nodes
             , TyArrow{} <- [node]
-            , let nid = NodeId k
             , case IntMap.lookup (nodeRefKey (typeRef nid)) bindParents of
                 Just (_, BindRigid) -> False
                 _ -> True
@@ -79,7 +77,7 @@ validateTranslatablePresolution c0 = do
     let interiorByGen =
             IntMap.fromList
                 [ (genNodeKey (gnId gen), structuralInterior nodes (gnSchemes gen))
-                | gen <- IntMap.elems genNodes
+                | gen <- IntMap.elems (getGenNodeMap genNodes)
                 ]
 
     let issuesOutside =
@@ -120,8 +118,8 @@ rigidifyTranslatablePresolutionM = do
         bindParents0 = cBindParents c1
 
         arrowNodes =
-            [ NodeId k
-            | (k, node) <- IntMap.toList nodes
+            [ nid
+            | (nid, node) <- toListNode nodes
             , TyArrow{} <- [node]
             ]
 
@@ -132,7 +130,7 @@ rigidifyTranslatablePresolutionM = do
 
         schemeRoots =
             [ root
-            | gen <- IntMap.elems genNodes
+            | gen <- IntMap.elems (getGenNodeMap genNodes)
             , root <- gnSchemes gen
             , isNonDegenerateSchemeRoot gen root
             ]
@@ -150,7 +148,7 @@ rigidifyTranslatablePresolutionM = do
         interiorByGen =
             IntMap.fromList
                 [ (genNodeKey (gnId gen), structuralInterior nodes (gnSchemes gen))
-                | gen <- IntMap.elems genNodes
+                | gen <- IntMap.elems (getGenNodeMap genNodes)
                 ]
 
         bindParents3 =
@@ -177,12 +175,12 @@ rigidifyTranslatablePresolutionM = do
 --
 -- The interior is the set of all nodes reachable from the roots by following
 -- structural children and instance bounds.
-structuralInterior :: IntMap TyNode -> [NodeId] -> IntSet.IntSet
+structuralInterior :: NodeMap TyNode -> [NodeId] -> IntSet.IntSet
 structuralInterior nodes =
     Traversal.reachableFromNodes id children
   where
     children nid =
-        maybe [] structuralChildrenWithBounds (IntMap.lookup (getNodeId nid) nodes)
+        maybe [] structuralChildrenWithBounds (lookupNodeIn nodes nid)
 
 -- | Compute the set of nodes that should be weakened in a translatable presolution.
 --
@@ -203,7 +201,7 @@ translatableWeakenedNodes c0 =
 
         schemeRoots =
             [ root
-            | gen <- IntMap.elems genNodes
+            | gen <- IntMap.elems (getGenNodeMap genNodes)
             , root <- gnSchemes gen
             , case IntMap.lookup (nodeRefKey (typeRef root)) bindParents of
                 Just (GenRef gid, _) | gid == gnId gen -> True
@@ -212,16 +210,16 @@ translatableWeakenedNodes c0 =
             ]
 
         arrowNodes =
-            [ NodeId k
-            | (k, node) <- IntMap.toList nodes
+            [ nid
+            | (nid, node) <- toListNode nodes
             , TyArrow{} <- [node]
-            , isRigid (nodeRefKey (typeRef (NodeId k)))
+            , isRigid (nodeRefKey (typeRef nid))
             ]
 
         interiorByGen =
             IntMap.fromList
                 [ (genNodeKey (gnId gen), structuralInterior nodes (gnSchemes gen))
-                | gen <- IntMap.elems genNodes
+                | gen <- IntMap.elems (getGenNodeMap genNodes)
                 ]
 
         nonInterior =

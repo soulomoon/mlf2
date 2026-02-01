@@ -1,3 +1,4 @@
+{-# LANGUAGE GADTs #-}
 module ReduceSpec (spec) where
 
 import Control.Monad (forM_)

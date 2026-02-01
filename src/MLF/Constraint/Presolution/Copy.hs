@@ -23,11 +23,14 @@ import qualified Data.IntSet as IntSet
 
 import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Presolution.Base (
+    CopyMap,
+    CopyMapping(..),
     MonadPresolution(..),
     PresolutionError(..),
     PresolutionM,
     PresolutionState(..),
     bindingPathToRootUnderM,
+    copiedNodes,
     instantiationBindersM
     )
 import MLF.Constraint.Presolution.Ops (
@@ -41,7 +44,7 @@ import MLF.Constraint.Presolution.StateAccess (
 import qualified MLF.Constraint.Canonicalize as Canonicalize
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Constraint.Traversal as Traversal
-import MLF.Constraint.Types
+import MLF.Constraint.Types hiding (lookupNode)
 
 data CopyState = CopyState
     { csCache :: IntMap NodeId
@@ -217,7 +220,7 @@ instantiateScheme bodyId substList = do
 -- when expanding an instantiation edge, we copy exactly the nodes "structurally
 -- strictly under g and in I(g)" and preserve binding edges/flags for copied nodes.
 -- The expansion root is bound at the same binder as the target node.
-instantiateSchemeWithTrace :: NodeId -> [(NodeId, NodeId)] -> PresolutionM (NodeId, IntMap NodeId, IntSet.IntSet, IntSet.IntSet)
+instantiateSchemeWithTrace :: NodeId -> [(NodeId, NodeId)] -> PresolutionM (NodeId, CopyMap, IntSet.IntSet, IntSet.IntSet)
 instantiateSchemeWithTrace bodyId substList =
     instantiateSchemeWithMode True bodyId substList
 
@@ -225,13 +228,14 @@ instantiateSchemeWithMode
     :: Bool
     -> NodeId
     -> [(NodeId, NodeId)]
-    -> PresolutionM (NodeId, IntMap NodeId, IntSet.IntSet, IntSet.IntSet)
+    -> PresolutionM (NodeId, CopyMap, IntSet.IntSet, IntSet.IntSet)
 instantiateSchemeWithMode replaceFrontier bodyId substList = do
     (c0, canonical) <- getConstraintAndCanonical
 
     let bodyC = canonical bodyId
-    when (IntMap.notMember (getNodeId bodyC) (cNodes c0)) $
-        throwError (NodeLookupFailed bodyC)
+    case lookupNodeIn (cNodes c0) bodyC of
+        Nothing -> throwError (NodeLookupFailed bodyC)
+        Just _ -> pure ()
 
     -- Paper (`papers/these-finale-english.txt`; see `papers/xmlf.txt` §3.2):
     -- expansion copies nodes in I^s(g) and F^s(g) that are reachable from s,
@@ -267,7 +271,7 @@ instantiateSchemeWithMode replaceFrontier bodyId substList = do
             let nidC = canonical nid
                 key = getNodeId nidC
             in IntSet.member key schemeRoots &&
-                case IntMap.lookup key nodes of
+                case lookupNodeIn nodes nidC of
                     Just TyVar{ tnBound = Just _ } -> True
                     _ -> False
         substAll = IntMap.fromList [(getNodeId k, v) | (k, v) <- substList]
@@ -284,7 +288,7 @@ instantiateSchemeWithMode replaceFrontier bodyId substList = do
                 , csInterior = initialInterior
                 }
     (root, st1) <- runStateT (copyNode copyInterior frontierForCopy degenerateRoot canonical subst bodyId) st0
-    let cmap = csCopyMap st1
+    let cmap = CopyMapping (csCopyMap st1)
         interior = csInterior st1
     let substKeys = IntSet.fromList (map (getNodeId . fst) substList)
     resetBindingsForCopies canonical c0 gid bodyC root frontierForCopy cmap substKeys
@@ -297,7 +301,7 @@ instantiateSchemeWithMode replaceFrontier bodyId substList = do
         -> NodeId
         -> NodeId
         -> IntSet.IntSet
-        -> IntMap NodeId
+        -> CopyMap
         -> IntSet.IntSet
         -> PresolutionM ()
     resetBindingsForCopies canonical c0 gid schemeRootId copyRoot frontierSet cmap0 substKeys = do
@@ -305,7 +309,7 @@ instantiateSchemeWithMode replaceFrontier bodyId substList = do
                 IntMap.fromListWith
                     (\a _ -> a)
                     [ (getNodeId (canonical (NodeId orig)), copy)
-                    | (orig, copy) <- IntMap.toList cmap0
+                    | (orig, copy) <- IntMap.toList (getCopyMapping cmap0)
                     ]
             schemeRootC = canonical schemeRootId
             copyRootC = canonical copyRoot
@@ -499,7 +503,7 @@ bindExpansionRootLikeTarget expansionRoot targetNode = do
             pure parentRef
         Nothing -> do
             -- Target is a root: bind the expansion root under the binding-tree root gen node.
-            let genIds = IntMap.keys (cGenNodes c)
+            let genIds = IntMap.keys (getGenNodeMap (cGenNodes c))
             rootGen <- foldM
                 (\acc gidInt -> do
                     case acc of
@@ -531,12 +535,12 @@ bindExpansionRootLikeTarget expansionRoot targetNode = do
 --
 -- This maintains the binding tree invariant that all non-term-dag-root nodes
 -- have binding parents.
-bindUnboundCopiedNodes :: IntMap NodeId -> IntSet.IntSet -> NodeId -> PresolutionM ()
+bindUnboundCopiedNodes :: CopyMap -> IntSet.IntSet -> NodeId -> PresolutionM ()
 bindUnboundCopiedNodes copyMap interior expansionRoot = do
     (c0, canonical) <- getConstraintAndCanonical
     let expansionRootC = canonical expansionRoot
     expansionPath <- bindingPathToRootUnderM canonical c0 (typeRef expansionRootC)
-    let copiedIds = IntSet.fromList (map getNodeId (IntMap.elems copyMap))
+    let copiedIds = IntSet.fromList (map getNodeId (copiedNodes copyMap))
         candidateIds0 = IntSet.union copiedIds interior
 
         lookupNode = lookupNodeIn (cNodes c0)

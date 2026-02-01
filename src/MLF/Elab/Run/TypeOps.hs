@@ -12,7 +12,7 @@ import qualified Data.Set as Set
 
 import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Constraint.Solve (SolveResult, frWith, srConstraint, srUnionFind)
-import MLF.Constraint.Types (TyNode(..), cNodes)
+import MLF.Constraint.Types (TyNode(..), cNodes, fromListNode, toListNode)
 import MLF.Reify.Core (namedNodes, reifyTypeWithNamedSetNoFallback)
 import MLF.Reify.TypeOps (
     freeTypeVarsType,
@@ -54,7 +54,12 @@ inlineBoundVarsTypeWith unboundToBottom res =
     constraint = srConstraint res
     canonical = frWith (srUnionFind res)
     namedSet = either (const IntSet.empty) id (namedNodes res)
-    nodesVarOnly = IntMap.filter isTyVar (cNodes constraint)
+    nodesVarOnly =
+        fromListNode
+            [ (nid, node)
+            | (nid, node) <- toListNode (cNodes constraint)
+            , isTyVar node
+            ]
     isTyVar node = case node of
         TyVar{} -> True
         _ -> False

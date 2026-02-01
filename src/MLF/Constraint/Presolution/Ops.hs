@@ -24,7 +24,6 @@ module MLF.Constraint.Presolution.Ops (
 
 import Control.Monad.State (get, gets, modify', put)
 import Control.Monad.Except (throwError)
-import qualified Data.IntMap.Strict as IntMap
 
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.VarStore as VarStore
@@ -45,7 +44,7 @@ registerNode :: NodeId -> TyNode -> PresolutionM ()
 registerNode nid node =
     modify' $ \st ->
         let c0 = psConstraint st
-            nodes' = IntMap.insert (getNodeId nid) node (cNodes c0)
+            nodes' = insertNode nid node (cNodes c0)
         in st { psConstraint = c0 { cNodes = nodes' } }
 
 -- | Set a binding parent for a node in the constraint.
@@ -63,7 +62,7 @@ setBindParentM child parentInfo =
 getNode :: NodeId -> PresolutionM TyNode
 getNode nid = do
     nodes <- gets (cNodes . psConstraint)
-    case IntMap.lookup (getNodeId nid) nodes of
+    case lookupNode nid nodes of
         Just n -> pure n
         Nothing -> throwError $ NodeLookupFailed nid
 
@@ -80,7 +79,7 @@ getCanonicalNode :: NodeId -> PresolutionM TyNode
 getCanonicalNode nid = do
     rootId <- findRoot nid
     nodes <- gets (cNodes . psConstraint)
-    case IntMap.lookup (getNodeId rootId) nodes of
+    case lookupNode rootId nodes of
         Just node -> pure node
         Nothing -> throwError $ NodeLookupFailed rootId
 

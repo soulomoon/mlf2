@@ -41,7 +41,10 @@ import MLF.Constraint.Types
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Presolution.Base (
     CopyMap,
+    InteriorNodes(..),
     InteriorSet,
+    memberInterior,
+    lookupCopy,
     MonadPresolution(..),
     PresolutionError(..),
     PresolutionM,
@@ -56,13 +59,12 @@ import MLF.Constraint.Presolution.StateAccess (
     lookupBindParentR,
     runWithCanonical
     )
-import MLF.Constraint.Presolution.Unify (unifyAcyclicRawWithRaiseTracePrefer)
 import qualified MLF.Constraint.Traversal as Traversal
 
 data EdgeUnifyState = EdgeUnifyState
-    { eusInteriorRoots :: IntSet.IntSet
+    { eusInteriorRoots :: InteriorNodes
     , eusBindersByRoot :: IntMap IntSet.IntSet -- ^ UF-root -> binder NodeIds whose args live in that class
-    , eusInteriorByRoot :: IntMap IntSet.IntSet -- ^ UF-root -> interior NodeIds (all nodes in I(r))
+    , eusInteriorByRoot :: IntMap InteriorNodes -- ^ UF-root -> interior NodeIds (all nodes in I(r))
     , eusEdgeRoot :: NodeId -- ^ Expansion root r (edge-local χe root)
     , eusEliminatedBinders :: IntSet.IntSet -- ^ binders eliminated by Merge/RaiseMerge ops we record
     , eusBinderMeta :: IntMap NodeId -- ^ source binder -> copied/meta node in χe
@@ -72,6 +74,15 @@ data EdgeUnifyState = EdgeUnifyState
     }
 
 type EdgeUnifyM = StateT EdgeUnifyState PresolutionM
+
+insertInteriorKey :: Int -> InteriorNodes -> InteriorNodes
+insertInteriorKey k (InteriorNodes s) = InteriorNodes (IntSet.insert k s)
+
+deleteInteriorKey :: Int -> InteriorNodes -> InteriorNodes
+deleteInteriorKey k (InteriorNodes s) = InteriorNodes (IntSet.delete k s)
+
+nullInteriorNodes :: InteriorNodes -> Bool
+nullInteriorNodes (InteriorNodes s) = IntSet.null s
 
 -- | Typeclass for monads that support edge-local unification operations.
 -- This allows functions to be polymorphic over the concrete monad stack,
@@ -84,7 +95,7 @@ class Monad m => MonadEdgeUnify m where
     -- | Modify the edge unify state.
     modifyEdgeUnifyState :: (EdgeUnifyState -> EdgeUnifyState) -> m ()
     -- | Get the interior roots set.
-    getInteriorRoots :: m IntSet.IntSet
+    getInteriorRoots :: m InteriorNodes
     -- | Get the edge root.
     getEdgeRoot :: m NodeId
     -- | Get the binder meta map.
@@ -183,7 +194,7 @@ mkOmegaExecEnv :: CopyMap -> OmegaExec.OmegaExecEnv EdgeUnifyM
 mkOmegaExecEnv copyMap =
     OmegaExec.OmegaExecEnv
         { OmegaExec.omegaMetaFor = metaFor
-        , OmegaExec.omegaLookupMeta = \bv -> pure (IntMap.lookup (getNodeId bv) copyMap)
+        , OmegaExec.omegaLookupMeta = \bv -> pure (lookupCopy bv copyMap)
         , OmegaExec.omegaLookupVarBound = \meta -> lookupVarBoundM meta
         , OmegaExec.omegaSetVarBound = \meta mb -> setVarBoundM meta mb
         , OmegaExec.omegaDropVarBind = \meta -> dropVarBindM meta
@@ -200,7 +211,7 @@ mkOmegaExecEnv copyMap =
   where
     metaFor :: NodeId -> EdgeUnifyM NodeId
     metaFor bv =
-        case IntMap.lookup (getNodeId bv) copyMap of
+        case lookupCopy bv copyMap of
             Just m -> pure m
             Nothing ->
                 throwPresolutionErrorM (InternalError ("mkOmegaExecEnv: missing copy for binder " ++ show bv))
@@ -241,8 +252,8 @@ unifyAcyclicEdgeNoMerge n1 n2 = do
         st0 <- get
         let r1 = getNodeId root1
             r2 = getNodeId root2
-            inInt1 = IntSet.member r1 (eusInteriorRoots st0)
-            inInt2 = IntSet.member r2 (eusInteriorRoots st0)
+            inInt1 = memberInterior root1 (eusInteriorRoots st0)
+            inInt2 = memberInterior root2 (eusInteriorRoots st0)
             bs1 = IntMap.findWithDefault IntSet.empty r1 (eusBindersByRoot st0)
             bs2 = IntMap.findWithDefault IntSet.empty r2 (eusBindersByRoot st0)
             bs = IntSet.union bs1 bs2
@@ -251,15 +262,15 @@ unifyAcyclicEdgeNoMerge n1 n2 = do
         raiseTrace <- unifyAcyclicRawWithRaiseTracePreferM prefer root1 root2
         rep <- findRootM root2
         let repId = getNodeId rep
-            int1 = IntMap.findWithDefault IntSet.empty r1 (eusInteriorByRoot st0)
-            int2 = IntMap.findWithDefault IntSet.empty r2 (eusInteriorByRoot st0)
-            intAll = IntSet.union int1 int2
+            int1 = IntMap.findWithDefault mempty r1 (eusInteriorByRoot st0)
+            int2 = IntMap.findWithDefault mempty r2 (eusInteriorByRoot st0)
+            intAll = int1 <> int2
         recordRaisesFromTrace intAll raiseTrace
 
         modify $ \st ->
             let roots' =
                     if inInt1 || inInt2
-                        then IntSet.insert repId (IntSet.delete r2 (IntSet.delete r1 (eusInteriorRoots st)))
+                        then insertInteriorKey repId (deleteInteriorKey r2 (deleteInteriorKey r1 (eusInteriorRoots st)))
                         else eusInteriorRoots st
                 binders' =
                     let m0 = eusBindersByRoot st
@@ -269,7 +280,7 @@ unifyAcyclicEdgeNoMerge n1 n2 = do
                     in m1
                 interior' =
                     let m0 = eusInteriorByRoot st
-                        m1 = if IntSet.null intAll
+                        m1 = if nullInteriorNodes intAll
                             then IntMap.delete r2 (IntMap.delete r1 m0)
                             else IntMap.insert repId intAll (IntMap.delete r2 (IntMap.delete r1 m0))
                     in m1
@@ -278,7 +289,7 @@ unifyAcyclicEdgeNoMerge n1 n2 = do
 initEdgeUnifyState :: [(NodeId, NodeId)] -> IntMap NodeId -> InteriorSet -> NodeId -> PresolutionM EdgeUnifyState
 initEdgeUnifyState binderArgs binderBounds interior edgeRoot = do
     roots <- forM (IntSet.toList interior) $ \i -> Ops.findRoot (NodeId i)
-    let interiorRoots = IntSet.fromList (map getNodeId roots)
+    let interiorRoots = InteriorNodes (IntSet.fromList (map getNodeId roots))
     bindersByRoot <- foldM
         (\m (bv, arg) -> do
             r <- Ops.findRoot arg
@@ -294,8 +305,8 @@ initEdgeUnifyState binderArgs binderBounds interior edgeRoot = do
         (\m i -> do
             r <- Ops.findRoot (NodeId i)
             let k = getNodeId r
-                v = IntSet.singleton i
-            pure (IntMap.insertWith IntSet.union k v m)
+                v = InteriorNodes (IntSet.singleton i)
+            pure (IntMap.insertWith (<>) k v m)
         )
         IntMap.empty
         (IntSet.toList interior)
@@ -346,10 +357,10 @@ recordEliminate bv = do
 isEliminated :: NodeId -> EdgeUnifyM Bool
 isEliminated bv = gets (IntSet.member (getNodeId bv) . eusEliminatedBinders)
 
-recordRaisesFromTrace :: IntSet.IntSet -> [NodeId] -> EdgeUnifyM ()
+recordRaisesFromTrace :: InteriorNodes -> [NodeId] -> EdgeUnifyM ()
 recordRaisesFromTrace interiorNodes raiseTrace =
     forM_ raiseTrace $ \nid ->
-        when (IntSet.member (getNodeId nid) interiorNodes) $ do
+        when (memberInterior nid interiorNodes) $ do
             already <- isEliminated nid
             isLocked <- checkNodeLocked nid
             when (not already && not isLocked) $
@@ -464,8 +475,8 @@ unifyAcyclicEdge n1 n2 = do
         st0 <- get
         let r1 = getNodeId root1
             r2 = getNodeId root2
-            inInt1 = IntSet.member r1 (eusInteriorRoots st0)
-            inInt2 = IntSet.member r2 (eusInteriorRoots st0)
+            inInt1 = memberInterior root1 (eusInteriorRoots st0)
+            inInt2 = memberInterior root2 (eusInteriorRoots st0)
             bs1 = IntMap.findWithDefault IntSet.empty r1 (eusBindersByRoot st0)
             bs2 = IntMap.findWithDefault IntSet.empty r2 (eusBindersByRoot st0)
             bs = IntSet.union bs1 bs2
@@ -479,9 +490,9 @@ unifyAcyclicEdge n1 n2 = do
         raiseTrace <- unifyAcyclicRawWithRaiseTracePreferM prefer root1 root2
         rep <- findRootM root2
         let repId = getNodeId rep
-            int1 = IntMap.findWithDefault IntSet.empty r1 (eusInteriorByRoot st0)
-            int2 = IntMap.findWithDefault IntSet.empty r2 (eusInteriorByRoot st0)
-            intAll = IntSet.union int1 int2
+            int1 = IntMap.findWithDefault mempty r1 (eusInteriorByRoot st0)
+            int2 = IntMap.findWithDefault mempty r2 (eusInteriorByRoot st0)
+            intAll = int1 <> int2
 
         -- Paper alignment (`papers/these-finale-english.txt`; see `papers/xmlf.txt` §3.4):
         -- record Raise(n) for exactly the node(s)
@@ -493,7 +504,7 @@ unifyAcyclicEdge n1 n2 = do
         modify $ \st ->
             let roots' =
                     if inInt1 || inInt2
-                        then IntSet.insert repId (IntSet.delete r2 (IntSet.delete r1 (eusInteriorRoots st)))
+                        then insertInteriorKey repId (deleteInteriorKey r2 (deleteInteriorKey r1 (eusInteriorRoots st)))
                         else eusInteriorRoots st
                 binders' =
                     let m0 = eusBindersByRoot st
@@ -504,7 +515,7 @@ unifyAcyclicEdge n1 n2 = do
                 -- Also update interior-by-root map
                 interior' =
                     let m0 = eusInteriorByRoot st
-                        m1 = if IntSet.null intAll
+                        m1 = if nullInteriorNodes intAll
                             then IntMap.delete r2 (IntMap.delete r1 m0)
                             else IntMap.insert repId intAll (IntMap.delete r2 (IntMap.delete r1 m0))
                     in m1
@@ -589,7 +600,7 @@ shouldRecordRaiseMerge binder ext = do
                         else do
                             above <- isBoundAboveInBindingTreeM edgeRoot extRoot
                             interiorRoots <- gets eusInteriorRoots
-                            let inInterior = IntSet.member (getNodeId extRoot) interiorRoots
+                            let inInterior = memberInterior extRoot interiorRoots
                             case debugEdgeUnify
                                 ( "shouldRecordRaiseMerge: binder="
                                     ++ show binder

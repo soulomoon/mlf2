@@ -125,7 +125,7 @@ import qualified MLF.Constraint.Traversal as Traversal
 import qualified MLF.Constraint.Unify.Decompose as UnifyDecompose
 import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Constraint.NodeAccess as NodeAccess
-import MLF.Constraint.Types
+import MLF.Constraint.Types hiding (lookupNode)
 import MLF.Util.Trace (debugBinding)
 
 -- | Errors that can arise during monotype unification.
@@ -279,7 +279,7 @@ solveUnify c0 = do
             rootGen =
                 let genRefs =
                         [ genRef (GenNodeId gid)
-                        | gid <- IntMap.keys (cGenNodes c)
+                        | gid <- IntMap.keys (getGenNodeMap (cGenNodes c))
                         ]
                     isRoot ref = not (IntMap.member (nodeRefKey ref) bindParents0)
                 in case filter isRoot genRefs of
@@ -296,7 +296,7 @@ solveUnify c0 = do
                         let parent = tnId node
                             kids = structuralChildrenWithBounds node
                         in foldl' (flip (addOne parent)) m kids
-                in IntMap.foldl' addNode IntMap.empty nodes
+                in foldl' addNode IntMap.empty (map snd (toListNode nodes))
             pickUpperParent childN =
                 case IntMap.lookup (getNodeId childN) incomingParents of
                     Just ps ->
@@ -331,8 +331,12 @@ solveUnify c0 = do
         let nodes = cNodes c
             genNodes = cGenNodes c
             okRef ref = case ref of
-                TypeRef nid -> IntMap.member (getNodeId nid) nodes
-                GenRef gid -> IntMap.member (getGenNodeId gid) genNodes
+                TypeRef nid ->
+                    case lookupNodeIn nodes nid of
+                        Just _ -> True
+                        Nothing -> False
+                GenRef gid ->
+                    IntMap.member (getGenNodeId gid) (getGenNodeMap genNodes)
             keep childKey (parentRef, _flag) =
                 okRef (nodeRefFromKey childKey) && okRef parentRef
             bindParents' = IntMap.filterWithKey keep (cBindParents c)
@@ -412,7 +416,7 @@ solveUnify c0 = do
     lookupNode :: NodeId -> SolveM TyNode
     lookupNode nid = do
         nodes <- gets (cNodes . suConstraint)
-        case IntMap.lookup (getNodeId nid) nodes of
+        case lookupNodeIn nodes nid of
             Just n -> pure n
             Nothing -> throwSolveError (MissingNode nid)
 
@@ -436,11 +440,11 @@ solveUnify c0 = do
             let aElim = VarStore.isEliminatedVar cCur aRoot
                 bElim = VarStore.isEliminatedVar cCur bRoot
                 isTyVar nid =
-                    case IntMap.lookup (getNodeId nid) nodes of
+                    case lookupNodeIn nodes nid of
                         Just TyVar{} -> True
                         _ -> False
                 hasBound nid =
-                    case IntMap.lookup (getNodeId nid) nodes of
+                    case lookupNodeIn nodes nid of
                         Just TyVar{ tnBound = Just _ } -> True
                         _ -> False
                 (fromRoot0, toRoot0) =
@@ -478,7 +482,7 @@ solveUnify c0 = do
         nodes <- gets (cNodes . suConstraint)
         uf <- gets suUnionFind
         let canonical = frWith uf
-            lookupTyNode nid = IntMap.lookup (getNodeId nid) nodes
+            lookupTyNode nid = lookupNodeIn nodes nid
         case Traversal.occursInUnder canonical lookupTyNode varRoot targetRoot of
             Left _ -> throwSolveError (OccursCheckFailed varRoot targetRoot)
             Right True -> throwSolveError (OccursCheckFailed varRoot targetRoot)
@@ -517,14 +521,15 @@ applyUFConstraint uf c =
                 (\childC ->
                     case childC of
                         TypeRef nid -> IntMap.member (getNodeId nid) nodes'
-                        GenRef gid -> IntMap.member (getGenNodeId gid) (cGenNodes c)
+                        GenRef gid ->
+                            IntMap.member (getGenNodeId gid) (getGenNodeMap (cGenNodes c))
                 )
                 bindParentsAdjusted
         eliminated' = rewriteEliminated canonical nodes' (cEliminatedVars c)
         weakened' = rewriteWeakened canonical nodes' (cWeakenedVars c)
         genNodes' = rewriteGenNodes canonical nodes' (cGenNodes c)
     in c
-        { cNodes = nodes'
+        { cNodes = NodeMap nodes'
         , cInstEdges = Canonicalize.rewriteInstEdges canonical (cInstEdges c)
         , cUnifyEdges = Canonicalize.rewriteUnifyEdges canonical (cUnifyEdges c)
         , cBindParents = bindParents'
@@ -567,7 +572,7 @@ applyUFConstraint uf c =
                 _ -> False
             ]
 
-    rewriteGenNodes :: (NodeId -> NodeId) -> IntMap TyNode -> IntMap.IntMap GenNode -> IntMap.IntMap GenNode
+    rewriteGenNodes :: (NodeId -> NodeId) -> IntMap TyNode -> GenNodeMap GenNode -> GenNodeMap GenNode
     rewriteGenNodes canon nodes0 gen0 =
         let rewriteOne g =
                 let (schemesRev, _seen) =
@@ -583,7 +588,8 @@ applyUFConstraint uf c =
                             (gnSchemes g)
                     schemes' = reverse schemesRev
                 in (genNodeKey (gnId g), g { gnSchemes = schemes' })
-        in IntMap.fromListWith const (map rewriteOne (IntMap.elems gen0))
+        in GenNodeMap
+            (IntMap.fromListWith const (map rewriteOne (IntMap.elems (getGenNodeMap gen0))))
 
 rewriteEliminatedBinders :: Constraint -> Either BindingError (Constraint, IntMap NodeId)
 rewriteEliminatedBinders c0
@@ -591,12 +597,17 @@ rewriteEliminatedBinders c0
         pure (c0, IntMap.empty)
     | otherwise = do
         let nodes0 = cNodes c0
+            nodes0Map =
+                IntMap.fromList
+                    [ (getNodeId nid, node)
+                    | (nid, node) <- toListNode nodes0
+                    ]
             bindParents0 = cBindParents c0
             maxId = maxNodeIdKeyOr0 c0
             elimList = IntSet.toList elims0
 
         forM_ elimList $ \vid ->
-            unless (IntMap.member vid nodes0) $
+            unless (IntMap.member vid nodes0Map) $
                 Left $
                     InvalidBindingTree $
                         "rewriteEliminatedBinders: eliminated node " ++ show vid ++ " not in cNodes"
@@ -605,7 +616,7 @@ rewriteEliminatedBinders c0
             rootGen =
                 let genRefs =
                         [ GenRef (GenNodeId gid)
-                        | gid <- IntMap.keys (cGenNodes c0)
+                        | gid <- IntMap.keys (getGenNodeMap (cGenNodes c0))
                         ]
                     isRoot ref = not (IntMap.member (nodeRefKey ref) bindParents0)
                 in find isRoot genRefs
@@ -643,7 +654,7 @@ rewriteEliminatedBinders c0
             resolve :: IntSet.IntSet -> NodeId -> Either BindingError NodeId
             resolve seen nid
                 | not (IntSet.member (getNodeId nid) elims0) =
-                    if IntMap.member (getNodeId nid) nodes0
+                    if IntMap.member (getNodeId nid) nodes0Map
                         then Right nid
                         else Left $
                             InvalidBindingTree $
@@ -695,13 +706,14 @@ rewriteEliminatedBinders c0
             nodes1 =
                 IntMap.fromList
                     [ (getNodeId (tnId n), rewriteNode n)
-                    | n <- IntMap.elems nodes0
+                    | n <- IntMap.elems nodes0Map
                     , not (IntSet.member (getNodeId (tnId n)) elimSet)
                     ]
             nodes' = IntMap.union nodes1 bottomNodes
             inNodesRef ref = case ref of
                 TypeRef nid -> IntMap.member (getNodeId nid) nodes'
-                GenRef gid -> IntMap.member (getGenNodeId gid) (cGenNodes c0)
+                GenRef gid ->
+                    IntMap.member (getGenNodeId gid) (getGenNodeMap (cGenNodes c0))
         let resolveParent ref0 = go IntSet.empty ref0
               where
                 go visited ref
@@ -799,7 +811,8 @@ rewriteEliminatedBinders c0
                                     (gnSchemes g)
                             schemes' = reverse schemesRev
                         in (genNodeKey (gnId g), g { gnSchemes = schemes' })
-                in IntMap.fromListWith const (map rewriteOne (NodeAccess.allGenNodes c0))
+                in GenNodeMap
+                    (IntMap.fromListWith const (map rewriteOne (NodeAccess.allGenNodes c0)))
             weakened' =
                 IntSet.fromList
                     [ getNodeId v'
@@ -812,7 +825,7 @@ rewriteEliminatedBinders c0
 
             c1 =
                 c0
-                    { cNodes = nodes'
+                    { cNodes = NodeMap nodes'
                     , cBindParents = bindParents'
                     , cInstEdges = instEdges'
                     , cUnifyEdges = unifyEdges'
@@ -865,6 +878,7 @@ validateWith opts SolveResult { srConstraint = c, srUnionFind = uf } =
             ]
     where
         nodes = cNodes c
+        nodeList = map snd (toListNode nodes)
         canonical :: NodeId -> NodeId
         canonical = frWith uf
 
@@ -874,7 +888,7 @@ validateWith opts SolveResult { srConstraint = c, srUnionFind = uf } =
         -- 1. No TyExp nodes remain.
         tyExpViolations =
                 [ msg "Unexpected TyExp node" [nid]
-                | TyExp { tnId = nid } <- IntMap.elems nodes
+                | TyExp { tnId = nid } <- nodeList
                 ]
 
         -- 2. Instantiation resolved (optional in lax mode, required in strict).
@@ -894,16 +908,16 @@ validateWith opts SolveResult { srConstraint = c, srUnionFind = uf } =
         canonicalViolations =
                 concat
                         [ [ msg "Node key/id mismatch" [tnId n]
-                            | n <- IntMap.elems nodes
-                            , IntMap.lookup (getNodeId (tnId n)) nodes /= Just n
+                            | n <- nodeList
+                            , lookupNodeIn nodes (tnId n) /= Just n
                             ]
                         , [ msg "Non-canonical node id" [tnId n]
-                            | n <- IntMap.elems nodes
+                            | n <- nodeList
                             , let cid = canonical (tnId n)
                             , cid /= tnId n
                             ]
                         , [ msg "Non-canonical child id" [parent, child]
-                            | n <- IntMap.elems nodes
+                            | n <- nodeList
                             , parent <- [tnId n]
                             , child <- childRefs n
                             , canonical child /= child
@@ -921,15 +935,17 @@ validateWith opts SolveResult { srConstraint = c, srUnionFind = uf } =
         -- 5. Child references must point to existing nodes.
         childPresenceViolations =
                 [ msg "Missing child node" [tnId n, child]
-                | n <- IntMap.elems nodes
+                | n <- nodeList
                 , child <- childRefs n
-                , IntMap.notMember (getNodeId child) nodes
+                , case lookupNodeIn nodes child of
+                    Nothing -> True
+                    Just _ -> False
                 ]
 
         -- 6. Occurs-safety: no variable is reachable from itself via structure edges.
         occursViolations =
                 [ msg "Occurs-check violation" [varId]
-                | var <- [ n | n@TyVar{} <- IntMap.elems nodes ]
+                | var <- [ n | n@TyVar{} <- nodeList ]
                 , let varId = tnId var
                 , reachesSelf varId
                 ]
@@ -940,7 +956,7 @@ validateWith opts SolveResult { srConstraint = c, srUnionFind = uf } =
                 go seen nid
                     | nid == start && not (IntSet.null seen) = True
                     | IntSet.member (getNodeId nid) seen = False
-                    | otherwise = case IntMap.lookup (getNodeId nid) nodes of
+                    | otherwise = case lookupNodeIn nodes nid of
                         Nothing -> False
                         Just node ->
                             let seen' = IntSet.insert (getNodeId nid) seen
