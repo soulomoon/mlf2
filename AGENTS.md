@@ -42,3 +42,28 @@
 
 - Commit messages typically use imperative, descriptive subjects (examples from history: `Add …`, `Improve …`, `Phase6: …`).
 - PRs should include: a short problem statement, approach summary, new/updated tests, and any relevant doc updates (`implementation_notes.md`, `roadmap.md`) when changing algorithmic behavior.
+
+## Task Management (Ralph)
+
+The `tasks/` folder contains PRDs and progress tracking for autonomous agent execution:
+
+```
+tasks/
+├── prd.json                    # Current Ralph PRD (JSON format for autonomous execution)
+├── prd-*.md                    # Human-readable PRD documentation
+├── progress.txt                # Progress log updated by Ralph during execution
+└── archive/                    # Completed PRDs organized by date and feature
+    └── YYYY-MM-DD-feature-name/
+        ├── prd.json
+        ├── prd-*.md
+        └── progress.txt
+```
+
+**For autonomous agents (Ralph):**
+- Read `tasks/prd.json` to get the current user stories and acceptance criteria
+- Update `tasks/progress.txt` with iteration results
+- Stories are ordered by priority/dependency — execute in order
+- Each story should be completable in one iteration (one context window)
+- Mark `passes: true` in prd.json when a story's acceptance criteria are met
+
+**Validation command:** `cabal build all && cabal test`
