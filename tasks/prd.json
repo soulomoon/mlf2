@@ -100,8 +100,8 @@
         "All tests pass"
       ],
       "priority": 7,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Replaced all 12 lift $ Left calls with throwSolveError. Reduced lift count to 0."
     },
     {
       "id": "US-008",

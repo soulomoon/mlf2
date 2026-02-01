@@ -105,3 +105,27 @@
 - Import throwError from Control.Monad.Except for the throwSolveError implementation
 - The typeclass methods should mirror the existing internal helper functions (lookupNode, findRoot, etc.)
 ---
+
+## 2026-02-01 - US-007
+- Replaced all 12 `lift $ Left` calls with `throwSolveError` in Solve.hs
+- Error calls updated in:
+  - ForallArityMismatch (processEdge TyForall case)
+  - BindingTreeError (two occurrences in orderedBinders calls)
+  - UnexpectedExpNode (two occurrences for TyExp nodes)
+  - BaseClash (decomposeUnifyChildren mismatch)
+  - ConstructorClash (decomposeUnifyChildren failure)
+  - MissingNode (lookupNode failure)
+  - OccursCheckFailed (three occurrences in occursCheck)
+  - BindingTreeError (harmonize failure)
+- Reduced lift $ count from 12 to 0 (target was under 4)
+- All tests pass
+
+**Files changed:**
+- src/MLF/Constraint/Solve.hs: Replaced all lift $ Left calls with throwSolveError
+
+**Learnings for future iterations:**
+- The MonadSolve typeclass from US-006 makes error throwing straightforward
+- All error cases in Solve.hs now use the semantic `throwSolveError` instead of `lift $ Left`
+- Pattern: once typeclass is defined, replacing lift calls is a simple search-and-replace operation
+- No changes needed to imports since throwSolveError is defined in the same module
+---

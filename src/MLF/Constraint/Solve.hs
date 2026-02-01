@@ -390,12 +390,12 @@ solveUnify c0 = do
                                     unionNodes lRoot rRoot
                                     enqueue [UnifyEdge b1 b2]
                                 | otherwise ->
-                                    lift $ Left (ForallArityMismatch (length bs1) (length bs2))
-                            (Left err, _) -> lift $ Left (BindingTreeError err)
-                            (_, Left err) -> lift $ Left (BindingTreeError err)
+                                    throwSolveError (ForallArityMismatch (length bs1) (length bs2))
+                            (Left err, _) -> throwSolveError (BindingTreeError err)
+                            (_, Left err) -> throwSolveError (BindingTreeError err)
 
-                    (TyExp{}, _) -> lift $ Left (UnexpectedExpNode lRoot)
-                    (_, TyExp{}) -> lift $ Left (UnexpectedExpNode rRoot)
+                    (TyExp{}, _) -> throwSolveError (UnexpectedExpNode lRoot)
+                    (_, TyExp{}) -> throwSolveError (UnexpectedExpNode rRoot)
 
                     _ ->
                         case UnifyDecompose.decomposeUnifyChildren lNode rNode of
@@ -404,9 +404,9 @@ solveUnify c0 = do
                                 unionNodes lRoot rRoot
                                 enqueue newEdges
                             Left (UnifyDecompose.MismatchBase b1 b2) ->
-                                lift $ Left (BaseClash b1 b2)
+                                throwSolveError (BaseClash b1 b2)
                             Left _ ->
-                                lift $ Left (ConstructorClash lNode rNode)
+                                throwSolveError (ConstructorClash lNode rNode)
 
     -- | Lookup a node by id or fail with 'MissingNode'.
     lookupNode :: NodeId -> SolveM TyNode
@@ -414,7 +414,7 @@ solveUnify c0 = do
         nodes <- gets (cNodes . suConstraint)
         case IntMap.lookup (getNodeId nid) nodes of
             Just n -> pure n
-            Nothing -> lift $ Left (MissingNode nid)
+            Nothing -> throwSolveError (MissingNode nid)
 
     -- Union-find helpers
     -- | Find canonical representative with path compression.
@@ -474,21 +474,21 @@ solveUnify c0 = do
     occursCheck var target = do
         varRoot <- findRoot var
         targetRoot <- findRoot target
-        when (varRoot == targetRoot) $ lift $ Left (OccursCheckFailed varRoot targetRoot)
+        when (varRoot == targetRoot) $ throwSolveError (OccursCheckFailed varRoot targetRoot)
         nodes <- gets (cNodes . suConstraint)
         uf <- gets suUnionFind
         let canonical = frWith uf
             lookupTyNode nid = IntMap.lookup (getNodeId nid) nodes
         case Traversal.occursInUnder canonical lookupTyNode varRoot targetRoot of
-            Left _ -> lift $ Left (OccursCheckFailed varRoot targetRoot)
-            Right True -> lift $ Left (OccursCheckFailed varRoot targetRoot)
+            Left _ -> throwSolveError (OccursCheckFailed varRoot targetRoot)
+            Right True -> throwSolveError (OccursCheckFailed varRoot targetRoot)
             Right False -> pure ()
 
     harmonize :: NodeId -> NodeId -> SolveM ()
     harmonize lRoot rRoot = do
         cBefore <- gets suConstraint
         case BindingAdjustment.harmonizeBindParentsWithTrace (typeRef lRoot) (typeRef rRoot) cBefore of
-            Left err -> lift $ Left (BindingTreeError err)
+            Left err -> throwSolveError (BindingTreeError err)
             Right (c', _trace) -> modify' $ \s -> s { suConstraint = c' }
 
 -- | Rewrite every node/edge to UF representatives and collapse duplicates,
