@@ -116,8 +116,8 @@
         "All tests pass"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added registerNode and bindExpansionArgs to MonadPresolution. Added MonadPresolution instance for ReaderT. Reduced user-level lift calls from 6 to 4 (Copy.hs only). StateAccess.hs lift eliminated entirely."
     },
     {
       "id": "US-009",

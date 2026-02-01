@@ -26,8 +26,9 @@ module MLF.Constraint.Presolution.Base (
 
 import Control.Applicative ((<|>))
 import Control.Monad.State (StateT, get, gets, modify', put, runStateT)
+import Control.Monad.Reader (ReaderT, lift)
 import Control.Monad.Except (throwError)
-import Control.Monad (unless, when)
+import Control.Monad (forM_, unless, when)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
@@ -166,6 +167,11 @@ class Monad m => MonadPresolution m where
     -- | Get constraint and canonical function together.
     -- Common pattern for binding tree operations.
     getConstraintAndCanonical :: m (Constraint, NodeId -> NodeId)
+    -- | Register a node in the constraint's node map.
+    registerNode :: NodeId -> TyNode -> m ()
+    -- | Bind expansion arguments to the appropriate binder.
+    -- Used during instantiation to bind copied argument nodes.
+    bindExpansionArgs :: NodeId -> [(NodeId, NodeId)] -> m ()
 
 -- | Find the canonical representative of a node (with path compression).
 findRoot :: NodeId -> PresolutionM NodeId
@@ -204,6 +210,38 @@ instance MonadPresolution PresolutionM where
         c <- gets psConstraint
         uf <- gets psUnionFind
         pure (c, UnionFind.frWith uf)
+    registerNode nid node =
+        modify' $ \st ->
+            let c0 = psConstraint st
+                nodes' = IntMap.insert (getNodeId nid) node (cNodes c0)
+            in st { psConstraint = c0 { cNodes = nodes' } }
+    bindExpansionArgs expansionRoot pairs = do
+        (c0, canonical) <- getConstraintAndCanonical
+        let expansionRootC = canonical expansionRoot
+            rootGen =
+                let genIds = IntMap.keys (cGenNodes c0)
+                    pickRoot acc gidInt =
+                        case acc of
+                            Just _ -> acc
+                            Nothing ->
+                                let gref = genRef (GenNodeId gidInt)
+                                in case Binding.lookupBindParentUnder canonical c0 gref of
+                                    Right Nothing -> Just gref
+                                    _ -> Nothing
+                in foldl' pickRoot Nothing genIds
+        forM_ pairs $ \(_bv, arg) -> do
+            let argC = canonical arg
+            case Binding.lookupBindParent c0 (typeRef argC) of
+                Just _ -> pure ()
+                Nothing ->
+                    case rootGen of
+                        Just gref ->
+                            modifyConstraint $ \c ->
+                                Binding.setBindParent (typeRef argC) (gref, BindFlex) c
+                        Nothing ->
+                            when (Binding.isUpper c0 (typeRef expansionRootC) (typeRef argC)) $
+                                modifyConstraint $ \c ->
+                                    Binding.setBindParent (typeRef argC) (typeRef expansionRootC, BindFlex) c
 
 bindingPathToRootUnderM
     :: (NodeId -> NodeId)
@@ -639,3 +677,20 @@ dropTrivialSchemeEdges constraint witnesses traces expansions =
         traces' = IntMap.filterWithKey (\eid _ -> keepEdge eid) traces
         expansions' = IntMap.filterWithKey (\eid _ -> keepEdge eid) expansions
     in (witnesses', traces', expansions')
+
+-- | MonadPresolution instance for ReaderT, allowing presolution operations
+-- to be used within ReaderT transformers without explicit lift.
+instance MonadPresolution m => MonadPresolution (ReaderT r m) where
+    getConstraint = lift getConstraint
+    modifyConstraint f = lift (modifyConstraint f)
+    getCanonical = lift getCanonical
+    getPresolutionState = lift getPresolutionState
+    putPresolutionState st = lift (putPresolutionState st)
+    throwPresolutionError err = lift (throwPresolutionError err)
+    getNode nid = lift (getNode nid)
+    getCanonicalNode nid = lift (getCanonicalNode nid)
+    lookupBindParent ref = lift (lookupBindParent ref)
+    modifyPresolution f = lift (modifyPresolution f)
+    getConstraintAndCanonical = lift getConstraintAndCanonical
+    registerNode nid node = lift (registerNode nid node)
+    bindExpansionArgs root pairs = lift (bindExpansionArgs root pairs)

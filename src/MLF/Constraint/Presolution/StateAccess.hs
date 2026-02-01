@@ -81,7 +81,12 @@ import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Util.UnionFind as UnionFind
 import MLF.Constraint.Types
-import MLF.Constraint.Presolution.Base (PresolutionM, PresolutionError(..), PresolutionState(..))
+import MLF.Constraint.Presolution.Base (
+    MonadPresolution(throwPresolutionError),
+    PresolutionM,
+    PresolutionError(..),
+    PresolutionState(..)
+    )
 import qualified MLF.Constraint.Presolution.Base as Base
 
 -- -----------------------------------------------------------------------------
@@ -325,7 +330,7 @@ getCanonicalNodeM nid = do
 -- | Lift a BindingError to PresolutionError within WithCanonicalT.
 liftBindingErrorR :: Either BindingError a -> WithCanonicalT PresolutionM a
 liftBindingErrorR = \case
-    Left err -> lift $ throwError (BindingTreeError err)
+    Left err -> throwPresolutionError (BindingTreeError err)
     Right result -> pure result
 
 -- | Look up the binding parent of a node within WithCanonicalT.

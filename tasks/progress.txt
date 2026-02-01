@@ -129,3 +129,28 @@
 - Pattern: once typeclass is defined, replacing lift calls is a simple search-and-replace operation
 - No changes needed to imports since throwSolveError is defined in the same module
 ---
+
+## 2026-02-01 - US-008
+- Added registerNode to MonadPresolution typeclass with implementations in PresolutionM, EdgeUnifyM, and ReaderT instances
+- Added bindExpansionArgs to MonadPresolution typeclass, moved implementation from EdgeProcessing.hs to Base.hs
+- Added MonadPresolution instance for ReaderT transformer (enables throwPresolutionError without lift in WithCanonicalT)
+- Updated Copy.hs to use MonadPresolution methods (getCanonicalNode, registerNode) instead of Ops imports
+- Updated EdgeProcessing.hs to use bindExpansionArgs from MonadPresolution (removed local definition)
+- Updated StateAccess.hs to use throwPresolutionError without lift (leveraging ReaderT instance)
+- Reduced user-level lift $ calls from 6 to 4 (Copy.hs only, EdgeProcessing.hs and StateAccess.hs now lift-free)
+- All tests pass
+
+**Files changed:**
+- src/MLF/Constraint/Presolution/Base.hs: Added registerNode and bindExpansionArgs to MonadPresolution, added ReaderT instance
+- src/MLF/Constraint/Presolution/EdgeUnify.hs: Added registerNode and bindExpansionArgs to MonadPresolution EdgeUnifyM instance
+- src/MLF/Constraint/Presolution/Copy.hs: Updated to use MonadPresolution methods instead of Ops imports
+- src/MLF/Constraint/Presolution/EdgeProcessing.hs: Removed local bindExpansionArgs definition, uses typeclass method now
+- src/MLF/Constraint/Presolution/StateAccess.hs: Uses throwPresolutionError without lift
+
+**Learnings for future iterations:**
+- Adding methods to MonadPresolution that exist in Ops requires removing Ops imports from consuming modules
+- When Base.hs needs to use functions from Ops-like modules, implement them directly using Constraint operations to avoid import cycles
+- MonadPresolution instance for ReaderT eliminates need for lift in WithCanonicalT (ReaderT-based) code
+- Moving helper functions into the typeclass centralizes definitions and enables usage across all monad stacks
+- The 4 remaining lifts in Copy.hs are necessary because it's inside StateT CopyState PresolutionM, not EdgeUnifyM
+---

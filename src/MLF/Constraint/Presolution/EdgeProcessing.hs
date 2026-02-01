@@ -211,7 +211,7 @@ processInstEdge edge = do
                     (_a, eu1) <- runStateT
                         (do
                             OmegaExec.executeOmegaBaseOpsPre omegaEnv baseOps
-                            lift $ bindExpansionArgs resNodeId bas
+                            bindExpansionArgs resNodeId bas
                             forM_ (IntSet.toList frontier0) $ \nidInt -> do
                                 case IntMap.lookup nidInt copyMapCanon of
                                     Nothing -> pure ()
@@ -277,33 +277,6 @@ canonicalizeEdgeTraceInteriorsM = do
                         ]
             in tr { etInterior = interior' }
     modify' $ \st -> st { psEdgeTraces = IntMap.map canonInterior (psEdgeTraces st) }
-
-bindExpansionArgs :: NodeId -> [(NodeId, NodeId)] -> PresolutionM ()
-bindExpansionArgs expansionRoot pairs = do
-    (c0, canonical) <- getConstraintAndCanonical
-    let expansionRootC = canonical expansionRoot
-        rootGen =
-            let genIds = IntMap.keys (cGenNodes c0)
-                pickRoot acc gidInt =
-                    case acc of
-                        Just _ -> acc
-                        Nothing ->
-                            let gref = genRef (GenNodeId gidInt)
-                            in case Binding.lookupBindParentUnder canonical c0 gref of
-                                Right Nothing -> Just gref
-                                _ -> Nothing
-            in foldl' pickRoot Nothing genIds
-    forM_ pairs $ \(_bv, arg) -> do
-        let argC = canonical arg
-        case Binding.lookupBindParent c0 (typeRef argC) of
-            Just _ -> pure ()
-            Nothing ->
-                case rootGen of
-                    Just gref -> setBindParentM (typeRef argC) (gref, BindFlex)
-                    Nothing ->
-                        if Binding.isUpper c0 (typeRef expansionRootC) (typeRef argC)
-                            then setBindParentM (typeRef argC) (typeRef expansionRootC, BindFlex)
-                            else pure ()
 
 -- | Build an edge witness from the chosen expansion recipe.
 buildEdgeWitness :: EdgeId -> NodeId -> NodeId -> TyNode -> Expansion -> [InstanceOp] -> NodeId -> PresolutionM EdgeWitness
