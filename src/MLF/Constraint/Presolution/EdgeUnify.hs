@@ -125,6 +125,7 @@ instance MonadPresolution EdgeUnifyM where
     getNode nid = lift (getNode nid)
     getCanonicalNode nid = lift (getCanonicalNode nid)
     lookupBindParent ref = lift (lookupBindParent ref)
+    modifyPresolution f = lift (modifyPresolution f)
 
 -- | Testing helper: run a single edge-local unification and return the recorded
 -- instance-operation witness slice.

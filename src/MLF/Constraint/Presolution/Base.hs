@@ -161,6 +161,8 @@ class Monad m => MonadPresolution m where
     getCanonicalNode :: NodeId -> m TyNode
     -- | Lookup the binding parent of a node (returns Nothing if root).
     lookupBindParent :: NodeRef -> m (Maybe (NodeRef, BindFlag))
+    -- | Modify the presolution state with a function.
+    modifyPresolution :: (Presolution -> Presolution) -> m ()
 
 -- | Find the canonical representative of a node (with path compression).
 findRoot :: NodeId -> PresolutionM NodeId
@@ -194,6 +196,7 @@ instance MonadPresolution PresolutionM where
     lookupBindParent ref = do
         c <- gets psConstraint
         pure $ Binding.lookupBindParent c ref
+    modifyPresolution f = modify' $ \st -> st { psPresolution = f (psPresolution st) }
 
 bindingPathToRootUnderM
     :: (NodeId -> NodeId)

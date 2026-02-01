@@ -56,8 +56,8 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented modifyPresolution following the same pattern as modifyConstraint"
     },
     {
       "id": "US-005",

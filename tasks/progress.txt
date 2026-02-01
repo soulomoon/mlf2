@@ -50,3 +50,18 @@
 - For type nodes, use `lookupBindParent (typeRef nid)` to convert NodeId to NodeRef
 - The pattern is consistent: add to typeclass in Base.hs, implement in PresolutionM, add to EdgeUnifyM via lift
 ---
+
+## 2026-02-01 - US-004
+- Extended MonadPresolution typeclass with modifyPresolution operation
+- Implemented in PresolutionM using modify' on psPresolution field
+- Implemented in EdgeUnifyM via lift (typeclass method is now available)
+- All tests pass
+
+**Files changed:**
+- src/MLF/Constraint/Presolution/Base.hs: Added modifyPresolution to MonadPresolution typeclass, implemented in PresolutionM instance
+- src/MLF/Constraint/Presolution/EdgeUnify.hs: Added modifyPresolution to MonadPresolution EdgeUnifyM instance
+
+**Learnings for future iterations:**
+- modifyPresolution follows the same pattern as modifyConstraint but operates on psPresolution field instead of psConstraint
+- The implementation is straightforward: `modify' $ \st -> st { psPresolution = f (psPresolution st) }`
+---
