@@ -24,6 +24,7 @@ import MLF.Elab.Inst (applyInstantiation)
 import MLF.Elab.Types
 import MLF.Frontend.ConstraintGen (AnnExpr(..))
 import MLF.Constraint.Types.Graph (EdgeId(..), getEdgeId)
+import MLF.Elab.Run.ResultType.Types (ResultTypeContext(..))
 
 -- | Generalize with plan helper
 generalizeWithPlan
