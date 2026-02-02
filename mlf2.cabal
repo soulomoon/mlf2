@@ -163,6 +163,7 @@ library mlf2-internal
                       MLF.Elab.Run.Instantiation,
                       MLF.Elab.Run.Pipeline,
                       MLF.Elab.Run.ResultType,
+                      MLF.Elab.Run.ResultType.Util,
                       MLF.Elab.Run.Scope,
                       MLF.Elab.Run.TypeOps,
                       MLF.Elab.Sigma,

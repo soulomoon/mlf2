@@ -1,0 +1,112 @@
+{
+  "project": "mlf2",
+  "branchName": "ralph/split-large-modules",
+  "description": "Refactor-only cleanup: split remaining large modules (ResultType + presolution Target planning) into cohesive submodules with stable facades, and split PresolutionSpec into smaller spec modules. Preserve paper-faithful behavior; public API changes are allowed if needed (but not the goal).",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Split ResultType: extract pure helpers into ResultType.Util",
+      "description": "As a developer, I want MLF.Elab.Run.ResultType split so pure utilities and shared helpers are isolated and the top-level module can become a thin facade.",
+      "acceptanceCriteria": [
+        "Create MLF.Elab.Run.ResultType.Util and move pure/shared helper functions there (no semantic change)",
+        "Keep MLF.Elab.Run.ResultType exporting ResultTypeContext/computeResultTypeFromAnn/computeResultTypeFallback (facade delegates to submodules where applicable)",
+        "Add new module(s) to mlf2.cabal (mlf2-internal other-modules)",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "No LOC targets; focus on cohesion and keeping the top-level module a stable facade."
+    },
+    {
+      "id": "US-002",
+      "title": "Split ResultType: move annotation-path computation to ResultType.Ann",
+      "description": "As a developer, I want computeResultTypeFromAnn isolated in its own module so annotation handling can evolve without editing a ~1k LOC file.",
+      "acceptanceCriteria": [
+        "Create MLF.Elab.Run.ResultType.Ann containing computeResultTypeFromAnn implementation",
+        "MLF.Elab.Run.ResultType delegates to ResultType.Ann (no caller changes required)",
+        "Add new module(s) to mlf2.cabal (mlf2-internal other-modules)",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Public API changes are allowed if necessary; if any occur, update docs/tests accordingly."
+    },
+    {
+      "id": "US-003",
+      "title": "Split ResultType: move fallback computation to ResultType.Fallback",
+      "description": "As a developer, I want computeResultTypeFallback isolated in its own module so fallback logic is separated from annotation logic.",
+      "acceptanceCriteria": [
+        "Create MLF.Elab.Run.ResultType.Fallback containing computeResultTypeFallback implementation",
+        "MLF.Elab.Run.ResultType delegates to ResultType.Fallback (no caller changes required)",
+        "Add new module(s) to mlf2.cabal (mlf2-internal other-modules)",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "Public API changes are allowed if necessary; if any occur, update docs/tests accordingly."
+    },
+    {
+      "id": "US-004",
+      "title": "Split Target planning: move TargetPlan into Target.TargetPlan",
+      "description": "As a developer, I want MLF.Constraint.Presolution.Plan.Target split so each plan (Target/Gamma/TypeRoot) lives in its own module, with the existing module remaining a stable facade.",
+      "acceptanceCriteria": [
+        "Create MLF.Constraint.Presolution.Plan.Target.TargetPlan containing TargetPlanInput/TargetPlan/buildTargetPlan",
+        "Keep MLF.Constraint.Presolution.Plan.Target as facade re-exporting the full API",
+        "Add new module(s) to mlf2.cabal (mlf2-internal other-modules)",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "Keep MLF.Constraint.Presolution.Plan.Target as a stable facade to avoid widespread import churn."
+    },
+    {
+      "id": "US-005",
+      "title": "Split Target planning: move GammaPlan into Target.GammaPlan",
+      "description": "As a developer, I want GammaPlan isolated so target-bound analysis and Γ construction concerns are separated.",
+      "acceptanceCriteria": [
+        "Create MLF.Constraint.Presolution.Plan.Target.GammaPlan containing GammaPlanInput/GammaPlan/buildGammaPlan",
+        "Keep MLF.Constraint.Presolution.Plan.Target as facade re-exporting the full API",
+        "Add new module(s) to mlf2.cabal (mlf2-internal other-modules)",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "Keep MLF.Constraint.Presolution.Plan.Target as a stable facade to avoid widespread import churn."
+    },
+    {
+      "id": "US-006",
+      "title": "Split Target planning: move TypeRootPlan into Target.TypeRootPlan",
+      "description": "As a developer, I want TypeRootPlan isolated so type-root selection logic is maintained separately from Target/Gamma planning.",
+      "acceptanceCriteria": [
+        "Create MLF.Constraint.Presolution.Plan.Target.TypeRootPlan containing TypeRootPlanInput/TypeRootPlan/buildTypeRootPlan",
+        "Keep MLF.Constraint.Presolution.Plan.Target as facade re-exporting the full API",
+        "Add new module(s) to mlf2.cabal (mlf2-internal other-modules)",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "Keep MLF.Constraint.Presolution.Plan.Target as a stable facade to avoid widespread import churn."
+    },
+    {
+      "id": "US-007",
+      "title": "Split PresolutionSpec into smaller spec modules",
+      "description": "As a developer, I want PresolutionSpec split into smaller spec modules so it is easier to navigate, review, and extend without merge conflicts.",
+      "acceptanceCriteria": [
+        "Split test/PresolutionSpec.hs into multiple modules under test/Presolution/*Spec.hs (each exposing spec :: Spec)",
+        "Update test/Main.hs to run the split presolution specs (optionally keep a thin PresolutionSpec facade)",
+        "Update mlf2.cabal test-suite mlf2-test other-modules to include new test modules",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "No LOC targets; split by domain (identity/instantiate/forall-intro/edge-local unification/etc.), keep existing coverage/behavior."
+    }
+  ]
+}

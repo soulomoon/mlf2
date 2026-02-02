@@ -5,7 +5,6 @@ module MLF.Elab.Run.ResultType (
     computeResultTypeFallback
 ) where
 
-import Data.Functor.Foldable (cata)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.Maybe (listToMaybe)
@@ -59,7 +58,6 @@ import MLF.Reify.TypeOps
 import MLF.Elab.Run.Annotation (adjustAnnotationInst, annNode)
 import MLF.Elab.Run.Debug (debugGaScope, debugGaScopeEnabled, debugWhenCondM, debugWhenM)
 import MLF.Util.Trace (TraceConfig)
-import MLF.Elab.Run.Generalize (generalizeAtWithBuilder)
 import MLF.Elab.Run.Instantiation (inferInstAppArgsFromScheme, instInsideFromArgsWithBounds)
 import MLF.Elab.Run.Scope
     ( bindingScopeRef
@@ -71,6 +69,16 @@ import MLF.Elab.Run.TypeOps
     ( inlineBoundVarsType
     , inlineBoundVarsTypeForBound
     , simplifyAnnotationType
+    )
+import MLF.Elab.Run.Generalize (generalizeAtWithBuilder)
+import Data.Functor.Foldable (cata)
+import MLF.Elab.Run.ResultType.Util
+    ( generalizeWithPlan
+    , containsBoundForall
+    , instHasBoundForall
+    , instantiateImplicitForalls
+    , stripAnn
+    , collectEdges
     )
 
 -- | Context for result type computation, bundling shared state.
@@ -87,73 +95,6 @@ data ResultTypeContext = ResultTypeContext
     , rtcRedirects :: IntMap.IntMap NodeId
     , rtcTraceConfig :: TraceConfig
     }
-
--- | Generalize with plan helper
-generalizeWithPlan
-    :: PresolutionPlanBuilder
-    -> GaBindParents
-    -> SolveResult
-    -> NodeRef
-    -> NodeId
-    -> Either ElabError (ElabScheme, IntMap.IntMap String)
-generalizeWithPlan planBuilder bindParentsGa res scopeRoot targetNode =
-    generalizeAtWithBuilder
-        planBuilder
-        (Just bindParentsGa)
-        res
-        scopeRoot
-        targetNode
-
--- | Check if a type contains foralls in bounds
-containsBoundForall :: ElabType -> Bool
-containsBoundForall ty =
-    let go t = case t of
-            TForall _ mb body ->
-                maybe False containsAnyForallBound mb || go body
-            TArrow a b -> go a || go b
-            _ -> False
-        containsAnyForallBound bound = case bound of
-            TArrow a b -> go a || go b
-            TForall _ _ _ -> True
-            _ -> False
-    in go ty
-
--- | Check if an instantiation contains foralls in bounds
-instHasBoundForall :: Instantiation -> Bool
-instHasBoundForall inst = cata instAlg inst
-  where
-    instAlg inst0 = case inst0 of
-        InstIdF -> False
-        InstSeqF a b -> a || b
-        InstAppF ty -> containsForallTy ty
-        InstBotF ty -> containsForallTy ty
-        InstInsideF innerInst -> innerInst
-        InstUnderF _ innerInst -> innerInst
-        InstIntroF -> False
-        InstElimF -> False
-        InstAbstrF _ -> False
-
--- | Instantiate implicit foralls (foralls with bounds)
-instantiateImplicitForalls :: ElabType -> ElabType
-instantiateImplicitForalls ty0 =
-    let go ty = case ty of
-            TForall _ (Just _) _ ->
-                case applyInstantiation ty InstElim of
-                    Right ty' -> go ty'
-                    Left _ -> ty
-            TForall v mb body ->
-                TForall v (fmap goBound mb) (go body)
-            TArrow a b -> TArrow (go a) (go b)
-            TBase _ -> ty
-            TBottom -> ty
-            TVar _ -> ty
-        goBound bound = case bound of
-            TArrow a b -> TArrow (go a) (go b)
-            TBase b -> TBase b
-            TBottom -> TBottom
-            TForall v mb body ->
-                TForall v (fmap goBound mb) (go body)
-    in go ty0
 
 -- | Compute result type from an annotation edge.
 computeResultTypeFromAnn
@@ -387,24 +328,6 @@ computeResultTypeFromAnn ctx inner innerPre annNodeId eid = do
                         generalizeWithPlan planBuilder bindParentsGa solvedForGen annScopeRoot annTargetNode
                     let annTy = schemeToType annSch
                     pure (simplifyAnnotationType annTy)
-
--- | Strip annotations from an AnnExpr
-stripAnn :: AnnExpr -> AnnExpr
-stripAnn ann0 = case ann0 of
-    AAnn inner _ _ -> stripAnn inner
-    _ -> ann0
-
--- | Collect all edge IDs from an AnnExpr
-collectEdges :: AnnExpr -> [EdgeId]
-collectEdges ann0 = case ann0 of
-    AVar _ _ -> []
-    ALit _ _ -> []
-    ALam _ _ _ body _ -> collectEdges body
-    AApp f a funEid argEid _ ->
-        funEid : argEid : collectEdges f ++ collectEdges a
-    ALet _ _ _ _ _ rhs body _ ->
-        collectEdges rhs ++ collectEdges body
-    AAnn inner _ eid -> eid : collectEdges inner
 
 -- | Compute result type when there's no direct annotation (fallback path).
 computeResultTypeFallback

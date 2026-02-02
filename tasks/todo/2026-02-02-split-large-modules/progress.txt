@@ -1,0 +1,14 @@
+## Progress
+
+Initial PRD + Ralph prd.json created (planning only; no code changes yet).
+
+## Decisions
+- Scope: **A** — split only `ResultType`, `Presolution.Plan.Target`, and `PresolutionSpec` (do not include `MLF.Elab.Phi.Omega` / `MLF.Reify.Core` in this task).
+- Module-size targets: **C** — no LOC targets; focus on cohesion + stable facades.
+- Breaking tolerance: **B** — public API changes are allowed if needed (prefer to keep stable when easy).
+
+## Notes / Repo Patterns
+- New internal modules must be listed in `mlf2.cabal` (`library mlf2-internal` `other-modules`) or Cabal will not compile them.
+- New test modules must be listed in `mlf2.cabal` (`test-suite mlf2-test` `other-modules`) and wired into `test/Main.hs`.
+- Keep top-level modules (`MLF.Elab.Run.ResultType`, `MLF.Constraint.Presolution.Plan.Target`) as stable facades to avoid import churn and accidental cycles.
+- Validation command: `cabal build all && cabal test`
