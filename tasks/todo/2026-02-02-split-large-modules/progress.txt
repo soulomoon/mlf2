@@ -54,6 +54,25 @@ Initial PRD + Ralph prd.json created (planning only; no code changes yet).
   - The AAnn case in computeResultTypeFallback needs to be handled at the facade level to avoid circular imports
 ---
 
+## 2026-02-02 - US-004
+- Created MLF.Constraint.Presolution.Plan.Target.TargetPlan module containing:
+  - TargetPlanInput data type with all 16 fields
+  - TargetPlan data type with all 15 fields
+  - buildTargetPlan function implementation
+- Refactored MLF.Constraint.Presolution.Plan.Target to be a facade that:
+  - Re-exports TargetPlan types and functions from the submodule
+  - Keeps GammaPlan and TypeRootPlan definitions (for US-005 and US-006)
+- Added new module to mlf2.cabal other-modules
+- Files changed:
+  - src/MLF/Constraint/Presolution/Plan/Target.hs (refactored to facade)
+  - src/MLF/Constraint/Presolution/Plan/Target/TargetPlan.hs (new)
+  - mlf2.cabal
+- **Learnings for future iterations:**
+  - The facade pattern works well - existing imports of MLF.Constraint.Presolution.Plan.Target continue to work
+  - When extracting to submodules, remove unused imports to keep build warning-free
+  - The Target.hs file still contains GammaPlan and TypeRootPlan (to be extracted in US-005 and US-006)
+---
+
 ## Decisions
 - Scope: **A** — split only `ResultType`, `Presolution.Plan.Target`, and `PresolutionSpec` (do not include `MLF.Elab.Phi.Omega` / `MLF.Reify.Core` in this task).
 - Module-size targets: **C** — no LOC targets; focus on cohesion + stable facades.

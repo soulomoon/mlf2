@@ -60,7 +60,7 @@
         "Tests pass"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "Keep MLF.Constraint.Presolution.Plan.Target as a stable facade to avoid widespread import churn."
     },
     {
