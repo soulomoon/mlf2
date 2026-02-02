@@ -120,6 +120,7 @@ library mlf2-internal
                       MLF.Constraint.Presolution.Plan.Target,
                       MLF.Constraint.Presolution.Plan.Target.TargetPlan,
                       MLF.Constraint.Presolution.Plan.Target.GammaPlan,
+                      MLF.Constraint.Presolution.Plan.Target.TypeRootPlan,
                       MLF.Constraint.Presolution.Unify,
                       MLF.Constraint.Presolution.WitnessCanon,
                       MLF.Constraint.Presolution.WitnessNorm,

@@ -73,6 +73,48 @@ Initial PRD + Ralph prd.json created (planning only; no code changes yet).
   - The Target.hs file still contains GammaPlan and TypeRootPlan (to be extracted in US-005 and US-006)
 ---
 
+## 2026-02-02 - US-005
+- Created MLF.Constraint.Presolution.Plan.Target.GammaPlan module containing:
+  - GammaPlanInput data type with all 24 fields
+  - GammaPlan data type with all 11 fields
+  - buildGammaPlan function implementation (~500 LOC)
+- Refactored MLF.Constraint.Presolution.Plan.Target to be a facade that:
+  - Re-exports TargetPlan from TargetPlan submodule
+  - Re-exports GammaPlan from new GammaPlan submodule
+  - Keeps TypeRootPlan definitions (for US-006)
+- Added MLF.Constraint.Presolution.Plan.Target.GammaPlan to mlf2.cabal other-modules
+- Files changed:
+  - src/MLF/Constraint/Presolution/Plan/Target.hs (refactored to re-export from GammaPlan)
+  - src/MLF/Constraint/Presolution/Plan/Target/GammaPlan.hs (new)
+  - mlf2.cabal
+- **Learnings for future iterations:**
+  - The facade pattern continues to work well - no import changes needed in other modules
+  - When extracting code that uses tracePlanEnabled, remember to import MLF.Util.Trace
+  - The GammaPlan module requires many imports: Binding.Tree, VarStore, IntMapUtils, Order, etc.
+  - Keep the IntMapUtils import in Target.hs for the TypeRootPlan code that remains there
+---
+
+## 2026-02-02 - US-006
+- Created MLF.Constraint.Presolution.Plan.Target.TypeRootPlan module containing:
+  - TypeRootPlanInput data type with all 22 fields
+  - TypeRootPlan data type with all 7 fields
+  - buildTypeRootPlan function implementation (~90 LOC)
+- Refactored MLF.Constraint.Presolution.Plan.Target to be a facade that:
+  - Re-exports TargetPlan from TargetPlan submodule
+  - Re-exports GammaPlan from GammaPlan submodule
+  - Re-exports TypeRootPlan from new TypeRootPlan submodule
+- Added MLF.Constraint.Presolution.Plan.Target.TypeRootPlan to mlf2.cabal other-modules
+- Files changed:
+  - src/MLF/Constraint/Presolution/Plan/Target.hs (refactored to re-export from TypeRootPlan)
+  - src/MLF/Constraint/Presolution/Plan/Target/TypeRootPlan.hs (new)
+  - mlf2.cabal
+- **Learnings for future iterations:**
+  - The facade pattern is now complete for Target planning - all three plans (TargetPlan, GammaPlan, TypeRootPlan) are in separate submodules
+  - TypeRootPlan is the smallest of the three plans (~90 LOC vs ~500 LOC for GammaPlan)
+  - No new imports were needed for TypeRootPlan beyond what was already imported in Target.hs
+  - The Target.hs facade is now a thin module that only re-exports from submodules
+---
+
 ## Decisions
 - Scope: **A** — split only `ResultType`, `Presolution.Plan.Target`, and `PresolutionSpec` (do not include `MLF.Elab.Phi.Omega` / `MLF.Reify.Core` in this task).
 - Module-size targets: **C** — no LOC targets; focus on cohesion + stable facades.
