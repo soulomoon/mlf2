@@ -15,7 +15,7 @@ module MLF.Util.UnionFind (
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 
-import MLF.Constraint.Types (NodeId(..))
+import MLF.Constraint.Types.Graph (NodeId(..))
 
 -- | Read-only chase to the canonical representative in a union-find map.
 --

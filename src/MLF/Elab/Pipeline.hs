@@ -9,6 +9,19 @@ module MLF.Elab.Pipeline (
     Instantiation(..),
     ElabError(..),
     TypeCheckError(..),
+    PipelineConfig(..),
+    defaultPipelineConfig,
+    TraceConfig(..),
+    defaultTraceConfig,
+    PipelineError(..),
+    renderPipelineError,
+    liftPipelineError,
+    fromConstraintError,
+    fromCycleError,
+    fromPresolutionError,
+    fromSolveError,
+    fromElabError,
+    fromTypeCheckError,
     Pretty(..),
     PrettyDisplay(..),
     elaborate,
@@ -27,6 +40,8 @@ module MLF.Elab.Pipeline (
     phiFromEdgeWitnessWithTrace,
     runPipelineElab,
     runPipelineElabChecked,
+    runPipelineElabWithConfig,
+    runPipelineElabCheckedWithConfig,
     applyRedirectsToAnn,
     -- * Exported for testing/debugging
     chaseRedirects,
@@ -48,13 +63,33 @@ module MLF.Elab.Pipeline (
 
 import MLF.Elab.Types
 import MLF.Elab.Elaborate (elaborate, expansionToInst)
+import MLF.Elab.PipelineConfig (PipelineConfig(..), defaultPipelineConfig)
+import MLF.Elab.PipelineError
+    ( PipelineError(..)
+    , renderPipelineError
+    , liftPipelineError
+    , fromConstraintError
+    , fromCycleError
+    , fromPresolutionError
+    , fromSolveError
+    , fromElabError
+    , fromTypeCheckError
+    )
+import MLF.Util.Trace (TraceConfig(..), defaultTraceConfig)
 import MLF.Elab.Run.Generalize (generalizeAtWithBuilder)
 import MLF.Elab.Inst (applyInstantiation, schemeToType)
 import MLF.Elab.TypeCheck (Env(..), checkInstantiation, typeCheck, typeCheckWithEnv)
 import MLF.Elab.Reduce (isValue, normalize, step)
 import MLF.Elab.Phi (contextToNodeBound, phiFromEdgeWitness, phiFromEdgeWitnessWithTrace)
 import MLF.Reify.Core (namedNodes, reifyBoundWithNames, reifyType, reifyTypeWithNamedSet, reifyTypeWithNames)
-import MLF.Elab.Run (applyRedirectsToAnn, chaseRedirects, runPipelineElab, runPipelineElabChecked)
+import MLF.Elab.Run
+    ( applyRedirectsToAnn
+    , chaseRedirects
+    , runPipelineElab
+    , runPipelineElabChecked
+    , runPipelineElabWithConfig
+    , runPipelineElabCheckedWithConfig
+    )
 import MLF.Elab.Sigma (sigmaReorder)
 
 -- `runPipelineElab` / redirect helpers live in `MLF.Elab.Run`.

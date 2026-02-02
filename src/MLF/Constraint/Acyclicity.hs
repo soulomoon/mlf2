@@ -36,7 +36,8 @@ import Data.IntSet (IntSet)
 import qualified Data.IntSet as IntSet
 import Data.Maybe (mapMaybe)
 
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Presolution (DepGraph(..))
 import qualified MLF.Constraint.Traversal as Traversal
 
 {- Note [Phase 3: Acyclicity Check]

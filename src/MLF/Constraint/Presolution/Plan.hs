@@ -79,7 +79,7 @@ import MLF.Constraint.Presolution.Plan.SchemeRoots
 import qualified MLF.Constraint.Presolution.Plan.ReifyPlan as Reify
 import MLF.Util.ElabError (ElabError(..), bindingToElab)
 import MLF.Util.Graph (reachableFrom, reachableFromStop)
-import MLF.Util.Trace (globalTraceConfig, tcGeneralize)
+import MLF.Util.Trace (TraceConfig, tcGeneralize)
 
 lookupNodeInMap :: IntMap.IntMap TyNode -> NodeId -> Maybe TyNode
 lookupNodeInMap nodes nid = IntMap.lookup (getNodeId nid) nodes
@@ -92,6 +92,7 @@ data PresolutionEnv = PresolutionEnv
     , peBindParentsGa :: Maybe GaBindParents
     , peScopeRoot :: NodeRef
     , peTargetNode :: NodeId
+    , peTraceConfig :: TraceConfig
     }
 
 data GeneralizePlan = GeneralizePlan
@@ -122,8 +123,9 @@ planGeneralizeAt PresolutionEnv
     , peBindParentsGa = mbBindParentsGa
     , peScopeRoot = scopeRoot
     , peTargetNode = targetNode
+    , peTraceConfig = traceCfg
     } = do
-    let env = mkGeneralizeEnv mbBindParentsGa res
+    let env = mkGeneralizeEnv traceCfg mbBindParentsGa res
         constraint = geConstraint env
         nodes = geNodes env
         canonical = geCanonical env
@@ -733,12 +735,13 @@ planReify _ plan = do
         }
 
 buildGeneralizePlans
-    :: SolveResult
+    :: TraceConfig
+    -> SolveResult
     -> Maybe GaBindParents
     -> NodeRef
     -> NodeId
     -> Either ElabError (GeneralizePlan, ReifyPlan)
-buildGeneralizePlans res mbBindParentsGa scopeRoot targetNode = do
+buildGeneralizePlans traceCfg res mbBindParentsGa scopeRoot targetNode = do
     let constraint = srConstraint res
         canonical = Solve.frWith (srUnionFind res)
         presEnv =
@@ -750,13 +753,14 @@ buildGeneralizePlans res mbBindParentsGa scopeRoot targetNode = do
                 , peBindParentsGa = mbBindParentsGa
                 , peScopeRoot = scopeRoot
                 , peTargetNode = targetNode
+                , peTraceConfig = traceCfg
                 }
     genPlan <- planGeneralizeAt presEnv
     reifyPlan <- planReify presEnv genPlan
     pure (genPlan, reifyPlan)
 
-mkGeneralizeEnv :: Maybe GaBindParents -> SolveResult -> GeneralizeEnv
-mkGeneralizeEnv mbBindParentsGa res =
+mkGeneralizeEnv :: TraceConfig -> Maybe GaBindParents -> SolveResult -> GeneralizeEnv
+mkGeneralizeEnv traceCfg mbBindParentsGa res =
     let constraint = srConstraint res
         nodes =
             IntMap.fromList
@@ -791,7 +795,7 @@ mkGeneralizeEnv mbBindParentsGa res =
         , geIsBaseLikeKey = isBaseLikeKey
         , geBindParentsGa = mbBindParentsGa
         , geRes = res
-        , geDebugEnabled = debugGeneralizeEnabled
+        , geDebugEnabled = tcGeneralize traceCfg
         }
 
 softenBindParents :: (NodeId -> NodeId) -> Constraint -> BindParents -> BindParents
@@ -804,6 +808,3 @@ softenBindParents canonical constraint =
                         (parent, BindFlex)
                 _ -> (parent, flag)
     in IntMap.mapWithKey softenOne
-
-debugGeneralizeEnabled :: Bool
-debugGeneralizeEnabled = tcGeneralize globalTraceConfig

@@ -26,6 +26,7 @@ module MLF.Constraint.Presolution.Expansion (
 
 import Control.Monad (foldM, zipWithM, zipWithM_)
 import Control.Monad.Except (throwError)
+import Control.Monad.Reader (ask)
 import Control.Monad.State (gets, modify)
 import Data.Functor.Foldable (cata)
 import qualified Data.IntMap.Strict as IntMap
@@ -66,7 +67,7 @@ import MLF.Constraint.Presolution.StateAccess (
 import MLF.Constraint.Types
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Presolution.Unify (unifyAcyclic)
-import MLF.Util.Trace (debugBinding)
+import MLF.Util.Trace (traceBindingM)
 
 -- | Get the current expansion for an expansion variable.
 getExpansion :: ExpVarId -> PresolutionM Expansion
@@ -221,7 +222,7 @@ forallSpecFromBinders binders0 = do
 decideMinimalExpansion :: Bool -> TyNode -> TyNode -> PresolutionM (Expansion, [(NodeId, NodeId)])
 decideMinimalExpansion allowTrivial (TyExp { tnBody = bodyId }) targetNode = do
     (bodyRoot, boundVars) <- instantiationBindersM bodyId
-    case debugExpansion
+    debugExpansion
         ( "decideMinimalExpansion: bodyId="
             ++ show bodyId
             ++ " bodyRoot="
@@ -231,9 +232,6 @@ decideMinimalExpansion allowTrivial (TyExp { tnBody = bodyId }) targetNode = do
             ++ " target="
             ++ show (tnId targetNode)
         )
-        ()
-        of
-            () -> pure ()
     isTrivialTarget <- case targetNode of
         TyVar { tnId = targetId, tnBound = Nothing } -> do
             mbGen <- nearestGenAncestor targetId
@@ -324,8 +322,10 @@ decideMinimalExpansion allowTrivial (TyExp { tnBody = bodyId }) targetNode = do
 
 decideMinimalExpansion _ _ _ = return (ExpIdentity, [])
 
-debugExpansion :: String -> a -> a
-debugExpansion = debugBinding
+debugExpansion :: String -> PresolutionM ()
+debugExpansion msg = do
+    cfg <- ask
+    traceBindingM cfg msg
 
 -- | Apply an expansion to a TyExp node.
 -- Note: this helper is used twice for distinct purposes.

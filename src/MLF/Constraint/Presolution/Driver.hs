@@ -34,15 +34,17 @@ module MLF.Constraint.Presolution.Driver (
 ) where
 
 import Control.Monad.State
+import Control.Monad.Reader (ask)
 import Control.Monad.Except (throwError)
 import Control.Monad (foldM, forM)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import MLF.Util.Trace (debugBinding)
+import MLF.Util.Trace (TraceConfig, traceBindingM)
 import Data.Maybe (catMaybes, fromMaybe, mapMaybe)
 
 import qualified MLF.Binding.Tree as Binding
+import MLF.Constraint.Canonicalizer (canonicalizerFrom)
 import qualified MLF.Constraint.Canonicalize as Canonicalize
 import MLF.Constraint.Types
 import MLF.Constraint.Presolution.Base
@@ -74,16 +76,20 @@ import MLF.Constraint.Presolution.EdgeProcessing (
     )
 import MLF.Constraint.Acyclicity (AcyclicityResult(..))
 
--- | Debug binding operations (uses global trace config).
-debugBindParents :: String -> a -> a
-debugBindParents = debugBinding
+-- | Debug binding operations (uses explicit trace config).
+debugBindParents :: String -> a -> PresolutionM a
+debugBindParents msg value = do
+    cfg <- ask
+    traceBindingM cfg msg
+    pure value
 
 -- | Main entry point: compute principal presolution.
 computePresolution
-    :: AcyclicityResult
+    :: TraceConfig
+    -> AcyclicityResult
     -> Constraint
     -> Either PresolutionError PresolutionResult
-computePresolution acyclicityResult constraint = do
+computePresolution traceCfg acyclicityResult constraint = do
     -- Initialize state
     let initialState = PresolutionState
             { psConstraint = constraint
@@ -98,12 +104,12 @@ computePresolution acyclicityResult constraint = do
             }
 
     -- Run the presolution loop
-    presState <- execStateT
-        (runPresolutionLoop (arSortedEdges acyclicityResult))
+    (_, presState) <- runPresolutionM traceCfg
         initialState
+        (runPresolutionLoop (arSortedEdges acyclicityResult))
 
     -- Materialize expansions, rewrite TyExp away, and apply UF canonicalization.
-    (redirects, finalState) <- runPresolutionM presState $ do
+    (redirects, finalState) <- runPresolutionM traceCfg presState $ do
         mapping <- materializeExpansions
         flushPendingWeakens
         redirects <- rewriteConstraint mapping
@@ -126,7 +132,7 @@ computePresolution acyclicityResult constraint = do
         , prEdgeWitnesses = edgeWitnesses
         , prEdgeTraces = edgeTraces
         , prRedirects = redirects
-        , prPlanBuilder = PresolutionPlanBuilder buildGeneralizePlans
+        , prPlanBuilder = PresolutionPlanBuilder (buildGeneralizePlans traceCfg)
         }
 
 -- | Rewrite constraint by removing TyExp nodes, applying expansion mapping and
@@ -167,17 +173,18 @@ rewriteConstraint mapping = do
                         then n'
                         else go (IntSet.insert (getNodeId n') seen) n'
             in go IntSet.empty nid
+        canon = canonicalizerFrom canonical
 
         newNodes = IntMap.fromListWith Canonicalize.chooseRepNode (mapMaybe (rewriteNode canonical) (NodeAccess.allNodes c))
         eliminated' = rewriteVarSet canonical newNodes (cEliminatedVars c)
         weakened' = rewriteVarSet canonical newNodes (cWeakenedVars c)
         genNodes' = rewriteGenNodes canonical newNodes (cGenNodes c)
 
-        newExps = IntMap.map (canonicalizeExpansion canonical) (psEdgeExpansions st)
+        newExps = IntMap.map (canonicalizeExpansion canon) (psEdgeExpansions st)
 
-        newWitnesses = IntMap.map (canonicalizeWitness canonical) (psEdgeWitnesses st)
+        newWitnesses = IntMap.map (canonicalizeWitness canon) (psEdgeWitnesses st)
 
-        newTraces0 = IntMap.map (canonicalizeTrace canonical) (psEdgeTraces st)
+        newTraces0 = IntMap.map (canonicalizeTrace canon) (psEdgeTraces st)
 
         bindingEdges0 = cBindParents c
         cStruct = c { cNodes = NodeMap newNodes, cGenNodes = genNodes' }
@@ -358,7 +365,7 @@ rewriteConstraint mapping = do
                                         ++ show schemeParent
                                         ++ " pick="
                                         ++ show pickParent
-                            in pure (debugBindParents msg bp')
+                            in debugBindParents msg bp'
 
         entries' <- fmap concat $ forM entries0 $ \(childRef, parent0, flag) -> do
             parent <- chooseBindParent childRef parent0

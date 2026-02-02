@@ -43,8 +43,23 @@ import qualified MLF.Constraint.Canonicalize as Canonicalize
 import qualified MLF.Constraint.Traversal as Traversal
 import qualified MLF.Constraint.Unify.Decompose as UnifyDecompose
 import qualified MLF.Constraint.NodeAccess as NodeAccess
-import qualified MLF.Constraint.Types as Types
-import MLF.Constraint.Types (BindFlag(..), Constraint(..), GenNode(..), InstEdge(..), NodeId(..), NodeMap, NodeRef(..), TyNode(..), UnifyEdge(..), lookupNodeIn, maxNodeIdKeyOr0, nodeRefFromKey, nodeRefKey, typeRef)
+import qualified MLF.Constraint.Types.Graph as Graph
+import MLF.Constraint.Types.Graph
+    ( BindFlag(..)
+    , Constraint(..)
+    , GenNode(..)
+    , InstEdge(..)
+    , NodeId(..)
+    , NodeMap
+    , NodeRef(..)
+    , TyNode(..)
+    , UnifyEdge(..)
+    , lookupNodeIn
+    , maxNodeIdKeyOr0
+    , nodeRefFromKey
+    , nodeRefKey
+    , typeRef
+    )
 
 {- Note [Normalization / Local Transformations]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -462,7 +477,7 @@ freshNodeId = do
 insertNode :: TyNode -> NormalizeM ()
 insertNode node = modify' $ \s ->
     let c = nsConstraint s
-        nodes' = Types.insertNode (tnId node) node (cNodes c)
+        nodes' = Graph.insertNode (tnId node) node (cNodes c)
     in s { nsConstraint = c { cNodes = nodes' } }
 
 {- Note [Merging]

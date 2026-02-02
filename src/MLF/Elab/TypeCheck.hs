@@ -9,7 +9,7 @@ module MLF.Elab.TypeCheck (
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
-import MLF.Constraint.Types (BaseTy(..))
+import MLF.Constraint.Types.Graph (BaseTy(..))
 import MLF.Elab.Inst (InstEvalSpec(..), evalInstantiationWith, renameInstBound, schemeToType)
 import MLF.Elab.Types
 import MLF.Reify.TypeOps

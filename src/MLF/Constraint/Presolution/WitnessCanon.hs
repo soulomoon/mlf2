@@ -18,7 +18,8 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.List (partition, sortBy)
 
-import MLF.Constraint.Types (InstanceOp(..), InstanceStep(..), NodeId(..), NodeRef(..), getNodeId, nodeRefFromKey, typeRef)
+import MLF.Constraint.Types.Graph (NodeId(..), NodeRef(..), getNodeId, nodeRefFromKey, typeRef)
+import MLF.Constraint.Types.Witness (InstanceOp(..), InstanceStep(..))
 import qualified MLF.Binding.Tree as Binding
 import MLF.Util.Order (compareNodesByOrderKey)
 import MLF.Constraint.Presolution.WitnessValidation (OmegaNormalizeEnv(..), OmegaNormalizeError(..), validateNormalizedWitness, compareNodesByOrderKeyM)
@@ -285,8 +286,9 @@ normalizeInstanceOpsFull env ops0 = do
     ops3 <- coalesceRaiseMergeWithEnv env ops2
     ops4 <- checkMergeDirection ops3
     ops5 <- reorderWeakenWithEnv env ops4
-    validateNormalizedWitness env ops5
-    pure ops5
+    let ops6 = dropRedundantOps ops5
+    validateNormalizedWitness env ops6
+    pure ops6
   where
     canon = canonical env
 
@@ -330,3 +332,25 @@ normalizeInstanceOpsFull env ops0 = do
         case ord of
             LT -> Right ()
             _ -> Left (MergeDirectionInvalid (canon n) (canon m))
+
+-- | Drop locally redundant witness operations without changing order.
+-- This removes consecutive duplicate raises and self-merges.
+dropRedundantOps :: [InstanceOp] -> [InstanceOp]
+dropRedundantOps = go Nothing
+  where
+    go _ [] = []
+    go lastRaise (op:rest) =
+        case op of
+            OpRaise n ->
+                case lastRaise of
+                    Just n' | n == n' -> go lastRaise rest
+                    _ -> op : go (Just n) rest
+            OpMerge n m ->
+                if n == m
+                    then go Nothing rest
+                    else op : go Nothing rest
+            OpRaiseMerge n m ->
+                if n == m
+                    then go Nothing rest
+                    else op : go Nothing rest
+            _ -> op : go Nothing rest

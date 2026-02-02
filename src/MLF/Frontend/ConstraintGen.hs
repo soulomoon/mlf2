@@ -10,7 +10,7 @@ import qualified Data.IntSet as IntSet
 
 import MLF.Frontend.Syntax (Expr)
 import MLF.Frontend.Desugar (desugarCoercions)
-import MLF.Constraint.Types (NodeId, PolySyms, cAnnEdges, getEdgeId)
+import MLF.Constraint.Types.Graph (NodeId, PolySyms, cAnnEdges, getEdgeId)
 import MLF.Frontend.ConstraintGen.Types
 import MLF.Frontend.ConstraintGen.State
 import MLF.Frontend.ConstraintGen.Translate (buildRootExpr)

@@ -25,6 +25,7 @@ module MLF.Constraint.Presolution.Rewrite (
 ) where
 
 import Control.Monad (forM, foldM)
+import Control.Monad.Reader (ask)
 import Control.Monad.Except (throwError)
 import Data.Functor.Foldable (cata)
 import Data.IntMap.Strict (IntMap)
@@ -33,16 +34,18 @@ import qualified Data.IntSet as IntSet
 import Data.Maybe (mapMaybe)
 
 import qualified MLF.Binding.Tree as Binding
+import MLF.Constraint.Canonicalizer (Canonicalizer, canonicalizeNode)
 import qualified MLF.Constraint.Canonicalize as Canonicalize
 import MLF.Constraint.Types
 import MLF.Constraint.Presolution.Base (CopyMapping(..), EdgeTrace(..), PresolutionError(..), PresolutionM, fromListInterior, toListInterior)
 import qualified MLF.Constraint.NodeAccess as NodeAccess
-import MLF.Util.Trace (debugBinding)
+import MLF.Util.Trace (traceBindingM)
 
 -- | Canonicalize an expansion through a node ID mapping.
-canonicalizeExpansion :: (NodeId -> NodeId) -> Expansion -> Expansion
-canonicalizeExpansion canonical = cata alg
+canonicalizeExpansion :: Canonicalizer -> Expansion -> Expansion
+canonicalizeExpansion canon = cata alg
   where
+    canonical = canonicalizeNode canon
     alg layer = case layer of
         ExpIdentityF -> ExpIdentity
         ExpInstantiateF args -> ExpInstantiate (map canonical args)
@@ -50,36 +53,41 @@ canonicalizeExpansion canonical = cata alg
         ExpComposeF exps -> ExpCompose exps
 
 -- | Canonicalize an instance operation.
-canonicalizeOp :: (NodeId -> NodeId) -> InstanceOp -> InstanceOp
-canonicalizeOp canonical = \case
+canonicalizeOp :: Canonicalizer -> InstanceOp -> InstanceOp
+canonicalizeOp canon = \case
     OpGraft sigma n -> OpGraft (canonical sigma) (canonical n)
     OpMerge a b -> OpMerge (canonical a) (canonical b)
     OpRaise n -> OpRaise (canonical n)
     OpWeaken n -> OpWeaken (canonical n)
     OpRaiseMerge n m -> OpRaiseMerge (canonical n) (canonical m)
+  where
+    canonical = canonicalizeNode canon
 
 -- | Canonicalize an instance step.
-canonicalizeStep :: (NodeId -> NodeId) -> InstanceStep -> InstanceStep
-canonicalizeStep canonical = \case
-    StepOmega op -> StepOmega (canonicalizeOp canonical op)
+canonicalizeStep :: Canonicalizer -> InstanceStep -> InstanceStep
+canonicalizeStep canon = \case
+    StepOmega op -> StepOmega (canonicalizeOp canon op)
     StepIntro -> StepIntro
 
 -- | Canonicalize an edge witness.
-canonicalizeWitness :: (NodeId -> NodeId) -> EdgeWitness -> EdgeWitness
-canonicalizeWitness canonical w =
+canonicalizeWitness :: Canonicalizer -> EdgeWitness -> EdgeWitness
+canonicalizeWitness canon w =
     let InstanceWitness ops = ewWitness w
     in w
         { ewLeft = canonical (ewLeft w)
         , ewRight = canonical (ewRight w)
         , ewRoot = canonical (ewRoot w)
-        , ewSteps = map (canonicalizeStep canonical) (ewSteps w)
-        , ewWitness = InstanceWitness (map (canonicalizeOp canonical) ops)
+        , ewSteps = map (canonicalizeStep canon) (ewSteps w)
+        , ewWitness = InstanceWitness (map (canonicalizeOp canon) ops)
         }
+  where
+    canonical = canonicalizeNode canon
 
 -- | Canonicalize an edge trace.
-canonicalizeTrace :: (NodeId -> NodeId) -> EdgeTrace -> EdgeTrace
-canonicalizeTrace canonical tr =
-    let canonPair (a, b) = (canonical a, canonical b)
+canonicalizeTrace :: Canonicalizer -> EdgeTrace -> EdgeTrace
+canonicalizeTrace canon tr =
+    let canonical = canonicalizeNode canon
+        canonPair (a, b) = (canonical a, canonical b)
         canonInterior =
             fromListInterior
                 [ canonical i
@@ -339,7 +347,7 @@ rebuildBindParents env = do
                                     ++ show schemeParent
                                     ++ " pick="
                                     ++ show pickParent
-                        in pure (debugBindParents msg bp')
+                        in debugBindParents msg bp'
 
     entries' <- fmap concat $ forM entries0 $ \(childRef, parent0, flag) -> do
         parent <- chooseBindParent childRef parent0
@@ -431,5 +439,8 @@ rebuildBindParents env = do
     pure (fixUpper bp1)
 
 -- | Debug binding operations (uses global trace config).
-debugBindParents :: String -> a -> a
-debugBindParents = debugBinding
+debugBindParents :: String -> a -> PresolutionM a
+debugBindParents msg value = do
+    cfg <- ask
+    traceBindingM cfg msg
+    pure value

@@ -72,6 +72,7 @@ import MLF.Constraint.Presolution.Core (
     )
 import MLF.Constraint.Presolution.Plan (buildGeneralizePlans)
 import MLF.Constraint.Presolution.Plan.Context (GaBindParents(..))
+import MLF.Util.Trace (TraceConfig)
 
-defaultPlanBuilder :: PresolutionPlanBuilder
-defaultPlanBuilder = PresolutionPlanBuilder buildGeneralizePlans
+defaultPlanBuilder :: TraceConfig -> PresolutionPlanBuilder
+defaultPlanBuilder traceCfg = PresolutionPlanBuilder (buildGeneralizePlans traceCfg)

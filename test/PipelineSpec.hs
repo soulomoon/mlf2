@@ -4,19 +4,30 @@ module PipelineSpec (spec) where
 import Data.List (isInfixOf)
 import Data.Bifunctor (first)
 import qualified Data.IntMap.Strict as IntMap
+import qualified Data.IntSet as IntSet
 import qualified Data.Set as Set
 import Test.Hspec
 
-import MLF.Elab.Pipeline (generalizeAtWithBuilder, applyRedirectsToAnn, runPipelineElab, pattern Forall, Pretty(..))
+import MLF.Elab.Pipeline
+    ( generalizeAtWithBuilder
+    , applyRedirectsToAnn
+    , renderPipelineError
+    , runPipelineElab
+    , pattern Forall
+    , Pretty(..)
+    )
 import MLF.Frontend.Syntax
 import MLF.Frontend.ConstraintGen
 import MLF.Constraint.Normalize
 import MLF.Constraint.Acyclicity
+import MLF.Constraint.Canonicalizer (canonicalizeNode)
 import MLF.Constraint.Presolution
 import MLF.Constraint.Solve
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
 import qualified MLF.Binding.Tree as Binding
-import SpecUtil (collectVarNodes)
+import MLF.Elab.Run.Provenance (buildTraceCopyMap, collectBaseNamedKeys)
+import MLF.Elab.Run.Util (makeCanonicalizer)
+import SpecUtil (collectVarNodes, defaultTraceConfig)
 
 spec :: Spec
 spec = describe "Pipeline (Phases 1-5)" $ do
@@ -33,7 +44,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                             case Binding.bindingRoots (srConstraint res) of
                                 [GenRef gid] -> genRef gid
                                 roots -> error ("PipelineSpec: unexpected binding roots " ++ show roots)
-                    let generalizeAt = generalizeAtWithBuilder defaultPlanBuilder Nothing
+                    let generalizeAt = generalizeAtWithBuilder (defaultPlanBuilder defaultTraceConfig) Nothing
                     case generalizeAt res scopeRoot root of
                         Right (Forall binds ty, _subst) -> do
                             binds `shouldBe` []
@@ -53,7 +64,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                  Right (res, ann) -> do
                      case ann of
                          ALet _ schemeGen schemeRoot _ _ _ _ _ -> do
-                             let generalizeAt = generalizeAtWithBuilder defaultPlanBuilder Nothing
+                             let generalizeAt = generalizeAtWithBuilder (defaultPlanBuilder defaultTraceConfig) Nothing
                              case generalizeAt res (genRef schemeGen) schemeRoot of
                                  Right scheme -> show scheme `shouldSatisfy` ("Forall" `isInfixOf`)
                                  Left err -> expectationFailure $ "Generalize error: " ++ show err
@@ -84,6 +95,51 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     let nodes = cNodes (srConstraint res)
                     baseNames nodes `shouldContain` [BaseTy "Int"]
                     noExpNodes nodes
+
+        it "tracks instantiation copy maps for named binders" $ do
+            -- Non-trivial instantiation: polymorphic id used at two types
+            let expr =
+                    ELet "id" (ELam "x" (EVar "x"))
+                        (ELet "a" (EApp (EVar "id") (ELit (LInt 1)))
+                            (EApp (EVar "id") (ELit (LBool True))))
+            let pipelineParts = do
+                    ConstraintResult{ crConstraint = c0 } <- first show (generateConstraints defaultPolySyms expr)
+                    let c1 = normalize c0
+                    acyc <- first show (checkAcyclicity c1)
+                    pres <- first show (computePresolution defaultTraceConfig acyc c1)
+                    solved <- first show (solveUnify defaultTraceConfig (prConstraint pres))
+                    pure (c1, pres, solved)
+            case pipelineParts of
+                Left err -> expectationFailure err
+                Right (c1, pres, solved) ->
+                    case validateSolvedGraphStrict solved of
+                        [] -> do
+                            let canon = makeCanonicalizer (srUnionFind solved) (prRedirects pres)
+                                adoptNode = canonicalizeNode canon
+                                baseNamedKeysAll = collectBaseNamedKeys c1
+                                traceMaps = map (buildTraceCopyMap c1 baseNamedKeysAll adoptNode)
+                                                 (IntMap.elems (prEdgeTraces pres))
+                                instCopyMapFull = foldl' IntMap.union IntMap.empty traceMaps
+                                baseCopyPairs =
+                                    [ (baseKey, copyN)
+                                    | tr <- IntMap.elems (prEdgeTraces pres)
+                                    , (baseKey, copyN) <- IntMap.toList (getCopyMapping (etCopyMap tr))
+                                    , IntSet.member baseKey baseNamedKeysAll
+                                    ]
+                            baseNamedKeysAll `shouldSatisfy` (not . IntSet.null)
+                            baseCopyPairs `shouldSatisfy` (not . null)
+                            mapM_
+                                (\(baseKey, copyN) ->
+                                    let expected = adoptNode (NodeId baseKey)
+                                        actual = IntMap.lookup (getNodeId (adoptNode copyN)) instCopyMapFull
+                                    in case actual of
+                                        Nothing ->
+                                            expectationFailure ("Missing instantiation copy-map entry for base key " ++ show baseKey)
+                                        Just mapped ->
+                                            adoptNode mapped `shouldBe` expected
+                                )
+                                baseCopyPairs
+                        vs -> expectationFailure ("validateSolvedGraph failed:\n" ++ unlines vs)
 
     it "handles higher-order polymorphic apply used twice" $ do
         -- let apply f x = f x; let id = \y. y; let a = apply id 1 in apply id True
@@ -122,7 +178,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 varNodes `shouldSatisfy` (not . null)
                 redirected `shouldSatisfy` (not . null)
         case runPipelineElab Set.empty expr of
-            Left err -> expectationFailure err
+            Left err -> expectationFailure (renderPipelineError err)
             Right (_term, ty) -> pretty ty `shouldSatisfy` ("∀" `isInfixOf`)
 
     it "generalizes reused constructors via make const" $ do
@@ -207,8 +263,8 @@ runPipelineWithInternals expr = do
         first show (generateConstraints defaultPolySyms expr)
     let c1 = normalize c0
     acyc <- first show (checkAcyclicity c1)
-    pres <- first show (computePresolution acyc c1)
-    res <- first show (solveUnify (prConstraint pres))
+    pres <- first show (computePresolution defaultTraceConfig acyc c1)
+    res <- first show (solveUnify defaultTraceConfig (prConstraint pres))
     case validateSolvedGraphStrict res of
         [] -> do
             let ann' = applyRedirectsToAnn (prRedirects pres) ann
@@ -221,7 +277,7 @@ runPipelineWithPresolution expr = do
         first show (generateConstraints defaultPolySyms expr)
     let c1 = normalize c0
     acyc <- first show (checkAcyclicity c1)
-    pres <- first show (computePresolution acyc c1)
+    pres <- first show (computePresolution defaultTraceConfig acyc c1)
     pure (pres, ann)
 
 runPipeline :: Expr -> Either String (SolveResult, NodeId)
@@ -230,8 +286,8 @@ runPipeline expr = do
         first show (generateConstraints defaultPolySyms expr)
     let c1 = normalize c0
     acyc <- first show (checkAcyclicity c1)
-    PresolutionResult{ prConstraint = c4, prRedirects = redirects } <- first show (computePresolution acyc c1)
-    res <- first show (solveUnify c4)
+    PresolutionResult{ prConstraint = c4, prRedirects = redirects } <- first show (computePresolution defaultTraceConfig acyc c1)
+    res <- first show (solveUnify defaultTraceConfig c4)
     -- Apply redirects (from Presolution) then canonicalize (from Solve)
     let rootRedirected = chaseRedirects redirects root
         root' = canonical (srUnionFind res) rootRedirected

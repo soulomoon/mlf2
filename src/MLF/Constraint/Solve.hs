@@ -126,7 +126,7 @@ import qualified MLF.Constraint.Unify.Decompose as UnifyDecompose
 import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Types hiding (lookupNode)
-import MLF.Util.Trace (debugBinding)
+import MLF.Util.Trace (TraceConfig, traceBinding)
 
 -- | Errors that can arise during monotype unification.
 data SolveError
@@ -205,9 +205,10 @@ instance MonadSolve SolveM where
 -- | Drain all unification edges; assumes instantiation work was already done
 -- by earlier phases. Returns the rewritten constraint and the final UF map.
 -- See Note [Paper alignment: solveUnify] and Note [Algorithm sketch: solveUnify].
-solveUnify :: Constraint -> Either SolveError SolveResult
-solveUnify c0 = do
-    let c0' = repairNonUpperParents c0
+solveUnify :: TraceConfig -> Constraint -> Either SolveError SolveResult
+solveUnify traceCfg c0 = do
+    let debugSolveBinding = traceBinding traceCfg
+        c0' = repairNonUpperParents c0
         probeIds = [NodeId 2, NodeId 3]
         probeInfo =
             [ ( pid
@@ -341,9 +342,6 @@ solveUnify c0 = do
                 okRef (nodeRefFromKey childKey) && okRef parentRef
             bindParents' = IntMap.filterWithKey keep (cBindParents c)
         in c { cBindParents = bindParents' }
-
-    debugSolveBinding :: String -> a -> a
-    debugSolveBinding = debugBinding
 
     -- | Process one equality edge using canonical representatives, decomposing
     -- arrows/foralls as needed and performing occurs-checks for var = structure.

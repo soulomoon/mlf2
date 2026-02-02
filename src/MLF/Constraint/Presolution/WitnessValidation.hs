@@ -18,7 +18,9 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.Maybe (listToMaybe)
 
-import MLF.Constraint.Types (Constraint(..), InstanceOp(..), NodeId, NodeRef(..), getNodeId, nodeRefFromKey, typeRef)
+import MLF.Constraint.Types.Graph (Constraint(..))
+import MLF.Constraint.Types.Graph (NodeId, NodeRef(..), getNodeId, nodeRefFromKey, typeRef)
+import MLF.Constraint.Types.Witness (InstanceOp(..))
 import qualified MLF.Binding.Tree as Binding
 import MLF.Util.Order (OrderKey, compareOrderKey)
 

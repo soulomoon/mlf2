@@ -26,10 +26,18 @@
 
 - Match existing formatting: 4-space indentation, explicit module export lists, and GHC-style `{- Note [...] -}` blocks for design rationale.
 - Keep builds warning-free (`-Wall` is enabled in `mlf2.cabal`). Prefer total pattern matches and clear error constructors.
+- When adding new modules under `src/`, update `mlf2.cabal` `other-modules`/`exposed-modules` so Cabal compiles them.
 - Many modules import `MLF.Constraint.Types` unqualified; when adding new exports with common names, check for clashes and use `hiding` or explicit imports as needed.
+- Constraint graph identifiers (`NodeId`, `NodeMap`, `GenNodeId`, `GenNodeMap`, `NodeRef` + helpers) live in `MLF.Constraint.Types.Graph`; `MLF.Constraint.Types` re-exports them for compatibility.
+- Core graph node/edge/constraint types (`BaseTy`, `TyNode`, `InstEdge`, `UnifyEdge`, `Constraint`, `BindFlag`/`BindParents`, `GenNode`, `EdgeId`, `ExpVarId`) live in `MLF.Constraint.Types.Graph`; `MLF.Constraint.Types` re-exports them for compatibility, while witness types live in `MLF.Constraint.Types.Witness`.
+- Presolution-only types (`Presolution`, `SolverState`, `DepGraph`) live in `MLF.Constraint.Types.Presolution`; `MLF.Constraint.Types` re-exports them for compatibility.
+- Binding tree errors (`BindingError`) live in `MLF.Constraint.Types.Graph` and are re-exported from `MLF.Constraint.Types` for compatibility.
 - Gen-node maps use `GenNodeMap` (`cGenNodes`); prefer `lookupGen`/`insertGen`/`fromListGen` or unwrap with `getGenNodeMap` when an `IntMap` API is required.
 - Presolution.Base defines node-set newtypes (`InteriorNodes`, `FrontierNodes`); prefer these + helpers over raw `IntSet` when plumbing node sets across modules.
 - Presolution traces use `CopyMapping` (`EdgeTrace.etCopyMap`); prefer `lookupCopy`/`insertCopy`/`copiedNodes`/`originalNodes` and unwrap with `getCopyMapping` when an `IntMap` API is required.
+- Tracing is explicit: pass `TraceConfig` (e.g., `defaultTraceConfig` or `pcTraceConfig defaultPipelineConfig`) into presolution/solve/elab helpers and `runPresolutionM`.
+- Presolution state access should go through `MonadPresolution` plus `MLF.Constraint.Presolution.Ops`/`StateAccess`; avoid new direct `gets psConstraint`/`gets psUnionFind` and manual `Binding` error lifting.
+- For redirect + union-find canonicalization, prefer `MLF.Constraint.Canonicalizer` (idempotent and cycle-safe) over ad hoc chase functions.
 - Naming conventions:
   - Modules: `src/MLF/Foo/Bar.hs` defines `module MLF.Foo.Bar`.
   - Public entry modules: `src-public/MLF/API.hs` defines `module MLF.API` (similarly `MLF.Pipeline`).

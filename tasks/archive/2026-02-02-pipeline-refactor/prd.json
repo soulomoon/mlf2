@@ -1,0 +1,385 @@
+{
+  "project": "mlf2",
+  "branchName": "ralph/pipeline-refactor",
+  "description": "Refactor the MLF pipeline to use typed errors, explicit tracing (no globals), a canonicalizer abstraction, and split mega-modules / constraint types to unblock paper-faithful evolution.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Add PipelineError type and rendering helpers",
+      "description": "As a developer, I want a typed PipelineError so that pipeline failures preserve phase-specific structure and are easier to debug than Either String.",
+      "acceptanceCriteria": [
+        "Add PipelineError with constructors for Phase 1\u20137 errors (ConstraintError, CycleError, PresolutionError, SolveError, ElabError, TypeCheckError)",
+        "Add renderPipelineError :: PipelineError -> String (or equivalent) for human-readable output",
+        "Add helper(s) to lift Either errors into Either PipelineError without losing original error values",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Add PipelineConfig with TraceConfig",
+      "description": "As a developer, I want a PipelineConfig (including TraceConfig) so that tracing and other toggles are explicit and deterministic.",
+      "acceptanceCriteria": [
+        "Add PipelineConfig containing at least TraceConfig",
+        "Add defaultPipelineConfig (all tracing disabled by default)",
+        "No IO/env reads are introduced in pure phase modules",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Add config-aware pipeline entry points",
+      "description": "As a developer, I want config-aware pipeline entry points so that callers can enable tracing and choose behaviors without globals.",
+      "acceptanceCriteria": [
+        "Add runPipelineElabWithConfig :: PipelineConfig -> PolySyms -> Expr -> Either PipelineError (ElabTerm, ElabType) (names may vary)",
+        "Add runPipelineElabCheckedWithConfig :: PipelineConfig -> PolySyms -> Expr -> Either PipelineError (ElabTerm, ElabType) (names may vary)",
+        "Keep existing runPipelineElab/runPipelineElabChecked as wrappers using defaultPipelineConfig",
+        "app/Main.hs uses the config-aware entry point",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Remove globalTraceConfig and unsafePerformIO",
+      "description": "As a developer, I want tracing to be explicit so that there is no unsafePerformIO/global trace configuration and evaluation is deterministic.",
+      "acceptanceCriteria": [
+        "src/MLF/Util/Trace.hs no longer imports or uses System.IO.Unsafe",
+        "Remove globalTraceConfig and any debug* wrappers that depend on global state",
+        "Update all call sites to use explicit TraceConfig (directly or via PipelineConfig)",
+        "rg -n \"unsafePerformIO|globalTraceConfig\" src src-public returns no matches",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Introduce Canonicalizer abstraction with tests",
+      "description": "As a developer, I want a first-class canonicalizer (redirect chasing + union-find canonicalization) so that NodeId plumbing is centralized and testable.",
+      "acceptanceCriteria": [
+        "Add a canonicalizer module (name TBD) that combines redirect chasing and union-find canonicalization",
+        "Canonicalization is idempotent (canonicalize twice == once)",
+        "Redirect-cycle chasing is safe (terminates and returns a stable result)",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Migrate witness/trace canonicalization utilities to Canonicalizer",
+      "description": "As a developer, I want witness/trace/expansion canonicalization to use the canonicalizer abstraction so that behavior is consistent across phases.",
+      "acceptanceCriteria": [
+        "Refactor canonicalizeWitness/canonicalizeTrace/canonicalizeExpansion to use the canonicalizer abstraction (or delete redundant helpers)",
+        "Refactor chaseRedirects/makeCanonicalizer to use the canonicalizer abstraction (or delete them if superseded)",
+        "Add or extend tests covering witness/trace canonicalization consistency",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Extract pipeline provenance/copy-map building logic",
+      "description": "As a developer, I want the pipeline's copy-map/provenance building logic extracted so MLF.Elab.Run.Pipeline is smaller and easier to validate.",
+      "acceptanceCriteria": [
+        "Move buildTraceCopyMap/buildInteriorSet/collectBaseNamedKeys (or equivalent) out of MLF.Elab.Run.Pipeline into a cohesive module",
+        "MLF.Elab.Run.Pipeline uses the extracted helpers (no duplicate logic remains)",
+        "Add a regression test covering instantiation copy-map behavior on a non-trivial program",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Split Phi: extract Env module",
+      "description": "As a developer, I want Phi translation to use explicit environment modules so Phi.hs can be split safely without changing behavior.",
+      "acceptanceCriteria": [
+        "Create MLF.Elab.Phi.Env (or equivalent) and move PhiEnv/PhiM and ask* accessors there",
+        "MLF.Elab.Phi remains as a facade re-exporting existing public entry points",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Split Phi: extract binder/index helpers",
+      "description": "As a developer, I want binder index/name logic extracted from Phi.hs so binder-related changes are localized and reviewable.",
+      "acceptanceCriteria": [
+        "Create MLF.Elab.Phi.Binder (or equivalent) and move binder index/name helpers out of MLF.Elab.Phi",
+        "No behavior change (existing tests continue to pass)",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Split Phi: extract Omega/step interpretation",
+      "description": "As a developer, I want \u03a9/Step interpretation extracted from Phi.hs so witness translation logic can evolve independently of context/binder logic.",
+      "acceptanceCriteria": [
+        "Create MLF.Elab.Phi.Omega (or equivalent) and move \u03a9/Step interpretation helpers out of MLF.Elab.Phi",
+        "No behavior change (existing tests continue to pass)",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Split Phi: finalize and enforce facade size",
+      "description": "As a developer, I want the MLF.Elab.Phi facade to be small so future paper-faithfulness changes are localized to submodules.",
+      "acceptanceCriteria": [
+        "Reduce src/MLF/Elab/Phi.hs to under ~400 LOC (facade only)",
+        "Update mlf2.cabal module lists for the new MLF.Elab.Phi.* modules",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "Split Elab.Run.Generalize: extract Types module",
+      "description": "As a developer, I want generalization types/records extracted so Generalize.hs can be split into coherent phases.",
+      "acceptanceCriteria": [
+        "Create MLF.Elab.Run.Generalize.Types (or equivalent) and move large type aliases/data records out of MLF.Elab.Run.Generalize",
+        "No behavior change (existing tests continue to pass)",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 12,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "Split Elab.Run.Generalize: extract phase helpers",
+      "description": "As a developer, I want phase helpers extracted so the generalization pipeline is easier to reason about and modify.",
+      "acceptanceCriteria": [
+        "Create one or more MLF.Elab.Run.Generalize.Phase* modules and move Phase 1/2 helpers out of MLF.Elab.Run.Generalize",
+        "MLF.Elab.Run.Generalize becomes a thin orchestrator calling extracted helpers",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 13,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "Split Elab.Run.Generalize: finalize and enforce orchestrator size",
+      "description": "As a developer, I want the generalization orchestrator to be small so future changes don't require editing a mega-module.",
+      "acceptanceCriteria": [
+        "Reduce src/MLF/Elab/Run/Generalize.hs to under ~400 LOC (orchestrator + exports only)",
+        "Update mlf2.cabal module lists for the new MLF.Elab.Run.Generalize.* modules",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 14,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-015",
+      "title": "Split BinderPlan: extract Util module",
+      "description": "As a developer, I want small BinderPlan helpers extracted so the binder planning code is modular and easier to test.",
+      "acceptanceCriteria": [
+        "Create MLF.Constraint.Presolution.Plan.BinderPlan.Util (or equivalent) and move small predicates/helpers there",
+        "No behavior change (existing tests continue to pass)",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 15,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-016",
+      "title": "Split BinderPlan: extract ordering logic",
+      "description": "As a developer, I want binder ordering logic extracted so ordering can evolve independently of selection/aliasing logic.",
+      "acceptanceCriteria": [
+        "Create MLF.Constraint.Presolution.Plan.BinderPlan.Order (or equivalent) and move ordering/toposort logic there",
+        "No behavior change (existing tests continue to pass)",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 16,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-017",
+      "title": "Split BinderPlan: finalize split and enforce facade size",
+      "description": "As a developer, I want BinderPlan.hs to be a small facade so binder planning stays reviewable and maintainable.",
+      "acceptanceCriteria": [
+        "Extract remaining BinderPlan chunks into submodules (aliasing/selection/etc.)",
+        "Reduce src/MLF/Constraint/Presolution/Plan/BinderPlan.hs to under ~400 LOC (facade only)",
+        "Update mlf2.cabal module lists for the new BinderPlan submodules",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 17,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-018",
+      "title": "Presolution foundation: document chosen access/ops abstraction",
+      "description": "As a developer, I want a clear presolution foundation style so contributors don't have to choose between overlapping APIs.",
+      "acceptanceCriteria": [
+        "Add a short design note (module note or docs file) stating the preferred presolution access/ops abstraction and the deprecation plan for others",
+        "No behavior change (pure documentation/structure only)",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 18,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-019",
+      "title": "Presolution foundation: converge redundant layers",
+      "description": "As a developer, I want presolution to use one consistent foundation layer so state access, canonicalization, and binding ops are not duplicated across modules.",
+      "acceptanceCriteria": [
+        "Remove or merge redundant presolution layers (choose an approach and apply it across presolution modules)",
+        "No three competing APIs remain for the same operations (state access, findRoot, registerNode, binding ops)",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 19,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-020",
+      "title": "Constraint.Types: add Graph/Witness/Presolution facade modules",
+      "description": "As a developer, I want stable submodules for constraint types so code can depend on smaller concepts than MLF.Constraint.Types.",
+      "acceptanceCriteria": [
+        "Add MLF.Constraint.Types.Graph, MLF.Constraint.Types.Witness, and MLF.Constraint.Types.Presolution as re-export facades (no behavior change)",
+        "Update mlf2.cabal module lists to include the new modules",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 20,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-021",
+      "title": "Constraint.Types: move witness-related types into Types.Witness",
+      "description": "As a developer, I want witness-related constraint types isolated so witness/eMLF\u2194xMLF translation work is localized and imports are clearer.",
+      "acceptanceCriteria": [
+        "Move witness-related types (Expansion, BoundRef, ForallSpec, InstanceOp, InstanceWitness, InstanceStep, EdgeWitness, and related helpers) into MLF.Constraint.Types.Witness",
+        "MLF.Constraint.Types re-exports witness-related types temporarily for compatibility",
+        "Update imports across src/src-public/test to use MLF.Constraint.Types.Witness where appropriate",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 21,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-022",
+      "title": "Constraint.Types: move identifier/map/reference types into Types.Graph",
+      "description": "As a developer, I want NodeId/NodeRef and map newtypes isolated so the core graph identity types are stable and reusable.",
+      "acceptanceCriteria": [
+        "Move NodeId, NodeMap, GenNodeId, GenNodeMap, NodeRef, and their helper functions into MLF.Constraint.Types.Graph",
+        "MLF.Constraint.Types re-exports these types temporarily for compatibility",
+        "Update imports across src/src-public/test to use MLF.Constraint.Types.Graph where appropriate",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 22,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-023",
+      "title": "Constraint.Types: move core graph node/edge/constraint types into Types.Graph",
+      "description": "As a developer, I want the core constraint graph types isolated so most modules can import a focused Graph module rather than a large monolith.",
+      "acceptanceCriteria": [
+        "Move BaseTy, TyNode, InstEdge, UnifyEdge, Constraint, and core graph helpers into MLF.Constraint.Types.Graph",
+        "Update imports across src/src-public/test accordingly",
+        "Update mlf2.cabal module lists as needed for moved modules",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 23,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-024",
+      "title": "Constraint.Types: move binding tree types/errors into the new module structure",
+      "description": "As a developer, I want binding tree types isolated so binding logic can depend on a small set of definitions with fewer import collisions.",
+      "acceptanceCriteria": [
+        "Move BindFlag, BindParents, and BindingError into the appropriate new module (Types.Graph or a dedicated Types.Binding module)",
+        "Update imports across src/src-public/test accordingly",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 24,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-025",
+      "title": "Constraint.Types: move presolution-only types into Types.Presolution",
+      "description": "As a developer, I want presolution-only types separated so non-presolution modules do not depend on presolution internals.",
+      "acceptanceCriteria": [
+        "Move Presolution, SolverState, DepGraph, and other presolution-only types into MLF.Constraint.Types.Presolution",
+        "Update imports across src/src-public/test accordingly",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 25,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-026",
+      "title": "Finalize breaking changes: update public API, changelog, and version",
+      "description": "As a maintainer, I want the public API and versioning updated so breaking refactor changes are communicated and the codebase has a coherent surface.",
+      "acceptanceCriteria": [
+        "Update src-public/MLF/API.hs and src-public/MLF/Pipeline.hs to reflect the new module layout and new pipeline entry points",
+        "Update CHANGELOG.md with a Breaking changes section describing key API/module moves",
+        "Bump mlf2.cabal version appropriately for breaking changes",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 26,
+      "passes": true,
+      "notes": ""
+    }
+  ]
+}

@@ -1,0 +1,247 @@
+## Codebase Patterns
+- Add new internal Haskell modules to `mlf2.cabal` `other-modules` (and `exposed-modules` if public) so Cabal builds them.
+- Tests that import internal modules must see them in `mlf2.cabal` `library mlf2-internal` `exposed-modules`, otherwise GHC treats them as hidden.
+- Pipeline-level types (errors/config) are re-exported from MLF.Elab.Pipeline for convenience.
+- Public API modules should re-export `TraceConfig`/`defaultTraceConfig` alongside `PipelineConfig` so callers can customize tracing.
+- When adding pipeline entry points/types, re-export them via `MLF.API`/`MLF.Pipeline` so callers avoid internal modules.
+- Tracing is explicit: pass a `TraceConfig` (e.g., `defaultTraceConfig` or `pcTraceConfig defaultPipelineConfig`) into presolution/solve/elab helpers and `runPresolutionM`.
+- Use `MLF.Constraint.Canonicalizer` for redirect + union-find canonicalization; it is idempotent and cycle-safe (stable rep picks the smallest `NodeId` in a cycle).
+- Presolution state access should go through `MonadPresolution` plus `MLF.Constraint.Presolution.Ops`/`StateAccess`; avoid new direct `gets psConstraint`/`gets psUnionFind` and manual `Binding` error lifting.
+- Presolution node ops (`getNode`/`getCanonicalNode`/`registerNode`/`findRoot`) live in `MLF.Constraint.Presolution.Ops`; canonical/constraint access (`getCanonical`/`getConstraintAndCanonical`) lives in `MLF.Constraint.Presolution.StateAccess`.
+- When a custom NodeId canonicalization is needed but helpers expect a `Canonicalizer`, wrap it with `canonicalizerFrom`.
+- Phi submodules live under `MLF.Elab.Phi.*`; keep `MLF.Elab.Phi` as a facade and list new submodules in `mlf2.cabal`.
+- When splitting BinderPlan, move shared types/functions into submodules and re-export from the BinderPlan facade to avoid import churn.
+- Witness/expansion types now live in `MLF.Constraint.Types.Witness`; `MLF.Constraint.Types` re-exports them for compatibility.
+- Graph identifiers/maps (`NodeId`, `NodeMap`, `GenNodeId`, `GenNodeMap`, `NodeRef` + helpers) now live in `MLF.Constraint.Types.Graph`; `MLF.Constraint.Types` re-exports them for compatibility.
+- Presolution-only types (`Presolution`, `SolverState`, `DepGraph`) now live in `MLF.Constraint.Types.Presolution`; `MLF.Constraint.Types` re-exports them for compatibility.
+- Core graph node/edge/constraint types (e.g., `BaseTy`, `TyNode`, `InstEdge`, `UnifyEdge`, `Constraint`, `BindFlag`/`BindParents`, `GenNode`, `EdgeId`, `ExpVarId`) now live in `MLF.Constraint.Types.Graph`; keep `MLF.Constraint.Types` only as a compatibility re-export and import witness types from `MLF.Constraint.Types.Witness`.
+- Binding tree errors (`BindingError`) now live in `MLF.Constraint.Types.Graph` and are re-exported from `MLF.Constraint.Types` for compatibility.
+
+## 2026-02-02 01:46:58 +0800 - US-001
+- What was implemented: Added PipelineError with phase constructors, render helper, and lift helpers; re-exported via MLF.Elab.Pipeline.
+- Files changed: src/MLF/Elab/PipelineError.hs; src/MLF/Elab/Pipeline.hs; mlf2.cabal
+- **Learnings for future iterations:**
+  - Patterns discovered: new internal modules must be listed in `mlf2.cabal` to compile.
+  - Gotchas encountered: `.git` is not writable here, so branch/commit operations fail.
+  - Useful context: PipelineError is re-exported from `MLF.Elab.Pipeline`.
+---
+
+## 2026-02-02 01:53:29 +0800 - US-002
+- What was implemented: Added PipelineConfig with trace config and default disabled config; re-exported from MLF.Elab.Pipeline.
+- Files changed: src/MLF/Elab/PipelineConfig.hs; src/MLF/Elab/Pipeline.hs; mlf2.cabal; tasks/todo/prd.json
+- **Learnings for future iterations:**
+  - Patterns discovered: pipeline-level types (errors/config) are re-exported from MLF.Elab.Pipeline for convenience.
+  - Gotchas encountered: none.
+  - Useful context: defaultPipelineConfig uses defaultTraceConfig (all tracing disabled).
+---
+
+## 2026-02-02 02:14:03 +0800 - US-003
+- What was implemented: Added config-aware pipeline entry points returning PipelineError, updated pipeline/result type error plumbing, re-exported config/errors in public API, and switched app/Main to the config-aware entry point.
+- Files changed: src/MLF/Elab/Run/Pipeline.hs; src/MLF/Elab/Run.hs; src/MLF/Elab/Pipeline.hs; src/MLF/Elab/Run/ResultType.hs; src-public/MLF/Pipeline.hs; src-public/MLF/API.hs; app/Main.hs; test/ElaborationSpec.hs; test/PipelineSpec.hs; tasks/todo/prd.json; tasks/todo/progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered: runPipelineElab now returns PipelineError, so tests should render via renderPipelineError for user-facing messages.
+  - Gotchas encountered: public executables can only import public modules unless you add mlf2-internal to build-depends.
+  - Useful context: app/Main.hs demonstrates the config-aware entry point with defaultPipelineConfig.
+---
+
+## 2026-02-02 03:16:00 +0800 - US-004
+- What was implemented: Removed global trace config/unsafe state, threaded TraceConfig through presolution/solve/elab/phi/pipeline, converted PresolutionM to ReaderT TraceConfig, updated debug helpers and tests to pass explicit trace config, and re-exported TraceConfig/defaultTraceConfig for internal use.
+- Files changed: src/MLF/Util/Trace.hs; src/MLF/Constraint/Presolution.hs; src/MLF/Constraint/Presolution/Base.hs; src/MLF/Constraint/Presolution/Driver.hs; src/MLF/Constraint/Presolution/EdgeProcessing.hs; src/MLF/Constraint/Presolution/EdgeUnify.hs; src/MLF/Constraint/Presolution/Expansion.hs; src/MLF/Constraint/Presolution/Plan.hs; src/MLF/Constraint/Presolution/Rewrite.hs; src/MLF/Constraint/Solve.hs; src/MLF/Elab/Elaborate.hs; src/MLF/Elab/Phi.hs; src/MLF/Elab/Pipeline.hs; src/MLF/Elab/Run/Debug.hs; src/MLF/Elab/Run/Generalize.hs; src/MLF/Elab/Run/Pipeline.hs; src/MLF/Elab/Run/ResultType.hs; test/SpecUtil.hs; test/PresolutionSpec.hs; test/SolveSpec.hs; test/PipelineSpec.hs; test/ConstraintGenSpec.hs; test/ElaborationSpec.hs; tasks/todo/prd.json; tasks/todo/progress.txt.
+- **Learnings for future iterations:**
+  - Patterns discovered: tracing is explicit; use `defaultTraceConfig` (or `pcTraceConfig defaultPipelineConfig`) and pass it into presolution/solve/elab helpers and `runPresolutionM`.
+  - Gotchas encountered: `PresolutionM` as `ReaderT` needs overlapping `MonadPresolution` instances; use `OVERLAPPING` for the concrete instance and `OVERLAPPABLE` for the ReaderT lift.
+  - Useful context: `defaultPlanBuilder` now requires a `TraceConfig` and `MLF.Elab.Pipeline` re-exports `TraceConfig/defaultTraceConfig` for internal callers.
+---
+
+## 2026-02-02 03:30:23 +0800 - US-005
+- What was implemented: Added `MLF.Constraint.Canonicalizer` with cycle-safe, idempotent canonicalization and tests covering redirect cycles/idempotence; normalized witness ops now drop redundant consecutive raises/self-merges so property tests remain stable.
+- Files changed: src/MLF/Constraint/Canonicalizer.hs; src/MLF/Constraint/Presolution/WitnessCanon.hs; mlf2.cabal; test/CanonicalizerSpec.hs; test/Main.hs; tasks/todo/prd.json; tasks/todo/progress.txt.
+- **Learnings for future iterations:**
+  - Patterns discovered: prefer the new `Canonicalizer` abstraction instead of hand-rolled redirect/union-find chases.
+  - Gotchas encountered: canonicalization must be idempotent even if redirects map union-find roots; stabilize the combined step.
+  - Useful context: redirect cycles resolve to the smallest `NodeId` for determinism.
+---
+
+## 2026-02-02 03:51:58 +0800 - US-006
+- What was implemented: Canonicalization helpers now use the Canonicalizer abstraction; chaseRedirects/makeCanonicalizer delegate to the new module; added canonicalizerFrom; pipeline uses Canonicalizer-based helpers; added witness/trace/expansion canonicalization tests.
+- Files changed: src/MLF/Constraint/Canonicalizer.hs; src/MLF/Constraint/Presolution/Driver.hs; src/MLF/Constraint/Presolution/Rewrite.hs; src/MLF/Elab/Run/Util.hs; src/MLF/Elab/Run/Pipeline.hs; mlf2.cabal; test/CanonicalizerSpec.hs; tasks/todo/prd.json; tasks/todo/progress.txt.
+- **Learnings for future iterations:**
+  - Patterns discovered: use `canonicalizerFrom` to adapt custom canonical functions to Canonicalizer-based helpers.
+  - Gotchas encountered: `.git` is not writable here, so branch/commit operations fail.
+  - Useful context: witness/trace/expansion canonicalizers now take `Canonicalizer`, and `chaseRedirects` uses `chaseRedirectsStable`.
+---
+## 2026-02-02 04:07:59 +0800 - US-007
+- What was implemented: Extracted copy-map/provenance helpers into MLF.Elab.Run.Provenance, wired pipeline to use them, and added a regression test that validates instantiation copy maps for a polymorphic id used at two types.
+- Files changed: src/MLF/Elab/Run/Provenance.hs; src/MLF/Elab/Run/Pipeline.hs; mlf2.cabal; test/PipelineSpec.hs; tasks/todo/prd.json; tasks/todo/progress.txt.
+- **Learnings for future iterations:**
+  - Patterns discovered: tests importing internal modules require those modules in `mlf2.cabal` `exposed-modules` for `mlf2-internal`.
+  - Gotchas encountered: .git is not writable here; branch/commit operations fail.
+  - Useful context: buildTraceCopyMap/collectBaseNamedKeys now live in MLF.Elab.Run.Provenance.
+---
+## 2026-02-02 04:18:26 +0800 - US-008
+- What was implemented: Extracted Phi environment types/accessors into `MLF.Elab.Phi.Env` and wired `MLF.Elab.Phi` to re-export the facade.
+- Files changed: src/MLF/Elab/Phi/Env.hs; src/MLF/Elab/Phi.hs; mlf2.cabal; tasks/todo/prd.json; tasks/todo/progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered: Phi helpers can be split into `MLF.Elab.Phi.*` modules while keeping `MLF.Elab.Phi` as the public facade.
+  - Gotchas encountered: `.git` is not writable here, so branch/commit operations fail.
+  - Useful context: Phi environment accessors now live in `MLF.Elab.Phi.Env` for reuse by future extractions.
+---
+
+## 2026-02-02 04:27:34 +0800 - US-009
+- What was implemented: Extracted binder index/name helpers into `MLF.Elab.Phi.Binder` and updated the Phi facade/cabal module list.
+- Files changed: src/MLF/Elab/Phi/Binder.hs; src/MLF/Elab/Phi.hs; mlf2.cabal; tasks/todo/prd.json; tasks/todo/progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered: binder helper functions for Phi live in `MLF.Elab.Phi.Binder` and are re-exported by `MLF.Elab.Phi`.
+  - Gotchas encountered: `.git` is not writable here, so branch/commit operations fail (index.lock permission).
+  - Useful context: `isBinderNodeM`/`lookupBinderIndexM`/`binderIndexM`/`binderNameForM` were moved out of `MLF.Elab.Phi`.
+---
+## 2026-02-02 04:56:44 +0800 - US-010
+- What was implemented: Extracted Omega/Step interpretation helpers into `MLF.Elab.Phi.Omega`, wired `Phi` to use the new module via `OmegaContext`, and updated Cabal module lists.
+- Files changed: src/MLF/Elab/Phi/Omega.hs; src/MLF/Elab/Phi.hs; mlf2.cabal; tasks/todo/prd.json; tasks/todo/progress.txt.
+- **Learnings for future iterations:**
+  - Patterns discovered: New `MLF.Elab.Phi.*` modules must be added to `mlf2.cabal` `other-modules` to compile.
+  - Gotchas encountered: `.git` is not writable here (index.lock permission), so branch/commit operations fail.
+  - Useful context: `phiFromEdgeWitnessWithTrace` now delegates Omega/Step translation to `MLF.Elab.Phi.Omega` via `OmegaContext`.
+---
+## 2026-02-02 05:06:00 +0800 - US-011
+- What was implemented: Moved Phi translation logic into `MLF.Elab.Phi.Translate` and reduced `MLF.Elab.Phi` to a facade re-exporting the public helpers.
+- Files changed: src/MLF/Elab/Phi.hs; src/MLF/Elab/Phi/Translate.hs; mlf2.cabal; tasks/todo/prd.json; tasks/todo/progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered: none.
+  - Gotchas encountered: `.git` is not writable here, so branch/commit operations fail (index.lock permission).
+  - Useful context: Phi translation logic now lives in `MLF.Elab.Phi.Translate`, with `MLF.Elab.Phi` acting as a facade.
+---
+## 2026-02-02 05:13:49 +0800 - US-012
+- What was implemented: Extracted generalization type aliases/records into MLF.Elab.Run.Generalize.Types and updated Generalize to consume the new module; added the new module to Cabal.
+- Files changed: src/MLF/Elab/Run/Generalize.hs; src/MLF/Elab/Run/Generalize/Types.hs; mlf2.cabal; tasks/todo/prd.json; tasks/todo/progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered: none.
+  - Gotchas encountered: none.
+  - Useful context: generalization phase record types now live in  for reuse by future splits.
+---
+## 2026-02-02 05:13:49 +0800 - US-012
+- What was implemented: Extracted generalization type aliases/records into MLF.Elab.Run.Generalize.Types and updated Generalize to consume the new module; added the new module to Cabal.
+- Files changed: src/MLF/Elab/Run/Generalize.hs; src/MLF/Elab/Run/Generalize/Types.hs; mlf2.cabal; tasks/todo/prd.json; tasks/todo/progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered: none.
+  - Gotchas encountered: none.
+  - Useful context: generalization phase record types now live in MLF.Elab.Run.Generalize.Types for reuse by future splits.
+---
+
+## 2026-02-02 05:30:20 +0800 - US-013
+- What was implemented: Split generalization phase helpers into Common/Phase1/Phase2 modules and wired Generalize to use them; updated Cabal module list.
+- Files changed: src/MLF/Elab/Run/Generalize.hs; src/MLF/Elab/Run/Generalize/Common.hs; src/MLF/Elab/Run/Generalize/Phase1.hs; src/MLF/Elab/Run/Generalize/Phase2.hs; mlf2.cabal; tasks/todo/prd.json; tasks/todo/progress.txt.
+- **Learnings for future iterations:**
+  - Patterns discovered: none.
+  - Gotchas encountered: none.
+  - Useful context: Phase1/Phase2 now own the scheme restoration and node mapping logic; Common holds shared helpers used across phases.
+---
+
+## 2026-02-02 05:43:54 +0800 - US-014
+- What was implemented: Split Generalize orchestrator further into Phase3/Phase4 plus Constraint/Finalize helpers; reduced Generalize.hs to a thin orchestrator and added new modules to Cabal.
+- Files changed: src/MLF/Elab/Run/Generalize.hs; src/MLF/Elab/Run/Generalize/Constraint.hs; src/MLF/Elab/Run/Generalize/Phase3.hs; src/MLF/Elab/Run/Generalize/Phase4.hs; src/MLF/Elab/Run/Generalize/Finalize.hs; mlf2.cabal; tasks/todo/prd.json; tasks/todo/progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered: none.
+  - Gotchas encountered: .git is not writable here, so branch/commit operations fail (index.lock permission).
+  - Useful context: Generalize.hs now delegates scheme ownership and bind-parent logic to Phase3/Phase4 modules.
+---
+## 2026-02-02 05:51:11 +0800 - US-015
+- What was implemented: Extracted BinderPlan utility helpers (lookupNodeInMap, boundRootWith, firstSchemeRootAncestorWith) into MLF.Constraint.Presolution.Plan.BinderPlan.Util and updated BinderPlan/ Cabal wiring.
+- Files changed: src/MLF/Constraint/Presolution/Plan/BinderPlan.hs; src/MLF/Constraint/Presolution/Plan/BinderPlan/Util.hs; mlf2.cabal; tasks/todo/prd.json; tasks/todo/progress.txt.
+- **Learnings for future iterations:**
+  - Patterns discovered: none.
+  - Gotchas encountered: git branch checkout fails due to .git/index.lock permission (repo .git not writable).
+  - Useful context: BinderPlan utility helpers now live in MLF.Constraint.Presolution.Plan.BinderPlan.Util and are re-exported by BinderPlan.
+---
+
+## 2026-02-02 05:58:47 +0800 - US-016
+- What was implemented: Extracted binder ordering/toposort logic into MLF.Constraint.Presolution.Plan.BinderPlan.Order and wired BinderPlan to import/re-export it; added the new module to Cabal.
+- Files changed: src/MLF/Constraint/Presolution/Plan/BinderPlan/Order.hs; src/MLF/Constraint/Presolution/Plan/BinderPlan.hs; mlf2.cabal; tasks/todo/prd.json; tasks/todo/progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered: when splitting BinderPlan, move shared types/functions into submodules and re-export from the facade to avoid import churn.
+  - Gotchas encountered: none.
+  - Useful context: orderBinderCandidates and GaBindParentsInfo now live in MLF.Constraint.Presolution.Plan.BinderPlan.Order.
+---
+## 2026-02-02 06:10:59 +0800 - US-017
+- What was implemented: Split BinderPlan into Build/Types/Selection/Alias/Predicate modules, left BinderPlan as a facade re-exporting helpers, and updated Cabal module lists.
+- Files changed: src/MLF/Constraint/Presolution/Plan/BinderPlan.hs; src/MLF/Constraint/Presolution/Plan/BinderPlan/Build.hs; src/MLF/Constraint/Presolution/Plan/BinderPlan/Types.hs; src/MLF/Constraint/Presolution/Plan/BinderPlan/Selection.hs; src/MLF/Constraint/Presolution/Plan/BinderPlan/Alias.hs; src/MLF/Constraint/Presolution/Plan/BinderPlan/Predicate.hs; mlf2.cabal; tasks/todo/prd.json; tasks/todo/progress.txt.
+- **Learnings for future iterations:**
+  - Patterns discovered: keep BinderPlan as a facade that re-exports submodules so downstream imports stay stable.
+  - Gotchas encountered: git checkout still fails because .git/index.lock is not writable in this environment.
+  - Useful context: binder-plan construction lives in BinderPlan.Build; alias/selection helpers are now isolated for future edits.
+---
+## 2026-02-02 06:16:17 +0800 - US-018
+- What was implemented: Added a presolution foundation design note describing the preferred access/ops abstraction and deprecation plan.
+- Files changed: AGENTS.md; src/MLF/Constraint/Presolution/Base.hs; tasks/todo/prd.json; tasks/todo/progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered: prefer MonadPresolution with Presolution.Ops/StateAccess for state access and binding/canonical helpers.
+  - Gotchas encountered: none.
+  - Useful context: the foundation note lives in MLF.Constraint.Presolution.Base for easy discovery.
+---
+## 2026-02-02 06:34:21 +0800 - US-019
+- What was implemented: Simplified MonadPresolution to only core state/error ops, routed canonical/constraint access to StateAccess and node ops to Ops, and updated presolution modules (EdgeUnify/EdgeProcessing/Copy) to use the consolidated helpers; removed the redundant Base.orderedBindersM export.
+- Files changed: src/MLF/Constraint/Presolution/Base.hs; src/MLF/Constraint/Presolution/StateAccess.hs; src/MLF/Constraint/Presolution/EdgeUnify.hs; src/MLF/Constraint/Presolution/EdgeProcessing.hs; src/MLF/Constraint/Presolution/Copy.hs; tasks/todo/prd.json; tasks/todo/progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered: Presolution canonical access belongs in StateAccess, while node/UF ops live in Ops (MonadPresolution no longer supplies those helpers).
+  - Gotchas encountered: .git is not writable here (index.lock permission), so branch/commit operations fail.
+  - Useful context: EdgeUnify now lifts Ops/StateAccess helpers explicitly (no implicit MonadPresolution access for node/canonical helpers).
+---
+
+## 2026-02-02 06:42:01 +0800 - US-020
+- What was implemented: Added Constraint.Types facade modules for Graph/Witness/Presolution and registered them in the internal library module list.
+- Files changed: src/MLF/Constraint/Types/Graph.hs; src/MLF/Constraint/Types/Witness.hs; src/MLF/Constraint/Types/Presolution.hs; mlf2.cabal; tasks/todo/prd.json; tasks/todo/progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered: Constraint type submodules live under `src/MLF/Constraint/Types/*` and should be listed in `mlf2.cabal` `exposed-modules` for internal use/tests.
+  - Gotchas encountered: none.
+  - Useful context: The new facade modules are pure re-exports from `MLF.Constraint.Types` (no behavior changes).
+---
+
+## 2026-02-02 06:58:33 +0800 - US-021
+- What was implemented: Moved witness/expansion types into `MLF.Constraint.Types.Witness`, added shared `MLF.Constraint.Types.Ids` for NodeId/EdgeId, updated imports to prefer the witness module, and wired the new module into Cabal.
+- Files changed: src/MLF/Constraint/Types.hs; src/MLF/Constraint/Types/Witness.hs; src/MLF/Constraint/Types/Ids.hs; src/MLF/Constraint/Presolution/WitnessCanon.hs; src/MLF/Constraint/Presolution/WitnessValidation.hs; src/MLF/Constraint/Presolution/Witness.hs; src/MLF/Elab/Run/Util.hs; src/MLF/Elab/Run/ResultType.hs; test/CanonicalizerSpec.hs; test/ElaborationSpec.hs; mlf2.cabal; tasks/todo/prd.json; tasks/todo/progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered: witness/expansion types live in `MLF.Constraint.Types.Witness` (re-exported from `MLF.Constraint.Types`).
+  - Gotchas encountered: `git checkout` failed because `.git/index.lock` is not writable in this environment.
+  - Useful context: NodeId/EdgeId definitions now live in `MLF.Constraint.Types.Ids` to avoid import cycles when splitting constraint types.
+---
+
+## 2026-02-02 07:17:09 +0800 - US-022
+- What was implemented: Moved NodeId/NodeMap/GenNodeId/GenNodeMap/NodeRef + helpers into `MLF.Constraint.Types.Graph`, re-exported them via `MLF.Constraint.Types`, and updated imports to prefer the Graph module; adjusted `Types.Ids`/witness to use the new home.
+- Files changed: AGENTS.md; src/MLF/Constraint/Types/Graph.hs; src/MLF/Constraint/Types/Ids.hs; src/MLF/Constraint/Types.hs; src/MLF/Constraint/Types/Witness.hs; src/MLF/Constraint/Canonicalize.hs; src/MLF/Constraint/Canonicalizer.hs; src/MLF/Constraint/Normalize.hs; src/MLF/Constraint/Traversal.hs; src/MLF/Constraint/Inert.hs; src/MLF/Constraint/Presolution/Witness.hs; src/MLF/Constraint/Presolution/WitnessCanon.hs; src/MLF/Constraint/Presolution/WitnessValidation.hs; src/MLF/Util/IntMapUtils.hs; src/MLF/Util/Order.hs; src/MLF/Util/OrderKey.hs; src/MLF/Util/UnionFind.hs; src/MLF/Util/ElabError.hs; src/MLF/Elab/Types.hs; src/MLF/Elab/Run/Util.hs; src/MLF/Elab/Run/Annotation.hs; src/MLF/Elab/Run/Debug.hs; src/MLF/Elab/Phi/Env.hs; src/MLF/Elab/Phi/Binder.hs; src/MLF/Frontend/ConstraintGen.hs; test/ElaborationSpec.hs; test/CanonicalizerSpec.hs; test/SpecUtil.hs; tasks/todo/prd.json; tasks/todo/progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered: import graph identifiers/maps from `MLF.Constraint.Types.Graph` and rely on `MLF.Constraint.Types` only for compatibility re-exports.
+  - Gotchas encountered: `MLF.Constraint.Types.Graph` needs `DeriveTraversable` to derive Functor/Foldable/Traversable for the map newtypes.
+  - Useful context: `MLF.Constraint.Types.Ids` now re-exports `NodeId` from `Types.Graph` while keeping `EdgeId` defined locally.
+---
+## 2026-02-02 07:52:01 +0800 - US-023
+- What was implemented: Moved core graph node/edge/constraint types (BaseTy/TyNode/InstEdge/UnifyEdge/Constraint + helpers) and graph-level bindings into `MLF.Constraint.Types.Graph`, re-exported via `MLF.Constraint.Types`, shifted EdgeId into Graph/Ids, and updated imports across src/src-public/test (including witness-specific imports in tests).
+- Files changed: src/MLF/Constraint/Types/Graph.hs; src/MLF/Constraint/Types.hs; src/MLF/Constraint/Types/Ids.hs; src/MLF/Constraint/Types/Witness.hs; src/MLF/Constraint/Canonicalize.hs; src/MLF/Constraint/Normalize.hs; src/MLF/Constraint/Traversal.hs; src/MLF/Constraint/Acyclicity.hs; src/MLF/Constraint/VarStore.hs; src/MLF/Constraint/BindingUtil.hs; src/MLF/Constraint/NodeAccess.hs; src/MLF/Constraint/Presolution/Witness.hs; src/MLF/Constraint/Presolution/WitnessValidation.hs; src/MLF/Util/Order.hs; src/MLF/Util/OrderKey.hs; src/MLF/Util/IntMapUtils.hs; src/MLF/Types/Elab.hs; src/MLF/Elab/Types.hs; src/MLF/Elab/TypeCheck.hs; src/MLF/Elab/Run/TypeOps.hs; src/MLF/Elab/Run/Debug.hs; src/MLF/Elab/Run/ResultType.hs; src/MLF/Elab/Run/Pipeline.hs; src/MLF/Frontend/ConstraintGen.hs; src-public/MLF/API.hs; src-public/MLF/Pipeline.hs; test/*.hs; tasks/todo/prd.json; tasks/todo/progress.txt; AGENTS.md.
+- **Learnings for future iterations:**
+  - Patterns discovered: core graph types now live in `MLF.Constraint.Types.Graph` while witness ops live in `MLF.Constraint.Types.Witness`; tests importing witness constructors must add the witness module explicitly.
+  - Gotchas encountered: `Normalize.hs` defines a local `insertNode`, so importing `insertNode` unqualified from Graph causes ambiguity; use a qualified import instead.
+  - Useful context: `DepGraph` and `Presolution` remain in `MLF.Constraint.Types`/`MLF.Constraint.Types.Presolution`, so code touching dependency graphs needs an explicit import alongside Graph.
+---
+## 2026-02-02 08:03:35 +0800 - US-024
+- What was implemented: Moved BindingError into MLF.Constraint.Types.Graph, re-exported via MLF.Constraint.Types, updated imports in src/test, and removed redundant test imports.
+- Files changed: src/MLF/Constraint/Types/Graph.hs; src/MLF/Constraint/Types.hs; src/MLF/Constraint/Inert.hs; src/MLF/Constraint/NodeAccess.hs; src/MLF/Util/ElabError.hs; test/BindingSpec.hs; test/GraphOpsSpec.hs; test/PresolutionSpec.hs; test/ElaborationSpec.hs; AGENTS.md; tasks/todo/prd.json; tasks/todo/progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered: BindingError now lives in MLF.Constraint.Types.Graph (re-exported from MLF.Constraint.Types for compatibility).
+  - Gotchas encountered: none.
+  - Useful context: tests already import MLF.Constraint.Types.Graph wholesale, so avoid redundant BindingError-only imports to keep -Wall clean.
+---
+## 2026-02-02 08:11:20 +0800 - US-025
+- What was implemented: Moved Presolution/SolverState/DepGraph definitions into MLF.Constraint.Types.Presolution; Types now re-exports; updated DepGraph/Presolution imports in acyclicity + tests.
+- Files changed: src/MLF/Constraint/Types/Presolution.hs; src/MLF/Constraint/Types.hs; src/MLF/Constraint/Acyclicity.hs; test/AcyclicitySpec.hs; test/PresolutionSpec.hs; tasks/todo/prd.json; tasks/todo/progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered: presolution-only types live in MLF.Constraint.Types.Presolution; use that module instead of the broad Types facade.
+  - Gotchas encountered: git branch/commit operations fail here because `.git/index.lock` is not writable.
+  - Useful context: MLF.Constraint.Types continues to re-export presolution types for compatibility.
+---
+## 2026-02-02 08:19:11 +0800 - US-026
+- What was implemented: Updated public API exports to include TraceConfig/defaultTraceConfig, documented breaking changes, bumped the package version for the refactor, and removed an unused test import to keep -Wall clean.
+- Files changed: src-public/MLF/API.hs; src-public/MLF/Pipeline.hs; CHANGELOG.md; mlf2.cabal; test/ConstraintGenSpec.hs; tasks/todo/prd.json; tasks/todo/progress.txt
+- **Learnings for future iterations:**
+  - Patterns discovered: public API modules should re-export TraceConfig/defaultTraceConfig when PipelineConfig is part of the surface.
+  - Gotchas encountered: git branch checkout still fails because `.git/index.lock` is not writable.
+  - Useful context: the 0.2.0.0 changelog entry summarizes the pipeline and constraint-type breaking changes.
+---

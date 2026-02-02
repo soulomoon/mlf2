@@ -18,7 +18,17 @@ module MLF.Constraint.Canonicalize (
 
 import qualified Data.IntMap.Strict as IntMap
 
-import MLF.Constraint.Types (NodeId(..), NodeRef(..), TyNode(..), InstEdge(..), UnifyEdge(..), BindParents, BindFlag, nodeRefFromKey, nodeRefKey)
+import MLF.Constraint.Types.Graph
+    ( BindFlag
+    , BindParents
+    , InstEdge(..)
+    , NodeId(..)
+    , NodeRef(..)
+    , TyNode(..)
+    , UnifyEdge(..)
+    , nodeRefFromKey
+    , nodeRefKey
+    )
 
 canonicalRef :: (NodeId -> NodeId) -> NodeRef -> NodeRef
 canonicalRef canonical ref = case ref of

@@ -11,7 +11,7 @@ import qualified Data.IntMap.Strict as IntMap
 
 import MLF.Frontend.ConstraintGen (AnnExpr(..))
 import MLF.Frontend.ConstraintGen.Types (AnnExprF(..))
-import MLF.Constraint.Types (NodeId(..))
+import MLF.Constraint.Types.Graph (NodeId(..))
 import MLF.Elab.Run.Util (chaseRedirects)
 import MLF.Elab.Types (ElabType, Instantiation(..), Ty(..))
 

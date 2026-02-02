@@ -34,7 +34,16 @@ import Data.List (mapAccumL, partition, sortOn)
 import Data.Ord (Down(..))
 import qualified Data.List.NonEmpty as NE
 
-import MLF.Constraint.Types (BindFlag(..), Expansion(..), ExpansionF(..), ForallSpec(..), GenNode(..), InstanceOp(..), InstanceStep(..), NodeId, NodeRef(..), TyNode(..), getNodeId, typeRef)
+import MLF.Constraint.Types.Graph
+    ( BindFlag(..)
+    , GenNode(..)
+    , NodeId
+    , NodeRef(..)
+    , TyNode(..)
+    , getNodeId
+    , typeRef
+    )
+import MLF.Constraint.Types.Witness (Expansion(..), ExpansionF(..), ForallSpec(..), InstanceOp(..), InstanceStep(..))
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Presolution.Base (PresolutionM, PresolutionError(..), instantiationBindersM)
 import MLF.Constraint.Presolution.Ops (getCanonicalNode, lookupVarBound)

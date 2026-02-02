@@ -12,7 +12,7 @@ import qualified Data.Set as Set
 
 import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Constraint.Solve (SolveResult, frWith, srConstraint, srUnionFind)
-import MLF.Constraint.Types (TyNode(..), cNodes, fromListNode, toListNode)
+import MLF.Constraint.Types.Graph (TyNode(..), cNodes, fromListNode, toListNode)
 import MLF.Reify.Core (namedNodes, reifyTypeWithNamedSetNoFallback)
 import MLF.Reify.TypeOps (
     freeTypeVarsType,

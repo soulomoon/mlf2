@@ -1,9 +1,17 @@
 module MLF.Pipeline
     ( BaseTy (..)
     , PolySyms
+    , PipelineConfig(..)
+    , defaultPipelineConfig
+    , TraceConfig(..)
+    , defaultTraceConfig
+    , PipelineError(..)
+    , renderPipelineError
     , inferConstraintGraph
     , runPipelineElab
     , runPipelineElabChecked
+    , runPipelineElabWithConfig
+    , runPipelineElabCheckedWithConfig
     , typeCheck
     , step
     , normalize
@@ -12,8 +20,23 @@ module MLF.Pipeline
 
 import MLF.Frontend.Syntax (Expr)
 import MLF.Frontend.ConstraintGen (ConstraintError, ConstraintResult, generateConstraints)
-import MLF.Constraint.Types (BaseTy(..), PolySyms)
-import MLF.Elab.Pipeline (isValue, normalize, runPipelineElab, runPipelineElabChecked, step, typeCheck)
+import MLF.Constraint.Types.Graph (BaseTy(..), PolySyms)
+import MLF.Elab.Pipeline
+    ( PipelineConfig(..)
+    , PipelineError(..)
+    , defaultPipelineConfig
+    , TraceConfig(..)
+    , defaultTraceConfig
+    , isValue
+    , normalize
+    , renderPipelineError
+    , runPipelineElab
+    , runPipelineElabChecked
+    , runPipelineElabWithConfig
+    , runPipelineElabCheckedWithConfig
+    , step
+    , typeCheck
+    )
 
 inferConstraintGraph :: PolySyms -> Expr -> Either ConstraintError ConstraintResult
 inferConstraintGraph = generateConstraints

@@ -3,7 +3,7 @@ module MLF.Util.ElabError (
     bindingToElab
 ) where
 
-import MLF.Constraint.Types (BindingError, NodeId)
+import MLF.Constraint.Types.Graph (BindingError, NodeId)
 import MLF.Frontend.Syntax (VarName)
 
 -- | Errors that can arise during elaboration or reification.

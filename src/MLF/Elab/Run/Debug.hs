@@ -12,31 +12,31 @@ import Data.List (intercalate)
 
 import MLF.Frontend.ConstraintGen (AnnExpr(..))
 import MLF.Frontend.ConstraintGen.Types (AnnExprF(..))
-import MLF.Constraint.Types (EdgeId(..), NodeId(..), getEdgeId)
-import MLF.Util.Trace (debugBinding, globalTraceConfig, tcBinding)
+import MLF.Constraint.Types.Graph (EdgeId(..), NodeId(..), getEdgeId)
+import MLF.Util.Trace (TraceConfig, traceBinding, tcBinding)
 
 
-debugGaScope :: String -> a -> a
-debugGaScope = debugBinding
+debugGaScope :: TraceConfig -> String -> a -> a
+debugGaScope cfg = traceBinding cfg
 
-debugGaScopeEnabled :: Bool
-debugGaScopeEnabled = tcBinding globalTraceConfig
+debugGaScopeEnabled :: TraceConfig -> Bool
+debugGaScopeEnabled = tcBinding
 
 -- | Monadic debug helper that traces a message when debugging is enabled.
 -- Replaces the verbose pattern:
---   case if debugGaScopeEnabled then debugGaScope msg () else () of () -> pure ()
-debugWhenM :: Applicative m => String -> m ()
-debugWhenM msg =
-    if debugGaScopeEnabled
-        then debugGaScope msg (pure ())
+--   case if debugGaScopeEnabled cfg then debugGaScope cfg msg () else () of () -> pure ()
+debugWhenM :: Applicative m => TraceConfig -> String -> m ()
+debugWhenM cfg msg =
+    if debugGaScopeEnabled cfg
+        then debugGaScope cfg msg (pure ())
         else pure ()
 
 -- | Conditional debug helper that only traces when both debugging is enabled
 -- and the condition is true.
-debugWhenCondM :: Applicative m => Bool -> String -> m ()
-debugWhenCondM cond msg =
-    if debugGaScopeEnabled && cond
-        then debugGaScope msg (pure ())
+debugWhenCondM :: Applicative m => TraceConfig -> Bool -> String -> m ()
+debugWhenCondM cfg cond msg =
+    if debugGaScopeEnabled cfg && cond
+        then debugGaScope cfg msg (pure ())
         else pure ()
 
 edgeOrigins :: AnnExpr -> IntMap.IntMap String

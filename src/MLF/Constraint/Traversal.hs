@@ -19,7 +19,12 @@ module MLF.Constraint.Traversal (
 import qualified Data.IntSet as IntSet
 import Data.IntSet (IntSet)
 
-import MLF.Constraint.Types (NodeId(..), TyNode, structuralChildren, structuralChildrenWithBounds)
+import MLF.Constraint.Types.Graph
+    ( NodeId(..)
+    , TyNode
+    , structuralChildren
+    , structuralChildrenWithBounds
+    )
 
 data TraversalError
     = MissingNode NodeId

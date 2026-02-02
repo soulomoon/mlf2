@@ -13,6 +13,7 @@ import qualified ReduceSpec
 import qualified ElaborationSpec
 import qualified BindingSpec
 import qualified GraphOpsSpec
+import qualified CanonicalizerSpec
 
 main :: IO ()
 main = hspec $ do
@@ -27,3 +28,4 @@ main = hspec $ do
     ElaborationSpec.spec
     BindingSpec.spec
     GraphOpsSpec.spec
+    CanonicalizerSpec.spec

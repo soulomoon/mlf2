@@ -9,7 +9,17 @@ import qualified Data.IntSet as IntSet
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Set as Set
 
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Presolution (Presolution(..))
+import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Witness
+    ( BoundRef(..)
+    , EdgeWitness(..)
+    , Expansion(..)
+    , ForallSpec(..)
+    , InstanceOp(..)
+    , InstanceStep(..)
+    , InstanceWitness(..)
+    )
 import MLF.Constraint.Presolution
 import MLF.Constraint.Presolution.Witness (OmegaNormalizeEnv(..), OmegaNormalizeError(..), coalesceRaiseMergeWithEnv, integratePhase2Ops, normalizeInstanceOpsFull, normalizeInstanceStepsFull, reorderWeakenWithEnv, validateNormalizedWitness, witnessFromExpansion)
 import MLF.Constraint.Acyclicity (AcyclicityResult(..))
@@ -21,6 +31,7 @@ import qualified MLF.Util.UnionFind as UF
 import qualified MLF.Util.Order as Order
 import SpecUtil
     ( bindParentsFromPairs
+    , defaultTraceConfig
     , emptyConstraint
     , inferBindParents
     , lookupNodeMaybe
@@ -128,7 +139,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         }
                 acyclicityRes = AcyclicityResult { arSortedEdges = [], arDepGraph = undefined }
 
-            case computePresolution acyclicityRes constraint of
+            case computePresolution defaultTraceConfig acyclicityRes constraint of
                 Left err -> expectationFailure ("computePresolution failed: " ++ show err)
                 Right pr -> do
                     let bp = cBindParents (prConstraint pr)
@@ -156,7 +167,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                             }
                 st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
 
-            case runPresolutionM st0 (instantiateScheme body [(bound, fresh)]) of
+            case runPresolutionM defaultTraceConfig st0 (instantiateScheme body [(bound, fresh)]) of
                 Left err -> expectationFailure $ "Instantiation failed: " ++ show err
                 Right (root, st1) -> do
                     arrow <- expectArrow (cNodes (psConstraint st1)) root
@@ -192,7 +203,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         }
                 st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
 
-            case runPresolutionM st0 (instantiateScheme body [(bound, fresh)]) of
+            case runPresolutionM defaultTraceConfig st0 (instantiateScheme body [(bound, fresh)]) of
                 Left err -> expectationFailure $ "Instantiation failed: " ++ show err
                 Right (root, st1) -> do
                     arrow <- expectArrow (cNodes (psConstraint st1)) root
@@ -253,7 +264,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
-            case runPresolutionM st0 (instantiateSchemeWithTrace bodyArrow [(b, meta)]) of
+            case runPresolutionM defaultTraceConfig st0 (instantiateSchemeWithTrace bodyArrow [(b, meta)]) of
                 Left err -> expectationFailure ("instantiateSchemeWithTrace failed: " ++ show err)
                 Right ((root, copyMap, _interior, frontier), st1) -> do
                     arrow <- expectArrow (cNodes (psConstraint st1)) root
@@ -311,7 +322,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
-            case runPresolutionM st0 (instantiateSchemeWithTrace bodyArrow []) of
+            case runPresolutionM defaultTraceConfig st0 (instantiateSchemeWithTrace bodyArrow []) of
                 Left err -> expectationFailure ("instantiateSchemeWithTrace failed: " ++ show err)
                 Right ((root, copyMap, _interior, frontier), st1) -> do
                     arrow <- expectArrow (cNodes (psConstraint st1)) root
@@ -356,7 +367,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         }
                 st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
 
-            case runPresolutionM st0 (instantiateScheme body [(bound, fresh)]) of
+            case runPresolutionM defaultTraceConfig st0 (instantiateScheme body [(bound, fresh)]) of
                 Left err -> expectationFailure $ "Instantiation failed: " ++ show err
                 Right (root, st1) -> do
                     arrow <- expectArrow (cNodes (psConstraint st1)) root
@@ -390,7 +401,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                             }
                 st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
 
-            case runPresolutionM st0 (instantiateScheme body [(bound, fresh)]) of
+            case runPresolutionM defaultTraceConfig st0 (instantiateScheme body [(bound, fresh)]) of
                 Left err -> expectationFailure $ "Instantiation failed: " ++ show err
                 Right (root, st1) -> do
                     arrow <- expectArrow (cNodes (psConstraint st1)) root
@@ -428,7 +439,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         }
                 st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 12 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
 
-            case runPresolutionM st0 (instantiateScheme topBody [(outer, freshOuter), (innerVar, freshInner)]) of
+            case runPresolutionM defaultTraceConfig st0 (instantiateScheme topBody [(outer, freshOuter), (innerVar, freshInner)]) of
                 Left err -> expectationFailure $ "Instantiation failed: " ++ show err
                 Right (root, st1) -> do
                     let nodes' = cNodes (psConstraint st1)
@@ -473,7 +484,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         }
                 st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
 
-            case runPresolutionM st0 (instantiateScheme outerBody [(bound, fresh)]) of
+            case runPresolutionM defaultTraceConfig st0 (instantiateScheme outerBody [(bound, fresh)]) of
                 Left err -> expectationFailure $ "Instantiation failed: " ++ show err
                 Right (root, st1) -> do
                     let nodes' = cNodes (psConstraint st1)
@@ -508,7 +519,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 constraint = rootedConstraint $ emptyConstraint { cNodes = nodes }
                 st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
 
-            case runPresolutionM st0 (instantiateScheme body [(bound, fresh)]) of
+            case runPresolutionM defaultTraceConfig st0 (instantiateScheme body [(bound, fresh)]) of
                 Left (NodeLookupFailed nid) -> nid `shouldBe` body
                 Left other -> expectationFailure $ "Unexpected error: " ++ show other
                 Right _ -> expectationFailure "Expected failure due to missing node"
@@ -554,7 +565,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
-            case runPresolutionM st0 (processInstEdge edge) of
+            case runPresolutionM defaultTraceConfig st0 (processInstEdge edge) of
                 Left err -> expectationFailure ("processInstEdge failed: " ++ show err)
                 Right (_, st1) -> do
                     let traces = psEdgeTraces st1
@@ -623,7 +634,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
-            case runPresolutionM st0 (processInstEdge edge0 >> processInstEdge edge1) of
+            case runPresolutionM defaultTraceConfig st0 (processInstEdge edge0 >> processInstEdge edge1) of
                 Left err -> expectationFailure ("processInstEdge failed: " ++ show err)
                 Right (_, st1) -> do
                     let traces = psEdgeTraces st1
@@ -697,7 +708,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
-            case runPresolutionM st0 (processInstEdge edge) of
+            case runPresolutionM defaultTraceConfig st0 (processInstEdge edge) of
                 Left err -> expectationFailure ("processInstEdge failed: " ++ show err)
                 Right (_, st1) -> do
                     let traces = psEdgeTraces st1
@@ -773,7 +784,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         , arDepGraph = undefined
                         }
 
-            case computePresolution acyclicityRes constraint of
+            case computePresolution defaultTraceConfig acyclicityRes constraint of
                 Left err -> expectationFailure ("Presolution failed: " ++ show err)
                 Right PresolutionResult{ prConstraint = c', prEdgeTraces = traces } -> do
                     tr <- case IntMap.lookup 0 traces of
@@ -843,7 +854,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
-            case runPresolutionM st0 (processInstEdge edge) of
+            case runPresolutionM defaultTraceConfig st0 (processInstEdge edge) of
                 Left err -> expectationFailure ("processInstEdge failed: " ++ show err)
                 Right (_, st1) -> do
                     case IntMap.lookup 0 (psEdgeWitnesses st1) of
@@ -924,7 +935,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         IntMap.empty
                 wants op = op == OpMerge b a
 
-            case runPresolutionM st0 (processInstEdge edge) of
+            case runPresolutionM defaultTraceConfig st0 (processInstEdge edge) of
                 Left err -> expectationFailure ("processInstEdge failed: " ++ show err)
                 Right (_, st1) -> do
                     case IntMap.lookup 0 (psEdgeWitnesses st1) of
@@ -975,7 +986,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         }
                 acyclicityRes = AcyclicityResult { arSortedEdges = [edge], arDepGraph = undefined }
 
-            case computePresolution acyclicityRes constraint of
+            case computePresolution defaultTraceConfig acyclicityRes constraint of
                 Left err -> expectationFailure ("computePresolution failed: " ++ show err)
                 Right pr -> do
                     tr <- case IntMap.lookup 0 (prEdgeTraces pr) of
@@ -1056,7 +1067,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                     OpRaiseMerge n m -> n == b && m == y
                     _ -> False
 
-            case runPresolutionM st0 (processInstEdge edge) of
+            case runPresolutionM defaultTraceConfig st0 (processInstEdge edge) of
                 Left err -> expectationFailure ("processInstEdge failed: " ++ show err)
                 Right (_, st1) -> do
                     case IntMap.lookup 0 (psEdgeWitnesses st1) of
@@ -1111,7 +1122,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         , cBindParents = bindParents
                         }
 
-            case computePresolution acyclicityRes constraint of
+            case computePresolution defaultTraceConfig acyclicityRes constraint of
                 Left err -> expectationFailure ("computePresolution failed: " ++ show err)
                 Right pr -> do
                     -- Extract binder-meta and instantiation-arg from the edge trace.
@@ -1200,7 +1211,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                     OpWeaken n -> n == a
                     _ -> False
 
-            case runPresolutionM st0 (processInstEdge edge) of
+            case runPresolutionM defaultTraceConfig st0 (processInstEdge edge) of
                 Left err -> expectationFailure ("processInstEdge failed: " ++ show err)
                 Right (_, st1) -> do
                     ew <- case IntMap.lookup 0 (psEdgeWitnesses st1) of
@@ -1238,7 +1249,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                     ExpCompose
                         (ExpForall (ForallSpec 1 [Nothing] NE.:| []) NE.:| [ExpInstantiate [argId]])
 
-            case runPresolutionM st0 (witnessFromExpansion expNodeId (nodeAt nodes 0) expansion) of
+            case runPresolutionM defaultTraceConfig st0 (witnessFromExpansion expNodeId (nodeAt nodes 0) expansion) of
                 Left err -> expectationFailure ("witnessFromExpansion failed: " ++ show err)
                 Right (steps, _) ->
                     steps `shouldBe`
@@ -1262,7 +1273,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 2 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
                 expansion = ExpForall (ForallSpec 2 [Nothing, Nothing] NE.:| [])
 
-            case runPresolutionM st0 (witnessFromExpansion expNodeId (nodeAt nodes 0) expansion) of
+            case runPresolutionM defaultTraceConfig st0 (witnessFromExpansion expNodeId (nodeAt nodes 0) expansion) of
                 Left err -> expectationFailure ("witnessFromExpansion failed: " ++ show err)
                 Right (steps, _) ->
                     steps `shouldBe` [StepIntro, StepIntro]
@@ -1692,7 +1703,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         , arDepGraph = undefined -- Not used by computePresolution currently
                         }
 
-            case computePresolution acyclicityRes constraint of
+            case computePresolution defaultTraceConfig acyclicityRes constraint of
                 Left err -> expectationFailure $ "Presolution failed: " ++ show err
                 Right PresolutionResult{ prEdgeExpansions = exps } ->
                     case IntMap.lookup 0 exps of
@@ -1737,7 +1748,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         , arDepGraph = undefined
                         }
 
-            case computePresolution acyclicityRes constraint of
+            case computePresolution defaultTraceConfig acyclicityRes constraint of
                 Left err -> expectationFailure $ "Presolution failed: " ++ show err
                 Right PresolutionResult{ prConstraint = c', prEdgeExpansions = exps } -> do
                     case IntMap.lookup 0 exps of
@@ -1788,7 +1799,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         }
                 acyclicityRes = AcyclicityResult { arSortedEdges = [edge], arDepGraph = undefined }
 
-            case computePresolution acyclicityRes constraint of
+            case computePresolution defaultTraceConfig acyclicityRes constraint of
                 Left err -> expectationFailure $ "Presolution failed: " ++ show err
                 Right PresolutionResult{ prEdgeExpansions = exps } -> do
                     case IntMap.lookup 0 exps of
@@ -1822,7 +1833,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         }
                 acyclicityRes = AcyclicityResult { arSortedEdges = [edge], arDepGraph = undefined }
 
-            case computePresolution acyclicityRes constraint of
+            case computePresolution defaultTraceConfig acyclicityRes constraint of
                 Left err -> expectationFailure $ "Presolution failed: " ++ show err
                 Right PresolutionResult{ prEdgeExpansions = exps, prConstraint = c' } -> do
                     case IntMap.lookup 0 exps of
@@ -1874,7 +1885,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         }
                 acyclicityRes = AcyclicityResult { arSortedEdges = [edge], arDepGraph = undefined }
 
-            case computePresolution acyclicityRes constraint of
+            case computePresolution defaultTraceConfig acyclicityRes constraint of
                 Left OccursCheckPresolution{} -> return ()
                 Left other -> expectationFailure $ "Unexpected error: " ++ show other
                 Right _ -> expectationFailure "Expected presolution occurs-check failure"
@@ -1909,7 +1920,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         }
                 acyclicityRes = AcyclicityResult { arSortedEdges = [edge], arDepGraph = undefined }
 
-            case computePresolution acyclicityRes constraint of
+            case computePresolution defaultTraceConfig acyclicityRes constraint of
                 Left err -> expectationFailure $ "Presolution failed: " ++ show err
                 Right PresolutionResult{ prEdgeExpansions = exps } ->
                     case IntMap.lookup 0 exps of
@@ -1943,7 +1954,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         }
                 acyclicityRes = AcyclicityResult { arSortedEdges = [edge], arDepGraph = undefined }
 
-            case computePresolution acyclicityRes constraint of
+            case computePresolution defaultTraceConfig acyclicityRes constraint of
                 Left other -> expectationFailure $ "Unexpected error: " ++ show other
                 Right _ -> pure ()
 
@@ -1954,7 +1965,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 n2 = NodeId 2
                 msg = "test mismatch"
 
-            case runPresolutionM st0 (throwError (UnmatchableTypes n1 n2 msg)) of
+            case runPresolutionM defaultTraceConfig st0 (throwError (UnmatchableTypes n1 n2 msg)) of
                 Left (UnmatchableTypes n1' n2' msg') -> do
                     n1' `shouldBe` n1
                     n2' `shouldBe` n2
@@ -1966,7 +1977,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
             let st0 = PresolutionState emptyConstraint (Presolution IntMap.empty) IntMap.empty 0 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
                 v = ExpVarId 123
 
-            case runPresolutionM st0 (throwError (UnresolvedExpVar v)) of
+            case runPresolutionM defaultTraceConfig st0 (throwError (UnresolvedExpVar v)) of
                 Left (UnresolvedExpVar v') -> v' `shouldBe` v
                 Left err -> expectationFailure $ "Expected UnresolvedExpVar, got " ++ show err
                 Right _ -> expectationFailure "Expected failure"
@@ -1975,7 +1986,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
             let st0 = PresolutionState emptyConstraint (Presolution IntMap.empty) IntMap.empty 0 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
                 msg = "test internal error"
 
-            case runPresolutionM st0 (throwError (InternalError msg)) of
+            case runPresolutionM defaultTraceConfig st0 (throwError (InternalError msg)) of
                 Left (InternalError msg') -> msg' `shouldBe` msg
                 Left err -> expectationFailure $ "Expected InternalError, got " ++ show err
                 Right _ -> expectationFailure "Expected failure"
@@ -1989,7 +2000,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
             -- a scenario where processInstEdge hits this case.
             -- Using runPresolutionM to call mergeExpansions directly is cleaner.
 
-            case runPresolutionM st0 (mergeExpansions (ExpVarId 0) exp1 exp2) of
+            case runPresolutionM defaultTraceConfig st0 (mergeExpansions (ExpVarId 0) exp1 exp2) of
                 Left (ArityMismatch ctx expected actual) -> do
                     ctx `shouldBe` "ExpInstantiate merge"
                     expected `shouldBe` 1
@@ -2009,7 +2020,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 2 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
                 expansion = ExpInstantiate [NodeId 2] -- dummy arg
 
-            case runPresolutionM st0 (applyExpansion expansion (nodeAt nodes 0)) of
+            case runPresolutionM defaultTraceConfig st0 (applyExpansion expansion (nodeAt nodes 0)) of
                 Left (InstantiateOnNonForall nid) -> nid `shouldBe` bodyId
                 Left err -> expectationFailure $ "Expected InstantiateOnNonForall, got " ++ show err
                 Right _ -> expectationFailure "Expected failure"
@@ -2032,7 +2043,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 -- Forall has 1 bound var, but we provide 2 args
                 expansion = ExpInstantiate [NodeId 3, NodeId 4]
 
-            case runPresolutionM st0 (applyExpansion expansion (nodeAt nodes 0)) of
+            case runPresolutionM defaultTraceConfig st0 (applyExpansion expansion (nodeAt nodes 0)) of
                 Left (ArityMismatch ctx expected actual) -> do
                     ctx `shouldBe` "applyExpansion"
                     expected `shouldBe` 1
@@ -2052,7 +2063,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 -- This will trigger the ExpCompose branch in applyExpansionOverNode
                 expansion = ExpCompose (ExpForall (ForallSpec 0 [] NE.:| []) NE.:| [ExpIdentity])
 
-            case runPresolutionM st0 (applyExpansion expansion (nodeAt nodes 0)) of
+            case runPresolutionM defaultTraceConfig st0 (applyExpansion expansion (nodeAt nodes 0)) of
                 Right (resId, _) -> do
                     -- Should wrap in Forall and then identity
                     -- TyBase -> TyForall(TyBase)
@@ -2097,7 +2108,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         }
                 expansion = ExpForall (forallSpec NE.:| [])
 
-            case runPresolutionM st0 (applyExpansion expansion (nodeAt nodes (getNodeId expNodeId))) of
+            case runPresolutionM defaultTraceConfig st0 (applyExpansion expansion (nodeAt nodes (getNodeId expNodeId))) of
                 Left err -> expectationFailure $ "Expansion failed: " ++ show err
                 Right (forallId, st1) -> do
                     let c1 = psConstraint st1
@@ -2156,7 +2167,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         , arDepGraph = undefined
                         }
 
-            case computePresolution acyclicityRes constraint of
+            case computePresolution defaultTraceConfig acyclicityRes constraint of
                 Left err -> expectationFailure $ "Presolution failed: " ++ show err
                 Right PresolutionResult{ prEdgeExpansions = exps } -> do
                     case (IntMap.lookup 0 exps, IntMap.lookup 1 exps) of
@@ -2187,7 +2198,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         }
                 acyclicityRes = AcyclicityResult { arSortedEdges = [edge1, edge2], arDepGraph = undefined }
 
-            case computePresolution acyclicityRes constraint of
+            case computePresolution defaultTraceConfig acyclicityRes constraint of
                 Left err -> expectationFailure $ "Presolution failed: " ++ show err
                 Right PresolutionResult{ prEdgeExpansions = exps, prConstraint = c' } -> do
                     case (IntMap.lookup 0 exps, IntMap.lookup 1 exps) of
@@ -2221,7 +2232,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 isExp TyExp{} = True
                 isExp _ = False
 
-            case computePresolution acyclicityRes constraint of
+            case computePresolution defaultTraceConfig acyclicityRes constraint of
                 Left err -> expectationFailure $ "Presolution failed: " ++ show err
                 Right PresolutionResult{ prConstraint = c' } -> do
                     any isExp (nodeMapElems (cNodes c')) `shouldBe` False
@@ -2265,7 +2276,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
-            case runPresolutionM st0 (unifyAcyclicRawWithRaiseTrace n m) of
+            case runPresolutionM defaultTraceConfig st0 (unifyAcyclicRawWithRaiseTrace n m) of
                 Left err ->
                     expectationFailure ("unifyAcyclicRawWithRaiseTrace failed: " ++ show err)
                 Right (trace, st1) -> do
@@ -2325,7 +2336,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         IntMap.empty
                 interior = IntSet.fromList [getNodeId a, getNodeId b]
 
-            case runPresolutionM st0 (runEdgeUnifyForTest rootArrow interior a c) of
+            case runPresolutionM defaultTraceConfig st0 (runEdgeUnifyForTest rootArrow interior a c) of
                 Left err ->
                     expectationFailure ("runEdgeUnifyForTest failed: " ++ show err)
                 Right (ops, _st1) -> do
@@ -2368,7 +2379,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
-            case runPresolutionM st0 (processInstEdge edge) of
+            case runPresolutionM defaultTraceConfig st0 (processInstEdge edge) of
                 Left (BindingTreeError _) -> pure ()
                 Left err -> expectationFailure ("Expected BindingTreeError, got: " ++ show err)
                 Right _ -> expectationFailure "Expected BindingTreeError"
@@ -2423,7 +2434,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
-            case runPresolutionM st0 (processInstEdge edge) of
+            case runPresolutionM defaultTraceConfig st0 (processInstEdge edge) of
                 Left err -> expectationFailure ("processInstEdge failed: " ++ show err)
                 Right (_, st1) -> do
                     -- Verify the edge trace contains the interior nodes
@@ -2491,7 +2502,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                     OpRaise n -> n == innerArrow
                     _ -> False
 
-            case runPresolutionM st0 (processInstEdge edge) of
+            case runPresolutionM defaultTraceConfig st0 (processInstEdge edge) of
                 Left err -> expectationFailure ("processInstEdge failed: " ++ show err)
                 Right (_, st1) -> do
                     case IntMap.lookup 0 (psEdgeWitnesses st1) of
@@ -2566,7 +2577,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                     OpRaise n -> n == nid
                     _ -> False
 
-            case runPresolutionM st0 (processInstEdge edge) of
+            case runPresolutionM defaultTraceConfig st0 (processInstEdge edge) of
                 Left err -> expectationFailure ("processInstEdge failed: " ++ show err)
                 Right (_, st1) -> do
                     tr <- case IntMap.lookup 0 (psEdgeTraces st1) of
@@ -2629,12 +2640,12 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                 interior = IntSet.fromList [getNodeId a]
 
             -- Sanity: both sides really do get raised by harmonization.
-            case runPresolutionM st0 (unifyAcyclicRawWithRaiseTrace a b) of
+            case runPresolutionM defaultTraceConfig st0 (unifyAcyclicRawWithRaiseTrace a b) of
                 Left err -> expectationFailure ("unifyAcyclicRawWithRaiseTrace failed: " ++ show err)
                 Right (trace, _st1) ->
                     trace `shouldBe` [a, b]
 
-            case runPresolutionM st0 (runEdgeUnifyForTest r interior a b) of
+            case runPresolutionM defaultTraceConfig st0 (runEdgeUnifyForTest r interior a b) of
                 Left err -> expectationFailure ("runEdgeUnifyForTest failed: " ++ show err)
                 Right (ops, _st1) -> do
                     ops `shouldSatisfy` elem (OpRaise a)
@@ -2691,7 +2702,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
-            case runPresolutionM st0 (processInstEdge edge) of
+            case runPresolutionM defaultTraceConfig st0 (processInstEdge edge) of
                 Left err -> expectationFailure ("processInstEdge failed: " ++ show err)
                 Right (_, st1) -> do
                     let finalConstraint = psConstraint st1
@@ -2779,7 +2790,7 @@ spec = describe "Phase 4 — Principal Presolution" $ do
                         leftVar = NodeId leftVarId
                         rightVar = NodeId rightVarId
 
-                    case runPresolutionM st0 (runEdgeUnifyForTest rootArrow interior leftVar rightVar) of
+                    case runPresolutionM defaultTraceConfig st0 (runEdgeUnifyForTest rootArrow interior leftVar rightVar) of
                         Left err ->
                             expectationFailure ("runEdgeUnifyForTest failed: " ++ show err)
                         Right (ops, st1) -> do

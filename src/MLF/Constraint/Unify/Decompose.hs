@@ -16,7 +16,7 @@ module MLF.Constraint.Unify.Decompose (
     decomposeUnifyChildren
 ) where
 
-import MLF.Constraint.Types (BaseTy, ExpVarId, TyNode(..), UnifyEdge(..))
+import MLF.Constraint.Types.Graph (BaseTy, ExpVarId, TyNode(..), UnifyEdge(..))
 
 -- | Structural mismatch reasons for a single head-constructor decomposition.
 data DecomposeMismatch

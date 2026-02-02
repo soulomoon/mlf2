@@ -6,7 +6,7 @@ module MLF.Constraint.BindingUtil (
 
 import Data.Maybe (listToMaybe)
 
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
 import qualified MLF.Binding.Tree as Binding
 import MLF.Util.ElabError (ElabError(..))
 

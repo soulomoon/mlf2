@@ -20,7 +20,7 @@ name:               mlf2
 -- PVP summary:     +-+------- breaking API changes
 --                  | | +----- non-breaking API additions
 --                  | | | +--- code changes with no API change
-version:            0.1.0.0
+version:            0.2.0.0
 
 -- A short (one-line) description of the package.
 -- synopsis:
@@ -61,6 +61,10 @@ library mlf2-internal
 
     -- Modules exported by the internal library (for tests / internal tooling).
     exposed-modules:  MLF.Constraint.Types,
+                      MLF.Constraint.Types.Graph,
+                      MLF.Constraint.Types.Witness,
+                      MLF.Constraint.Types.Presolution,
+                      MLF.Constraint.Canonicalizer,
                       MLF.Frontend.Syntax,
                       MLF.Frontend.ConstraintGen,
                       MLF.Constraint.Normalize,
@@ -70,6 +74,8 @@ library mlf2-internal
                       MLF.Constraint.Presolution.Witness,
                       MLF.Constraint.Solve,
                       MLF.Elab.Pipeline,
+                      MLF.Elab.Run.Provenance,
+                      MLF.Elab.Run.Util,
                       MLF.Binding.Tree,
                       MLF.Binding.Validation,
                       MLF.Binding.Canonicalization,
@@ -83,7 +89,8 @@ library mlf2-internal
                       MLF.Constraint.NodeAccess,
                       MLF.Util.UnionFind
 
-    other-modules:    MLF.Constraint.Presolution.Base,
+    other-modules:    MLF.Constraint.Types.Ids,
+                      MLF.Constraint.Presolution.Base,
                       MLF.Constraint.Presolution.Core,
                       MLF.Constraint.Presolution.Copy,
                       MLF.Constraint.Presolution.Driver,
@@ -98,6 +105,13 @@ library mlf2-internal
                       MLF.Constraint.Presolution.Rewrite,
                       MLF.Constraint.Presolution.Validation,
                       MLF.Constraint.Presolution.Plan.BinderPlan,
+                      MLF.Constraint.Presolution.Plan.BinderPlan.Alias,
+                      MLF.Constraint.Presolution.Plan.BinderPlan.Build,
+                      MLF.Constraint.Presolution.Plan.BinderPlan.Order,
+                      MLF.Constraint.Presolution.Plan.BinderPlan.Predicate,
+                      MLF.Constraint.Presolution.Plan.BinderPlan.Selection,
+                      MLF.Constraint.Presolution.Plan.BinderPlan.Types,
+                      MLF.Constraint.Presolution.Plan.BinderPlan.Util,
                       MLF.Constraint.Presolution.Plan.Context,
                       MLF.Constraint.Presolution.Plan.Finalize,
                       MLF.Constraint.Presolution.Plan.Normalize,
@@ -127,17 +141,30 @@ library mlf2-internal
                       MLF.Elab.Generalize,
                       MLF.Elab.Phi,
                       MLF.Elab.Phi.Context,
+                      MLF.Elab.Phi.Binder,
+                      MLF.Elab.Phi.Env,
+                      MLF.Elab.Phi.Omega,
+                      MLF.Elab.Phi.Translate,
+                      MLF.Elab.PipelineConfig,
+                      MLF.Elab.PipelineError,
                       MLF.Elab.Reduce,
                       MLF.Elab.Run,
                       MLF.Elab.Run.Annotation,
                       MLF.Elab.Run.Debug,
                       MLF.Elab.Run.Generalize,
+                      MLF.Elab.Run.Generalize.Common,
+                      MLF.Elab.Run.Generalize.Constraint,
+                      MLF.Elab.Run.Generalize.Finalize,
+                      MLF.Elab.Run.Generalize.Phase1,
+                      MLF.Elab.Run.Generalize.Phase2,
+                      MLF.Elab.Run.Generalize.Phase3,
+                      MLF.Elab.Run.Generalize.Phase4,
+                      MLF.Elab.Run.Generalize.Types,
                       MLF.Elab.Run.Instantiation,
                       MLF.Elab.Run.Pipeline,
                       MLF.Elab.Run.ResultType,
                       MLF.Elab.Run.Scope,
                       MLF.Elab.Run.TypeOps,
-                      MLF.Elab.Run.Util,
                       MLF.Elab.Sigma,
                       MLF.Elab.TypeCheck,
                       MLF.Frontend.ConstraintGen.Types,
@@ -226,6 +253,7 @@ test-suite mlf2-test
                       ElaborationSpec,
                       BindingSpec,
                       GraphOpsSpec,
+                      CanonicalizerSpec,
                       SpecUtil,
 
     -- LANGUAGE extensions used by modules in this package.

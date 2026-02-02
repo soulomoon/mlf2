@@ -26,7 +26,13 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.List (sortBy)
 
-import MLF.Constraint.Types (NodeId(..), NodeMap, TyNode, lookupNodeIn, structuralChildren)
+import MLF.Constraint.Types.Graph
+    ( NodeId(..)
+    , NodeMap
+    , TyNode
+    , lookupNodeIn
+    , structuralChildren
+    )
 
 -- | Errors that can occur when comparing nodes by order key.
 data OrderKeyError

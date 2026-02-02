@@ -9,7 +9,8 @@ import qualified Data.Set as Set
 import Test.Hspec
 import Test.QuickCheck
 
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Witness (BoundRef(..), ForallSpec(..))
 import MLF.Binding.Tree
 import qualified MLF.Binding.Adjustment as BindingAdjustment
 import qualified MLF.Binding.GraphOps as GraphOps

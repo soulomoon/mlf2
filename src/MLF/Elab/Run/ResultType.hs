@@ -17,11 +17,9 @@ import MLF.Constraint.Presolution
     )
 import MLF.Constraint.Presolution.Base (CopyMapping(..), lookupCopy)
 import MLF.Constraint.Solve (SolveResult(..), frWith)
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
     ( Constraint
     , EdgeId(..)
-    , EdgeWitness(..)
-    , Expansion(..)
     , GenNode(..)
     , NodeId(..)
     , NodeRef(..)
@@ -30,7 +28,6 @@ import MLF.Constraint.Types
     , cGenNodes
     , cLetEdges
     , cNodes
-    , ewRight
     , fromListNode
     , getEdgeId
     , getNodeId
@@ -41,6 +38,7 @@ import MLF.Constraint.Types
     , nodeRefFromKey
     , toListNode
     )
+import MLF.Constraint.Types.Witness (EdgeWitness(..), Expansion(..))
 import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Elab.Generalize (GaBindParents(..))
@@ -60,7 +58,7 @@ import MLF.Reify.TypeOps
     )
 import MLF.Elab.Run.Annotation (adjustAnnotationInst, annNode)
 import MLF.Elab.Run.Debug (debugGaScope, debugGaScopeEnabled, debugWhenCondM, debugWhenM)
-import MLF.Elab.Run.Util (firstShow)
+import MLF.Util.Trace (TraceConfig)
 import MLF.Elab.Run.Generalize (generalizeAtWithBuilder)
 import MLF.Elab.Run.Instantiation (inferInstAppArgsFromScheme, instInsideFromArgsWithBounds)
 import MLF.Elab.Run.Scope
@@ -87,6 +85,7 @@ data ResultTypeContext = ResultTypeContext
     , rtcPlanBuilder :: PresolutionPlanBuilder
     , rtcBaseConstraint :: Constraint
     , rtcRedirects :: IntMap.IntMap NodeId
+    , rtcTraceConfig :: TraceConfig
     }
 
 -- | Generalize with plan helper
@@ -163,7 +162,7 @@ computeResultTypeFromAnn
     -> AnnExpr      -- ^ innerPre (pre-redirect)
     -> NodeId       -- ^ annNodeId
     -> EdgeId       -- ^ eid
-    -> Either String ElabType
+    -> Either ElabError ElabType
 computeResultTypeFromAnn ctx inner innerPre annNodeId eid = do
     let canonical = rtcCanonical ctx
         edgeWitnesses = rtcEdgeWitnesses ctx
@@ -173,12 +172,13 @@ computeResultTypeFromAnn ctx inner innerPre annNodeId eid = do
         planBuilder = rtcPlanBuilder ctx
         c1 = rtcBaseConstraint ctx
         redirects = rtcRedirects ctx
+        traceCfg = rtcTraceConfig ctx
         generalizeAtWith = generalizeAtWithBuilder planBuilder
 
     let rootPre = annNode inner
         rootC = canonical rootPre
     ew <- case IntMap.lookup (getEdgeId eid) edgeWitnesses of
-        Nothing -> Left "missing edge witness for annotation"
+        Nothing -> Left (ValidationFailed ["missing edge witness for annotation"])
         Just ew' -> Right ew'
     let mTrace = IntMap.lookup (getEdgeId eid) edgeTraces
     let targetC = schemeBodyTarget solvedForGen rootC
@@ -187,13 +187,13 @@ computeResultTypeFromAnn ctx inner innerPre annNodeId eid = do
             let solvedToBase = gaSolvedToBase bindParentsGa
             in IntMap.findWithDefault scopeRootNodePre0 (getNodeId targetC) solvedToBase
         scopeRootNodePost = annNode inner
-    scopeRootPre <- firstShow (resolveCanonicalScope c1 solvedForGen redirects scopeRootNodePre)
+    scopeRootPre <- bindingToElab (resolveCanonicalScope c1 solvedForGen redirects scopeRootNodePre)
     let scopeRootPost =
             case bindingScopeRef (srConstraint solvedForGen) scopeRootNodePost of
                 Right ref -> canonicalizeScopeRef solvedForGen redirects ref
                 Left _ -> scopeRootPre
         scopeRoot = scopeRootPre
-    debugWhenCondM (scopeRootPre /= scopeRootPost)
+    debugWhenCondM traceCfg (scopeRootPre /= scopeRootPost)
         ("runPipelineElab: ga' mismatch (AAnn) pre="
             ++ show scopeRootPre
             ++ " post="
@@ -203,14 +203,14 @@ computeResultTypeFromAnn ctx inner innerPre annNodeId eid = do
             ++ " postNode="
             ++ show scopeRootNodePost
         )
-    (sch0, subst0) <- firstShow
-        (generalizeWithPlan planBuilder bindParentsGa solvedForGen scopeRoot targetC)
+    (sch0, subst0) <-
+        generalizeWithPlan planBuilder bindParentsGa solvedForGen scopeRoot targetC
     let sch = sch0
         subst = subst0
         srcTy = schemeToType sch
         schemeInfo = SchemeInfo { siScheme = sch, siSubst = subst }
-    phi0 <- firstShow (phiFromEdgeWitnessWithTrace generalizeAtWith solvedForGen (Just bindParentsGa) (Just schemeInfo) mTrace ew)
-    namedSetSolved <- firstShow (namedNodes solvedForGen)
+    phi0 <- phiFromEdgeWitnessWithTrace traceCfg generalizeAtWith solvedForGen (Just bindParentsGa) (Just schemeInfo) mTrace ew
+    namedSetSolved <- namedNodes solvedForGen
     let annBound = VarStore.lookupVarBound (srConstraint solvedForGen) annNodeId
         annTargetNode0 =
             case annBound of
@@ -303,7 +303,7 @@ computeResultTypeFromAnn ctx inner innerPre annNodeId eid = do
                             case targetTyBaseInlineM of
                                 Just ty -> Just (normalizeTarget ty)
                                 Nothing -> targetTyMatchNormM
-    debugWhenM
+    debugWhenM traceCfg
         ("runPipelineElab: ann explicit="
             ++ show annotationExplicit
             ++ " annTargetBase="
@@ -352,7 +352,7 @@ computeResultTypeFromAnn ctx inner innerPre annNodeId eid = do
                             if targetHasBoundForall
                                 then phi0
                                 else adjustAnnotationInst phi0
-    debugWhenM
+    debugWhenM traceCfg
         ("runPipelineElab: ann targetTy="
             ++ show targetTyMatchM
             ++ " targetTyRaw="
@@ -362,7 +362,7 @@ computeResultTypeFromAnn ctx inner innerPre annNodeId eid = do
             ++ " phiFromTarget="
             ++ show phiFromTargetArgs
         )
-    debugWhenM
+    debugWhenM traceCfg
         ("runPipelineElab: ann srcTy="
             ++ pretty srcTy
             ++ " phi0="
@@ -372,17 +372,19 @@ computeResultTypeFromAnn ctx inner innerPre annNodeId eid = do
         )
     case phiFromTarget of
         Just _ -> do
-            ty0 <- firstShow (applyInstantiation srcTy phi)
+            ty0 <- applyInstantiation srcTy phi
             pure (simplifyAnnotationType ty0)
         Nothing ->
             if targetHasBoundForall
                 then do
-                    ty0 <- firstShow (applyInstantiation srcTy phi)
+                    ty0 <- applyInstantiation srcTy phi
                     pure (simplifyAnnotationType ty0)
                 else do
-                    annScopeRoot <- firstShow (resolveCanonicalScope (srConstraint solvedForGen) solvedForGen redirects annTargetNode)
-                    (annSch, _substAnn) <- firstShow
-                        (generalizeWithPlan planBuilder bindParentsGa solvedForGen annScopeRoot annTargetNode)
+                    annScopeRoot <-
+                        bindingToElab
+                            (resolveCanonicalScope (srConstraint solvedForGen) solvedForGen redirects annTargetNode)
+                    (annSch, _substAnn) <-
+                        generalizeWithPlan planBuilder bindParentsGa solvedForGen annScopeRoot annTargetNode
                     let annTy = schemeToType annSch
                     pure (simplifyAnnotationType annTy)
 
@@ -409,7 +411,7 @@ computeResultTypeFallback
     :: ResultTypeContext
     -> AnnExpr      -- ^ annCanon (post-redirect)
     -> AnnExpr      -- ^ ann (pre-redirect)
-    -> Either String ElabType
+    -> Either ElabError ElabType
 computeResultTypeFallback ctx annCanon ann = do
     let canonical = rtcCanonical ctx
         edgeWitnesses = rtcEdgeWitnesses ctx
@@ -422,6 +424,7 @@ computeResultTypeFallback ctx annCanon ann = do
         planBuilder = rtcPlanBuilder ctx
         c1 = rtcBaseConstraint ctx
         redirects = rtcRedirects ctx
+        traceCfg = rtcTraceConfig ctx
         generalizeAtWith = generalizeAtWithBuilder planBuilder
 
     let edgeTraceCounts =
@@ -511,7 +514,7 @@ computeResultTypeFallback ctx annCanon ann = do
                 instAppBasesFromWitness funEid =
                     case IntMap.lookup (getEdgeId funEid) edgeWitnesses of
                         Just ew ->
-                            case phiFromEdgeWitnessWithTrace generalizeAtWith solved (Just bindParentsGa) Nothing (IntMap.lookup (getEdgeId funEid) edgeTraces) ew of
+                            case phiFromEdgeWitnessWithTrace traceCfg generalizeAtWith solved (Just bindParentsGa) Nothing (IntMap.lookup (getEdgeId funEid) edgeTraces) ew of
                                 Right inst ->
                                     IntSet.fromList
                                         [ getNodeId nid
@@ -657,7 +660,7 @@ computeResultTypeFallback ctx annCanon ann = do
                                 [baseKey] -> Just (NodeId baseKey)
                                 _ -> Nothing
                         _ -> Nothing
-            debugWhenM
+            debugWhenM traceCfg
                 (let showBase tr =
                         let bases =
                                 [ resolveBaseBoundForInstConstraint constraint canonical argNode
@@ -728,13 +731,13 @@ computeResultTypeFallback ctx annCanon ann = do
                                 constraint' = (srConstraint resFinal) { cNodes = nodes' }
                             in resFinal { srConstraint = constraint' }
             let scopeRootNodePre = rootForTypePre
-            scopeRootPre <- firstShow (resolveCanonicalScope c1 resFinalBounded redirects scopeRootNodePre)
+            scopeRootPre <- bindingToElab (resolveCanonicalScope c1 resFinalBounded redirects scopeRootNodePre)
             let scopeRootPost =
                     case bindingScopeRef (srConstraint resFinalBounded) rootC of
                         Right ref -> canonicalizeScopeRef resFinalBounded redirects ref
                         Left _ -> scopeRootPre
                 scopeRoot = scopeRootPre
-            debugWhenCondM (scopeRootPre /= scopeRootPost)
+            debugWhenCondM traceCfg (scopeRootPre /= scopeRootPost)
                 ("runPipelineElab: ga' mismatch pre="
                     ++ show scopeRootPre
                     ++ " post="
@@ -792,7 +795,7 @@ computeResultTypeFallback ctx annCanon ann = do
                                                 TypeRef _ -> True
                                         Nothing -> False
                                 reportHit label =
-                                    if debugGaScopeEnabled
+                                    if debugGaScopeEnabled traceCfg
                                         then
                                             let owner = IntMap.lookup key schemeRootOwnerFinal
                                                 nodeTag =
@@ -804,7 +807,7 @@ computeResultTypeFallback ctx annCanon ann = do
                                                         Just TyBase{} -> "base"
                                                         Just TyBottom{} -> "bottom"
                                                         Nothing -> "missing"
-                                            in debugGaScope
+                                            in debugGaScope traceCfg
                                                 ("runPipelineElab: boundHasForall hit="
                                                     ++ label
                                                     ++ " node="
@@ -878,9 +881,9 @@ computeResultTypeFallback ctx annCanon ann = do
                                     , Just bnd <- [VarStore.lookupVarBound (srConstraint resFinalBounded) (canonicalFinal child)]
                                     ]
                                 debugCandidates =
-                                    if debugGaScopeEnabled
+                                    if debugGaScopeEnabled traceCfg
                                         then
-                                            debugGaScope
+                                            debugGaScope traceCfg
                                                 ("runPipelineElab: boundVarTargetRoot="
                                                     ++ show boundVarTargetRoot
                                                     ++ " candidates="
@@ -940,9 +943,9 @@ computeResultTypeFallback ctx annCanon ann = do
                                 baseConstraint' = baseConstraint { cNodes = nodes' }
                             in bindParentsGa { gaBaseConstraint = baseConstraint' }
                         Nothing -> bindParentsGa
-            (sch, _subst) <- firstShow
-                (generalizeWithPlan planBuilder bindParentsGaFinal resFinalBounded scopeRoot targetC)
-            debugWhenM
+            (sch, _subst) <-
+                generalizeWithPlan planBuilder bindParentsGaFinal resFinalBounded scopeRoot targetC
+            debugWhenM traceCfg
                 ("runPipelineElab: final scheme="
                     ++ pretty sch
                     ++ " keepTargetBase="

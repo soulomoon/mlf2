@@ -10,6 +10,7 @@ module SpecUtil (
     rootedConstraint,
     bindParentsFromPairs,
     collectVarNodes,
+    defaultTraceConfig,
     expectRight,
     requireRight,
     inferBindParents,
@@ -25,10 +26,30 @@ import GHC.Stack (HasCallStack)
 import Test.Hspec (Expectation, expectationFailure)
 
 import qualified MLF.Binding.Tree as Binding
-import MLF.Constraint.Types (BindFlag(..), BindParents, Constraint(..), GenNode(..), GenNodeId(..), GenNodeMap, NodeId(..), NodeMap(..), TyNode(..), fromListGen, fromListNode, genRef, getNodeId, insertGen, nodeRefKey, structuralChildren, toListNode, typeRef)
-import qualified MLF.Constraint.Types as Types
+import qualified MLF.Constraint.Types.Graph as Graph
+import MLF.Constraint.Types.Graph
+    ( BindFlag(..)
+    , BindParents
+    , Constraint(..)
+    , GenNode(..)
+    , GenNodeId(..)
+    , GenNodeMap
+    , NodeId(..)
+    , NodeMap(..)
+    , TyNode(..)
+    , fromListGen
+    , fromListNode
+    , genRef
+    , getNodeId
+    , insertGen
+    , nodeRefKey
+    , structuralChildren
+    , toListNode
+    , typeRef
+    )
 import MLF.Frontend.ConstraintGen (AnnExpr(..))
 import MLF.Frontend.Syntax (VarName)
+import MLF.Elab.Pipeline (defaultTraceConfig)
 
 emptyConstraint :: Constraint
 emptyConstraint = Constraint
@@ -61,7 +82,7 @@ nodeMapSize = length . toListNode
 
 nodeMapMember :: NodeId -> NodeMap a -> Bool
 nodeMapMember nid nodes =
-    case Types.lookupNode nid nodes of
+    case Graph.lookupNode nid nodes of
         Just _ -> True
         Nothing -> False
 
@@ -134,7 +155,7 @@ inferBindParents nodes =
         in foldl' addOne bp kids
 
 lookupNodeMaybe :: NodeMap TyNode -> NodeId -> Maybe TyNode
-lookupNodeMaybe nodes nid = Types.lookupNode nid nodes
+lookupNodeMaybe nodes nid = Graph.lookupNode nid nodes
 
 lookupNode :: HasCallStack => NodeMap TyNode -> NodeId -> IO TyNode
 lookupNode = lookupNodeIO

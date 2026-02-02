@@ -31,7 +31,6 @@ module MLF.Constraint.Presolution.Base (
     bindingPathToRootUnderM,
     requireValidBindingTree,
     edgeInteriorExact,
-    orderedBindersM,
     instantiationBindersM,
     forallSpecM,
     dropTrivialSchemeEdges
@@ -39,7 +38,7 @@ module MLF.Constraint.Presolution.Base (
 
 import Control.Applicative ((<|>))
 import Control.Monad.State (StateT, get, gets, modify', put, runStateT)
-import Control.Monad.Reader (ReaderT, lift)
+import Control.Monad.Reader (ReaderT, ask, lift, runReaderT)
 import Control.Monad.Except (throwError)
 import Control.Monad (forM_, unless, when)
 import Data.IntMap.Strict (IntMap)
@@ -56,7 +55,7 @@ import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Constraint.Traversal as Traversal
 import qualified MLF.Util.Order as Order
 import qualified MLF.Util.UnionFind as UnionFind
-import MLF.Util.Trace (debugBinding)
+import MLF.Util.Trace (TraceConfig, traceBindingM)
 import MLF.Constraint.Presolution.Plan (GeneralizePlan, ReifyPlan)
 import MLF.Constraint.Presolution.Plan.Context (GaBindParents)
 import MLF.Constraint.Solve (SolveResult)
@@ -204,11 +203,37 @@ unionTrace (m1, s1, f1) (m2, s2, f2) =
     (m1 <> m2, IntSet.union s1 s2, IntSet.union f1 f2)
 
 -- | The Presolution monad.
-type PresolutionM = StateT PresolutionState (Either PresolutionError)
+type PresolutionM = ReaderT TraceConfig (StateT PresolutionState (Either PresolutionError))
 
 -- | Run a PresolutionM action with an initial state (testing helper).
-runPresolutionM :: PresolutionState -> PresolutionM a -> Either PresolutionError (a, PresolutionState)
-runPresolutionM st action = runStateT action st
+runPresolutionM :: TraceConfig -> PresolutionState -> PresolutionM a -> Either PresolutionError (a, PresolutionState)
+runPresolutionM cfg st action = runStateT (runReaderT action cfg) st
+
+{- Note [Presolution foundation]
+Presolution state access is intentionally layered to keep the core algorithms
+paper-faithful while avoiding ad-hoc state plumbing:
+
+  * Preferred abstraction: use the `MonadPresolution` class for functions that
+    should work across presolution sub-monads (e.g., `PresolutionM` and
+    `EdgeUnifyM`).
+
+  * Preferred helper modules:
+      - `MLF.Constraint.Presolution.Ops` for low-level stateful primitives
+        (fresh IDs, node registration, union-find roots, variable bounds).
+      - `MLF.Constraint.Presolution.StateAccess` for canonical/constraint access,
+        binding-tree queries, and `WithCanonicalT` when threading the canonical
+        environment through nested helpers.
+
+  * Avoid adding new direct uses of `gets psConstraint` / `gets psUnionFind`,
+    ad-hoc `UnionFind.frWith`, or manual `Binding.*` error lifting in submodules.
+    Instead, extend the helper modules above when a common access pattern is
+    missing.
+
+Deprecation plan: legacy helper functions and direct state access remain for
+now, but callers should be migrated to the foundation modules as we converge
+presolution layers (see US-019). Once migrated, redundant helpers will be
+removed.
+-}
 
 -- | Typeclass for monads that support presolution operations.
 -- This allows functions to be polymorphic over the concrete monad stack,
@@ -218,75 +243,30 @@ class Monad m => MonadPresolution m where
     getConstraint :: m Constraint
     -- | Modify the constraint with a function.
     modifyConstraint :: (Constraint -> Constraint) -> m ()
-    -- | Get the canonical node ID resolver (union-find lookup).
-    getCanonical :: m (NodeId -> NodeId)
     -- | Get the full presolution state.
     getPresolutionState :: m PresolutionState
     -- | Put a new presolution state.
     putPresolutionState :: PresolutionState -> m ()
     -- | Throw a presolution error.
     throwPresolutionError :: PresolutionError -> m a
-    -- | Lookup a node in the constraint graph (throws on missing).
-    getNode :: NodeId -> m TyNode
-    -- | Lookup a node at its canonical representative (throws on missing).
-    getCanonicalNode :: NodeId -> m TyNode
-    -- | Lookup the binding parent of a node (returns Nothing if root).
-    lookupBindParent :: NodeRef -> m (Maybe (NodeRef, BindFlag))
     -- | Modify the presolution state with a function.
     modifyPresolution :: (Presolution -> Presolution) -> m ()
-    -- | Get constraint and canonical function together.
-    -- Common pattern for binding tree operations.
-    getConstraintAndCanonical :: m (Constraint, NodeId -> NodeId)
-    -- | Register a node in the constraint's node map.
-    registerNode :: NodeId -> TyNode -> m ()
     -- | Bind expansion arguments to the appropriate binder.
     -- Used during instantiation to bind copied argument nodes.
     bindExpansionArgs :: NodeId -> [(NodeId, NodeId)] -> m ()
 
--- | Find the canonical representative of a node (with path compression).
-findRoot :: NodeId -> PresolutionM NodeId
-findRoot nid = do
-    uf <- gets psUnionFind
-    let (root, uf') = UnionFind.findRootWithCompression uf nid
-    modify' $ \st -> st { psUnionFind = uf' }
-    pure root
-
 -- | Instance for the concrete PresolutionM monad.
-instance MonadPresolution PresolutionM where
+instance {-# OVERLAPPING #-} MonadPresolution PresolutionM where
     getConstraint = gets psConstraint
     modifyConstraint f = modify' $ \st -> st { psConstraint = f (psConstraint st) }
-    getCanonical = do
-        uf <- gets psUnionFind
-        pure (UnionFind.frWith uf)
     getPresolutionState = get
     putPresolutionState = put
     throwPresolutionError = throwError
-    getNode nid = do
-        nodes <- gets (cNodes . psConstraint)
-        case Types.lookupNode nid nodes of
-            Just n -> pure n
-            Nothing -> throwError $ NodeLookupFailed nid
-    getCanonicalNode nid = do
-        rootId <- findRoot nid
-        nodes <- gets (cNodes . psConstraint)
-        case Types.lookupNode rootId nodes of
-            Just node -> pure node
-            Nothing -> throwError $ NodeLookupFailed rootId
-    lookupBindParent ref = do
-        c <- gets psConstraint
-        pure $ Binding.lookupBindParent c ref
     modifyPresolution f = modify' $ \st -> st { psPresolution = f (psPresolution st) }
-    getConstraintAndCanonical = do
-        c <- gets psConstraint
-        uf <- gets psUnionFind
-        pure (c, UnionFind.frWith uf)
-    registerNode nid node =
-        modify' $ \st ->
-            let c0 = psConstraint st
-                nodes' = Types.insertNode nid node (cNodes c0)
-            in st { psConstraint = c0 { cNodes = nodes' } }
     bindExpansionArgs expansionRoot pairs = do
-        (c0, canonical) <- getConstraintAndCanonical
+        c0 <- gets psConstraint
+        uf <- gets psUnionFind
+        let canonical = UnionFind.frWith uf
         let expansionRootC = canonical expansionRoot
             rootGen =
                 let genIds = IntMap.keys (getGenNodeMap (cGenNodes c0))
@@ -495,15 +475,6 @@ edgeInteriorExact root0 = do
                     , TypeRef nid <- [nodeRefFromKey key]
                     ]
 
-orderedBindersM :: NodeId -> PresolutionM [NodeId]
-orderedBindersM binder0 = do
-    c0 <- gets psConstraint
-    uf0 <- gets psUnionFind
-    let canonical = UnionFind.frWith uf0
-    case Binding.orderedBinders canonical c0 (typeRef binder0) of
-        Left err -> throwError (BindingTreeError err)
-        Right binders -> pure binders
-
 orderedBindersRawM :: NodeId -> PresolutionM [NodeId]
 orderedBindersRawM binder0 = do
     c0 <- gets psConstraint
@@ -537,8 +508,7 @@ instantiationBindersM nid0 = do
                                 ++ show nid
                                 ++ " root="
                                 ++ show root
-                    case debugBinders debugMsg () of
-                        () -> pure ()
+                    debugBinders debugMsg
                     pure (root, binders)
         Nothing -> case lookupNode of
             Nothing -> throwError (NodeLookupFailed nid)
@@ -580,8 +550,7 @@ instantiationBindersM nid0 = do
                                         ++ show nid
                                         ++ " root="
                                         ++ show root
-                            case debugBinders debugMsg () of
-                                () -> pure ()
+                            debugBinders debugMsg
                             when (not (null binders)) $
                                 modify' $ \st1 ->
                                     let cache1 = psBinderCache st1
@@ -731,9 +700,11 @@ forallSpecM binder0 = do
         Left err -> throwError (BindingTreeError err)
         Right fs -> pure fs
 
--- | Debug binders using global trace config.
-debugBinders :: String -> a -> a
-debugBinders = debugBinding
+-- | Debug binders using explicit trace config.
+debugBinders :: String -> PresolutionM ()
+debugBinders msg = do
+    cfg <- ask
+    traceBindingM cfg msg
 
 -- | Drop trivial scheme edges (let edges) from the result maps.
 dropTrivialSchemeEdges
@@ -752,17 +723,11 @@ dropTrivialSchemeEdges constraint witnesses traces expansions =
 
 -- | MonadPresolution instance for ReaderT, allowing presolution operations
 -- to be used within ReaderT transformers without explicit lift.
-instance MonadPresolution m => MonadPresolution (ReaderT r m) where
+instance {-# OVERLAPPABLE #-} MonadPresolution m => MonadPresolution (ReaderT r m) where
     getConstraint = lift getConstraint
     modifyConstraint f = lift (modifyConstraint f)
-    getCanonical = lift getCanonical
     getPresolutionState = lift getPresolutionState
     putPresolutionState st = lift (putPresolutionState st)
     throwPresolutionError err = lift (throwPresolutionError err)
-    getNode nid = lift (getNode nid)
-    getCanonicalNode nid = lift (getCanonicalNode nid)
-    lookupBindParent ref = lift (lookupBindParent ref)
     modifyPresolution f = lift (modifyPresolution f)
-    getConstraintAndCanonical = lift getConstraintAndCanonical
-    registerNode nid node = lift (registerNode nid node)
     bindExpansionArgs root pairs = lift (bindExpansionArgs root pairs)

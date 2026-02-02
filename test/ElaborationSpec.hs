@@ -11,7 +11,25 @@ import qualified Data.Set as Set
 import MLF.Frontend.Syntax (Expr(..), Lit(..), SrcType(..), SrcScheme(..))
 import qualified MLF.Elab.Pipeline as Elab
 import qualified MLF.Util.Order as Order
-import MLF.Constraint.Types (BaseTy(..), BindingError(..), NodeId(..), EdgeId(..), GenNode(..), GenNodeId(..), NodeRef(..), TyNode(..), Constraint(..), InstanceOp(..), InstanceStep(..), InstanceWitness(..), EdgeWitness(..), BindFlag(..), fromListGen, getNodeId, genRef, lookupNodeIn, nodeRefKey, typeRef)
+import MLF.Constraint.Types.Graph (BindingError(..))
+import MLF.Constraint.Types.Graph
+    ( BaseTy(..)
+    , BindFlag(..)
+    , Constraint(..)
+    , EdgeId(..)
+    , GenNode(..)
+    , GenNodeId(..)
+    , NodeId(..)
+    , NodeRef(..)
+    , TyNode(..)
+    , fromListGen
+    , genRef
+    , getNodeId
+    , lookupNodeIn
+    , nodeRefKey
+    , typeRef
+    )
+import MLF.Constraint.Types.Witness (InstanceOp(..), InstanceStep(..), InstanceWitness(..), EdgeWitness(..))
 import qualified MLF.Binding.Tree as Binding
 import MLF.Frontend.ConstraintGen (ConstraintError, ConstraintResult(..), generateConstraints)
 import MLF.Constraint.Normalize (normalize)
@@ -26,7 +44,7 @@ import MLF.Constraint.Presolution
     )
 import MLF.Constraint.Solve (SolveResult(..), solveUnify)
 import qualified MLF.Constraint.Solve as Solve (frWith)
-import SpecUtil (bindParentsFromPairs, collectVarNodes, emptyConstraint, nodeMapFromList, requireRight, rootedConstraint)
+import SpecUtil (bindParentsFromPairs, collectVarNodes, defaultTraceConfig, emptyConstraint, nodeMapFromList, requireRight, rootedConstraint)
 
 boundToType :: Elab.BoundType -> Elab.ElabType
 boundToType bound = case bound of
@@ -50,7 +68,7 @@ generalizeAtWith
     -> NodeRef
     -> NodeId
     -> Either Elab.ElabError (Elab.ElabScheme, IntMap.IntMap String)
-generalizeAtWith = Elab.generalizeAtWithBuilder defaultPlanBuilder
+generalizeAtWith = Elab.generalizeAtWithBuilder (defaultPlanBuilder defaultTraceConfig)
 
 generalizeAt
     :: SolveResult
@@ -309,8 +327,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 ConstraintResult { crConstraint = c0, crRoot = root } <- firstShow (generateConstraintsDefault e)
                 let c1 = normalize c0
                 acyc <- firstShow (checkAcyclicity c1)
-                pres <- firstShow (computePresolution acyc c1)
-                solved <- firstShow (solveUnify (prConstraint pres))
+                pres <- firstShow (computePresolution defaultTraceConfig acyc c1)
+                solved <- firstShow (solveUnify defaultTraceConfig (prConstraint pres))
                 let root' = Elab.chaseRedirects (prRedirects pres) root
                 scopeRoot <- case Binding.bindingRoots (srConstraint solved) of
                     [rootRef] -> Right rootRef
@@ -472,7 +490,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , cEliminatedVars = IntSet.singleton (getNodeId v)
                         }
 
-            solved <- requireRight (solveUnify c)
+            solved <- requireRight (solveUnify defaultTraceConfig c)
             (sch, _subst) <- requireRight (generalizeAt solved (typeRef forallNode) forallNode)
             sch `shouldBe`
                 Elab.schemeFromType (Elab.TArrow Elab.TBottom Elab.TBottom)
@@ -499,7 +517,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , cEliminatedVars = IntSet.singleton (getNodeId v)
                         }
 
-            solved <- requireRight (solveUnify c)
+            solved <- requireRight (solveUnify defaultTraceConfig c)
             (sch, _subst) <- requireRight (generalizeAt solved (typeRef forallNode) forallNode)
             Elab.prettyDisplay sch `shouldBe` "∀a. a -> a"
 
@@ -524,7 +542,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 ]
                         }
 
-            solved <- requireRight (solveUnify c)
+            solved <- requireRight (solveUnify defaultTraceConfig c)
             case generalizeAt solved (typeRef forallNode) forallNode of
                 Left err ->
                     show err `shouldSatisfy` isInfixOf "alias bounds survived"
@@ -862,8 +880,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     ConstraintResult { crConstraint = c0 } <- firstShow (generateConstraintsDefault e)
                     let c1 = normalize c0
                     acyc <- firstShow (checkAcyclicity c1)
-                    pres <- firstShow (computePresolution acyc c1)
-                    solved <- firstShow (solveUnify (prConstraint pres))
+                    pres <- firstShow (computePresolution defaultTraceConfig acyc c1)
+                    solved <- firstShow (solveUnify defaultTraceConfig (prConstraint pres))
                     pure (solved, prEdgeWitnesses pres, prEdgeTraces pres)
 
                 runSolvedWithRoot :: Expr -> Either String (SolveResult, NodeId)
@@ -871,8 +889,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     ConstraintResult { crConstraint = c0, crRoot = root } <- firstShow (generateConstraintsDefault e)
                     let c1 = normalize c0
                     acyc <- firstShow (checkAcyclicity c1)
-                    pres <- firstShow (computePresolution acyc c1)
-                    solved <- firstShow (solveUnify (prConstraint pres))
+                    pres <- firstShow (computePresolution defaultTraceConfig acyc c1)
+                    solved <- firstShow (solveUnify defaultTraceConfig (prConstraint pres))
                     let root' = Elab.chaseRedirects (prRedirects pres) root
                     pure (solved, root')
 
@@ -906,7 +924,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (Elab.phiFromEdgeWitness generalizeAtWith solved (Just si) ew)
+                phi <- requireRight (Elab.phiFromEdgeWitness defaultTraceConfig generalizeAtWith solved (Just si) ew)
 
                 -- Because we target the *second* binder, Φ must do more than a plain ⟨Int⟩.
                 phi `shouldNotBe` Elab.InstApp (Elab.TBase (BaseTy "Int"))
@@ -950,7 +968,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (Elab.phiFromEdgeWitness generalizeAtWith solved (Just si) ew)
+                phi <- requireRight (Elab.phiFromEdgeWitness defaultTraceConfig generalizeAtWith solved (Just si) ew)
                 Elab.pretty phi `shouldBe` "O; ∀(u0 ⩾) N"
 
             it "scheme-aware Φ can translate Merge (alias one binder to another)" $ do
@@ -973,7 +991,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (Elab.phiFromEdgeWitness generalizeAtWith solved (Just si) ew)
+                phi <- requireRight (Elab.phiFromEdgeWitness defaultTraceConfig generalizeAtWith solved (Just si) ew)
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
                 let expected =
                         Elab.TForall "a" Nothing
@@ -999,7 +1017,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (Elab.phiFromEdgeWitness generalizeAtWith solved (Just si) ew)
+                phi <- requireRight (Elab.phiFromEdgeWitness defaultTraceConfig generalizeAtWith solved (Just si) ew)
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
                 let expected =
                         Elab.TForall "a" Nothing
@@ -1043,7 +1061,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (Elab.phiFromEdgeWitness generalizeAtWith solved (Just si) ew)
+                phi <- requireRight (Elab.phiFromEdgeWitness defaultTraceConfig generalizeAtWith solved (Just si) ew)
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
                 let expected =
                         Elab.TForall "u0" Nothing
@@ -1095,7 +1113,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (Elab.phiFromEdgeWitness generalizeAtWith solved (Just si) ew)
+                phi <- requireRight (Elab.phiFromEdgeWitness defaultTraceConfig generalizeAtWith solved (Just si) ew)
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
 
                 let expected =
@@ -1158,7 +1176,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace generalizeAtWith solved Nothing (Just si) (Just tr) ew)
+                phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew)
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
 
                 let expected =
@@ -1192,7 +1210,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             (tgtSch, _) <- requireRight (generalizeAt solved tgtScope (ewRight ew))
                             let srcTy = Elab.schemeToType srcSch
                                 tgtTy = Elab.schemeToType tgtSch
-                            phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace generalizeAtWith solved Nothing Nothing mTrace ew)
+                            phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing Nothing mTrace ew)
                             out <- requireRight (Elab.applyInstantiation srcTy phi)
                             canonType (stripBoundWrapper out) `shouldBe` canonType (stripBoundWrapper tgtTy)
 
@@ -1224,7 +1242,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             (tgtSch, _) <- requireRight (generalizeAt solved tgtScope (ewRight ew))
                             let srcTy = Elab.schemeToType srcSch
                                 tgtTy = Elab.schemeToType tgtSch
-                            phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace generalizeAtWith solved Nothing Nothing mTrace ew)
+                            phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing Nothing mTrace ew)
                             out <- requireRight (Elab.applyInstantiation srcTy phi)
                             canonType (stripBoundWrapper out) `shouldBe` canonType (stripBoundWrapper tgtTy)
 
@@ -1481,7 +1499,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace generalizeAtWith solved Nothing (Just si) (Just tr) ew)
+                phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew)
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
 
                 let expected =
@@ -1510,7 +1528,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     ConstraintResult { crConstraint = c0 } <- firstShow (generateConstraintsDefault e)
                     let c1 = normalize c0
                     acyc <- firstShow (checkAcyclicity c1)
-                    pres <- firstShow (computePresolution acyc c1)
+                    pres <- firstShow (computePresolution defaultTraceConfig acyc c1)
                     pure (prEdgeWitnesses pres)
 
                 firstShow :: Show err => Either err a -> Either String a
@@ -1550,7 +1568,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     ConstraintResult { crConstraint = c0, crAnnotated = ann } <- firstShow (generateConstraintsDefault expr)
                     let c1 = normalize c0
                     acyc <- firstShow (checkAcyclicity c1)
-                    pres <- firstShow (computePresolution acyc c1)
+                    pres <- firstShow (computePresolution defaultTraceConfig acyc c1)
                     pure (prRedirects pres, ann)
 
             case runToPresolution of
@@ -1656,7 +1674,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
             case Elab.runPipelineElab Set.empty expr of
                 Left err ->
-                    expectationFailure ("Expected this to typecheck per these-finale-english.txt (see xmlf.txt), but got: " ++ err)
+                    expectationFailure
+                        ("Expected this to typecheck per these-finale-english.txt (see xmlf.txt), but got: "
+                            ++ Elab.renderPipelineError err)
                 Right (_term, ty) -> do
                     let expected =
                             Elab.TForall "a" Nothing

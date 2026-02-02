@@ -24,6 +24,7 @@ module MLF.Constraint.Presolution.EdgeUnify (
 ) where
 
 import Control.Monad.State
+import Control.Monad.Reader (ask)
 import Control.Monad.Except (throwError)
 import Control.Monad (foldM, forM, forM_, when)
 import Data.IntMap.Strict (IntMap)
@@ -35,7 +36,7 @@ import qualified MLF.Binding.GraphOps as GraphOps
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Util.Order as Order
 import qualified MLF.Witness.OmegaExec as OmegaExec
-import MLF.Util.Trace (debugBinding)
+import MLF.Util.Trace (traceBindingM)
 
 import MLF.Constraint.Types
 import qualified MLF.Constraint.NodeAccess as NodeAccess
@@ -55,6 +56,7 @@ import qualified MLF.Constraint.Presolution.Ops as Ops
 import qualified MLF.Constraint.Presolution.Unify as Unify
 import MLF.Constraint.Presolution.StateAccess (
     WithCanonicalT,
+    getConstraintAndCanonical,
     liftBindingError,
     lookupBindParentR,
     runWithCanonical
@@ -149,16 +151,10 @@ instance MonadEdgeUnify EdgeUnifyM where
 instance MonadPresolution EdgeUnifyM where
     getConstraint = lift getConstraint
     modifyConstraint f = lift (modifyConstraint f)
-    getCanonical = lift getCanonical
     getPresolutionState = lift getPresolutionState
     putPresolutionState st = lift (putPresolutionState st)
     throwPresolutionError err = lift (throwPresolutionError err)
-    getNode nid = lift (getNode nid)
-    getCanonicalNode nid = lift (getCanonicalNode nid)
-    lookupBindParent ref = lift (lookupBindParent ref)
     modifyPresolution f = lift (modifyPresolution f)
-    getConstraintAndCanonical = lift getConstraintAndCanonical
-    registerNode nid node = lift (registerNode nid node)
     bindExpansionArgs root pairs = lift (bindExpansionArgs root pairs)
 
 -- | Testing helper: run a single edge-local unification and return the recorded
@@ -530,7 +526,7 @@ unifyAcyclicEdge n1 n2 = do
             let repBinder = NodeId repBinderId
             case (IntSet.null bs1, IntSet.null bs2) of
                 (False, True) | inInt1 && not inInt2 -> do
-                    node2 <- getCanonicalNode root2
+                    node2 <- lift $ Ops.getCanonicalNode root2
                     case node2 of
                         TyVar{} -> do
                             should <- shouldRecordRaiseMerge repBinder root2
@@ -544,7 +540,7 @@ unifyAcyclicEdge n1 n2 = do
                                 recordEliminate repBinder
                         _ -> pure ()
                 (True, False) | inInt2 && not inInt1 -> do
-                    node1 <- getCanonicalNode root1
+                    node1 <- lift $ Ops.getCanonicalNode root1
                     case node1 of
                         TyVar{} -> do
                             should <- shouldRecordRaiseMerge rep root1
@@ -560,21 +556,18 @@ shouldRecordRaiseMerge :: NodeId -> NodeId -> EdgeUnifyM Bool
 shouldRecordRaiseMerge binder ext = do
     edgeRoot <- gets eusEdgeRoot
     binderBounds <- gets eusBinderBounds
-    extNode <- getNode ext
+    extNode <- lift $ Ops.getNode ext
     case extNode of
         TyVar{} -> do
             case IntMap.lookup (getNodeId binder) binderBounds of
                 Nothing -> do
-                    case debugEdgeUnify
+                    debugEdgeUnify
                         ( "shouldRecordRaiseMerge: binder="
                             ++ show binder
                             ++ " ext="
                             ++ show ext
                             ++ " bound=None"
                         )
-                        ()
-                        of
-                            () -> pure ()
                     -- Unbounded binder: RaiseMerge is not needed; InstApp is expressible.
                     pure False
                 Just bndOrig -> do
@@ -582,7 +575,7 @@ shouldRecordRaiseMerge binder ext = do
                     extRoot <- findRootM ext
                     if bndRoot == extRoot
                         then do
-                            case debugEdgeUnify
+                            debugEdgeUnify
                                 ( "shouldRecordRaiseMerge: binder="
                                     ++ show binder
                                     ++ " ext="
@@ -593,15 +586,12 @@ shouldRecordRaiseMerge binder ext = do
                                     ++ show extRoot
                                     ++ " sameRoot=True"
                                 )
-                                ()
-                                of
-                                    () -> pure ()
                             pure False
                         else do
                             above <- isBoundAboveInBindingTreeM edgeRoot extRoot
                             interiorRoots <- gets eusInteriorRoots
                             let inInterior = memberInterior extRoot interiorRoots
-                            case debugEdgeUnify
+                            debugEdgeUnify
                                 ( "shouldRecordRaiseMerge: binder="
                                     ++ show binder
                                     ++ " ext="
@@ -617,14 +607,13 @@ shouldRecordRaiseMerge binder ext = do
                                     ++ " inInterior="
                                     ++ show inInterior
                                 )
-                                ()
-                                of
-                                    () -> pure ()
                             pure (above || not inInterior)
         _ -> pure False
 
-debugEdgeUnify :: String -> a -> a
-debugEdgeUnify = debugBinding
+debugEdgeUnify :: String -> EdgeUnifyM ()
+debugEdgeUnify msg = do
+    cfg <- ask
+    traceBindingM cfg msg
 
 -- | True iff @ext@ is bound above @edgeRoot@ in the binding tree.
 --
@@ -650,7 +639,7 @@ unifyStructureEdge :: NodeId -> NodeId -> EdgeUnifyM ()
 unifyStructureEdge n1 n2 = do
     root1 <- findRootM n1
     root2 <- findRootM n2
-    case debugEdgeUnify
+    debugEdgeUnify
         ( "unifyStructureEdge: n1="
             ++ show n1
             ++ " root1="
@@ -660,13 +649,10 @@ unifyStructureEdge n1 n2 = do
             ++ " root2="
             ++ show root2
         )
-        ()
-        of
-            () -> pure ()
     if root1 == root2 then pure ()
     else do
-        node1 <- getCanonicalNode n1
-        node2 <- getCanonicalNode n2
+        node1 <- lift $ Ops.getCanonicalNode n1
+        node2 <- lift $ Ops.getCanonicalNode n2
         isMeta1 <- isBinderMetaRoot root1
         isMeta2 <- isBinderMetaRoot root2
         let isVar1 = case node1 of
@@ -684,7 +670,7 @@ unifyStructureEdge n1 n2 = do
                             _ -> pure ()
                     _ -> pure ()
             trySetBound target bnd = do
-                (c0, canonical) <- getConstraintAndCanonical
+                (c0, canonical) <- lift getConstraintAndCanonical
                 let targetC = canonical target
                     bndC = canonical bnd
                 occurs <- case Traversal.occursInUnder canonical (NodeAccess.lookupNode c0) targetC bndC of
@@ -707,7 +693,7 @@ unifyStructureEdge n1 n2 = do
                         mbMetaBound <- lookupVarBoundM metaRoot
                         case mbMetaBound of
                             Just bMeta -> do
-                                bMetaNode <- getCanonicalNode bMeta
+                                bMetaNode <- lift $ Ops.getCanonicalNode bMeta
                                 case bMetaNode of
                                     TyVar{} -> do
                                         _ <- trySetBound bMeta (tnId otherNode)

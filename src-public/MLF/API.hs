@@ -14,10 +14,18 @@ module MLF.API
     , Instantiation (..)
     , ElabError (..)
     , TypeCheckError (..)
+    , PipelineConfig(..)
+    , defaultPipelineConfig
+    , TraceConfig(..)
+    , defaultTraceConfig
+    , PipelineError(..)
+    , renderPipelineError
     , Pretty (..)
     , schemeFromType
     , runPipelineElab
     , runPipelineElabChecked
+    , runPipelineElabWithConfig
+    , runPipelineElabCheckedWithConfig
     , typeCheck
     , step
     , normalize
@@ -25,7 +33,7 @@ module MLF.API
     ) where
 
 import MLF.Frontend.Syntax
-import MLF.Constraint.Types (BaseTy (..), PolySyms)
+import MLF.Constraint.Types.Graph (BaseTy (..), PolySyms)
 import MLF.Frontend.ConstraintGen (ConstraintError (..), ConstraintResult (..))
 import MLF.Elab.Pipeline
     ( ElabError (..)
@@ -36,11 +44,19 @@ import MLF.Elab.Pipeline
     , Ty (..)
     , Instantiation (..)
     , TypeCheckError (..)
+    , PipelineConfig(..)
+    , defaultPipelineConfig
+    , TraceConfig(..)
+    , defaultTraceConfig
+    , PipelineError(..)
     , Pretty (..)
     , isValue
     , normalize
+    , renderPipelineError
     , runPipelineElab
     , runPipelineElabChecked
+    , runPipelineElabWithConfig
+    , runPipelineElabCheckedWithConfig
     , schemeFromType
     , step
     , typeCheck

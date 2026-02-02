@@ -3,7 +3,7 @@ module NormalizeSpec (spec) where
 import qualified Data.IntMap.Strict as IntMap
 import Test.Hspec
 
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
 import MLF.Constraint.Normalize
 import SpecUtil (emptyConstraint, nodeMapFromList, nodeMapSingleton, nodeMapSize)
 

@@ -2,7 +2,7 @@ module TypeCheckSpec (spec) where
 
 import Test.Hspec
 
-import MLF.Constraint.Types (BaseTy(..))
+import MLF.Constraint.Types.Graph (BaseTy(..))
 import MLF.Elab.Pipeline (ElabTerm(..), Ty(..), Instantiation(..), TypeCheckError(..), schemeFromType, typeCheck)
 import MLF.Frontend.Syntax (Lit(..))
 

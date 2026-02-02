@@ -65,7 +65,15 @@ import qualified Data.IntSet as IntSet
 import Data.IntMap.Strict (IntMap)
 import Data.IntSet (IntSet)
 
-import MLF.Constraint.Types (NodeRef(..), NodeId, GenNodeId, BindFlag(..), BindParents, nodeRefKey, nodeRefFromKey)
+import MLF.Constraint.Types.Graph
+    ( BindFlag(..)
+    , BindParents
+    , GenNodeId
+    , NodeId
+    , NodeRef(..)
+    , nodeRefFromKey
+    , nodeRefKey
+    )
 
 -- -----------------------------------------------------------------------------
 -- Bind parent utilities

@@ -4,7 +4,8 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Test.Hspec
 
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Presolution (DepGraph(..))
+import MLF.Constraint.Types.Graph
 import MLF.Constraint.Acyclicity
 import SpecUtil (emptyConstraint, nodeMapFromList, nodeMapSingleton)
 

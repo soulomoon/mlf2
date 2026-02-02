@@ -47,7 +47,7 @@ import Data.Functor.Foldable (Base, Corecursive(..), Recursive(..))
 import Data.Kind (Type)
 import Data.IntMap.Strict (IntMap)
 
-import MLF.Constraint.Types (BaseTy(..), BindFlag(..))
+import MLF.Constraint.Types.Graph (BaseTy(..), BindFlag(..))
 import MLF.Frontend.Syntax (Lit(..))
 import Util.IndexedRecursion
     ( IxFunctor(..)

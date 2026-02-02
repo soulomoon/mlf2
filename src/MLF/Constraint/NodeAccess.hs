@@ -79,10 +79,10 @@ import qualified Data.IntSet as IntSet
 import Data.IntSet (IntSet)
 import Data.Maybe (mapMaybe)
 
-import qualified MLF.Constraint.Types as Types
-import MLF.Constraint.Types
-    ( BindingError(..)
-    , BindFlag
+import qualified MLF.Constraint.Types.Graph as Graph
+import MLF.Constraint.Types.Graph
+    ( BindFlag
+    , BindingError(..)
     , Constraint(..)
     , GenNode
     , GenNodeId(..)
@@ -102,7 +102,7 @@ import MLF.Constraint.Types
 --
 -- Returns 'Nothing' if the node is not present.
 lookupNode :: Constraint -> NodeId -> Maybe TyNode
-lookupNode c nid = Types.lookupNode nid (cNodes c)
+lookupNode c nid = Graph.lookupNode nid (cNodes c)
 
 -- | Look up a type node, returning an error if not found.
 --
@@ -117,7 +117,7 @@ lookupNodeSafe c nid =
 --
 -- Returns 'Nothing' if the gen node is not present.
 lookupGenNode :: Constraint -> GenNodeId -> Maybe GenNode
-lookupGenNode c gid = Types.lookupGen gid (cGenNodes c)
+lookupGenNode c gid = Graph.lookupGen gid (cGenNodes c)
 
 -- | Look up a gen node, returning an error if not found.
 lookupGenNodeSafe :: Constraint -> GenNodeId -> Either String GenNode

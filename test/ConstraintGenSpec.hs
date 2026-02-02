@@ -391,7 +391,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
         -- Verify that application translation produces a single instantiation edge
         -- s τ ≤ (Int → α) where the left-hand side points to the let-generalized
         -- scheme (the TyExp node) and the right-hand side is the arrow demanded by
-        -- the call site. Note [Expansion nodes] in 'MLF.Constraint.Types' explains how the
+        -- the call site. Note [Expansion nodes] in 'MLF.Constraint.Types.Graph' explains how the
         -- solver processes these edges.
         it "emits instantiation edges for applications" $ do
             let expr =
@@ -650,7 +650,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
                     ConstraintResult { crConstraint = c0 } <- firstShow (inferConstraintGraphDefault e)
                     let c1 = normalize c0
                     acyc <- firstShow (checkAcyclicity c1)
-                    firstShow (computePresolution acyc c1)
+                    firstShow (computePresolution defaultTraceConfig acyc c1)
 
                 firstShow :: Show err => Either err a -> Either String a
                 firstShow = either (Left . show) Right
@@ -658,7 +658,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
             pres <- requireRight (runToPresolution expr)
             let eliminated = cEliminatedVars (prConstraint pres)
 
-            solved <- requireRight (solveUnify (prConstraint pres))
+            solved <- requireRight (solveUnify defaultTraceConfig (prConstraint pres))
             let cSolved = srConstraint solved
                 schemeGens =
                     [ gnId gen

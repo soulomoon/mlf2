@@ -15,7 +15,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Maybe (listToMaybe)
 import MLF.Util.Names (parseNameId)
-import MLF.Util.Trace (debugGeneralize)
+import MLF.Util.Trace (TraceConfig, traceGeneralize)
 import MLF.Reify.TypeOps
     ( alphaEqType
     , inlineBaseBoundsType
@@ -133,7 +133,8 @@ schemeBodyTarget res target =
         _ -> targetC
 
 elaborate
-    :: GeneralizeAtWith
+    :: TraceConfig
+    -> GeneralizeAtWith
     -> SolveResult
     -> SolveResult
     -> IntMap.IntMap EdgeWitness
@@ -141,7 +142,7 @@ elaborate
     -> IntMap.IntMap Expansion
     -> AnnExpr
     -> Either ElabError ElabTerm
-elaborate generalizeAtWith resPhi resGen edgeWitnesses edgeTraces edgeExpansions ann =
+elaborate traceCfg generalizeAtWith resPhi resGen edgeWitnesses edgeTraces edgeExpansions ann =
     let constraint = srConstraint resGen
         keys = map (getNodeId . fst) (toListNode (cNodes constraint))
         baseToSolved =
@@ -160,10 +161,11 @@ elaborate generalizeAtWith resPhi resGen edgeWitnesses edgeTraces edgeExpansions
             , gaBaseToSolved = baseToSolved
             , gaSolvedToBase = solvedToBase
             }
-    in elaborateWithGen generalizeAtWith resPhi resGen resGen gaParents edgeWitnesses edgeTraces edgeExpansions ann
+    in elaborateWithGen traceCfg generalizeAtWith resPhi resGen resGen gaParents edgeWitnesses edgeTraces edgeExpansions ann
 
 elaborateWithGen
-    :: GeneralizeAtWith
+    :: TraceConfig
+    -> GeneralizeAtWith
     -> SolveResult
     -> SolveResult
     -> SolveResult
@@ -173,11 +175,12 @@ elaborateWithGen
     -> IntMap.IntMap Expansion
     -> AnnExpr
     -> Either ElabError ElabTerm
-elaborateWithGen generalizeAtWith resPhi resReify resGen gaParents edgeWitnesses edgeTraces edgeExpansions ann =
-    elaborateWithScope generalizeAtWith resPhi resReify resGen gaParents edgeWitnesses edgeTraces edgeExpansions IntMap.empty ann
+elaborateWithGen traceCfg generalizeAtWith resPhi resReify resGen gaParents edgeWitnesses edgeTraces edgeExpansions ann =
+    elaborateWithScope traceCfg generalizeAtWith resPhi resReify resGen gaParents edgeWitnesses edgeTraces edgeExpansions IntMap.empty ann
 
 elaborateWithScope
-    :: GeneralizeAtWith
+    :: TraceConfig
+    -> GeneralizeAtWith
     -> SolveResult
     -> SolveResult
     -> SolveResult
@@ -188,7 +191,7 @@ elaborateWithScope
     -> IntMap.IntMap NodeRef
     -> AnnExpr
     -> Either ElabError ElabTerm
-elaborateWithScope generalizeAtWith resPhi resReify resGen gaParents edgeWitnesses edgeTraces edgeExpansions scopeOverrides ann = do
+elaborateWithScope traceCfg generalizeAtWith resPhi resReify resGen gaParents edgeWitnesses edgeTraces edgeExpansions scopeOverrides ann = do
     namedSetPhi <- namedNodes resPhi
     namedSetReify <- namedNodes resReify
     let ElabOut { elabTerm = runElab } = para (elabAlg namedSetPhi namedSetReify) ann
@@ -283,6 +286,7 @@ elaborateWithScope generalizeAtWith resPhi resReify resGen gaParents edgeWitness
                             case IntMap.lookup (getNodeId (canonical schemeRootId)) scopeOverrides of
                                 Just ref -> ref
                                 Nothing -> scopeRootFromBase schemeRootId
+                    let debugGeneralize = traceGeneralize traceCfg
                     _ <- pure $
                         debugGeneralize
                             ("elaborate let: schemeGenId=" ++ show schemeGenId
@@ -329,7 +333,9 @@ elaborateWithScope generalizeAtWith resPhi resReify resGen gaParents edgeWitness
     -- reordering and targeted instantiation.
     reifyInst :: IntSet.IntSet -> Env -> AnnExpr -> EdgeId -> Either ElabError Instantiation
     reifyInst namedSetReify env funAnn (EdgeId eid) =
-        let dbg =
+        let debugGeneralize :: String -> a -> a
+            debugGeneralize = traceGeneralize traceCfg
+            dbg =
                 debugGeneralize
                     ("reifyInst: edge=" ++ show eid
                         ++ " witness=" ++ show (IntMap.member eid edgeWitnesses)
@@ -357,7 +363,7 @@ elaborateWithScope generalizeAtWith resPhi resReify resGen gaParents edgeWitness
                                 , null binds ->
                                     Nothing
                             _ -> mSchemeInfo
-                phi0 <- phiFromEdgeWitnessWithTrace generalizeAtWith resReify (Just gaParents) mSchemeInfo' mTrace ew
+                phi0 <- phiFromEdgeWitnessWithTrace traceCfg generalizeAtWith resReify (Just gaParents) mSchemeInfo' mTrace ew
                 let phi = patchInstAppsFromTarget namedSetReify ew mSchemeInfo phi0
                 instFromTrace <- case (phi, mExpansion) of
                     (InstId, Just (ExpInstantiate args)) -> do

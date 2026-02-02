@@ -6,7 +6,7 @@ Copyright   : (c) 2024
 License     : BSD-3-Clause
 
 This module provides a pure, effect-based approach to debug tracing,
-replacing the previous @unsafePerformIO@ pattern. Tracing is controlled
+replacing the previous implicit IO-based pattern. Tracing is controlled
 via a 'TraceConfig' that can be initialized from environment variables
 at program startup.
 
@@ -24,8 +24,8 @@ main = do
 Within pure code, use the trace functions which are no-ops when disabled:
 
 @
-debugBinding :: TraceConfig -> String -> a -> a
-debugBinding cfg msg = traceWhen (tcBinding cfg) msg
+traceBinding :: TraceConfig -> String -> a -> a
+traceBinding cfg msg = traceWhen (tcBinding cfg) msg
 @
 -}
 module MLF.Util.Trace (
@@ -46,22 +46,11 @@ module MLF.Util.Trace (
     tracePresolutionM,
     traceSolveM,
     traceElabM,
-    -- * Global config (for gradual migration)
-    globalTraceConfig,
-    debugBinding,
-    debugPresolution,
-    debugSolve,
-    debugElab,
-    debugNormalize,
-    debugGeneralize,
-    debugBindingM,
-    debugPresolutionM,
 ) where
 
 import Control.Monad (when)
 import Debug.Trace (trace)
 import System.Environment (lookupEnv)
-import System.IO.Unsafe (unsafePerformIO)
 
 -- | Configuration for which trace categories are enabled.
 data TraceConfig = TraceConfig
@@ -167,51 +156,3 @@ traceSolveM cfg msg = when (tcSolve cfg) $ trace msg (pure ())
 -- | Monadic elaboration trace.
 traceElabM :: Monad m => TraceConfig -> String -> m ()
 traceElabM cfg msg = when (tcElab cfg) $ trace msg (pure ())
-
---------------------------------------------------------------------------------
--- Global config for gradual migration
---
--- These functions use a global TraceConfig initialized once from the
--- environment. This allows existing code to be migrated incrementally
--- without threading TraceConfig through all functions.
---
--- Eventually, these should be replaced with explicit config passing.
---------------------------------------------------------------------------------
-
--- | Global trace configuration, initialized from environment.
--- This is the only use of unsafePerformIO in the tracing system.
-globalTraceConfig :: TraceConfig
-globalTraceConfig = unsafePerformIO traceConfigFromEnv
-{-# NOINLINE globalTraceConfig #-}
-
--- | Debug binding using global config.
-debugBinding :: String -> a -> a
-debugBinding = traceBinding globalTraceConfig
-
--- | Debug presolution using global config.
-debugPresolution :: String -> a -> a
-debugPresolution = tracePresolution globalTraceConfig
-
--- | Debug solve using global config.
-debugSolve :: String -> a -> a
-debugSolve = traceSolve globalTraceConfig
-
--- | Debug elaboration using global config.
-debugElab :: String -> a -> a
-debugElab = traceElab globalTraceConfig
-
--- | Debug normalization using global config.
-debugNormalize :: String -> a -> a
-debugNormalize = traceNormalize globalTraceConfig
-
--- | Debug generalization using global config.
-debugGeneralize :: String -> a -> a
-debugGeneralize = traceGeneralize globalTraceConfig
-
--- | Monadic debug binding using global config.
-debugBindingM :: Monad m => String -> m ()
-debugBindingM = traceBindingM globalTraceConfig
-
--- | Monadic debug presolution using global config.
-debugPresolutionM :: Monad m => String -> m ()
-debugPresolutionM = tracePresolutionM globalTraceConfig

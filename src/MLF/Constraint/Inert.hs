@@ -22,7 +22,17 @@ import qualified Data.Set as Set
 
 import qualified MLF.Binding.GraphOps as GraphOps
 import qualified MLF.Binding.Tree as Binding
-import MLF.Constraint.Types (BindFlag(..), BindingError, Constraint(..), NodeId(..), NodeRef(..), TyNode(..), getNodeId, toListNode, typeRef)
+import MLF.Constraint.Types.Graph
+    ( BindFlag(..)
+    , BindingError
+    , Constraint(..)
+    , NodeId(..)
+    , NodeRef(..)
+    , TyNode(..)
+    , getNodeId
+    , toListNode
+    , typeRef
+    )
 
 -- | True for nodes that count as "intrinsically polymorphic" anchors when
 -- computing inertness.

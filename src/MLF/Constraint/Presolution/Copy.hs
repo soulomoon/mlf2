@@ -25,7 +25,6 @@ import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Presolution.Base (
     CopyMap,
     CopyMapping(..),
-    MonadPresolution(..),
     PresolutionError(..),
     PresolutionM,
     PresolutionState(..),
@@ -35,9 +34,12 @@ import MLF.Constraint.Presolution.Base (
     )
 import MLF.Constraint.Presolution.Ops (
     createFreshNodeId,
+    getCanonicalNode,
+    registerNode,
     setBindParentM
     )
 import MLF.Constraint.Presolution.StateAccess (
+    getConstraintAndCanonical,
     liftBindingError,
     lookupBindParentM
     )
