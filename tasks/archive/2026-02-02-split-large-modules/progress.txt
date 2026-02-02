@@ -1,3 +1,6 @@
+## Codebase Patterns
+- Presolution tests should import helpers/types via `MLF.Constraint.Presolution` (re-exports EdgeTrace/PresolutionResult/lookupCopy) instead of hidden `Presolution.Base` modules.
+
 ## Progress
 
 Initial PRD + Ralph prd.json created (planning only; no code changes yet).
@@ -125,3 +128,10 @@ Initial PRD + Ralph prd.json created (planning only; no code changes yet).
 - New test modules must be listed in `mlf2.cabal` (`test-suite mlf2-test` `other-modules`) and wired into `test/Main.hs`.
 - Keep top-level modules (`MLF.Elab.Run.ResultType`, `MLF.Constraint.Presolution.Plan.Target`) as stable facades to avoid import churn and accidental cycles.
 - Validation command: `cabal build all && cabal test`
+## 2026-02-02 20:29 - US-007
+- Split PresolutionSpec into focused modules under test/Presolution (Enforcement/Instantiate/EdgeTrace/MergeEmission/Witness/Expansion/Raise) plus shared Presolution.Util.
+- Updated test/Main.hs to run the new presolution specs and mlf2.cabal test-suite other-modules to include them.
+- **Learnings for future iterations:**
+  - Presolution tests should import EdgeTrace/PresolutionResult/lookupCopy via MLF.Constraint.Presolution exports (Presolution.Base is hidden).
+  - Record field selectors like ewWitness/etCopyMap require importing the record types with (..) in test modules.
+---
