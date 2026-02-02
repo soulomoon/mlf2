@@ -13,6 +13,9 @@
 - `test/` contains the Hspec suite (`*Spec.hs`) and a manual test runner (`test/Main.hs`).
 - `papers/` holds reference material (PDF/TXT) used to align the implementation with the xMLF/MLF papers; it is not required to build.
 - `MLF.Constraint.Types.EdgeWitness` now records `ewSteps` (interleaved O/Ω steps for Φ) alongside Ω-only `ewWitness`.
+- Shared unification logic lives in `MLF.Constraint.Unify.Core`; configure phase-specific behavior via `UnifyStrategy` instead of duplicating unification loops.
+- Shared structural decomposition lives in `MLF.Constraint.Unify.Decompose`; presolution structural unification should call `decomposeUnifyChildren` after handling TyVar/TyExp special cases.
+- Legacy expansion-to-instantiation translation lives in `MLF.Elab.Legacy`; `MLF.Elab.Elaborate`/`MLF.Elab.Pipeline` re-export `expansionToInst` for compatibility.
 
 ## Build, Test, and Development Commands
 
@@ -36,7 +39,9 @@
 - Presolution.Base defines node-set newtypes (`InteriorNodes`, `FrontierNodes`); prefer these + helpers over raw `IntSet` when plumbing node sets across modules.
 - Presolution traces use `CopyMapping` (`EdgeTrace.etCopyMap`); prefer `lookupCopy`/`insertCopy`/`copiedNodes`/`originalNodes` and unwrap with `getCopyMapping` when an `IntMap` API is required.
 - Tracing is explicit: pass `TraceConfig` (e.g., `defaultTraceConfig` or `pcTraceConfig defaultPipelineConfig`) into presolution/solve/elab helpers and `runPresolutionM`.
+- Elaboration entry points now bundle inputs as `ElabConfig`/`ElabEnv`; prefer `elaborateWithEnv` for new call sites.
 - Presolution state access should go through `MonadPresolution` plus `MLF.Constraint.Presolution.Ops`/`StateAccess`; avoid new direct `gets psConstraint`/`gets psUnionFind` and manual `Binding` error lifting.
+- Edge-level presolution helpers in `MLF.Constraint.Presolution.EdgeProcessing` should use `EdgeCtx` to snapshot let/ann edge checks and trace config instead of ad hoc state reads.
 - For redirect + union-find canonicalization, prefer `MLF.Constraint.Canonicalizer` (idempotent and cycle-safe) over ad hoc chase functions.
 - Naming conventions:
   - Modules: `src/MLF/Foo/Bar.hs` defines `module MLF.Foo.Bar`.

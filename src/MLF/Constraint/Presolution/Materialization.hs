@@ -19,7 +19,6 @@ module MLF.Constraint.Presolution.Materialization (
     frWith
 ) where
 
-import Control.Monad.State
 import Control.Monad (forM)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
@@ -27,6 +26,7 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified MLF.Util.UnionFind as UnionFind
 import MLF.Constraint.Types
 import MLF.Constraint.Presolution.Base
+import MLF.Constraint.Presolution.StateAccess (getConstraintAndCanonical)
 import MLF.Constraint.Presolution.Expansion (
     applyExpansion,
     getExpansion
@@ -35,9 +35,8 @@ import MLF.Constraint.Presolution.Expansion (
 -- | Apply final expansions to all TyExp nodes and record their replacements.
 materializeExpansions :: PresolutionM (IntMap NodeId)
 materializeExpansions = do
-    nodes <- gets (cNodes . psConstraint)
-    let exps = [ n | (_, n@TyExp{}) <- toListNode nodes ]
-    uf <- gets psUnionFind
+    (c0, canonical) <- getConstraintAndCanonical
+    let exps = [ n | (_, n@TyExp{}) <- toListNode (cNodes c0) ]
     fmap IntMap.fromList $ forM exps $ \expNode -> do
         let eid = tnId expNode
         expn <- getExpansion (tnExpVar expNode)
@@ -48,7 +47,7 @@ materializeExpansions = do
             -- materialized and unified the `TyExp` with its expansion result. Reuse
             -- that representative to avoid duplicating fresh nodes here.
             _ ->
-                let root = frWith uf eid
+                let root = canonical eid
                 in if root /= eid
                     then pure root
                     else applyExpansion expn expNode

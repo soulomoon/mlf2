@@ -29,7 +29,7 @@ module MLF.Constraint.Normalize (
     mergeUnifyEdges
 ) where
 
-import Control.Monad (when, foldM)
+import Control.Monad (when)
 import Control.Monad.State.Strict
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
@@ -41,7 +41,7 @@ import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Util.UnionFind as UnionFind
 import qualified MLF.Constraint.Canonicalize as Canonicalize
 import qualified MLF.Constraint.Traversal as Traversal
-import qualified MLF.Constraint.Unify.Decompose as UnifyDecompose
+import qualified MLF.Constraint.Unify.Core as UnifyCore
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Constraint.Types.Graph as Graph
 import MLF.Constraint.Types.Graph
@@ -559,108 +559,84 @@ mergeUnifyEdges = do
 
 -- | Process unification edges, returning any that couldn't be resolved.
 processUnifyEdges :: [UnifyEdge] -> NormalizeM [UnifyEdge]
-processUnifyEdges = foldM processOne []
-  where
-    -- Handles Var=?, Arrow=Arrow, Base=Base (same head), Forall=Forall with
-    -- matching levels, and Exp=Exp with matching expansion vars. Any other
-    -- pairing (missing nodes, constructor clash, mismatched levels/exp vars)
-    -- is preserved in the accumulator so later phases can surface an error.
-    processOne acc edge = do
+processUnifyEdges edges =
+    UnifyCore.processUnifyEdgesWith
+        normalizeUnifyStrategy
+        normalizeFindRoot
+        normalizeLookupNode
+        unionNodes
+        edges
+
+normalizeFindRoot :: NodeId -> NormalizeM NodeId
+normalizeFindRoot nid = do
+    uf <- gets nsUnionFind
+    pure (findRoot uf nid)
+
+normalizeLookupNode :: NodeId -> NormalizeM (Maybe TyNode)
+normalizeLookupNode nid = do
+    nodes <- gets (cNodes . nsConstraint)
+    pure (lookupNodeIn nodes nid)
+
+normalizeUnifyStrategy :: UnifyCore.UnifyStrategy (State NormalizeState)
+normalizeUnifyStrategy = UnifyCore.UnifyStrategy
+    { UnifyCore.usOccursCheck = UnifyCore.OccursCheckNone
+    , UnifyCore.usTyExpPolicy = UnifyCore.TyExpAllow
+    , UnifyCore.usForallArityPolicy = UnifyCore.ForallArityCheck normalizeForallArity
+    , UnifyCore.usRepresentative = UnifyCore.RepresentativeChoice normalizeRepresentative
+    , UnifyCore.usOnMismatch = \_ -> pure UnifyCore.KeepEdge
+    }
+
+normalizeForallArity :: NodeId -> NormalizeM (Maybe Int)
+normalizeForallArity nid = do
+    c0 <- gets nsConstraint
+    uf <- gets nsUnionFind
+    let canonical = findRoot uf
+    case Binding.orderedBinders canonical c0 (typeRef nid) of
+        Right bs -> pure (Just (length bs))
+        Left _ -> pure Nothing
+
+{- Note [Normalize representative choice]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Prefer keeping the *structured* node (`TyExp`) as representative so we don't
+lose information (notably: λ-parameters are referenced through fresh `TyExp`
+nodes created by `EVar`, and application relies on propagating those wrappers
+through unification).
+
+However, if the expansion node's body is (up to UF) the variable itself, then
+unifying Var ~ (s·Var) would create a self-loop if we made Var point to the
+`TyExp`. In that special case, we collapse the wrapper by making the `TyExp`
+point to the variable (this corresponds to forcing `s` to be the identity
+expansion).
+-}
+normalizeRepresentative :: NodeId -> TyNode -> NodeId -> TyNode -> NormalizeM (NodeId, NodeId)
+normalizeRepresentative left leftNode right rightNode = case (leftNode, rightNode) of
+    (TyVar{}, TyVar{}) -> do
+        modify' $ \s ->
+            let c0 = nsConstraint s
+                c1 = BindingAdjustment.harmonizeBindParents (typeRef left) (typeRef right) c0
+            in s { nsConstraint = c1 }
+        pure (left, right)
+    (TyVar{}, TyExp { tnBody = b }) -> do
         uf <- gets nsUnionFind
-        c <- gets nsConstraint
-        let nodes = cNodes c
-            left = findRoot uf (uniLeft edge)
-            right = findRoot uf (uniRight edge)
+        let bRoot = findRoot uf b
+        if bRoot == left
+            then pure (right, left)
+            else pure (left, right)
+    (TyExp { tnBody = b }, TyVar{}) -> do
+        uf <- gets nsUnionFind
+        let bRoot = findRoot uf b
+        if bRoot == right
+            then pure (left, right)
+            else pure (right, left)
+    (TyVar{}, _) -> pure (left, right)
+    (_, TyVar{}) -> pure (right, left)
+    _ -> pure (left, right)
 
-        if left == right
-            then pure acc  -- Already unified
-            else do
-                let leftNode = lookupNodeIn nodes left
-                    rightNode = lookupNodeIn nodes right
-                case (leftNode, rightNode) of
-                    -- TyExp vs TyVar:
-                    --
-                    -- Prefer keeping the *structured* node (`TyExp`) as representative so we
-                    -- don't lose information (notably: λ-parameters are referenced through
-                    -- fresh `TyExp` nodes created by `EVar`, and application relies on
-                    -- propagating those wrappers through unification).
-                    --
-                    -- However, if the expansion node's body is (up to UF) the variable itself,
-                    -- then unifying Var ~ (s·Var) would create a self-loop if we made Var point
-                    -- to the `TyExp`. In that special case, we collapse the wrapper by making
-                    -- the `TyExp` point to the variable (this corresponds to forcing `s` to be
-                    -- the identity expansion).
-                    (Just TyVar {}, Just (TyExp { tnBody = b })) -> do
-                        let bRoot = findRoot uf b
-                        if bRoot == left
-                            then unionNodes right left   -- collapse (s·Var) ~ Var
-                            else unionNodes left right   -- Var points to TyExp (keep structure)
-                        pure acc
-                    (Just (TyExp { tnBody = b }), Just TyVar {}) -> do
-                        let bRoot = findRoot uf b
-                        if bRoot == right
-                            then unionNodes left right   -- collapse (s·Var) ~ Var
-                            else unionNodes right left   -- Var points to TyExp (keep structure)
-                        pure acc
-
-                    -- Var = Var: before unioning, harmonize binding parents so
-                    -- scope stays well-formed (paper Raise(n)).
-                    (Just TyVar {}, Just TyVar {}) -> do
-                        modify' $ \s ->
-                            let c0 = nsConstraint s
-                                c1 = BindingAdjustment.harmonizeBindParents (typeRef left) (typeRef right) c0
-                            in s { nsConstraint = c1 }
-                        unionNodes left right
-                        pure acc
-
-                    -- Variable = anything: point variable to other
-                    (Just TyVar {}, _) -> do
-                        unionNodes left right
-                        pure acc
-                    (_, Just TyVar {}) -> do
-                        unionNodes right left
-                        pure acc
-
-                    -- Forall = Forall: unify bodies when binder arity matches
-                    (Just (TyForall { tnBody = b1 }), Just (TyForall { tnBody = b2 })) -> do
-                        c0 <- gets nsConstraint
-                        let canonical = findRoot uf
-                            arityOf nid =
-                                case Binding.orderedBinders canonical c0 (typeRef nid) of
-                                    Right bs -> Just (length bs)
-                                    Left _ -> Nothing
-                        case (arityOf left, arityOf right) of
-                            (Just k1, Just k2)
-                                | k1 == k2 -> do
-                                    unionNodes left right
-                                    pure (UnifyEdge b1 b2 : acc)
-                            _ ->
-                                -- Arity mismatch (or invalid binder): type error, keep edge
-                                pure (edge : acc)
-
-                    (Just node1, Just node2) ->
-                        case UnifyDecompose.decomposeUnifyChildren node1 node2 of
-                            Right newEdges -> do
-                                unionNodes left right
-                                case node1 of
-                                    TyArrow{} -> pure (acc ++ newEdges)
-                                    TyExp{} -> pure (newEdges ++ acc)
-                                    _ -> pure acc
-                            Left _ ->
-                                pure (edge : acc)
-
-                    -- Missing nodes / incompatible structures: keep edge to signal error
-                    _ ->
-                        pure (edge : acc)
-
-    -- Union-find link; caller is responsible for any scope maintenance (e.g.
-    -- binding-edge harmonization / paper Raise(n) for Var/Var unions).
-    unionNodes :: NodeId -> NodeId -> NormalizeM ()
-    unionNodes = unionNodesRaw
-
-    unionNodesRaw :: NodeId -> NodeId -> NormalizeM ()
-    unionNodesRaw from to = modify' $ \s ->
-        s { nsUnionFind = IntMap.insert (getNodeId from) to (nsUnionFind s) }
+-- Union-find link; caller is responsible for any scope maintenance (e.g.
+-- binding-edge harmonization / paper Raise(n) for Var/Var unions).
+unionNodes :: NodeId -> NodeId -> NormalizeM ()
+unionNodes from to = modify' $ \s ->
+    s { nsUnionFind = IntMap.insert (getNodeId from) to (nsUnionFind s) }
 
 -- | Find the root/canonical representative of a node.
 findRoot :: IntMap NodeId -> NodeId -> NodeId

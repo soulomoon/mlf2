@@ -61,6 +61,7 @@ import MLF.Constraint.Presolution.StateAccess (
     lookupBindParentR,
     runWithCanonical
     )
+import qualified MLF.Constraint.Unify.Decompose as UnifyDecompose
 import qualified MLF.Constraint.Traversal as Traversal
 
 data EdgeUnifyState = EdgeUnifyState
@@ -175,6 +176,13 @@ runEdgeUnifyForTest edgeRoot interior n1 n2 = do
     (_a, eu1) <- runStateT (unifyAcyclicEdge n1 n2) eu0
     pure (eusOps eu1)
 
+{- Note [Edge-local Weaken scheduling]
+Base Omega operations from `ExpInstantiate` include `Weaken`, but the paper
+executes Weaken only after all other chi_e actions below it. To preserve that
+ordering (and keep RaiseMerge discoverable), we execute the base ops in two
+phases and queue Weaken in `psPendingWeakens` for a later flush.
+-}
+
 -- | Build an ω executor environment for χe base ops (Graft/Merge/Weaken).
 --
 -- This is used to execute the base operations induced directly by
@@ -224,7 +232,7 @@ flushPendingWeakens = do
         forM_ (IntSet.toList pending) $ \nidInt -> do
             let nid0 = NodeId nidInt
             nid <- Ops.findRoot nid0
-            c0 <- gets psConstraint
+            c0 <- getConstraint
             -- Redundant weakens can arise when multiple edges share the same
             -- expansion variable (merged χe). Treat "already rigid" as a no-op.
             case Binding.lookupBindParent c0 (typeRef nid) of
@@ -234,7 +242,7 @@ flushPendingWeakens = do
                     case GraphOps.applyWeaken (typeRef nid) c0 of
                         Left err -> throwError (BindingTreeError err)
                         Right (c', _op) ->
-                            modify' $ \st -> st { psConstraint = c' }
+                            modifyConstraint (const c')
     modify' $ \st -> st { psPendingWeakens = IntSet.empty }
 
 -- | Edge-local union like 'unifyAcyclicEdge', but without emitting merge-like
@@ -306,7 +314,7 @@ initEdgeUnifyState binderArgs binderBounds interior edgeRoot = do
         )
         IntMap.empty
         (IntSet.toList interior)
-    constraint <- gets psConstraint
+    constraint <- getConstraint
     let interiorRootRef =
             case Binding.lookupBindParent constraint (typeRef edgeRoot) of
                 Just (parent, _) -> parent
@@ -462,6 +470,16 @@ recordMergesIntoRep bs
                 o <- cmp x y
                 if o == LT then pure (x:y:ys) else (y:) <$> insertOne x ys
         foldM (\acc x -> insertOne x acc) [] xs
+
+{- Note [Edge-local Raise/Merge emission]
+Edge-local unification mirrors the paper's chi_e operations. Binding-edge
+harmonization produces a raise trace, and we emit `OpRaise` for the interior
+nodes that were actually raised. When binder metas become aliased we emit
+`OpMerge` (and eliminate the merged binder). If a binder class merges with an
+exterior TyVar class, we emit RaiseMerge as an explicit Raise followed by Merge
+so that `normalizeInstanceOpsFull` can coalesce it later. See
+`papers/these-finale-english.txt` and `papers/xmlf.txt` section 3.4 / Fig. 10.
+-}
 
 unifyAcyclicEdge :: NodeId -> NodeId -> EdgeUnifyM ()
 unifyAcyclicEdge n1 n2 = do
@@ -681,6 +699,16 @@ unifyStructureEdge n1 n2 = do
                     else if bndC /= targetC
                         then setVarBoundM targetC (Just bndC) >> pure True
                         else pure False
+            unifyStructureChildren nodeA nodeB =
+                case (nodeA, nodeB) of
+                    (TyVar{}, _) -> pure ()
+                    (_, TyVar{}) -> pure ()
+                    (TyExp{}, _) -> pure ()
+                    (_, TyExp{}) -> pure ()
+                    _ ->
+                        case UnifyDecompose.decomposeUnifyChildren nodeA nodeB of
+                            Right edges -> mapM_ (\edge -> unifyStructureEdge (uniLeft edge) (uniRight edge)) edges
+                            Left _ -> pure ()
         if isMeta1 || isMeta2
             then
                 if isVar1 && isVar2
@@ -720,12 +748,8 @@ unifyStructureEdge n1 n2 = do
                         when (b1 /= tnId node2) (unifyStructureEdge b1 (tnId node2))
                     (_, TyVar { tnBound = Just b2 }) ->
                         when (b2 /= tnId node1) (unifyStructureEdge (tnId node1) b2)
-                    (TyArrow { tnDom = d1, tnCod = c1 }, TyArrow { tnDom = d2, tnCod = c2 }) -> do
-                        unifyStructureEdge d1 d2
-                        unifyStructureEdge c1 c2
-                    (TyForall { tnBody = b1 }, TyForall { tnBody = b2 }) ->
-                        unifyStructureEdge b1 b2
-                    _ -> pure ()
+                    _ ->
+                        unifyStructureChildren node1 node2
 
 isBinderMetaRoot :: NodeId -> EdgeUnifyM Bool
 isBinderMetaRoot root = do

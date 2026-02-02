@@ -23,6 +23,7 @@ import qualified MLF.Util.Order as Order
 import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Types
 import MLF.Constraint.Presolution.Base
+import MLF.Constraint.Presolution.StateAccess (liftBindingError)
 import MLF.Constraint.Presolution.Validation (translatableWeakenedNodes)
 import MLF.Constraint.Presolution.Witness (
     normalizeInstanceStepsFull,
@@ -33,7 +34,7 @@ import qualified MLF.Constraint.Presolution.Witness as Witness
 -- | Normalize edge witnesses against the finalized presolution constraint.
 normalizeEdgeWitnessesM :: PresolutionM ()
 normalizeEdgeWitnessesM = do
-    c0 <- gets psConstraint
+    c0 <- getConstraint
     traces <- gets psEdgeTraces
     witnesses0 <- gets psEdgeWitnesses
     let rewriteNodeWith copyMap nid =
@@ -95,15 +96,14 @@ normalizeEdgeWitnessesM = do
                     InteriorNodes s -> s
         interiorExact <-
             if IntSet.null traceInteriorKeys
-                then case Binding.interiorOf c0 interiorRoot of
-                    Left err -> throwError (BindingTreeError err)
-                    Right s ->
-                        pure $
-                            IntSet.fromList
-                                [ getNodeId nid
-                                | key <- IntSet.toList s
-                                , TypeRef nid <- [nodeRefFromKey key]
-                                ]
+                then do
+                    s <- liftBindingError (Binding.interiorOf c0 interiorRoot)
+                    pure $
+                        IntSet.fromList
+                            [ getNodeId nid
+                            | key <- IntSet.toList s
+                            , TypeRef nid <- [nodeRefFromKey key]
+                            ]
                 else pure traceInteriorKeys
         let interiorNorm =
                 -- Normalize against an expansion-aware interior so ops on copied nodes

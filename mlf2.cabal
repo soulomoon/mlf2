@@ -63,6 +63,8 @@ library mlf2-internal
     exposed-modules:  MLF.Constraint.Types,
                       MLF.Constraint.Types.Graph,
                       MLF.Constraint.Types.Graph.NodeEdge,
+                      MLF.Constraint.Types.Graph.Binding,
+                      MLF.Constraint.Types.Graph.Accessors,
                       MLF.Constraint.Types.Witness,
                       MLF.Constraint.Types.Presolution,
                       MLF.Constraint.Canonicalizer,

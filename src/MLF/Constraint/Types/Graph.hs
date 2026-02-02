@@ -28,9 +28,10 @@ flag ('BindFlex' or 'BindRigid') that determines whether it can be generalized.
 
 = Module Structure
 
-Core node and edge definitions are in 'MLF.Constraint.Types.Graph.NodeEdge'
-and re-exported here. This module adds binding-related types and the
-'Constraint' record.
+Core node and edge definitions are in 'MLF.Constraint.Types.Graph.NodeEdge'.
+Binding-related types are in 'MLF.Constraint.Types.Graph.Binding'.
+Accessor utilities are in 'MLF.Constraint.Types.Graph.Accessors'.
+This module re-exports all submodules and adds the 'Constraint' record.
 -}
 module MLF.Constraint.Types.Graph (
     -- * Re-exports from NodeEdge
@@ -66,78 +67,24 @@ module MLF.Constraint.Types.Graph (
     lookupNodeIn,
     InstEdge (..),
     UnifyEdge (..),
-    -- * Binding types
+    -- * Re-exports from Binding
     BindFlag (..),
     BindParents,
     BindingError (..),
     EliminatedVars,
     WeakenedVars,
     PolySyms,
+    -- * Accessors
+    maxNodeIdKeyOr0,
     -- * Constraint record
     Constraint (..),
-    maxNodeIdKeyOr0,
 ) where
 
-import Data.IntMap.Strict (IntMap)
-import qualified Data.IntMap.Strict as IntMap
 import Data.IntSet (IntSet)
-import Data.Set (Set)
 
+import qualified MLF.Constraint.Types.Graph.Accessors as Accessors
+import MLF.Constraint.Types.Graph.Binding
 import MLF.Constraint.Types.Graph.NodeEdge
-
--- | Flag indicating whether a binding edge is flexible or rigid.
---
--- Paper mapping (`papers/these-finale-english.txt`; see `papers/xmlf.txt` §3.1):
--- flexible binders can be raised/weakened
--- during instantiation; rigid binders are locked and cannot be modified.
-data BindFlag = BindFlex | BindRigid
-    deriving (Eq, Ord, Show)
-
--- | Binding-edge map: child NodeRef -> (parent NodeRef, flag).
---
--- This represents the paper's binding tree explicitly. Every non-root node
--- has exactly one binding parent. Roots are nodes that do not appear as keys.
-type BindParents = IntMap (NodeRef, BindFlag)
-
--- | Errors that can occur when validating or manipulating the binding tree.
-data BindingError
-    = MissingBindParent NodeRef
-        -- ^ A node that should have a binding parent does not have one.
-    | BindingCycleDetected [NodeRef]
-        -- ^ A cycle was detected in the binding-parent chain.
-    | NoCommonAncestor NodeRef NodeRef
-        -- ^ Two nodes have no common ancestor in the binding tree.
-    | ParentNotUpper NodeRef NodeRef
-        -- ^ The parent is not "upper" than the child in the term-DAG.
-        -- First NodeId is the child, second is the parent.
-    | OperationOnLockedNode NodeRef
-        -- ^ Attempted to raise/weaken a node that is locked (rigidly bound path).
-    | RaiseNotPossible NodeRef
-        -- ^ Raise step not possible (e.g., parent is already a root).
-    | GenFallbackRequired
-        { fallbackBinder :: NodeId
-        , fallbackGen :: GenNodeId
-        , fallbackBinders :: [NodeId]
-        }
-        -- ^ Type-node binder enumeration would require a gen-ancestor fallback.
-    | GenSchemeFreeVars
-        { schemeRoot :: NodeId
-        , schemeGen :: GenNodeId
-        , freeNodes :: [NodeId]
-        }
-        -- ^ A scheme root reaches named nodes not bound under its gen node.
-    | InvalidBindingTree String
-        -- ^ Generic binding tree invariant violation with description.
-    deriving (Eq, Show)
-
--- | Persistent marker for variables eliminated during ω execution / presolution.
-type EliminatedVars = IntSet
-
--- | Variables whose binding edge was weakened by ω (OpWeaken).
-type WeakenedVars = IntSet
-
--- | Polymorphic type constructor symbols (paper Poly set).
-type PolySyms = Set BaseTy
 
 {- Note [Binding tree]
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -222,11 +169,4 @@ data Constraint = Constraint
 -- This is used to initialize fresh NodeId counters in phases that allocate new
 -- nodes during rewriting (Normalize, Presolution).
 maxNodeIdKeyOr0 :: Constraint -> Int
-maxNodeIdKeyOr0 c =
-    case lookupMaxNode (cNodes c) of
-        Nothing -> 0
-        Just (NodeId k, _node) -> k
-
-lookupMaxNode :: NodeMap a -> Maybe (NodeId, a)
-lookupMaxNode (NodeMap nodes) =
-    fmap (\(k, v) -> (NodeId k, v)) (IntMap.lookupMax nodes)
+maxNodeIdKeyOr0 c = Accessors.maxNodeIdKeyOr0 (cNodes c)

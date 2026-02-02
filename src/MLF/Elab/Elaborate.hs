@@ -1,16 +1,18 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
 module MLF.Elab.Elaborate (
+    ElabConfig(..),
+    ElabEnv(..),
     expansionToInst,
     elaborate,
     elaborateWithGen,
-    elaborateWithScope
+    elaborateWithScope,
+    elaborateWithEnv
 ) where
 
 import Data.Functor.Foldable (cata, para)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Maybe (listToMaybe)
@@ -20,9 +22,7 @@ import MLF.Reify.TypeOps
     ( alphaEqType
     , inlineBaseBoundsType
     , matchType
-    , resolveBaseBoundForInstConstraint
     )
-import MLF.Util.RecursionSchemes (cataM)
 
 import MLF.Frontend.Syntax (VarName)
 import MLF.Constraint.Types
@@ -30,6 +30,7 @@ import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Solve (SolveResult(..))
 import MLF.Elab.Types
 import MLF.Elab.Generalize (GaBindParents(..))
+import MLF.Elab.Legacy (expansionToInst)
 import MLF.Elab.Run.TypeOps (inlineBoundVarsTypeForBound)
 import MLF.Constraint.BindingUtil (bindingPathToRootLocal)
 import MLF.Elab.Phi (phiFromEdgeWitnessWithTrace)
@@ -39,7 +40,6 @@ import MLF.Reify.Core
     ( namedNodes
     , reifyBoundWithNames
     , reifyTypeWithNamedSetNoFallback
-    , reifyTypeWithNamesNoFallback
     )
 import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Constraint.Solve as Solve (frWith)
@@ -56,61 +56,21 @@ type GeneralizeAtWith =
     -> NodeId
     -> Either ElabError (ElabScheme, IntMap.IntMap String)
 
--- | Convert an Expansion to an Instantiation witness.
--- This translates the presolution expansion recipe into an xMLF instantiation.
---
--- Note on paper alignment:
--- Presolution's expansions (Instantiate, Forall, Compose) map roughly to
--- xMLF's instantiations (App/Elim, Intro, Seq).
--- Specifically:
---   - ExpInstantiate args: In xMLF, instantiation is N (Elim) followed by
---     substitution. Presolution does "forall elimination + substitution" in one step.
---     We map this to a sequence of (N; ⟨τ⟩) or just ⟨τ⟩ depending on context,
---     but since xMLF ⟨τ⟩ usually implies elimination in standard F, we model
---     ExpInstantiate as a sequence of type applications ⟨τ⟩ which implicitly
---     includes the elimination step N where needed, or explicit N if args are empty.
---     Actually, looking at `papers/these-finale-english.txt` (see `papers/xmlf.txt`):
---       (∀(α ⩾ τ) τ') N  --> τ'{α ← τ}  (Eliminate quantifier)
---       (∀(α ⩾ τ) τ') !α --> τ'{α ← τ}  (Abstract bound)
---     Presolution's ExpInstantiate [t1..tn] means "instantiate the outermost
---     quantifiers with t1..tn". This corresponds to N; ⟨t1⟩; ...; N; ⟨tn⟩.
---     However, standard presentation often folds N into the application.
---     For strict adherence, we should emit N for every quantifier eliminated.
---     But ExpInstantiate removes the quantifier *and* substitutes.
---     We map ExpInstantiate [t] to (N; ⟨t⟩) if it replaces a bounded var,
---     or just ⟨t⟩ if it's a standard F app.
---     Given we don't track the *source* type here easily, we generate a sequence
---     of applications ⟨t⟩, assuming the elaboration context or a later pass
---     refines this if explicit N is required.
---     For now: ExpInstantiate [t] -> ⟨t⟩.
---
-expansionToInst :: SolveResult -> Expansion -> Either ElabError Instantiation
-expansionToInst res = cataM alg
-  where
-    constraint = srConstraint res
-    canonical = Solve.frWith (srUnionFind res)
-    resolveBaseBound = resolveBaseBoundForInstConstraint constraint canonical
-    reifyArg arg =
-        let argC = canonical arg
-        in case resolveBaseBound argC of
-            Just baseC -> reifyTypeWithNamesNoFallback res IntMap.empty baseC
-            Nothing -> reifyTypeWithNamesNoFallback res IntMap.empty argC
-    -- See Note [Instantiation arg sanitization] in
-    -- docs/notes/2026-01-27-elab-changes.md.
-    sanitizeArg = inlineBoundVarsTypeForBound res
-    alg layer = case layer of
-        ExpIdentityF -> Right InstId
-        ExpInstantiateF args -> do
-            tys <- mapM reifyArg args
-            let tys' = map sanitizeArg tys
-            -- Build a sequence of type applications.
-            -- In xMLF, simple application is usually sufficient.
-            -- If we needed explicit N, we'd need to know the source type schema.
-            if null tys'
-                then Right InstId
-                else Right $ foldr1 InstSeq (map InstApp tys')
-        ExpForallF _ -> Right InstIntro
-        ExpComposeF exps -> Right $ foldr1 InstSeq (NE.toList exps)
+data ElabConfig = ElabConfig
+    { ecTraceConfig :: TraceConfig
+    , ecGeneralizeAtWith :: GeneralizeAtWith
+    }
+
+data ElabEnv = ElabEnv
+    { eeResPhi :: SolveResult
+    , eeResReify :: SolveResult
+    , eeResGen :: SolveResult
+    , eeGaParents :: GaBindParents
+    , eeEdgeWitnesses :: IntMap.IntMap EdgeWitness
+    , eeEdgeTraces :: IntMap.IntMap EdgeTrace
+    , eeEdgeExpansions :: IntMap.IntMap Expansion
+    , eeScopeOverrides :: IntMap.IntMap NodeRef
+    }
 
 type Env = Map.Map VarName SchemeInfo
 
@@ -191,12 +151,49 @@ elaborateWithScope
     -> IntMap.IntMap NodeRef
     -> AnnExpr
     -> Either ElabError ElabTerm
-elaborateWithScope traceCfg generalizeAtWith resPhi resReify resGen gaParents edgeWitnesses edgeTraces edgeExpansions scopeOverrides ann = do
+elaborateWithScope traceCfg generalizeAtWith resPhi resReify resGen gaParents edgeWitnesses edgeTraces edgeExpansions scopeOverrides ann =
+    elaborateWithEnv
+        ElabConfig
+            { ecTraceConfig = traceCfg
+            , ecGeneralizeAtWith = generalizeAtWith
+            }
+        ElabEnv
+            { eeResPhi = resPhi
+            , eeResReify = resReify
+            , eeResGen = resGen
+            , eeGaParents = gaParents
+            , eeEdgeWitnesses = edgeWitnesses
+            , eeEdgeTraces = edgeTraces
+            , eeEdgeExpansions = edgeExpansions
+            , eeScopeOverrides = scopeOverrides
+            }
+        ann
+
+elaborateWithEnv
+    :: ElabConfig
+    -> ElabEnv
+    -> AnnExpr
+    -> Either ElabError ElabTerm
+elaborateWithEnv config elabEnv ann = do
     namedSetPhi <- namedNodes resPhi
     namedSetReify <- namedNodes resReify
     let ElabOut { elabTerm = runElab } = para (elabAlg namedSetPhi namedSetReify) ann
     runElab Map.empty
   where
+    ElabConfig
+        { ecTraceConfig = traceCfg
+        , ecGeneralizeAtWith = generalizeAtWith
+        } = config
+    ElabEnv
+        { eeResPhi = resPhi
+        , eeResReify = resReify
+        , eeResGen = resGen
+        , eeGaParents = gaParents
+        , eeEdgeWitnesses = edgeWitnesses
+        , eeEdgeTraces = edgeTraces
+        , eeEdgeExpansions = edgeExpansions
+        , eeScopeOverrides = scopeOverrides
+        } = elabEnv
     canonical = Solve.frWith (srUnionFind resReify)
     scopeRootFromBase root =
         case IntMap.lookup (getNodeId (canonical root)) (gaSolvedToBase gaParents) of

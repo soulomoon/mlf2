@@ -20,7 +20,7 @@ import MLF.Constraint.Presolution
 import MLF.Constraint.Solve hiding (BindingTreeError, MissingNode)
 import qualified MLF.Constraint.Solve as Solve
 import MLF.Constraint.Types.Graph (PolySyms)
-import MLF.Elab.Elaborate (elaborateWithScope)
+import MLF.Elab.Elaborate (ElabConfig(..), ElabEnv(..), elaborateWithEnv)
 import MLF.Elab.PipelineConfig (PipelineConfig(..), defaultPipelineConfig)
 import MLF.Elab.PipelineError
     ( PipelineError(..)
@@ -101,7 +101,21 @@ runPipelineElabWith traceCfg genConstraints expr = do
                 edgeTraces = IntMap.map (canonicalizeTrace canonNode) (prEdgeTraces pres)
                 edgeExpansions = IntMap.map (canonicalizeExpansion canonNode) (prEdgeExpansions pres)
             let scopeOverrides = letScopeOverrides c1 (srConstraint solvedForGen) solvedClean (prRedirects pres) annCanon
-            term <- fromElabError (elaborateWithScope traceCfg generalizeAtWith solvedClean solvedClean solvedForGen bindParentsGa edgeWitnesses edgeTraces edgeExpansions scopeOverrides annCanon)
+            let elabConfig = ElabConfig
+                    { ecTraceConfig = traceCfg
+                    , ecGeneralizeAtWith = generalizeAtWith
+                    }
+                elabEnv = ElabEnv
+                    { eeResPhi = solvedClean
+                    , eeResReify = solvedClean
+                    , eeResGen = solvedForGen
+                    , eeGaParents = bindParentsGa
+                    , eeEdgeWitnesses = edgeWitnesses
+                    , eeEdgeTraces = edgeTraces
+                    , eeEdgeExpansions = edgeExpansions
+                    , eeScopeOverrides = scopeOverrides
+                    }
+            term <- fromElabError (elaborateWithEnv elabConfig elabEnv annCanon)
 
             -- Build context for result type computation
             let canonical = frWith (srUnionFind solvedClean)

@@ -122,7 +122,7 @@ import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Util.UnionFind as UnionFind
 import qualified MLF.Constraint.Canonicalize as Canonicalize
 import qualified MLF.Constraint.Traversal as Traversal
-import qualified MLF.Constraint.Unify.Decompose as UnifyDecompose
+import qualified MLF.Constraint.Unify.Core as UnifyCore
 import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Types hiding (lookupNode)
@@ -354,61 +354,110 @@ solveUnify traceCfg c0 = do
             else do
                 lNode <- lookupNode lRoot
                 rNode <- lookupNode rRoot
-                case (lNode, rNode) of
-                    (TyVar{ tnBound = mb1 }, TyVar{ tnBound = mb2 }) -> do
-                        harmonize lRoot rRoot
-                        unionNodes lRoot rRoot
-                        case (mb1, mb2) of
-                            (Just b1, Just b2) ->
-                                when (b1 /= b2) (enqueue [UnifyEdge b1 b2])
-                            _ -> pure ()
+                let boundEdges = boundEdgesFor lRoot lNode rRoot rNode
+                newEdges <-
+                    UnifyCore.processUnifyEdgesWith
+                        solveUnifyStrategy
+                        findRoot
+                        lookupNodeMaybe
+                        unionNodes
+                        [UnifyEdge lRoot rRoot]
+                enqueue (boundEdges ++ newEdges)
 
-                    (TyVar{ tnBound = mb1 }, _) -> do
-                        occursCheck lRoot rRoot
-                        harmonize lRoot rRoot
-                        unionNodes lRoot rRoot
-                        case mb1 of
-                            Just b1 | b1 /= rRoot -> enqueue [UnifyEdge b1 rRoot]
-                            _ -> pure ()
+    boundEdgesFor :: NodeId -> TyNode -> NodeId -> TyNode -> [UnifyEdge]
+    boundEdgesFor lRoot lNode rRoot rNode = case (lNode, rNode) of
+        (TyVar{ tnBound = mb1 }, TyVar{ tnBound = mb2 }) ->
+            case (mb1, mb2) of
+                (Just b1, Just b2)
+                    | b1 /= b2 -> [UnifyEdge b1 b2]
+                _ -> []
+        (TyVar{ tnBound = mb1 }, _) ->
+            case mb1 of
+                Just b1 | b1 /= rRoot -> [UnifyEdge b1 rRoot]
+                _ -> []
+        (_, TyVar{ tnBound = mb2 }) ->
+            case mb2 of
+                Just b2 | b2 /= lRoot -> [UnifyEdge b2 lRoot]
+                _ -> []
+        _ -> []
 
-                    (_, TyVar{ tnBound = mb2 }) -> do
-                        occursCheck rRoot lRoot
-                        harmonize lRoot rRoot
-                        unionNodes rRoot lRoot
-                        case mb2 of
-                            Just b2 | b2 /= lRoot -> enqueue [UnifyEdge b2 lRoot]
-                            _ -> pure ()
+    solveUnifyStrategy :: UnifyCore.UnifyStrategy SolveM
+    solveUnifyStrategy = UnifyCore.UnifyStrategy
+        { UnifyCore.usOccursCheck = UnifyCore.OccursCheck occursCheck
+        , UnifyCore.usTyExpPolicy = UnifyCore.TyExpReject
+        , UnifyCore.usForallArityPolicy = UnifyCore.ForallArityCheck solveForallArity
+        , UnifyCore.usRepresentative = UnifyCore.RepresentativeChoice solveRepresentative
+        , UnifyCore.usOnMismatch = solveOnMismatch
+        }
 
-                    (TyForall { tnBody = b1 }, TyForall { tnBody = b2 }) -> do
-                        cCur <- gets suConstraint
-                        uf0 <- gets suUnionFind
-                        let canonical = UnionFind.frWith uf0
-                        case ( Binding.orderedBinders canonical cCur (typeRef lRoot)
-                             , Binding.orderedBinders canonical cCur (typeRef rRoot)
-                             ) of
-                            (Right bs1, Right bs2)
-                                | length bs1 == length bs2 -> do
-                                    harmonize lRoot rRoot
-                                    unionNodes lRoot rRoot
-                                    enqueue [UnifyEdge b1 b2]
-                                | otherwise ->
-                                    throwSolveError (ForallArityMismatch (length bs1) (length bs2))
-                            (Left err, _) -> throwSolveError (BindingTreeError err)
-                            (_, Left err) -> throwSolveError (BindingTreeError err)
+    solveForallArity :: NodeId -> SolveM (Maybe Int)
+    solveForallArity nid = do
+        cCur <- gets suConstraint
+        uf0 <- gets suUnionFind
+        let canonical = UnionFind.frWith uf0
+        case Binding.orderedBinders canonical cCur (typeRef nid) of
+            Right bs -> pure (Just (length bs))
+            Left err -> throwSolveError (BindingTreeError err)
 
-                    (TyExp{}, _) -> throwSolveError (UnexpectedExpNode lRoot)
-                    (_, TyExp{}) -> throwSolveError (UnexpectedExpNode rRoot)
+    solveRepresentative :: NodeId -> TyNode -> NodeId -> TyNode -> SolveM (NodeId, NodeId)
+    solveRepresentative left leftNode right rightNode = do
+        harmonize left right
+        cCur <- gets suConstraint
+        let leftElim = VarStore.isEliminatedVar cCur left
+            rightElim = VarStore.isEliminatedVar cCur right
+            isVarLeft = case leftNode of
+                TyVar{} -> True
+                _ -> False
+            isVarRight = case rightNode of
+                TyVar{} -> True
+                _ -> False
+            hasBoundLeft = case leftNode of
+                TyVar{ tnBound = Just _ } -> True
+                _ -> False
+            hasBoundRight = case rightNode of
+                TyVar{ tnBound = Just _ } -> True
+                _ -> False
+            (from0, to0) =
+                case (leftElim, rightElim) of
+                    (False, True) -> (right, left)
+                    _ -> (left, right)
+            (from, to)
+                | isVarLeft
+                , not isVarRight
+                , not leftElim
+                , hasBoundLeft = (right, left)
+                | not isVarLeft
+                , isVarRight
+                , not rightElim
+                , hasBoundRight = (left, right)
+                | not leftElim
+                , not rightElim
+                , isVarLeft
+                , isVarRight =
+                    case (hasBoundLeft, hasBoundRight) of
+                        (True, False) -> (right, left)
+                        (False, True) -> (left, right)
+                        _ -> (from0, to0)
+                | otherwise = (from0, to0)
+        pure (from, to)
 
-                    _ ->
-                        case UnifyDecompose.decomposeUnifyChildren lNode rNode of
-                            Right newEdges -> do
-                                harmonize lRoot rRoot
-                                unionNodes lRoot rRoot
-                                enqueue newEdges
-                            Left (UnifyDecompose.MismatchBase b1 b2) ->
-                                throwSolveError (BaseClash b1 b2)
-                            Left _ ->
-                                throwSolveError (ConstructorClash lNode rNode)
+    solveOnMismatch :: UnifyCore.UnifyMismatch -> SolveM UnifyCore.UnifyMismatchAction
+    solveOnMismatch mismatch = case mismatch of
+        UnifyCore.MismatchMissingNode nid ->
+            throwSolveError (MissingNode nid)
+        UnifyCore.MismatchConstructor n1 n2 ->
+            throwSolveError (ConstructorClash n1 n2)
+        UnifyCore.MismatchBase b1 b2 ->
+            throwSolveError (BaseClash b1 b2)
+        UnifyCore.MismatchForallArity (Just k1) (Just k2) ->
+            throwSolveError (ForallArityMismatch k1 k2)
+        UnifyCore.MismatchForallArity _ _ ->
+            throwSolveError (ForallArityMismatch 0 0)
+        UnifyCore.MismatchExpVar _ _ ->
+            -- Unreachable with TyExpReject; treat as unexpected expansion if it occurs.
+            throwSolveError (UnexpectedExpNode (NodeId 0))
+        UnifyCore.MismatchUnexpectedExp nid ->
+            throwSolveError (UnexpectedExpNode nid)
 
     -- | Lookup a node by id or fail with 'MissingNode'.
     lookupNode :: NodeId -> SolveM TyNode
@@ -417,6 +466,11 @@ solveUnify traceCfg c0 = do
         case lookupNodeIn nodes nid of
             Just n -> pure n
             Nothing -> throwSolveError (MissingNode nid)
+
+    lookupNodeMaybe :: NodeId -> SolveM (Maybe TyNode)
+    lookupNodeMaybe nid = do
+        nodes <- gets (cNodes . suConstraint)
+        pure (lookupNodeIn nodes nid)
 
     -- Union-find helpers
     -- | Find canonical representative with path compression.
@@ -428,47 +482,12 @@ solveUnify traceCfg c0 = do
         pure root
 
     -- | Union two sets, pointing the first root at the second.
+    -- Representative choice is handled by 'solveRepresentative'.
     unionNodes :: NodeId -> NodeId -> SolveM ()
-    unionNodes a b = do
-        aRoot <- findRoot a
-        bRoot <- findRoot b
-        when (aRoot /= bRoot) $ do
-            cCur <- gets suConstraint
-            nodes <- gets (cNodes . suConstraint)
-            let aElim = VarStore.isEliminatedVar cCur aRoot
-                bElim = VarStore.isEliminatedVar cCur bRoot
-                isTyVar nid =
-                    case lookupNodeIn nodes nid of
-                        Just TyVar{} -> True
-                        _ -> False
-                hasBound nid =
-                    case lookupNodeIn nodes nid of
-                        Just TyVar{ tnBound = Just _ } -> True
-                        _ -> False
-                (fromRoot0, toRoot0) =
-                    case (aElim, bElim) of
-                        (False, True) -> (bRoot, aRoot)
-                        _ -> (aRoot, bRoot)
-                (fromRoot, toRoot)
-                    | isTyVar aRoot
-                    , not (isTyVar bRoot)
-                    , not aElim
-                    , hasBound aRoot = (bRoot, aRoot)
-                    | not (isTyVar aRoot)
-                    , isTyVar bRoot
-                    , not bElim
-                    , hasBound bRoot = (aRoot, bRoot)
-                    | not aElim
-                    , not bElim
-                    , isTyVar aRoot
-                    , isTyVar bRoot =
-                        case (hasBound aRoot, hasBound bRoot) of
-                            (True, False) -> (bRoot, aRoot)
-                            (False, True) -> (aRoot, bRoot)
-                            _ -> (fromRoot0, toRoot0)
-                    | otherwise = (fromRoot0, toRoot0)
+    unionNodes from to =
+        when (from /= to) $
             modify' $ \s ->
-                s { suUnionFind = IntMap.insert (getNodeId fromRoot) toRoot (suUnionFind s) }
+                s { suUnionFind = IntMap.insert (getNodeId from) to (suUnionFind s) }
 
     -- | Reject unifying a variable with a structure that already contains it.
     -- Traverses under current UF representatives so it stays sound after merges.

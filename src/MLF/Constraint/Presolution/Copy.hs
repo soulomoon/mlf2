@@ -25,9 +25,9 @@ import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Presolution.Base (
     CopyMap,
     CopyMapping(..),
+    MonadPresolution(getConstraint),
     PresolutionError(..),
     PresolutionM,
-    PresolutionState(..),
     bindingPathToRootUnderM,
     copiedNodes,
     instantiationBindersM
@@ -324,7 +324,7 @@ instantiateSchemeWithMode replaceFrontier bodyId substList = do
             case IntMap.lookup (getNodeId nidC) cmap of
                 Nothing -> pure ()
                 Just copy -> do
-                    c1 <- gets psConstraint
+                    c1 <- getConstraint
                     let childRef = typeRef copy
                         parentCandidate = typeRef copyRootC
                         parentFinal =
@@ -362,7 +362,7 @@ instantiateSchemeWithMode replaceFrontier bodyId substList = do
                                                 case IntMap.lookup (getNodeId (canonical pid)) cmap of
                                                     Just parentCopy -> pure (typeRef parentCopy)
                                                     Nothing -> pure (typeRef copyRootC)
-                                        c1 <- gets psConstraint
+                                        c1 <- getConstraint
                                         let childRef = typeRef copy
                                             parentFinal1 =
                                                 if parentFinal0 == childRef
@@ -561,7 +561,7 @@ bindUnboundCopiedNodes copyMap interior expansionRoot = do
     forM_ (IntSet.toList candidateIds) $ \nid -> do
         let node0 = NodeId nid
             nodeC = canonical node0
-        c' <- gets psConstraint
+        c' <- getConstraint
         let chooseParent childRef =
                 let uppers = filter (\p -> Binding.isUpper c' p childRef) expansionPath
                     preferGen = [p | p@GenRef{} <- uppers]
