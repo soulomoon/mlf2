@@ -37,6 +37,23 @@ Initial PRD + Ralph prd.json created (planning only; no code changes yet).
   - The computeResultTypeFallback function remains in the main ResultType module for now (will be extracted in US-003)
 ---
 
+## 2026-02-02 - US-003
+- Created MLF.Elab.Run.ResultType.Fallback module with computeResultTypeFallback implementation
+- Updated MLF.Elab.Run.ResultType to be a thin facade that:
+  - Re-exports computeResultTypeFromAnn from the Ann module
+  - Handles dispatch between AAnn case (delegates to Ann) and non-AAnn case (delegates to Fallback)
+- Added MLF.Elab.Run.ResultType.Fallback to mlf2.cabal other-modules
+- Files changed:
+  - src/MLF/Elab/Run/ResultType.hs (refactored to facade)
+  - src/MLF/Elab/Run/ResultType/Fallback.hs (new)
+  - mlf2.cabal
+- **Learnings for future iterations:**
+  - When splitting a module where functions call each other (like Fallback calling Ann), keep the dispatch logic in the facade
+  - The facade pattern allows submodules to remain independent without circular dependencies
+  - When moving code, check for unused imports to keep the build warning-free
+  - The AAnn case in computeResultTypeFallback needs to be handled at the facade level to avoid circular imports
+---
+
 ## Decisions
 - Scope: **A** — split only `ResultType`, `Presolution.Plan.Target`, and `PresolutionSpec` (do not include `MLF.Elab.Phi.Omega` / `MLF.Reify.Core` in this task).
 - Module-size targets: **C** — no LOC targets; focus on cohesion + stable facades.
