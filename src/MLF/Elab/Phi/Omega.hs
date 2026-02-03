@@ -276,6 +276,10 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
                     then Just [ty | name <- binderNames, Just ty <- [Map.lookup name subst]]
                     else Nothing
 
+    -- | Paper Def. 15.3.4 / Fig. 15.3.5: Φ(e) = Σ prefix then Φχe(Ω).
+    -- We always attempt binder reordering via Σ(g), independent of whether Ω
+    -- contains Raise operations. When no reorder is needed, reorderBindersByPrec
+    -- returns InstId.
     phiWithScheme :: Either ElabError Instantiation
     phiWithScheme = do
         let ty0 = schemeToType (siScheme si)
@@ -283,18 +287,10 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
             lookupBinder (NodeId i) = IntMap.lookup i subst
             ids0 = idsForStartType si ty0
             binderKeys = IntSet.fromList (IntMap.keys subst)
-            omegaOps = [op | StepOmega op <- steps]
-        (sigma, ty1, ids1) <-
-            if needsPrec omegaOps
-                then reorderBindersByPrec ty0 ids0
-                else Right (InstId, ty0, ids0)
+        -- Always attempt Σ(g) reordering at the start, per thesis Def. 15.3.4
+        (sigma, ty1, ids1) <- reorderBindersByPrec ty0 ids0
         (_, _, phiOps) <- goSteps binderKeys keepBinderKeys namedSet ty1 ids1 InstId steps lookupBinder
         pure (normalizeInst (instMany [sigma, phiOps]))
-
-    needsPrec :: [InstanceOp] -> Bool
-    needsPrec = any $ \case
-        OpRaise{} -> True
-        _ -> False
 
     applyInst :: String -> ElabType -> Instantiation -> Either ElabError ElabType
     applyInst label ty0 inst = case applyInstantiation ty0 inst of
