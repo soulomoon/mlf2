@@ -3,12 +3,14 @@
 module MLF.Frontend.Syntax (
     VarName,
     Lit (..),
-    Expr (..),
-    ExprF (..),
+    Expr (EVar, ELam, ELamAnn, EApp, ELet, EAnn, ELit),
+    ExprF (EVarF, ELamF, ELamAnnF, EAppF, ELetF, EAnnF, ELitF),
     SrcType (..),
     SrcTypeF (..),
     AnnotatedExpr (..),
-    BindingSite (..)
+    BindingSite (..),
+    mkCoerce,
+    viewCoerce
 ) where
 
 import Data.Functor.Foldable (Base, Corecursive (..), Recursive (..))
@@ -135,29 +137,41 @@ instance Corecursive SrcType where
 --     by Phase 1,
 --   - annotated lambda parameters (`ELamAnn`) are desugared via κσ coercions
 --     (see `MLF.Frontend.Desugar`) before constraint generation.
+--   - term annotations (`EAnn`) desugar to explicit coercions (`ECoerce`),
+--     which are internal and not part of the surface grammar.
 --
 -- See `MLF.Frontend.ConstraintGen` for the authoritative translation.
 --
 -- Unannotated forms infer types; annotated forms check against provided types.
 data Expr
     = EVar VarName
-    | EVarRaw VarName                           -- ^ Internal: skip per-use TyExp wrapping
     | ELam VarName Expr                         -- ^ λx. e (inferred parameter type)
     | ELamAnn VarName SrcType Expr              -- ^ λ(x : τ). e (annotated parameter)
     | EApp Expr Expr
     | ELet VarName Expr Expr                    -- ^ let x = e₁ in e₂ (inferred scheme)
-    | EAnn Expr SrcType                         -- ^ (e : τ) (term annotation)
+    | EAnn Expr SrcType                         -- ^ (e : τ) (term annotation; desugars to coercion)
+    | ECoerce SrcType Expr                      -- ^ Internal: coercion term (cκ e)
     | ELit Lit
     deriving (Eq, Show)
 
+-- | Internal coercion constructor helper.
+mkCoerce :: SrcType -> Expr -> Expr
+mkCoerce = ECoerce
+
+-- | Internal coercion view (used by desugaring/translation).
+viewCoerce :: Expr -> Maybe (SrcType, Expr)
+viewCoerce expr = case expr of
+    ECoerce ty e -> Just (ty, e)
+    _ -> Nothing
+
 data ExprF a
     = EVarF VarName
-    | EVarRawF VarName
     | ELamF VarName a
     | ELamAnnF VarName SrcType a
     | EAppF a a
     | ELetF VarName a a
     | EAnnF a SrcType
+    | ECoerceF SrcType a
     | ELitF Lit
     deriving (Eq, Show, Functor, Foldable, Traversable)
 
@@ -166,23 +180,23 @@ type instance Base Expr = ExprF
 instance Recursive Expr where
     project expr = case expr of
         EVar v -> EVarF v
-        EVarRaw v -> EVarRawF v
         ELam v body -> ELamF v body
         ELamAnn v ty body -> ELamAnnF v ty body
         EApp f a -> EAppF f a
         ELet v rhs body -> ELetF v rhs body
         EAnn e ty -> EAnnF e ty
+        ECoerce ty e -> ECoerceF ty e
         ELit l -> ELitF l
 
 instance Corecursive Expr where
     embed expr = case expr of
         EVarF v -> EVar v
-        EVarRawF v -> EVarRaw v
         ELamF v body -> ELam v body
         ELamAnnF v ty body -> ELamAnn v ty body
         EAppF f a -> EApp f a
         ELetF v rhs body -> ELet v rhs body
         EAnnF e ty -> EAnn e ty
+        ECoerceF ty e -> ECoerce ty e
         ELitF l -> ELit l
 
 -- | Optional wrapper for attaching binding-site metadata to a surface expression.
