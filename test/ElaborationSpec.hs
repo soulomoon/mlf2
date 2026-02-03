@@ -871,8 +871,166 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     Left _ -> pure ()
                     Right sig -> expectationFailure ("Expected failure, got: " ++ show sig)
 
-            it "applies Σ reordering even without Raise when Typ/Typexp differ (gap)" $ do
-                pendingWith "Needs Typ vs Typexp mismatch detection + Σ integration in Φ when no Raise ops are present."
+            it "applies Σ reordering even without Raise when Typ/Typexp differ" $ do
+                -- Build a constraint graph where <P order is: a < b (a appears first in arrow)
+                -- but the scheme has binders in order b, a. Φ should reorder to match <P.
+                let root = NodeId 100
+                    aN = NodeId 1
+                    bN = NodeId 2
+                    -- Arrow: a -> b, so <P order is a < b
+                    c = rootedConstraint emptyConstraint
+                        { cNodes = nodeMapFromList
+                            [ (getNodeId root, TyArrow root aN bN)
+                            , (getNodeId aN, TyVar { tnId = aN, tnBound = Nothing })
+                            , (getNodeId bN, TyVar { tnId = bN, tnBound = Nothing })
+                            ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef aN), (genRef (GenNodeId 0), BindFlex))
+                                , (nodeRefKey (typeRef bN), (genRef (GenNodeId 0), BindFlex))
+                                ]
+                        }
+                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+
+                    -- Scheme has binders in order: b, a (opposite of <P order)
+                    scheme =
+                        Elab.schemeFromType
+                            (Elab.TForall "b" Nothing
+                                (Elab.TForall "a" Nothing
+                                    (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))))
+                    subst = IntMap.fromList [(getNodeId aN, "a"), (getNodeId bN, "b")]
+                    si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = subst }
+
+                    -- Empty witness ops - no Raise, Graft, Weaken, etc.
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewSteps = []
+                        , ewWitness = InstanceWitness []
+                        }
+
+                phi <- requireRight (Elab.phiFromEdgeWitness defaultTraceConfig generalizeAtWith solved (Just si) ew)
+                -- Φ should produce a non-identity instantiation (reordering)
+                phi `shouldNotBe` Elab.InstId
+                -- Apply and verify the result has binders in <P order (a before b)
+                out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
+                let expected =
+                        Elab.TForall "a" Nothing
+                            (Elab.TForall "b" Nothing
+                                (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b")))
+                canonType out `shouldBe` canonType expected
+
+            it "empty Ω produces non-identity instantiation when binder order differs from <P" $ do
+                -- Three binders: <P order is a < b < c (left-to-right in nested arrows)
+                -- Scheme order is c, b, a. Φ should reorder to a, b, c.
+                let root = NodeId 100
+                    inner = NodeId 101
+                    aN = NodeId 1
+                    bN = NodeId 2
+                    cN = NodeId 3
+                    -- a -> (b -> c), so <P order is a < b < c
+                    c = rootedConstraint emptyConstraint
+                        { cNodes = nodeMapFromList
+                            [ (getNodeId root, TyArrow root aN inner)
+                            , (getNodeId inner, TyArrow inner bN cN)
+                            , (getNodeId aN, TyVar { tnId = aN, tnBound = Nothing })
+                            , (getNodeId bN, TyVar { tnId = bN, tnBound = Nothing })
+                            , (getNodeId cN, TyVar { tnId = cN, tnBound = Nothing })
+                            ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef aN), (genRef (GenNodeId 0), BindFlex))
+                                , (nodeRefKey (typeRef bN), (genRef (GenNodeId 0), BindFlex))
+                                , (nodeRefKey (typeRef cN), (genRef (GenNodeId 0), BindFlex))
+                                , (nodeRefKey (typeRef inner), (typeRef root, BindFlex))
+                                ]
+                        }
+                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+
+                    -- Scheme has binders in reverse order: c, b, a
+                    scheme =
+                        Elab.schemeFromType
+                            (Elab.TForall "c" Nothing
+                                (Elab.TForall "b" Nothing
+                                    (Elab.TForall "a" Nothing
+                                        (Elab.TArrow (Elab.TVar "a")
+                                            (Elab.TArrow (Elab.TVar "b") (Elab.TVar "c"))))))
+                    subst = IntMap.fromList
+                        [ (getNodeId aN, "a")
+                        , (getNodeId bN, "b")
+                        , (getNodeId cN, "c")
+                        ]
+                    si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = subst }
+
+                    -- Empty witness ops
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewSteps = []
+                        , ewWitness = InstanceWitness []
+                        }
+
+                phi <- requireRight (Elab.phiFromEdgeWitness defaultTraceConfig generalizeAtWith solved (Just si) ew)
+                phi `shouldNotBe` Elab.InstId
+                out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
+                let expected =
+                        Elab.TForall "a" Nothing
+                            (Elab.TForall "b" Nothing
+                                (Elab.TForall "c" Nothing
+                                    (Elab.TArrow (Elab.TVar "a")
+                                        (Elab.TArrow (Elab.TVar "b") (Elab.TVar "c")))))
+                canonType out `shouldBe` canonType expected
+
+            it "missing <P order key for a binder causes fail-fast error" $ do
+                -- Create a constraint where a binder node is NOT reachable from the root
+                -- (so it won't have an order key), triggering the fail-fast error.
+                let root = NodeId 100
+                    aN = NodeId 1
+                    bN = NodeId 2
+                    -- Only 'a' is in the arrow; 'b' is disconnected from root
+                    c = rootedConstraint emptyConstraint
+                        { cNodes = nodeMapFromList
+                            [ (getNodeId root, TyArrow root aN aN)  -- a -> a (no b)
+                            , (getNodeId aN, TyVar { tnId = aN, tnBound = Nothing })
+                            , (getNodeId bN, TyVar { tnId = bN, tnBound = Nothing })  -- disconnected
+                            ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef aN), (genRef (GenNodeId 0), BindFlex))
+                                , (nodeRefKey (typeRef bN), (genRef (GenNodeId 0), BindFlex))
+                                ]
+                        }
+                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+
+                    -- Scheme references both a and b
+                    scheme =
+                        Elab.schemeFromType
+                            (Elab.TForall "a" Nothing
+                                (Elab.TForall "b" Nothing
+                                    (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))))
+                    subst = IntMap.fromList [(getNodeId aN, "a"), (getNodeId bN, "b")]
+                    si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = subst }
+
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewSteps = []
+                        , ewWitness = InstanceWitness []
+                        }
+
+                case Elab.phiFromEdgeWitness defaultTraceConfig generalizeAtWith solved (Just si) ew of
+                    Left (Elab.InstantiationError msg) ->
+                        msg `shouldSatisfy` ("PhiReorder:" `isInfixOf`)
+                    Left other ->
+                        expectationFailure $ "Expected InstantiationError with PhiReorder prefix, got: " ++ show other
+                    Right inst ->
+                        expectationFailure $ "Expected failure due to missing order key, got: " ++ Elab.pretty inst
 
         describe "Φ translation soundness" $ do
             let runToSolved :: Expr -> Either String (SolveResult, IntMap.IntMap EdgeWitness, IntMap.IntMap EdgeTrace)
