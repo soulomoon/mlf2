@@ -12,6 +12,29 @@ module MLF.Constraint.Presolution.EdgeProcessing.Unify (
     setBindParentIfUpper
 ) where
 
+{- Note [Edge-local omega execution]
+Edge-local unification executes the paper's χe operations (Raise, Merge, Weaken)
+around the chosen expansion recipe. The execution order here is:
+
+  1. Apply the expansion (copying nodes + binding the expansion root).
+  2. Execute Omega base ops *before* structural unification.
+  3. Unify expansion structure with the target (unifyStructureEdge).
+  4. Unify the edge root with the expansion result (unifyAcyclicEdge).
+  5. Execute Omega base ops *after* unification.
+
+The Raise/Merge/Weaken steps are recorded by EdgeUnify while χe runs, and are
+later integrated with expansion-derived steps into a per-edge witness (Φ).
+This aligns with `papers/these-finale-english.txt` (see also `papers/xmlf.txt`
+Fig. 10 for Ω/Φ). TyVar/TyExp special cases remain in presolution; shared
+structural decomposition lives in `Unify.Decompose`.
+-}
+
+{- Note [Weaken suppression]
+Annotation edges suppress OpWeaken steps (see EdgeProcessing + Witness). This
+module assumes `baseOps` already reflect that decision; it only executes the
+ops it is given. Keep this invariant intact when extending edge-local unification.
+-}
+
 import Control.Monad (forM, forM_, when)
 import Control.Monad.Except (throwError)
 import Control.Monad.Reader (ask)
