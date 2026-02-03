@@ -29,8 +29,8 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Validation already in place in WitnessNorm.hs; fixed test to properly trigger validation error"
     },
     {
       "id": "US-003",

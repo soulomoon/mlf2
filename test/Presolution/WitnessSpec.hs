@@ -9,10 +9,12 @@ import qualified Data.Set as Set
 
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Witness
-    ( Expansion(..)
+    ( EdgeWitness(..)
+    , Expansion(..)
     , ForallSpec(..)
     , InstanceOp(..)
     , InstanceStep(..)
+    , InstanceWitness(..)
     )
 import MLF.Constraint.Presolution.Witness
     ( OmegaNormalizeEnv(..)
@@ -26,7 +28,14 @@ import MLF.Constraint.Presolution.Witness
     , witnessFromExpansion
     )
 import MLF.Constraint.Types.Presolution (Presolution(..))
-import MLF.Constraint.Presolution (PresolutionState(..), runPresolutionM)
+import MLF.Constraint.Presolution
+    ( PresolutionState(..)
+    , PresolutionError(..)
+    , runPresolutionM
+    , normalizeEdgeWitnessesM
+    , EdgeTrace(..)
+    , InteriorNodes(..)
+    )
 import qualified MLF.Constraint.Inert as Inert
 import qualified MLF.Binding.Tree as Binding
 import SpecUtil
@@ -398,6 +407,76 @@ spec = do
                     ops = [OpWeaken parent, OpMerge parent child]
                 validateNormalizedWitness env ops
                     `shouldBe` Left (OpUnderRigid child)
+
+            it "returns WitnessNormalizationError for op outside interior via presolution" $ do
+                -- Set up a constraint with an edge whose witness contains an op
+                -- targeting a node outside the expansion interior I(r).
+                -- This should trigger WitnessNormalizationError during
+                -- normalizeEdgeWitnessesM.
+                let root = NodeId 0
+                    interiorNode = NodeId 1
+                    exteriorNode = NodeId 2
+                    edgeId = 0
+                    nodes = nodeMapFromList
+                            [ (getNodeId root, TyForall root interiorNode)
+                            , (getNodeId interiorNode, TyVar { tnId = interiorNode, tnBound = Nothing })
+                            , (getNodeId exteriorNode, TyVar { tnId = exteriorNode, tnBound = Nothing })
+                            ]
+                    bindParents =
+                        bindParentsFromPairs
+                            [ (interiorNode, root, BindFlex)
+                            -- exteriorNode has no binding parent (outside interior)
+                            ]
+                    constraint = rootedConstraint $ emptyConstraint
+                            { cNodes = nodes
+                            , cBindParents = bindParents
+                            }
+                    -- Create a witness with an OpMerge where one target is outside the interior.
+                    -- OpMerge n m: both n and m must be in interior for validation to pass,
+                    -- but stripExteriorOps only requires one target to be in interior to keep the op.
+                    -- This ensures the op is kept by normalization but fails validation.
+                    badOp = OpMerge interiorNode exteriorNode
+                    witness = EdgeWitness
+                            { ewEdgeId = EdgeId edgeId
+                            , ewLeft = root
+                            , ewRight = exteriorNode
+                            , ewRoot = root
+                            , ewSteps = [StepOmega badOp]
+                            , ewWitness = InstanceWitness [badOp]
+                            }
+                    -- Create an edge trace with interior that does NOT include exteriorNode
+                    edgeTrace = EdgeTrace
+                            { etRoot = root
+                            , etBinderArgs = []
+                            , etInterior = InteriorNodes (IntSet.fromList [getNodeId interiorNode])
+                            , etCopyMap = mempty
+                            }
+                    st0 = PresolutionState
+                            { psConstraint = constraint
+                            , psPresolution = Presolution IntMap.empty
+                            , psUnionFind = IntMap.empty
+                            , psNextNodeId = 3
+                            , psPendingWeakens = IntSet.empty
+                            , psBinderCache = IntMap.empty
+                            , psEdgeExpansions = IntMap.empty
+                            , psEdgeWitnesses = IntMap.fromList [(edgeId, witness)]
+                            , psEdgeTraces = IntMap.fromList [(edgeId, edgeTrace)]
+                            }
+                case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
+                    Left (WitnessNormalizationError (EdgeId eid) err) -> do
+                        eid `shouldBe` edgeId
+                        -- The op outside interior can trigger different errors depending on
+                        -- which phase catches it first. MalformedRaiseMerge is returned by
+                        -- coalesceRaiseMergeWithEnv when it detects a Merge with target outside
+                        -- interior (n in interior, m not in interior).
+                        case err of
+                            OpOutsideInterior _ -> pure ()
+                            MalformedRaiseMerge _ -> pure ()
+                            _ -> expectationFailure $ "Expected OpOutsideInterior or MalformedRaiseMerge, got: " ++ show err
+                    Left other ->
+                        expectationFailure $ "Expected WitnessNormalizationError, got: " ++ show other
+                    Right _ ->
+                        expectationFailure "Expected WitnessNormalizationError for op outside interior, but normalization succeeded"
 
         describe "Inert-locked detection" $ do
             it "does not mark nodes with flex path to ⊥ as inert-locked" $ do

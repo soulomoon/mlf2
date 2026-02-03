@@ -21,7 +21,25 @@
   - The pre-existing test failure `elaborates lambda with rank-2 argument` is unrelated to US-001
 ---
 
-# US-002
+## 2026-02-03 - US-002
+- What was implemented:
+  - Verified that validation is already being called after normalization in `normalizeEdgeWitnessesM` (WitnessNorm.hs lines 170-173)
+  - The `WitnessNormalizationError` constructor already exists in Base.hs and is properly structured with `EdgeId` and `OmegaNormalizeError`
+  - Fixed the existing regression test that was failing due to incorrect `EdgeWitness` constructor usage
+  - Updated test imports to include `EdgeWitness(..)` and `InstanceWitness(..)` from `MLF.Constraint.Types.Witness`
+  - Fixed test to use correct `EdgeWitness` field names (`ewEdgeId`, `ewLeft`, `ewRight`, `ewRoot`, `ewSteps`, `ewWitness`)
+  - Updated the test case to properly trigger a validation error by using `OpMerge` with one target outside interior
+  - The test now accepts either `OpOutsideInterior` or `MalformedRaiseMerge` errors (both indicate op outside interior)
+- Files changed:
+  - `test/Presolution/WitnessSpec.hs` - Fixed imports, fixed EdgeWitness usage, updated test case
+- **Learnings for future iterations:**
+  - `EdgeWitness` has more fields than just `ewRoot`, `ewSteps`, `ewWitness` - it also requires `ewEdgeId`, `ewLeft`, `ewRight`
+  - `stripExteriorOps` in normalization removes ops that don't touch the interior BEFORE validation
+  - To trigger validation errors, use ops where stripping logic keeps the op but validation rejects it
+  - For `OpMerge n m`: stripping keeps if `n` OR `m` in interior; validation requires BOTH in interior
+  - For `OpGraft sigma n`: stripping and validation both only check `n` (the target binder)
+  - The `MalformedRaiseMerge` error is returned by `coalesceRaiseMergeWithEnv` when it detects invalid Merge
+---
 
 # US-003
 
