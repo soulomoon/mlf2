@@ -135,8 +135,10 @@ instance Corecursive SrcType where
 --   - applications (`EApp`) generate instantiation constraints (≤),
 --   - annotations (`EAnn`) are turned into constraint graph structure
 --     by Phase 1,
---   - annotated lambda parameters (`ELamAnn`) are desugared via κσ coercions
---     (see `MLF.Frontend.Desugar`) before constraint generation.
+--   - annotated lambda parameters (`ELamAnn`) are surface sugar (thesis §12.3.2):
+--       λ(x : τ) a  ≜  λ(x) let x = (x : τ) in a
+--     and are desugared to `ELam`/`ELet` plus coercions (see `MLF.Frontend.Desugar`)
+--     before constraint generation.
 --   - term annotations (`EAnn`) desugar to explicit coercions (`ECoerce`),
 --     which are internal and not part of the surface grammar.
 --

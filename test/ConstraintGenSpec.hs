@@ -169,23 +169,36 @@ spec = describe "Phase 1 — Constraint generation" $ do
                         expectationFailure $ "Expected application annotation, saw " ++ show other
 
     describe "Annotated Terms" $ do
-        it "represents annotated lambda parameters directly" $ do
-            -- λ(x:Int). x  keeps the annotation as the parameter type.
+        it "desugars annotated lambda parameters via let" $ do
+            -- Thesis sugar (Chapter 12.3.2):
+            --   λ(x : τ) a  ≜  λ(x) let x = (x : τ) in a
+            --
+            -- So Phase 1 should see an ordinary lambda whose body is a let-binding
+            -- with an annotated RHS.
             let ann = STBase "Int"
                 expr = ELamAnn "x" ann (EVar "x")
             expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let constraint = crConstraint result
                     nodes = cNodes constraint
                 case crAnnotated result of
-                    ALam _ param _ bodyAnn _ ->
+                    ALam _ lamParam _ bodyAnn _ ->
                         case bodyAnn of
-                            AVar "x" useNode -> do
-                                useNode `shouldBe` param
-                                annNode <- lookupNode nodes param
-                                case annNode of
+                            ALet "x" _ schemeRoot _ _ rhsAnn bodyAnn' _ -> do
+                                schemeNode <- lookupNode nodes schemeRoot
+                                case schemeNode of
                                     TyBase { tnBase = BaseTy name } -> name `shouldBe` "Int"
-                                    other -> expectationFailure $ "Expected Int annotation node, saw " ++ show other
-                            other -> expectationFailure $ "Expected AVar annotation, saw " ++ show other
+                                    other -> expectationFailure $ "Expected Int scheme root, saw " ++ show other
+                                case rhsAnn of
+                                    AAnn (AVar "x" rhsUse) _ _ -> rhsUse `shouldBe` lamParam
+                                    other -> expectationFailure $ "Expected annotated RHS, saw " ++ show other
+                                case bodyAnn' of
+                                    AAnn (AVar "x" useNode) _ _ -> do
+                                        useTy <- lookupNode nodes useNode
+                                        case useTy of
+                                            TyExp { tnBody = bodyId } -> bodyId `shouldBe` schemeRoot
+                                            other -> expectationFailure $ "Expected TyExp use of let-bound x, saw " ++ show other
+                                    other -> expectationFailure $ "Expected annotated let body, saw " ++ show other
+                            other -> expectationFailure $ "Expected let-body for desugared ELamAnn, saw " ++ show other
                     other -> expectationFailure $ "Expected ALam annotation, saw " ++ show other
 
         it "respects polymorphic let annotations" $ do
@@ -250,20 +263,27 @@ spec = describe "Phase 1 — Constraint generation" $ do
                     other -> expectationFailure $ "Expected Arrow scheme root, saw " ++ show other
 
         it "respects instance bounds in Forall types" $ do
-            -- λ(x : ∀(a ⩾ Int). a). x keeps the forall annotation on the parameter.
+            -- λ(x : ∀(a ⩾ Int). a). x desugars to a let-binding that carries the forall
+            -- scheme, and uses of x in the body should behave like let-bound schemes.
             let ann = STForall "a" (Just (STBase "Int")) (STVar "a")
                 expr = ELamAnn "x" ann (EVar "x")
             expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let constraint = crConstraint result
                     nodes = cNodes constraint
                 case crAnnotated result of
-                    ALam _ param _ bodyAnn _ ->
+                    ALam _ lamParam _ bodyAnn _ ->
                         case bodyAnn of
-                            AVar "x" useNode -> do
-                                case lookupNodeMaybe nodes useNode of
-                                    Just TyExp { tnBody = bodyId } -> bodyId `shouldBe` param
-                                    other -> expectationFailure $ "Expected TyExp for polymorphic x, saw " ++ show other
-                                annVar <- lookupNode nodes param
+                            ALet "x" _ schemeRoot _ _ rhsAnn bodyAnn' _ -> do
+                                case rhsAnn of
+                                    AAnn (AVar "x" rhsUse) _ _ -> rhsUse `shouldBe` lamParam
+                                    other -> expectationFailure $ "Expected annotated RHS, saw " ++ show other
+                                case bodyAnn' of
+                                    AAnn (AVar "x" useNode) _ _ -> do
+                                        case lookupNodeMaybe nodes useNode of
+                                            Just TyExp { tnBody = bodyId } -> bodyId `shouldBe` schemeRoot
+                                            other -> expectationFailure $ "Expected TyExp for polymorphic x, saw " ++ show other
+                                    other -> expectationFailure $ "Expected annotated let body, saw " ++ show other
+                                annVar <- lookupNode nodes schemeRoot
                                 case annVar of
                                     TyVar { tnBound = Just boundId } -> do
                                         rhs <- lookupNode nodes boundId
@@ -272,28 +292,37 @@ spec = describe "Phase 1 — Constraint generation" $ do
                                             other -> expectationFailure $ "Expected bound Int, saw " ++ show other
                                     TyVar { tnBound = Nothing } ->
                                         expectationFailure "Expected bound for variable, saw Nothing"
-                                    other -> expectationFailure $ "Expected TyVar annotation node, saw " ++ show other
-                            other -> expectationFailure $ "Expected AVar annotation, saw " ++ show other
+                                    other -> expectationFailure $ "Expected TyVar scheme root node, saw " ++ show other
+                            other -> expectationFailure $ "Expected let-body for desugared ELamAnn, saw " ++ show other
                     other -> expectationFailure $ "Expected ALam annotation, saw " ++ show other
 
         it "internalizes Bottom type" $ do
-            -- λ(x : ⊥). x keeps the bottom annotation on the parameter.
+            -- λ(x : ⊥). x desugars through a let-binding with scheme ⊥.
             let ann = STBottom
                 expr = ELamAnn "x" ann (EVar "x")
             expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let constraint = crConstraint result
                     nodes = cNodes constraint
                 case crAnnotated result of
-                    ALam _ param _ bodyAnn _ ->
+                    ALam _ lamParam _ bodyAnn _ ->
                         case bodyAnn of
-                            AVar "x" useNode -> do
-                                useNode `shouldBe` param
-                                annNode' <- lookupNode nodes param
+                            ALet "x" _ schemeRoot _ _ rhsAnn bodyAnn' _ -> do
+                                case rhsAnn of
+                                    AAnn (AVar "x" rhsUse) _ _ -> rhsUse `shouldBe` lamParam
+                                    other -> expectationFailure $ "Expected annotated RHS, saw " ++ show other
+                                case bodyAnn' of
+                                    AAnn (AVar "x" useNode) _ _ -> do
+                                        useTy <- lookupNode nodes useNode
+                                        case useTy of
+                                            TyExp { tnBody = bodyId } -> bodyId `shouldBe` schemeRoot
+                                            other -> expectationFailure $ "Expected TyExp use of let-bound x, saw " ++ show other
+                                    other -> expectationFailure $ "Expected annotated let body, saw " ++ show other
+                                annNode' <- lookupNode nodes schemeRoot
                                 case annNode' of
                                     -- Bottom is internalized as a fresh TyVar.
                                     TyVar {} -> pure ()
-                                    other -> expectationFailure $ "Expected TyVar { tnId = for, tnBound = Nothing } Bottom, saw " ++ show other
-                            other -> expectationFailure $ "Expected AVar annotation, saw " ++ show other
+                                    other -> expectationFailure $ "Expected TyVar scheme root for Bottom, saw " ++ show other
+                            other -> expectationFailure $ "Expected let-body for desugared ELamAnn, saw " ++ show other
                     other -> expectationFailure $ "Expected ALam annotation, saw " ++ show other
 
     describe "Annotation Edge Cases" $ do

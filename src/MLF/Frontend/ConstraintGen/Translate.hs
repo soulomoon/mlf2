@@ -67,28 +67,8 @@ buildExprRaw env scopeRoot expr =
                 setVarBound rootVar (Just arrowNode)
                 pure (rootVar, ALam param argNode scopeRoot bodyAnn rootVar)
 
-            -- Annotated lambda parameters preserve the annotation as the parameter type,
-            -- enabling rank-2 argument types for explicit foralls.
-            ELamAnn param annTy body -> do
-                annNode <- internalizeSrcTypeBound scopeRoot Map.empty annTy
-                schemeGenUsed <- lookupSchemeGenForRoot annNode
-                let bindingGenUsed =
-                        case (annTy, schemeGenUsed) of
-                            (STForall{}, Nothing) -> Just scopeRoot
-                            _ -> schemeGenUsed
-                let env' = Map.insert param (Binding annNode bindingGenUsed) env
-                (bodyNode, bodyAnn) <- buildExpr env' scopeRoot body
-                arrowNode <- allocArrow annNode bodyNode
-                -- Annotated parameters still bind at the current binding node.
-                case annTy of
-                    STForall{} -> pure ()
-                    _ ->
-                        case schemeGenUsed of
-                            Nothing -> setBindParentOverride (typeRef annNode) (genRef scopeRoot) BindFlex
-                            Just _ -> pure ()
-                rootVar <- allocVar
-                setVarBound rootVar (Just arrowNode)
-                pure (rootVar, ALam param annNode scopeRoot bodyAnn rootVar)
+            ELamAnn{} ->
+                throwError (InternalConstraintError "buildExprRaw: ELamAnn should have been desugared (see MLF.Frontend.Desugar)")
 
             -- See Note [Application and Instantiation Edges]
             EApp fun arg -> do
@@ -240,21 +220,19 @@ Both copies remain wrapped (like `internalizeSrcType`). The codomain is returned
 as the annotation result, while the domain stays the instantiation target.
 -}
 
-{- Note [Annotated Lambda parameters via κσ]
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-`papers/these-finale-english.txt` (see `papers/xmlf.txt` §3.1) presents annotated lambda
-parameters as syntactic sugar:
+{- Note [Annotated Lambda parameters]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The thesis treats annotated lambdas as syntactic sugar (Chapter 12.3.2):
 
-  λ(x : σ) b  ≜  λ(x) let x = κσ x in b
+  λ(x : τ) a  ≜  λ(x) let x = (x : τ) in a
 
-We preserve `ELamAnn` in the surface AST and translate it directly so the
-parameter type is the annotation scheme itself. This keeps the κσ intuition
-while ensuring explicit-forall annotations produce rank-2 argument types:
+(and `(x : τ)` itself is sugar for applying a coercion/retyping constant).
 
-  λ(x : ∀a. a -> a). b  :  (∀a. a -> a) -> ...
-
-Inside the body, `x` is bound to the annotated scheme and uses the usual
-expansion machinery when the scheme is polymorphic.
+We keep `ELamAnn` only in the surface AST for the parser/tests; it is eliminated
+by `MLF.Frontend.Desugar.desugarCoercions` before Phase 1. This makes annotated
+lambdas "let-constructs" structurally (as the thesis later relies on for
+complexity accounting) and delegates the rank-2/polymorphic case to the normal
+annotated-let machinery.
 -}
 
 {- Note [Annotated Let via EAnn]
