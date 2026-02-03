@@ -90,7 +90,9 @@ library mlf2-internal
                       MLF.Witness.OmegaExec,
                       MLF.Constraint.VarStore,
                       MLF.Constraint.NodeAccess,
-                      MLF.Util.UnionFind
+                      MLF.Util.UnionFind,
+                      MLF.Types.Elab,
+                      MLF.Reify.Core
 
     other-modules:    MLF.Constraint.Types.Ids,
                       MLF.Constraint.Presolution.Base,
@@ -143,7 +145,6 @@ library mlf2-internal
                       MLF.Util.OrderKey,
                       MLF.Util.RecursionSchemes,
                       MLF.Util.Trace,
-                      MLF.Reify.Core,
                       MLF.Reify.TypeOps,
                       MLF.Elab.Inst,
                       MLF.Elab.Elaborate,
@@ -186,8 +187,7 @@ library mlf2-internal
                       MLF.Frontend.ConstraintGen.Scope,
                       MLF.Frontend.ConstraintGen.Emit,
                       MLF.Frontend.ConstraintGen.Translate,
-                      MLF.Elab.Types,
-                      MLF.Types.Elab
+                      MLF.Elab.Types
 
     -- Other library packages from which modules are imported.
     build-depends:    base ^>=4.21.0.0,

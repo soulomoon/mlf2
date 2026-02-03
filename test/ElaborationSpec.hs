@@ -4,6 +4,7 @@ module ElaborationSpec (spec) where
 import Test.Hspec
 import Control.Monad (forM_, when)
 import Data.List (isInfixOf, stripPrefix)
+import qualified Data.List.NonEmpty as NE
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Set as Set
@@ -391,6 +392,10 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                     fv1 <- go bound visited' (canonical d)
                                     fv2 <- go bound visited' (canonical c)
                                     pure (fv1 `IntSet.union` fv2)
+                                Just TyCon{ tnArgs = args } -> do
+                                    let visited' = IntSet.insert key visited
+                                    fvs <- mapM (go bound visited' . canonical) (NE.toList args)
+                                    pure (IntSet.unions fvs)
                                 Just TyForall{ tnId = fId, tnBody = b } -> do
                                     let visited' = IntSet.insert key visited
                                     binders <- Binding.boundFlexChildrenUnder canonical constraint (typeRef (canonical fId))

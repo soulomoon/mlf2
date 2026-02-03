@@ -142,3 +142,22 @@ Initial PRD converted to Ralph `prd.json` (planning only; no code changes yet).
   - The codebase already had the placeholder for TyCon but was missing the recursive case - a common partial implementation pattern
   - Pre-existing test failures (2 in ElaborationSpec) continue to be unrelated to TyCon work
 ---
+
+## 2026-02-03 - US-009
+- What was implemented:
+  - Verified `src/MLF/Reify/Core.hs` already reifies TyCon to TCon (lines 395-402)
+  - Verified `src/MLF/Elab/Phi/Context.hs` already handles TyCon in `needsInsideRoot` and `go` (lines 93, 182-184)
+  - Verified `src/MLF/Constraint/Presolution/Validation.hs` already handles TyCon in rigidification (lines 76-83, 134-138, 235-240)
+  - Added `MLF.Types.Elab` and `MLF.Reify.Core` to exposed-modules in `mlf2.cabal` for test access
+  - Fixed incomplete pattern match in `test/ElaborationSpec.hs` freeVarsUnder (added TyCon case)
+  - Added PipelineSpec tests for TyCon reification (single and nested TCon)
+- Files changed:
+  - `mlf2.cabal` (exposed-modules for mlf2-internal)
+  - `test/ElaborationSpec.hs` (TyCon case in freeVarsUnder)
+  - `test/PipelineSpec.hs` (TyCon reification tests)
+- **Learnings for future iterations:**
+  - Internal library modules must be listed in `exposed-modules` (not just `other-modules`) for test suite access
+  - When adding test files that import internal modules, ensure those modules are exposed
+  - The `freeVarsUnder` helper in ElaborationSpec needed a TyCon case to avoid incomplete pattern warnings
+  - Pre-existing test failures (2 in ElaborationSpec) continue to be unrelated to TyCon work
+---
