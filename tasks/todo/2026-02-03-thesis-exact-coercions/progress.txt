@@ -1,0 +1,54 @@
+## Codebase Patterns
+- Coercion types are built via `internalizeCoercionType` which creates domain (rigid) and codomain (flexible) copies
+- Existential/free type variables are shared via `SharedEnv` map passed between copies
+- `rebindIfParent` is used to avoid locked descendants by rebinding children under structural nodes
+- `nodeKind` from `MLF.Binding.Queries` classifies nodes as Root/Instantiable/Restricted/Locked
+
+## Progress
+
+Initial PRD created (planning only; no code changes yet).
+
+---
+
+## 2026-02-03 - US-001
+- Already implemented in commit f5b44b8 (prior to this iteration)
+- Domain copy uses BindRigid, codomain uses BindFlex
+- Existentials shared via SharedEnv
+- No coercion-local nodes are locked (rebindIfParent prevents this)
+- All 415 tests pass
+
+---
+
+## 2026-02-03 - US-002
+- What was implemented: Changed `buildCoerce` to return `codomainNode` instead of `domainNode`
+- Files changed: `src/MLF/Frontend/ConstraintGen/Translate.hs`
+- Updated Note [Coercion domain/codomain semantics] to reflect thesis-exact behavior
+- **Learnings for future iterations:**
+  - The instantiation edge still connects to the domain node (edgeLeft ≤ domainNode)
+  - Returning codomain makes annotation results thesis-exact (§12.3.2.2, §15.3.8)
+  - All 415 tests passed without modification after this change
+
+---
+
+## 2026-02-03 - US-003
+- Already satisfied: All tests pass after US-002 changes
+- No presolution errors, no GenSchemeFreeVars or OperationOnLockedNode errors
+- **Learnings for future iterations:**
+  - The rigid domain / flexible codomain design avoids presolution issues
+  - Restricted nodes (rigid binding edge) are not the same as locked nodes (rigid ancestor)
+
+---
+
+## 2026-02-03 - US-004
+- What was implemented: Added 3 regression tests for coercion semantics
+- Files changed: `test/ConstraintGenSpec.hs`
+- Tests added:
+  1. "coercion domain nodes are restricted but not locked" - verifies nodeKind is NodeRestricted
+  2. "EAnn returns the codomain copy (not domain)" - verifies root != domainNode
+  3. "existential type variables are shared between domain and codomain" - verifies free vars are shared
+- **Learnings for future iterations:**
+  - Use `nodeKind` from `MLF.Binding.Tree` to classify node binding status
+  - For free type variables, domain and codomain share the same node (existential sharing)
+  - Test count increased from 415 to 418
+
+---
