@@ -1,0 +1,63 @@
+## Progress
+
+## Codebase Patterns
+- Unit tests for Φ translation need proper constraint graph structure with nested TyForall nodes and correct binding tree (binding parent must be "upper" in term-DAG)
+- Error messages in Φ/Σ computation use stable "PhiReorder:" prefix for fail-fast behavior
+
+2026-02-03: Converted `tasks/prd-thesis-exact-phir-reorder.md` to `tasks/todo/2026-02-03-thesis-exact-phir-reorder/prd.json` for Ralph execution. No implementation work started yet.
+
+## 2026-02-03 - US-001
+- What was implemented: Removed the `needsPrec` gate in `phiWithSchemeOmega` so Φ translation always attempts Σ(g) binder reordering at the start, independent of whether Ω contains Raise operations
+- Files changed: `src/MLF/Elab/Phi/Omega.hs`
+- **Learnings for future iterations:**
+  - The `reorderBindersByPrec` function already handles the no-reorder case by returning `(InstId, ty, ids)` when there are fewer than 2 quantifiers or missing order keys
+  - The paper structure is: Φ(e) = Σ prefix then Φχe(Ω) (thesis Def. 15.3.4 / Fig. 15.3.5)
+  - The `needsPrec` helper was only checking for `OpRaise` operations, which was too restrictive
+---
+
+## 2026-02-03 - US-002
+- What was implemented: Made Σ/ϕR computation deterministic and fail-fast
+  - Validates binder spine bookkeeping (length matches)
+  - Requires concrete binder identities (no Nothing ids) when 2+ quantifiers
+  - Requires <P order keys for all binders; missing keys produce ElabError
+  - Bound dependencies are topo-sorted with cycle detection
+  - All errors use stable "PhiReorder:" prefix
+- Files changed: `src/MLF/Elab/Phi/Omega.hs`, `test/ElaborationSpec.hs`
+- **Learnings for future iterations:**
+  - Unit tests using synthetic node IDs must include those nodes in the constraint graph with proper binding tree structure
+  - For a type like `∀a. ∀b. a -> b`, need two nested TyForall nodes (root -> forallB -> bodyNode)
+  - Binding parent must be "upper" in term-DAG: forallB's parent should be root (not binderA), since binderA is not structurally above forallB
+  - The `rootedConstraint` helper adds a GenNode root and binds term-DAG roots to it
+---
+
+## 2026-02-03 - US-003
+- What was implemented: Added three regression tests for thesis-exact ϕR integration
+  1. "applies Σ reordering even without Raise when Typ/Typexp differ" - tests that Φ reorders binders to match <P order even with empty witness ops
+  2. "empty Ω produces non-identity instantiation when binder order differs from <P" - tests three-binder reordering (c,b,a → a,b,c)
+  3. "missing <P order key for a binder causes fail-fast error" - tests that disconnected binder nodes trigger PhiReorder: error
+- Files changed: `test/ElaborationSpec.hs`
+- **Learnings for future iterations:**
+  - To test Σ reordering without Raise, create a constraint graph where <P order differs from scheme binder order
+  - Order keys are computed from the edge root via `orderKeysFromRootWithExtra`; nodes not reachable from root won't have keys
+  - The `rootedConstraint` helper binds term-DAG roots to GenNodeId 0, so use `genRef (GenNodeId 0)` for top-level binder parents
+---
+
+## 2026-02-03 - US-004
+- What was implemented: Documentation updates for paper-faithfulness
+  1. Updated `implementation_notes.md` summary to remove ϕR Raise-only gap from remaining deltas
+  2. Updated `implementation_notes.md` Σ(g) section to describe the new thesis-exact behavior with references to Def. 15.3.4 / Fig. 15.3.5
+  3. Updated `.kiro/specs/paper-faithfulness-remaining-deltas/requirements.md` Requirement 2 status from "partial" to "present" with updated evidence
+- Files changed: `implementation_notes.md`, `.kiro/specs/paper-faithfulness-remaining-deltas/requirements.md`
+- **Learnings for future iterations:**
+  - `docs/paper-map.md` does not exist; the thesis ↔ repo mapping is in `implementation_notes.md` under "thesis ↔ repo mapping"
+  - When updating paper-faithfulness status, update both `implementation_notes.md` (summary + alignment notes) and the `.kiro/specs/` requirements file
+---
+
+## 2026-02-03 - PRD Completion
+- All 4 user stories (US-001 through US-004) have been implemented and committed
+- Updated prd.json to mark all stories as `passes: true`
+- **Note:** Two test failures exist after merge with origin/master, but these are pre-existing failures introduced by commit ff51f38 ("Implement xMLF constructor types") on master, not caused by this PRD's changes. Tests passed at commit 1d12e4e (US-004) before the merge.
+- Pre-existing failures:
+  1. "elaborates lambda with rank-2 argument" - alias bounds survived scheme finalization
+  2. "annotated lambda parameter should accept a polymorphic argument via κσ" - type mismatch
+---
