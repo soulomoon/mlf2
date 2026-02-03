@@ -72,6 +72,8 @@ module MLF.Constraint.Types.Graph.NodeEdge (
 
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
+import Data.List.NonEmpty (NonEmpty)
+import qualified Data.List.NonEmpty as NE
 
 -- | Stable identifier for a node in the term-DAG (`TyNode`).
 --
@@ -247,6 +249,17 @@ data TyNode
         { tnId :: NodeId
         , tnBase :: BaseTy
         }
+    -- | Type constructor application (C σ₁ … σₙ).
+    --
+    -- In the paper's term-DAG view, `TyCon` is a constructor node with n
+    -- children. The head `tnCon` is a base type name and `tnArgs` are the
+    -- type arguments. Sharing is explicit: multiple TyCon nodes may point
+    -- to the same argument subgraphs.
+    | TyCon
+        { tnId :: NodeId
+        , tnCon :: BaseTy
+        , tnArgs :: NonEmpty NodeId
+        }
     -- | Explicit quantifier node (∀).
     --
     -- Quantifier binders are represented by binding edges (`Constraint.cBindParents`):
@@ -281,6 +294,7 @@ structuralChildren :: TyNode -> [NodeId]
 structuralChildren TyVar{} = []
 structuralChildren TyBottom{} = []
 structuralChildren TyBase{} = []
+structuralChildren TyCon{ tnArgs = args } = NE.toList args
 structuralChildren TyArrow{ tnDom = d, tnCod = c } = [d, c]
 structuralChildren TyForall{ tnBody = b } = [b]
 structuralChildren TyExp{ tnBody = b } = [b]
