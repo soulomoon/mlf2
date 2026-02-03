@@ -373,6 +373,39 @@ Paper references:
   - ICFP 2008, §5 for computing minimal expansions
 -}
 
+{- Note [Alternative let scoping (Figure 15.2.6)]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The thesis distinguishes two typing constraints for `let x = a in b`
+(papers/these-finale-english.txt §15.2.6, Figure 15.2.6):
+
+  1) The "basic" / leftmost constraint does *not* introduce a fresh gen node for
+     the whole let expression. Instead, it piggybacks on the gen node introduced
+     for `b`.
+
+     This is the nicer constraint for *type inference* (smaller/simpler), but it
+     has an unusual scope interaction: the scope of the let expression (hence of
+     `b`) is visible from `a`. The thesis explicitly calls out that this severely
+     complicates translation into xMLF.
+
+  2) The "alternative" / rightmost constraint introduces an extra gen node for
+     the let expression and a trivial type scheme at the root, plus a single
+     additional instantiation edge from the body to that trivial scheme.
+
+We follow the thesis' *translation-friendly* choice (2):
+
+  - `letGen` is the gen node for the whole let expression.
+  - `trivialRoot` is the (bottom) type node used as the trivial scheme root.
+  - We translate the body under `bodyGen`, then add `letEdge : bodyNode ≤ trivialRoot`.
+
+This makes the binding/scope structure well-behaved for translation/elaboration.
+In the principal presolution, the added instantiation edge corresponds to the
+identity computation (thesis §15.2.6.1).
+
+Implementation detail: `letEdge` is recorded in `cLetEdges` (via `recordLetEdge`)
+so presolution/elaboration can drop its witness/expansion (`dropTrivialSchemeEdges`)
+and avoid generating spurious instantiation computations for this internal edge.
+-}
+
 lookupVar :: Env -> VarName -> ConstraintM Binding
 lookupVar env name = case Map.lookup name env of
     Just binding -> pure binding
