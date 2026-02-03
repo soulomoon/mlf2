@@ -2,12 +2,16 @@ module MLF.Frontend.ConstraintGen.Translate (
     buildRootExpr
 ) where
 
+import Control.Monad (foldM)
 import Control.Monad.Except (MonadError (throwError))
-import Control.Monad.State.Strict (gets)
+import Control.Monad.State.Strict (gets, modify')
+import Data.List.NonEmpty (NonEmpty(..))
+import qualified Data.List.NonEmpty as NE
 import Data.Map.Strict (Map)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Map.Strict as Map
 import Data.Maybe (listToMaybe)
+import qualified Data.Set as Set
 
 import MLF.Constraint.Types
 import MLF.Frontend.Syntax
@@ -507,8 +511,9 @@ internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared srcType 
                     setBindParentOverride (typeRef varNode) (genRef currentGen) bindFlag
                     pure (varNode, shared2)
                 else pure (arrowNode, shared2)
-    
+
         STBase name -> do
+            registerTyConArity (BaseTy name) 0
             baseNode <- allocBase (BaseTy name)
             if wrap
                 then do
@@ -521,7 +526,36 @@ internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared srcType 
                     setBindParentOverride (typeRef varNode) (genRef currentGen) bindFlag
                     pure (varNode, shared)
                 else pure (baseNode, shared)
-    
+
+        STCon name args -> do
+            let arity = NE.length args
+            registerTyConArity (BaseTy name) arity
+            (argNodes, sharedFinal) <- foldM
+                (\(accNodes, accShared) argTy -> do
+                    (argNode, newShared) <-
+                        internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv accShared argTy
+                    pure (accNodes ++ [argNode], newShared))
+                ([], shared)
+                (NE.toList args)
+            conNode <- case argNodes of
+                (h:t) -> allocCon (BaseTy name) (h :| t)
+                [] -> error "STCon must have at least one argument"
+            case bindFlag of
+                BindRigid -> do
+                    mapM_ (\argNode -> rebindIfParent argNode (typeRef conNode) (genRef currentGen) bindFlag) argNodes
+                BindFlex -> pure ()
+            if wrap
+                then do
+                    varNode <- allocVar
+                    setVarBound varNode (Just conNode)
+                    case bindFlag of
+                        BindRigid ->
+                            rebindIfParent conNode (typeRef varNode) (genRef currentGen) bindFlag
+                        BindFlex -> pure ()
+                    setBindParentOverride (typeRef varNode) (genRef currentGen) bindFlag
+                    pure (varNode, sharedFinal)
+                else pure (conNode, sharedFinal)
+
         STForall var mBound body ->
             case mBound of
                 Just (STVar alias) | alias /= var -> do
@@ -537,9 +571,20 @@ internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared srcType 
                                         pure (nid, Map.insert alias nid shared)
                     let tyEnv' = Map.insert var aliasNode tyEnv
                     internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv' shared1 body
+                Just (STVar alias) | alias == var ->
+                    -- Binder occurs in its own bound - this is ill-formed
+                    throwError (ForallBoundMentionsBinder var)
                 Just (STVar _) ->
+                    -- This case is now unreachable since alias /= var is handled above
+                    -- and alias == var throws an error
                     internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared (STForall var Nothing body)
                 _ -> do
+                    -- Check forall-bound well-formedness: binder must not occur in its own bound
+                    case mBound of
+                        Just bound
+                            | Set.member var (srcTypeFreeVars bound) ->
+                                throwError (ForallBoundMentionsBinder var)
+                        _ -> pure ()
                     Scope.pushScope
                     schemeGenId <- allocGenNode []
                     setBindParentIfMissing (genRef schemeGenId) (genRef currentGen) BindFlex
@@ -636,6 +681,7 @@ internalizeSrcTypeWith wrap currentGen tyEnv srcType = case srcType of
             else pure arrowNode
 
     STBase name -> do
+        registerTyConArity (BaseTy name) 0
         baseNode <- allocBase (BaseTy name)
         if wrap
             then do
@@ -643,6 +689,18 @@ internalizeSrcTypeWith wrap currentGen tyEnv srcType = case srcType of
                 setVarBound varNode (Just baseNode)
                 pure varNode
             else pure baseNode
+
+    STCon name args -> do
+        let arity = NE.length args
+        registerTyConArity (BaseTy name) arity
+        argNodes <- mapM (internalizeSrcTypeWith wrap currentGen tyEnv) args
+        conNode <- allocCon (BaseTy name) argNodes
+        if wrap
+            then do
+                varNode <- allocVar
+                setVarBound varNode (Just conNode)
+                pure varNode
+            else pure conNode
 
     STForall var mBound body ->
         case mBound of
@@ -652,9 +710,20 @@ internalizeSrcTypeWith wrap currentGen tyEnv srcType = case srcType of
                     Nothing -> allocVar
                 let tyEnv' = Map.insert var aliasNode tyEnv
                 internalizeSrcTypeWith False currentGen tyEnv' body
+            Just (STVar alias) | alias == var ->
+                -- Binder occurs in its own bound - this is ill-formed
+                throwError (ForallBoundMentionsBinder var)
             Just (STVar _) ->
+                -- This case is now unreachable since alias /= var is handled above
+                -- and alias == var throws an error
                 internalizeSrcTypeWith wrap currentGen tyEnv (STForall var Nothing body)
             _ -> do
+                -- Check forall-bound well-formedness: binder must not occur in its own bound
+                case mBound of
+                    Just bound
+                        | Set.member var (srcTypeFreeVars bound) ->
+                            throwError (ForallBoundMentionsBinder var)
+                    _ -> pure ()
                 Scope.pushScope
                 schemeGenId <- allocGenNode []
                 setBindParentIfMissing (genRef schemeGenId) (genRef currentGen) BindFlex
@@ -714,6 +783,12 @@ internalizeBinders currentGen bindings = go Map.empty [] bindings
                 let tyEnv' = Map.insert name aliasNode tyEnv
                 go tyEnv' acc rest
             _ -> do
+                -- Check forall-bound well-formedness: binder must not occur in its own bound
+                case mBound of
+                    Just bound
+                        | Set.member name (srcTypeFreeVars bound) ->
+                            throwError (ForallBoundMentionsBinder name)
+                    _ -> pure ()
                 -- Allocate a type variable for this binding
                 varNode <- allocVar
                 let tyEnv' = Map.insert name varNode tyEnv
@@ -748,3 +823,29 @@ baseFor lit = BaseTy $ case lit of
     LInt _ -> "Int"
     LBool _ -> "Bool"
     LString _ -> "String"
+
+-- | Register the arity of a type constructor. If the constructor has already
+-- been seen with a different arity, throw TypeConstructorArityMismatch.
+registerTyConArity :: BaseTy -> Int -> ConstraintM ()
+registerTyConArity con arity = do
+    arityMap <- gets bsTyConArity
+    case Map.lookup con arityMap of
+        Just existingArity
+            | existingArity /= arity ->
+                throwError (TypeConstructorArityMismatch con existingArity arity)
+        _ -> modify' $ \st ->
+            st { bsTyConArity = Map.insert con arity (bsTyConArity st) }
+
+-- | Check if a type variable name occurs free in a SrcType.
+srcTypeFreeVars :: SrcType -> Set.Set String
+srcTypeFreeVars = go Set.empty
+  where
+    go bound ty = case ty of
+        STVar v -> if Set.member v bound then Set.empty else Set.singleton v
+        STArrow dom cod -> go bound dom <> go bound cod
+        STBase _ -> Set.empty
+        STCon _ args -> foldMap (go bound) args
+        STForall v mb body ->
+            let bound' = Set.insert v bound
+            in maybe Set.empty (go bound) mb <> go bound' body
+        STBottom -> Set.empty
