@@ -16,7 +16,7 @@ module MLF.Elab.Phi.Omega (
 ) where
 
 import Control.Applicative ((<|>))
-import Control.Monad (when)
+import Control.Monad (unless, when)
 import Data.Functor.Foldable (cata)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
@@ -329,12 +329,18 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
     reorderBindersByPrec ty ids = do
         let (qs, _) = splitForalls ty
         when (length qs /= length ids) $
-            Left (InstantiationError "reorderBindersByPrec: binder spine / identity list length mismatch")
-        let hasMissingKeys = any (\case Just nid -> not (IntMap.member (getNodeId (canonicalNode nid)) orderKeys); Nothing -> False) ids
-            knownKeyCount = length [() | Just nid <- ids, IntMap.member (getNodeId (canonicalNode nid)) orderKeys]
-        if length qs < 2 || hasMissingKeys || knownKeyCount < 2
+            Left (InstantiationError "PhiReorder: binder spine / identity list length mismatch")
+        if length qs < 2
             then Right (InstId, ty, ids)
             else do
+                -- Require concrete binder identities for all quantifiers (fail-fast)
+                let missingIdPositions = [i | (i, Nothing) <- zip [(0::Int)..] ids]
+                unless (null missingIdPositions) $
+                    Left (InstantiationError $ "PhiReorder: missing binder identity at positions " ++ show missingIdPositions)
+                -- Require order keys for all binder identities (fail-fast)
+                let missingKeyBinders = [nid | Just nid <- ids, not (IntMap.member (getNodeId (canonicalNode nid)) orderKeys)]
+                unless (null missingKeyBinders) $
+                    Left (InstantiationError $ "PhiReorder: missing order key for binders " ++ show missingKeyBinders)
                 desired <- desiredBinderOrder ty ids
                 reorderTo ty ids desired
 
@@ -374,7 +380,7 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
 
         idxs <-
             topoSortBy
-                "reorderBindersByPrec: cycle in bound dependencies"
+                "PhiReorder: cycle in bound dependencies"
                 cmpIdx
                 depsFor
                 indices
