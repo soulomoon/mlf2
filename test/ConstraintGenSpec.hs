@@ -8,7 +8,7 @@ import qualified Data.IntSet as IntSet
 import qualified Data.Set as Set
 import Test.Hspec
 
-import MLF.Binding.Tree (boundFlexChildren, checkBindingTree, nodeKind, NodeKind(..))
+import MLF.Binding.Tree (boundFlexChildren, checkBindingTree, isUnderRigidBinder, nodeKind, NodeKind(..))
 import MLF.Constraint.Acyclicity (checkAcyclicity)
 import MLF.Constraint.Normalize (normalize)
 import MLF.Constraint.Presolution (PresolutionResult(..), computePresolution)
@@ -793,6 +793,12 @@ spec = describe "Phase 1 — Constraint generation" $ do
                             Right k -> pure k
                             Left err -> expectationFailure (show err) >> pure NodeRoot
                         kind `shouldBe` NodeRestricted
+                        -- "Locked" means flex edge but rigid ancestor; ensure there is
+                        -- no strict rigid ancestor on the binding path.
+                        underRigid <- case isUnderRigidBinder constraint (typeRef domainNode) of
+                            Right b -> pure b
+                            Left err -> expectationFailure (show err) >> pure True
+                        underRigid `shouldBe` False
                     other -> expectationFailure $ "Expected 1 inst edge, saw " ++ show (length other)
 
         it "EAnn returns the codomain copy (not domain)" $ do
