@@ -29,9 +29,9 @@ import MLF.Constraint.Types.Graph
     , nodeRefKey
     , typeRef
     )
-import MLF.Constraint.Types.Witness (InstanceOp(..), InstanceStep(..), InstanceWitness(..), EdgeWitness(..))
+import MLF.Constraint.Types.Witness (Expansion(..), InstanceOp(..), InstanceStep(..), InstanceWitness(..), EdgeWitness(..))
 import qualified MLF.Binding.Tree as Binding
-import MLF.Frontend.ConstraintGen (ConstraintError, ConstraintResult(..), generateConstraints)
+import MLF.Frontend.ConstraintGen (AnnExpr(..), ConstraintError, ConstraintResult(..), generateConstraints)
 import MLF.Constraint.Normalize (normalize)
 import MLF.Constraint.Acyclicity (checkAcyclicity)
 import MLF.Constraint.Presolution
@@ -1605,6 +1605,56 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         expectationFailure $ "Expected ValidationFailed for OpRaise outside interior, got: " ++ show otherErr
                     Right inst ->
                         expectationFailure $ "Expected failure for OpRaise outside interior, got instantiation: " ++ show inst
+
+            -- US-004: Φ requires EdgeTrace (no best-effort mode)
+            it "elaboration fails with MissingEdgeTrace when witness exists but trace is missing" $ do
+                -- Construct a scenario where an edge has a non-trivial witness but no trace.
+                -- Per US-004, elaboration should fail with MissingEdgeTrace, not proceed
+                -- with best-effort mode (empty interior/copied sets).
+                let aN = NodeId 1
+                    bN = NodeId 2
+                    edgeId = EdgeId 42
+
+                    -- Minimal constraint with nodes
+                    c = rootedConstraint emptyConstraint
+                        { cNodes = nodeMapFromList
+                                [ (getNodeId aN, TyVar { tnId = aN, tnBound = Nothing })
+                                , (getNodeId bN, TyVar { tnId = bN, tnBound = Nothing })
+                                ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef aN), (genRef (GenNodeId 0), BindFlex))
+                                , (nodeRefKey (typeRef bN), (genRef (GenNodeId 0), BindFlex))
+                                ]
+                        }
+                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+
+                    -- Create a NON-TRIVIAL witness for the edge (has ops)
+                    ew = EdgeWitness
+                        { ewEdgeId = edgeId
+                        , ewLeft = aN
+                        , ewRight = bN
+                        , ewRoot = aN
+                        , ewSteps = [StepOmega (OpRaise aN)]  -- Non-trivial: has an op
+                        , ewWitness = InstanceWitness [OpRaise aN]
+                        }
+
+                    -- edgeWitnesses has the witness, but edgeTraces is EMPTY (missing trace)
+                    edgeWitnesses = IntMap.singleton 42 ew
+                    edgeTraces = IntMap.empty  -- Missing trace!
+                    edgeExpansions = IntMap.singleton 42 ExpIdentity
+
+                    -- Construct an AAnn that references the edge (simpler than AApp)
+                    annExpr = AAnn (ALit (LInt 1) aN) bN edgeId
+
+                -- Elaboration should fail with MissingEdgeTrace
+                case Elab.elaborate defaultTraceConfig generalizeAtWith solved solved edgeWitnesses edgeTraces edgeExpansions annExpr of
+                    Left (Elab.MissingEdgeTrace eid) ->
+                        eid `shouldBe` edgeId
+                    Left otherErr ->
+                        expectationFailure $ "Expected MissingEdgeTrace, got: " ++ show otherErr
+                    Right _term ->
+                        expectationFailure "Expected MissingEdgeTrace error, but elaboration succeeded"
 
     describe "Presolution witness ops (paper alignment)" $ do
         it "does not require Merge for bounded aliasing (b ⩾ a)" $ do
