@@ -42,6 +42,7 @@ import MLF.Constraint.Types.Graph
 isPolymorphicAnchor :: Constraint -> TyNode -> Bool
 isPolymorphicAnchor _ TyBottom{} = True
 isPolymorphicAnchor c TyBase{ tnBase = b } = Set.member b (cPolySyms c)
+isPolymorphicAnchor c TyCon{ tnCon = con } = Set.member con (cPolySyms c)
 isPolymorphicAnchor _ _ = False
 
 -- | Compute the set of inert nodes.

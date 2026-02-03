@@ -34,6 +34,7 @@ import Control.Monad.State.Strict
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
+import qualified Data.List.NonEmpty as NE
 
 import qualified Data.Set as Set
 import qualified MLF.Binding.Adjustment as BindingAdjustment
@@ -248,13 +249,16 @@ partitionGraftable edges nodes = do
                 leftNode = lookupNodeIn nodes leftId
                 rightNode = lookupNodeIn nodes rightId
             in case (leftNode, rightNode) of
-                -- Variable ≤ Structure: graft arrows; base only if rigid (not Poly)
+                -- Variable ≤ Structure: graft arrows; base/con only if rigid (not Poly)
                 (Just TyVar {}, Just TyArrow {}) -> True
                 (Just TyVar {}, Just TyBase{ tnBase = base }) ->
                     not (Set.member base polySyms)
+                (Just TyVar {}, Just TyCon{ tnCon = con }) ->
+                    not (Set.member con polySyms)
                 -- Structure ≤ Structure: decompose or check compatibility
                 (Just TyArrow {}, Just TyArrow {}) -> True
                 (Just TyBase {}, Just TyBase {}) -> True
+                (Just TyCon {}, Just TyCon {}) -> True
                 (Just TyBottom {}, Just TyBottom {}) -> True
                 -- Incompatible structures: type error, but we process them
                 (Just TyArrow {}, Just TyBase {}) -> True
@@ -263,6 +267,12 @@ partitionGraftable edges nodes = do
                 (Just TyBottom {}, Just TyArrow {}) -> True
                 (Just TyBase {}, Just TyBottom {}) -> True
                 (Just TyBottom {}, Just TyBase {}) -> True
+                (Just TyArrow {}, Just TyCon {}) -> True
+                (Just TyCon {}, Just TyArrow {}) -> True
+                (Just TyBase {}, Just TyCon {}) -> True
+                (Just TyCon {}, Just TyBase {}) -> True
+                (Just TyCon {}, Just TyBottom {}) -> True
+                (Just TyBottom {}, Just TyCon {}) -> True
                 -- Variable ≤ Variable: can't graft, keep for Phase 4
                 -- TyForall/TyExp cases: require presolution, keep for Phase 4
                 _ -> False
@@ -406,6 +416,37 @@ graftEdge edge = do
                         _ -> []
             in pure $ Just (UnifyEdge leftId rightId : boundEdges)
 
+        -- Variable ≤ TyCon: graft constructor structure onto the variable node
+        (Just TyVar { tnBound = mbBound }, Just (TyCon { tnCon = con, tnArgs = rArgs }))
+          | occursIn nodes uf leftId rightId -> pure Nothing
+          | otherwise -> do
+            -- Create fresh variable nodes for each argument
+            argVars <- mapM (const freshVar) (NE.toList rArgs)
+            let argVarsNE = NE.fromList argVars
+            -- Rewrite the variable node in-place to a TyCon node.
+            insertNode TyCon { tnId = leftId, tnCon = con, tnArgs = argVarsNE }
+            -- Bind fresh children to the new TyCon node.
+            mapM_ (\v -> setBindParentNorm v leftId BindFlex) argVars
+            -- Rebind any existing bound under the var to preserve binding-tree validity.
+            case mbBound of
+                Nothing -> pure ()
+                Just bnd -> do
+                    let bp = cBindParents c
+                    case IntMap.lookup (nodeRefKey (typeRef leftId)) bp of
+                        Nothing -> pure ()
+                        Just (parentRef, flag) ->
+                            setBindParentRefNorm (typeRef bnd) parentRef flag
+            let boundEdges =
+                    case mbBound of
+                        Just bnd
+                            | bnd /= leftId
+                            , not (IntSet.member (getNodeId leftId) schemeRoots) ->
+                                [UnifyEdge bnd leftId]
+                        _ -> []
+            -- Emit unification edges for each argument
+            let argUnifyEdges = zipWith (\v r -> UnifyEdge v (findRoot uf r)) argVars (NE.toList rArgs)
+            pure $ Just (boundEdges ++ argUnifyEdges)
+
         -- Arrow ≤ Arrow: decompose into unification of components
         (Just (TyArrow { tnDom = lDom, tnCod = lCod }),
          Just (TyArrow { tnDom = rDom, tnCod = rCod })) ->
@@ -418,6 +459,16 @@ graftEdge edge = do
             | lBase == rBase -> pure $ Just []  -- Same type, trivially satisfied
             | otherwise -> pure Nothing  -- Type error: keep edge to report later
 
+        -- TyCon ≤ TyCon: decompose into unification of args when heads match
+        (Just (TyCon { tnCon = lCon, tnArgs = lArgs }),
+         Just (TyCon { tnCon = rCon, tnArgs = rArgs }))
+            | lCon == rCon, NE.length lArgs == NE.length rArgs ->
+                -- Same constructor and arity: unify corresponding args
+                let argEdges = zipWith (\l r -> UnifyEdge (findRoot uf l) (findRoot uf r))
+                                       (NE.toList lArgs) (NE.toList rArgs)
+                in pure $ Just argEdges
+            | otherwise -> pure Nothing  -- Type error: constructor or arity mismatch
+
         -- Bottom ≤ Bottom: trivially satisfied
         (Just TyBottom {}, Just TyBottom {}) ->
             pure $ Just []
@@ -429,6 +480,13 @@ graftEdge edge = do
         (Just TyBottom {}, Just TyArrow {}) -> pure Nothing
         (Just TyBase {}, Just TyBottom {}) -> pure Nothing
         (Just TyBottom {}, Just TyBase {}) -> pure Nothing
+        -- TyCon vs other structures: type error
+        (Just TyArrow {}, Just TyCon {}) -> pure Nothing
+        (Just TyCon {}, Just TyArrow {}) -> pure Nothing
+        (Just TyBase {}, Just TyCon {}) -> pure Nothing
+        (Just TyCon {}, Just TyBase {}) -> pure Nothing
+        (Just TyCon {}, Just TyBottom {}) -> pure Nothing
+        (Just TyBottom {}, Just TyCon {}) -> pure Nothing
 
         -- Other cases: shouldn't reach here (filtered by partitionGraftable)
         _ -> pure $ Just []
@@ -728,6 +786,8 @@ applyToStructure uf node = case node of
     TyArrow { tnId = nid, tnDom = dom, tnCod = cod } ->
         TyArrow { tnId = nid, tnDom = findRoot uf dom, tnCod = findRoot uf cod }
     TyBase {} -> node
+    TyCon { tnId = nid, tnCon = con, tnArgs = args } ->
+        TyCon { tnId = nid, tnCon = con, tnArgs = fmap (findRoot uf) args }
     TyForall { tnId = nid, tnBody = body } ->
         TyForall { tnId = nid, tnBody = findRoot uf body }
     TyExp { tnId = nid, tnExpVar = ev, tnBody = body } ->
