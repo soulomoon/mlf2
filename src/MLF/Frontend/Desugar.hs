@@ -31,5 +31,4 @@ desugarCoercions = cata alg
         ELamAnnF v ty body -> ELamAnn v ty body
         EAppF f a -> EApp f a
         ELetF v rhs body -> ELet v rhs body
-        ELetAnnF v sch rhs body -> ELetAnn v sch rhs body
         EAnnF e ty -> EAnn e ty

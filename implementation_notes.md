@@ -139,7 +139,7 @@ This repo’s design is primarily informed by:
 
 | Paper | Meaning | Repo |
 |------:|---------|------|
-| `b` | eMLF surface term | `src/MLF/Frontend/Syntax.hs` (`Expr`, plus `SrcType`/`SrcScheme`) |
+| `b` | eMLF surface term | `src/MLF/Frontend/Syntax.hs` (`Expr` + `SrcType`) |
 | `χ` | constraint graph | `src/MLF/Constraint/Types.hs` (`Constraint`) |
 | `n` | type node in the graph | `NodeId` + `TyNode` in `Constraint.cNodes` |
 | `g` | binding-tree node (generalization site) | `GenNodeId`/`GenNode` + `Constraint.cBindParents` |

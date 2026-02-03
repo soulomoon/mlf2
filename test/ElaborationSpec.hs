@@ -8,7 +8,7 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Set as Set
 
-import MLF.Frontend.Syntax (Expr(..), Lit(..), SrcType(..), SrcScheme(..))
+import MLF.Frontend.Syntax (Expr(..), Lit(..), SrcType(..))
 import qualified MLF.Elab.Pipeline as Elab
 import qualified MLF.Util.Order as Order
 import MLF.Constraint.Types.Graph (BindingError(..))
@@ -44,7 +44,16 @@ import MLF.Constraint.Presolution
     )
 import MLF.Constraint.Solve (SolveResult(..), solveUnify)
 import qualified MLF.Constraint.Solve as Solve (frWith)
-import SpecUtil (bindParentsFromPairs, collectVarNodes, defaultTraceConfig, emptyConstraint, nodeMapFromList, requireRight, rootedConstraint)
+import SpecUtil
+    ( bindParentsFromPairs
+    , collectVarNodes
+    , defaultTraceConfig
+    , emptyConstraint
+    , nodeMapFromList
+    , requireRight
+    , rootedConstraint
+    , mkForalls
+    )
 
 boundToType :: Elab.BoundType -> Elab.ElabType
 boundToType bound = case bound of
@@ -432,8 +441,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             -- Actually, 'a >= Int -> Int' means 'a' is an instance of 'Int -> Int'.
             -- So 'a' could be 'Int -> Int'.
             let bound = STArrow (STBase "Int") (STBase "Int")
-                scheme = SrcScheme [("a", Just bound)] (STArrow (STVar "a") (STVar "a"))
-                expr = ELetAnn "f" scheme (ELam "x" (EVar "x")) (EVar "f")
+                ann = mkForalls [("a", Just bound)] (STArrow (STVar "a") (STVar "a"))
+                expr = ELet "f" (EAnn (ELam "x" (EVar "x")) ann) (EVar "f")
 
             (term, ty) <- requirePipeline expr
             let termStr = Elab.prettyDisplay term
@@ -445,8 +454,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
         it "elaborates annotated let with polymorphic bound (Rank-2ish)" $ do
             -- let f : ∀(a ⩾ ∀b. b -> b). a -> a = \x. x in f
             let innerBound = STForall "b" Nothing (STArrow (STVar "b") (STVar "b"))
-                scheme = SrcScheme [("a", Just innerBound)] (STArrow (STVar "a") (STVar "a"))
-                expr = ELetAnn "f" scheme (ELam "x" (EVar "x")) (EVar "f")
+                ann = mkForalls [("a", Just innerBound)] (STArrow (STVar "a") (STVar "a"))
+                expr = ELet "f" (EAnn (ELam "x" (EVar "x")) ann) (EVar "f")
 
             (_term, ty) <- requirePipeline expr
             let expected =
@@ -694,11 +703,13 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
         it "parses and represents STBottom" $ do
             STBottom `shouldBe` STBottom
 
-        it "represents SrcScheme with multiple binders" $ do
+        it "represents nested STForall with multiple binders" $ do
             let binds = [("a", Nothing), ("b", Just (STBase "Int"))]
                 body = STArrow (STVar "a") (STVar "b")
-                scheme = SrcScheme binds body
-            scheme `shouldBe` SrcScheme binds body
+                st = mkForalls binds body
+            st `shouldBe`
+                STForall "a" Nothing
+                    (STForall "b" (Just (STBase "Int")) body)
 
     describe "Expansion to Instantiation conversion" $ do
         it "converts ExpIdentity to InstId" $ do
@@ -1512,8 +1523,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
     describe "Presolution witness ops (paper alignment)" $ do
         it "does not require Merge for bounded aliasing (b ⩾ a)" $ do
             let rhs = ELam "x" (ELam "y" (EVar "x"))
-                scheme =
-                    SrcScheme
+                schemeTy =
+                    mkForalls
                         [ ("a", Nothing)
                         , ("b", Just (STVar "a"))
                         ]
@@ -1521,7 +1532,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 ann =
                     STForall "a" Nothing
                         (STArrow (STVar "a") (STArrow (STVar "a") (STVar "a")))
-                expr = ELetAnn "c" scheme rhs (EAnn (EVar "c") ann)
+                expr =
+                    ELet "c" (EAnn rhs schemeTy) (EAnn (EVar "c") ann)
 
             let runToPresolutionWitnesses :: Expr -> Either String (IntMap.IntMap EdgeWitness)
                 runToPresolutionWitnesses e = do
@@ -1661,8 +1673,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             -- Today, presolution witnesses are derived only from expansions (Graft/Weaken),
             -- which translates to InstApp and fails on non-⊥ bounds.
             let rhs = ELam "x" (ELam "y" (EVar "x"))
-                scheme =
-                    SrcScheme
+                schemeTy =
+                    mkForalls
                         [ ("a", Nothing)
                         , ("b", Just (STVar "a"))
                         ]
@@ -1670,7 +1682,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 ann =
                     STForall "a" Nothing
                         (STArrow (STVar "a") (STArrow (STVar "a") (STVar "a")))
-                expr = ELetAnn "c" scheme rhs (EAnn (EVar "c") ann)
+                expr =
+                    ELet "c" (EAnn rhs schemeTy) (EAnn (EVar "c") ann)
 
             case Elab.runPipelineElab Set.empty expr of
                 Left err ->

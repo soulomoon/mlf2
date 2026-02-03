@@ -16,7 +16,8 @@ module SpecUtil (
     inferBindParents,
     lookupNodeMaybe,
     lookupNode,
-    lookupNodeIO
+    lookupNodeIO,
+    mkForalls
 ) where
 
 import qualified Data.IntMap.Strict as IntMap
@@ -48,7 +49,7 @@ import MLF.Constraint.Types.Graph
     , typeRef
     )
 import MLF.Frontend.ConstraintGen (AnnExpr(..))
-import MLF.Frontend.Syntax (VarName)
+import MLF.Frontend.Syntax (SrcType(..), VarName)
 import MLF.Elab.Pipeline (defaultTraceConfig)
 
 emptyConstraint :: Constraint
@@ -93,6 +94,13 @@ genNodeMap ids =
         | nid <- ids
         , let gid = GenNodeId (getNodeId nid)
         ]
+
+mkForalls :: [(String, Maybe SrcType)] -> SrcType -> SrcType
+mkForalls binds body =
+    foldr
+        (\(name, mbBound) acc -> STForall name mbBound acc)
+        body
+        binds
 
 -- | Attach a root gen node and bind term-DAG roots under it (test helper).
 rootedConstraint :: Constraint -> Constraint

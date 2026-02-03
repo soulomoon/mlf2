@@ -11,7 +11,7 @@ This document maps sections of `papers/these-finale-english.txt` (thesis) to the
 
 | Paper | Meaning | Repo Types/Modules |
 |------:|---------|-------------------|
-| `b` | eMLF surface term | `MLF.Frontend.Syntax.Expr`, `SrcType`, `SrcScheme` |
+| `b` | eMLF surface term | `MLF.Frontend.Syntax.Expr`, `SrcType` |
 | `χ` | constraint graph | `MLF.Constraint.Types.Constraint` |
 | `n` | type node in the graph | `MLF.Constraint.Types.Graph.NodeId`, `TyNode` in `cNodes` |
 | `g` | binding-tree node (generalization site) | `GenNodeId`, `GenNode` in `cGenNodes` |

@@ -15,7 +15,7 @@ import MLF.Binding.Tree
 import qualified MLF.Binding.Adjustment as BindingAdjustment
 import qualified MLF.Binding.GraphOps as GraphOps
 import qualified MLF.Util.Order as Order
-import MLF.Frontend.Syntax (Expr(..), Lit(..), SrcType(..), SrcScheme(..))
+import MLF.Frontend.Syntax (Expr(..), Lit(..), SrcType(..))
 import MLF.Frontend.ConstraintGen (ConstraintError, ConstraintResult(..), generateConstraints)
 import SpecUtil
     ( bindParentsFromPairs
@@ -24,6 +24,7 @@ import SpecUtil
     , nodeMapKeys
     , nodeMapSingleton
     , rootedConstraint
+    , mkForalls
     )
 
 generateConstraintsDefault :: Expr -> Either ConstraintError ConstraintResult
@@ -854,7 +855,10 @@ bindingTreeSpec = describe "MLF.Binding.Tree" $ do
                     -- Test cases that exercise internalizeSrcType with STArrow/STForall
                     , ("term annotation with arrow", EAnn (ELam "x" (EVar "x")) (STArrow (STBase "Int") (STBase "Int")))
                     , ("term annotation with forall", EAnn (ELam "x" (EVar "x")) (STForall "a" Nothing (STArrow (STVar "a") (STVar "a"))))
-                    , ("let with annotated scheme", ELetAnn "id" (SrcScheme [("a", Nothing)] (STArrow (STVar "a") (STVar "a"))) (ELam "x" (EVar "x")) (EVar "id"))
+                    , ( "let with annotated scheme"
+                      , let ann = mkForalls [("a", Nothing)] (STArrow (STVar "a") (STVar "a"))
+                        in ELet "id" (EAnn (ELam "x" (EVar "x")) ann) (EVar "id")
+                      )
                     , ("nested forall annotation", EAnn (ELam "x" (EVar "x")) (STForall "a" Nothing (STForall "b" Nothing (STArrow (STVar "a") (STVar "b")))))
                     ]
             forM_ testExprs $ \(name, expr) -> do

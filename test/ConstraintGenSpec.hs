@@ -15,7 +15,15 @@ import MLF.Constraint.Presolution (PresolutionResult(..), computePresolution)
 import MLF.Constraint.Solve (SolveResult(..), solveUnify)
 import MLF.Frontend.ConstraintGen (AnnExpr (..))
 import MyLib hiding (normalize, lookupNode)
-import SpecUtil (expectRight, lookupNode, lookupNodeMaybe, nodeMapElems, nodeMapSize, requireRight)
+import SpecUtil
+    ( expectRight
+    , lookupNode
+    , lookupNodeMaybe
+    , nodeMapElems
+    , nodeMapSize
+    , requireRight
+    , mkForalls
+    )
 
 inferConstraintGraphDefault :: Expr -> Either ConstraintError ConstraintResult
 inferConstraintGraphDefault = inferConstraintGraph Set.empty
@@ -182,8 +190,8 @@ spec = describe "Phase 1 — Constraint generation" $ do
 
         it "respects polymorphic let annotations" $ do
             -- let id : ∀α. α → α = λx. x in id
-            let scheme = SrcScheme [("a", Nothing)] (STArrow (STVar "a") (STVar "a"))
-                expr = ELetAnn "id" scheme (ELam "x" (EVar "x")) (EVar "id")
+            let ann = mkForalls [("a", Nothing)] (STArrow (STVar "a") (STVar "a"))
+                expr = ELet "id" (EAnn (ELam "x" (EVar "x")) ann) (EVar "id")
             expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let nodes = cNodes (crConstraint result)
                 schemeRoot <- case crAnnotated result of
@@ -213,8 +221,8 @@ spec = describe "Phase 1 — Constraint generation" $ do
         it "respects bounded quantification in schemes" $ do
             -- let f : ∀(a ⩾ Int). a -> a = ...
             -- This checks internalizeBinders with a bound
-            let scheme = SrcScheme [("a", Just (STBase "Int"))] (STArrow (STVar "a") (STVar "a"))
-                expr = ELetAnn "f" scheme (ELam "x" (EVar "x")) (EVar "f")
+            let ann = mkForalls [("a", Just (STBase "Int"))] (STArrow (STVar "a") (STVar "a"))
+                expr = ELet "f" (EAnn (ELam "x" (EVar "x")) ann) (EVar "f")
             expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let constraint = crConstraint result
                     nodes = cNodes constraint
@@ -634,8 +642,8 @@ spec = describe "Phase 1 — Constraint generation" $ do
 
         it "elimination rewrite removes eliminated binders from Q(n)" $ do
             let rhs = ELam "x" (ELam "y" (EVar "x"))
-                scheme =
-                    SrcScheme
+                schemeTy =
+                    mkForalls
                         [ ("a", Nothing)
                         , ("b", Just (STVar "a"))
                         ]
@@ -643,7 +651,8 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 ann =
                     STForall "a" Nothing
                         (STArrow (STVar "a") (STArrow (STVar "a") (STVar "a")))
-                expr = ELetAnn "c" scheme rhs (EAnn (EVar "c") ann)
+                expr =
+                    ELet "c" (EAnn rhs schemeTy) (EAnn (EVar "c") ann)
 
                 runToPresolution :: Expr -> Either String PresolutionResult
                 runToPresolution e = do

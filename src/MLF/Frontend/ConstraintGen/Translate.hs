@@ -112,101 +112,84 @@ buildExprRaw env scopeRoot expr = case expr of
     pure (resultNode, AApp funAnn argAnn funEid argEid resultNode)
 
   -- See Note [Let Bindings and Expansion Variables]
-  ELet name rhs body -> do
-    schemeGenId <- allocGenNode []
+  ELet name rhs body ->
+    let buildUnder gen subExpr = do
+            Scope.pushScope
+            (node, ann) <- buildExpr env gen subExpr
+            scope <- Scope.popScope
+            pure (node, ann, scope)
+        buildLet schemeGenId schemeGenUsed schemeRootNode rhsGen rhsAnn = do
+            let env' = Map.insert name (Binding schemeRootNode (Just schemeGenUsed)) env
 
-    Scope.pushScope
-    (rhsNode, rhsAnn) <- buildExpr env schemeGenId rhs
-    rhsScope <- Scope.popScope
+            -- Alternative let scoping (Fig. 15.2.6, rightmost constraint):
+            -- introduce a gen node for the let expression and a trivial scheme root.
+            letGen <- allocGenNode []
+            setBindParentIfMissing (genRef letGen) (genRef scopeRoot) BindFlex
+            setBindParentOverride (genRef schemeGenId) (genRef letGen) BindFlex
+            if rhsGen /= schemeGenId
+                then setBindParentOverride (genRef rhsGen) (genRef letGen) BindFlex
+                else pure ()
+            bodyGen <- allocGenNode []
+            setBindParentIfMissing (genRef bodyGen) (genRef letGen) BindFlex
 
-    schemeGenUsed <- fmap (maybe schemeGenId id) (lookupSchemeGenForRoot rhsNode)
-    setGenNodeSchemes schemeGenUsed [rhsNode]
-    Scope.rebindScopeNodes (genRef schemeGenUsed) rhsNode rhsScope
-    setBindParentOverride (typeRef rhsNode) (genRef schemeGenUsed) BindFlex
+            trivialRoot <- allocVar
+            setBindParentIfMissing (typeRef trivialRoot) (genRef letGen) BindFlex
+            setGenNodeSchemes letGen [trivialRoot]
 
-    let env' = Map.insert name (Binding rhsNode (Just schemeGenUsed)) env
+            Scope.pushScope
+            (bodyNode, bodyAnn0) <- buildExpr env' bodyGen body
+            bodyScope <- Scope.popScope
+            Scope.rebindScopeNodes (genRef bodyGen) bodyNode bodyScope
 
-    -- Alternative let scoping (Fig. 15.2.6, rightmost constraint):
-    -- introduce a gen node for the let expression, a trivial scheme root, and
-    -- type the body under a fresh gen node bound beneath it.
-    letGen <- allocGenNode []
-    setBindParentIfMissing (genRef letGen) (genRef scopeRoot) BindFlex
-    setBindParentOverride (genRef schemeGenId) (genRef letGen) BindFlex
-    bodyGen <- allocGenNode []
-    setBindParentIfMissing (genRef bodyGen) (genRef letGen) BindFlex
+            letEdge <- addInstEdge bodyNode trivialRoot
+            recordLetEdge letEdge
+            let bodyAnn = AAnn bodyAnn0 trivialRoot letEdge
 
-    trivialRoot <- allocVar
-    setBindParentIfMissing (typeRef trivialRoot) (genRef letGen) BindFlex
-    setGenNodeSchemes letGen [trivialRoot]
+            -- Pass schemeNode as scheme, 0 as dummy expVar
+            pure (trivialRoot, ALet name schemeGenUsed schemeRootNode (ExpVarId 0) rhsGen rhsAnn bodyAnn trivialRoot)
+    in case rhs of
+        -- Desugared annotated let: let x = (e : σ) in b
+        -- (note: ELetAnn was removed; we handle the annotation here)
+        EAnn rhsExpr annTy -> do
+            let (bindings, bodyType) = splitForalls annTy
+            -- Build the explicit scheme in its own scope.
+            Scope.pushScope
+            schemeGenId <- allocGenNode []
+            (tyEnv, quantVars) <- internalizeBinders schemeGenId bindings
+            schemeBodyNode <- internalizeSrcTypeBound schemeGenId tyEnv bodyType
+            schemeScope <- Scope.popScope
+            let schemeRootNode = schemeBodyNode
+            schemeGenUsed <- fmap (maybe schemeGenId id) (lookupSchemeGenForRoot schemeRootNode)
+            -- schemeGenId already allocated above
+            Scope.rebindScopeNodes (typeRef schemeRootNode) schemeBodyNode schemeScope
+            setBindParentIfMissing (typeRef schemeRootNode) (genRef schemeGenUsed) BindFlex
+            -- Ensure explicit scheme binders are bound under the scheme gen node (named nodes).
+            mapM_ (\varNode -> setBindParentOverride (typeRef varNode) (genRef schemeGenUsed) BindFlex) quantVars
+            setGenNodeSchemes schemeGenUsed [schemeRootNode]
 
-    Scope.pushScope
-    (bodyNode, bodyAnn0) <- buildExpr env' bodyGen body
-    bodyScope <- Scope.popScope
-    Scope.rebindScopeNodes (genRef bodyGen) bodyNode bodyScope
+            -- Build the RHS in a fresh scope and bind it under a let-introduced forall.
+            rhsGen <- allocGenNode []
+            (rhsNode, rhsAnn, rhsScope) <- buildUnder rhsGen rhsExpr
+            Scope.rebindScopeNodes (genRef rhsGen) rhsNode rhsScope
 
-    letEdge <- addInstEdge bodyNode trivialRoot
-    recordLetEdge letEdge
-    let bodyAnn = AAnn bodyAnn0 trivialRoot letEdge
+            -- Emit instantiation: the annotated scheme must instantiate to the RHS.
+            (annExpNode, _) <- allocExpNode schemeRootNode
+            setBindParentIfMissing (typeRef annExpNode) (genRef schemeGenId) BindFlex
+            rhsEdge <- addInstEdge annExpNode rhsNode
+            let rhsAnn' = AAnn rhsAnn annExpNode rhsEdge
 
-    pure (trivialRoot, ALet name schemeGenUsed rhsNode (ExpVarId 0) schemeGenId rhsAnn bodyAnn trivialRoot)
+            buildLet schemeGenId schemeGenUsed schemeRootNode rhsGen rhsAnn'
+        _ -> do
+            schemeGenId <- allocGenNode []
 
-  -- See Note [Annotated Let]
-  ELetAnn name (SrcScheme bindings bodyType) rhs body -> do
-    -- Build the explicit scheme in its own scope.
-    Scope.pushScope
-    schemeGenId <- allocGenNode []
-    (tyEnv, quantVars) <- internalizeBinders schemeGenId bindings
-    schemeBodyNode <- internalizeSrcTypeBound schemeGenId tyEnv bodyType
-    schemeScope <- Scope.popScope
-    let schemeRootNode = schemeBodyNode
-    schemeGenUsed <- fmap (maybe schemeGenId id) (lookupSchemeGenForRoot schemeRootNode)
-    -- schemeGenId already allocated above
-    Scope.rebindScopeNodes (typeRef schemeRootNode) schemeBodyNode schemeScope
-    setBindParentIfMissing (typeRef schemeRootNode) (genRef schemeGenUsed) BindFlex
-    -- Ensure explicit scheme binders are bound under the scheme gen node (named nodes).
-    mapM_ (\varNode -> setBindParentOverride (typeRef varNode) (genRef schemeGenUsed) BindFlex) quantVars
-    setGenNodeSchemes schemeGenUsed [schemeRootNode]
+            (rhsNode, rhsAnn, rhsScope) <- buildUnder schemeGenId rhs
 
-    -- Build the RHS in a fresh scope and bind it under a let-introduced forall.
-    Scope.pushScope
-    rhsGen <- allocGenNode []
-    (rhsNode, rhsAnn) <- buildExpr env rhsGen rhs
-    rhsScope <- Scope.popScope
-    Scope.rebindScopeNodes (genRef rhsGen) rhsNode rhsScope
+            schemeGenUsed <- fmap (maybe schemeGenId id) (lookupSchemeGenForRoot rhsNode)
+            setGenNodeSchemes schemeGenUsed [rhsNode]
+            Scope.rebindScopeNodes (genRef schemeGenUsed) rhsNode rhsScope
+            setBindParentOverride (typeRef rhsNode) (genRef schemeGenUsed) BindFlex
 
-    -- Emit instantiation: the annotated scheme must instantiate to the RHS.
-    (annExpNode, _) <- allocExpNode schemeRootNode
-    setBindParentIfMissing (typeRef annExpNode) (genRef schemeGenId) BindFlex
-    rhsEdge <- addInstEdge annExpNode rhsNode
-    let rhsAnn' = AAnn rhsAnn annExpNode rhsEdge
-
-    -- Bind the scheme node directly
-    let env' = Map.insert name (Binding schemeRootNode (Just schemeGenUsed)) env
-
-    -- Alternative let scoping (Fig. 15.2.6, rightmost constraint):
-    -- introduce a gen node for the let expression and a trivial scheme root.
-    letGen <- allocGenNode []
-    setBindParentIfMissing (genRef letGen) (genRef scopeRoot) BindFlex
-    setBindParentOverride (genRef schemeGenId) (genRef letGen) BindFlex
-    setBindParentOverride (genRef rhsGen) (genRef letGen) BindFlex
-    bodyGen <- allocGenNode []
-    setBindParentIfMissing (genRef bodyGen) (genRef letGen) BindFlex
-
-    trivialRoot <- allocVar
-    setBindParentIfMissing (typeRef trivialRoot) (genRef letGen) BindFlex
-    setGenNodeSchemes letGen [trivialRoot]
-
-    Scope.pushScope
-    (bodyNode, bodyAnn0) <- buildExpr env' bodyGen body
-    bodyScope <- Scope.popScope
-    Scope.rebindScopeNodes (genRef bodyGen) bodyNode bodyScope
-
-    letEdge <- addInstEdge bodyNode trivialRoot
-    recordLetEdge letEdge
-    let bodyAnn = AAnn bodyAnn0 trivialRoot letEdge
-
-    -- Pass schemeNode as scheme, 0 as dummy expVar
-    pure (trivialRoot, ALet name schemeGenUsed schemeRootNode (ExpVarId 0) rhsGen rhsAnn' bodyAnn trivialRoot)
+            buildLet schemeGenId schemeGenUsed rhsNode schemeGenId rhsAnn
 
   -- Term Annotation
   EAnn annotatedExpr srcType -> do
@@ -249,22 +232,24 @@ Inside the body, `x` is bound to the annotated scheme and uses the usual
 expansion machinery when the scheme is polymorphic.
 -}
 
-{- Note [Annotated Let]
-~~~~~~~~~~~~~~~~~~~~~~~
-An annotated let `let x : σ = e₁ in e₂` allows the user to specify the type
-scheme for a let-bound variable. We:
+{- Note [Annotated Let via EAnn]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The surface grammar does not include a dedicated `let` annotation form.
+Instead, users write:
 
-  1. Internalize the annotation scheme σ as a graph node (often a `TyForall`).
-  2. Translate the RHS e₁ in a fresh scope and bind it under a fresh `TyForall`
-     anchor gᵣₕₛ.
-  3. Emit an instantiation edge gᵣₕₛ ≤ σ to enforce the annotation.
-  4. Bind x to σ in the environment and translate the body e₂.
+  let x = (e : σ) in b
 
-As with unannotated lets, use sites wrap σ in `TyExp` so presolution can record
-per-occurrence witnesses Φ(e).
+When `ELet` sees an RHS of the form `EAnn`, we treat the annotation as the
+declared scheme for the binding (the old `ELetAnn` behavior):
 
-This allows explicit type annotations while maintaining the MLF constraint
-solving approach.
+  1. Split the leading `∀` binders of σ into explicit scheme binders.
+  2. Internalize the scheme under a fresh gen node (named binders).
+  3. Translate the RHS `e` under a fresh gen node.
+  4. Emit an instantiation edge from an expansion of the scheme to the RHS.
+  5. Bind `x` to the scheme node when translating the body.
+
+This keeps the surface language thesis-faithful while preserving the
+annotation semantics expected by later phases.
 -}
 
 {- Note [Lambda Translation]
@@ -417,6 +402,14 @@ lookupSchemeOwnerForRoot root = do
 
 -- | Type variable environment for internalizing source types.
 type TyEnv = Map VarName NodeId
+
+-- | Split a nested forall type into explicit scheme binders and a body.
+-- This peels only the leading `STForall`s, leaving any inner foralls intact.
+splitForalls :: SrcType -> ([(String, Maybe SrcType)], SrcType)
+splitForalls = go []
+  where
+    go acc (STForall name mb body) = go ((name, mb):acc) body
+    go acc body = (reverse acc, body)
 
 -- | Internalize a source type annotation into a constraint graph.
 -- This creates nodes for the type structure and connects them appropriately.
