@@ -4,6 +4,58 @@
 
 **Current vs target:** The current pipeline records presolution witnesses and produces explicit generalization plans in `MLF.Constraint.Presolution.Plan`; elaboration applies these plans via `MLF.Elab.Generalize` without re-solving. The remaining paper-faithfulness deltas are tracked in `.kiro/specs/paper-faithfulness-remaining-deltas/` (constructor types `Cσ` and stricter translatability validation for Φ).
 
+## Module Structure (Post-Refactor)
+
+The codebase has been refactored for improved navigation and paper-faithfulness auditing:
+
+### Graph Types (`MLF.Constraint.Types.Graph`)
+
+The monolithic `Graph` module has been split into focused submodules:
+
+| Submodule | Contents |
+|-----------|----------|
+| `Graph.NodeEdge` | Core node and edge definitions (`NodeId`, `TyNode`, `InstEdge`, `UnifyEdge`, etc.) |
+| `Graph.Binding` | Binding-related types (`BindFlag`, `BindParents`, `BindingError`) |
+| `Graph.Accessors` | Accessor utilities (`maxNodeIdKeyOr0`) |
+
+`MLF.Constraint.Types.Graph` re-exports all submodules as a facade.
+
+### Presolution (`MLF.Constraint.Presolution`)
+
+Presolution modules now use shared state-access helpers:
+
+| Module | Purpose |
+|--------|---------|
+| `StateAccess` / `Ops` | Shared `MonadPresolution` accessors (`getConstraint`, `modifyConstraint`, `liftBindingError`) |
+| `EdgeProcessing` | Edge-local logic with explicit `EdgeCtx` |
+| `EdgeProcessing.Witness` | Witness construction helpers |
+| `EdgeProcessing.Unify` | Edge-local unification |
+
+### Unification (`MLF.Constraint.Unify`)
+
+Shared unification core for consistent behavior across phases:
+
+| Module | Purpose |
+|--------|---------|
+| `Unify.Core` | Policy-driven unification with `UnifyStrategy` |
+| `Unify.Decompose` | Structural decomposition helpers |
+
+### Elaboration (`MLF.Elab`)
+
+Elaboration now uses structured config records:
+
+| Record | Purpose |
+|--------|---------|
+| `ElabConfig` | Static configuration (debug flags, etc.) |
+| `ElabEnv` | Per-elaboration environment (naming, etc.) |
+
+Legacy code is isolated in `MLF.Elab.Legacy` (e.g., `expansionToInst`).
+
+### Documentation
+
+- `docs/paper-map.md` — Paper-to-code mapping for auditing
+- `docs/phase-notes.md` — Phase invariants and test references
+
 ### 1. src/MLF/Constraint/Presolution/Driver.hs (+ EdgeUnify/Witness)
 - **`unifyStructure` / `unifyStructureEdge`**: Recursively unify structural children (TyArrow, TyForall, plus TyVar bounds) so `Arrow A B ~ Arrow C D` propagates `A~C` and `B~D` (Driver for global merges; EdgeUnify for edge-local χe execution).
 - **`processInstEdge`**:
@@ -87,7 +139,7 @@ This repo’s design is primarily informed by:
 
 | Paper | Meaning | Repo |
 |------:|---------|------|
-| `b` | eMLF surface term | `src/MLF/Frontend/Syntax.hs` (`Expr`, plus `SrcType`/`SrcScheme`) |
+| `b` | eMLF surface term | `src/MLF/Frontend/Syntax.hs` (`Expr` + `SrcType`) |
 | `χ` | constraint graph | `src/MLF/Constraint/Types.hs` (`Constraint`) |
 | `n` | type node in the graph | `NodeId` + `TyNode` in `Constraint.cNodes` |
 | `g` | binding-tree node (generalization site) | `GenNodeId`/`GenNode` + `Constraint.cBindParents` |

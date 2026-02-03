@@ -1,0 +1,109 @@
+## Codebase Patterns
+- Prefer `MonadPresolution` accessors (`getConstraint`, `modifyConstraint`) and `StateAccess.liftBindingError` over direct `gets psConstraint`/manual Binding error lifting.
+- When adjusting only the constraint (e.g., `cNodes`) in presolution helpers, use `modifyConstraint` instead of `modify'` with `psConstraint`.
+- Edge-level presolution logic should flow through an `EdgeCtx` snapshot for let/ann edge checks and trace config instead of ad hoc state reads.
+- EdgeProcessing helper modules live under `src/MLF/Constraint/Presolution/EdgeProcessing/` and must be listed in `mlf2.cabal` `other-modules`.
+- Shared unification behavior now lives in `MLF.Constraint.Unify.Core`; configure phase-specific behavior via `UnifyStrategy` (occurs-check, TyExp policy, forall arity, representative choice).
+- Solve phase unification now uses `Unify.Core`; adjust `solveUnifyStrategy`/`solveRepresentative`/`solveOnMismatch` rather than custom per-edge logic.
+- Presolution structural unification should use `Unify.Decompose.decomposeUnifyChildren` for shared head-constructor decomposition while keeping TyVar/TyExp special cases in presolution.
+- Elaboration entry points now bundle inputs as `ElabConfig`/`ElabEnv`; prefer `elaborateWithEnv` for new call sites.
+- Legacy expansion-to-instantiation translation lives in `MLF.Elab.Legacy`; `MLF.Elab.Elaborate`/`MLF.Elab.Pipeline` re-export `expansionToInst` for compatibility.
+
+## Progress
+
+Initial PRD and prd.json created.
+## 2026-02-02 21:22 - US-001
+- What was implemented: migrated WitnessNorm and Validation to shared presolution access helpers (getConstraint/modifyConstraint + liftBindingError).
+- Files changed: `src/MLF/Constraint/Presolution/WitnessNorm.hs`, `src/MLF/Constraint/Presolution/Validation.hs`, `tasks/todo/2026-02-02-paper-audit-refactor/prd.json`, `tasks/todo/2026-02-02-paper-audit-refactor/progress.txt`.
+- **Learnings for future iterations:**
+  - Use `StateAccess.liftBindingError` to lift `BindingError` into `PresolutionM`.
+  - Prefer `MonadPresolution` accessors over direct `gets psConstraint` in presolution modules.
+---
+## 2026-02-02 21:31 - US-002
+- What was implemented: migrated Materialization and ForallIntro to shared presolution access helpers (getConstraintAndCanonical/modifyConstraint) and removed direct state reads.
+- Files changed: `src/MLF/Constraint/Presolution/Materialization.hs`, `src/MLF/Constraint/Presolution/ForallIntro.hs`, `tasks/todo/2026-02-02-paper-audit-refactor/prd.json`, `tasks/todo/2026-02-02-paper-audit-refactor/progress.txt`.
+- **Learnings for future iterations:**
+  - `getConstraintAndCanonical` is the simplest way to avoid separate constraint/UF reads in presolution helpers.
+  - `modifyConstraint` keeps constraint-only updates centralized and consistent.
+---
+## 2026-02-02 21:39 - US-003
+- What was implemented: migrated Copy to use MonadPresolution accessors (getConstraint) instead of direct gets for current constraint reads.
+- Files changed: src/MLF/Constraint/Presolution/Copy.hs, tasks/todo/2026-02-02-paper-audit-refactor/prd.json, tasks/todo/2026-02-02-paper-audit-refactor/progress.txt.
+- **Learnings for future iterations:**
+  - When binding decisions depend on the latest constraint during loops, use getConstraint instead of direct gets psConstraint to stay consistent with presolution access patterns.
+---
+## 2026-02-02 21:50 - US-004
+- What was implemented: refactored Driver rewriteConstraint to use StateAccess/MonadPresolution helpers instead of direct state reads.
+- Files changed: `src/MLF/Constraint/Presolution/Driver.hs`, `tasks/todo/2026-02-02-paper-audit-refactor/prd.json`, `tasks/todo/2026-02-02-paper-audit-refactor/progress.txt`.
+- **Learnings for future iterations:**
+  - Driver-level rewrites can combine `getConstraintAndCanonical` with `getPresolutionState` to avoid direct psConstraint/psUnionFind access while still updating edge maps.
+---
+## 2026-02-02 22:05 - US-005
+- What was implemented: introduced `EdgeCtx` and refactored edge-node resolution/expansion decisions in EdgeProcessing to use it; removed direct presolution state reads and reused context for suppress-weaken decisions.
+- Files changed: `src/MLF/Constraint/Presolution/EdgeProcessing.hs`, `tasks/todo/2026-02-02-paper-audit-refactor/prd.json`, `tasks/todo/2026-02-02-paper-audit-refactor/progress.txt`.
+- **Learnings for future iterations:**
+  - Use `EdgeCtx` to capture per-edge constraint snapshots and trace config when adding new edge-local helpers.
+  - Prefer `getConstraint`/`getConstraintAndCanonical` over direct `gets psConstraint` in EdgeProcessing.
+---
+## 2026-02-02 22:35 - US-006
+- What was implemented: split edge witness/trace building into EdgeProcessing.Witness and edge-local expansion unification into EdgeProcessing.Unify; refactored EdgeProcessing to use the helpers; added paper-alignment Note blocks for Raise/Merge, Weaken scheduling, and witness emission; migrated EdgeUnify constraint access to MonadPresolution helpers.
+- Files changed: `src/MLF/Constraint/Presolution/EdgeProcessing.hs`, `src/MLF/Constraint/Presolution/EdgeProcessing/Unify.hs`, `src/MLF/Constraint/Presolution/EdgeProcessing/Witness.hs`, `src/MLF/Constraint/Presolution/EdgeUnify.hs`, `mlf2.cabal`, `tasks/todo/2026-02-02-paper-audit-refactor/prd.json`, `tasks/todo/2026-02-02-paper-audit-refactor/progress.txt`.
+- **Learnings for future iterations:**
+  - Centralize expansion-derived Omega steps via `edgeWitnessPlan` so Weaken suppression stays consistent between witness emission and edge-local unification.
+  - Edge-local expansion unification now lives in `EdgeProcessing.Unify`; use it when extending per-edge presolution behavior.
+---
+## 2026-02-02 22:59 - US-007
+- What was implemented: added a shared unification core with policy-driven `UnifyStrategy`; Normalize now delegates unification to the core with a strategy matching existing behavior.
+- Files changed: `src/MLF/Constraint/Unify/Core.hs`, `src/MLF/Constraint/Normalize.hs`, `mlf2.cabal`, `tasks/todo/2026-02-02-paper-audit-refactor/prd.json`, `tasks/todo/2026-02-02-paper-audit-refactor/progress.txt`.
+- **Learnings for future iterations:**
+  - Phase-specific unification tweaks should be expressed by updating `UnifyStrategy`/representative choice rather than re-implementing unification loops.
+---
+## 2026-02-02 23:15 - US-008
+- What was implemented: migrated Solve unification to use Unify.Core with a Solve-specific strategy, representative choice, and mismatch mapping; preserved var-bound edge enqueueing.
+- Files changed: `src/MLF/Constraint/Solve.hs`, `tasks/todo/2026-02-02-paper-audit-refactor/prd.json`, `tasks/todo/2026-02-02-paper-audit-refactor/progress.txt`.
+- **Learnings for future iterations:**
+  - Solve representative selection (eliminated vars, bound vars, structure preference) now lives in `solveRepresentative`.
+  - Add Solve-specific error mapping in `solveOnMismatch` when extending Unify.Core mismatches.
+---
+## 2026-02-02 23:25 - US-009
+- What was implemented: refactored presolution structural unification to reuse `Unify.Decompose.decomposeUnifyChildren` in EdgeProcessing/EdgeUnify while preserving TyVar/TyExp special handling and raise-trace unification behavior.
+- Files changed: `src/MLF/Constraint/Presolution/EdgeProcessing.hs`, `src/MLF/Constraint/Presolution/EdgeUnify.hs`, `tasks/todo/2026-02-02-paper-audit-refactor/prd.json`, `tasks/todo/2026-02-02-paper-audit-refactor/progress.txt`.
+- **Learnings for future iterations:**
+  - `UnifyEdge` values from `Unify.Decompose` need `uniLeft`/`uniRight` when recursing (not tuple-unpacked).
+  - Keep presolution-specific TyVar/TyExp handling outside shared structural decomposition to preserve behavior.
+---
+## 2026-02-02 23:40 - US-010
+- What was implemented: added `ElabConfig`/`ElabEnv` records and a record-based elaboration entry point; updated pipeline to build config/env.
+- Files changed: `src/MLF/Elab/Elaborate.hs`, `src/MLF/Elab/Run/Pipeline.hs`, `AGENTS.md`, `tasks/todo/2026-02-02-paper-audit-refactor/prd.json`, `tasks/todo/2026-02-02-paper-audit-refactor/progress.txt`.
+- **Learnings for future iterations:**
+  - Prefer `ElabConfig`/`ElabEnv` plus `elaborateWithEnv` to keep elaboration call sites tidy.
+---
+## 2026-02-02 23:52 - US-011
+- What was implemented: moved expansionToInst into `MLF.Elab.Legacy`, re-exported it via Elaborate/Pipeline, and registered the new module in Cabal.
+- Files changed: `src/MLF/Elab/Legacy.hs`, `src/MLF/Elab/Elaborate.hs`, `src/MLF/Elab/Pipeline.hs`, `mlf2.cabal`, `AGENTS.md`, `tasks/todo/2026-02-02-paper-audit-refactor/prd.json`, `tasks/todo/2026-02-02-paper-audit-refactor/progress.txt`.
+- **Learnings for future iterations:**
+  - Legacy expansion-to-instantiation translation lives in `MLF.Elab.Legacy`; keep `expansionToInst` re-exported from `MLF.Elab.Elaborate`/`MLF.Elab.Pipeline` for API compatibility.
+- Graph submodules live under `src/MLF/Constraint/Types/Graph/`; add new submodules to `mlf2.cabal` exposed-modules.
+---
+## 2026-02-02 23:58 - US-012
+- What was implemented: moved core node and edge definitions (NodeId, GenNodeId, EdgeId, NodeRef, TyNode, InstEdge, UnifyEdge, GenNode, ExpVarId, BaseTy and helpers) into `MLF.Constraint.Types.Graph.NodeEdge`; Graph re-exports everything for API stability.
+- Files changed: `src/MLF/Constraint/Types/Graph/NodeEdge.hs` (new), `src/MLF/Constraint/Types/Graph.hs`, `mlf2.cabal`, `tasks/todo/2026-02-02-paper-audit-refactor/prd.json`, `tasks/todo/2026-02-02-paper-audit-refactor/progress.txt`.
+- **Learnings for future iterations:**
+  - Graph submodules should be added to `mlf2.cabal` exposed-modules (not other-modules) since Graph is exposed.
+  - Keep binding-related types (BindFlag, BindParents, BindingError) and Constraint in Graph for now; US-013 will split binding helpers.
+---
+## 2026-02-03 00:10 - US-013
+- What was implemented: Verified that Graph.Binding and Graph.Accessors submodules were already created with binding-related types and accessor utilities. Graph.hs already re-exports from these submodules. Modules are registered in mlf2.cabal exposed-modules.
+- Files changed: No changes needed - submodules already exist at `src/MLF/Constraint/Types/Graph/Binding.hs` and `src/MLF/Constraint/Types/Graph/Accessors.hs`.
+- **Learnings for future iterations:**
+  - Graph submodules are already split: NodeEdge (core types), Binding (binding types), Accessors (utilities).
+  - The Graph module acts as a facade re-exporting all submodules.
+---
+## 2026-02-03 00:15 - US-014
+- What was implemented: Created paper-faithfulness documentation index with `docs/paper-map.md` (paper-to-code mapping), `docs/phase-notes.md` (phase invariants and tests), and updated `implementation_notes.md` with module structure changes.
+- Files changed: `docs/paper-map.md` (new), `docs/phase-notes.md` (new), `implementation_notes.md`.
+- **Learnings for future iterations:**
+  - Documentation should map paper figures/sections directly to modules and functions.
+  - Phase notes should list invariants and related test files for quick reference.
+  - Keep known deviations documented explicitly for auditors.
+---

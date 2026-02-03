@@ -26,6 +26,7 @@ module MLF.Reify.TypeOps (
 ) where
 
 import qualified Data.IntSet as IntSet
+import Data.Foldable (toList)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
@@ -77,6 +78,12 @@ freeTypeVarsFromWith bindInBound bound0 ty =
         TArrowIF d c ->
             BoundFun $ \boundSet ->
                 Set.union (runBoundFun d boundSet) (runBoundFun c boundSet)
+        TConIF _ args ->
+            BoundFun $ \boundSet ->
+                foldr
+                    (\arg acc -> Set.union (runBoundFun arg boundSet) acc)
+                    Set.empty
+                    args
         TBaseIF _ -> BoundFun (const Set.empty)
         TBottomIF -> BoundFun (const Set.empty)
         TForallIF v mb body ->
@@ -96,6 +103,7 @@ substTypeCapture x s = goSub
     substBoundCaptureLocal name replacement bound = case bound of
         TArrow a b ->
             TArrow (substTypeCapture name replacement a) (substTypeCapture name replacement b)
+        TCon c args -> TCon c (fmap (substTypeCapture name replacement) args)
         TBase b -> TBase b
         TBottom -> TBottom
         TForall v mb body
@@ -126,6 +134,7 @@ substTypeCapture x s = goSub
                 | v == x -> s
                 | otherwise -> TVar v
             TArrowIF d c -> TArrow (snd (unIxPair d)) (snd (unIxPair c))
+            TConIF c args -> TCon c (fmap (snd . unIxPair) args)
             TBaseIF b -> TBase b
             TBottomIF -> TBottom
             TForallIF v mb body
@@ -155,6 +164,7 @@ substTypeSimple name replacement = paraIx alg
     substBoundSimpleLocal name0 replacement0 bound = case bound of
         TArrow a b ->
             TArrow (substTypeSimple name0 replacement0 a) (substTypeSimple name0 replacement0 b)
+        TCon c args -> TCon c (fmap (substTypeSimple name0 replacement0) args)
         TBase b -> TBase b
         TBottom -> TBottom
         TForall v mb body
@@ -171,6 +181,7 @@ substTypeSimple name replacement = paraIx alg
             | v == name -> replacement
             | otherwise -> TVar v
         TArrowIF d c -> TArrow (snd (unIxPair d)) (snd (unIxPair c))
+        TConIF c args -> TCon c (fmap (snd . unIxPair) args)
         TBaseIF b -> TBase b
         TBottomIF -> TBottom
         TForallIF v mb body
@@ -219,12 +230,19 @@ alphaEqType = go Map.empty Map.empty
                         Nothing -> a == b
         (TArrow a1 b1, TArrow a2 b2) ->
             go envL envR a1 a2 && go envL envR b1 b2
+        (TCon c1 args1, TCon c2 args2) ->
+            c1 == c2 && alphaEqArgs envL envR (toList args1) (toList args2)
         (TBase b1, TBase b2) -> b1 == b2
         (TBottom, TBottom) -> True
         (TForall v1 mb1 body1, TForall v2 mb2 body2) ->
             let envL' = Map.insert v1 v2 envL
                 envR' = Map.insert v2 v1 envR
             in alphaEqMaybeBound envL envR mb1 mb2 && go envL' envR' body1 body2
+        _ -> False
+
+    alphaEqArgs envL envR as bs = case (as, bs) of
+        ([], []) -> True
+        (a:as', b:bs') -> go envL envR a b && alphaEqArgs envL envR as' bs'
         _ -> False
 
     alphaEqMaybeBound envL envR mb1 mb2 = case (mb1, mb2) of
@@ -235,6 +253,8 @@ alphaEqType = go Map.empty Map.empty
     alphaEqBound envL envR b1 b2 = case (b1, b2) of
         (TArrow a1 b1', TArrow a2 b2') ->
             go envL envR a1 a2 && go envL envR b1' b2'
+        (TCon c1 args1, TCon c2 args2) ->
+            c1 == c2 && alphaEqArgs envL envR (toList args1) (toList args2)
         (TBase b1', TBase b2') -> b1' == b2'
         (TBottom, TBottom) -> True
         (TForall v1 mb1 body1, TForall v2 mb2 body2) ->
@@ -266,6 +286,9 @@ matchType binderSet = goMatch Map.empty Map.empty
         (TArrow a b, TArrow a' b') -> do
             subst1 <- goMatch env subst a a'
             goMatch env subst1 b b'
+        (TCon c0 args0, TCon c1 args1)
+            | c0 == c1 ->
+                matchArgs env subst (toList args0) (toList args1)
         (TBase b0, TBase b1)
             | b0 == b1 -> Right subst
         (TBottom, TBottom) -> Right subst
@@ -277,10 +300,20 @@ matchType binderSet = goMatch Map.empty Map.empty
             goMatch (Map.insert v v' env) subst1 b b'
         _ -> Left (InstantiationError "matchType: structure mismatch")
 
+    matchArgs env subst0 argsP argsT = case (argsP, argsT) of
+        ([], []) -> Right subst0
+        (a:as, b:bs) -> do
+            subst1 <- goMatch env subst0 a b
+            matchArgs env subst1 as bs
+        _ -> Left (InstantiationError "matchType: structure mismatch")
+
     matchBound env subst boundP boundT = case (boundP, boundT) of
         (TArrow a b, TArrow a' b') -> do
             subst1 <- goMatch env subst a a'
             goMatch env subst1 b b'
+        (TCon c0 args0, TCon c1 args1)
+            | c0 == c1 ->
+                matchArgs env subst (toList args0) (toList args1)
         (TBase b0, TBase b1)
             | b0 == b1 -> Right subst
         (TBottom, TBottom) -> Right subst
@@ -357,6 +390,7 @@ inlineBaseBoundsType constraint canonical = cataIx alg
                 Nothing -> TVar v
         TArrowIF a b -> TArrow a b
         TForallIF v mb body -> TForall v mb body
+        TConIF c args -> TCon c args
         TBaseIF b -> TBase b
         TBottomIF -> TBottom
 
@@ -417,6 +451,7 @@ inlineAliasBoundsWithBySeen fallbackToBottom canonical nodes lookupBound reifyBo
                                     Nothing -> ty
                     Nothing -> ty
         TArrow a b -> TArrow (goAlias seen boundNames a) (goAlias seen boundNames b)
+        TCon c args -> TCon c (fmap (goAlias seen boundNames) args)
         TForall v mb body ->
             let boundNames' = Set.insert v boundNames
                 mb' = fmap (goBound seen boundNames') mb
@@ -427,6 +462,7 @@ inlineAliasBoundsWithBySeen fallbackToBottom canonical nodes lookupBound reifyBo
 
     goBound seen boundNames bound = case bound of
         TArrow a b -> TArrow (goAlias seen boundNames a) (goAlias seen boundNames b)
+        TCon c args -> TCon c (fmap (goAlias seen boundNames) args)
         TBase b -> TBase b
         TBottom -> TBottom
         TForall v mb body ->

@@ -26,6 +26,7 @@ inferInstAppArgsFromScheme binds body targetTy =
         targetForallNames =
             let alg ty = case ty of
                     TForallIF v _ body' -> v : unK body'
+                    TConIF _ args -> concatMap unK args
                     _ -> []
             in cataIxConst alg targetTy
         argsAreIdentity :: [String] -> [ElabType] -> Bool
@@ -94,6 +95,7 @@ varsInType = cataIxConst alg
     alg ty = case ty of
         TVarIF v -> Set.singleton v
         TArrowIF a b -> Set.union (unK a) (unK b)
+        TConIF _ args -> foldr (Set.union . unK) Set.empty args
         TBaseIF _ -> Set.empty
         TBottomIF -> Set.empty
         TForallIF _ mb body ->
@@ -114,6 +116,8 @@ substTypeSelective binderSet subst ty0 = runSubstFun (cataIx alg ty0) Set.empty
                         Nothing -> TVar v
         TArrowIF a b ->
             SubstFun $ \bound -> TArrow (runSubstFun a bound) (runSubstFun b bound)
+        TConIF c args ->
+            SubstFun $ \bound -> TCon c (fmap (\f -> runSubstFun f bound) args)
         TBaseIF b -> SubstFun (const (TBase b))
         TBottomIF -> SubstFun (const TBottom)
         TForallIF v mb body ->
@@ -143,4 +147,5 @@ containsForallType = cataIxConst alg
     alg ty = case ty of
         TForallIF _ _ _ -> True
         TArrowIF a b -> unK a || unK b
+        TConIF _ args -> any unK args
         _ -> False

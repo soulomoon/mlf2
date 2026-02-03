@@ -81,6 +81,10 @@ types where needed, e.g.:
 
   λ(f : ∀α. α → α). (f 1, f True)
 
+These are surface sugar and are desugared before Phase 1 (thesis §12.3.2):
+
+  λ(x : τ) a  ≜  λ(x) let x = (x : τ) in a
+
 Paper references:
   - ICFP 2008, §1 describes the constraint language and type syntax
   - ICFP 2008, §3 defines solved forms and expansion variables (s · τ)

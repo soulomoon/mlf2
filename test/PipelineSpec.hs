@@ -27,7 +27,7 @@ import MLF.Constraint.Types.Graph
 import qualified MLF.Binding.Tree as Binding
 import MLF.Elab.Run.Provenance (buildTraceCopyMap, collectBaseNamedKeys)
 import MLF.Elab.Run.Util (makeCanonicalizer)
-import SpecUtil (collectVarNodes, defaultTraceConfig)
+import SpecUtil (collectVarNodes, defaultTraceConfig, mkForalls)
 
 spec :: Spec
 spec = describe "Pipeline (Phases 1-5)" $ do
@@ -35,7 +35,9 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         it "reifies type with flexible bound" $ do
             -- let f : ∀(a ⩾ Int). a -> a = \x. x
             let ann = STForall "a" (Just (STBase "Int")) (STArrow (STVar "a") (STVar "a"))
-                expr = ELetAnn "f" (SrcScheme [] ann) (ELam "x" (EVar "x")) (EVar "f")
+                expr =
+                    let schemeTy = mkForalls [] ann
+                    in ELet "f" (EAnn (ELam "x" (EVar "x")) schemeTy) (EVar "f")
 
             case runPipeline expr of
                 Right (res, root) -> do

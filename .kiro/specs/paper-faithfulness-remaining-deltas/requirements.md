@@ -9,7 +9,7 @@ Source of truth: `papers/these-finale-english.txt` (thesis), focusing on Chapter
 **User Story:** As a maintainer, I want the xMLF type AST to cover all thesis constructors, so that elaboration can represent every xMLF type the paper defines.
 
 #### Acceptance Criteria
-1. WHEN the thesis defines constructor types `Cσ` in xMLF (Fig. 14.2.1) THEN the system SHALL provide a corresponding type constructor (or document an explicit deviation). (Status: **missing**; Evidence: `papers/these-finale-english.txt:14616-14645`; `src/MLF/Types/Elab.hs:85-90`.)
+1. WHEN the thesis defines constructor types `Cσ` in xMLF (Fig. 14.2.1) THEN the system SHALL provide a corresponding type constructor (or document an explicit deviation). (Status: **present**; Evidence: `papers/these-finale-english.txt:14616-14645`; `src/MLF/Types/Elab.hs:86-92`.)
 2. WHEN the thesis defines bounded type abstractions and type instantiation terms (Fig. 14.2.2) THEN the system SHALL represent `Λ(α ⩾ σ) a` and `a[ϕ]` in the xMLF term AST. (Status: **present**; Evidence: `papers/these-finale-english.txt:14653-14683`; `src/MLF/Types/Elab.hs:271-278`.)
 
 ### Requirement 2 — Quantifier reordering ϕR is applied when needed

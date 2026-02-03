@@ -1,0 +1,137 @@
+## Codebase Patterns
+- Presolution tests should import helpers/types via `MLF.Constraint.Presolution` (re-exports EdgeTrace/PresolutionResult/lookupCopy) instead of hidden `Presolution.Base` modules.
+
+## Progress
+
+Initial PRD + Ralph prd.json created (planning only; no code changes yet).
+
+## 2026-02-02 - US-001
+- Created MLF.Elab.Run.ResultType.Util module with pure helper functions:
+  - generalizeWithPlan, containsBoundForall, instHasBoundForall
+  - instantiateImplicitForalls, stripAnn, collectEdges
+- Updated MLF.Elab.Run.ResultType to import from Util module
+- Added MLF.Elab.Run.ResultType.Util to mlf2.cabal other-modules
+- Files changed: src/MLF/Elab/Run/ResultType.hs, src/MLF/Elab/Run/ResultType/Util.hs (new), mlf2.cabal
+- **Learnings for future iterations:**
+  - When extracting functions to a new Util module, ensure all imports are properly transferred
+  - The `generalizeAtWithBuilder` function is in MLF.Elab.Run.Generalize (not MLF.Elab.Generalize)
+  - `applyInstantiation` is in MLF.Elab.Inst
+  - `cata` requires Data.Functor.Foldable import
+  - Always run `cabal build all && cabal test` to validate
+---
+
+## 2026-02-02 - US-002
+- Created MLF.Elab.Run.ResultType.Ann module with computeResultTypeFromAnn implementation
+- Created MLF.Elab.Run.ResultType.Types module for shared ResultTypeContext data type
+- Updated MLF.Elab.Run.ResultType to delegate to ResultType.Ann and ResultType.Util
+- Updated MLF.Elab.Run.ResultType.Util to import ResultTypeContext from Types module
+- Added new modules to mlf2.cabal other-modules
+- Files changed:
+  - src/MLF/Elab/Run/ResultType.hs (refactored to delegate)
+  - src/MLF/Elab/Run/ResultType/Ann.hs (new)
+  - src/MLF/Elab/Run/ResultType/Types.hs (new)
+  - src/MLF/Elab/Run/ResultType/Util.hs (updated imports)
+  - mlf2.cabal
+- **Learnings for future iterations:**
+  - When extracting shared data types, create a separate Types module to avoid circular imports
+  - ResultTypeContext is used by both the facade and submodules
+  - GaBindParents(..) import is needed for gaBaseConstraint field accessor
+  - Type annotations on cata usage may be needed when moving code between modules
+  - The computeResultTypeFallback function remains in the main ResultType module for now (will be extracted in US-003)
+---
+
+## 2026-02-02 - US-003
+- Created MLF.Elab.Run.ResultType.Fallback module with computeResultTypeFallback implementation
+- Updated MLF.Elab.Run.ResultType to be a thin facade that:
+  - Re-exports computeResultTypeFromAnn from the Ann module
+  - Handles dispatch between AAnn case (delegates to Ann) and non-AAnn case (delegates to Fallback)
+- Added MLF.Elab.Run.ResultType.Fallback to mlf2.cabal other-modules
+- Files changed:
+  - src/MLF/Elab/Run/ResultType.hs (refactored to facade)
+  - src/MLF/Elab/Run/ResultType/Fallback.hs (new)
+  - mlf2.cabal
+- **Learnings for future iterations:**
+  - When splitting a module where functions call each other (like Fallback calling Ann), keep the dispatch logic in the facade
+  - The facade pattern allows submodules to remain independent without circular dependencies
+  - When moving code, check for unused imports to keep the build warning-free
+  - The AAnn case in computeResultTypeFallback needs to be handled at the facade level to avoid circular imports
+---
+
+## 2026-02-02 - US-004
+- Created MLF.Constraint.Presolution.Plan.Target.TargetPlan module containing:
+  - TargetPlanInput data type with all 16 fields
+  - TargetPlan data type with all 15 fields
+  - buildTargetPlan function implementation
+- Refactored MLF.Constraint.Presolution.Plan.Target to be a facade that:
+  - Re-exports TargetPlan types and functions from the submodule
+  - Keeps GammaPlan and TypeRootPlan definitions (for US-005 and US-006)
+- Added new module to mlf2.cabal other-modules
+- Files changed:
+  - src/MLF/Constraint/Presolution/Plan/Target.hs (refactored to facade)
+  - src/MLF/Constraint/Presolution/Plan/Target/TargetPlan.hs (new)
+  - mlf2.cabal
+- **Learnings for future iterations:**
+  - The facade pattern works well - existing imports of MLF.Constraint.Presolution.Plan.Target continue to work
+  - When extracting to submodules, remove unused imports to keep build warning-free
+  - The Target.hs file still contains GammaPlan and TypeRootPlan (to be extracted in US-005 and US-006)
+---
+
+## 2026-02-02 - US-005
+- Created MLF.Constraint.Presolution.Plan.Target.GammaPlan module containing:
+  - GammaPlanInput data type with all 24 fields
+  - GammaPlan data type with all 11 fields
+  - buildGammaPlan function implementation (~500 LOC)
+- Refactored MLF.Constraint.Presolution.Plan.Target to be a facade that:
+  - Re-exports TargetPlan from TargetPlan submodule
+  - Re-exports GammaPlan from new GammaPlan submodule
+  - Keeps TypeRootPlan definitions (for US-006)
+- Added MLF.Constraint.Presolution.Plan.Target.GammaPlan to mlf2.cabal other-modules
+- Files changed:
+  - src/MLF/Constraint/Presolution/Plan/Target.hs (refactored to re-export from GammaPlan)
+  - src/MLF/Constraint/Presolution/Plan/Target/GammaPlan.hs (new)
+  - mlf2.cabal
+- **Learnings for future iterations:**
+  - The facade pattern continues to work well - no import changes needed in other modules
+  - When extracting code that uses tracePlanEnabled, remember to import MLF.Util.Trace
+  - The GammaPlan module requires many imports: Binding.Tree, VarStore, IntMapUtils, Order, etc.
+  - Keep the IntMapUtils import in Target.hs for the TypeRootPlan code that remains there
+---
+
+## 2026-02-02 - US-006
+- Created MLF.Constraint.Presolution.Plan.Target.TypeRootPlan module containing:
+  - TypeRootPlanInput data type with all 22 fields
+  - TypeRootPlan data type with all 7 fields
+  - buildTypeRootPlan function implementation (~90 LOC)
+- Refactored MLF.Constraint.Presolution.Plan.Target to be a facade that:
+  - Re-exports TargetPlan from TargetPlan submodule
+  - Re-exports GammaPlan from GammaPlan submodule
+  - Re-exports TypeRootPlan from new TypeRootPlan submodule
+- Added MLF.Constraint.Presolution.Plan.Target.TypeRootPlan to mlf2.cabal other-modules
+- Files changed:
+  - src/MLF/Constraint/Presolution/Plan/Target.hs (refactored to re-export from TypeRootPlan)
+  - src/MLF/Constraint/Presolution/Plan/Target/TypeRootPlan.hs (new)
+  - mlf2.cabal
+- **Learnings for future iterations:**
+  - The facade pattern is now complete for Target planning - all three plans (TargetPlan, GammaPlan, TypeRootPlan) are in separate submodules
+  - TypeRootPlan is the smallest of the three plans (~90 LOC vs ~500 LOC for GammaPlan)
+  - No new imports were needed for TypeRootPlan beyond what was already imported in Target.hs
+  - The Target.hs facade is now a thin module that only re-exports from submodules
+---
+
+## Decisions
+- Scope: **A** — split only `ResultType`, `Presolution.Plan.Target`, and `PresolutionSpec` (do not include `MLF.Elab.Phi.Omega` / `MLF.Reify.Core` in this task).
+- Module-size targets: **C** — no LOC targets; focus on cohesion + stable facades.
+- Breaking tolerance: **B** — public API changes are allowed if needed (prefer to keep stable when easy).
+
+## Notes / Repo Patterns
+- New internal modules must be listed in `mlf2.cabal` (`library mlf2-internal` `other-modules`) or Cabal will not compile them.
+- New test modules must be listed in `mlf2.cabal` (`test-suite mlf2-test` `other-modules`) and wired into `test/Main.hs`.
+- Keep top-level modules (`MLF.Elab.Run.ResultType`, `MLF.Constraint.Presolution.Plan.Target`) as stable facades to avoid import churn and accidental cycles.
+- Validation command: `cabal build all && cabal test`
+## 2026-02-02 20:29 - US-007
+- Split PresolutionSpec into focused modules under test/Presolution (Enforcement/Instantiate/EdgeTrace/MergeEmission/Witness/Expansion/Raise) plus shared Presolution.Util.
+- Updated test/Main.hs to run the new presolution specs and mlf2.cabal test-suite other-modules to include them.
+- **Learnings for future iterations:**
+  - Presolution tests should import EdgeTrace/PresolutionResult/lookupCopy via MLF.Constraint.Presolution exports (Presolution.Base is hidden).
+  - Record field selectors like ewWitness/etCopyMap require importing the record types with (..) in test modules.
+---

@@ -25,13 +25,12 @@ module MLF.Constraint.Presolution.Validation (
     bindingToPresM
 ) where
 
-import Control.Monad.State
-import Control.Monad.Except (throwError)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
 import MLF.Constraint.Types
 import MLF.Constraint.Presolution.Base
+import MLF.Constraint.Presolution.StateAccess (liftBindingError)
 import qualified MLF.Constraint.Traversal as Traversal
 import qualified MLF.Constraint.Inert as Inert
 import qualified MLF.Util.IntMapUtils as IntMapUtils
@@ -99,7 +98,7 @@ bindingToPres = either (Left . BindingTreeError) Right
 
 -- | Convert binding errors to presolution errors in monadic context.
 bindingToPresM :: Either BindingError a -> PresolutionM a
-bindingToPresM = either (throwError . BindingTreeError) pure
+bindingToPresM = liftBindingError
 
 -- | Rigidify a translatable presolution by converting flexible bindings to rigid.
 --
@@ -111,7 +110,7 @@ bindingToPresM = either (throwError . BindingTreeError) pure
 -- 4. Rigidify non-interior flexible children
 rigidifyTranslatablePresolutionM :: PresolutionM ()
 rigidifyTranslatablePresolutionM = do
-    c0 <- gets psConstraint
+    c0 <- getConstraint
     c1 <- bindingToPresM (Inert.weakenInertLockedNodes c0)
     let nodes = cNodes c1
         genNodes = cGenNodes c1
@@ -169,7 +168,7 @@ rigidifyTranslatablePresolutionM = do
         c2 = c1 { cBindParents = bindParents3 }
 
     c3 <- bindingToPresM (Inert.weakenInertLockedNodes c2)
-    modify' $ \st -> st { psConstraint = c3 }
+    modifyConstraint (const c3)
 
 -- | Compute the structural interior of a set of scheme roots.
 --

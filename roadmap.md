@@ -152,7 +152,7 @@ Now that we have an xMLF term, we must treat it as a runnable program.
 
 This repo’s module-level decomposition:
 
-1. **`MLF.Frontend.Syntax`**: Source `Expr` (+ `SrcType`/`SrcScheme` for annotations).
+1. **`MLF.Frontend.Syntax`**: Source `Expr` (+ `SrcType` for annotations).
 2. **`MLF.Constraint.Types`**: Graphic constraints (`Constraint`, `TyNode`, binding edges + bound/elimination stores) + per-edge witness types (`EdgeWitness`, `InstanceOp`).
 3. **`MLF.Frontend.ConstraintGen`**: Phase 1 constraint generation (produces annotated AST with `NodeId`/`EdgeId`).
 4. **`MLF.Constraint.Normalize`**: Phase 2 local rewrites (grafting/merging).

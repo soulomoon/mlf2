@@ -84,6 +84,7 @@ inlineRigidTypes rigidBounds = go Set.empty
                     | Set.member v seen -> TVar v
                     | otherwise -> go (Set.insert v seen) bound
                 Nothing -> TVar v
+        TCon c args -> TCon c (fmap (go seen) args)
         TBase b -> TBase b
         TBottom -> TBottom
         TArrow a b -> TArrow (go seen a) (go seen b)
@@ -91,6 +92,7 @@ inlineRigidTypes rigidBounds = go Set.empty
             TForall v (fmap (goBound seen) mb) (go seen body)
     goBound seen = \case
         TArrow a b -> TArrow (go seen a) (go seen b)
+        TCon c args -> TCon c (fmap (go seen) args)
         TBase b -> TBase b
         TBottom -> TBottom
         TForall v mb body -> TForall v (fmap (goBound seen) mb) (go seen body)

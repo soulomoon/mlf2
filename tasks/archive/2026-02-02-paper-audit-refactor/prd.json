@@ -1,0 +1,206 @@
+{
+  "project": "mlf4",
+  "branchName": "ralph/paper-audit-refactor",
+  "description": "Refactor presolution, unification, and elaboration for readability and easier paper-faithfulness auditing against papers/these-finale-english.txt without behavior changes.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Presolution state access migration: WitnessNorm + Validation",
+      "description": "As a maintainer, I want WitnessNorm and Validation to use shared state-access helpers so that invariants are enforced consistently and auditing is easier.",
+      "acceptanceCriteria": [
+        "Add any missing helpers to MLF.Constraint.Presolution.StateAccess or MLF.Constraint.Presolution.Ops for patterns used in WitnessNorm and Validation",
+        "Refactor MLF.Constraint.Presolution.WitnessNorm and MLF.Constraint.Presolution.Validation to use helpers and avoid direct gets psConstraint/psUnionFind",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Presolution state access migration: Materialization + ForallIntro",
+      "description": "As a maintainer, I want Materialization and ForallIntro to use shared state-access helpers so state access is consistent across presolution.",
+      "acceptanceCriteria": [
+        "Add any missing helpers to MLF.Constraint.Presolution.StateAccess or MLF.Constraint.Presolution.Ops for patterns used in Materialization and ForallIntro",
+        "Refactor MLF.Constraint.Presolution.Materialization and MLF.Constraint.Presolution.ForallIntro to use helpers and avoid direct gets psConstraint/psUnionFind",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Presolution state access migration: Copy",
+      "description": "As a maintainer, I want Copy to use shared state-access helpers so presolution state access is centralized and auditable.",
+      "acceptanceCriteria": [
+        "Add any missing helpers to MLF.Constraint.Presolution.StateAccess or MLF.Constraint.Presolution.Ops for patterns used in Copy",
+        "Refactor MLF.Constraint.Presolution.Copy to use helpers and avoid direct gets psConstraint/psUnionFind",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Presolution state access migration: Driver",
+      "description": "As a maintainer, I want the presolution driver to use shared state-access helpers so invariants are enforced consistently.",
+      "acceptanceCriteria": [
+        "Add any missing helpers to MLF.Constraint.Presolution.StateAccess or MLF.Constraint.Presolution.Ops for patterns used in Driver",
+        "Refactor MLF.Constraint.Presolution.Driver to use helpers and avoid direct gets psConstraint/psUnionFind",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Introduce EdgeCtx and refactor EdgeProcessing (part 1)",
+      "description": "As a maintainer, I want EdgeProcessing to use an explicit EdgeCtx and smaller helpers for node resolution and expansion decisions.",
+      "acceptanceCriteria": [
+        "Introduce an EdgeCtx record capturing per-edge environment (edge id, canonical function, constraint snapshot, suppressWeaken, trace config)",
+        "Refactor MLF.Constraint.Presolution.EdgeProcessing to use EdgeCtx for node resolution and expansion decision logic",
+        "No new direct gets psConstraint/psUnionFind in EdgeProcessing",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "EdgeProcessing helper split and paper anchor notes",
+      "description": "As a maintainer, I want witness construction and edge-local unify logic isolated with explicit paper anchors for auditability.",
+      "acceptanceCriteria": [
+        "Split witness construction and edge-local unify logic into focused helpers or submodules used by EdgeProcessing",
+        "Add Note blocks for paper-sensitive decisions (Raise, Merge, Weaken handling and witness emission)",
+        "EdgeProcessing and EdgeUnify use StateAccess or Ops helpers without new direct state access",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Shared unification core and Normalize migration",
+      "description": "As a maintainer, I want Normalize to use a shared unification core with explicit policies so behavior is consistent and easier to audit.",
+      "acceptanceCriteria": [
+        "Introduce a shared unification core module with a UnifyStrategy record (occurs-check policy, TyExp policy, forall arity policy, representative choice)",
+        "Update MLF.Constraint.Normalize to use the shared unification core with a strategy matching current behavior",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Solve migration to shared unification core",
+      "description": "As a maintainer, I want Solve to use the shared unification core so unification behavior is centralized and auditable.",
+      "acceptanceCriteria": [
+        "Update MLF.Constraint.Solve to use the shared unification core with a strategy matching current behavior, including error mapping",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Presolution integration with shared unification core",
+      "description": "As a maintainer, I want presolution structural unification to reuse the shared unification core where applicable while preserving raise-trace semantics.",
+      "acceptanceCriteria": [
+        "Update presolution unification helpers to reuse shared structural decomposition where applicable",
+        "Preserve raise-trace behavior and existing witness recording semantics",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Elaboration API config/env records",
+      "description": "As a maintainer, I want elaboration entry points to take structured config/env records to reduce parameter sprawl and improve clarity.",
+      "acceptanceCriteria": [
+        "Introduce ElabConfig and ElabEnv (or equivalent) records and refactor elaborate entry points to use them",
+        "Update all call sites to the new API while keeping public exports stable",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Move expansionToInst to legacy module",
+      "description": "As a maintainer, I want the legacy expansion-to-instantiation translation isolated so the witness-based path is clearly primary.",
+      "acceptanceCriteria": [
+        "Move expansionToInst into a legacy or debug module (for example, MLF.Elab.Legacy) and adjust imports",
+        "Re-export expansionToInst to keep the public API stable",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "Split Constraint.Types.Graph: core node and edge definitions",
+      "description": "As a maintainer, I want core node and edge definitions moved into a dedicated submodule with Graph as a facade to improve navigation.",
+      "acceptanceCriteria": [
+        "Create a Graph submodule for core node and edge definitions and move them out of MLF.Constraint.Types.Graph",
+        "Update MLF.Constraint.Types.Graph to re-export the moved definitions",
+        "Update mlf2.cabal other-modules and any necessary imports",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 12,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "Split Constraint.Types.Graph: binding helpers and accessors",
+      "description": "As a maintainer, I want binding helpers and accessor utilities moved into dedicated submodules with Graph as a facade.",
+      "acceptanceCriteria": [
+        "Create Graph submodules for binding helpers and accessors and move corresponding functions out of MLF.Constraint.Types.Graph",
+        "Update MLF.Constraint.Types.Graph to re-export the moved helpers",
+        "Update mlf2.cabal other-modules and any necessary imports",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 13,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "Paper-faithfulness documentation index",
+      "description": "As an auditor, I want a structured paper-to-code map and phase notes so I can verify alignment quickly.",
+      "acceptanceCriteria": [
+        "Add docs/paper-map.md mapping papers/these-finale-english.txt sections and figures to modules and functions with explicit deviations",
+        "Add docs/phase-notes.md with a short section per phase listing invariants and related tests",
+        "Update implementation_notes.md to reflect module changes",
+        "Typecheck passes"
+      ],
+      "priority": 14,
+      "passes": true,
+      "notes": ""
+    }
+  ]
+}

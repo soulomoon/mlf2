@@ -32,7 +32,7 @@ module MLF.API
     , isValue
     ) where
 
-import MLF.Frontend.Syntax
+import MLF.Frontend.Syntax hiding (mkCoerce, viewCoerce)
 import MLF.Constraint.Types.Graph (BaseTy (..), PolySyms)
 import MLF.Frontend.ConstraintGen (ConstraintError (..), ConstraintResult (..))
 import MLF.Elab.Pipeline

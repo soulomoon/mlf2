@@ -14,7 +14,6 @@ module MLF.Constraint.Presolution.ForallIntro (
 
 import Control.Monad (forM_, unless, when)
 import Control.Monad.Except (throwError)
-import Control.Monad.State (modify')
 import Data.List (partition)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
@@ -24,7 +23,7 @@ import qualified MLF.Constraint.Traversal as Traversal
 import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Util.Order as Order
 import MLF.Constraint.Types
-import MLF.Constraint.Presolution.Base (PresolutionM, PresolutionError(..), PresolutionState(..))
+import MLF.Constraint.Presolution.Base (MonadPresolution(..), PresolutionM, PresolutionError(..))
 import MLF.Constraint.Presolution.Ops (createFreshNodeId, registerNode, setBindParentM, setVarBound)
 import MLF.Constraint.Presolution.StateAccess (getConstraintAndCanonical, liftBindingError)
 
@@ -63,9 +62,8 @@ introduceForallFromSpec spec bodyRoot = do
 
 rewireStructuralParents :: (NodeId -> NodeId) -> NodeId -> NodeId -> PresolutionM ()
 rewireStructuralParents canonical old new =
-    modify' $ \st ->
-        let c0 = psConstraint st
-            nodes0 = cNodes c0
+    modifyConstraint $ \c0 ->
+        let nodes0 = cNodes c0
             oldC = canonical old
             rep nid =
                 if canonical nid == oldC
@@ -84,7 +82,7 @@ rewireStructuralParents canonical old new =
                     [ (nid, if nid == new then node else updateNode node)
                     | (nid, node) <- toListNode nodes0
                     ]
-        in st { psConstraint = c0 { cNodes = nodes1 } }
+        in c0 { cNodes = nodes1 }
 
 bindForallBindersFromSpec :: NodeId -> NodeId -> ForallSpec -> PresolutionM ()
 bindForallBindersFromSpec forallId bodyRoot ForallSpec{ fsBinderCount = k, fsBounds = bounds } = do

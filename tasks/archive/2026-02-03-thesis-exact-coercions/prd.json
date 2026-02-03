@@ -1,0 +1,70 @@
+{
+  "project": "mlf4",
+  "branchName": "ralph/thesis-exact-coercions",
+  "description": "Align term annotations with the thesis coercion semantics (rigid domain / flexible codomain with shared existentials).",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Build thesis-exact coercion graph",
+      "description": "As a type-system developer, I want coercion types to have a rigid domain, flexible codomain, and shared existentials so annotations match the thesis semantics.",
+      "acceptanceCriteria": [
+        "Domain copy uses rigid binding edges for coercion-local nodes",
+        "Codomain copy uses flexible binding edges",
+        "Existential/free vars are shared between domain and codomain copies",
+        "No coercion-local node is locked (restricted only)",
+        "Binding tree validates for constraints involving coercions",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Implemented in commit f5b44b8"
+    },
+    {
+      "id": "US-002",
+      "title": "Return codomain for annotations",
+      "description": "As a user, I want (e : κ) to type as the coercion codomain so annotation results are thesis-exact.",
+      "acceptanceCriteria": [
+        "buildCoerce returns the codomain node",
+        "Instantiation edge remains edgeLeft ≤ domainNode",
+        "AAnn records the codomain as the annotation result",
+        "Annotation-focused tests updated to assert codomain behavior",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "Changed buildCoerce to return codomainNode"
+    },
+    {
+      "id": "US-003",
+      "title": "Presolution compatibility for rigid domains",
+      "description": "As a system maintainer, I need presolution/elaboration to remain valid after adding rigid domain coercions.",
+      "acceptanceCriteria": [
+        "ElaborationSpec term annotation cases pass without presolution errors",
+        "ConstraintGenSpec elimination-rewrite case passes",
+        "No GenSchemeFreeVars or OperationOnLockedNode errors after codomain switch",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "All 415 tests pass after codomain switch"
+    },
+    {
+      "id": "US-004",
+      "title": "Add regression tests for coercion semantics",
+      "description": "As a contributor, I want tests that lock in rigidity, codomain return, and existential sharing for coercions.",
+      "acceptanceCriteria": [
+        "Add test asserting domain is restricted but not locked",
+        "Add test asserting EAnn returns the codomain copy",
+        "Add test asserting existential sharing across domain/codomain",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "Added 3 regression tests for rigidity, codomain return, and existential sharing"
+    }
+  ]
+}

@@ -33,238 +33,226 @@ buildExpr env scopeRoot expr = do
     pure (rootNode, ann)
 
 buildExprRaw :: Env -> GenNodeId -> Expr -> ConstraintM (NodeId, AnnExpr)
-buildExprRaw env scopeRoot expr = case expr of
-  EVarRaw name -> do
-    binding <- lookupVar env name
-    let nid = bindingNode binding
-    pure (nid, AVar name nid)
-  EVar name -> do
-    binding <- lookupVar env name
-    let nid = bindingNode binding
-    case bindingGen binding of
-        -- Polymorphic bindings (let-bound schemes) get a fresh expansion node.
-        Just _ -> do
-            (expNode, _) <- allocExpNode nid
-            pure (expNode, AVar name expNode)
-        -- Monomorphic bindings (e.g. lambda parameters) do not need expansion.
-        Nothing ->
-            pure (nid, AVar name nid)
-  ELit lit -> do
-    baseNode <- allocBase (baseFor lit)
-    varNode <- allocVar
-    setVarBound varNode (Just baseNode)
-    pure (varNode, ALit lit varNode)
-  -- See Note [Lambda Translation]
-  ELam param body -> do
-    -- Allocate children first, then create the arrow
-    argNode <- allocVar
-    let env' = Map.insert param (Binding argNode Nothing) env
-    (bodyNode, bodyAnn) <- buildExpr env' scopeRoot body
-    -- allocArrow sets binding parents for dom/cod automatically
-    arrowNode <- allocArrow argNode bodyNode
-    -- Lambda parameters are bound at the current binding node (not under the arrow).
-    setBindParentOverride (typeRef argNode) (genRef scopeRoot) BindFlex
-    rootVar <- allocVar
-    setVarBound rootVar (Just arrowNode)
-    pure (rootVar, ALam param argNode scopeRoot bodyAnn rootVar)
+buildExprRaw env scopeRoot expr =
+    case viewCoerce expr of
+        Just (annTy, annotatedExpr) -> buildCoerce env scopeRoot annTy annotatedExpr
+        Nothing -> case expr of
+            EVar name -> do
+                binding <- lookupVar env name
+                let nid = bindingNode binding
+                case bindingGen binding of
+                    -- Polymorphic bindings (let-bound schemes) get a fresh expansion node.
+                    Just _ -> do
+                        (expNode, _) <- allocExpNode nid
+                        pure (expNode, AVar name expNode)
+                    -- Monomorphic bindings (e.g. lambda parameters) do not need expansion.
+                    Nothing ->
+                        pure (nid, AVar name nid)
+            ELit lit -> do
+                baseNode <- allocBase (baseFor lit)
+                varNode <- allocVar
+                setVarBound varNode (Just baseNode)
+                pure (varNode, ALit lit varNode)
+            -- See Note [Lambda Translation]
+            ELam param body -> do
+                -- Allocate children first, then create the arrow
+                argNode <- allocVar
+                let env' = Map.insert param (Binding argNode Nothing) env
+                (bodyNode, bodyAnn) <- buildExpr env' scopeRoot body
+                -- allocArrow sets binding parents for dom/cod automatically
+                arrowNode <- allocArrow argNode bodyNode
+                -- Lambda parameters are bound at the current binding node (not under the arrow).
+                setBindParentOverride (typeRef argNode) (genRef scopeRoot) BindFlex
+                rootVar <- allocVar
+                setVarBound rootVar (Just arrowNode)
+                pure (rootVar, ALam param argNode scopeRoot bodyAnn rootVar)
 
-  -- Annotated lambda parameters preserve the annotation as the parameter type,
-  -- enabling rank-2 argument types for explicit foralls.
-  ELamAnn param annTy body -> do
-    annNode <- internalizeSrcTypeBound scopeRoot Map.empty annTy
-    schemeGenUsed <- lookupSchemeGenForRoot annNode
-    let bindingGenUsed =
-            case (annTy, schemeGenUsed) of
-                (STForall{}, Nothing) -> Just scopeRoot
-                _ -> schemeGenUsed
-    let env' = Map.insert param (Binding annNode bindingGenUsed) env
-    (bodyNode, bodyAnn) <- buildExpr env' scopeRoot body
-    arrowNode <- allocArrow annNode bodyNode
-    -- Annotated parameters still bind at the current binding node.
-    case annTy of
-        STForall{} -> pure ()
-        _ ->
-            case schemeGenUsed of
-                Nothing -> setBindParentOverride (typeRef annNode) (genRef scopeRoot) BindFlex
-                Just _ -> pure ()
-    rootVar <- allocVar
-    setVarBound rootVar (Just arrowNode)
-    pure (rootVar, ALam param annNode scopeRoot bodyAnn rootVar)
+            ELamAnn{} ->
+                throwError (InternalConstraintError "buildExprRaw: ELamAnn should have been desugared (see MLF.Frontend.Desugar)")
 
-  -- See Note [Application and Instantiation Edges]
-  EApp fun arg -> do
-    (funNode, funAnn) <- buildExpr env scopeRoot fun
-    (argNode, argAnn) <- buildExpr env scopeRoot arg
-    domNode <- allocVar
-    resultNode <- allocVar
-    -- allocArrow sets binding parents for dom/cod automatically
-    arrowNode <- allocArrow domNode resultNode
-    funEid <- addInstEdge funNode arrowNode
-    argEid <- addInstEdge argNode domNode
-    case funAnn of
-        ALam _ paramNode _ _ _ -> do
-            nodes <- gets bsNodes
-            case IntMap.lookup (getNodeId paramNode) nodes of
-                Just TyVar{ tnBound = Nothing } -> pure ()
-                _ -> setVarBound domNode (Just paramNode)
-        _ -> pure ()
-    -- The result node is what we return, but the arrow is the structural root
-    pure (resultNode, AApp funAnn argAnn funEid argEid resultNode)
+            -- See Note [Application and Instantiation Edges]
+            EApp fun arg -> do
+                (funNode, funAnn) <- buildExpr env scopeRoot fun
+                (argNode, argAnn) <- buildExpr env scopeRoot arg
+                domNode <- allocVar
+                resultNode <- allocVar
+                -- allocArrow sets binding parents for dom/cod automatically
+                arrowNode <- allocArrow domNode resultNode
+                funEid <- addInstEdge funNode arrowNode
+                argEid <- addInstEdge argNode domNode
+                case funAnn of
+                    ALam _ paramNode _ _ _ -> do
+                        nodes <- gets bsNodes
+                        case IntMap.lookup (getNodeId paramNode) nodes of
+                            Just TyVar{ tnBound = Nothing } -> pure ()
+                            _ -> setVarBound domNode (Just paramNode)
+                    _ -> pure ()
+                -- The result node is what we return, but the arrow is the structural root
+                pure (resultNode, AApp funAnn argAnn funEid argEid resultNode)
 
-  -- See Note [Let Bindings and Expansion Variables]
-  ELet name rhs body -> do
-    schemeGenId <- allocGenNode []
+            -- See Note [Let Bindings and Expansion Variables]
+            ELet name rhs body ->
+                let buildUnder gen subExpr = do
+                        Scope.pushScope
+                        (node, ann) <- buildExpr env gen subExpr
+                        scope <- Scope.popScope
+                        pure (node, ann, scope)
+                    buildLet schemeGenId schemeGenUsed schemeRootNode rhsGen rhsAnn = do
+                        let env' = Map.insert name (Binding schemeRootNode (Just schemeGenUsed)) env
 
-    Scope.pushScope
-    (rhsNode, rhsAnn) <- buildExpr env schemeGenId rhs
-    rhsScope <- Scope.popScope
+                        -- Alternative let scoping (Fig. 15.2.6, rightmost constraint):
+                        -- introduce a gen node for the let expression and a trivial scheme root.
+                        letGen <- allocGenNode []
+                        setBindParentIfMissing (genRef letGen) (genRef scopeRoot) BindFlex
+                        setBindParentOverride (genRef schemeGenId) (genRef letGen) BindFlex
+                        if rhsGen /= schemeGenId
+                            then setBindParentOverride (genRef rhsGen) (genRef letGen) BindFlex
+                            else pure ()
+                        bodyGen <- allocGenNode []
+                        setBindParentIfMissing (genRef bodyGen) (genRef letGen) BindFlex
 
-    schemeGenUsed <- fmap (maybe schemeGenId id) (lookupSchemeGenForRoot rhsNode)
-    setGenNodeSchemes schemeGenUsed [rhsNode]
-    Scope.rebindScopeNodes (genRef schemeGenUsed) rhsNode rhsScope
-    setBindParentOverride (typeRef rhsNode) (genRef schemeGenUsed) BindFlex
+                        trivialRoot <- allocVar
+                        setBindParentIfMissing (typeRef trivialRoot) (genRef letGen) BindFlex
+                        setGenNodeSchemes letGen [trivialRoot]
 
-    let env' = Map.insert name (Binding rhsNode (Just schemeGenUsed)) env
+                        Scope.pushScope
+                        (bodyNode, bodyAnn0) <- buildExpr env' bodyGen body
+                        bodyScope <- Scope.popScope
+                        Scope.rebindScopeNodes (genRef bodyGen) bodyNode bodyScope
 
-    -- Alternative let scoping (Fig. 15.2.6, rightmost constraint):
-    -- introduce a gen node for the let expression, a trivial scheme root, and
-    -- type the body under a fresh gen node bound beneath it.
-    letGen <- allocGenNode []
-    setBindParentIfMissing (genRef letGen) (genRef scopeRoot) BindFlex
-    setBindParentOverride (genRef schemeGenId) (genRef letGen) BindFlex
-    bodyGen <- allocGenNode []
-    setBindParentIfMissing (genRef bodyGen) (genRef letGen) BindFlex
+                        letEdge <- addInstEdge bodyNode trivialRoot
+                        recordLetEdge letEdge
+                        let bodyAnn = AAnn bodyAnn0 trivialRoot letEdge
 
-    trivialRoot <- allocVar
-    setBindParentIfMissing (typeRef trivialRoot) (genRef letGen) BindFlex
-    setGenNodeSchemes letGen [trivialRoot]
+                        -- Pass schemeNode as scheme, 0 as dummy expVar
+                        pure (trivialRoot, ALet name schemeGenUsed schemeRootNode (ExpVarId 0) rhsGen rhsAnn bodyAnn trivialRoot)
+                    buildAnnotated annTy rhsExpr = do
+                        let (bindings, bodyType) = splitForalls annTy
+                        -- Build the explicit scheme in its own scope.
+                        Scope.pushScope
+                        schemeGenId <- allocGenNode []
+                        (tyEnv, quantVars) <- internalizeBinders schemeGenId bindings
+                        schemeBodyNode <- internalizeSrcTypeBound schemeGenId tyEnv bodyType
+                        schemeScope <- Scope.popScope
+                        let schemeRootNode = schemeBodyNode
+                        schemeGenUsed <- fmap (maybe schemeGenId id) (lookupSchemeGenForRoot schemeRootNode)
+                        -- schemeGenId already allocated above
+                        Scope.rebindScopeNodes (typeRef schemeRootNode) schemeBodyNode schemeScope
+                        setBindParentIfMissing (typeRef schemeRootNode) (genRef schemeGenUsed) BindFlex
+                        -- Ensure explicit scheme binders are bound under the scheme gen node (named nodes).
+                        mapM_ (\varNode -> setBindParentOverride (typeRef varNode) (genRef schemeGenUsed) BindFlex) quantVars
+                        setGenNodeSchemes schemeGenUsed [schemeRootNode]
 
-    Scope.pushScope
-    (bodyNode, bodyAnn0) <- buildExpr env' bodyGen body
-    bodyScope <- Scope.popScope
-    Scope.rebindScopeNodes (genRef bodyGen) bodyNode bodyScope
+                        -- Build the RHS in a fresh scope and bind it under a let-introduced forall.
+                        rhsGen <- allocGenNode []
+                        (rhsNode, rhsAnn, rhsScope) <- buildUnder rhsGen rhsExpr
+                        Scope.rebindScopeNodes (genRef rhsGen) rhsNode rhsScope
 
-    letEdge <- addInstEdge bodyNode trivialRoot
-    recordLetEdge letEdge
-    let bodyAnn = AAnn bodyAnn0 trivialRoot letEdge
+                        -- Emit instantiation: the annotated scheme must instantiate to the RHS.
+                        (annExpNode, _) <- allocExpNode schemeRootNode
+                        setBindParentIfMissing (typeRef annExpNode) (genRef schemeGenId) BindFlex
+                        rhsEdge <- addInstEdge annExpNode rhsNode
+                        let rhsAnn' = AAnn rhsAnn annExpNode rhsEdge
 
-    pure (trivialRoot, ALet name schemeGenUsed rhsNode (ExpVarId 0) schemeGenId rhsAnn bodyAnn trivialRoot)
+                        pure (schemeGenId, schemeGenUsed, schemeRootNode, rhsGen, rhsAnn')
+                    buildInferred rhsExpr = do
+                        schemeGenId <- allocGenNode []
+                        (rhsNode, rhsAnn, rhsScope) <- buildUnder schemeGenId rhsExpr
+                        schemeGenUsed <- fmap (maybe schemeGenId id) (lookupSchemeGenForRoot rhsNode)
+                        setGenNodeSchemes schemeGenUsed [rhsNode]
+                        Scope.rebindScopeNodes (genRef schemeGenUsed) rhsNode rhsScope
+                        setBindParentOverride (typeRef rhsNode) (genRef schemeGenUsed) BindFlex
+                        pure (schemeGenId, schemeGenUsed, rhsNode, schemeGenId, rhsAnn)
+                in do
+                    (schemeGenId, schemeGenUsed, schemeRootNode, rhsGen, rhsAnn) <-
+                        case viewCoerce rhs of
+                            -- Desugared annotated let: let x = (e : σ) in b
+                            -- (note: ELetAnn was removed; we handle the annotation here)
+                            Just (annTy, rhsExpr) -> buildAnnotated annTy rhsExpr
+                            Nothing -> buildInferred rhs
+                    buildLet schemeGenId schemeGenUsed schemeRootNode rhsGen rhsAnn
 
-  -- See Note [Annotated Let]
-  ELetAnn name (SrcScheme bindings bodyType) rhs body -> do
-    -- Build the explicit scheme in its own scope.
-    Scope.pushScope
-    schemeGenId <- allocGenNode []
-    (tyEnv, quantVars) <- internalizeBinders schemeGenId bindings
-    schemeBodyNode <- internalizeSrcTypeBound schemeGenId tyEnv bodyType
-    schemeScope <- Scope.popScope
-    let schemeRootNode = schemeBodyNode
-    schemeGenUsed <- fmap (maybe schemeGenId id) (lookupSchemeGenForRoot schemeRootNode)
-    -- schemeGenId already allocated above
-    Scope.rebindScopeNodes (typeRef schemeRootNode) schemeBodyNode schemeScope
-    setBindParentIfMissing (typeRef schemeRootNode) (genRef schemeGenUsed) BindFlex
-    -- Ensure explicit scheme binders are bound under the scheme gen node (named nodes).
-    mapM_ (\varNode -> setBindParentOverride (typeRef varNode) (genRef schemeGenUsed) BindFlex) quantVars
-    setGenNodeSchemes schemeGenUsed [schemeRootNode]
+            -- Term Annotation (surface form; desugars to ECoerce)
+            EAnn annotatedExpr srcType ->
+                buildExprRaw env scopeRoot (mkCoerce srcType annotatedExpr)
+            _ ->
+                throwError (InternalConstraintError "buildExprRaw: unexpected Expr constructor")
 
-    -- Build the RHS in a fresh scope and bind it under a let-introduced forall.
-    Scope.pushScope
-    rhsGen <- allocGenNode []
-    (rhsNode, rhsAnn) <- buildExpr env rhsGen rhs
-    rhsScope <- Scope.popScope
-    Scope.rebindScopeNodes (genRef rhsGen) rhsNode rhsScope
-
-    -- Emit instantiation: the annotated scheme must instantiate to the RHS.
-    (annExpNode, _) <- allocExpNode schemeRootNode
-    setBindParentIfMissing (typeRef annExpNode) (genRef schemeGenId) BindFlex
-    rhsEdge <- addInstEdge annExpNode rhsNode
-    let rhsAnn' = AAnn rhsAnn annExpNode rhsEdge
-
-    -- Bind the scheme node directly
-    let env' = Map.insert name (Binding schemeRootNode (Just schemeGenUsed)) env
-
-    -- Alternative let scoping (Fig. 15.2.6, rightmost constraint):
-    -- introduce a gen node for the let expression and a trivial scheme root.
-    letGen <- allocGenNode []
-    setBindParentIfMissing (genRef letGen) (genRef scopeRoot) BindFlex
-    setBindParentOverride (genRef schemeGenId) (genRef letGen) BindFlex
-    setBindParentOverride (genRef rhsGen) (genRef letGen) BindFlex
-    bodyGen <- allocGenNode []
-    setBindParentIfMissing (genRef bodyGen) (genRef letGen) BindFlex
-
-    trivialRoot <- allocVar
-    setBindParentIfMissing (typeRef trivialRoot) (genRef letGen) BindFlex
-    setGenNodeSchemes letGen [trivialRoot]
-
-    Scope.pushScope
-    (bodyNode, bodyAnn0) <- buildExpr env' bodyGen body
-    bodyScope <- Scope.popScope
-    Scope.rebindScopeNodes (genRef bodyGen) bodyNode bodyScope
-
-    letEdge <- addInstEdge bodyNode trivialRoot
-    recordLetEdge letEdge
-    let bodyAnn = AAnn bodyAnn0 trivialRoot letEdge
-
-    -- Pass schemeNode as scheme, 0 as dummy expVar
-    pure (trivialRoot, ALet name schemeGenUsed schemeRootNode (ExpVarId 0) rhsGen rhsAnn' bodyAnn trivialRoot)
-
-  -- Term Annotation
-  EAnn annotatedExpr srcType -> do
+buildCoerce :: Env -> GenNodeId -> SrcType -> Expr -> ConstraintM (NodeId, AnnExpr)
+buildCoerce env scopeRoot annTy annotatedExpr = do
     (exprNode, exprAnn) <- buildExpr env scopeRoot annotatedExpr
     annGen <- allocGenNode []
     setBindParentIfMissing (genRef annGen) (genRef scopeRoot) BindFlex
     Scope.pushScope
-    annNode <- internalizeSrcType annGen Map.empty srcType
+    (domainNode, codomainNode) <- internalizeCoercionType annGen annTy
     annScope <- Scope.popScope
-    Scope.rebindScopeNodes (genRef annGen) annNode annScope
-    case annotatedExpr of
+    Scope.rebindScopeNodes (genRef annGen) codomainNode annScope
+    edgeBody <- case annotatedExpr of
         EVar{} -> do
-            -- κσ x for variables uses the existing node (already expanded if polymorphic).
-            eid <- addInstEdge exprNode annNode
-            pure (annNode, AAnn exprAnn annNode eid)
-        EVarRaw{} -> do
-            setVarBound exprNode (Just annNode)
-            eid <- addInstEdge exprNode annNode
-            pure (annNode, AAnn exprAnn annNode eid)
-        _ -> do
-            -- Non-variable annotations get a fresh expansion node.
-            (annExpNode, _) <- allocExpNode exprNode
-            eid <- addInstEdge annExpNode annNode
-            pure (annNode, AAnn exprAnn annNode eid)
+            nodes <- gets bsNodes
+            case IntMap.lookup (getNodeId exprNode) nodes of
+                Just TyExp{ tnBody = body } -> pure body
+                _ -> pure exprNode
+        _ -> pure exprNode
+    (edgeLeft, _) <- allocExpNode edgeBody
+    setBindParentOverride (typeRef edgeLeft) (genRef annGen) BindFlex
+    eid <- addInstEdge edgeLeft domainNode
+    pure (codomainNode, AAnn exprAnn codomainNode eid)
 
-{- Note [Annotated Lambda parameters via κσ]
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-`papers/these-finale-english.txt` (see `papers/xmlf.txt` §3.1) presents annotated lambda
-parameters as syntactic sugar:
+{- Note [Coercion domain/codomain semantics]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The thesis' coercion κσ builds a rigid domain and flexible codomain. We
+construct two copies (with shared existentials) and return the *codomain* node
+as the annotation result, matching the thesis semantics (§12.3.2.2, §15.3.8).
 
-  λ(x : σ) b  ≜  λ(x) let x = κσ x in b
+The instantiation edge connects the expression to the *domain* node, ensuring
+the expression is constrained to match the annotation type. The codomain is
+returned as the result type, allowing the annotation to be used in contexts
+that expect the annotated type.
 
-We preserve `ELamAnn` in the surface AST and translate it directly so the
-parameter type is the annotation scheme itself. This keeps the κσ intuition
-while ensuring explicit-forall annotations produce rank-2 argument types:
+We mark the domain copy as *restricted* by binding its coercion-local nodes
+with rigid edges under gen nodes (shared existentials stay flexible, and no
+rigid ancestor is introduced). This pushes toward
+the thesis’ “rigid domain” intent while staying presolution-safe: the nodes are
+not instantiable, but they are not locked under a rigid ancestor.
 
-  λ(x : ∀a. a -> a). b  :  (∀a. a -> a) -> ...
-
-Inside the body, `x` is bound to the annotated scheme and uses the usual
-expansion machinery when the scheme is polymorphic.
+Both copies remain wrapped (like `internalizeSrcType`). The codomain is returned
+as the annotation result, while the domain stays the instantiation target.
 -}
 
-{- Note [Annotated Let]
-~~~~~~~~~~~~~~~~~~~~~~~
-An annotated let `let x : σ = e₁ in e₂` allows the user to specify the type
-scheme for a let-bound variable. We:
+{- Note [Annotated Lambda parameters]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The thesis treats annotated lambdas as syntactic sugar (Chapter 12.3.2):
 
-  1. Internalize the annotation scheme σ as a graph node (often a `TyForall`).
-  2. Translate the RHS e₁ in a fresh scope and bind it under a fresh `TyForall`
-     anchor gᵣₕₛ.
-  3. Emit an instantiation edge gᵣₕₛ ≤ σ to enforce the annotation.
-  4. Bind x to σ in the environment and translate the body e₂.
+  λ(x : τ) a  ≜  λ(x) let x = (x : τ) in a
 
-As with unannotated lets, use sites wrap σ in `TyExp` so presolution can record
-per-occurrence witnesses Φ(e).
+(and `(x : τ)` itself is sugar for applying a coercion/retyping constant).
 
-This allows explicit type annotations while maintaining the MLF constraint
-solving approach.
+We keep `ELamAnn` only in the surface AST for the parser/tests; it is eliminated
+by `MLF.Frontend.Desugar.desugarCoercions` before Phase 1. This makes annotated
+lambdas "let-constructs" structurally (as the thesis later relies on for
+complexity accounting) and delegates the rank-2/polymorphic case to the normal
+annotated-let machinery.
+-}
+
+{- Note [Annotated Let via EAnn]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The surface grammar does not include a dedicated `let` annotation form.
+Instead, users write:
+
+  let x = (e : σ) in b
+
+When `ELet` sees an RHS of the form `EAnn`, we treat the annotation as the
+declared scheme for the binding (the old `ELetAnn` behavior):
+
+  1. Split the leading `∀` binders of σ into explicit scheme binders.
+  2. Internalize the scheme under a fresh gen node (named binders).
+  3. Translate the RHS `e` under a fresh gen node.
+  4. Emit an instantiation edge from an expansion of the scheme to the RHS.
+  5. Bind `x` to the scheme node when translating the body.
+
+This keeps the surface language thesis-faithful while preserving the
+annotation semantics expected by later phases.
 -}
 
 {- Note [Lambda Translation]
@@ -385,6 +373,39 @@ Paper references:
   - ICFP 2008, §5 for computing minimal expansions
 -}
 
+{- Note [Alternative let scoping (Figure 15.2.6)]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The thesis distinguishes two typing constraints for `let x = a in b`
+(papers/these-finale-english.txt §15.2.6, Figure 15.2.6):
+
+  1) The "basic" / leftmost constraint does *not* introduce a fresh gen node for
+     the whole let expression. Instead, it piggybacks on the gen node introduced
+     for `b`.
+
+     This is the nicer constraint for *type inference* (smaller/simpler), but it
+     has an unusual scope interaction: the scope of the let expression (hence of
+     `b`) is visible from `a`. The thesis explicitly calls out that this severely
+     complicates translation into xMLF.
+
+  2) The "alternative" / rightmost constraint introduces an extra gen node for
+     the let expression and a trivial type scheme at the root, plus a single
+     additional instantiation edge from the body to that trivial scheme.
+
+We follow the thesis' *translation-friendly* choice (2):
+
+  - `letGen` is the gen node for the whole let expression.
+  - `trivialRoot` is the (bottom) type node used as the trivial scheme root.
+  - We translate the body under `bodyGen`, then add `letEdge : bodyNode ≤ trivialRoot`.
+
+This makes the binding/scope structure well-behaved for translation/elaboration.
+In the principal presolution, the added instantiation edge corresponds to the
+identity computation (thesis §15.2.6.1).
+
+Implementation detail: `letEdge` is recorded in `cLetEdges` (via `recordLetEdge`)
+so presolution/elaboration can drop its witness/expansion (`dropTrivialSchemeEdges`)
+and avoid generating spurious instantiation computations for this internal edge.
+-}
+
 lookupVar :: Env -> VarName -> ConstraintM Binding
 lookupVar env name = case Map.lookup name env of
     Just binding -> pure binding
@@ -417,14 +438,180 @@ lookupSchemeOwnerForRoot root = do
 
 -- | Type variable environment for internalizing source types.
 type TyEnv = Map VarName NodeId
+type SharedEnv = Map VarName NodeId
+
+-- | Split a nested forall type into explicit scheme binders and a body.
+-- This peels only the leading `STForall`s, leaving any inner foralls intact.
+splitForalls :: SrcType -> ([(String, Maybe SrcType)], SrcType)
+splitForalls = go []
+  where
+    go acc (STForall name mb body) = go ((name, mb):acc) body
+    go acc body = (reverse acc, body)
+
+-- | Internalize a coercion type κ as a rigid domain and flexible codomain,
+-- sharing existential (free) variables across both copies.
+internalizeCoercionType :: GenNodeId -> SrcType -> ConstraintM (NodeId, NodeId)
+internalizeCoercionType coerceGen ty = do
+    (domainNode, shared1) <-
+        internalizeCoercionCopy BindRigid True coerceGen coerceGen Map.empty Map.empty ty
+    (codomainNode, _shared2) <-
+        internalizeCoercionCopy BindFlex True coerceGen coerceGen Map.empty shared1 ty
+    pure (domainNode, codomainNode)
+
+-- | Internalize a coercion copy with a given binding flag (rigid/flex),
+-- optional wrapping, and shared existentials.
+internalizeCoercionCopy
+    :: BindFlag
+    -> Bool
+    -> GenNodeId
+    -> GenNodeId
+    -> TyEnv
+    -> SharedEnv
+    -> SrcType
+    -> ConstraintM (NodeId, SharedEnv)
+internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared srcType =
+    case srcType of
+        -- Domain copies use BindRigid to mark coercion-local nodes as restricted.
+        -- To avoid locked descendants, rebind children auto-bound under structural
+        -- nodes back to the current gen when rigid.
+        STVar name ->
+            case Map.lookup name tyEnv of
+                Just nid -> pure (nid, shared)
+                Nothing ->
+                    case Map.lookup name shared of
+                        Just nid -> pure (nid, shared)
+                        Nothing -> do
+                            nid <- allocVar
+                            setBindParentOverride (typeRef nid) (genRef coerceGen) BindFlex
+                            pure (nid, Map.insert name nid shared)
+    
+        STArrow dom cod -> do
+            (domNode, shared1) <-
+                internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared dom
+            (codNode, shared2) <-
+                internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared1 cod
+            arrowNode <- allocArrow domNode codNode
+            case bindFlag of
+                BindRigid -> do
+                    rebindIfParent domNode (typeRef arrowNode) (genRef currentGen) bindFlag
+                    rebindIfParent codNode (typeRef arrowNode) (genRef currentGen) bindFlag
+                BindFlex -> pure ()
+            if wrap
+                then do
+                    varNode <- allocVar
+                    setVarBound varNode (Just arrowNode)
+                    case bindFlag of
+                        BindRigid ->
+                            rebindIfParent arrowNode (typeRef varNode) (genRef currentGen) bindFlag
+                        BindFlex -> pure ()
+                    setBindParentOverride (typeRef varNode) (genRef currentGen) bindFlag
+                    pure (varNode, shared2)
+                else pure (arrowNode, shared2)
+    
+        STBase name -> do
+            baseNode <- allocBase (BaseTy name)
+            if wrap
+                then do
+                    varNode <- allocVar
+                    setVarBound varNode (Just baseNode)
+                    case bindFlag of
+                        BindRigid ->
+                            rebindIfParent baseNode (typeRef varNode) (genRef currentGen) bindFlag
+                        BindFlex -> pure ()
+                    setBindParentOverride (typeRef varNode) (genRef currentGen) bindFlag
+                    pure (varNode, shared)
+                else pure (baseNode, shared)
+    
+        STForall var mBound body ->
+            case mBound of
+                Just (STVar alias) | alias /= var -> do
+                    (aliasNode, shared1) <-
+                        case Map.lookup alias tyEnv of
+                            Just nid -> pure (nid, shared)
+                            Nothing ->
+                                case Map.lookup alias shared of
+                                    Just nid -> pure (nid, shared)
+                                    Nothing -> do
+                                        nid <- allocVar
+                                        setBindParentOverride (typeRef nid) (genRef coerceGen) BindFlex
+                                        pure (nid, Map.insert alias nid shared)
+                    let tyEnv' = Map.insert var aliasNode tyEnv
+                    internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv' shared1 body
+                Just (STVar _) ->
+                    internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared (STForall var Nothing body)
+                _ -> do
+                    Scope.pushScope
+                    schemeGenId <- allocGenNode []
+                    setBindParentIfMissing (genRef schemeGenId) (genRef currentGen) BindFlex
+                    varNode <- allocVar
+                    let tyEnv' = Map.insert var varNode tyEnv
+                    (mbBoundNode, shared1) <- case mBound of
+                        Nothing -> pure (Nothing, shared)
+                        Just bound -> do
+                            Scope.pushScope
+                            (boundNode, shared2) <-
+                                internalizeCoercionCopy bindFlag False coerceGen schemeGenId tyEnv' shared bound
+                            boundScope <- Scope.popScope
+                            mbBoundOwner <- lookupSchemeOwnerForRoot boundNode
+                            case mbBoundOwner of
+                                Just gid -> do
+                                    Scope.rebindScopeNodes (genRef gid) boundNode boundScope
+                                    setGenNodeSchemes gid [boundNode]
+                                Nothing -> Scope.rebindScopeNodes (typeRef varNode) boundNode boundScope
+                            let sharedNodes = Map.elems shared2
+                            case mbBoundOwner of
+                                Nothing ->
+                                    if boundNode `elem` sharedNodes
+                                        then pure ()
+                                        else
+                                            case bindFlag of
+                                                BindRigid ->
+                                                    setBindParentOverride
+                                                        (typeRef boundNode)
+                                                        (genRef schemeGenId)
+                                                        bindFlag
+                                                BindFlex ->
+                                                    setBindParentOverride
+                                                        (typeRef boundNode)
+                                                        (typeRef varNode)
+                                                        bindFlag
+                                Just gid ->
+                                    if boundNode `elem` sharedNodes
+                                        then pure ()
+                                        else setBindParentOverride (typeRef boundNode) (genRef gid) bindFlag
+                            pure (Just boundNode, shared2)
+    
+                    setVarBound varNode mbBoundNode
+    
+                    (bodyNode, shared2) <-
+                        internalizeCoercionCopy bindFlag False coerceGen schemeGenId tyEnv' shared1 body
+                    scopeFrame <- Scope.popScope
+                    Scope.rebindScopeNodes (genRef schemeGenId) bodyNode scopeFrame
+                    setBindParentOverride (typeRef varNode) (genRef schemeGenId) bindFlag
+                    let sharedNodes = Map.elems shared2
+                    if bodyNode `elem` sharedNodes
+                        then pure ()
+                        else setBindParentOverride (typeRef bodyNode) (genRef schemeGenId) bindFlag
+                    setGenNodeSchemes schemeGenId [bodyNode]
+                    pure (bodyNode, shared2)
+    
+        STBottom -> do
+            varNode <- allocVar
+            pure (varNode, shared)
+
+rebindIfParent :: NodeId -> NodeRef -> NodeRef -> BindFlag -> ConstraintM ()
+rebindIfParent child expectedParent newParent flag = do
+    bindParents <- gets bsBindParents
+    case IntMap.lookup (nodeRefKey (typeRef child)) bindParents of
+        Just (parent, _)
+            | parent == expectedParent ->
+                setBindParentOverride (typeRef child) newParent flag
+        _ -> pure ()
 
 -- | Internalize a source type annotation into a constraint graph.
 -- This creates nodes for the type structure and connects them appropriately.
 --
 -- The tyEnv maps type variable names to their allocated NodeIds (for quantified vars).
-internalizeSrcType :: GenNodeId -> TyEnv -> SrcType -> ConstraintM NodeId
-internalizeSrcType = internalizeSrcTypeWith True
-
 internalizeSrcTypeBound :: GenNodeId -> TyEnv -> SrcType -> ConstraintM NodeId
 internalizeSrcTypeBound = internalizeSrcTypeWith False
 

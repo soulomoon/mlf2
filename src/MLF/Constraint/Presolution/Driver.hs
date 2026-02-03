@@ -33,7 +33,6 @@ module MLF.Constraint.Presolution.Driver (
     processInstEdge
 ) where
 
-import Control.Monad.State
 import Control.Monad.Reader (ask)
 import Control.Monad.Except (throwError)
 import Control.Monad (foldM, forM)
@@ -66,14 +65,14 @@ import MLF.Constraint.Presolution.WitnessNorm (normalizeEdgeWitnessesM)
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Presolution.Expansion (getExpansion)
 import MLF.Constraint.Presolution.Materialization (
-    materializeExpansions,
-    frWith
+    materializeExpansions
     )
 import MLF.Constraint.Presolution.EdgeUnify (flushPendingWeakens)
 import MLF.Constraint.Presolution.EdgeProcessing (
     runPresolutionLoop,
     processInstEdge
     )
+import MLF.Constraint.Presolution.StateAccess (getConstraintAndCanonical)
 import MLF.Constraint.Acyclicity (AcyclicityResult(..))
 
 -- | Debug binding operations (uses explicit trace config).
@@ -141,9 +140,11 @@ computePresolution traceCfg acyclicityResult constraint = do
 -- Returns the canonicalized redirect map.
 rewriteConstraint :: IntMap NodeId -> PresolutionM (IntMap NodeId)
 rewriteConstraint mapping = do
-    st <- get
-    let c = psConstraint st
-        uf = psUnionFind st
+    (c, canonicalUf) <- getConstraintAndCanonical
+    st <- getPresolutionState
+    let edgeExpansions0 = psEdgeExpansions st
+        edgeWitnesses0 = psEdgeWitnesses st
+        edgeTraces0 = psEdgeTraces st
 
     -- If an identity `TyExp` wrapper is unified away (i.e. it is not the UF root),
     -- we still must redirect the whole UF class to the wrapper’s body, otherwise
@@ -155,7 +156,7 @@ rewriteConstraint mapping = do
             expn <- getExpansion (tnExpVar expNode)
             pure $ case expn of
                 ExpIdentity ->
-                    let root = frWith uf (tnId expNode)
+                    let root = canonicalUf (tnId expNode)
                     in Just (getNodeId root, tnBody expNode)
                 _ -> Nothing
         let chooseMin a b = min a b
@@ -163,7 +164,7 @@ rewriteConstraint mapping = do
 
     let canonical nid =
             let step n =
-                    let r0 = frWith uf n
+                    let r0 = canonicalUf n
                         r1 = fromMaybe r0 (IntMap.lookup (getNodeId r0) identityRootMap)
                         r2 = fromMaybe r1 (IntMap.lookup (getNodeId r1) mapping)
                     in r2
@@ -180,11 +181,11 @@ rewriteConstraint mapping = do
         weakened' = rewriteVarSet canonical newNodes (cWeakenedVars c)
         genNodes' = rewriteGenNodes canonical newNodes (cGenNodes c)
 
-        newExps = IntMap.map (canonicalizeExpansion canon) (psEdgeExpansions st)
+        newExps = IntMap.map (canonicalizeExpansion canon) edgeExpansions0
 
-        newWitnesses = IntMap.map (canonicalizeWitness canon) (psEdgeWitnesses st)
+        newWitnesses = IntMap.map (canonicalizeWitness canon) edgeWitnesses0
 
-        newTraces0 = IntMap.map (canonicalizeTrace canon) (psEdgeTraces st)
+        newTraces0 = IntMap.map (canonicalizeTrace canon) edgeTraces0
 
         bindingEdges0 = cBindParents c
         cStruct = c { cNodes = NodeMap newNodes, cGenNodes = genNodes' }
@@ -483,7 +484,7 @@ rewriteConstraint mapping = do
                 pure tr { etInterior = interiorNodes }
         traverse updateTrace newTraces0
 
-    put st
+    putPresolutionState st
         { psConstraint = c'
         , psEdgeExpansions = newExps
         , psEdgeWitnesses = newWitnesses
