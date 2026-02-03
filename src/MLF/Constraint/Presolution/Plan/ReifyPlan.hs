@@ -452,6 +452,7 @@ bindingFor env plan (name, nidInt) = do
                             Just v' -> TVar v'
                             Nothing -> TVar v
             TArrow a b -> TArrow (substAliasTy boundSet a) (substAliasTy boundSet b)
+            TCon c args -> TCon c (fmap (substAliasTy boundSet) args)
             TBase _ -> ty
             TBottom -> ty
             TForall v mb body ->
@@ -460,6 +461,7 @@ bindingFor env plan (name, nidInt) = do
                 in TForall v mb' body'
         substAliasBound boundSet bound = case bound of
             TArrow a b -> TArrow (substAliasTy boundSet a) (substAliasTy boundSet b)
+            TCon c args -> TCon c (fmap (substAliasTy boundSet) args)
             TBase _ -> bound
             TBottom -> bound
             TForall v mb body ->

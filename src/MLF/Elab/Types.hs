@@ -61,6 +61,7 @@ module MLF.Elab.Types (
 ) where
 
 import Data.Functor.Foldable (cata, zygo)
+import Data.List.NonEmpty (NonEmpty(..))
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Map.Strict as Map
@@ -95,6 +96,7 @@ instance Pretty ElabType where
         complexAlg ty = case ty of
             TArrowIF _ _ -> K True
             TForallIF _ _ _ -> K True
+            TConIF _ _ -> K True
             _ -> K False
 
         prettyAlg :: TyIF i (IxPair (K Bool) (K String)) -> K String i
@@ -106,6 +108,15 @@ instance Pretty ElabType where
                     (_, r) = unIxPair c
                     left = if unK isComplex then "(" ++ unK l ++ ")" else unK l
                 in K (left ++ " -> " ++ unK r)
+            TConIF (BaseTy c) args ->
+                let parArg :: IxPair (K Bool) (K String) 'AllowVar -> String
+                    parArg ix =
+                        let (isComplex, s) = unIxPair ix
+                            sStr = unK s
+                        in if unK isComplex then "(" ++ sStr ++ ")" else sStr
+                    argsStr = case args of
+                        arg :| rest -> unwords (map parArg (arg : rest))
+                in K (c ++ " " ++ argsStr)
             TForallIF v mb body ->
                 let boundStr = fmap (unK . snd . unIxPair) mb
                 in case boundStr of
@@ -192,6 +203,7 @@ inlineBoundsForDisplay = go
     -- Conservative approximation: inline only single covariant occurrences with base/var bounds.
     go ty = case ty of
         TArrow d c -> TArrow (go d) (go c)
+        TCon c args -> TCon c (fmap go args)
         TForall v mb body ->
             let mb' = fmap goBound mb
                 body' = go body
@@ -227,11 +239,13 @@ inlineBoundsForDisplay = go
         TBottom -> True
         TVar{} -> True
         TArrow{} -> True
+        TCon{} -> True
         _ -> False
 
     goBound :: BoundType -> BoundType
     goBound bound = case bound of
         TArrow a b -> TArrow (go a) (go b)
+        TCon c args -> TCon c (fmap go args)
         TBase b -> TBase b
         TBottom -> TBottom
         TForall v mb body ->
@@ -261,6 +275,14 @@ inlineBoundsForDisplay = go
                     occD' = flipOccMap (oiOccMap occD)
                     occC' = oiOccMap occC
                 in K (OccInfo freeVars (mergeOccMaps occD' occC'))
+            TConIF _ args ->
+                let occArg :: IxPair Ty (K OccInfo) 'AllowVar -> OccInfo
+                    occArg ix = unK (snd (unIxPair ix))
+                    occArgs = case args of
+                        arg :| rest -> map occArg (arg : rest)
+                    freeVars = Set.unions (map oiFreeVars occArgs)
+                    occMaps = map oiOccMap occArgs
+                in K (OccInfo freeVars (foldr mergeOccMaps Map.empty occMaps))
             TBaseIF _ -> K emptyOccInfo
             TBottomIF -> K emptyOccInfo
             TForallIF v mb body ->
@@ -284,6 +306,12 @@ inlineBoundsForDisplay = go
                 freeVars = Set.union (oiFreeVars occA) (oiFreeVars occB)
                 occA' = flipOccMap (oiOccMap occA)
             in OccInfo freeVars (mergeOccMaps occA' (oiOccMap occB))
+        TCon _ args ->
+            let occArgs = case args of
+                    arg :| rest -> map occInfo (arg : rest)
+                freeVars = Set.unions (map oiFreeVars occArgs)
+                occMaps = map oiOccMap occArgs
+            in OccInfo freeVars (foldr mergeOccMaps Map.empty occMaps)
         TBase _ -> emptyOccInfo
         TBottom -> emptyOccInfo
         TForall v mb body ->

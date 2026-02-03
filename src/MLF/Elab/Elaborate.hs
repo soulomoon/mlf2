@@ -522,6 +522,7 @@ substInTy subst = cataIx alg
     alg node = case node of
         TVarIF v -> TVar (applySubst v)
         TArrowIF d c -> TArrow d c
+        TConIF c args -> TCon c args
         TBaseIF b -> TBase b
         TForallIF v mb body -> TForall v mb body
         TBottomIF -> TBottom

@@ -139,6 +139,7 @@ substBound :: String -> ElabType -> BoundType -> BoundType
 substBound v replacement bound = case bound of
     TArrow a b ->
         TArrow (substType v replacement a) (substType v replacement b)
+    TCon c args -> TCon c (fmap (substType v replacement) args)
     TBase b -> TBase b
     TBottom -> TBottom
     TForall name mb body
@@ -166,6 +167,7 @@ containsForall = cataIxConst alg
     alg ty = case ty of
         TForallIF _ _ _ -> True
         TArrowIF d c -> unK d || unK c
+        TConIF _ args -> any unK args
         _ -> False
 
 containsArrow :: ElabType -> Bool
@@ -176,4 +178,5 @@ containsArrow = cataIxConst alg
         TForallIF _ mb body ->
             let boundHasArrow = maybe False unK mb
             in boundHasArrow || unK body
+        TConIF _ args -> any unK args
         _ -> False

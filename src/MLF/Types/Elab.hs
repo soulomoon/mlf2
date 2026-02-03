@@ -46,6 +46,7 @@ module MLF.Types.Elab (
 import Data.Functor.Foldable (Base, Corecursive(..), Recursive(..))
 import Data.Kind (Type)
 import Data.IntMap.Strict (IntMap)
+import Data.List.NonEmpty (NonEmpty)
 
 import MLF.Constraint.Types.Graph (BaseTy(..), BindFlag(..))
 import MLF.Frontend.Syntax (Lit(..))
@@ -74,7 +75,8 @@ import Util.IndexedRecursion
 -- Constructors:
 --   * TVar: Type variables (α)
 --   * TArrow: Function types (τ -> τ)
---   * TBase: Base types (Int, Bool, etc.) - extension of the paper's calculus
+--   * TCon: Constructor application (C σ), per thesis Fig. 14.2.1.
+--   * TBase: Base types (Int, Bool, etc.). This is a 0-ary constructor convenience.
 --   * TForall: Flexible quantification ∀(α ⩾ τ). σ.
 --       - Nothing bound implies ⩾ ⊥ (standard System F unbounded quantification)
 --       - Just bound implies explicit instance bound
@@ -84,6 +86,7 @@ data TopVar = AllowVar | NoTopVar
 data Ty (v :: TopVar) where
     TVar :: String -> Ty 'AllowVar
     TArrow :: Ty AllowVar -> Ty AllowVar -> Ty a
+    TCon :: BaseTy -> NonEmpty (Ty AllowVar) -> Ty a
     TBase :: BaseTy -> Ty a
     TForall :: String -> Maybe (Ty 'NoTopVar) -> Ty AllowVar -> Ty a -- ∀(α ⩾ τ?). σ
     TBottom :: Ty a
@@ -98,6 +101,7 @@ type BoundType = Ty 'NoTopVar
 data TyIF (v :: TopVar) (r :: TopVar -> Type) where
     TVarIF :: String -> TyIF 'AllowVar r
     TArrowIF :: r 'AllowVar -> r 'AllowVar -> TyIF v r
+    TConIF :: BaseTy -> NonEmpty (r 'AllowVar) -> TyIF v r
     TBaseIF :: BaseTy -> TyIF v r
     TForallIF :: String -> Maybe (r 'NoTopVar) -> r 'AllowVar -> TyIF v r
     TBottomIF :: TyIF v r
@@ -106,6 +110,7 @@ instance IxFunctor TyIF where
     imap f node = case node of
         TVarIF v -> TVarIF v
         TArrowIF a b -> TArrowIF (f a) (f b)
+        TConIF c args -> TConIF c (fmap f args)
         TBaseIF b -> TBaseIF b
         TForallIF v mb body -> TForallIF v (fmap f mb) (f body)
         TBottomIF -> TBottomIF
@@ -116,6 +121,7 @@ instance IxRecursive Ty where
     projectIx ty = case ty of
         TVar v -> TVarIF v
         TArrow a b -> TArrowIF a b
+        TCon c args -> TConIF c args
         TBase b -> TBaseIF b
         TForall v mb body -> TForallIF v mb body
         TBottom -> TBottomIF
@@ -124,6 +130,7 @@ instance IxCorecursive Ty where
     embedIx ty = case ty of
         TVarIF v -> TVar v
         TArrowIF a b -> TArrow a b
+        TConIF c args -> TCon c args
         TBaseIF b -> TBase b
         TForallIF v mb body -> TForall v mb body
         TBottomIF -> TBottom
@@ -132,6 +139,7 @@ tyToElab :: Ty v -> ElabType
 tyToElab ty = case ty of
     TVar v -> TVar v
     TArrow a b -> TArrow (tyToElab a) (tyToElab b)
+    TCon c args -> TCon c (fmap tyToElab args)
     TBase b -> TBase b
     TBottom -> TBottom
     TForall v mb body -> TForall v mb (tyToElab body)
@@ -141,6 +149,7 @@ elabToBound ty = case ty of
     TVar v ->
         Left ("elabToBound: unexpected variable bound " ++ show v)
     TArrow a b -> Right (TArrow a b)
+    TCon c args -> Right (TCon c args)
     TBase b -> Right (TBase b)
     TForall v mb body -> Right (TForall v mb body)
     TBottom -> Right TBottom
@@ -151,6 +160,7 @@ containsForallTy = cataIxConst alg
     alg node = case node of
         TForallIF _ _ _ -> True
         TArrowIF a b -> unK a || unK b
+        TConIF _ args -> any unK args
         _ -> False
 
 containsArrowTy :: Ty v -> Bool
@@ -159,6 +169,7 @@ containsArrowTy = cataIxConst alg
     alg node = case node of
         TArrowIF _ _ -> True
         TForallIF _ mb body -> maybe False unK mb || unK body
+        TConIF _ args -> any unK args
         _ -> False
 
 data Binder (k :: BindFlag) where

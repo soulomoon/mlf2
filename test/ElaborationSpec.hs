@@ -58,6 +58,7 @@ import SpecUtil
 boundToType :: Elab.BoundType -> Elab.ElabType
 boundToType bound = case bound of
     Elab.TArrow a b -> Elab.TArrow a b
+    Elab.TCon c args -> Elab.TCon c args
     Elab.TBase b -> Elab.TBase b
     Elab.TBottom -> Elab.TBottom
     Elab.TForall v mb body -> Elab.TForall v mb body
@@ -67,6 +68,7 @@ boundFromType ty = case ty of
     Elab.TVar v ->
         error ("boundFromType: unexpected variable bound " ++ show v)
     Elab.TArrow a b -> Elab.TArrow a b
+    Elab.TCon c args -> Elab.TCon c args
     Elab.TBase b -> Elab.TBase b
     Elab.TBottom -> Elab.TBottom
     Elab.TForall v mb body -> Elab.TForall v mb body
@@ -122,6 +124,7 @@ canonType = go [] (0 :: Int)
             case lookup v env of
                 Just v' -> Elab.TVar v'
                 Nothing -> Elab.TVar v
+        Elab.TCon c args -> Elab.TCon c (fmap (go env n) args)
         Elab.TBase b -> Elab.TBase b
         Elab.TBottom -> Elab.TBottom
         Elab.TArrow a b -> Elab.TArrow (go env n a) (go env n b)

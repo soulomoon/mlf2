@@ -28,6 +28,7 @@ import MLF.Elab.Types
 mapBound :: (ElabType -> ElabType) -> BoundType -> BoundType
 mapBound f bound = case bound of
     TArrow a b -> TArrow (f a) (f b)
+    TCon c args -> TCon c (fmap f args)
     TBase b -> TBase b
     TBottom -> TBottom
     TForall v mb body ->
@@ -73,6 +74,7 @@ simplifyAnnotationType = go
   where
     go ty = case ty of
         TVar _ -> ty
+        TCon c args -> TCon c (fmap go args)
         TBase _ -> ty
         TBottom -> ty
         TArrow a b -> TArrow (go a) (go b)

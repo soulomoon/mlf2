@@ -10,6 +10,7 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import Data.List.NonEmpty (NonEmpty(..))
 
 import MLF.Constraint.Types
 import qualified MLF.Constraint.VarStore as VarStore
@@ -41,6 +42,7 @@ import MLF.Util.ElabError (ElabError(..))
 mapBound :: (ElabType -> ElabType) -> BoundType -> BoundType
 mapBound f bound = case bound of
     TArrow a b -> TArrow (f a) (f b)
+    TCon c args -> TCon c (fmap f args)
     TBase b -> TBase b
     TBottom -> TBottom
     TForall v mb body ->
@@ -128,6 +130,18 @@ finalizeScheme FinalizeInput{..} =
                     let (a', free1, n1) = go boundEnv freeEnv n a
                         (b', free2, n2) = go boundEnv free1 n1 b
                     in (TArrow a' b', free2, n2)
+                TCon c (arg :| args) ->
+                    let (arg', free1, n1) = go boundEnv freeEnv n arg
+                        (argsRev, free2, n2) =
+                            foldl
+                                (\(acc, freeAcc, nAcc) a ->
+                                    let (a', free', n') = go boundEnv freeAcc nAcc a
+                                    in (a' : acc, free', n')
+                                )
+                                ([], free1, n1)
+                                args
+                        args' = reverse argsRev
+                    in (TCon c (arg' :| args'), free2, n2)
                 TForall v mb body ->
                     let v' = "v" ++ show n
                         n1 = n + 1
@@ -145,6 +159,18 @@ finalizeScheme FinalizeInput{..} =
                     let (a', free1, n1) = go boundEnv freeEnv n a
                         (b', free2, n2) = go boundEnv free1 n1 b
                     in (TArrow a' b', free2, n2)
+                TCon c (arg :| args) ->
+                    let (arg', free1, n1) = go boundEnv freeEnv n arg
+                        (argsRev, free2, n2) =
+                            foldl
+                                (\(acc, freeAcc, nAcc) a ->
+                                    let (a', free', n') = go boundEnv freeAcc nAcc a
+                                    in (a' : acc, free', n')
+                                )
+                                ([], free1, n1)
+                                args
+                        args' = reverse argsRev
+                    in (TCon c (arg' :| args'), free2, n2)
                 TBase b -> (TBase b, freeEnv, n)
                 TBottom -> (TBottom, freeEnv, n)
                 TForall v mb body ->
@@ -165,6 +191,7 @@ finalizeScheme FinalizeInput{..} =
                 | otherwise =
                     case ty of
                         TArrow a b -> TArrow (goReplace a) (goReplace b)
+                        TCon c args -> TCon c (fmap goReplace args)
                         TForall name mb body ->
                             TForall name (fmap (mapBound goReplace) mb) (goReplace body)
                         _ -> ty
@@ -178,9 +205,11 @@ finalizeScheme FinalizeInput{..} =
             TForall v Nothing body ->
                 TForall v Nothing (stripAliasForall body)
             TArrow a b -> TArrow (stripAliasForall a) (stripAliasForall b)
+            TCon c args -> TCon c (fmap stripAliasForall args)
             _ -> ty
         stripAliasForallBound bound = case bound of
             TArrow a b -> TArrow (stripAliasForall a) (stripAliasForall b)
+            TCon c args -> TCon c (fmap stripAliasForall args)
             TBase _ -> bound
             TBottom -> bound
             TForall v mb body ->
@@ -240,6 +269,7 @@ finalizeScheme FinalizeInput{..} =
             alg ty = case ty of
                 TVarIF v -> TVar (renameFromSubst v)
                 TArrowIF a b -> TArrow a b
+                TConIF c args -> TCon c args
                 TBaseIF b -> TBase b
                 TBottomIF -> TBottom
                 TForallIF v mb body ->
@@ -287,6 +317,7 @@ finalizeScheme FinalizeInput{..} =
             alg ty = case ty of
                 TVarIF v -> TVar (renameFromMap v)
                 TArrowIF a b -> TArrow a b
+                TConIF c args -> TCon c args
                 TBaseIF b -> TBase b
                 TBottomIF -> TBottom
                 TForallIF v mb body ->

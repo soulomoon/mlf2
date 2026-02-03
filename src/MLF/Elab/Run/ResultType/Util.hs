@@ -23,8 +23,7 @@ import MLF.Elab.Run.Generalize (generalizeAtWithBuilder)
 import MLF.Elab.Inst (applyInstantiation)
 import MLF.Elab.Types
 import MLF.Frontend.ConstraintGen (AnnExpr(..))
-import MLF.Constraint.Types.Graph (EdgeId(..), getEdgeId)
-import MLF.Elab.Run.ResultType.Types (ResultTypeContext(..))
+import MLF.Constraint.Types.Graph (EdgeId(..))
 
 -- | Generalize with plan helper
 generalizeWithPlan
@@ -49,9 +48,11 @@ containsBoundForall ty =
             TForall _ mb body ->
                 maybe False containsAnyForallBound mb || go body
             TArrow a b -> go a || go b
+            TCon _ args -> any go args
             _ -> False
         containsAnyForallBound bound = case bound of
             TArrow a b -> go a || go b
+            TCon _ args -> any go args
             TForall _ _ _ -> True
             _ -> False
     in go ty
@@ -82,11 +83,13 @@ instantiateImplicitForalls ty0 =
             TForall v mb body ->
                 TForall v (fmap goBound mb) (go body)
             TArrow a b -> TArrow (go a) (go b)
+            TCon c args -> TCon c (fmap go args)
             TBase _ -> ty
             TBottom -> ty
             TVar _ -> ty
         goBound bound = case bound of
             TArrow a b -> TArrow (go a) (go b)
+            TCon c args -> TCon c (fmap go args)
             TBase b -> TBase b
             TBottom -> TBottom
             TForall v mb body ->

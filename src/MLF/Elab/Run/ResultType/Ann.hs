@@ -7,34 +7,22 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
 import MLF.Frontend.ConstraintGen (AnnExpr(..))
-import MLF.Constraint.Presolution
-    ( EdgeTrace(..)
-    , PresolutionPlanBuilder(..)
-    )
-import MLF.Constraint.Presolution.Base (CopyMapping(..), lookupCopy)
 import MLF.Constraint.Solve (SolveResult(..))
 import MLF.Constraint.Types.Graph
-    ( Constraint
-    , EdgeId(..)
-    , GenNode(..)
+    ( EdgeId(..)
     , NodeId(..)
     , NodeRef(..)
     , TyNode(..)
-    , cBindParents
     , cGenNodes
-    , cLetEdges
     , cNodes
     , fromListNode
     , getEdgeId
     , getNodeId
     , lookupGen
     , lookupNodeIn
-    , gnId
     , gnSchemes
-    , nodeRefFromKey
     , toListNode
     )
-import MLF.Constraint.Types.Witness (EdgeWitness(..), Expansion(..))
 import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Elab.Inst (applyInstantiation, schemeToType)
@@ -48,12 +36,10 @@ import MLF.Elab.Types
 import MLF.Reify.TypeOps
     ( inlineAliasBoundsWithBy
     , inlineBaseBoundsType
-    , resolveBaseBoundForInstConstraint
     , resolveBoundBodyConstraint
     )
 import MLF.Elab.Run.Annotation (adjustAnnotationInst, annNode)
 import MLF.Elab.Run.Debug (debugWhenCondM, debugWhenM)
-import MLF.Util.Trace (TraceConfig)
 import MLF.Elab.Run.Instantiation (inferInstAppArgsFromScheme, instInsideFromArgsWithBounds)
 import MLF.Elab.Run.Scope
     ( bindingScopeRef
@@ -72,7 +58,6 @@ import MLF.Elab.Run.ResultType.Util
     , containsBoundForall
     , instHasBoundForall
     , instantiateImplicitForalls
-    , stripAnn
     )
 import MLF.Elab.Run.ResultType.Types (ResultTypeContext(..))
 

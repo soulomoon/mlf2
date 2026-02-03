@@ -11,7 +11,6 @@ import MLF.Constraint.Presolution
     , PresolutionPlanBuilder(..)
     )
 import MLF.Constraint.Solve (SolveResult(..))
-import MLF.Constraint.Types.Graph (NodeId(..))
 import MLF.Constraint.Types.Witness (EdgeWitness(..), Expansion(..))
 import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Util.Trace (TraceConfig)

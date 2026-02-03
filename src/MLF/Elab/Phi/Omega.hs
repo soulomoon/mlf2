@@ -209,6 +209,9 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
             TArrowIF a b ->
                 ApplyFun $ \bound ->
                     TArrow (runApplyFun a bound) (runApplyFun b bound)
+            TConIF c args ->
+                ApplyFun $ \bound ->
+                    TCon c (fmap (\f -> runApplyFun f bound) args)
             TBaseIF b -> ApplyFun (const (TBase b))
             TBottomIF -> ApplyFun (const TBottom)
             TForallIF v mb body ->
