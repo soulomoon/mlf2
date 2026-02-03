@@ -8,7 +8,7 @@ import qualified Data.IntSet as IntSet
 import qualified Data.Set as Set
 import Test.Hspec
 
-import MLF.Binding.Tree (boundFlexChildren, checkBindingTree)
+import MLF.Binding.Tree (boundFlexChildren, checkBindingTree, nodeKind, NodeKind(..))
 import MLF.Constraint.Acyclicity (checkAcyclicity)
 import MLF.Constraint.Normalize (normalize)
 import MLF.Constraint.Presolution (PresolutionResult(..), computePresolution)
@@ -770,3 +770,73 @@ spec = describe "Phase 1 — Constraint generation" $ do
                     arrowNodes = [n | n@TyArrow {} <- nodes]
                 length arrowNodes `shouldSatisfy` (>= 2)
                 cInstEdges constraint `shouldSatisfy` ((== 2) . length)
+
+    describe "Coercion semantics (thesis-exact)" $ do
+        -- US-004: Regression tests for thesis-exact coercion behavior
+        -- These tests lock in the rigid domain / flexible codomain semantics
+        -- described in papers/these-finale-english.txt §12.3.2.2, §15.3.8
+
+        it "coercion domain nodes are restricted but not locked" $ do
+            -- (1 : Int) - the domain copy should be restricted (rigid binding edge)
+            -- but not locked (no rigid ancestor)
+            let ann = STBase "Int"
+                expr = EAnn (ELit (LInt 1)) ann
+            expectRight (inferConstraintGraphDefault expr) $ \result -> do
+                let constraint = crConstraint result
+                    insts = cInstEdges constraint
+                -- Find the annotation edge (the one with domain as right side)
+                case insts of
+                    [InstEdge _ _ domainNode] -> do
+                        -- Domain node should be restricted (rigid binding edge)
+                        -- but not locked (no rigid ancestor)
+                        kind <- case nodeKind constraint (typeRef domainNode) of
+                            Right k -> pure k
+                            Left err -> expectationFailure (show err) >> pure NodeRoot
+                        kind `shouldBe` NodeRestricted
+                    other -> expectationFailure $ "Expected 1 inst edge, saw " ++ show (length other)
+
+        it "EAnn returns the codomain copy (not domain)" $ do
+            -- (1 : Int) - the result type should be the codomain copy
+            -- which is distinct from the domain node on the inst edge
+            let ann = STBase "Int"
+                expr = EAnn (ELit (LInt 1)) ann
+            expectRight (inferConstraintGraphDefault expr) $ \result -> do
+                let constraint = crConstraint result
+                    insts = cInstEdges constraint
+                    root = crRoot result
+                case insts of
+                    [InstEdge _ _ domainNode] -> do
+                        -- The root (annotation result) should NOT be the domain node
+                        -- It should be the codomain copy
+                        root `shouldNotBe` domainNode
+                        -- Both should be TyVar nodes bound to Int
+                        let nodes = cNodes constraint
+                        rootNode <- lookupNode nodes root
+                        domNode <- lookupNode nodes domainNode
+                        case (rootNode, domNode) of
+                            (TyVar { tnBound = Just rootBnd }, TyVar { tnBound = Just domBnd }) -> do
+                                rootBndNode <- lookupNode nodes rootBnd
+                                domBndNode <- lookupNode nodes domBnd
+                                case (rootBndNode, domBndNode) of
+                                    (TyBase { tnBase = BaseTy n1 }, TyBase { tnBase = BaseTy n2 }) -> do
+                                        n1 `shouldBe` "Int"
+                                        n2 `shouldBe` "Int"
+                                    other -> expectationFailure $ "Expected Int bases, saw " ++ show other
+                            other -> expectationFailure $ "Expected TyVar nodes, saw " ++ show other
+                    other -> expectationFailure $ "Expected 1 inst edge, saw " ++ show (length other)
+
+        it "existential type variables are shared between domain and codomain" $ do
+            -- (1 : a) where 'a' is free - the free var should be shared
+            -- between domain and codomain copies
+            let ann = STVar "a"
+                expr = EAnn (ELit (LInt 1)) ann
+            expectRight (inferConstraintGraphDefault expr) $ \result -> do
+                let constraint = crConstraint result
+                    insts = cInstEdges constraint
+                    root = crRoot result
+                case insts of
+                    [InstEdge _ _ domainNode] -> do
+                        -- For a free type variable, domain and codomain should
+                        -- share the same node (existential sharing)
+                        root `shouldBe` domainNode
+                    other -> expectationFailure $ "Expected 1 inst edge, saw " ++ show (length other)
