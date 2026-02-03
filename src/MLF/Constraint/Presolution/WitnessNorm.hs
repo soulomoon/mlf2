@@ -28,6 +28,7 @@ import MLF.Constraint.Presolution.Validation (translatableWeakenedNodes)
 import MLF.Constraint.Presolution.Witness (
     normalizeInstanceStepsFull,
     OmegaNormalizeEnv(OmegaNormalizeEnv, oneRoot),
+    validateNormalizedWitness,
     )
 import qualified MLF.Constraint.Presolution.Witness as Witness
 
@@ -163,7 +164,14 @@ normalizeEdgeWitnessesM = do
         steps <- case normalizeInstanceStepsFull env steps0 of
             Right steps' -> pure steps'
             Left err ->
-                throwError (InternalError ("normalizeInstanceStepsFull failed: " ++ show err))
+                throwError (WitnessNormalizationError (EdgeId eid) err)
+        -- Validate normalized ops against Fig. 15.3.4 invariants (thesis-exact).
+        -- IMPORTANT: Validate BEFORE restoring to original node space, since
+        -- interiorNorm is in the rewritten node space (matching the normalized steps).
+        let opsRewritten = [op | StepOmega op <- steps]
+        case validateNormalizedWitness env opsRewritten of
+            Left valErr -> throwError (WitnessNormalizationError (EdgeId eid) valErr)
+            Right () -> pure ()
         let stepsFinal = map restoreStep steps
             ops = [op | StepOmega op <- stepsFinal]
         pure (eid, w0 { ewSteps = stepsFinal, ewWitness = InstanceWitness ops })

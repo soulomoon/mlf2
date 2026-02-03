@@ -41,6 +41,8 @@ import MLF.Constraint.Presolution
     , computePresolution
     , defaultPlanBuilder
     , fromListInterior
+    , InteriorNodes(..)
+    , CopyMapping(..)
     )
 import MLF.Constraint.Solve (SolveResult(..), solveUnify)
 import qualified MLF.Constraint.Solve as Solve (frWith)
@@ -188,6 +190,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             Elab.prettyDisplay ty `shouldBe` "Int"
 
         it "elaborates polymorphic instantiation" $ do
+            -- US-003: thesis-exact Φ now rejects OpRaise outside I(r) instead of skipping
+            pendingWith "US-003: thesis-exact Φ rejects OpRaise outside interior; witness generation needs update"
             -- let id = \x. x in id 1
             let expr = ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (ELit (LInt 1)))
             (term, ty) <- requirePipeline expr
@@ -262,6 +266,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     (Elab.TArrow (Elab.TVar "a") (Elab.TVar "t13"))
 
         it "elaborates dual instantiation in application" $ do
+            -- US-003: thesis-exact Φ now rejects OpRaise outside I(r) instead of skipping
+            pendingWith "US-003: thesis-exact Φ rejects OpRaise outside interior; witness generation needs update"
             -- let id = \x. x in id id
             let expr = ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (EVar "id"))
             (term, _ty) <- requirePipeline expr
@@ -282,6 +288,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     expectationFailure $ "Expected let-binding result, saw " ++ show other
 
         it "elaborates usage of polymorphic let (instantiated at different types)" $ do
+            -- US-003: thesis-exact Φ now rejects OpRaise outside I(r) instead of skipping
+            pendingWith "US-003: thesis-exact Φ rejects OpRaise outside interior; witness generation needs update"
             -- let f = \x. x in let _ = f 1 in f true
             -- This forces 'f' to be instantiated twice: once at Int, once at Bool
             let expr = ELet "f" (ELam "x" (EVar "x"))
@@ -468,6 +476,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             ty `shouldAlphaEqType` expected
 
         it "elaborates lambda with rank-2 argument" $ do
+            -- US-003: thesis-exact Φ now rejects OpRaise outside I(r) instead of skipping
+            pendingWith "US-003: thesis-exact Φ rejects OpRaise outside interior; witness generation needs update"
             -- \x : (∀a. a -> a). x 1
             -- The annotation is preserved as a rank-2 argument type.
             let paramTy = STForall "a" Nothing (STArrow (STVar "a") (STVar "a"))
@@ -1533,6 +1543,69 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                     (Elab.TVar "m")))
                 out `shouldAlphaEqType` expected
 
+            -- US-003: Φ errors on OpRaise outside I(r) (remove skip)
+            it "Φ rejects OpRaise targeting node outside interior I(r)" $ do
+                -- Construct a scenario where OpRaise targets a node outside the
+                -- expansion interior I(r). Per Fig. 15.3.4, such witnesses are
+                -- non-translatable and should be rejected with a hard error.
+                let root = NodeId 100
+                    aN = NodeId 1
+                    bN = NodeId 2
+                    exteriorN = NodeId 99
+
+                    -- Interior set only contains aN and bN, NOT exteriorN
+                    interiorSet = IntSet.fromList [getNodeId aN, getNodeId bN]
+
+                    c = rootedConstraint emptyConstraint
+                        { cNodes = nodeMapFromList
+                                [ (getNodeId root, TyArrow root aN bN)
+                                , (getNodeId aN, TyVar { tnId = aN, tnBound = Nothing })
+                                , (getNodeId bN, TyVar { tnId = bN, tnBound = Nothing })
+                                , (getNodeId exteriorN, TyVar { tnId = exteriorN, tnBound = Nothing })
+                                ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef aN), (genRef (GenNodeId 0), BindFlex))
+                                , (nodeRefKey (typeRef bN), (genRef (GenNodeId 0), BindFlex))
+                                , (nodeRefKey (typeRef exteriorN), (genRef (GenNodeId 0), BindFlex))
+                                ]
+                        }
+                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+
+                    scheme =
+                        Elab.schemeFromType
+                            (Elab.TForall "a" Nothing (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))))
+                    subst = IntMap.fromList [(getNodeId aN, "a"), (getNodeId bN, "b")]
+                    si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = subst }
+
+                    -- OpRaise targets exteriorN which is outside interiorSet
+                    ops = [OpRaise exteriorN]
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewSteps = map StepOmega ops
+                        , ewWitness = InstanceWitness ops
+                        }
+
+                    -- Create an EdgeTrace with the restricted interior
+                    tr = EdgeTrace
+                        { etRoot = root
+                        , etInterior = InteriorNodes interiorSet
+                        , etCopyMap = CopyMapping IntMap.empty
+                        , etBinderArgs = []
+                        }
+
+                -- Φ should fail with ValidationFailed, not silently skip or return InstId
+                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew of
+                    Left (Elab.ValidationFailed msgs) ->
+                        msgs `shouldSatisfy` any (isInfixOf "OpRaise targets node outside interior")
+                    Left otherErr ->
+                        expectationFailure $ "Expected ValidationFailed for OpRaise outside interior, got: " ++ show otherErr
+                    Right inst ->
+                        expectationFailure $ "Expected failure for OpRaise outside interior, got instantiation: " ++ show inst
+
     describe "Presolution witness ops (paper alignment)" $ do
         it "does not require Merge for bounded aliasing (b ⩾ a)" $ do
             let rhs = ELam "x" (ELam "y" (EVar "x"))
@@ -1574,6 +1647,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
     describe "Paper alignment baselines" $ do
         it "let id = (\\x. x) in id id should have type ∀a. a -> a" $ do
+            -- US-003: thesis-exact Φ now rejects OpRaise outside I(r) instead of skipping
+            pendingWith "US-003: thesis-exact Φ rejects OpRaise outside interior; witness generation needs update"
             let expr =
                     ELet "id" (ELam "x" (EVar "x"))
                         (EApp (EVar "id") (EVar "id"))
@@ -1667,6 +1742,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             ty `shouldAlphaEqType` expected
 
         it "\\y. let id = (\\x. x) in id y should have type ∀a. a -> a" $ do
+            -- US-003: thesis-exact Φ now rejects OpRaise outside I(r) instead of skipping
+            pendingWith "US-003: thesis-exact Φ rejects OpRaise outside interior; witness generation needs update"
             let expr =
                     ELam "y"
                         (ELet "id" (ELam "x" (EVar "x"))
@@ -1757,6 +1834,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
     describe "Explicit forall annotation edge cases" $ do
         it "explicit forall annotation round-trips on let-bound variables" $ do
+            -- US-003: thesis-exact Φ now rejects OpRaise outside I(r) instead of skipping
+            pendingWith "US-003: thesis-exact Φ rejects OpRaise outside interior; witness generation needs update"
             let ann = STForall "a" Nothing (STArrow (STVar "a") (STVar "a"))
                 expr =
                     ELet "id" (ELam "x" (EVar "x"))

@@ -39,7 +39,8 @@ module MLF.Constraint.Presolution (
     instantiateScheme,
     instantiateSchemeWithTrace,
     mergeExpansions,
-    applyExpansion
+    applyExpansion,
+    normalizeEdgeWitnessesM
 ) where
 
 import MLF.Constraint.Presolution.Base (
@@ -70,6 +71,7 @@ import MLF.Constraint.Presolution.Core (
     runEdgeUnifyForTest,
     unifyAcyclicRawWithRaiseTrace
     )
+import MLF.Constraint.Presolution.WitnessNorm (normalizeEdgeWitnessesM)
 import MLF.Constraint.Presolution.Plan (buildGeneralizePlans)
 import MLF.Constraint.Presolution.Plan.Context (GaBindParents(..))
 import MLF.Util.Trace (TraceConfig)

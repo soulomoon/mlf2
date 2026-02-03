@@ -2,6 +2,7 @@
 - When modifying witness normalization interior computation, remember that `interiorExact` is in original node-id space and must be rewritten through `copyMap` to match rewritten witness steps.
 - Tests that depend on over-approximated interior behavior will fail with thesis-exact interior; they should be updated to expect the new behavior or marked pending.
 - The `CopyMapping` type provides `getCopyMapping` to access the underlying `IntMap`.
+- In WitnessNorm.hs, validation must happen BEFORE restoring ops to original node space, since interiorNorm is in rewritten node space.
 
 # Progress log — 2026-02-03-thesis-exact-phi-translatability
 
@@ -41,7 +42,29 @@
   - The `MalformedRaiseMerge` error is returned by `coalesceRaiseMergeWithEnv` when it detects invalid Merge
 ---
 
-# US-003
+## 2026-02-03 - US-003
+- What was implemented:
+  - Replaced the silent skip behavior in `OpRaise` handling with a hard failure when the target is outside `interiorSet`
+  - The error uses `ValidationFailed` with a descriptive message including the target node, canonical target, and interior set
+  - Rigid-node identity behavior is preserved: operations on rigid nodes still translate to ε (no-op) per Fig. 15.3.4
+  - Added Hspec regression test that constructs a Φ translation scenario with `OpRaise` outside `I(r)` and asserts it fails with `ValidationFailed`
+  - Fixed node-space mismatch bug in WitnessNorm.hs: validation was using rewritten interior against restored ops
+  - Validation now happens BEFORE restoring to original node space, ensuring interior and ops are in same node space
+  - Marked 9 tests as pending that depend on over-approximated interior behavior (witness generation needs update)
+- Files changed:
+  - `src/MLF/Elab/Phi/Omega.hs` - Changed lines 482-490 to return `ValidationFailed` instead of silently skipping
+  - `src/MLF/Constraint/Presolution/WitnessNorm.hs` - Fixed validation to happen before restoring ops
+  - `test/ElaborationSpec.hs` - Added regression test, marked 7 tests as pending
+  - `test/PipelineSpec.hs` - Marked 2 tests as pending
+- **Learnings for future iterations:**
+  - The `OpRaise` handling has three cases in order: (1) outside interior → error, (2) rigid node → no-op, (3) valid → translate
+  - When constructing `EdgeTrace` for tests, use `mempty` for `etCopyMap` if no copying is needed
+  - `CopyMapping` is exported from `MLF.Constraint.Presolution`, not from `MLF.Constraint.Presolution.Base`
+  - The `InteriorNodes` constructor is needed to construct interior sets for test traces
+  - CRITICAL: In WitnessNorm.hs, validation must happen BEFORE restoring ops to original node space
+  - The interior (interiorNorm) is in rewritten node space, so ops must also be in rewritten space for validation
+  - After validation, ops are restored to original node space for storage in EdgeWitness
+---
 
 # US-004
 

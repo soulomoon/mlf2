@@ -58,6 +58,7 @@ import qualified MLF.Util.UnionFind as UnionFind
 import MLF.Util.Trace (TraceConfig, traceBindingM)
 import MLF.Constraint.Presolution.Plan (GeneralizePlan, ReifyPlan)
 import MLF.Constraint.Presolution.Plan.Context (GaBindParents)
+import MLF.Constraint.Presolution.WitnessValidation (OmegaNormalizeError)
 import MLF.Constraint.Solve (SolveResult)
 import MLF.Util.ElabError (ElabError)
 
@@ -96,6 +97,7 @@ data PresolutionError
     | OccursCheckPresolution NodeId NodeId   -- ^ Unification would make node reachable from itself
     | BindingTreeError BindingError          -- ^ Invalid binding tree when binding edges are in use
     | NonTranslatablePresolution [TranslatabilityIssue]
+    | WitnessNormalizationError EdgeId OmegaNormalizeError  -- ^ Normalized witness violates Fig. 15.3.4 invariants
     | InternalError String                   -- ^ Unexpected internal state
     deriving (Eq, Show)
 

@@ -482,7 +482,12 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
             if not (IntSet.null interiorSet)
                 && not (IntSet.member (getNodeId nOrig) interiorSet)
                 && not (IntSet.member (getNodeId nC) interiorSet)
-                then go binderKeys keepBinderKeys' namedSet' ty ids phi rest lookupBinder
+                then Left $ ValidationFailed
+                    [ "OpRaise targets node outside interior I(r)"
+                    , "  target node: " ++ show nOrig
+                    , "  canonical target: " ++ show nC
+                    , "  interior set: " ++ show (IntSet.toList interiorSet)
+                    ]
                 else
                         -- Paper Fig. 10: operations on rigid nodes translate to the identity
                         -- instantiation (they are inlined and not expressible as xMLF instantiation

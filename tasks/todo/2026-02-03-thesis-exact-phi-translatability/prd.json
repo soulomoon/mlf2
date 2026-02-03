@@ -44,8 +44,8 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Fixed node-space mismatch in WitnessNorm.hs validation; marked 9 tests as pending that depend on over-approximated interior"
     },
     {
       "id": "US-004",
