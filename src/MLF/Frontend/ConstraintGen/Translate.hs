@@ -236,9 +236,8 @@ rigid ancestor is introduced). This pushes toward
 the thesis’ “rigid domain” intent while staying presolution-safe: the nodes are
 not instantiable, but they are not locked under a rigid ancestor.
 
-Both copies remain wrapped (like `internalizeSrcType`). The separate codomain
-copy is retained for future work once presolution/elaboration can consume it
-directly without breaking the binding tree invariants.
+Both copies remain wrapped (like `internalizeSrcType`). The codomain is returned
+as the annotation result, while the domain stays the instantiation target.
 -}
 
 {- Note [Annotated Lambda parameters via κσ]
