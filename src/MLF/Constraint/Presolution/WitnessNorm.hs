@@ -106,10 +106,12 @@ normalizeEdgeWitnessesM = do
                             ]
                 else pure traceInteriorKeys
         let interiorNorm =
-                -- Normalize against an expansion-aware interior so ops on copied nodes
-                -- (e.g., escaping binder metas) are retained for Raise/Merge witnesses.
-                IntSet.union interiorExact $
-                    IntSet.fromList (map getNodeId (copiedNodes copyMap))
+                -- Rewrite interior through copyMap so it's in the same node-id space
+                -- as the rewritten witness steps (thesis-exact I(r) membership).
+                IntSet.fromList
+                    [ getNodeId (rewriteNode (NodeId n))
+                    | n <- IntSet.toList interiorExact
+                    ]
         let steps0 = map rewriteStep (ewSteps w0)
             orderKeys0 = Order.orderKeysFromConstraintWith id c0 orderRoot Nothing
             opTargets = \case
