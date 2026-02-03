@@ -996,21 +996,37 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 Elab.pretty phi `shouldBe` "O; ∀(u0 ⩾) N"
 
             it "scheme-aware Φ can translate Merge (alias one binder to another)" $ do
-                (solved, _intNode) <- requireRight (runSolvedWithRoot (ELit (LInt 1)))
-
                 let scheme =
                         Elab.schemeFromType
                             (Elab.TForall "a" Nothing (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))))
-                    subst = IntMap.fromList [(1, "a"), (2, "b")]
+                    root = NodeId 100
+                    aN = NodeId 1
+                    bN = NodeId 2
+                    subst = IntMap.fromList [(getNodeId aN, "a"), (getNodeId bN, "b")]
                     si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = subst }
 
-                    -- Merge binder “b” into binder “a”, i.e. ∀a. ∀b. a -> b  ~~>  ∀a. a -> a
-                    ops = [OpMerge (NodeId 2) (NodeId 1)]
+                    -- Set up a proper constraint with binding parents for nodes 1 and 2
+                    c = rootedConstraint emptyConstraint
+                        { cNodes = nodeMapFromList
+                                [ (getNodeId root, TyArrow root aN bN)
+                                , (getNodeId aN, TyVar { tnId = aN, tnBound = Nothing })
+                                , (getNodeId bN, TyVar { tnId = bN, tnBound = Nothing })
+                                ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef aN), (genRef (GenNodeId 0), BindFlex))
+                                , (nodeRefKey (typeRef bN), (genRef (GenNodeId 0), BindFlex))
+                                ]
+                        }
+                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+
+                    -- Merge binder "b" into binder "a", i.e. ∀a. ∀b. a -> b  ~~>  ∀a. a -> a
+                    ops = [OpMerge bN aN]
                     ew = EdgeWitness
                         { ewEdgeId = EdgeId 0
-                        , ewLeft = NodeId 0
-                        , ewRight = NodeId 0
-                        , ewRoot = NodeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
                         , ewSteps = map StepOmega ops
                         , ewWitness = InstanceWitness ops
                         }
@@ -1023,20 +1039,36 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 canonType out `shouldBe` canonType expected
 
             it "scheme-aware Φ can translate RaiseMerge (alias one binder to another)" $ do
-                (solved, _intNode) <- requireRight (runSolvedWithRoot (ELit (LInt 1)))
-
                 let scheme =
                         Elab.schemeFromType
                             (Elab.TForall "a" Nothing (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))))
-                    subst = IntMap.fromList [(1, "a"), (2, "b")]
+                    root = NodeId 100
+                    aN = NodeId 1
+                    bN = NodeId 2
+                    subst = IntMap.fromList [(getNodeId aN, "a"), (getNodeId bN, "b")]
                     si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = subst }
 
-                    ops = [OpRaiseMerge (NodeId 2) (NodeId 1)]
+                    -- Set up a proper constraint with binding parents for nodes 1 and 2
+                    c = rootedConstraint emptyConstraint
+                        { cNodes = nodeMapFromList
+                                [ (getNodeId root, TyArrow root aN bN)
+                                , (getNodeId aN, TyVar { tnId = aN, tnBound = Nothing })
+                                , (getNodeId bN, TyVar { tnId = bN, tnBound = Nothing })
+                                ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef aN), (genRef (GenNodeId 0), BindFlex))
+                                , (nodeRefKey (typeRef bN), (genRef (GenNodeId 0), BindFlex))
+                                ]
+                        }
+                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+
+                    ops = [OpRaiseMerge bN aN]
                     ew = EdgeWitness
                         { ewEdgeId = EdgeId 0
-                        , ewLeft = NodeId 0
-                        , ewRight = NodeId 0
-                        , ewRoot = NodeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
                         , ewSteps = map StepOmega ops
                         , ewWitness = InstanceWitness ops
                         }
@@ -1605,6 +1637,67 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         expectationFailure $ "Expected ValidationFailed for OpRaise outside interior, got: " ++ show otherErr
                     Right inst ->
                         expectationFailure $ "Expected failure for OpRaise outside interior, got instantiation: " ++ show inst
+
+            -- US-005: Φ errors on OpWeaken targeting non-binder node (eliminate skip paths)
+            it "Φ rejects OpWeaken targeting non-binder node" $ do
+                -- Construct a scenario where OpWeaken targets a node that is not a binder.
+                -- Per US-005, such witnesses should be rejected with a hard error, not silently skipped.
+                let root = NodeId 100
+                    aN = NodeId 1
+                    nonBinderN = NodeId 50  -- Not in binderKeys (siSubst)
+
+                    -- Minimal constraint with nodes - all bound to gen node (valid binding tree)
+                    c = rootedConstraint emptyConstraint
+                        { cNodes = nodeMapFromList
+                                [ (getNodeId root, TyVar { tnId = root, tnBound = Nothing })
+                                , (getNodeId aN, TyVar { tnId = aN, tnBound = Nothing })
+                                , (getNodeId nonBinderN, TyVar { tnId = nonBinderN, tnBound = Nothing })
+                                ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef root), (genRef (GenNodeId 0), BindFlex))
+                                , (nodeRefKey (typeRef aN), (genRef (GenNodeId 0), BindFlex))
+                                , (nodeRefKey (typeRef nonBinderN), (genRef (GenNodeId 0), BindFlex))
+                                ]
+                        }
+                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+
+                    -- Create a scheme with one binder (aN) - nonBinderN is NOT in siSubst
+                    scheme = Elab.Forall [("a", Nothing)] (Elab.TVar "a")
+                    si = Elab.SchemeInfo
+                        { Elab.siScheme = scheme
+                        , Elab.siSubst = IntMap.singleton (getNodeId aN) "a"
+                        }
+
+                    -- Create an EdgeWitness with OpWeaken targeting nonBinderN (not in siSubst = not a binder)
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 1
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewSteps = [StepOmega (OpWeaken nonBinderN)]
+                        , ewWitness = InstanceWitness [OpWeaken nonBinderN]
+                        }
+
+                    -- Interior includes all nodes
+                    interiorSet = IntSet.fromList [getNodeId root, getNodeId aN, getNodeId nonBinderN]
+
+                    -- Create an EdgeTrace with the interior
+                    tr = EdgeTrace
+                        { etRoot = root
+                        , etInterior = InteriorNodes interiorSet
+                        , etCopyMap = CopyMapping IntMap.empty
+                        , etBinderArgs = []
+                        }
+
+                -- Φ should fail with ValidationFailed for non-binder target
+                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew of
+                    Left (Elab.ValidationFailed msgs) ->
+                        msgs `shouldSatisfy` any (isInfixOf "OpWeaken targets non-binder node")
+                    Left otherErr ->
+                        expectationFailure $ "Expected ValidationFailed for OpWeaken non-binder, got: " ++ show otherErr
+                    Right inst ->
+                        expectationFailure $ "Expected failure for OpWeaken non-binder, got instantiation: " ++ show inst
 
             -- US-004: Φ requires EdgeTrace (no best-effort mode)
             it "elaboration fails with MissingEdgeTrace when witness exists but trace is missing" $ do

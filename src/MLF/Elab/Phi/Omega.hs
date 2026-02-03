@@ -407,58 +407,87 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
 
         (OpGraft arg bv : OpWeaken bv' : rest)
             | bv == bv' -> do
-                if not (isBinderNode binderKeys bv)
+                -- Paper Fig. 15.3.4: operations on rigid nodes translate to identity (ε)
+                if isRigidNode bv
                     then go binderKeys keepBinderKeys' namedSet' ty ids phi rest lookupBinder
-                    else do
-                        case lookupBinderIndex binderKeys ids bv of
-                            Nothing -> go binderKeys keepBinderKeys' namedSet' ty ids phi rest lookupBinder
-                            Just i -> do
-                                let (qs, _) = splitForalls ty
-                                when (length qs /= length ids) $
-                                    Left (InstantiationError "OpGraft+OpWeaken: binder spine / identity list length mismatch")
-                                let mbBound = snd (qs !! i)
-                                if mbBound /= Just TBottom && mbBound /= Nothing
-                                    then go binderKeys keepBinderKeys' namedSet' ty ids phi rest lookupBinder
-                                    else do
-                                        (inst, ids1) <- atBinder binderKeys ids ty bv $ do
-                                            argTy <- reifyTypeArg namedSet' (Just bv) (graftArgFor arg bv)
-                                            pure (InstApp (inlineAliasBoundsAsBound argTy))
-                                        ty' <- applyInst "OpGraft+OpWeaken" ty inst
-                                        go binderKeys keepBinderKeys' namedSet' ty' ids1 (composeInst phi inst) rest lookupBinder
+                    else if not (isBinderNode binderKeys bv)
+                        then Left $ ValidationFailed
+                            [ "OpGraft+OpWeaken targets non-binder node"
+                            , "  target node: " ++ show bv
+                            , "  canonical: " ++ show (canonicalNode bv)
+                            ]
+                        else do
+                            case lookupBinderIndex binderKeys ids bv of
+                                Nothing -> Left $ ValidationFailed
+                                    [ "OpGraft+OpWeaken: binder not found in quantifier spine"
+                                    , "  target node: " ++ show bv
+                                    , "  canonical: " ++ show (canonicalNode bv)
+                                    ]
+                                Just i -> do
+                                    let (qs, _) = splitForalls ty
+                                    when (length qs /= length ids) $
+                                        Left (InstantiationError "OpGraft+OpWeaken: binder spine / identity list length mismatch")
+                                    let mbBound = snd (qs !! i)
+                                    if mbBound /= Just TBottom && mbBound /= Nothing
+                                        then go binderKeys keepBinderKeys' namedSet' ty ids phi rest lookupBinder
+                                        else do
+                                            (inst, ids1) <- atBinder binderKeys ids ty bv $ do
+                                                argTy <- reifyTypeArg namedSet' (Just bv) (graftArgFor arg bv)
+                                                pure (InstApp (inlineAliasBoundsAsBound argTy))
+                                            ty' <- applyInst "OpGraft+OpWeaken" ty inst
+                                            go binderKeys keepBinderKeys' namedSet' ty' ids1 (composeInst phi inst) rest lookupBinder
             | otherwise ->
                 Left (InstantiationError "witness op mismatch: OpGraft/OpWeaken refer to different nodes")
 
         (OpGraft arg bv : rest) -> do
-            if not (isBinderNode binderKeys bv)
+            -- Paper Fig. 15.3.4: operations on rigid nodes translate to identity (ε)
+            if isRigidNode bv
                 then go binderKeys keepBinderKeys' namedSet' ty ids phi rest lookupBinder
-                else do
-                    case lookupBinderIndex binderKeys ids bv of
-                        Nothing -> go binderKeys keepBinderKeys' namedSet' ty ids phi rest lookupBinder
-                        Just i -> do
-                            let (qs, _) = splitForalls ty
-                            when (length qs /= length ids) $
-                                Left (InstantiationError "OpGraft: binder spine / identity list length mismatch")
-                            let mbBound = snd (qs !! i)
-                            if mbBound /= Just TBottom && mbBound /= Nothing
-                                then go binderKeys keepBinderKeys' namedSet' ty ids phi rest lookupBinder
-                                else do
-                                    (inst, ids1) <- atBinderKeep binderKeys ids ty bv $ do
-                                        argTy <- reifyTypeArg namedSet' (Just bv) arg
-                                        pure (InstInside (InstBot (inlineAliasBoundsAsBound argTy)))
-                                    ty' <- applyInst "OpGraft" ty inst
-                                    go binderKeys keepBinderKeys' namedSet' ty' ids1 (composeInst phi inst) rest lookupBinder
+                else if not (isBinderNode binderKeys bv)
+                    then Left $ ValidationFailed
+                        [ "OpGraft targets non-binder node"
+                        , "  target node: " ++ show bv
+                        , "  canonical: " ++ show (canonicalNode bv)
+                        ]
+                    else do
+                        case lookupBinderIndex binderKeys ids bv of
+                            Nothing -> Left $ ValidationFailed
+                                [ "OpGraft: binder not found in quantifier spine"
+                                , "  target node: " ++ show bv
+                                , "  canonical: " ++ show (canonicalNode bv)
+                                ]
+                            Just i -> do
+                                let (qs, _) = splitForalls ty
+                                when (length qs /= length ids) $
+                                    Left (InstantiationError "OpGraft: binder spine / identity list length mismatch")
+                                let mbBound = snd (qs !! i)
+                                if mbBound /= Just TBottom && mbBound /= Nothing
+                                    then go binderKeys keepBinderKeys' namedSet' ty ids phi rest lookupBinder
+                                    else do
+                                        (inst, ids1) <- atBinderKeep binderKeys ids ty bv $ do
+                                            argTy <- reifyTypeArg namedSet' (Just bv) arg
+                                            pure (InstInside (InstBot (inlineAliasBoundsAsBound argTy)))
+                                        ty' <- applyInst "OpGraft" ty inst
+                                        go binderKeys keepBinderKeys' namedSet' ty' ids1 (composeInst phi inst) rest lookupBinder
 
         (OpWeaken bv : rest) -> do
-            if not (isBinderNode binderKeys bv)
+            -- Paper Fig. 15.3.4: operations on rigid nodes translate to identity (ε)
+            if isRigidNode bv
                 then go binderKeys keepBinderKeys' namedSet' ty ids phi rest lookupBinder
-                else do
-                    let key = getNodeId (canonicalNode bv)
-                    if IntSet.member key keepBinderKeys'
-                        then go binderKeys keepBinderKeys' namedSet' ty ids phi rest lookupBinder
-                        else do
-                            (inst, ids1) <- atBinder binderKeys ids ty bv (pure InstElim)
-                            ty' <- applyInst "OpWeaken" ty inst
-                            go binderKeys keepBinderKeys' namedSet' ty' ids1 (composeInst phi inst) rest lookupBinder
+                else if not (isBinderNode binderKeys bv)
+                    then Left $ ValidationFailed
+                        [ "OpWeaken targets non-binder node"
+                        , "  target node: " ++ show bv
+                        , "  canonical: " ++ show (canonicalNode bv)
+                        ]
+                    else do
+                        let key = getNodeId (canonicalNode bv)
+                        if IntSet.member key keepBinderKeys'
+                            then go binderKeys keepBinderKeys' namedSet' ty ids phi rest lookupBinder
+                            else do
+                                (inst, ids1) <- atBinder binderKeys ids ty bv (pure InstElim)
+                                ty' <- applyInst "OpWeaken" ty inst
+                                go binderKeys keepBinderKeys' namedSet' ty' ids1 (composeInst phi inst) rest lookupBinder
 
         (OpRaise n : rest) -> do
             let nOrig = canonicalNode n
@@ -665,8 +694,21 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
                                                 go binderKeys keepBinderKeys' namedSet' ty' ids2 (composeInst phi inst) rest lookupBinder
 
         (OpMerge n m : rest)
-            | not (isBinderNode binderKeys n) || not (isBinderNode binderKeys m) ->
+            -- Paper Fig. 15.3.4: operations on rigid nodes translate to identity (ε)
+            | isRigidNode n || isRigidNode m ->
                 go binderKeys keepBinderKeys' namedSet' ty ids phi rest lookupBinder
+            | not (isBinderNode binderKeys n) ->
+                Left $ ValidationFailed
+                    [ "OpMerge: first target is non-binder node"
+                    , "  target node: " ++ show n
+                    , "  canonical: " ++ show (canonicalNode n)
+                    ]
+            | not (isBinderNode binderKeys m) ->
+                Left $ ValidationFailed
+                    [ "OpMerge: second target is non-binder node"
+                    , "  target node: " ++ show m
+                    , "  canonical: " ++ show (canonicalNode m)
+                    ]
             | canonicalNode n == canonicalNode m ->
                 go binderKeys keepBinderKeys' namedSet' ty ids phi rest lookupBinder
             | otherwise -> do
@@ -677,30 +719,43 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
                 go binderKeys keepBinderKeys' namedSet' ty' ids1 (composeInst phi inst) rest lookupBinder
 
         (OpRaiseMerge n m : rest) -> do
-            if not (isBinderNode binderKeys n) || not (isBinderNode binderKeys m)
+            -- Paper Fig. 15.3.4: operations on rigid nodes translate to identity (ε)
+            if isRigidNode n || isRigidNode m
                 then go binderKeys keepBinderKeys' namedSet' ty ids phi rest lookupBinder
-                else do
-                    -- Paper Fig. 10 special-cases RaiseMerge(r, m) at the (flexible) expansion
-                    -- root r as !alpha m. We implement that case precisely: it applies only when
-                    -- n is the expansion root (up to union-find).
-                    let nC = canonicalNode n
-                        rC = canonicalNode orderRoot
-                    if nC == rC
-                        then do
-                            mName <- binderNameFor binderKeys ty ids m lookupBinder
-                            ty' <- applyInst "OpRaiseMerge(abs)" ty (InstAbstr mName)
-                            go binderKeys keepBinderKeys' namedSet' ty' [] (composeInst phi (InstAbstr mName)) rest lookupBinder
+                else if not (isBinderNode binderKeys n)
+                    then Left $ ValidationFailed
+                        [ "OpRaiseMerge: first target is non-binder node"
+                        , "  target node: " ++ show n
+                        , "  canonical: " ++ show (canonicalNode n)
+                        ]
+                    else if not (isBinderNode binderKeys m)
+                        then Left $ ValidationFailed
+                            [ "OpRaiseMerge: second target is non-binder node"
+                            , "  target node: " ++ show m
+                            , "  canonical: " ++ show (canonicalNode m)
+                            ]
                         else do
-                            -- Non-root RaiseMerge behaves like Merge inside the context of n.
-                            case lookupBinderIndex binderKeys ids n of
-                                Nothing ->
-                                    Left (InstantiationError ("OpRaiseMerge: binder " ++ show n ++ " not found in quantifier spine"))
-                                Just _ -> do
+                            -- Paper Fig. 10 special-cases RaiseMerge(r, m) at the (flexible) expansion
+                            -- root r as !alpha m. We implement that case precisely: it applies only when
+                            -- n is the expansion root (up to union-find).
+                            let nC = canonicalNode n
+                                rC = canonicalNode orderRoot
+                            if nC == rC
+                                then do
                                     mName <- binderNameFor binderKeys ty ids m lookupBinder
-                                    let hAbs = InstSeq (InstInside (InstAbstr mName)) InstElim
-                                    (inst, ids1) <- atBinder binderKeys ids ty n (pure hAbs)
-                                    ty' <- applyInst "OpRaiseMerge" ty inst
-                                    go binderKeys keepBinderKeys' namedSet' ty' ids1 (composeInst phi inst) rest lookupBinder
+                                    ty' <- applyInst "OpRaiseMerge(abs)" ty (InstAbstr mName)
+                                    go binderKeys keepBinderKeys' namedSet' ty' [] (composeInst phi (InstAbstr mName)) rest lookupBinder
+                                else do
+                                    -- Non-root RaiseMerge behaves like Merge inside the context of n.
+                                    case lookupBinderIndex binderKeys ids n of
+                                        Nothing ->
+                                            Left (InstantiationError ("OpRaiseMerge: binder " ++ show n ++ " not found in quantifier spine"))
+                                        Just _ -> do
+                                            mName <- binderNameFor binderKeys ty ids m lookupBinder
+                                            let hAbs = InstSeq (InstInside (InstAbstr mName)) InstElim
+                                            (inst, ids1) <- atBinder binderKeys ids ty n (pure hAbs)
+                                            ty' <- applyInst "OpRaiseMerge" ty inst
+                                            go binderKeys keepBinderKeys' namedSet' ty' ids1 (composeInst phi inst) rest lookupBinder
 
     idsForStartType :: SchemeInfo -> ElabType -> [Maybe NodeId]
     idsForStartType si' ty =
@@ -771,6 +826,14 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
     isBinderNode binderKeys nid =
         let key = getNodeId (canonicalNode nid)
         in IntSet.member key binderKeys
+
+    -- | Check if a node is bound rigidly (thesis Fig. 15.3.4: operations on rigid nodes
+    -- translate to identity/ε).
+    isRigidNode :: NodeId -> Bool
+    isRigidNode nid =
+        case lookupBindParent (srConstraint res) (typeRef (canonicalNode nid)) of
+            Just (_, BindRigid) -> True
+            _ -> False
 
     lookupBinderIndex :: IntSet.IntSet -> [Maybe NodeId] -> NodeId -> Maybe Int
     lookupBinderIndex binderKeys ids nid
