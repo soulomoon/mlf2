@@ -1,0 +1,144 @@
+## Codebase Patterns
+- Surface annotation types live in `src/MLF/Frontend/Syntax.hs` as `SrcType`.
+- Constraint term-DAG nodes live in `src/MLF/Constraint/Types/Graph/NodeEdge.hs` as `TyNode`.
+- Phase 1 internalization of `SrcType` is in `src/MLF/Frontend/ConstraintGen/Translate.hs`.
+- Normalization grafting/decomposition is in `src/MLF/Constraint/Normalize.hs`.
+- Shared unification decomposition is in `src/MLF/Constraint/Unify/Decompose.hs` (used by both Normalize and Solve).
+- Unification core with configurable policies is in `src/MLF/Constraint/Unify/Core.hs`.
+- Presolution copying is in `src/MLF/Constraint/Presolution/Copy.hs`.
+- Reification is in `src/MLF/Reify/Core.hs`.
+- Node allocators (allocVar, allocBase, allocArrow, allocCon, etc.) are in `src/MLF/Frontend/ConstraintGen/Emit.hs`.
+- **Presolution Copy pattern**: When adding a new `TyNode` constructor, update both:
+  1. The placeholder shell creation in `copyNode` (around line 450)
+  2. The recursive children copying case (around line 467)
+
+## Progress
+
+Initial PRD converted to Ralph `prd.json` (planning only; no code changes yet).
+
+## 2026-02-03 - US-001
+- What was implemented:
+  - Added `TyCon { tnId, tnCon :: BaseTy, tnArgs :: NonEmpty NodeId }` to `TyNode` in `src/MLF/Constraint/Types/Graph/NodeEdge.hs`
+  - Updated `structuralChildren` to return TyCon args in order (structuralChildrenWithBounds already handles it via fallback)
+  - Added `allocCon :: BaseTy -> NonEmpty NodeId -> ConstraintM NodeId` in `src/MLF/Frontend/ConstraintGen/Emit.hs`
+  - `allocCon` sets default binding parents for all args (like `allocArrow`)
+- Files changed:
+  - `src/MLF/Constraint/Types/Graph/NodeEdge.hs`
+  - `src/MLF/Frontend/ConstraintGen/Emit.hs`
+- **Learnings for future iterations:**
+  - `structuralChildrenWithBounds` falls back to `structuralChildren` for non-TyVar nodes, so adding a case to `structuralChildren` is sufficient
+  - There are 2 pre-existing test failures in ElaborationSpec (bounded quantification tests) unrelated to TyCon work
+  - NonEmpty import: `Data.List.NonEmpty` with qualified `NE` for `NE.toList`
+---
+
+## 2026-02-03 - US-002
+- What was implemented:
+  - Added `STCon String (NonEmpty SrcType)` to `SrcType` in `src/MLF/Frontend/Syntax.hs`
+  - Added `STConF String (NonEmpty a)` to `SrcTypeF`
+  - Updated `Recursive SrcType` instance (`project`) to handle `STCon`
+  - Updated `Corecursive SrcType` instance (`embed`) to handle `STConF`
+  - Added `Data.List.NonEmpty` import
+- Files changed:
+  - `src/MLF/Frontend/Syntax.hs`
+- **Learnings for future iterations:**
+  - The `SrcType`/`SrcTypeF` pattern requires updating both the data type and its functor variant, plus both `Recursive` and `Corecursive` instances
+  - Pre-existing test failures (2 in ElaborationSpec) are unrelated to TyCon work and should be ignored
+---
+
+## 2026-02-03 - US-003
+- What was implemented:
+  - Added `bsTyConArity :: Map.Map BaseTy Int` to `BuildState` in `src/MLF/Frontend/ConstraintGen/State.hs`
+  - Initialized `bsTyConArity` to `Map.empty` in `mkInitialStateWithPolySyms`
+  - Added `TypeConstructorArityMismatch BaseTy Int Int` to `ConstraintError` in `src/MLF/Frontend/ConstraintGen/Types.hs`
+  - Added `ForallBoundMentionsBinder String` to `ConstraintError`
+- Files changed:
+  - `src/MLF/Frontend/ConstraintGen/State.hs`
+  - `src/MLF/Frontend/ConstraintGen/Types.hs`
+- **Learnings for future iterations:**
+  - `BaseTy` is already exported from `MLF.Constraint.Types` which is imported by both State.hs and Types.hs
+  - Pre-existing test failures (2 in ElaborationSpec) continue to be unrelated to TyCon work
+---
+
+## 2026-02-03 - US-004
+- What was implemented:
+  - Implemented arity registration during internalization: `STBase` registers arity 0; `STCon` registers its arg count; mismatches throw `TypeConstructorArityMismatch`
+  - Implemented `STCon` handling in `internalizeSrcTypeWith` using `allocCon`
+  - Implemented `STCon` handling in `internalizeCoercionCopy` for coercion types (both BindRigid and BindFlex cases)
+  - Enforced forall-bound well-formedness: binder not in scope for its bound; if binder occurs in bound, throw `ForallBoundMentionsBinder`
+  - Added helper functions: `registerTyConArity` and `srcTypeFreeVars`
+  - Added ConstraintGenSpec tests for STCon annotation internalization (head + arg structure)
+  - Added ConstraintGenSpec tests for TypeConstructorArityMismatch on conflicting arities
+  - Added ConstraintGenSpec tests for ForallBoundMentionsBinder
+- Files changed:
+  - `src/MLF/Frontend/ConstraintGen/Translate.hs`
+  - `test/ConstraintGenSpec.hs`
+- **Learnings for future iterations:**
+  - `EAnn` uses `internalizeCoercionCopy`, not `internalizeSrcTypeWith`, so both functions need STCon handling
+  - The `STForall` case has special handling for `Just (STVar alias)` where `alias == var` that silently converts to unbounded forall - this needs explicit error checking for ForallBoundMentionsBinder
+  - Pre-existing test failures (2 in ElaborationSpec) continue to be unrelated to TyCon work
+---
+
+## 2026-02-03 - US-005
+- What was implemented:
+  - Updated `parentIsSticky` in `src/MLF/Frontend/ConstraintGen/Scope.hs` to treat `TyCon` like `TyArrow` (structural node)
+  - Note: STCon handling in `internalizeCoercionCopy` (both BindRigid and BindFlex cases) was already implemented in US-004
+  - Note: BindRigid rebinding for TyCon args was already implemented in US-004
+  - Note: Test cases for term annotations with STCon already exist from US-004
+- Files changed:
+  - `src/MLF/Frontend/ConstraintGen/Scope.hs`
+- **Learnings for future iterations:**
+  - `parentIsSticky` determines which parent nodes are "sticky" during scope rebinding - structural nodes (TyArrow, TyCon) should be sticky
+  - US-004 implemented more than its acceptance criteria stated - it also covered most of US-005's requirements
+  - Pre-existing test failures (2 in ElaborationSpec) continue to be unrelated to TyCon work
+---
+
+## 2026-02-03 - US-006
+- What was implemented:
+  - Updated `partitionGraftable` in `src/MLF/Constraint/Normalize.hs` to treat `Var ≤ TyCon` as graftable when the head is not in `cPolySyms`
+  - Implemented `Var ≤ TyCon` grafting in `graftEdge`: rewrites the var node into TyCon with fresh arg vars and emits unify edges per arg
+  - Implemented `TyCon ≤ TyCon` decomposition: when heads and arities match, emits unify edges for corresponding args; otherwise keeps inst edge as type error
+  - Added TyCon type error cases for TyCon vs Arrow, TyCon vs Base, TyCon vs Bottom
+  - Updated `applyToStructure` to handle TyCon nodes (apply union-find to args)
+  - Updated `isPolymorphicAnchor` in `src/MLF/Constraint/Inert.hs` to treat TyCon head in Poly as an anchor
+  - Added NormalizeSpec tests for TyCon grafting and decomposition (8 new test cases)
+- Files changed:
+  - `src/MLF/Constraint/Normalize.hs`
+  - `src/MLF/Constraint/Inert.hs`
+  - `test/NormalizeSpec.hs`
+- **Learnings for future iterations:**
+  - Grafting TyCon follows the same pattern as TyArrow: create fresh vars for each arg, rewrite the var node in-place, set binding parents, emit unify edges
+  - TyCon decomposition requires checking both head equality AND arity equality
+  - Pre-existing test failures (2 in ElaborationSpec) continue to be unrelated to TyCon work
+---
+
+## 2026-02-03 - US-007
+- What was implemented:
+  - Added TyCon/TyCon decomposition in `src/MLF/Constraint/Unify/Decompose.hs` with head and arity checks
+  - Added `MismatchTyCon` and `MismatchTyConArity` to `DecomposeMismatch` and `UnifyMismatch`
+  - Updated `processUnifyEdgesWith` in `src/MLF/Constraint/Unify/Core.hs` to handle TyCon decomposition results
+  - Added TyCon case to `rewriteNode` functions in `src/MLF/Constraint/Solve.hs` for UF canonicalization
+  - Added `TyConClash` and `TyConArityMismatch` error handling in `solveOnMismatch`
+  - Added SolveSpec tests: TyCon structural unification (single and multi-arg), head clash, arity mismatch, TyCon vs TyBase clash, TyCon vs TyArrow clash, occurs-check under TyCon (direct and nested)
+- Files changed:
+  - `src/MLF/Constraint/Unify/Decompose.hs`
+  - `src/MLF/Constraint/Unify/Core.hs`
+  - `src/MLF/Constraint/Solve.hs`
+  - `test/SolveSpec.hs`
+- **Learnings for future iterations:**
+  - Unification decomposition is centralized in `Unify/Decompose.hs` and used by both Normalize and Solve phases
+  - `rewriteNode` in Solve.hs appears twice: once in `applyUFConstraint` and once in `rewriteEliminatedBinders` - both need TyCon cases
+  - Pre-existing test failures (2 in ElaborationSpec) continue to be unrelated to TyCon work
+---
+
+## 2026-02-03 - US-008
+- What was implemented:
+  - Added TyCon recursive copying case in `copyNode` function in `src/MLF/Constraint/Presolution/Copy.hs`
+  - The placeholder shell for TyCon already existed (line 462-463), but the recursive case to copy args was missing
+  - Added `TyCon { tnCon = con, tnArgs = args } -> do args' <- traverse (copyNode ...) args; return $ TyCon freshId con args'`
+- Files changed:
+  - `src/MLF/Constraint/Presolution/Copy.hs`
+- **Learnings for future iterations:**
+  - Presolution copying has two places that need updating for new node types: (1) placeholder shell creation, (2) recursive children copying
+  - The codebase already had the placeholder for TyCon but was missing the recursive case - a common partial implementation pattern
+  - Pre-existing test failures (2 in ElaborationSpec) continue to be unrelated to TyCon work
+---

@@ -1,0 +1,148 @@
+{
+  "project": "mlf4",
+  "branchName": "ralph/csigma-constructor-types",
+  "description": "Add end-to-end support for general type-constructor application types (C σ…) in surface annotations, constraint graphs, and the solver/elaboration pipeline.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Add TyCon node and allocator",
+      "description": "As a maintainer, I want the constraint term-DAG to represent constructor application nodes so later phases can preserve C σ… structure.",
+      "acceptanceCriteria": [
+        "Add TyCon { tnId, tnCon :: BaseTy, tnArgs :: NonEmpty NodeId } to TyNode in src/MLF/Constraint/Types/Graph/NodeEdge.hs",
+        "Update structuralChildren/structuralChildrenWithBounds so TyCon children are its args in order",
+        "Add allocCon :: BaseTy -> NonEmpty NodeId -> ConstraintM NodeId in src/MLF/Frontend/ConstraintGen/Emit.hs",
+        "allocCon sets default binding parents for all args (like allocArrow)",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Add STCon to surface SrcType",
+      "description": "As a maintainer, I want SrcType to represent constructor application types so tests/users can express the paper’s C σ… forms in annotations.",
+      "acceptanceCriteria": [
+        "Add STCon String (NonEmpty SrcType) to SrcType in src/MLF/Frontend/Syntax.hs",
+        "Extend SrcTypeF/Recursive/Corecursive with STConF String (NonEmpty a)",
+        "Existing code using STBase/STArrow/STForall/STBottom continues to compile",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Add constructor arity tracking and errors",
+      "description": "As a maintainer, I want constructor symbol arity to be validated so the implementation matches the thesis assumption of an arity function on Σ.",
+      "acceptanceCriteria": [
+        "Extend BuildState with bsTyConArity :: Map BaseTy Int in src/MLF/Frontend/ConstraintGen/State.hs (initialized empty)",
+        "Extend ConstraintError in src/MLF/Frontend/ConstraintGen/Types.hs with TypeConstructorArityMismatch BaseTy Int Int",
+        "Extend ConstraintError in src/MLF/Frontend/ConstraintGen/Types.hs with ForallBoundMentionsBinder String",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Internalize STCon in non-coercion annotation types",
+      "description": "As a maintainer, I want Phase 1 to internalize STCon annotations into TyCon nodes so constructor types flow through the pipeline like arrows/base types.",
+      "acceptanceCriteria": [
+        "Implement arity registration during internalization: STBase registers arity 0; STCon registers its arg count; mismatches throw TypeConstructorArityMismatch",
+        "Implement STCon handling in internalizeSrcTypeWith in src/MLF/Frontend/ConstraintGen/Translate.hs using allocCon",
+        "Enforce forall-bound well-formedness: binder not in scope for its bound; if binder occurs in bound, throw ForallBoundMentionsBinder",
+        "Add ConstraintGenSpec coverage for STCon annotation internalization (head + arg structure)",
+        "Add ConstraintGenSpec coverage for TypeConstructorArityMismatch on conflicting arities",
+        "Add ConstraintGenSpec coverage for ForallBoundMentionsBinder (e.g. ∀(a ⩾ a). ...)",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Internalize STCon in coercion types (rigid/flex copies)",
+      "description": "As a maintainer, I want coercion type internalization to support STCon so term annotations using constructor types behave consistently with thesis-exact coercion semantics.",
+      "acceptanceCriteria": [
+        "Implement STCon handling in internalizeCoercionCopy in src/MLF/Frontend/ConstraintGen/Translate.hs (both BindRigid and BindFlex cases)",
+        "For BindRigid coercion copies, rebind TyCon args away from structural parents when needed (mirror STArrow logic with rebindIfParent)",
+        "Update any structural/sticky-parent classifiers that must treat TyCon like TyArrow (e.g. src/MLF/Frontend/ConstraintGen/Scope.hs parentIsSticky)",
+        "Add a ConstraintGenSpec or PipelineSpec case that uses a term annotation containing STCon and ensure constraint generation succeeds",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Normalize supports grafting/decomposition for TyCon",
+      "description": "As a maintainer, I want Phase 2 normalization to graft/decompose constructor nodes so constraints involving C σ… simplify like arrows/base types.",
+      "acceptanceCriteria": [
+        "Update src/MLF/Constraint/Normalize.hs to treat Var ≤ TyCon as graftable when the head is not in cPolySyms (align with existing Var ≤ Base restriction)",
+        "Implement grafting Var ≤ TyCon by rewriting the var node into TyCon with fresh arg vars and emitting unify edges per arg",
+        "Implement decomposition TyCon ≤ TyCon when heads and arities match; otherwise keep inst edge as type error",
+        "Update polymorphic-anchor logic to treat TyCon head in Poly as an anchor where applicable (e.g. src/MLF/Constraint/Inert.hs isPolymorphicAnchor)",
+        "Add NormalizeSpec coverage for Var ≤ TyCon grafting and TyCon ≤ TyCon decomposition",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Unification supports TyCon structural decomposition",
+      "description": "As a maintainer, I want unification to structurally unify TyCon nodes so Phase 5 solve can accept constraints containing constructor applications.",
+      "acceptanceCriteria": [
+        "Update src/MLF/Constraint/Unify/Decompose.hs to decompose TyCon/TyCon into arg unifications when heads and arities match",
+        "Ensure constructor mismatches involving TyCon yield deterministic errors in solve (generic ConstructorClash is acceptable if test-covered)",
+        "Add SolveSpec coverage: TyCon unifies structurally; TyCon clashes with TyBase/TyArrow; occurs-check fails when var appears under TyCon",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Presolution copying supports TyCon",
+      "description": "As a maintainer, I want presolution expansion copying to handle TyCon nodes so expansions and interiors can include constructor applications without crashing or dropping structure.",
+      "acceptanceCriteria": [
+        "Update src/MLF/Constraint/Presolution/Copy.hs to copy TyCon nodes (placeholder shell + recursive copying of args)",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Reify and Φ context traversal support TyCon",
+      "description": "As a maintainer, I want reification and Φ context computation to preserve constructor applications so elaboration can emit xMLF TCon types.",
+      "acceptanceCriteria": [
+        "Update src/MLF/Reify/Core.hs to reify TyCon into TCon with reified args",
+        "Update src/MLF/Elab/Phi/Context.hs to descend into TyCon args and treat TyCon as structural for needsInsideRoot",
+        "Update any other TyNode classifiers that must treat TyCon like TyArrow for correctness (e.g. translatable presolution validation in src/MLF/Constraint/Presolution/Validation.hs)",
+        "Add a test that reifies a constraint containing TyCon and asserts the resulting ElabType contains TCon",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}
