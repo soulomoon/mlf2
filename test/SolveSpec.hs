@@ -3,6 +3,7 @@ module SolveSpec (spec) where
 import Test.Hspec
 import qualified Data.IntMap.Strict as IntMap
 import Data.List (isPrefixOf)
+import Data.List.NonEmpty (NonEmpty(..))
 
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Solve
@@ -214,6 +215,170 @@ spec = describe "Phase 5 -- Solve" $ do
                     , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 1)]
                     }
             solveUnify defaultTraceConfig constraint `shouldBe` Left (BaseClash (BaseTy "Int") (BaseTy "Bool"))
+
+    describe "TyCon handling" $ do
+        it "unifies TyCon structurally when heads and arities match" $ do
+            -- List α = List Int should decompose to α = Int
+            let alpha = TyVar { tnId = NodeId 0, tnBound = Nothing }
+                intNode = TyBase (NodeId 1) (BaseTy "Int")
+                list1 = TyCon (NodeId 2) (BaseTy "List") (NodeId 0 :| [])
+                list2 = TyCon (NodeId 3) (BaseTy "List") (NodeId 1 :| [])
+                nodes = nodeMapFromList
+                        [ (0, alpha)
+                        , (1, intNode)
+                        , (2, list1)
+                        , (3, list2)
+                        ]
+                constraint = rootedConstraint $ emptyConstraint
+                    { cNodes = nodes
+                    , cBindParents = inferBindParents nodes
+                    , cUnifyEdges = [UnifyEdge (NodeId 2) (NodeId 3)]
+                    }
+            case solveUnify defaultTraceConfig constraint of
+                Left err -> expectationFailure $ "Unexpected solve error: " ++ show err
+                Right SolveResult{ srConstraint = sc, srUnionFind = uf } -> do
+                    cUnifyEdges sc `shouldBe` []
+                    -- α should be unified with Int
+                    frWith uf (NodeId 0) `shouldBe` NodeId 1
+
+        it "unifies multi-arg TyCon structurally" $ do
+            -- Either α β = Either Int Bool should decompose to α = Int, β = Bool
+            let alpha = TyVar { tnId = NodeId 0, tnBound = Nothing }
+                beta = TyVar { tnId = NodeId 1, tnBound = Nothing }
+                intNode = TyBase (NodeId 2) (BaseTy "Int")
+                boolNode = TyBase (NodeId 3) (BaseTy "Bool")
+                either1 = TyCon (NodeId 4) (BaseTy "Either") (NodeId 0 :| [NodeId 1])
+                either2 = TyCon (NodeId 5) (BaseTy "Either") (NodeId 2 :| [NodeId 3])
+                nodes = nodeMapFromList
+                        [ (0, alpha)
+                        , (1, beta)
+                        , (2, intNode)
+                        , (3, boolNode)
+                        , (4, either1)
+                        , (5, either2)
+                        ]
+                constraint = rootedConstraint $ emptyConstraint
+                    { cNodes = nodes
+                    , cBindParents = inferBindParents nodes
+                    , cUnifyEdges = [UnifyEdge (NodeId 4) (NodeId 5)]
+                    }
+            case solveUnify defaultTraceConfig constraint of
+                Left err -> expectationFailure $ "Unexpected solve error: " ++ show err
+                Right SolveResult{ srConstraint = sc, srUnionFind = uf } -> do
+                    cUnifyEdges sc `shouldBe` []
+                    -- α should be unified with Int, β with Bool
+                    frWith uf (NodeId 0) `shouldBe` NodeId 2
+                    frWith uf (NodeId 1) `shouldBe` NodeId 3
+
+        it "detects TyCon head clash (List vs Maybe)" $ do
+            let alpha = TyVar { tnId = NodeId 0, tnBound = Nothing }
+                intNode = TyBase (NodeId 1) (BaseTy "Int")
+                list1 = TyCon (NodeId 2) (BaseTy "List") (NodeId 0 :| [])
+                maybe2 = TyCon (NodeId 3) (BaseTy "Maybe") (NodeId 1 :| [])
+                nodes = nodeMapFromList
+                        [ (0, alpha)
+                        , (1, intNode)
+                        , (2, list1)
+                        , (3, maybe2)
+                        ]
+                constraint = rootedConstraint $ emptyConstraint
+                    { cNodes = nodes
+                    , cBindParents = inferBindParents nodes
+                    , cUnifyEdges = [UnifyEdge (NodeId 2) (NodeId 3)]
+                    }
+            solveUnify defaultTraceConfig constraint `shouldBe` Left (TyConClash (BaseTy "List") (BaseTy "Maybe"))
+
+        it "detects TyCon arity mismatch" $ do
+            let alpha = TyVar { tnId = NodeId 0, tnBound = Nothing }
+                beta = TyVar { tnId = NodeId 1, tnBound = Nothing }
+                intNode = TyBase (NodeId 2) (BaseTy "Int")
+                -- Pair α β has arity 2
+                pair1 = TyCon (NodeId 3) (BaseTy "Pair") (NodeId 0 :| [NodeId 1])
+                -- Pair Int has arity 1 (malformed, but tests arity check)
+                pair2 = TyCon (NodeId 4) (BaseTy "Pair") (NodeId 2 :| [])
+                nodes = nodeMapFromList
+                        [ (0, alpha)
+                        , (1, beta)
+                        , (2, intNode)
+                        , (3, pair1)
+                        , (4, pair2)
+                        ]
+                constraint = rootedConstraint $ emptyConstraint
+                    { cNodes = nodes
+                    , cBindParents = inferBindParents nodes
+                    , cUnifyEdges = [UnifyEdge (NodeId 3) (NodeId 4)]
+                    }
+            solveUnify defaultTraceConfig constraint `shouldBe` Left (TyConArityMismatch (BaseTy "Pair") 2 1)
+
+        it "detects constructor clash (TyCon vs TyBase)" $ do
+            let alpha = TyVar { tnId = NodeId 0, tnBound = Nothing }
+                intNode = TyBase (NodeId 1) (BaseTy "Int")
+                list1 = TyCon (NodeId 2) (BaseTy "List") (NodeId 0 :| [])
+                nodes = nodeMapFromList
+                        [ (0, alpha)
+                        , (1, intNode)
+                        , (2, list1)
+                        ]
+                constraint = rootedConstraint $ emptyConstraint
+                    { cNodes = nodes
+                    , cBindParents = inferBindParents nodes
+                    , cUnifyEdges = [UnifyEdge (NodeId 2) (NodeId 1)]
+                    }
+            solveUnify defaultTraceConfig constraint `shouldBe` Left (ConstructorClash list1 intNode)
+
+        it "detects constructor clash (TyCon vs TyArrow)" $ do
+            let alpha = TyVar { tnId = NodeId 0, tnBound = Nothing }
+                intNode = TyBase (NodeId 1) (BaseTy "Int")
+                boolNode = TyBase (NodeId 2) (BaseTy "Bool")
+                list1 = TyCon (NodeId 3) (BaseTy "List") (NodeId 0 :| [])
+                arrow = TyArrow (NodeId 4) (NodeId 1) (NodeId 2)
+                nodes = nodeMapFromList
+                        [ (0, alpha)
+                        , (1, intNode)
+                        , (2, boolNode)
+                        , (3, list1)
+                        , (4, arrow)
+                        ]
+                constraint = rootedConstraint $ emptyConstraint
+                    { cNodes = nodes
+                    , cBindParents = inferBindParents nodes
+                    , cUnifyEdges = [UnifyEdge (NodeId 3) (NodeId 4)]
+                    }
+            solveUnify defaultTraceConfig constraint `shouldBe` Left (ConstructorClash list1 arrow)
+
+        it "fails occurs-check when variable appears under TyCon" $ do
+            -- α = List α should fail occurs-check
+            let alpha = TyVar { tnId = NodeId 0, tnBound = Nothing }
+                list1 = TyCon (NodeId 1) (BaseTy "List") (NodeId 0 :| [])
+                nodes = nodeMapFromList
+                        [ (0, alpha)
+                        , (1, list1)
+                        ]
+                constraint = rootedConstraint $ emptyConstraint
+                    { cNodes = nodes
+                    , cBindParents = inferBindParents nodes
+                    , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 1)]
+                    }
+            solveUnify defaultTraceConfig constraint `shouldBe` Left (OccursCheckFailed (NodeId 0) (NodeId 1))
+
+        it "fails occurs-check when variable appears nested under TyCon" $ do
+            -- α = Either Int (List α) should fail occurs-check
+            let alpha = TyVar { tnId = NodeId 0, tnBound = Nothing }
+                intNode = TyBase (NodeId 1) (BaseTy "Int")
+                innerList = TyCon (NodeId 2) (BaseTy "List") (NodeId 0 :| [])
+                either1 = TyCon (NodeId 3) (BaseTy "Either") (NodeId 1 :| [NodeId 2])
+                nodes = nodeMapFromList
+                        [ (0, alpha)
+                        , (1, intNode)
+                        , (2, innerList)
+                        , (3, either1)
+                        ]
+                constraint = rootedConstraint $ emptyConstraint
+                    { cNodes = nodes
+                    , cBindParents = inferBindParents nodes
+                    , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 3)]
+                    }
+            solveUnify defaultTraceConfig constraint `shouldBe` Left (OccursCheckFailed (NodeId 0) (NodeId 3))
 
     describe "Forall handling" $ do
         it "fails when forall nodes have mismatched binder arity" $ do

@@ -69,6 +69,8 @@ data UnifyMismatch
     | MismatchForallArity (Maybe Int) (Maybe Int)
     | MismatchExpVar ExpVarId ExpVarId
     | MismatchUnexpectedExp NodeId
+    | MismatchTyCon BaseTy BaseTy
+    | MismatchTyConArity BaseTy Int Int
     deriving (Eq, Show)
 
 -- | Actions for mismatches.
@@ -149,6 +151,10 @@ processUnifyEdgesWith strategy findRoot lookupNode unionNodes = foldM processOne
                         mismatch (MismatchBase b1 b2) acc edge
                     Left (UnifyDecompose.MismatchExpVar s1 s2) ->
                         mismatch (MismatchExpVar s1 s2) acc edge
+                    Left (UnifyDecompose.MismatchTyCon c1 c2) ->
+                        mismatch (MismatchTyCon c1 c2) acc edge
+                    Left (UnifyDecompose.MismatchTyConArity c k1 k2) ->
+                        mismatch (MismatchTyConArity c k1 k2) acc edge
                     Left UnifyDecompose.MismatchConstructor ->
                         mismatch (MismatchConstructor leftNode rightNode) acc edge
 
@@ -180,6 +186,7 @@ processUnifyEdgesWith strategy findRoot lookupNode unionNodes = foldM processOne
 
     insertEdges node newEdges acc = case node of
         TyArrow{} -> acc ++ newEdges
+        TyCon{} -> acc ++ newEdges
         TyExp{} -> newEdges ++ acc
         TyForall{} -> newEdges ++ acc
         _ -> acc
