@@ -217,17 +217,20 @@ buildCoerce env scopeRoot annTy annotatedExpr = do
     (edgeLeft, _) <- allocExpNode edgeBody
     setBindParentOverride (typeRef edgeLeft) (genRef annGen) BindFlex
     eid <- addInstEdge edgeLeft domainNode
-    pure (domainNode, AAnn exprAnn domainNode eid)
+    pure (codomainNode, AAnn exprAnn codomainNode eid)
 
-{- Note [Coercion domain/codomain tradeoff]
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-The thesis’ coercion κσ builds a rigid domain and flexible codomain. We still
-construct two copies (with shared existentials), but currently return the
-*domain* node as the annotation result. Returning the codomain directly leads
-to extra generalization in bounds and presolution/elaboration failures in the
-current pipeline (see term-annotation tests).
+{- Note [Coercion domain/codomain semantics]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The thesis' coercion κσ builds a rigid domain and flexible codomain. We
+construct two copies (with shared existentials) and return the *codomain* node
+as the annotation result, matching the thesis semantics (§12.3.2.2, §15.3.8).
 
-We now mark the domain copy as *restricted* by binding its coercion-local nodes
+The instantiation edge connects the expression to the *domain* node, ensuring
+the expression is constrained to match the annotation type. The codomain is
+returned as the result type, allowing the annotation to be used in contexts
+that expect the annotated type.
+
+We mark the domain copy as *restricted* by binding its coercion-local nodes
 with rigid edges under gen nodes (shared existentials stay flexible, and no
 rigid ancestor is introduced). This pushes toward
 the thesis’ “rigid domain” intent while staying presolution-safe: the nodes are
