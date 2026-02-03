@@ -14,6 +14,7 @@ module MLF.Frontend.Syntax (
 ) where
 
 import Data.Functor.Foldable (Base, Corecursive (..), Recursive (..))
+import Data.List.NonEmpty (NonEmpty)
 
 {- Note [Surface syntax and paper alignment]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -92,6 +93,7 @@ data SrcType
     = STVar String                              -- ^ Type variable: α
     | STArrow SrcType SrcType                   -- ^ Arrow type: τ → σ
     | STBase String                             -- ^ Base type: Int, Bool, ...
+    | STCon String (NonEmpty SrcType)           -- ^ Constructor application: C σ…
     | STForall String (Maybe SrcType) SrcType   -- ^ Bounded quantification: ∀(α ⩾ τ?). σ
     | STBottom                                  -- ^ Bottom type: ⊥
     deriving (Eq, Show)
@@ -100,6 +102,7 @@ data SrcTypeF a
     = STVarF String
     | STArrowF a a
     | STBaseF String
+    | STConF String (NonEmpty a)
     | STForallF String (Maybe a) a
     | STBottomF
     deriving (Eq, Show, Functor, Foldable, Traversable)
@@ -111,6 +114,7 @@ instance Recursive SrcType where
         STVar v -> STVarF v
         STArrow a b -> STArrowF a b
         STBase b -> STBaseF b
+        STCon c args -> STConF c args
         STForall v mb body -> STForallF v mb body
         STBottom -> STBottomF
 
@@ -119,6 +123,7 @@ instance Corecursive SrcType where
         STVarF v -> STVar v
         STArrowF a b -> STArrow a b
         STBaseF b -> STBase b
+        STConF c args -> STCon c args
         STForallF v mb body -> STForall v mb body
         STBottomF -> STBottom
 
