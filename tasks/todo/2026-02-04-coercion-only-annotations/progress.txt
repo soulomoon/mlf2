@@ -1,0 +1,27 @@
+## Codebase Patterns
+- Use `cabal build all && cabal test` for validation
+- Tests use Hspec with `xit` for pending tests
+- The constraint generation pipeline: SurfaceExpr -> Desugar -> ConstraintGen (Phase 1) -> Normalize (Phase 2) -> ...
+- `ELamAnn` surface syntax desugars to `ELamAnnCore` core syntax (to be changed in US-002)
+- Coercion constants (`ECoerceConst`) represent term annotations in core syntax
+
+## 2026-02-04 22:30 - US-001
+- Removed declared-scheme let interpretation from `Translate.hs`
+- Deleted `isAnnotatedLetRhs`, `buildAnnotated`, and `internalizeBinders` functions
+- Updated `ELet` translation to treat all RHS terms uniformly (no special case for coercion shape)
+- Updated notes in `Translate.hs`, `Desugar.hs`, and `Syntax.hs` to describe coercion-only semantics
+- Updated test "reifies type with flexible bound" to reflect new behavior
+- Updated test "does not require Merge for bounded aliasing" to reflect new behavior
+- Marked test "elaborates lambda with rank-2 argument" as pending (US-004)
+- Files changed:
+  - `src/MLF/Frontend/ConstraintGen/Translate.hs`
+  - `src/MLF/Frontend/Desugar.hs`
+  - `src/MLF/Frontend/Syntax.hs`
+  - `test/PipelineSpec.hs`
+  - `test/ElaborationSpec.hs`
+- **Learnings for future iterations:**
+  - The `buildLet` function in Translate.hs now always uses `buildInferred` for the RHS
+  - Previously, `isAnnotatedLetRhs` detected `EApp (ECoerceConst _) _` patterns to trigger declared-scheme behavior
+  - The `ELamAnnCore` handling still exists but will be revisited in US-004 for rank-2 typing
+  - Coercion-only semantics means annotations are just terms (`cτ e`), not type system extensions
+---
