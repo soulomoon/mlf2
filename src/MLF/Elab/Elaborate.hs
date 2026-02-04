@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
 module MLF.Elab.Elaborate (
@@ -214,15 +215,15 @@ elaborateWithEnv config elabEnv ann = do
         AVarF v _ -> mkOut $ \env ->
             maybe (Left (EnvLookup v)) (const (Right (EVar v))) (Map.lookup v env)
         ALitF lit _ -> mkOut $ \_ -> Right (ELit lit)
-        ALamF v n _ (_bodyAnn, bodyOut) _ ->
+        ALamF v paramNode _ (_bodyAnn, bodyOut) _ ->
             let f env = do
-                    ty <- reifyTypeWithNamedSetNoFallback resReify IntMap.empty namedSetReify n
-                    -- Add lambda parameter to env as a scheme derived from the annotated type,
-                    -- so κσ can reorder/instantiate quantified parameters when present.
-                    let paramScheme = SchemeInfo { siScheme = schemeFromType ty, siSubst = IntMap.empty }
+                    -- Use the parameter node for the lambda's term-level annotation.
+                    -- For annotated lambdas, the body uses the let-bound scheme which shadows this.
+                    paramTy <- reifyTypeWithNamedSetNoFallback resReify IntMap.empty namedSetReify paramNode
+                    let paramScheme = SchemeInfo { siScheme = schemeFromType paramTy, siSubst = IntMap.empty }
                         env' = Map.insert v paramScheme env
                     body' <- elabTerm bodyOut env'
-                    pure (ELam v ty body')
+                    pure (ELam v paramTy body')
             in mkOut f
         AAppF (fAnn, fOut) (aAnn, aOut) funEid argEid _ ->
             let f env = do

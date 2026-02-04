@@ -466,7 +466,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
             ty `shouldAlphaEqType` expected
 
-        xit "elaborates lambda with rank-2 argument (US-004)" $ do
+        it "elaborates lambda with rank-2 argument (US-004)" $ do
             -- PENDING: This test is part of US-004 (Preserve thesis-exact rank-2
             -- annotated lambda result typing). After removing declared-scheme let
             -- interpretation in US-001, the rank-2 lambda handling needs to be
