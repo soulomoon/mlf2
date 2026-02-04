@@ -49,7 +49,7 @@
   3. Updated `.kiro/specs/paper-faithfulness-remaining-deltas/requirements.md` Requirement 2 status from "partial" to "present" with updated evidence
 - Files changed: `implementation_notes.md`, `.kiro/specs/paper-faithfulness-remaining-deltas/requirements.md`
 - **Learnings for future iterations:**
-  - `docs/paper-map.md` does not exist; the thesis ↔ repo mapping is in `implementation_notes.md` under "thesis ↔ repo mapping"
+  - `docs/paper-map.md` exists and provides a thesis ↔ repo index; keep its Σ(g)/Φ entries consistent with `implementation_notes.md`
   - When updating paper-faithfulness status, update both `implementation_notes.md` (summary + alignment notes) and the `.kiro/specs/` requirements file
 ---
 
@@ -61,3 +61,8 @@
   1. "elaborates lambda with rank-2 argument" - alias bounds survived scheme finalization
   2. "annotated lambda parameter should accept a polymorphic argument via κσ" - type mismatch
 ---
+
+## 2026-02-04 - Post-merge verification
+- What was implemented: Merged `master` and resolved conflicts, then fixed the “missing <P order key” regression test to preserve binding-tree invariants while still exercising the `PhiReorder:` fail-fast path.
+- Validation: `cabal test` passes on the merged branch.
+- Task metadata: `prd.json` remains `passes: true` for US-001..US-004; US-004 note updated to reflect that `docs/paper-map.md` exists.

@@ -64,7 +64,7 @@
       ],
       "priority": 4,
       "passes": true,
-      "notes": "docs/paper-map.md does not exist; Σ(g) info added to implementation_notes.md thesis mapping section instead"
+      "notes": "docs/paper-map.md exists and already maps Σ(g) to `MLF.Elab.Pipeline.sigmaReorder`; this task updates Φ/Σ behavior + requirements/notes accordingly."
     }
   ]
 }
