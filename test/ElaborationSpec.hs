@@ -1108,16 +1108,6 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     solved <- firstShow (solveUnify defaultTraceConfig (prConstraint pres))
                     pure (solved, prEdgeWitnesses pres, prEdgeTraces pres)
 
-                runSolvedWithRoot :: SurfaceExpr -> Either String (SolveResult, NodeId)
-                runSolvedWithRoot e = do
-                    ConstraintResult { crConstraint = c0, crRoot = root } <- firstShow (generateConstraintsDefault e)
-                    let c1 = normalize c0
-                    acyc <- firstShow (checkAcyclicity c1)
-                    pres <- firstShow (computePresolution defaultTraceConfig acyc c1)
-                    solved <- firstShow (solveUnify defaultTraceConfig (prConstraint pres))
-                    let root' = Elab.chaseRedirects (prRedirects pres) root
-                    pure (solved, root')
-
                 firstShow :: Show err => Either err a -> Either String a
                 firstShow = either (Left . show) Right
 
