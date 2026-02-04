@@ -8,8 +8,8 @@ module MLF.Frontend.ConstraintGen (
 import Data.Functor.Foldable (cata)
 import qualified Data.IntSet as IntSet
 
-import MLF.Frontend.Syntax (Expr)
-import MLF.Frontend.Desugar (desugarCoercions)
+import MLF.Frontend.Syntax (SurfaceExpr)
+import MLF.Frontend.Desugar (desugarSurface)
 import MLF.Constraint.Types.Graph (NodeId, PolySyms, cAnnEdges, getEdgeId)
 import MLF.Frontend.ConstraintGen.Types
 import MLF.Frontend.ConstraintGen.State
@@ -92,9 +92,9 @@ Paper references:
     discusses the design choice of annotation-free let-polymorphism
 -}
 
-generateConstraints :: PolySyms -> Expr -> Either ConstraintError ConstraintResult
+generateConstraints :: PolySyms -> SurfaceExpr -> Either ConstraintError ConstraintResult
 generateConstraints polySyms expr = do
-    let expr' = desugarCoercions expr
+    let expr' = desugarSurface expr
     let initialState = mkInitialStateWithPolySyms polySyms
     ((_rootGen, rootNode, annRoot), finalState) <-
         runConstraintM (buildRootExpr expr') initialState

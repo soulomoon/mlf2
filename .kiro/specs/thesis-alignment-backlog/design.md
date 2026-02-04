@@ -44,7 +44,10 @@ Part II: Graphic constraints (Ch 9-13)
 - Ch 12 (type inference): Partial.
   - Code: `src/MLF/Constraint/Solve.hs`, `src/MLF/Constraint/Acyclicity.hs`.
   - Gaps: simplification rules (12.2, 12.4), ML constraints translation.
-- Ch 13 (constraints up to similarity or abstraction): Missing.
+- Ch 13 (constraints up to similarity or abstraction): Doc-only / deferred.
+  - Thesis note: for typing constraints, inference up to similarity is not needed (Cor. 13.2.5; `papers/these-finale-english.txt:14271-14278`).
+  - iMLF does not permit type inference and has no principal presolutions (`papers/these-finale-english.txt:14513-14518`).
+  - Audit: `.kiro/specs/constraint-similarity-abstraction/audit.md`.
 
 Part III: Explicit language for MLF (Ch 14-15)
 - Ch 14 (xMLF types, typing rules, reduction): Partial.
@@ -80,8 +83,8 @@ P1 (important for full coverage)
   - New spec: `.kiro/specs/let-scope-alternative-typing`.
 - P1/M: Syntactic <-> graphic translation and bound inlining rules (Ch 8).
   - New spec: `.kiro/specs/syntactic-graphic-translation`.
-- P1/L: Constraints up to similarity or abstraction (Ch 13).
-  - New spec: `.kiro/specs/constraint-similarity-abstraction`.
+- P1/L: Constraints up to similarity or abstraction (Ch 13) — doc-only unless implementing iMLF tooling.
+  - Spec + audit: `.kiro/specs/constraint-similarity-abstraction/`.
 - P1/M: Generalized unification (Ch 7.6).
   - New spec: `.kiro/specs/generalized-unification`.
 

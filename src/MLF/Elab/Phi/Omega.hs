@@ -290,7 +290,7 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
             lookupBinder (NodeId i) = IntMap.lookup i subst
             ids0 = idsForStartType si ty0
             binderKeys = IntSet.fromList (IntMap.keys subst)
-        -- Always attempt Σ(g) reordering at the start, per thesis Def. 15.3.4
+        -- Always attempt Σ(g) / ϕR at the start (thesis Def. 15.3.4), even if Ω has no Raise steps.
         (sigma, ty1, ids1) <- reorderBindersByPrec ty0 ids0
         (_, _, phiOps) <- goSteps binderKeys keepBinderKeys namedSet ty1 ids1 InstId steps lookupBinder
         pure (normalizeInst (instMany [sigma, phiOps]))
