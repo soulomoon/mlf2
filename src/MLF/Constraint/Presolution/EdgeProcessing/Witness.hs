@@ -117,7 +117,11 @@ buildEdgeTrace
     -> PresolutionM EdgeTrace
 buildEdgeTrace _eid left leftRaw expn (copyMap0, _interior0, _frontier0) = do
     bas <- binderArgsFromExpansion leftRaw expn
-    root <- findRoot left
+    -- Paper root `r` for Φ/Σ is the TyExp body, not the TyExp wrapper itself.
+    let rootSeed = case leftRaw of
+            TyExp{ tnBody = b } -> b
+            _ -> left
+    root <- findRoot rootSeed
     (c0, canonical) <- getConstraintAndCanonical
     interiorRaw <- do
         s <- liftBindingError $ Binding.interiorOfUnder canonical c0 (typeRef root)

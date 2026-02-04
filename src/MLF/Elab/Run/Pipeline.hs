@@ -8,7 +8,7 @@ module MLF.Elab.Run.Pipeline (
 
 import qualified Data.IntMap.Strict as IntMap
 
-import MLF.Frontend.Syntax (Expr)
+import MLF.Frontend.Syntax (SurfaceExpr)
 import MLF.Frontend.ConstraintGen (AnnExpr(..), ConstraintError, ConstraintResult(..), generateConstraints)
 import MLF.Constraint.Normalize (normalize)
 import MLF.Constraint.Acyclicity (checkAcyclicity)
@@ -51,17 +51,17 @@ import MLF.Elab.Run.Util
 import MLF.Elab.Run.ResultType (ResultTypeContext(..), computeResultTypeFromAnn, computeResultTypeFallback)
 import MLF.Util.Trace (TraceConfig)
 
-runPipelineElab :: PolySyms -> Expr -> Either PipelineError (ElabTerm, ElabType)
+runPipelineElab :: PolySyms -> SurfaceExpr -> Either PipelineError (ElabTerm, ElabType)
 runPipelineElab = runPipelineElabWithConfig defaultPipelineConfig
 
-runPipelineElabChecked :: PolySyms -> Expr -> Either PipelineError (ElabTerm, ElabType)
+runPipelineElabChecked :: PolySyms -> SurfaceExpr -> Either PipelineError (ElabTerm, ElabType)
 runPipelineElabChecked = runPipelineElabCheckedWithConfig defaultPipelineConfig
 
-runPipelineElabWithConfig :: PipelineConfig -> PolySyms -> Expr -> Either PipelineError (ElabTerm, ElabType)
+runPipelineElabWithConfig :: PipelineConfig -> PolySyms -> SurfaceExpr -> Either PipelineError (ElabTerm, ElabType)
 runPipelineElabWithConfig config polySyms =
     runPipelineElabWith (pcTraceConfig config) (generateConstraints polySyms)
 
-runPipelineElabCheckedWithConfig :: PipelineConfig -> PolySyms -> Expr -> Either PipelineError (ElabTerm, ElabType)
+runPipelineElabCheckedWithConfig :: PipelineConfig -> PolySyms -> SurfaceExpr -> Either PipelineError (ElabTerm, ElabType)
 runPipelineElabCheckedWithConfig config polySyms expr = do
     (term, _ty) <- runPipelineElabWithConfig config polySyms expr
     tyChecked <- fromTypeCheckError (typeCheck term)
@@ -69,8 +69,8 @@ runPipelineElabCheckedWithConfig config polySyms expr = do
 
 runPipelineElabWith
     :: TraceConfig
-    -> (Expr -> Either ConstraintError ConstraintResult)
-    -> Expr
+    -> (SurfaceExpr -> Either ConstraintError ConstraintResult)
+    -> SurfaceExpr
     -> Either PipelineError (ElabTerm, ElabType)
 runPipelineElabWith traceCfg genConstraints expr = do
     ConstraintResult { crConstraint = c0, crAnnotated = ann } <- fromConstraintError (genConstraints expr)

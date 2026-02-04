@@ -114,8 +114,17 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
         case mTrace of
             Nothing -> IntSet.empty
             Just tr ->
-                case etInterior tr of
-                    InteriorNodes s -> s
+                let InteriorNodes s0 = etInterior tr
+                    remapKey k =
+                        let nidC = canonicalNode (NodeId k)
+                            keyC = getNodeId nidC
+                        in case NodeAccess.lookupNode (srConstraint res) nidC of
+                            Just TyVar{} ->
+                                case IntMap.lookup keyC copyMap of
+                                    Nothing -> keyC
+                                    Just nid -> getNodeId (canonicalNode nid)
+                            _ -> keyC
+                in IntSet.fromList (map remapKey (IntSet.toList s0))
 
     orderRoot :: NodeId
     -- Paper root `r` for Phi/Sigma is the expansion root (TyExp body), not the TyExp
@@ -286,18 +295,15 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
             lookupBinder (NodeId i) = IntMap.lookup i subst
             ids0 = idsForStartType si ty0
             binderKeys = IntSet.fromList (IntMap.keys subst)
-            omegaOps = [op | StepOmega op <- steps]
-        (sigma, ty1, ids1) <-
-            if needsPrec omegaOps
-                then reorderBindersByPrec ty0 ids0
-                else Right (InstId, ty0, ids0)
+            -- The thesis introduces a reordering ϕR (aka Σ(g)) whenever the
+            -- gMLF scheme type Typ(a′) disagrees with Typexp(a′) in quantifier
+            -- order (Definition 15.3.4). This mismatch can occur even when the
+            -- propagation witness Ω contains no Raise steps, so we always attempt
+            -- to reorder by <P when we have enough information; `reorderBindersByPrec`
+            -- returns the identity instantiation when no reordering is needed.
+        (sigma, ty1, ids1) <- reorderBindersByPrec ty0 ids0
         (_, _, phiOps) <- goSteps binderKeys keepBinderKeys namedSet ty1 ids1 InstId steps lookupBinder
         pure (normalizeInst (instMany [sigma, phiOps]))
-
-    needsPrec :: [InstanceOp] -> Bool
-    needsPrec = any $ \case
-        OpRaise{} -> True
-        _ -> False
 
     applyInst :: String -> ElabType -> Instantiation -> Either ElabError ElabType
     applyInst label ty0 inst = case applyInstantiation ty0 inst of
@@ -515,6 +521,8 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
                     [ "OpRaise targets node outside interior I(r)"
                     , "  target node: " ++ show nOrig
                     , "  canonical target: " ++ show nC
+                    , "  edgeRoot: " ++ show edgeRoot
+                    , "  orderRoot: " ++ show orderRoot
                     , "  interior set: " ++ show (IntSet.toList interiorSet)
                     ]
                 else
@@ -639,15 +647,32 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
                                                 case lookupBindParent (srConstraint res) (typeRef nC) of
                                                     Just (GenRef _, _) -> Just (minIdx, False)
                                                     Just (TypeRef parent, _) ->
-                                                        case NodeAccess.lookupNode (srConstraint res) (canonicalNode parent) of
-                                                            Just TyForall{} -> Just (minIdx, True)
-                                                            _ -> Nothing
+                                                        let parentC = canonicalNode parent
+                                                            rootC = canonicalNode orderRoot
+                                                        in if parentC == rootC
+                                                            then Just (minIdx, True)
+                                                            else
+                                                                case NodeAccess.lookupNode (srConstraint res) parentC of
+                                                                    Just TyForall{} -> Just (minIdx, True)
+                                                                    _ -> Nothing
                                                     _ -> Nothing
                                         case (mbCandidate, fallbackAtTop) of
                                             (Nothing, Nothing) ->
                                                 Left $
                                                     InstantiationError $
-                                                        "OpRaise (non-spine): missing context for " ++ show nOrig
+                                                        unlines
+                                                            [ "OpRaise (non-spine): missing context"
+                                                            , "  target node: " ++ show nOrig
+                                                            , "  canonical target: " ++ show nC
+                                                            , "  context target: " ++ show nContextTarget
+                                                            , "  orderRoot: " ++ show orderRoot
+                                                            , "  edgeRoot: " ++ show edgeRoot
+                                                            , "  minIdx: " ++ show minIdx
+                                                            , "  deps(Txi(n)): " ++ show deps
+                                                            , "  nodeTy: " ++ show nodeTy
+                                                            , "  idsSynced: " ++ show idsSynced
+                                                            , "  bindParent: " ++ show (lookupBindParent (srConstraint res) (typeRef nC))
+                                                            ]
                                             (Just (insertIdx, ctxMn), _) -> do
                                                 let prefixBefore = take insertIdx names
                                                     aliasOld = applyContext ctxMn InstElim

@@ -284,7 +284,8 @@ normalizeInstanceOpsFull env ops0 = do
     let ops1 = stripExteriorOps env ops0
     ops2 <- canonicalizeOps ops1
     ops3 <- coalesceRaiseMergeWithEnv env ops2
-    ops4 <- checkMergeDirection ops3
+    let ops3' = dropRedundantOps ops3
+    ops4 <- checkMergeDirection ops3'
     ops5 <- reorderWeakenWithEnv env ops4
     let ops6 = dropRedundantOps ops5
     validateNormalizedWitness env ops6
