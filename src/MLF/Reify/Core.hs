@@ -139,26 +139,28 @@ reifyWith _contextLabel res nameForVar isNamed rootMode nid =
 
     boundIsSimple start =
         let go visited nid0 =
-                let nidC = canonical nid0
-                    key = getNodeId nidC
-                in if IntSet.member key visited
-                    then True
-                    else
-                        case lookupNodeIn nodes nidC of
-                            Nothing -> True
-                            Just node ->
-                                let visited' = IntSet.insert key visited
-                                in case node of
-                                    TyBase{} -> True
-                                    TyBottom{} -> True
-                                    TyVar{} ->
-                                        case VarStore.lookupVarBound constraint nidC of
-                                            Nothing -> True
-                                            Just bnd -> go visited' bnd
-                                    TyExp{ tnBody = b } -> go visited' b
-                                    TyArrow{} -> False
-                                    TyForall{} -> False
-        in go IntSet.empty start
+                    let nidC = canonical nid0
+                        key = getNodeId nidC
+                    in if IntSet.member key visited
+                        then True
+                        else
+                            case lookupNodeIn nodes nidC of
+                                Nothing -> True
+                                Just node ->
+                                    let visited' = IntSet.insert key visited
+                                    in case node of
+                                        TyBase{} -> True
+                                        TyBottom{} -> True
+                                        TyCon{ tnArgs = args } ->
+                                            all (go visited') (NE.toList args)
+                                        TyVar{} ->
+                                            case VarStore.lookupVarBound constraint nidC of
+                                                Nothing -> True
+                                                Just bnd -> go visited' bnd
+                                        TyExp{ tnBody = b } -> go visited' b
+                                        TyArrow{} -> False
+                                        TyForall{} -> False
+            in go IntSet.empty start
 
     boundIsSimpleFor n =
         case VarStore.lookupVarBound constraint (canonical n) of
