@@ -1,0 +1,70 @@
+{
+  "project": "mlf4",
+  "branchName": "ralph/thesis-exact-phir-reorder",
+  "description": "Make Φ translation apply thesis quantifier reordering ϕR/Σ(g) when Typ vs Typexp differ, independent of Raise ops, with deterministic fail-fast behavior and regression tests.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Apply Σ/ϕR reordering independent of Raise",
+      "description": "As a maintainer, I want Φ translation to compute and apply Σ(g) even when Ω has no Raise operations, so the elaboration matches thesis Def. 15.3.4 and Fig. 15.3.5.",
+      "acceptanceCriteria": [
+        "Remove the `needsPrec` gate in `src/MLF/Elab/Phi/Omega.hs` so reordering is not conditional on `OpRaise`",
+        "Φ translation always attempts binder reordering at the start of `phiWithSchemeOmega`, producing `InstId` when no reorder is needed",
+        "The emitted instantiation preserves the paper structure: Φ(e) is Σ prefix then Φχe(Ω)",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Deterministic, fail-fast Σ/ϕR computation",
+      "description": "As a maintainer, I want the Σ/ϕR computation to be deterministic and to fail fast when it cannot be computed, so non-translatable presolutions do not silently produce paper-incorrect instantiations.",
+      "acceptanceCriteria": [
+        "Σ computation validates binder spine bookkeeping (binder list length matches ids list)",
+        "Σ computation requires concrete binder identities when a reorder is attempted (no `Nothing` binder ids)",
+        "Σ computation requires <P order keys for every binder identity under the chosen root; missing keys produce a clear `ElabError`",
+        "Bound dependencies are respected: if a binder appears free in another binder’s bound, it must appear earlier (topo-sorted with cycle detection)",
+        "Any missing order key or dependency cycle returns `Left` (fail fast) rather than silently returning `InstId`",
+        "Errors are surfaced as `ElabError` (e.g., `InstantiationError` with a stable `PhiReorder:` prefix)",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Regression tests for reorder-without-Raise and fail-fast behavior",
+      "description": "As a contributor, I want tests that lock in thesis-exact ϕR integration so future refactors do not reintroduce the Raise-only behavior.",
+      "acceptanceCriteria": [
+        "Un-pend and implement `test/ElaborationSpec.hs` test \"applies Σ reordering even without Raise when Typ/Typexp differ (gap)\"",
+        "Add a test showing empty Ω (no ops) can still produce a non-identity instantiation when binder order differs",
+        "Add a test showing a missing <P order key for a binder causes Φ translation to fail fast with a clear error",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Documentation updates for paper-faithfulness",
+      "description": "As a maintainer, I want docs to reflect that ϕR/Σ(g) is now integrated so the repo's paper-alignment status remains accurate.",
+      "acceptanceCriteria": [
+        "Update `implementation_notes.md` to remove the ϕR Raise-only gap note and to describe the new behavior with thesis references",
+        "Update `docs/paper-map.md` to mention Σ(g) is applied during Φ translation (with `MLF.Elab.Sigma` as the commutation-building primitive)",
+        "Update `.kiro/specs/paper-faithfulness-remaining-deltas/requirements.md` Requirement 2 evidence/status to reflect the new integration",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "docs/paper-map.md exists and already maps Σ(g) to `MLF.Elab.Pipeline.sigmaReorder`; this task updates Φ/Σ behavior + requirements/notes accordingly."
+    }
+  ]
+}

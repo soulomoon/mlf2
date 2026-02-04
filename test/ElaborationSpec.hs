@@ -894,7 +894,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     Left _ -> pure ()
                     Right sig -> expectationFailure ("Expected failure, got: " ++ show sig)
 
-            it "applies Σ reordering even without Raise when Typ/Typexp differ (gap)" $ do
+            it "applies Σ reordering even without Raise when Typ/Typexp differ" $ do
                 -- Thesis Def. 15.3.4: ϕR (aka Σ(g)) is required whenever the scheme
                 -- type Typ(a′) and the expansion type Typexp(a′) disagree in binder
                 -- order. This can happen even when Ω contains no Raise steps, so Φ
@@ -918,7 +918,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                     [ (nodeRefKey (typeRef forallNode), (genRef rootGen, BindFlex))
                                     , (nodeRefKey (typeRef arrow), (typeRef forallNode, BindFlex))
                                     , (nodeRefKey (typeRef vA), (typeRef forallNode, BindFlex))
-                                    , (nodeRefKey (typeRef vB), (typeRef forallNode, BindFlex))
+                                    -- vB is intentionally unreachable from the order root so Φ’s Σ(g)
+                                    -- reordering fails fast (missing <P order key).
+                                    , (nodeRefKey (typeRef vB), (genRef rootGen, BindFlex))
                                     ]
                             , cGenNodes =
                                 fromListGen
@@ -951,14 +953,150 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         }
 
                 phi <- requireRight (Elab.phiFromEdgeWitness defaultTraceConfig generalizeAtWith solved (Just si) ew)
+                -- Φ should produce a non-identity instantiation (reordering)
                 phi `shouldNotBe` Elab.InstId
-
+                -- Apply and verify the result has binders in <P order (a before b)
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
-                let typexp =
+                let expected =
                         Elab.TForall "a" Nothing
                             (Elab.TForall "b" Nothing
                                 (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b")))
-                canonType out `shouldBe` canonType typexp
+                canonType out `shouldBe` canonType expected
+
+            it "empty Ω produces non-identity instantiation when binder order differs from <P" $ do
+                -- Three binders: <P order is a < b < c (left-to-right in nested arrows)
+                -- Scheme order is c, b, a. Φ should reorder to a, b, c.
+                let rootGen = GenNodeId 0
+                    vA = NodeId 10
+                    vB = NodeId 11
+                    vC = NodeId 12
+                    inner = NodeId 21
+                    arrow = NodeId 20
+                    forallNode = NodeId 30
+
+                    c =
+                        emptyConstraint
+                            { cNodes = nodeMapFromList
+                                    [ (getNodeId vA, TyVar { tnId = vA, tnBound = Nothing })
+                                    , (getNodeId vB, TyVar { tnId = vB, tnBound = Nothing })
+                                    , (getNodeId vC, TyVar { tnId = vC, tnBound = Nothing })
+                                    , (getNodeId inner, TyArrow inner vB vC)
+                                    , (getNodeId arrow, TyArrow arrow vA inner)
+                                    , (getNodeId forallNode, TyForall forallNode arrow)
+                                    ]
+                            , cBindParents =
+                                IntMap.fromList
+                                    [ (nodeRefKey (typeRef forallNode), (genRef rootGen, BindFlex))
+                                    , (nodeRefKey (typeRef arrow), (typeRef forallNode, BindFlex))
+                                    , (nodeRefKey (typeRef inner), (typeRef forallNode, BindFlex))
+                                    , (nodeRefKey (typeRef vA), (typeRef forallNode, BindFlex))
+                                    , (nodeRefKey (typeRef vB), (typeRef forallNode, BindFlex))
+                                    , (nodeRefKey (typeRef vC), (typeRef forallNode, BindFlex))
+                                    ]
+                            , cGenNodes =
+                                fromListGen
+                                    [ (rootGen, GenNode rootGen [forallNode]) ]
+                            }
+
+                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+
+                    -- Scheme has binders in reverse order: c, b, a
+                    scheme =
+                        Elab.schemeFromType
+                            (Elab.TForall "c" Nothing
+                                (Elab.TForall "b" Nothing
+                                    (Elab.TForall "a" Nothing
+                                        (Elab.TArrow (Elab.TVar "a")
+                                            (Elab.TArrow (Elab.TVar "b") (Elab.TVar "c"))))))
+                    subst =
+                        IntMap.fromList
+                            [ (getNodeId vA, "a")
+                            , (getNodeId vB, "b")
+                            , (getNodeId vC, "c")
+                            ]
+                    si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = subst }
+
+                    -- Empty witness ops
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = arrow
+                        , ewRight = arrow
+                        , ewRoot = arrow
+                        , ewSteps = []
+                        , ewWitness = InstanceWitness []
+                        }
+
+                phi <- requireRight (Elab.phiFromEdgeWitness defaultTraceConfig generalizeAtWith solved (Just si) ew)
+                phi `shouldNotBe` Elab.InstId
+                out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
+                let expected =
+                        Elab.TForall "a" Nothing
+                            (Elab.TForall "b" Nothing
+                                (Elab.TForall "c" Nothing
+                                    (Elab.TArrow (Elab.TVar "a")
+                                        (Elab.TArrow (Elab.TVar "b") (Elab.TVar "c")))))
+                canonType out `shouldBe` canonType expected
+
+            it "missing <P order key for a binder causes fail-fast error" $ do
+                -- Create a constraint where a binder node is NOT reachable from the root
+                -- (so it won't have an order key), triggering the fail-fast error.
+                let rootGen = GenNodeId 0
+                    vA = NodeId 10
+                    vB = NodeId 11
+                    arrow = NodeId 20
+                    forallNode = NodeId 30
+
+                    c =
+                        emptyConstraint
+                            { cNodes = nodeMapFromList
+                                    [ (getNodeId vA, TyVar { tnId = vA, tnBound = Nothing })
+                                    , (getNodeId vB, TyVar { tnId = vB, tnBound = Nothing })
+                                    , (getNodeId arrow, TyArrow arrow vA vA)  -- a -> a (no b)
+                                    , (getNodeId forallNode, TyForall forallNode arrow)
+                                    ]
+                            , cBindParents =
+                                IntMap.fromList
+                                    [ (nodeRefKey (typeRef forallNode), (genRef rootGen, BindFlex))
+                                    , (nodeRefKey (typeRef arrow), (typeRef forallNode, BindFlex))
+                                    , (nodeRefKey (typeRef vA), (typeRef forallNode, BindFlex))
+                                    , (nodeRefKey (typeRef vB), (genRef rootGen, BindFlex))
+                                    ]
+                            , cGenNodes =
+                                fromListGen
+                                    [ (rootGen, GenNode rootGen [forallNode]) ]
+                            }
+
+                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+
+                    -- Scheme references both a and b
+                    scheme =
+                        Elab.schemeFromType
+                            (Elab.TForall "a" Nothing
+                                (Elab.TForall "b" Nothing
+                                    (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))))
+                    subst =
+                        IntMap.fromList
+                            [ (getNodeId vA, "a")
+                            , (getNodeId vB, "b")
+                            ]
+                    si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = subst }
+
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = arrow
+                        , ewRight = arrow
+                        , ewRoot = arrow
+                        , ewSteps = []
+                        , ewWitness = InstanceWitness []
+                        }
+
+                case Elab.phiFromEdgeWitness defaultTraceConfig generalizeAtWith solved (Just si) ew of
+                    Left (Elab.InstantiationError msg) ->
+                        msg `shouldSatisfy` ("PhiReorder:" `isInfixOf`)
+                    Left other ->
+                        expectationFailure $ "Expected InstantiationError with PhiReorder prefix, got: " ++ show other
+                    Right inst ->
+                        expectationFailure $ "Expected failure due to missing order key, got: " ++ Elab.pretty inst
 
         describe "Φ translation soundness" $ do
             let runToSolved :: SurfaceExpr -> Either String (SolveResult, IntMap.IntMap EdgeWitness, IntMap.IntMap EdgeTrace)
@@ -984,11 +1122,37 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 firstShow = either (Left . show) Right
 
             it "scheme-aware Φ can target a non-front binder (reordering before instantiation)" $ do
-                -- Build a SolveResult that can reify a graft argument type (Int).
-                (solved, intNode) <- requireRight (runSolvedWithRoot (ELit (LInt 1)))
+                -- Build a constraint graph with proper nested TyForall structure for ∀a. ∀b. a -> b
+                let root = NodeId 0        -- outer TyForall
+                    binderA = NodeId 1     -- binder for 'a'
+                    forallB = NodeId 2     -- inner TyForall
+                    binderB = NodeId 3     -- binder for 'b'
+                    bodyNode = NodeId 4    -- arrow node
+                    intNode = NodeId 5     -- Int type (separate root)
+                    nodes = nodeMapFromList
+                        [ (getNodeId root, TyForall root forallB)
+                        , (getNodeId binderA, TyVar { tnId = binderA, tnBound = Nothing })
+                        , (getNodeId forallB, TyForall forallB bodyNode)
+                        , (getNodeId binderB, TyVar { tnId = binderB, tnBound = Nothing })
+                        , (getNodeId bodyNode, TyArrow bodyNode binderA binderB)
+                        , (getNodeId intNode, TyBase intNode (BaseTy "Int"))
+                        ]
+                    -- Binding tree: binders bound to their respective foralls
+                    -- forallB and bodyNode are inside root's scope
+                    bindParents =
+                        IntMap.fromList
+                            [ (nodeRefKey (typeRef binderA), (typeRef root, BindFlex))
+                            , (nodeRefKey (typeRef forallB), (typeRef root, BindFlex))
+                            , (nodeRefKey (typeRef binderB), (typeRef forallB, BindFlex))
+                            , (nodeRefKey (typeRef bodyNode), (typeRef forallB, BindFlex))
+                            ]
+                    constraint =
+                        rootedConstraint emptyConstraint
+                            { cNodes = nodes
+                            , cBindParents = bindParents
+                            }
+                    solved = SolveResult { srConstraint = constraint, srUnionFind = IntMap.empty }
 
-                let binderA = NodeId 101
-                    binderB = NodeId 102
                     scheme =
                         Elab.schemeFromType
                             (Elab.TForall "a" Nothing (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))))
@@ -999,13 +1163,13 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             ]
                     si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = subst }
 
-                    -- Witness says: graft Int into binder “b”, then weaken it.
+                    -- Witness says: graft Int into binder "b", then weaken it.
                     ops = [OpGraft intNode binderB, OpWeaken binderB]
                     ew = EdgeWitness
                         { ewEdgeId = EdgeId 0
-                        , ewLeft = NodeId 0
-                        , ewRight = NodeId 0
-                        , ewRoot = NodeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
                         , ewSteps = map StepOmega ops
                         , ewWitness = InstanceWitness ops
                         }
@@ -1016,10 +1180,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 phi `shouldNotBe` Elab.InstApp (Elab.TBase (BaseTy "Int"))
 
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
-                argTy <- requireRight (Elab.reifyBoundWithNames solved IntMap.empty intNode)
                 let expected =
                         Elab.TForall "a" Nothing
-                            (Elab.TArrow (Elab.TVar "a") argTy)
+                            (Elab.TArrow (Elab.TVar "a") (Elab.TBase (BaseTy "Int")))
                 canonType out `shouldBe` canonType expected
 
             it "interleaves StepIntro with Omega ops in Φ translation" $ do
@@ -1058,21 +1221,47 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 Elab.pretty phi `shouldBe` "O; ∀(u0 ⩾) N"
 
             it "scheme-aware Φ can translate Merge (alias one binder to another)" $ do
-                (solved, _intNode) <- requireRight (runSolvedWithRoot (ELit (LInt 1)))
+                -- Build a constraint graph with proper nested TyForall structure for ∀a. ∀b. a -> b
+                let root = NodeId 0        -- outer TyForall
+                    binderA = NodeId 1     -- binder for 'a'
+                    forallB = NodeId 2     -- inner TyForall
+                    binderB = NodeId 3     -- binder for 'b'
+                    bodyNode = NodeId 4    -- arrow node
+                    nodes = nodeMapFromList
+                        [ (getNodeId root, TyForall root forallB)
+                        , (getNodeId binderA, TyVar { tnId = binderA, tnBound = Nothing })
+                        , (getNodeId forallB, TyForall forallB bodyNode)
+                        , (getNodeId binderB, TyVar { tnId = binderB, tnBound = Nothing })
+                        , (getNodeId bodyNode, TyArrow bodyNode binderA binderB)
+                        ]
+                    -- Binding tree: binders bound to their respective foralls
+                    bindParents =
+                        IntMap.fromList
+                            [ (nodeRefKey (typeRef binderA), (typeRef root, BindFlex))
+                            , (nodeRefKey (typeRef forallB), (typeRef root, BindFlex))
+                            , (nodeRefKey (typeRef binderB), (typeRef forallB, BindFlex))
+                            , (nodeRefKey (typeRef bodyNode), (typeRef forallB, BindFlex))
+                            ]
+                    constraint =
+                        rootedConstraint emptyConstraint
+                            { cNodes = nodes
+                            , cBindParents = bindParents
+                            }
+                    solved = SolveResult { srConstraint = constraint, srUnionFind = IntMap.empty }
 
-                let scheme =
+                    scheme =
                         Elab.schemeFromType
                             (Elab.TForall "a" Nothing (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))))
-                    subst = IntMap.fromList [(1, "a"), (2, "b")]
+                    subst = IntMap.fromList [(getNodeId binderA, "a"), (getNodeId binderB, "b")]
                     si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = subst }
 
-                    -- Merge binder “b” into binder “a”, i.e. ∀a. ∀b. a -> b  ~~>  ∀a. a -> a
-                    ops = [OpMerge (NodeId 2) (NodeId 1)]
+                    -- Merge binder "b" into binder "a", i.e. ∀a. ∀b. a -> b  ~~>  ∀a. a -> a
+                    ops = [OpMerge binderB binderA]
                     ew = EdgeWitness
                         { ewEdgeId = EdgeId 0
-                        , ewLeft = NodeId 0
-                        , ewRight = NodeId 0
-                        , ewRoot = NodeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
                         , ewSteps = map StepOmega ops
                         , ewWitness = InstanceWitness ops
                         }
@@ -1085,20 +1274,46 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 canonType out `shouldBe` canonType expected
 
             it "scheme-aware Φ can translate RaiseMerge (alias one binder to another)" $ do
-                (solved, _intNode) <- requireRight (runSolvedWithRoot (ELit (LInt 1)))
+                -- Build a constraint graph with proper nested TyForall structure for ∀a. ∀b. a -> b
+                let root = NodeId 0        -- outer TyForall
+                    binderA = NodeId 1     -- binder for 'a'
+                    forallB = NodeId 2     -- inner TyForall
+                    binderB = NodeId 3     -- binder for 'b'
+                    bodyNode = NodeId 4    -- arrow node
+                    nodes = nodeMapFromList
+                        [ (getNodeId root, TyForall root forallB)
+                        , (getNodeId binderA, TyVar { tnId = binderA, tnBound = Nothing })
+                        , (getNodeId forallB, TyForall forallB bodyNode)
+                        , (getNodeId binderB, TyVar { tnId = binderB, tnBound = Nothing })
+                        , (getNodeId bodyNode, TyArrow bodyNode binderA binderB)
+                        ]
+                    -- Binding tree: binders bound to their respective foralls
+                    bindParents =
+                        IntMap.fromList
+                            [ (nodeRefKey (typeRef binderA), (typeRef root, BindFlex))
+                            , (nodeRefKey (typeRef forallB), (typeRef root, BindFlex))
+                            , (nodeRefKey (typeRef binderB), (typeRef forallB, BindFlex))
+                            , (nodeRefKey (typeRef bodyNode), (typeRef forallB, BindFlex))
+                            ]
+                    constraint =
+                        rootedConstraint emptyConstraint
+                            { cNodes = nodes
+                            , cBindParents = bindParents
+                            }
+                    solved = SolveResult { srConstraint = constraint, srUnionFind = IntMap.empty }
 
-                let scheme =
+                    scheme =
                         Elab.schemeFromType
                             (Elab.TForall "a" Nothing (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))))
-                    subst = IntMap.fromList [(1, "a"), (2, "b")]
+                    subst = IntMap.fromList [(getNodeId binderA, "a"), (getNodeId binderB, "b")]
                     si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = subst }
 
-                    ops = [OpRaiseMerge (NodeId 2) (NodeId 1)]
+                    ops = [OpRaiseMerge binderB binderA]
                     ew = EdgeWitness
                         { ewEdgeId = EdgeId 0
-                        , ewLeft = NodeId 0
-                        , ewRight = NodeId 0
-                        , ewRoot = NodeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
                         , ewSteps = map StepOmega ops
                         , ewWitness = InstanceWitness ops
                         }
