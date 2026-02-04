@@ -913,7 +913,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                     [ (nodeRefKey (typeRef forallNode), (genRef rootGen, BindFlex))
                                     , (nodeRefKey (typeRef arrow), (typeRef forallNode, BindFlex))
                                     , (nodeRefKey (typeRef vA), (typeRef forallNode, BindFlex))
-                                    , (nodeRefKey (typeRef vB), (typeRef forallNode, BindFlex))
+                                    -- vB is intentionally unreachable from the order root so Φ’s Σ(g)
+                                    -- reordering fails fast (missing <P order key).
+                                    , (nodeRefKey (typeRef vB), (genRef rootGen, BindFlex))
                                     ]
                             , cGenNodes =
                                 fromListGen
@@ -1052,7 +1054,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                     [ (nodeRefKey (typeRef forallNode), (genRef rootGen, BindFlex))
                                     , (nodeRefKey (typeRef arrow), (typeRef forallNode, BindFlex))
                                     , (nodeRefKey (typeRef vA), (typeRef forallNode, BindFlex))
-                                    , (nodeRefKey (typeRef vB), (typeRef forallNode, BindFlex))
+                                    , (nodeRefKey (typeRef vB), (genRef rootGen, BindFlex))
                                     ]
                             , cGenNodes =
                                 fromListGen
