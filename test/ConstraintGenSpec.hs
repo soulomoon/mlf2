@@ -25,7 +25,7 @@ import SpecUtil
     , mkForalls
     )
 
-inferConstraintGraphDefault :: Expr -> Either ConstraintError ConstraintResult
+inferConstraintGraphDefault :: SurfaceExpr -> Either ConstraintError ConstraintResult
 inferConstraintGraphDefault = inferConstraintGraph Set.empty
 
 spec :: Spec
@@ -171,10 +171,11 @@ spec = describe "Phase 1 — Constraint generation" $ do
     describe "Annotated Terms" $ do
         it "desugars annotated lambda parameters via let" $ do
             -- Thesis sugar (Chapter 12.3.2):
-            --   λ(x : τ) a  ≜  λ(x) let x = (x : τ) in a
+            --   λ(x : τ) a  ≜  λ(x) let x = (x : τ) in a  ≜  λ(x) let x = cτ x in a
             --
             -- So Phase 1 should see an ordinary lambda whose body is a let-binding
-            -- with an annotated RHS.
+            -- with a coercion application as the RHS. The coercion creates a type
+            -- variable with the annotated type as its bound.
             let ann = STBase "Int"
                 expr = ELamAnn "x" ann (EVar "x")
             expectRight (inferConstraintGraphDefault expr) $ \result -> do
@@ -185,9 +186,15 @@ spec = describe "Phase 1 — Constraint generation" $ do
                         case bodyAnn of
                             ALet "x" _ schemeRoot _ _ rhsAnn bodyAnn' _ -> do
                                 schemeNode <- lookupNode nodes schemeRoot
+                                -- With coercion-based desugaring, the scheme root is a type
+                                -- variable (the coercion's codomain), not the base type directly
                                 case schemeNode of
-                                    TyBase { tnBase = BaseTy name } -> name `shouldBe` "Int"
-                                    other -> expectationFailure $ "Expected Int scheme root, saw " ++ show other
+                                    TyVar { tnBound = Just boundId } -> do
+                                        boundNode <- lookupNode nodes boundId
+                                        case boundNode of
+                                            TyBase { tnBase = BaseTy name } -> name `shouldBe` "Int"
+                                            other -> expectationFailure $ "Expected Int bound, saw " ++ show other
+                                    other -> expectationFailure $ "Expected TyVar with bound, saw " ++ show other
                                 case rhsAnn of
                                     AAnn (AVar "x" rhsUse) _ _ -> rhsUse `shouldBe` lamParam
                                     other -> expectationFailure $ "Expected annotated RHS, saw " ++ show other
@@ -201,8 +208,9 @@ spec = describe "Phase 1 — Constraint generation" $ do
                             other -> expectationFailure $ "Expected let-body for desugared ELamAnn, saw " ++ show other
                     other -> expectationFailure $ "Expected ALam annotation, saw " ++ show other
 
-        it "respects polymorphic let annotations" $ do
-            -- let id : ∀α. α → α = λx. x in id
+        it "respects polymorphic term annotations in let RHS (coercion)" $ do
+            -- let id = (λx. x : ∀α. α → α) in id
+            -- The annotation is a term coercion, not a declared scheme.
             let ann = mkForalls [("a", Nothing)] (STArrow (STVar "a") (STVar "a"))
                 expr = ELet "id" (EAnn (ELam "x" (EVar "x")) ann) (EVar "id")
             expectRight (inferConstraintGraphDefault expr) $ \result -> do
@@ -231,9 +239,9 @@ spec = describe "Phase 1 — Constraint generation" $ do
                             other -> expectationFailure $ "Expected Int bound, saw " ++ show other
                     other -> expectationFailure $ "Expected Int node, saw " ++ show other
 
-        it "respects bounded quantification in schemes" $ do
-            -- let f : ∀(a ⩾ Int). a -> a = ...
-            -- This checks internalizeBinders with a bound
+        it "respects bounded quantification in term annotations (coercion)" $ do
+            -- let f = (λx. x : ∀(a ⩾ Int). a -> a) in f
+            -- The annotation is a term coercion with bounded quantification.
             let ann = mkForalls [("a", Just (STBase "Int"))] (STArrow (STVar "a") (STVar "a"))
                 expr = ELet "f" (EAnn (ELam "x" (EVar "x")) ann) (EVar "f")
             expectRight (inferConstraintGraphDefault expr) $ \result -> do
@@ -262,9 +270,9 @@ spec = describe "Phase 1 — Constraint generation" $ do
                                 expectationFailure $ "Expected TyVar { tnId = for, tnBound = Nothing } domain, saw " ++ show other
                     other -> expectationFailure $ "Expected Arrow scheme root, saw " ++ show other
 
-        it "respects instance bounds in Forall types" $ do
-            -- λ(x : ∀(a ⩾ Int). a). x desugars to a let-binding that carries the forall
-            -- scheme, and uses of x in the body should behave like let-bound schemes.
+        it "respects instance bounds in annotated lambda parameters (coercion)" $ do
+            -- λ(x : ∀(a ⩾ Int). a). x desugars to a let-binding with a coercion term.
+            -- Uses of x in the body go through the coercion result type.
             let ann = STForall "a" (Just (STBase "Int")) (STVar "a")
                 expr = ELamAnn "x" ann (EVar "x")
             expectRight (inferConstraintGraphDefault expr) $ \result -> do
@@ -683,7 +691,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 expr =
                     ELet "c" (EAnn rhs schemeTy) (EAnn (EVar "c") ann)
 
-                runToPresolution :: Expr -> Either String PresolutionResult
+                runToPresolution :: SurfaceExpr -> Either String PresolutionResult
                 runToPresolution e = do
                     ConstraintResult { crConstraint = c0 } <- firstShow (inferConstraintGraphDefault e)
                     let c1 = normalize c0
@@ -875,3 +883,56 @@ spec = describe "Phase 1 — Constraint generation" $ do
                         -- share the same node (existential sharing)
                         root `shouldBe` domainNode
                     other -> expectationFailure $ "Expected 1 inst edge, saw " ++ show (length other)
+
+        -- US-003 Regression: ELet x (EAnn e σ) should NOT introduce explicit-scheme
+        -- instantiation edge structure. With coercion-only semantics, an annotated
+        -- let is just a normal let whose RHS happens to be a coercion term.
+        it "ELet with EAnn RHS does not create explicit-scheme instantiation structure" $ do
+            -- let id = ((\x. x) : ∀a. a -> a) in id
+            -- This should create the same constraint structure as:
+            --   let id = \x. x in id
+            -- Because the annotation is just a term coercion, not a declared scheme.
+            let ann = mkForalls [("a", Nothing)] (STArrow (STVar "a") (STVar "a"))
+                expr = ELet "id" (EAnn (ELam "x" (EVar "x")) ann) (EVar "id")
+            expectRight (inferConstraintGraphDefault expr) $ \result -> do
+                let constraint = crConstraint result
+                    nodes = cNodes constraint
+                    insts = cInstEdges constraint
+
+                -- Get the scheme root from the let annotation
+                -- ALet: name, schemeGenId, schemeRootId, expVar, scopeRoot, rhs, body, nid
+                schemeRoot <- case crAnnotated result of
+                    ALet _ _ schemeRoot' _ _ _ _ _ -> pure schemeRoot'
+                    other -> expectationFailure ("Expected ALet annotation, saw " ++ show other) >> fail "no schemeRoot"
+
+                -- The scheme root should be a TyArrow (the lambda's type), not a
+                -- TyForall (which would indicate declared-scheme behavior)
+                schemeNode <- lookupNode nodes schemeRoot
+                case schemeNode of
+                    TyArrow { tnDom = domId, tnCod = codId } -> do
+                        -- The identity function has shared domain/codomain
+                        domId `shouldBe` codId
+                    other ->
+                        expectationFailure $
+                            "Expected TyArrow scheme root (inferred type), saw " ++ show other ++
+                            ". This may indicate declared-scheme semantics are still present."
+
+                -- There should be no TyForall nodes in the constraint (no declared scheme)
+                let forallNodes = [n | n@TyForall{} <- nodeMapElems nodes]
+                forallNodes `shouldBe` []
+
+                -- The use of 'id' in the body should have a TyExp node (normal let-polymorphism)
+                -- not a direct link to a TyForall scheme
+                case crAnnotated result of
+                    ALet _ _ _ _ _ _ bodyAnn _ ->
+                        case bodyAnn of
+                            AAnn (AVar "id" useNode) _ _ -> do
+                                useTy <- lookupNode nodes useNode
+                                case useTy of
+                                    TyExp {} -> pure () -- Normal let-polymorphic use
+                                    other -> expectationFailure $
+                                        "Expected TyExp for let-bound use, saw " ++ show other
+                            other -> expectationFailure $
+                                "Expected annotated var in body, saw " ++ show other
+                    other -> expectationFailure $
+                        "Expected ALet annotation, saw " ++ show other

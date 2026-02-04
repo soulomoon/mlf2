@@ -18,7 +18,7 @@ module MLF.Pipeline
     , isValue
     ) where
 
-import MLF.Frontend.Syntax (Expr)
+import MLF.Frontend.Syntax (SurfaceExpr)
 import MLF.Frontend.ConstraintGen (ConstraintError, ConstraintResult, generateConstraints)
 import MLF.Constraint.Types.Graph (BaseTy(..), PolySyms)
 import MLF.Elab.Pipeline
@@ -38,5 +38,5 @@ import MLF.Elab.Pipeline
     , typeCheck
     )
 
-inferConstraintGraph :: PolySyms -> Expr -> Either ConstraintError ConstraintResult
+inferConstraintGraph :: PolySyms -> SurfaceExpr -> Either ConstraintError ConstraintResult
 inferConstraintGraph = generateConstraints

@@ -2,8 +2,9 @@
 - Use `cabal build all && cabal test` for validation
 - Tests use Hspec with `xit` for pending tests
 - The constraint generation pipeline: SurfaceExpr -> Desugar -> ConstraintGen (Phase 1) -> Normalize (Phase 2) -> ...
-- `ELamAnn` surface syntax desugars to `ELamAnnCore` core syntax (to be changed in US-002)
+- `ELamAnn` surface syntax desugars to plain `ELam` with let + coercion (US-002 completed)
 - Coercion constants (`ECoerceConst`) represent term annotations in core syntax
+- `SurfaceExpr` and `CoreExpr` are distinct types (Expr 'Surface and Expr 'Core)
 
 ## 2026-02-04 22:30 - US-001
 - Removed declared-scheme let interpretation from `Translate.hs`
@@ -24,4 +25,54 @@
   - Previously, `isAnnotatedLetRhs` detected `EApp (ECoerceConst _) _` patterns to trigger declared-scheme behavior
   - The `ELamAnnCore` handling still exists but will be revisited in US-004 for rank-2 typing
   - Coercion-only semantics means annotations are just terms (`cτ e`), not type system extensions
+---
+
+## 2026-02-04 23:45 - US-002
+- Removed `ELamAnnCore` constructor from `Expr 'Core` in `Syntax.hs`
+- Updated `desugarSurface` in `Desugar.hs` to desugar `ELamAnn` to plain `ELam` with let + coercion:
+  - `ELamAnn x τ body` now desugars to `ELam x (ELet x (EApp (ECoerceConst τ) (EVar x)) body)`
+- Removed `ELamAnnCore` handling from `Translate.hs` (no longer needed)
+- Removed Note [Annotated Lambda parameters] from `Translate.hs` (no longer applicable)
+- Updated test "desugars annotated lambda parameters via let" to reflect new constraint graph structure:
+  - Scheme root is now a TyVar with bound (coercion codomain), not direct TyBase
+- Marked test "annotated lambda parameter should accept a polymorphic argument via κσ" as pending (US-004)
+- Fixed type signatures in public API and tests to use `SurfaceExpr` instead of `Expr`
+- Files changed:
+  - `src/MLF/Frontend/Syntax.hs`
+  - `src/MLF/Frontend/Desugar.hs`
+  - `src/MLF/Frontend/ConstraintGen/Translate.hs`
+  - `src/MLF/Frontend/ConstraintGen.hs`
+  - `src/MLF/Elab/Run/Pipeline.hs`
+  - `src-public/MLF/Pipeline.hs`
+  - `test/ConstraintGenSpec.hs`
+  - `test/BindingSpec.hs`
+  - `test/ElaborationSpec.hs`
+- **Learnings for future iterations:**
+  - The `ELamAnnCore` constructor was providing special handling for rank-2 result typing
+  - Without it, annotated lambdas desugar to plain lambdas with let-bindings
+  - The coercion-based desugaring creates TyVar nodes with bounds (not direct base types)
+  - US-004 will need to address rank-2 result typing for annotated lambdas
+---
+
+## 2026-02-04 10:15 - US-003
+- Renamed test descriptions to use "let with RHS term annotation (coercion)" instead of "annotated let":
+  - "respects polymorphic let annotations" → "respects polymorphic term annotations in let RHS (coercion)"
+  - "respects bounded quantification in schemes" → "respects bounded quantification in term annotations (coercion)"
+  - "respects instance bounds in Forall types" → "respects instance bounds in annotated lambda parameters (coercion)"
+  - "elaborates annotated let with flexible bound" → "elaborates let with RHS term annotation (coercion) and flexible bound"
+  - "elaborates annotated let with polymorphic bound" → "elaborates let with RHS term annotation (coercion) and polymorphic bound"
+  - "let with annotated scheme" → "let with RHS term annotation (coercion)"
+- Added US-003 regression test: "ELet with EAnn RHS does not create explicit-scheme instantiation structure"
+  - Verifies that let-bindings with annotated RHS create TyArrow scheme roots (inferred type)
+  - Verifies no TyForall nodes exist in the constraint (no declared scheme)
+  - Verifies TyExp nodes for let-bound uses (normal let-polymorphism)
+- Files changed:
+  - `test/ConstraintGenSpec.hs`
+  - `test/ElaborationSpec.hs`
+  - `test/BindingSpec.hs`
+- **Learnings for future iterations:**
+  - ALet pattern: `ALet name schemeGenId schemeRootId expVar scopeRoot rhs body nid`
+  - The `schemeRootId` (3rd field) is the NodeId for the scheme root
+  - Coercion-only semantics: `let x = (e : σ)` is just `let x = cσ e in ...` (normal let with coercion term)
+  - Tests should emphasize that annotations are term-level coercions, not declared schemes
 ---

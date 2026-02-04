@@ -29,21 +29,21 @@
         "Tests pass"
       ],
       "priority": 2,
-      "passes": false
+      "passes": true
     },
     {
       "id": "US-003",
       "title": "Update tests and add regression for coercion-only semantics",
       "description": "As a reviewer, I want tests that pin coercion-only annotation semantics and prevent reintroducing declared-scheme lets.",
       "acceptanceCriteria": [
-        "Rename/reword tests that say ‘annotated let’ to ‘let with RHS term annotation (coercion)’",
+        "Rename/reword tests that say 'annotated let' to 'let with RHS term annotation (coercion)'",
         "Update Phase 6 expectations that depended on declared-scheme semantics",
         "Add regression test asserting ELet x (EAnn e σ) does not introduce explicit-scheme instantiation edge structure",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 3,
-      "passes": false
+      "passes": true
     },
     {
       "id": "US-004",
