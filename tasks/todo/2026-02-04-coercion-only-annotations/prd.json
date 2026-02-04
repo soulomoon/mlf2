@@ -50,13 +50,13 @@
       "title": "Preserve thesis-exact rank-2 annotated lambda result typing",
       "description": "As a user, I want \\x : (∀a. a -> a). x 1 to elaborate with thesis-style flexible bounds (bounded quantification) rather than collapsing directly to Int.",
       "acceptanceCriteria": [
-        "ElaborationSpec ‘elaborates lambda with rank-2 argument’ passes with the expected bounded result type (up to α-equivalence)",
+        "ElaborationSpec 'elaborates lambda with rank-2 argument' passes with the expected bounded result type (up to α-equivalence)",
         "Any required fixes are documented in a Note block near the relevant result-type / instantiation logic",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 4,
-      "passes": false
+      "passes": true
     }
   ]
 }

@@ -5,6 +5,8 @@
 - `ELamAnn` surface syntax desugars to plain `ELam` with let + coercion (US-002 completed)
 - Coercion constants (`ECoerceConst`) represent term annotations in core syntax
 - `SurfaceExpr` and `CoreExpr` are distinct types (Expr 'Surface and Expr 'Core)
+- Annotated lambda result type: For rank-2 annotations, use bounded quantifier `∀a ⩾ bodyTy. paramTy -> a`
+- `containsForallTy` checks if a type contains forall (used to detect rank-2 types)
 
 ## 2026-02-04 22:30 - US-001
 - Removed declared-scheme let interpretation from `Translate.hs`
@@ -75,4 +77,29 @@
   - The `schemeRootId` (3rd field) is the NodeId for the scheme root
   - Coercion-only semantics: `let x = (e : σ)` is just `let x = cσ e in ...` (normal let with coercion term)
   - Tests should emphasize that annotations are term-level coercions, not declared schemes
+---
+
+## 2026-02-04 - US-004
+- Added special handling for annotated lambdas in result type computation
+- Pattern detected: `ALam paramName _ _ (ALet letName _ _ _ _ (AAnn _ annNode _) bodyAnn _) _`
+  where `paramName == letName`
+- For rank-2 annotations (parameter type contains forall):
+  - Result type is `∀a ⩾ bodyTy. paramTy -> a` (bounded quantifier)
+- For simple annotations (no forall in parameter type):
+  - Result type is `paramTy -> bodyTy` (simple arrow)
+- Added Note [Annotated Lambda Result Type] in `ResultType/Fallback.hs`
+- Enabled test "elaborates lambda with rank-2 argument (US-004)"
+- Second test "annotated lambda parameter should accept a polymorphic argument via κσ" remains pending
+  - This test requires additional work on result type computation for applications
+  - The issue is that the result type of `let id = \x. x in (\f : Int -> Int. f 1) id` is computed as `∀a. a` instead of `Int`
+- Files changed:
+  - `src/MLF/Elab/Run/ResultType/Fallback.hs`
+  - `src/MLF/Elab/Elaborate.hs` (minor cleanup: renamed variables for clarity)
+  - `test/ElaborationSpec.hs`
+- **Learnings for future iterations:**
+  - `computeResultTypeFallback` is the entry point for result type computation
+  - `computeResultTypeFallbackCore` handles the non-annotated-lambda case
+  - `containsForallTy` checks if a type contains forall (used to detect rank-2 types)
+  - `elabToBound` converts `ElabType` to `BoundType` (for bounded quantifiers)
+  - The second test failure is related to application result type computation, not lambda result type
 ---

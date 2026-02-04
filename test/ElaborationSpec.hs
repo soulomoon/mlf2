@@ -890,7 +890,70 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     Right sig -> expectationFailure ("Expected failure, got: " ++ show sig)
 
             it "applies Σ reordering even without Raise when Typ/Typexp differ (gap)" $ do
-                pendingWith "Needs Typ vs Typexp mismatch detection + Σ integration in Φ when no Raise ops are present."
+                -- Thesis Def. 15.3.4: ϕR (aka Σ(g)) is required whenever the scheme
+                -- type Typ(a′) and the expansion type Typexp(a′) disagree in binder
+                -- order. This can happen even when Ω contains no Raise steps, so Φ
+                -- must still prefix the translated witness with Σ(g).
+                let rootGen = GenNodeId 0
+                    vA = NodeId 10
+                    vB = NodeId 11
+                    arrow = NodeId 20
+                    forallNode = NodeId 30
+
+                    c =
+                        emptyConstraint
+                            { cNodes = nodeMapFromList
+                                    [ (getNodeId vA, TyVar { tnId = vA, tnBound = Nothing })
+                                    , (getNodeId vB, TyVar { tnId = vB, tnBound = Nothing })
+                                    , (getNodeId arrow, TyArrow arrow vA vB)
+                                    , (getNodeId forallNode, TyForall forallNode arrow)
+                                    ]
+                            , cBindParents =
+                                IntMap.fromList
+                                    [ (nodeRefKey (typeRef forallNode), (genRef rootGen, BindFlex))
+                                    , (nodeRefKey (typeRef arrow), (typeRef forallNode, BindFlex))
+                                    , (nodeRefKey (typeRef vA), (typeRef forallNode, BindFlex))
+                                    , (nodeRefKey (typeRef vB), (typeRef forallNode, BindFlex))
+                                    ]
+                            , cGenNodes =
+                                fromListGen
+                                    [ (rootGen, GenNode rootGen [forallNode]) ]
+                            }
+
+                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+
+                    -- Typ has binders in the opposite order of <P for the expansion root.
+                    scheme =
+                        Elab.schemeFromType
+                            (Elab.TForall "b" Nothing
+                                (Elab.TForall "a" Nothing
+                                    (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))))
+                    subst =
+                        IntMap.fromList
+                            [ (getNodeId vA, "a")
+                            , (getNodeId vB, "b")
+                            ]
+                    si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = subst }
+
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = arrow
+                        , ewRight = arrow
+                        -- Expansion root r (TyExp body); order keys derived from this.
+                        , ewRoot = arrow
+                        , ewSteps = []
+                        , ewWitness = InstanceWitness []
+                        }
+
+                phi <- requireRight (Elab.phiFromEdgeWitness defaultTraceConfig generalizeAtWith solved (Just si) ew)
+                phi `shouldNotBe` Elab.InstId
+
+                out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
+                let typexp =
+                        Elab.TForall "a" Nothing
+                            (Elab.TForall "b" Nothing
+                                (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b")))
+                canonType out `shouldBe` canonType typexp
 
         describe "Φ translation soundness" $ do
             let runToSolved :: SurfaceExpr -> Either String (SolveResult, IntMap.IntMap EdgeWitness, IntMap.IntMap EdgeTrace)
@@ -1564,10 +1627,6 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     , let InstanceWitness xs = ewWitness ew
                     , op <- xs
                     ]
-            let isMerge :: InstanceOp -> Bool
-                isMerge op = case op of
-                    OpMerge{} -> True
-                    _ -> False
             -- With coercion-only semantics, the witness operations may differ.
             -- The important thing is that presolution succeeds.
             -- We no longer assert "no Merge" since coercion-based typing may differ.

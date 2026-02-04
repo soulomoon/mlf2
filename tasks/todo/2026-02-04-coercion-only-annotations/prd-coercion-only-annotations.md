@@ -23,38 +23,38 @@ We will remove that extension and make **all annotation effects flow exclusively
 **Description:** As a type‑system maintainer, I want `let x = (e : σ) in b` to be interpreted as a normal let binding of the coerced term `cσ e`, not as a declared scheme for `x`, so the frontend remains thesis‑faithful.
 
 **Acceptance Criteria:**
-- [ ] `MLF.Frontend.ConstraintGen.Translate` no longer special‑cases `ELet` RHS annotations to construct an explicit scheme for `x`.
-- [ ] Any helpers used only for declared‑scheme construction are removed (e.g. binder splitting/internalize helpers) or relocated if still needed elsewhere.
-- [ ] Notes in `Translate.hs` no longer mention “declared scheme” / “old `ELetAnn` behavior”; they state coercion‑only semantics.
-- [ ] `cabal build all` succeeds.
-- [ ] `cabal test --test-show-details=direct` succeeds.
+- [x] `MLF.Frontend.ConstraintGen.Translate` no longer special‑cases `ELet` RHS annotations to construct an explicit scheme for `x`.
+- [x] Any helpers used only for declared‑scheme construction are removed (e.g. binder splitting/internalize helpers) or relocated if still needed elsewhere.
+- [x] Notes in `Translate.hs` no longer mention “declared scheme” / “old `ELetAnn` behavior”; they state coercion‑only semantics.
+- [x] `cabal build all` succeeds.
+- [x] `cabal test --test-show-details=direct` succeeds.
 
 ### US-002: Make annotated lambdas purely desugar to `ELam` + `ELet` + coercion
 **Description:** As a contributor aligning with the thesis, I want `ELamAnn` to desugar exactly to `ELam x (ELet x (cτ x) body)` with no core-only lambda annotation constructor, so Phase 1 never needs to “know about” lambda annotations.
 
 **Acceptance Criteria:**
-- [ ] Core AST contains no lambda-annotation constructor (remove `ELamAnnCore`).
-- [ ] `MLF.Frontend.Desugar.desugarSurface` implements the thesis sugar: `ELamAnn x τ body → ELam x (ELet x (EApp (ECoerceConst τ) (EVar x)) …)`.
-- [ ] `Translate.hs` has no `ELamAnnCore` branch; only `ELam` remains.
-- [ ] `cabal build all` succeeds.
-- [ ] `cabal test --test-show-details=direct` succeeds.
+- [x] Core AST contains no lambda-annotation constructor (remove `ELamAnnCore`).
+- [x] `MLF.Frontend.Desugar.desugarSurface` implements the thesis sugar: `ELamAnn x τ body → ELam x (ELet x (EApp (ECoerceConst τ) (EVar x)) …)`.
+- [x] `Translate.hs` has no `ELamAnnCore` branch; only `ELam` remains.
+- [x] `cabal build all` succeeds.
+- [x] `cabal test --test-show-details=direct` succeeds.
 
 ### US-003: Update tests to reflect coercion-only semantics (and add regression)
 **Description:** As a reviewer, I want tests that clearly pin coercion-only semantics so the declared‑scheme behavior cannot regress.
 
 **Acceptance Criteria:**
-- [ ] Rename/reword test descriptions that say “annotated let” to “let with RHS term annotation (coercion)”.
-- [ ] Update Phase 6 expectations for any tests that depended on declared‑scheme semantics.
-- [ ] Add a regression test asserting that `ELet x (EAnn e σ) body` does *not* build the explicit-scheme instantiation edge structure (i.e. no “scheme-exp instantiates to RHS” constraint is introduced).
-- [ ] `cabal test --test-show-details=direct` succeeds.
+- [x] Rename/reword test descriptions that say “annotated let” to “let with RHS term annotation (coercion)”.
+- [x] Update Phase 6 expectations for any tests that depended on declared‑scheme semantics.
+- [x] Add a regression test asserting that `ELet x (EAnn e σ) body` does *not* build the explicit-scheme instantiation edge structure (i.e. no “scheme-exp instantiates to RHS” constraint is introduced).
+- [x] `cabal test --test-show-details=direct` succeeds.
 
 ### US-004: Preserve thesis-exact rank-2 annotated lambda behavior
 **Description:** As a user, I want `\x : (∀a. a -> a). x 1` to elaborate with thesis‑style flexible bounds (bounded quantification) rather than collapsing directly to `Int`, ensuring rank‑2 annotation behavior stays paper‑faithful.
 
 **Acceptance Criteria:**
-- [ ] `test/ElaborationSpec.hs` “elaborates lambda with rank-2 argument” passes with the expected bounded result type (up to α‑equivalence).
-- [ ] Any required fixes are documented in a `Note [...]` block near the relevant logic (result-type computation or instantiation/witness translation).
-- [ ] `cabal test --test-show-details=direct` succeeds.
+- [x] `test/ElaborationSpec.hs` “elaborates lambda with rank-2 argument” passes with the expected bounded result type (up to α‑equivalence).
+- [x] Any required fixes are documented in a `Note [...]` block near the relevant logic (result-type computation or instantiation/witness translation).
+- [x] `cabal test --test-show-details=direct` succeeds.
 
 ## Functional Requirements
 - FR-1: `(e : σ)` must be implemented only as `cσ e` (coercion application).
