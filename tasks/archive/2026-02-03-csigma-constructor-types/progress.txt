@@ -161,3 +161,8 @@ Initial PRD converted to Ralph `prd.json` (planning only; no code changes yet).
   - The `freeVarsUnder` helper in ElaborationSpec needed a TyCon case to avoid incomplete pattern warnings
   - Pre-existing test failures (2 in ElaborationSpec) continue to be unrelated to TyCon work
 ---
+
+## 2026-02-04 - Verification
+- Verified on branch `ralph/csigma-constructor-types` after merging `master`.
+- `cabal build all && cabal test` passes (445 examples, 0 failures).
+- Task ready to archive.
