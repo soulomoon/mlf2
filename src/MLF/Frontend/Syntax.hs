@@ -1,25 +1,33 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveTraversable #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
 module MLF.Frontend.Syntax (
     VarName,
     Lit (..),
-    Expr (EVar, ELam, ELamAnn, EApp, ELet, EAnn, ELit),
-    ExprF (EVarF, ELamF, ELamAnnF, EAppF, ELetF, EAnnF, ELitF),
+    ExprStage (..),
+    Expr (..),
+    SurfaceExpr,
+    CoreExpr,
     SrcType (..),
     SrcTypeF (..),
     AnnotatedExpr (..),
-    BindingSite (..),
-    mkCoerce,
-    viewCoerce
+    BindingSite (..)
 ) where
 
 import Data.Functor.Foldable (Base, Corecursive (..), Recursive (..))
 
 {- Note [Surface syntax and paper alignment]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-This module defines the *surface language* accepted by the pipeline:
+This module defines the *surface language* accepted by the pipeline and the
+*core language* consumed by constraint generation:
 
-  - `Expr` is the core eMLF term language (partially annotated λ-calculus).
+  - `Expr 'Surface` is the surface eMLF term language (partially annotated
+    λ-calculus).
+  - `Expr 'Core` is the annotation-free core term language used internally
+    after desugaring.
   - `SrcType` are the user-written type annotations.
 
 Paper reference
@@ -29,7 +37,7 @@ eMLF terms is (using the paper’s notation):
 
   b ::= x | λ(x) b | λ(x : σ) b | b b | let x = b in b | (b : σ)
 
-Our `Expr` constructors correspond one-to-one to that grammar:
+Our surface `Expr 'Surface` constructors correspond one-to-one to that grammar:
 
   - `EVar`       ↔ x
   - `ELam`       ↔ λ(x) b
@@ -40,7 +48,7 @@ Our `Expr` constructors correspond one-to-one to that grammar:
 
 The paper notes that term/type annotations can be desugared using coercion
 functions κσ. This repository keeps annotations explicit in the AST and
-implements their meaning directly during constraint generation.
+eliminates them in `MLF.Frontend.Desugar` before constraint generation.
 
 Annotated lets are represented using `ELet` with an annotated RHS:
 
@@ -122,84 +130,41 @@ instance Corecursive SrcType where
         STForallF v mb body -> STForall v mb body
         STBottomF -> STBottom
 
--- | Core term language (eMLF) supported by constraint generation.
+data ExprStage = Surface | Core
+
+-- | eMLF expressions, indexed by stage.
 --
--- This is intentionally small and matches the paper’s eMLF term grammar.
+-- The surface stage matches the thesis' expression grammar and includes
+-- annotations (`EAnn`, `ELamAnn`). The core stage is annotation-free and
+-- represents term annotations via explicit coercion constants (`ECoerceConst`)
+-- plus ordinary application/let (thesis §12.3.2).
 --
--- Downstream meaning (high level)
--- ------------------------------
--- `Expr` does not itself encode polymorphism rules. Instead:
+-- Surface annotations are desugared to coercion constants before constraint
+-- generation. For example:
 --
---   - lambda binders (`ELam`) behave monomorphically,
---   - let binders (`ELet`) are generalization points,
---   - applications (`EApp`) generate instantiation constraints (≤),
---   - annotations (`EAnn`) are turned into constraint graph structure
---     by Phase 1,
---   - annotated lambda parameters (`ELamAnn`) are surface sugar (thesis §12.3.2):
---       λ(x : τ) a  ≜  λ(x) let x = (x : τ) in a
---     and are desugared to `ELam`/`ELet` plus coercions (see `MLF.Frontend.Desugar`)
---     before constraint generation.
---   - term annotations (`EAnn`) desugar to explicit coercions (`ECoerce`),
---     which are internal and not part of the surface grammar.
+--   let x : σ = e in b   ≜   let x = (e : σ) in b   ≜   let x = cσ e in b
 --
--- See `MLF.Frontend.ConstraintGen` for the authoritative translation.
---
--- Unannotated forms infer types; annotated forms check against provided types.
-data Expr
-    = EVar VarName
-    | ELam VarName Expr                         -- ^ λx. e (inferred parameter type)
-    | ELamAnn VarName SrcType Expr              -- ^ λ(x : τ). e (annotated parameter)
-    | EApp Expr Expr
-    | ELet VarName Expr Expr                    -- ^ let x = e₁ in e₂ (inferred scheme)
-    | EAnn Expr SrcType                         -- ^ (e : τ) (term annotation; desugars to coercion)
-    | ECoerce SrcType Expr                      -- ^ Internal: coercion term (cκ e)
-    | ELit Lit
-    deriving (Eq, Show)
+-- The resulting let-binding has a coercion term as its RHS, which is treated
+-- as an ordinary let-binding (not a special "declared scheme" form).
+data Expr (s :: ExprStage) where
+    EVar :: VarName -> Expr s
+    ELit :: Lit -> Expr s
+    ELam :: VarName -> Expr s -> Expr s                         -- ^ λx. e (inferred parameter type)
+    EApp :: Expr s -> Expr s -> Expr s
+    ELet :: VarName -> Expr s -> Expr s -> Expr s               -- ^ let x = e₁ in e₂ (inferred scheme)
 
--- | Internal coercion constructor helper.
-mkCoerce :: SrcType -> Expr -> Expr
-mkCoerce = ECoerce
+    -- Surface-only.
+    ELamAnn :: VarName -> SrcType -> Expr 'Surface -> Expr 'Surface
+    EAnn :: Expr 'Surface -> SrcType -> Expr 'Surface
 
--- | Internal coercion view (used by desugaring/translation).
-viewCoerce :: Expr -> Maybe (SrcType, Expr)
-viewCoerce expr = case expr of
-    ECoerce ty e -> Just (ty, e)
-    _ -> Nothing
+    -- Core-only.
+    ECoerceConst :: SrcType -> Expr 'Core                       -- ^ cτ (coercion constant)
 
-data ExprF a
-    = EVarF VarName
-    | ELamF VarName a
-    | ELamAnnF VarName SrcType a
-    | EAppF a a
-    | ELetF VarName a a
-    | EAnnF a SrcType
-    | ECoerceF SrcType a
-    | ELitF Lit
-    deriving (Eq, Show, Functor, Foldable, Traversable)
+deriving instance Eq (Expr s)
+deriving instance Show (Expr s)
 
-type instance Base Expr = ExprF
-
-instance Recursive Expr where
-    project expr = case expr of
-        EVar v -> EVarF v
-        ELam v body -> ELamF v body
-        ELamAnn v ty body -> ELamAnnF v ty body
-        EApp f a -> EAppF f a
-        ELet v rhs body -> ELetF v rhs body
-        EAnn e ty -> EAnnF e ty
-        ECoerce ty e -> ECoerceF ty e
-        ELit l -> ELitF l
-
-instance Corecursive Expr where
-    embed expr = case expr of
-        EVarF v -> EVar v
-        ELamF v body -> ELam v body
-        ELamAnnF v ty body -> ELamAnn v ty body
-        EAppF f a -> EApp f a
-        ELetF v rhs body -> ELet v rhs body
-        EAnnF e ty -> EAnn e ty
-        ECoerceF ty e -> ECoerce ty e
-        ELitF l -> ELit l
+type SurfaceExpr = Expr 'Surface
+type CoreExpr = Expr 'Core
 
 -- | Optional wrapper for attaching binding-site metadata to a surface expression.
 --
@@ -207,7 +172,7 @@ instance Corecursive Expr where
 -- occurrence is a lambda parameter vs a let-binding”). The main constraint
 -- generator uses its own annotation structure (`MLF.Frontend.ConstraintGen.AnnExpr`).
 data AnnotatedExpr = AnnotatedExpr
-    { annExpr :: Expr
+    { annExpr :: SurfaceExpr
     , annBinding :: Maybe BindingSite
     }
     deriving (Eq, Show)
