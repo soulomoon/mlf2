@@ -117,7 +117,7 @@ data InstanceOp
     -- original binder (Fig. 10, §3.4). The current presolution records Raise
     -- steps during instantiation-edge solving via binding-edge harmonization,
     -- including interior nodes (not just binders). Remaining alignment notes
-    -- are tracked in `plans/merge_raise_merge_plan.txt`.
+    -- are tracked in `.kiro/specs/paper-faithfulness-remaining-deltas/` and `TODO.md`.
     | OpRaise NodeId
     | OpWeaken NodeId
     | OpRaiseMerge NodeId NodeId

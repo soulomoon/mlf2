@@ -62,6 +62,103 @@ computeResultTypeFallback
     -> AnnExpr      -- ^ ann (pre-redirect)
     -> Either ElabError ElabType
 computeResultTypeFallback ctx annCanon ann = do
+    -- Note [Annotated Lambda Result Type]
+    -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    -- When we have an annotated lambda like `\x : τ. body`, it desugars to:
+    --   λx. let x = cτ x in body
+    -- The result type should be an arrow from the annotation type τ to the
+    -- body's type. We detect this pattern and handle it specially to produce
+    -- the correct result type with bounded quantification.
+    --
+    -- For thesis-exact semantics with rank-2 annotations, the result type is:
+    --   ∀a ⩾ bodyTy. paramTy -> a
+    -- where `a` is a fresh bounded variable bounded by the body's type.
+    --
+    -- For simple (non-rank-2) annotations, the result type is:
+    --   paramTy -> bodyTy
+    --
+    -- Pattern: ALam paramName _ _ (ALet letName _ _ _ _ (AAnn _ annNode _) bodyAnn _) _
+    -- where paramName == letName
+    case annCanon of
+        ALam paramName _paramNode _scopeRoot
+            (ALet letName _schemeGen _schemeRoot _expVar _rhsGen rhsAnn bodyAnn _letNode)
+            _lamNode
+            | paramName == letName
+            , AAnn _innerAnn annNodeId _eid <- rhsAnn -> do
+                -- This is an annotated lambda pattern.
+                -- Get the parameter type from the coercion's codomain.
+                -- We need to generalize at the annotation node to get the full
+                -- type with any forall wrappers.
+                let solvedForGen = rtcSolvedForGen ctx
+                    bindParentsGa = rtcBindParentsGa ctx
+                    planBuilder = rtcPlanBuilder ctx
+                    c1 = rtcBaseConstraint ctx
+                    redirects = rtcRedirects ctx
+                -- Find the scope root for the annotation node
+                scopeRoot <- bindingToElab (resolveCanonicalScope c1 solvedForGen redirects annNodeId)
+                let targetC = schemeBodyTarget solvedForGen annNodeId
+                (paramSch, _subst) <- generalizeWithPlan planBuilder bindParentsGa solvedForGen scopeRoot targetC
+                let paramTy = case paramSch of
+                        Forall binds body -> foldr (\(n, b) t -> TForall n b t) body binds
+                -- Compute the result type from the body.
+                -- The body may be wrapped in AAnn (from alternative let scoping),
+                -- so we need to handle that case.
+                bodyTy <- computeBodyResultType ctx bodyAnn
+                -- Check if the parameter type is a rank-2 type (contains forall).
+                -- For rank-2 annotations, wrap the result in a bounded quantifier.
+                -- For simple annotations, just return the arrow type.
+                let isRank2 = containsForallTy paramTy
+                if isRank2
+                    then do
+                        -- For thesis-exact semantics, wrap the result in a bounded quantifier.
+                        -- The result type is: ∀a ⩾ bodyTy. paramTy -> a
+                        let resultVar = "a"
+                        boundTy <- case elabToBound bodyTy of
+                            Left err -> Left (ValidationFailed ["elabToBound failed: " ++ err])
+                            Right b -> Right b
+                        let boundedResultTy =
+                                TForall resultVar (Just boundTy)
+                                    (TArrow paramTy (TVar resultVar))
+                        pure boundedResultTy
+                    else
+                        -- For simple annotations, just return the arrow type.
+                        pure (TArrow paramTy bodyTy)
+        _ -> computeResultTypeFallbackCore ctx annCanon ann
+
+-- | Compute result type for the body of an annotated lambda.
+-- This handles the case where the body is wrapped in AAnn.
+computeBodyResultType
+    :: ResultTypeContext
+    -> AnnExpr
+    -> Either ElabError ElabType
+computeBodyResultType ctx bodyAnn =
+    case bodyAnn of
+        AAnn inner annNodeId eid ->
+            computeResultTypeFromAnnLocal ctx inner inner annNodeId eid
+        _ ->
+            computeResultTypeFallbackCore ctx bodyAnn bodyAnn
+
+-- | Local version of computeResultTypeFromAnn to avoid circular imports.
+-- This is a simplified version that handles the common case.
+computeResultTypeFromAnnLocal
+    :: ResultTypeContext
+    -> AnnExpr      -- ^ inner (post-redirect)
+    -> AnnExpr      -- ^ innerPre (pre-redirect)
+    -> NodeId       -- ^ annNodeId
+    -> EdgeId       -- ^ eid
+    -> Either ElabError ElabType
+computeResultTypeFromAnnLocal ctx inner _innerPre _annNodeId _eid = do
+    -- For the body of an annotated lambda, we just need to compute the
+    -- result type from the inner expression.
+    computeBodyResultType ctx inner
+
+-- | Core implementation of computeResultTypeFallback (non-annotated-lambda case).
+computeResultTypeFallbackCore
+    :: ResultTypeContext
+    -> AnnExpr      -- ^ annCanon (post-redirect)
+    -> AnnExpr      -- ^ ann (pre-redirect)
+    -> Either ElabError ElabType
+computeResultTypeFallbackCore ctx annCanon ann = do
     let canonical = rtcCanonical ctx
         edgeWitnesses = rtcEdgeWitnesses ctx
         edgeTraces = rtcEdgeTraces ctx
@@ -456,6 +553,7 @@ computeResultTypeFallback ctx annCanon ann = do
                                                         Just TyForall{} -> "forall"
                                                         Just TyExp{} -> "exp"
                                                         Just TyBase{} -> "base"
+                                                        Just TyCon{} -> "con"
                                                         Just TyBottom{} -> "bottom"
                                                         Nothing -> "missing"
                                             in debugGaScope traceCfg

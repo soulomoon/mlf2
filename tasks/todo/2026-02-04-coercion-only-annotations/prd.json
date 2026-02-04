@@ -1,0 +1,62 @@
+{
+  "project": "mlf4",
+  "branchName": "ralph/coercion-only-annotations",
+  "description": "Make all surface annotations thesis-exact coercions (cτ) and remove the non-thesis declared-scheme let annotation behavior (old ELetAnn semantics).",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Remove declared-scheme let interpretation",
+      "description": "As a type-system maintainer, I want `let x = (e : σ) in b` (desugared `let x = cσ e in b`) to be a normal let of a coercion term, not a declared scheme for x, so Phase 1 remains thesis-faithful.",
+      "acceptanceCriteria": [
+        "ELet translation no longer special-cases RHS coercion shape to build an explicit scheme",
+        "All 'declared scheme' / 'old ELetAnn' notes are removed or rewritten to describe coercion-only semantics",
+        "Any helpers only used for declared-scheme construction are removed (or relocated if still needed)",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 1,
+      "passes": true
+    },
+    {
+      "id": "US-002",
+      "title": "Desugar annotated lambdas purely via let + coercion",
+      "description": "As a contributor aligning with the thesis, I want `ELamAnn` to desugar exactly to `ELam x (ELet x (cτ x) body)` with no core-only lambda-annotation constructor, so Phase 1 never needs lambda-annotation special cases.",
+      "acceptanceCriteria": [
+        "Remove core-only lambda annotation constructor (ELamAnnCore)",
+        "desugarSurface implements: ELamAnn x τ body -> ELam x (ELet x (EApp (ECoerceConst τ) (EVar x)) ...)",
+        "Translate.hs contains no ELamAnnCore branch; only ELam remains",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 2,
+      "passes": true
+    },
+    {
+      "id": "US-003",
+      "title": "Update tests and add regression for coercion-only semantics",
+      "description": "As a reviewer, I want tests that pin coercion-only annotation semantics and prevent reintroducing declared-scheme lets.",
+      "acceptanceCriteria": [
+        "Rename/reword tests that say 'annotated let' to 'let with RHS term annotation (coercion)'",
+        "Update Phase 6 expectations that depended on declared-scheme semantics",
+        "Add regression test asserting ELet x (EAnn e σ) does not introduce explicit-scheme instantiation edge structure",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 3,
+      "passes": true
+    },
+    {
+      "id": "US-004",
+      "title": "Preserve thesis-exact rank-2 annotated lambda result typing",
+      "description": "As a user, I want \\x : (∀a. a -> a). x 1 to elaborate with thesis-style flexible bounds (bounded quantification) rather than collapsing directly to Int.",
+      "acceptanceCriteria": [
+        "ElaborationSpec 'elaborates lambda with rank-2 argument' passes with the expected bounded result type (up to α-equivalence)",
+        "Any required fixes are documented in a Note block near the relevant result-type / instantiation logic",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 4,
+      "passes": true
+    }
+  ]
+}

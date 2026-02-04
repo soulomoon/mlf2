@@ -34,7 +34,7 @@ This roadmap now matches the implementation: Elab is *thin* and consumes explici
 
 **Current vs target:** The current codebase matches the Frontend/Normalize/Solve structure and records presolution witnesses, and generalization planning (binder selection, ordering, alias policy, scheme-root policy) now lives in presolution (`MLF.Constraint.Presolution.Plan`). Elab consumes `GeneralizePlan`/`ReifyPlan` outputs and applies them without new solving decisions.
 
-**Known deviations (tracked):** See `.kiro/specs/2026-01-08-explicit-forall-genbinding/` and `.kiro/specs/thesis-exact-scheme-closure-audit/` for scope/explicit‑forall alignment and scheme‑closure edge cases. Remaining paper‑faithfulness deltas (constructor types `Cσ`, ϕR integration when `Typ` ≠ `Typexp`, and stricter Φ translatability validation) are tracked in `.kiro/specs/paper-faithfulness-remaining-deltas/`.
+**Known deviations (tracked):** See `.kiro/specs/2026-01-08-explicit-forall-genbinding/` and `.kiro/specs/thesis-exact-scheme-closure-audit/` for scope/explicit‑forall alignment and scheme‑closure edge cases. Remaining paper‑faithfulness deltas (stricter Φ translatability validation and witness‑normalization alignment) are tracked in `.kiro/specs/paper-faithfulness-remaining-deltas/`.
 
 ⸻
 

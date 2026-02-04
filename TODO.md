@@ -107,7 +107,7 @@ Based on `papers/these-finale-english.txt`; see also `papers/xmlf.txt` §1 & §2
 ## Paper-faithfulness deltas (tracked)
 
 - [x] Add constructor types `Cσ` to the xMLF type AST (Fig. 14.2.1).
-- [ ] Integrate quantifier reordering ϕR when `Typ` vs `Typexp` differ (Def. 15.3.4).
+- [x] Integrate quantifier reordering ϕR when `Typ` vs `Typexp` differ (Def. 15.3.4).
 - [ ] Enforce translatable-presolution invariants for Φ (fail on non-interior ops / missing contexts).
 - [ ] Confirm Ω normalization emits all Fig. 15.3.4 operations (or document deviations).
 
