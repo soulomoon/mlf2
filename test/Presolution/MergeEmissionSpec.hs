@@ -230,7 +230,7 @@ spec = describe "Phase 2 — Merge/RaiseMerge emission" $ do
                 tr <- case IntMap.lookup 0 (prEdgeTraces pr) of
                     Nothing -> expectationFailure "Expected EdgeTrace for EdgeId 0" >> fail "missing EdgeTrace"
                     Just tr' -> pure tr'
-                meta <- case lookupCopy b (etCopyMap tr) of
+                _meta <- case lookupCopy b (etCopyMap tr) of
                     Nothing -> expectationFailure "Expected binder-meta in EdgeTrace.etCopyMap" >> fail "missing binder-meta"
                     Just m -> pure m
                 -- With thesis-exact interior, ops outside I(r) are stripped.

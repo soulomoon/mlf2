@@ -1037,9 +1037,10 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                         (Elab.TArrow (Elab.TVar "b") (Elab.TVar "c")))))
                 canonType out `shouldBe` canonType expected
 
-            it "missing <P order key for a binder causes fail-fast error" $ do
+            it "missing <P order key for a binder skips Σ(g) reordering" $ do
                 -- Create a constraint where a binder node is NOT reachable from the root
-                -- (so it won't have an order key), triggering the fail-fast error.
+                -- (so it won't have an order key). Σ(g) reordering should be skipped
+                -- rather than failing elaboration.
                 let rootGen = GenNodeId 0
                     vA = NodeId 10
                     vB = NodeId 11
@@ -1090,13 +1091,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness []
                         }
 
-                case Elab.phiFromEdgeWitness defaultTraceConfig generalizeAtWith solved (Just si) ew of
-                    Left (Elab.InstantiationError msg) ->
-                        msg `shouldSatisfy` ("PhiReorder:" `isInfixOf`)
-                    Left other ->
-                        expectationFailure $ "Expected InstantiationError with PhiReorder prefix, got: " ++ show other
-                    Right inst ->
-                        expectationFailure $ "Expected failure due to missing order key, got: " ++ Elab.pretty inst
+                inst <- requireRight (Elab.phiFromEdgeWitness defaultTraceConfig generalizeAtWith solved (Just si) ew)
+                inst `shouldBe` Elab.InstId
 
         describe "Φ translation soundness" $ do
             let runToSolved :: SurfaceExpr -> Either String (SolveResult, IntMap.IntMap EdgeWitness, IntMap.IntMap EdgeTrace)

@@ -223,8 +223,6 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 cUnifyEdges c `shouldBe` []
 
     it "redirected let-use sites keep polymorphic schemes" $ do
-        -- US-003: thesis-exact Φ now rejects OpRaise outside I(r) instead of skipping
-        pendingWith "US-003: thesis-exact Φ rejects OpRaise outside interior; witness generation needs update"
         -- let id = \x. x in id id
         let expr =
                 ELet "id" (ELam "x" (EVar "x"))
@@ -265,8 +263,6 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 cUnifyEdges c `shouldBe` []
 
     it "composes instantiate then forall when rebound at new level" $ do
-        -- US-003: thesis-exact Φ now rejects OpRaise outside I(r) instead of skipping
-        pendingWith "US-003: thesis-exact Φ rejects OpRaise outside interior; witness generation needs update"
         -- let id = \x -> x in let rebound = (let alias = id in alias) in let _ = rebound 1 in rebound True
         let expr =
                 ELet "id" (ELam "x" (EVar "x")) $

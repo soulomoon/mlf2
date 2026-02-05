@@ -436,7 +436,7 @@ spec = do
                     -- but stripExteriorOps only requires one target to be in interior to keep the op.
                     -- This ensures the op is kept by normalization but fails validation.
                     badOp = OpMerge interiorNode exteriorNode
-                    witness = EdgeWitness
+                    edgeWitness = EdgeWitness
                             { ewEdgeId = EdgeId edgeId
                             , ewLeft = root
                             , ewRight = exteriorNode
@@ -459,7 +459,7 @@ spec = do
                             , psPendingWeakens = IntSet.empty
                             , psBinderCache = IntMap.empty
                             , psEdgeExpansions = IntMap.empty
-                            , psEdgeWitnesses = IntMap.fromList [(edgeId, witness)]
+                            , psEdgeWitnesses = IntMap.fromList [(edgeId, edgeWitness)]
                             , psEdgeTraces = IntMap.fromList [(edgeId, edgeTrace)]
                             }
                 case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of

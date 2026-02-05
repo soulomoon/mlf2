@@ -45,7 +45,7 @@
       ],
       "priority": 3,
       "passes": true,
-      "notes": "Fixed node-space mismatch in WitnessNorm.hs validation; marked 9 tests as pending that depend on over-approximated interior"
+      "notes": "Fixed node-space mismatch in WitnessNorm.hs validation; previously pending US-003 tests are now enabled and passing"
     },
     {
       "id": "US-004",
@@ -58,8 +58,8 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added MissingEdgeTrace error; only requires trace for non-trivial witnesses (with ops/steps)"
     },
     {
       "id": "US-005",
@@ -73,8 +73,8 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added isRigidNode helper; replaced skip paths with ValidationFailed errors for OpGraft, OpWeaken, OpMerge, OpRaiseMerge; added test for OpWeaken non-binder; fixed existing Merge/RaiseMerge tests; fixed Φ soundness by translating OpGraft/OpWeaken even when the target binder is rigid in the final presolution constraint"
     }
   ]
 }

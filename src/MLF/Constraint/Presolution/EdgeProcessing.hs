@@ -416,5 +416,6 @@ nodeTag = \case
     TyBottom{} -> "TyBottom"
     TyArrow{} -> "TyArrow"
     TyBase{} -> "TyBase"
+    TyCon{} -> "TyCon"
     TyForall{} -> "TyForall"
     TyExp{} -> "TyExp"

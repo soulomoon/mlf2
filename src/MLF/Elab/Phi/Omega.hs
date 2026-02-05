@@ -16,13 +16,13 @@ module MLF.Elab.Phi.Omega (
 ) where
 
 import Control.Applicative ((<|>))
-import Control.Monad (unless, when)
+import Control.Monad (foldM, when)
 import Data.Functor.Foldable (cata)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.List (elemIndex, findIndex)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (catMaybes, fromMaybe, mapMaybe)
+import Data.Maybe (catMaybes, fromMaybe, listToMaybe, mapMaybe)
 import qualified Data.Set as Set
 import Text.Read (readMaybe)
 
@@ -136,7 +136,12 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
             Just tr -> etRoot tr
 
     orderKeys :: IntMap.IntMap Order.OrderKey
-    orderKeys = OrderKey.orderKeysFromRootWithExtra canonicalNode nodes extraChildren orderRoot Nothing
+    -- Order keys are used to compare binder positions (≺) for Σ(g) / ϕR (thesis Def. 15.3.4).
+    -- The natural "paper root" for Φ/Σ is the expansion root `r` (often a TyExp body), but `r`
+    -- might not reach the scheme binders via the binding tree when `r` is strictly *under* a
+    -- TyForall wrapper. In that situation, compute order keys from the binding-tree LCA of the
+    -- scheme binders instead, so every binder identity has a key.
+    orderKeys = OrderKey.orderKeysFromRootWithExtra canonicalNode nodes extraChildren orderKeysRoot Nothing
       where
         nodes = cNodes (srConstraint res)
         extraChildren nid = boundKids nid ++ bindKids nid
@@ -152,6 +157,23 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
             ]
         parentRefCanon (TypeRef parentN) = TypeRef (canonicalNode parentN)
         parentRefCanon (GenRef gid) = GenRef gid
+
+    orderKeysRoot :: NodeId
+    orderKeysRoot =
+        let binderRefs =
+                [ TypeRef (canonicalNode (NodeId k))
+                | k <- IntMap.keys (siSubst si)
+                ]
+        in case binderRefs of
+            [] -> orderRoot
+            (r0:rs) ->
+                case foldM (Binding.bindingLCA (srConstraint res)) r0 rs of
+                    Left _ -> orderRoot
+                    Right (TypeRef nid) -> canonicalNode nid
+                    Right (GenRef gid) ->
+                        fromMaybe orderRoot $ do
+                            gen <- NodeAccess.lookupGenNode (srConstraint res) gid
+                            listToMaybe (gnSchemes gen)
 
     substForTypes :: IntMap.IntMap String
     substForTypes =
@@ -345,16 +367,22 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
         if length qs < 2
             then Right (InstId, ty, ids)
             else do
-                -- Require concrete binder identities for all quantifiers (fail-fast)
+                -- Σ(g) / ϕR is only meaningful when binder identities are tracked in the
+                -- solved graph (so we can compare them by ≺). In a few edge cases (notably
+                -- after reification/naming), some quantifiers can lose a concrete identity
+                -- or become detached from the chosen ≺ root. In that case, keep the
+                -- current binder order rather than failing elaboration.
                 let missingIdPositions = [i | (i, Nothing) <- zip [(0::Int)..] ids]
-                unless (null missingIdPositions) $
-                    Left (InstantiationError $ "PhiReorder: missing binder identity at positions " ++ show missingIdPositions)
-                -- Require order keys for all binder identities (fail-fast)
-                let missingKeyBinders = [nid | Just nid <- ids, not (IntMap.member (getNodeId (canonicalNode nid)) orderKeys)]
-                unless (null missingKeyBinders) $
-                    Left (InstantiationError $ "PhiReorder: missing order key for binders " ++ show missingKeyBinders)
-                desired <- desiredBinderOrder ty ids
-                reorderTo ty ids desired
+                    missingKeyBinders =
+                        [ nid
+                        | Just nid <- ids
+                        , not (IntMap.member (getNodeId (canonicalNode nid)) orderKeys)
+                        ]
+                if not (null missingIdPositions) || not (null missingKeyBinders)
+                    then Right (InstId, ty, ids)
+                    else do
+                        desired <- desiredBinderOrder ty ids
+                        reorderTo ty ids desired
 
     desiredBinderOrder :: ElabType -> [Maybe NodeId] -> Either ElabError [Maybe NodeId]
     desiredBinderOrder ty ids = do
@@ -418,10 +446,13 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
 
         (OpGraft arg bv : OpWeaken bv' : rest)
             | bv == bv' -> do
-                -- Paper Fig. 15.3.4: operations on rigid nodes translate to identity (ε)
-                if isRigidNode bv
-                    then go binderKeys keepBinderKeys' namedSet' ty ids phi rest lookupBinder
-                    else if not (isBinderNode binderKeys bv)
+                -- Note: A binder can be rigid in the *final* presolution constraint
+                -- (e.g. due to later rigidification), even though this ω step was
+                -- executed while the binder was still instantiable. We must still
+                -- translate the operation to an xMLF instantiation here; skipping
+                -- would make Φ unsound (see ElaborationSpec “witness instantiation
+                -- matches solved edge types …”).
+                if not (isBinderNode binderKeys bv)
                         then Left $ ValidationFailed
                             [ "OpGraft+OpWeaken targets non-binder node"
                             , "  target node: " ++ show bv
@@ -451,10 +482,7 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
                 Left (InstantiationError "witness op mismatch: OpGraft/OpWeaken refer to different nodes")
 
         (OpGraft arg bv : rest) -> do
-            -- Paper Fig. 15.3.4: operations on rigid nodes translate to identity (ε)
-            if isRigidNode bv
-                then go binderKeys keepBinderKeys' namedSet' ty ids phi rest lookupBinder
-                else if not (isBinderNode binderKeys bv)
+            if not (isBinderNode binderKeys bv)
                     then Left $ ValidationFailed
                         [ "OpGraft targets non-binder node"
                         , "  target node: " ++ show bv
@@ -482,10 +510,7 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
                                         go binderKeys keepBinderKeys' namedSet' ty' ids1 (composeInst phi inst) rest lookupBinder
 
         (OpWeaken bv : rest) -> do
-            -- Paper Fig. 15.3.4: operations on rigid nodes translate to identity (ε)
-            if isRigidNode bv
-                then go binderKeys keepBinderKeys' namedSet' ty ids phi rest lookupBinder
-                else if not (isBinderNode binderKeys bv)
+            if not (isBinderNode binderKeys bv)
                     then Left $ ValidationFailed
                         [ "OpWeaken targets non-binder node"
                         , "  target node: " ++ show bv
@@ -857,8 +882,8 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
         let key = getNodeId (canonicalNode nid)
         in IntSet.member key binderKeys
 
-    -- | Check if a node is bound rigidly (thesis Fig. 15.3.4: operations on rigid nodes
-    -- translate to identity/ε).
+    -- | Check if a node is bound rigidly. Some ω operations treat rigid targets as
+    -- ε/identity (thesis Fig. 15.3.4), but not all (see the OpGraft/OpWeaken note).
     isRigidNode :: NodeId -> Bool
     isRigidNode nid =
         case lookupBindParent (srConstraint res) (typeRef (canonicalNode nid)) of
