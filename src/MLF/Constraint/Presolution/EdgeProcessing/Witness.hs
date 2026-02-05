@@ -14,21 +14,18 @@ module MLF.Constraint.Presolution.EdgeProcessing.Witness (
     dropWeakenSteps
 ) where
 
-import Control.Applicative ((<|>))
-import Data.Maybe (listToMaybe)
 import qualified Data.IntSet as IntSet
 
 import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Types
-import qualified MLF.Constraint.NodeAccess as NodeAccess
-import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Constraint.Presolution.Base (
     CopyMap,
     EdgeTrace(..),
     FrontierSet,
     InteriorSet,
     PresolutionM,
-    fromListInterior
+    fromListInterior,
+    traceInteriorRootRef
     )
 import MLF.Constraint.Presolution.Ops (findRoot)
 import MLF.Constraint.Presolution.StateAccess (
@@ -119,7 +116,7 @@ buildEdgeTrace
     -> Expansion
     -> (CopyMap, InteriorSet, FrontierSet)
     -> PresolutionM EdgeTrace
-buildEdgeTrace _eid left leftRaw expn (copyMap0, interior0, _frontier0) = do
+buildEdgeTrace _eid left leftRaw expn (copyMap0, _interior0, _frontier0) = do
     bas <- binderArgsFromExpansion leftRaw expn
     -- Paper root `r` for Φ/Σ is the TyExp body, not the TyExp wrapper itself.
     let rootSeed = case leftRaw of
@@ -127,29 +124,7 @@ buildEdgeTrace _eid left leftRaw expn (copyMap0, interior0, _frontier0) = do
             _ -> left
     root <- findRoot rootSeed
     (c0, canonical) <- getConstraintAndCanonical
-    let rootC = canonical root
-        schemeOwner =
-            listToMaybe
-                [ gnId gen
-                | gen <- NodeAccess.allGenNodes c0
-                , any (\r -> canonical r == rootC) (gnSchemes gen)
-                ]
-        schemeOwnerByBody =
-            listToMaybe
-                [ gnId gen
-                | gen <- NodeAccess.allGenNodes c0
-                , any
-                    (\r ->
-                        case VarStore.lookupVarBound c0 (canonical r) of
-                            Just bnd -> canonical bnd == rootC
-                            Nothing -> False
-                    )
-                    (gnSchemes gen)
-                ]
-        interiorRootRef =
-            case schemeOwner <|> schemeOwnerByBody of
-                Just gid -> genRef gid
-                Nothing -> typeRef rootC
+    let interiorRootRef = traceInteriorRootRef canonical c0 root
     interiorRaw <- do
         s <- liftBindingError $ Binding.interiorOfUnder canonical c0 interiorRootRef
         pure
@@ -157,11 +132,5 @@ buildEdgeTrace _eid left leftRaw expn (copyMap0, interior0, _frontier0) = do
             | key <- IntSet.toList s
             , TypeRef nid <- [nodeRefFromKey key]
             ]
-    let interiorSet =
-            IntSet.unions
-                [ IntSet.fromList (map (getNodeId . canonical) interiorRaw)
-                , IntSet.fromList (map (getNodeId . canonical . fst) bas)
-                , IntSet.fromList [ getNodeId (canonical (NodeId nidInt)) | nidInt <- IntSet.toList interior0 ]
-                ]
-        interior = fromListInterior (map NodeId (IntSet.toList interiorSet))
+    let interior = fromListInterior (map canonical interiorRaw)
     pure EdgeTrace { etRoot = root, etBinderArgs = bas, etInterior = interior, etCopyMap = copyMap0 }

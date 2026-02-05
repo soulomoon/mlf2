@@ -18,7 +18,7 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.Maybe (listToMaybe)
 
-import MLF.Constraint.Types.Graph (Constraint(..))
+import MLF.Constraint.Types.Graph (BindFlag(..), Constraint(..))
 import MLF.Constraint.Types.Graph (NodeId, NodeRef(..), getNodeId, nodeRefFromKey, typeRef)
 import MLF.Constraint.Types.Witness (InstanceOp(..))
 import qualified MLF.Binding.Tree as Binding
@@ -41,6 +41,9 @@ data OmegaNormalizeError
     | RaiseMergeInsideInterior NodeId NodeId
     | OpUnderRigid NodeId
     | MissingOrderKey NodeId
+    | RigidOperationInvalid InstanceOp NodeId
+    | RigidOperandMismatch InstanceOp NodeId NodeId
+    | NotTransitivelyFlexBound InstanceOp NodeId NodeId
     | MalformedRaiseMerge [InstanceOp]
     deriving (Eq, Show)
 
@@ -68,10 +71,29 @@ validateNormalizedWitness env ops = do
     inInterior nid =
         IntSet.member (getNodeId (canon nid)) (interior env)
 
+    isRigid nid =
+        case Binding.lookupBindParent (constraint env) (typeRef (canon nid)) of
+            Just (_, BindRigid) -> True
+            _ -> False
+
     requireInterior op nid =
         if inInterior nid
             then Right ()
             else Left (OpOutsideInterior op)
+
+    requireTransitivelyFlexBoundToRoot op nid = go IntSet.empty (canon nid)
+      where
+        targetC = canon nid
+        failNotFlex = Left (NotTransitivelyFlexBound op targetC rootC)
+
+        go seen cur
+            | cur == rootC = Right ()
+            | IntSet.member (getNodeId cur) seen = failNotFlex
+            | otherwise =
+                let seen' = IntSet.insert (getNodeId cur) seen
+                in case Binding.lookupBindParent (constraint env) (typeRef cur) of
+                    Just (TypeRef parent, BindFlex) -> go seen' (canon parent)
+                    _ -> failNotFlex
 
     mergeKeyNode nid =
         case IntMap.lookup (getNodeId (canon nid)) (binderArgs env) of
@@ -95,15 +117,28 @@ validateNormalizedWitness env ops = do
             OpWeaken n ->
                 requireInterior op n
             OpMerge n m -> do
-                requireInterior op n
-                requireInterior op m
-                checkMergeDirection n m
-            OpRaise n ->
-                if inInterior n
+                if isRigid n
                     then Right ()
-                    else Left (RaiseNotUnderRoot (canon n) rootC)
+                    else if isRigid m
+                        then Left (RigidOperandMismatch op (canon n) (canon m))
+                        else do
+                            requireInterior op n
+                            requireInterior op m
+                            checkMergeDirection n m
+                            requireTransitivelyFlexBoundToRoot op n
+                            requireTransitivelyFlexBoundToRoot op m
+            OpRaise n ->
+                if isRigid n
+                    then Right ()
+                    else if inInterior n
+                        then Right ()
+                        else Left (RaiseNotUnderRoot (canon n) rootC)
             OpRaiseMerge n m -> do
-                if not (inInterior n)
+                if isRigid n
+                    then Right ()
+                else if isRigid m
+                    then Left (RigidOperandMismatch op (canon n) (canon m))
+                else if not (inInterior n)
                     then Left (OpOutsideInterior op)
                     else if inInterior m
                         then Left (RaiseMergeInsideInterior (canon n) (canon m))

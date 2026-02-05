@@ -158,14 +158,6 @@ reorderWeakenWithEnv env ops =
         then Right ops
         else do
             infos <- mapM mkWeakenInfo weakenIndexed
-            let missing =
-                    [ wiBinder info
-                    | info <- infos
-                    , not (IntMap.member (getNodeId (wiBinder info)) (orderKeys env))
-                    ]
-            case missing of
-                [] -> pure ()
-                (nid:_) -> Left (MissingOrderKey nid)
             let groups =
                     IntMap.fromListWith (++)
                         [ (wiAnchor info, [info])

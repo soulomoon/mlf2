@@ -408,6 +408,53 @@ spec = do
                 validateNormalizedWitness env ops
                     `shouldBe` Left (OpUnderRigid child)
 
+            it "rejects Merge when only the non-operated endpoint is rigid" $ do
+                let root = NodeId 0
+                    n = NodeId 1
+                    m = NodeId 2
+                    c =
+                        rootedConstraint emptyConstraint
+                            { cNodes = nodeMapFromList
+                                    [ (getNodeId root, TyArrow root n m)
+                                    , (getNodeId n, TyVar { tnId = n, tnBound = Nothing })
+                                    , (getNodeId m, TyVar { tnId = m, tnBound = Nothing })
+                                    ]
+                            , cBindParents =
+                                bindParentsFromPairs
+                                    [ (n, root, BindFlex)
+                                    , (m, root, BindRigid)
+                                    ]
+                            }
+                    env = mkNormalizeEnv c root (IntSet.fromList [getNodeId n, getNodeId m])
+                    op = OpMerge n m
+                validateNormalizedWitness env [op]
+                    `shouldBe` Left (RigidOperandMismatch op n m)
+
+            it "rejects non-rigid operations not transitively flexibly bound to the root" $ do
+                let root = NodeId 0
+                    m = NodeId 1
+                    parent = NodeId 2
+                    n = NodeId 3
+                    c =
+                        rootedConstraint emptyConstraint
+                            { cNodes = nodeMapFromList
+                                    [ (getNodeId root, TyArrow root m parent)
+                                    , (getNodeId m, TyVar { tnId = m, tnBound = Nothing })
+                                    , (getNodeId parent, TyForall parent n)
+                                    , (getNodeId n, TyVar { tnId = n, tnBound = Nothing })
+                                    ]
+                            , cBindParents =
+                                bindParentsFromPairs
+                                    [ (m, root, BindFlex)
+                                    , (parent, root, BindRigid)
+                                    , (n, parent, BindFlex)
+                                    ]
+                            }
+                    env = mkNormalizeEnv c root (IntSet.fromList [getNodeId m, getNodeId parent, getNodeId n])
+                    op = OpMerge n m
+                validateNormalizedWitness env [op]
+                    `shouldBe` Left (NotTransitivelyFlexBound op n root)
+
             it "returns WitnessNormalizationError for op outside interior via presolution" $ do
                 -- Set up a constraint with an edge whose witness contains an op
                 -- targeting a node outside the expansion interior I(r).
@@ -477,6 +524,60 @@ spec = do
                         expectationFailure $ "Expected WitnessNormalizationError, got: " ++ show other
                     Right _ ->
                         expectationFailure "Expected WitnessNormalizationError for op outside interior, but normalization succeeded"
+
+            it "returns WitnessNormalizationError for missing <P order key via presolution" $ do
+                let root = NodeId 0
+                    interiorNode = NodeId 1
+                    outsideNode = NodeId 2
+                    edgeId = 0
+                    nodes = nodeMapFromList
+                            [ (getNodeId root, TyForall root interiorNode)
+                            , (getNodeId interiorNode, TyVar { tnId = interiorNode, tnBound = Nothing })
+                            , (getNodeId outsideNode, TyVar { tnId = outsideNode, tnBound = Nothing })
+                            ]
+                    bindParents =
+                        IntMap.fromList
+                            [ (nodeRefKey (typeRef interiorNode), (typeRef root, BindFlex))
+                            , (nodeRefKey (typeRef outsideNode), (genRef (GenNodeId 0), BindFlex))
+                            ]
+                    constraint = rootedConstraint $ emptyConstraint
+                            { cNodes = nodes
+                            , cBindParents = bindParents
+                            }
+                    badOp = OpMerge interiorNode outsideNode
+                    edgeWitness = EdgeWitness
+                            { ewEdgeId = EdgeId edgeId
+                            , ewLeft = root
+                            , ewRight = outsideNode
+                            , ewRoot = root
+                            , ewSteps = [StepOmega badOp]
+                            , ewWitness = InstanceWitness [badOp]
+                            }
+                    edgeTrace = EdgeTrace
+                            { etRoot = root
+                            , etBinderArgs = []
+                            , etInterior = InteriorNodes (IntSet.fromList [getNodeId interiorNode, getNodeId outsideNode])
+                            , etCopyMap = mempty
+                            }
+                    st0 = PresolutionState
+                            { psConstraint = constraint
+                            , psPresolution = Presolution IntMap.empty
+                            , psUnionFind = IntMap.empty
+                            , psNextNodeId = 3
+                            , psPendingWeakens = IntSet.empty
+                            , psBinderCache = IntMap.empty
+                            , psEdgeExpansions = IntMap.empty
+                            , psEdgeWitnesses = IntMap.fromList [(edgeId, edgeWitness)]
+                            , psEdgeTraces = IntMap.fromList [(edgeId, edgeTrace)]
+                            }
+                case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
+                    Left (WitnessNormalizationError (EdgeId eid) (MissingOrderKey nid)) -> do
+                        eid `shouldBe` edgeId
+                        nid `shouldBe` outsideNode
+                    Left other ->
+                        expectationFailure $ "Expected WitnessNormalizationError MissingOrderKey, got: " ++ show other
+                    Right _ ->
+                        expectationFailure "Expected WitnessNormalizationError for missing order key"
 
         describe "Inert-locked detection" $ do
             it "does not mark nodes with flex path to ⊥ as inert-locked" $ do

@@ -36,12 +36,11 @@ module MLF.Constraint.Presolution.Driver (
 import Control.Monad.Reader (ask)
 import Control.Monad.Except (throwError)
 import Control.Monad (foldM, forM)
-import Control.Applicative ((<|>))
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import MLF.Util.Trace (TraceConfig, traceBindingM)
-import Data.Maybe (catMaybes, fromMaybe, listToMaybe, mapMaybe)
+import Data.Maybe (catMaybes, fromMaybe, mapMaybe)
 
 import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Canonicalizer (canonicalizerFrom)
@@ -64,7 +63,6 @@ import MLF.Constraint.Presolution.Validation (
     )
 import MLF.Constraint.Presolution.WitnessNorm (normalizeEdgeWitnessesM)
 import qualified MLF.Constraint.NodeAccess as NodeAccess
-import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Constraint.Presolution.Expansion (getExpansion)
 import MLF.Constraint.Presolution.Materialization (
     materializeExpansions
@@ -477,28 +475,7 @@ rewriteConstraint mapping = do
     newTraces' <- do
         let updateTrace tr = do
                 let root = etRoot tr
-                    schemeOwner =
-                        listToMaybe
-                            [ gnId gen
-                            | gen <- NodeAccess.allGenNodes c'
-                            , root `elem` gnSchemes gen
-                            ]
-                    schemeOwnerByBody =
-                        listToMaybe
-                            [ gnId gen
-                            | gen <- NodeAccess.allGenNodes c'
-                            , any
-                                (\r ->
-                                    case VarStore.lookupVarBound c' r of
-                                        Just bnd -> bnd == root
-                                        Nothing -> False
-                                )
-                                (gnSchemes gen)
-                            ]
-                    interiorRootRef =
-                        case schemeOwner <|> schemeOwnerByBody of
-                            Just gid -> genRef gid
-                            Nothing -> typeRef root
+                    interiorRootRef = traceInteriorRootRef id c' root
                 interior <- bindingToPresM (Binding.interiorOf c' interiorRootRef)
                 let interiorNodes =
                         fromListInterior

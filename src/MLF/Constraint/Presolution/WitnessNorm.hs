@@ -17,13 +17,11 @@ import Control.Monad.Except (throwError)
 import Control.Monad (forM)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import Data.Maybe (mapMaybe)
 
 import qualified MLF.Util.Order as Order
-import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Types
 import MLF.Constraint.Presolution.Base
-import MLF.Constraint.Presolution.StateAccess (liftBindingError)
+import MLF.Constraint.Presolution.StateAccess (getConstraintAndCanonical)
 import MLF.Constraint.Presolution.Validation (translatableWeakenedNodes)
 import MLF.Constraint.Presolution.Witness (
     normalizeInstanceStepsFull,
@@ -35,14 +33,14 @@ import qualified MLF.Constraint.Presolution.Witness as Witness
 -- | Normalize edge witnesses against the finalized presolution constraint.
 normalizeEdgeWitnessesM :: PresolutionM ()
 normalizeEdgeWitnessesM = do
-    c0 <- getConstraint
+    (c0, canonical) <- getConstraintAndCanonical
     traces <- gets psEdgeTraces
     witnesses0 <- gets psEdgeWitnesses
     let rewriteNodeWith copyMap nid =
             IntMap.findWithDefault nid (getNodeId nid) (getCopyMapping copyMap)
         weakenedOps =
             IntSet.fromList
-                [ getNodeId (rewriteNodeWith copyMap n)
+                [ getNodeId (canonical (rewriteNodeWith copyMap n))
                 | (eid, w0) <- IntMap.toList witnesses0
                 , let copyMap = maybe mempty etCopyMap (IntMap.lookup eid traces)
                 , StepOmega (OpWeaken n) <- ewSteps w0
@@ -57,7 +55,9 @@ normalizeEdgeWitnessesM = do
             rewriteNode = rewriteNodeWith copyMap
             binderArgs =
                 IntMap.fromList
-                    [ (getNodeId (rewriteNode bv), rewriteNode arg)
+                    [ ( getNodeId (canonical (rewriteNode bv))
+                      , canonical (rewriteNode arg)
+                      )
                     | (bv, arg) <- binderArgs0
                     ]
             copyToOriginal =
@@ -89,75 +89,32 @@ normalizeEdgeWitnessesM = do
                 case step of
                     StepOmega op -> StepOmega (restoreOp op)
                     StepIntro -> StepIntro
-        let interiorRoot = typeRef edgeRoot
-            orderBase = edgeRoot
+        let orderBase = edgeRoot
             orderRoot = orderBase
             traceInteriorKeys =
                 case traceInterior of
                     InteriorNodes s -> s
         interiorExact <-
             if IntSet.null traceInteriorKeys
-                then do
-                    s <- liftBindingError (Binding.interiorOf c0 interiorRoot)
-                    pure $
-                        IntSet.fromList
-                            [ getNodeId nid
-                            | key <- IntSet.toList s
-                            , TypeRef nid <- [nodeRefFromKey key]
-                            ]
+                then edgeInteriorExact edgeRoot
                 else pure traceInteriorKeys
         let interiorNorm =
                 -- Rewrite interior through copyMap so it's in the same node-id space
                 -- as the rewritten witness steps (thesis-exact I(r) membership).
                 IntSet.fromList
-                    [ getNodeId (rewriteNode (NodeId n))
+                    [ getNodeId (canonical (rewriteNode (NodeId n)))
                     | n <- IntSet.toList interiorExact
                     ]
         let steps0 = map rewriteStep (ewSteps w0)
-            orderKeys0 = Order.orderKeysFromConstraintWith id c0 orderRoot Nothing
-            opTargets = \case
-                OpGraft sigma n -> [sigma, n]
-                OpWeaken n -> [n]
-                OpMerge n m -> [n, m]
-                OpRaise n -> [n]
-                OpRaiseMerge n m -> [n, m]
-            missingKeys =
-                IntSet.fromList
-                    [ getNodeId n
-                    | StepOmega op <- steps0
-                    , n <- opTargets op
-                    , not (IntMap.member (getNodeId n) orderKeys0)
-                    ]
-            orderKeys =
-                if IntSet.null missingKeys
-                    then orderKeys0
-                    else
-                        -- Defensive: if an op targets a node outside the ≺ traversal,
-                        -- assign a stable ordering key so normalization can proceed.
-                        let existingFirsts =
-                                mapMaybe
-                                    (\k -> case Order.okPath k of
-                                        [] -> Nothing
-                                        (x:_) -> Just x
-                                    )
-                                    (IntMap.elems orderKeys0)
-                            base =
-                                case existingFirsts of
-                                    [] -> 0
-                                    _ -> maximum existingFirsts + 1
-                            extraKeys =
-                                IntMap.fromList
-                                    [ (nidInt, Order.OrderKey { Order.okDepth = 0, Order.okPath = [base, idx] })
-                                    | (idx, nidInt) <- zip [0 ..] (IntSet.toList missingKeys)
-                                    ]
-                        in IntMap.union orderKeys0 extraKeys
+            orderKeys0 = Order.orderKeysFromConstraintWith canonical c0 (canonical orderRoot) Nothing
+            orderKeys = orderKeys0
             env =
                 OmegaNormalizeEnv
-                    { oneRoot = edgeRoot
+                    { oneRoot = canonical edgeRoot
                     , Witness.interior = interiorNorm
                     , Witness.weakened = weakened
                     , Witness.orderKeys = orderKeys
-                    , Witness.canonical = id
+                    , Witness.canonical = canonical
                     , Witness.constraint = c0
                     , Witness.binderArgs = binderArgs
                     }

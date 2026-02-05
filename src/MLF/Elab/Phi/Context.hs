@@ -209,7 +209,7 @@ contextToNodeBoundWithOrderKeys canonical keys c _namedSet root target = do
         -> NodeId
         -> NodeId
         -> Either ElabError (IntMap.IntMap (Maybe [ContextStep]), Maybe [ContextStep])
-    goForall visiting memo forallId body0 = do
+    goForall visiting memo forallId _body0 = do
         binders <- orderedBindersAt forallId
         let targetC = canonical target
         case elemIndex targetC binders of
@@ -236,18 +236,4 @@ contextToNodeBoundWithOrderKeys canonical keys c _namedSet root target = do
                 (memo', boundRes) <- tryBound memo binders
                 case boundRes of
                     Just _ -> pure (memo', boundRes)
-                    Nothing ->
-                        if null binders
-                            then pure (memo', Nothing)
-                            else do
-                        -- If the target is not one of the binders and does not appear in any
-                        -- binder bound, it may still appear in the body of the quantifier.
-                        -- In that case, the computation context descends under all binders
-                        -- before continuing its search in the body.
-                        let bodyC = canonical body0
-                        (memo'', bodyRes) <- go visiting memo' bodyC
-                        case bodyRes of
-                            Nothing -> pure (memo'', Nothing)
-                            Just ctx ->
-                                let steps = map (StepUnder . nameFor) binders ++ ctx
-                                in pure (memo'', Just steps)
+                    Nothing -> pure (memo', Nothing)

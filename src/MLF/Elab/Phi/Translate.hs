@@ -30,8 +30,12 @@ helpers live in "MLF.Elab.Phi.Omega"; the "MLF.Elab.Phi" module re-exports
 the public entry points as a facade.
 -}
 module MLF.Elab.Phi.Translate (
-    phiFromEdgeWitness,
+    -- * Production entry point (requires trace)
     phiFromEdgeWitnessWithTrace,
+    -- * Test-only entry point (no trace required)
+    phiFromEdgeWitnessNoTrace,
+    -- * Legacy alias (deprecated)
+    phiFromEdgeWitness,
     canonicalNodeM,
     remapSchemeInfoM
 ) where
@@ -86,6 +90,20 @@ type GeneralizeAtWith =
     -> NodeId
     -> Either ElabError (ElabScheme, IntMap.IntMap String)
 
+-- | Test/debug-only: Translate without requiring an EdgeTrace.
+-- This bypasses thesis-exact precondition checks and must not be used by
+-- production elaboration paths.
+phiFromEdgeWitnessNoTrace
+    :: TraceConfig
+    -> GeneralizeAtWith
+    -> SolveResult
+    -> Maybe SchemeInfo
+    -> EdgeWitness
+    -> Either ElabError Instantiation
+phiFromEdgeWitnessNoTrace traceCfg generalizeAtWith res mSchemeInfo ew =
+    phiFromEdgeWitnessCore traceCfg generalizeAtWith res Nothing mSchemeInfo Nothing ew
+
+-- | Legacy alias for 'phiFromEdgeWitnessNoTrace' (deprecated; test/debug-only).
 phiFromEdgeWitness
     :: TraceConfig
     -> GeneralizeAtWith
@@ -93,8 +111,9 @@ phiFromEdgeWitness
     -> Maybe SchemeInfo
     -> EdgeWitness
     -> Either ElabError Instantiation
-phiFromEdgeWitness traceCfg generalizeAtWith res mSchemeInfo ew =
-    phiFromEdgeWitnessWithTrace traceCfg generalizeAtWith res Nothing mSchemeInfo Nothing ew
+phiFromEdgeWitness = phiFromEdgeWitnessNoTrace
+
+{-# DEPRECATED phiFromEdgeWitness "Use phiFromEdgeWitnessNoTrace only in tests/debugging; production code must use phiFromEdgeWitnessWithTrace." #-}
 
 phiFromEdgeWitnessWithTrace
     :: TraceConfig
@@ -105,7 +124,21 @@ phiFromEdgeWitnessWithTrace
     -> Maybe EdgeTrace
     -> EdgeWitness
     -> Either ElabError Instantiation
-phiFromEdgeWitnessWithTrace traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTrace ew = do
+phiFromEdgeWitnessWithTrace traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTrace ew =
+    case mTrace of
+        Nothing -> Left (MissingEdgeTrace (ewEdgeId ew))
+        Just _ -> phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTrace ew
+
+phiFromEdgeWitnessCore
+    :: TraceConfig
+    -> GeneralizeAtWith
+    -> SolveResult
+    -> Maybe GaBindParents
+    -> Maybe SchemeInfo
+    -> Maybe EdgeTrace
+    -> EdgeWitness
+    -> Either ElabError Instantiation
+phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTrace ew = do
     requireValidBindingTree
     namedSet0 <- namedNodes res
     case debugPhi

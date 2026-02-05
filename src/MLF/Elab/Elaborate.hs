@@ -349,15 +349,7 @@ elaborateWithEnv config elabEnv ann = do
                     (Right InstId)
             Just ew -> do
                 let mTrace = IntMap.lookup eid edgeTraces
-                    -- US-004: Require trace when witness has non-trivial steps
-                    -- (identity edges with empty witnesses don't need traces)
-                    hasNonTrivialWitness =
-                        not (null (ewSteps ew)) ||
-                        not (null (getInstanceOps (ewWitness ew)))
-                case mTrace of
-                    Nothing | hasNonTrivialWitness -> Left (MissingEdgeTrace (EdgeId eid))
-                    _ -> pure ()
-                let mExpansion = IntMap.lookup eid edgeExpansions
+                    mExpansion = IntMap.lookup eid edgeExpansions
                 let mSchemeInfo = case funAnn of
                         AVar v _ -> Map.lookup v env
                         _ -> Nothing

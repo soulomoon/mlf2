@@ -139,6 +139,8 @@ processInstEdge edge = do
             w <- buildEdgeWitness edgeId n1Id n2Id n1Raw (ewpBaseSteps witnessPlan) []
             recordEdgeWitness edgeId w
             solveNonExpInstantiation (tnId n1) (tnId n2)
+            tr <- buildEdgeTrace edgeId n1Id n1Raw ExpIdentity emptyTrace
+            recordEdgeTrace edgeId tr
             canonicalizeEdgeTraceInteriorsM
 
 resolveEdgeNodes :: EdgeCtx -> NodeId -> NodeId -> PresolutionM (TyNode, TyNode)
