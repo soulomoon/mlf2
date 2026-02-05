@@ -20,6 +20,8 @@ import MLF.Frontend.Syntax (Lit, VarName)
 data ConstraintError
     = UnknownVariable VarName
     | InternalConstraintError String  -- ^ Unexpected internal state
+    | TypeConstructorArityMismatch BaseTy Int Int  -- ^ Constructor, expected arity, actual arity
+    | ForallBoundMentionsBinder String  -- ^ Binder name that appears in its own bound
     deriving (Eq, Show)
 
 -- | Successful constraint generation returns the full constraint graph and the

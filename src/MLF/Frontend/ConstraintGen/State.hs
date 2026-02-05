@@ -12,6 +12,7 @@ import Control.Monad.Except (Except, runExcept)
 import Control.Monad.State.Strict (StateT, runStateT)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
+import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
 import MLF.Constraint.Types
@@ -34,6 +35,7 @@ data BuildState = BuildState
     , bsPolySyms :: !PolySyms -- ^ Polymorphic type constructors (paper Poly)
     , bsScopes :: ![ScopeFrame]    -- ^ Stack of scopes tracking newly created nodes
     , bsLetEdges :: !IntSet.IntSet -- ^ Let-scope instantiation edges (body → trivial root)
+    , bsTyConArity :: !(Map.Map BaseTy Int) -- ^ Arity of each type constructor (paper Σ arity function)
     }
 
 type ConstraintM = StateT BuildState (Except ConstraintError)
@@ -58,6 +60,7 @@ mkInitialStateWithPolySyms polySyms = BuildState
     , bsPolySyms = polySyms
     , bsScopes = [ScopeFrame IntSet.empty]
     , bsLetEdges = IntSet.empty
+    , bsTyConArity = Map.empty
     }
 
 buildConstraint :: BuildState -> Constraint

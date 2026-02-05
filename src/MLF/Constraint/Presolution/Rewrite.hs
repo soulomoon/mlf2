@@ -125,6 +125,9 @@ rewriteNode canonical = \case
     TyBase { tnId = nid, tnBase = b } ->
         let nid' = canonical nid
         in Just (getNodeId nid', TyBase nid' b)
+    TyCon { tnId = nid, tnCon = con, tnArgs = args } ->
+        let nid' = canonical nid
+        in Just (getNodeId nid', TyCon nid' con (fmap canonical args))
     TyForall { tnId = nid, tnBody = b } ->
         let nid' = canonical nid
         in Just (getNodeId nid', TyForall nid' (canonical b))

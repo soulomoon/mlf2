@@ -105,6 +105,7 @@ data TranslatabilityIssue
     = InertLockedNodes [NodeId]
     | SchemeRootNotRigid GenNodeId NodeId
     | ArrowNodeNotRigid NodeId
+    | TyConNodeNotRigid NodeId
     | NonInteriorNodeNotRigid GenNodeId NodeId
     deriving (Eq, Show)
 

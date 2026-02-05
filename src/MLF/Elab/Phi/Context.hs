@@ -28,6 +28,7 @@ import Control.Monad (unless)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.List (elemIndex)
+import qualified Data.List.NonEmpty as NE
 
 import qualified MLF.Util.Order as Order
 import MLF.Constraint.Types
@@ -88,6 +89,7 @@ contextToNodeBoundWithOrderKeys canonical keys c _namedSet root target = do
                         Just TyExp{} -> False
                         Just TyVar{} -> True
                         Just TyArrow{} -> True
+                        Just TyCon{} -> True
                         Just TyBase{} -> True
                         Just TyBottom{} -> True
                         Nothing -> False
@@ -175,6 +177,9 @@ contextToNodeBoundWithOrderKeys canonical keys c _namedSet root target = do
                                             finish res memo'
                                         TyArrow{ tnDom = dom, tnCod = cod } -> do
                                             (memo', res) <- goChildren visiting' memo [dom, cod]
+                                            finish res memo'
+                                        TyCon{ tnArgs = args } -> do
+                                            (memo', res) <- goChildren visiting' memo (NE.toList args)
                                             finish res memo'
                                         TyExp{ tnBody = body } -> do
                                             (memo', res) <- go visiting' memo body

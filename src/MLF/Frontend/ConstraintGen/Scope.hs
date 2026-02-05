@@ -135,6 +135,7 @@ rebindScopeNodes binder root frame = do
                         Just TyVar{} -> True
                         Just TyForall{} -> True
                         Just TyArrow{} -> True
+                        Just TyCon{} -> True
                         Just TyExp{} -> True
                         _ -> False
             isSchemeRootParent ref =

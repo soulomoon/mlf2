@@ -16,6 +16,8 @@ module MLF.Constraint.Unify.Decompose (
     decomposeUnifyChildren
 ) where
 
+import qualified Data.List.NonEmpty as NE
+
 import MLF.Constraint.Types.Graph (BaseTy, ExpVarId, TyNode(..), UnifyEdge(..))
 
 -- | Structural mismatch reasons for a single head-constructor decomposition.
@@ -23,6 +25,8 @@ data DecomposeMismatch
     = MismatchConstructor
     | MismatchBase BaseTy BaseTy
     | MismatchExpVar ExpVarId ExpVarId
+    | MismatchTyCon BaseTy BaseTy
+    | MismatchTyConArity BaseTy Int Int
     deriving (Eq, Show)
 
 -- | Decompose a "same-head" equality into a list of child equalities.
@@ -47,6 +51,11 @@ decomposeUnifyChildren n1 n2 = case (n1, n2) of
     (TyExp { tnExpVar = s1, tnBody = b1 }, TyExp { tnExpVar = s2, tnBody = b2 })
         | s1 == s2 -> Right [UnifyEdge b1 b2]
         | otherwise -> Left (MismatchExpVar s1 s2)
+
+    (TyCon { tnCon = c1, tnArgs = args1 }, TyCon { tnCon = c2, tnArgs = args2 })
+        | c1 /= c2 -> Left (MismatchTyCon c1 c2)
+        | NE.length args1 /= NE.length args2 -> Left (MismatchTyConArity c1 (NE.length args1) (NE.length args2))
+        | otherwise -> Right (zipWith UnifyEdge (NE.toList args1) (NE.toList args2))
 
     _ ->
         Left MismatchConstructor

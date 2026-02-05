@@ -2,6 +2,7 @@ module ConstraintGenSpec (spec) where
 
 import Control.Monad (filterM, forM, when)
 import Data.List (nub)
+import Data.List.NonEmpty (NonEmpty(..))
 import Data.Maybe (catMaybes)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
@@ -884,6 +885,107 @@ spec = describe "Phase 1 — Constraint generation" $ do
                         root `shouldBe` domainNode
                     other -> expectationFailure $ "Expected 1 inst edge, saw " ++ show (length other)
 
+    describe "Constructor types (STCon)" $ do
+        it "internalizes STCon annotations into TyCon nodes" $ do
+            -- (1 : List Int) - should create a TyCon node with head "List" and one arg
+            let ann = STCon "List" (STBase "Int" :| [])
+                expr = EAnn (ELit (LInt 1)) ann
+            expectRight (inferConstraintGraphDefault expr) $ \result -> do
+                let nodes = cNodes (crConstraint result)
+                    tyConNodes = [n | n@TyCon{} <- nodeMapElems nodes]
+                length tyConNodes `shouldBe` 2  -- domain + codomain copies
+                case tyConNodes of
+                    (TyCon { tnCon = BaseTy name, tnArgs = args }:_) -> do
+                        name `shouldBe` "List"
+                        length args `shouldBe` 1
+                    _ -> expectationFailure "Expected TyCon nodes"
+
+        it "internalizes nested STCon annotations" $ do
+            -- (1 : Either Int Bool) - should create a TyCon node with two args
+            let ann = STCon "Either" (STBase "Int" :| [STBase "Bool"])
+                expr = EAnn (ELit (LInt 1)) ann
+            expectRight (inferConstraintGraphDefault expr) $ \result -> do
+                let nodes = cNodes (crConstraint result)
+                    tyConNodes = [n | n@TyCon{} <- nodeMapElems nodes]
+                length tyConNodes `shouldBe` 2  -- domain + codomain copies
+                case tyConNodes of
+                    (TyCon { tnCon = BaseTy name, tnArgs = args }:_) -> do
+                        name `shouldBe` "Either"
+                        length args `shouldBe` 2
+                    _ -> expectationFailure "Expected TyCon nodes"
+
+        it "TyCon args are correctly structured" $ do
+            -- (1 : List Int) - the arg should be an Int base type
+            let ann = STCon "List" (STBase "Int" :| [])
+                expr = EAnn (ELit (LInt 1)) ann
+            expectRight (inferConstraintGraphDefault expr) $ \result -> do
+                let nodes = cNodes (crConstraint result)
+                    tyConNodes = [n | n@TyCon{} <- nodeMapElems nodes]
+                case tyConNodes of
+                    (TyCon { tnArgs = (argId :| _) }:_) -> do
+                        argNode <- lookupNode nodes argId
+                        case argNode of
+                            TyVar { tnBound = Just boundId } -> do
+                                boundNode <- lookupNode nodes boundId
+                                case boundNode of
+                                    TyBase { tnBase = BaseTy name } -> name `shouldBe` "Int"
+                                    other -> expectationFailure $ "Expected Int base, saw " ++ show other
+                            other -> expectationFailure $ "Expected TyVar arg, saw " ++ show other
+                    _ -> expectationFailure "Expected TyCon nodes"
+
+    describe "Type constructor arity validation" $ do
+        it "throws TypeConstructorArityMismatch on conflicting arities" $ do
+            -- Use List with arity 1, then with arity 2
+            let ann1 = STCon "List" (STBase "Int" :| [])
+                ann2 = STCon "List" (STBase "Int" :| [STBase "Bool"])
+                -- Create a type that uses List with different arities
+                ann = STArrow ann1 ann2
+                expr = EAnn (ELit (LInt 1)) ann
+            case inferConstraintGraphDefault expr of
+                Left (TypeConstructorArityMismatch (BaseTy name) expected actual) -> do
+                    name `shouldBe` "List"
+                    expected `shouldBe` 1
+                    actual `shouldBe` 2
+                Left other -> expectationFailure $ "Expected TypeConstructorArityMismatch, saw " ++ show other
+                Right _ -> expectationFailure "Expected arity mismatch error"
+
+        it "STBase registers arity 0" $ do
+            -- Use Int as base (arity 0), then as constructor (arity 1)
+            let ann = STArrow (STBase "Int") (STCon "Int" (STBase "Bool" :| []))
+                expr = EAnn (ELit (LInt 1)) ann
+            case inferConstraintGraphDefault expr of
+                Left (TypeConstructorArityMismatch (BaseTy name) expected actual) -> do
+                    name `shouldBe` "Int"
+                    expected `shouldBe` 0
+                    actual `shouldBe` 1
+                Left other -> expectationFailure $ "Expected TypeConstructorArityMismatch, saw " ++ show other
+                Right _ -> expectationFailure "Expected arity mismatch error"
+
+    describe "Forall-bound well-formedness" $ do
+        it "throws ForallBoundMentionsBinder when binder occurs in its own bound" $ do
+            -- ∀(a ⩾ a). a - the binder 'a' occurs in its own bound
+            let ann = STForall "a" (Just (STVar "a")) (STVar "a")
+                expr = EAnn (ELit (LInt 1)) ann
+            case inferConstraintGraphDefault expr of
+                Left (ForallBoundMentionsBinder name) -> name `shouldBe` "a"
+                Left other -> expectationFailure $ "Expected ForallBoundMentionsBinder, saw " ++ show other
+                Right _ -> expectationFailure "Expected ForallBoundMentionsBinder error"
+
+        it "throws ForallBoundMentionsBinder for nested occurrence" $ do
+            -- ∀(a ⩾ List a). a - the binder 'a' occurs nested in its bound
+            let ann = STForall "a" (Just (STCon "List" (STVar "a" :| []))) (STVar "a")
+                expr = EAnn (ELit (LInt 1)) ann
+            case inferConstraintGraphDefault expr of
+                Left (ForallBoundMentionsBinder name) -> name `shouldBe` "a"
+                Left other -> expectationFailure $ "Expected ForallBoundMentionsBinder, saw " ++ show other
+                Right _ -> expectationFailure "Expected ForallBoundMentionsBinder error"
+
+        it "allows binder in body but not in bound" $ do
+            -- ∀(a ⩾ Int). a - valid: 'a' is in body but not in bound
+            let ann = STForall "a" (Just (STBase "Int")) (STVar "a")
+                expr = EAnn (ELit (LInt 1)) ann
+            expectRight (inferConstraintGraphDefault expr) $ \_ -> pure ()
+
         -- US-003 Regression: ELet x (EAnn e σ) should NOT introduce explicit-scheme
         -- instantiation edge structure. With coercion-only semantics, an annotated
         -- let is just a normal let whose RHS happens to be a coercion term.
@@ -897,7 +999,6 @@ spec = describe "Phase 1 — Constraint generation" $ do
             expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let constraint = crConstraint result
                     nodes = cNodes constraint
-                    insts = cInstEdges constraint
 
                 -- Get the scheme root from the let annotation
                 -- ALet: name, schemeGenId, schemeRootId, expVar, scopeRoot, rhs, body, nid

@@ -28,6 +28,9 @@ import qualified MLF.Binding.Tree as Binding
 import MLF.Elab.Run.Provenance (buildTraceCopyMap, collectBaseNamedKeys)
 import MLF.Elab.Run.Util (makeCanonicalizer)
 import SpecUtil (collectVarNodes, defaultTraceConfig, mkForalls)
+import MLF.Types.Elab (Ty(..))
+import MLF.Reify.Core (reifyType)
+import Data.List.NonEmpty (NonEmpty(..))
 
 spec :: Spec
 spec = describe "Pipeline (Phases 1-5)" $ do
@@ -76,6 +79,59 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                                  Left err -> expectationFailure $ "Generalize error: " ++ show err
                          _ -> expectationFailure "Expected ALet annotation"
                  Left err -> expectationFailure err
+
+        it "reifies TyCon nodes to TCon in elaborated types" $ do
+            -- Test that a constraint containing TyCon nodes reifies correctly to TCon
+            -- Create a simple constraint with TyCon: List Int
+            let intBase = BaseTy "Int"
+                listBase = BaseTy "List"
+                var0 = NodeId 0
+                var1 = NodeId 1
+                baseNode = TyBase var0 intBase
+                listNode = TyCon var1 listBase (var0 :| [])
+                nodes = fromListNode [(var0, baseNode), (var1, listNode)]
+                constraint = emptyConstraint { cNodes = nodes }
+                res = SolveResult { srConstraint = constraint, srUnionFind = IntMap.empty }
+            case reifyType res var1 of
+                Right ty ->
+                    case ty of
+                        TCon con args -> do
+                            con `shouldBe` listBase
+                            length args `shouldBe` 1
+                            case args of
+                                (TBase b :| []) -> b `shouldBe` intBase
+                                _ -> expectationFailure "Expected TBase Int as argument"
+                        _ -> expectationFailure $ "Expected TCon, got: " ++ show ty
+                Left err -> expectationFailure $ "Reify error: " ++ show err
+
+        it "reifies nested TyCon nodes to nested TCon" $ do
+            -- Test nested TyCon: List (Maybe Int)
+            let intBase = BaseTy "Int"
+                maybeBase = BaseTy "Maybe"
+                listBase = BaseTy "List"
+                var0 = NodeId 0
+                var1 = NodeId 1
+                var2 = NodeId 2
+                intNode = TyBase var0 intBase
+                maybeNode = TyCon var1 maybeBase (var0 :| [])
+                listNode = TyCon var2 listBase (var1 :| [])
+                nodes = fromListNode [(var0, intNode), (var1, maybeNode), (var2, listNode)]
+                constraint = emptyConstraint { cNodes = nodes }
+                res = SolveResult { srConstraint = constraint, srUnionFind = IntMap.empty }
+            case reifyType res var2 of
+                Right ty ->
+                    case ty of
+                        TCon outerCon outerArgs -> do
+                            outerCon `shouldBe` listBase
+                            case outerArgs of
+                                (TCon innerCon innerArgs :| []) -> do
+                                    innerCon `shouldBe` maybeBase
+                                    case innerArgs of
+                                        (TBase b :| []) -> b `shouldBe` intBase
+                                        _ -> expectationFailure "Expected TBase Int as innermost arg"
+                                _ -> expectationFailure "Expected nested TCon (Maybe Int)"
+                        _ -> expectationFailure $ "Expected TCon, got: " ++ show ty
+                Left err -> expectationFailure $ "Reify error: " ++ show err
 
     describe "Integration Tests" $ do
         it "solves let-bound id applied to Bool" $ do
@@ -334,3 +390,18 @@ noExpNodes nodes =
 
 baseNames :: NodeMap TyNode -> [BaseTy]
 baseNames nodes = [ b | TyBase _ b <- map snd (toListNode nodes) ]
+
+-- | Empty constraint for testing reification
+emptyConstraint :: Constraint
+emptyConstraint = Constraint
+    { cNodes = fromListNode []
+    , cInstEdges = []
+    , cUnifyEdges = []
+    , cBindParents = IntMap.empty
+    , cPolySyms = Set.empty
+    , cEliminatedVars = IntSet.empty
+    , cWeakenedVars = IntSet.empty
+    , cAnnEdges = IntSet.empty
+    , cLetEdges = IntSet.empty
+    , cGenNodes = fromListGen []
+    }

@@ -26,6 +26,7 @@ import MLF.Constraint.Types hiding (lookupNode)
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Types.Elab
 import MLF.Util.ElabError (ElabError(..), bindingToElab)
+import qualified Data.List.NonEmpty as NE
 import MLF.Util.Graph (topoSortBy)
 import MLF.Constraint.Solve hiding (BindingTreeError, MissingNode)
 import qualified MLF.Constraint.Solve as Solve (frWith)
@@ -138,26 +139,28 @@ reifyWith _contextLabel res nameForVar isNamed rootMode nid =
 
     boundIsSimple start =
         let go visited nid0 =
-                let nidC = canonical nid0
-                    key = getNodeId nidC
-                in if IntSet.member key visited
-                    then True
-                    else
-                        case lookupNodeIn nodes nidC of
-                            Nothing -> True
-                            Just node ->
-                                let visited' = IntSet.insert key visited
-                                in case node of
-                                    TyBase{} -> True
-                                    TyBottom{} -> True
-                                    TyVar{} ->
-                                        case VarStore.lookupVarBound constraint nidC of
-                                            Nothing -> True
-                                            Just bnd -> go visited' bnd
-                                    TyExp{ tnBody = b } -> go visited' b
-                                    TyArrow{} -> False
-                                    TyForall{} -> False
-        in go IntSet.empty start
+                    let nidC = canonical nid0
+                        key = getNodeId nidC
+                    in if IntSet.member key visited
+                        then True
+                        else
+                            case lookupNodeIn nodes nidC of
+                                Nothing -> True
+                                Just node ->
+                                    let visited' = IntSet.insert key visited
+                                    in case node of
+                                        TyBase{} -> True
+                                        TyBottom{} -> True
+                                        TyCon{ tnArgs = args } ->
+                                            all (go visited') (NE.toList args)
+                                        TyVar{} ->
+                                            case VarStore.lookupVarBound constraint nidC of
+                                                Nothing -> True
+                                                Just bnd -> go visited' bnd
+                                        TyExp{ tnBody = b } -> go visited' b
+                                        TyArrow{} -> False
+                                        TyForall{} -> False
+            in go IntSet.empty start
 
     boundIsSimpleFor n =
         case VarStore.lookupVarBound constraint (canonical n) of
@@ -391,6 +394,14 @@ reifyWith _contextLabel res nameForVar isNamed rootMode nid =
                                             (cache1, d') <- vChild cache0 namedExtra' mode (canonical d)
                                             (cache2, c') <- vChild cache1 namedExtra' mode (canonical c)
                                             pure (cache2, TArrow d' c')
+                                        TyCon{ tnCon = con, tnArgs = args } -> do
+                                            (cache', args') <- foldM
+                                                (\(cacheAcc, acc) arg -> do
+                                                    (cacheNext, arg') <- vChild cacheAcc namedExtra' mode (canonical arg)
+                                                    pure (cacheNext, arg' : acc))
+                                                (cache0, [])
+                                                (NE.toList args)
+                                            pure (cache', TCon con (NE.fromList (reverse args')))
                                         TyForall{ tnBody = b } ->
                                             let bodyC = canonical b
                                             in vChild cache0 namedExtra' mode bodyC
@@ -817,6 +828,8 @@ freeVars res nid visited
             Just TyArrow{ tnDom = d, tnCod = c } ->
                 freeVarsChild visited' d `IntSet.union`
                 freeVarsChild visited' c
+            Just TyCon{ tnArgs = args } ->
+                IntSet.unions (map (freeVarsChild visited') (NE.toList args))
             Just TyForall{ tnBody = b } ->
                 freeVarsChild visited' b
             Just TyExp{ tnBody = b } ->

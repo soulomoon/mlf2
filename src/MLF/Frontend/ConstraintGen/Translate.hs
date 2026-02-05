@@ -3,12 +3,16 @@ module MLF.Frontend.ConstraintGen.Translate (
     buildRootExpr
 ) where
 
+import Control.Monad (foldM)
 import Control.Monad.Except (MonadError (throwError))
-import Control.Monad.State.Strict (gets)
+import Control.Monad.State.Strict (gets, modify')
+import Data.List.NonEmpty (NonEmpty(..))
+import qualified Data.List.NonEmpty as NE
 import Data.Map.Strict (Map)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Map.Strict as Map
 import Data.Maybe (listToMaybe)
+import qualified Data.Set as Set
 
 import MLF.Constraint.Types
 import MLF.Frontend.Syntax
@@ -192,8 +196,8 @@ rigid ancestor is introduced). This pushes toward
 the thesis’ “rigid domain” intent while staying presolution-safe: the nodes are
 not instantiable, but they are not locked under a rigid ancestor.
 
-Both copies remain wrapped (like `internalizeSrcType`). The codomain is returned
-as the annotation result, while the domain stays the instantiation target.
+Both copies remain wrapped. The codomain is returned as the annotation result,
+while the domain stays the instantiation target.
 -}
 
 {- Note [Lambda Translation]
@@ -381,14 +385,6 @@ lookupSchemeOwnerForRoot root = do
 type TyEnv = Map VarName NodeId
 type SharedEnv = Map VarName NodeId
 
--- | Split a nested forall type into explicit scheme binders and a body.
--- This peels only the leading `STForall`s, leaving any inner foralls intact.
-splitForalls :: SrcType -> ([(String, Maybe SrcType)], SrcType)
-splitForalls = go []
-  where
-    go acc (STForall name mb body) = go ((name, mb):acc) body
-    go acc body = (reverse acc, body)
-
 -- | Internalize a coercion type κ as a rigid domain and flexible codomain,
 -- sharing existential (free) variables across both copies.
 internalizeCoercionType :: GenNodeId -> SrcType -> ConstraintM (NodeId, NodeId)
@@ -448,8 +444,9 @@ internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared srcType 
                     setBindParentOverride (typeRef varNode) (genRef currentGen) bindFlag
                     pure (varNode, shared2)
                 else pure (arrowNode, shared2)
-    
+
         STBase name -> do
+            registerTyConArity (BaseTy name) 0
             baseNode <- allocBase (BaseTy name)
             if wrap
                 then do
@@ -462,7 +459,36 @@ internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared srcType 
                     setBindParentOverride (typeRef varNode) (genRef currentGen) bindFlag
                     pure (varNode, shared)
                 else pure (baseNode, shared)
-    
+
+        STCon name args -> do
+            let arity = NE.length args
+            registerTyConArity (BaseTy name) arity
+            (argNodes, sharedFinal) <- foldM
+                (\(accNodes, accShared) argTy -> do
+                    (argNode, newShared) <-
+                        internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv accShared argTy
+                    pure (accNodes ++ [argNode], newShared))
+                ([], shared)
+                (NE.toList args)
+            conNode <- case argNodes of
+                (h:t) -> allocCon (BaseTy name) (h :| t)
+                [] -> error "STCon must have at least one argument"
+            case bindFlag of
+                BindRigid -> do
+                    mapM_ (\argNode -> rebindIfParent argNode (typeRef conNode) (genRef currentGen) bindFlag) argNodes
+                BindFlex -> pure ()
+            if wrap
+                then do
+                    varNode <- allocVar
+                    setVarBound varNode (Just conNode)
+                    case bindFlag of
+                        BindRigid ->
+                            rebindIfParent conNode (typeRef varNode) (genRef currentGen) bindFlag
+                        BindFlex -> pure ()
+                    setBindParentOverride (typeRef varNode) (genRef currentGen) bindFlag
+                    pure (varNode, sharedFinal)
+                else pure (conNode, sharedFinal)
+
         STForall var mBound body ->
             case mBound of
                 Just (STVar alias) | alias /= var -> do
@@ -478,9 +504,20 @@ internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared srcType 
                                         pure (nid, Map.insert alias nid shared)
                     let tyEnv' = Map.insert var aliasNode tyEnv
                     internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv' shared1 body
+                Just (STVar alias) | alias == var ->
+                    -- Binder occurs in its own bound - this is ill-formed
+                    throwError (ForallBoundMentionsBinder var)
                 Just (STVar _) ->
+                    -- This case is now unreachable since alias /= var is handled above
+                    -- and alias == var throws an error
                     internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared (STForall var Nothing body)
                 _ -> do
+                    -- Check forall-bound well-formedness: binder must not occur in its own bound
+                    case mBound of
+                        Just bound
+                            | Set.member var (srcTypeFreeVars bound) ->
+                                throwError (ForallBoundMentionsBinder var)
+                        _ -> pure ()
                     Scope.pushScope
                     schemeGenId <- allocGenNode []
                     setBindParentIfMissing (genRef schemeGenId) (genRef currentGen) BindFlex
@@ -549,99 +586,34 @@ rebindIfParent child expectedParent newParent flag = do
                 setBindParentOverride (typeRef child) newParent flag
         _ -> pure ()
 
--- | Internalize a source type annotation into a constraint graph.
--- This creates nodes for the type structure and connects them appropriately.
---
--- The tyEnv maps type variable names to their allocated NodeIds (for quantified vars).
-internalizeSrcTypeBound :: GenNodeId -> TyEnv -> SrcType -> ConstraintM NodeId
-internalizeSrcTypeBound = internalizeSrcTypeWith False
-
-internalizeSrcTypeWith :: Bool -> GenNodeId -> TyEnv -> SrcType -> ConstraintM NodeId
-internalizeSrcTypeWith wrap currentGen tyEnv srcType = case srcType of
-    STVar name -> case Map.lookup name tyEnv of
-        Just nid -> pure nid
-        Nothing -> do
-            -- Free type variable: allocate a fresh variable
-            nid <- allocVar
-            pure nid
-
-    STArrow dom cod -> do
-        domNode <- internalizeSrcTypeWith wrap currentGen tyEnv dom
-        codNode <- internalizeSrcTypeWith wrap currentGen tyEnv cod
-        arrowNode <- allocArrow domNode codNode
-        if wrap
-            then do
-                varNode <- allocVar
-                setVarBound varNode (Just arrowNode)
-                pure varNode
-            else pure arrowNode
-
-    STBase name -> do
-        baseNode <- allocBase (BaseTy name)
-        if wrap
-            then do
-                varNode <- allocVar
-                setVarBound varNode (Just baseNode)
-                pure varNode
-            else pure baseNode
-
-    STForall var mBound body ->
-        case mBound of
-            Just (STVar alias) | alias /= var -> do
-                aliasNode <- case Map.lookup alias tyEnv of
-                    Just nid -> pure nid
-                    Nothing -> allocVar
-                let tyEnv' = Map.insert var aliasNode tyEnv
-                internalizeSrcTypeWith False currentGen tyEnv' body
-            Just (STVar _) ->
-                internalizeSrcTypeWith wrap currentGen tyEnv (STForall var Nothing body)
-            _ -> do
-                Scope.pushScope
-                schemeGenId <- allocGenNode []
-                setBindParentIfMissing (genRef schemeGenId) (genRef currentGen) BindFlex
-                -- Allocate a type variable for the bound variable
-                varNode <- allocVar
-                -- Extend the environment with this binding
-                let tyEnv' = Map.insert var varNode tyEnv
-                -- Process the bound if present (for instance bounds)
-                mbBoundNode <- case mBound of
-                    Nothing -> pure Nothing
-                    Just bound -> do
-                        Scope.pushScope
-                        boundNode <- internalizeSrcTypeBound schemeGenId tyEnv' bound
-                        boundScope <- Scope.popScope
-                        mbBoundOwner <- lookupSchemeOwnerForRoot boundNode
-                        case mbBoundOwner of
-                            Just gid -> do
-                                Scope.rebindScopeNodes (genRef gid) boundNode boundScope
-                                setGenNodeSchemes gid [boundNode]
-                            Nothing -> Scope.rebindScopeNodes (typeRef varNode) boundNode boundScope
-                        case mbBoundOwner of
-                            Nothing -> setBindParentOverride (typeRef boundNode) (typeRef varNode) BindFlex
-                            Just gid -> setBindParentOverride (typeRef boundNode) (genRef gid) BindFlex
-                        pure (Just boundNode)
-
-                -- Record the bound on the variable
-                setVarBound varNode mbBoundNode
-
-                -- Internalize the body with the extended environment
-                bodyNode <- internalizeSrcTypeWith False schemeGenId tyEnv' body
-                scopeFrame <- Scope.popScope
-                -- Represent explicit forall via a fresh gen node (named binders).
-                Scope.rebindScopeNodes (genRef schemeGenId) bodyNode scopeFrame
-                setBindParentOverride (typeRef varNode) (genRef schemeGenId) BindFlex
-                setBindParentOverride (typeRef bodyNode) (genRef schemeGenId) BindFlex
-                setGenNodeSchemes schemeGenId [bodyNode]
-                pure bodyNode
-
-    STBottom -> do
-        -- Bottom is the minimal type, represented as a fresh variable
-        -- that can be instantiated to anything
-        allocVar
-
-
 baseFor :: Lit -> BaseTy
 baseFor lit = BaseTy $ case lit of
     LInt _ -> "Int"
     LBool _ -> "Bool"
     LString _ -> "String"
+
+-- | Register the arity of a type constructor. If the constructor has already
+-- been seen with a different arity, throw TypeConstructorArityMismatch.
+registerTyConArity :: BaseTy -> Int -> ConstraintM ()
+registerTyConArity con arity = do
+    arityMap <- gets bsTyConArity
+    case Map.lookup con arityMap of
+        Just existingArity
+            | existingArity /= arity ->
+                throwError (TypeConstructorArityMismatch con existingArity arity)
+        _ -> modify' $ \st ->
+            st { bsTyConArity = Map.insert con arity (bsTyConArity st) }
+
+-- | Check if a type variable name occurs free in a SrcType.
+srcTypeFreeVars :: SrcType -> Set.Set String
+srcTypeFreeVars = go Set.empty
+  where
+    go bound ty = case ty of
+        STVar v -> if Set.member v bound then Set.empty else Set.singleton v
+        STArrow dom cod -> go bound dom <> go bound cod
+        STBase _ -> Set.empty
+        STCon _ args -> foldMap (go bound) args
+        STForall v mb body ->
+            let bound' = Set.insert v bound
+            in maybe Set.empty (go bound) mb <> go bound' body
+        STBottom -> Set.empty

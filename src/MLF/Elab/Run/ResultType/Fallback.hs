@@ -553,6 +553,7 @@ computeResultTypeFallbackCore ctx annCanon ann = do
                                                         Just TyForall{} -> "forall"
                                                         Just TyExp{} -> "exp"
                                                         Just TyBase{} -> "base"
+                                                        Just TyCon{} -> "con"
                                                         Just TyBottom{} -> "bottom"
                                                         Nothing -> "missing"
                                             in debugGaScope traceCfg

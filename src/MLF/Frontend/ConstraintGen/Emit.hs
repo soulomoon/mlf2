@@ -3,6 +3,7 @@ module MLF.Frontend.ConstraintGen.Emit (
     allocVar,
     allocBase,
     allocArrow,
+    allocCon,
     allocGenNode,
     setGenNodeSchemes,
     allocExpNode,
@@ -18,6 +19,8 @@ import Control.Monad (when)
 import Control.Monad.State.Strict (gets, modify')
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
+import Data.List.NonEmpty (NonEmpty)
+import qualified Data.List.NonEmpty as NE
 
 import MLF.Constraint.Types hiding (insertNode)
 import MLF.Frontend.ConstraintGen.State (BuildState(..), ConstraintM)
@@ -73,6 +76,23 @@ allocArrow domNode codNode = do
     -- existing binding structure.
     setBindParentIfMissing (typeRef domNode) (typeRef nid) BindFlex
     setBindParentIfMissing (typeRef codNode) (typeRef nid) BindFlex
+    pure nid
+
+-- | Allocate a TyCon node (type constructor application C σ₁ … σₙ).
+allocCon :: BaseTy -> NonEmpty NodeId -> ConstraintM NodeId
+allocCon con argNodes = do
+    nid <- freshNodeId
+    insertNode TyCon
+        { tnId = nid
+        , tnCon = con
+        , tnArgs = argNodes
+        }
+    -- Set default binding edges for all args to this TyCon node,
+    -- but only if they don't already have binding parents.
+    -- This ensures all non-root nodes have binding parents while preserving
+    -- existing binding structure.
+    mapM_ (\argNode -> setBindParentIfMissing (typeRef argNode) (typeRef nid) BindFlex)
+          (NE.toList argNodes)
     pure nid
 
 allocGenNode :: [NodeId] -> ConstraintM GenNodeId

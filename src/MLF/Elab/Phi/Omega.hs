@@ -16,7 +16,7 @@ module MLF.Elab.Phi.Omega (
 ) where
 
 import Control.Applicative ((<|>))
-import Control.Monad (when)
+import Control.Monad (unless, when)
 import Data.Functor.Foldable (cata)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
@@ -288,6 +288,10 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
                     then Just [ty | name <- binderNames, Just ty <- [Map.lookup name subst]]
                     else Nothing
 
+    -- | Paper Def. 15.3.4 / Fig. 15.3.5: Φ(e) = Σ prefix then Φχe(Ω).
+    -- We always attempt binder reordering via Σ(g), independent of whether Ω
+    -- contains Raise operations. When no reorder is needed, reorderBindersByPrec
+    -- returns InstId.
     phiWithScheme :: Either ElabError Instantiation
     phiWithScheme = do
         let ty0 = schemeToType (siScheme si)
@@ -295,12 +299,7 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
             lookupBinder (NodeId i) = IntMap.lookup i subst
             ids0 = idsForStartType si ty0
             binderKeys = IntSet.fromList (IntMap.keys subst)
-            -- The thesis introduces a reordering ϕR (aka Σ(g)) whenever the
-            -- gMLF scheme type Typ(a′) disagrees with Typexp(a′) in quantifier
-            -- order (Definition 15.3.4). This mismatch can occur even when the
-            -- propagation witness Ω contains no Raise steps, so we always attempt
-            -- to reorder by <P when we have enough information; `reorderBindersByPrec`
-            -- returns the identity instantiation when no reordering is needed.
+        -- Always attempt Σ(g) / ϕR at the start (thesis Def. 15.3.4), even if Ω has no Raise steps.
         (sigma, ty1, ids1) <- reorderBindersByPrec ty0 ids0
         (_, _, phiOps) <- goSteps binderKeys keepBinderKeys namedSet ty1 ids1 InstId steps lookupBinder
         pure (normalizeInst (instMany [sigma, phiOps]))
@@ -342,12 +341,18 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
     reorderBindersByPrec ty ids = do
         let (qs, _) = splitForalls ty
         when (length qs /= length ids) $
-            Left (InstantiationError "reorderBindersByPrec: binder spine / identity list length mismatch")
-        let hasMissingKeys = any (\case Just nid -> not (IntMap.member (getNodeId (canonicalNode nid)) orderKeys); Nothing -> False) ids
-            knownKeyCount = length [() | Just nid <- ids, IntMap.member (getNodeId (canonicalNode nid)) orderKeys]
-        if length qs < 2 || hasMissingKeys || knownKeyCount < 2
+            Left (InstantiationError "PhiReorder: binder spine / identity list length mismatch")
+        if length qs < 2
             then Right (InstId, ty, ids)
             else do
+                -- Require concrete binder identities for all quantifiers (fail-fast)
+                let missingIdPositions = [i | (i, Nothing) <- zip [(0::Int)..] ids]
+                unless (null missingIdPositions) $
+                    Left (InstantiationError $ "PhiReorder: missing binder identity at positions " ++ show missingIdPositions)
+                -- Require order keys for all binder identities (fail-fast)
+                let missingKeyBinders = [nid | Just nid <- ids, not (IntMap.member (getNodeId (canonicalNode nid)) orderKeys)]
+                unless (null missingKeyBinders) $
+                    Left (InstantiationError $ "PhiReorder: missing order key for binders " ++ show missingKeyBinders)
                 desired <- desiredBinderOrder ty ids
                 reorderTo ty ids desired
 
@@ -387,7 +392,7 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
 
         idxs <-
             topoSortBy
-                "reorderBindersByPrec: cycle in bound dependencies"
+                "PhiReorder: cycle in bound dependencies"
                 cmpIdx
                 depsFor
                 indices

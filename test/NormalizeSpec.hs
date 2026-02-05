@@ -1,6 +1,7 @@
 module NormalizeSpec (spec) where
 
 import qualified Data.IntMap.Strict as IntMap
+import Data.List.NonEmpty (NonEmpty(..))
 import Test.Hspec
 
 import MLF.Constraint.Types.Graph
@@ -601,3 +602,138 @@ spec = describe "Phase 2 — Normalization" $ do
                         }
                     result = normalize constraint
                 cUnifyEdges result `shouldBe` []
+
+    describe "TyCon grafting and decomposition" $ do
+        it "grafts TyCon structure onto variable (Var ≤ TyCon)" $ do
+            -- α ≤ List Int should graft TyCon structure onto α
+            let intNode = TyBase (NodeId 1) (BaseTy "Int")
+                listNode = TyCon (NodeId 2) (BaseTy "List") (pure (NodeId 1))
+                varNode = TyVar { tnId = NodeId 0, tnBound = Nothing }
+                edge = InstEdge (EdgeId 0) (NodeId 0) (NodeId 2)
+                constraint = emptyConstraint
+                    { cNodes = nodeMapFromList
+                        [(0, varNode), (1, intNode), (2, listNode)]
+                    , cInstEdges = [edge]
+                    }
+                result = normalize constraint
+            -- The inst edge should be consumed (grafted)
+            cInstEdges result `shouldBe` []
+            -- New TyCon node should exist that unifies with α
+            -- Check that nodes count increased (fresh vars for args)
+            nodeMapSize (cNodes result) `shouldSatisfy` (> 3)
+
+        it "decomposes TyCon ≤ TyCon into arg unifications (same head)" $ do
+            -- List α ≤ List Int should decompose to α = Int
+            let alpha = TyVar { tnId = NodeId 0, tnBound = Nothing }
+                intNode = TyBase (NodeId 1) (BaseTy "Int")
+                list1 = TyCon (NodeId 2) (BaseTy "List") (pure (NodeId 0))
+                list2 = TyCon (NodeId 3) (BaseTy "List") (pure (NodeId 1))
+                edge = InstEdge (EdgeId 0) (NodeId 2) (NodeId 3)
+                constraint = emptyConstraint
+                    { cNodes = nodeMapFromList
+                        [(0, alpha), (1, intNode), (2, list1), (3, list2)]
+                    , cInstEdges = [edge]
+                    }
+                result = normalize constraint
+            -- TyCon ≤ TyCon becomes α = Int, all merged
+            cInstEdges result `shouldBe` []
+            cUnifyEdges result `shouldBe` []
+
+        it "keeps TyCon ≤ TyCon as type error when heads differ" $ do
+            -- List α ≤ Maybe Int is a type error
+            let alpha = TyVar { tnId = NodeId 0, tnBound = Nothing }
+                intNode = TyBase (NodeId 1) (BaseTy "Int")
+                list1 = TyCon (NodeId 2) (BaseTy "List") (pure (NodeId 0))
+                maybe2 = TyCon (NodeId 3) (BaseTy "Maybe") (pure (NodeId 1))
+                edge = InstEdge (EdgeId 0) (NodeId 2) (NodeId 3)
+                constraint = emptyConstraint
+                    { cNodes = nodeMapFromList
+                        [(0, alpha), (1, intNode), (2, list1), (3, maybe2)]
+                    , cInstEdges = [edge]
+                    }
+                result = normalize constraint
+            -- Type error: different constructors, edge is kept
+            length (cInstEdges result) `shouldBe` 1
+
+        it "keeps TyCon ≤ Arrow as type error" $ do
+            -- List α ≤ (Int → Bool) is a type error
+            let alpha = TyVar { tnId = NodeId 0, tnBound = Nothing }
+                intNode = TyBase (NodeId 1) (BaseTy "Int")
+                boolNode = TyBase (NodeId 2) (BaseTy "Bool")
+                list1 = TyCon (NodeId 3) (BaseTy "List") (pure (NodeId 0))
+                arr = TyArrow (NodeId 4) (NodeId 1) (NodeId 2)
+                edge = InstEdge (EdgeId 0) (NodeId 3) (NodeId 4)
+                constraint = emptyConstraint
+                    { cNodes = nodeMapFromList
+                        [(0, alpha), (1, intNode), (2, boolNode), (3, list1), (4, arr)]
+                    , cInstEdges = [edge]
+                    }
+                result = normalize constraint
+            -- Type error: TyCon vs Arrow, edge is kept
+            length (cInstEdges result) `shouldBe` 1
+
+        it "keeps Arrow ≤ TyCon as type error" $ do
+            -- (Int → Bool) ≤ List α is a type error
+            let alpha = TyVar { tnId = NodeId 0, tnBound = Nothing }
+                intNode = TyBase (NodeId 1) (BaseTy "Int")
+                boolNode = TyBase (NodeId 2) (BaseTy "Bool")
+                arr = TyArrow (NodeId 3) (NodeId 1) (NodeId 2)
+                list1 = TyCon (NodeId 4) (BaseTy "List") (pure (NodeId 0))
+                edge = InstEdge (EdgeId 0) (NodeId 3) (NodeId 4)
+                constraint = emptyConstraint
+                    { cNodes = nodeMapFromList
+                        [(0, alpha), (1, intNode), (2, boolNode), (3, arr), (4, list1)]
+                    , cInstEdges = [edge]
+                    }
+                result = normalize constraint
+            -- Type error: Arrow vs TyCon, edge is kept
+            length (cInstEdges result) `shouldBe` 1
+
+        it "keeps TyCon ≤ Base as type error" $ do
+            -- List α ≤ Int is a type error
+            let alpha = TyVar { tnId = NodeId 0, tnBound = Nothing }
+                intNode = TyBase (NodeId 1) (BaseTy "Int")
+                list1 = TyCon (NodeId 2) (BaseTy "List") (pure (NodeId 0))
+                edge = InstEdge (EdgeId 0) (NodeId 2) (NodeId 1)
+                constraint = emptyConstraint
+                    { cNodes = nodeMapFromList
+                        [(0, alpha), (1, intNode), (2, list1)]
+                    , cInstEdges = [edge]
+                    }
+                result = normalize constraint
+            -- Type error: TyCon vs Base, edge is kept
+            length (cInstEdges result) `shouldBe` 1
+
+        it "keeps Base ≤ TyCon as type error" $ do
+            -- Int ≤ List α is a type error
+            let alpha = TyVar { tnId = NodeId 0, tnBound = Nothing }
+                intNode = TyBase (NodeId 1) (BaseTy "Int")
+                list1 = TyCon (NodeId 2) (BaseTy "List") (pure (NodeId 0))
+                edge = InstEdge (EdgeId 0) (NodeId 1) (NodeId 2)
+                constraint = emptyConstraint
+                    { cNodes = nodeMapFromList
+                        [(0, alpha), (1, intNode), (2, list1)]
+                    , cInstEdges = [edge]
+                    }
+                result = normalize constraint
+            -- Type error: Base vs TyCon, edge is kept
+            length (cInstEdges result) `shouldBe` 1
+
+        it "decomposes multi-arg TyCon ≤ TyCon" $ do
+            -- Either α β ≤ Either Int Bool should decompose to α = Int, β = Bool
+            let alpha = TyVar { tnId = NodeId 0, tnBound = Nothing }
+                beta = TyVar { tnId = NodeId 1, tnBound = Nothing }
+                intNode = TyBase (NodeId 2) (BaseTy "Int")
+                boolNode = TyBase (NodeId 3) (BaseTy "Bool")
+                either1 = TyCon (NodeId 4) (BaseTy "Either") (NodeId 0 :| [NodeId 1])
+                either2 = TyCon (NodeId 5) (BaseTy "Either") (NodeId 2 :| [NodeId 3])
+                edge = InstEdge (EdgeId 0) (NodeId 4) (NodeId 5)
+                constraint = emptyConstraint
+                    { cNodes = nodeMapFromList
+                        [(0, alpha), (1, beta), (2, intNode), (3, boolNode), (4, either1), (5, either2)]
+                    , cInstEdges = [edge]
+                    }
+                result = normalize constraint
+            -- Either ≤ Either becomes α = Int, β = Bool, all merged
+            cInstEdges result `shouldBe` []
+            cUnifyEdges result `shouldBe` []

@@ -116,6 +116,7 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.List (find)
 import Data.Maybe (catMaybes, fromMaybe, isNothing)
+import qualified Data.List.NonEmpty as NE
 
 import qualified MLF.Binding.Adjustment as BindingAdjustment
 import qualified MLF.Binding.Tree as Binding
@@ -138,6 +139,8 @@ data SolveError
     | UnexpectedExpNode NodeId
     | BindingTreeError BindingError
     | ValidationFailed [String]         -- ^ Post-solve validation failures
+    | TyConClash BaseTy BaseTy          -- ^ TyCon head mismatch
+    | TyConArityMismatch BaseTy Int Int -- ^ TyCon arity mismatch (head, arity1, arity2)
     deriving (Eq, Show)
 
 -- | Successful unification result.
@@ -458,6 +461,10 @@ solveUnify traceCfg c0 = do
             throwSolveError (UnexpectedExpNode (NodeId 0))
         UnifyCore.MismatchUnexpectedExp nid ->
             throwSolveError (UnexpectedExpNode nid)
+        UnifyCore.MismatchTyCon c1 c2 ->
+            throwSolveError (TyConClash c1 c2)
+        UnifyCore.MismatchTyConArity c k1 k2 ->
+            throwSolveError (TyConArityMismatch c k1 k2)
 
     -- | Lookup a node by id or fail with 'MissingNode'.
     lookupNode :: NodeId -> SolveM TyNode
@@ -565,6 +572,7 @@ applyUFConstraint uf c =
             TyBase { tnBase = b } -> TyBase nid' b
             TyForall { tnBody = b } -> TyForall nid' (frWith uf b)
             TyExp { tnExpVar = s, tnBody = b } -> TyExp nid' s (frWith uf b)
+            TyCon { tnCon = con, tnArgs = args } -> TyCon nid' con (NE.map (frWith uf) args)
             )
 
     rewriteEliminated :: (NodeId -> NodeId) -> IntMap TyNode -> EliminatedVars -> EliminatedVars
@@ -719,6 +727,8 @@ rewriteEliminatedBinders c0
                     TyForall nid (substNode b)
                 TyExp { tnId = nid, tnExpVar = s, tnBody = b } ->
                     TyExp nid s (substNode b)
+                TyCon { tnId = nid, tnCon = con, tnArgs = args } ->
+                    TyCon nid con (NE.map substNode args)
 
             nodes1 =
                 IntMap.fromList

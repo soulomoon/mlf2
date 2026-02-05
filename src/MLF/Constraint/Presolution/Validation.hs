@@ -73,6 +73,15 @@ validateTranslatablePresolution c0 = do
                 _ -> True
             ]
 
+    let issuesTyCon =
+            [ TyConNodeNotRigid nid
+            | (nid, node) <- toListNode nodes
+            , TyCon{} <- [node]
+            , case IntMap.lookup (nodeRefKey (typeRef nid)) bindParents of
+                Just (_, BindRigid) -> False
+                _ -> True
+            ]
+
     let interiorByGen =
             IntMap.fromList
                 [ (genNodeKey (gnId gen), structuralInterior nodes (gnSchemes gen))
@@ -87,7 +96,7 @@ validateTranslatablePresolution c0 = do
             , not (IntSet.member (getNodeId child) interior)
             ]
 
-    let issues = issuesLocked ++ issuesScheme ++ issuesArrow ++ issuesOutside
+    let issues = issuesLocked ++ issuesScheme ++ issuesArrow ++ issuesTyCon ++ issuesOutside
     if null issues
         then pure ()
         else Left (NonTranslatablePresolution issues)
@@ -122,6 +131,12 @@ rigidifyTranslatablePresolutionM = do
             , TyArrow{} <- [node]
             ]
 
+        tyConNodes =
+            [ nid
+            | (nid, node) <- toListNode nodes
+            , TyCon{} <- [node]
+            ]
+
         isNonDegenerateSchemeRoot gen root =
             case IntMap.lookup (nodeRefKey (typeRef root)) bindParents0 of
                 Just (GenRef gid, _) | gid == gnId gen -> True
@@ -141,8 +156,10 @@ rigidifyTranslatablePresolutionM = do
 
         bindParents1 =
             foldl' rigidifyKey bindParents0 (map typeRef arrowNodes)
+        bindParents1' =
+            foldl' rigidifyKey bindParents1 (map typeRef tyConNodes)
         bindParents2 =
-            foldl' rigidifyKey bindParents1 (map typeRef schemeRoots)
+            foldl' rigidifyKey bindParents1' (map typeRef schemeRoots)
 
         interiorByGen =
             IntMap.fromList
@@ -215,6 +232,13 @@ translatableWeakenedNodes c0 =
             , isRigid (nodeRefKey (typeRef nid))
             ]
 
+        tyConNodes =
+            [ nid
+            | (nid, node) <- toListNode nodes
+            , TyCon{} <- [node]
+            , isRigid (nodeRefKey (typeRef nid))
+            ]
+
         interiorByGen =
             IntMap.fromList
                 [ (genNodeKey (gnId gen), structuralInterior nodes (gnSchemes gen))
@@ -230,5 +254,5 @@ translatableWeakenedNodes c0 =
             ]
 
         toKey = getNodeId
-        inferred = IntSet.fromList (map toKey (schemeRoots ++ arrowNodes ++ nonInterior))
+        inferred = IntSet.fromList (map toKey (schemeRoots ++ arrowNodes ++ tyConNodes ++ nonInterior))
     in IntSet.union (cWeakenedVars c0) inferred
