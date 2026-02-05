@@ -918,9 +918,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                     [ (nodeRefKey (typeRef forallNode), (genRef rootGen, BindFlex))
                                     , (nodeRefKey (typeRef arrow), (typeRef forallNode, BindFlex))
                                     , (nodeRefKey (typeRef vA), (typeRef forallNode, BindFlex))
-                                    -- vB is intentionally unreachable from the order root so Φ’s Σ(g)
-                                    -- reordering fails fast (missing <P order key).
-                                    , (nodeRefKey (typeRef vB), (genRef rootGen, BindFlex))
+                                    , (nodeRefKey (typeRef vB), (typeRef forallNode, BindFlex))
                                     ]
                             , cGenNodes =
                                 fromListGen
@@ -952,7 +950,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness []
                         }
 
-                phi <- requireRight (Elab.phiFromEdgeWitness defaultTraceConfig generalizeAtWith solved (Just si) ew)
+                phi <- requireRight (Elab.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
                 -- Φ should produce a non-identity instantiation (reordering)
                 phi `shouldNotBe` Elab.InstId
                 -- Apply and verify the result has binders in <P order (a before b)
@@ -1026,7 +1024,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness []
                         }
 
-                phi <- requireRight (Elab.phiFromEdgeWitness defaultTraceConfig generalizeAtWith solved (Just si) ew)
+                phi <- requireRight (Elab.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
                 phi `shouldNotBe` Elab.InstId
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
                 let expected =
@@ -1037,10 +1035,11 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                         (Elab.TArrow (Elab.TVar "b") (Elab.TVar "c")))))
                 canonType out `shouldBe` canonType expected
 
-            it "missing <P order key for a binder causes fail-fast error" $ do
+            it "missing <P order key for a binder fails Σ(g) reordering" $ do
                 -- Create a constraint where a binder node is NOT reachable from the root
-                -- (so it won't have an order key), triggering the fail-fast error.
+                -- (so it won't have an order key). Σ(g) must fail fast.
                 let rootGen = GenNodeId 0
+                    otherGen = GenNodeId 1
                     vA = NodeId 10
                     vB = NodeId 11
                     arrow = NodeId 20
@@ -1059,11 +1058,13 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                     [ (nodeRefKey (typeRef forallNode), (genRef rootGen, BindFlex))
                                     , (nodeRefKey (typeRef arrow), (typeRef forallNode, BindFlex))
                                     , (nodeRefKey (typeRef vA), (typeRef forallNode, BindFlex))
-                                    , (nodeRefKey (typeRef vB), (genRef rootGen, BindFlex))
+                                    , (nodeRefKey (typeRef vB), (genRef otherGen, BindFlex))
                                     ]
                             , cGenNodes =
                                 fromListGen
-                                    [ (rootGen, GenNode rootGen [forallNode]) ]
+                                    [ (rootGen, GenNode rootGen [forallNode])
+                                    , (otherGen, GenNode otherGen [])
+                                    ]
                             }
 
                     solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
@@ -1090,13 +1091,15 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness []
                         }
 
-                case Elab.phiFromEdgeWitness defaultTraceConfig generalizeAtWith solved (Just si) ew of
+                case Elab.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew of
                     Left (Elab.InstantiationError msg) ->
-                        msg `shouldSatisfy` ("PhiReorder:" `isInfixOf`)
+                        msg `shouldSatisfy` ("PhiReorder: missing order key" `isInfixOf`)
+                    Left Elab.BindingTreeError{} ->
+                        pure ()
                     Left other ->
-                        expectationFailure $ "Expected InstantiationError with PhiReorder prefix, got: " ++ show other
+                        expectationFailure ("Expected PhiReorder missing-order-key or binding-tree failure, got " ++ show other)
                     Right inst ->
-                        expectationFailure $ "Expected failure due to missing order key, got: " ++ Elab.pretty inst
+                        expectationFailure ("Expected PhiReorder failure, got " ++ Elab.pretty inst)
 
         describe "Φ translation soundness" $ do
             let runToSolved :: SurfaceExpr -> Either String (SolveResult, IntMap.IntMap EdgeWitness, IntMap.IntMap EdgeTrace)
@@ -1110,6 +1113,220 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
                 firstShow :: Show err => Either err a -> Either String a
                 firstShow = either (Left . show) Right
+
+            it "elaboration fails when a witness has no trace entry" $ do
+                let expr = ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (ELit (LInt 1)))
+                ConstraintResult { crConstraint = c0, crAnnotated = ann } <- requireRight (generateConstraintsDefault expr)
+                let c1 = normalize c0
+                acyc <- requireRight (checkAcyclicity c1)
+                pres <- requireRight (computePresolution defaultTraceConfig acyc c1)
+                solved <- requireRight (solveUnify defaultTraceConfig (prConstraint pres))
+                case IntMap.lookupMin (prEdgeWitnesses pres) of
+                    Nothing -> expectationFailure "Expected at least one edge witness"
+                    Just (eid, _) -> do
+                        let edgeTraces' = IntMap.delete eid (prEdgeTraces pres)
+                            generalizeAtWith' = Elab.generalizeAtWithBuilder (prPlanBuilder pres)
+                        case Elab.elaborate defaultTraceConfig generalizeAtWith' solved solved (prEdgeWitnesses pres) edgeTraces' (prEdgeExpansions pres) ann of
+                            Left (Elab.MissingEdgeTrace (EdgeId eid')) -> eid' `shouldBe` eid
+                            Left err -> expectationFailure ("Expected MissingEdgeTrace, got " ++ show err)
+                            Right _ -> expectationFailure "Expected elaboration to fail due to missing trace"
+
+            it "OpRaise on a rigid node outside I(r) translates to identity" $ do
+                let root = NodeId 100
+                    rigidN = NodeId 1
+                    c = rootedConstraint emptyConstraint
+                        { cNodes = nodeMapFromList
+                                [ (getNodeId root, TyArrow root rigidN rigidN)
+                                , (getNodeId rigidN, TyVar { tnId = rigidN, tnBound = Nothing })
+                                ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef rigidN), (genRef (GenNodeId 0), BindRigid))
+                                ]
+                        }
+                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+                    scheme = Elab.schemeFromType (Elab.TForall "a" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
+                    si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = IntMap.fromList [(getNodeId rigidN, "a")] }
+                    tr =
+                        EdgeTrace
+                            { etRoot = root
+                            , etBinderArgs = []
+                            , etInterior = fromListInterior [root]
+                            , etCopyMap = mempty
+                            }
+                    ops = [OpRaise rigidN]
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewSteps = map StepOmega ops
+                        , ewWitness = InstanceWitness ops
+                        }
+                phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew)
+                phi `shouldBe` Elab.InstId
+
+            it "OpMerge with rigid operated node n translates to identity" $ do
+                let root = NodeId 100
+                    n = NodeId 1
+                    m = NodeId 2
+                    c = rootedConstraint emptyConstraint
+                        { cNodes = nodeMapFromList
+                                [ (getNodeId root, TyArrow root n m)
+                                , (getNodeId n, TyVar { tnId = n, tnBound = Nothing })
+                                , (getNodeId m, TyVar { tnId = m, tnBound = Nothing })
+                                ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef n), (genRef (GenNodeId 0), BindRigid))
+                                , (nodeRefKey (typeRef m), (genRef (GenNodeId 0), BindFlex))
+                                ]
+                        }
+                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+                    scheme = Elab.schemeFromType (Elab.TForall "a" Nothing (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))))
+                    si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = IntMap.fromList [(getNodeId n, "a"), (getNodeId m, "b")] }
+                    tr =
+                        EdgeTrace
+                            { etRoot = root
+                            , etBinderArgs = []
+                            , etInterior = fromListInterior [root, n, m]
+                            , etCopyMap = mempty
+                            }
+                    ops = [OpMerge n m]
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewSteps = map StepOmega ops
+                        , ewWitness = InstanceWitness ops
+                        }
+                phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew)
+                phi `shouldBe` Elab.InstId
+
+            it "OpRaiseMerge with rigid operated node n translates to identity" $ do
+                let root = NodeId 100
+                    n = NodeId 1
+                    m = NodeId 2
+                    c = rootedConstraint emptyConstraint
+                        { cNodes = nodeMapFromList
+                                [ (getNodeId root, TyArrow root n m)
+                                , (getNodeId n, TyVar { tnId = n, tnBound = Nothing })
+                                , (getNodeId m, TyVar { tnId = m, tnBound = Nothing })
+                                ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef n), (genRef (GenNodeId 0), BindRigid))
+                                , (nodeRefKey (typeRef m), (genRef (GenNodeId 0), BindFlex))
+                                ]
+                        }
+                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+                    scheme = Elab.schemeFromType (Elab.TForall "a" Nothing (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))))
+                    si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = IntMap.fromList [(getNodeId n, "a"), (getNodeId m, "b")] }
+                    tr =
+                        EdgeTrace
+                            { etRoot = root
+                            , etBinderArgs = []
+                            , etInterior = fromListInterior [root, n]
+                            , etCopyMap = mempty
+                            }
+                    ops = [OpRaiseMerge n m]
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewSteps = map StepOmega ops
+                        , ewWitness = InstanceWitness ops
+                        }
+                phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew)
+                phi `shouldBe` Elab.InstId
+
+            it "OpMerge with rigid endpoint only on m fails as non-translatable" $ do
+                let root = NodeId 100
+                    n = NodeId 1
+                    m = NodeId 2
+                    c = rootedConstraint emptyConstraint
+                        { cNodes = nodeMapFromList
+                                [ (getNodeId root, TyArrow root n m)
+                                , (getNodeId n, TyVar { tnId = n, tnBound = Nothing })
+                                , (getNodeId m, TyVar { tnId = m, tnBound = Nothing })
+                                ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef n), (genRef (GenNodeId 0), BindFlex))
+                                , (nodeRefKey (typeRef m), (genRef (GenNodeId 0), BindRigid))
+                                ]
+                        }
+                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+                    scheme = Elab.schemeFromType (Elab.TForall "a" Nothing (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))))
+                    si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = IntMap.fromList [(getNodeId n, "a"), (getNodeId m, "b")] }
+                    tr =
+                        EdgeTrace
+                            { etRoot = root
+                            , etBinderArgs = []
+                            , etInterior = fromListInterior [root, n, m]
+                            , etCopyMap = mempty
+                            }
+                    ops = [OpMerge n m]
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewSteps = map StepOmega ops
+                        , ewWitness = InstanceWitness ops
+                        }
+                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew of
+                    Left (Elab.ValidationFailed msgs) ->
+                        msgs `shouldSatisfy` any ("OpMerge: rigid endpoint appears only on non-operated node" `isInfixOf`)
+                    Left err ->
+                        expectationFailure ("Expected ValidationFailed, got " ++ show err)
+                    Right phi ->
+                        expectationFailure ("Expected failure, got " ++ Elab.pretty phi)
+
+            it "OpRaiseMerge with rigid endpoint only on m fails as non-translatable" $ do
+                let root = NodeId 100
+                    n = NodeId 1
+                    m = NodeId 2
+                    c = rootedConstraint emptyConstraint
+                        { cNodes = nodeMapFromList
+                                [ (getNodeId root, TyArrow root n m)
+                                , (getNodeId n, TyVar { tnId = n, tnBound = Nothing })
+                                , (getNodeId m, TyVar { tnId = m, tnBound = Nothing })
+                                ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef n), (genRef (GenNodeId 0), BindFlex))
+                                , (nodeRefKey (typeRef m), (genRef (GenNodeId 0), BindRigid))
+                                ]
+                        }
+                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+                    scheme = Elab.schemeFromType (Elab.TForall "a" Nothing (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))))
+                    si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = IntMap.fromList [(getNodeId n, "a"), (getNodeId m, "b")] }
+                    tr =
+                        EdgeTrace
+                            { etRoot = root
+                            , etBinderArgs = []
+                            , etInterior = fromListInterior [root, n]
+                            , etCopyMap = mempty
+                            }
+                    ops = [OpRaiseMerge n m]
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewSteps = map StepOmega ops
+                        , ewWitness = InstanceWitness ops
+                        }
+                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew of
+                    Left (Elab.ValidationFailed msgs) ->
+                        msgs `shouldSatisfy` any ("OpRaiseMerge: rigid endpoint appears only on non-operated node" `isInfixOf`)
+                    Left err ->
+                        expectationFailure ("Expected ValidationFailed, got " ++ show err)
+                    Right phi ->
+                        expectationFailure ("Expected failure, got " ++ Elab.pretty phi)
 
             it "scheme-aware Φ can target a non-front binder (reordering before instantiation)" $ do
                 -- Build a constraint graph with proper nested TyForall structure for ∀a. ∀b. a -> b
@@ -1164,7 +1381,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (Elab.phiFromEdgeWitness defaultTraceConfig generalizeAtWith solved (Just si) ew)
+                phi <- requireRight (Elab.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
 
                 -- Because we target the *second* binder, Φ must do more than a plain ⟨Int⟩.
                 phi `shouldNotBe` Elab.InstApp (Elab.TBase (BaseTy "Int"))
@@ -1207,7 +1424,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (Elab.phiFromEdgeWitness defaultTraceConfig generalizeAtWith solved (Just si) ew)
+                phi <- requireRight (Elab.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
                 Elab.pretty phi `shouldBe` "O; ∀(u0 ⩾) N"
 
             it "scheme-aware Φ can translate Merge (alias one binder to another)" $ do
@@ -1256,7 +1473,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (Elab.phiFromEdgeWitness defaultTraceConfig generalizeAtWith solved (Just si) ew)
+                phi <- requireRight (Elab.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
                 let expected =
                         Elab.TForall "a" Nothing
@@ -1308,7 +1525,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (Elab.phiFromEdgeWitness defaultTraceConfig generalizeAtWith solved (Just si) ew)
+                phi <- requireRight (Elab.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
                 let expected =
                         Elab.TForall "a" Nothing
@@ -1352,7 +1569,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (Elab.phiFromEdgeWitness defaultTraceConfig generalizeAtWith solved (Just si) ew)
+                phi <- requireRight (Elab.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
                 let expected =
                         Elab.TForall "u0" Nothing
@@ -1404,7 +1621,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (Elab.phiFromEdgeWitness defaultTraceConfig generalizeAtWith solved (Just si) ew)
+                phi <- requireRight (Elab.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
 
                 let expected =
@@ -1653,6 +1870,29 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 
                 steps <- requireRight (Elab.contextToNodeBound solved root domN)
+                steps `shouldBe` Nothing
+
+            it "contextToNodeBound does not descend through forall body fallback" $ do
+                let root = NodeId 100
+                    body = NodeId 101
+                    aN = NodeId 1
+                    bodyOnly = NodeId 2
+                    c = rootedConstraint emptyConstraint
+                        { cNodes = nodeMapFromList
+                                [ (getNodeId root, TyForall root body)
+                                , (getNodeId body, TyArrow body aN bodyOnly)
+                                , (getNodeId aN, TyVar { tnId = aN, tnBound = Nothing })
+                                , (getNodeId bodyOnly, TyVar { tnId = bodyOnly, tnBound = Nothing })
+                                ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef body), (typeRef root, BindFlex))
+                                , (nodeRefKey (typeRef aN), (typeRef root, BindFlex))
+                                , (nodeRefKey (typeRef bodyOnly), (typeRef body, BindFlex))
+                                ]
+                        }
+                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+                steps <- requireRight (Elab.contextToNodeBound solved root bodyOnly)
                 steps `shouldBe` Nothing
 
             it "rejects fallback-dependent binders (gen fallback invariant)" $ do

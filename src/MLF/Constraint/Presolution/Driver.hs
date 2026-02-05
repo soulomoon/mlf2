@@ -474,7 +474,9 @@ rewriteConstraint mapping = do
 
     newTraces' <- do
         let updateTrace tr = do
-                interior <- bindingToPresM (Binding.interiorOf c' (typeRef (etRoot tr)))
+                let root = etRoot tr
+                    interiorRootRef = traceInteriorRootRef id c' root
+                interior <- bindingToPresM (Binding.interiorOf c' interiorRootRef)
                 let interiorNodes =
                         fromListInterior
                             [ nid

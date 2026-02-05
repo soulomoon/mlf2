@@ -35,9 +35,10 @@ module MLF.Elab.Pipeline (
     applyInstantiation,
     schemeFromType,
     sigmaReorder,
-    -- * Witness translation (for tests/debugging)
-    phiFromEdgeWitness,
+    -- * Witness translation (tests/debugging; production paths should use trace-required APIs)
     phiFromEdgeWitnessWithTrace,
+    phiFromEdgeWitnessNoTrace,
+    phiFromEdgeWitness,
     runPipelineElab,
     runPipelineElabChecked,
     runPipelineElabWithConfig,
@@ -81,7 +82,7 @@ import MLF.Elab.Run.Generalize (generalizeAtWithBuilder)
 import MLF.Elab.Inst (applyInstantiation, schemeToType)
 import MLF.Elab.TypeCheck (Env(..), checkInstantiation, typeCheck, typeCheckWithEnv)
 import MLF.Elab.Reduce (isValue, normalize, step)
-import MLF.Elab.Phi (contextToNodeBound, phiFromEdgeWitness, phiFromEdgeWitnessWithTrace)
+import MLF.Elab.Phi (contextToNodeBound, phiFromEdgeWitness, phiFromEdgeWitnessNoTrace, phiFromEdgeWitnessWithTrace)
 import MLF.Reify.Core (namedNodes, reifyBoundWithNames, reifyType, reifyTypeWithNamedSet, reifyTypeWithNames)
 import MLF.Elab.Run
     ( applyRedirectsToAnn

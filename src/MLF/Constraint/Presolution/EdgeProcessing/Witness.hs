@@ -24,7 +24,8 @@ import MLF.Constraint.Presolution.Base (
     FrontierSet,
     InteriorSet,
     PresolutionM,
-    fromListInterior
+    fromListInterior,
+    traceInteriorRootRef
     )
 import MLF.Constraint.Presolution.Ops (findRoot)
 import MLF.Constraint.Presolution.StateAccess (
@@ -117,10 +118,15 @@ buildEdgeTrace
     -> PresolutionM EdgeTrace
 buildEdgeTrace _eid left leftRaw expn (copyMap0, _interior0, _frontier0) = do
     bas <- binderArgsFromExpansion leftRaw expn
-    root <- findRoot left
+    -- Paper root `r` for Φ/Σ is the TyExp body, not the TyExp wrapper itself.
+    let rootSeed = case leftRaw of
+            TyExp{ tnBody = b } -> b
+            _ -> left
+    root <- findRoot rootSeed
     (c0, canonical) <- getConstraintAndCanonical
+    let interiorRootRef = traceInteriorRootRef canonical c0 root
     interiorRaw <- do
-        s <- liftBindingError $ Binding.interiorOfUnder canonical c0 (typeRef root)
+        s <- liftBindingError $ Binding.interiorOfUnder canonical c0 interiorRootRef
         pure
             [ nid
             | key <- IntSet.toList s

@@ -281,15 +281,25 @@ computeResultTypeFromAnn ctx inner innerPre annNodeId eid = do
             ty0 <- applyInstantiation srcTy phi
             pure (simplifyAnnotationType ty0)
         Nothing ->
-            if targetHasBoundForall
+            if annotationExplicit
                 then do
-                    ty0 <- applyInstantiation srcTy phi
-                    pure (simplifyAnnotationType ty0)
-                else do
+                    -- For explicit annotations, report the (generalized) target type itself.
+                    -- This preserves explicit bounds (including nested foralls) rather than
+                    -- re-deriving a type solely from the witness-derived instantiation.
                     annScopeRoot <-
                         bindingToElab
                             (resolveCanonicalScope (srConstraint solvedForGen) solvedForGen redirects annTargetNode)
                     (annSch, _substAnn) <-
                         generalizeWithPlan planBuilder bindParentsGa solvedForGen annScopeRoot annTargetNode
-                    let annTy = schemeToType annSch
-                    pure (simplifyAnnotationType annTy)
+                    pure (simplifyAnnotationType (schemeToType annSch))
+                else if targetHasBoundForall
+                    then do
+                        ty0 <- applyInstantiation srcTy phi
+                        pure (simplifyAnnotationType ty0)
+                    else do
+                        annScopeRoot <-
+                            bindingToElab
+                                (resolveCanonicalScope (srConstraint solvedForGen) solvedForGen redirects annTargetNode)
+                        (annSch, _substAnn) <-
+                            generalizeWithPlan planBuilder bindParentsGa solvedForGen annScopeRoot annTargetNode
+                        pure (simplifyAnnotationType (schemeToType annSch))

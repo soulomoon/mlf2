@@ -1,0 +1,80 @@
+{
+  "project": "mlf4",
+  "branchName": "ralph/thesis-exact-phi-translatability",
+  "description": "Make Φ (Ω→instantiation translation) thesis-exact by enforcing translatable-presolution invariants and rejecting witnesses that contain operations outside I(r) instead of silently skipping them.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Use exact interior in witness normalization (node-space correct)",
+      "description": "As a maintainer, I want witness normalization to use I(r) in the same node-id space as the normalized witness steps, so interior membership checks are thesis-exact and not over-approximated via copied nodes.",
+      "acceptanceCriteria": [
+        "In `src/MLF/Constraint/Presolution/WitnessNorm.hs`, replace `interiorNorm = interiorExact ∪ copiedNodes(copyMap)` with an interior set computed by rewriting `interiorExact` through the same `copyMap` rewrite used on steps (i.e. `interiorRewrite = { rewriteNode n | n ∈ interiorExact }`).",
+        "No code path treats `copiedNodes(copyMap)` as automatically inside `I(r)` for normalization/validation.",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Presolution rejects invalid normalized witnesses (structured error)",
+      "description": "As a maintainer, I want presolution to reject any edge witness whose normalized Ω ops violate Fig. 15.3.4 invariants, so Φ never sees a non-translatable witness.",
+      "acceptanceCriteria": [
+        "After `normalizeInstanceStepsFull` succeeds in `src/MLF/Constraint/Presolution/WitnessNorm.hs`, validate the resulting Ω ops with `validateNormalizedWitness` using the same `OmegaNormalizeEnv`.",
+        "If normalization or validation fails for an edge, presolution returns a structured `PresolutionError` that includes the `EdgeId` and the specific `OmegaNormalizeError` (not `InternalError`).",
+        "Add an Hspec regression (in an existing presolution spec module) that runs `normalizeEdgeWitnessesM` via `runPresolutionM` and asserts the new structured error on a witness containing an op outside `I(r)`.",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "Validation already in place in WitnessNorm.hs; fixed test to properly trigger validation error"
+    },
+    {
+      "id": "US-003",
+      "title": "Φ errors on OpRaise outside I(r) (remove skip)",
+      "description": "As a maintainer, I want Φ translation to reject `OpRaise` that targets a node outside the expansion interior I(r), rather than silently skipping it.",
+      "acceptanceCriteria": [
+        "In `src/MLF/Elab/Phi/Omega.hs`, replace the `OpRaise` branch that calls `go ... rest` when the target is outside `interiorSet` with a hard failure (`ElabError.ValidationFailed` preferred) that includes the op and relevant node ids.",
+        "Rigid-node identity behavior remains: operations on rigid nodes translate to ε (no-op) per Fig. 15.3.4.",
+        "Add an Hspec regression (existing spec module) that constructs a Φ translation scenario where an `OpRaise` is outside `I(r)` and asserts Φ/elaboration fails (not `InstId`, not success).",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "Fixed node-space mismatch in WitnessNorm.hs validation; previously pending US-003 tests are now enabled and passing"
+    },
+    {
+      "id": "US-004",
+      "title": "Φ requires EdgeTrace (no best-effort mode)",
+      "description": "As a maintainer, I want Φ translation to require `EdgeTrace` so interior and computation-context checks are meaningful and paper-faithful.",
+      "acceptanceCriteria": [
+        "In `src/MLF/Elab/Elaborate.hs`, when an edge has a witness (`edgeWitnesses`) but no corresponding trace (`edgeTraces`), elaboration fails with an explicit `ElabError` (not `InstId`).",
+        "Add an Hspec regression that sets up an environment where a witness exists but the trace map entry is missing and assert elaboration fails.",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "Added MissingEdgeTrace error; only requires trace for non-trivial witnesses (with ops/steps)"
+    },
+    {
+      "id": "US-005",
+      "title": "Eliminate remaining Φ skip paths (defense in depth)",
+      "description": "As a maintainer, I want Φ translation to reject any normalized witness op that violates translatability preconditions (except rigid-node identity cases), so no invalid op is silently ignored.",
+      "acceptanceCriteria": [
+        "Audit `src/MLF/Elab/Phi/Omega.hs` and replace any remaining silent skip/ignore paths caused by translatability violations (e.g. exterior/interior mismatch, missing computation context, non-binder targets) with explicit `ElabError` failures.",
+        "Keep the thesis-sanctioned identity cases on rigid nodes (Fig. 15.3.4) as no-ops.",
+        "Add/extend tests so at least one additional previously-skipped case (other than `OpRaise` outside `I(r)`) is asserted to fail.",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "Added isRigidNode helper; replaced skip paths with ValidationFailed errors for OpGraft, OpWeaken, OpMerge, OpRaiseMerge; added test for OpWeaken non-binder; fixed existing Merge/RaiseMerge tests; fixed Φ soundness by translating OpGraft/OpWeaken even when the target binder is rigid in the final presolution constraint"
+    }
+  ]
+}

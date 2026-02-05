@@ -76,7 +76,7 @@ spec = describe "EdgeTrace" $ do
                 case IntMap.lookup 0 traces of
                     Nothing -> expectationFailure "Expected EdgeTrace for EdgeId 0"
                     Just tr -> do
-                        etRoot tr `shouldBe` UF.frWith (psUnionFind st1) expNode
+                        etRoot tr `shouldBe` UF.frWith (psUnionFind st1) forallNode
                         etInterior tr `shouldSatisfy` (/= mempty)
                         case etBinderArgs tr of
                             [(bv, _arg)] -> do

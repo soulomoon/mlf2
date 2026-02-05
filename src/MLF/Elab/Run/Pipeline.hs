@@ -16,10 +16,12 @@ import MLF.Constraint.Canonicalizer (canonicalizeNode)
 import MLF.Constraint.Presolution
     ( PresolutionResult(..)
     , computePresolution
+    , EdgeTrace(..)
     )
 import MLF.Constraint.Solve hiding (BindingTreeError, MissingNode)
 import qualified MLF.Constraint.Solve as Solve
 import MLF.Constraint.Types.Graph (PolySyms)
+import MLF.Constraint.Types (cNodes, lookupNodeIn)
 import MLF.Elab.Elaborate (ElabConfig(..), ElabEnv(..), elaborateWithEnv)
 import MLF.Elab.PipelineConfig (PipelineConfig(..), defaultPipelineConfig)
 import MLF.Elab.PipelineError
@@ -85,12 +87,21 @@ runPipelineElabWith traceCfg genConstraints expr = do
         [] -> do
             let canonNode = makeCanonicalizer (srUnionFind solvedClean) (prRedirects pres)
                 adoptNode = canonicalizeNode canonNode
+                baseNodes = cNodes c1
+                edgeTracesForCopy =
+                    IntMap.filter
+                        (\tr ->
+                            case lookupNodeIn baseNodes (etRoot tr) of
+                                Just _ -> True
+                                Nothing -> False
+                        )
+                        (prEdgeTraces pres)
                 instCopyNodes =
-                    instantiationCopyNodes solvedClean (prRedirects pres) (prEdgeTraces pres)
+                    instantiationCopyNodes solvedClean (prRedirects pres) edgeTracesForCopy
                 instCopyMapFull =
                     let baseNamedKeysAll = collectBaseNamedKeys c1
                         traceMaps = map (buildTraceCopyMap c1 baseNamedKeysAll adoptNode)
-                                         (IntMap.elems (prEdgeTraces pres))
+                                         (IntMap.elems edgeTracesForCopy)
                     in foldl' IntMap.union IntMap.empty traceMaps
                 (constraintForGen, bindParentsGa) =
                     constraintForGeneralization traceCfg solvedClean (prRedirects pres) instCopyNodes instCopyMapFull c1 ann

@@ -31,6 +31,7 @@ module MLF.Constraint.Presolution.Base (
     bindingPathToRootUnderM,
     requireValidBindingTree,
     edgeInteriorExact,
+    traceInteriorRootRef,
     instantiationBindersM,
     forallSpecM,
     dropTrivialSchemeEdges
@@ -58,6 +59,7 @@ import qualified MLF.Util.UnionFind as UnionFind
 import MLF.Util.Trace (TraceConfig, traceBindingM)
 import MLF.Constraint.Presolution.Plan (GeneralizePlan, ReifyPlan)
 import MLF.Constraint.Presolution.Plan.Context (GaBindParents)
+import MLF.Constraint.Presolution.WitnessValidation (OmegaNormalizeError)
 import MLF.Constraint.Solve (SolveResult)
 import MLF.Util.ElabError (ElabError)
 
@@ -96,6 +98,7 @@ data PresolutionError
     | OccursCheckPresolution NodeId NodeId   -- ^ Unification would make node reachable from itself
     | BindingTreeError BindingError          -- ^ Invalid binding tree when binding edges are in use
     | NonTranslatablePresolution [TranslatabilityIssue]
+    | WitnessNormalizationError EdgeId OmegaNormalizeError  -- ^ Normalized witness violates Fig. 15.3.4 invariants
     | InternalError String                   -- ^ Unexpected internal state
     deriving (Eq, Show)
 
@@ -466,7 +469,8 @@ edgeInteriorExact root0 = do
     c0 <- gets psConstraint
     uf <- gets psUnionFind
     let canonical = UnionFind.frWith uf
-    case Binding.interiorOfUnder canonical c0 (typeRef root0) of
+        interiorRootRef = traceInteriorRootRef canonical c0 root0
+    case Binding.interiorOfUnder canonical c0 interiorRootRef of
         Left err -> throwError (BindingTreeError err)
         Right interior ->
             pure $
@@ -475,6 +479,33 @@ edgeInteriorExact root0 = do
                     | key <- IntSet.toList interior
                     , TypeRef nid <- [nodeRefFromKey key]
                     ]
+
+-- | Choose the binding-tree root reference used for exact I(r) computation in
+-- edge traces and post-rewrite trace refresh.
+traceInteriorRootRef :: (NodeId -> NodeId) -> Constraint -> NodeId -> NodeRef
+traceInteriorRootRef canonical c0 root0 =
+    let rootC = canonical root0
+        schemeOwner =
+            listToMaybe
+                [ gnId gen
+                | gen <- NodeAccess.allGenNodes c0
+                , any (\r -> canonical r == rootC) (gnSchemes gen)
+                ]
+        schemeOwnerByBody =
+            listToMaybe
+                [ gnId gen
+                | gen <- NodeAccess.allGenNodes c0
+                , any
+                    (\r ->
+                        case VarStore.lookupVarBound c0 (canonical r) of
+                            Just bnd -> canonical bnd == rootC
+                            Nothing -> False
+                    )
+                    (gnSchemes gen)
+                ]
+    in case schemeOwner <|> schemeOwnerByBody of
+        Just gid -> genRef gid
+        Nothing -> typeRef rootC
 
 orderedBindersRawM :: NodeId -> PresolutionM [NodeId]
 orderedBindersRawM binder0 = do
