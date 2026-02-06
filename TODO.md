@@ -91,7 +91,7 @@ Based on `papers/these-finale-english.txt`; see also `papers/xmlf.txt` §3.
 - [x] **Tests**
     - [x] Elaboration basics (id, const) + let-polymorphism
     - [x] Φ/Σ unit tests + instantiation-soundness checks
-- [ ] `A2 (P1)` Align pipeline-reported result type with checked type as authoritative.
+- [x] `A2 (P1)` Align pipeline-reported result type with checked type as authoritative.
 - [ ] `A3 (P2)` Remove legacy helper from public elaboration API surface.
 - [ ] `A6 (P2)` Add checked-vs-unchecked elaboration parity tests (incl. US-004-style paths).
 
@@ -129,7 +129,7 @@ See `.kiro/specs/paper-faithfulness-remaining-deltas/` for the audit and plan.
 AC: Presolution witness normalization fails fast on malformed merge direction; no fallback acceptance in production path.
 Files: `src/MLF/Constraint/Presolution/WitnessCanon.hs`, `src/MLF/Constraint/Presolution/WitnessNorm.hs`, `test/Presolution/WitnessSpec.hs`
 
-- [ ] `A2 (P1)` Make checked type authoritative for pipeline results.
+- [x] `A2 (P1)` Make checked type authoritative for pipeline results.
 AC: `runPipelineElab` and checked pipeline type outcomes are aligned for known divergence cases (including US-004-style scenarios).
 Files: `src/MLF/Elab/Run/Pipeline.hs`, `src/MLF/Elab/Run/ResultType/Fallback.hs`, `test/ElaborationSpec.hs`
 

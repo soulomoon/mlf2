@@ -64,9 +64,18 @@ evalInstantiationWith spec inst = eval inst
             Right (k1, TForall v mb' body)
         _ -> Left (instInsideError spec errInst t)
 
-    instAppFn argTy (k, env', t) = do
-        (k1, t1) <- instInsideFn InstId (instBot spec argTy) (k, env', t)
-        instElimFn (InstSeq (InstInside (InstBot argTy)) InstElim) (k1, env', t1)
+    -- InstApp applies a concrete type argument directly to the front forall,
+    -- but first validates it against the binder bound via instBot semantics.
+    -- This preserves variable arguments (e.g. TVar) while still rejecting
+    -- arguments that violate explicit bounds.
+    instAppFn argTy (k, env', t) = case t of
+        TForall v mbBound body -> do
+            let b0 = maybe TBottom tyToElab mbBound
+            (k1, checkedArg) <- instBot spec argTy (k, env', b0)
+            Right (k1, substTypeCapture v checkedArg body)
+        _ ->
+            Left
+                (instElimError spec (InstSeq (InstInside (InstBot argTy)) InstElim) t)
 
     instAlg inst0 = case inst0 of
         InstIdF -> \(k, _env', t) -> Right (k, t)

@@ -42,9 +42,10 @@ import MLF.Elab.Phi.Context (contextToNodeBoundWithOrderKeys)
 import MLF.Elab.Sigma (bubbleReorderTo)
 import MLF.Elab.Types
 import MLF.Reify.Core (reifyBoundWithNames, reifyTypeWithNamedSetNoFallback)
-import MLF.Reify.TypeOps (freeTypeVarsList, inlineAliasBoundsWithBy, inlineBaseBoundsType, matchType)
+import MLF.Reify.TypeOps (freeTypeVarsList, inlineAliasBoundsWithBy, inlineBaseBoundsType, matchType, substTypeCapture)
 import MLF.Util.Graph (topoSortBy)
 import MLF.Util.Trace (TraceConfig, traceGeneralize)
+import MLF.Util.Names (parseNameId)
 
 -- | Shared context for Omega/Step interpretation.
 data OmegaContext = OmegaContext
@@ -253,26 +254,30 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
                 in Map.fromList entries
             _ -> Map.empty
 
+    inferredArgMapFromTarget :: IntSet.IntSet -> Map.Map String ElabType
+    inferredArgMapFromTarget namedSet' =
+        case mSchemeInfo of
+            Nothing -> Map.empty
+            Just si' ->
+                let inferFrom nid =
+                        case reifyTargetTypeForInst namedSet' nid of
+                            Left _ -> Nothing
+                            Right targetTy -> inferInstAppArgs (siScheme si') targetTy
+                    mbArgs =
+                        inferFrom edgeRight
+                            <|> inferFrom edgeLeft
+                in case mbArgs of
+                    Nothing -> Map.empty
+                    Just args ->
+                        let (binds, _) = splitForalls (schemeToType (siScheme si'))
+                            names = map fst binds
+                        in Map.fromList (zip names args)
+
     inferredArgMap :: IntSet.IntSet -> Map.Map String ElabType
     inferredArgMap namedSet' =
-        let inferred =
-                case mSchemeInfo of
-                    Nothing -> Map.empty
-                    Just si' ->
-                        let inferFrom nid =
-                                case reifyTargetTypeForInst namedSet' nid of
-                                    Left _ -> Nothing
-                                    Right targetTy -> inferInstAppArgs (siScheme si') targetTy
-                            mbArgs =
-                                inferFrom edgeRight
-                                    <|> inferFrom edgeLeft
-                        in case mbArgs of
-                            Nothing -> Map.empty
-                            Just args ->
-                                let (binds, _) = splitForalls (schemeToType (siScheme si'))
-                                    names = map fst binds
-                                in Map.fromList (zip names args)
-        in Map.union (traceArgMap namedSet') inferred
+        -- Prefer target/scheme inference over trace args when both are present;
+        -- trace reification can collapse to ⊥ too early for copied binder nodes.
+        Map.union (inferredArgMapFromTarget namedSet') (traceArgMap namedSet')
 
     applyInferredArgs :: IntSet.IntSet -> ElabType -> ElabType
     applyInferredArgs namedSet' = applyInferredArgsWith namedSet' Set.empty
@@ -310,13 +315,73 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
         Map.lookup name (inferredArgMap namedSet')
 
     reifyTypeArg :: IntSet.IntSet -> Maybe NodeId -> NodeId -> Either ElabError ElabType
-    reifyTypeArg namedSet' mbBinder arg =
-        case mbBinder >>= binderArgType namedSet' of
-            Just ty -> Right ty
-            Nothing ->
-                case Map.toList (inferredArgMap namedSet') of
-                    [(_name, ty)] -> Right (inlineAliasBounds ty)
-                    _ -> inlineAliasBounds <$> reifyBoundWithNames res substForTypes arg
+    reifyTypeArg namedSet' mbBinder arg = do
+        let argC = canonicalNode arg
+        ty <- case VarStore.lookupVarBound (srConstraint res) argC of
+            Just bnd -> reifyTypeWithNamedSetNoFallback res substForTypes namedSet' bnd
+            Nothing -> reifyTypeWithNamedSetNoFallback res substForTypes namedSet' argC
+        let inferredSingleton =
+                case Map.toList (inferredArgMapFromTarget namedSet') of
+                    [(_name, inferredTy)] -> Just inferredTy
+                    _ -> Nothing
+            chosenTy0 =
+                case (ty, inferredSingleton) of
+                    (TVar _, Just inferredTy)
+                        | not (containsBottomTy inferredTy) -> inferredTy
+                    _ -> ty
+            chosenTy1 =
+                case (chosenTy0, inferredSingleton) of
+                    (TVar _, _) -> chosenTy0
+                    (_, Just (TVar inferredVar)) ->
+                        case
+                            (parseNameId inferredVar >>= (`IntMap.lookup` substForTypes))
+                                <|> Just inferredVar of
+                            Just binderName ->
+                                case filter (/= binderName) (freeTypeVarsList chosenTy0) of
+                                    [fv] -> substTypeCapture fv (TVar binderName) chosenTy0
+                                    _ -> chosenTy0
+                            Nothing -> chosenTy0
+                    _ -> chosenTy0
+            chosenTy = substSchemeNames chosenTy1
+        debugPhi
+            ("reifyTypeArg(reify) arg=" ++ show arg
+                ++ " mbBinder=" ++ show mbBinder
+                ++ " inferredFromTarget=" ++ show (inferredArgMapFromTarget namedSet')
+                ++ " inferredMap=" ++ show (inferredArgMap namedSet')
+                ++ " freeChosen=" ++ show (freeTypeVarsList chosenTy0)
+                ++ " ty=" ++ show ty
+                ++ " chosenTy0=" ++ show chosenTy0
+                ++ " chosenTy1=" ++ show chosenTy1
+                ++ " chosenTy=" ++ show chosenTy
+            )
+            (pure chosenTy)
+
+    substSchemeNames :: ElabType -> ElabType
+    substSchemeNames = cataIx alg
+      where
+        alg :: TyIF i Ty -> Ty i
+        alg tyNode = case tyNode of
+            TVarIF v ->
+                case parseNameId v of
+                    Just nid ->
+                        case IntMap.lookup nid substForTypes of
+                            Just name -> TVar name
+                            Nothing -> TVar v
+                    Nothing -> TVar v
+            TArrowIF a b -> TArrow a b
+            TConIF c args -> TCon c args
+            TBaseIF b -> TBase b
+            TForallIF v mb body -> TForall v mb body
+            TBottomIF -> TBottom
+
+    containsBottomTy :: Ty v -> Bool
+    containsBottomTy ty = case ty of
+        TVar _ -> False
+        TBase _ -> False
+        TBottom -> True
+        TArrow a b -> containsBottomTy a || containsBottomTy b
+        TCon _ args -> any containsBottomTy args
+        TForall _ mb body -> maybe False containsBottomTy mb || containsBottomTy body
 
     reifyBoundType :: NodeId -> Either ElabError ElabType
     reifyBoundType = reifyBoundWithNames res substForTypes
@@ -327,7 +392,7 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
         ty <- case VarStore.lookupVarBound (srConstraint res) nidC of
             Just bnd -> reifyTypeWithNamedSetNoFallback res substForTypes namedSet' bnd
             Nothing -> reifyTypeWithNamedSetNoFallback res substForTypes namedSet' nidC
-        pure (inlineBaseBounds (inlineAliasBounds ty))
+        pure (inlineBaseBounds ty)
 
     inlineBaseBounds :: ElabType -> ElabType
     inlineBaseBounds =
@@ -558,12 +623,12 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
                         if null qs
                             then do
                                 argTy <- reifyTypeArg namedSet' Nothing (graftArgFor arg bv)
-                                let inst = InstBot (inlineAliasBoundsAsBound argTy)
+                                let inst = InstBot argTy
                                 ty' <- applyInst "OpGraft+OpWeaken(root,bot)" ty inst
                                 go binderKeys keepBinderKeys' namedSet' ty' ids (composeInst phi inst) rest lookupBinder
                             else do
                                 argTy <- reifyTypeArg namedSet' Nothing (graftArgFor arg bv)
-                                let inst = InstApp (inlineAliasBoundsAsBound argTy)
+                                let inst = InstApp argTy
                                 (ty', ids') <- applyInstAndSyncIds "OpGraft+OpWeaken(root)" ty ids inst
                                 go binderKeys keepBinderKeys' namedSet' ty' ids' (composeInst phi inst) rest lookupBinder
                     else if not (isBinderNode binderKeys bv) && isRootAdjacent
@@ -572,12 +637,12 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
                             if null qs
                                 then do
                                     argTy <- reifyTypeArg namedSet' Nothing (graftArgFor arg bv)
-                                    let inst = InstBot (inlineAliasBoundsAsBound argTy)
+                                    let inst = InstBot argTy
                                     ty' <- applyInst "OpGraft+OpWeaken(non-binder,bot)" ty inst
                                     go binderKeys keepBinderKeys' namedSet' ty' ids (composeInst phi inst) rest lookupBinder
                                 else do
                                     argTy <- reifyTypeArg namedSet' Nothing (graftArgFor arg bv)
-                                    let inst = InstApp (inlineAliasBoundsAsBound argTy)
+                                    let inst = InstApp argTy
                                     (ty', ids') <- applyInstAndSyncIds "OpGraft+OpWeaken(non-binder)" ty ids inst
                                     go binderKeys keepBinderKeys' namedSet' ty' ids' (composeInst phi inst) rest lookupBinder
                     else if not (isBinderNode binderKeys bv)
@@ -610,7 +675,7 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
                                         else do
                                             (inst, ids1) <- atBinder binderKeys ids ty bv $ do
                                                 argTy <- reifyTypeArg namedSet' (Just bv) (graftArgFor arg bv)
-                                                pure (InstApp (inlineAliasBoundsAsBound argTy))
+                                                pure (InstApp argTy)
                                             ty' <- applyInst "OpGraft+OpWeaken" ty inst
                                             go binderKeys keepBinderKeys' namedSet' ty' ids1 (composeInst phi inst) rest lookupBinder
             | otherwise ->
@@ -635,12 +700,12 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
                     if null qs
                         then do
                             argTy <- reifyTypeArg namedSet' Nothing (graftArgFor arg bv)
-                            let inst = InstBot (inlineAliasBoundsAsBound argTy)
+                            let inst = InstBot argTy
                             ty' <- applyInst "OpGraft(root,bot)" ty inst
                             go binderKeys keepBinderKeys' namedSet' ty' ids (composeInst phi inst) rest lookupBinder
                         else do
                             argTy <- reifyTypeArg namedSet' Nothing (graftArgFor arg bv)
-                            let inst = InstApp (inlineAliasBoundsAsBound argTy)
+                            let inst = InstApp argTy
                             (ty', ids') <- applyInstAndSyncIds "OpGraft(root)" ty ids inst
                             go binderKeys keepBinderKeys' namedSet' ty' ids' (composeInst phi inst) rest lookupBinder
                 else if not (isBinderNode binderKeys bv) && isRootAdjacent
@@ -649,12 +714,12 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
                         if null qs
                             then do
                                 argTy <- reifyTypeArg namedSet' Nothing (graftArgFor arg bv)
-                                let inst = InstBot (inlineAliasBoundsAsBound argTy)
+                                let inst = InstBot argTy
                                 ty' <- applyInst "OpGraft(non-binder,bot)" ty inst
                                 go binderKeys keepBinderKeys' namedSet' ty' ids (composeInst phi inst) rest lookupBinder
                             else do
                                 argTy <- reifyTypeArg namedSet' Nothing (graftArgFor arg bv)
-                                let inst = InstApp (inlineAliasBoundsAsBound argTy)
+                                let inst = InstApp argTy
                                 (ty', ids') <- applyInstAndSyncIds "OpGraft(non-binder)" ty ids inst
                                 go binderKeys keepBinderKeys' namedSet' ty' ids' (composeInst phi inst) rest lookupBinder
                 else if not (isBinderNode binderKeys bv)
@@ -687,7 +752,7 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
                                     else do
                                         (inst, ids1) <- atBinderKeep binderKeys ids ty bv $ do
                                             argTy <- reifyTypeArg namedSet' (Just bv) arg
-                                            pure (InstInside (InstBot (inlineAliasBoundsAsBound argTy)))
+                                            pure (InstInside (InstBot argTy))
                                         ty' <- applyInst "OpGraft" ty inst
                                         go binderKeys keepBinderKeys' namedSet' ty' ids1 (composeInst phi inst) rest lookupBinder
 
@@ -810,12 +875,12 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
                                                     Just TyForall{} -> reifyTypeWithNamedSetNoFallback res substForTypes namedSet' nC
                                                     _ -> reifyBoundType nC
                                             _ -> reifyBoundType nC
-                                    let nodeTy = applyInferredArgs namedSet' (inlineAliasBoundsAsBound nodeTy0)
+                                    let nodeTy = applyInferredArgs namedSet' (inlineAliasBounds nodeTy0)
                                     nodeTyBound <-
                                         case VarStore.lookupVarBound (srConstraint res) (canonicalNode nC) of
                                             Just bnd -> reifyTypeWithNamedSetNoFallback res substForTypes namedSet' bnd
                                             Nothing -> pure nodeTy
-                                    let nodeTyBound' = inlineAliasBoundsAsBound nodeTyBound
+                                    let nodeTyBound' = inlineAliasBounds nodeTyBound
 
                                     _ <- pure $ debugPhi ("OpRaise: nodeTy=" ++ show nodeTy ++ " ty=" ++ show ty) ()
                                     _ <- pure $ debugPhi ("OpRaise: nodeTyBound=" ++ show nodeTyBound) ()
@@ -880,7 +945,7 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
                                                                             case inferInstAppArgs (siScheme si') nodeTyBoundInlined of
                                                                                 Just args
                                                                                     | not (null args) ->
-                                                                                        instMany (map (InstApp . inlineAliasBoundsAsBound) args)
+                                                                                        instMany (map InstApp args)
                                                                                 _ -> InstApp nodeTyBoundInlined
                                                                         Nothing -> InstApp nodeTyBoundInlined
                                                                 prefixBefore = take minIdx names

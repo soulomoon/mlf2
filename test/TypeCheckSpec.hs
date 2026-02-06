@@ -39,3 +39,18 @@ spec = describe "Phase 7 typecheck" $ do
         case typeCheck (ETyInst (ELit (LInt 1)) InstElim) of
             Left TCInstantiationError{} -> pure ()
             other -> expectationFailure ("Expected instantiation error, got: " ++ show other)
+
+    it "rejects InstApp that violates an explicit bound" $ do
+        let boolTy = TBase (BaseTy "Bool")
+            term =
+                ETyInst
+                    (ETyAbs "a" (Just intTy) (ELam "x" (TVar "a") (EVar "x")))
+                    (InstApp boolTy)
+        case typeCheck term of
+            Left TCInstantiationError{} -> pure ()
+            other -> expectationFailure ("Expected bounded instantiation error, got: " ++ show other)
+
+    it "preserves type-variable InstApp arguments" $ do
+        let idTyAbs = ETyAbs "a" Nothing (ELam "x" (TVar "a") (EVar "x"))
+            term = ETyAbs "b" Nothing (ETyInst idTyAbs (InstApp (TVar "b")))
+        typeCheck term `shouldBe` Right (TForall "b" Nothing (TArrow (TVar "b") (TVar "b")))

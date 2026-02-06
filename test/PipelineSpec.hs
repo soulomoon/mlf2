@@ -1,18 +1,23 @@
 {-# LANGUAGE PatternSynonyms #-}
 module PipelineSpec (spec) where
 
+import Control.Monad (unless)
 import Data.List (isInfixOf)
 import Data.Bifunctor (first)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Set as Set
 import Test.Hspec
+import Test.QuickCheck (Gen, arbitrary, chooseInt, elements, forAll, property, withMaxSuccess)
 
 import MLF.Elab.Pipeline
-    ( generalizeAtWithBuilder
+    ( ElabType
+    , generalizeAtWithBuilder
     , applyRedirectsToAnn
     , renderPipelineError
     , runPipelineElab
+    , runPipelineElabChecked
+    , typeCheck
     , pattern Forall
     , Pretty(..)
     )
@@ -318,6 +323,46 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 cInstEdges c `shouldBe` []
                 cUnifyEdges c `shouldBe` []
 
+    describe "Checked-authoritative invariant" $ do
+        it "runPipelineElab type matches typeCheck(term) and checked pipeline type" $ property $
+            withMaxSuccess 80 $
+                forAll genClosedWellTypedExpr $ \expr -> do
+                    case runPipelineElab Set.empty expr of
+                        Left err ->
+                            expectationFailure
+                                ( "runPipelineElab failed for generated expression:\n"
+                                    ++ show expr
+                                    ++ "\nerror: "
+                                    ++ renderPipelineError err
+                                )
+                        Right (term, ty) -> do
+                            checkedTy <-
+                                case typeCheck term of
+                                    Left tcErr ->
+                                        expectationFailure
+                                            ( "typeCheck failed for elaborated term.\nexpr: "
+                                                ++ show expr
+                                                ++ "\nterm: "
+                                                ++ show term
+                                                ++ "\nerror: "
+                                                ++ show tcErr
+                                            )
+                                            >> fail "typeCheck failure"
+                                    Right out -> pure out
+                            assertTypeEq "runPipelineElab vs typeCheck(term)" expr ty checkedTy
+
+                            case runPipelineElabChecked Set.empty expr of
+                                Left errChecked ->
+                                    expectationFailure
+                                        ( "runPipelineElabChecked failed for generated expression:\n"
+                                            ++ show expr
+                                            ++ "\nerror: "
+                                            ++ renderPipelineError errChecked
+                                        )
+                                Right (_termChecked, tyChecked) -> do
+                                    assertTypeEq "runPipelineElab vs runPipelineElabChecked" expr ty tyChecked
+                                    assertTypeEq "runPipelineElabChecked vs typeCheck(term)" expr tyChecked checkedTy
+
 -- Helpers
 runPipelineWithInternals :: SurfaceExpr -> Either String (SolveResult, AnnExpr)
 runPipelineWithInternals expr = do
@@ -386,6 +431,44 @@ noExpNodes nodes =
 
 baseNames :: NodeMap TyNode -> [BaseTy]
 baseNames nodes = [ b | TyBase _ b <- map snd (toListNode nodes) ]
+
+assertTypeEq :: String -> SurfaceExpr -> ElabType -> ElabType -> Expectation
+assertTypeEq label expr actual expected =
+    unless (actual == expected) $
+        expectationFailure
+            ( label
+                ++ " mismatch.\nexpr: "
+                ++ show expr
+                ++ "\nactual: "
+                ++ pretty actual
+                ++ "\nexpected: "
+                ++ pretty expected
+            )
+
+genClosedWellTypedExpr :: Gen SurfaceExpr
+genClosedWellTypedExpr = do
+    n <- chooseInt (-5, 5)
+    m <- chooseInt (-3, 9)
+    b1 <- arbitrary
+    let idLam = ELam "x" (EVar "x")
+        intLit = ELit (LInt (fromIntegral n))
+        intLit2 = ELit (LInt (fromIntegral m))
+        boolLit = ELit (LBool b1)
+        polyIdTy = STForall "a" Nothing (STArrow (STVar "a") (STVar "a"))
+        exprs =
+            [ idLam
+            , EApp idLam intLit
+            , EApp idLam boolLit
+            , ELet "id" idLam (EVar "id")
+            , ELet "id" idLam (EApp (EVar "id") intLit)
+            , ELet "id" idLam (EApp (EVar "id") boolLit)
+            , ELet "id" idLam (ELet "_" (EApp (EVar "id") intLit) (EApp (EVar "id") boolLit))
+            , ELet "id" idLam (EApp (EVar "id") (EVar "id"))
+            , ELam "y" (ELet "id" idLam (EApp (EVar "id") (EVar "y")))
+            , ELamAnn "x" polyIdTy (EApp (EVar "x") intLit)
+            , ELet "f" (EAnn idLam polyIdTy) (EApp (EVar "f") intLit2)
+            ]
+    elements exprs
 
 -- | Empty constraint for testing reification
 emptyConstraint :: Constraint

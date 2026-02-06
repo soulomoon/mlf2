@@ -11,16 +11,16 @@ module MLF.Elab.Elaborate (
     elaborateWithEnv
 ) where
 
-import Data.Functor.Foldable (cata, para)
+import Data.Functor.Foldable (para)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
-import Data.Maybe (listToMaybe)
-import MLF.Util.Names (parseNameId)
+import Data.Maybe (fromMaybe, listToMaybe)
 import MLF.Util.Trace (TraceConfig, traceGeneralize)
 import MLF.Reify.TypeOps
     ( alphaEqType
+    , freeTypeVarsType
     , inlineBaseBoundsType
     , matchType
     )
@@ -32,10 +32,13 @@ import MLF.Constraint.Solve (SolveResult(..))
 import MLF.Elab.Types
 import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Elab.Legacy (expansionToInst)
-import MLF.Elab.Run.TypeOps (inlineBoundVarsTypeForBound)
+import MLF.Elab.TermClosure (closeTermWithSchemeSubstIfNeeded)
+import MLF.Elab.Run.TypeOps (inlineBoundVarsType)
+import MLF.Elab.Run.Annotation (adjustAnnotationInst)
 import MLF.Constraint.BindingUtil (bindingPathToRootLocal)
 import MLF.Elab.Phi (phiFromEdgeWitnessWithTrace)
 import MLF.Elab.Inst (applyInstantiation, schemeToType)
+import MLF.Elab.TypeCheck (typeCheck)
 import qualified MLF.Elab.Inst as Inst
 import MLF.Reify.Core
     ( namedNodes
@@ -231,6 +234,60 @@ elaborateWithEnv config elabEnv ann = do
                         pure (schemeFromType ty, IntMap.empty)
             Left err -> Left err
 
+    scopeRootForNode :: NodeId -> NodeRef
+    scopeRootForNode nodeId =
+        case IntMap.lookup (getNodeId (canonical nodeId)) scopeOverrides of
+            Just ref -> ref
+            Nothing -> scopeRootFromBase nodeId
+
+    generalizeAtNode :: NodeId -> Either ElabError (ElabScheme, IntMap.IntMap String)
+    generalizeAtNode nodeId =
+        let scopeRoot = scopeRootForNode nodeId
+            targetC = schemeBodyTarget resGen nodeId
+        in case generalizeAtWith (Just gaParents) resGen scopeRoot targetC of
+            Right out -> Right out
+            Left (BindingTreeError GenSchemeFreeVars{}) ->
+                case generalizeAtWith Nothing resGen scopeRoot targetC of
+                    Right out -> Right out
+                    Left (BindingTreeError GenSchemeFreeVars{}) -> do
+                        tyFallback <- reifyNodeTypePreferringBound targetC
+                        pure (schemeFromType tyFallback, IntMap.empty)
+                    Left err -> Left err
+            Left err -> Left err
+
+    reifyNodeTypePreferringBound :: NodeId -> Either ElabError ElabType
+    reifyNodeTypePreferringBound nodeId = do
+        namedSet <- namedNodes resReify
+        let nodeC = canonical nodeId
+        case VarStore.lookupVarBound (srConstraint resReify) nodeC of
+            Just bnd -> reifyTypeForParam namedSet resReify bnd
+            Nothing -> reifyTypeForParam namedSet resReify nodeC
+
+    closeTermForAnnotation :: ElabTerm -> ElabTerm
+    closeTermForAnnotation term =
+        case typeCheck term of
+            Right ty ->
+                let freeVars = Set.toList (freeTypeVarsType ty)
+                    sch = Forall [(v, Nothing) | v <- freeVars] ty
+                in closeTermWithSchemeSubstIfNeeded IntMap.empty sch term
+            Left _ -> term
+
+    resolvedLambdaParamNode :: NodeId -> Maybe NodeId
+    resolvedLambdaParamNode lamNodeId =
+        let lamC = canonical lamNodeId
+        in case NodeAccess.lookupNode (srConstraint resReify) lamC of
+            Just TyArrow{ tnDom = dom } -> Just dom
+            Just TyVar{ tnBound = Just bnd } ->
+                case NodeAccess.lookupNode (srConstraint resReify) (canonical bnd) of
+                    Just TyArrow{ tnDom = dom } -> Just dom
+                    _ -> Nothing
+            _ -> Nothing
+
+    termStartsWithTypeAbstraction :: ElabTerm -> Bool
+    termStartsWithTypeAbstraction term = case term of
+        ETyAbs{} -> True
+        _ -> False
+
     mkOut :: (Env -> Either ElabError ElabTerm) -> ElabOut
     mkOut f = ElabOut f f
 
@@ -239,31 +296,32 @@ elaborateWithEnv config elabEnv ann = do
         AVarF v _ -> mkOut $ \env ->
             maybe (Left (EnvLookup v)) (const (Right (EVar v))) (Map.lookup v env)
         ALitF lit _ -> mkOut $ \_ -> Right (ELit lit)
-        ALamF v paramNode _ (bodyAnn, bodyOut) _ ->
+        ALamF v paramNode _ (bodyAnn, bodyOut) lamNodeId ->
             let f env = do
                     let mAnnLambda = desugaredAnnLambdaInfo v bodyAnn
+                        paramSource = fromMaybe paramNode (resolvedLambdaParamNode lamNodeId)
                         bodyElabOut =
                             case mAnnLambda of
                                 Just (_, innerBodyAnn) ->
                                     para (elabAlg namedSetPhi namedSetReify) innerBodyAnn
                                 Nothing -> bodyOut
+                    paramTySurface <- reifyNodeTypePreferringBound paramSource
                     (paramTy, paramSchemeInfo) <- case mAnnLambda of
-                        Just (annNodeId, _) -> do
-                            let scopeRoot =
-                                    case IntMap.lookup (getNodeId (canonical paramNode)) scopeOverrides of
-                                        Just ref -> ref
-                                        Nothing -> scopeRootFromBase paramNode
-                                targetC = schemeBodyTarget resGen annNodeId
-                            case generalizeAtWith (Just gaParents) resGen scopeRoot targetC of
-                                Right (paramSch, subst) ->
-                                    pure
-                                        ( schemeToType paramSch
-                                        , SchemeInfo { siScheme = paramSch, siSubst = subst }
+                        Just (annNodeId, _) ->
+                            case generalizeAtNode annNodeId of
+                                Right (paramSch, _subst) ->
+                                    let paramTy0 = schemeToType paramSch
+                                    in pure
+                                        ( paramTy0
+                                        , SchemeInfo
+                                            { siScheme = schemeFromType paramTy0
+                                            , siSubst = IntMap.empty
+                                            }
                                         )
                                 Left (BindingTreeError GenSchemeFreeVars{}) -> do
                                     -- Some coercion codomain roots are outside the scheme
                                     -- ownership checks; recover the term-level type directly.
-                                    paramTy0 <- reifyTypeWithNamedSetNoFallback resReify IntMap.empty namedSetReify annNodeId
+                                    paramTy0 <- reifyNodeTypePreferringBound annNodeId
                                     pure
                                         ( paramTy0
                                         , SchemeInfo
@@ -272,12 +330,11 @@ elaborateWithEnv config elabEnv ann = do
                                             }
                                         )
                                 Left err -> Left err
-                        Nothing -> do
-                            paramTy0 <- reifyTypeWithNamedSetNoFallback resReify IntMap.empty namedSetReify paramNode
+                        Nothing ->
                             pure
-                                ( paramTy0
+                                ( paramTySurface
                                 , SchemeInfo
-                                    { siScheme = schemeFromType paramTy0
+                                    { siScheme = schemeFromType paramTySurface
                                     , siSubst = IntMap.empty
                                     }
                                 )
@@ -290,86 +347,29 @@ elaborateWithEnv config elabEnv ann = do
             let f env = do
                     f' <- elabTerm fOut env
                     a' <- elabTerm aOut env
-                    funInst0 <- reifyInst namedSetReify env fAnn funEid
-                    let argNode = annNode aAnn
-                        argType = case VarStore.lookupVarBound (srConstraint resPhi) argNode of
-                            Just bnd -> reifyTypeForInstArg namedSetPhi resPhi bnd
-                            Nothing -> reifyTypeForInstArg namedSetPhi resPhi argNode
-                    let funIsPoly = functionSourceIsPolymorphic env fAnn
-                        funIsMonoVar = functionSourceIsMonomorphic env fAnn
-                        allowArgDrivenInst = funIsPoly || (not funIsMonoVar && hasMeaningfulInst funInst0)
-                        baseInst
-                            | allowArgDrivenInst =
-                                case (funInst0, IntMap.lookup (getEdgeId funEid) edgeExpansions) of
-                                    (InstId, Just (ExpInstantiate args))
-                                        | not (null args) ->
-                                            case argType of
-                                                Right argTy -> InstApp argTy
-                                                Left _ -> funInst0
-                                    (InstApp TBottom, Just (ExpInstantiate args))
-                                        | not (null args) ->
-                                            case argType of
-                                                Right argTy | argTy /= TBottom -> InstApp argTy
-                                                _ -> funInst0
-                                    _ -> funInst0
-                            | otherwise = funInst0
-                        funInst
-                            | allowArgDrivenInst =
-                                case (argType, baseInst) of
-                                    (Right argTy, InstApp _) -> InstApp argTy
-                                    (Right argTy, _)
-                                        | countInstApps baseInst == 1 ->
-                                            let (inst', _rest) = replaceInstApps [argTy] baseInst
-                                            in inst'
-                                    _ -> baseInst
-                            | otherwise = baseInst
-                        funInstFinal
-                            | funIsMonoVar = InstId
-                            | otherwise = funInst
+                    funInst <- reifyInst namedSetReify env fAnn funEid
                     argInst <- reifyInst namedSetReify env aAnn argEid
-                    let argIsPoly =
-                            case aAnn of
-                                AVar v _ ->
-                                    case Map.lookup v env of
-                                        Just SchemeInfo{ siScheme = Forall binds _ } -> not (null binds)
-                                        Nothing -> False
-                                _ -> False
-                        argTargetType =
-                            case IntMap.lookup (getEdgeId argEid) edgeWitnesses of
-                                Nothing -> Nothing
-                                Just ewArg ->
-                                    let targetNode = ewRight ewArg
-                                        targetTyE =
-                                            case VarStore.lookupVarBound (srConstraint resPhi) targetNode of
-                                                Just bnd -> reifyTypeForInstArg namedSetPhi resPhi bnd
-                                                Nothing -> reifyTypeForInstArg namedSetPhi resPhi targetNode
-                                    in case targetTyE of
-                                        Right ty -> Just ty
-                                        Left _ -> Nothing
-                        funExpectedArgType =
-                            case f' of
-                                ELam _ ty _ -> Just ty
-                                _ -> argTargetType
-                        argExpectedInst =
-                            case aAnn of
-                                AVar v _ -> do
+                    let funInst' =
+                            case (funInst, sourceAnnIsPolymorphic env aAnn) of
+                                (InstApp (TVar _), False) ->
+                                    case reifyNodeTypePreferringBound (annNode aAnn) of
+                                        Right argTy -> InstApp argTy
+                                        Left _ -> funInst
+                                _ -> funInst
+                    let argInstFromFun =
+                            case (aAnn, f') of
+                                (AVar v _, ELam _ paramTy _) -> do
                                     si <- Map.lookup v env
-                                    targetTy <- funExpectedArgType
-                                    args <- inferInstAppArgs (siScheme si) targetTy
-                                    pure (instSeqApps (map (inlineBoundVarsTypeForBound resReify) args))
+                                    args <- inferInstAppArgs (siScheme si) paramTy
+                                    pure (instSeqApps (map (inlineBoundVarsType resReify) args))
                                 _ -> Nothing
                     let argInst' =
-                            if argIsPoly
-                                then case (argInst, funInstFinal) of
-                                    (InstId, InstApp ty) -> InstApp ty
-                                    (InstId, InstId) ->
-                                        maybe argInst id argExpectedInst
-                                    (InstId, inst) | hasMeaningfulInst inst -> inst
-                                    _ -> argInst
-                                else argInst
-                    let fApp = case funInstFinal of
+                            case (sourceAnnIsPolymorphic env aAnn, argInstFromFun) of
+                                (True, Just inst) -> inst
+                                _ -> argInst
+                    let fApp = case funInst' of
                             InstId -> f'
-                            _      -> ETyInst f' funInstFinal
+                            _      -> ETyInst f' funInst'
                         aApp = case argInst' of
                             InstId -> a'
                             _      -> ETyInst a' argInst'
@@ -378,40 +378,23 @@ elaborateWithEnv config elabEnv ann = do
         ALetF v schemeGenId schemeRootId _ _rhsScopeGen (_rhsAnn, rhsOut) (bodyAnn, bodyOut) trivialRoot ->
             let elaborateLet env = do
                     rhs' <- elabTerm rhsOut env
-                    let scopeRoot =
-                            case IntMap.lookup (getNodeId (canonical schemeRootId)) scopeOverrides of
-                                Just ref -> ref
-                                Nothing -> scopeRootFromBase schemeRootId
                     let debugGeneralize = traceGeneralize traceCfg
                     _ <- pure $
                         debugGeneralize
                             ("elaborate let: schemeGenId=" ++ show schemeGenId
                                 ++ " schemeRootId=" ++ show schemeRootId
-                                ++ " scopeRoot=" ++ show scopeRoot
+                                ++ " scopeRoot=" ++ show (scopeRootForNode schemeRootId)
                             )
                             ()
-                    let targetC = schemeBodyTarget resGen schemeRootId
-                    (sch, subst) <-
-                        case generalizeAtWith (Just gaParents) resGen scopeRoot targetC of
-                            Right out -> pure out
-                            Left (BindingTreeError GenSchemeFreeVars{}) ->
-                                case generalizeAtWith Nothing resGen scopeRoot targetC of
-                                    Right out -> pure out
-                                    Left (BindingTreeError GenSchemeFreeVars{}) -> do
-                                        tyFallback <- reifyTypeWithNamedSetNoFallback resReify IntMap.empty namedSetReify targetC
-                                        pure (schemeFromType tyFallback, IntMap.empty)
-                                    Left err -> Left err
-                            Left err -> Left err
+                    (sch, subst) <- generalizeAtNode schemeRootId
                     case debugGeneralize
                         ("elaborate let: scheme=" ++ show sch
                             ++ " subst=" ++ show subst
                         )
                         () of
                         () -> pure ()
-                    let rhsSubst = substInTerm subst rhs'
                     let env' = Map.insert v SchemeInfo { siScheme = sch, siSubst = subst } env
-                        rhsAbs = case sch of
-                            Forall binds _ -> foldr (\(name, bound) e -> ETyAbs name bound e) rhsSubst binds
+                        rhsAbs = closeTermWithSchemeSubstIfNeeded subst sch rhs'
                     let bodyElab =
                             case bodyAnn of
                                 AAnn _ target _ | canonical target == canonical trivialRoot ->
@@ -429,41 +412,57 @@ elaborateWithEnv config elabEnv ann = do
                 { elabTerm = f
                 , elabStripped = fStripped
                 }
-        AAnnF (exprAnn, exprOut) _ eid ->
+        AAnnF (exprAnn, exprOut) annNodeId eid ->
             ElabOut
                 { elabTerm = \env -> do
                     expr' <- elabTerm exprOut env
                     inst <- reifyInst namedSetReify env exprAnn eid
-                    pure $ case inst of
-                        InstId -> expr'
-                        _      -> ETyInst expr' inst
+                    mExpectedBound <- case generalizeAtNode annNodeId of
+                        Right (Forall ((_, Just bnd) : _) _, _) -> pure (Just (tyToElab bnd))
+                        Left _ -> pure Nothing
+                        _ -> pure Nothing
+                    let instAdjusted0 = adjustAnnotationInst inst
+                        instAdjusted =
+                            case (mExpectedBound, instAdjusted0) of
+                                (Just expectedBound, InstInside (InstBot _)) ->
+                                    InstInside (InstBot expectedBound)
+                                _ -> instAdjusted0
+                    exprClosed <-
+                        if instAdjusted == InstId
+                            then pure expr'
+                            else
+                                if termStartsWithTypeAbstraction expr' || sourceAnnIsPolymorphic env exprAnn
+                                    then pure expr'
+                                    else pure (closeTermForAnnotation expr')
+                    let instFinal =
+                            case instAdjusted of
+                                InstId -> InstId
+                                _ ->
+                                    case typeCheck exprClosed of
+                                        Right tyExpr ->
+                                            case tyExpr of
+                                                TForall{} ->
+                                                    case applyInstantiation tyExpr instAdjusted of
+                                                        Right tyApplied
+                                                            | alphaEqType tyApplied tyExpr -> InstId
+                                                        _ -> instAdjusted
+                                                _ -> InstId
+                                        Left _ -> instAdjusted
+                    pure $ case instFinal of
+                        InstId -> exprClosed
+                        _      -> ETyInst exprClosed instFinal
                 , elabStripped = \env -> elabTerm exprOut env
                 }
 
-    functionSourceIsPolymorphic :: Env -> AnnExpr -> Bool
-    functionSourceIsPolymorphic env funAnn =
-        case funAnn of
+    sourceAnnIsPolymorphic :: Env -> AnnExpr -> Bool
+    sourceAnnIsPolymorphic env sourceAnn =
+        case sourceAnn of
             AVar v _ ->
                 case Map.lookup v env of
                     Just SchemeInfo{ siScheme = Forall binds _ } -> not (null binds)
                     _ -> False
+            AAnn inner _ _ -> sourceAnnIsPolymorphic env inner
             _ -> False
-
-    functionSourceIsMonomorphic :: Env -> AnnExpr -> Bool
-    functionSourceIsMonomorphic env funAnn =
-        case funAnn of
-            AVar v _ ->
-                case Map.lookup v env of
-                    Just SchemeInfo{ siScheme = Forall binds _ } -> null binds
-                    _ -> False
-            _ -> False
-
-    hasMeaningfulInst :: Instantiation -> Bool
-    hasMeaningfulInst inst =
-        case inst of
-            InstId -> False
-            InstApp ty -> ty /= TBottom
-            _ -> True
 
     desugaredAnnLambdaInfo :: VarName -> AnnExpr -> Maybe (NodeId, AnnExpr)
     desugaredAnnLambdaInfo param bodyAnn =
@@ -520,17 +519,32 @@ elaborateWithEnv config elabEnv ann = do
                                 , null binds ->
                                     Nothing
                             _ -> mSchemeInfo
-                phi0 <- phiFromEdgeWitnessWithTrace traceCfg generalizeAtWith resReify (Just gaParents) mSchemeInfo' mTrace ew
-                let phi = patchInstAppsFromTarget namedSetReify ew mSchemeInfo phi0
-                instFromTrace <- case (phi, mExpansion) of
-                    (InstId, Just (ExpInstantiate args)) -> do
+                case debugGeneralize
+                    ("reifyInst scheme edge=" ++ show eid
+                        ++ " source=" ++ show (fmap siSubst mSchemeInfo)
+                    )
+                    () of
+                    () -> pure ()
+                phi <- phiFromEdgeWitnessWithTrace traceCfg generalizeAtWith resReify (Just gaParents) mSchemeInfo' mTrace ew
+                case debugGeneralize
+                    ("reifyInst phi edge=" ++ show eid ++ " phi=" ++ show phi)
+                    () of
+                    () -> pure ()
+                let allowFallbackFromTrace =
+                        case mSchemeInfo of
+                            Just si ->
+                                case siScheme si of
+                                    Forall binds _ -> not (null binds)
+                            Nothing -> True
+                instFromTrace <- case (allowFallbackFromTrace, phi, mExpansion, mSchemeInfo) of
+                    (True, InstId, Just (ExpInstantiate args), mSi) -> do
                         let argNodes =
                                 case mTrace of
                                     Just tr | not (null (etBinderArgs tr)) ->
                                         map snd (etBinderArgs tr)
                                     _ -> args
                         let targetArgs =
-                                case mSchemeInfo of
+                                case mSi of
                                     Just si ->
                                         case reifyTargetType namedSetReify ew si of
                                             Right targetTy ->
@@ -541,8 +555,15 @@ elaborateWithEnv config elabEnv ann = do
                                                     _ -> Nothing
                                             Left _ -> Nothing
                                     Nothing -> Nothing
+                        case debugGeneralize
+                            ("reifyInst fallback edge=" ++ show eid
+                                ++ " argNodes=" ++ show argNodes
+                                ++ " targetArgs=" ++ show targetArgs
+                            )
+                            () of
+                            () -> pure ()
                         let substForArgs =
-                                case mSchemeInfo of
+                                case mSi of
                                     Just si -> siSubst si
                                     Nothing -> IntMap.empty
                             constraint = srConstraint resReify
@@ -553,58 +574,19 @@ elaborateWithEnv config elabEnv ann = do
                         argTys <- case targetArgs of
                             Just inferred -> pure inferred
                             Nothing -> mapM reifyArg argNodes
-                        let argTys' = map (inlineBoundVarsTypeForBound resReify) argTys
+                        let argTys' = map (inlineBoundVarsType resReify) argTys
+                        case debugGeneralize
+                            ("reifyInst fallback edge=" ++ show eid
+                                ++ " argTys=" ++ show argTys
+                                ++ " argTys'=" ++ show argTys'
+                            )
+                            () of
+                            () -> pure ()
                         pure (Just (instSeqApps argTys'))
                     _ -> pure Nothing
                 case instFromTrace of
                     Just inst -> Right inst
-                    Nothing -> simplifyInstForScheme namedSetReify mSchemeInfo mExpansion phi
-
-    simplifyInstForScheme
-        :: IntSet.IntSet
-        -> Maybe SchemeInfo
-        -> Maybe Expansion
-        -> Instantiation
-        -> Either ElabError Instantiation
-    simplifyInstForScheme namedSetReify mSchemeInfo mExpansion phi =
-        case (mSchemeInfo, mExpansion) of
-            (Just si, Just (ExpInstantiate args)) -> do
-                let subst = siSubst si
-                    schemeTy = schemeToType (siScheme si)
-                let constraint = srConstraint resReify
-                    reifyArg arg =
-                        case VarStore.lookupVarBound constraint arg of
-                            Just bnd -> reifyBoundWithNames resReify subst bnd
-                            Nothing -> reifyTypeWithNamedSetNoFallback resReify subst namedSetReify arg
-                argTys <- mapM reifyArg args
-                let argTys' = map (inlineBoundVarsTypeForBound resReify) argTys
-                case applyInstantiation schemeTy phi of
-                    Left _ -> Right phi
-                    Right targetTy -> do
-                        let candidates = [instSeqApps (take k argTys') | k <- [0 .. length argTys']]
-                            matches inst =
-                                case applyInstantiation schemeTy inst of
-                                    Right ty -> alphaEqType ty targetTy
-                                    Left _ -> False
-                        pure $ case filter matches candidates of
-                            (inst:_) -> inst
-                            [] -> phi
-            _ -> Right phi
-
-    patchInstAppsFromTarget :: IntSet.IntSet -> EdgeWitness -> Maybe SchemeInfo -> Instantiation -> Instantiation
-    patchInstAppsFromTarget namedSetReify ew mSchemeInfo inst =
-        case mSchemeInfo of
-            Nothing -> inst
-            Just si ->
-                case reifyTargetType namedSetReify ew si of
-                    Left _ -> inst
-                    Right targetTy ->
-                        case inferInstAppArgs (siScheme si) targetTy of
-                            Nothing -> inst
-                            Just args ->
-                                let args' = map (inlineBoundVarsTypeForBound resReify) args
-                                    (inst', _unused) = replaceInstApps args' inst
-                                in inst'
+                    Nothing -> Right phi
 
     reifyTargetType :: IntSet.IntSet -> EdgeWitness -> SchemeInfo -> Either ElabError ElabType
     reifyTargetType namedSetReify ew si =
@@ -624,105 +606,17 @@ elaborateWithEnv config elabEnv ann = do
                     then Just [ty | name <- binderNames, Just ty <- [Map.lookup name subst]]
                     else Nothing
 
-    replaceInstApps :: [ElabType] -> Instantiation -> (Instantiation, [ElabType])
-    replaceInstApps args0 inst0 = (cata alg inst0) args0
-      where
-        alg inst args = case inst of
-            InstIdF -> (InstId, args)
-            InstSeqF a b ->
-                    let (a', args1) = a args
-                        (b', args2) = b args1
-                    in (InstSeq a' b', args2)
-            InstAppF t ->
-                case args of
-                    (t':rest) -> (InstApp t', rest)
-                    [] -> (InstApp t, [])
-            InstBotF t -> (InstBot t, args)
-            InstAbstrF v -> (InstAbstr v, args)
-            InstIntroF -> (InstIntro, args)
-            InstElimF -> (InstElim, args)
-            InstInsideF phi ->
-                    let (phi', rest) = phi args
-                    in (InstInside phi', rest)
-            InstUnderF v phi ->
-                    let (phi', rest) = phi args
-                    in (InstUnder v phi', rest)
-
-    countInstApps :: Instantiation -> Int
-    countInstApps = cata alg
-      where
-        alg inst0 = case inst0 of
-            InstIdF -> 0
-            InstSeqF a b -> a + b
-            InstAppF _ -> 1
-            InstBotF _ -> 0
-            InstAbstrF _ -> 0
-            InstIntroF -> 0
-            InstElimF -> 0
-            InstInsideF phi -> phi
-            InstUnderF _ phi -> phi
-
--- | Substitute names in a term (and its embedded types)
-substInTerm :: IntMap.IntMap String -> ElabTerm -> ElabTerm
-substInTerm subst = cata alg
-  where
-    alg term = case term of
-        EVarF v -> EVar v
-        ELitF l -> ELit l
-        ELamF v ty body -> ELam v (substInTy subst ty) body
-        EAppF f a -> EApp f a
-        ELetF v sch rhs body -> ELet v (substInScheme subst sch) rhs body
-        ETyAbsF v b body -> ETyAbs v (fmap (substInTy subst) b) body
-        ETyInstF e i -> ETyInst e (substInInst subst i)
-
-substInTy :: IntMap.IntMap String -> Ty v -> Ty v
-substInTy subst = cataIx alg
-  where
-    alg :: TyIF i Ty -> Ty i
-    alg node = case node of
-        TVarIF v -> TVar (applySubst v)
-        TArrowIF d c -> TArrow d c
-        TConIF c args -> TCon c args
-        TBaseIF b -> TBase b
-        TForallIF v mb body -> TForall v mb body
-        TBottomIF -> TBottom
-
-    applySubst name =
-        case parseNameId name of
-            Just nid -> case IntMap.lookup nid subst of
-                Just newName -> newName
-                Nothing -> name
-            Nothing -> name
-
-substInScheme :: IntMap.IntMap String -> ElabScheme -> ElabScheme
-substInScheme subst scheme =
-    schemeFromType (substInTy subst (schemeToType scheme))
-
-substInInst :: IntMap.IntMap String -> Instantiation -> Instantiation
-substInInst subst = cata alg
-  where
-    alg inst = case inst of
-        InstIdF -> InstId
-        InstAppF t -> InstApp (substInTy subst t)
-        InstBotF t -> InstBot (substInTy subst t)
-        InstIntroF -> InstIntro
-        InstElimF -> InstElim
-        InstAbstrF v -> InstAbstr v
-        InstUnderF v i' -> InstUnder v i'
-        InstInsideF i' -> InstInside i'
-        InstSeqF i1 i2 -> InstSeq i1 i2
-
 instSeqApps :: [ElabType] -> Instantiation
 instSeqApps tys = case map InstApp tys of
     [] -> InstId
     [inst] -> inst
     insts -> foldr1 InstSeq insts
 
-reifyTypeForInstArg :: IntSet.IntSet -> SolveResult -> NodeId -> Either ElabError ElabType
-reifyTypeForInstArg namedSet res nid = do
+reifyTypeForParam :: IntSet.IntSet -> SolveResult -> NodeId -> Either ElabError ElabType
+reifyTypeForParam namedSet res nid = do
     ty <- reifyTypeWithNamedSetNoFallback res IntMap.empty namedSet nid
     let ty' = inlineBaseBounds res ty
-    pure (inlineBoundVarsTypeForBound res ty')
+    pure (inlineBoundVarsType res ty')
 
 inlineBaseBounds :: SolveResult -> ElabType -> ElabType
 inlineBaseBounds res =

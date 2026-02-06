@@ -149,6 +149,7 @@ library mlf2-internal
                       MLF.Reify.TypeOps,
                       MLF.Elab.Inst,
                       MLF.Elab.Elaborate,
+                      MLF.Elab.TermClosure,
                       MLF.Elab.Legacy,
                       MLF.Elab.Generalize,
                       MLF.Elab.Phi,

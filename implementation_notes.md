@@ -4,6 +4,15 @@
 
 **Current vs target:** The current pipeline records presolution witnesses and produces explicit generalization plans in `MLF.Constraint.Presolution.Plan`; elaboration applies these plans via `MLF.Elab.Generalize` without re-solving. The remaining paper-faithfulness deltas are tracked in `.kiro/specs/paper-faithfulness-remaining-deltas/` (constructor types `Cσ` and stricter translatability validation for Φ).
 
+### 2026-02-06 strict checked-authoritative follow-up
+
+- `runPipelineElab` now uses checked type authority end-to-end while keeping reconstruction paths for diagnostics only.
+- Top-level closure now falls back to explicit free-variable closure when root generalization yields no binders but the elaborated term is still type-open.
+- Shared closure (`MLF.Elab.TermClosure`) now freshens scheme binders against existing `ETyAbs` names and rewrites free type-variable occurrences in term types/instantiations to avoid capture/regressions.
+- Annotation elaboration aligns `InstInside (InstBot ...)` with the generalized annotation-bound head when available, reducing bound-erasure in explicit-forall annotation paths.
+- Regression expectations in `test/ElaborationSpec.hs` were updated for checked-authoritative term/type shapes (top-level `ETyAbs` wrappers, `Bool`-authoritative result, and closed `∀a. a -> a` fallback for `\\y. let id = ... in id y`).
+- Known gap remains: bounded aliasing requiring thesis Merge/RaiseMerge witness translation is still unresolved and tracked as an explicit expected-failure shape in tests.
+
 ## Module Structure (Post-Refactor)
 
 The codebase has been refactored for improved navigation and paper-faithfulness auditing:
@@ -109,7 +118,7 @@ Legacy code is isolated in `MLF.Elab.Legacy` (e.g., `expansionToInst`).
   - Implemented explicit quantifier reordering instantiations (`sigmaReorder`) using adjacent swaps per `papers/these-finale-english.txt` (see `papers/xmlf.txt` §3.4).
   - Implemented `applyInstantiation` (in `MLF.Elab.Inst`, reexported via `MLF.Elab.Pipeline`) to check/apply xMLF instantiations to xMLF types (see `papers/these-finale-english.txt`; `papers/xmlf.txt` Fig. 3), used by tests to validate that `Φ(e)` transforms the source type into the target type.
 - **`expansionToInst`**: Kept as a legacy/debug conversion from `Expansion` to `Instantiation` (no longer the main path for elaboration).
-- **`runPipelineElab`**: Generalizes the top-level result using the nearest gen ancestor of the expression root (root gen node for top-level).
+- **`runPipelineElab`**: Generalizes the top-level result using the nearest gen ancestor of the expression root (root gen node for top-level), keeps reconstruction checks for diagnostics, and reports the type-checker result as the authoritative pipeline type.
 
 ## Testing
 - **`test/ElaborationSpec.hs`**: Updated expectations to reflect correct polymorphic behavior and variable naming. Added integration tests for polymorphic instantiation.

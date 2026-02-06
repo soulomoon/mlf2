@@ -57,7 +57,6 @@ import MLF.Constraint.Presolution.Base (CopyMapping(..), InteriorNodes(..), copi
 import qualified MLF.Binding.Tree as Binding
 import MLF.Binding.Tree (checkBindingTree, checkNoGenFallback, checkSchemeClosureUnder)
 import qualified MLF.Constraint.NodeAccess as NodeAccess
-import qualified MLF.Util.IntMapUtils as IntMapUtils
 import MLF.Elab.Phi.Env (PhiM, askCanonical, askResult)
 import MLF.Elab.Phi.Omega (OmegaContext(..), phiWithSchemeOmega)
 import MLF.Util.Trace (TraceConfig, traceGeneralize)
@@ -207,36 +206,35 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
             case (mSchemeInfo, mTrace) of
                 (Just si, Just tr) -> Just (remapSchemeInfo tr si)
                 _ -> mSchemeInfo
+    case debugPhi
+        ("phi scheme subst edge=" ++ show (ewEdgeId ew)
+            ++ " subst=" ++ show (fmap siSubst mSchemeInfo')
+        )
+        () of
+        () -> pure ()
     targetBinderKeysRaw <-
-        case mTrace of
-            Nothing -> pure IntSet.empty
-            Just _ ->
-                let targetRootC = canonicalNode (ewRight ew)
-                in if nodeRefExistsLocal (srConstraint res) (typeRef targetRootC)
-                    then do
-                        tgtScope <- instScopeRoot targetRootC
-                        case tgtScope of
-                            GenRef gid -> do
-                                bindParents <-
-                                    bindingToElab $
-                                        Binding.canonicalizeBindParentsUnder canonicalNode (srConstraint res)
-                                let binders =
-                                        [ childN
-                                        | childN <- IntMapUtils.typeChildrenOfGen bindParents gid
-                                        , case NodeAccess.lookupNode (srConstraint res) childN of
-                                            Just TyVar{} -> True
-                                            _ -> False
-                                        ]
-                                debugPhi
-                                    ("phi targetScope=" ++ show tgtScope
-                                        ++ " targetBinders=" ++ show binders
-                                    )
-                                    (pure ())
-                                pure (IntSet.fromList (map (getNodeId . canonicalNode) binders))
-                            TypeRef _ -> do
-                                debugPhi ("phi targetScope=" ++ show tgtScope) (pure ())
-                                pure IntSet.empty
-                    else pure IntSet.empty
+        case (mTrace, mSchemeInfo') of
+            (Just _, Just si) -> do
+                let subst = siSubst si
+                    targetRootC = canonicalNode (ewRight ew)
+                    schemeKeys = IntSet.fromList (IntMap.keys subst)
+                targetBinders <-
+                    case bindingToElab (Binding.orderedBinders canonicalNode (srConstraint res) (typeRef targetRootC)) of
+                        Right bs -> pure bs
+                        Left _ -> pure []
+                let targetKeys =
+                        IntSet.fromList
+                            [ getNodeId (canonicalNode binder)
+                            | binder <- targetBinders
+                            ]
+                    keepKeys = IntSet.intersection schemeKeys targetKeys
+                debugPhi
+                    ("phi target binders=" ++ show targetBinders
+                        ++ " keep-keys=" ++ show (IntSet.toList keepKeys)
+                    )
+                    (pure ())
+                pure keepKeys
+            _ -> pure IntSet.empty
     let targetBinderKeys =
             debugPhi
                 ("phi targetBinderKeys=" ++ show (IntSet.toList targetBinderKeysRaw))
@@ -249,15 +247,15 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
                     case mTrace of
                         Just tr -> remapSchemeInfo tr si0
                         Nothing -> si0
-            phiWithSchemeOmega omegaCtx namedSet targetBinderKeys si1 steps0
+            phiWithSchemeOmega (omegaCtx (Just si1)) namedSet targetBinderKeys si1 steps0
         Just si -> do
-            phiWithSchemeOmega omegaCtx namedSet targetBinderKeys si steps0
+            phiWithSchemeOmega (omegaCtx mSchemeInfo') namedSet targetBinderKeys si steps0
   where
     debugPhi :: String -> a -> a
     debugPhi = traceGeneralize traceCfg
 
-    omegaCtx :: OmegaContext
-    omegaCtx =
+    omegaCtx :: Maybe SchemeInfo -> OmegaContext
+    omegaCtx mSchemeInfoCtx =
         OmegaContext
             { ocTraceConfig = traceCfg
             , ocResult = res
@@ -265,7 +263,7 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
             , ocCopyMap = copyMap
             , ocGaParents = mbGaParents
             , ocTrace = mTrace
-            , ocSchemeInfo = mSchemeInfo
+            , ocSchemeInfo = mSchemeInfoCtx
             , ocEdgeRoot = ewRoot ew
             , ocEdgeLeft = ewLeft ew
             , ocEdgeRight = ewRight ew
@@ -371,13 +369,3 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
         in case NodeAccess.lookupNode (srConstraint res) (NodeId key) of
             Just TyVar{} -> True
             _ -> False
-
-    nodeRefExistsLocal :: Constraint -> NodeRef -> Bool
-    nodeRefExistsLocal c ref =
-        case ref of
-            TypeRef nid ->
-                case lookupNodeIn (cNodes c) nid of
-                    Just _ -> True
-                    Nothing -> False
-            GenRef gid ->
-                IntMap.member (getGenNodeId gid) (getGenNodeMap (cGenNodes c))

@@ -7,6 +7,7 @@ module MLF.Elab.Run.Pipeline (
 ) where
 
 import qualified Data.IntMap.Strict as IntMap
+import qualified Data.Set as Set
 
 import MLF.Frontend.Syntax (SurfaceExpr)
 import MLF.Frontend.ConstraintGen (AnnExpr(..), ConstraintError, ConstraintResult(..), generateConstraints)
@@ -21,7 +22,7 @@ import MLF.Constraint.Presolution
 import MLF.Constraint.Solve hiding (BindingTreeError, MissingNode)
 import qualified MLF.Constraint.Solve as Solve
 import MLF.Constraint.Types.Graph (PolySyms)
-import MLF.Constraint.Types (cNodes, lookupNodeIn)
+import MLF.Constraint.Types (BindingError(..), cNodes, lookupNodeIn)
 import MLF.Elab.Elaborate (ElabConfig(..), ElabEnv(..), elaborateWithEnv)
 import MLF.Elab.PipelineConfig (PipelineConfig(..), defaultPipelineConfig)
 import MLF.Elab.PipelineError
@@ -35,7 +36,8 @@ import MLF.Elab.PipelineError
     )
 import MLF.Elab.TypeCheck (typeCheck)
 import MLF.Elab.Types
-import MLF.Elab.Run.Annotation (applyRedirectsToAnn, canonicalizeAnn)
+import MLF.Elab.TermClosure (closeTermWithSchemeSubst, substInTerm)
+import MLF.Elab.Run.Annotation (applyRedirectsToAnn, canonicalizeAnn, annNode)
 import MLF.Elab.Run.Generalize
     ( constraintForGeneralization
     , generalizeAtWithBuilder
@@ -44,6 +46,7 @@ import MLF.Elab.Run.Generalize
     )
 import MLF.Elab.Run.Provenance (buildTraceCopyMap, collectBaseNamedKeys)
 import MLF.Elab.Run.Scope (letScopeOverrides)
+import MLF.Elab.Run.Scope (resolveCanonicalScope, schemeBodyTarget)
 import MLF.Elab.Run.Util
     ( canonicalizeExpansion
     , canonicalizeTrace
@@ -51,7 +54,9 @@ import MLF.Elab.Run.Util
     , makeCanonicalizer
     )
 import MLF.Elab.Run.ResultType (ResultTypeContext(..), computeResultTypeFromAnn, computeResultTypeFallback)
-import MLF.Util.Trace (TraceConfig)
+import MLF.Reify.Core (reifyType)
+import MLF.Reify.TypeOps (freeTypeVarsType)
+import MLF.Util.Trace (TraceConfig, traceGeneralize)
 
 runPipelineElab :: PolySyms -> SurfaceExpr -> Either PipelineError (ElabTerm, ElabType)
 runPipelineElab = runPipelineElabWithConfig defaultPipelineConfig
@@ -64,10 +69,7 @@ runPipelineElabWithConfig config polySyms =
     runPipelineElabWith (pcTraceConfig config) (generateConstraints polySyms)
 
 runPipelineElabCheckedWithConfig :: PipelineConfig -> PolySyms -> SurfaceExpr -> Either PipelineError (ElabTerm, ElabType)
-runPipelineElabCheckedWithConfig config polySyms expr = do
-    (term, _ty) <- runPipelineElabWithConfig config polySyms expr
-    tyChecked <- fromTypeCheckError (typeCheck term)
-    pure (term, tyChecked)
+runPipelineElabCheckedWithConfig = runPipelineElabWithConfig
 
 runPipelineElabWith
     :: TraceConfig
@@ -127,6 +129,42 @@ runPipelineElabWith traceCfg genConstraints expr = do
                     , eeScopeOverrides = scopeOverrides
                     }
             term <- fromElabError (elaborateWithEnv elabConfig elabEnv annCanon)
+            case traceGeneralize traceCfg ("pipeline elaborated term=" ++ show term) () of
+                () -> pure ()
+            rootScope <- fromElabError $
+                bindingToElab $
+                    resolveCanonicalScope c1 solvedForGen (prRedirects pres) (annNode ann)
+            let rootTarget = schemeBodyTarget solvedForGen (annNode annCanon)
+            (rootScheme, rootSubst) <- fromElabError $
+                case generalizeAtWith (Just bindParentsGa) solvedForGen rootScope rootTarget of
+                    Right out -> Right out
+                    Left (BindingTreeError GenSchemeFreeVars{}) ->
+                        case generalizeAtWith Nothing solvedForGen rootScope rootTarget of
+                            Right out -> Right out
+                            Left (BindingTreeError GenSchemeFreeVars{}) -> do
+                                tyFallback <- reifyType solvedForGen rootTarget
+                                pure (schemeFromType tyFallback, IntMap.empty)
+                            Left err -> Left err
+                    Left err -> Left err
+            let termSubst = substInTerm rootSubst term
+                termClosed =
+                    case typeCheck termSubst of
+                        Right ty | null (freeTypeVarsType ty) -> termSubst
+                        Right ty ->
+                            case rootScheme of
+                                Forall binds _
+                                    | null binds ->
+                                        let freeBinds =
+                                                [ (name, Nothing)
+                                                | name <- Set.toList (freeTypeVarsType ty)
+                                                ]
+                                            freeScheme = Forall freeBinds ty
+                                        in closeTermWithSchemeSubst IntMap.empty freeScheme termSubst
+                                _ -> closeTermWithSchemeSubst rootSubst rootScheme term
+                        Left _ -> closeTermWithSchemeSubst rootSubst rootScheme term
+            let checkedAuthoritative = do
+                    tyChecked <- fromTypeCheckError (typeCheck termClosed)
+                    pure (termClosed, tyChecked)
 
             -- Build context for result type computation
             let canonical = frWith (srUnionFind solvedClean)
@@ -144,20 +182,13 @@ runPipelineElabWith traceCfg genConstraints expr = do
                     , rtcTraceConfig = traceCfg
                     }
 
-            -- Compute result type
-            let refineTrivialResultType ty =
-                    case ty of
-                        TForall v Nothing (TVar v')
-                            | v == v' ->
-                                case typeCheck term of
-                                    Right tyChecked -> tyChecked
-                                    Left _ -> ty
-                        _ -> ty
+            -- Keep result-type reconstruction for diagnostics, but report the
+            -- type-checker result as authoritative.
             case annCanon of
                 AAnn inner annNodeId eid -> do
-                    ty <- fromElabError (computeResultTypeFromAnn resultTypeCtx inner inner annNodeId eid)
-                    pure (term, refineTrivialResultType ty)
+                    _ <- fromElabError (computeResultTypeFromAnn resultTypeCtx inner inner annNodeId eid)
+                    checkedAuthoritative
                 _ -> do
-                    ty <- fromElabError (computeResultTypeFallback resultTypeCtx annCanon ann)
-                    pure (term, refineTrivialResultType ty)
+                    _ <- fromElabError (computeResultTypeFallback resultTypeCtx annCanon ann)
+                    checkedAuthoritative
         vs -> Left (PipelineSolveError (Solve.ValidationFailed vs))

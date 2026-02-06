@@ -352,7 +352,29 @@ buildForalls binds body = foldr (\(v, b) t -> TForall v b t) body binds
 
 schemeFromType :: ElabType -> ElabScheme
 schemeFromType ty =
-    let (binds, body) = splitForalls ty
+    let (binds0, body0) = splitForalls ty
+        binderNames = map fst binds0
+        bodyFvs = Set.toList (freeTypeVarsType body0)
+        bodyFvSet = Set.fromList bodyFvs
+        externalFvs =
+            [ v
+            | v <- bodyFvs
+            , v `notElem` binderNames
+            ]
+        unusedBinders =
+            [ v
+            | v <- binderNames
+            , not (Set.member v bodyFvSet)
+            ]
+        ty' =
+            if length externalFvs <= length unusedBinders && not (null externalFvs)
+                then
+                    foldl
+                        (\acc (fromV, toV) -> substTypeCapture fromV (TVar toV) acc)
+                        ty
+                        (zip externalFvs unusedBinders)
+                else ty
+        (binds, body) = splitForalls ty'
     in mkElabScheme binds body
 
 data TypeCheckError
