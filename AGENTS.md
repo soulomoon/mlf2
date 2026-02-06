@@ -17,6 +17,16 @@
 - Shared structural decomposition lives in `MLF.Constraint.Unify.Decompose`; presolution structural unification should call `decomposeUnifyChildren` after handling TyVar/TyExp special cases.
 - Legacy expansion-to-instantiation translation lives in `MLF.Elab.Legacy`; `MLF.Elab.Elaborate`/`MLF.Elab.Pipeline` re-export `expansionToInst` for compatibility.
 
+### Key Data Types
+
+- `Expr` (`MLF.Frontend.Syntax`): Surface language (eMLF terms)
+- `Constraint` (`MLF.Constraint.Types`): The constraint graph with nodes, edges, and binding tree
+- `TyNode`: Type nodes in the term-DAG (TyVar, TyArrow, TyForall, TyBase, TyExp, TyBottom)
+- `InstEdge`: Instantiation edges (≤) between nodes
+- `BindParents`: Binding tree as child → (parent, BindFlag) map
+- `Expansion`: Presolution recipes (identity, ∀-intro, instantiation, composition)
+- `EdgeWitness`: Per-edge witness metadata for xMLF instantiation reconstruction
+
 ## Build, Test, and Development Commands
 
 - `cabal build` — build the library and executable into `dist-newstyle/`.
@@ -27,6 +37,7 @@
 
 ## Coding Style & Naming Conventions
 
+- Use `haskell-pro` (`/Users/ares/.agents/skills/haskell-pro/SKILL.md`) as the default style guide for Haskell design decisions, including expressive types, pure IO boundaries, and total functions.
 - Match existing formatting: 4-space indentation, explicit module export lists, and GHC-style `{- Note [...] -}` blocks for design rationale.
 - Keep builds warning-free (`-Wall` is enabled in `mlf2.cabal`). Prefer total pattern matches and clear error constructors.
 - When adding new modules under `src/`, update `mlf2.cabal` `other-modules`/`exposed-modules` so Cabal compiles them.
@@ -94,3 +105,20 @@ tasks/
 - Mark `passes: true` in `prd.json` when a story's acceptance criteria are met
 
 **Validation command:** `cabal build all && cabal test`
+
+## Bug Tracking
+
+- Maintain `/Volumes/src/mlf4/Bugs.md` as the canonical bug tracker for implementation defects and thesis-faithfulness gaps.
+- For every newly discovered bug, add an entry in `Bugs.md` in the same iteration with:
+  - unique bug ID, status, and discovery date
+  - minimal reproducer (expression and/or test command)
+  - expected vs actual behavior
+  - suspected module/file ownership
+  - thesis impact note (if any)
+- When a bug is fixed, move it to a resolved section in `Bugs.md` and link the regression test path(s).
+
+## Paper References
+
+- Primary source: `papers/these-finale-english.txt` (thesis)
+- Supplementary: `papers/xmlf.txt` (used only when thesis is silent)
+- Document any conflicts or deviations from the papers
