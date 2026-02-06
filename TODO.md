@@ -19,6 +19,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 - [x] Expansion variables shared across multiple uses of same binding
 - [x] Variable shadowing / lexical scoping
 - [x] Unknown variable error reporting
+- [ ] `A5 (P3)` Totalize STCon coercion-copy path and remove remaining partial failure branch.
 
 **Tests:** 23 examples, all passing (`cabal test`)
 
@@ -60,6 +61,8 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 - [x] `applyExpansion`/`instantiateScheme` to realize expansions and graft fresh nodes
 - [x] Incremental unification inside presolution loop
 - [x] Tests: `test/PresolutionSpec.hs` covers identity, instantiate, forall-intro, and compose (instantiate→forall)
+- [ ] `A1 (P1)` Strict Ω normalization only (remove permissive fallback path in production).
+- [ ] `A6 (P2)` Add thesis-anchored witness normalization/translatability regression fixtures.
 
 ## Phase 5 — Unification Solver ✅
 
@@ -88,6 +91,9 @@ Based on `papers/these-finale-english.txt`; see also `papers/xmlf.txt` §3.
 - [x] **Tests**
     - [x] Elaboration basics (id, const) + let-polymorphism
     - [x] Φ/Σ unit tests + instantiation-soundness checks
+- [ ] `A2 (P1)` Align pipeline-reported result type with checked type as authoritative.
+- [ ] `A3 (P2)` Remove legacy helper from public elaboration API surface.
+- [ ] `A6 (P2)` Add checked-vs-unchecked elaboration parity tests (incl. US-004-style paths).
 
 ---
 
@@ -101,6 +107,7 @@ Based on `papers/these-finale-english.txt`; see also `papers/xmlf.txt` §1 & §2
 - [x] **Evaluator** (`src/MLF/Elab/Reduce.hs`)
     - [x] Implement small-step reduction `a ⟶ a'`
     - [x] Implement instantiation reduction rules (e.g., `(Λ...) N ⟶ ...`)
+- [ ] `A6 (P2)` Add regression cases ensuring typecheck confirms elaboration parity for bounded/coercion-heavy terms.
 
 ---
 
@@ -110,8 +117,37 @@ Based on `papers/these-finale-english.txt`; see also `papers/xmlf.txt` §1 & §2
 - [x] Integrate quantifier reordering ϕR when `Typ` vs `Typexp` differ (Def. 15.3.4).
 - [x] Enforce translatable-presolution invariants for Φ (explicit `PhiTranslatabilityError` / `PhiInvariantError`; no silent non-spine `OpRaise` fallback).
 - [x] Confirm Ω normalization emits Fig. 15.3.4 operations for current coverage; document the remaining US-004 κσ deviation in `test/ElaborationSpec.hs`.
+- [ ] `A4 (P2)` Refresh paper-faithfulness docs to reflect implemented strict Φ/Σ behavior and list only unresolved deltas.
 
 See `.kiro/specs/paper-faithfulness-remaining-deltas/` for the audit and plan.
+
+---
+
+## Audit Backlog — 2026-02-06
+
+- [ ] `A1 (P1)` Enforce strict Ω normalization in production witness path (no permissive fallback on merge-direction errors).
+AC: Presolution witness normalization fails fast on malformed merge direction; no fallback acceptance in production path.
+Files: `src/MLF/Constraint/Presolution/WitnessCanon.hs`, `src/MLF/Constraint/Presolution/WitnessNorm.hs`, `test/Presolution/WitnessSpec.hs`
+
+- [ ] `A2 (P1)` Make checked type authoritative for pipeline results.
+AC: `runPipelineElab` and checked pipeline type outcomes are aligned for known divergence cases (including US-004-style scenarios).
+Files: `src/MLF/Elab/Run/Pipeline.hs`, `src/MLF/Elab/Run/ResultType/Fallback.hs`, `test/ElaborationSpec.hs`
+
+- [ ] `A3 (P2)` Quarantine legacy elaboration helpers from public API surface.
+AC: Legacy conversion helper is not exposed from public pipeline exports used by downstream clients.
+Files: `src/MLF/Elab/Pipeline.hs`, `src/MLF/Elab/Legacy.hs`, `src-public/MLF/API.hs`, `src-public/MLF/Pipeline.hs`
+
+- [ ] `A4 (P2)` Sync paper-faithfulness docs/specs with current strict Φ/Σ behavior and remaining true deltas only.
+AC: `.kiro` paper-faithfulness status lines reflect current implementation; remaining open items are explicit and non-contradictory.
+Files: `.kiro/specs/paper-faithfulness-remaining-deltas/requirements.md`, `.kiro/specs/paper-faithfulness-remaining-deltas/tasks.md`, `implementation_notes.md`
+
+- [ ] `A5 (P3)` Remove remaining totality/harness footguns.
+AC: No partial `error` in frontend STCon path; test-suite wiring cannot silently omit presolution umbrella spec.
+Files: `src/MLF/Frontend/ConstraintGen/Translate.hs`, `mlf2.cabal`, `test/Main.hs`
+
+- [ ] `A6 (P2)` Expand thesis-anchored regression matrix for translatability, bounded coercions, and checked-vs-unchecked parity.
+AC: Added targeted tests for strict translatability invariants and elaboration/type-check parity; references to thesis anchors included in spec names/comments.
+Files: `test/ElaborationSpec.hs`, `test/Presolution/WitnessSpec.hs`, `test/PipelineSpec.hs`, `test/TypeCheckSpec.hs`, `test/ReduceSpec.hs`
 
 ---
 

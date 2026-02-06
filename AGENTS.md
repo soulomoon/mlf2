@@ -60,6 +60,7 @@
 
 - Commit messages typically use imperative, descriptive subjects (examples from history: `Add …`, `Improve …`, `Phase6: …`).
 - PRs should include: a short problem statement, approach summary, new/updated tests, and any relevant doc updates (`implementation_notes.md`, `roadmap.md`) when changing algorithmic behavior.
+- When a change makes meaningful project progress, add a concise corresponding entry to `CHANGELOG.md` in the same update.
 
 ## Task Management (Ralph)
 
