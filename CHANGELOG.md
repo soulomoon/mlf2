@@ -1,5 +1,9 @@
 # Revision history for mlf2
 
+## Unreleased
+
+* Presolution: production witness normalization now uses strict Ω-step normalization, failing fast on malformed merge direction (`MergeDirectionInvalid`) without permissive fallback acceptance in `normalizeEdgeWitnessesM`.
+
 ## 0.2.0.0 -- 2026-02-02
 
 * Breaking: pipeline entry points now return `PipelineError` and provide config-aware variants (`runPipelineElabWithConfig`, `runPipelineElabCheckedWithConfig`).

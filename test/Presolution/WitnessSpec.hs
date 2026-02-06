@@ -254,6 +254,14 @@ spec = do
                         , StepOmega (OpGraft arg2 root)
                         ]
 
+        it "normalizeInstanceStepsFull keeps permissive merge-direction fallback for non-production callers" $ do
+            let c = mkNormalizeConstraint
+                root = NodeId 0
+                (mLess, nGreater) = orderedPairByPrec c root
+                env = mkNormalizeEnv c root (IntSet.fromList [getNodeId mLess, getNodeId nGreater])
+                steps0 = [StepOmega (OpMerge mLess nGreater)]
+            normalizeInstanceStepsFull env steps0 `shouldBe` Right steps0
+
         it "preserves Graft/Weaken when a later Merge eliminates the binder during emission" $ do
             let a = NodeId 2
                 b = NodeId 3
@@ -624,6 +632,61 @@ spec = do
                         expectationFailure $ "Expected WitnessNormalizationError, got: " ++ show other
                     Right _ ->
                         expectationFailure "Expected WitnessNormalizationError for op outside interior, but normalization succeeded"
+
+            it "fails fast with MergeDirectionInvalid via strict production normalization" $ do
+                let root = NodeId 0
+                    leftNode = NodeId 2
+                    rightNode = NodeId 3
+                    edgeId = 0
+                    nodes = nodeMapFromList
+                            [ (getNodeId root, TyArrow root leftNode rightNode)
+                            , (getNodeId leftNode, TyVar { tnId = leftNode, tnBound = Nothing })
+                            , (getNodeId rightNode, TyVar { tnId = rightNode, tnBound = Nothing })
+                            ]
+                    bindParents =
+                        bindParentsFromPairs
+                            [ (leftNode, root, BindFlex)
+                            , (rightNode, root, BindFlex)
+                            ]
+                    constraint = rootedConstraint $ emptyConstraint
+                            { cNodes = nodes
+                            , cBindParents = bindParents
+                            }
+                    (mLess, nGreater) = orderedPairByPrec constraint root
+                    badOp = OpMerge mLess nGreater
+                    edgeWitness = EdgeWitness
+                            { ewEdgeId = EdgeId edgeId
+                            , ewLeft = leftNode
+                            , ewRight = rightNode
+                            , ewRoot = root
+                            , ewSteps = [StepOmega badOp]
+                            , ewWitness = InstanceWitness [badOp]
+                            }
+                    edgeTrace = EdgeTrace
+                            { etRoot = root
+                            , etBinderArgs = []
+                            , etInterior = InteriorNodes (IntSet.fromList [getNodeId mLess, getNodeId nGreater])
+                            , etCopyMap = mempty
+                            }
+                    st0 = PresolutionState
+                            { psConstraint = constraint
+                            , psPresolution = Presolution IntMap.empty
+                            , psUnionFind = IntMap.empty
+                            , psNextNodeId = 4
+                            , psPendingWeakens = IntSet.empty
+                            , psBinderCache = IntMap.empty
+                            , psEdgeExpansions = IntMap.empty
+                            , psEdgeWitnesses = IntMap.fromList [(edgeId, edgeWitness)]
+                            , psEdgeTraces = IntMap.fromList [(edgeId, edgeTrace)]
+                            }
+                case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
+                    Left (WitnessNormalizationError (EdgeId eid) err) -> do
+                        eid `shouldBe` edgeId
+                        err `shouldBe` MergeDirectionInvalid mLess nGreater
+                    Left other ->
+                        expectationFailure $ "Expected WitnessNormalizationError MergeDirectionInvalid, got: " ++ show other
+                    Right _ ->
+                        expectationFailure "Expected WitnessNormalizationError MergeDirectionInvalid for malformed merge direction"
 
             it "returns WitnessNormalizationError for missing <P order key via presolution" $ do
                 let root = NodeId 0

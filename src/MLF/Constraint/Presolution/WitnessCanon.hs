@@ -8,6 +8,7 @@ instance operation witnesses, enforcing the conditions from the MLF thesis.
 -}
 module MLF.Constraint.Presolution.WitnessCanon (
     normalizeInstanceStepsFull,
+    normalizeInstanceStepsStrict,
     normalizeInstanceOpsFull,
     coalesceRaiseMergeWithEnv,
     reorderWeakenWithEnv
@@ -63,8 +64,12 @@ normalizeInstanceOpsWithFallback env ops0 =
                 Right () -> Right ops3
         Left err -> Left err
 
-normalizeInstanceStepsFull :: OmegaNormalizeEnv -> [InstanceStep] -> Either OmegaNormalizeError [InstanceStep]
-normalizeInstanceStepsFull env steps =
+normalizeInstanceStepsWith
+    :: (OmegaNormalizeEnv -> [InstanceOp] -> Either OmegaNormalizeError [InstanceOp])
+    -> OmegaNormalizeEnv
+    -> [InstanceStep]
+    -> Either OmegaNormalizeError [InstanceStep]
+normalizeInstanceStepsWith normalizeOps env steps =
     let stepper = cata (normalizeAlg env) steps
     in stepper []
   where
@@ -85,7 +90,14 @@ normalizeInstanceStepsFull env steps =
     flush env' opsRev =
         if null opsRev
             then Right []
-            else map StepOmega <$> normalizeInstanceOpsWithFallback env' (reverse opsRev)
+            else map StepOmega <$> normalizeOps env' (reverse opsRev)
+
+normalizeInstanceStepsFull :: OmegaNormalizeEnv -> [InstanceStep] -> Either OmegaNormalizeError [InstanceStep]
+normalizeInstanceStepsFull = normalizeInstanceStepsWith normalizeInstanceOpsWithFallback
+
+-- | Production strict Ω-segment normalization (no permissive merge-direction fallback).
+normalizeInstanceStepsStrict :: OmegaNormalizeEnv -> [InstanceStep] -> Either OmegaNormalizeError [InstanceStep]
+normalizeInstanceStepsStrict = normalizeInstanceStepsWith normalizeInstanceOpsFull
 
 coalesceRaiseMergeWithEnv :: OmegaNormalizeEnv -> [InstanceOp] -> Either OmegaNormalizeError [InstanceOp]
 coalesceRaiseMergeWithEnv env ops =
