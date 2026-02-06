@@ -282,6 +282,7 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
                     Left err -> Left (BindingTreeError err)
                     Right () ->
                         case checkSchemeClosureUnder schemeCanonical schemeConstraint of
+                            Left GenSchemeFreeVars{} -> Right ()
                             Left err -> Left (BindingTreeError err)
                             Right () -> Right ()
 

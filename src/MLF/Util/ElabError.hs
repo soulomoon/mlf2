@@ -13,6 +13,8 @@ data ElabError
     | FreeVarOutOfScope NodeId
     | EnvLookup VarName
     | ValidationFailed [String]
+    | PhiTranslatabilityError [String]
+    | PhiInvariantError String
     | BindingTreeError BindingError
     | NameConflict String
     | InstantiationError String

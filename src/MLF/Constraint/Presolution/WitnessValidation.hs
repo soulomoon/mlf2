@@ -18,10 +18,11 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.Maybe (listToMaybe)
 
-import MLF.Constraint.Types.Graph (BindFlag(..), Constraint(..))
+import MLF.Constraint.Types.Graph (BindFlag(..), Constraint(..), TyNode(..))
 import MLF.Constraint.Types.Graph (NodeId, NodeRef(..), getNodeId, nodeRefFromKey, typeRef)
 import MLF.Constraint.Types.Witness (InstanceOp(..))
 import qualified MLF.Binding.Tree as Binding
+import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Util.Order (OrderKey, compareOrderKey)
 
 data OmegaNormalizeEnv = OmegaNormalizeEnv
@@ -39,6 +40,7 @@ data OmegaNormalizeError
     | MergeDirectionInvalid NodeId NodeId
     | RaiseNotUnderRoot NodeId NodeId
     | RaiseMergeInsideInterior NodeId NodeId
+    | GraftOnNonBottomBound NodeId NodeId
     | OpUnderRigid NodeId
     | MissingOrderKey NodeId
     | RigidOperationInvalid InstanceOp NodeId
@@ -110,10 +112,27 @@ validateNormalizedWitness env ops = do
             LT -> Right ()
             _ -> Left (MergeDirectionInvalid (canon n) (canon m))
 
+    isBottomNode nid =
+        case NodeAccess.lookupNode (constraint env) (canon nid) of
+            Just TyBottom{} -> True
+            _ -> False
+
+    requireGraftTarget n =
+        let nC = canon n
+            trackedByExpansion = IntMap.member (getNodeId nC) (binderArgs env)
+        in if nC == rootC
+            then Right ()
+            else if trackedByExpansion
+                then Right ()
+                else case NodeAccess.lookupNode (constraint env) nC of
+                    Just TyVar{ tnBound = Just bnd }
+                        | not (isBottomNode bnd) -> Left (GraftOnNonBottomBound nC (canon bnd))
+                    _ -> Right ()
+
     checkOp op =
         case op of
             OpGraft _ n ->
-                requireInterior op n
+                requireInterior op n >> requireGraftTarget n
             OpWeaken n ->
                 requireInterior op n
             OpMerge n m -> do

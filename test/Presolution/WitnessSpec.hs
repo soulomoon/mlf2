@@ -31,11 +31,14 @@ import MLF.Constraint.Types.Presolution (Presolution(..))
 import MLF.Constraint.Presolution
     ( PresolutionState(..)
     , PresolutionError(..)
+    , PresolutionResult(..)
+    , computePresolution
     , runPresolutionM
     , normalizeEdgeWitnessesM
     , EdgeTrace(..)
     , InteriorNodes(..)
     )
+import MLF.Constraint.Acyclicity (AcyclicityResult(..))
 import qualified MLF.Constraint.Inert as Inert
 import qualified MLF.Binding.Tree as Binding
 import SpecUtil
@@ -109,6 +112,59 @@ spec = do
                 Left err -> expectationFailure ("witnessFromExpansion failed: " ++ show err)
                 Right (steps, _) ->
                     steps `shouldBe` [StepIntro, StepIntro]
+
+        it "does not emit StepIntro for forall <= non-forall level mismatch" $ do
+            let srcBinderId = NodeId 0
+                srcForallId = NodeId 1
+                expNodeId = NodeId 2
+                targetVarId = NodeId 3
+                rootId = NodeId 4
+                rootGen = GenNodeId 0
+                srcGen = GenNodeId 10
+                tgtGen = GenNodeId 11
+                edgeId = 0
+                edge = InstEdge (EdgeId edgeId) expNodeId targetVarId
+                nodes = nodeMapFromList
+                    [ (getNodeId srcBinderId, TyVar { tnId = srcBinderId, tnBound = Nothing })
+                    , (getNodeId srcForallId, TyForall srcForallId srcBinderId)
+                    , (getNodeId expNodeId, TyExp expNodeId (ExpVarId 0) srcForallId)
+                    , (getNodeId targetVarId, TyVar { tnId = targetVarId, tnBound = Nothing })
+                    , (getNodeId rootId, TyArrow rootId expNodeId targetVarId)
+                    ]
+                bindParents0 = inferBindParents nodes
+                bindParents =
+                    IntMap.insert (nodeRefKey (genRef srcGen)) (genRef rootGen, BindFlex) $
+                        IntMap.insert (nodeRefKey (genRef tgtGen)) (genRef rootGen, BindFlex) $
+                    IntMap.insert (nodeRefKey (typeRef srcForallId)) (genRef srcGen, BindFlex) $
+                        IntMap.insert (nodeRefKey (typeRef targetVarId)) (genRef tgtGen, BindFlex) bindParents0
+                genNodes =
+                    fromListGen
+                        [ (srcGen, GenNode srcGen [srcForallId])
+                        , (tgtGen, GenNode tgtGen [targetVarId])
+                        ]
+                constraint =
+                    rootedConstraint emptyConstraint
+                        { cNodes = nodes
+                        , cInstEdges = [edge]
+                        , cBindParents = bindParents
+                        , cGenNodes = genNodes
+                        }
+                acyclicityRes =
+                    AcyclicityResult
+                        { arSortedEdges = [edge]
+                        , arDepGraph = undefined
+                        }
+
+            case computePresolution defaultTraceConfig acyclicityRes constraint of
+                Left err -> expectationFailure $ "Presolution failed: " ++ show err
+                Right PresolutionResult{ prEdgeExpansions = exps, prEdgeWitnesses = ews } -> do
+                    case IntMap.lookup edgeId exps of
+                        Just (ExpInstantiate _) -> pure ()
+                        Just other -> expectationFailure $ "Expected ExpInstantiate, got " ++ show other
+                        Nothing -> expectationFailure "No expansion found for Edge 0"
+                    case IntMap.lookup edgeId ews of
+                        Just ew -> ewSteps ew `shouldSatisfy` all (/= StepIntro)
+                        Nothing -> expectationFailure "No witness found for Edge 0"
 
     describe "Phase 3 — Witness normalization" $ do
         it "pushes Weaken after ops on strict descendants" $ do
@@ -339,6 +395,50 @@ spec = do
                     op = OpGraft (NodeId 2) (NodeId 3)
                 validateNormalizedWitness env [op]
                     `shouldBe` Left (OpOutsideInterior op)
+
+            it "rejects Graft on non-bottom binder bounds" $ do
+                let root = NodeId 0
+                    binder = NodeId 1
+                    bound = NodeId 2
+                    arg = NodeId 3
+                    c =
+                        rootedConstraint emptyConstraint
+                            { cNodes = nodeMapFromList
+                                    [ (getNodeId root, TyForall root binder)
+                                    , (getNodeId binder, TyVar { tnId = binder, tnBound = Just bound })
+                                    , (getNodeId bound, TyBase bound (BaseTy "Int"))
+                                    , (getNodeId arg, TyVar { tnId = arg, tnBound = Nothing })
+                                    ]
+                            , cBindParents =
+                                bindParentsFromPairs
+                                    [ (binder, root, BindFlex)
+                                    , (bound, root, BindFlex)
+                                    , (arg, root, BindFlex)
+                                    ]
+                            }
+                    env = mkNormalizeEnv c root (IntSet.fromList [getNodeId root, getNodeId binder, getNodeId bound, getNodeId arg])
+                    op = OpGraft arg binder
+                validateNormalizedWitness env [op]
+                    `shouldBe` Left (GraftOnNonBottomBound binder bound)
+
+            it "allows Graft on the expansion root (root operation)" $ do
+                let root = NodeId 0
+                    arg = NodeId 1
+                    c =
+                        rootedConstraint emptyConstraint
+                            { cNodes = nodeMapFromList
+                                    [ (getNodeId root, TyArrow root arg arg)
+                                    , (getNodeId arg, TyVar { tnId = arg, tnBound = Nothing })
+                                    ]
+                            , cBindParents =
+                                bindParentsFromPairs
+                                    [ (arg, root, BindFlex)
+                                    ]
+                            }
+                    env = mkNormalizeEnv c root (IntSet.fromList [getNodeId root, getNodeId arg])
+                    op = OpGraft arg root
+                validateNormalizedWitness env [op]
+                    `shouldBe` Right ()
 
             it "rejects Merge with wrong ≺ direction (condition 2)" $ do
                 let c = mkNormalizeConstraint

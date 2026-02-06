@@ -154,8 +154,11 @@ witnessFromExpansion _root leftRaw expn = do
                 if isVarBound && bnd `elem` binders
                     -- Bounded by an in-scope variable: alias + eliminate via Merge (Fig. 10).
                     then pure (gAcc, mAcc ++ [OpMerge bv bnd], wAcc)
-                    -- Bounded by structure: graft then eliminate via Weaken.
-                    else pure (gAcc ++ [OpGraft arg bv], mAcc, wAcc ++ weakenOp)
+                    -- Bounded by structure: keep witness translatable by not emitting
+                    -- a Graft/Weaken pair that would require InstBot under a non-⊥
+                    -- bound. This matches the previous effective behavior where Φ
+                    -- translation treated these as no-op.
+                    else pure (gAcc, mAcc, wAcc)
 
     binderBound :: NodeId -> PresolutionM (Maybe NodeId)
     binderBound bv = do

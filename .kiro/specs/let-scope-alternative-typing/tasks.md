@@ -21,7 +21,7 @@
   - Verification: `rg -n "ELet|let" src/MLF/Frontend/ConstraintGen -S`
   - _Requirements: 1.1, 1.2_
 
-- [ ] 3. Enforce and validate translatable presolutions (Def. 15.2.10)
+- [x] 3. Enforce and validate translatable presolutions (Def. 15.2.10)
   - Steps:
     - Apply Theorem 15.2.11 order:
       (1) weaken inert-locked + app/abs arrow nodes;

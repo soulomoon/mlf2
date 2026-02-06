@@ -23,16 +23,18 @@
     - _Requirements: 2.1_
     - **Verification:** doc review
 
-- [ ] 3. Enforce translatable‑presolution invariants for Φ translation
-  - [ ] 3.1 Add a validation pass that checks witness ops only target flexibly‑bound interior nodes and that computation contexts exist for each op.
+- [x] 3. Enforce translatable‑presolution invariants for Φ translation
+  - [x] 3.1 Add a validation pass that checks witness ops only target flexibly‑bound interior nodes and that computation contexts exist for each op.
     - Files: `src/MLF/Constraint/Presolution/Validation.hs` (or new module), `src/MLF/Elab/Phi/Omega.hs`
     - Tests: negative cases that previously “skipped” ops now fail with a clear error.
+    - Current status: normalization/validation enforces interior/order invariants; Ω translation requires explicit non-spine contexts and reports explicit Φ errors.
     - _Requirements: 3.2_
     - **Verification:** `cabal test`
-  - [ ] 3.2 Replace silent skips of non‑interior ops with explicit errors (or prove unreachable and document).
+  - [x] 3.2 Replace silent skips of non‑interior ops with explicit errors (or prove unreachable and document).
     - Files: `src/MLF/Elab/Phi/Omega.hs`
     - Tests: confirm error surfaced for invalid witness.
-    - Current status: Φ translation still skips some non-interior/non-binder ops (e.g., `OpRaise` outside interior) in `src/MLF/Elab/Phi/Omega.hs`.
+    - Current status: `OpRaise` non-spine fallback branches were removed; root/non-binder graft handling is explicit; non-translatable paths fail via `PhiTranslatabilityError`.
+    - Note: US-004 κσ remains a documented deviation (`test/ElaborationSpec.hs`: type inferred as `∀a. a`, expected `Int`).
     - _Requirements: 3.2_
     - **Verification:** `cabal test`
 

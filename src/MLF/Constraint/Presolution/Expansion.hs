@@ -195,30 +195,6 @@ nearestGenAncestor nid0 = do
                         go (IntSet.insert (nodeRefKey ref) visited) (typeRef (canonical parent))
     go IntSet.empty start
 
-forallSpecFromBinders :: [NodeId] -> PresolutionM ForallSpec
-forallSpecFromBinders binders0 = do
-    canonical <- getCanonical
-    let binders = map canonical binders0
-        binderIndex =
-            IntMap.fromList
-                [ (getNodeId b, idx)
-                | (idx, b) <- zip [0..] binders
-                ]
-        boundFor b = do
-            mbBound <- lookupVarBound b
-            pure $ case mbBound of
-                Nothing -> Nothing
-                Just bnd ->
-                    let bndC = canonical bnd
-                    in case IntMap.lookup (getNodeId bndC) binderIndex of
-                        Just idx -> Just (BoundBinder idx)
-                        Nothing -> Just (BoundNode bndC)
-    bounds <- mapM boundFor binders
-    pure ForallSpec
-        { fsBinderCount = length binders
-        , fsBounds = bounds
-        }
-
 decideMinimalExpansion :: Bool -> TyNode -> TyNode -> PresolutionM (Expansion, [(NodeId, NodeId)])
 decideMinimalExpansion allowTrivial (TyExp { tnBody = bodyId }) targetNode = do
     (bodyRoot, boundVars) <- instantiationBindersM bodyId
@@ -246,25 +222,6 @@ decideMinimalExpansion allowTrivial (TyExp { tnBody = bodyId }) targetNode = do
                                 Nothing -> []
                     pure (allowTrivial && targetC `elem` schemeRoots)
         _ -> pure False
-    levelMismatch <- if null boundVars
-        then pure False
-        else do
-            srcGen <- nearestGenAncestor bodyRoot
-            tgtGen <- nearestGenAncestor (tnId targetNode)
-            targetIsVar <- case targetNode of
-                TyVar{ tnId = targetId } -> do
-                    mbBound <- lookupVarBound targetId
-                    case mbBound of
-                        Nothing -> pure True
-                        Just bnd -> do
-                            bndNode <- getCanonicalNode bnd
-                            pure $ case bndNode of
-                                TyArrow{} -> False
-                                TyBase{} -> False
-                                TyBottom{} -> False
-                                _ -> True
-                _ -> pure False
-            pure (srcGen /= tgtGen && srcGen /= Nothing && tgtGen /= Nothing && targetIsVar)
     if not (null boundVars)
         then if isTrivialTarget
             then
@@ -284,13 +241,6 @@ decideMinimalExpansion allowTrivial (TyExp { tnBody = bodyId }) targetNode = do
                                 ExpCompose
                                     (ExpInstantiate freshNodes NE.<| (ExpForall (targetSpec NE.:| []) NE.:| []))
                         return (expn, [])
-            _ | levelMismatch -> do
-                freshNodes <- mapM (const createFreshVar) boundVars
-                spec <- forallSpecFromBinders boundVars
-                let expn =
-                        ExpCompose
-                            (ExpInstantiate freshNodes NE.<| (ExpForall (spec NE.:| []) NE.:| []))
-                return (expn, [])
             _ -> do
                 -- target is not a forall → instantiate to expose structure
                 -- Note [Minimal Expansion Decision] case 2 (∀≤structure, with binders)

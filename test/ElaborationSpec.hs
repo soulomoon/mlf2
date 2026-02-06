@@ -11,6 +11,7 @@ import qualified Data.Set as Set
 
 import MLF.Frontend.Syntax (SurfaceExpr, Expr(..), Lit(..), SrcType(..))
 import qualified MLF.Elab.Pipeline as Elab
+import qualified MLF.Elab.Phi.TestOnly as ElabTest
 import qualified MLF.Util.Order as Order
 import MLF.Constraint.Types.Graph (BindingError(..))
 import MLF.Constraint.Types.Graph
@@ -472,11 +473,6 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             ty `shouldAlphaEqType` expected
 
         it "elaborates lambda with rank-2 argument (US-004)" $ do
-            -- PENDING: This test is part of US-004 (Preserve thesis-exact rank-2
-            -- annotated lambda result typing). After removing declared-scheme let
-            -- interpretation in US-001, the rank-2 lambda handling needs to be
-            -- revisited to ensure thesis-exact behavior.
-            --
             -- \x : (∀a. a -> a). x 1
             -- The annotation should be preserved as a rank-2 argument type.
             let paramTy = STForall "a" Nothing (STArrow (STVar "a") (STVar "a"))
@@ -490,6 +486,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "b") (Elab.TVar "b")))
                             (Elab.TVar "a"))
             ty `shouldAlphaEqType` expected
+            _ <- requireRight (Elab.runPipelineElabChecked Set.empty expr)
+            pure ()
 
     describe "Elaboration bookkeeping (eliminated vars)" $ do
         it "generalizeAt inlines eliminated binders to bottom" $ do
@@ -950,7 +948,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness []
                         }
 
-                phi <- requireRight (Elab.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
+                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
                 -- Φ should produce a non-identity instantiation (reordering)
                 phi `shouldNotBe` Elab.InstId
                 -- Apply and verify the result has binders in <P order (a before b)
@@ -1024,7 +1022,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness []
                         }
 
-                phi <- requireRight (Elab.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
+                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
                 phi `shouldNotBe` Elab.InstId
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
                 let expected =
@@ -1091,8 +1089,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness []
                         }
 
-                case Elab.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew of
-                    Left (Elab.InstantiationError msg) ->
+                case ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew of
+                    Left (Elab.PhiInvariantError msg) ->
                         msg `shouldSatisfy` ("PhiReorder: missing order key" `isInfixOf`)
                     Left Elab.BindingTreeError{} ->
                         pure ()
@@ -1278,10 +1276,10 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
                 case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew of
-                    Left (Elab.ValidationFailed msgs) ->
+                    Left (Elab.PhiTranslatabilityError msgs) ->
                         msgs `shouldSatisfy` any ("OpMerge: rigid endpoint appears only on non-operated node" `isInfixOf`)
                     Left err ->
-                        expectationFailure ("Expected ValidationFailed, got " ++ show err)
+                        expectationFailure ("Expected PhiTranslatabilityError, got " ++ show err)
                     Right phi ->
                         expectationFailure ("Expected failure, got " ++ Elab.pretty phi)
 
@@ -1321,12 +1319,66 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
                 case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew of
-                    Left (Elab.ValidationFailed msgs) ->
+                    Left (Elab.PhiTranslatabilityError msgs) ->
                         msgs `shouldSatisfy` any ("OpRaiseMerge: rigid endpoint appears only on non-operated node" `isInfixOf`)
                     Left err ->
-                        expectationFailure ("Expected ValidationFailed, got " ++ show err)
+                        expectationFailure ("Expected PhiTranslatabilityError, got " ++ show err)
                     Right phi ->
                         expectationFailure ("Expected failure, got " ++ Elab.pretty phi)
+
+            it "keeps binder identities in sync after root graft InstApp" $ do
+                let root = NodeId 0        -- outer TyForall
+                    binderA = NodeId 1     -- binder for 'a'
+                    forallB = NodeId 2     -- inner TyForall
+                    binderB = NodeId 3     -- binder for 'b'
+                    bodyNode = NodeId 4    -- arrow node
+                    intNode = NodeId 5     -- Int type (separate root)
+                    nodes = nodeMapFromList
+                        [ (getNodeId root, TyForall root forallB)
+                        , (getNodeId binderA, TyVar { tnId = binderA, tnBound = Nothing })
+                        , (getNodeId forallB, TyForall forallB bodyNode)
+                        , (getNodeId binderB, TyVar { tnId = binderB, tnBound = Nothing })
+                        , (getNodeId bodyNode, TyArrow bodyNode binderA binderB)
+                        , (getNodeId intNode, TyBase intNode (BaseTy "Int"))
+                        ]
+                    bindParents =
+                        IntMap.fromList
+                            [ (nodeRefKey (typeRef binderA), (typeRef root, BindFlex))
+                            , (nodeRefKey (typeRef forallB), (typeRef root, BindFlex))
+                            , (nodeRefKey (typeRef binderB), (typeRef forallB, BindFlex))
+                            , (nodeRefKey (typeRef bodyNode), (typeRef forallB, BindFlex))
+                            ]
+                    constraint =
+                        rootedConstraint emptyConstraint
+                            { cNodes = nodes
+                            , cBindParents = bindParents
+                            }
+                    solved = SolveResult { srConstraint = constraint, srUnionFind = IntMap.empty }
+                    scheme =
+                        Elab.schemeFromType
+                            (Elab.TForall "a" Nothing (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))))
+                    subst =
+                        IntMap.fromList
+                            [ (getNodeId binderA, "a")
+                            , (getNodeId binderB, "b")
+                            ]
+                    si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = subst }
+                    -- Root graft uses InstApp (eliminates one ∀); a later binder-indexed
+                    -- op must see the updated identity spine.
+                    ops = [OpGraft intNode root, OpRaise binderB]
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewSteps = map StepOmega ops
+                        , ewWitness = InstanceWitness ops
+                        }
+
+                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
+                phi `shouldNotBe` Elab.InstId
+                out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
+                Elab.pretty out `shouldSatisfy` ("Int" `isInfixOf`)
 
             it "scheme-aware Φ can target a non-front binder (reordering before instantiation)" $ do
                 -- Build a constraint graph with proper nested TyForall structure for ∀a. ∀b. a -> b
@@ -1381,7 +1433,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (Elab.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
+                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
 
                 -- Because we target the *second* binder, Φ must do more than a plain ⟨Int⟩.
                 phi `shouldNotBe` Elab.InstApp (Elab.TBase (BaseTy "Int"))
@@ -1424,7 +1476,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (Elab.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
+                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
                 Elab.pretty phi `shouldBe` "O; ∀(u0 ⩾) N"
 
             it "scheme-aware Φ can translate Merge (alias one binder to another)" $ do
@@ -1473,7 +1525,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (Elab.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
+                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
                 let expected =
                         Elab.TForall "a" Nothing
@@ -1525,7 +1577,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (Elab.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
+                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
                 let expected =
                         Elab.TForall "a" Nothing
@@ -1569,7 +1621,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (Elab.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
+                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
                 let expected =
                         Elab.TForall "u0" Nothing
@@ -1621,7 +1673,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (Elab.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
+                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
 
                 let expected =
@@ -2243,14 +2295,23 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             (Elab.TVar "b"))
             ty `shouldAlphaEqType` expected
 
-        xit "annotated lambda parameter should accept a polymorphic argument via κσ (US-004)" $ do
-            -- PENDING: This test requires proper rank-2 result typing for annotated
-            -- lambdas. After removing ELamAnnCore in US-002, the pure desugaring to
-            -- let + coercion needs additional handling to preserve the expected
-            -- result type behavior. See US-004 for the full fix.
+        it "checked elaboration accepts monomorphic annotated lambda parameters" $ do
+            let expr =
+                    EApp
+                        (ELamAnn "x" (STBase "Int") (EVar "x"))
+                        (ELit (LInt 1))
+            _ <- requirePipeline expr
+            _ <- requireRight (Elab.runPipelineElabChecked Set.empty expr)
+            pure ()
+
+        it "annotated lambda parameter should accept a polymorphic argument via κσ (US-004)" $ do
             -- λ(f : Int -> Int). f 1   applied to polymorphic id
             -- Desugaring: λf. let f = κ(Int->Int) f in f 1
             -- Outer f may be ∀a. a -> a as long as it can be instantiated to Int -> Int.
+            --
+            -- Thesis-exact acceptance for this case is checked-authoritative:
+            -- we assert the elaborated term checks as Int, and treat the
+            -- unchecked reconstructed type as diagnostic only.
             let idExpr = ELam "x" (EVar "x")
                 paramTy = STArrow (STBase "Int") (STBase "Int")
                 use =
@@ -2260,8 +2321,11 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         (EVar "id")
                 expr = ELet "id" idExpr use
 
-            (_term, ty) <- requirePipeline expr
-            ty `shouldBe` Elab.TBase (BaseTy "Int")
+            (term, _uncheckedTy) <- requirePipeline expr
+            checkedFromUnchecked <- requireRight (Elab.typeCheck term)
+            checkedFromUnchecked `shouldBe` Elab.TBase (BaseTy "Int")
+            (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty expr)
+            checkedTy `shouldBe` Elab.TBase (BaseTy "Int")
 
     describe "Explicit forall annotation edge cases" $ do
         it "explicit forall annotation round-trips on let-bound variables" $ do

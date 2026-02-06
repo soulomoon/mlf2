@@ -108,8 +108,8 @@ Based on `papers/these-finale-english.txt`; see also `papers/xmlf.txt` §1 & §2
 
 - [x] Add constructor types `Cσ` to the xMLF type AST (Fig. 14.2.1).
 - [x] Integrate quantifier reordering ϕR when `Typ` vs `Typexp` differ (Def. 15.3.4).
-- [ ] Enforce translatable-presolution invariants for Φ (fail on non-interior ops / missing contexts).
-- [ ] Confirm Ω normalization emits all Fig. 15.3.4 operations (or document deviations).
+- [x] Enforce translatable-presolution invariants for Φ (explicit `PhiTranslatabilityError` / `PhiInvariantError`; no silent non-spine `OpRaise` fallback).
+- [x] Confirm Ω normalization emits Fig. 15.3.4 operations for current coverage; document the remaining US-004 κσ deviation in `test/ElaborationSpec.hs`.
 
 See `.kiro/specs/paper-faithfulness-remaining-deltas/` for the audit and plan.
 

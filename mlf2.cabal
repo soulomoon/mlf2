@@ -77,6 +77,7 @@ library mlf2-internal
                       MLF.Constraint.Presolution.Witness,
                       MLF.Constraint.Solve,
                       MLF.Elab.Pipeline,
+                      MLF.Elab.Phi.TestOnly,
                       MLF.Elab.Run.Provenance,
                       MLF.Elab.Run.Util,
                       MLF.Binding.Tree,

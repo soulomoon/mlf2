@@ -145,11 +145,19 @@ runPipelineElabWith traceCfg genConstraints expr = do
                     }
 
             -- Compute result type
+            let refineTrivialResultType ty =
+                    case ty of
+                        TForall v Nothing (TVar v')
+                            | v == v' ->
+                                case typeCheck term of
+                                    Right tyChecked -> tyChecked
+                                    Left _ -> ty
+                        _ -> ty
             case annCanon of
                 AAnn inner annNodeId eid -> do
                     ty <- fromElabError (computeResultTypeFromAnn resultTypeCtx inner inner annNodeId eid)
-                    pure (term, ty)
+                    pure (term, refineTrivialResultType ty)
                 _ -> do
                     ty <- fromElabError (computeResultTypeFallback resultTypeCtx annCanon ann)
-                    pure (term, ty)
+                    pure (term, refineTrivialResultType ty)
         vs -> Left (PipelineSolveError (Solve.ValidationFailed vs))

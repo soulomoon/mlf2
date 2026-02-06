@@ -382,9 +382,38 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
     applyInst :: String -> ElabType -> Instantiation -> Either ElabError ElabType
     applyInst label ty0 inst = case applyInstantiation ty0 inst of
         Left (InstantiationError msg) ->
-            Left $ InstantiationError $
+            Left $ PhiInvariantError $
                 label ++ ": " ++ msg ++ " ; inst=" ++ pretty inst ++ " ; ty=" ++ pretty ty0
         other -> other
+
+    -- Keep binder identities aligned with the quantifier spine after each
+    -- translated operation (thesis Fig. 10 sequencing: Φξ(ω; Ω') = Φξ(ω); Φω(ξ)(Ω')).
+    syncIdsAcrossInstantiation :: ElabType -> [Maybe NodeId] -> ElabType -> [Maybe NodeId]
+    syncIdsAcrossInstantiation tyBefore idsBefore tyAfter =
+        let (qsBefore, _) = splitForalls tyBefore
+            namesBefore = map fst qsBefore
+            nameToId =
+                Map.fromList
+                    [ (nm, nid)
+                    | (nm, Just nid) <- zip namesBefore idsBefore
+                    ]
+            (qsAfter, _) = splitForalls tyAfter
+            namesAfter = map fst qsAfter
+        in [Map.lookup nm nameToId <|> parseBinderId nm | nm <- namesAfter]
+
+    applyInstAndSyncIds
+        :: String
+        -> ElabType
+        -> [Maybe NodeId]
+        -> Instantiation
+        -> Either ElabError (ElabType, [Maybe NodeId])
+    applyInstAndSyncIds label tyBefore idsBefore inst = do
+        let (qsBefore, _) = splitForalls tyBefore
+        when (length qsBefore /= length idsBefore) $
+            Left (PhiInvariantError (label ++ ": binder spine / identity list length mismatch"))
+        tyAfter <- applyInst label tyBefore inst
+        let idsAfter = syncIdsAcrossInstantiation tyBefore idsBefore tyAfter
+        pure (tyAfter, idsAfter)
 
     goSteps
         :: IntSet.IntSet
@@ -416,7 +445,7 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
     reorderBindersByPrec ty ids = do
         let (qs, _) = splitForalls ty
         when (length qs /= length ids) $
-            Left (InstantiationError "PhiReorder: binder spine / identity list length mismatch")
+            Left (PhiInvariantError "PhiReorder: binder spine / identity list length mismatch")
         if length qs < 2
             then Right (InstId, ty, ids)
             else do
@@ -431,11 +460,11 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
                         ]
                 unless (null missingIdPositions) $
                     Left $
-                        InstantiationError $
+                        PhiInvariantError $
                             "PhiReorder: missing binder identity at positions " ++ show missingIdPositions
                 unless (null missingKeyBinders) $
                     Left $
-                        InstantiationError $
+                        PhiInvariantError $
                             "PhiReorder: missing order key for binders " ++ show missingKeyBinders
                 desired <- desiredBinderOrder orderKeysActive ty ids
                 reorderTo ty ids desired
@@ -505,32 +534,79 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
 
         (OpGraft arg bv : OpWeaken bv' : rest)
             | bv == bv' -> do
+                let bvC = canonicalNode bv
+                    rootC = canonicalNode orderRoot
+                    isRootAdjacent =
+                        case lookupBindParent (srConstraint res) (typeRef bvC) of
+                            Just (TypeRef parent, _) ->
+                                let parentC = canonicalNode parent
+                                in parentC == rootC
+                                    || case NodeAccess.lookupNode (srConstraint res) parentC of
+                                        Just TyForall{} -> True
+                                        _ -> False
+                            Just (GenRef _, _) -> True
+                            _ -> False
                 -- Note: A binder can be rigid in the *final* presolution constraint
                 -- (e.g. due to later rigidification), even though this ω step was
                 -- executed while the binder was still instantiable. We must still
                 -- translate the operation to an xMLF instantiation here; skipping
                 -- would make Φ unsound (see ElaborationSpec “witness instantiation
                 -- matches solved edge types …”).
-                if not (isBinderNode binderKeys bv)
-                        then Left $ ValidationFailed
+                if bvC == rootC
+                    then do
+                        let (qs, _) = splitForalls ty
+                        if null qs
+                            then do
+                                argTy <- reifyTypeArg namedSet' Nothing (graftArgFor arg bv)
+                                let inst = InstBot (inlineAliasBoundsAsBound argTy)
+                                ty' <- applyInst "OpGraft+OpWeaken(root,bot)" ty inst
+                                go binderKeys keepBinderKeys' namedSet' ty' ids (composeInst phi inst) rest lookupBinder
+                            else do
+                                argTy <- reifyTypeArg namedSet' Nothing (graftArgFor arg bv)
+                                let inst = InstApp (inlineAliasBoundsAsBound argTy)
+                                (ty', ids') <- applyInstAndSyncIds "OpGraft+OpWeaken(root)" ty ids inst
+                                go binderKeys keepBinderKeys' namedSet' ty' ids' (composeInst phi inst) rest lookupBinder
+                    else if not (isBinderNode binderKeys bv) && isRootAdjacent
+                        then do
+                            let (qs, _) = splitForalls ty
+                            if null qs
+                                then do
+                                    argTy <- reifyTypeArg namedSet' Nothing (graftArgFor arg bv)
+                                    let inst = InstBot (inlineAliasBoundsAsBound argTy)
+                                    ty' <- applyInst "OpGraft+OpWeaken(non-binder,bot)" ty inst
+                                    go binderKeys keepBinderKeys' namedSet' ty' ids (composeInst phi inst) rest lookupBinder
+                                else do
+                                    argTy <- reifyTypeArg namedSet' Nothing (graftArgFor arg bv)
+                                    let inst = InstApp (inlineAliasBoundsAsBound argTy)
+                                    (ty', ids') <- applyInstAndSyncIds "OpGraft+OpWeaken(non-binder)" ty ids inst
+                                    go binderKeys keepBinderKeys' namedSet' ty' ids' (composeInst phi inst) rest lookupBinder
+                    else if not (isBinderNode binderKeys bv)
+                        then Left $ PhiTranslatabilityError
                             [ "OpGraft+OpWeaken targets non-binder node"
                             , "  target node: " ++ show bv
-                            , "  canonical: " ++ show (canonicalNode bv)
+                            , "  canonical: " ++ show bvC
                             ]
                         else do
                             case lookupBinderIndex binderKeys ids bv of
-                                Nothing -> Left $ ValidationFailed
+                                Nothing -> Left $ PhiTranslatabilityError
                                     [ "OpGraft+OpWeaken: binder not found in quantifier spine"
                                     , "  target node: " ++ show bv
-                                    , "  canonical: " ++ show (canonicalNode bv)
+                                    , "  canonical: " ++ show bvC
                                     ]
                                 Just i -> do
                                     let (qs, _) = splitForalls ty
                                     when (length qs /= length ids) $
-                                        Left (InstantiationError "OpGraft+OpWeaken: binder spine / identity list length mismatch")
+                                        Left (PhiInvariantError "OpGraft+OpWeaken: binder spine / identity list length mismatch")
                                     let mbBound = snd (qs !! i)
                                     if mbBound /= Just TBottom && mbBound /= Nothing
-                                        then go binderKeys keepBinderKeys' namedSet' ty ids phi rest lookupBinder
+                                        then
+                                            Left $
+                                                PhiTranslatabilityError
+                                                    [ "OpGraft+OpWeaken requires target binder to be unbounded or ⊥-bounded"
+                                                    , "  target node: " ++ show bv
+                                                    , "  canonical: " ++ show bvC
+                                                    , "  binder bound: " ++ show mbBound
+                                                    ]
                                         else do
                                             (inst, ids1) <- atBinder binderKeys ids ty bv $ do
                                                 argTy <- reifyTypeArg namedSet' (Just bv) (graftArgFor arg bv)
@@ -538,29 +614,76 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
                                             ty' <- applyInst "OpGraft+OpWeaken" ty inst
                                             go binderKeys keepBinderKeys' namedSet' ty' ids1 (composeInst phi inst) rest lookupBinder
             | otherwise ->
-                Left (InstantiationError "witness op mismatch: OpGraft/OpWeaken refer to different nodes")
+                Left (PhiTranslatabilityError ["witness op mismatch: OpGraft/OpWeaken refer to different nodes"])
 
         (OpGraft arg bv : rest) -> do
-            if not (isBinderNode binderKeys bv)
-                    then Left $ ValidationFailed
+            let bvC = canonicalNode bv
+                rootC = canonicalNode orderRoot
+                isRootAdjacent =
+                    case lookupBindParent (srConstraint res) (typeRef bvC) of
+                        Just (TypeRef parent, _) ->
+                            let parentC = canonicalNode parent
+                            in parentC == rootC
+                                || case NodeAccess.lookupNode (srConstraint res) parentC of
+                                    Just TyForall{} -> True
+                                    _ -> False
+                        Just (GenRef _, _) -> True
+                        _ -> False
+            if bvC == rootC
+                then do
+                    let (qs, _) = splitForalls ty
+                    if null qs
+                        then do
+                            argTy <- reifyTypeArg namedSet' Nothing (graftArgFor arg bv)
+                            let inst = InstBot (inlineAliasBoundsAsBound argTy)
+                            ty' <- applyInst "OpGraft(root,bot)" ty inst
+                            go binderKeys keepBinderKeys' namedSet' ty' ids (composeInst phi inst) rest lookupBinder
+                        else do
+                            argTy <- reifyTypeArg namedSet' Nothing (graftArgFor arg bv)
+                            let inst = InstApp (inlineAliasBoundsAsBound argTy)
+                            (ty', ids') <- applyInstAndSyncIds "OpGraft(root)" ty ids inst
+                            go binderKeys keepBinderKeys' namedSet' ty' ids' (composeInst phi inst) rest lookupBinder
+                else if not (isBinderNode binderKeys bv) && isRootAdjacent
+                    then do
+                        let (qs, _) = splitForalls ty
+                        if null qs
+                            then do
+                                argTy <- reifyTypeArg namedSet' Nothing (graftArgFor arg bv)
+                                let inst = InstBot (inlineAliasBoundsAsBound argTy)
+                                ty' <- applyInst "OpGraft(non-binder,bot)" ty inst
+                                go binderKeys keepBinderKeys' namedSet' ty' ids (composeInst phi inst) rest lookupBinder
+                            else do
+                                argTy <- reifyTypeArg namedSet' Nothing (graftArgFor arg bv)
+                                let inst = InstApp (inlineAliasBoundsAsBound argTy)
+                                (ty', ids') <- applyInstAndSyncIds "OpGraft(non-binder)" ty ids inst
+                                go binderKeys keepBinderKeys' namedSet' ty' ids' (composeInst phi inst) rest lookupBinder
+                else if not (isBinderNode binderKeys bv)
+                    then Left $ PhiTranslatabilityError
                         [ "OpGraft targets non-binder node"
                         , "  target node: " ++ show bv
-                        , "  canonical: " ++ show (canonicalNode bv)
+                        , "  canonical: " ++ show bvC
                         ]
                     else do
                         case lookupBinderIndex binderKeys ids bv of
-                            Nothing -> Left $ ValidationFailed
+                            Nothing -> Left $ PhiTranslatabilityError
                                 [ "OpGraft: binder not found in quantifier spine"
                                 , "  target node: " ++ show bv
-                                , "  canonical: " ++ show (canonicalNode bv)
+                                , "  canonical: " ++ show bvC
                                 ]
                             Just i -> do
                                 let (qs, _) = splitForalls ty
                                 when (length qs /= length ids) $
-                                    Left (InstantiationError "OpGraft: binder spine / identity list length mismatch")
+                                    Left (PhiInvariantError "OpGraft: binder spine / identity list length mismatch")
                                 let mbBound = snd (qs !! i)
                                 if mbBound /= Just TBottom && mbBound /= Nothing
-                                    then go binderKeys keepBinderKeys' namedSet' ty ids phi rest lookupBinder
+                                    then
+                                        Left $
+                                            PhiTranslatabilityError
+                                                [ "OpGraft requires target binder to be unbounded or ⊥-bounded"
+                                                , "  target node: " ++ show bv
+                                                , "  canonical: " ++ show bvC
+                                                , "  binder bound: " ++ show mbBound
+                                                ]
                                     else do
                                         (inst, ids1) <- atBinderKeep binderKeys ids ty bv $ do
                                             argTy <- reifyTypeArg namedSet' (Just bv) arg
@@ -569,14 +692,18 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
                                         go binderKeys keepBinderKeys' namedSet' ty' ids1 (composeInst phi inst) rest lookupBinder
 
         (OpWeaken bv : rest) -> do
-            if not (isBinderNode binderKeys bv)
-                    then Left $ ValidationFailed
+            let bvC = canonicalNode bv
+                rootC = canonicalNode orderRoot
+            if bvC == rootC
+                then go binderKeys keepBinderKeys' namedSet' ty ids phi rest lookupBinder
+                else if not (isBinderNode binderKeys bv)
+                    then Left $ PhiTranslatabilityError
                         [ "OpWeaken targets non-binder node"
                         , "  target node: " ++ show bv
-                        , "  canonical: " ++ show (canonicalNode bv)
+                        , "  canonical: " ++ show bvC
                         ]
                     else do
-                        let key = getNodeId (canonicalNode bv)
+                        let key = getNodeId bvC
                         if IntSet.member key keepBinderKeys'
                             then go binderKeys keepBinderKeys' namedSet' ty ids phi rest lookupBinder
                             else do
@@ -611,7 +738,7 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
                     if not (IntSet.null interiorSet)
                         && not (IntSet.member (getNodeId nOrig) interiorSet)
                         && not (IntSet.member (getNodeId nC) interiorSet)
-                        then Left $ ValidationFailed
+                        then Left $ PhiTranslatabilityError
                             [ "OpRaise target outside I(r)"
                             , "edge: " ++ show edgeLeft ++ " <= " ++ show edgeRight
                             , "op: OpRaise " ++ show n
@@ -630,9 +757,9 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
                                     -- Spine binder case: existing logic
                                     let (qs, _) = splitForalls ty
                                     when (length qs /= length ids) $
-                                        Left (InstantiationError "OpRaise: binder spine / identity list length mismatch")
+                                        Left (PhiInvariantError "OpRaise: binder spine / identity list length mismatch")
                                     when (i < 0 || i >= length qs) $
-                                        Left (InstantiationError "OpRaise: binder index out of range")
+                                        Left (PhiInvariantError "OpRaise: binder index out of range")
 
                                     let names = map fst qs
                                         mbBound = snd (qs !! i)
@@ -645,7 +772,7 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
                                         insertIndex = cutoff + 1
 
                                     when (insertIndex > i) $
-                                        Left (InstantiationError "OpRaise: computed insertion point is after binder")
+                                        Left (PhiInvariantError "OpRaise: computed insertion point is after binder")
 
                                     let prefixBefore = take insertIndex names
                                         between = take (i - insertIndex) (drop insertIndex names)
@@ -700,7 +827,7 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
                                         names = map fst qs
 
                                     when (length qs /= length idsSynced) $
-                                        Left (InstantiationError "OpRaise (non-spine): binder spine / identity list length mismatch")
+                                        Left (PhiInvariantError "OpRaise (non-spine): binder spine / identity list length mismatch")
 
                                     -- Compute dependency cutoff: the new binder must be inserted after any
                                     -- binder that appears free in `Txi(n)`.
@@ -728,37 +855,41 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
                                                         Just ctx' -> Right (Just (i, ctx'))
 
                                     mbCandidate <- findCandidate [minIdx .. length idsSynced - 1]
-                                    let fallbackAtTop =
-                                            case lookupBindParent (srConstraint res) (typeRef nC) of
-                                                Just (GenRef _, _) -> Just (minIdx, False)
-                                                Just (TypeRef parent, _) ->
+                                    rootCtx <-
+                                        contextToNodeBoundWithOrderKeys
+                                            canonicalNode
+                                            orderKeys
+                                            (srConstraint res)
+                                            namedSet'
+                                            (canonicalNode orderRoot)
+                                            nContextTarget
+                                    let mbRootInst =
+                                            case (rootCtx, lookupBindParent (srConstraint res) (typeRef nC)) of
+                                                (Just _, Just (TypeRef parent, _)) ->
                                                     let parentC = canonicalNode parent
                                                         rootC = canonicalNode orderRoot
                                                     in if parentC == rootC
-                                                        then Just (minIdx, True)
-                                                        else
-                                                            case NodeAccess.lookupNode (srConstraint res) parentC of
-                                                                Just TyForall{} -> Just (minIdx, True)
-                                                                _ -> Nothing
+                                                        || case NodeAccess.lookupNode (srConstraint res) parentC of
+                                                            Just TyForall{} -> True
+                                                            _ -> False
+                                                        then
+                                                            let nodeTyBoundInlined = inlineBaseBounds nodeTyBound'
+                                                                instArgInst =
+                                                                    case mSchemeInfo of
+                                                                        Just si' ->
+                                                                            case inferInstAppArgs (siScheme si') nodeTyBoundInlined of
+                                                                                Just args
+                                                                                    | not (null args) ->
+                                                                                        instMany (map (InstApp . inlineAliasBoundsAsBound) args)
+                                                                                _ -> InstApp nodeTyBoundInlined
+                                                                        Nothing -> InstApp nodeTyBoundInlined
+                                                                prefixBefore = take minIdx names
+                                                                inst = underContext prefixBefore instArgInst
+                                                            in Just (inst, idsSynced)
+                                                        else Nothing
                                                 _ -> Nothing
-                                    case (mbCandidate, fallbackAtTop) of
-                                        (Nothing, Nothing) ->
-                                            Left $
-                                                InstantiationError $
-                                                    unlines
-                                                        [ "OpRaise (non-spine): missing context"
-                                                        , "  target node: " ++ show nOrig
-                                                        , "  canonical target: " ++ show nC
-                                                        , "  context target: " ++ show nContextTarget
-                                                        , "  orderRoot: " ++ show orderRoot
-                                                        , "  edgeRoot: " ++ show edgeRoot
-                                                        , "  minIdx: " ++ show minIdx
-                                                        , "  deps(Txi(n)): " ++ show deps
-                                                        , "  nodeTy: " ++ show nodeTy
-                                                        , "  idsSynced: " ++ show idsSynced
-                                                        , "  bindParent: " ++ show (lookupBindParent (srConstraint res) (typeRef nC))
-                                                        ]
-                                        (Just (insertIdx, ctxMn), _) -> do
+                                    case mbCandidate of
+                                        Just (insertIdx, ctxMn) -> do
                                             let prefixBefore = take insertIdx names
                                                 aliasOld = applyContext ctxMn InstElim
 
@@ -775,52 +906,45 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
                                             ids1 <- insertAt insertIdx (Just nC) idsSynced
                                             let ids2 = resyncIds ty' ids1
                                             go binderKeys keepBinderKeys' namedSet' ty' ids2 (composeInst phi inst) rest lookupBinder
-                                        (Nothing, Just (insertIdx, True)) -> do
-                                            let nodeTyBoundInlined = inlineBaseBounds nodeTyBound'
-                                                instArgInst =
-                                                    case mSchemeInfo of
-                                                        Just si' ->
-                                                            case inferInstAppArgs (siScheme si') nodeTyBoundInlined of
-                                                                Just args
-                                                                    | not (null args) ->
-                                                                        instMany (map (InstApp . inlineAliasBoundsAsBound) args)
-                                                                _ -> InstApp nodeTyBoundInlined
-                                                        Nothing -> InstApp nodeTyBoundInlined
-                                                prefixBefore = take insertIdx names
-                                                inst = underContext prefixBefore instArgInst
-                                            ty' <- applyInst "OpRaise(non-spine)" ty inst
-                                            go binderKeys keepBinderKeys' namedSet' ty' idsSynced (composeInst phi inst) rest lookupBinder
-                                        (Nothing, Just (insertIdx, False)) -> do
-                                            let prefixBefore = take insertIdx names
-                                                local =
-                                                    instMany
-                                                        [ InstIntro
-                                                        , InstInside (InstBot (inlineAliasBoundsAsBound nodeTy))
-                                                        ]
-                                                inst = underContext prefixBefore local
-                                            ty' <- applyInst "OpRaise(non-spine)" ty inst
-                                            ids1 <- insertAt insertIdx (Just nC) idsSynced
-                                            let ids2 = resyncIds ty' ids1
-                                            go binderKeys keepBinderKeys' namedSet' ty' ids2 (composeInst phi inst) rest lookupBinder
+                                        Nothing ->
+                                            case mbRootInst of
+                                                Just (inst, idsNext) -> do
+                                                    (ty', idsAfter) <- applyInstAndSyncIds "OpRaise(non-spine,root)" ty idsNext inst
+                                                    go binderKeys keepBinderKeys' namedSet' ty' idsAfter (composeInst phi inst) rest lookupBinder
+                                                Nothing ->
+                                                    Left $
+                                                        PhiTranslatabilityError
+                                                            [ "OpRaise (non-spine): missing computation context"
+                                                            , "  target node: " ++ show nOrig
+                                                            , "  canonical target: " ++ show nC
+                                                            , "  context target: " ++ show nContextTarget
+                                                            , "  orderRoot: " ++ show orderRoot
+                                                            , "  edgeRoot: " ++ show edgeRoot
+                                                            , "  minIdx: " ++ show minIdx
+                                                            , "  deps(Txi(n)): " ++ show deps
+                                                            , "  nodeTy: " ++ show nodeTy
+                                                            , "  idsSynced: " ++ show idsSynced
+                                                            , "  bindParent: " ++ show (lookupBindParent (srConstraint res) (typeRef nC))
+                                                            ]
 
         (OpMerge n m : rest)
             -- Paper Fig. 15.3.4: rigid-node identity is conditioned on the operated node n.
             | isRigidNode n ->
                 go binderKeys keepBinderKeys' namedSet' ty ids phi rest lookupBinder
             | isRigidNode m ->
-                Left $ ValidationFailed
+                Left $ PhiTranslatabilityError
                     [ "OpMerge: rigid endpoint appears only on non-operated node"
                     , "  operated node n: " ++ show n
                     , "  other endpoint m: " ++ show m
                     ]
             | not (isBinderNode binderKeys n) ->
-                Left $ ValidationFailed
+                Left $ PhiTranslatabilityError
                     [ "OpMerge: first target is non-binder node"
                     , "  target node: " ++ show n
                     , "  canonical: " ++ show (canonicalNode n)
                     ]
             | not (isBinderNode binderKeys m) ->
-                Left $ ValidationFailed
+                Left $ PhiTranslatabilityError
                     [ "OpMerge: second target is non-binder node"
                     , "  target node: " ++ show m
                     , "  canonical: " ++ show (canonicalNode m)
@@ -839,19 +963,19 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
             if isRigidNode n
                 then go binderKeys keepBinderKeys' namedSet' ty ids phi rest lookupBinder
                 else if isRigidNode m
-                    then Left $ ValidationFailed
+                    then Left $ PhiTranslatabilityError
                         [ "OpRaiseMerge: rigid endpoint appears only on non-operated node"
                         , "  operated node n: " ++ show n
                         , "  other endpoint m: " ++ show m
                         ]
                 else if not (isBinderNode binderKeys n)
-                    then Left $ ValidationFailed
+                    then Left $ PhiTranslatabilityError
                         [ "OpRaiseMerge: first target is non-binder node"
                         , "  target node: " ++ show n
                         , "  canonical: " ++ show (canonicalNode n)
                         ]
                     else if not (isBinderNode binderKeys m)
-                        then Left $ ValidationFailed
+                        then Left $ PhiTranslatabilityError
                             [ "OpRaiseMerge: second target is non-binder node"
                             , "  target node: " ++ show m
                             , "  canonical: " ++ show (canonicalNode m)
@@ -871,7 +995,7 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
                                     -- Non-root RaiseMerge behaves like Merge inside the context of n.
                                     case lookupBinderIndex binderKeys ids n of
                                         Nothing ->
-                                            Left (InstantiationError ("OpRaiseMerge: binder " ++ show n ++ " not found in quantifier spine"))
+                                            Left (PhiTranslatabilityError ["OpRaiseMerge: binder " ++ show n ++ " not found in quantifier spine"])
                                         Just _ -> do
                                             mName <- binderNameFor binderKeys ty ids m lookupBinder
                                             let hAbs = InstSeq (InstInside (InstAbstr mName)) InstElim
@@ -917,9 +1041,9 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
         case lookupBinderIndex binderKeys ids nid of
             Just i
                 | length names /= length ids ->
-                    Left (InstantiationError "binderNameFor: binder spine / identity list length mismatch")
+                    Left (PhiInvariantError "binderNameFor: binder spine / identity list length mismatch")
                 | i >= length names ->
-                    Left (InstantiationError "binderNameFor: index out of range")
+                    Left (PhiInvariantError "binderNameFor: index out of range")
                 | otherwise -> Right (names !! i)
             Nothing ->
                 Right (fromMaybe ("t" ++ show (getNodeId nid)) (lookupBinder nid))
@@ -983,15 +1107,15 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
             Just i -> Right i
             Nothing ->
                 Left $
-                    InstantiationError $
+                    PhiInvariantError $
                         "binder " ++ show nid ++ " not found in identity list " ++ show ids
 
     prefixBinderNames :: ElabType -> [Maybe NodeId] -> Int -> Either ElabError [String]
     prefixBinderNames ty ids i
         | length names /= length ids =
-            Left (InstantiationError "prefixBinderNames: binder spine / identity list length mismatch")
+            Left (PhiInvariantError "prefixBinderNames: binder spine / identity list length mismatch")
         | i < 0 || i > length names =
-            Left (InstantiationError "prefixBinderNames: index out of range")
+            Left (PhiInvariantError "prefixBinderNames: index out of range")
         | otherwise = Right (take i names)
       where
         (qs, _) = splitForalls ty
@@ -1002,17 +1126,17 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
 
     deleteAt :: Int -> [a] -> Either ElabError [a]
     deleteAt i xs
-        | i < 0 = Left (InstantiationError "deleteAt: negative index")
+        | i < 0 = Left (PhiInvariantError "deleteAt: negative index")
         | otherwise =
             let (pre, rest) = splitAt i xs
             in case rest of
-                [] -> Left (InstantiationError "deleteAt: index out of range")
+                [] -> Left (PhiInvariantError "deleteAt: index out of range")
                 (_:rs) -> Right (pre ++ rs)
 
     insertAt :: Int -> a -> [a] -> Either ElabError [a]
     insertAt i x xs
-        | i < 0 = Left (InstantiationError "insertAt: negative index")
-        | i > length xs = Left (InstantiationError "insertAt: index out of range")
+        | i < 0 = Left (PhiInvariantError "insertAt: negative index")
+        | i > length xs = Left (PhiInvariantError "insertAt: index out of range")
         | otherwise =
             let (pre, rest) = splitAt i xs
             in Right (pre ++ (x : rest))

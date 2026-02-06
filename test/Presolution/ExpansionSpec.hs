@@ -121,6 +121,51 @@ spec = do
                         (Just _, Just _) -> pure ()
                         _ -> expectationFailure "Nodes 2 and 5 should remain distinct"
 
+        it "keeps ExpInstantiate for forall <= non-forall level mismatch" $ do
+            let srcBinderId = NodeId 0
+                srcForallId = NodeId 1
+                expNodeId = NodeId 2
+                targetVarId = NodeId 3
+                rootId = NodeId 4
+                rootGen = GenNodeId 0
+                srcGen = GenNodeId 10
+                tgtGen = GenNodeId 11
+                nodes = nodeMapFromList
+                    [ (getNodeId srcBinderId, TyVar { tnId = srcBinderId, tnBound = Nothing })
+                    , (getNodeId srcForallId, TyForall srcForallId srcBinderId)
+                    , (getNodeId expNodeId, TyExp expNodeId (ExpVarId 0) srcForallId)
+                    , (getNodeId targetVarId, TyVar { tnId = targetVarId, tnBound = Nothing })
+                    , (getNodeId rootId, TyArrow rootId expNodeId targetVarId)
+                    ]
+                edge = InstEdge (EdgeId 0) expNodeId targetVarId
+                bindParents0 = inferBindParents nodes
+                bindParents =
+                    IntMap.insert (nodeRefKey (genRef srcGen)) (genRef rootGen, BindFlex) $
+                        IntMap.insert (nodeRefKey (genRef tgtGen)) (genRef rootGen, BindFlex) $
+                    IntMap.insert (nodeRefKey (typeRef srcForallId)) (genRef srcGen, BindFlex) $
+                        IntMap.insert (nodeRefKey (typeRef targetVarId)) (genRef tgtGen, BindFlex) bindParents0
+                genNodes =
+                    fromListGen
+                        [ (srcGen, GenNode srcGen [srcForallId])
+                        , (tgtGen, GenNode tgtGen [targetVarId])
+                        ]
+                constraint =
+                    rootedConstraint emptyConstraint
+                        { cNodes = nodes
+                        , cInstEdges = [edge]
+                        , cBindParents = bindParents
+                        , cGenNodes = genNodes
+                        }
+                acyclicityRes = AcyclicityResult { arSortedEdges = [edge], arDepGraph = undefined }
+
+            case computePresolution defaultTraceConfig acyclicityRes constraint of
+                Left err -> expectationFailure $ "Presolution failed: " ++ show err
+                Right PresolutionResult{ prEdgeExpansions = exps } ->
+                    case IntMap.lookup 0 exps of
+                        Just (ExpInstantiate args) -> length args `shouldBe` 1
+                        Just other -> expectationFailure $ "Expected ExpInstantiate, got " ++ show other
+                        Nothing -> expectationFailure "No expansion found for Edge 0"
+
         it "returns compose (instantiate then forall) when forall binder arity differs" $ do
             -- s · (∀ a. a) ≤ (∀ b0 b1. b0 → b1)
             -- Different binder counts mean we must instantiate the source binder(s)

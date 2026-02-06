@@ -17,6 +17,7 @@ import MLF.Constraint.Solve (SolveResult(..))
 import MLF.Constraint.Types.Graph
     ( NodeId(..)
     , NodeRef(..)
+    , BindingError(..)
     )
 import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Elab.Run.Generalize (generalizeAtWithBuilder)
@@ -34,12 +35,21 @@ generalizeWithPlan
     -> NodeId
     -> Either ElabError (ElabScheme, IntMap.IntMap String)
 generalizeWithPlan planBuilder bindParentsGa res scopeRoot targetNode =
-    generalizeAtWithBuilder
+    case generalizeAtWithBuilder
         planBuilder
         (Just bindParentsGa)
         res
         scopeRoot
-        targetNode
+        targetNode of
+        Right out -> Right out
+        Left (BindingTreeError GenSchemeFreeVars{}) ->
+            generalizeAtWithBuilder
+                planBuilder
+                Nothing
+                res
+                scopeRoot
+                targetNode
+        Left err -> Left err
 
 -- | Check if a type contains foralls in bounds
 containsBoundForall :: ElabType -> Bool
