@@ -87,6 +87,8 @@ tasks/
 - Work from a single task folder under `tasks/todo/YYYY-MM-DD-description/`
 - Read `tasks/todo/YYYY-MM-DD-description/prd.json` to get the current user stories and acceptance criteria
 - Update `tasks/todo/YYYY-MM-DD-description/progress.txt` with iteration results
+- Maintain the repository root `TODO.md` as the rolling list of next goals; update it whenever priorities or upcoming work change.
+- Maintain `implementation_notes.md` when behavior, architecture, or thesis-alignment details change, so documentation stays in sync with implementation.
 - Stories are ordered by priority/dependency — execute in order
 - Each story should be completable in one iteration (one context window)
 - Mark `passes: true` in `prd.json` when a story's acceptance criteria are met

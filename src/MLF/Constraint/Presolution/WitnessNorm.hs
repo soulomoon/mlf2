@@ -23,8 +23,8 @@ import MLF.Constraint.Types
 import MLF.Constraint.Presolution.Base
 import MLF.Constraint.Presolution.StateAccess (getConstraintAndCanonical)
 import MLF.Constraint.Presolution.Validation (translatableWeakenedNodes)
-import MLF.Constraint.Presolution.WitnessCanon (normalizeInstanceStepsStrict)
 import MLF.Constraint.Presolution.Witness (
+    normalizeInstanceStepsFull,
     OmegaNormalizeEnv(OmegaNormalizeEnv, oneRoot),
     validateNormalizedWitness,
     )
@@ -118,7 +118,7 @@ normalizeEdgeWitnessesM = do
                     , Witness.constraint = c0
                     , Witness.binderArgs = binderArgs
                     }
-        steps <- case normalizeInstanceStepsStrict env steps0 of
+        steps <- case normalizeInstanceStepsFull env steps0 of
             Right steps' -> pure steps'
             Left err ->
                 throwError (WitnessNormalizationError (EdgeId eid) err)

@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-* Presolution: production witness normalization now uses strict Ω-step normalization, failing fast on malformed merge direction (`MergeDirectionInvalid`) without permissive fallback acceptance in `normalizeEdgeWitnessesM`.
+* Presolution: witness normalization is strict for malformed merge direction (`MergeDirectionInvalid`) across helper and production paths; permissive merge-direction fallback was removed entirely.
 
 ## 0.2.0.0 -- 2026-02-02
 

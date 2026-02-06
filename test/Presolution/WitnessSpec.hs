@@ -254,13 +254,13 @@ spec = do
                         , StepOmega (OpGraft arg2 root)
                         ]
 
-        it "normalizeInstanceStepsFull keeps permissive merge-direction fallback for non-production callers" $ do
+        it "normalizeInstanceStepsFull rejects wrong merge direction" $ do
             let c = mkNormalizeConstraint
                 root = NodeId 0
                 (mLess, nGreater) = orderedPairByPrec c root
                 env = mkNormalizeEnv c root (IntSet.fromList [getNodeId mLess, getNodeId nGreater])
                 steps0 = [StepOmega (OpMerge mLess nGreater)]
-            normalizeInstanceStepsFull env steps0 `shouldBe` Right steps0
+            normalizeInstanceStepsFull env steps0 `shouldBe` Left (MergeDirectionInvalid mLess nGreater)
 
         it "preserves Graft/Weaken when a later Merge eliminates the binder during emission" $ do
             let a = NodeId 2
@@ -633,7 +633,7 @@ spec = do
                     Right _ ->
                         expectationFailure "Expected WitnessNormalizationError for op outside interior, but normalization succeeded"
 
-            it "fails fast with MergeDirectionInvalid via strict production normalization" $ do
+            it "fails fast with MergeDirectionInvalid via presolution normalization" $ do
                 let root = NodeId 0
                     leftNode = NodeId 2
                     rightNode = NodeId 3

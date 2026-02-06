@@ -8,7 +8,6 @@ instance operation witnesses, enforcing the conditions from the MLF thesis.
 -}
 module MLF.Constraint.Presolution.WitnessCanon (
     normalizeInstanceStepsFull,
-    normalizeInstanceStepsStrict,
     normalizeInstanceOpsFull,
     coalesceRaiseMergeWithEnv,
     reorderWeakenWithEnv
@@ -50,20 +49,6 @@ stripExteriorOps env =
 
     keepOp op = touchesInterior op
 
-normalizeInstanceOpsWithFallback :: OmegaNormalizeEnv -> [InstanceOp] -> Either OmegaNormalizeError [InstanceOp]
-normalizeInstanceOpsWithFallback env ops0 =
-    case normalizeInstanceOpsFull env ops0 of
-        Right ops' -> Right ops'
-        Left (MergeDirectionInvalid _ _) -> do
-            let ops1 = stripExteriorOps env ops0
-            ops2 <- coalesceRaiseMergeWithEnv env ops1
-            ops3 <- reorderWeakenWithEnv env ops2
-            case validateNormalizedWitness env ops3 of
-                Left (MergeDirectionInvalid _ _) -> Right ops3
-                Left err' -> Left err'
-                Right () -> Right ops3
-        Left err -> Left err
-
 normalizeInstanceStepsWith
     :: (OmegaNormalizeEnv -> [InstanceOp] -> Either OmegaNormalizeError [InstanceOp])
     -> OmegaNormalizeEnv
@@ -93,11 +78,7 @@ normalizeInstanceStepsWith normalizeOps env steps =
             else map StepOmega <$> normalizeOps env' (reverse opsRev)
 
 normalizeInstanceStepsFull :: OmegaNormalizeEnv -> [InstanceStep] -> Either OmegaNormalizeError [InstanceStep]
-normalizeInstanceStepsFull = normalizeInstanceStepsWith normalizeInstanceOpsWithFallback
-
--- | Production strict Ω-segment normalization (no permissive merge-direction fallback).
-normalizeInstanceStepsStrict :: OmegaNormalizeEnv -> [InstanceStep] -> Either OmegaNormalizeError [InstanceStep]
-normalizeInstanceStepsStrict = normalizeInstanceStepsWith normalizeInstanceOpsFull
+normalizeInstanceStepsFull = normalizeInstanceStepsWith normalizeInstanceOpsFull
 
 coalesceRaiseMergeWithEnv :: OmegaNormalizeEnv -> [InstanceOp] -> Either OmegaNormalizeError [InstanceOp]
 coalesceRaiseMergeWithEnv env ops =
