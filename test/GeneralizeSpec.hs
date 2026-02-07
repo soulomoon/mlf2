@@ -4,16 +4,11 @@ import Data.List (isInfixOf)
 import Test.Hspec
 
 import MLF.Constraint.Types.Graph (BaseTy(..))
-import MLF.Elab.Phi.TestOnly (shadowCompareTypesTestOnly)
-import MLF.Elab.Pipeline (ElabError(..), ElabType, Ty(..))
-
-selectSolvedOrderWithShadow :: String -> ElabType -> Maybe ElabType -> Either ElabError ElabType
-selectSolvedOrderWithShadow ctx solvedTy mbBaseTy =
-    case mbBaseTy of
-        Nothing -> Right solvedTy
-        Just baseTy -> do
-            shadowCompareTypesTestOnly ctx solvedTy baseTy
-            Right solvedTy
+import MLF.Elab.Phi.TestOnly
+    ( selectSolvedOrderWithShadowTestOnly
+    , shadowCompareTypesTestOnly
+    )
+import MLF.Elab.Pipeline (ElabError(..), Ty(..))
 
 spec :: Spec
 spec = do
@@ -36,12 +31,12 @@ spec = do
         it "returns solved type when solved/base shadow comparison succeeds" $ do
             let solvedTy = TForall "a" Nothing (TVar "a")
                 baseTy = TForall "b" Nothing (TVar "b")
-            selectSolvedOrderWithShadow "ctx" solvedTy (Just baseTy) `shouldBe` Right solvedTy
+            selectSolvedOrderWithShadowTestOnly "ctx" solvedTy (Just baseTy) `shouldBe` Right solvedTy
 
         it "fails hard on solved/base shadow mismatch when base shadow is present" $ do
             let solvedTy = TForall "a" Nothing (TArrow (TVar "a") (TVar "a"))
                 baseTy = TForall "a" Nothing (TArrow (TVar "a") (TBase (BaseTy "Int")))
-            case selectSolvedOrderWithShadow "ctx" solvedTy (Just baseTy) of
+            case selectSolvedOrderWithShadowTestOnly "ctx" solvedTy (Just baseTy) of
                 Left (ValidationFailed msgs) ->
                     msgs `shouldSatisfy` any (isInfixOf "shadow reify mismatch")
                 other ->
