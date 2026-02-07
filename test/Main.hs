@@ -17,6 +17,7 @@ import qualified PipelineSpec
 import qualified TypeCheckSpec
 import qualified ReduceSpec
 import qualified ElaborationSpec
+import qualified GeneralizeSpec
 import qualified BindingSpec
 import qualified GraphOpsSpec
 import qualified CanonicalizerSpec
@@ -42,6 +43,7 @@ main = hspec $ do
     TypeCheckSpec.spec
     ReduceSpec.spec
     ElaborationSpec.spec
+    GeneralizeSpec.spec
     BindingSpec.spec
     GraphOpsSpec.spec
     CanonicalizerSpec.spec

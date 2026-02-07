@@ -21,7 +21,8 @@ See 'MLF.Constraint.Presolution.Plan' for the plan generation logic.
 -}
 module MLF.Elab.Generalize (
     GaBindParents(..),
-    applyGeneralizePlan
+    applyGeneralizePlan,
+    shadowCompareTypes
 ) where
 
 import qualified Data.IntMap.Strict as IntMap
@@ -60,7 +61,7 @@ import MLF.Reify.Core
     , reifyBoundWithNames
     , reifyBoundWithNamesOnConstraint
     )
-import MLF.Reify.TypeOps (freeTypeVarsFrom, inlineAliasBoundsWithBy)
+import MLF.Reify.TypeOps (alphaEqType, freeTypeVarsFrom, inlineAliasBoundsWithBy)
 import MLF.Elab.Types
 import MLF.Util.Graph (reachableFromStop)
 
@@ -71,6 +72,19 @@ rigidNameFor key = "__rigid" ++ show key
 -- | Build a forall type from a list of binders and a body type.
 buildForallType :: [(String, Maybe BoundType)] -> ElabType -> ElabType
 buildForallType binds body = foldr (\(n, b) t -> TForall n b t) body binds
+
+-- | Validate that solved-order and base-path shadow reification are semantically equivalent.
+shadowCompareTypes :: String -> ElabType -> ElabType -> Either ElabError ()
+shadowCompareTypes context solvedTy baseTy
+    | alphaEqType solvedTy baseTy = Right ()
+    | otherwise =
+        Left $
+            ValidationFailed
+                [ "shadow reify mismatch"
+                , "context=" ++ context
+                , "solved=" ++ pretty solvedTy
+                , "base=" ++ pretty baseTy
+                ]
 
 -- | Inline rigid type variables by substituting them with their bounds.
 -- Uses cycle detection to prevent infinite loops when bounds reference each other.
