@@ -78,8 +78,8 @@
         "Tests pass"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Changed desugarSurface to NormSurfaceExpr -> NormCoreExpr. Changed generateConstraints to accept NormSurfaceExpr. Converted internalizeCoercionType/Copy to work with NormSrcType (removed alias-bound special case, added structBoundToNormSrcType/structBoundFreeVars helpers). Updated pipeline (runPipelineElab*, runPipelineElabWith) and public API (inferConstraintGraph) signatures. All test callsites normalize via normalizeExpr before calling Phase 1. Self-bound forall test updated to check normalization error. All 543 tests pass."
     },
     {
       "id": "US-006",
@@ -94,8 +94,8 @@
         "Tests pass"
       ],
       "priority": 6,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Updated MLF.Pipeline to export NormSurfaceExpr, NormSrcType(..), StructBound(..), NormalizationError(..), normalizeExpr, normalizeType alongside pipeline entrypoints. Updated MLF.API export list with section comments documenting staged types, normalization, constraint graph, elaboration types, pipeline configuration, and normalized-only pipeline entrypoints. Updated app/Main.hs to explicitly normalize via normalizeExpr before calling runPipelineElabWithConfig. All 543 tests pass."
     },
     {
       "id": "US-007",

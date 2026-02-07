@@ -10,6 +10,10 @@
 - Use pattern match on `filter` results instead of `head` to avoid `-Wx-partial` warning with GHC 9.12
 - Frontend normalization: alias bounds (STVar in forall bound) are inlined via capture-avoiding substitution; structural bounds go through `normalizeBound` which has no STVar case
 - Adding a type parameter to a GADT is backward-compatible when existing type aliases fix the new parameter to the old concrete type (e.g., `type SurfaceExpr = Expr 'Surface SrcType`)
+- Constraint generation (generateConstraints) and desugaring (desugarSurface) accept NormSurfaceExpr/NormCoreExpr; callers must normalize via normalizeExpr before Phase 1
+- internalizeCoercionCopy works with NormSrcType; StructBound is converted to NormSrcType via structBoundToNormSrcType for recursive internalization
+- Test helpers (inferConstraintGraphDefault, requirePipeline, etc.) normalize via normalizeExpr before calling pipeline functions
+- MLF.Pipeline is the focused pipeline-only public API (exports staged types + normalization + pipeline entrypoints); MLF.API is the full public API re-exporting everything
 
 ## Iteration Log
 - 2026-02-08: Task initialized from PRD conversion.
@@ -86,4 +90,39 @@
   - Normalized parser entrypoints are a simple composition: parse raw → normalize, with error type unification via a sum type
   - Re-export chain (MLF.Frontend.Parse → MLF.API → MyLib) automatically picks up new exports when using `module MLF.Frontend.Syntax` re-export
   - All 543 tests pass (17 new), no warnings
+---
+
+## 2026-02-08 - US-005
+- What was implemented: Made desugaring and Phase 1 constraint generation normalized-input only
+  - Changed `desugarSurface :: NormSurfaceExpr -> NormCoreExpr` (was `SurfaceExpr -> CoreExpr`)
+  - Changed `generateConstraints :: PolySyms -> NormSurfaceExpr -> Either ConstraintError ConstraintResult`
+  - Converted `internalizeCoercionType`/`internalizeCoercionCopy` from `SrcType` to `NormSrcType`
+  - Removed alias-bound special case (`Just (STVar alias)`) from `internalizeCoercionCopy` — no longer needed since normalization inlines alias bounds
+  - Added `structBoundToNormSrcType` and `structBoundFreeVars` helpers for `StructBound` handling
+  - Updated `buildRootExpr`, `buildExpr`, `buildExprRaw`, `buildCoerce` signatures to `NormCoreExpr`/`NormSrcType`
+  - Updated pipeline signatures: `runPipelineElab*`, `runPipelineElabWith`, `inferConstraintGraph` all accept `NormSurfaceExpr`
+  - Updated all test callsites to normalize via `normalizeExpr` before calling Phase 1
+  - Updated self-bound forall test to check `SelfBoundVariable` normalization error instead of `ForallBoundMentionsBinder`
+  - Updated `scripts/Debug.hs` to normalize before constraint generation
+- Files changed: src/MLF/Frontend/Desugar.hs, src/MLF/Frontend/ConstraintGen.hs, src/MLF/Frontend/ConstraintGen/Translate.hs, src/MLF/Elab/Run/Pipeline.hs, src-public/MLF/Pipeline.hs, test/BindingSpec.hs, test/ConstraintGenSpec.hs, test/ElaborationSpec.hs, test/PipelineSpec.hs, scripts/Debug.hs
+- **Learnings for future iterations:**
+  - When switching from `SrcType` to `NormSrcType`, the `STForall` alias-bound case (`Just (STVar alias)`) becomes unreachable — normalization has already inlined it. The `NSTForall` case only needs to handle `Maybe StructBound`.
+  - `StructBound` has no variable constructor, so it must be converted to `NormSrcType` via `structBoundToNormSrcType` for recursive internalization in `internalizeCoercionCopy`
+  - Self-bound forall errors shift from `ForallBoundMentionsBinder` (constraint gen) to `SelfBoundVariable` (normalization) — tests checking for this error need updating
+  - Test helpers that wrap pipeline functions (e.g., `inferConstraintGraphDefault`, `requirePipeline`) are the cleanest place to add normalization — avoids touching every individual test case
+  - All 543 tests pass, no warnings
+---
+
+## 2026-02-08 - US-006
+- What was implemented: Updated public API and pipeline to normalized-only contract
+  - Updated `MLF.Pipeline` exports: added `NormSurfaceExpr`, `NormSrcType(..)`, `StructBound(..)`, `NormalizationError(..)`, `normalizeExpr`, `normalizeType` — making it a self-contained public API for the normalized pipeline
+  - Updated `MLF.API` export list with section comments: "Frontend syntax (raw and staged types)", "Constraint generation", "Normalization (raw → normalized)", "Constraint graph", "Elaboration types", "Pipeline configuration", "Pipeline entrypoints (normalized-only)"
+  - Updated `app/Main.hs` to explicitly normalize via `normalizeExpr` before calling `runPipelineElabWithConfig`, demonstrating the normalized-only contract
+  - Verified all pipeline signatures (`runPipelineElab`, `runPipelineElabChecked`, `runPipelineElabWithConfig`, `runPipelineElabCheckedWithConfig`, `inferConstraintGraph`) accept `NormSurfaceExpr`
+- Files changed: src-public/MLF/Pipeline.hs, src-public/MLF/API.hs, app/Main.hs
+- **Learnings for future iterations:**
+  - `MLF.Pipeline` is the focused pipeline-only public API; `MLF.API` is the full public API re-exporting everything including syntax, parsing, and elaboration types
+  - GADT constructors that don't mention the type parameter (e.g., `ELam`, `EVar`) are polymorphic in it, so `ELam "x" (EVar "x")` has type `Expr 'Surface ty` for any `ty` — this means simple expressions compile against `NormSurfaceExpr` without explicit normalization, but explicit normalization is still best practice
+  - The `module MLF.Frontend.Syntax` re-export in `MLF.API` automatically picks up all staged type exports (TypeStage, NormSrcType, StructBound, etc.)
+  - All 543 tests pass, no warnings
 ---
