@@ -22,7 +22,8 @@ See 'MLF.Constraint.Presolution.Plan' for the plan generation logic.
 module MLF.Elab.Generalize (
     GaBindParents(..),
     applyGeneralizePlan,
-    shadowCompareTypes
+    shadowCompareTypes,
+    selectSolvedOrderWithShadow
 ) where
 
 import qualified Data.IntMap.Strict as IntMap
@@ -85,6 +86,14 @@ shadowCompareTypes context solvedTy baseTy
                 , "solved=" ++ pretty solvedTy
                 , "base=" ++ pretty baseTy
                 ]
+
+selectSolvedOrderWithShadow :: String -> ElabType -> Maybe ElabType -> Either ElabError ElabType
+selectSolvedOrderWithShadow context solvedTy mbBaseTy =
+    case mbBaseTy of
+        Nothing -> Right solvedTy
+        Just baseTy -> do
+            shadowCompareTypes context solvedTy baseTy
+            Right solvedTy
 
 -- | Inline rigid type variables by substituting them with their bounds.
 -- Uses cycle detection to prevent infinite loops when bounds reference each other.

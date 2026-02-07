@@ -5,20 +5,44 @@ import Test.Hspec
 
 import MLF.Constraint.Types.Graph (BaseTy(..))
 import MLF.Elab.Phi.TestOnly (shadowCompareTypesTestOnly)
-import MLF.Elab.Pipeline (ElabError(..), Ty(..))
+import MLF.Elab.Pipeline (ElabError(..), ElabType, Ty(..))
+
+selectSolvedOrderWithShadow :: String -> ElabType -> Maybe ElabType -> Either ElabError ElabType
+selectSolvedOrderWithShadow ctx solvedTy mbBaseTy =
+    case mbBaseTy of
+        Nothing -> Right solvedTy
+        Just baseTy -> do
+            shadowCompareTypesTestOnly ctx solvedTy baseTy
+            Right solvedTy
 
 spec :: Spec
-spec = describe "Generalize shadow comparator" $ do
-    it "accepts alpha-equivalent types" $ do
-        let solvedTy = TForall "a" Nothing (TVar "a")
-            baseTy = TForall "b" Nothing (TVar "b")
-        shadowCompareTypesTestOnly "ctx" solvedTy baseTy `shouldBe` Right ()
+spec = do
+    describe "Generalize shadow comparator" $ do
+        it "accepts alpha-equivalent types" $ do
+            let solvedTy = TForall "a" Nothing (TVar "a")
+                baseTy = TForall "b" Nothing (TVar "b")
+            shadowCompareTypesTestOnly "ctx" solvedTy baseTy `shouldBe` Right ()
 
-    it "rejects semantic mismatch with shadow reify mismatch diagnostics" $ do
-        let solvedTy = TForall "a" Nothing (TArrow (TVar "a") (TVar "a"))
-            baseTy = TForall "a" Nothing (TArrow (TVar "a") (TBase (BaseTy "Int")))
-        case shadowCompareTypesTestOnly "ctx" solvedTy baseTy of
-            Left (ValidationFailed msgs) ->
-                msgs `shouldSatisfy` any (isInfixOf "shadow reify mismatch")
-            other ->
-                expectationFailure ("Expected ValidationFailed shadow mismatch, got: " ++ show other)
+        it "rejects semantic mismatch with shadow reify mismatch diagnostics" $ do
+            let solvedTy = TForall "a" Nothing (TArrow (TVar "a") (TVar "a"))
+                baseTy = TForall "a" Nothing (TArrow (TVar "a") (TBase (BaseTy "Int")))
+            case shadowCompareTypesTestOnly "ctx" solvedTy baseTy of
+                Left (ValidationFailed msgs) ->
+                    msgs `shouldSatisfy` any (isInfixOf "shadow reify mismatch")
+                other ->
+                    expectationFailure ("Expected ValidationFailed shadow mismatch, got: " ++ show other)
+
+    describe "selectSolvedOrderWithShadow" $ do
+        it "returns solved type when solved/base shadow comparison succeeds" $ do
+            let solvedTy = TForall "a" Nothing (TVar "a")
+                baseTy = TForall "b" Nothing (TVar "b")
+            selectSolvedOrderWithShadow "ctx" solvedTy (Just baseTy) `shouldBe` Right solvedTy
+
+        it "fails hard on solved/base shadow mismatch when base shadow is present" $ do
+            let solvedTy = TForall "a" Nothing (TArrow (TVar "a") (TVar "a"))
+                baseTy = TForall "a" Nothing (TArrow (TVar "a") (TBase (BaseTy "Int")))
+            case selectSolvedOrderWithShadow "ctx" solvedTy (Just baseTy) of
+                Left (ValidationFailed msgs) ->
+                    msgs `shouldSatisfy` any (isInfixOf "shadow reify mismatch")
+                other ->
+                    expectationFailure ("Expected ValidationFailed shadow mismatch, got: " ++ show other)
