@@ -490,7 +490,15 @@ internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared srcType 
                 else pure (conNode, sharedFinal)
 
         NSTForall var mBound body -> do
-            -- Check forall-bound well-formedness: binder must not occur in its own bound
+            -- Note: Alias bounds (∀(b ⩾ a). body where the bound is a bare
+            -- variable) are unreachable here — normalization inlines them via
+            -- capture-avoiding substitution before constraint generation.
+            -- StructBound has no variable constructor, so mBound :: Maybe StructBound
+            -- can only be Nothing or a structural bound (arrow, base, con, forall, bottom).
+            --
+            -- Well-formedness check: binder must not occur in its own structural bound.
+            -- This catches cases like ∀(a ⩾ List a). a where the binder appears
+            -- nested inside a structural bound.
             case mBound of
                 Just bound
                     | Set.member var (structBoundFreeVars bound) ->
