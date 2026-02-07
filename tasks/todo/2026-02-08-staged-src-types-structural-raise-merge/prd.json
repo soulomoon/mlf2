@@ -1,0 +1,192 @@
+{
+  "project": "mlf4",
+  "branchName": "ralph/staged-src-types-structural-raise-merge",
+  "description": "Introduce staged frontend SrcType/Expr normalization boundaries and refactor Merge/RaiseMerge gating to depend only on live structural graph facts.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Introduce staged frontend type kinds and constructors",
+      "description": "As a compiler maintainer, I want staged frontend type constructors indexed by normalization state and top-variable policy so that normalized alias-bound forms are unrepresentable at the type level.",
+      "acceptanceCriteria": [
+        "Add staged frontend type definition (raw vs normalized, top-var policy) in Frontend.Syntax",
+        "Export concrete aliases for raw and normalized frontend type forms",
+        "Normalized bound form cannot encode top-level variable alias bounds by construction",
+        "cabal build all succeeds",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Stage frontend expression types for raw and normalized annotations",
+      "description": "As a compiler maintainer, I want expression stages to carry raw vs normalized annotation payloads so phase ordering is enforced by types.",
+      "acceptanceCriteria": [
+        "Update Expr typing so annotation/coercion payloads track raw vs normalized stage",
+        "Export raw and normalized surface/core expression aliases",
+        "All modules compiling against Frontend.Syntax are updated for the new staged signatures",
+        "cabal build all succeeds",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Add raw-to-normalized frontend normalization module",
+      "description": "As a compiler maintainer, I want explicit normalization APIs that inline alias bounds capture-safely so normalized syntax can be the only input to constraint generation.",
+      "acceptanceCriteria": [
+        "Add Frontend.Normalize module with normalizeType and normalizeExpr (or equivalent)",
+        "Normalization inlines alias bound forms like ∀(b ⩾ a) using capture-avoiding substitution",
+        "Normalization keeps invalid self-bound cases deterministic via explicit error return",
+        "Unit tests cover at least one alpha-capture avoidance scenario",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Split parser API into raw and normalized entrypoints",
+      "description": "As an API consumer, I want to parse into raw AST or directly into normalized AST so tooling and compiler phases can use explicit boundaries.",
+      "acceptanceCriteria": [
+        "Expose raw parser entrypoints for eMLF types and expressions",
+        "Expose normalized parser entrypoints that parse raw then normalize",
+        "Parse error rendering remains available and usable for both paths",
+        "Frontend parse specs are updated for raw and normalized APIs",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Make desugaring and Phase 1 normalized-input only",
+      "description": "As a compiler maintainer, I want desugaring and constraint generation to only accept normalized surface syntax so alias elimination cannot be bypassed.",
+      "acceptanceCriteria": [
+        "Desugar entrypoint accepts normalized surface expressions only",
+        "generateConstraints accepts normalized surface expressions only",
+        "No implicit normalization occurs inside generateConstraints",
+        "Constraint generation callsites are updated to normalize before Phase 1",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Update public API and pipeline to normalized-only contract",
+      "description": "As an API consumer, I want public infer/elab entrypoints to require normalized expressions so phase boundaries are explicit and type-safe.",
+      "acceptanceCriteria": [
+        "Update public API exports to staged frontend types and normalized pipeline signatures",
+        "runPipelineElab and runPipelineElabChecked (and config variants) accept normalized expressions",
+        "inferConstraintGraph public signature matches normalized-only contract",
+        "API and pipeline tests compile with staged signatures",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Remove alias-specific coercion internalization branch",
+      "description": "As a compiler maintainer, I want coercion type internalization to rely on normalized input invariants instead of alias-shape special-cases.",
+      "acceptanceCriteria": [
+        "Remove or make unreachable alias-special branch in coercion type internalization for STForall alias bounds",
+        "Retain necessary well-formedness checks unrelated to alias syntax survivability",
+        "ConstraintGenSpec coverage reflects normalized-only alias handling",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Drop precomputed binder-bound snapshots from edge-unify state",
+      "description": "As a presolution maintainer, I want edge-unify state to avoid stale binder-bound metadata so witness gating always uses current graph truth.",
+      "acceptanceCriteria": [
+        "Remove eusBinderBounds from EdgeUnifyState",
+        "Update initEdgeUnifyState signature and all callsites to remove binderBounds parameter",
+        "Remove binderBounds map construction in EdgeProcessing.Unify",
+        "Presolution modules compile after signature changes",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Refactor RaiseMerge gating to purely structural live queries",
+      "description": "As a presolution maintainer, I want shouldRecordRaiseMerge to use canonical bounds, binding ancestry, and interior membership from the current constraint graph.",
+      "acceptanceCriteria": [
+        "shouldRecordRaiseMerge computes binder bound from current canonical graph state",
+        "Decision logic uses only node kind, live bound root, edge-root ancestry, interior membership, and elimination state",
+        "No-bound and same-root exclusions remain enforced",
+        "Unbounded binders do not produce RaiseMerge",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Preserve witness normalization and translatability invariants",
+      "description": "As a type-soundness maintainer, I want witness normalization/validation behavior to stay unchanged while gating source changes.",
+      "acceptanceCriteria": [
+        "Normalization of OpRaise followed by OpMerge to OpRaiseMerge remains intact",
+        "Rigid endpoint translatability checks keep existing failure behavior",
+        "Presolution witness canon/validation tests pass without loosening assertions",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Restore bounded aliasing baseline end-to-end",
+      "description": "As a user of thesis-faithful elaboration, I want bounded aliasing examples to elaborate to ∀a. a -> a -> a in both checked and unchecked pipelines.",
+      "acceptanceCriteria": [
+        "ElaborationSpec bounded-alias baseline passes via runPipelineElab",
+        "Same bounded-alias baseline passes via runPipelineElabChecked",
+        "Result types are alpha-equivalent to ∀a. a -> a -> a",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "Update project docs and trackers for staged/structural model",
+      "description": "As a maintainer, I want docs and bug tracking updated so staged frontend invariants and structural RaiseMerge gating are auditable.",
+      "acceptanceCriteria": [
+        "implementation_notes.md documents staged frontend raw->normalized boundary and structural RaiseMerge gating",
+        "CHANGELOG.md includes concise entry for this feature",
+        "Bugs.md updates bounded-alias bug status with linked regression tests",
+        "TODO.md is updated if priorities changed",
+        "Typecheck passes"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}

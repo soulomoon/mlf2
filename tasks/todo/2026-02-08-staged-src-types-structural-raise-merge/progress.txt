@@ -1,0 +1,7 @@
+## Codebase Patterns
+- Validation command: cabal build all && cabal test
+- Hspec test suite: mlf2-test
+- Keep implementation paper-faithful to papers/these-finale-english.txt
+
+## Iteration Log
+- 2026-02-08: Task initialized from PRD conversion.
