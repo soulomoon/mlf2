@@ -1822,6 +1822,31 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             out <- requireRight (Elab.applyInstantiation srcTy phi)
                             canonType (stripBoundWrapper out) `shouldBe` canonType (stripBoundWrapper tgtTy)
 
+            it "witness normalization preserves OpRaiseMerge coalescing end-to-end (US-010)" $ do
+                -- Verify that the full presolution pipeline still produces valid
+                -- normalized witnesses after the structural RaiseMerge gating
+                -- refactor (US-007 through US-009).
+                let expr = ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (ELit (LInt 1)))
+                    checkNoDupRaises [] = pure ()
+                    checkNoDupRaises [_] = pure ()
+                    checkNoDupRaises (OpRaise n : rest@(OpRaise m : _))
+                        | n == m = expectationFailure ("Consecutive duplicate OpRaise on " ++ show n)
+                        | otherwise = checkNoDupRaises rest
+                    checkNoDupRaises (_ : rest) = checkNoDupRaises rest
+                case runToSolved expr of
+                    Left err -> expectationFailure err
+                    Right (solved, ews, traces) -> do
+                        IntMap.size ews `shouldSatisfy` (> 0)
+                        forM_ (IntMap.elems ews) $ \ew -> do
+                            let ops = [op | StepOmega op <- ewSteps ew]
+                            checkNoDupRaises ops
+                            let EdgeId eid = ewEdgeId ew
+                                mTrace = IntMap.lookup eid traces
+                            case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing Nothing mTrace ew of
+                                Left (Elab.PhiTranslatabilityError _) -> pure ()
+                                Left err -> expectationFailure ("Unexpected error: " ++ show err)
+                                Right _ -> pure ()
+
             it "contextToNodeBound computes inside-bound contexts (context)" $ do
                 -- root binds a and b; b's bound contains binder c.
                 -- Context to reach c must go under a, then inside b's bound.

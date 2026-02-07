@@ -395,6 +395,102 @@ spec = do
                 ops0 = [OpGraft arg b, OpWeaken b, OpMerge b a]
             normalizeInstanceOpsFull env ops0 `shouldBe` Right ops0
 
+        describe "Witness normalization invariants (US-010 regression)" $ do
+            it "OpRaise;OpMerge coalesces to OpRaiseMerge through full pipeline" $ do
+                let c = mkNormalizeConstraint
+                    root = NodeId 0
+                    n = NodeId 2
+                    m = NodeId 3
+                    env = mkNormalizeEnv c root (IntSet.fromList [getNodeId n])
+                    ops0 = [OpRaise n, OpMerge n m]
+                normalizeInstanceOpsFull env ops0 `shouldBe` Right [OpRaiseMerge n m]
+
+            it "multiple OpRaise;OpMerge coalesces to single OpRaiseMerge" $ do
+                let c = mkNormalizeConstraint
+                    root = NodeId 0
+                    n = NodeId 2
+                    m = NodeId 3
+                    env = mkNormalizeEnv c root (IntSet.fromList [getNodeId n])
+                    ops0 = [OpRaise n, OpRaise n, OpRaise n, OpMerge n m]
+                normalizeInstanceOpsFull env ops0 `shouldBe` Right [OpRaiseMerge n m]
+
+            it "RaiseMerge validation rejects rigid endpoint only on non-operated node m" $ do
+                let root = NodeId 0
+                    n = NodeId 1
+                    m = NodeId 2
+                    c =
+                        rootedConstraint emptyConstraint
+                            { cNodes = nodeMapFromList
+                                    [ (getNodeId root, TyArrow root n m)
+                                    , (getNodeId n, TyVar { tnId = n, tnBound = Nothing })
+                                    , (getNodeId m, TyVar { tnId = m, tnBound = Nothing })
+                                    ]
+                            , cBindParents =
+                                bindParentsFromPairs
+                                    [ (n, root, BindFlex)
+                                    , (m, root, BindRigid)
+                                    ]
+                            }
+                    env = mkNormalizeEnv c root (IntSet.fromList [getNodeId n, getNodeId m])
+                    op = OpRaiseMerge n m
+                validateNormalizedWitness env [op]
+                    `shouldBe` Left (RigidOperandMismatch op n m)
+
+            it "RaiseMerge with rigid operated node n passes validation" $ do
+                let root = NodeId 0
+                    n = NodeId 1
+                    m = NodeId 2
+                    c =
+                        rootedConstraint emptyConstraint
+                            { cNodes = nodeMapFromList
+                                    [ (getNodeId root, TyArrow root n m)
+                                    , (getNodeId n, TyVar { tnId = n, tnBound = Nothing })
+                                    , (getNodeId m, TyVar { tnId = m, tnBound = Nothing })
+                                    ]
+                            , cBindParents =
+                                bindParentsFromPairs
+                                    [ (n, root, BindRigid)
+                                    , (m, root, BindFlex)
+                                    ]
+                            }
+                    env = mkNormalizeEnv c root (IntSet.fromList [getNodeId n])
+                    op = OpRaiseMerge n m
+                validateNormalizedWitness env [op] `shouldBe` Right ()
+
+            it "normalizeInstanceStepsFull preserves RaiseMerge coalescing across StepIntro boundaries" $ do
+                let c = mkNormalizeConstraint
+                    root = NodeId 0
+                    n = NodeId 2
+                    m = NodeId 3
+                    arg = NodeId 10
+                    env = mkNormalizeEnv c root (IntSet.fromList [getNodeId root, getNodeId n])
+                    steps0 =
+                        [ StepOmega (OpRaise n)
+                        , StepOmega (OpMerge n m)
+                        , StepIntro
+                        , StepOmega (OpGraft arg root)
+                        ]
+                normalizeInstanceStepsFull env steps0
+                    `shouldBe`
+                        Right
+                            [ StepOmega (OpRaiseMerge n m)
+                            , StepIntro
+                            , StepOmega (OpGraft arg root)
+                            ]
+
+            it "validated witnesses remain valid after idempotent re-normalization" $ do
+                let c = mkNormalizeConstraint
+                    root = NodeId 0
+                    n = NodeId 2
+                    m = NodeId 3
+                    env = mkNormalizeEnv c root (IntSet.fromList [getNodeId n])
+                    ops0 = [OpRaise n, OpMerge n m]
+                case normalizeInstanceOpsFull env ops0 of
+                    Left err -> expectationFailure ("first normalization failed: " ++ show err)
+                    Right ops1 -> do
+                        ops1 `shouldBe` [OpRaiseMerge n m]
+                        normalizeInstanceOpsFull env ops1 `shouldBe` Right ops1
+
         describe "Normalized witness validation" $ do
             it "rejects ops outside the interior (condition 1)" $ do
                 let c = mkNormalizeConstraint
