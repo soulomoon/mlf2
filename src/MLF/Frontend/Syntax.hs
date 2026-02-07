@@ -11,8 +11,15 @@ module MLF.Frontend.Syntax (
     Expr (..),
     SurfaceExpr,
     CoreExpr,
+    -- * Raw source types (parser output)
     SrcType (..),
     SrcTypeF (..),
+    -- * Staged frontend types
+    TypeStage (..),
+    NormSrcType (..),
+    StructBound (..),
+    RawSrcType,
+    -- * Metadata
     AnnotatedExpr (..),
     BindingSite (..)
 ) where
@@ -29,12 +36,14 @@ This module defines the *surface language* accepted by the pipeline and the
     λ-calculus).
   - `Expr 'Core` is the annotation-free core term language used internally
     after desugaring.
-  - `SrcType` are the user-written type annotations.
+  - `SrcType` are the user-written type annotations (raw, as parsed).
+  - `NormSrcType` are normalized type annotations where alias bounds have been
+    inlined (see Note [Staged frontend types]).
 
 Paper reference
 --------------
 In `papers/these-finale-english.txt` (see `papers/xmlf.txt` §"From λ-terms to typing constraints"), the grammar for
-eMLF terms is (using the paper’s notation):
+eMLF terms is (using the paper's notation):
 
   b ::= x | λ(x) b | λ(x : σ) b | b b | let x = b in b | (b : σ)
 
@@ -77,7 +86,30 @@ data Lit
     | LString String
     deriving (Eq, Show)
 
--- | Source-level type syntax for annotations.
+{- Note [Staged frontend types]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Frontend types come in two stages, tracked by 'TypeStage':
+
+  - 'Raw' ('SrcType'): Produced by the parser. Forall bounds can be any type,
+    including bare variable aliases like @∀(b ⩾ a). body@.
+
+  - 'Normalized' ('NormSrcType'): Produced by 'MLF.Frontend.Normalize'. Alias
+    bounds have been inlined via capture-avoiding substitution. The bound of a
+    forall is always structural (arrow, base, constructor, forall, or bottom) —
+    never a bare variable. This invariant is enforced by construction:
+    'NormSrcType' uses 'StructBound' for forall bounds, and 'StructBound' has
+    no variable constructor.
+
+'SrcType' is the original (unchanged) data type used throughout the codebase.
+'NormSrcType' is a new type introduced for the normalized stage. The alias
+@RawSrcType = SrcType@ is provided for symmetry.
+-}
+
+-- | Normalization stage for frontend types.
+data TypeStage = Raw | Normalized
+    deriving (Eq, Show)
+
+-- | Source-level type syntax for annotations (raw / parser output).
 --
 -- This corresponds closely to the type language presented in
 -- `papers/these-finale-english.txt` (see `papers/xmlf.txt`):
@@ -89,7 +121,7 @@ data Lit
 --
 -- We add a small convenience notationally:
 --
---   - In `STForall v Nothing body`, the missing bound means “bound = ⊥”, i.e.
+--   - In @STForall v Nothing body@, the missing bound means "bound = ⊥", i.e.
 --     the common unbounded form ∀(v). body.
 --
 -- Examples:
@@ -104,6 +136,37 @@ data SrcType
     | STCon String (NonEmpty SrcType)           -- ^ Constructor application: C σ…
     | STForall String (Maybe SrcType) SrcType   -- ^ Bounded quantification: ∀(α ⩾ τ?). σ
     | STBottom                                  -- ^ Bottom type: ⊥
+    deriving (Eq, Show)
+
+-- | Backward-compatible alias: 'RawSrcType' = 'SrcType'.
+type RawSrcType = SrcType
+
+-- | Normalized source-level type syntax.
+--
+-- Like 'SrcType' but forall bounds use 'StructBound' instead of @Maybe SrcType@,
+-- ensuring that alias bounds (∀(b ⩾ a). body) are unrepresentable by
+-- construction. See Note [Staged frontend types].
+data NormSrcType
+    = NSTVar String                                         -- ^ Type variable: α
+    | NSTArrow NormSrcType NormSrcType                      -- ^ Arrow type: τ → σ
+    | NSTBase String                                        -- ^ Base type: Int, Bool, ...
+    | NSTCon String (NonEmpty NormSrcType)                  -- ^ Constructor application: C σ…
+    | NSTForall String (Maybe StructBound) NormSrcType      -- ^ Bounded quantification: ∀(α ⩾ τ?). σ
+    | NSTBottom                                             -- ^ Bottom type: ⊥
+    deriving (Eq, Show)
+
+-- | Structural bound for normalized forall types.
+--
+-- This type mirrors 'NormSrcType' but intentionally omits a variable
+-- constructor, ensuring that alias bounds (∀(b ⩾ a). body) are
+-- unrepresentable after normalization. A forall bound in normalized form is
+-- always structural: arrow, base, constructor, nested forall, or bottom.
+data StructBound
+    = SBArrow NormSrcType NormSrcType                       -- ^ Arrow bound: τ → σ
+    | SBBase String                                         -- ^ Base type bound: Int, Bool, ...
+    | SBCon String (NonEmpty NormSrcType)                   -- ^ Constructor bound: C σ…
+    | SBForall String (Maybe StructBound) NormSrcType       -- ^ Nested forall bound: ∀(α ⩾ τ?). σ
+    | SBBottom                                              -- ^ Bottom bound: ⊥
     deriving (Eq, Show)
 
 data SrcTypeF a
@@ -173,8 +236,8 @@ type CoreExpr = Expr 'Core
 
 -- | Optional wrapper for attaching binding-site metadata to a surface expression.
 --
--- This is primarily useful for tooling/debugging (e.g. reporting “this variable
--- occurrence is a lambda parameter vs a let-binding”). The main constraint
+-- This is primarily useful for tooling/debugging (e.g. reporting "this variable
+-- occurrence is a lambda parameter vs a let-binding"). The main constraint
 -- generator uses its own annotation structure (`MLF.Frontend.ConstraintGen.AnnExpr`).
 data AnnotatedExpr = AnnotatedExpr
     { annExpr :: SurfaceExpr
@@ -184,7 +247,7 @@ data AnnotatedExpr = AnnotatedExpr
 
 -- | Distinguish between lambda parameters and let-bound values.
 --
--- This mirrors the paper’s key distinction:
+-- This mirrors the paper's key distinction:
 --   - lambda-bound variables are not generalized (monomorphic),
 --   - let-bound variables may be generalized and later instantiated.
 data BindingSite
