@@ -173,8 +173,8 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
             } = binderPlan
         ReifyPlan
             { rpPlan = reifyPlan
-            , rpTypeRootForReifyAdjusted = typeRootForReifyAdjusted
-            , rpSubstForReifyAdjusted = substForReifyAdjusted
+            , rpTypeRootForReifyAdjusted = _typeRootForReifyAdjusted
+            , rpSubstForReifyAdjusted = _substForReifyAdjusted
             } = reifyPlanWrapper
         Reify.ReifyPlan
             { Reify.rpSubst = subst
@@ -195,14 +195,19 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
                     structuralChildrenWithBounds node
                 Just node -> structuralChildren node
                 Nothing -> []
-    let uniqueUnboundedName =
+    let lookupCanonicalBound nid =
+            case VarStore.lookupVarBound constraint (canonical nid) of
+                Just bnd
+                    | Just _ <- NodeAccess.lookupNode constraint (canonical bnd) ->
+                        Just (canonical bnd)
+                _ -> Nothing
+        uniqueUnboundedName =
             case [ name
                  | (name, nidInt) <- zip binderNames orderedBinders
                  , Nothing <- [lookupCanonicalBound (NodeId nidInt)]
                  ] of
                 [nm] -> Just nm
                 _ -> Nothing
-        lookupCanonicalBound nid = VarStore.lookupVarBound constraint (canonical nid)
     let binderSet = IntSet.fromList orderedBinders
         bindingEnv =
             Reify.ReifyBindingEnv
@@ -271,7 +276,12 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
             -- Basic setup
             bodyRootC = canonical bodyRoot
             canonicalKey = getNodeId . canonical
-            lookupBound nid = VarStore.lookupVarBound constraint (canonical nid)
+            lookupBound nid =
+                case VarStore.lookupVarBound constraint (canonical nid) of
+                    Just bnd
+                        | Just _ <- NodeAccess.lookupNode constraint (canonical bnd) ->
+                            Just (canonical bnd)
+                    _ -> Nothing
 
             -- Determine whether to use constraint-based or result-based reification
             useConstraintReify =
@@ -311,6 +321,13 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
                     | key <- rigidNodeKeys
                     ]
 
+            binderNameByCanonicalKey =
+                IntMap.fromList
+                    [ (key, name)
+                    | (b, name) <- binderPairs
+                    , key <- canonicalKey b : [ canonicalKey bnd | Just bnd <- [lookupBound b] ]
+                    ]
+
             -- Alias handling
             reachableWithoutBound bnd =
                 let shouldStop nid = getNodeId nid == getNodeId (canonical bnd)
@@ -342,20 +359,31 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
                     let computeRigidBound key = do
                             let nid = NodeId key
                                 name = rigidNameFor key
+                                fallbackTy =
+                                    case IntMap.lookup key substMap of
+                                        Just substName -> TVar substName
+                                        Nothing ->
+                                            case IntMap.lookup key binderNameByCanonicalKey of
+                                                Just binderName -> TVar binderName
+                                                Nothing -> TVar name
                             case lookupBound nid of
-                                Nothing -> pure (name, TBottom)
+                                Nothing -> pure (name, fallbackTy)
                                 Just bnd -> do
-                                    bndTy <- reifyBoundWith substMap constraintArg resArg (canonical bnd)
-                                    pure (name, bndTy)
+                                    case reifyBoundWith substMap constraintArg resArg (canonical bnd) of
+                                        Left (MissingNode _) -> pure (name, fallbackTy)
+                                        Left err -> Left err
+                                        Right bndTy -> pure (name, bndTy)
                     rigidBounds <- mapM computeRigidBound rigidNodeKeys
                     let rigidMap = Map.fromList rigidBounds
                     pure (inlineRigidTypes rigidMap ty)
 
-    let orderedBinderPairs = zip (map NodeId orderedBinders) binderNames
+    let solvedTypeRootForReify = typeRoot
+        solvedSubstForReify = subst
+        orderedBinderPairs = zip (map NodeId orderedBinders) binderNames
         reifyTypeWithOrderedBinders =
             reifyTypeWithAliases
-                typeRootForReifyAdjusted
-                substForReifyAdjusted
+                solvedTypeRootForReify
+                solvedSubstForReify
                 orderedBinderPairs
 
     let reifySchemeType
@@ -422,11 +450,16 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
                         , case IntMap.lookup (getNodeId typeRootC) nodes of
                             Just TyVar{} | Just bnd <- lookupCanonicalBound typeRootC ->
                                 canonical bnd
-                            _ -> typeRootForReifyAdjusted
+                            _ -> solvedTypeRootForReify
                         )
 
             explicitBounds binders names substExplicit =
-                let lookupBound nid = VarStore.lookupVarBound constraint (canonical nid)
+                let lookupBound nid =
+                        case VarStore.lookupVarBound constraint (canonical nid) of
+                            Just bnd
+                                | Just _ <- NodeAccess.lookupNode constraint (canonical bnd) ->
+                                    Just (canonical bnd)
+                            _ -> Nothing
                     inlineNamedBounds = inlineNamedBoundsFor substExplicit
                     computeBound (b, name) =
                         case lookupBound b of
@@ -456,8 +489,8 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
                 | scopeHasStructuralScheme && null bindings =
                     reifyTypeWithNamesNoFallbackOnConstraint
                         constraint
-                        substForReifyAdjusted
-                        typeRootForReifyAdjusted
+                        solvedSubstForReify
+                        solvedTypeRootForReify
                 | Just ga <- mbBindParentsGa = reifyWithGaBase ga
                 | otherwise = reifyTypeWithOrderedBinders
 
@@ -471,16 +504,21 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
                         Just baseN
                             | canonical baseN /= canonical typeRoot
                             , Just _ <- NodeAccess.lookupNode (gaBaseConstraint ga') baseN -> do
-                                tyBase <-
+                                case
                                     reifyTypeWithNamesNoFallbackOnConstraint
                                         (gaBaseConstraint ga')
                                         substBaseByKey
                                         baseN
-                                let freeBase = freeTypeVarsFrom Set.empty tyBase
-                                    allowedBase = Set.fromList (IntMap.elems substBaseByKey)
-                                if Set.isSubsetOf freeBase allowedBase
-                                    then pure (Just tyBase)
-                                    else pure Nothing
+                                    of
+                                    Left (MissingNode _) -> pure Nothing
+                                    Left err -> Left err
+                                    Right tyBase ->
+                                        let freeBase = freeTypeVarsFrom Set.empty tyBase
+                                            allowedBase = Set.fromList (IntMap.elems substBaseByKey)
+                                        in
+                                            if Set.isSubsetOf freeBase allowedBase
+                                                then pure (Just tyBase)
+                                                else pure Nothing
                         _ -> pure Nothing
     ty0Raw <- reifySchemeType
     finalizeScheme FinalizeInput
