@@ -7,6 +7,9 @@
 - Downstream modules import SrcType(..) from MLF.Frontend.Syntax or via MLF.API/MyLib re-exports
 - Only `LambdaCase` is a default extension in mlf2.cabal; other extensions need per-file pragmas
 - Adding a type parameter to a GADT is backward-compatible when existing type aliases fix the new parameter to the old concrete type (e.g., `type SurfaceExpr = Expr 'Surface SrcType`)
+- Use pattern match on `filter` results instead of `head` to avoid `-Wx-partial` warning with GHC 9.12
+- Frontend normalization: alias bounds (STVar in forall bound) are inlined via capture-avoiding substitution; structural bounds go through `normalizeBound` which has no STVar case
+- Adding a type parameter to a GADT is backward-compatible when existing type aliases fix the new parameter to the old concrete type (e.g., `type SurfaceExpr = Expr 'Surface SrcType`)
 
 ## Iteration Log
 - 2026-02-08: Task initialized from PRD conversion.
@@ -40,4 +43,47 @@
   - The `Eq ty =>` and `Show ty =>` constraints on standalone deriving are required when the GADT stores `ty` values
   - Re-export chain (MLF.Frontend.Syntax → MLF.API via `module MLF.Frontend.Syntax` → MyLib) automatically picks up new exports
   - All 499 tests pass, no warnings
+---
+
+## 2026-02-08 - US-003
+- What was implemented: Raw-to-normalized frontend normalization module
+  - Added `MLF.Frontend.Normalize` with `normalizeType :: SrcType -> Either NormalizationError NormSrcType`
+  - Added `normalizeExpr :: SurfaceExpr -> Either NormalizationError NormSurfaceExpr`
+  - Alias bounds (∀(b ⩾ a). body) are inlined via capture-avoiding substitution: `body[b := a]`
+  - Self-bound foralls (∀(a ⩾ a). body) produce explicit `SelfBoundVariable` error
+  - Capture-avoiding substitution alpha-renames binders when replacement would be captured
+  - Exported `freeVarsSrcType` and `substSrcType` utilities for testing
+  - Added `FrontendNormalizeSpec` with 27 unit tests covering:
+    - Free variable computation (6 tests)
+    - Capture-avoiding substitution (6 tests)
+    - Type normalization including alias inlining, structural bounds, self-bound rejection, alpha-capture avoidance, constructors (10 tests)
+    - Expression normalization (4 tests)
+    - One explicit alpha-capture avoidance scenario: ∀a. ∀(b ⩾ a). ∀a. b → a
+- Files changed: src/MLF/Frontend/Normalize.hs (new), test/FrontendNormalizeSpec.hs (new), mlf2.cabal, test/Main.hs
+- **Learnings for future iterations:**
+  - The `freshNameLike` pattern (base, base1, base2, ...) works well for alpha-renaming; use pattern match instead of `head` to avoid `-Wx-partial` warning
+  - `StructBound` has no variable constructor, so `normalizeBound` for `STVar` is unreachable from the `STForall` handler — the alias case is peeled off before calling `normalizeBound`
+  - Normalization of nested alias bounds in structural positions requires recursive re-normalization after inlining
+  - All 526 tests pass (27 new), no warnings
+---
+
+## 2026-02-08 - US-004
+- What was implemented: Split parser API into raw and normalized entrypoints
+  - Added `parseRawEmlfExpr` / `parseRawEmlfType` as explicit raw parser entrypoints
+  - Added `parseNormEmlfExpr` / `parseNormEmlfType` that parse raw then normalize via `MLF.Frontend.Normalize`
+  - Added `NormParseError` sum type (`NormParseErr EmlfParseError | NormNormErr NormalizationError`)
+  - Added `renderNormParseError` for human-readable error rendering of both parse and normalization errors
+  - Kept `parseEmlfExpr` / `parseEmlfType` as backward-compatible legacy aliases for raw entrypoints
+  - Updated `MLF.API` exports: raw entrypoints, normalized entrypoints, `NormParseError(..)`, `renderNormParseError`, plus `NormalizationError(..)`, `normalizeType`, `normalizeExpr`
+  - Updated `FrontendParseSpec` with 17 new tests:
+    - 8 normalized type tests (variable, arrow, unbounded forall, structural bound, alias inlining, self-bound rejection, base, constructor)
+    - 4 normalized expression tests (unannotated, annotation, annotated lambda, self-bound rejection)
+    - 2 legacy alias equivalence tests
+    - 3 error rendering tests (raw parse error, normalized parse error, normalization error)
+- Files changed: src/MLF/Frontend/Parse.hs, src-public/MLF/API.hs, test/FrontendParseSpec.hs
+- **Learnings for future iterations:**
+  - The `mapLeft` helper is needed for composing `Either` chains with different error types; Haskell base doesn't export it
+  - Normalized parser entrypoints are a simple composition: parse raw → normalize, with error type unification via a sum type
+  - Re-export chain (MLF.Frontend.Parse → MLF.API → MyLib) automatically picks up new exports when using `module MLF.Frontend.Syntax` re-export
+  - All 543 tests pass (17 new), no warnings
 ---

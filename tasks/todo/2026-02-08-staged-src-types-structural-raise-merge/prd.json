@@ -46,8 +46,8 @@
         "Tests pass"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added MLF.Frontend.Normalize module with normalizeType (SrcType → NormSrcType) and normalizeExpr (SurfaceExpr → NormSurfaceExpr). Alias bounds (∀(b ⩾ a). body) are inlined via capture-avoiding substitution. Self-bound foralls produce explicit SelfBoundVariable error. 27 new tests in FrontendNormalizeSpec covering free vars, substitution, normalization, and alpha-capture avoidance. All 526 tests pass."
     },
     {
       "id": "US-004",
@@ -62,8 +62,8 @@
         "Tests pass"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added parseRawEmlfExpr/parseRawEmlfType (raw entrypoints returning SrcType/SurfaceExpr) and parseNormEmlfExpr/parseNormEmlfType (normalized entrypoints that parse raw then normalize, returning NormSrcType/NormSurfaceExpr). Added NormParseError sum type and renderNormParseError. Legacy parseEmlfExpr/parseEmlfType kept as aliases. All exports added to MLF.API. FrontendParseSpec updated with 17 new tests covering raw, normalized, legacy, and error rendering paths. All 543 tests pass."
     },
     {
       "id": "US-005",

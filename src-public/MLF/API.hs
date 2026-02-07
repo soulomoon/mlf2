@@ -3,10 +3,25 @@ module MLF.API
     ( module MLF.Frontend.Syntax
     , ConstraintResult (..)
     , ConstraintError (..)
+    -- * Parse error types
     , EmlfParseError
+    , NormParseError (..)
+    , renderEmlfParseError
+    , renderNormParseError
+    -- * Raw parser entrypoints
+    , parseRawEmlfExpr
+    , parseRawEmlfType
+    -- * Normalized parser entrypoints
+    , parseNormEmlfExpr
+    , parseNormEmlfType
+    -- * Legacy parser aliases (backward-compatible, same as raw)
     , parseEmlfExpr
     , parseEmlfType
-    , renderEmlfParseError
+    -- * Normalization
+    , NormalizationError (..)
+    , normalizeType
+    , normalizeExpr
+    -- * Pretty-printing
     , prettyEmlfExpr
     , prettyEmlfType
     , BaseTy (..)
@@ -41,9 +56,20 @@ module MLF.API
 import MLF.Frontend.Syntax
 import MLF.Frontend.Parse
     ( EmlfParseError
+    , NormParseError (..)
+    , parseRawEmlfExpr
+    , parseRawEmlfType
+    , parseNormEmlfExpr
+    , parseNormEmlfType
     , parseEmlfExpr
     , parseEmlfType
     , renderEmlfParseError
+    , renderNormParseError
+    )
+import MLF.Frontend.Normalize
+    ( NormalizationError (..)
+    , normalizeType
+    , normalizeExpr
     )
 import MLF.Frontend.Pretty
     ( prettyEmlfExpr

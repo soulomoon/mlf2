@@ -1,8 +1,18 @@
 module MLF.Frontend.Parse (
+    -- * Error types
     EmlfParseError,
+    NormParseError (..),
+    renderEmlfParseError,
+    renderNormParseError,
+    -- * Raw parser entrypoints (return SrcType / SurfaceExpr)
+    parseRawEmlfExpr,
+    parseRawEmlfType,
+    -- * Normalized parser entrypoints (parse raw, then normalize)
+    parseNormEmlfExpr,
+    parseNormEmlfType,
+    -- * Legacy aliases (backward-compatible, same as raw)
     parseEmlfExpr,
     parseEmlfType,
-    renderEmlfParseError
 ) where
 
 import Control.Monad (void)
@@ -11,9 +21,16 @@ import Data.List.NonEmpty (NonEmpty (..))
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Void (Void)
+import MLF.Frontend.Normalize
+    ( NormalizationError
+    , normalizeExpr
+    , normalizeType
+    )
 import MLF.Frontend.Syntax
     ( Expr (..)
     , Lit (..)
+    , NormSrcType
+    , NormSurfaceExpr
     , SrcType (..)
     , SurfaceExpr
     )
@@ -40,20 +57,79 @@ type Parser = Parsec Void String
 newtype EmlfParseError = EmlfParseError (ParseErrorBundle String Void)
     deriving (Eq, Show)
 
-parseEmlfExpr :: String -> Either EmlfParseError SurfaceExpr
-parseEmlfExpr input =
+-- | Errors from normalized parsing: either a parse error or a normalization error.
+data NormParseError
+    = NormParseErr EmlfParseError
+    | NormNormErr NormalizationError
+    deriving (Eq, Show)
+
+-- ---------------------------------------------------------------------------
+-- Raw parser entrypoints
+-- ---------------------------------------------------------------------------
+
+-- | Parse a raw eMLF expression (returns 'SurfaceExpr' with 'SrcType' annotations).
+parseRawEmlfExpr :: String -> Either EmlfParseError SurfaceExpr
+parseRawEmlfExpr input =
     case parse (sc *> pExpr <* eof) "<emlf-expr>" input of
         Left err -> Left (EmlfParseError err)
         Right e -> Right e
 
-parseEmlfType :: String -> Either EmlfParseError SrcType
-parseEmlfType input =
+-- | Parse a raw eMLF type (returns 'SrcType').
+parseRawEmlfType :: String -> Either EmlfParseError SrcType
+parseRawEmlfType input =
     case parse (sc *> pType <* eof) "<emlf-type>" input of
         Left err -> Left (EmlfParseError err)
         Right ty -> Right ty
 
+-- ---------------------------------------------------------------------------
+-- Normalized parser entrypoints (parse raw, then normalize)
+-- ---------------------------------------------------------------------------
+
+-- | Parse an eMLF expression and normalize all type annotations.
+-- Returns 'NormSurfaceExpr' with 'NormSrcType' annotations.
+parseNormEmlfExpr :: String -> Either NormParseError NormSurfaceExpr
+parseNormEmlfExpr input = do
+    raw <- mapLeft NormParseErr (parseRawEmlfExpr input)
+    mapLeft NormNormErr (normalizeExpr raw)
+
+-- | Parse an eMLF type and normalize it.
+-- Returns 'NormSrcType' with alias bounds inlined.
+parseNormEmlfType :: String -> Either NormParseError NormSrcType
+parseNormEmlfType input = do
+    raw <- mapLeft NormParseErr (parseRawEmlfType input)
+    mapLeft NormNormErr (normalizeType raw)
+
+-- ---------------------------------------------------------------------------
+-- Legacy aliases (backward-compatible)
+-- ---------------------------------------------------------------------------
+
+-- | Legacy alias for 'parseRawEmlfExpr'.
+parseEmlfExpr :: String -> Either EmlfParseError SurfaceExpr
+parseEmlfExpr = parseRawEmlfExpr
+
+-- | Legacy alias for 'parseRawEmlfType'.
+parseEmlfType :: String -> Either EmlfParseError SrcType
+parseEmlfType = parseRawEmlfType
+
+-- ---------------------------------------------------------------------------
+-- Error rendering
+-- ---------------------------------------------------------------------------
+
 renderEmlfParseError :: EmlfParseError -> String
 renderEmlfParseError (EmlfParseError err) = errorBundlePretty err
+
+-- | Render a 'NormParseError' to a human-readable string.
+renderNormParseError :: NormParseError -> String
+renderNormParseError (NormParseErr pe) = renderEmlfParseError pe
+renderNormParseError (NormNormErr ne) = "Normalization error: " ++ show ne
+
+-- ---------------------------------------------------------------------------
+-- Internal helpers
+-- ---------------------------------------------------------------------------
+
+mapLeft :: (a -> c) -> Either a b -> Either c b
+mapLeft f (Left a) = Left (f a)
+mapLeft _ (Right b) = Right b
 
 sc :: Parser ()
 sc =
