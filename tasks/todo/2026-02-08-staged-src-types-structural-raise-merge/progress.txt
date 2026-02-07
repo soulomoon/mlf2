@@ -15,6 +15,7 @@
 - Test helpers (inferConstraintGraphDefault, requirePipeline, etc.) normalize via normalizeExpr before calling pipeline functions
 - MLF.Pipeline is the focused pipeline-only public API (exports staged types + normalization + pipeline entrypoints); MLF.API is the full public API re-exporting everything
 - EdgeUnifyM has MonadPresolution instance; prefer live graph queries (e.g., lookupVarBoundM) over precomputed snapshots in edge-unify state
+- `shouldRecordRaiseMerge` is the single source of truth for RaiseMerge gating — encapsulates all five structural criteria (node kind, live bound, same-root, ancestry/interior, elimination)
 
 ## Iteration Log
 - 2026-02-08: Task initialized from PRD conversion.
@@ -159,5 +160,25 @@
   - `lookupVarBoundM` (from `MonadEdgeUnify` typeclass) provides live UF-canonical bound lookup, making precomputed snapshots unnecessary — the live query is always up-to-date with unification state
   - `EdgeUnifyM` has `MonadPresolution` instance, so `Ops.lookupVarBound` is accessible via `lift` or via the typeclass method `lookupVarBoundM`
   - The `binderBounds` map in `Fallback.hs` is a completely different local variable (elaboration-time base-bound tracking) — not related to `eusBinderBounds`
+  - All 544 tests pass, no warnings
+---
+
+## 2026-02-08 - US-009
+- What was implemented: Refactored RaiseMerge gating to purely structural live queries
+  - Moved `isEliminated` check from call sites in `unifyAcyclicEdge` into `shouldRecordRaiseMerge`, making it the single source of truth for all five structural criteria
+  - Removed redundant `TyVar` node-kind checks at call sites (already checked inside `shouldRecordRaiseMerge`)
+  - Simplified call sites: `shouldRecordRaiseMerge` now returns `False` for already-eliminated binders, so callers just check `when should`
+  - Added comprehensive Haddock documenting the five-criterion decision logic:
+    1. Node kind: ext must be TyVar
+    2. Live bound root: binder must have canonical bound (via `lookupVarBoundM`)
+    3. Same-root exclusion: bound root ≠ ext root
+    4. Edge-root ancestry / interior membership: `above || not inInterior`
+    5. Elimination state: binder not already eliminated
+  - All queries use current canonical graph state — no precomputed snapshots
+- Files changed: src/MLF/Constraint/Presolution/EdgeUnify.hs
+- **Learnings for future iterations:**
+  - When consolidating decision logic into a single function, check for redundant checks at call sites that can be removed
+  - The `isEliminated` check is a short-circuit: placing it first avoids unnecessary graph queries for already-eliminated binders
+  - The five structural criteria map directly to the paper's RaiseMerge side-conditions (thesis §3.4)
   - All 544 tests pass, no warnings
 ---

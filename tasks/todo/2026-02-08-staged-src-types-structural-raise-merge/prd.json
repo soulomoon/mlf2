@@ -140,8 +140,8 @@
         "Tests pass"
       ],
       "priority": 9,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Refactored shouldRecordRaiseMerge to be the single source of truth for RaiseMerge gating. Moved elimination state check (isEliminated) into shouldRecordRaiseMerge so all five structural criteria (node kind, live bound root, same-root exclusion, edge-root ancestry/interior membership, elimination state) are encapsulated in one function. Removed redundant TyVar checks at call sites in unifyAcyclicEdge. Added comprehensive Haddock documenting the five-criterion decision logic. All queries use live canonical graph state — no precomputed snapshots. All 544 tests pass."
     },
     {
       "id": "US-010",
