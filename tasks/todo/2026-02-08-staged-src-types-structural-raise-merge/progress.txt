@@ -14,6 +14,7 @@
 - internalizeCoercionCopy works with NormSrcType; StructBound is converted to NormSrcType via structBoundToNormSrcType for recursive internalization
 - Test helpers (inferConstraintGraphDefault, requirePipeline, etc.) normalize via normalizeExpr before calling pipeline functions
 - MLF.Pipeline is the focused pipeline-only public API (exports staged types + normalization + pipeline entrypoints); MLF.API is the full public API re-exporting everything
+- EdgeUnifyM has MonadPresolution instance; prefer live graph queries (e.g., lookupVarBoundM) over precomputed snapshots in edge-unify state
 
 ## Iteration Log
 - 2026-02-08: Task initialized from PRD conversion.
@@ -125,4 +126,38 @@
   - GADT constructors that don't mention the type parameter (e.g., `ELam`, `EVar`) are polymorphic in it, so `ELam "x" (EVar "x")` has type `Expr 'Surface ty` for any `ty` — this means simple expressions compile against `NormSurfaceExpr` without explicit normalization, but explicit normalization is still best practice
   - The `module MLF.Frontend.Syntax` re-export in `MLF.API` automatically picks up all staged type exports (TypeStage, NormSrcType, StructBound, etc.)
   - All 543 tests pass, no warnings
+---
+
+## 2026-02-08 - US-007
+- What was implemented: Documented alias-bound unreachability in coercion internalization and updated ConstraintGenSpec for normalized-only alias handling
+  - Added documentation to `NSTForall` case in `internalizeCoercionCopy` explaining that alias bounds are unreachable because normalization inlines them via capture-avoiding substitution before constraint generation
+  - `StructBound` has no variable constructor, so `Maybe StructBound` can only be `Nothing` or a structural bound — alias bounds are structurally unrepresentable
+  - Retained `ForallBoundMentionsBinder` well-formedness check for structural self-reference (e.g., `∀(a ⩾ List a). a`)
+  - Updated ConstraintGenSpec test section from "Forall-bound well-formedness" to "Forall-bound well-formedness (normalized-only)"
+  - Renamed test descriptions to accurately reflect the normalized-only world:
+    - "alias self-bound ∀(a ⩾ a) caught by normalization as SelfBoundVariable"
+    - "structural self-reference ∀(a ⩾ List a) caught by ForallBoundMentionsBinder"
+  - Added new test: "alias bound ∀(b ⩾ a) inlined by normalization before constraint gen" — verifies that `∀(b ⩾ a). b → a` is inlined to `a → a` by normalization and produces a valid constraint graph
+- Files changed: src/MLF/Frontend/ConstraintGen/Translate.hs, test/ConstraintGenSpec.hs
+- **Learnings for future iterations:**
+  - The alias-specific branch removal was already done in US-005 when `internalizeCoercionCopy` switched from `SrcType` to `NormSrcType`. US-007's main contribution is documentation and test coverage reflecting this invariant.
+  - `StructBound` having no variable constructor is the key type-level guarantee that alias bounds cannot reach constraint generation
+  - `ForallBoundMentionsBinder` remains useful for structural self-reference (binder appearing nested in a structural bound like `List a`), which normalization does not reject
+  - All 544 tests pass (1 new), no warnings
+---
+
+## 2026-02-08 - US-008
+- What was implemented: Dropped precomputed binder-bound snapshots from edge-unify state
+  - Removed `eusBinderBounds :: IntMap NodeId` field from `EdgeUnifyState` record
+  - Updated `initEdgeUnifyState` signature: removed `binderBounds` parameter (was `[(NodeId, NodeId)] -> IntMap NodeId -> InteriorSet -> NodeId`, now `[(NodeId, NodeId)] -> InteriorSet -> NodeId`)
+  - Removed `binderBounds` map construction in `EdgeProcessing.Unify` (6 lines building `IntMap` from `VarStore.lookupVarBound`)
+  - Removed unused `VarStore` import from `EdgeProcessing.Unify`
+  - Updated `shouldRecordRaiseMerge` to use `lookupVarBoundM binder` (live graph query via `MonadEdgeUnify` typeclass) instead of `IntMap.lookup (getNodeId binder) binderBounds` (precomputed snapshot)
+  - Updated `runEdgeUnifyForTest` callsite to match new 3-parameter signature
+- Files changed: src/MLF/Constraint/Presolution/EdgeUnify.hs, src/MLF/Constraint/Presolution/EdgeProcessing/Unify.hs
+- **Learnings for future iterations:**
+  - `lookupVarBoundM` (from `MonadEdgeUnify` typeclass) provides live UF-canonical bound lookup, making precomputed snapshots unnecessary — the live query is always up-to-date with unification state
+  - `EdgeUnifyM` has `MonadPresolution` instance, so `Ops.lookupVarBound` is accessible via `lift` or via the typeclass method `lookupVarBoundM`
+  - The `binderBounds` map in `Fallback.hs` is a completely different local variable (elaboration-time base-bound tracking) — not related to `eusBinderBounds`
+  - All 544 tests pass, no warnings
 ---

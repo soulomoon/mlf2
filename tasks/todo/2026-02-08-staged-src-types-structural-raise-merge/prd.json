@@ -109,8 +109,8 @@
         "Tests pass"
       ],
       "priority": 7,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Alias-specific branch was already removed in US-005 when internalizeCoercionCopy switched from SrcType to NormSrcType (StructBound has no variable constructor). US-007 documents this invariant in Translate.hs, updates ConstraintGenSpec test descriptions to reflect normalized-only alias handling, and adds a new test verifying alias bounds are inlined by normalization before reaching constraint gen. ForallBoundMentionsBinder retained for structural self-reference (e.g., ∀(a ⩾ List a). a). All 544 tests pass."
     },
     {
       "id": "US-008",
@@ -124,8 +124,8 @@
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Removed eusBinderBounds field from EdgeUnifyState record. Updated initEdgeUnifyState signature to drop binderBounds parameter (3→2 args before interior/edgeRoot). Removed binderBounds map construction in EdgeProcessing.Unify (VarStore import also removed). shouldRecordRaiseMerge now uses lookupVarBoundM for live graph queries instead of precomputed snapshot. runEdgeUnifyForTest updated. All 544 tests pass."
     },
     {
       "id": "US-009",

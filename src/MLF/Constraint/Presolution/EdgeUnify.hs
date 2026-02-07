@@ -71,7 +71,6 @@ data EdgeUnifyState = EdgeUnifyState
     , eusEdgeRoot :: NodeId -- ^ Expansion root r (edge-local χe root)
     , eusEliminatedBinders :: IntSet.IntSet -- ^ binders eliminated by Merge/RaiseMerge ops we record
     , eusBinderMeta :: IntMap NodeId -- ^ source binder -> copied/meta node in χe
-    , eusBinderBounds :: IntMap NodeId -- ^ source binder -> original bound (if any) before ω execution
     , eusOrderKeys :: IntMap Order.OrderKey -- ^ order keys for meta nodes (edge-local ≺)
     , eusOps :: [InstanceOp]
     }
@@ -172,7 +171,7 @@ runEdgeUnifyForTest
     -> PresolutionM [InstanceOp]
 runEdgeUnifyForTest edgeRoot interior n1 n2 = do
     requireValidBindingTree
-    eu0 <- initEdgeUnifyState [] IntMap.empty interior edgeRoot
+    eu0 <- initEdgeUnifyState [] interior edgeRoot
     (_a, eu1) <- runStateT (unifyAcyclicEdge n1 n2) eu0
     pure (eusOps eu1)
 
@@ -290,8 +289,8 @@ unifyAcyclicEdgeNoMerge n1 n2 = do
                     in m1
             in st { eusInteriorRoots = roots', eusBindersByRoot = binders', eusInteriorByRoot = interior' }
 
-initEdgeUnifyState :: [(NodeId, NodeId)] -> IntMap NodeId -> InteriorSet -> NodeId -> PresolutionM EdgeUnifyState
-initEdgeUnifyState binderArgs binderBounds interior edgeRoot = do
+initEdgeUnifyState :: [(NodeId, NodeId)] -> InteriorSet -> NodeId -> PresolutionM EdgeUnifyState
+initEdgeUnifyState binderArgs interior edgeRoot = do
     roots <- forM (IntSet.toList interior) $ \i -> Ops.findRoot (NodeId i)
     let interiorRoots = InteriorNodes (IntSet.fromList (map getNodeId roots))
     bindersByRoot <- foldM
@@ -344,7 +343,6 @@ initEdgeUnifyState binderArgs binderBounds interior edgeRoot = do
         , eusEdgeRoot = edgeRoot
         , eusEliminatedBinders = IntSet.empty
         , eusBinderMeta = binderMetaMap
-        , eusBinderBounds = binderBounds
         , eusOrderKeys = keys
         , eusOps = []
         }
@@ -573,11 +571,11 @@ unifyAcyclicEdge n1 n2 = do
 shouldRecordRaiseMerge :: NodeId -> NodeId -> EdgeUnifyM Bool
 shouldRecordRaiseMerge binder ext = do
     edgeRoot <- gets eusEdgeRoot
-    binderBounds <- gets eusBinderBounds
     extNode <- lift $ Ops.getNode ext
     case extNode of
         TyVar{} -> do
-            case IntMap.lookup (getNodeId binder) binderBounds of
+            mbBnd <- lookupVarBoundM binder
+            case mbBnd of
                 Nothing -> do
                     debugEdgeUnify
                         ( "shouldRecordRaiseMerge: binder="
