@@ -173,8 +173,8 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
             } = binderPlan
         ReifyPlan
             { rpPlan = reifyPlan
-            , rpTypeRootForReifyAdjusted = _typeRootForReifyAdjusted
-            , rpSubstForReifyAdjusted = _substForReifyAdjusted
+            , rpTypeRootForReifyAdjusted = typeRootForReifyAdjusted
+            , rpSubstForReifyAdjusted = substForReifyAdjusted
             } = reifyPlanWrapper
         Reify.ReifyPlan
             { Reify.rpSubst = subst
@@ -377,10 +377,17 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
                     let rigidMap = Map.fromList rigidBounds
                     pure (inlineRigidTypes rigidMap ty)
 
-    let solvedTypeRootForReify = typeRoot
+    let adjustedTypeRootForReify = typeRootForReifyAdjusted
+        adjustedSubstForReify = substForReifyAdjusted
+        solvedTypeRootForReify = typeRoot
         solvedSubstForReify = subst
         orderedBinderPairs = zip (map NodeId orderedBinders) binderNames
         reifyTypeWithOrderedBinders =
+            reifyTypeWithAliases
+                adjustedTypeRootForReify
+                adjustedSubstForReify
+                orderedBinderPairs
+        reifyTypeWithSolvedBinders =
             reifyTypeWithAliases
                 solvedTypeRootForReify
                 solvedSubstForReify
@@ -450,7 +457,7 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
                         , case IntMap.lookup (getNodeId typeRootC) nodes of
                             Just TyVar{} | Just bnd <- lookupCanonicalBound typeRootC ->
                                 canonical bnd
-                            _ -> solvedTypeRootForReify
+                            _ -> adjustedTypeRootForReify
                         )
 
             explicitBounds binders names substExplicit =
@@ -489,13 +496,13 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
                 | scopeHasStructuralScheme && null bindings =
                     reifyTypeWithNamesNoFallbackOnConstraint
                         constraint
-                        solvedSubstForReify
-                        solvedTypeRootForReify
+                        adjustedSubstForReify
+                        adjustedTypeRootForReify
                 | Just ga <- mbBindParentsGa = reifyWithGaBase ga
                 | otherwise = reifyTypeWithOrderedBinders
 
             reifyWithGaBase ga = do
-                solvedTy <- reifyTypeWithOrderedBinders
+                solvedTy <- reifyTypeWithSolvedBinders
                 mbBaseTy <- reifyShadowBaseType ga
                 selectSolvedOrderWithShadow "generalizeAt:fallbackSchemeType" solvedTy mbBaseTy
               where
