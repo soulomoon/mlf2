@@ -27,7 +27,10 @@ import SpecUtil
     )
 
 inferConstraintGraphDefault :: SurfaceExpr -> Either ConstraintError ConstraintResult
-inferConstraintGraphDefault = inferConstraintGraph Set.empty
+inferConstraintGraphDefault expr =
+    case normalizeExpr expr of
+        Left err -> error ("normalizeExpr failed in test: " ++ show err)
+        Right normExpr -> inferConstraintGraph Set.empty normExpr
 
 spec :: Spec
 spec = describe "Phase 1 — Constraint generation" $ do
@@ -964,12 +967,13 @@ spec = describe "Phase 1 — Constraint generation" $ do
     describe "Forall-bound well-formedness" $ do
         it "throws ForallBoundMentionsBinder when binder occurs in its own bound" $ do
             -- ∀(a ⩾ a). a - the binder 'a' occurs in its own bound
+            -- With normalized-only input, this is caught at the normalization stage
+            -- as SelfBoundVariable before reaching constraint generation.
             let ann = STForall "a" (Just (STVar "a")) (STVar "a")
                 expr = EAnn (ELit (LInt 1)) ann
-            case inferConstraintGraphDefault expr of
-                Left (ForallBoundMentionsBinder name) -> name `shouldBe` "a"
-                Left other -> expectationFailure $ "Expected ForallBoundMentionsBinder, saw " ++ show other
-                Right _ -> expectationFailure "Expected ForallBoundMentionsBinder error"
+            case normalizeExpr expr of
+                Left (SelfBoundVariable name _) -> name `shouldBe` "a"
+                Right _ -> expectationFailure "Expected SelfBoundVariable error"
 
         it "throws ForallBoundMentionsBinder for nested occurrence" $ do
             -- ∀(a ⩾ List a). a - the binder 'a' occurs nested in its bound

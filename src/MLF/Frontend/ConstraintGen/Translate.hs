@@ -21,7 +21,7 @@ import qualified MLF.Frontend.ConstraintGen.Scope as Scope
 import MLF.Frontend.ConstraintGen.State (BuildState(..), ConstraintM)
 import MLF.Frontend.ConstraintGen.Types
 
-buildRootExpr :: CoreExpr -> ConstraintM (GenNodeId, NodeId, AnnExpr)
+buildRootExpr :: NormCoreExpr -> ConstraintM (GenNodeId, NodeId, AnnExpr)
 buildRootExpr expr = do
     rootGen <- allocGenNode []
     (rootNode, annRoot) <- buildExpr Map.empty rootGen expr
@@ -31,13 +31,13 @@ buildRootExpr expr = do
     setGenNodeSchemes rootGen [rootNode]
     pure (rootGen, rootNode, annRoot)
 
-buildExpr :: Env -> GenNodeId -> CoreExpr -> ConstraintM (NodeId, AnnExpr)
+buildExpr :: Env -> GenNodeId -> NormCoreExpr -> ConstraintM (NodeId, AnnExpr)
 buildExpr env scopeRoot expr = do
     (rootNode, ann) <- buildExprRaw env scopeRoot expr
     setBindParentIfMissing (typeRef rootNode) (genRef scopeRoot) BindFlex
     pure (rootNode, ann)
 
-buildExprRaw :: Env -> GenNodeId -> CoreExpr -> ConstraintM (NodeId, AnnExpr)
+buildExprRaw :: Env -> GenNodeId -> NormCoreExpr -> ConstraintM (NodeId, AnnExpr)
 buildExprRaw env scopeRoot expr =
     case expr of
         EVar name -> do
@@ -155,7 +155,7 @@ buildExprRaw env scopeRoot expr =
 -- We treat coercions as a special form rather than a regular function
 -- application so that Phase 1 produces exactly one instantiation edge for the
 -- annotation site, and Phase 6 can elaborate it as an xMLF instantiation.
-buildCoerce :: Env -> GenNodeId -> SrcType -> CoreExpr -> ConstraintM (NodeId, AnnExpr)
+buildCoerce :: Env -> GenNodeId -> NormSrcType -> NormCoreExpr -> ConstraintM (NodeId, AnnExpr)
 buildCoerce env scopeRoot annTy annotatedExpr = do
     (exprNode, exprAnn) <- buildExpr env scopeRoot annotatedExpr
     annGen <- allocGenNode []
@@ -387,7 +387,7 @@ type SharedEnv = Map VarName NodeId
 
 -- | Internalize a coercion type κ as a rigid domain and flexible codomain,
 -- sharing existential (free) variables across both copies.
-internalizeCoercionType :: GenNodeId -> SrcType -> ConstraintM (NodeId, NodeId)
+internalizeCoercionType :: GenNodeId -> NormSrcType -> ConstraintM (NodeId, NodeId)
 internalizeCoercionType coerceGen ty = do
     (domainNode, shared1) <-
         internalizeCoercionCopy BindRigid True coerceGen coerceGen Map.empty Map.empty ty
@@ -404,14 +404,14 @@ internalizeCoercionCopy
     -> GenNodeId
     -> TyEnv
     -> SharedEnv
-    -> SrcType
+    -> NormSrcType
     -> ConstraintM (NodeId, SharedEnv)
 internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared srcType =
     case srcType of
         -- Domain copies use BindRigid to mark coercion-local nodes as restricted.
         -- To avoid locked descendants, rebind children auto-bound under structural
         -- nodes back to the current gen when rigid.
-        STVar name ->
+        NSTVar name ->
             case Map.lookup name tyEnv of
                 Just nid -> pure (nid, shared)
                 Nothing ->
@@ -421,8 +421,8 @@ internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared srcType 
                             nid <- allocVar
                             setBindParentOverride (typeRef nid) (genRef coerceGen) BindFlex
                             pure (nid, Map.insert name nid shared)
-    
-        STArrow dom cod -> do
+
+        NSTArrow dom cod -> do
             (domNode, shared1) <-
                 internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared dom
             (codNode, shared2) <-
@@ -445,7 +445,7 @@ internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared srcType 
                     pure (varNode, shared2)
                 else pure (arrowNode, shared2)
 
-        STBase name -> do
+        NSTBase name -> do
             registerTyConArity (BaseTy name) 0
             baseNode <- allocBase (BaseTy name)
             if wrap
@@ -460,7 +460,7 @@ internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared srcType 
                     pure (varNode, shared)
                 else pure (baseNode, shared)
 
-        STCon name args -> do
+        NSTCon name args -> do
             let arity = NE.length args
             registerTyConArity (BaseTy name) arity
             (argNodes, sharedFinal) <- foldM
@@ -472,7 +472,7 @@ internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared srcType 
                 (NE.toList args)
             conNode <- case argNodes of
                 (h:t) -> allocCon (BaseTy name) (h :| t)
-                [] -> error "STCon must have at least one argument"
+                [] -> error "NSTCon must have at least one argument"
             case bindFlag of
                 BindRigid -> do
                     mapM_ (\argNode -> rebindIfParent argNode (typeRef conNode) (genRef currentGen) bindFlag) argNodes
@@ -489,91 +489,70 @@ internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared srcType 
                     pure (varNode, sharedFinal)
                 else pure (conNode, sharedFinal)
 
-        STForall var mBound body ->
+        NSTForall var mBound body -> do
+            -- Check forall-bound well-formedness: binder must not occur in its own bound
             case mBound of
-                Just (STVar alias) | alias /= var -> do
-                    (aliasNode, shared1) <-
-                        case Map.lookup alias tyEnv of
-                            Just nid -> pure (nid, shared)
-                            Nothing ->
-                                case Map.lookup alias shared of
-                                    Just nid -> pure (nid, shared)
-                                    Nothing -> do
-                                        nid <- allocVar
-                                        setBindParentOverride (typeRef nid) (genRef coerceGen) BindFlex
-                                        pure (nid, Map.insert alias nid shared)
-                    let tyEnv' = Map.insert var aliasNode tyEnv
-                    internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv' shared1 body
-                Just (STVar alias) | alias == var ->
-                    -- Binder occurs in its own bound - this is ill-formed
-                    throwError (ForallBoundMentionsBinder var)
-                Just (STVar _) ->
-                    -- This case is now unreachable since alias /= var is handled above
-                    -- and alias == var throws an error
-                    internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared (STForall var Nothing body)
-                _ -> do
-                    -- Check forall-bound well-formedness: binder must not occur in its own bound
-                    case mBound of
-                        Just bound
-                            | Set.member var (srcTypeFreeVars bound) ->
-                                throwError (ForallBoundMentionsBinder var)
-                        _ -> pure ()
+                Just bound
+                    | Set.member var (structBoundFreeVars bound) ->
+                        throwError (ForallBoundMentionsBinder var)
+                _ -> pure ()
+            Scope.pushScope
+            schemeGenId <- allocGenNode []
+            setBindParentIfMissing (genRef schemeGenId) (genRef currentGen) BindFlex
+            varNode <- allocVar
+            let tyEnv' = Map.insert var varNode tyEnv
+            (mbBoundNode, shared1) <- case mBound of
+                Nothing -> pure (Nothing, shared)
+                Just bound -> do
+                    let boundAsNorm = structBoundToNormSrcType bound
                     Scope.pushScope
-                    schemeGenId <- allocGenNode []
-                    setBindParentIfMissing (genRef schemeGenId) (genRef currentGen) BindFlex
-                    varNode <- allocVar
-                    let tyEnv' = Map.insert var varNode tyEnv
-                    (mbBoundNode, shared1) <- case mBound of
-                        Nothing -> pure (Nothing, shared)
-                        Just bound -> do
-                            Scope.pushScope
-                            (boundNode, shared2) <-
-                                internalizeCoercionCopy bindFlag False coerceGen schemeGenId tyEnv' shared bound
-                            boundScope <- Scope.popScope
-                            mbBoundOwner <- lookupSchemeOwnerForRoot boundNode
-                            case mbBoundOwner of
-                                Just gid -> do
-                                    Scope.rebindScopeNodes (genRef gid) boundNode boundScope
-                                    setGenNodeSchemes gid [boundNode]
-                                Nothing -> Scope.rebindScopeNodes (typeRef varNode) boundNode boundScope
-                            let sharedNodes = Map.elems shared2
-                            case mbBoundOwner of
-                                Nothing ->
-                                    if boundNode `elem` sharedNodes
-                                        then pure ()
-                                        else
-                                            case bindFlag of
-                                                BindRigid ->
-                                                    setBindParentOverride
-                                                        (typeRef boundNode)
-                                                        (genRef schemeGenId)
-                                                        bindFlag
-                                                BindFlex ->
-                                                    setBindParentOverride
-                                                        (typeRef boundNode)
-                                                        (typeRef varNode)
-                                                        bindFlag
-                                Just gid ->
-                                    if boundNode `elem` sharedNodes
-                                        then pure ()
-                                        else setBindParentOverride (typeRef boundNode) (genRef gid) bindFlag
-                            pure (Just boundNode, shared2)
-    
-                    setVarBound varNode mbBoundNode
-    
-                    (bodyNode, shared2) <-
-                        internalizeCoercionCopy bindFlag False coerceGen schemeGenId tyEnv' shared1 body
-                    scopeFrame <- Scope.popScope
-                    Scope.rebindScopeNodes (genRef schemeGenId) bodyNode scopeFrame
-                    setBindParentOverride (typeRef varNode) (genRef schemeGenId) bindFlag
+                    (boundNode, shared2) <-
+                        internalizeCoercionCopy bindFlag False coerceGen schemeGenId tyEnv' shared boundAsNorm
+                    boundScope <- Scope.popScope
+                    mbBoundOwner <- lookupSchemeOwnerForRoot boundNode
+                    case mbBoundOwner of
+                        Just gid -> do
+                            Scope.rebindScopeNodes (genRef gid) boundNode boundScope
+                            setGenNodeSchemes gid [boundNode]
+                        Nothing -> Scope.rebindScopeNodes (typeRef varNode) boundNode boundScope
                     let sharedNodes = Map.elems shared2
-                    if bodyNode `elem` sharedNodes
-                        then pure ()
-                        else setBindParentOverride (typeRef bodyNode) (genRef schemeGenId) bindFlag
-                    setGenNodeSchemes schemeGenId [bodyNode]
-                    pure (bodyNode, shared2)
-    
-        STBottom -> do
+                    case mbBoundOwner of
+                        Nothing ->
+                            if boundNode `elem` sharedNodes
+                                then pure ()
+                                else
+                                    case bindFlag of
+                                        BindRigid ->
+                                            setBindParentOverride
+                                                (typeRef boundNode)
+                                                (genRef schemeGenId)
+                                                bindFlag
+                                        BindFlex ->
+                                            setBindParentOverride
+                                                (typeRef boundNode)
+                                                (typeRef varNode)
+                                                bindFlag
+                        Just gid ->
+                            if boundNode `elem` sharedNodes
+                                then pure ()
+                                else setBindParentOverride (typeRef boundNode) (genRef gid) bindFlag
+                    pure (Just boundNode, shared2)
+
+            setVarBound varNode mbBoundNode
+
+            (bodyNode, shared2) <-
+                internalizeCoercionCopy bindFlag False coerceGen schemeGenId tyEnv' shared1 body
+            scopeFrame <- Scope.popScope
+            Scope.rebindScopeNodes (genRef schemeGenId) bodyNode scopeFrame
+            setBindParentOverride (typeRef varNode) (genRef schemeGenId) bindFlag
+            let sharedNodes = Map.elems shared2
+            if bodyNode `elem` sharedNodes
+                then pure ()
+                else setBindParentOverride (typeRef bodyNode) (genRef schemeGenId) bindFlag
+            setGenNodeSchemes schemeGenId [bodyNode]
+            pure (bodyNode, shared2)
+
+        NSTBottom -> do
             varNode <- allocVar
             pure (varNode, shared)
 
@@ -604,16 +583,34 @@ registerTyConArity con arity = do
         _ -> modify' $ \st ->
             st { bsTyConArity = Map.insert con arity (bsTyConArity st) }
 
--- | Check if a type variable name occurs free in a SrcType.
-srcTypeFreeVars :: SrcType -> Set.Set String
-srcTypeFreeVars = go Set.empty
+-- | Convert a 'StructBound' back to 'NormSrcType' for recursive internalization.
+structBoundToNormSrcType :: StructBound -> NormSrcType
+structBoundToNormSrcType sb = case sb of
+    SBArrow dom cod -> NSTArrow dom cod
+    SBBase name -> NSTBase name
+    SBCon name args -> NSTCon name args
+    SBForall v mb body -> NSTForall v mb body
+    SBBottom -> NSTBottom
+
+-- | Check if a type variable name occurs free in a 'StructBound'.
+structBoundFreeVars :: StructBound -> Set.Set String
+structBoundFreeVars = go Set.empty
   where
-    go bound ty = case ty of
-        STVar v -> if Set.member v bound then Set.empty else Set.singleton v
-        STArrow dom cod -> go bound dom <> go bound cod
-        STBase _ -> Set.empty
-        STCon _ args -> foldMap (go bound) args
-        STForall v mb body ->
+    go bound sb = case sb of
+        SBArrow dom cod -> normFreeVars bound dom <> normFreeVars bound cod
+        SBBase _ -> Set.empty
+        SBCon _ args -> foldMap (normFreeVars bound) args
+        SBForall v mb body ->
             let bound' = Set.insert v bound
-            in maybe Set.empty (go bound) mb <> go bound' body
-        STBottom -> Set.empty
+            in maybe Set.empty (go bound) mb <> normFreeVars bound' body
+        SBBottom -> Set.empty
+
+    normFreeVars bound ty = case ty of
+        NSTVar v -> if Set.member v bound then Set.empty else Set.singleton v
+        NSTArrow dom cod -> normFreeVars bound dom <> normFreeVars bound cod
+        NSTBase _ -> Set.empty
+        NSTCon _ args -> foldMap (normFreeVars bound) args
+        NSTForall v mb body ->
+            let bound' = Set.insert v bound
+            in maybe Set.empty (go bound) mb <> normFreeVars bound' body
+        NSTBottom -> Set.empty

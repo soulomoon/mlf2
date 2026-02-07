@@ -4,7 +4,7 @@ module MLF.Frontend.Desugar (
     desugarSurface
 ) where
 
-import MLF.Frontend.Syntax (CoreExpr, Expr (..), SurfaceExpr)
+import MLF.Frontend.Syntax (Expr (..), NormCoreExpr, NormSurfaceExpr)
 
 {- Note [κσ coercions and desugaring]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -38,7 +38,7 @@ a coercion. There is no special core-level constructor for annotated lambdas—
 the constraint generator sees only `ELam` and processes the let normally.
 -}
 
-desugarSurface :: SurfaceExpr -> CoreExpr
+desugarSurface :: NormSurfaceExpr -> NormCoreExpr
 desugarSurface expr = case expr of
     EVar v -> EVar v
     ELit l -> ELit l

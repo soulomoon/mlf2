@@ -10,7 +10,8 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Set as Set
 
-import MLF.Frontend.Syntax (SurfaceExpr, Expr(..), Lit(..), SrcType(..))
+import MLF.Frontend.Syntax (SurfaceExpr, NormSurfaceExpr, Expr(..), Lit(..), SrcType(..))
+import MLF.Frontend.Normalize (normalizeExpr)
 import qualified MLF.Elab.Pipeline as Elab
 import qualified MLF.Elab.Phi.TestOnly as ElabTest
 import qualified MLF.Util.Order as Order
@@ -92,10 +93,23 @@ generalizeAt
 generalizeAt = generalizeAtWith Nothing
 
 requirePipeline :: SurfaceExpr -> IO (Elab.ElabTerm, Elab.ElabType)
-requirePipeline = requireRight . Elab.runPipelineElab Set.empty
+requirePipeline expr =
+    case normalizeExpr expr of
+        Left err -> error ("normalizeExpr failed in test: " ++ show err)
+        Right normExpr -> requireRight (Elab.runPipelineElab Set.empty normExpr)
 
 generateConstraintsDefault :: SurfaceExpr -> Either ConstraintError ConstraintResult
-generateConstraintsDefault = generateConstraints Set.empty
+generateConstraintsDefault expr =
+    case normalizeExpr expr of
+        Left err -> error ("normalizeExpr failed in test: " ++ show err)
+        Right normExpr -> generateConstraints Set.empty normExpr
+
+-- | Normalize a surface expression, failing the test on normalization error.
+unsafeNormalize :: SurfaceExpr -> NormSurfaceExpr
+unsafeNormalize expr =
+    case normalizeExpr expr of
+        Left err -> error ("normalizeExpr failed in test: " ++ show err)
+        Right normExpr -> normExpr
 
 fInstantiations :: String -> [String]
 fInstantiations = go
@@ -488,7 +502,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         (Elab.TForall "a" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
                         (Elab.TBase (BaseTy "Int"))
             ty `shouldAlphaEqType` expected
-            (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty expr)
+            (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalize expr))
             checkedTy `shouldAlphaEqType` ty
 
     describe "Elaboration bookkeeping (eliminated vars)" $ do
@@ -2261,7 +2275,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 expr =
                     ELet "c" (EAnn rhs schemeTy) (EAnn (EVar "c") ann)
 
-            case Elab.runPipelineElab Set.empty expr of
+            case Elab.runPipelineElab Set.empty (unsafeNormalize expr) of
                 Left (Elab.PipelineTypeCheckError (Elab.TCLetTypeMismatch _ _)) ->
                     pure ()
                 Left err ->
@@ -2301,7 +2315,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         (ELamAnn "x" (STBase "Int") (EVar "x"))
                         (ELit (LInt 1))
             _ <- requirePipeline expr
-            _ <- requireRight (Elab.runPipelineElabChecked Set.empty expr)
+            _ <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalize expr))
             pure ()
 
         it "annotated lambda parameter should accept a polymorphic argument via κσ (US-004)" $ do
@@ -2323,7 +2337,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             checkedFromUnchecked <- requireRight (Elab.typeCheck term)
             checkedFromUnchecked `shouldBe` Elab.TBase (BaseTy "Int")
             ty `shouldBe` Elab.TBase (BaseTy "Int")
-            (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty expr)
+            (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalize expr))
             checkedTy `shouldBe` Elab.TBase (BaseTy "Int")
             checkedTy `shouldBe` ty
 
