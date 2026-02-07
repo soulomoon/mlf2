@@ -153,6 +153,10 @@ Files: `test/ElaborationSpec.hs`, `test/Presolution/WitnessSpec.hs`, `test/Pipel
 
 ## Stretch Goals / Future Work
 
-- [ ] Pretty-printer for xMLF terms
+- [x] Pretty-printer for xMLF terms
+- [x] Parser + pretty-printer for eMLF surface syntax (`MLF.Frontend.Parse`, `MLF.Frontend.Pretty`)
+- [x] Parser + pretty-printer for paper-faithful xMLF syntax (`MLF.XMLF.Parse`, `MLF.XMLF.Pretty`)
+- [x] Canonical syntax docs (`docs/syntax.md`) and parser/pretty test coverage
+- [ ] Push toward removing the Legacy syntax (keep parser compatibility transition-only; remove legacy pretty forms from internal/debug paths)
 - [ ] Visualization of constraint graph (Graphviz / DOT)
 - [ ] REPL that prints the inferred type and the elaborated xMLF term

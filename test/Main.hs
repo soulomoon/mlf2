@@ -20,6 +20,10 @@ import qualified ElaborationSpec
 import qualified BindingSpec
 import qualified GraphOpsSpec
 import qualified CanonicalizerSpec
+import qualified FrontendParseSpec
+import qualified FrontendPrettySpec
+import qualified XMLFParseSpec
+import qualified XMLFPrettySpec
 
 main :: IO ()
 main = hspec $ do
@@ -41,3 +45,7 @@ main = hspec $ do
     BindingSpec.spec
     GraphOpsSpec.spec
     CanonicalizerSpec.spec
+    FrontendParseSpec.spec
+    FrontendPrettySpec.spec
+    XMLFParseSpec.spec
+    XMLFPrettySpec.spec

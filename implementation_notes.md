@@ -13,6 +13,29 @@
 - Regression expectations in `test/ElaborationSpec.hs` were updated for checked-authoritative term/type shapes (top-level `ETyAbs` wrappers, `Bool`-authoritative result, and closed `∀a. a -> a` fallback for `\\y. let id = ... in id y`).
 - Known gap remains: bounded aliasing requiring thesis Merge/RaiseMerge witness translation is still unresolved and tracked as an explicit expected-failure shape in tests.
 
+### 2026-02-07 syntax frontend + canonical pretty migration
+
+- Added eMLF parser/pretty modules:
+  - `src/MLF/Frontend/Parse.hs`
+  - `src/MLF/Frontend/Pretty.hs`
+- Added paper-faithful xMLF syntax/parser/pretty modules:
+  - `src/MLF/XMLF/Syntax.hs`
+  - `src/MLF/XMLF/Parse.hs`
+  - `src/MLF/XMLF/Pretty.hs`
+- Added public xMLF API module: `src-public/MLF/XMLF.hs`.
+- Extended `MLF.API` with eMLF parse/pretty entry points (`parseEmlfExpr`, `parseEmlfType`, `prettyEmlfExpr`, `prettyEmlfType`) and parse error rendering helpers.
+- Added canonical syntax spec document: `docs/syntax.md` (legacy output, canonical target grammar, migration deltas, normalization rules, and implementation extensions).
+- Migrated `MLF.Elab.Types` pretty-printing to syntax-driven rendering through `MLF.XMLF.Pretty`/`MLF.XMLF.Syntax` conversion helpers:
+  - canonical xMLF computation forms are now printed (`ε`, `⊲σ`, `α⊳`, explicit `∀(⩾ ϕ)`/`∀(α ⩾) ϕ`, and derived `InstApp` as `∀(⩾ ⊲σ); N`);
+  - unbounded binders are printed with explicit bottom bounds (`⩾ ⊥`);
+  - term/type binder syntax now follows canonical parenthesized forms (`λ(x : σ)`, `Λ(α ⩾ σ)`).
+- Added parser/pretty coverage tests:
+  - `test/FrontendParseSpec.hs`
+  - `test/FrontendPrettySpec.hs`
+  - `test/XMLFParseSpec.hs`
+  - `test/XMLFPrettySpec.hs`
+- Updated existing elaboration pretty-output expectations in `test/ElaborationSpec.hs` to canonical syntax forms.
+
 ## Module Structure (Post-Refactor)
 
 The codebase has been refactored for improved navigation and paper-faithfulness auditing:

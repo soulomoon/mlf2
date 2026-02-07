@@ -3,6 +3,12 @@ module MLF.API
     ( module MLF.Frontend.Syntax
     , ConstraintResult (..)
     , ConstraintError (..)
+    , EmlfParseError
+    , parseEmlfExpr
+    , parseEmlfType
+    , renderEmlfParseError
+    , prettyEmlfExpr
+    , prettyEmlfType
     , BaseTy (..)
     , PolySyms
     , inferConstraintGraph
@@ -33,6 +39,16 @@ module MLF.API
     ) where
 
 import MLF.Frontend.Syntax
+import MLF.Frontend.Parse
+    ( EmlfParseError
+    , parseEmlfExpr
+    , parseEmlfType
+    , renderEmlfParseError
+    )
+import MLF.Frontend.Pretty
+    ( prettyEmlfExpr
+    , prettyEmlfType
+    )
 import MLF.Constraint.Types.Graph (BaseTy (..), PolySyms)
 import MLF.Frontend.ConstraintGen (ConstraintError (..), ConstraintResult (..))
 import MLF.Elab.Pipeline

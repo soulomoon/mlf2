@@ -1,6 +1,7 @@
 {-# LANGUAGE GADTs #-}
 module ElaborationSpec (spec) where
 
+import Control.Applicative ((<|>))
 import Test.Hspec
 import Control.Monad (forM_, when)
 import Data.List (isInfixOf, stripPrefix)
@@ -101,7 +102,7 @@ fInstantiations = go
   where
     go [] = []
     go s =
-        case stripPrefix "f [" s of
+        case stripPrefix "f[" s <|> stripPrefix "f [" s of
             Just rest ->
                 let inst = takeWhile (/= ']') rest
                     afterBracket = dropWhile (/= ']') rest
@@ -161,7 +162,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             let expr = ELam "x" (EVar "x")
             (_, ty) <- requirePipeline expr
             -- Result is generalized at top level
-            Elab.prettyDisplay ty `shouldBe` "∀a. a -> a"
+            Elab.prettyDisplay ty `shouldBe` "∀(a ⩾ ⊥) a -> a"
 
         it "elaborates application" $ do
             let expr = EApp (ELam "x" (EVar "x")) (ELit (LInt 42))
@@ -174,8 +175,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             let expr = ELet "id" (ELam "x" (EVar "x")) (EVar "id")
             (term, ty) <- requirePipeline expr
 
-            -- Term should look like: let id : ∀a. a -> a = Λa. λx:a. x in id
-            Elab.prettyDisplay term `shouldBe` "let id : ∀a. a -> a = Λa. λx:a. x in id"
+            -- Canonical syntax printer uses explicit bounds and parenthesized binders.
+            Elab.prettyDisplay term `shouldBe` "let id : ∀(a ⩾ ⊥) a -> a = Λ(a ⩾ ⊥) λ(x : a) x in id"
 
             -- Type is polymorphic (compare up to α-equivalence).
             let expected =
@@ -194,7 +195,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             let expr = ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (ELit (LInt 1)))
             (term, ty) <- requirePipeline expr
             Elab.prettyDisplay ty `shouldBe` "Int"
-            Elab.prettyDisplay term `shouldBe` "let id : ∀a. a -> a = Λa. λx:a. x in (id [⟨Int⟩]) 1"
+            Elab.prettyDisplay term `shouldBe` "let id : ∀(a ⩾ ⊥) a -> a = Λ(a ⩾ ⊥) λ(x : a) x in id[∀(⩾ ⊲Int); N] 1"
 
         it "generalizeAt quantifies vars bound under the scope root" $ do
             let rootGen = GenNodeId 0
@@ -456,8 +457,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
             (term, ty) <- requirePipeline expr
             let termStr = Elab.prettyDisplay term
-            termStr `shouldSatisfy` ("let f : (Int -> Int) -> Int -> Int" `isInfixOf`)
-            termStr `shouldSatisfy` ("λx:" `isInfixOf`)
+            termStr `shouldSatisfy` ("let f :" `isInfixOf`)
+            termStr `shouldSatisfy` ("λ(" `isInfixOf`)
 
             Elab.prettyDisplay ty `shouldBe` "(Int -> Int) -> Int -> Int"
 
@@ -539,7 +540,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
             solved <- requireRight (solveUnify defaultTraceConfig c)
             (sch, _subst) <- requireRight (generalizeAt solved (typeRef forallNode) forallNode)
-            Elab.prettyDisplay sch `shouldBe` "∀a. a -> a"
+            Elab.prettyDisplay sch `shouldBe` "∀(a ⩾ ⊥) a -> a"
 
         it "generalizeAt rejects alias bounds (no ∀(b ⩾ a))" $ do
             let a = NodeId 1
@@ -573,31 +574,31 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
         it "pretty prints unbounded forall" $ do
             let ty :: Elab.ElabType
                 ty = Elab.TForall "a" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
-            Elab.pretty ty `shouldBe` "∀a. a -> a"
+            Elab.pretty ty `shouldBe` "∀(a ⩾ ⊥) a -> a"
 
         it "pretty prints bounded forall" $ do
             let bound = Elab.TArrow (Elab.TBase (BaseTy "Int")) (Elab.TBase (BaseTy "Int"))
                 ty :: Elab.ElabType
                 ty = Elab.TForall "a" (Just (boundFromType bound)) (Elab.TVar "a")
-            Elab.pretty ty `shouldBe` "∀(a ⩾ Int -> Int). a"
+            Elab.pretty ty `shouldBe` "∀(a ⩾ Int -> Int) a"
 
         it "pretty prints nested bounded forall" $ do
             let innerBound = Elab.TArrow (Elab.TVar "b") (Elab.TVar "b")
                 inner = Elab.TForall "b" Nothing innerBound
                 outer :: Elab.ElabType
                 outer = Elab.TForall "a" (Just (boundFromType inner)) (Elab.TVar "a")
-            Elab.pretty outer `shouldBe` "∀(a ⩾ ∀b. b -> b). a"
+            Elab.pretty outer `shouldBe` "∀(a ⩾ ∀(b ⩾ ⊥) b -> b) a"
 
         it "pretty prints bottom type" $ do
             Elab.pretty (Elab.TBottom :: Elab.ElabType) `shouldBe` "⊥"
 
     describe "xMLF instantiation witnesses" $ do
         it "pretty prints identity instantiation" $ do
-            Elab.pretty Elab.InstId `shouldBe` "1"
+            Elab.pretty Elab.InstId `shouldBe` "ε"
 
         it "pretty prints type application" $ do
             let inst = Elab.InstApp (Elab.TBase (BaseTy "Int"))
-            Elab.pretty inst `shouldBe` "⟨Int⟩"
+            Elab.pretty inst `shouldBe` "∀(⩾ ⊲Int); N"
 
         it "pretty prints intro (skip forall)" $ do
             Elab.pretty Elab.InstIntro `shouldBe` "O"
@@ -606,23 +607,23 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             Elab.pretty Elab.InstElim `shouldBe` "N"
 
         it "pretty prints abstract bound" $ do
-            Elab.pretty (Elab.InstAbstr "a") `shouldBe` "!a"
+            Elab.pretty (Elab.InstAbstr "a") `shouldBe` "a⊳"
 
         it "pretty prints under instantiation" $ do
             let inst = Elab.InstUnder "a" (Elab.InstApp (Elab.TBase (BaseTy "Int")))
-            Elab.pretty inst `shouldBe` "∀(a ⩾) ⟨Int⟩"
+            Elab.pretty inst `shouldBe` "∀(a ⩾) (∀(⩾ ⊲Int); N)"
 
         it "pretty prints inside instantiation" $ do
             let inst = Elab.InstInside (Elab.InstApp (Elab.TBase (BaseTy "Int")))
-            Elab.pretty inst `shouldBe` "∀(⩾ ⟨Int⟩)"
+            Elab.pretty inst `shouldBe` "∀(⩾ ∀(⩾ ⊲Int); N)"
 
         it "pretty prints composed instantiation" $ do
             let inst = Elab.InstSeq (Elab.InstApp (Elab.TBase (BaseTy "Int"))) Elab.InstIntro
-            Elab.pretty inst `shouldBe` "⟨Int⟩; O"
+            Elab.pretty inst `shouldBe` "∀(⩾ ⊲Int); N; O"
 
         it "pretty prints bottom instantiation" $ do
             let inst = Elab.InstBot (Elab.TBase (BaseTy "Int"))
-            Elab.pretty inst `shouldBe` "Int"
+            Elab.pretty inst `shouldBe` "⊲Int"
 
     describe "xMLF instantiation semantics (applyInstantiation)" $ do
         it "InstElim substitutes the binder with its bound (default ⊥)" $ do
@@ -677,21 +678,21 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
         it "pretty prints type abstraction with bound" $ do
             let bound = Elab.TArrow (Elab.TVar "b") (Elab.TVar "b")
                 term = Elab.ETyAbs "a" (Just (boundFromType bound)) (Elab.EVar "x")
-            Elab.pretty term `shouldBe` "Λ(a ⩾ b -> b). x"
+            Elab.pretty term `shouldBe` "Λ(a ⩾ b -> b) x"
 
         it "pretty prints unbounded type abstraction" $ do
             let term = Elab.ETyAbs "a" Nothing (Elab.EVar "x")
-            Elab.pretty term `shouldBe` "Λa. x"
+            Elab.pretty term `shouldBe` "Λ(a ⩾ ⊥) x"
 
         it "pretty prints type instantiation" $ do
             let inst = Elab.InstApp (Elab.TBase (BaseTy "Int"))
                 term = Elab.ETyInst (Elab.EVar "f") inst
-            Elab.pretty term `shouldBe` "f [⟨Int⟩]"
+            Elab.pretty term `shouldBe` "f[∀(⩾ ⊲Int); N]"
 
         it "pretty prints let with scheme" $ do
             let scheme = Elab.schemeFromType (Elab.TForall "a" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
                 term = Elab.ELet "id" scheme (Elab.ETyAbs "a" Nothing (Elab.ELam "x" (Elab.TVar "a") (Elab.EVar "x"))) (Elab.EVar "id")
-            Elab.pretty term `shouldBe` "let id : ∀a. a -> a = Λa. λx:a. x in id"
+            Elab.pretty term `shouldBe` "let id : ∀(a ⩾ ⊥) a -> a = Λ(a ⩾ ⊥) λ(x : a) x in id"
 
     describe "eMLF source annotations" $ do
         it "parses and represents STVar" $ do
@@ -734,7 +735,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     Elab.InstSeq
                         (Elab.InstApp (Elab.TBase (BaseTy "Int")))
                         (Elab.InstApp (Elab.TBase (BaseTy "Bool")))
-            Elab.pretty inst `shouldBe` "⟨Int⟩; ⟨Bool⟩"
+            Elab.pretty inst `shouldBe` "∀(⩾ ⊲Int); N; (∀(⩾ ⊲Bool); N)"
 
         it "converts ExpForall to InstIntro" $ do
             Elab.pretty Elab.InstIntro `shouldBe` "O"
@@ -767,7 +768,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 
             (sch, _subst) <- requireRight (generalizeAt solved (genRef rootGen) forallNode)
-            Elab.pretty sch `shouldBe` "∀a b. a -> b"
+            Elab.pretty sch `shouldBe` "∀(a ⩾ ⊥) ∀(b ⩾ ⊥) a -> b"
 
         it "generalizeAt orders binders by <P when paths diverge (leftmost beats depth)" $ do
             -- The leftmost binder should quantify first even if it is shallower.
@@ -799,7 +800,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 
             (sch, _subst) <- requireRight (generalizeAt solved (genRef rootGen) forallNode)
-            Elab.pretty sch `shouldBe` "∀a b. a -> Int -> b"
+            Elab.pretty sch `shouldBe` "∀(a ⩾ ⊥) ∀(b ⩾ ⊥) a -> Int -> b"
 
         it "generalizeAt respects binder bound dependencies (a ≺ b if b’s bound mentions a)" $ do
             let rootGen = GenNodeId 0
@@ -831,7 +832,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 
             (sch, _subst) <- requireRight (generalizeAt solved (genRef rootGen) forallNode)
-            Elab.pretty sch `shouldBe` "∀a (b ⩾ a -> a). b -> a"
+            Elab.pretty sch `shouldBe` "∀(a ⩾ ⊥) ∀(b ⩾ a -> a) b -> a"
 
     describe "Witness translation (Φ/Σ)" $ do
         describe "Σ(g) quantifier reordering" $ do
@@ -2193,7 +2194,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
 
             (sch, _subst) <- requireRight (generalizeAt solved (genRef rootGen) arrow)
-            Elab.prettyDisplay sch `shouldBe` "∀a. a -> a"
+            Elab.prettyDisplay sch `shouldBe` "∀(a ⩾ ⊥) a -> a"
 
         it "generalizeAt inlines rigid vars with structured bounds" $ do
             let rootGen = GenNodeId 0

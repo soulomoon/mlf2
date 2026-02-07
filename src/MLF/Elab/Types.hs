@@ -60,7 +60,6 @@ module MLF.Elab.Types (
     selectMinPrecInsertionIndex,
 ) where
 
-import Data.Functor.Foldable (cata, zygo)
 import Data.List.NonEmpty (NonEmpty(..))
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
@@ -70,10 +69,11 @@ import qualified Data.Set as Set
 import qualified MLF.Util.Order as Order
 import MLF.Constraint.Types.Graph (BaseTy(..))
 import MLF.Constraint.Types.Graph (NodeId(..), getNodeId)
-import MLF.Frontend.Syntax (Lit(..))
 import MLF.Util.ElabError (ElabError(..), bindingToElab)
 import MLF.Types.Elab
 import MLF.Reify.TypeOps (splitForalls, substTypeCapture, freeTypeVarsType)
+import qualified MLF.XMLF.Pretty as XMLFPretty
+import qualified MLF.XMLF.Syntax as XMLF
 
 -- | Simple pretty-printing class for elaborated artifacts.
 class Pretty a where
@@ -83,113 +83,80 @@ class Pretty a where
 class PrettyDisplay a where
     prettyDisplay :: a -> String
 
-prettyBound :: BoundType -> String
-prettyBound = pretty . tyToElab
-
-prettyDisplayBound :: BoundType -> String
-prettyDisplayBound = prettyDisplay . tyToElab
-
 instance Pretty ElabType where
-    pretty = unK . zygoIx complexAlg prettyAlg
-      where
-        complexAlg :: TyIF i (K Bool) -> K Bool i
-        complexAlg ty = case ty of
-            TArrowIF _ _ -> K True
-            TForallIF _ _ _ -> K True
-            TConIF _ _ -> K True
-            _ -> K False
-
-        prettyAlg :: TyIF i (IxPair (K Bool) (K String)) -> K String i
-        prettyAlg ty = case ty of
-            TVarIF v -> K v
-            TBaseIF (BaseTy b) -> K b
-            TArrowIF d c ->
-                let (isComplex, l) = unIxPair d
-                    (_, r) = unIxPair c
-                    left = if unK isComplex then "(" ++ unK l ++ ")" else unK l
-                in K (left ++ " -> " ++ unK r)
-            TConIF (BaseTy c) args ->
-                let parArg :: IxPair (K Bool) (K String) 'AllowVar -> String
-                    parArg ix =
-                        let (isComplex, s) = unIxPair ix
-                            sStr = unK s
-                        in if unK isComplex then "(" ++ sStr ++ ")" else sStr
-                    argsStr = case args of
-                        arg :| rest -> unwords (map parArg (arg : rest))
-                in K (c ++ " " ++ argsStr)
-            TForallIF v mb body ->
-                let boundStr = fmap (unK . snd . unIxPair) mb
-                in case boundStr of
-                    Nothing -> K ("∀" ++ v ++ ". " ++ unK (snd (unIxPair body)))
-                    Just bound -> K ("∀(" ++ v ++ " ⩾ " ++ bound ++ "). " ++ unK (snd (unIxPair body)))
-            TBottomIF -> K "⊥"
+    pretty = XMLFPretty.prettyXmlfType . toXmlfType
 
 instance Pretty ElabScheme where
-    pretty (Forall [] ty) = pretty ty
-    pretty (Forall binds ty) = "∀" ++ unwords (map prettyBind binds) ++ ". " ++ pretty ty
-      where
-        prettyBind (v, Nothing) = v
-        prettyBind (v, Just bound) = "(" ++ v ++ " ⩾ " ++ prettyBound bound ++ ")"
+    pretty (Forall binds ty) = pretty (buildForalls binds ty)
 
 instance Pretty Instantiation where
-    pretty = prettyInstWith pretty
+    pretty = XMLFPretty.prettyXmlfComp . toXmlfComp
 
 instance Pretty ElabTerm where
-    pretty = prettyTermWith pretty pretty pretty
+    pretty = prettyTermCanonical
 
-prettyInstWith :: (ElabType -> String) -> Instantiation -> String
-prettyInstWith prettyTy = cata alg
+prettyTermCanonical :: ElabTerm -> String
+prettyTermCanonical term = case term of
+    ELet v sch rhs body ->
+        "let " ++ v
+            ++ " : "
+            ++ pretty sch
+            ++ " = "
+            ++ prettyTermCanonical rhs
+            ++ " in "
+            ++ prettyTermCanonical body
+    _ ->
+        XMLFPretty.prettyXmlfTerm (toXmlfTerm term)
+
+toXmlfType :: ElabType -> XMLF.XmlfType
+toXmlfType ty = case ty of
+    TVar v -> XMLF.XTVar v
+    TArrow a b -> XMLF.XTArrow (toXmlfType a) (toXmlfType b)
+    TCon (BaseTy c) args -> XMLF.XTCon c (fmap toXmlfType args)
+    TBase (BaseTy b) -> XMLF.XTBase b
+    TForall v mb body ->
+        let bound = maybe XMLF.XTBottom toXmlfBound mb
+        in XMLF.XTForall v bound (toXmlfType body)
+    TBottom -> XMLF.XTBottom
+
+toXmlfBound :: BoundType -> XMLF.XmlfType
+toXmlfBound bound = case bound of
+    TArrow a b -> XMLF.XTArrow (toXmlfType a) (toXmlfType b)
+    TCon (BaseTy c) args -> XMLF.XTCon c (fmap toXmlfType args)
+    TBase (BaseTy b) -> XMLF.XTBase b
+    TForall v mb body ->
+        let boundTy = maybe XMLF.XTBottom toXmlfBound mb
+        in XMLF.XTForall v boundTy (toXmlfType body)
+    TBottom -> XMLF.XTBottom
+
+toXmlfComp :: Instantiation -> XMLF.XmlfComp
+toXmlfComp inst = case inst of
+    InstId -> XMLF.XCId
+    InstApp ty -> compFromType ty
+    InstBot ty -> XMLF.XCBot (toXmlfType ty)
+    InstIntro -> XMLF.XCIntro
+    InstElim -> XMLF.XCElim
+    InstAbstr v -> XMLF.XCHyp v
+    InstUnder v i -> XMLF.XCOuter v (toXmlfComp i)
+    InstInside i -> XMLF.XCInner (toXmlfComp i)
+    InstSeq i1 i2 -> XMLF.XCSeq (toXmlfComp i1) (toXmlfComp i2)
   where
-    alg inst = case inst of
-        InstIdF -> "1"
-        InstAppF ty -> "⟨" ++ prettyTy ty ++ "⟩"
-        InstBotF ty -> prettyTy ty
-        InstIntroF -> "O"
-        InstElimF -> "N"
-        InstAbstrF v -> "!" ++ v
-        InstUnderF v i -> "∀(" ++ v ++ " ⩾) " ++ i
-        InstInsideF i -> "∀(⩾ " ++ i ++ ")"
-        InstSeqF i1 i2 -> i1 ++ "; " ++ i2
+    compFromType ty =
+        XMLF.XCSeq
+            (XMLF.XCInner (XMLF.XCBot (toXmlfType ty)))
+            XMLF.XCElim
 
-prettyTermWith
-    :: (ElabType -> String)
-    -> (ElabScheme -> String)
-    -> (Instantiation -> String)
-    -> ElabTerm
-    -> String
-prettyTermWith prettyTy prettyScheme prettyInst = zygo needsParensAlg prettyAlg
-  where
-    needsParensAlg term = case term of
-        EAppF _ _ -> True
-        ELamF _ _ _ -> True
-        _ -> False
-
-    prettyAlg term = case term of
-        EVarF v -> v
-        ELitF l -> case l of
-            LInt i -> show i
-            LBool b -> if b then "true" else "false"
-            LString s -> show s
-        ELamF v ty body -> "λ" ++ v ++ ":" ++ prettyTy ty ++ ". " ++ snd body
-        EAppF f a ->
-            let par s = "(" ++ s ++ ")"
-                arg =
-                    if fst a
-                        then par (snd a)
-                        else snd a
-            in par (snd f) ++ " " ++ arg
-        ELetF v sch rhs body ->
-            "let " ++ v ++ " : " ++ prettyScheme sch
-                ++ " = " ++ snd rhs
-                ++ " in " ++ snd body
-        ETyAbsF v Nothing body -> "Λ" ++ v ++ ". " ++ snd body
-        ETyAbsF v (Just bound) body ->
-            "Λ(" ++ v ++ " ⩾ " ++ prettyTy (tyToElab bound) ++ "). " ++ snd body
-        ETyInstF e inst ->
-            let instStr = case inst of
-                    InstId -> "1"
-                    _ -> "[" ++ prettyInst inst ++ "]"
-            in snd e ++ " " ++ instStr
+toXmlfTerm :: ElabTerm -> XMLF.XmlfTerm
+toXmlfTerm term = case term of
+    EVar v -> XMLF.XVar v
+    ELit l -> XMLF.XLit l
+    ELam v ty body -> XMLF.XLam v (toXmlfType ty) (toXmlfTerm body)
+    EApp f a -> XMLF.XApp (toXmlfTerm f) (toXmlfTerm a)
+    ELet v _ rhs body -> XMLF.XLet v (toXmlfTerm rhs) (toXmlfTerm body)
+    ETyAbs v mb body ->
+        let bound = maybe XMLF.XTBottom toXmlfBound mb
+        in XMLF.XTyAbs v bound (toXmlfTerm body)
+    ETyInst e inst -> XMLF.XTyInst (toXmlfTerm e) (toXmlfComp inst)
 
 data OccInfo = OccInfo
     { oiFreeVars :: Set.Set String
@@ -328,21 +295,13 @@ instance PrettyDisplay ElabType where
     prettyDisplay = pretty . inlineBoundsForDisplay
 
 instance PrettyDisplay ElabScheme where
-    prettyDisplay sch =
-        let ty = inlineBoundsForDisplay (schemeToTypeLocal sch)
-            (binds, body) = splitForalls ty
-        in case binds of
-            [] -> prettyDisplay body
-            _ -> "∀" ++ unwords (map prettyBind binds) ++ ". " ++ prettyDisplay body
-      where
-        prettyBind (v, Nothing) = v
-        prettyBind (v, Just bound) = "(" ++ v ++ " ⩾ " ++ prettyDisplayBound bound ++ ")"
+    prettyDisplay = prettyDisplay . inlineBoundsForDisplay . schemeToTypeLocal
 
 instance PrettyDisplay Instantiation where
-    prettyDisplay = prettyInstWith prettyDisplay
+    prettyDisplay = pretty
 
 instance PrettyDisplay ElabTerm where
-    prettyDisplay = prettyTermWith prettyDisplay prettyDisplay prettyDisplay
+    prettyDisplay = pretty
 
 schemeToTypeLocal :: ElabScheme -> ElabType
 schemeToTypeLocal (Forall binds body) = buildForalls binds body

@@ -69,6 +69,11 @@ library mlf2-internal
                       MLF.Constraint.Types.Presolution,
                       MLF.Constraint.Canonicalizer,
                       MLF.Frontend.Syntax,
+                      MLF.Frontend.Parse,
+                      MLF.Frontend.Pretty,
+                      MLF.XMLF.Syntax,
+                      MLF.XMLF.Parse,
+                      MLF.XMLF.Pretty,
                       MLF.Frontend.ConstraintGen,
                       MLF.Constraint.Normalize,
                       MLF.Constraint.Acyclicity,
@@ -194,6 +199,7 @@ library mlf2-internal
     -- Other library packages from which modules are imported.
     build-depends:    base ^>=4.21.0.0,
                       containers,
+                      megaparsec,
                       mtl,
                       recursion-schemes
 
@@ -212,7 +218,8 @@ library
     -- Modules exported by the public library.
     exposed-modules:  MyLib,
                       MLF.API,
-                      MLF.Pipeline
+                      MLF.Pipeline,
+                      MLF.XMLF
 
     -- Other library packages from which modules are imported.
     build-depends:    base ^>=4.21.0.0,
@@ -278,6 +285,10 @@ test-suite mlf2-test
                       BindingSpec,
                       GraphOpsSpec,
                       CanonicalizerSpec,
+                      FrontendParseSpec,
+                      FrontendPrettySpec,
+                      XMLFParseSpec,
+                      XMLFPrettySpec,
                       SpecUtil,
 
     -- LANGUAGE extensions used by modules in this package.
