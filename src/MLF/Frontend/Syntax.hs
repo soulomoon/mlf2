@@ -9,8 +9,12 @@ module MLF.Frontend.Syntax (
     Lit (..),
     ExprStage (..),
     Expr (..),
+    -- * Raw expression aliases (backward-compatible)
     SurfaceExpr,
     CoreExpr,
+    -- * Normalized expression aliases
+    NormSurfaceExpr,
+    NormCoreExpr,
     -- * Raw source types (parser output)
     SrcType (..),
     SrcTypeF (..),
@@ -200,7 +204,11 @@ instance Corecursive SrcType where
 
 data ExprStage = Surface | Core
 
--- | eMLF expressions, indexed by stage.
+-- | eMLF expressions, indexed by stage and annotation type.
+--
+-- The type parameter @ty@ determines which type representation annotations
+-- carry: 'SrcType' for raw (parser output) or 'NormSrcType' for normalized
+-- (alias bounds inlined). See Note [Staged frontend types].
 --
 -- The surface stage matches the thesis' expression grammar and includes
 -- annotations (`EAnn`, `ELamAnn`). The core stage is annotation-free and
@@ -214,25 +222,31 @@ data ExprStage = Surface | Core
 --
 -- The resulting let-binding has a coercion term as its RHS, which is treated
 -- as an ordinary let-binding (not a special "declared scheme" form).
-data Expr (s :: ExprStage) where
-    EVar :: VarName -> Expr s
-    ELit :: Lit -> Expr s
-    ELam :: VarName -> Expr s -> Expr s                         -- ^ λx. e (inferred parameter type)
-    EApp :: Expr s -> Expr s -> Expr s
-    ELet :: VarName -> Expr s -> Expr s -> Expr s               -- ^ let x = e₁ in e₂ (inferred scheme)
+data Expr (s :: ExprStage) ty where
+    EVar :: VarName -> Expr s ty
+    ELit :: Lit -> Expr s ty
+    ELam :: VarName -> Expr s ty -> Expr s ty                         -- ^ λx. e (inferred parameter type)
+    EApp :: Expr s ty -> Expr s ty -> Expr s ty
+    ELet :: VarName -> Expr s ty -> Expr s ty -> Expr s ty            -- ^ let x = e₁ in e₂ (inferred scheme)
 
     -- Surface-only.
-    ELamAnn :: VarName -> SrcType -> Expr 'Surface -> Expr 'Surface
-    EAnn :: Expr 'Surface -> SrcType -> Expr 'Surface
+    ELamAnn :: VarName -> ty -> Expr 'Surface ty -> Expr 'Surface ty
+    EAnn :: Expr 'Surface ty -> ty -> Expr 'Surface ty
 
     -- Core-only.
-    ECoerceConst :: SrcType -> Expr 'Core                       -- ^ cτ (coercion constant)
+    ECoerceConst :: ty -> Expr 'Core ty                               -- ^ cτ (coercion constant)
 
-deriving instance Eq (Expr s)
-deriving instance Show (Expr s)
+deriving instance Eq ty => Eq (Expr s ty)
+deriving instance Show ty => Show (Expr s ty)
 
-type SurfaceExpr = Expr 'Surface
-type CoreExpr = Expr 'Core
+-- | Raw surface expression (backward-compatible alias).
+type SurfaceExpr = Expr 'Surface SrcType
+-- | Raw core expression (backward-compatible alias).
+type CoreExpr = Expr 'Core SrcType
+-- | Normalized surface expression (alias bounds inlined).
+type NormSurfaceExpr = Expr 'Surface NormSrcType
+-- | Normalized core expression (alias bounds inlined).
+type NormCoreExpr = Expr 'Core NormSrcType
 
 -- | Optional wrapper for attaching binding-site metadata to a surface expression.
 --

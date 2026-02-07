@@ -15,8 +15,8 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented as separate NormSrcType data type with StructBound (no variable constructor) rather than GADT with type family, to preserve full backward compatibility with existing SrcType usage."
     },
     {
       "id": "US-002",
@@ -30,8 +30,8 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added type parameter `ty` to Expr GADT for annotation type. SurfaceExpr/CoreExpr remain backward-compatible aliases (= Expr 'Surface SrcType / Expr 'Core SrcType). New NormSurfaceExpr/NormCoreExpr aliases use NormSrcType. Zero downstream changes needed."
     },
     {
       "id": "US-003",
