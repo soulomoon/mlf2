@@ -155,8 +155,8 @@
         "Tests pass"
       ],
       "priority": 10,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Validated that witness normalization and rigid-endpoint translatability invariants remain unchanged after structural RaiseMerge gating updates. Confirmed OpRaise;OpMerge -> OpRaiseMerge coalescing and rigid-endpoint failure behavior through focused specs, then ran full project validation (`cabal build all && cabal test`), with all 551 tests passing."
     },
     {
       "id": "US-011",

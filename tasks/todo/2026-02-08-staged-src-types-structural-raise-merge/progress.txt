@@ -16,6 +16,7 @@
 - MLF.Pipeline is the focused pipeline-only public API (exports staged types + normalization + pipeline entrypoints); MLF.API is the full public API re-exporting everything
 - EdgeUnifyM has MonadPresolution instance; prefer live graph queries (e.g., lookupVarBoundM) over precomputed snapshots in edge-unify state
 - `shouldRecordRaiseMerge` is the single source of truth for RaiseMerge gating — encapsulates all five structural criteria (node kind, live bound, same-root, ancestry/interior, elimination)
+- Witness invariants around RaiseMerge are guarded by both `test/Presolution/WitnessSpec.hs` and `test/ElaborationSpec.hs`; run those focused specs before full `cabal build all && cabal test` when touching witness gating/translation
 
 ## Iteration Log
 - 2026-02-08: Task initialized from PRD conversion.
@@ -181,4 +182,16 @@
   - The `isEliminated` check is a short-circuit: placing it first avoids unnecessary graph queries for already-eliminated binders
   - The five structural criteria map directly to the paper's RaiseMerge side-conditions (thesis §3.4)
   - All 544 tests pass, no warnings
+---
+
+## 2026-02-08 04:55:24 CST - US-010
+- What was implemented:
+  - Validated that witness normalization still coalesces `OpRaise; OpMerge` into `OpRaiseMerge` via targeted US-010 regression specs
+  - Validated rigid-endpoint translatability behavior remains strict (`OpMerge`/`OpRaiseMerge` fail when only the non-operated endpoint is rigid)
+  - Ran full project validation to ensure witness canon/validation behavior is unchanged end-to-end
+- Files changed: tasks/todo/2026-02-08-staged-src-types-structural-raise-merge/prd.json, tasks/todo/2026-02-08-staged-src-types-structural-raise-merge/progress.txt
+- **Learnings for future iterations:**
+  - `test/Presolution/WitnessSpec.hs` ("Witness normalization invariants (US-010 regression)") is the primary guardrail for `OpRaise;OpMerge -> OpRaiseMerge` canonicalization and rigid operand validation behavior
+  - `test/ElaborationSpec.hs` rigid-endpoint Φ tests ("rigid endpoint only on m") are the canonical checks for translatability failure behavior
+  - Full validation (`cabal build all && cabal test`) currently passes with 551 tests; use this as the completion gate for witness-related refactors
 ---
