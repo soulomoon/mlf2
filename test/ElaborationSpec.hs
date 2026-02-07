@@ -2304,6 +2304,19 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             _ <- requireRight (Elab.runPipelineElabChecked Set.empty expr)
             pure ()
 
+        it "BUG-2026-02-06-001 mapped-base elaboration remains Int for nested let + annotated lambda" $ do
+            let expr =
+                    ELet "id" (ELam "x" (EVar "x"))
+                        (ELet "n" (ELit (LInt 0))
+                            (EApp
+                                (ELamAnn "f" (STArrow (STBase "Int") (STBase "Int"))
+                                    (EApp (EVar "f") (EVar "n")))
+                                (EVar "id")))
+            (_term, ty) <- requirePipeline expr
+            ty `shouldBe` Elab.TBase (BaseTy "Int")
+            (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty expr)
+            checkedTy `shouldBe` Elab.TBase (BaseTy "Int")
+
         it "annotated lambda parameter should accept a polymorphic argument via κσ (US-004)" $ do
             -- λ(f : Int -> Int). f 1   applied to polymorphic id
             -- Desugaring: λf. let f = κ(Int->Int) f in f 1

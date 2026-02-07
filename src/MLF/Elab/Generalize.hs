@@ -461,20 +461,27 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
                 | Just ga <- mbBindParentsGa = reifyWithGaBase ga
                 | otherwise = reifyTypeWithOrderedBinders
 
-            reifyWithGaBase ga =
-                case IntMap.lookup (getNodeId (canonical typeRoot)) solvedToBasePrefPlan of
-                    Just baseN | canonical baseN /= canonical typeRoot -> do
-                        tyBase <-
-                            reifyTypeWithNamesNoFallbackOnConstraint
-                                (gaBaseConstraint ga)
-                                substBaseByKey
-                                baseN
-                        let freeBase = freeTypeVarsFrom Set.empty tyBase
-                            allowedBase = Set.fromList (IntMap.elems substBaseByKey)
-                        if Set.isSubsetOf freeBase allowedBase
-                            then pure tyBase
-                            else reifyTypeWithOrderedBinders
-                    _ -> reifyTypeWithOrderedBinders
+            reifyWithGaBase ga = do
+                solvedTy <- reifyTypeWithOrderedBinders
+                mbBaseTy <- reifyShadowBaseType ga
+                selectSolvedOrderWithShadow "generalizeAt:fallbackSchemeType" solvedTy mbBaseTy
+              where
+                reifyShadowBaseType ga' =
+                    case IntMap.lookup (getNodeId (canonical typeRoot)) solvedToBasePrefPlan of
+                        Just baseN
+                            | canonical baseN /= canonical typeRoot
+                            , Just _ <- NodeAccess.lookupNode (gaBaseConstraint ga') baseN -> do
+                                tyBase <-
+                                    reifyTypeWithNamesNoFallbackOnConstraint
+                                        (gaBaseConstraint ga')
+                                        substBaseByKey
+                                        baseN
+                                let freeBase = freeTypeVarsFrom Set.empty tyBase
+                                    allowedBase = Set.fromList (IntMap.elems substBaseByKey)
+                                if Set.isSubsetOf freeBase allowedBase
+                                    then pure (Just tyBase)
+                                    else pure Nothing
+                        _ -> pure Nothing
     ty0Raw <- reifySchemeType
     finalizeScheme FinalizeInput
         { fiEnv = env
