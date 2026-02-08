@@ -92,6 +92,8 @@ library mlf2-internal
                       MLF.Binding.Queries,
                       MLF.Binding.Path,
                       MLF.Binding.NodeRefs,
+                      MLF.Binding.ScopeGraph,
+                      MLF.Binding.Children,
                       MLF.Binding.Adjustment,
                       MLF.Binding.GraphOps,
                       MLF.Util.Order,

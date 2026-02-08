@@ -1,6 +1,8 @@
 module BindingSharedAbstractionSpec (spec) where
 
 import qualified Data.IntMap.Strict as IntMap
+import qualified Data.IntSet as IntSet
+import MLF.Binding.ScopeGraph (buildTypeEdgesFrom, rootsForScope)
 import MLF.Binding.Path (
     bindingPathToRootWithLookup,
     firstGenAncestorFromPath,
@@ -25,3 +27,9 @@ spec = describe "Binding shared abstractions" $ do
             fakePath _ = Right []
         firstGenAncestorFromPath fakePath (TypeRef (NodeId 5))
             `shouldBe` Just (GenNodeId 2)
+
+    it "rootsForScope returns non-referenced nodes inside scope" $ do
+        let _keepBuildTypeEdgesFrom = buildTypeEdgesFrom
+            edges = IntMap.fromList [(0, IntSet.fromList [1, 2]), (1, IntSet.singleton 3)]
+            scope = IntSet.fromList [0, 1, 2, 3]
+        rootsForScope id Just edges scope `shouldBe` IntSet.singleton 0
