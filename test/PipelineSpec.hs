@@ -34,6 +34,7 @@ import MLF.Elab.Run.Util (makeCanonicalizer)
 import SpecUtil
     ( collectVarNodes
     , defaultTraceConfig
+    , emptyConstraint
     , firstShowE
     , mkForalls
     , runToSolvedDefault
@@ -469,18 +470,3 @@ genClosedWellTypedExpr = do
             , ELet "f" (EAnn idLam polyIdTy) (EApp (EVar "f") intLit2)
             ]
     elements exprs
-
--- | Empty constraint for testing reification
-emptyConstraint :: Constraint
-emptyConstraint = Constraint
-    { cNodes = fromListNode []
-    , cInstEdges = []
-    , cUnifyEdges = []
-    , cBindParents = IntMap.empty
-    , cPolySyms = Set.empty
-    , cEliminatedVars = IntSet.empty
-    , cWeakenedVars = IntSet.empty
-    , cAnnEdges = IntSet.empty
-    , cLetEdges = IntSet.empty
-    , cGenNodes = fromListGen []
-    }
