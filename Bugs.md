@@ -8,18 +8,22 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 - Status: Open
 - Priority: High
 - Discovered: 2026-02-06
-- Summary: Φ translation fails with binder-spine mismatch on polymorphic factory use.
+- Summary: Polymorphic factory (`make`) elaboration/generalization drifts; let scheme specializes while RHS remains polymorphic.
 - Reproducer (surface expression):
   - `ELet "make" (ELam "x" (ELam "y" (EVar "x"))) (ELet "c1" (EApp (EVar "make") (ELit (LInt (-4)))) (EApp (EVar "c1") (ELit (LBool True))))`
 - Expected:
   - Pipeline elaborates and typechecks successfully (result should be `Int`).
 - Actual:
-  - `Phase 6 (elaboration): PhiTranslatabilityError ["OpGraft: binder not found in quantifier spine", ...]`.
+  - Current reproducer behavior on 2026-02-08:
+    - `Phase 7 (type checking): TCLetTypeMismatch (TForall "a" Nothing (TForall "b" Nothing (TArrow (TVar "a") (TArrow (TVar "t23") (TVar "a"))))) (TForall "a" Nothing (TForall "b" Nothing (TArrow (TVar "a") (TArrow (TVar "b") (TBase Int)))))`
+  - Diagnostic trace shows let scheme for `make` is reified as `∀a b. a -> b -> Int` while elaborated RHS term still has shape `a -> t23 -> a`.
 - Suspected area:
-  - `/Volumes/src/mlf4/src/MLF/Elab/Phi/Translate.hs`
-  - `/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs`
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/Plan/BinderPlan/Build.hs`
+  - `/Volumes/src/mlf4/src/MLF/Elab/Run/Generalize/Phase2.hs`
+  - `/Volumes/src/mlf4/src/MLF/Elab/Run/Generalize/Finalize.hs`
+  - `/Volumes/src/mlf4/src/MLF/Elab/Run/Provenance.hs`
 - Thesis impact:
-  - Indicates witness-to-Φ translation is still incomplete for a valid let-polymorphic application path.
+  - Valid let-polymorphic factory path remains non-elaboratable end-to-end under thesis-aligned generalization semantics.
 
 ### BUG-2026-02-08-004
 - Status: Open

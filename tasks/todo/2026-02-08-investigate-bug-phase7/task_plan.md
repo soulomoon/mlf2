@@ -4,7 +4,7 @@
 Trace why `make`'s let-scheme specializes to `... -> Int` while its elaborated RHS remains polymorphic, document likely root causes and fix approaches, and recommend a path forward.
 
 ## Current Phase
-Phase 1
+Phase 3
 
 ## Phases
 
@@ -16,15 +16,15 @@ Phase 1
 
 ### Phase 2: Planning & Structure
 - [x] Define technical approach
-- [ ] Create project structure if needed
-- [ ] Document decisions with rationale
-- **Status:** in_progress
+- [x] Create project structure if needed
+- [x] Document decisions with rationale
+- **Status:** complete
 
 ### Phase 3: Implementation
-- [ ] Execute the plan step by step
-- [ ] Write code to files before executing
-- [ ] Test incrementally
-- **Status:** pending
+- [x] Execute the plan step by step
+- [x] Write code to files before executing
+- [x] Test incrementally
+- **Status:** in_progress
 
 ### Phase 4: Testing & Verification
 - [ ] Verify all requirements met
@@ -45,12 +45,16 @@ Phase 1
 ## Decisions Made
 | Decision | Rationale |
 |----------|-----------|
-|          |           |
+| Use strict systematic-debugging flow (reproduce → compare patterns → single-hypothesis tests) before any durable fix | Prevents guesswork and isolates causes in a multi-phase pipeline |
+| Treat code edits as temporary hypothesis probes and revert unless they improve bug behavior | Keeps workspace stable and avoids compounded regressions |
+| Use internal pipeline dumps (`solvedClean` vs `solvedForGen`, `gaSolvedToBase`, trace logs) as primary evidence | The failure emerges from cross-module data-flow, not a single local function |
 
 ## Errors Encountered
 | Error | Attempt | Resolution |
 |-------|---------|------------|
 | Catchup script missing ${CLAUDE_PLUGIN_ROOT}/scripts/session-catchup.py | 1 | Directory absent; noted and continuing |
+| `cabal exec runghc` intermittently hid package module `MLF.API` | 1 | Switched reproducible runs to `cabal repl lib:mlf2` + `:l script` |
+| Internal dump scripts initially failed due hidden modules / missing imports | 1 | Executed via `cabal repl lib:mlf2-internal` and fixed imports |
 
 ## Notes
 - Update phase status as you progress: pending → in_progress → complete

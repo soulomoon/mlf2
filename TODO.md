@@ -25,6 +25,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 - Follow-up:
   - `BUG-2026-02-08-001` stays in `Bugs.md` under **Resolved**.
   - Runtime base-shadow cutover completed: `MLF.Elab.Generalize` fallback no longer reifies or compares base-path output at runtime; solved-order output is authoritative.
+  - `BUG-2026-02-06-002` remains open: current debugging indicates binder-representative filtering in generalization can drop required factory binders (`make` path), causing scheme specialization drift or `SchemeFreeVars`.
 
 ---
 
