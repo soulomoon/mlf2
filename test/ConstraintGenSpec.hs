@@ -695,6 +695,14 @@ spec = describe "Phase 1 — Constraint generation" $ do
             expectRight (inferConstraintGraphDefault expr) $ \result ->
                 checkBindingTree (crConstraint result) `shouldBe` Right ()
 
+        it "coercion and let scope wiring preserve single-parent invariant" $ do
+            let expr =
+                    ELet "id"
+                        (EAnn (ELam "x" (EVar "x")) (STArrow (STBase "Int") (STBase "Int")))
+                        (EVar "id")
+            result <- requireRight (inferConstraintGraphDefault expr)
+            checkBindingTree (crConstraint result) `shouldBe` Right ()
+
         it "elimination rewrite removes eliminated binders from Q(n)" $ do
             let rhs = ELam "x" (ELam "y" (EVar "x"))
                 schemeTy =
