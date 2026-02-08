@@ -185,8 +185,8 @@
         "Typecheck passes"
       ],
       "priority": 12,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Updated implementation_notes.md to record the staged raw->normalized frontend boundary and live structural RaiseMerge gating as implemented behavior (not pending direction). Added concise Unreleased changelog entries for staged syntax/normalized-only contracts and structural gating + bounded-alias restoration. Updated Bugs.md by moving BUG-2026-02-06-003 to Resolved with linked regression tests (ElaborationSpec bounded alias baseline + WitnessSpec invariants). TODO priorities were unchanged. Full validation gate `cabal build all && cabal test` passes (551 tests)."
     }
   ]
 }

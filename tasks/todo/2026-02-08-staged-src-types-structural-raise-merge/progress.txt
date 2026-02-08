@@ -18,6 +18,7 @@
 - `shouldRecordRaiseMerge` is the single source of truth for RaiseMerge gating — encapsulates all five structural criteria (node kind, live bound, same-root, ancestry/interior, elimination)
 - Witness invariants around RaiseMerge are guarded by both `test/Presolution/WitnessSpec.hs` and `test/ElaborationSpec.hs`; run those focused specs before full `cabal build all && cabal test` when touching witness gating/translation
 - Witness normalization interior widening must be narrowly scoped; broad widening leaks non-binder ω ops into Φ translation (for example `OpWeaken` translatability failures)
+- When closing a bug in `Bugs.md`, move it from Open to Resolved and include explicit regression test anchors (file + test case/section name)
 
 ## Iteration Log
 - 2026-02-08: Task initialized from PRD conversion.
@@ -207,4 +208,17 @@
   - The bounded-aliasing regression was caused by witness normalization stripping edge-local `OpGraft` steps for a multi-binder instantiate edge; preserving those steps restored thesis-aligned elaboration
   - Broad `I(r)` widening causes unrelated Φ regressions; a targeted widening predicate (multi-binder traces) keeps the needed alias path while preserving existing translatability invariants
   - Full gate `cabal build all && cabal test` is required here; focused US-011 checks alone missed cross-spec regressions during intermediate attempts
+---
+
+## 2026-02-08 17:07:19 CST - US-012
+- What was implemented:
+  - Updated `implementation_notes.md` to document the staged raw->normalized frontend boundary and structural live-graph RaiseMerge gating as implemented behavior.
+  - Added concise `CHANGELOG.md` Unreleased entries for staged syntax/normalized-only pipeline contracts and structural gating with bounded-alias baseline restoration.
+  - Updated `Bugs.md` by moving `BUG-2026-02-06-003` to Resolved and linking concrete regression tests.
+  - Verified TODO priorities remained unchanged; no TODO edits were required by this story.
+- Files changed: implementation_notes.md, CHANGELOG.md, Bugs.md, tasks/todo/2026-02-08-staged-src-types-structural-raise-merge/prd.json, tasks/todo/2026-02-08-staged-src-types-structural-raise-merge/progress.txt
+- **Learnings for future iterations:**
+  - Keep implementation notes synchronized with reality; sections labeled "pending implementation" should be converted to outcome-oriented notes as soon as the PRD stories land.
+  - For bug-tracker closures, always cite the exact regression test case name, not only the file, to keep audit trails reproducible.
+  - Documentation-only stories still use the full validation gate (`cabal build all && cabal test`) before marking `passes: true` in `prd.json`.
 ---

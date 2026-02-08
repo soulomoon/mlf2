@@ -38,77 +38,20 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 - Thesis impact:
   - Indicates witness-to-Φ translation is still incomplete for a valid let-polymorphic application path.
 
-### BUG-2026-02-06-003
-- Status: Open
-- Priority: High
-- Discovered: 2026-02-06
-- Summary: Bounded aliasing (`b ⩾ a`) path that requires thesis Merge/RaiseMerge translation is not implemented end-to-end.
-- Reproducer (test case):
-  - `/Volumes/src/mlf4/test/ElaborationSpec.hs` case: `bounded aliasing (b ⩾ a) elaborates as ∀a. a -> a -> a (Merge/RaiseMerge path)`
-- Reproducer (surface expression):
-  - `ELet "c" (EAnn (ELam "x" (ELam "y" (EVar "x"))) (STForall "a" Nothing (STForall "b" (Just (STVar "a")) (STArrow (STVar "a") (STArrow (STVar "b") (STVar "a")))))) (EAnn (EVar "c") (STForall "a" Nothing (STArrow (STVar "a") (STArrow (STVar "a") (STVar "a")))))`
-- Expected:
-  - Typechecks per thesis-aligned Merge/RaiseMerge witness path; equivalent to `∀a. a -> a -> a`.
-- Actual:
-  - Regression test expects success but currently fails with:
-    - `PipelineTypeCheckError (TCLetTypeMismatch _ _)`
-- Suspected area:
-  - `/Volumes/src/mlf4/src/MLF/Elab/Phi/Translate.hs`
-  - `/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs`
-  - `/Volumes/src/mlf4/src/MLF/Elab/Elaborate.hs`
-- Thesis impact:
-  - Direct paper-faithfulness gap for bounded aliasing coercions requiring Merge/RaiseMerge composition.
-- Detailed investigation (2026-02-07):
-  - Validation command (direct reproducer):
-    - `cabal exec -- runghc /tmp/check_bug003.hs` where `/tmp/check_bug003.hs` calls both `runPipelineElab` and `runPipelineElabChecked` on the reproducer expression.
-  - Runtime result:
-    - `runPipelineElab` and `runPipelineElabChecked` both fail with:
-      - `Phase 7 (type checking): TCLetTypeMismatch ...`
-    - Mismatch is between:
-      - actual inferred let type: `∀a. ∀(t0 ⩾ ⊥ -> ⊥). t0 -> ⊥ -> t0`
-      - expected annotation: `∀a. a -> a -> a`
-  - Trace-backed phase findings:
-    - Presolution edge-local unification does not emit Merge/RaiseMerge on the failing annotation path.
-      - Debug trace shows: `shouldRecordRaiseMerge: binder=... bound=None`, so RaiseMerge is skipped.
-      - Relevant code: `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/EdgeUnify.hs:573`
-    - Witness translation for the critical edge sees only `StepOmega (OpRaise ...)`, not `OpMerge`/`OpRaiseMerge`.
-      - Relevant code paths:
-        - witness construction/classification: `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/Witness.hs:135`
-        - Ω interpretation of Raise/Merge/RaiseMerge: `/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs:779`
-    - Because Φ returns `InstId` on that edge, elaboration falls back to expansion-arg reconstruction (`reifyInst` fallback), which introduces `InstBot`/`⊥` arguments and yields the non-thesis type shape.
-      - Relevant code: `/Volumes/src/mlf4/src/MLF/Elab/Elaborate.hs:490`
-  - Regression status:
-    - `/Volumes/src/mlf4/test/ElaborationSpec.hs:2244`
-  - Root-cause hypothesis:
-    - The bounded aliasing coercion path is losing bounded-binder alias information before/while deciding chi_e witness ops, so the pipeline reaches a Raise-only + fallback-instantiation route instead of thesis Merge/RaiseMerge translation.
-    - Secondary effect: fallback reconstruction is currently too permissive for this path and materializes `⊥` where alias-preserving instantiation is required.
-  - Phase-order clarification:
-    - This is **not** a pipeline-order bug. The repo still follows thesis order:
-      - surface desugaring/coercion translation first;
-      - then graphic-constraint presolution and normalized per-edge propagation witness construction.
-    - The mismatch is semantic: current coercion alias lowering can erase explicit bounded-binder shape before edge-local unification computes `binderBounds`, while RaiseMerge emission is currently gated on that metadata.
-    - Thesis RaiseMerge is propagation-structure-driven (`χe^p ⊑ χp` normalization), not syntax-presence-driven for alias bounds.
-  - Rigid/non-translatable invariant status:
-    - Existing strict invariants are still enforced and should remain unchanged:
-      - merge-direction/translatability checks in witness normalization/validation stay active.
-      - rigid-endpoint rejection behavior for merge-like ops remains covered by tests.
-  - Acceptance-criteria gap (A7):
-    - Not yet satisfied. Reproducer still fails in both unchecked and checked pipeline variants and does not produce `∀a. a -> a -> a`.
-  - Proposed fix directions:
-    - Replace `shouldRecordRaiseMerge` metadata-gating with live structural gating from the current constraint graph (canonical bounds + binding-tree ancestry + edge interior), so no alias-syntax survival metadata is required.
-    - Guarantee bounded alias cases emit normalizable `OpMerge` or `OpRaise; OpMerge` (`OpRaiseMerge` after normalization) on the relevant edge.
-    - Tighten/eliminate fallback-instantiation on this path when thesis witness translation should be authoritative.
-    - Keep success assertions for both pipelines and drive them from red to green:
-      - `runPipelineElab`
-      - `runPipelineElabChecked`
-    - Keep rigid/non-translatable Φ invariants unchanged and explicitly regression-test them alongside the bounded-aliasing success case.
-  - Locked decisions (2026-02-08):
-    - Raw parser output remains part of long-term stable public API.
-    - Normalization diagnostics remain structural-only for now.
-    - External API split is explicit:
-      - parser APIs may return raw syntax;
-      - APIs that generate graphic constraints must take normalized syntax.
-
 ## Resolved
 
-- None yet.
+### BUG-2026-02-06-003
+- Status: Resolved
+- Priority: High
+- Discovered: 2026-02-06
+- Resolved: 2026-02-08
+- Summary: Bounded aliasing (`b ⩾ a`) Merge/RaiseMerge path now elaborates end-to-end.
+- Fix:
+  - RaiseMerge gating now uses live structural graph queries in `shouldRecordRaiseMerge` (canonical bound lookup + ancestry/interior + elimination state), with no precomputed binder-bound snapshots.
+  - Edge-local elimination persists binder substitution targets before elimination, preserving witness inputs required for thesis-aligned Φ translation.
+  - Witness normalization interior widening is restricted to multi-binder edge traces so required alias-path evidence is preserved without broad translatability regressions.
+- Regression tests:
+  - `/Volumes/src/mlf4-ralph/test/ElaborationSpec.hs` case: `bounded aliasing (b ⩾ a) elaborates to ∀a. a -> a -> a in unchecked and checked pipelines`
+  - `/Volumes/src/mlf4-ralph/test/Presolution/WitnessSpec.hs` section: `Witness normalization invariants (US-010 regression)`
+- Thesis impact:
+  - Closes the bounded-alias paper-faithfulness gap by restoring the thesis-aligned `∀a. a -> a -> a` baseline in both checked and unchecked elaboration pipelines.
