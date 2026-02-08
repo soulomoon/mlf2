@@ -15,7 +15,7 @@ import MLF.Binding.Tree
 import qualified MLF.Binding.Adjustment as BindingAdjustment
 import qualified MLF.Binding.GraphOps as GraphOps
 import qualified MLF.Util.Order as Order
-import MLF.Frontend.Syntax (SurfaceExpr, Expr(..), Lit(..), SrcType(..))
+import MLF.Frontend.Syntax (SurfaceExpr, Expr(..), Lit(..), SrcTy(..))
 import MLF.Frontend.ConstraintGen (ConstraintError, ConstraintResult(..), generateConstraints)
 import MLF.Frontend.Normalize (normalizeExpr)
 import SpecUtil

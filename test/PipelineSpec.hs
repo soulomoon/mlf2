@@ -46,7 +46,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             -- are treated as normal lets with coercion terms, not declared schemes.
             -- let f = ((\x.x) : ∀(a ⩾ Int). a -> a) in f
             -- The coercion constrains the RHS to match the annotation type.
-            let ann = STForall "a" (Just (STBase "Int")) (STArrow (STVar "a") (STVar "a"))
+            let ann = STForall "a" (Just (mkSrcBound (STBase "Int"))) (STArrow (STVar "a") (STVar "a"))
                 expr =
                     let schemeTy = mkForalls [] ann
                     in ELet "f" (EAnn (ELam "x" (EVar "x")) schemeTy) (EVar "f")

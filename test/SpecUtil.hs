@@ -49,7 +49,7 @@ import MLF.Constraint.Types.Graph
     , typeRef
     )
 import MLF.Frontend.ConstraintGen (AnnExpr(..))
-import MLF.Frontend.Syntax (SrcType(..), VarName)
+import MLF.Frontend.Syntax (SrcTy(..), SrcType, VarName, mkSrcBound)
 import MLF.Elab.Pipeline (defaultTraceConfig)
 
 emptyConstraint :: Constraint
@@ -98,7 +98,7 @@ genNodeMap ids =
 mkForalls :: [(String, Maybe SrcType)] -> SrcType -> SrcType
 mkForalls binds body =
     foldr
-        (\(name, mbBound) acc -> STForall name mbBound acc)
+        (\(name, mbBound) acc -> STForall name (fmap mkSrcBound mbBound) acc)
         body
         binds
 
