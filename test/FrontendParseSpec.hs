@@ -1,14 +1,17 @@
 module FrontendParseSpec (spec) where
 
 import Data.List.NonEmpty (NonEmpty (..))
+import qualified Data.Set as Set
 import Test.Hspec
 
 import MLF.API
-    ( Expr (..)
+    ( BaseTy (..)
+    , Expr (..)
     , NormParseError (..)
     , NormSrcType (..)
     , SrcType (..)
     , StructBound (..)
+    , Ty (..)
     , parseEmlfExpr
     , parseEmlfType
     , parseNormEmlfExpr
@@ -17,6 +20,8 @@ import MLF.API
     , parseRawEmlfType
     , renderEmlfParseError
     , renderNormParseError
+    , renderPipelineError
+    , runPipelineElab
     )
 
 spec :: Spec
@@ -111,6 +116,18 @@ spec = describe "Frontend eMLF parser" $ do
 
         it "rejects expression with self-bound annotation" $
             parseNormEmlfExpr "(x : ∀(a ⩾ a). a)" `shouldSatisfy` isNormExprErr
+
+        it "parseNormEmlfExpr output feeds runPipelineElab normalized-only API" $ do
+            let input = "let id = λ(x) x in let a = id 1 in id 2"
+            case parseNormEmlfExpr input of
+                Left err ->
+                    expectationFailure ("parseNormEmlfExpr failed: " ++ renderNormParseError err)
+                Right normExpr ->
+                    case runPipelineElab Set.empty normExpr of
+                        Left err ->
+                            expectationFailure ("runPipelineElab failed: " ++ renderPipelineError err)
+                        Right (_term, ty) ->
+                            ty `shouldBe` TBase (BaseTy "Int")
 
     describe "legacy aliases" $ do
         it "parseEmlfExpr is the same as parseRawEmlfExpr" $
