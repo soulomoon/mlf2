@@ -18,7 +18,7 @@ import MLF.Constraint.Types
 import MLF.Frontend.Syntax
 import MLF.Frontend.ConstraintGen.Emit
 import qualified MLF.Frontend.ConstraintGen.Scope as Scope
-import MLF.Frontend.ConstraintGen.State (BuildState(..), ConstraintM)
+import MLF.Frontend.ConstraintGen.State (BuildState(..), ConstraintM, ScopeFrame)
 import MLF.Frontend.ConstraintGen.Types
 
 buildRootExpr :: NormCoreExpr -> ConstraintM (GenNodeId, NodeId, AnnExpr)
@@ -26,7 +26,7 @@ buildRootExpr expr = do
     rootGen <- allocGenNode []
     (rootNode, annRoot) <- buildExpr Map.empty rootGen expr
     topFrame <- Scope.peekScope
-    Scope.rebindScopeNodes (genRef rootGen) rootNode topFrame
+    rebindScopeRoot (genRef rootGen) rootNode topFrame
     setBindParentIfMissing (typeRef rootNode) (genRef rootGen) BindFlex
     setGenNodeSchemes rootGen [rootNode]
     pure (rootGen, rootNode, annRoot)
@@ -36,6 +36,93 @@ buildExpr env scopeRoot expr = do
     (rootNode, ann) <- buildExprRaw env scopeRoot expr
     setBindParentIfMissing (typeRef rootNode) (genRef scopeRoot) BindFlex
     pure (rootNode, ann)
+
+withScopedBuild :: ConstraintM a -> ConstraintM (a, ScopeFrame)
+withScopedBuild action = do
+    Scope.pushScope
+    out <- action
+    frame <- Scope.popScope
+    pure (out, frame)
+
+attachUnder :: NodeRef -> NodeRef -> BindFlag -> ConstraintM ()
+attachUnder child parent flag =
+    setBindParentOverride child parent flag
+
+rebindScopeRoot :: NodeRef -> NodeId -> ScopeFrame -> ConstraintM ()
+rebindScopeRoot binder root frame =
+    Scope.rebindScopeNodes binder root frame
+
+withScopedRebind :: NodeRef -> (a -> NodeId) -> ConstraintM a -> ConstraintM a
+withScopedRebind binder rootOf action = do
+    (out, frame) <- withScopedBuild action
+    rebindScopeRoot binder (rootOf out) frame
+    pure out
+
+allocChildGenUnder :: GenNodeId -> ConstraintM GenNodeId
+allocChildGenUnder parent = do
+    child <- allocGenNode []
+    setBindParentIfMissing (genRef child) (genRef parent) BindFlex
+    pure child
+
+withWrappedNode
+    :: BindFlag
+    -> Bool
+    -> GenNodeId
+    -> NodeId
+    -> SharedEnv
+    -> ConstraintM (NodeId, SharedEnv)
+withWrappedNode bindFlag wrap currentGen innerNode shared =
+    if wrap
+        then do
+            varNode <- allocVar
+            setVarBound varNode (Just innerNode)
+            whenRigid bindFlag $
+                rebindIfParent innerNode (typeRef varNode) (genRef currentGen) bindFlag
+            setBindParentOverride (typeRef varNode) (genRef currentGen) bindFlag
+            pure (varNode, shared)
+        else pure (innerNode, shared)
+
+whenRigid :: BindFlag -> ConstraintM () -> ConstraintM ()
+whenRigid bindFlag action =
+    case bindFlag of
+        BindRigid -> action
+        BindFlex -> pure ()
+
+rebindChildrenIfRigid
+    :: BindFlag
+    -> NodeId
+    -> NodeRef
+    -> [NodeId]
+    -> ConstraintM ()
+rebindChildrenIfRigid bindFlag parent newParent children =
+    whenRigid bindFlag $
+        mapM_ (\child -> rebindIfParent child (typeRef parent) newParent bindFlag) children
+
+unlessShared :: SharedEnv -> NodeId -> ConstraintM () -> ConstraintM ()
+unlessShared shared node action =
+    if node `elem` Map.elems shared
+        then pure ()
+        else action
+
+attachForallChild
+    :: BindFlag
+    -> GenNodeId
+    -> NodeId
+    -> Maybe GenNodeId
+    -> SharedEnv
+    -> NodeId
+    -> ConstraintM ()
+attachForallChild bindFlag schemeGenId varNode mOwner shared node =
+    unlessShared shared node $
+        case mOwner of
+            Just owner ->
+                attachUnder (typeRef node) (genRef owner) bindFlag
+            Nothing ->
+                case bindFlag of
+                    BindRigid ->
+                        attachUnder (typeRef node) (genRef schemeGenId) bindFlag
+                    BindFlex ->
+                        attachUnder (typeRef node) (typeRef varNode) bindFlag
 
 buildExprRaw :: Env -> GenNodeId -> NormCoreExpr -> ConstraintM (NodeId, AnnExpr)
 buildExprRaw env scopeRoot expr =
@@ -99,9 +186,7 @@ buildExprRaw env scopeRoot expr =
         -- See Note [Let Bindings and Expansion Variables]
         ELet name rhs body ->
             let buildUnder gen subExpr = do
-                    Scope.pushScope
-                    (node, ann) <- buildExpr env gen subExpr
-                    scope <- Scope.popScope
+                    ((node, ann), scope) <- withScopedBuild (buildExpr env gen subExpr)
                     pure (node, ann, scope)
                 buildLet schemeGenId schemeRootNode rhsGen rhsAnn = do
                     let schemeGenUsed = schemeGenId
@@ -109,23 +194,19 @@ buildExprRaw env scopeRoot expr =
 
                     -- Alternative let scoping (Fig. 15.2.6, rightmost constraint):
                     -- introduce a gen node for the let expression and a trivial scheme root.
-                    letGen <- allocGenNode []
-                    setBindParentIfMissing (genRef letGen) (genRef scopeRoot) BindFlex
-                    setBindParentOverride (genRef schemeGenId) (genRef letGen) BindFlex
+                    letGen <- allocChildGenUnder scopeRoot
+                    attachUnder (genRef schemeGenId) (genRef letGen) BindFlex
                     if rhsGen /= schemeGenId
-                        then setBindParentOverride (genRef rhsGen) (genRef letGen) BindFlex
+                        then attachUnder (genRef rhsGen) (genRef letGen) BindFlex
                         else pure ()
-                    bodyGen <- allocGenNode []
-                    setBindParentIfMissing (genRef bodyGen) (genRef letGen) BindFlex
+                    bodyGen <- allocChildGenUnder letGen
 
                     trivialRoot <- allocVar
                     setBindParentIfMissing (typeRef trivialRoot) (genRef letGen) BindFlex
                     setGenNodeSchemes letGen [trivialRoot]
 
-                    Scope.pushScope
-                    (bodyNode, bodyAnn0) <- buildExpr env' bodyGen body
-                    bodyScope <- Scope.popScope
-                    Scope.rebindScopeNodes (genRef bodyGen) bodyNode bodyScope
+                    (bodyNode, bodyAnn0) <-
+                        withScopedRebind (genRef bodyGen) fst (buildExpr env' bodyGen body)
 
                     letEdge <- addInstEdge bodyNode trivialRoot
                     recordLetEdge letEdge
@@ -138,8 +219,8 @@ buildExprRaw env scopeRoot expr =
                     (rhsNode, rhsAnn, rhsScope) <- buildUnder schemeGenId rhsExpr
                     schemeGenUsed <- fmap (maybe schemeGenId id) (lookupSchemeGenForRoot rhsNode)
                     setGenNodeSchemes schemeGenUsed [rhsNode]
-                    Scope.rebindScopeNodes (genRef schemeGenUsed) rhsNode rhsScope
-                    setBindParentOverride (typeRef rhsNode) (genRef schemeGenUsed) BindFlex
+                    rebindScopeRoot (genRef schemeGenUsed) rhsNode rhsScope
+                    attachUnder (typeRef rhsNode) (genRef schemeGenUsed) BindFlex
                     pure (schemeGenId, rhsNode, schemeGenId, rhsAnn)
             in do
                 (schemeGenId, schemeRootNode, rhsGen, rhsAnn) <- buildInferred rhs
@@ -158,12 +239,9 @@ buildExprRaw env scopeRoot expr =
 buildCoerce :: Env -> GenNodeId -> NormSrcType -> NormCoreExpr -> ConstraintM (NodeId, AnnExpr)
 buildCoerce env scopeRoot annTy annotatedExpr = do
     (exprNode, exprAnn) <- buildExpr env scopeRoot annotatedExpr
-    annGen <- allocGenNode []
-    setBindParentIfMissing (genRef annGen) (genRef scopeRoot) BindFlex
-    Scope.pushScope
-    (domainNode, codomainNode) <- internalizeCoercionType annGen annTy
-    annScope <- Scope.popScope
-    Scope.rebindScopeNodes (genRef annGen) codomainNode annScope
+    annGen <- allocChildGenUnder scopeRoot
+    (domainNode, codomainNode) <-
+        withScopedRebind (genRef annGen) snd (internalizeCoercionType annGen annTy)
 
     -- If we're annotating a variable occurrence, prefer instantiating from the
     -- underlying scheme root rather than stacking expansions (see tests).
@@ -175,7 +253,7 @@ buildCoerce env scopeRoot annTy annotatedExpr = do
                 _ -> pure exprNode
         _ -> pure exprNode
     (edgeLeft, _) <- allocExpNode edgeBody
-    setBindParentOverride (typeRef edgeLeft) (genRef annGen) BindFlex
+    attachUnder (typeRef edgeLeft) (genRef annGen) BindFlex
     eid <- addInstEdge edgeLeft domainNode
     pure (codomainNode, AAnn exprAnn codomainNode eid)
 
@@ -428,37 +506,13 @@ internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared srcType 
             (codNode, shared2) <-
                 internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared1 cod
             arrowNode <- allocArrow domNode codNode
-            case bindFlag of
-                BindRigid -> do
-                    rebindIfParent domNode (typeRef arrowNode) (genRef currentGen) bindFlag
-                    rebindIfParent codNode (typeRef arrowNode) (genRef currentGen) bindFlag
-                BindFlex -> pure ()
-            if wrap
-                then do
-                    varNode <- allocVar
-                    setVarBound varNode (Just arrowNode)
-                    case bindFlag of
-                        BindRigid ->
-                            rebindIfParent arrowNode (typeRef varNode) (genRef currentGen) bindFlag
-                        BindFlex -> pure ()
-                    setBindParentOverride (typeRef varNode) (genRef currentGen) bindFlag
-                    pure (varNode, shared2)
-                else pure (arrowNode, shared2)
+            rebindChildrenIfRigid bindFlag arrowNode (genRef currentGen) [domNode, codNode]
+            withWrappedNode bindFlag wrap currentGen arrowNode shared2
 
         STBase name -> do
             registerTyConArity (BaseTy name) 0
             baseNode <- allocBase (BaseTy name)
-            if wrap
-                then do
-                    varNode <- allocVar
-                    setVarBound varNode (Just baseNode)
-                    case bindFlag of
-                        BindRigid ->
-                            rebindIfParent baseNode (typeRef varNode) (genRef currentGen) bindFlag
-                        BindFlex -> pure ()
-                    setBindParentOverride (typeRef varNode) (genRef currentGen) bindFlag
-                    pure (varNode, shared)
-                else pure (baseNode, shared)
+            withWrappedNode bindFlag wrap currentGen baseNode shared
 
         STCon name args -> do
             let arity = NE.length args
@@ -474,21 +528,8 @@ internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared srcType 
                 (NE.tail args)
             let argNodes = headNode : tailNodes
             conNode <- allocCon (BaseTy name) (headNode :| tailNodes)
-            case bindFlag of
-                BindRigid -> do
-                    mapM_ (\argNode -> rebindIfParent argNode (typeRef conNode) (genRef currentGen) bindFlag) argNodes
-                BindFlex -> pure ()
-            if wrap
-                then do
-                    varNode <- allocVar
-                    setVarBound varNode (Just conNode)
-                    case bindFlag of
-                        BindRigid ->
-                            rebindIfParent conNode (typeRef varNode) (genRef currentGen) bindFlag
-                        BindFlex -> pure ()
-                    setBindParentOverride (typeRef varNode) (genRef currentGen) bindFlag
-                    pure (varNode, sharedFinal)
-                else pure (conNode, sharedFinal)
+            rebindChildrenIfRigid bindFlag conNode (genRef currentGen) argNodes
+            withWrappedNode bindFlag wrap currentGen conNode sharedFinal
 
         STForall var mBound body -> do
             -- Note: Alias bounds (∀(b ⩾ a). body where the bound is a bare
@@ -505,59 +546,36 @@ internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared srcType 
                     | Set.member var (structBoundFreeVars (unNormBound bound)) ->
                         throwError (ForallBoundMentionsBinder var)
                 _ -> pure ()
-            Scope.pushScope
-            schemeGenId <- allocGenNode []
-            setBindParentIfMissing (genRef schemeGenId) (genRef currentGen) BindFlex
-            varNode <- allocVar
-            let tyEnv' = Map.insert var varNode tyEnv
-            (mbBoundNode, shared1) <- case mBound of
-                Nothing -> pure (Nothing, shared)
-                Just bound -> do
-                    let boundAsNorm = structBoundToNormSrcType (unNormBound bound)
-                    Scope.pushScope
-                    (boundNode, shared2) <-
-                        internalizeCoercionCopy bindFlag False coerceGen schemeGenId tyEnv' shared boundAsNorm
-                    boundScope <- Scope.popScope
-                    mbBoundOwner <- lookupSchemeOwnerForRoot boundNode
-                    case mbBoundOwner of
-                        Just gid -> do
-                            Scope.rebindScopeNodes (genRef gid) boundNode boundScope
-                            setGenNodeSchemes gid [boundNode]
-                        Nothing -> Scope.rebindScopeNodes (typeRef varNode) boundNode boundScope
-                    let sharedNodes = Map.elems shared2
-                    case mbBoundOwner of
-                        Nothing ->
-                            if boundNode `elem` sharedNodes
-                                then pure ()
-                                else
-                                    case bindFlag of
-                                        BindRigid ->
-                                            setBindParentOverride
-                                                (typeRef boundNode)
-                                                (genRef schemeGenId)
-                                                bindFlag
-                                        BindFlex ->
-                                            setBindParentOverride
-                                                (typeRef boundNode)
-                                                (typeRef varNode)
-                                                bindFlag
-                        Just gid ->
-                            if boundNode `elem` sharedNodes
-                                then pure ()
-                                else setBindParentOverride (typeRef boundNode) (genRef gid) bindFlag
-                    pure (Just boundNode, shared2)
+            ((schemeGenId, varNode, bodyNode, shared2), scopeFrame) <- withScopedBuild $ do
+                schemeGenId <- allocChildGenUnder currentGen
+                varNode <- allocVar
+                let tyEnv' = Map.insert var varNode tyEnv
+                (mbBoundNode, shared1) <- case mBound of
+                    Nothing -> pure (Nothing, shared)
+                    Just bound -> do
+                        let boundAsNorm = structBoundToNormSrcType (unNormBound bound)
+                        ((boundNode, shared2), boundScope) <-
+                            withScopedBuild
+                                (internalizeCoercionCopy bindFlag False coerceGen schemeGenId tyEnv' shared boundAsNorm)
+                        mbBoundOwner <- lookupSchemeOwnerForRoot boundNode
+                        case mbBoundOwner of
+                            Just gid -> do
+                                rebindScopeRoot (genRef gid) boundNode boundScope
+                                setGenNodeSchemes gid [boundNode]
+                            Nothing -> rebindScopeRoot (typeRef varNode) boundNode boundScope
+                        attachForallChild bindFlag schemeGenId varNode mbBoundOwner shared2 boundNode
+                        pure (Just boundNode, shared2)
 
-            setVarBound varNode mbBoundNode
+                setVarBound varNode mbBoundNode
 
-            (bodyNode, shared2) <-
-                internalizeCoercionCopy bindFlag False coerceGen schemeGenId tyEnv' shared1 body
-            scopeFrame <- Scope.popScope
-            Scope.rebindScopeNodes (genRef schemeGenId) bodyNode scopeFrame
-            setBindParentOverride (typeRef varNode) (genRef schemeGenId) bindFlag
-            let sharedNodes = Map.elems shared2
-            if bodyNode `elem` sharedNodes
-                then pure ()
-                else setBindParentOverride (typeRef bodyNode) (genRef schemeGenId) bindFlag
+                (bodyNode, shared2) <-
+                    internalizeCoercionCopy bindFlag False coerceGen schemeGenId tyEnv' shared1 body
+                pure (schemeGenId, varNode, bodyNode, shared2)
+
+            rebindScopeRoot (genRef schemeGenId) bodyNode scopeFrame
+            attachUnder (typeRef varNode) (genRef schemeGenId) bindFlag
+            unlessShared shared2 bodyNode $
+                attachUnder (typeRef bodyNode) (genRef schemeGenId) bindFlag
             setGenNodeSchemes schemeGenId [bodyNode]
             pure (bodyNode, shared2)
 

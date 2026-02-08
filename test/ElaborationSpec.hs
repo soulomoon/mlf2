@@ -2428,6 +2428,19 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
             ty `shouldAlphaEqType` expected
 
+        it "explicit forall coercion in let RHS elaborates through use-site application" $ do
+            let ann = STForall "a" Nothing (STArrow (STVar "a") (STVar "a"))
+                expr =
+                    ELet "f" (EAnn (ELam "x" (EVar "x")) ann)
+                        (EApp (EVar "f") (ELit (LInt 1)))
+
+            (term, ty) <- requirePipeline expr
+            checkedFromUnchecked <- requireRight (Elab.typeCheck term)
+            checkedFromUnchecked `shouldBe` Elab.TBase (BaseTy "Int")
+            ty `shouldBe` Elab.TBase (BaseTy "Int")
+            (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalize expr))
+            checkedTy `shouldBe` Elab.TBase (BaseTy "Int")
+
         it "explicit forall annotation preserves foralls in bounds" $ do
             let ann =
                     STForall "a"
