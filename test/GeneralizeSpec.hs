@@ -1,5 +1,6 @@
 module GeneralizeSpec (spec) where
 
+import Data.List.NonEmpty (NonEmpty(..))
 import Data.List (isInfixOf)
 import Test.Hspec
 
@@ -23,6 +24,26 @@ spec = do
                 baseTy = TArrow (TVar "a") (TVar "a")
             shadowCompareTypesTestOnly "ctx" solvedTy baseTy `shouldBe` Right ()
 
+        it "accepts nested forall body renaming without bounds" $ do
+            let solvedTy =
+                    TForall "a" Nothing
+                        (TForall "b" Nothing (TArrow (TVar "a") (TVar "b")))
+                baseTy =
+                    TForall "x" Nothing
+                        (TForall "y" Nothing (TArrow (TVar "x") (TVar "y")))
+            shadowCompareTypesTestOnly "ctx" solvedTy baseTy `shouldBe` Right ()
+
+        it "accepts nested forall renaming through explicit bounds and body" $ do
+            let solvedTy =
+                    TForall "a" (Just (TArrow (TVar "a") (TVar "a")))
+                        (TForall "b" (Just (TCon (BaseTy "Box") (TVar "a" :| [TVar "b"])))
+                            (TArrow (TVar "b") (TVar "a")))
+                baseTy =
+                    TForall "x" (Just (TArrow (TVar "x") (TVar "x")))
+                        (TForall "y" (Just (TCon (BaseTy "Box") (TVar "x" :| [TVar "y"])))
+                            (TArrow (TVar "y") (TVar "x")))
+            shadowCompareTypesTestOnly "ctx" solvedTy baseTy `shouldBe` Right ()
+
         it "rejects inconsistent free-variable reuse under renaming" $ do
             let solvedTy = TArrow (TVar "a") (TVar "b")
                 baseTy = TArrow (TVar "x") (TVar "x")
@@ -31,6 +52,28 @@ spec = do
                     msgs `shouldSatisfy` any (isInfixOf "shadow reify mismatch")
                 other ->
                     expectationFailure ("Expected ValidationFailed shadow mismatch, got: " ++ show other)
+
+        it "rejects non-bijective mapping reused across bound and body" $ do
+            let solvedTy =
+                    TForall "a" (Just (TArrow (TVar "a") (TVar "a")))
+                        (TArrow (TVar "a") (TVar "b"))
+                baseTy =
+                    TForall "x" (Just (TArrow (TVar "x") (TVar "x")))
+                        (TArrow (TVar "x") (TVar "x"))
+            case shadowCompareTypesTestOnly "ctx" solvedTy baseTy of
+                Left (ValidationFailed msgs) ->
+                    msgs `shouldSatisfy` any (isInfixOf "shadow reify mismatch")
+                other ->
+                    expectationFailure ("Expected ValidationFailed shadow mismatch, got: " ++ show other)
+
+        it "accepts renamed variables through constructor arguments" $ do
+            let solvedTy =
+                    TForall "a" Nothing
+                        (TForall "b" Nothing (TCon (BaseTy "Pair") (TVar "a" :| [TVar "b"])))
+                baseTy =
+                    TForall "x" Nothing
+                        (TForall "y" Nothing (TCon (BaseTy "Pair") (TVar "x" :| [TVar "y"])))
+            shadowCompareTypesTestOnly "ctx" solvedTy baseTy `shouldBe` Right ()
 
         it "rejects semantic mismatch with shadow reify mismatch diagnostics" $ do
             let solvedTy = TForall "a" Nothing (TArrow (TVar "a") (TVar "a"))
