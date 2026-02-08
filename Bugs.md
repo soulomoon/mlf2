@@ -133,5 +133,11 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
   - `cabal test mlf2-test --test-show-details=direct --test-options='--match="mapped-base elaboration"'`
   - `cabal test mlf2-test --test-show-details=direct --test-options='--match="redirected let-use"'`
   - `cabal build all && cabal test`
+  - Task 7 closure gate rerun (2026-02-08, local `+0800`): `cabal build all && cabal test` passed 5/5 consecutively
+    - `1/5` `2026-02-08T16:17:43+0800` → `2026-02-08T16:17:46+0800`
+    - `2/5` `2026-02-08T16:17:46+0800` → `2026-02-08T16:17:49+0800`
+    - `3/5` `2026-02-08T16:17:49+0800` → `2026-02-08T16:17:52+0800`
+    - `4/5` `2026-02-08T16:17:52+0800` → `2026-02-08T16:17:55+0800`
+    - `5/5` `2026-02-08T16:17:55+0800` → `2026-02-08T16:17:58+0800`
 - Thesis impact:
   - Restores thesis-faithful elaboration for redirected let-use identity without weakening mismatch detection for structurally different types.

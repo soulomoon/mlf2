@@ -7,17 +7,24 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 ## Task 7 Verification Gate — 2026-02-08
 
 - Command: `cabal build all && cabal test`
-- Gate status: **Blocked** (no consecutive green streak)
-- Baseline full verification: **FAIL** (`506 examples, 4 failures`; Phase 6 `shadow reify mismatch`)
-- Consecutive tracking:
-  - `1/5` — **FAIL** (2026-02-08T07:42:32Z, 2s): `ValidationFailed ["shadow reify mismatch", ... "solved=t14 -> t14", "base=a -> a"]`
-  - `2/5` — **FAIL** (2026-02-08T07:42:42Z, 3s): same failure signature
-  - `3/5` — **FAIL** (2026-02-08T07:42:51Z, 3s): same failure signature
-  - `4/5` — **FAIL** (2026-02-08T07:43:03Z, 3s): same failure signature
-  - `5/5` — **FAIL** (2026-02-08T07:43:13Z, 3s): same failure signature
+- Gate status: **Passed** (post-fix 5/5 consecutive green after `cb5e51d`)
+- Historical context (pre-fix, before `cb5e51d`):
+  - Baseline full verification: **FAIL** (`506 examples, 4 failures`; Phase 6 `shadow reify mismatch`)
+  - Consecutive tracking:
+    - `1/5` — **FAIL** (2026-02-08T07:42:32Z, 2s): `ValidationFailed ["shadow reify mismatch", ... "solved=t14 -> t14", "base=a -> a"]`
+    - `2/5` — **FAIL** (2026-02-08T07:42:42Z, 3s): same failure signature
+    - `3/5` — **FAIL** (2026-02-08T07:42:51Z, 3s): same failure signature
+    - `4/5` — **FAIL** (2026-02-08T07:43:03Z, 3s): same failure signature
+    - `5/5` — **FAIL** (2026-02-08T07:43:13Z, 3s): same failure signature
+- Post-fix revalidation (exact timestamps, local timezone `+0800`):
+  - `1/5` — **PASS** (start `2026-02-08T16:17:43+0800`, end `2026-02-08T16:17:46+0800`)
+  - `2/5` — **PASS** (start `2026-02-08T16:17:46+0800`, end `2026-02-08T16:17:49+0800`)
+  - `3/5` — **PASS** (start `2026-02-08T16:17:49+0800`, end `2026-02-08T16:17:52+0800`)
+  - `4/5` — **PASS** (start `2026-02-08T16:17:52+0800`, end `2026-02-08T16:17:55+0800`)
+  - `5/5` — **PASS** (start `2026-02-08T16:17:55+0800`, end `2026-02-08T16:17:58+0800`)
 - Follow-up:
-  - Added bug entry `BUG-2026-02-08-001` in `Bugs.md`.
-  - Runtime base-path ownership cleanup is deferred until the 5/5 green gate is satisfied.
+  - `BUG-2026-02-08-001` stays in `Bugs.md` under **Resolved**.
+  - Runtime base-selection audit: no dead runtime base-selection branch identified; solved/base shadow selection remains live in generalization/finalization/result-type paths, so no code removal was applied.
 
 ---
 
