@@ -1,0 +1,57 @@
+# Progress Log: A7 Group 3 Test Harness Dedup
+
+## 2026-02-08
+- Initialized task folder and planning files.
+- Loaded implementation plan and required skill templates.
+- Prepared to execute Task 1.
+- Entered Task 1 execution (red→green) with focused scope: `test/SpecUtil.hs`, `test/PipelineSpec.hs`, `test/ElaborationSpec.hs`, `test/ConstraintGenSpec.hs`.
+- RED: migrated one helper usage in each target spec to new `SpecUtil` symbols before implementation.
+- RED verify command: `cabal test mlf2-test --test-show-details=direct --test-option='-m' --test-option='Pipeline|Binding tree coverage|elimination rewrite'` -> FAIL (missing `SpecUtil` exports as expected).
+- GREEN: added `unsafeNormalizeExpr`, `firstShowE`, `runToPresolutionDefault`, `runToSolvedDefault` to `test/SpecUtil.hs`.
+- GREEN verify command: `cabal test mlf2-test --test-show-details=direct --test-option='-m' --test-option='Pipeline'` -> PASS (15 examples, 0 failures).
+- Task 1 completed via subagent and review gates.
+- Spec compliance review: ✅
+- Code quality review: ✅
+- Commit: 5744914c2930122cc94a044a1799f2ae3d39e76d
+- Task 2 follow-up (post code-quality review): fixed PipelineSpec single-run consistency and restored strict solved validation in elaboration-helper paths.
+- Verification command: `cabal test mlf2-test --test-show-details=direct --test-option='-m' --test-option='Pipeline'` -> PASS (15 examples, 0 failures).
+- Task 2 re-review requested for fix commit range `b8874a57..e3ab1240`.
+- Inspected diff (`test/PipelineSpec.hs`) and compared resulting code paths for solved-graph strict validation and single-run artifact consistency.
+- Re-ran focused verification: `cabal test mlf2-test --test-show-details=direct --test-option='-m' --test-option='Pipeline'` -> PASS (15 examples, 0 failures).
+- Re-review result: no remaining regressions found for the two prior issues; assessment approved.
+- Task 2 implemented in `test/PipelineSpec.hs` with red->green migration to shared `SpecUtil` helpers.
+- Initial Task 2 commit: `b8874a57bbe3552958965f32bcf20f0e36b025c9`.
+- Code-quality review flagged mixed-run artifact usage + missing strict validation; applied focused follow-up fix commit.
+- Task 2 fix commit: `e3ab124024316cc419eada9b40362b978533f72e`.
+- Final Task 2 status: spec compliance ✅, code quality ✅.
+- Task 2 implemented in `test/PipelineSpec.hs` with red->green migration to shared `SpecUtil` helpers.
+- Initial Task 2 commit: `b8874a57bbe3552958965f32bcf20f0e36b025c9`.
+- Code-quality review flagged mixed-run artifact usage + missing strict validation; applied focused follow-up fix commit.
+- Task 2 fix commit: `e3ab124024316cc419eada9b40362b978533f72e`.
+- Final Task 2 status: spec compliance ✅, code quality ✅.
+- Task 3 start: preparing red-phase helper dedup in `ElaborationSpec` and `ConstraintGenSpec`.
+- Plan for red phase: remove local `firstShow`/`runToPresolution` definitions before migrating call sites.
+- RED verify command: `cabal test mlf2-test --test-show-details=direct --test-option='-m' --test-option='Elaboration|ConstraintGen'` -> FAIL as expected (missing `firstShow` and `runToPresolution` symbols after local helper removal).
+- GREEN edits applied to `test/ElaborationSpec.hs` and `test/ConstraintGenSpec.hs`: removed local helper definitions and migrated call sites to shared `SpecUtil` helpers (`firstShowE`, `runToPresolutionDefault`, `runToSolvedDefault`, existing `unsafeNormalizeExpr`).
+- Verification command: `cabal test mlf2-test --test-show-details=direct --test-option='-m' --test-option='Elaboration'` -> PASS (10 examples, 0 failures).
+- Initial `ConstraintGen` verification attempt was run in parallel with `Elaboration` and failed due Cabal package.conf race (`package.conf.inplace already exists`).
+- Recovery: reran `cabal test mlf2-test --test-show-details=direct --test-option='-m' --test-option='ConstraintGen'` sequentially -> PASS (0 examples, 0 failures).
+- Additional confidence check: `cabal test mlf2-test --test-show-details=direct --test-option='-m' --test-option='Constraint generation'` -> PASS (46 examples, 0 failures).
+- Task 3 commit created: `828d1c06b4d435865fdbb027f2f1211478f9b2af` with message `refactor(test): migrate Elaboration/ConstraintGen specs to shared harness`.
+- Task 3 implemented commit: `828d1c03ab771b2dad576d78ce763b0e5cea9e12`.
+- Task 3 spec review: ✅
+- Task 3 initial code-quality review: ❌ (vacuous elimination assertion + double-stringified error path).
+- Follow-up fix commit: `cf669ec8c6cb2daa88084a475bde5667de93bd9a` (presolution-sourced elimination signal + direct requireRight path in Elaboration redirect test).
+- Follow-up focused test runs:
+  - `cabal test ... --test-option='Elaboration'` -> suite PASS (10 examples, 0 failures), process exit non-zero due sandbox-denied write to `/Users/ares/.cache/cabal/logs/build.log`.
+  - `cabal test ... --test-option='Constraint generation'` -> suite PASS (46 examples, 0 failures), process exit non-zero due same sandbox log-write denial.
+- Second quality review: ❌ requested explicit non-empty eliminated-signal assertion.
+- Final follow-up commit: `107bcba8433b63c21edc7fc9658d2931cffd9374`.
+- Final Task 3 code-quality re-review: ✅
+- Task 4 initial commit: `4eb43de197f17098386ef27d995c4480587fa1fd` (CHANGELOG entry).
+- Task 4 spec review initially failed on duplicate local `emptyConstraint` in PipelineSpec.
+- Task 4 fix commit: `ab95b294ab1d3018ff7cde0e9e0f696f21f5f2f9` (dedup PipelineSpec helper).
+- Independent verification run by controller:
+  - `cabal build all && cabal test` -> PASS (572 examples, 0 failures).
+  - `cabal test ... --test-option='Pipeline|Elaboration|ConstraintGen'` -> PASS (0 examples, 0 failures; matcher selects none).
+- Task 4 final review status: spec ✅, code quality ✅.
