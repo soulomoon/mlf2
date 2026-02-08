@@ -290,7 +290,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                                 | nid <- annLetSchemeRoots annRedirected
                                 , canonicalize nid /= nid
                                 ]
-                            annCanonical = rewriteAnnNodes canonicalize annRedirected
+                            annCanonical = canonicalizeAnn canonicalize annRedirected
                             staleCanonicalNodes =
                                 [ nid
                                 | nid <- annNodeOccurrences annCanonical
@@ -479,31 +479,31 @@ chaseRedirects redirects nid = case IntMap.lookup (getNodeId nid) redirects of
     Just n' -> if n' == nid then nid else chaseRedirects redirects n'
     Nothing -> nid
 
-rewriteAnnNodes :: (NodeId -> NodeId) -> AnnExpr -> AnnExpr
-rewriteAnnNodes rewrite expr = case expr of
-    AVar v nid -> AVar v (rewrite nid)
-    ALit lit nid -> ALit lit (rewrite nid)
+canonicalizeAnn :: (NodeId -> NodeId) -> AnnExpr -> AnnExpr
+canonicalizeAnn canonicalNode expr = case expr of
+    AVar v nid -> AVar v (canonicalNode nid)
+    ALit lit nid -> ALit lit (canonicalNode nid)
     ALam v pNode eid body nid ->
-        ALam v (rewrite pNode) eid (rewriteAnnNodes rewrite body) (rewrite nid)
+        ALam v (canonicalNode pNode) eid (canonicalizeAnn canonicalNode body) (canonicalNode nid)
     AApp fn arg fEid aEid nid ->
         AApp
-            (rewriteAnnNodes rewrite fn)
-            (rewriteAnnNodes rewrite arg)
+            (canonicalizeAnn canonicalNode fn)
+            (canonicalizeAnn canonicalNode arg)
             fEid
             aEid
-            (rewrite nid)
+            (canonicalNode nid)
     ALet v schemeGen schemeRoot expVar scopeRoot rhs body nid ->
         ALet
             v
             schemeGen
-            (rewrite schemeRoot)
+            (canonicalNode schemeRoot)
             expVar
             scopeRoot
-            (rewriteAnnNodes rewrite rhs)
-            (rewriteAnnNodes rewrite body)
-            (rewrite nid)
+            (canonicalizeAnn canonicalNode rhs)
+            (canonicalizeAnn canonicalNode body)
+            (canonicalNode nid)
     AAnn inner nid eid ->
-        AAnn (rewriteAnnNodes rewrite inner) (rewrite nid) eid
+        AAnn (canonicalizeAnn canonicalNode inner) (canonicalNode nid) eid
 
 annNodeOccurrences :: AnnExpr -> [NodeId]
 annNodeOccurrences expr = case expr of
