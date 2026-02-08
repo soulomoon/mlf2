@@ -24,7 +24,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - `5/5` — **PASS** (start `2026-02-08T16:17:55+0800`, end `2026-02-08T16:17:58+0800`)
 - Follow-up:
   - `BUG-2026-02-08-001` stays in `Bugs.md` under **Resolved**.
-  - Runtime base-selection audit: no dead runtime base-selection branch identified; solved/base shadow selection remains live in generalization/finalization/result-type paths, so no code removal was applied.
+  - Runtime base-shadow cutover completed: `MLF.Elab.Generalize` fallback no longer reifies or compares base-path output at runtime; solved-order output is authoritative.
 
 ---
 

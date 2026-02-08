@@ -40,9 +40,9 @@
 ### 2026-02-08 solved-order shadow cutover semantics
 
 - Generalize now treats solved-order as the solved-authoritative output order for reification/quantifier emission.
-- The base path remains only as a shadow compare path (`base shadow`) and is not authoritative for emitted results.
-- Any solved/base ordering mismatch is a hard-fail: `ValidationFailed` is raised with a context payload for debugging.
-- Full removal of the base path is gated on 5 consecutive green runs of the shadow comparator suite.
+- After the 5/5 green gate, runtime fallback in `MLF.Elab.Generalize` no longer reifies or compares base-path shadow output.
+- Solved-order output is authoritative in runtime generalization fallback (no runtime base-shadow compare).
+- Shadow comparator helpers (`shadowCompareTypes`, `selectSolvedOrderWithShadow`) remain available for focused unit tests/debugging.
 
 ### 2026-02-08 approved plan: staged frontend normalization + structural RaiseMerge gating (pending implementation)
 

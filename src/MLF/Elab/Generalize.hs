@@ -63,7 +63,7 @@ import MLF.Reify.Core
     , reifyBoundWithNames
     , reifyBoundWithNamesOnConstraint
     )
-import MLF.Reify.TypeOps (alphaEqType, freeTypeVarsFrom, inlineAliasBoundsWithBy)
+import MLF.Reify.TypeOps (alphaEqType, inlineAliasBoundsWithBy)
 import MLF.Elab.Types
 import MLF.Util.Graph (reachableFromStop)
 
@@ -310,7 +310,7 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
             } = reifyPlanWrapper
         Reify.ReifyPlan
             { Reify.rpSubst = subst
-            , Reify.rpSubstBaseByKey = substBaseByKey
+            , Reify.rpSubstBaseByKey = _
             , Reify.rpSchemeTypeChoice = schemeTypeChoice
             , Reify.rpBindingScopeGen = bindingScopeGenPlan
             , Reify.rpHasExplicitBound = hasExplicitBoundPlan
@@ -630,42 +630,8 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
                         constraint
                         adjustedSubstForReify
                         adjustedTypeRootForReify
-                | Just ga <- mbBindParentsGa = reifyWithGaBase ga
+                | Just _ <- mbBindParentsGa = reifyTypeWithSolvedBinders
                 | otherwise = reifyTypeWithOrderedBinders
-
-            reifyWithGaBase ga = do
-                solvedTy <- reifyTypeWithSolvedBinders
-                mbBaseTy <- reifyShadowBaseType ga
-                selectSolvedOrderWithShadowWithDetails
-                    "generalizeAt:fallbackSchemeType"
-                    [ "scopeRootC=" ++ show scopeRootC
-                    , "typeRoot=" ++ show typeRoot
-                    , "binders=" ++ show orderedBinders
-                    ]
-                    solvedTy
-                    mbBaseTy
-              where
-                reifyShadowBaseType ga' =
-                    case IntMap.lookup (getNodeId (canonical typeRoot)) solvedToBasePrefPlan of
-                        Just baseN
-                            | canonical baseN /= canonical typeRoot
-                            , Just _ <- NodeAccess.lookupNode (gaBaseConstraint ga') baseN -> do
-                                case
-                                    reifyTypeWithNamesNoFallbackOnConstraint
-                                        (gaBaseConstraint ga')
-                                        substBaseByKey
-                                        baseN
-                                    of
-                                    Left (MissingNode _) -> pure Nothing
-                                    Left err -> Left err
-                                    Right tyBase ->
-                                        let freeBase = freeTypeVarsFrom Set.empty tyBase
-                                            allowedBase = Set.fromList (IntMap.elems substBaseByKey)
-                                        in
-                                            if Set.isSubsetOf freeBase allowedBase
-                                                then pure (Just tyBase)
-                                                else pure Nothing
-                        _ -> pure Nothing
     ty0Raw <- reifySchemeType
     finalizeScheme FinalizeInput
         { fiEnv = env
