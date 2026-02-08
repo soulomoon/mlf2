@@ -73,9 +73,11 @@
 - PRs should include: a short problem statement, approach summary, new/updated tests, and any relevant doc updates (`implementation_notes.md`, `roadmap.md`) when changing algorithmic behavior.
 - When a change makes meaningful project progress, add a concise corresponding entry to `CHANGELOG.md` in the same update.
 
-## Task Management (Ralph)
+## Task Management (Skill-Driven File Planning)
 
-The `tasks/` folder contains PRDs and progress tracking for autonomous agent execution.
+The `tasks/` folder contains task plans and execution tracking for autonomous agent execution using:
+- `[$using-superpowers](/Users/ares/.codex/superpowers/skills/using-superpowers/SKILL.md)`
+- `[$planning-with-files](/Users/ares/.codex/skills/planning-with-files/SKILL.md)`
 
 Create a new task under `tasks/todo/` as a folder named `YYYY-MM-DD-description/` (e.g. `2026-02-03-thesis-exact-coercions/`). Completed tasks move to `tasks/archive/` with the same folder name.
 
@@ -84,25 +86,26 @@ tasks/
 ├── readme
 ├── todo/
 │   └── YYYY-MM-DD-description/
-│       ├── prd.json            # Current Ralph PRD (JSON format for autonomous execution)
-│       ├── prd-*.md            # Human-readable PRD documentation
-│       └── progress.txt        # Progress log updated by Ralph during execution
+│       ├── task_plan.md        # Phase plan, status, decisions, and error log
+│       ├── findings.md         # Key discoveries and paper/code alignment notes
+│       └── progress.md         # Iteration log, commands run, and outcomes
 └── archive/                    # Completed tasks organized by date and description
     └── YYYY-MM-DD-description/
-        ├── prd.json
-        ├── prd-*.md
-        └── progress.txt
+        ├── task_plan.md
+        ├── findings.md
+        └── progress.md
 ```
 
-**For autonomous agents (Ralph):**
-- Work from a single task folder under `tasks/todo/YYYY-MM-DD-description/`
-- Read `tasks/todo/YYYY-MM-DD-description/prd.json` to get the current user stories and acceptance criteria
-- Update `tasks/todo/YYYY-MM-DD-description/progress.txt` with iteration results
+**For autonomous agents (using-superpowers + planning-with-files):**
+- Invoke `[$using-superpowers](/Users/ares/.codex/superpowers/skills/using-superpowers/SKILL.md)` first, then follow `[$planning-with-files](/Users/ares/.codex/skills/planning-with-files/SKILL.md)` for execution.
+- Work from a single task folder under `tasks/todo/YYYY-MM-DD-description/`.
+- Initialize and maintain `task_plan.md`, `findings.md`, and `progress.md` in that task folder before substantial work.
+- Re-read `task_plan.md` before major decisions, and update phase status after each completed phase.
+- Log all errors and recovery attempts in `task_plan.md`; do not repeat the same failed action unchanged.
+- Write discoveries to `findings.md` throughout execution and keep `progress.md` as the running session log.
 - Maintain the repository root `TODO.md` as the rolling list of next goals; update it whenever priorities or upcoming work change.
 - Maintain `implementation_notes.md` when behavior, architecture, or thesis-alignment details change, so documentation stays in sync with implementation.
-- Stories are ordered by priority/dependency — execute in order
-- Each story should be completable in one iteration (one context window)
-- Mark `passes: true` in `prd.json` when a story's acceptance criteria are met
+- Close a task by marking all phases complete in `task_plan.md` and moving the folder to `tasks/archive/`.
 
 **Validation command:** `cabal build all && cabal test`
 
