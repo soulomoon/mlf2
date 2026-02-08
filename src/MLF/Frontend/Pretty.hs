@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
 module MLF.Frontend.Pretty (
     prettyEmlfType,
@@ -6,16 +7,19 @@ module MLF.Frontend.Pretty (
 
 import Data.List.NonEmpty (NonEmpty (..))
 import MLF.Frontend.Syntax
-    ( Expr (..)
+    ( BoundTopVar
+    , ExprStage (..)
+    , Expr (..)
     , Lit (..)
-    , SrcType (..)
-    , SurfaceExpr
+    , SrcBound (..)
+    , SrcTopVar (..)
+    , SrcTy (..)
     )
 
-prettyEmlfType :: SrcType -> String
+prettyEmlfType :: SrcTy n v -> String
 prettyEmlfType = goType 0
   where
-    goType :: Int -> SrcType -> String
+    goType :: Int -> SrcTy n v -> String
     goType p ty = case ty of
         STVar v -> v
         STBase b -> b
@@ -23,26 +27,36 @@ prettyEmlfType = goType 0
         STCon c args -> c ++ " " ++ unwords (map (goArg 2) (toListNE args))
         STArrow a b ->
             paren (p > 1) (goType 2 a ++ " -> " ++ goType 1 b)
-        STForall{} ->
-            let (binds, body) = collectForalls ty
+        STForall v mb body ->
+            let (tailBinds, tailBody) = collectForalls body
+                binds = (v, fmap unSrcBound mb) : tailBinds
                 bindStr = unwords (map prettyBind binds)
-            in paren (p > 0) ("∀" ++ bindStr ++ ". " ++ goType 0 body)
+            in paren (p > 0) ("∀" ++ bindStr ++ ". " ++ goType 0 tailBody)
 
-    goArg :: Int -> SrcType -> String
+    goArg :: Int -> SrcTy n v -> String
     goArg p ty = case ty of
         STVar{} -> goType p ty
         STBase{} -> goType p ty
         STBottom{} -> goType p ty
         _ -> "(" ++ goType 0 ty ++ ")"
 
-    prettyBind :: (String, Maybe SrcType) -> String
+    prettyBind :: (String, Maybe (SrcTy n (BoundTopVar n))) -> String
     prettyBind (v, Nothing) = v
     prettyBind (v, Just bound) = "(" ++ v ++ " ⩾ " ++ goType 0 bound ++ ")"
 
-prettyEmlfExpr :: SurfaceExpr -> String
+    collectForalls
+        :: SrcTy n 'TopVarAllowed
+        -> ([(String, Maybe (SrcTy n (BoundTopVar n)))], SrcTy n 'TopVarAllowed)
+    collectForalls ty = case ty of
+        STForall v mb body ->
+            let (rest, body') = collectForalls body
+            in ((v, fmap unSrcBound mb) : rest, body')
+        _ -> ([], ty)
+
+prettyEmlfExpr :: Expr 'Surface (SrcTy n v) -> String
 prettyEmlfExpr = goExpr 0
   where
-    goExpr :: Int -> SurfaceExpr -> String
+    goExpr :: Int -> Expr 'Surface (SrcTy n v) -> String
     goExpr p expr = case expr of
         EVar v -> v
         ELit l -> prettyLit l
@@ -57,7 +71,7 @@ prettyEmlfExpr = goExpr 0
         EAnn e ty ->
             "(" ++ goExpr 0 e ++ " : " ++ prettyEmlfType ty ++ ")"
 
-    goArg :: SurfaceExpr -> String
+    goArg :: Expr 'Surface (SrcTy n v) -> String
     goArg expr = case expr of
         EVar{} -> goExpr 2 expr
         ELit{} -> goExpr 2 expr
@@ -69,13 +83,6 @@ prettyEmlfExpr = goExpr 0
         LInt i -> show i
         LBool b -> if b then "true" else "false"
         LString s -> show s
-
-collectForalls :: SrcType -> ([(String, Maybe SrcType)], SrcType)
-collectForalls = go []
-  where
-    go acc ty = case ty of
-        STForall v mb body -> go (acc ++ [(v, mb)]) body
-        _ -> (acc, ty)
 
 toListNE :: NonEmpty a -> [a]
 toListNE (x :| xs) = x : xs
