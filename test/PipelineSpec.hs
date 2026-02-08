@@ -3,7 +3,6 @@ module PipelineSpec (spec) where
 
 import Control.Monad (unless)
 import Data.List (isInfixOf)
-import Data.Bifunctor (first)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Set as Set
@@ -23,9 +22,8 @@ import MLF.Elab.Pipeline
     )
 import MLF.Frontend.Syntax
 import MLF.Frontend.ConstraintGen
-import MLF.Frontend.Normalize (normalizeExpr)
 import MLF.Constraint.Normalize
-import MLF.Constraint.Acyclicity
+import MLF.Constraint.Acyclicity (checkAcyclicity)
 import MLF.Constraint.Canonicalizer (canonicalizeNode)
 import MLF.Constraint.Presolution
 import MLF.Constraint.Solve
@@ -33,7 +31,15 @@ import MLF.Constraint.Types.Graph
 import qualified MLF.Binding.Tree as Binding
 import MLF.Elab.Run.Provenance (buildTraceCopyMap, collectBaseNamedKeys)
 import MLF.Elab.Run.Util (makeCanonicalizer)
-import SpecUtil (collectVarNodes, defaultTraceConfig, mkForalls)
+import SpecUtil
+    ( collectVarNodes
+    , defaultTraceConfig
+    , emptyConstraint
+    , firstShowE
+    , mkForalls
+    , runToSolvedDefault
+    , unsafeNormalizeExpr
+    )
 import MLF.Types.Elab (Ty(..))
 import MLF.Reify.Core (reifyType)
 import Data.List.NonEmpty (NonEmpty(..))
@@ -51,7 +57,20 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     let schemeTy = mkForalls [] ann
                     in ELet "f" (EAnn (ELam "x" (EVar "x")) schemeTy) (EVar "f")
 
-            case runPipeline expr of
+            let pipelineParts = do
+                    ConstraintResult{ crConstraint = c0, crRoot = root } <-
+                        firstShowE (generateConstraints defaultPolySyms (unsafeNormalizeExpr expr))
+                    let c1 = normalize c0
+                    acyc <- firstShowE (checkAcyclicity c1)
+                    pres <- firstShowE (computePresolution defaultTraceConfig acyc c1)
+                    res <- firstShowE (solveUnify defaultTraceConfig (prConstraint pres))
+                    case validateSolvedGraphStrict res of
+                        [] -> do
+                            let rootRedirected = chaseRedirects (prRedirects pres) root
+                                root' = canonical (srUnionFind res) rootRedirected
+                            pure (res, root')
+                        vs -> Left ("validateSolvedGraph failed:\n" ++ unlines vs)
+            case pipelineParts of
                 Right (res, root) -> do
                     -- With coercion-only semantics, f's type is inferred (not declared)
                     -- The coercion ensures the RHS has the annotated type.
@@ -75,7 +94,19 @@ spec = describe "Pipeline (Phases 1-5)" $ do
              let expr = ELet "id" (ELam "x" (EVar "x")) (EVar "id")
 
              -- We intercept the pipeline after solve to test generalizeAt on the 'id' binding
-             case runPipelineWithInternals expr of
+             let pipelineParts = do
+                     ConstraintResult{ crConstraint = c0, crAnnotated = ann } <-
+                         firstShowE (generateConstraints defaultPolySyms (unsafeNormalizeExpr expr))
+                     let c1 = normalize c0
+                     acyc <- firstShowE (checkAcyclicity c1)
+                     pres <- firstShowE (computePresolution defaultTraceConfig acyc c1)
+                     res <- firstShowE (solveUnify defaultTraceConfig (prConstraint pres))
+                     case validateSolvedGraphStrict res of
+                         [] -> do
+                             let ann' = applyRedirectsToAnn (prRedirects pres) ann
+                             pure (res, ann')
+                         vs -> Left ("validateSolvedGraph failed:\n" ++ unlines vs)
+             case pipelineParts of
                  Right (res, ann) -> do
                      case ann of
                          ALet _ schemeGen schemeRoot _ _ _ _ _ -> do
@@ -142,11 +173,11 @@ spec = describe "Pipeline (Phases 1-5)" $ do
     describe "Integration Tests" $ do
         it "solves let-bound id applied to Bool" $ do
             let expr = ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (ELit (LBool True)))
-            case runPipeline expr of
+            case runToSolvedDefault defaultPolySyms expr of
                 Left err -> expectationFailure err
-                Right (res, _root) -> do
-                    validateStrict res
-                    let nodes = cNodes (srConstraint res)
+                Right solved -> do
+                    validateStrict solved
+                    let nodes = cNodes (srConstraint solved)
                     baseNames nodes `shouldContain` [BaseTy "Bool"]
                     noExpNodes nodes
 
@@ -156,9 +187,9 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     ELet "id" (ELam "x" (EVar "x"))
                         (ELet "a" (EApp (EVar "id") (ELit (LInt 1)))
                             (EApp (EVar "id") (ELit (LBool True))))
-            case runPipeline expr of
+            case runToSolvedDefault defaultPolySyms expr of
                 Left err -> expectationFailure err
-                Right (res, _root) -> do
+                Right res -> do
                     validateStrict res
                     let nodes = cNodes (srConstraint res)
                     baseNames nodes `shouldContain` [BaseTy "Int"]
@@ -171,11 +202,12 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                         (ELet "a" (EApp (EVar "id") (ELit (LInt 1)))
                             (EApp (EVar "id") (ELit (LBool True))))
             let pipelineParts = do
-                    ConstraintResult{ crConstraint = c0 } <- first show (generateConstraints defaultPolySyms (unsafeNormalize expr))
+                    ConstraintResult{ crConstraint = c0 } <-
+                        firstShowE (generateConstraints defaultPolySyms (unsafeNormalizeExpr expr))
                     let c1 = normalize c0
-                    acyc <- first show (checkAcyclicity c1)
-                    pres <- first show (computePresolution defaultTraceConfig acyc c1)
-                    solved <- first show (solveUnify defaultTraceConfig (prConstraint pres))
+                    acyc <- firstShowE (checkAcyclicity c1)
+                    pres <- firstShowE (computePresolution defaultTraceConfig acyc c1)
+                    solved <- firstShowE (solveUnify defaultTraceConfig (prConstraint pres))
                     pure (c1, pres, solved)
             case pipelineParts of
                 Left err -> expectationFailure err
@@ -216,9 +248,9 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     (ELet "id" (ELam "y" (EVar "y"))
                         (ELet "a" (EApp (EApp (EVar "apply") (EVar "id")) (ELit (LInt 1)))
                             (EApp (EApp (EVar "apply") (EVar "id")) (ELit (LBool True)))))
-        case runPipeline expr of
+        case runToSolvedDefault defaultPolySyms expr of
             Left err -> expectationFailure err
-            Right (res, _root) -> do
+            Right res -> do
                 validateStrict res
                 let c = srConstraint res
                     nodes = cNodes c
@@ -233,7 +265,14 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         let expr =
                 ELet "id" (ELam "x" (EVar "x"))
                     (EApp (EVar "id") (EVar "id"))
-        case runPipelineWithPresolution expr of
+        let pipelineParts = do
+                ConstraintResult{ crConstraint = c0, crAnnotated = ann } <-
+                    firstShowE (generateConstraints defaultPolySyms (unsafeNormalizeExpr expr))
+                let c1 = normalize c0
+                acyc <- firstShowE (checkAcyclicity c1)
+                pres <- firstShowE (computePresolution defaultTraceConfig acyc c1)
+                pure (pres, ann)
+        case pipelineParts of
             Left err -> expectationFailure err
             Right (pres, ann) -> do
                 let redirects = prRedirects pres
@@ -256,9 +295,9 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     (ELet "c1" (EApp (EVar "make") (ELit (LInt 2)))
                         (ELet "c2" (EApp (EVar "make") (ELit (LBool False)))
                             (EApp (EVar "c1") (ELit (LBool True)))))
-        case runPipeline expr of
+        case runToSolvedDefault defaultPolySyms expr of
             Left err -> expectationFailure err
-            Right (res, _root) -> do
+            Right res -> do
                 validateStrict res
                 let c = srConstraint res
                     nodes = cNodes c
@@ -275,9 +314,9 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     ELet "rebound" (ELet "alias" (EVar "id") (EVar "alias")) $
                         ELet "_" (EApp (EVar "rebound") (ELit (LInt 1)))
                             (EApp (EVar "rebound") (ELit (LBool True)))
-        case runPipeline expr of
+        case runToSolvedDefault defaultPolySyms expr of
             Left err -> expectationFailure err
-            Right (res, _root) -> do
+            Right res -> do
                 validateStrict res
                 let c = srConstraint res
                     nodes = cNodes c
@@ -294,9 +333,9 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                         (ELet "b" (EApp (EVar "mk") (ELit (LBool True)))
                             (ELet "_" (EApp (EVar "a") (ELit (LInt 1)))
                                 (EApp (EVar "b") (ELit (LBool True))))))
-        case runPipeline expr of
+        case runToSolvedDefault defaultPolySyms expr of
             Left err -> expectationFailure err
-            Right (res, _root) -> do
+            Right res -> do
                 validateStrict res
                 let c = srConstraint res
                     nodes = cNodes c
@@ -313,9 +352,9 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                         (ELet "lifted" (EApp (EVar "lift") (EVar "id"))
                             (ELet "_" (EApp (EVar "lifted") (ELit (LInt 1)))
                                 (EApp (EVar "lifted") (ELit (LBool True))))))
-        case runPipeline expr of
+        case runToSolvedDefault defaultPolySyms expr of
             Left err -> expectationFailure err
-            Right (res, _root) -> do
+            Right res -> do
                 validateStrict res
                 let c = srConstraint res
                     nodes = cNodes c
@@ -328,7 +367,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         it "runPipelineElab type matches typeCheck(term) and checked pipeline type" $ property $
             withMaxSuccess 80 $
                 forAll genClosedWellTypedExpr $ \expr -> do
-                    case runPipelineElab Set.empty (unsafeNormalize expr) of
+                    case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
                         Left err ->
                             expectationFailure
                                 ( "runPipelineElab failed for generated expression:\n"
@@ -352,7 +391,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                                     Right out -> pure out
                             assertTypeEq "runPipelineElab vs typeCheck(term)" expr ty checkedTy
 
-                            case runPipelineElabChecked Set.empty (unsafeNormalize expr) of
+                            case runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr) of
                                 Left errChecked ->
                                     expectationFailure
                                         ( "runPipelineElabChecked failed for generated expression:\n"
@@ -363,52 +402,6 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                                 Right (_termChecked, tyChecked) -> do
                                     assertTypeEq "runPipelineElab vs runPipelineElabChecked" expr ty tyChecked
                                     assertTypeEq "runPipelineElabChecked vs typeCheck(term)" expr tyChecked checkedTy
-
--- | Normalize a surface expression, failing on normalization error.
-unsafeNormalize :: SurfaceExpr -> NormSurfaceExpr
-unsafeNormalize expr =
-    case normalizeExpr expr of
-        Left err -> error ("normalizeExpr failed in test: " ++ show err)
-        Right normExpr -> normExpr
-
--- Helpers
-runPipelineWithInternals :: SurfaceExpr -> Either String (SolveResult, AnnExpr)
-runPipelineWithInternals expr = do
-    ConstraintResult{ crConstraint = c0, crRoot = _root, crAnnotated = ann } <-
-        first show (generateConstraints defaultPolySyms (unsafeNormalize expr))
-    let c1 = normalize c0
-    acyc <- first show (checkAcyclicity c1)
-    pres <- first show (computePresolution defaultTraceConfig acyc c1)
-    res <- first show (solveUnify defaultTraceConfig (prConstraint pres))
-    case validateSolvedGraphStrict res of
-        [] -> do
-            let ann' = applyRedirectsToAnn (prRedirects pres) ann
-            Right (res, ann')
-        vs -> Left ("validateSolvedGraph failed:\n" ++ unlines vs)
-
-runPipelineWithPresolution :: SurfaceExpr -> Either String (PresolutionResult, AnnExpr)
-runPipelineWithPresolution expr = do
-    ConstraintResult{ crConstraint = c0, crAnnotated = ann } <-
-        first show (generateConstraints defaultPolySyms (unsafeNormalize expr))
-    let c1 = normalize c0
-    acyc <- first show (checkAcyclicity c1)
-    pres <- first show (computePresolution defaultTraceConfig acyc c1)
-    pure (pres, ann)
-
-runPipeline :: SurfaceExpr -> Either String (SolveResult, NodeId)
-runPipeline expr = do
-    ConstraintResult{ crConstraint = c0, crRoot = root, crAnnotated = _ann } <-
-        first show (generateConstraints defaultPolySyms (unsafeNormalize expr))
-    let c1 = normalize c0
-    acyc <- first show (checkAcyclicity c1)
-    PresolutionResult{ prConstraint = c4, prRedirects = redirects } <- first show (computePresolution defaultTraceConfig acyc c1)
-    res <- first show (solveUnify defaultTraceConfig c4)
-    -- Apply redirects (from Presolution) then canonicalize (from Solve)
-    let rootRedirected = chaseRedirects redirects root
-        root' = canonical (srUnionFind res) rootRedirected
-    case validateSolvedGraphStrict res of
-        [] -> Right (res, root')
-        vs -> Left ("validateSolvedGraph failed:\n" ++ unlines vs)
 
 canonical :: IntMap.IntMap NodeId -> NodeId -> NodeId
 canonical uf nid =
@@ -477,18 +470,3 @@ genClosedWellTypedExpr = do
             , ELet "f" (EAnn idLam polyIdTy) (EApp (EVar "f") intLit2)
             ]
     elements exprs
-
--- | Empty constraint for testing reification
-emptyConstraint :: Constraint
-emptyConstraint = Constraint
-    { cNodes = fromListNode []
-    , cInstEdges = []
-    , cUnifyEdges = []
-    , cBindParents = IntMap.empty
-    , cPolySyms = Set.empty
-    , cEliminatedVars = IntSet.empty
-    , cWeakenedVars = IntSet.empty
-    , cAnnEdges = IntSet.empty
-    , cLetEdges = IntSet.empty
-    , cGenNodes = fromListGen []
-    }

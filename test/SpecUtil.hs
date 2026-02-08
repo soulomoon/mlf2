@@ -11,6 +11,10 @@ module SpecUtil (
     bindParentsFromPairs,
     collectVarNodes,
     defaultTraceConfig,
+    unsafeNormalizeExpr,
+    firstShowE,
+    runToPresolutionDefault,
+    runToSolvedDefault,
     expectRight,
     requireRight,
     inferBindParents,
@@ -37,6 +41,7 @@ import MLF.Constraint.Types.Graph
     , GenNodeMap
     , NodeId(..)
     , NodeMap(..)
+    , PolySyms
     , TyNode(..)
     , fromListGen
     , fromListNode
@@ -48,8 +53,13 @@ import MLF.Constraint.Types.Graph
     , toListNode
     , typeRef
     )
-import MLF.Frontend.ConstraintGen (AnnExpr(..))
-import MLF.Frontend.Syntax (SrcTy(..), SrcType, VarName, mkSrcBound)
+import MLF.Constraint.Acyclicity (checkAcyclicity)
+import MLF.Constraint.Normalize (normalize)
+import MLF.Constraint.Presolution (PresolutionResult(..), computePresolution)
+import MLF.Constraint.Solve (SolveResult, solveUnify)
+import MLF.Frontend.ConstraintGen (AnnExpr(..), ConstraintResult(..), generateConstraints)
+import MLF.Frontend.Normalize (normalizeExpr)
+import MLF.Frontend.Syntax (NormSurfaceExpr, SrcTy(..), SrcType, SurfaceExpr, VarName, mkSrcBound)
 import MLF.Elab.Pipeline (defaultTraceConfig)
 
 emptyConstraint :: Constraint
@@ -138,6 +148,28 @@ expectRight value k =
 
 requireRight :: Show e => Either e a -> IO a
 requireRight = either (\e -> expectationFailure (show e) >> fail "requireRight") pure
+
+unsafeNormalizeExpr :: SurfaceExpr -> NormSurfaceExpr
+unsafeNormalizeExpr expr =
+    case normalizeExpr expr of
+        Left err -> error ("normalizeExpr failed in test: " ++ show err)
+        Right out -> out
+
+firstShowE :: Show e => Either e a -> Either String a
+firstShowE = either (Left . show) Right
+
+runToPresolutionDefault :: PolySyms -> SurfaceExpr -> Either String PresolutionResult
+runToPresolutionDefault poly expr = do
+    ConstraintResult{ crConstraint = c0 } <-
+        firstShowE (generateConstraints poly (unsafeNormalizeExpr expr))
+    let c1 = normalize c0
+    acyc <- firstShowE (checkAcyclicity c1)
+    firstShowE (computePresolution defaultTraceConfig acyc c1)
+
+runToSolvedDefault :: PolySyms -> SurfaceExpr -> Either String SolveResult
+runToSolvedDefault poly expr = do
+    pres <- runToPresolutionDefault poly expr
+    firstShowE (solveUnify defaultTraceConfig (prConstraint pres))
 
 inferBindParents :: NodeMap TyNode -> BindParents
 inferBindParents nodes =

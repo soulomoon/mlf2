@@ -10,9 +10,7 @@ import qualified Data.Set as Set
 import Test.Hspec
 
 import MLF.Binding.Tree (boundFlexChildren, checkBindingTree, isUnderRigidBinder, nodeKind, NodeKind(..))
-import MLF.Constraint.Acyclicity (checkAcyclicity)
-import MLF.Constraint.Normalize (normalize)
-import MLF.Constraint.Presolution (PresolutionResult(..), computePresolution)
+import MLF.Constraint.Presolution (PresolutionResult(..))
 import MLF.Constraint.Solve (SolveResult(..), solveUnify)
 import MLF.Frontend.ConstraintGen (AnnExpr (..))
 import MyLib hiding (normalize, lookupNode)
@@ -24,6 +22,7 @@ import SpecUtil
     , nodeMapSize
     , requireRight
     , mkForalls
+    , runToPresolutionDefault
     )
 
 inferConstraintGraphDefault :: SurfaceExpr -> Either ConstraintError ConstraintResult
@@ -709,21 +708,10 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 expr =
                     ELet "c" (EAnn rhs schemeTy) (EAnn (EVar "c") ann)
 
-                runToPresolution :: SurfaceExpr -> Either String PresolutionResult
-                runToPresolution e = do
-                    ConstraintResult { crConstraint = c0 } <- firstShow (inferConstraintGraphDefault e)
-                    let c1 = normalize c0
-                    acyc <- firstShow (checkAcyclicity c1)
-                    firstShow (computePresolution defaultTraceConfig acyc c1)
-
-                firstShow :: Show err => Either err a -> Either String a
-                firstShow = either (Left . show) Right
-
-            pres <- requireRight (runToPresolution expr)
-            let eliminated = cEliminatedVars (prConstraint pres)
-
+            pres <- requireRight (runToPresolutionDefault Set.empty expr)
             solved <- requireRight (solveUnify defaultTraceConfig (prConstraint pres))
             let cSolved = srConstraint solved
+                eliminated = cEliminatedVars (prConstraint pres)
                 schemeGens =
                     [ gnId gen
                     | gen <- IntMap.elems (getGenNodeMap (cGenNodes cSolved))
@@ -735,6 +723,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
             qn <- fmap concat $ forM schemeGens $ \gid ->
                 requireRight (boundFlexChildren cSolved (genRef gid))
             let qnIds = IntSet.fromList (map getNodeId qn)
+            eliminated `shouldSatisfy` (not . IntSet.null)
             IntSet.intersection eliminated qnIds `shouldBe` IntSet.empty
 
     describe "Expansion nodes" $ do
