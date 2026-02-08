@@ -1,0 +1,1 @@
+session-catchup script unavailable (CLAUDE_PLUGIN_ROOT unset or script missing)
