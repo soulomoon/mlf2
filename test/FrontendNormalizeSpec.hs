@@ -1,3 +1,4 @@
+{-# LANGUAGE GADTs #-}
 module FrontendNormalizeSpec (spec) where
 
 import Test.Hspec
@@ -35,13 +36,13 @@ freeVarsSpec = describe "freeVarsSrcType" $ do
             `shouldBe` Set.empty
 
     it "forall does not bind in the bound" $
-        freeVarsSrcType (STForall "a" (Just (STVar "a")) (STVar "b"))
+        freeVarsSrcType (STForall "a" (Just (mkSrcBound (STVar "a"))) (STVar "b"))
             `shouldBe` Set.fromList ["a", "b"]
 
     it "nested foralls shadow correctly" $
         freeVarsSrcType
             (STForall "a" Nothing
-                (STForall "b" (Just (STVar "a")) (STVar "c")))
+                (STForall "b" (Just (mkSrcBound (STVar "a"))) (STVar "c")))
             `shouldBe` Set.fromList ["c"]
 
 -- -----------------------------------------------------------------------
@@ -68,22 +69,20 @@ substSpec = describe "substSrcType" $ do
             `shouldBe` STForall "a" Nothing (STVar "a")
 
     it "alpha-renames to avoid capture" $
-        -- subst a → b in ∀b. a → b
-        -- b in the forall would capture the replacement, so rename b → b1
+        -- subst a -> b in forall b. a -> b
         let input = STForall "b" Nothing (STArrow (STVar "a") (STVar "b"))
             result = substSrcType "a" (STVar "b") input
         in case result of
             STForall v' Nothing (STArrow (STVar r) (STVar inner)) -> do
-                v' `shouldNotBe` "b"  -- renamed away from "b"
-                r `shouldBe` "b"      -- replacement is STVar "b"
-                inner `shouldBe` v'   -- body uses the renamed binder
-            other -> expectationFailure $
-                "unexpected shape: " ++ show other
+                v' `shouldNotBe` "b"
+                r `shouldBe` "b"
+                inner `shouldBe` v'
+            other -> expectationFailure ("unexpected shape: " ++ show other)
 
     it "substitutes in forall bound" $
         substSrcType "a" (STBase "Int")
-            (STForall "b" (Just (STVar "a")) (STVar "b"))
-            `shouldBe` STForall "b" (Just (STBase "Int")) (STVar "b")
+            (STForall "b" (Just (mkSrcBound (STVar "a"))) (STVar "b"))
+            `shouldBe` STForall "b" (Just (mkSrcBound (STBase "Int"))) (STVar "b")
 
 -- -----------------------------------------------------------------------
 -- Type normalization
@@ -93,78 +92,72 @@ normalizeTypeSpec :: Spec
 normalizeTypeSpec = describe "normalizeType" $ do
     it "normalizes a simple variable" $
         normalizeType (STVar "a")
-            `shouldBe` Right (NSTVar "a")
+            `shouldBe` Right (STVar "a")
 
     it "normalizes an arrow" $
         normalizeType (STArrow (STVar "a") (STBase "Int"))
-            `shouldBe` Right (NSTArrow (NSTVar "a") (NSTBase "Int"))
+            `shouldBe` Right (STArrow (STVar "a") (STBase "Int"))
 
     it "normalizes bottom" $
         normalizeType STBottom
-            `shouldBe` Right NSTBottom
+            `shouldBe` Right STBottom
 
     it "normalizes unbounded forall" $
         normalizeType (STForall "a" Nothing (STVar "a"))
-            `shouldBe` Right (NSTForall "a" Nothing (NSTVar "a"))
+            `shouldBe` Right (STForall "a" Nothing (STVar "a"))
 
-    it "normalizes structural bound" $
-        normalizeType (STForall "a" (Just (STBase "Int")) (STVar "a"))
-            `shouldBe` Right (NSTForall "a" (Just (SBBase "Int")) (NSTVar "a"))
+    it "normalizes structural bound to StructBound alias over SrcTy" $
+        normalizeType (STForall "a" (Just (mkSrcBound (STBase "Int"))) (STVar "a"))
+            `shouldBe` Right (STForall "a" (Just (mkNormBound (STBase "Int"))) (STVar "a"))
 
-    it "inlines alias bound (∀(b ⩾ a). b → a  →  a → a)" $
-        -- ∀(b ⩾ a). b → a  should become  a → a  (b replaced by a)
-        let input = STForall "b" (Just (STVar "a"))
+    it "inlines alias bound (forall (b >= a). b -> a -> a -> a)" $
+        let input = STForall "b" (Just (mkSrcBound (STVar "a")))
                         (STArrow (STVar "b") (STVar "a"))
         in normalizeType input
-            `shouldBe` Right (NSTArrow (NSTVar "a") (NSTVar "a"))
+            `shouldBe` Right (STArrow (STVar "a") (STVar "a"))
 
-    it "inlines nested alias: ∀a. ∀(b ⩾ a). a → b → a  →  ∀a. a → a → a" $
+    it "inlines nested alias: forall a. forall (b >= a). a -> b -> a" $
         let input = STForall "a" Nothing
-                        (STForall "b" (Just (STVar "a"))
+                        (STForall "b" (Just (mkSrcBound (STVar "a")))
                             (STArrow (STVar "a")
                                 (STArrow (STVar "b") (STVar "a"))))
         in normalizeType input
-            `shouldBe` Right (NSTForall "a" Nothing
-                        (NSTArrow (NSTVar "a")
-                            (NSTArrow (NSTVar "a") (NSTVar "a"))))
+            `shouldBe` Right (STForall "a" Nothing
+                        (STArrow (STVar "a")
+                            (STArrow (STVar "a") (STVar "a"))))
 
     it "rejects self-bound variable" $
-        let input = STForall "a" (Just (STVar "a")) (STVar "a")
+        let input = STForall "a" (Just (mkSrcBound (STVar "a"))) (STVar "a")
         in normalizeType input
             `shouldBe` Left (SelfBoundVariable "a" (STVar "a"))
 
     it "handles alpha-capture during alias inlining" $
-        -- ∀a. ∀(b ⩾ a). ∀a. b → a
-        -- After inlining b → a (outer a), the inner ∀a shadows, so we need
-        -- capture avoidance. Result: ∀a. ∀a1. a → a1 (or similar fresh name)
         let input = STForall "a" Nothing
-                        (STForall "b" (Just (STVar "a"))
+                        (STForall "b" (Just (mkSrcBound (STVar "a")))
                             (STForall "a" Nothing
                                 (STArrow (STVar "b") (STVar "a"))))
         in case normalizeType input of
-            Right (NSTForall "a" Nothing
-                    (NSTForall v' Nothing
-                        (NSTArrow (NSTVar outer) (NSTVar inner)))) -> do
-                outer `shouldBe` "a"   -- b was replaced by outer a
-                inner `shouldBe` v'    -- inner a was renamed
-                v' `shouldNotBe` "a"   -- must be fresh
-            Right other -> expectationFailure $
-                "unexpected normalized shape: " ++ show other
-            Left err -> expectationFailure $
-                "unexpected error: " ++ show err
+            Right (STForall "a" Nothing
+                    (STForall v' Nothing
+                        (STArrow (STVar outer) (STVar inner)))) -> do
+                outer `shouldBe` "a"
+                inner `shouldBe` v'
+                v' `shouldNotBe` "a"
+            Right other -> expectationFailure ("unexpected normalized shape: " ++ show other)
+            Left err -> expectationFailure ("unexpected error: " ++ show err)
 
     it "normalizes constructor types" $
         normalizeType (STCon "List" (STVar "a" :| []))
-            `shouldBe` Right (NSTCon "List" (NSTVar "a" :| []))
+            `shouldBe` Right (STCon "List" (STVar "a" :| []))
 
     it "normalizes structural arrow bound" $
         normalizeType
-            (STForall "a" (Just (STArrow (STBase "Int") (STBase "Bool")))
+            (STForall "a" (Just (mkSrcBound (STArrow (STBase "Int") (STBase "Bool"))))
                 (STVar "a"))
             `shouldBe` Right
-                (NSTForall "a"
-                    (Just (SBArrow (NSTBase "Int") (NSTBase "Bool")))
-                    (NSTVar "a"))
+                (STForall "a"
+                    (Just (mkNormBound (STArrow (STBase "Int") (STBase "Bool"))))
+                    (STVar "a"))
 
 -- -----------------------------------------------------------------------
 -- Expression normalization
@@ -173,23 +166,23 @@ normalizeTypeSpec = describe "normalizeType" $ do
 normalizeExprSpec :: Spec
 normalizeExprSpec = describe "normalizeExpr" $ do
     it "normalizes annotation in EAnn" $
-        let ty = STForall "b" (Just (STVar "a"))
+        let ty = STForall "b" (Just (mkSrcBound (STVar "a")))
                     (STArrow (STVar "b") (STVar "a"))
             expr = EAnn (EVar "x") ty
         in normalizeExpr expr
             `shouldBe` Right (EAnn (EVar "x")
-                (NSTArrow (NSTVar "a") (NSTVar "a")))
+                (STArrow (STVar "a") (STVar "a")))
 
     it "normalizes annotation in ELamAnn" $
         let ty = STForall "a" Nothing (STVar "a")
             expr = ELamAnn "x" ty (EVar "x")
         in normalizeExpr expr
             `shouldBe` Right (ELamAnn "x"
-                (NSTForall "a" Nothing (NSTVar "a"))
+                (STForall "a" Nothing (STVar "a"))
                 (EVar "x"))
 
     it "propagates error from annotation" $
-        let ty = STForall "a" (Just (STVar "a")) (STVar "a")
+        let ty = STForall "a" (Just (mkSrcBound (STVar "a"))) (STVar "a")
             expr = EAnn (EVar "x") ty
         in normalizeExpr expr
             `shouldBe` Left (SelfBoundVariable "a" (STVar "a"))

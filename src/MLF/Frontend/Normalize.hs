@@ -57,7 +57,7 @@ freeVarsSrcType = go Set.empty
         STCon _ args -> foldMap (go bound) args
         STForall v mb body ->
             let bound' = Set.insert v bound
-                freeBound = maybe Set.empty (go bound) mb
+                freeBound = maybe Set.empty (go bound . unSrcBound) mb
             in Set.union freeBound (go bound' body)
         STBottom -> Set.empty
 
@@ -71,6 +71,7 @@ substSrcType :: String -> SrcType -> SrcType -> SrcType
 substSrcType x s = goSub
   where
     freeS = freeVarsSrcType s
+    mapRawBound f = mkSrcBound . f . unSrcBound
 
     goSub = \case
         STVar v
@@ -83,20 +84,20 @@ substSrcType x s = goSub
         STForall v mb body
             | v == x ->
                 -- x is shadowed; only substitute in the bound, not the body
-                STForall v (fmap goSub mb) body
+                STForall v (fmap (mapRawBound goSub) mb) body
             | Set.member v freeS ->
                 -- v would capture a free variable in s; alpha-rename v
                 let used = Set.unions
                         [ freeS
                         , freeVarsSrcType body
-                        , maybe Set.empty freeVarsSrcType mb
+                        , maybe Set.empty (freeVarsSrcType . unSrcBound) mb
                         , Set.singleton v
                         ]
                     v' = freshNameLike v used
                     body' = substSrcType v (STVar v') body
-                in STForall v' (fmap goSub mb) (goSub body')
+                in STForall v' (fmap (mapRawBound goSub) mb) (goSub body')
             | otherwise ->
-                STForall v (fmap goSub mb) (goSub body)
+                STForall v (fmap (mapRawBound goSub) mb) (goSub body)
 
 -- ---------------------------------------------------------------------------
 -- Fresh name generation
@@ -126,25 +127,25 @@ normalizeType = go
   where
     go :: SrcType -> Either NormalizationError NormSrcType
     go = \case
-        STVar v -> Right (NSTVar v)
-        STArrow a b -> NSTArrow <$> go a <*> go b
-        STBase b -> Right (NSTBase b)
-        STCon c args -> NSTCon c <$> traverse go args
-        STBottom -> Right NSTBottom
+        STVar v -> Right (STVar v)
+        STArrow a b -> STArrow <$> go a <*> go b
+        STBase b -> Right (STBase b)
+        STCon c args -> STCon c <$> traverse go args
+        STBottom -> Right STBottom
         STForall v Nothing body ->
-            NSTForall v Nothing <$> go body
+            STForall v Nothing <$> go body
         STForall v (Just bound) body -> case bound of
-            STVar alias
+            SrcBound (STVar alias)
                 | alias == v ->
                     Left (SelfBoundVariable v body)
                 | otherwise ->
                     -- Alias bound: inline by substituting v → alias in body
                     let body' = substSrcType v (STVar alias) body
                     in go body'
-            _ -> do
+            SrcBound boundTy -> do
                 -- Structural bound: normalize and convert to StructBound
-                sb <- normalizeBound bound
-                NSTForall v (Just sb) <$> go body
+                sb <- normalizeBound boundTy
+                STForall v (Just (mkNormBound sb)) <$> go body
 
     normalizeBound :: SrcType -> Either NormalizationError StructBound
     normalizeBound = \case
@@ -155,23 +156,23 @@ normalizeType = go
             -- But StructBound has no variable constructor, so this is
             -- unreachable from the STForall handler (which peels off STVar).
             error "normalizeBound: unreachable — STVar handled in STForall branch"
-        STArrow a b -> SBArrow <$> go a <*> go b
-        STBase b -> Right (SBBase b)
-        STCon c args -> SBCon c <$> traverse go args
-        STBottom -> Right SBBottom
+        STArrow a b -> STArrow <$> go a <*> go b
+        STBase b -> Right (STBase b)
+        STCon c args -> STCon c <$> traverse go args
+        STBottom -> Right STBottom
         STForall v Nothing body ->
-            SBForall v Nothing <$> go body
+            STForall v Nothing <$> go body
         STForall v (Just bound) body -> case bound of
-            STVar alias
+            SrcBound (STVar alias)
                 | alias == v ->
                     Left (SelfBoundVariable v body)
                 | otherwise ->
                     -- Alias in nested bound: inline and re-normalize
                     let body' = substSrcType v (STVar alias) body
                     in normalizeBound body'
-            _ -> do
-                sb <- normalizeBound bound
-                SBForall v (Just sb) <$> go body
+            SrcBound boundTy -> do
+                sb <- normalizeBound boundTy
+                STForall v (Just (mkNormBound sb)) <$> go body
 
 -- ---------------------------------------------------------------------------
 -- Expression normalization: Expr s SrcType → Expr s NormSrcType
