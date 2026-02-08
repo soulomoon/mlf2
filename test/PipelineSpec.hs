@@ -23,6 +23,7 @@ import MLF.Elab.Pipeline
 import MLF.Frontend.Syntax
 import MLF.Frontend.ConstraintGen
 import MLF.Constraint.Normalize
+import MLF.Constraint.Acyclicity (checkAcyclicity)
 import MLF.Constraint.Canonicalizer (canonicalizeNode)
 import MLF.Constraint.Presolution
 import MLF.Constraint.Solve
@@ -35,7 +36,6 @@ import SpecUtil
     , defaultTraceConfig
     , firstShowE
     , mkForalls
-    , runToPresolutionDefault
     , runToSolvedDefault
     , unsafeNormalizeExpr
     )
@@ -57,13 +57,18 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     in ELet "f" (EAnn (ELam "x" (EVar "x")) schemeTy) (EVar "f")
 
             let pipelineParts = do
-                    ConstraintResult{ crRoot = root } <-
+                    ConstraintResult{ crConstraint = c0, crRoot = root } <-
                         firstShowE (generateConstraints defaultPolySyms (unsafeNormalizeExpr expr))
-                    pres <- runToPresolutionDefault defaultPolySyms expr
-                    res <- runToSolvedDefault defaultPolySyms expr
-                    let rootRedirected = chaseRedirects (prRedirects pres) root
-                        root' = canonical (srUnionFind res) rootRedirected
-                    pure (res, root')
+                    let c1 = normalize c0
+                    acyc <- firstShowE (checkAcyclicity c1)
+                    pres <- firstShowE (computePresolution defaultTraceConfig acyc c1)
+                    res <- firstShowE (solveUnify defaultTraceConfig (prConstraint pres))
+                    case validateSolvedGraphStrict res of
+                        [] -> do
+                            let rootRedirected = chaseRedirects (prRedirects pres) root
+                                root' = canonical (srUnionFind res) rootRedirected
+                            pure (res, root')
+                        vs -> Left ("validateSolvedGraph failed:\n" ++ unlines vs)
             case pipelineParts of
                 Right (res, root) -> do
                     -- With coercion-only semantics, f's type is inferred (not declared)
@@ -89,12 +94,17 @@ spec = describe "Pipeline (Phases 1-5)" $ do
 
              -- We intercept the pipeline after solve to test generalizeAt on the 'id' binding
              let pipelineParts = do
-                     ConstraintResult{ crAnnotated = ann } <-
+                     ConstraintResult{ crConstraint = c0, crAnnotated = ann } <-
                          firstShowE (generateConstraints defaultPolySyms (unsafeNormalizeExpr expr))
-                     pres <- runToPresolutionDefault defaultPolySyms expr
-                     res <- runToSolvedDefault defaultPolySyms expr
-                     let ann' = applyRedirectsToAnn (prRedirects pres) ann
-                     pure (res, ann')
+                     let c1 = normalize c0
+                     acyc <- firstShowE (checkAcyclicity c1)
+                     pres <- firstShowE (computePresolution defaultTraceConfig acyc c1)
+                     res <- firstShowE (solveUnify defaultTraceConfig (prConstraint pres))
+                     case validateSolvedGraphStrict res of
+                         [] -> do
+                             let ann' = applyRedirectsToAnn (prRedirects pres) ann
+                             pure (res, ann')
+                         vs -> Left ("validateSolvedGraph failed:\n" ++ unlines vs)
              case pipelineParts of
                  Right (res, ann) -> do
                      case ann of
@@ -194,8 +204,9 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     ConstraintResult{ crConstraint = c0 } <-
                         firstShowE (generateConstraints defaultPolySyms (unsafeNormalizeExpr expr))
                     let c1 = normalize c0
-                    pres <- runToPresolutionDefault defaultPolySyms expr
-                    solved <- runToSolvedDefault defaultPolySyms expr
+                    acyc <- firstShowE (checkAcyclicity c1)
+                    pres <- firstShowE (computePresolution defaultTraceConfig acyc c1)
+                    solved <- firstShowE (solveUnify defaultTraceConfig (prConstraint pres))
                     pure (c1, pres, solved)
             case pipelineParts of
                 Left err -> expectationFailure err
@@ -254,9 +265,11 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 ELet "id" (ELam "x" (EVar "x"))
                     (EApp (EVar "id") (EVar "id"))
         let pipelineParts = do
-                ConstraintResult{ crAnnotated = ann } <-
+                ConstraintResult{ crConstraint = c0, crAnnotated = ann } <-
                     firstShowE (generateConstraints defaultPolySyms (unsafeNormalizeExpr expr))
-                pres <- runToPresolutionDefault defaultPolySyms expr
+                let c1 = normalize c0
+                acyc <- firstShowE (checkAcyclicity c1)
+                pres <- firstShowE (computePresolution defaultTraceConfig acyc c1)
                 pure (pres, ann)
         case pipelineParts of
             Left err -> expectationFailure err
