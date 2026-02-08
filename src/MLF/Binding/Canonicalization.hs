@@ -25,14 +25,11 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.IntSet (IntSet)
 
+import MLF.Binding.NodeRefs (
+    allNodeRefs,
+    )
 import qualified MLF.Constraint.Canonicalize as Canonicalize
 import MLF.Constraint.Types
-
--- | All node references in a constraint.
-allNodeRefs :: Constraint -> [NodeRef]
-allNodeRefs c =
-    map (TypeRef . fst) (toListNode (cNodes c)) ++
-    map (GenRef . GenNodeId) (IntMap.keys (getGenNodeMap (cGenNodes c)))
 
 -- | Canonicalize the binding-parent relation under a canonicalization function.
 --

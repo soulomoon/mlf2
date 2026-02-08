@@ -940,6 +940,11 @@ bindingTreeSpec = describe "MLF.Binding.Tree" $ do
                                     IntSet.isSubsetOf childInterior parentInterior `shouldBe` True
                                 _ -> pure ()  -- Error is acceptable
 
+        it "interiorOf equals interiorOfUnder id on valid constraints" $ property $
+            \(SmallBindingConstraint c0) ->
+                forAll (elements (bindingRoots c0)) $ \root ->
+                    interiorOf c0 root == interiorOfUnder id c0 root
+
         it "interiorOfUnder matches quotient binding-path characterization (interiorOfUnder property)" $ property $
             forAll (choose (2, 20)) $ \n -> do
                 c <- generate (genTreeBindingTree n)

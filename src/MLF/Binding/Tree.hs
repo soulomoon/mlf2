@@ -66,11 +66,22 @@ module MLF.Binding.Tree (
     allNodeIds,
 ) where
 
-import Control.Monad (foldM, unless, when)
+import Control.Monad (unless)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.IntSet (IntSet)
 
+import MLF.Binding.Children (
+    collectBoundChildrenWithFlag,
+    )
+import MLF.Binding.NodeRefs (
+    nodeRefExists,
+    )
+import MLF.Binding.ScopeGraph (
+    buildScopeNodesFromPaths,
+    buildTypeEdgesFrom,
+    rootsForScope,
+    )
 import qualified MLF.Util.OrderKey as OrderKey
 import qualified MLF.Constraint.Canonicalize as Canonicalize
 import qualified MLF.Constraint.VarStore as VarStore
@@ -108,84 +119,6 @@ import MLF.Binding.Queries (
     lookupBindParent,
     nodeKind,
     )
-
-nodeRefExists :: Constraint -> NodeRef -> Bool
-nodeRefExists c ref = case ref of
-    TypeRef nid ->
-        case lookupNodeIn (cNodes c) nid of
-            Just _ -> True
-            Nothing -> False
-    GenRef gid ->
-        IntMap.member (getGenNodeId gid) (getGenNodeMap (cGenNodes c))
-
--- | Build type-level structure edges from nodes.
---
--- This is a shared helper that builds a map from parent node key to the set
--- of child node keys, based on structural children (TyArrow dom/cod, TyForall body, etc.).
--- Self-edges are automatically removed.
-buildTypeEdgesFrom
-    :: (NodeId -> Int)  -- ^ Key mapping function (e.g., getNodeId or nodeRefKey . TypeRef)
-    -> NodeMap TyNode
-    -> IntMap.IntMap IntSet
-buildTypeEdgesFrom toKey nodes =
-    foldl' addOne IntMap.empty (map snd (toListNode nodes))
-  where
-    addOne m node =
-        let parentKey = toKey (tnId node)
-            childKeys = IntSet.fromList [ toKey child | child <- structuralChildrenWithBounds node ]
-            childKeys' = IntSet.delete parentKey childKeys  -- Remove self-edges
-        in if IntSet.null childKeys'
-            then m
-            else IntMap.insertWith IntSet.union parentKey childKeys' m
-
--- | Build scope map from type nodes to their gen ancestors.
---
--- Returns a map from gen node ID to the set of type node IDs bound under it.
-buildScopeNodesFromPaths
-    :: (NodeRef -> Either BindingError [NodeRef])  -- ^ Path lookup function
-    -> [Int]  -- ^ Type node IDs to process
-    -> Either BindingError (IntMap.IntMap IntSet)
-buildScopeNodesFromPaths pathLookup typeIds =
-    foldM addOne IntMap.empty typeIds
-  where
-    addOne m nidInt = do
-        path <- pathLookup (typeRef (NodeId nidInt))
-        let gens = [ gid | GenRef gid <- path ]
-        when (null gens) $
-            Left (MissingBindParent (typeRef (NodeId nidInt)))
-        pure $
-            foldl'
-                (\acc gid ->
-                    IntMap.insertWith
-                        IntSet.union
-                        (getGenNodeId gid)
-                        (IntSet.singleton nidInt)
-                        acc
-                )
-                m
-                gens
-
--- | Compute structural roots within a scope set.
---
--- Given a scope (set of node IDs) and type edges, returns the IDs of nodes
--- in the scope that are not referenced by any other node in the scope.
-rootsForScope
-    :: (Int -> Int)  -- ^ Parent key mapping
-    -> (Int -> Maybe Int)  -- ^ Child key extraction (returns Nothing to skip)
-    -> IntMap.IntMap IntSet  -- ^ Type edges
-    -> IntSet  -- ^ Scope set
-    -> IntSet
-rootsForScope parentKey childKey typeEdges scopeSet =
-    let referenced =
-            IntSet.fromList
-                [ cid
-                | nidInt <- IntSet.toList scopeSet
-                , let pkey = parentKey nidInt
-                , childRawKey <- IntSet.toList (IntMap.findWithDefault IntSet.empty pkey typeEdges)
-                , Just cid <- [childKey childRawKey]
-                , IntSet.member cid scopeSet
-                ]
-    in IntSet.difference scopeSet referenced
 
 -- | Paper node kinds (`papers/these-finale-english.txt`; see `papers/xmlf.txt` §3.1).
 --
@@ -226,50 +159,6 @@ setBindParent child parentInfo c =
 removeBindParent :: NodeRef -> Constraint -> Constraint
 removeBindParent child c =
     c { cBindParents = IntMap.delete (nodeRefKey child) (cBindParents c) }
-
--- | Generic bound children collector with configurable filtering.
---
--- This is the shared core for boundFlexChildren variants, parameterized by:
---   - A filter function for child nodes (returns Just nodeId to include, Nothing to skip)
---   - A flag predicate (returns True if the bind flag is acceptable)
---   - The constraint to operate on
---   - The bind parents map to use
---   - The binder node reference
---   - An error context string for error messages
-collectBoundChildrenWithFlag
-    :: (NodeRef -> Maybe NodeId)  -- ^ Child node filter
-    -> (BindFlag -> Bool)         -- ^ Flag predicate
-    -> Constraint
-    -> BindParents
-    -> NodeRef
-    -> String
-    -> Either BindingError [NodeId]
-collectBoundChildrenWithFlag childFilter flagOk c bindParents binder errCtx =
-    reverse <$> foldM
-        (\acc (childKey, (parent, flag)) ->
-            if parent /= binder || not (flagOk flag)
-                then pure acc
-                else
-                    let childRef = nodeRefFromKey childKey
-                    in case childRef of
-                        TypeRef childN ->
-                            case NodeAccess.lookupNode c childN of
-                                Nothing ->
-                                    Left $
-                                        InvalidBindingTree $
-                                            errCtx ++ ": child " ++ show childN ++ " not in cNodes"
-                                Just _ ->
-                                    maybe (pure acc) (\nid -> pure (nid : acc)) (childFilter (TypeRef childN))
-                        GenRef gid ->
-                            if IntMap.member (getGenNodeId gid) (getGenNodeMap (cGenNodes c))
-                                then pure acc
-                                else
-                                    Left $
-                                        InvalidBindingTree $
-                                            errCtx ++ ": child " ++ show gid ++ " not in cGenNodes"
-        )
-        []
-        (IntMap.toList bindParents)
 
 -- | Convenience wrapper for collectBoundChildrenWithFlag that only accepts BindFlex.
 collectBoundChildren

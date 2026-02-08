@@ -6,6 +6,7 @@ module MLF.Constraint.BindingUtil (
 
 import Data.Maybe (listToMaybe)
 
+import MLF.Binding.Path (firstGenAncestorFromPath)
 import MLF.Constraint.Types.Graph
 import qualified MLF.Binding.Tree as Binding
 import MLF.Util.ElabError (ElabError(..))
@@ -24,6 +25,4 @@ bindingPathToRootLocal bindParents start =
 
 firstGenAncestorFrom :: BindParents -> NodeRef -> Maybe GenNodeId
 firstGenAncestorFrom bindParents start =
-    case bindingPathToRootLocal bindParents start of
-        Left _ -> Nothing
-        Right path -> listToMaybe [gid | GenRef gid <- drop 1 path]
+    firstGenAncestorFromPath (Binding.bindingPathToRootLocal bindParents) start

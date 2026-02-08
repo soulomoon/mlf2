@@ -36,26 +36,19 @@ import Data.IntSet (IntSet)
 
 import MLF.Constraint.Types
 
+import MLF.Binding.NodeRefs (
+    allNodeRefs,
+    nodeRefExists,
+    )
+import MLF.Binding.Path (
+    bindingPathToRoot,
+    bindingPathToRootLocal,
+    bindingPathToRootWithLookup,
+    )
 -- Import canonicalization functions
 import MLF.Binding.Canonicalization (
     withQuotientBindParents,
     )
-
--- | All node references in a constraint.
-allNodeRefs :: Constraint -> [NodeRef]
-allNodeRefs c =
-    map (TypeRef . fst) (toListNode (cNodes c)) ++
-    map (GenRef . GenNodeId) (IntMap.keys (getGenNodeMap (cGenNodes c)))
-
--- | Check if a node reference exists in the constraint.
-nodeRefExists :: Constraint -> NodeRef -> Bool
-nodeRefExists c ref = case ref of
-    TypeRef nid ->
-        case lookupNodeIn (cNodes c) nid of
-            Just _ -> True
-            Nothing -> False
-    GenRef gid ->
-        IntMap.member (getGenNodeId gid) (getGenNodeMap (cGenNodes c))
 
 -- | Look up the binding parent and flag for a node.
 --
@@ -80,38 +73,6 @@ isBindingRoot c ref = not $ IntMap.member (nodeRefKey ref) (cBindParents c)
 -- | Compute the set of binding roots (nodes with no binding parent).
 bindingRoots :: Constraint -> [NodeRef]
 bindingRoots c = filter (isBindingRoot c) (allNodeRefs c)
-
--- | Trace the binding-parent chain from a node to a root.
---
--- Returns the path as a list of NodeRefs, starting with the given node
--- and ending with a root. Returns an error if a cycle is detected.
-bindingPathToRoot :: Constraint -> NodeRef -> Either BindingError [NodeRef]
-bindingPathToRoot c =
-    bindingPathToRootWithLookup (\key -> IntMap.lookup key (cBindParents c))
-
--- | Generic binding path tracing with a configurable parent lookup.
---
--- This is the shared core for bindingPathToRoot variants.
-bindingPathToRootWithLookup
-    :: (Int -> Maybe (NodeRef, BindFlag))  -- ^ Parent lookup by key
-    -> NodeRef
-    -> Either BindingError [NodeRef]
-bindingPathToRootWithLookup lookupParent start =
-    go IntSet.empty [start] (nodeRefKey start)
-  where
-    go visited path key
-        | IntSet.member key visited =
-            Left $ BindingCycleDetected (reverse path)
-        | otherwise =
-            case lookupParent key of
-                Nothing -> Right (reverse path)
-                Just (parentRef, _flag) ->
-                    go (IntSet.insert key visited) (parentRef : path) (nodeRefKey parentRef)
-
--- | Trace binding path using a local BindParents map.
-bindingPathToRootLocal :: BindParents -> NodeRef -> Either BindingError [NodeRef]
-bindingPathToRootLocal bindParents =
-    bindingPathToRootWithLookup (\key -> IntMap.lookup key bindParents)
 
 -- | Compute the lowest common ancestor of two nodes in the binding tree.
 --

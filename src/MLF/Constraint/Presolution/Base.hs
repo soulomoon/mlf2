@@ -47,6 +47,8 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.Maybe (listToMaybe)
 
+import qualified MLF.Binding.Canonicalization as BindingCanonical
+import qualified MLF.Binding.Path as BindingPath
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.Canonicalize as Canonicalize
 import MLF.Constraint.Types hiding (lookupNode)
@@ -302,20 +304,11 @@ bindingPathToRootUnderM
     -> Constraint
     -> NodeRef
     -> PresolutionM [NodeRef]
-bindingPathToRootUnderM canonical c start = go IntSet.empty [start] start
-  where
-    go :: IntSet.IntSet -> [NodeRef] -> NodeRef -> PresolutionM [NodeRef]
-    go visited path ref
-        | IntSet.member (nodeRefKey ref) visited =
-            throwError (BindingTreeError (BindingCycleDetected (reverse path)))
-        | otherwise = do
-            mbParentInfo <- case Binding.lookupBindParentUnder canonical c ref of
-                Left err -> throwError (BindingTreeError err)
-                Right p -> pure p
-            case mbParentInfo of
-                Nothing -> pure (reverse path)
-                Just (parent, _flag) ->
-                    go (IntSet.insert (nodeRefKey ref) visited) (parent : path) parent
+bindingPathToRootUnderM canonical c start =
+    case BindingCanonical.withQuotientBindParents "bindingPathToRootUnderM" canonical c start $ \startC bindParents ->
+        BindingPath.bindingPathToRootLocal bindParents startC of
+        Left err -> throwError (BindingTreeError err)
+        Right path -> pure path
 
 requireValidBindingTree :: PresolutionM ()
 requireValidBindingTree = do
