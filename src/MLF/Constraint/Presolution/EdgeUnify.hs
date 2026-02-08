@@ -542,27 +542,30 @@ unifyAcyclicEdge n1 n2 = do
         -- node kind, live bound root, edge-root ancestry, interior membership,
         -- and elimination state — all from current canonical graph facts.
         when (IntSet.size bs >= 1) $ do
-            repBinderId <- pickRepBinderId bs
-            let repBinder = NodeId repBinderId
-            case (IntSet.null bs1, IntSet.null bs2) of
-                (False, True) | inInt1 && not inInt2 -> do
-                    should <- shouldRecordRaiseMerge repBinder root2
-                    when should $ do
-                        -- Paper-shaped RaiseMerge is a sequence (Raise(n))^k; Merge(n, m).
-                        -- We record it in that explicit form and let `normalizeInstanceOpsFull`
-                        -- coalesce it back to `OpRaiseMerge`.
-                        recordOp (OpRaise repBinder)
-                        recordOp (OpMerge repBinder root2)
-                        setVarBoundM repBinder (Just root2)
-                        recordEliminate repBinder
-                (True, False) | inInt2 && not inInt1 -> do
-                    should <- shouldRecordRaiseMerge rep root1
-                    when should $ do
-                        recordOp (OpRaise rep)
-                        recordOp (OpMerge rep root1)
-                        setVarBoundM rep (Just root1)
-                        recordEliminate rep
-                _ -> pure ()
+            eliminated <- gets eusEliminatedBinders
+            let live = IntSet.filter (\bid -> not (IntSet.member bid eliminated)) bs
+            when (not (IntSet.null live)) $ do
+                repBinderId <- pickRepBinderId live
+                let repBinder = NodeId repBinderId
+                case (IntSet.null bs1, IntSet.null bs2) of
+                    (False, True) | inInt1 && not inInt2 -> do
+                        should <- shouldRecordRaiseMerge repBinder root2
+                        when should $ do
+                            -- Paper-shaped RaiseMerge is a sequence (Raise(n))^k; Merge(n, m).
+                            -- We record it in that explicit form and let `normalizeInstanceOpsFull`
+                            -- coalesce it back to `OpRaiseMerge`.
+                            recordOp (OpRaise repBinder)
+                            recordOp (OpMerge repBinder root2)
+                            setVarBoundM repBinder (Just root2)
+                            recordEliminate repBinder
+                    (True, False) | inInt2 && not inInt1 -> do
+                        should <- shouldRecordRaiseMerge repBinder root1
+                        when should $ do
+                            recordOp (OpRaise repBinder)
+                            recordOp (OpMerge repBinder root1)
+                            setVarBoundM repBinder (Just root1)
+                            recordEliminate repBinder
+                    _ -> pure ()
 
 -- | Decide whether to record a RaiseMerge(binder, ext) operation.
 --
