@@ -723,6 +723,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
             qn <- fmap concat $ forM schemeGens $ \gid ->
                 requireRight (boundFlexChildren cSolved (genRef gid))
             let qnIds = IntSet.fromList (map getNodeId qn)
+            eliminated `shouldSatisfy` (not . IntSet.null)
             IntSet.intersection eliminated qnIds `shouldBe` IntSet.empty
 
     describe "Expansion nodes" $ do
