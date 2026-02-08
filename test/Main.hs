@@ -19,6 +19,7 @@ import qualified ReduceSpec
 import qualified ElaborationSpec
 import qualified GeneralizeSpec
 import qualified BindingSpec
+import qualified BindingSharedAbstractionSpec
 import qualified GraphOpsSpec
 import qualified CanonicalizerSpec
 import qualified FrontendParseSpec
@@ -46,6 +47,7 @@ main = hspec $ do
     ElaborationSpec.spec
     GeneralizeSpec.spec
     BindingSpec.spec
+    BindingSharedAbstractionSpec.spec
     GraphOpsSpec.spec
     CanonicalizerSpec.spec
     FrontendParseSpec.spec
