@@ -57,6 +57,13 @@
   - Ralph task: `tasks/todo/2026-02-08-staged-src-types-structural-raise-merge/prd.json`
   - Related bug: `BUG-2026-02-06-003` (`Bugs.md`)
 
+### 2026-02-08 Phase 6 crash hardening (BUG-2026-02-06-001)
+
+- `MLF.Elab.Generalize.reifyWithGaBase` now validates that a `solvedToBasePref` target exists in `gaBaseConstraint` before using base-constraint reification.
+- If that base node is missing (stale mapping), elaboration now falls back to solved-order reification instead of throwing `MissingNode`.
+- This resolves the prior Phase 6 crash for the nested let + annotated-lambda reproducer and is covered by a dedicated regression in `test/ElaborationSpec.hs`.
+- Remaining failure on the same program moved to Phase 7 (`TCLetTypeMismatch`) and is tracked separately as `BUG-2026-02-08-004`.
+
 ## Module Structure (Post-Refactor)
 
 The codebase has been refactored for improved navigation and paper-faithfulness auditing:

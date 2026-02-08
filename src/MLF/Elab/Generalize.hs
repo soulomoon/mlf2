@@ -440,7 +440,9 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
 
             reifyWithGaBase ga =
                 case IntMap.lookup (getNodeId (canonical typeRoot)) solvedToBasePrefPlan of
-                    Just baseN | canonical baseN /= canonical typeRoot -> do
+                    Just baseN
+                        | canonical baseN /= canonical typeRoot
+                        , Just _ <- lookupNodeIn (cNodes (gaBaseConstraint ga)) baseN -> do
                         tyBase <-
                             reifyTypeWithNamesNoFallbackOnConstraint
                                 (gaBaseConstraint ga)

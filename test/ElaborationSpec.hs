@@ -2241,13 +2241,12 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
             ty `shouldAlphaEqType` expected
 
-        it "bounded aliasing (b ⩾ a) remains a known Merge/RaiseMerge gap" $ do
+        it "bounded aliasing (b ⩾ a) elaborates as ∀a. a -> a -> a (Merge/RaiseMerge path)" $ do
             -- This corresponds to “aliasing” a bounded variable to an existing binder:
             --   ∀a. ∀(b ⩾ a). a -> b -> a  ≤  ∀a. a -> a -> a
             --
-            -- In paper terms, this is naturally witnessed via Merge/RaiseMerge (Fig. 10).
-            -- The current implementation still misses this thesis-exact path and
-            -- is tracked as a known gap until Merge/RaiseMerge translation is completed.
+            -- In paper terms, this should be witnessed via Merge/RaiseMerge (Fig. 10)
+            -- and elaborate/typecheck as ∀a. a -> a -> a.
             let rhs = ELam "x" (ELam "y" (EVar "x"))
                 schemeTy =
                     mkForalls
@@ -2260,16 +2259,16 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         (STArrow (STVar "a") (STArrow (STVar "a") (STVar "a")))
                 expr =
                     ELet "c" (EAnn rhs schemeTy) (EAnn (EVar "c") ann)
+                expected =
+                    Elab.TForall "a" Nothing
+                        (Elab.TArrow (Elab.TVar "a") (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
 
-            case Elab.runPipelineElab Set.empty expr of
-                Left (Elab.PipelineTypeCheckError (Elab.TCLetTypeMismatch _ _)) ->
-                    pure ()
-                Left err ->
-                    expectationFailure ("Unexpected failure shape: " ++ Elab.renderPipelineError err)
-                Right (_term, ty) ->
-                    expectationFailure
-                        ("Expected current Merge/RaiseMerge gap to fail, but got type: "
-                            ++ Elab.pretty ty)
+            (_term, ty) <- requirePipeline expr
+            ty `shouldAlphaEqType` expected
+
+            (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty expr)
+            checkedTy `shouldAlphaEqType` expected
+            checkedTy `shouldAlphaEqType` ty
 
         it "term annotation can instantiate a polymorphic result" $ do
             -- Paper view (`papers/these-finale-english.txt`; see `papers/xmlf.txt` §3.1):
@@ -2326,6 +2325,22 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty expr)
             checkedTy `shouldBe` Elab.TBase (BaseTy "Int")
             checkedTy `shouldBe` ty
+
+        it "nested let + annotated lambda application does not crash in Phase 6 (BUG-2026-02-06-001)" $ do
+            let expr =
+                    ELet "id" (ELam "x" (EVar "x"))
+                        (ELet "use"
+                            (ELamAnn "f" (STArrow (STBase "Int") (STBase "Int"))
+                                (EApp (EVar "f") (ELit (LInt 0))))
+                            (EApp (EVar "use") (EVar "id")))
+                assertNoElabFailure label res =
+                    case res of
+                        Left (Elab.PipelineElabError err) ->
+                            expectationFailure (label ++ " failed in Phase 6: " ++ show err)
+                        _ -> pure ()
+
+            assertNoElabFailure "runPipelineElab" (Elab.runPipelineElab Set.empty expr)
+            assertNoElabFailure "runPipelineElabChecked" (Elab.runPipelineElabChecked Set.empty expr)
 
     describe "Explicit forall annotation edge cases" $ do
         it "explicit forall annotation round-trips on let-bound variables" $ do

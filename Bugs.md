@@ -4,23 +4,6 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 
 ## Open
 
-### BUG-2026-02-06-001
-- Status: Open
-- Priority: High
-- Discovered: 2026-02-06
-- Summary: Elaboration fails with `MissingNode` for a valid annotated-lambda application.
-- Reproducer (surface expression):
-  - `ELet "id" (ELam "x" (EVar "x")) (ELet "use" (ELamAnn "f" (STArrow (STBase "Int") (STBase "Int")) (EApp (EVar "f") (ELit (LInt 0)))) (EApp (EVar "use") (EVar "id")))`
-- Expected:
-  - Pipeline elaborates and typechecks successfully (result should be `Int` under checked-authoritative behavior).
-- Actual:
-  - `Phase 6 (elaboration): MissingNode (NodeId {getNodeId = 38})`.
-- Suspected area:
-  - `/Volumes/src/mlf4/src/MLF/Elab/Elaborate.hs`
-  - `/Volumes/src/mlf4/src/MLF/Elab/Run/Pipeline.hs`
-- Thesis impact:
-  - Breaks elaboration soundness for valid coercion/annotation flow.
-
 ### BUG-2026-02-06-002
 - Status: Open
 - Priority: High
@@ -102,13 +85,44 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
       - `runPipelineElab`
       - `runPipelineElabChecked`
     - Keep rigid/non-translatable Φ invariants unchanged and explicitly regression-test them alongside the bounded-aliasing success case.
-  - Locked decisions (2026-02-08):
-    - Raw parser output remains part of long-term stable public API.
-    - Normalization diagnostics remain structural-only for now.
-    - External API split is explicit:
+- Locked decisions (2026-02-08):
+  - Raw parser output remains part of long-term stable public API.
+  - Normalization diagnostics remain structural-only for now.
+  - External API split is explicit:
       - parser APIs may return raw syntax;
       - APIs that generate graphic constraints must take normalized syntax.
 
+### BUG-2026-02-08-004
+- Status: Open
+- Priority: High
+- Discovered: 2026-02-08
+- Summary: Nested let + annotated-lambda application now reaches Phase 7 but fails with `TCLetTypeMismatch`.
+- Reproducer (surface expression):
+  - `ELet "id" (ELam "x" (EVar "x")) (ELet "use" (ELamAnn "f" (STArrow (STBase "Int") (STBase "Int")) (EApp (EVar "f") (ELit (LInt 0)))) (EApp (EVar "use") (EVar "id")))`
+- Expected:
+  - Pipeline elaborates and typechecks successfully (result `Int`).
+- Actual:
+  - `Phase 7 (type checking): TCLetTypeMismatch (TForall "a" Nothing (TArrow (TArrow Int Int) Int)) (TForall "a" Nothing (TArrow (TVar "a") Int))`.
+- Suspected area:
+  - `/Volumes/src/mlf4/src/MLF/Elab/Elaborate.hs`
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/Plan/Target/GammaPlan.hs`
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/Plan/ReifyPlan.hs`
+- Thesis impact:
+  - Valid coercion/annotation flow still does not typecheck under checked-authoritative semantics.
+
 ## Resolved
 
-- None yet.
+### BUG-2026-02-06-001
+- Status: Resolved
+- Priority: High
+- Discovered: 2026-02-06
+- Resolved: 2026-02-08
+- Summary: Eliminated Phase 6 `MissingNode` crash on nested let + annotated-lambda application.
+- Root cause:
+  - `reifyWithGaBase` accepted `solvedToBasePref` entries whose base node did not exist in `gaBaseConstraint`, then called base-constraint reification on that stale node id.
+- Fix:
+  - Added a base-node existence guard in `/Volumes/src/mlf4/src/MLF/Elab/Generalize.hs` so base-constraint reification is only used when that node is present; otherwise elaboration falls back to solved-order reification.
+- Regression test:
+  - `/Volumes/src/mlf4/test/ElaborationSpec.hs` (`nested let + annotated lambda application does not crash in Phase 6 (BUG-2026-02-06-001)`).
+- Follow-up:
+  - Remaining type-checking failure for the same surface program is tracked as `BUG-2026-02-08-004`.
