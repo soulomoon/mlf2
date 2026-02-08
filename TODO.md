@@ -4,6 +4,23 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 7 Verification Gate — 2026-02-08
+
+- Command: `cabal build all && cabal test`
+- Gate status: **Blocked** (no consecutive green streak)
+- Baseline full verification: **FAIL** (`506 examples, 4 failures`; Phase 6 `shadow reify mismatch`)
+- Consecutive tracking:
+  - `1/5` — **FAIL** (2026-02-08T07:42:32Z, 2s): `ValidationFailed ["shadow reify mismatch", ... "solved=t14 -> t14", "base=a -> a"]`
+  - `2/5` — **FAIL** (2026-02-08T07:42:42Z, 3s): same failure signature
+  - `3/5` — **FAIL** (2026-02-08T07:42:51Z, 3s): same failure signature
+  - `4/5` — **FAIL** (2026-02-08T07:43:03Z, 3s): same failure signature
+  - `5/5` — **FAIL** (2026-02-08T07:43:13Z, 3s): same failure signature
+- Follow-up:
+  - Added bug entry `BUG-2026-02-08-001` in `Bugs.md`.
+  - Runtime base-path ownership cleanup is deferred until the 5/5 green gate is satisfied.
+
+---
+
 ## Phase 1 — Constraint Generation ✅
 
 - [x] Graphic type nodes (`TyVar`, `TyArrow`, `TyBase`, `TyForall`, `TyExp`)

@@ -4,6 +4,26 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 
 ## Open
 
+### BUG-2026-02-08-001
+- Status: Open
+- Priority: High
+- Discovered: 2026-02-08
+- Summary: Task 7 verification gate is blocked by deterministic `shadow reify mismatch` failures in Phase 6 fallback generalization.
+- Reproducer (test command):
+  - `cabal test --test-show-details=direct --test-options="--match '/Pipeline (Phases 1-5)/redirected let-use sites keep polymorphic schemes/'"`
+- Reproducer (surface expression from failing property):
+  - `ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (EVar "id"))`
+- Expected:
+  - `cabal build all && cabal test` passes, and solved-order/base-path shadow comparison accepts the elaborated identity shape.
+- Actual:
+  - Verification fails with Phase 6 `ValidationFailed ["shadow reify mismatch", ... "solved=t14 -> t14", "base=a -> a"]`, producing `506 examples, 4 failures`.
+- Suspected area:
+  - `/Users/ares/.config/superpowers/worktrees/mlf4/solved-order-shadow-cutover/src/MLF/Elab/Generalize.hs`
+  - `/Users/ares/.config/superpowers/worktrees/mlf4/solved-order-shadow-cutover/src/MLF/Constraint/Presolution/Plan/ReifyPlan.hs`
+  - `/Users/ares/.config/superpowers/worktrees/mlf4/solved-order-shadow-cutover/src/MLF/Constraint/Presolution/Plan/Finalize.hs`
+- Thesis impact:
+  - Blocks the thesis-faithful elaboration path for let-polymorphic self-application (`id id`) due solved/base shadow disagreement in the fallback scheme route.
+
 ### BUG-2026-02-06-001
 - Status: Open
 - Priority: High
