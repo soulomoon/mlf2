@@ -33,6 +33,11 @@ spec = do
                 baseTy = TForall "b" Nothing (TVar "b")
             selectSolvedOrderWithShadowTestOnly "ctx" solvedTy (Just baseTy) `shouldBe` Right solvedTy
 
+        it "returns solved output even when base output is alpha-equivalent but syntactically different" $ do
+            let solvedTy = TForall "a" Nothing (TVar "a")
+                baseTy = TForall "z" Nothing (TVar "z")
+            selectSolvedOrderWithShadowTestOnly "ctx" solvedTy (Just baseTy) `shouldBe` Right solvedTy
+
         it "fails hard on solved/base shadow mismatch when base shadow is present" $ do
             let solvedTy = TForall "a" Nothing (TArrow (TVar "a") (TVar "a"))
                 baseTy = TForall "a" Nothing (TArrow (TVar "a") (TBase (BaseTy "Int")))
