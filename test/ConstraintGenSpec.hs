@@ -703,6 +703,12 @@ spec = describe "Phase 1 — Constraint generation" $ do
             result <- requireRight (inferConstraintGraphDefault expr)
             checkBindingTree (crConstraint result) `shouldBe` Right ()
 
+        it "nested forall coercion paths preserve valid binding tree" $ do
+            let ann = STForall "a" Nothing (STArrow (STVar "a") (STVar "a"))
+                expr = ELet "f" (EAnn (ELam "x" (EVar "x")) ann) (EApp (EVar "f") (ELit (LInt 1)))
+            result <- requireRight (inferConstraintGraphDefault expr)
+            checkBindingTree (crConstraint result) `shouldBe` Right ()
+
         it "elimination rewrite removes eliminated binders from Q(n)" $ do
             let rhs = ELam "x" (ELam "y" (EVar "x"))
                 schemeTy =
