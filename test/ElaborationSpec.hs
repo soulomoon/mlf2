@@ -2221,10 +2221,10 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             let expr =
                     ELet "id" (ELam "x" (EVar "x"))
                         (EApp (EVar "id") (EVar "id"))
-            ConstraintResult { crConstraint = c0, crAnnotated = ann } <- requireRight (firstShowE (generateConstraintsDefault expr))
+            ConstraintResult { crConstraint = c0, crAnnotated = ann } <- requireRight (generateConstraintsDefault expr)
             let c1 = normalize c0
-            acyc <- requireRight (firstShowE (checkAcyclicity c1))
-            pres <- requireRight (firstShowE (computePresolution defaultTraceConfig acyc c1))
+            acyc <- requireRight (checkAcyclicity c1)
+            pres <- requireRight (computePresolution defaultTraceConfig acyc c1)
             let redirects = prRedirects pres
                 varNodes = collectVarNodes "id" ann
                 redirected =

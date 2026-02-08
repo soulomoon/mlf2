@@ -10,7 +10,8 @@ import qualified Data.Set as Set
 import Test.Hspec
 
 import MLF.Binding.Tree (boundFlexChildren, checkBindingTree, isUnderRigidBinder, nodeKind, NodeKind(..))
-import MLF.Constraint.Solve (SolveResult(..))
+import MLF.Constraint.Presolution (PresolutionResult(..))
+import MLF.Constraint.Solve (SolveResult(..), solveUnify)
 import MLF.Frontend.ConstraintGen (AnnExpr (..))
 import MyLib hiding (normalize, lookupNode)
 import SpecUtil
@@ -21,7 +22,7 @@ import SpecUtil
     , nodeMapSize
     , requireRight
     , mkForalls
-    , runToSolvedDefault
+    , runToPresolutionDefault
     )
 
 inferConstraintGraphDefault :: SurfaceExpr -> Either ConstraintError ConstraintResult
@@ -707,9 +708,10 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 expr =
                     ELet "c" (EAnn rhs schemeTy) (EAnn (EVar "c") ann)
 
-            solved <- requireRight (runToSolvedDefault Set.empty expr)
+            pres <- requireRight (runToPresolutionDefault Set.empty expr)
+            solved <- requireRight (solveUnify defaultTraceConfig (prConstraint pres))
             let cSolved = srConstraint solved
-                eliminated = cEliminatedVars cSolved
+                eliminated = cEliminatedVars (prConstraint pres)
                 schemeGens =
                     [ gnId gen
                     | gen <- IntMap.elems (getGenNodeMap (cGenNodes cSolved))
