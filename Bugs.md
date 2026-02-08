@@ -10,7 +10,7 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 - Discovered: 2026-02-08
 - Summary: Task 7 verification gate is blocked by deterministic `shadow reify mismatch` failures in Phase 6 fallback generalization.
 - Reproducer (test command):
-  - `cabal test --test-show-details=direct --test-options="--match '/Pipeline (Phases 1-5)/redirected let-use sites keep polymorphic schemes/'"`
+  - `cabal test --test-show-details=direct --test-options='--match=redirected --skip=instantiation'`
 - Reproducer (surface expression from failing property):
   - `ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (EVar "id"))`
 - Expected:
