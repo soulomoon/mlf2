@@ -2,16 +2,16 @@
 - Validation command: cabal build all && cabal test
 - Hspec test suite: mlf2-test
 - Keep implementation paper-faithful to papers/these-finale-english.txt
-- SrcType is a plain data type (not a GADT); avoid parameterizing it with type families as this breaks type inference at construction sites (e.g., `STForall "a" Nothing body` becomes ambiguous)
-- Use separate data types (SrcType vs NormSrcType) rather than a single indexed GADT for staged frontend types — preserves backward compatibility
-- Downstream modules import SrcType(..) from MLF.Frontend.Syntax or via MLF.API/MyLib re-exports
+- Frontend source types are unified under indexed `SrcTy` with aliases `SrcType`, `NormSrcType`, and `StructBound`
+- Forall bounds are wrapped in `SrcBound`; use `mkSrcBound`/`mkNormBound`/`unNormBound` at raw/normalized boundaries
+- Downstream modules should import constructors via `SrcTy(..)` (and keep alias types for stage clarity)
 - Only `LambdaCase` is a default extension in mlf2.cabal; other extensions need per-file pragmas
 - Adding a type parameter to a GADT is backward-compatible when existing type aliases fix the new parameter to the old concrete type (e.g., `type SurfaceExpr = Expr 'Surface SrcType`)
 - Use pattern match on `filter` results instead of `head` to avoid `-Wx-partial` warning with GHC 9.12
-- Frontend normalization: alias bounds (STVar in forall bound) are inlined via capture-avoiding substitution; structural bounds go through `normalizeBound` which has no STVar case
+- Frontend normalization: alias bounds (STVar in forall bound) are inlined via capture-avoiding substitution; structural bounds are carried via `SrcBound 'NormN` wrappers
 - Adding a type parameter to a GADT is backward-compatible when existing type aliases fix the new parameter to the old concrete type (e.g., `type SurfaceExpr = Expr 'Surface SrcType`)
 - Constraint generation (generateConstraints) and desugaring (desugarSurface) accept NormSurfaceExpr/NormCoreExpr; callers must normalize via normalizeExpr before Phase 1
-- internalizeCoercionCopy works with NormSrcType; StructBound is converted to NormSrcType via structBoundToNormSrcType for recursive internalization
+- internalizeCoercionCopy works with NormSrcType; structural bounds are unwrapped with `unNormBound` and re-internalized through the same `SrcTy` constructors
 - Test helpers (inferConstraintGraphDefault, requirePipeline, etc.) normalize via normalizeExpr before calling pipeline functions
 - MLF.Pipeline is the focused pipeline-only public API (exports staged types + normalization + pipeline entrypoints); MLF.API is the full public API re-exporting everything
 - EdgeUnifyM has MonadPresolution instance; prefer live graph queries (e.g., lookupVarBoundM) over precomputed snapshots in edge-unify state
@@ -221,4 +221,20 @@
   - Keep implementation notes synchronized with reality; sections labeled "pending implementation" should be converted to outcome-oriented notes as soon as the PRD stories land.
   - For bug-tracker closures, always cite the exact regression test case name, not only the file, to keep audit trails reproducible.
   - Documentation-only stories still use the full validation gate (`cabal build all && cabal test`) before marking `passes: true` in `prd.json`.
+---
+
+## 2026-02-08 19:42:00 CST - US-013
+- What was implemented:
+  - Replaced split frontend type declarations with a single indexed `SrcTy` model in `MLF.Frontend.Syntax` (`SrcNorm`, `SrcTopVar`, `SrcBound`).
+  - Migrated frontend normalization/parser/pretty and affected tests to wrapper-aware forall bounds (`mkSrcBound`, `mkNormBound`).
+  - Generalized pretty entry points to staged types and added regression coverage for normalized pretty rendering.
+  - Updated coercion internalization in `MLF.Frontend.ConstraintGen.Translate` to use indexed `SrcTy` constructors end-to-end (legacy `NST*`/`SB*` patterns removed).
+  - Added targeted API/constraintgen smoke tests:
+    - `exports staged SrcTy aliases for raw and normalized paths`
+    - `internalizes normalized forall bounds using indexed StructBound alias`
+- Files changed: src/MLF/Frontend/Syntax.hs, src/MLF/Frontend/Normalize.hs, src/MLF/Frontend/Parse.hs, src/MLF/Frontend/Pretty.hs, src/MLF/Frontend/ConstraintGen/Translate.hs, src-public/MLF/Pipeline.hs, test/ElaborationSpec.hs, test/FrontendNormalizeSpec.hs, test/FrontendParseSpec.hs, test/FrontendPrettySpec.hs, test/ConstraintGenSpec.hs, test/PipelineSpec.hs, test/SpecUtil.hs, test/BindingSpec.hs, implementation_notes.md, CHANGELOG.md, tasks/todo/2026-02-08-staged-src-types-structural-raise-merge/progress.txt
+- **Learnings for future iterations:**
+  - Keeping compatibility aliases (`SrcType`, `NormSrcType`, `StructBound`) while consolidating constructors under `SrcTy(..)` allows large staged refactors without API breakage.
+  - Wrapper-aware forall bounds should be introduced together with test-helper updates (`mkForalls`, parser fixtures), otherwise compile-level regressions cascade across the suite.
+  - Hspec `--match` with alternation text (`a|b`) may select zero examples depending on suite labels; run explicit focused matchers as a follow-up when auditing coverage.
 ---

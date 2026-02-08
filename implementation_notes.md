@@ -48,8 +48,9 @@
 ### 2026-02-08 staged frontend normalization + structural RaiseMerge gating (implemented)
 
 - Implemented staged frontend boundaries:
-  - Raw syntax remains `SrcType`/`SurfaceExpr`.
-  - Normalized syntax uses `NormSrcType`/`NormSurfaceExpr`, and `StructBound` intentionally excludes top-level variable alias bounds.
+  - Frontend types are now one indexed family: `SrcTy (n :: SrcNorm) (v :: SrcTopVar)`.
+  - Backward-compatible aliases remain: `SrcType`, `NormSrcType`, `StructBound`, `RawSrcType`.
+  - Forall bounds use `SrcBound n`; normalized bounds unwrap to `StructBound` via `unNormBound`.
 - Implemented explicit normalization boundary:
   - `MLF.Frontend.Normalize` provides `normalizeType`/`normalizeExpr` with capture-avoiding alias inlining and explicit `SelfBoundVariable` errors.
   - Parser API now has explicit raw and normalized entrypoints (`parseRaw*`, `parseNorm*`).
@@ -64,6 +65,24 @@
 - Tracking:
   - Ralph task: `tasks/todo/2026-02-08-staged-src-types-structural-raise-merge/prd.json`
   - Related bug: `BUG-2026-02-06-003` (resolved in `Bugs.md`)
+
+### 2026-02-08 strict SrcTy indexed model + staged pretty (implemented)
+
+- Consolidated split frontend type declarations into one indexed AST in `MLF.Frontend.Syntax`:
+  - `SrcNorm = RawN | NormN`
+  - `SrcTopVar = TopVarAllowed | TopVarDisallowed`
+  - `SrcTy` constructors (`STVar`, `STArrow`, `STBase`, `STCon`, `STForall`, `STBottom`) shared across raw/normalized paths.
+- Added `SrcBound` wrappers and helpers (`mkSrcBound`, `mkNormBound`, `unNormBound`) so normalized forall bounds remain structurally rooted by type.
+- Parser/normalizer/constraintgen internals now consume alias-aware wrappers instead of separate concrete `NST*`/`SB*` node declarations.
+- Pretty printing is now staged/generic:
+  - `prettyEmlfType :: SrcTy n v -> String`
+  - `prettyEmlfExpr :: Expr 'Surface (SrcTy n v) -> String`
+  while preserving canonical output syntax.
+- Regression anchors:
+  - `test/ElaborationSpec.hs` — `SrcTy indexed aliases compile shape`
+  - `test/FrontendParseSpec.hs` — `parses raw forall binder and keeps raw alias type`
+  - `test/FrontendPrettySpec.hs` — `pretty-prints normalized staged types`
+  - `test/ConstraintGenSpec.hs` — `internalizes normalized forall bounds using indexed StructBound alias`
 
 ### 2026-02-08 Phase 6 crash hardening (BUG-2026-02-06-001)
 
@@ -209,7 +228,7 @@ This repo’s design is primarily informed by:
 
 | Paper | Meaning | Repo |
 |------:|---------|------|
-| `b` | eMLF surface term | `src/MLF/Frontend/Syntax.hs` (`Expr` + `SrcType`) |
+| `b` | eMLF surface term | `src/MLF/Frontend/Syntax.hs` (`Expr` + indexed `SrcTy` aliases) |
 | `χ` | constraint graph | `src/MLF/Constraint/Types.hs` (`Constraint`) |
 | `n` | type node in the graph | `NodeId` + `TyNode` in `Constraint.cNodes` |
 | `g` | binding-tree node (generalization site) | `GenNodeId`/`GenNode` + `Constraint.cBindParents` |
