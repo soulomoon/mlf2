@@ -3,6 +3,7 @@
 ## Unreleased
 
 * Frontend syntax/pretty: consolidated raw and normalized frontend type syntax into indexed `SrcTy` (`SrcNorm`, `SrcTopVar`, `SrcBound`) with compatibility aliases (`SrcType`, `NormSrcType`, `StructBound`), and generalized pretty entry points to staged types (`prettyEmlfType :: SrcTy n v -> String`, `prettyEmlfExpr :: Expr 'Surface (SrcTy n v) -> String`).
+* Frontend/elab abstractions: deduplicated frontend scope-wiring in `ConstraintGen.Translate` via local helpers (`withScopedBuild`, `attachUnder`, `rebindScopeRoot`) and centralized AnnExpr node traversal in `MLF.Elab.Run.Annotation.mapAnnNodes` (reused by redirect/canonicalization/debug origin utilities).
 * Frontend/pipeline: introduced staged raw vs normalized frontend types and parser entrypoints (`parseRaw*`/`parseNorm*`), and made desugaring/constraint generation/pipeline entrypoints normalized-input only.
 * Frontend/normalization: removed the reachable `normalizeBound` runtime crash path by reporting `NonStructuralBoundInStructContext`, and completed the parser clean break by removing legacy `parseEmlf*` compatibility aliases.
 * Presolution/elaboration: RaiseMerge gating now uses live structural graph state (no binder-bound snapshots), preserving witness normalization/translatability invariants while restoring bounded aliasing baseline elaboration (`∀a. a -> a -> a`) in both checked and unchecked pipelines.

@@ -4,6 +4,12 @@
 
 **Current vs target:** The current pipeline records presolution witnesses and produces explicit generalization plans in `MLF.Constraint.Presolution.Plan`; elaboration applies these plans via `MLF.Elab.Generalize` without re-solving. The remaining paper-faithfulness deltas are tracked in `.kiro/specs/paper-faithfulness-remaining-deltas/` (constructor types `Cσ` and stricter translatability validation for Φ).
 
+### 2026-02-08 A7 group 2 dedup checklist
+
+- [x] Frontend translate scope/parent wiring now routes through local helpers (`withScopedBuild`, `attachUnder`, `rebindScopeRoot`) across let/coercion/forall-internalization paths.
+- [x] Elab run annotation node rewriting now routes through shared `mapAnnNodes`, reused by `applyRedirectsToAnn`, `canonicalizeAnn`, and debug edge-origin traversal.
+- Result: duplicated control-flow wiring was collapsed into shared local helpers without changing behavior.
+
 ### 2026-02-06 strict checked-authoritative follow-up
 
 - `runPipelineElab` now uses checked type authority end-to-end while keeping reconstruction paths for diagnostics only.
