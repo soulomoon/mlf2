@@ -7,6 +7,7 @@ import qualified Data.Set as Set
 import MLF.Frontend.Syntax
 import MLF.Frontend.ConstraintGen (generateConstraints)
 import MLF.Frontend.ConstraintGen.Types (ConstraintResult(..))
+import MLF.Frontend.Normalize (normalizeExpr)
 import MLF.Constraint.Normalize (normalize)
 import MLF.Constraint.Acyclicity (checkAcyclicity)
 import MLF.Constraint.Presolution (computePresolution, PresolutionResult(..))
@@ -48,9 +49,11 @@ main = do
             EAnn
                 (ELam "x" (EVar "x"))
                 (STArrow (STBase "Int") (STBase "Int"))
-    case generateConstraints Set.empty expr of
-        Left err -> print err
-        Right ConstraintResult{..} -> do
+    case normalizeExpr expr of
+        Left normErr -> print normErr
+        Right normExpr -> case generateConstraints Set.empty normExpr of
+            Left err -> print err
+            Right ConstraintResult{..} -> do
             putStrLn $ "ann (raw): " ++ show crAnnotated
             putStrLn $ "nodes (raw):"
             mapM_ print (IntMap.toList (cNodes crConstraint))

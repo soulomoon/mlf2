@@ -76,7 +76,6 @@ import MLF.Constraint.Presolution.EdgeUnify (
     unifyStructureEdge
     )
 import MLF.Constraint.Presolution.Witness (binderArgsFromExpansion)
-import qualified MLF.Constraint.VarStore as VarStore
 
 -- | Result of applying an expansion and running edge-local unification.
 data EdgeExpansionResult = EdgeExpansionResult
@@ -144,15 +143,7 @@ runExpansionUnify edgeId leftRaw target expn baseOps =
             interiorExact <- edgeInteriorExact resNodeId
             let interior = IntSet.union canonInteriorSet interiorExact
 
-            cForBounds <- getConstraint
-            let binderBounds =
-                    IntMap.fromList
-                        [ (getNodeId b, bnd)
-                        | (b, _arg) <- bas
-                        , Just bnd <- [VarStore.lookupVarBound cForBounds b]
-                        ]
-
-            eu0 <- initEdgeUnifyState binderMetas binderBounds interior resNodeId
+            eu0 <- initEdgeUnifyState binderMetas interior resNodeId
             let omegaEnv = mkOmegaExecEnv copyMap0
             (_a, eu1) <- runStateT
                 (do

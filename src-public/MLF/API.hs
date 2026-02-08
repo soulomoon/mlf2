@@ -1,17 +1,36 @@
 {-# LANGUAGE PatternSynonyms #-}
 module MLF.API
-    ( module MLF.Frontend.Syntax
+    ( -- * Frontend syntax (raw and staged types)
+      module MLF.Frontend.Syntax
+    -- * Constraint generation
     , ConstraintResult (..)
     , ConstraintError (..)
+    -- * Parse error types
     , EmlfParseError
+    , NormParseError (..)
+    , renderEmlfParseError
+    , renderNormParseError
+    -- * Raw parser entrypoints
+    , parseRawEmlfExpr
+    , parseRawEmlfType
+    -- * Normalized parser entrypoints
+    , parseNormEmlfExpr
+    , parseNormEmlfType
+    -- * Legacy parser aliases (backward-compatible, same as raw)
     , parseEmlfExpr
     , parseEmlfType
-    , renderEmlfParseError
+    -- * Normalization (raw → normalized)
+    , NormalizationError (..)
+    , normalizeType
+    , normalizeExpr
+    -- * Pretty-printing
     , prettyEmlfExpr
     , prettyEmlfType
+    -- * Constraint graph
     , BaseTy (..)
     , PolySyms
     , inferConstraintGraph
+    -- * Elaboration types
     , ElabType
     , Ty (..)
     , ElabScheme
@@ -20,10 +39,12 @@ module MLF.API
     , Instantiation (..)
     , ElabError (..)
     , TypeCheckError (..)
+    -- * Pipeline configuration
     , PipelineConfig(..)
     , defaultPipelineConfig
     , TraceConfig(..)
     , defaultTraceConfig
+    -- * Pipeline entrypoints (normalized-only)
     , PipelineError(..)
     , renderPipelineError
     , Pretty (..)
@@ -41,9 +62,20 @@ module MLF.API
 import MLF.Frontend.Syntax
 import MLF.Frontend.Parse
     ( EmlfParseError
+    , NormParseError (..)
+    , parseRawEmlfExpr
+    , parseRawEmlfType
+    , parseNormEmlfExpr
+    , parseNormEmlfType
     , parseEmlfExpr
     , parseEmlfType
     , renderEmlfParseError
+    , renderNormParseError
+    )
+import MLF.Frontend.Normalize
+    ( NormalizationError (..)
+    , normalizeType
+    , normalizeExpr
     )
 import MLF.Frontend.Pretty
     ( prettyEmlfExpr

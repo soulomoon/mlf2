@@ -11,8 +11,9 @@
 - Shared closure (`MLF.Elab.TermClosure`) now freshens scheme binders against existing `ETyAbs` names and rewrites free type-variable occurrences in term types/instantiations to avoid capture/regressions.
 - Annotation elaboration aligns `InstInside (InstBot ...)` with the generalized annotation-bound head when available, reducing bound-erasure in explicit-forall annotation paths.
 - Regression expectations in `test/ElaborationSpec.hs` were updated for checked-authoritative term/type shapes (top-level `ETyAbs` wrappers, `Bool`-authoritative result, and closed `∀a. a -> a` fallback for `\\y. let id = ... in id y`).
-- Known gap remains: bounded aliasing requiring thesis Merge/RaiseMerge witness translation is still unresolved and tracked by an active failing success-baseline regression (`∀a. a -> a -> a`) in `test/ElaborationSpec.hs`.
-- Clarification: this gap is not due to incorrect phase ordering (desugaring still happens before presolution as in thesis); it is due to alias-bound information being erased on a coercion path before edge-local RaiseMerge gating.
+- Historical note: bounded aliasing requiring thesis Merge/RaiseMerge witness translation was still unresolved at this checkpoint.
+- Root-cause clarification at that time: the gap was not pipeline order (desugaring before presolution remained correct), but alias-bound information being erased on a coercion path before edge-local RaiseMerge gating.
+- This gap is now resolved by the 2026-02-08 staged-normalization + structural-gating implementation (see `BUG-2026-02-06-003` in `Bugs.md`).
 
 ### 2026-02-07 syntax frontend + canonical pretty migration
 
@@ -44,25 +45,32 @@
 - Solved-order output is authoritative in runtime generalization fallback (no runtime base-shadow compare).
 - Shadow comparator helpers (`shadowCompareTypes`, `selectSolvedOrderWithShadow`) remain available for focused unit tests/debugging.
 
-### 2026-02-08 approved plan: staged frontend normalization + structural RaiseMerge gating (pending implementation)
+### 2026-02-08 staged frontend normalization + structural RaiseMerge gating (implemented)
 
-- This section records **locked design decisions and implementation direction**. It is not yet the current runtime behavior.
-- Locked API decisions:
-  - Raw parser output remains part of long-term stable public API.
-  - Normalization diagnostics remain structural-only for now.
-  - External API split is explicit:
-    - parser APIs may return raw syntax;
-    - APIs that generate graphic constraints must require normalized syntax.
-- Frontend architecture direction:
-  - Introduce staged frontend syntax types (raw vs normalized) so alias bounds are representable only before normalization.
-  - Make Phase 1 (`generateConstraints`) and pipeline graph-producing entry points normalized-input only.
-- Presolution architecture direction:
-  - Remove `binderBounds` snapshot gating for `shouldRecordRaiseMerge`.
-  - Gate `Merge`/`RaiseMerge` from live structural graph facts only (canonical bounds + binding-tree ancestry + interior), matching thesis propagation structure.
+- Implemented staged frontend boundaries:
+  - Raw syntax remains `SrcType`/`SurfaceExpr`.
+  - Normalized syntax uses `NormSrcType`/`NormSurfaceExpr`, and `StructBound` intentionally excludes top-level variable alias bounds.
+- Implemented explicit normalization boundary:
+  - `MLF.Frontend.Normalize` provides `normalizeType`/`normalizeExpr` with capture-avoiding alias inlining and explicit `SelfBoundVariable` errors.
+  - Parser API now has explicit raw and normalized entrypoints (`parseRaw*`, `parseNorm*`).
+- Implemented normalized-only compiler contracts:
+  - `desugarSurface`, `generateConstraints`, and pipeline graph/elaboration entrypoints accept normalized expressions only.
+- Implemented structural RaiseMerge gating:
+  - `shouldRecordRaiseMerge` now uses only live canonical bound queries, binding-tree ancestry, edge-interior membership, same-root exclusion, and elimination state.
+  - Precomputed binder-bound snapshots (`eusBinderBounds`) were removed from edge-unify state.
+- Bounded aliasing baseline is restored end-to-end:
+  - `runPipelineElab` and `runPipelineElabChecked` now both elaborate the bounded aliasing baseline to a type alpha-equivalent to `∀a. a -> a -> a`.
+  - Regression test anchor: `test/ElaborationSpec.hs` case `bounded aliasing (b ⩾ a) elaborates to ∀a. a -> a -> a in unchecked and checked pipelines`.
 - Tracking:
-  - PRD: `tasks/prd-staged-src-types-structural-raise-merge.md`
   - Ralph task: `tasks/todo/2026-02-08-staged-src-types-structural-raise-merge/prd.json`
-  - Related bug: `BUG-2026-02-06-003` (`Bugs.md`)
+  - Related bug: `BUG-2026-02-06-003` (resolved in `Bugs.md`)
+
+### 2026-02-08 Phase 6 crash hardening (BUG-2026-02-06-001)
+
+- Before the solved-order cutover, `MLF.Elab.Generalize.reifyWithGaBase` validated `solvedToBasePref` targets before any base-constraint reification.
+- After the cutover gate passed, runtime elaboration no longer depends on `reifyWithGaBase`; fallback now reifies from solved-order roots/substitutions.
+- The nested let + annotated-lambda reproducer remains covered by `test/ElaborationSpec.hs` and no longer crashes in Phase 6.
+- Remaining failure on the same program moved to Phase 7 (`TCLetTypeMismatch`) and is tracked separately as `BUG-2026-02-08-004`.
 
 ## Module Structure (Post-Refactor)
 
@@ -129,10 +137,10 @@ Legacy code is isolated in `MLF.Elab.Legacy` (e.g., `expansionToInst`).
   - Witness steps are normalized in `normalizeEdgeWitnessesM` via `normalizeInstanceStepsFull` (coalesces Raise+Merge into RaiseMerge, enforces “Weaken-last” ordering, avoids double elimination).
   - `ExpInstantiate` witness/application logic skips “vacuous” `TyForall` wrappers (quantifier levels with no binders) so `Φ` construction doesn’t fail on nested/structural ∀ nodes.
   - `ExpInstantiate` witnesses avoid invalid grafts under non-⊥ bounds: if a binder has an instance bound that is another in-scope variable (e.g. `b ⩾ a`), presolution emits `OpMerge(b, a)` rather than `OpGraft` (paper Fig. 10 “alias + eliminate”).
-    - Caveat (current behavior): this currently relies on explicit bound metadata surviving into presolution; coercion alias-lowering can collapse that shape on some annotation edges (see `BUG-2026-02-06-003`). Approved direction (2026-02-08): replace metadata-gated RaiseMerge decisions with live structural gating.
+    - Current behavior: RaiseMerge recording uses live structural graph facts (`shouldRecordRaiseMerge`) rather than alias-metadata survivability; this closed `BUG-2026-02-06-003`.
   - When an expansion includes a later `ExpForall`, `ExpInstantiate` witnesses suppress `OpWeaken` so binder metas stay flexible until the new quantifier is introduced (avoids empty Q(n) and lost ∀ in bounded-aliasing cases).
   - Edge-local unification can record `OpRaiseMerge(b, m)` when unification forces a **bounded** binder’s instantiation meta to unify with a `TyVar` bound **above the instantiation-edge root** in the binding tree (recorded as `OpRaise` + `OpMerge`, then normalized to `OpRaiseMerge`), matching the paper’s “escape to bound-above node” shape.
-    - Current limitation: this emission path is gated by edge-local `binderBounds`; when that map is empty due to earlier alias collapse on coercion paths, RaiseMerge is skipped (`bound=None`) even though thesis normalization is propagation-structure-driven. Approved direction (2026-02-08): structural gating from live canonical graph state.
+    - Implemented behavior: this emission path is no longer gated by edge-local `binderBounds`; it queries live canonical bounds and structural ancestry/interior predicates directly.
 - **Scope tracking (paper `Raise` as graph transformation)**:
   - TyVar/TyVar unions harmonize binding parents by executing the paper `Raise(n)` graph operation as a binding-edge rewrite on `Constraint.cBindParents` (`MLF.Binding.Adjustment` / `MLF.Binding.GraphOps`).
   - During instantiation-edge solving (χe), the same per-step raises are also recorded as `OpRaise` in the edge witness Ω (`unifyAcyclicRawWithRaiseTracePrefer` → `unifyAcyclicEdge` / `unifyAcyclicEdgeNoMerge`), aligning with `papers/these-finale-english.txt` (see `papers/xmlf.txt` §3.4 / Fig. 10).
@@ -228,7 +236,7 @@ This repo’s design is primarily informed by:
 - **Witness translation (`Φ`)**: `papers/these-finale-english.txt` translates *normalized instance-operation witnesses* into xMLF instantiations (see `papers/xmlf.txt` Fig. 10). This repo records a per-edge `EdgeWitness` during presolution and translates it to an xMLF `Instantiation` via `MLF.Elab.Pipeline.phiFromEdgeWitnessWithTrace` in production paths (`phiFromEdgeWitnessNoTrace` remains test/debug-only).
   - Quantifier-introduction (`O`) is not part of Ω in the thesis (see `papers/xmlf.txt`); the repo records these steps as `StepIntro` entries in `EdgeWitness.ewSteps` (from `ExpForall`) and translates them interleaved with Ω segments when constructing Φ(e).
   - Ω ops emitted today include `OpGraft`+`OpWeaken`, `OpMerge` (bounded aliasing like `b ⩾ a`, plus unification-induced aliasing during instantiation-edge solving), `OpRaise` (paper-general binding-edge raising on arbitrary interior nodes), and `OpRaiseMerge` for bounded-binder “escape” patterns. χe execution is paper-shaped for binding-tree ops: Raise/Weaken are executable binding-edge rewrites, and `EdgeTrace.etInterior` records the exact paper interior `I(r)` for filtering.
-    - Open caveat (`BUG-2026-02-06-003`): current RaiseMerge gating still depends on bound metadata survivability, so some bounded-alias annotation cases degrade to Raise-only witnesses + fallback instantiation. Approved direction (2026-02-08): move to structural live-graph gating and normalized-input graph APIs.
+    - Bounded-aliasing caveat (`BUG-2026-02-06-003`) is resolved: RaiseMerge gating now uses structural live-graph predicates, and bounded aliasing elaborates to the thesis-aligned baseline in both checked and unchecked pipelines.
   - Φ requires a representable translation context; missing contexts and other non-translatable cases are hard failures. Rigid identity handling is literal for Raise/Merge/RaiseMerge on operated node `n`; rigid only on the non-operated endpoint is rejected as non-translatable.
 - **Trace root/interior coherence**: `EdgeTrace` root/interior refresh and normalization share a single root-selection helper (`traceInteriorRootRef`) so `etRoot`, `etInterior`, and witness normalization all use the same interpretation of `r`/`I(r)`.
 - **Witness merge-direction strictness**: Ω normalization rejects malformed merge direction (`MergeDirectionInvalid`) in all normalization entrypoints (helper + production); there is no permissive merge-direction fallback.

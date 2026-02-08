@@ -2,6 +2,223 @@
 - Validation command: cabal build all && cabal test
 - Hspec test suite: mlf2-test
 - Keep implementation paper-faithful to papers/these-finale-english.txt
+- SrcType is a plain data type (not a GADT); avoid parameterizing it with type families as this breaks type inference at construction sites (e.g., `STForall "a" Nothing body` becomes ambiguous)
+- Use separate data types (SrcType vs NormSrcType) rather than a single indexed GADT for staged frontend types — preserves backward compatibility
+- Downstream modules import SrcType(..) from MLF.Frontend.Syntax or via MLF.API/MyLib re-exports
+- Only `LambdaCase` is a default extension in mlf2.cabal; other extensions need per-file pragmas
+- Adding a type parameter to a GADT is backward-compatible when existing type aliases fix the new parameter to the old concrete type (e.g., `type SurfaceExpr = Expr 'Surface SrcType`)
+- Use pattern match on `filter` results instead of `head` to avoid `-Wx-partial` warning with GHC 9.12
+- Frontend normalization: alias bounds (STVar in forall bound) are inlined via capture-avoiding substitution; structural bounds go through `normalizeBound` which has no STVar case
+- Adding a type parameter to a GADT is backward-compatible when existing type aliases fix the new parameter to the old concrete type (e.g., `type SurfaceExpr = Expr 'Surface SrcType`)
+- Constraint generation (generateConstraints) and desugaring (desugarSurface) accept NormSurfaceExpr/NormCoreExpr; callers must normalize via normalizeExpr before Phase 1
+- internalizeCoercionCopy works with NormSrcType; StructBound is converted to NormSrcType via structBoundToNormSrcType for recursive internalization
+- Test helpers (inferConstraintGraphDefault, requirePipeline, etc.) normalize via normalizeExpr before calling pipeline functions
+- MLF.Pipeline is the focused pipeline-only public API (exports staged types + normalization + pipeline entrypoints); MLF.API is the full public API re-exporting everything
+- EdgeUnifyM has MonadPresolution instance; prefer live graph queries (e.g., lookupVarBoundM) over precomputed snapshots in edge-unify state
+- `shouldRecordRaiseMerge` is the single source of truth for RaiseMerge gating — encapsulates all five structural criteria (node kind, live bound, same-root, ancestry/interior, elimination)
+- Witness invariants around RaiseMerge are guarded by both `test/Presolution/WitnessSpec.hs` and `test/ElaborationSpec.hs`; run those focused specs before full `cabal build all && cabal test` when touching witness gating/translation
+- Witness normalization interior widening must be narrowly scoped; broad widening leaks non-binder ω ops into Φ translation (for example `OpWeaken` translatability failures)
+- When closing a bug in `Bugs.md`, move it from Open to Resolved and include explicit regression test anchors (file + test case/section name)
 
 ## Iteration Log
 - 2026-02-08: Task initialized from PRD conversion.
+
+## 2026-02-08 - US-001
+- What was implemented: Staged frontend type kinds and constructors in Frontend.Syntax
+  - Added `TypeStage` kind (`Raw | Normalized`)
+  - Added `NormSrcType` data type with `NST*` constructors mirroring `SrcType`
+  - Added `StructBound` data type (no variable constructor) for normalized forall bounds
+  - Added `RawSrcType` alias for symmetry
+  - Kept `SrcType` unchanged for full backward compatibility
+- Files changed: src/MLF/Frontend/Syntax.hs
+- **Learnings for future iterations:**
+  - A GADT approach with `SrcTy (s :: TypeStage)` and `type family ForallBound s` was attempted first but abandoned: GHC cannot infer the stage parameter at construction sites when the type family makes `Nothing` ambiguous between `Maybe SrcType` and `Maybe StructBound`
+  - The separate-data-type approach (SrcType + NormSrcType) is cleaner and requires zero downstream changes
+  - `StructBound` excludes bare variables by construction (no `SBVar` constructor), satisfying the "unrepresentable at the type level" requirement
+  - All 499 tests pass, no warnings
+---
+
+## 2026-02-08 - US-002
+- What was implemented: Staged frontend expression types for raw and normalized annotations
+  - Added type parameter `ty` to `Expr (s :: ExprStage) ty` GADT for annotation payloads
+  - `ELamAnn`, `EAnn`, `ECoerceConst` now use `ty` instead of hardcoded `SrcType`
+  - `deriving instance` constraints updated: `Eq ty =>` and `Show ty =>`
+  - Backward-compatible aliases preserved: `SurfaceExpr = Expr 'Surface SrcType`, `CoreExpr = Expr 'Core SrcType`
+  - New normalized aliases: `NormSurfaceExpr = Expr 'Surface NormSrcType`, `NormCoreExpr = Expr 'Core NormSrcType`
+  - All exports added to module header with section comments
+- Files changed: src/MLF/Frontend/Syntax.hs
+- **Learnings for future iterations:**
+  - Adding a type parameter to a GADT is backward-compatible when existing type aliases fix the new parameter to the old concrete type — zero downstream changes needed
+  - The `Eq ty =>` and `Show ty =>` constraints on standalone deriving are required when the GADT stores `ty` values
+  - Re-export chain (MLF.Frontend.Syntax → MLF.API via `module MLF.Frontend.Syntax` → MyLib) automatically picks up new exports
+  - All 499 tests pass, no warnings
+---
+
+## 2026-02-08 - US-003
+- What was implemented: Raw-to-normalized frontend normalization module
+  - Added `MLF.Frontend.Normalize` with `normalizeType :: SrcType -> Either NormalizationError NormSrcType`
+  - Added `normalizeExpr :: SurfaceExpr -> Either NormalizationError NormSurfaceExpr`
+  - Alias bounds (∀(b ⩾ a). body) are inlined via capture-avoiding substitution: `body[b := a]`
+  - Self-bound foralls (∀(a ⩾ a). body) produce explicit `SelfBoundVariable` error
+  - Capture-avoiding substitution alpha-renames binders when replacement would be captured
+  - Exported `freeVarsSrcType` and `substSrcType` utilities for testing
+  - Added `FrontendNormalizeSpec` with 27 unit tests covering:
+    - Free variable computation (6 tests)
+    - Capture-avoiding substitution (6 tests)
+    - Type normalization including alias inlining, structural bounds, self-bound rejection, alpha-capture avoidance, constructors (10 tests)
+    - Expression normalization (4 tests)
+    - One explicit alpha-capture avoidance scenario: ∀a. ∀(b ⩾ a). ∀a. b → a
+- Files changed: src/MLF/Frontend/Normalize.hs (new), test/FrontendNormalizeSpec.hs (new), mlf2.cabal, test/Main.hs
+- **Learnings for future iterations:**
+  - The `freshNameLike` pattern (base, base1, base2, ...) works well for alpha-renaming; use pattern match instead of `head` to avoid `-Wx-partial` warning
+  - `StructBound` has no variable constructor, so `normalizeBound` for `STVar` is unreachable from the `STForall` handler — the alias case is peeled off before calling `normalizeBound`
+  - Normalization of nested alias bounds in structural positions requires recursive re-normalization after inlining
+  - All 526 tests pass (27 new), no warnings
+---
+
+## 2026-02-08 - US-004
+- What was implemented: Split parser API into raw and normalized entrypoints
+  - Added `parseRawEmlfExpr` / `parseRawEmlfType` as explicit raw parser entrypoints
+  - Added `parseNormEmlfExpr` / `parseNormEmlfType` that parse raw then normalize via `MLF.Frontend.Normalize`
+  - Added `NormParseError` sum type (`NormParseErr EmlfParseError | NormNormErr NormalizationError`)
+  - Added `renderNormParseError` for human-readable error rendering of both parse and normalization errors
+  - Kept `parseEmlfExpr` / `parseEmlfType` as backward-compatible legacy aliases for raw entrypoints
+  - Updated `MLF.API` exports: raw entrypoints, normalized entrypoints, `NormParseError(..)`, `renderNormParseError`, plus `NormalizationError(..)`, `normalizeType`, `normalizeExpr`
+  - Updated `FrontendParseSpec` with 17 new tests:
+    - 8 normalized type tests (variable, arrow, unbounded forall, structural bound, alias inlining, self-bound rejection, base, constructor)
+    - 4 normalized expression tests (unannotated, annotation, annotated lambda, self-bound rejection)
+    - 2 legacy alias equivalence tests
+    - 3 error rendering tests (raw parse error, normalized parse error, normalization error)
+- Files changed: src/MLF/Frontend/Parse.hs, src-public/MLF/API.hs, test/FrontendParseSpec.hs
+- **Learnings for future iterations:**
+  - The `mapLeft` helper is needed for composing `Either` chains with different error types; Haskell base doesn't export it
+  - Normalized parser entrypoints are a simple composition: parse raw → normalize, with error type unification via a sum type
+  - Re-export chain (MLF.Frontend.Parse → MLF.API → MyLib) automatically picks up new exports when using `module MLF.Frontend.Syntax` re-export
+  - All 543 tests pass (17 new), no warnings
+---
+
+## 2026-02-08 - US-005
+- What was implemented: Made desugaring and Phase 1 constraint generation normalized-input only
+  - Changed `desugarSurface :: NormSurfaceExpr -> NormCoreExpr` (was `SurfaceExpr -> CoreExpr`)
+  - Changed `generateConstraints :: PolySyms -> NormSurfaceExpr -> Either ConstraintError ConstraintResult`
+  - Converted `internalizeCoercionType`/`internalizeCoercionCopy` from `SrcType` to `NormSrcType`
+  - Removed alias-bound special case (`Just (STVar alias)`) from `internalizeCoercionCopy` — no longer needed since normalization inlines alias bounds
+  - Added `structBoundToNormSrcType` and `structBoundFreeVars` helpers for `StructBound` handling
+  - Updated `buildRootExpr`, `buildExpr`, `buildExprRaw`, `buildCoerce` signatures to `NormCoreExpr`/`NormSrcType`
+  - Updated pipeline signatures: `runPipelineElab*`, `runPipelineElabWith`, `inferConstraintGraph` all accept `NormSurfaceExpr`
+  - Updated all test callsites to normalize via `normalizeExpr` before calling Phase 1
+  - Updated self-bound forall test to check `SelfBoundVariable` normalization error instead of `ForallBoundMentionsBinder`
+  - Updated `scripts/Debug.hs` to normalize before constraint generation
+- Files changed: src/MLF/Frontend/Desugar.hs, src/MLF/Frontend/ConstraintGen.hs, src/MLF/Frontend/ConstraintGen/Translate.hs, src/MLF/Elab/Run/Pipeline.hs, src-public/MLF/Pipeline.hs, test/BindingSpec.hs, test/ConstraintGenSpec.hs, test/ElaborationSpec.hs, test/PipelineSpec.hs, scripts/Debug.hs
+- **Learnings for future iterations:**
+  - When switching from `SrcType` to `NormSrcType`, the `STForall` alias-bound case (`Just (STVar alias)`) becomes unreachable — normalization has already inlined it. The `NSTForall` case only needs to handle `Maybe StructBound`.
+  - `StructBound` has no variable constructor, so it must be converted to `NormSrcType` via `structBoundToNormSrcType` for recursive internalization in `internalizeCoercionCopy`
+  - Self-bound forall errors shift from `ForallBoundMentionsBinder` (constraint gen) to `SelfBoundVariable` (normalization) — tests checking for this error need updating
+  - Test helpers that wrap pipeline functions (e.g., `inferConstraintGraphDefault`, `requirePipeline`) are the cleanest place to add normalization — avoids touching every individual test case
+  - All 543 tests pass, no warnings
+---
+
+## 2026-02-08 - US-006
+- What was implemented: Updated public API and pipeline to normalized-only contract
+  - Updated `MLF.Pipeline` exports: added `NormSurfaceExpr`, `NormSrcType(..)`, `StructBound(..)`, `NormalizationError(..)`, `normalizeExpr`, `normalizeType` — making it a self-contained public API for the normalized pipeline
+  - Updated `MLF.API` export list with section comments: "Frontend syntax (raw and staged types)", "Constraint generation", "Normalization (raw → normalized)", "Constraint graph", "Elaboration types", "Pipeline configuration", "Pipeline entrypoints (normalized-only)"
+  - Updated `app/Main.hs` to explicitly normalize via `normalizeExpr` before calling `runPipelineElabWithConfig`, demonstrating the normalized-only contract
+  - Verified all pipeline signatures (`runPipelineElab`, `runPipelineElabChecked`, `runPipelineElabWithConfig`, `runPipelineElabCheckedWithConfig`, `inferConstraintGraph`) accept `NormSurfaceExpr`
+- Files changed: src-public/MLF/Pipeline.hs, src-public/MLF/API.hs, app/Main.hs
+- **Learnings for future iterations:**
+  - `MLF.Pipeline` is the focused pipeline-only public API; `MLF.API` is the full public API re-exporting everything including syntax, parsing, and elaboration types
+  - GADT constructors that don't mention the type parameter (e.g., `ELam`, `EVar`) are polymorphic in it, so `ELam "x" (EVar "x")` has type `Expr 'Surface ty` for any `ty` — this means simple expressions compile against `NormSurfaceExpr` without explicit normalization, but explicit normalization is still best practice
+  - The `module MLF.Frontend.Syntax` re-export in `MLF.API` automatically picks up all staged type exports (TypeStage, NormSrcType, StructBound, etc.)
+  - All 543 tests pass, no warnings
+---
+
+## 2026-02-08 - US-007
+- What was implemented: Documented alias-bound unreachability in coercion internalization and updated ConstraintGenSpec for normalized-only alias handling
+  - Added documentation to `NSTForall` case in `internalizeCoercionCopy` explaining that alias bounds are unreachable because normalization inlines them via capture-avoiding substitution before constraint generation
+  - `StructBound` has no variable constructor, so `Maybe StructBound` can only be `Nothing` or a structural bound — alias bounds are structurally unrepresentable
+  - Retained `ForallBoundMentionsBinder` well-formedness check for structural self-reference (e.g., `∀(a ⩾ List a). a`)
+  - Updated ConstraintGenSpec test section from "Forall-bound well-formedness" to "Forall-bound well-formedness (normalized-only)"
+  - Renamed test descriptions to accurately reflect the normalized-only world:
+    - "alias self-bound ∀(a ⩾ a) caught by normalization as SelfBoundVariable"
+    - "structural self-reference ∀(a ⩾ List a) caught by ForallBoundMentionsBinder"
+  - Added new test: "alias bound ∀(b ⩾ a) inlined by normalization before constraint gen" — verifies that `∀(b ⩾ a). b → a` is inlined to `a → a` by normalization and produces a valid constraint graph
+- Files changed: src/MLF/Frontend/ConstraintGen/Translate.hs, test/ConstraintGenSpec.hs
+- **Learnings for future iterations:**
+  - The alias-specific branch removal was already done in US-005 when `internalizeCoercionCopy` switched from `SrcType` to `NormSrcType`. US-007's main contribution is documentation and test coverage reflecting this invariant.
+  - `StructBound` having no variable constructor is the key type-level guarantee that alias bounds cannot reach constraint generation
+  - `ForallBoundMentionsBinder` remains useful for structural self-reference (binder appearing nested in a structural bound like `List a`), which normalization does not reject
+  - All 544 tests pass (1 new), no warnings
+---
+
+## 2026-02-08 - US-008
+- What was implemented: Dropped precomputed binder-bound snapshots from edge-unify state
+  - Removed `eusBinderBounds :: IntMap NodeId` field from `EdgeUnifyState` record
+  - Updated `initEdgeUnifyState` signature: removed `binderBounds` parameter (was `[(NodeId, NodeId)] -> IntMap NodeId -> InteriorSet -> NodeId`, now `[(NodeId, NodeId)] -> InteriorSet -> NodeId`)
+  - Removed `binderBounds` map construction in `EdgeProcessing.Unify` (6 lines building `IntMap` from `VarStore.lookupVarBound`)
+  - Removed unused `VarStore` import from `EdgeProcessing.Unify`
+  - Updated `shouldRecordRaiseMerge` to use `lookupVarBoundM binder` (live graph query via `MonadEdgeUnify` typeclass) instead of `IntMap.lookup (getNodeId binder) binderBounds` (precomputed snapshot)
+  - Updated `runEdgeUnifyForTest` callsite to match new 3-parameter signature
+- Files changed: src/MLF/Constraint/Presolution/EdgeUnify.hs, src/MLF/Constraint/Presolution/EdgeProcessing/Unify.hs
+- **Learnings for future iterations:**
+  - `lookupVarBoundM` (from `MonadEdgeUnify` typeclass) provides live UF-canonical bound lookup, making precomputed snapshots unnecessary — the live query is always up-to-date with unification state
+  - `EdgeUnifyM` has `MonadPresolution` instance, so `Ops.lookupVarBound` is accessible via `lift` or via the typeclass method `lookupVarBoundM`
+  - The `binderBounds` map in `Fallback.hs` is a completely different local variable (elaboration-time base-bound tracking) — not related to `eusBinderBounds`
+  - All 544 tests pass, no warnings
+---
+
+## 2026-02-08 - US-009
+- What was implemented: Refactored RaiseMerge gating to purely structural live queries
+  - Moved `isEliminated` check from call sites in `unifyAcyclicEdge` into `shouldRecordRaiseMerge`, making it the single source of truth for all five structural criteria
+  - Removed redundant `TyVar` node-kind checks at call sites (already checked inside `shouldRecordRaiseMerge`)
+  - Simplified call sites: `shouldRecordRaiseMerge` now returns `False` for already-eliminated binders, so callers just check `when should`
+  - Added comprehensive Haddock documenting the five-criterion decision logic:
+    1. Node kind: ext must be TyVar
+    2. Live bound root: binder must have canonical bound (via `lookupVarBoundM`)
+    3. Same-root exclusion: bound root ≠ ext root
+    4. Edge-root ancestry / interior membership: `above || not inInterior`
+    5. Elimination state: binder not already eliminated
+  - All queries use current canonical graph state — no precomputed snapshots
+- Files changed: src/MLF/Constraint/Presolution/EdgeUnify.hs
+- **Learnings for future iterations:**
+  - When consolidating decision logic into a single function, check for redundant checks at call sites that can be removed
+  - The `isEliminated` check is a short-circuit: placing it first avoids unnecessary graph queries for already-eliminated binders
+  - The five structural criteria map directly to the paper's RaiseMerge side-conditions (thesis §3.4)
+  - All 544 tests pass, no warnings
+---
+
+## 2026-02-08 04:55:24 CST - US-010
+- What was implemented:
+  - Validated that witness normalization still coalesces `OpRaise; OpMerge` into `OpRaiseMerge` via targeted US-010 regression specs
+  - Validated rigid-endpoint translatability behavior remains strict (`OpMerge`/`OpRaiseMerge` fail when only the non-operated endpoint is rigid)
+  - Ran full project validation to ensure witness canon/validation behavior is unchanged end-to-end
+- Files changed: tasks/todo/2026-02-08-staged-src-types-structural-raise-merge/prd.json, tasks/todo/2026-02-08-staged-src-types-structural-raise-merge/progress.txt
+- **Learnings for future iterations:**
+  - `test/Presolution/WitnessSpec.hs` ("Witness normalization invariants (US-010 regression)") is the primary guardrail for `OpRaise;OpMerge -> OpRaiseMerge` canonicalization and rigid operand validation behavior
+  - `test/ElaborationSpec.hs` rigid-endpoint Φ tests ("rigid endpoint only on m") are the canonical checks for translatability failure behavior
+  - Full validation (`cabal build all && cabal test`) currently passes with 551 tests; use this as the completion gate for witness-related refactors
+---
+
+## 2026-02-08 16:54:12 CST - US-011
+- What was implemented:
+  - Updated edge-local elimination recording in `EdgeUnify` to persist binder substitution targets (`setVarBoundM ...`) before `recordEliminate` for both merge-class elimination and RaiseMerge recording paths
+  - Narrowed witness normalization interior widening in `WitnessNorm` to multi-binder edge traces only (`IntMap.size binderArgs > 1`), preserving required alias-instantiation `OpGraft` evidence without globally widening `I(r)`
+  - Switched bounded aliasing baseline in `ElaborationSpec` from expected failure to expected success, asserting alpha-equivalent `∀a. a -> a -> a` for both unchecked and checked pipelines
+- Files changed: src/MLF/Constraint/Presolution/EdgeUnify.hs, src/MLF/Constraint/Presolution/WitnessNorm.hs, test/ElaborationSpec.hs, tasks/todo/2026-02-08-staged-src-types-structural-raise-merge/prd.json, tasks/todo/2026-02-08-staged-src-types-structural-raise-merge/progress.txt
+- **Learnings for future iterations:**
+  - The bounded-aliasing regression was caused by witness normalization stripping edge-local `OpGraft` steps for a multi-binder instantiate edge; preserving those steps restored thesis-aligned elaboration
+  - Broad `I(r)` widening causes unrelated Φ regressions; a targeted widening predicate (multi-binder traces) keeps the needed alias path while preserving existing translatability invariants
+  - Full gate `cabal build all && cabal test` is required here; focused US-011 checks alone missed cross-spec regressions during intermediate attempts
+---
+
+## 2026-02-08 17:07:19 CST - US-012
+- What was implemented:
+  - Updated `implementation_notes.md` to document the staged raw->normalized frontend boundary and structural live-graph RaiseMerge gating as implemented behavior.
+  - Added concise `CHANGELOG.md` Unreleased entries for staged syntax/normalized-only pipeline contracts and structural gating with bounded-alias baseline restoration.
+  - Updated `Bugs.md` by moving `BUG-2026-02-06-003` to Resolved and linking concrete regression tests.
+  - Verified TODO priorities remained unchanged; no TODO edits were required by this story.
+- Files changed: implementation_notes.md, CHANGELOG.md, Bugs.md, tasks/todo/2026-02-08-staged-src-types-structural-raise-merge/prd.json, tasks/todo/2026-02-08-staged-src-types-structural-raise-merge/progress.txt
+- **Learnings for future iterations:**
+  - Keep implementation notes synchronized with reality; sections labeled "pending implementation" should be converted to outcome-oriented notes as soon as the PRD stories land.
+  - For bug-tracker closures, always cite the exact regression test case name, not only the file, to keep audit trails reproducible.
+  - Documentation-only stories still use the full validation gate (`cabal build all && cabal test`) before marking `passes: true` in `prd.json`.
+---

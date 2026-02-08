@@ -23,6 +23,7 @@ import MLF.Elab.Pipeline
     )
 import MLF.Frontend.Syntax
 import MLF.Frontend.ConstraintGen
+import MLF.Frontend.Normalize (normalizeExpr)
 import MLF.Constraint.Normalize
 import MLF.Constraint.Acyclicity
 import MLF.Constraint.Canonicalizer (canonicalizeNode)
@@ -170,7 +171,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                         (ELet "a" (EApp (EVar "id") (ELit (LInt 1)))
                             (EApp (EVar "id") (ELit (LBool True))))
             let pipelineParts = do
-                    ConstraintResult{ crConstraint = c0 } <- first show (generateConstraints defaultPolySyms expr)
+                    ConstraintResult{ crConstraint = c0 } <- first show (generateConstraints defaultPolySyms (unsafeNormalize expr))
                     let c1 = normalize c0
                     acyc <- first show (checkAcyclicity c1)
                     pres <- first show (computePresolution defaultTraceConfig acyc c1)
@@ -327,7 +328,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         it "runPipelineElab type matches typeCheck(term) and checked pipeline type" $ property $
             withMaxSuccess 80 $
                 forAll genClosedWellTypedExpr $ \expr -> do
-                    case runPipelineElab Set.empty expr of
+                    case runPipelineElab Set.empty (unsafeNormalize expr) of
                         Left err ->
                             expectationFailure
                                 ( "runPipelineElab failed for generated expression:\n"
@@ -351,7 +352,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                                     Right out -> pure out
                             assertTypeEq "runPipelineElab vs typeCheck(term)" expr ty checkedTy
 
-                            case runPipelineElabChecked Set.empty expr of
+                            case runPipelineElabChecked Set.empty (unsafeNormalize expr) of
                                 Left errChecked ->
                                     expectationFailure
                                         ( "runPipelineElabChecked failed for generated expression:\n"
@@ -363,11 +364,18 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                                     assertTypeEq "runPipelineElab vs runPipelineElabChecked" expr ty tyChecked
                                     assertTypeEq "runPipelineElabChecked vs typeCheck(term)" expr tyChecked checkedTy
 
+-- | Normalize a surface expression, failing on normalization error.
+unsafeNormalize :: SurfaceExpr -> NormSurfaceExpr
+unsafeNormalize expr =
+    case normalizeExpr expr of
+        Left err -> error ("normalizeExpr failed in test: " ++ show err)
+        Right normExpr -> normExpr
+
 -- Helpers
 runPipelineWithInternals :: SurfaceExpr -> Either String (SolveResult, AnnExpr)
 runPipelineWithInternals expr = do
     ConstraintResult{ crConstraint = c0, crRoot = _root, crAnnotated = ann } <-
-        first show (generateConstraints defaultPolySyms expr)
+        first show (generateConstraints defaultPolySyms (unsafeNormalize expr))
     let c1 = normalize c0
     acyc <- first show (checkAcyclicity c1)
     pres <- first show (computePresolution defaultTraceConfig acyc c1)
@@ -381,7 +389,7 @@ runPipelineWithInternals expr = do
 runPipelineWithPresolution :: SurfaceExpr -> Either String (PresolutionResult, AnnExpr)
 runPipelineWithPresolution expr = do
     ConstraintResult{ crConstraint = c0, crAnnotated = ann } <-
-        first show (generateConstraints defaultPolySyms expr)
+        first show (generateConstraints defaultPolySyms (unsafeNormalize expr))
     let c1 = normalize c0
     acyc <- first show (checkAcyclicity c1)
     pres <- first show (computePresolution defaultTraceConfig acyc c1)
@@ -390,7 +398,7 @@ runPipelineWithPresolution expr = do
 runPipeline :: SurfaceExpr -> Either String (SolveResult, NodeId)
 runPipeline expr = do
     ConstraintResult{ crConstraint = c0, crRoot = root, crAnnotated = _ann } <-
-        first show (generateConstraints defaultPolySyms expr)
+        first show (generateConstraints defaultPolySyms (unsafeNormalize expr))
     let c1 = normalize c0
     acyc <- first show (checkAcyclicity c1)
     PresolutionResult{ prConstraint = c4, prRedirects = redirects } <- first show (computePresolution defaultTraceConfig acyc c1)

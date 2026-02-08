@@ -9,7 +9,7 @@ module MLF.Elab.Run.Pipeline (
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Set as Set
 
-import MLF.Frontend.Syntax (SurfaceExpr)
+import MLF.Frontend.Syntax (NormSurfaceExpr)
 import MLF.Frontend.ConstraintGen (AnnExpr(..), ConstraintError, ConstraintResult(..), generateConstraints)
 import MLF.Constraint.Normalize (normalize)
 import MLF.Constraint.Acyclicity (checkAcyclicity)
@@ -58,23 +58,23 @@ import MLF.Reify.Core (reifyType)
 import MLF.Reify.TypeOps (freeTypeVarsType)
 import MLF.Util.Trace (TraceConfig, traceGeneralize)
 
-runPipelineElab :: PolySyms -> SurfaceExpr -> Either PipelineError (ElabTerm, ElabType)
+runPipelineElab :: PolySyms -> NormSurfaceExpr -> Either PipelineError (ElabTerm, ElabType)
 runPipelineElab = runPipelineElabWithConfig defaultPipelineConfig
 
-runPipelineElabChecked :: PolySyms -> SurfaceExpr -> Either PipelineError (ElabTerm, ElabType)
+runPipelineElabChecked :: PolySyms -> NormSurfaceExpr -> Either PipelineError (ElabTerm, ElabType)
 runPipelineElabChecked = runPipelineElabCheckedWithConfig defaultPipelineConfig
 
-runPipelineElabWithConfig :: PipelineConfig -> PolySyms -> SurfaceExpr -> Either PipelineError (ElabTerm, ElabType)
+runPipelineElabWithConfig :: PipelineConfig -> PolySyms -> NormSurfaceExpr -> Either PipelineError (ElabTerm, ElabType)
 runPipelineElabWithConfig config polySyms =
     runPipelineElabWith (pcTraceConfig config) (generateConstraints polySyms)
 
-runPipelineElabCheckedWithConfig :: PipelineConfig -> PolySyms -> SurfaceExpr -> Either PipelineError (ElabTerm, ElabType)
+runPipelineElabCheckedWithConfig :: PipelineConfig -> PolySyms -> NormSurfaceExpr -> Either PipelineError (ElabTerm, ElabType)
 runPipelineElabCheckedWithConfig = runPipelineElabWithConfig
 
 runPipelineElabWith
     :: TraceConfig
-    -> (SurfaceExpr -> Either ConstraintError ConstraintResult)
-    -> SurfaceExpr
+    -> (NormSurfaceExpr -> Either ConstraintError ConstraintResult)
+    -> NormSurfaceExpr
     -> Either PipelineError (ElabTerm, ElabType)
 runPipelineElabWith traceCfg genConstraints expr = do
     ConstraintResult { crConstraint = c0, crAnnotated = ann } <- fromConstraintError (genConstraints expr)

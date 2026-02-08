@@ -23,6 +23,7 @@ import qualified GraphOpsSpec
 import qualified CanonicalizerSpec
 import qualified FrontendParseSpec
 import qualified FrontendPrettySpec
+import qualified FrontendNormalizeSpec
 import qualified XMLFParseSpec
 import qualified XMLFPrettySpec
 
@@ -49,5 +50,6 @@ main = hspec $ do
     CanonicalizerSpec.spec
     FrontendParseSpec.spec
     FrontendPrettySpec.spec
+    FrontendNormalizeSpec.spec
     XMLFParseSpec.spec
     XMLFPrettySpec.spec

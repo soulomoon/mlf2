@@ -15,8 +15,8 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented as separate NormSrcType data type with StructBound (no variable constructor) rather than GADT with type family, to preserve full backward compatibility with existing SrcType usage."
     },
     {
       "id": "US-002",
@@ -30,8 +30,8 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added type parameter `ty` to Expr GADT for annotation type. SurfaceExpr/CoreExpr remain backward-compatible aliases (= Expr 'Surface SrcType / Expr 'Core SrcType). New NormSurfaceExpr/NormCoreExpr aliases use NormSrcType. Zero downstream changes needed."
     },
     {
       "id": "US-003",
@@ -46,8 +46,8 @@
         "Tests pass"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added MLF.Frontend.Normalize module with normalizeType (SrcType → NormSrcType) and normalizeExpr (SurfaceExpr → NormSurfaceExpr). Alias bounds (∀(b ⩾ a). body) are inlined via capture-avoiding substitution. Self-bound foralls produce explicit SelfBoundVariable error. 27 new tests in FrontendNormalizeSpec covering free vars, substitution, normalization, and alpha-capture avoidance. All 526 tests pass."
     },
     {
       "id": "US-004",
@@ -62,8 +62,8 @@
         "Tests pass"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added parseRawEmlfExpr/parseRawEmlfType (raw entrypoints returning SrcType/SurfaceExpr) and parseNormEmlfExpr/parseNormEmlfType (normalized entrypoints that parse raw then normalize, returning NormSrcType/NormSurfaceExpr). Added NormParseError sum type and renderNormParseError. Legacy parseEmlfExpr/parseEmlfType kept as aliases. All exports added to MLF.API. FrontendParseSpec updated with 17 new tests covering raw, normalized, legacy, and error rendering paths. All 543 tests pass."
     },
     {
       "id": "US-005",
@@ -78,8 +78,8 @@
         "Tests pass"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Changed desugarSurface to NormSurfaceExpr -> NormCoreExpr. Changed generateConstraints to accept NormSurfaceExpr. Converted internalizeCoercionType/Copy to work with NormSrcType (removed alias-bound special case, added structBoundToNormSrcType/structBoundFreeVars helpers). Updated pipeline (runPipelineElab*, runPipelineElabWith) and public API (inferConstraintGraph) signatures. All test callsites normalize via normalizeExpr before calling Phase 1. Self-bound forall test updated to check normalization error. All 543 tests pass."
     },
     {
       "id": "US-006",
@@ -94,8 +94,8 @@
         "Tests pass"
       ],
       "priority": 6,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Updated MLF.Pipeline to export NormSurfaceExpr, NormSrcType(..), StructBound(..), NormalizationError(..), normalizeExpr, normalizeType alongside pipeline entrypoints. Updated MLF.API export list with section comments documenting staged types, normalization, constraint graph, elaboration types, pipeline configuration, and normalized-only pipeline entrypoints. Updated app/Main.hs to explicitly normalize via normalizeExpr before calling runPipelineElabWithConfig. All 543 tests pass."
     },
     {
       "id": "US-007",
@@ -109,8 +109,8 @@
         "Tests pass"
       ],
       "priority": 7,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Alias-specific branch was already removed in US-005 when internalizeCoercionCopy switched from SrcType to NormSrcType (StructBound has no variable constructor). US-007 documents this invariant in Translate.hs, updates ConstraintGenSpec test descriptions to reflect normalized-only alias handling, and adds a new test verifying alias bounds are inlined by normalization before reaching constraint gen. ForallBoundMentionsBinder retained for structural self-reference (e.g., ∀(a ⩾ List a). a). All 544 tests pass."
     },
     {
       "id": "US-008",
@@ -124,8 +124,8 @@
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Removed eusBinderBounds field from EdgeUnifyState record. Updated initEdgeUnifyState signature to drop binderBounds parameter (3→2 args before interior/edgeRoot). Removed binderBounds map construction in EdgeProcessing.Unify (VarStore import also removed). shouldRecordRaiseMerge now uses lookupVarBoundM for live graph queries instead of precomputed snapshot. runEdgeUnifyForTest updated. All 544 tests pass."
     },
     {
       "id": "US-009",
@@ -140,8 +140,8 @@
         "Tests pass"
       ],
       "priority": 9,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Refactored shouldRecordRaiseMerge to be the single source of truth for RaiseMerge gating. Moved elimination state check (isEliminated) into shouldRecordRaiseMerge so all five structural criteria (node kind, live bound root, same-root exclusion, edge-root ancestry/interior membership, elimination state) are encapsulated in one function. Removed redundant TyVar checks at call sites in unifyAcyclicEdge. Added comprehensive Haddock documenting the five-criterion decision logic. All queries use live canonical graph state — no precomputed snapshots. All 544 tests pass."
     },
     {
       "id": "US-010",
@@ -155,8 +155,8 @@
         "Tests pass"
       ],
       "priority": 10,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Validated that witness normalization and rigid-endpoint translatability invariants remain unchanged after structural RaiseMerge gating updates. Confirmed OpRaise;OpMerge -> OpRaiseMerge coalescing and rigid-endpoint failure behavior through focused specs, then ran full project validation (`cabal build all && cabal test`), with all 551 tests passing."
     },
     {
       "id": "US-011",
@@ -170,8 +170,8 @@
         "Tests pass"
       ],
       "priority": 11,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Updated edge-local merge recording to persist binder substitution targets before elimination and narrowed witness interior widening to multi-binder edges so required OpGraft evidence survives normalization without reintroducing non-binder translatability regressions. The bounded aliasing ElaborationSpec now asserts success for both runPipelineElab and runPipelineElabChecked; full validation (`cabal build all && cabal test`) passes (551 tests)."
     },
     {
       "id": "US-012",
@@ -185,8 +185,8 @@
         "Typecheck passes"
       ],
       "priority": 12,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Updated implementation_notes.md to record the staged raw->normalized frontend boundary and live structural RaiseMerge gating as implemented behavior (not pending direction). Added concise Unreleased changelog entries for staged syntax/normalized-only contracts and structural gating + bounded-alias restoration. Updated Bugs.md by moving BUG-2026-02-06-003 to Resolved with linked regression tests (ElaborationSpec bounded alias baseline + WitnessSpec invariants). TODO priorities were unchanged. Full validation gate `cabal build all && cabal test` passes (551 tests)."
     }
   ]
 }

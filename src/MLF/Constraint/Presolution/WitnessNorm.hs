@@ -105,13 +105,17 @@ normalizeEdgeWitnessesM = do
                     [ getNodeId (canonical (rewriteNode (NodeId n)))
                     | n <- IntSet.toList interiorExact
                     ]
+            interiorWithBinders =
+                if IntMap.size binderArgs > 1
+                    then IntSet.union interiorNorm (IntSet.fromList (IntMap.keys binderArgs))
+                    else interiorNorm
         let steps0 = map rewriteStep (ewSteps w0)
             orderKeys0 = Order.orderKeysFromConstraintWith canonical c0 (canonical orderRoot) Nothing
             orderKeys = orderKeys0
             env =
                 OmegaNormalizeEnv
                     { oneRoot = canonical edgeRoot
-                    , Witness.interior = interiorNorm
+                    , Witness.interior = interiorWithBinders
                     , Witness.weakened = weakened
                     , Witness.orderKeys = orderKeys
                     , Witness.canonical = canonical
