@@ -8,8 +8,8 @@ import MLF.API
     , SrcType (..)
     , prettyEmlfExpr
     , prettyEmlfType
-    , parseEmlfExpr
-    , parseEmlfType
+    , parseRawEmlfExpr
+    , parseRawEmlfType
     )
 
 spec :: Spec
@@ -35,8 +35,8 @@ spec = describe "Frontend eMLF pretty printer" $ do
                 ELet "f"
                     (ELamAnn "x" (STBase "Int") (EVar "x"))
                     (EApp (EVar "f") (EVar "f"))
-        parseEmlfExpr (prettyEmlfExpr expr) `shouldBe` Right expr
+        parseRawEmlfExpr (prettyEmlfExpr expr) `shouldBe` Right expr
 
     it "roundtrips type parse(pretty(type))" $ do
         let ty = STForall "a" Nothing (STCon "List" (STVar "a" :| []))
-        parseEmlfType (prettyEmlfType ty) `shouldBe` Right ty
+        parseRawEmlfType (prettyEmlfType ty) `shouldBe` Right ty

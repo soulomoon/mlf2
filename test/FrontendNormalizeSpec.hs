@@ -128,6 +128,14 @@ normalizeTypeSpec = describe "normalizeType" $ do
                         (NSTArrow (NSTVar "a")
                             (NSTArrow (NSTVar "a") (NSTVar "a"))))
 
+    it "rejects nested alias bound that normalizes to a non-structural variable bound" $
+        let input =
+                STForall "x"
+                    (Just (STForall "b" (Just (STVar "a")) (STVar "b")))
+                    (STVar "x")
+        in normalizeType input
+            `shouldBe` Left (NonStructuralBoundInStructContext (STVar "a"))
+
     it "rejects self-bound variable" $
         let input = STForall "a" (Just (STVar "a")) (STVar "a")
         in normalizeType input

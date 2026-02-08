@@ -10,9 +10,6 @@ module MLF.Frontend.Parse (
     -- * Normalized parser entrypoints (parse raw, then normalize)
     parseNormEmlfExpr,
     parseNormEmlfType,
-    -- * Legacy aliases (backward-compatible, same as raw)
-    parseEmlfExpr,
-    parseEmlfType,
 ) where
 
 import Control.Monad (void)
@@ -98,18 +95,6 @@ parseNormEmlfType :: String -> Either NormParseError NormSrcType
 parseNormEmlfType input = do
     raw <- mapLeft NormParseErr (parseRawEmlfType input)
     mapLeft NormNormErr (normalizeType raw)
-
--- ---------------------------------------------------------------------------
--- Legacy aliases (backward-compatible)
--- ---------------------------------------------------------------------------
-
--- | Legacy alias for 'parseRawEmlfExpr'.
-parseEmlfExpr :: String -> Either EmlfParseError SurfaceExpr
-parseEmlfExpr = parseRawEmlfExpr
-
--- | Legacy alias for 'parseRawEmlfType'.
-parseEmlfType :: String -> Either EmlfParseError SrcType
-parseEmlfType = parseRawEmlfType
 
 -- ---------------------------------------------------------------------------
 -- Error rendering

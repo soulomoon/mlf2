@@ -12,8 +12,6 @@ import MLF.API
     , SrcType (..)
     , StructBound (..)
     , Ty (..)
-    , parseEmlfExpr
-    , parseEmlfType
     , parseNormEmlfExpr
     , parseNormEmlfType
     , parseRawEmlfExpr
@@ -128,13 +126,6 @@ spec = describe "Frontend eMLF parser" $ do
                             expectationFailure ("runPipelineElab failed: " ++ renderPipelineError err)
                         Right (_term, ty) ->
                             ty `shouldBe` TBase (BaseTy "Int")
-
-    describe "legacy aliases" $ do
-        it "parseEmlfExpr is the same as parseRawEmlfExpr" $
-            parseEmlfExpr "x" `shouldBe` parseRawEmlfExpr "x"
-
-        it "parseEmlfType is the same as parseRawEmlfType" $
-            parseEmlfType "a -> b" `shouldBe` parseRawEmlfType "a -> b"
 
     describe "error rendering" $ do
         it "renderEmlfParseError produces non-empty output" $
