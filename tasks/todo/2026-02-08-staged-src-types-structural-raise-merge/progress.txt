@@ -17,6 +17,7 @@
 - EdgeUnifyM has MonadPresolution instance; prefer live graph queries (e.g., lookupVarBoundM) over precomputed snapshots in edge-unify state
 - `shouldRecordRaiseMerge` is the single source of truth for RaiseMerge gating — encapsulates all five structural criteria (node kind, live bound, same-root, ancestry/interior, elimination)
 - Witness invariants around RaiseMerge are guarded by both `test/Presolution/WitnessSpec.hs` and `test/ElaborationSpec.hs`; run those focused specs before full `cabal build all && cabal test` when touching witness gating/translation
+- Witness normalization interior widening must be narrowly scoped; broad widening leaks non-binder ω ops into Φ translation (for example `OpWeaken` translatability failures)
 
 ## Iteration Log
 - 2026-02-08: Task initialized from PRD conversion.
@@ -194,4 +195,16 @@
   - `test/Presolution/WitnessSpec.hs` ("Witness normalization invariants (US-010 regression)") is the primary guardrail for `OpRaise;OpMerge -> OpRaiseMerge` canonicalization and rigid operand validation behavior
   - `test/ElaborationSpec.hs` rigid-endpoint Φ tests ("rigid endpoint only on m") are the canonical checks for translatability failure behavior
   - Full validation (`cabal build all && cabal test`) currently passes with 551 tests; use this as the completion gate for witness-related refactors
+---
+
+## 2026-02-08 16:54:12 CST - US-011
+- What was implemented:
+  - Updated edge-local elimination recording in `EdgeUnify` to persist binder substitution targets (`setVarBoundM ...`) before `recordEliminate` for both merge-class elimination and RaiseMerge recording paths
+  - Narrowed witness normalization interior widening in `WitnessNorm` to multi-binder edge traces only (`IntMap.size binderArgs > 1`), preserving required alias-instantiation `OpGraft` evidence without globally widening `I(r)`
+  - Switched bounded aliasing baseline in `ElaborationSpec` from expected failure to expected success, asserting alpha-equivalent `∀a. a -> a -> a` for both unchecked and checked pipelines
+- Files changed: src/MLF/Constraint/Presolution/EdgeUnify.hs, src/MLF/Constraint/Presolution/WitnessNorm.hs, test/ElaborationSpec.hs, tasks/todo/2026-02-08-staged-src-types-structural-raise-merge/prd.json, tasks/todo/2026-02-08-staged-src-types-structural-raise-merge/progress.txt
+- **Learnings for future iterations:**
+  - The bounded-aliasing regression was caused by witness normalization stripping edge-local `OpGraft` steps for a multi-binder instantiate edge; preserving those steps restored thesis-aligned elaboration
+  - Broad `I(r)` widening causes unrelated Φ regressions; a targeted widening predicate (multi-binder traces) keeps the needed alias path while preserving existing translatability invariants
+  - Full gate `cabal build all && cabal test` is required here; focused US-011 checks alone missed cross-spec regressions during intermediate attempts
 ---

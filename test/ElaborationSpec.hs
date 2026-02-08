@@ -2280,13 +2280,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
             ty `shouldAlphaEqType` expected
 
-        it "bounded aliasing (b ⩾ a) remains a known Merge/RaiseMerge gap" $ do
-            -- This corresponds to “aliasing” a bounded variable to an existing binder:
+        it "bounded aliasing (b ⩾ a) elaborates to ∀a. a -> a -> a in unchecked and checked pipelines" $ do
+            -- This corresponds to aliasing a bounded variable to an existing binder:
             --   ∀a. ∀(b ⩾ a). a -> b -> a  ≤  ∀a. a -> a -> a
-            --
-            -- In paper terms, this is naturally witnessed via Merge/RaiseMerge (Fig. 10).
-            -- The current implementation still misses this thesis-exact path and
-            -- is tracked as a known gap until Merge/RaiseMerge translation is completed.
             let rhs = ELam "x" (ELam "y" (EVar "x"))
                 schemeTy =
                     mkForalls
@@ -2299,16 +2295,16 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         (STArrow (STVar "a") (STArrow (STVar "a") (STVar "a")))
                 expr =
                     ELet "c" (EAnn rhs schemeTy) (EAnn (EVar "c") ann)
+                expected =
+                    Elab.TForall "a" Nothing
+                        (Elab.TArrow
+                            (Elab.TVar "a")
+                            (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
 
-            case Elab.runPipelineElab Set.empty (unsafeNormalize expr) of
-                Left (Elab.PipelineTypeCheckError (Elab.TCLetTypeMismatch _ _)) ->
-                    pure ()
-                Left err ->
-                    expectationFailure ("Unexpected failure shape: " ++ Elab.renderPipelineError err)
-                Right (_term, ty) ->
-                    expectationFailure
-                        ("Expected current Merge/RaiseMerge gap to fail, but got type: "
-                            ++ Elab.pretty ty)
+            (_uncheckedTerm, uncheckedTy) <- requireRight (Elab.runPipelineElab Set.empty (unsafeNormalize expr))
+            (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalize expr))
+            uncheckedTy `shouldAlphaEqType` expected
+            checkedTy `shouldAlphaEqType` expected
 
         it "term annotation can instantiate a polymorphic result" $ do
             -- Paper view (`papers/these-finale-english.txt`; see `papers/xmlf.txt` §3.1):

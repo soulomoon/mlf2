@@ -458,6 +458,7 @@ recordMergesIntoRep bs
             already <- isEliminated b
             when (not already) $ do
                 recordOp (OpMerge b rep)
+                setVarBoundM b (Just rep)
                 recordEliminate b
   where
     sortByM :: (a -> a -> EdgeUnifyM Ordering) -> [a] -> EdgeUnifyM [a]
@@ -552,12 +553,14 @@ unifyAcyclicEdge n1 n2 = do
                         -- coalesce it back to `OpRaiseMerge`.
                         recordOp (OpRaise repBinder)
                         recordOp (OpMerge repBinder root2)
+                        setVarBoundM repBinder (Just root2)
                         recordEliminate repBinder
                 (True, False) | inInt2 && not inInt1 -> do
                     should <- shouldRecordRaiseMerge rep root1
                     when should $ do
                         recordOp (OpRaise rep)
                         recordOp (OpMerge rep root1)
+                        setVarBoundM rep (Just root1)
                         recordEliminate rep
                 _ -> pure ()
 

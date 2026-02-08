@@ -170,8 +170,8 @@
         "Tests pass"
       ],
       "priority": 11,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Updated edge-local merge recording to persist binder substitution targets before elimination and narrowed witness interior widening to multi-binder edges so required OpGraft evidence survives normalization without reintroducing non-binder translatability regressions. The bounded aliasing ElaborationSpec now asserts success for both runPipelineElab and runPipelineElabChecked; full validation (`cabal build all && cabal test`) passes (551 tests)."
     },
     {
       "id": "US-012",
