@@ -42,6 +42,7 @@ module MLF.Elab.Pipeline (
     runPipelineElabWithConfig,
     runPipelineElabCheckedWithConfig,
     applyRedirectsToAnn,
+    canonicalizeAnn,
     -- * Exported for testing/debugging
     chaseRedirects,
     SchemeInfo(..),
@@ -84,6 +85,7 @@ import MLF.Elab.Phi (contextToNodeBound, phiFromEdgeWitnessWithTrace)
 import MLF.Reify.Core (namedNodes, reifyBoundWithNames, reifyType, reifyTypeWithNamedSet, reifyTypeWithNames)
 import MLF.Elab.Run
     ( applyRedirectsToAnn
+    , canonicalizeAnn
     , chaseRedirects
     , runPipelineElab
     , runPipelineElabChecked

@@ -4,10 +4,11 @@ module MLF.Elab.Run (
     runPipelineElabWithConfig,
     runPipelineElabCheckedWithConfig,
     applyRedirectsToAnn,
+    canonicalizeAnn,
     chaseRedirects
 ) where
 
-import MLF.Elab.Run.Annotation (applyRedirectsToAnn)
+import MLF.Elab.Run.Annotation (applyRedirectsToAnn, canonicalizeAnn)
 import MLF.Elab.Run.Pipeline
     ( runPipelineElab
     , runPipelineElabChecked

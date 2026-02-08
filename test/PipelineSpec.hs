@@ -14,6 +14,7 @@ import MLF.Elab.Pipeline
     ( ElabType
     , generalizeAtWithBuilder
     , applyRedirectsToAnn
+    , canonicalizeAnn
     , renderPipelineError
     , runPipelineElab
     , runPipelineElabChecked
@@ -478,32 +479,6 @@ chaseRedirects :: IntMap.IntMap NodeId -> NodeId -> NodeId
 chaseRedirects redirects nid = case IntMap.lookup (getNodeId nid) redirects of
     Just n' -> if n' == nid then nid else chaseRedirects redirects n'
     Nothing -> nid
-
-canonicalizeAnn :: (NodeId -> NodeId) -> AnnExpr -> AnnExpr
-canonicalizeAnn canonicalNode expr = case expr of
-    AVar v nid -> AVar v (canonicalNode nid)
-    ALit lit nid -> ALit lit (canonicalNode nid)
-    ALam v pNode eid body nid ->
-        ALam v (canonicalNode pNode) eid (canonicalizeAnn canonicalNode body) (canonicalNode nid)
-    AApp fn arg fEid aEid nid ->
-        AApp
-            (canonicalizeAnn canonicalNode fn)
-            (canonicalizeAnn canonicalNode arg)
-            fEid
-            aEid
-            (canonicalNode nid)
-    ALet v schemeGen schemeRoot expVar scopeRoot rhs body nid ->
-        ALet
-            v
-            schemeGen
-            (canonicalNode schemeRoot)
-            expVar
-            scopeRoot
-            (canonicalizeAnn canonicalNode rhs)
-            (canonicalizeAnn canonicalNode body)
-            (canonicalNode nid)
-    AAnn inner nid eid ->
-        AAnn (canonicalizeAnn canonicalNode inner) (canonicalNode nid) eid
 
 annNodeOccurrences :: AnnExpr -> [NodeId]
 annNodeOccurrences expr = case expr of
