@@ -14,8 +14,6 @@ import MLF.API
     , Ty (..)
     , mkNormBound
     , mkSrcBound
-    , parseEmlfExpr
-    , parseEmlfType
     , parseNormEmlfExpr
     , parseNormEmlfType
     , parseRawEmlfExpr
@@ -142,13 +140,6 @@ spec = describe "Frontend eMLF parser" $ do
                 _norm = STBase "Int"
             show _raw `shouldNotBe` ""
             show _norm `shouldNotBe` ""
-
-    describe "legacy aliases" $ do
-        it "parseEmlfExpr is the same as parseRawEmlfExpr" $
-            parseEmlfExpr "x" `shouldBe` parseRawEmlfExpr "x"
-
-        it "parseEmlfType is the same as parseRawEmlfType" $
-            parseEmlfType "a -> b" `shouldBe` parseRawEmlfType "a -> b"
 
     describe "error rendering" $ do
         it "renderEmlfParseError produces non-empty output" $

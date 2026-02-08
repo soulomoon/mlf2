@@ -16,9 +16,6 @@ module MLF.API
     -- * Normalized parser entrypoints
     , parseNormEmlfExpr
     , parseNormEmlfType
-    -- * Legacy parser aliases (backward-compatible, same as raw)
-    , parseEmlfExpr
-    , parseEmlfType
     -- * Normalization (raw → normalized)
     , NormalizationError (..)
     , normalizeType
@@ -67,8 +64,6 @@ import MLF.Frontend.Parse
     , parseRawEmlfType
     , parseNormEmlfExpr
     , parseNormEmlfType
-    , parseEmlfExpr
-    , parseEmlfType
     , renderEmlfParseError
     , renderNormParseError
     )
