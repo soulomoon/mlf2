@@ -238,6 +238,75 @@ spec = describe "Phase 2 — Merge/RaiseMerge emission" $ do
                 -- Check that presolution succeeded and trace contains the copy.
                 etCopyMap tr `shouldSatisfy` (not . IntMap.null . getCopyMapping)
 
+    it "records RaiseMerge for a live binder when a lower-≺ binder in bs was already eliminated" $ do
+        -- TyExp s · (∀(a ⩾ b) (b ⩾ x). a -> b) ≤ (y -> y)
+        --
+        -- Base ω execution performs Merge(a, b), eliminating `a` before structural
+        -- unification. Later, the aliased class {a,b} escapes to outer `y`.
+        -- Phase 2 must still record RaiseMerge using the live binder `b`.
+        let x = NodeId 0
+            a = NodeId 1
+            b = NodeId 2
+            bodyArrow = NodeId 3
+            forallNode = NodeId 4
+            expNode = NodeId 5
+            y = NodeId 6
+            targetArrow = NodeId 7
+            rootArrow = NodeId 8
+
+            nodes = nodeMapFromList
+                    [ (getNodeId x, TyVar { tnId = x, tnBound = Nothing })
+                    , (getNodeId a, TyVar { tnId = a, tnBound = Just b })
+                    , (getNodeId b, TyVar { tnId = b, tnBound = Just x })
+                    , (getNodeId bodyArrow, TyArrow bodyArrow a b)
+                    , (getNodeId forallNode, TyForall forallNode bodyArrow)
+                    , (getNodeId expNode, TyExp expNode (ExpVarId 0) forallNode)
+                    , (getNodeId y, TyVar { tnId = y, tnBound = Nothing })
+                    , (getNodeId targetArrow, TyArrow targetArrow y y)
+                    , (getNodeId rootArrow, TyArrow rootArrow expNode targetArrow)
+                    ]
+
+            edge = InstEdge (EdgeId 0) expNode targetArrow
+            bindParents =
+                IntMap.insert
+                    (nodeRefKey (typeRef a))
+                    (typeRef forallNode, BindFlex)
+                    (IntMap.insert
+                        (nodeRefKey (typeRef b))
+                        (typeRef forallNode, BindFlex)
+                        (inferBindParents nodes))
+            constraint =
+                rootedConstraint emptyConstraint
+                    { cNodes = nodes
+                    , cInstEdges = [edge]
+                    , cBindParents = bindParents
+                    }
+            st0 =
+                PresolutionState constraint (Presolution IntMap.empty)
+                    IntMap.empty
+                    9
+                    IntSet.empty
+                    IntMap.empty
+                    IntMap.empty
+                    IntMap.empty
+                    IntMap.empty
+
+        case runPresolutionM defaultTraceConfig st0 (processInstEdge edge) of
+            Left err -> expectationFailure ("processInstEdge failed: " ++ show err)
+            Right (_, st1) -> do
+                ew <- case IntMap.lookup 0 (psEdgeWitnesses st1) of
+                    Nothing -> expectationFailure "Expected EdgeWitness for EdgeId 0" >> fail "missing EdgeWitness"
+                    Just ew0 -> pure ew0
+
+                let InstanceWitness ops = ewWitness ew
+
+                -- Base op proved `a` was eliminated before the structural escape.
+                ops `shouldSatisfy` elem (OpMerge a b)
+                -- Regression: RaiseMerge must still be emitted on live binder `b`.
+                ops `shouldSatisfy` elem (OpRaise b)
+                ops `shouldSatisfy` elem (OpMerge b y)
+                ops `shouldNotSatisfy` elem (OpMerge a y)
+
     it "does not record Raise for unbounded binder metas (graft+weaken only)" $ do
         -- TyExp s · (∀b. b -> b) ≤ (y -> y)
         --

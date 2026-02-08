@@ -9,10 +9,21 @@ module MLF.Frontend.Syntax (
     Lit (..),
     ExprStage (..),
     Expr (..),
+    -- * Raw expression aliases (backward-compatible)
     SurfaceExpr,
     CoreExpr,
+    -- * Normalized expression aliases
+    NormSurfaceExpr,
+    NormCoreExpr,
+    -- * Raw source types (parser output)
     SrcType (..),
     SrcTypeF (..),
+    -- * Staged frontend types
+    TypeStage (..),
+    NormSrcType (..),
+    StructBound (..),
+    RawSrcType,
+    -- * Metadata
     AnnotatedExpr (..),
     BindingSite (..)
 ) where
@@ -29,12 +40,14 @@ This module defines the *surface language* accepted by the pipeline and the
     λ-calculus).
   - `Expr 'Core` is the annotation-free core term language used internally
     after desugaring.
-  - `SrcType` are the user-written type annotations.
+  - `SrcType` are the user-written type annotations (raw, as parsed).
+  - `NormSrcType` are normalized type annotations where alias bounds have been
+    inlined (see Note [Staged frontend types]).
 
 Paper reference
 --------------
 In `papers/these-finale-english.txt` (see `papers/xmlf.txt` §"From λ-terms to typing constraints"), the grammar for
-eMLF terms is (using the paper’s notation):
+eMLF terms is (using the paper's notation):
 
   b ::= x | λ(x) b | λ(x : σ) b | b b | let x = b in b | (b : σ)
 
@@ -77,7 +90,30 @@ data Lit
     | LString String
     deriving (Eq, Show)
 
--- | Source-level type syntax for annotations.
+{- Note [Staged frontend types]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Frontend types come in two stages, tracked by 'TypeStage':
+
+  - 'Raw' ('SrcType'): Produced by the parser. Forall bounds can be any type,
+    including bare variable aliases like @∀(b ⩾ a). body@.
+
+  - 'Normalized' ('NormSrcType'): Produced by 'MLF.Frontend.Normalize'. Alias
+    bounds have been inlined via capture-avoiding substitution. The bound of a
+    forall is always structural (arrow, base, constructor, forall, or bottom) —
+    never a bare variable. This invariant is enforced by construction:
+    'NormSrcType' uses 'StructBound' for forall bounds, and 'StructBound' has
+    no variable constructor.
+
+'SrcType' is the original (unchanged) data type used throughout the codebase.
+'NormSrcType' is a new type introduced for the normalized stage. The alias
+@RawSrcType = SrcType@ is provided for symmetry.
+-}
+
+-- | Normalization stage for frontend types.
+data TypeStage = Raw | Normalized
+    deriving (Eq, Show)
+
+-- | Source-level type syntax for annotations (raw / parser output).
 --
 -- This corresponds closely to the type language presented in
 -- `papers/these-finale-english.txt` (see `papers/xmlf.txt`):
@@ -89,7 +125,7 @@ data Lit
 --
 -- We add a small convenience notationally:
 --
---   - In `STForall v Nothing body`, the missing bound means “bound = ⊥”, i.e.
+--   - In @STForall v Nothing body@, the missing bound means "bound = ⊥", i.e.
 --     the common unbounded form ∀(v). body.
 --
 -- Examples:
@@ -104,6 +140,37 @@ data SrcType
     | STCon String (NonEmpty SrcType)           -- ^ Constructor application: C σ…
     | STForall String (Maybe SrcType) SrcType   -- ^ Bounded quantification: ∀(α ⩾ τ?). σ
     | STBottom                                  -- ^ Bottom type: ⊥
+    deriving (Eq, Show)
+
+-- | Backward-compatible alias: 'RawSrcType' = 'SrcType'.
+type RawSrcType = SrcType
+
+-- | Normalized source-level type syntax.
+--
+-- Like 'SrcType' but forall bounds use 'StructBound' instead of @Maybe SrcType@,
+-- ensuring that alias bounds (∀(b ⩾ a). body) are unrepresentable by
+-- construction. See Note [Staged frontend types].
+data NormSrcType
+    = NSTVar String                                         -- ^ Type variable: α
+    | NSTArrow NormSrcType NormSrcType                      -- ^ Arrow type: τ → σ
+    | NSTBase String                                        -- ^ Base type: Int, Bool, ...
+    | NSTCon String (NonEmpty NormSrcType)                  -- ^ Constructor application: C σ…
+    | NSTForall String (Maybe StructBound) NormSrcType      -- ^ Bounded quantification: ∀(α ⩾ τ?). σ
+    | NSTBottom                                             -- ^ Bottom type: ⊥
+    deriving (Eq, Show)
+
+-- | Structural bound for normalized forall types.
+--
+-- This type mirrors 'NormSrcType' but intentionally omits a variable
+-- constructor, ensuring that alias bounds (∀(b ⩾ a). body) are
+-- unrepresentable after normalization. A forall bound in normalized form is
+-- always structural: arrow, base, constructor, nested forall, or bottom.
+data StructBound
+    = SBArrow NormSrcType NormSrcType                       -- ^ Arrow bound: τ → σ
+    | SBBase String                                         -- ^ Base type bound: Int, Bool, ...
+    | SBCon String (NonEmpty NormSrcType)                   -- ^ Constructor bound: C σ…
+    | SBForall String (Maybe StructBound) NormSrcType       -- ^ Nested forall bound: ∀(α ⩾ τ?). σ
+    | SBBottom                                              -- ^ Bottom bound: ⊥
     deriving (Eq, Show)
 
 data SrcTypeF a
@@ -137,7 +204,11 @@ instance Corecursive SrcType where
 
 data ExprStage = Surface | Core
 
--- | eMLF expressions, indexed by stage.
+-- | eMLF expressions, indexed by stage and annotation type.
+--
+-- The type parameter @ty@ determines which type representation annotations
+-- carry: 'SrcType' for raw (parser output) or 'NormSrcType' for normalized
+-- (alias bounds inlined). See Note [Staged frontend types].
 --
 -- The surface stage matches the thesis' expression grammar and includes
 -- annotations (`EAnn`, `ELamAnn`). The core stage is annotation-free and
@@ -151,30 +222,36 @@ data ExprStage = Surface | Core
 --
 -- The resulting let-binding has a coercion term as its RHS, which is treated
 -- as an ordinary let-binding (not a special "declared scheme" form).
-data Expr (s :: ExprStage) where
-    EVar :: VarName -> Expr s
-    ELit :: Lit -> Expr s
-    ELam :: VarName -> Expr s -> Expr s                         -- ^ λx. e (inferred parameter type)
-    EApp :: Expr s -> Expr s -> Expr s
-    ELet :: VarName -> Expr s -> Expr s -> Expr s               -- ^ let x = e₁ in e₂ (inferred scheme)
+data Expr (s :: ExprStage) ty where
+    EVar :: VarName -> Expr s ty
+    ELit :: Lit -> Expr s ty
+    ELam :: VarName -> Expr s ty -> Expr s ty                         -- ^ λx. e (inferred parameter type)
+    EApp :: Expr s ty -> Expr s ty -> Expr s ty
+    ELet :: VarName -> Expr s ty -> Expr s ty -> Expr s ty            -- ^ let x = e₁ in e₂ (inferred scheme)
 
     -- Surface-only.
-    ELamAnn :: VarName -> SrcType -> Expr 'Surface -> Expr 'Surface
-    EAnn :: Expr 'Surface -> SrcType -> Expr 'Surface
+    ELamAnn :: VarName -> ty -> Expr 'Surface ty -> Expr 'Surface ty
+    EAnn :: Expr 'Surface ty -> ty -> Expr 'Surface ty
 
     -- Core-only.
-    ECoerceConst :: SrcType -> Expr 'Core                       -- ^ cτ (coercion constant)
+    ECoerceConst :: ty -> Expr 'Core ty                               -- ^ cτ (coercion constant)
 
-deriving instance Eq (Expr s)
-deriving instance Show (Expr s)
+deriving instance Eq ty => Eq (Expr s ty)
+deriving instance Show ty => Show (Expr s ty)
 
-type SurfaceExpr = Expr 'Surface
-type CoreExpr = Expr 'Core
+-- | Raw surface expression (backward-compatible alias).
+type SurfaceExpr = Expr 'Surface SrcType
+-- | Raw core expression (backward-compatible alias).
+type CoreExpr = Expr 'Core SrcType
+-- | Normalized surface expression (alias bounds inlined).
+type NormSurfaceExpr = Expr 'Surface NormSrcType
+-- | Normalized core expression (alias bounds inlined).
+type NormCoreExpr = Expr 'Core NormSrcType
 
 -- | Optional wrapper for attaching binding-site metadata to a surface expression.
 --
--- This is primarily useful for tooling/debugging (e.g. reporting “this variable
--- occurrence is a lambda parameter vs a let-binding”). The main constraint
+-- This is primarily useful for tooling/debugging (e.g. reporting "this variable
+-- occurrence is a lambda parameter vs a let-binding"). The main constraint
 -- generator uses its own annotation structure (`MLF.Frontend.ConstraintGen.AnnExpr`).
 data AnnotatedExpr = AnnotatedExpr
     { annExpr :: SurfaceExpr
@@ -184,7 +261,7 @@ data AnnotatedExpr = AnnotatedExpr
 
 -- | Distinguish between lambda parameters and let-bound values.
 --
--- This mirrors the paper’s key distinction:
+-- This mirrors the paper's key distinction:
 --   - lambda-bound variables are not generalized (monomorphic),
 --   - let-bound variables may be generalized and later instantiated.
 data BindingSite

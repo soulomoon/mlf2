@@ -10,7 +10,8 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Set as Set
 
-import MLF.Frontend.Syntax (SurfaceExpr, Expr(..), Lit(..), SrcType(..))
+import MLF.Frontend.Syntax (SurfaceExpr, NormSurfaceExpr, Expr(..), Lit(..), SrcType(..))
+import MLF.Frontend.Normalize (normalizeExpr)
 import qualified MLF.Elab.Pipeline as Elab
 import qualified MLF.Elab.Phi.TestOnly as ElabTest
 import qualified MLF.Util.Order as Order
@@ -92,10 +93,23 @@ generalizeAt
 generalizeAt = generalizeAtWith Nothing
 
 requirePipeline :: SurfaceExpr -> IO (Elab.ElabTerm, Elab.ElabType)
-requirePipeline = requireRight . Elab.runPipelineElab Set.empty
+requirePipeline expr =
+    case normalizeExpr expr of
+        Left err -> error ("normalizeExpr failed in test: " ++ show err)
+        Right normExpr -> requireRight (Elab.runPipelineElab Set.empty normExpr)
 
 generateConstraintsDefault :: SurfaceExpr -> Either ConstraintError ConstraintResult
-generateConstraintsDefault = generateConstraints Set.empty
+generateConstraintsDefault expr =
+    case normalizeExpr expr of
+        Left err -> error ("normalizeExpr failed in test: " ++ show err)
+        Right normExpr -> generateConstraints Set.empty normExpr
+
+-- | Normalize a surface expression, failing the test on normalization error.
+unsafeNormalize :: SurfaceExpr -> NormSurfaceExpr
+unsafeNormalize expr =
+    case normalizeExpr expr of
+        Left err -> error ("normalizeExpr failed in test: " ++ show err)
+        Right normExpr -> normExpr
 
 fInstantiations :: String -> [String]
 fInstantiations = go
@@ -488,7 +502,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         (Elab.TForall "a" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
                         (Elab.TBase (BaseTy "Int"))
             ty `shouldAlphaEqType` expected
-            (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty expr)
+            (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalize expr))
             checkedTy `shouldAlphaEqType` ty
 
     describe "Elaboration bookkeeping (eliminated vars)" $ do
@@ -1808,6 +1822,31 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             out <- requireRight (Elab.applyInstantiation srcTy phi)
                             canonType (stripBoundWrapper out) `shouldBe` canonType (stripBoundWrapper tgtTy)
 
+            it "witness normalization preserves OpRaiseMerge coalescing end-to-end (US-010)" $ do
+                -- Verify that the full presolution pipeline still produces valid
+                -- normalized witnesses after the structural RaiseMerge gating
+                -- refactor (US-007 through US-009).
+                let expr = ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (ELit (LInt 1)))
+                    checkNoDupRaises [] = pure ()
+                    checkNoDupRaises [_] = pure ()
+                    checkNoDupRaises (OpRaise n : rest@(OpRaise m : _))
+                        | n == m = expectationFailure ("Consecutive duplicate OpRaise on " ++ show n)
+                        | otherwise = checkNoDupRaises rest
+                    checkNoDupRaises (_ : rest) = checkNoDupRaises rest
+                case runToSolved expr of
+                    Left err -> expectationFailure err
+                    Right (solved, ews, traces) -> do
+                        IntMap.size ews `shouldSatisfy` (> 0)
+                        forM_ (IntMap.elems ews) $ \ew -> do
+                            let ops = [op | StepOmega op <- ewSteps ew]
+                            checkNoDupRaises ops
+                            let EdgeId eid = ewEdgeId ew
+                                mTrace = IntMap.lookup eid traces
+                            case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing Nothing mTrace ew of
+                                Left (Elab.PhiTranslatabilityError _) -> pure ()
+                                Left err -> expectationFailure ("Unexpected error: " ++ show err)
+                                Right _ -> pure ()
+
             it "contextToNodeBound computes inside-bound contexts (context)" $ do
                 -- root binds a and b; b's bound contains binder c.
                 -- Context to reach c must go under a, then inside b's bound.
@@ -2241,12 +2280,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
             ty `shouldAlphaEqType` expected
 
-        it "bounded aliasing (b ⩾ a) elaborates as ∀a. a -> a -> a (Merge/RaiseMerge path)" $ do
-            -- This corresponds to “aliasing” a bounded variable to an existing binder:
+        it "bounded aliasing (b ⩾ a) elaborates to ∀a. a -> a -> a in unchecked and checked pipelines" $ do
+            -- This corresponds to aliasing a bounded variable to an existing binder:
             --   ∀a. ∀(b ⩾ a). a -> b -> a  ≤  ∀a. a -> a -> a
-            --
-            -- In paper terms, this should be witnessed via Merge/RaiseMerge (Fig. 10)
-            -- and elaborate/typecheck as ∀a. a -> a -> a.
             let rhs = ELam "x" (ELam "y" (EVar "x"))
                 schemeTy =
                     mkForalls
@@ -2261,14 +2297,14 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     ELet "c" (EAnn rhs schemeTy) (EAnn (EVar "c") ann)
                 expected =
                     Elab.TForall "a" Nothing
-                        (Elab.TArrow (Elab.TVar "a") (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
+                        (Elab.TArrow
+                            (Elab.TVar "a")
+                            (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
 
-            (_term, ty) <- requirePipeline expr
-            ty `shouldAlphaEqType` expected
-
-            (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty expr)
+            (_uncheckedTerm, uncheckedTy) <- requireRight (Elab.runPipelineElab Set.empty (unsafeNormalize expr))
+            (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalize expr))
+            uncheckedTy `shouldAlphaEqType` expected
             checkedTy `shouldAlphaEqType` expected
-            checkedTy `shouldAlphaEqType` ty
 
         it "term annotation can instantiate a polymorphic result" $ do
             -- Paper view (`papers/these-finale-english.txt`; see `papers/xmlf.txt` §3.1):
@@ -2300,7 +2336,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         (ELamAnn "x" (STBase "Int") (EVar "x"))
                         (ELit (LInt 1))
             _ <- requirePipeline expr
-            _ <- requireRight (Elab.runPipelineElabChecked Set.empty expr)
+            _ <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalize expr))
             pure ()
 
         it "annotated lambda parameter should accept a polymorphic argument via κσ (US-004)" $ do
@@ -2322,7 +2358,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             checkedFromUnchecked <- requireRight (Elab.typeCheck term)
             checkedFromUnchecked `shouldBe` Elab.TBase (BaseTy "Int")
             ty `shouldBe` Elab.TBase (BaseTy "Int")
-            (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty expr)
+            (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalize expr))
             checkedTy `shouldBe` Elab.TBase (BaseTy "Int")
             checkedTy `shouldBe` ty
 
@@ -2339,8 +2375,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             expectationFailure (label ++ " failed in Phase 6: " ++ show err)
                         _ -> pure ()
 
-            assertNoElabFailure "runPipelineElab" (Elab.runPipelineElab Set.empty expr)
-            assertNoElabFailure "runPipelineElabChecked" (Elab.runPipelineElabChecked Set.empty expr)
+            assertNoElabFailure "runPipelineElab" (Elab.runPipelineElab Set.empty (unsafeNormalize expr))
+            assertNoElabFailure "runPipelineElabChecked" (Elab.runPipelineElabChecked Set.empty (unsafeNormalize expr))
 
     describe "Explicit forall annotation edge cases" $ do
         it "explicit forall annotation round-trips on let-bound variables" $ do

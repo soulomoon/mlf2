@@ -71,7 +71,6 @@ data EdgeUnifyState = EdgeUnifyState
     , eusEdgeRoot :: NodeId -- ^ Expansion root r (edge-local χe root)
     , eusEliminatedBinders :: IntSet.IntSet -- ^ binders eliminated by Merge/RaiseMerge ops we record
     , eusBinderMeta :: IntMap NodeId -- ^ source binder -> copied/meta node in χe
-    , eusBinderBounds :: IntMap NodeId -- ^ source binder -> original bound (if any) before ω execution
     , eusOrderKeys :: IntMap Order.OrderKey -- ^ order keys for meta nodes (edge-local ≺)
     , eusOps :: [InstanceOp]
     }
@@ -172,7 +171,7 @@ runEdgeUnifyForTest
     -> PresolutionM [InstanceOp]
 runEdgeUnifyForTest edgeRoot interior n1 n2 = do
     requireValidBindingTree
-    eu0 <- initEdgeUnifyState [] IntMap.empty interior edgeRoot
+    eu0 <- initEdgeUnifyState [] interior edgeRoot
     (_a, eu1) <- runStateT (unifyAcyclicEdge n1 n2) eu0
     pure (eusOps eu1)
 
@@ -290,8 +289,8 @@ unifyAcyclicEdgeNoMerge n1 n2 = do
                     in m1
             in st { eusInteriorRoots = roots', eusBindersByRoot = binders', eusInteriorByRoot = interior' }
 
-initEdgeUnifyState :: [(NodeId, NodeId)] -> IntMap NodeId -> InteriorSet -> NodeId -> PresolutionM EdgeUnifyState
-initEdgeUnifyState binderArgs binderBounds interior edgeRoot = do
+initEdgeUnifyState :: [(NodeId, NodeId)] -> InteriorSet -> NodeId -> PresolutionM EdgeUnifyState
+initEdgeUnifyState binderArgs interior edgeRoot = do
     roots <- forM (IntSet.toList interior) $ \i -> Ops.findRoot (NodeId i)
     let interiorRoots = InteriorNodes (IntSet.fromList (map getNodeId roots))
     bindersByRoot <- foldM
@@ -344,7 +343,6 @@ initEdgeUnifyState binderArgs binderBounds interior edgeRoot = do
         , eusEdgeRoot = edgeRoot
         , eusEliminatedBinders = IntSet.empty
         , eusBinderMeta = binderMetaMap
-        , eusBinderBounds = binderBounds
         , eusOrderKeys = keys
         , eusOps = []
         }
@@ -460,6 +458,7 @@ recordMergesIntoRep bs
             already <- isEliminated b
             when (not already) $ do
                 recordOp (OpMerge b rep)
+                setVarBoundM b (Just rep)
                 recordEliminate b
   where
     sortByM :: (a -> a -> EdgeUnifyM Ordering) -> [a] -> EdgeUnifyM [a]
@@ -539,94 +538,113 @@ unifyAcyclicEdge n1 n2 = do
         recordMergesIntoRep bs
 
         -- Record RaiseMerge when a binder-class merges with an exterior TyVar-class.
+        -- shouldRecordRaiseMerge encapsulates the full structural decision:
+        -- node kind, live bound root, edge-root ancestry, interior membership,
+        -- and elimination state — all from current canonical graph facts.
         when (IntSet.size bs >= 1) $ do
-            repBinderId <- pickRepBinderId bs
-            let repBinder = NodeId repBinderId
-            case (IntSet.null bs1, IntSet.null bs2) of
-                (False, True) | inInt1 && not inInt2 -> do
-                    node2 <- lift $ Ops.getCanonicalNode root2
-                    case node2 of
-                        TyVar{} -> do
-                            should <- shouldRecordRaiseMerge repBinder root2
-                            already <- isEliminated repBinder
-                            when (should && not already) $ do
-                                -- Paper-shaped RaiseMerge is a sequence (Raise(n))^k; Merge(n, m).
-                                -- We record it in that explicit form and let `normalizeInstanceOpsFull`
-                                -- coalesce it back to `OpRaiseMerge`.
-                                recordOp (OpRaise repBinder)
-                                recordOp (OpMerge repBinder root2)
-                                recordEliminate repBinder
-                        _ -> pure ()
-                (True, False) | inInt2 && not inInt1 -> do
-                    node1 <- lift $ Ops.getCanonicalNode root1
-                    case node1 of
-                        TyVar{} -> do
-                            should <- shouldRecordRaiseMerge rep root1
-                            already <- isEliminated rep
-                            when (should && not already) $ do
-                                recordOp (OpRaise rep)
-                                recordOp (OpMerge rep root1)
-                                recordEliminate rep
-                        _ -> pure ()
-                _ -> pure ()
+            eliminated <- gets eusEliminatedBinders
+            let live = IntSet.filter (\bid -> not (IntSet.member bid eliminated)) bs
+            when (not (IntSet.null live)) $ do
+                repBinderId <- pickRepBinderId live
+                let repBinder = NodeId repBinderId
+                case (IntSet.null bs1, IntSet.null bs2) of
+                    (False, True) | inInt1 && not inInt2 -> do
+                        should <- shouldRecordRaiseMerge repBinder root2
+                        when should $ do
+                            -- Paper-shaped RaiseMerge is a sequence (Raise(n))^k; Merge(n, m).
+                            -- We record it in that explicit form and let `normalizeInstanceOpsFull`
+                            -- coalesce it back to `OpRaiseMerge`.
+                            recordOp (OpRaise repBinder)
+                            recordOp (OpMerge repBinder root2)
+                            setVarBoundM repBinder (Just root2)
+                            recordEliminate repBinder
+                    (True, False) | inInt2 && not inInt1 -> do
+                        should <- shouldRecordRaiseMerge repBinder root1
+                        when should $ do
+                            recordOp (OpRaise repBinder)
+                            recordOp (OpMerge repBinder root1)
+                            setVarBoundM repBinder (Just root1)
+                            recordEliminate repBinder
+                    _ -> pure ()
 
+-- | Decide whether to record a RaiseMerge(binder, ext) operation.
+--
+-- The decision depends on five purely structural, live graph facts:
+--
+--   1. **Node kind**: @ext@ must be a @TyVar@ (non-variable nodes cannot be
+--      RaiseMerge targets).
+--   2. **Live bound root**: @binder@ must have a canonical bound in the current
+--      constraint graph (unbounded binders use InstApp/graft instead).
+--   3. **Same-root exclusion**: the canonical bound root and @ext@ root must
+--      differ (same UF class means no raise is needed).
+--   4. **Edge-root ancestry / interior membership**: @ext@ is bound above the
+--      edge root in the binding tree, or @ext@ is outside the interior @I(r)@.
+--   5. **Elimination state**: @binder@ must not already be eliminated by a
+--      prior Merge/RaiseMerge in this edge.
+--
+-- All queries use the current canonical graph state (UF roots, binding tree,
+-- interior set) — no precomputed snapshots.
 shouldRecordRaiseMerge :: NodeId -> NodeId -> EdgeUnifyM Bool
 shouldRecordRaiseMerge binder ext = do
-    edgeRoot <- gets eusEdgeRoot
-    binderBounds <- gets eusBinderBounds
-    extNode <- lift $ Ops.getNode ext
-    case extNode of
-        TyVar{} -> do
-            case IntMap.lookup (getNodeId binder) binderBounds of
-                Nothing -> do
-                    debugEdgeUnify
-                        ( "shouldRecordRaiseMerge: binder="
-                            ++ show binder
-                            ++ " ext="
-                            ++ show ext
-                            ++ " bound=None"
-                        )
-                    -- Unbounded binder: RaiseMerge is not needed; InstApp is expressible.
-                    pure False
-                Just bndOrig -> do
-                    bndRoot <- findRootM bndOrig
-                    extRoot <- findRootM ext
-                    if bndRoot == extRoot
-                        then do
+    already <- isEliminated binder
+    if already
+        then pure False
+        else do
+            edgeRoot <- gets eusEdgeRoot
+            extNode <- lift $ Ops.getNode ext
+            case extNode of
+                TyVar{} -> do
+                    mbBnd <- lookupVarBoundM binder
+                    case mbBnd of
+                        Nothing -> do
                             debugEdgeUnify
                                 ( "shouldRecordRaiseMerge: binder="
                                     ++ show binder
                                     ++ " ext="
                                     ++ show ext
-                                    ++ " boundRoot="
-                                    ++ show bndRoot
-                                    ++ " extRoot="
-                                    ++ show extRoot
-                                    ++ " sameRoot=True"
+                                    ++ " bound=None"
                                 )
+                            -- Unbounded binder: RaiseMerge is not needed; InstApp is expressible.
                             pure False
-                        else do
-                            above <- isBoundAboveInBindingTreeM edgeRoot extRoot
-                            interiorRoots <- gets eusInteriorRoots
-                            let inInterior = memberInterior extRoot interiorRoots
-                            debugEdgeUnify
-                                ( "shouldRecordRaiseMerge: binder="
-                                    ++ show binder
-                                    ++ " ext="
-                                    ++ show ext
-                                    ++ " boundRoot="
-                                    ++ show bndRoot
-                                    ++ " extRoot="
-                                    ++ show extRoot
-                                    ++ " edgeRoot="
-                                    ++ show edgeRoot
-                                    ++ " above="
-                                    ++ show above
-                                    ++ " inInterior="
-                                    ++ show inInterior
-                                )
-                            pure (above || not inInterior)
-        _ -> pure False
+                        Just bndOrig -> do
+                            bndRoot <- findRootM bndOrig
+                            extRoot <- findRootM ext
+                            if bndRoot == extRoot
+                                then do
+                                    debugEdgeUnify
+                                        ( "shouldRecordRaiseMerge: binder="
+                                            ++ show binder
+                                            ++ " ext="
+                                            ++ show ext
+                                            ++ " boundRoot="
+                                            ++ show bndRoot
+                                            ++ " extRoot="
+                                            ++ show extRoot
+                                            ++ " sameRoot=True"
+                                        )
+                                    pure False
+                                else do
+                                    above <- isBoundAboveInBindingTreeM edgeRoot extRoot
+                                    interiorRoots <- gets eusInteriorRoots
+                                    let inInterior = memberInterior extRoot interiorRoots
+                                    debugEdgeUnify
+                                        ( "shouldRecordRaiseMerge: binder="
+                                            ++ show binder
+                                            ++ " ext="
+                                            ++ show ext
+                                            ++ " boundRoot="
+                                            ++ show bndRoot
+                                            ++ " extRoot="
+                                            ++ show extRoot
+                                            ++ " edgeRoot="
+                                            ++ show edgeRoot
+                                            ++ " above="
+                                            ++ show above
+                                            ++ " inInterior="
+                                            ++ show inInterior
+                                            )
+                                    pure (above || not inInterior)
+                _ -> pure False
 
 debugEdgeUnify :: String -> EdgeUnifyM ()
 debugEdgeUnify msg = do

@@ -17,6 +17,7 @@ import qualified MLF.Binding.GraphOps as GraphOps
 import qualified MLF.Util.Order as Order
 import MLF.Frontend.Syntax (SurfaceExpr, Expr(..), Lit(..), SrcType(..))
 import MLF.Frontend.ConstraintGen (ConstraintError, ConstraintResult(..), generateConstraints)
+import MLF.Frontend.Normalize (normalizeExpr)
 import SpecUtil
     ( bindParentsFromPairs
     , emptyConstraint
@@ -28,7 +29,10 @@ import SpecUtil
     )
 
 generateConstraintsDefault :: SurfaceExpr -> Either ConstraintError ConstraintResult
-generateConstraintsDefault = generateConstraints Set.empty
+generateConstraintsDefault expr =
+    case normalizeExpr expr of
+        Left err -> error ("normalizeExpr failed in test: " ++ show err)
+        Right normExpr -> generateConstraints Set.empty normExpr
 
 -- | Generate a valid binding tree with n nodes.
 -- The tree is structured as a chain of TyForall nodes: node 0 -> node 1 -> ... -> node (n-1)

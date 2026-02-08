@@ -27,7 +27,10 @@ import SpecUtil
     )
 
 inferConstraintGraphDefault :: SurfaceExpr -> Either ConstraintError ConstraintResult
-inferConstraintGraphDefault = inferConstraintGraph Set.empty
+inferConstraintGraphDefault expr =
+    case normalizeExpr expr of
+        Left err -> error ("normalizeExpr failed in test: " ++ show err)
+        Right normExpr -> inferConstraintGraph Set.empty normExpr
 
 spec :: Spec
 spec = describe "Phase 1 — Constraint generation" $ do
@@ -961,18 +964,20 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 Left other -> expectationFailure $ "Expected TypeConstructorArityMismatch, saw " ++ show other
                 Right _ -> expectationFailure "Expected arity mismatch error"
 
-    describe "Forall-bound well-formedness" $ do
-        it "throws ForallBoundMentionsBinder when binder occurs in its own bound" $ do
-            -- ∀(a ⩾ a). a - the binder 'a' occurs in its own bound
+    describe "Forall-bound well-formedness (normalized-only)" $ do
+        it "alias self-bound ∀(a ⩾ a) caught by normalization as SelfBoundVariable" $ do
+            -- ∀(a ⩾ a). a - alias self-bound is rejected at normalization,
+            -- before reaching constraint generation.
             let ann = STForall "a" (Just (STVar "a")) (STVar "a")
                 expr = EAnn (ELit (LInt 1)) ann
-            case inferConstraintGraphDefault expr of
-                Left (ForallBoundMentionsBinder name) -> name `shouldBe` "a"
-                Left other -> expectationFailure $ "Expected ForallBoundMentionsBinder, saw " ++ show other
-                Right _ -> expectationFailure "Expected ForallBoundMentionsBinder error"
+            case normalizeExpr expr of
+                Left (SelfBoundVariable name _) -> name `shouldBe` "a"
+                Right _ -> expectationFailure "Expected SelfBoundVariable error"
 
-        it "throws ForallBoundMentionsBinder for nested occurrence" $ do
-            -- ∀(a ⩾ List a). a - the binder 'a' occurs nested in its bound
+        it "structural self-reference ∀(a ⩾ List a) caught by ForallBoundMentionsBinder" $ do
+            -- ∀(a ⩾ List a). a - the binder 'a' occurs nested in a structural bound.
+            -- Normalization passes this through (structural bound, not alias), so
+            -- constraint generation catches it via ForallBoundMentionsBinder.
             let ann = STForall "a" (Just (STCon "List" (STVar "a" :| []))) (STVar "a")
                 expr = EAnn (ELit (LInt 1)) ann
             case inferConstraintGraphDefault expr of
@@ -985,6 +990,18 @@ spec = describe "Phase 1 — Constraint generation" $ do
             let ann = STForall "a" (Just (STBase "Int")) (STVar "a")
                 expr = EAnn (ELit (LInt 1)) ann
             expectRight (inferConstraintGraphDefault expr) $ \_ -> pure ()
+
+        it "alias bound ∀(b ⩾ a) inlined by normalization before constraint gen" $ do
+            -- ∀(b ⩾ a). b → a is an alias bound: normalization inlines b := a,
+            -- producing a → a. Constraint generation never sees the alias bound.
+            let ann = STForall "b" (Just (STVar "a")) (STArrow (STVar "b") (STVar "a"))
+                expr = EAnn (ELit (LInt 1)) ann
+            expectRight (inferConstraintGraphDefault expr) $ \result -> do
+                let nodes = cNodes (crConstraint result)
+                -- After alias inlining, the annotation type is a → a (an arrow
+                -- with shared domain/codomain variable). Verify an arrow exists.
+                let arrowNodes = [n | n@TyArrow{} <- nodeMapElems nodes]
+                length arrowNodes `shouldSatisfy` (> 0)
 
         -- US-003 Regression: ELet x (EAnn e σ) should NOT introduce explicit-scheme
         -- instantiation edge structure. With coercion-only semantics, an annotated
