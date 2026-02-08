@@ -250,30 +250,62 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             Right (_term, ty) -> pretty ty `shouldSatisfy` ("∀" `isInfixOf`)
 
     it "applyRedirectsToAnn and canonicalizeAnn rewrite every node occurrence consistently" $ do
-        -- let id = \x. x in let a = id 1 in id True
-        let expr =
+        -- Exercise rewrite coverage on a shape with redirected + canonicalized let scheme roots.
+        let rewriteExpr =
+                ELet "id" (ELam "x" (EVar "x"))
+                    (ELet "f" (EVar "id")
+                        (ELet "a" (EApp (EVar "f") (ELit (LInt 1)))
+                            (EApp (EVar "f") (ELit (LBool True)))))
+            -- Separately exercise the production canonicalizeAnn path via pipeline run.
+            canonicalizePathExpr =
                 ELet "id" (ELam "x" (EVar "x"))
                     (ELet "a" (EApp (EVar "id") (ELit (LInt 1)))
-                        (EApp (EVar "id") (ELit (LBool True))))
-        case runPipelineWithPresolution expr of
+                        (EApp (EVar "id") (ELit (LBool True)))
+                    )
+        case runPipelineWithPresolution rewriteExpr of
             Left err -> expectationFailure err
             Right (pres, ann) -> do
                 let redirects = prRedirects pres
-                    schemeRoots = annLetSchemeRoots ann
                     redirectedSchemeRoots =
                         [ nid
-                        | nid <- schemeRoots
+                        | nid <- annLetSchemeRoots ann
                         , chaseRedirects redirects nid /= nid
                         ]
-                    ann' = applyRedirectsToAnn redirects ann
-                    staleNodes =
+                    annRedirected = applyRedirectsToAnn redirects ann
+                    staleRedirectNodes =
                         [ nid
-                        | nid <- annNodeOccurrences ann'
+                        | nid <- annNodeOccurrences annRedirected
                         , chaseRedirects redirects nid /= nid
                         ]
                 redirectedSchemeRoots `shouldSatisfy` (not . null)
-                staleNodes `shouldBe` []
-                annRootNode ann' `shouldSatisfy` (\nid -> chaseRedirects redirects nid == nid)
+                staleRedirectNodes `shouldBe` []
+                annRootNode annRedirected `shouldSatisfy` (\nid -> chaseRedirects redirects nid == nid)
+                case solveUnify defaultTraceConfig (prConstraint pres) of
+                    Left err -> expectationFailure ("solveUnify failed: " ++ show err)
+                    Right solved -> do
+                        validateStrict solved
+                        let canonicalize = canonicalizeNode (makeCanonicalizer (srUnionFind solved) redirects)
+                            canonicalizedSchemeRoots =
+                                [ nid
+                                | nid <- annLetSchemeRoots annRedirected
+                                , canonicalize nid /= nid
+                                ]
+                            annCanonical = rewriteAnnNodes canonicalize annRedirected
+                            staleCanonicalNodes =
+                                [ nid
+                                | nid <- annNodeOccurrences annCanonical
+                                , canonicalize nid /= nid
+                                ]
+                        canonicalizedSchemeRoots `shouldSatisfy` (not . null)
+                        staleCanonicalNodes `shouldBe` []
+                        annRootNode annCanonical `shouldSatisfy` (\nid -> canonicalize nid == nid)
+        case runPipelineElab Set.empty canonicalizePathExpr of
+            Left err -> expectationFailure (renderPipelineError err)
+            Right (_term, ty) ->
+                case runPipelineElabChecked Set.empty canonicalizePathExpr of
+                    Left errChecked -> expectationFailure (renderPipelineError errChecked)
+                    Right (_termChecked, tyChecked) -> do
+                        ty `shouldBe` tyChecked
 
     it "generalizes reused constructors via make const" $ do
         -- let make x = (\z -> x) in let c1 = make 2 in let c2 = make False in c1 True
@@ -446,6 +478,32 @@ chaseRedirects :: IntMap.IntMap NodeId -> NodeId -> NodeId
 chaseRedirects redirects nid = case IntMap.lookup (getNodeId nid) redirects of
     Just n' -> if n' == nid then nid else chaseRedirects redirects n'
     Nothing -> nid
+
+rewriteAnnNodes :: (NodeId -> NodeId) -> AnnExpr -> AnnExpr
+rewriteAnnNodes rewrite expr = case expr of
+    AVar v nid -> AVar v (rewrite nid)
+    ALit lit nid -> ALit lit (rewrite nid)
+    ALam v pNode eid body nid ->
+        ALam v (rewrite pNode) eid (rewriteAnnNodes rewrite body) (rewrite nid)
+    AApp fn arg fEid aEid nid ->
+        AApp
+            (rewriteAnnNodes rewrite fn)
+            (rewriteAnnNodes rewrite arg)
+            fEid
+            aEid
+            (rewrite nid)
+    ALet v schemeGen schemeRoot expVar scopeRoot rhs body nid ->
+        ALet
+            v
+            schemeGen
+            (rewrite schemeRoot)
+            expVar
+            scopeRoot
+            (rewriteAnnNodes rewrite rhs)
+            (rewriteAnnNodes rewrite body)
+            (rewrite nid)
+    AAnn inner nid eid ->
+        AAnn (rewriteAnnNodes rewrite inner) (rewrite nid) eid
 
 annNodeOccurrences :: AnnExpr -> [NodeId]
 annNodeOccurrences expr = case expr of
