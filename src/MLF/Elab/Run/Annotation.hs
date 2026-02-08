@@ -1,5 +1,6 @@
 {-# LANGUAGE GADTs #-}
 module MLF.Elab.Run.Annotation (
+    mapAnnNodes,
     applyRedirectsToAnn,
     canonicalizeAnn,
     annNode,
@@ -15,34 +16,23 @@ import MLF.Constraint.Types.Graph (NodeId(..))
 import MLF.Elab.Run.Util (chaseRedirects)
 import MLF.Elab.Types (ElabType, Instantiation(..), Ty(..))
 
+mapAnnNodes :: (NodeId -> NodeId) -> AnnExpr -> AnnExpr
+mapAnnNodes f = cata $ \case
+    ALitF l nid -> ALit l (f nid)
+    AVarF v nid -> AVar v (f nid)
+    ALamF v pNode x bodyAnn nid ->
+        ALam v (f pNode) x bodyAnn (f nid)
+    AAppF fAnn argAnn funEid argEid nid ->
+        AApp fAnn argAnn funEid argEid (f nid)
+    ALetF v schemeGenId schemeRootId ev rhsGen rhsAnn bodyAnn nid ->
+        ALet v schemeGenId (f schemeRootId) ev rhsGen rhsAnn bodyAnn (f nid)
+    AAnnF exprAnn nid eid -> AAnn exprAnn (f nid) eid
+
 applyRedirectsToAnn :: IntMap.IntMap NodeId -> AnnExpr -> AnnExpr
-applyRedirectsToAnn redirects = cata alg
-  where
-    redir = chaseRedirects redirects
-    alg ann = case ann of
-        ALitF l nid -> ALit l (redir nid)
-        AVarF v nid -> AVar v (redir nid)
-        ALamF v pNode x bodyAnn nid ->
-            ALam v (redir pNode) x bodyAnn (redir nid)
-        AAppF fAnn argAnn funEid argEid nid ->
-            AApp fAnn argAnn funEid argEid (redir nid)
-        ALetF v schemeGenId schemeRootId ev rhsGen rhsAnn bodyAnn nid ->
-            ALet v schemeGenId schemeRootId ev rhsGen rhsAnn bodyAnn (redir nid)
-        AAnnF exprAnn nid eid -> AAnn exprAnn (redir nid) eid
+applyRedirectsToAnn redirects = mapAnnNodes (chaseRedirects redirects)
 
 canonicalizeAnn :: (NodeId -> NodeId) -> AnnExpr -> AnnExpr
-canonicalizeAnn canonical = cata alg
-  where
-    alg ann = case ann of
-        ALitF l nid -> ALit l (canonical nid)
-        AVarF v nid -> AVar v (canonical nid)
-        ALamF v pNode x bodyAnn nid ->
-            ALam v (canonical pNode) x bodyAnn (canonical nid)
-        AAppF fAnn argAnn funEid argEid nid ->
-            AApp fAnn argAnn funEid argEid (canonical nid)
-        ALetF v schemeGenId schemeRootId ev rhsGen rhsAnn bodyAnn nid ->
-            ALet v schemeGenId (canonical schemeRootId) ev rhsGen rhsAnn bodyAnn (canonical nid)
-        AAnnF exprAnn nid eid -> AAnn exprAnn (canonical nid) eid
+canonicalizeAnn canonical = mapAnnNodes canonical
 
 annNode :: AnnExpr -> NodeId
 annNode = cata alg

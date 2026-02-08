@@ -13,6 +13,7 @@ import Data.List (intercalate)
 import MLF.Frontend.ConstraintGen (AnnExpr(..))
 import MLF.Frontend.ConstraintGen.Types (AnnExprF(..))
 import MLF.Constraint.Types.Graph (EdgeId(..), NodeId(..), getEdgeId)
+import MLF.Elab.Run.Annotation (mapAnnNodes)
 import MLF.Util.Trace (TraceConfig, traceBinding, tcBinding)
 
 
@@ -40,7 +41,7 @@ debugWhenCondM cfg cond msg =
         else pure ()
 
 edgeOrigins :: AnnExpr -> IntMap.IntMap String
-edgeOrigins = fmap (intercalate " | ") . aoMap . cata alg
+edgeOrigins = fmap (intercalate " | ") . aoMap . cata alg . mapAnnNodes id
   where
     tagNode nid = "node=" ++ show nid
     insertEdge eid msg =

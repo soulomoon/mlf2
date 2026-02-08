@@ -249,6 +249,32 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             Left err -> expectationFailure (renderPipelineError err)
             Right (_term, ty) -> pretty ty `shouldSatisfy` ("∀" `isInfixOf`)
 
+    it "applyRedirectsToAnn and canonicalizeAnn rewrite every node occurrence consistently" $ do
+        -- let id = \x. x in let a = id 1 in id True
+        let expr =
+                ELet "id" (ELam "x" (EVar "x"))
+                    (ELet "a" (EApp (EVar "id") (ELit (LInt 1)))
+                        (EApp (EVar "id") (ELit (LBool True))))
+        case runPipelineWithPresolution expr of
+            Left err -> expectationFailure err
+            Right (pres, ann) -> do
+                let redirects = prRedirects pres
+                    schemeRoots = annLetSchemeRoots ann
+                    redirectedSchemeRoots =
+                        [ nid
+                        | nid <- schemeRoots
+                        , chaseRedirects redirects nid /= nid
+                        ]
+                    ann' = applyRedirectsToAnn redirects ann
+                    staleNodes =
+                        [ nid
+                        | nid <- annNodeOccurrences ann'
+                        , chaseRedirects redirects nid /= nid
+                        ]
+                redirectedSchemeRoots `shouldSatisfy` (not . null)
+                staleNodes `shouldBe` []
+                annRootNode ann' `shouldSatisfy` (\nid -> chaseRedirects redirects nid == nid)
+
     it "generalizes reused constructors via make const" $ do
         -- let make x = (\z -> x) in let c1 = make 2 in let c2 = make False in c1 True
         let expr =
@@ -420,6 +446,35 @@ chaseRedirects :: IntMap.IntMap NodeId -> NodeId -> NodeId
 chaseRedirects redirects nid = case IntMap.lookup (getNodeId nid) redirects of
     Just n' -> if n' == nid then nid else chaseRedirects redirects n'
     Nothing -> nid
+
+annNodeOccurrences :: AnnExpr -> [NodeId]
+annNodeOccurrences expr = case expr of
+    AVar _ nid -> [nid]
+    ALit _ nid -> [nid]
+    ALam _ pNode _ body nid -> pNode : nid : annNodeOccurrences body
+    AApp fn arg _ _ nid -> nid : annNodeOccurrences fn ++ annNodeOccurrences arg
+    ALet _ _ schemeRoot _ _ rhs body nid ->
+        schemeRoot : nid : annNodeOccurrences rhs ++ annNodeOccurrences body
+    AAnn inner nid _ -> nid : annNodeOccurrences inner
+
+annLetSchemeRoots :: AnnExpr -> [NodeId]
+annLetSchemeRoots expr = case expr of
+    AVar _ _ -> []
+    ALit _ _ -> []
+    ALam _ _ _ body _ -> annLetSchemeRoots body
+    AApp fn arg _ _ _ -> annLetSchemeRoots fn ++ annLetSchemeRoots arg
+    ALet _ _ schemeRoot _ _ rhs body _ ->
+        schemeRoot : annLetSchemeRoots rhs ++ annLetSchemeRoots body
+    AAnn inner _ _ -> annLetSchemeRoots inner
+
+annRootNode :: AnnExpr -> NodeId
+annRootNode expr = case expr of
+    AVar _ nid -> nid
+    ALit _ nid -> nid
+    ALam _ _ _ _ nid -> nid
+    AApp _ _ _ _ nid -> nid
+    ALet _ _ _ _ _ _ _ nid -> nid
+    AAnn _ nid _ -> nid
 
 
 validateStrict :: SolveResult -> Expectation
