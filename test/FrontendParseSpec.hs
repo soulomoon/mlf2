@@ -7,11 +7,13 @@ import Test.Hspec
 import MLF.API
     ( BaseTy (..)
     , Expr (..)
+    , NormSrcType
     , NormParseError (..)
-    , NormSrcType (..)
-    , SrcType (..)
-    , StructBound (..)
+    , SrcTy (..)
+    , SrcType
     , Ty (..)
+    , mkNormBound
+    , mkSrcBound
     , parseEmlfExpr
     , parseEmlfType
     , parseNormEmlfExpr
@@ -51,6 +53,10 @@ spec = describe "Frontend eMLF parser" $ do
             parseRawEmlfExpr "let x = in x" `shouldSatisfy` isLeft
 
     describe "raw types" $ do
+        it "parses raw forall binder and keeps raw alias type" $
+            parseRawEmlfType "forall a. a -> a"
+                `shouldBe` Right (STForall "a" Nothing (STArrow (STVar "a") (STVar "a")))
+
         it "parses arrow types as right associative" $
             parseRawEmlfType "a -> b -> c"
                 `shouldBe` Right (STArrow (STVar "a") (STArrow (STVar "b") (STVar "c")))
@@ -59,7 +65,7 @@ spec = describe "Frontend eMLF parser" $ do
             parseRawEmlfType "∀a (b ⩾ Int). a -> b"
                 `shouldBe` Right
                     ( STForall "a" Nothing
-                        (STForall "b" (Just (STBase "Int")) (STArrow (STVar "a") (STVar "b")))
+                        (STForall "b" (Just (mkSrcBound (STBase "Int"))) (STArrow (STVar "a") (STVar "b")))
                     )
 
         it "parses constructor application" $
@@ -70,34 +76,33 @@ spec = describe "Frontend eMLF parser" $ do
 
     describe "normalized types" $ do
         it "normalizes simple variable type" $
-            parseNormEmlfType "a" `shouldBe` Right (NSTVar "a")
+            parseNormEmlfType "a" `shouldBe` Right (STVar "a")
 
         it "normalizes arrow type" $
             parseNormEmlfType "a -> b"
-                `shouldBe` Right (NSTArrow (NSTVar "a") (NSTVar "b"))
+                `shouldBe` Right (STArrow (STVar "a") (STVar "b"))
 
         it "normalizes unbounded forall" $
             parseNormEmlfType "∀a. a -> a"
-                `shouldBe` Right (NSTForall "a" Nothing (NSTArrow (NSTVar "a") (NSTVar "a")))
+                `shouldBe` Right (STForall "a" Nothing (STArrow (STVar "a") (STVar "a")))
 
         it "normalizes structural bound to StructBound" $
             parseNormEmlfType "∀(a ⩾ Int). a"
-                `shouldBe` Right (NSTForall "a" (Just (SBBase "Int")) (NSTVar "a"))
+                `shouldBe` Right (STForall "a" (Just (mkNormBound (STBase "Int"))) (STVar "a"))
 
         it "inlines alias bound during normalization" $
-            -- ∀(b ⩾ a). b  →  a  (alias bound inlined)
             parseNormEmlfType "∀(b ⩾ a). b"
-                `shouldBe` Right (NSTVar "a")
+                `shouldBe` Right (STVar "a")
 
         it "rejects self-bound forall" $
             parseNormEmlfType "∀(a ⩾ a). a" `shouldSatisfy` isNormErr
 
         it "normalizes base type" $
-            parseNormEmlfType "Int" `shouldBe` Right (NSTBase "Int")
+            parseNormEmlfType "Int" `shouldBe` Right (STBase "Int")
 
         it "normalizes constructor application" $
             parseNormEmlfType "List Int"
-                `shouldBe` Right (NSTCon "List" (NSTBase "Int" :| []))
+                `shouldBe` Right (STCon "List" (STBase "Int" :| []))
 
     describe "normalized expressions" $ do
         it "normalizes unannotated expression unchanged" $
@@ -105,13 +110,13 @@ spec = describe "Frontend eMLF parser" $ do
 
         it "normalizes annotation type in expression" $
             parseNormEmlfExpr "(x : Int)"
-                `shouldBe` Right (EAnn (EVar "x") (NSTBase "Int"))
+                `shouldBe` Right (EAnn (EVar "x") (STBase "Int"))
 
         it "normalizes annotated lambda type" $
             parseNormEmlfExpr "λ(x : ∀a. a -> a) x"
                 `shouldBe` Right
                     (ELamAnn "x"
-                        (NSTForall "a" Nothing (NSTArrow (NSTVar "a") (NSTVar "a")))
+                        (STForall "a" Nothing (STArrow (STVar "a") (STVar "a")))
                         (EVar "x"))
 
         it "rejects expression with self-bound annotation" $
@@ -128,6 +133,15 @@ spec = describe "Frontend eMLF parser" $ do
                             expectationFailure ("runPipelineElab failed: " ++ renderPipelineError err)
                         Right (_term, ty) ->
                             ty `shouldBe` TBase (BaseTy "Int")
+
+    describe "API exports" $ do
+        it "exports staged SrcTy aliases for raw and normalized paths" $ do
+            let _raw :: SrcType
+                _raw = STBase "Int"
+                _norm :: NormSrcType
+                _norm = STBase "Int"
+            show _raw `shouldNotBe` ""
+            show _norm `shouldNotBe` ""
 
     describe "legacy aliases" $ do
         it "parseEmlfExpr is the same as parseRawEmlfExpr" $

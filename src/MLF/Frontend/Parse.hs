@@ -31,8 +31,10 @@ import MLF.Frontend.Syntax
     , Lit (..)
     , NormSrcType
     , NormSurfaceExpr
-    , SrcType (..)
+    , SrcTy (..)
+    , SrcType
     , SurfaceExpr
+    , mkSrcBound
     )
 import Text.Megaparsec
     ( Parsec
@@ -212,7 +214,7 @@ pForallType = try $ do
     binders <- some pForallBinder
     void (optional (symbol "."))
     body <- pType
-    pure (foldr (\(v, mb) acc -> STForall v mb acc) body binders)
+    pure (foldr (\(v, mb) acc -> STForall v (fmap mkSrcBound mb) acc) body binders)
 
 pForallBinder :: Parser (String, Maybe SrcType)
 pForallBinder =
