@@ -10,21 +10,18 @@ import qualified Data.Set as Set
 import Test.Hspec
 
 import MLF.Binding.Tree (boundFlexChildren, checkBindingTree, isUnderRigidBinder, nodeKind, NodeKind(..))
-import MLF.Constraint.Acyclicity (checkAcyclicity)
-import MLF.Constraint.Normalize (normalize)
-import MLF.Constraint.Presolution (PresolutionResult(..), computePresolution)
-import MLF.Constraint.Solve (SolveResult(..), solveUnify)
+import MLF.Constraint.Solve (SolveResult(..))
 import MLF.Frontend.ConstraintGen (AnnExpr (..))
 import MyLib hiding (normalize, lookupNode)
 import SpecUtil
     ( expectRight
-    , firstShowE
     , lookupNode
     , lookupNodeMaybe
     , nodeMapElems
     , nodeMapSize
     , requireRight
     , mkForalls
+    , runToSolvedDefault
     )
 
 inferConstraintGraphDefault :: SurfaceExpr -> Either ConstraintError ConstraintResult
@@ -710,18 +707,9 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 expr =
                     ELet "c" (EAnn rhs schemeTy) (EAnn (EVar "c") ann)
 
-                runToPresolution :: SurfaceExpr -> Either String PresolutionResult
-                runToPresolution e = do
-                    ConstraintResult { crConstraint = c0 } <- firstShowE (inferConstraintGraphDefault e)
-                    let c1 = normalize c0
-                    acyc <- firstShowE (checkAcyclicity c1)
-                    firstShowE (computePresolution defaultTraceConfig acyc c1)
-
-            pres <- requireRight (runToPresolution expr)
-            let eliminated = cEliminatedVars (prConstraint pres)
-
-            solved <- requireRight (solveUnify defaultTraceConfig (prConstraint pres))
+            solved <- requireRight (runToSolvedDefault Set.empty expr)
             let cSolved = srConstraint solved
+                eliminated = cEliminatedVars cSolved
                 schemeGens =
                     [ gnId gen
                     | gen <- IntMap.elems (getGenNodeMap (cGenNodes cSolved))

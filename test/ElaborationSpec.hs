@@ -53,9 +53,11 @@ import SpecUtil
     , collectVarNodes
     , defaultTraceConfig
     , emptyConstraint
+    , firstShowE
     , nodeMapFromList
     , requireRight
     , rootedConstraint
+    , runToPresolutionDefault
     , unsafeNormalizeExpr
     , mkForalls
     )
@@ -395,16 +397,13 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     expectationFailure ("Expected bounded forall, got " ++ show ty)
 
     describe "Binding tree coverage" $ do
-        let firstShow :: Show err => Either err a -> Either String a
-            firstShow = either (Left . show) Right
-
-            runSolvedWithScope :: SurfaceExpr -> Either String (SolveResult, NodeRef, NodeId)
+        let runSolvedWithScope :: SurfaceExpr -> Either String (SolveResult, NodeRef, NodeId)
             runSolvedWithScope e = do
-                ConstraintResult { crConstraint = c0, crRoot = root } <- firstShow (generateConstraintsDefault e)
+                ConstraintResult { crConstraint = c0, crRoot = root } <- firstShowE (generateConstraintsDefault e)
                 let c1 = normalize c0
-                acyc <- firstShow (checkAcyclicity c1)
-                pres <- firstShow (computePresolution defaultTraceConfig acyc c1)
-                solved <- firstShow (solveUnify defaultTraceConfig (prConstraint pres))
+                acyc <- firstShowE (checkAcyclicity c1)
+                pres <- firstShowE (computePresolution defaultTraceConfig acyc c1)
+                solved <- firstShowE (solveUnify defaultTraceConfig (prConstraint pres))
                 let root' = Elab.chaseRedirects (prRedirects pres) root
                 scopeRoot <- case Binding.bindingRoots (srConstraint solved) of
                     [rootRef] -> Right rootRef
@@ -1162,15 +1161,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
         describe "Φ translation soundness" $ do
             let runToSolved :: SurfaceExpr -> Either String (SolveResult, IntMap.IntMap EdgeWitness, IntMap.IntMap EdgeTrace)
                 runToSolved e = do
-                    ConstraintResult { crConstraint = c0 } <- firstShow (generateConstraintsDefault e)
-                    let c1 = normalize c0
-                    acyc <- firstShow (checkAcyclicity c1)
-                    pres <- firstShow (computePresolution defaultTraceConfig acyc c1)
-                    solved <- firstShow (solveUnify defaultTraceConfig (prConstraint pres))
+                    pres <- runToPresolutionDefault Set.empty e
+                    solved <- firstShowE (solveUnify defaultTraceConfig (prConstraint pres))
                     pure (solved, prEdgeWitnesses pres, prEdgeTraces pres)
-
-                firstShow :: Show err => Either err a -> Either String a
-                firstShow = either (Left . show) Right
 
             it "elaboration fails when a witness has no trace entry" $ do
                 let expr = ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (ELit (LInt 1)))
@@ -2198,14 +2191,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
             let runToPresolutionWitnesses :: SurfaceExpr -> Either String (IntMap.IntMap EdgeWitness)
                 runToPresolutionWitnesses e = do
-                    ConstraintResult { crConstraint = c0 } <- firstShow (generateConstraintsDefault e)
-                    let c1 = normalize c0
-                    acyc <- firstShow (checkAcyclicity c1)
-                    pres <- firstShow (computePresolution defaultTraceConfig acyc c1)
+                    pres <- runToPresolutionDefault Set.empty e
                     pure (prEdgeWitnesses pres)
-
-                firstShow :: Show err => Either err a -> Either String a
-                firstShow = either (Left . show) Right
 
             ews <- requireRight (runToPresolutionWitnesses expr)
             let ops =
@@ -2234,26 +2221,19 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             let expr =
                     ELet "id" (ELam "x" (EVar "x"))
                         (EApp (EVar "id") (EVar "id"))
-            let firstShow :: Show err => Either err a -> Either String a
-                firstShow = either (Left . show) Right
-                runToPresolution = do
-                    ConstraintResult { crConstraint = c0, crAnnotated = ann } <- firstShow (generateConstraintsDefault expr)
-                    let c1 = normalize c0
-                    acyc <- firstShow (checkAcyclicity c1)
-                    pres <- firstShow (computePresolution defaultTraceConfig acyc c1)
-                    pure (prRedirects pres, ann)
-
-            case runToPresolution of
-                Left err -> expectationFailure err
-                Right (redirects, ann) -> do
-                    let varNodes = collectVarNodes "id" ann
-                        redirected =
-                            [ nid
-                            | nid <- varNodes
-                            , Elab.chaseRedirects redirects nid /= nid
-                            ]
-                    varNodes `shouldSatisfy` (not . null)
-                    redirected `shouldSatisfy` (not . null)
+            ConstraintResult { crConstraint = c0, crAnnotated = ann } <- requireRight (firstShowE (generateConstraintsDefault expr))
+            let c1 = normalize c0
+            acyc <- requireRight (firstShowE (checkAcyclicity c1))
+            pres <- requireRight (firstShowE (computePresolution defaultTraceConfig acyc c1))
+            let redirects = prRedirects pres
+                varNodes = collectVarNodes "id" ann
+                redirected =
+                    [ nid
+                    | nid <- varNodes
+                    , Elab.chaseRedirects redirects nid /= nid
+                    ]
+            varNodes `shouldSatisfy` (not . null)
+            redirected `shouldSatisfy` (not . null)
 
         it "generalizeAt inlines rigid vars via bounds at top-level" $ do
             let rootGen = GenNodeId 0
