@@ -411,7 +411,7 @@ internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared srcType 
         -- Domain copies use BindRigid to mark coercion-local nodes as restricted.
         -- To avoid locked descendants, rebind children auto-bound under structural
         -- nodes back to the current gen when rigid.
-        NSTVar name ->
+        STVar name ->
             case Map.lookup name tyEnv of
                 Just nid -> pure (nid, shared)
                 Nothing ->
@@ -422,7 +422,7 @@ internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared srcType 
                             setBindParentOverride (typeRef nid) (genRef coerceGen) BindFlex
                             pure (nid, Map.insert name nid shared)
 
-        NSTArrow dom cod -> do
+        STArrow dom cod -> do
             (domNode, shared1) <-
                 internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared dom
             (codNode, shared2) <-
@@ -445,7 +445,7 @@ internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared srcType 
                     pure (varNode, shared2)
                 else pure (arrowNode, shared2)
 
-        NSTBase name -> do
+        STBase name -> do
             registerTyConArity (BaseTy name) 0
             baseNode <- allocBase (BaseTy name)
             if wrap
@@ -460,19 +460,20 @@ internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared srcType 
                     pure (varNode, shared)
                 else pure (baseNode, shared)
 
-        NSTCon name args -> do
+        STCon name args -> do
             let arity = NE.length args
             registerTyConArity (BaseTy name) arity
-            (argNodes, sharedFinal) <- foldM
+            (headNode, shared1) <-
+                internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared (NE.head args)
+            (tailNodes, sharedFinal) <- foldM
                 (\(accNodes, accShared) argTy -> do
                     (argNode, newShared) <-
                         internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv accShared argTy
                     pure (accNodes ++ [argNode], newShared))
-                ([], shared)
-                (NE.toList args)
-            conNode <- case argNodes of
-                (h:t) -> allocCon (BaseTy name) (h :| t)
-                [] -> error "NSTCon must have at least one argument"
+                ([], shared1)
+                (NE.tail args)
+            let argNodes = headNode : tailNodes
+            conNode <- allocCon (BaseTy name) (headNode :| tailNodes)
             case bindFlag of
                 BindRigid -> do
                     mapM_ (\argNode -> rebindIfParent argNode (typeRef conNode) (genRef currentGen) bindFlag) argNodes
@@ -489,19 +490,19 @@ internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared srcType 
                     pure (varNode, sharedFinal)
                 else pure (conNode, sharedFinal)
 
-        NSTForall var mBound body -> do
+        STForall var mBound body -> do
             -- Note: Alias bounds (∀(b ⩾ a). body where the bound is a bare
             -- variable) are unreachable here — normalization inlines them via
             -- capture-avoiding substitution before constraint generation.
-            -- StructBound has no variable constructor, so mBound :: Maybe StructBound
-            -- can only be Nothing or a structural bound (arrow, base, con, forall, bottom).
+            -- `mBound` is wrapped as `Maybe (SrcBound 'NormN)`; unwrapping with
+            -- `unNormBound` yields a `StructBound` whose root cannot be a variable.
             --
             -- Well-formedness check: binder must not occur in its own structural bound.
             -- This catches cases like ∀(a ⩾ List a). a where the binder appears
             -- nested inside a structural bound.
             case mBound of
                 Just bound
-                    | Set.member var (structBoundFreeVars bound) ->
+                    | Set.member var (structBoundFreeVars (unNormBound bound)) ->
                         throwError (ForallBoundMentionsBinder var)
                 _ -> pure ()
             Scope.pushScope
@@ -512,7 +513,7 @@ internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared srcType 
             (mbBoundNode, shared1) <- case mBound of
                 Nothing -> pure (Nothing, shared)
                 Just bound -> do
-                    let boundAsNorm = structBoundToNormSrcType bound
+                    let boundAsNorm = structBoundToNormSrcType (unNormBound bound)
                     Scope.pushScope
                     (boundNode, shared2) <-
                         internalizeCoercionCopy bindFlag False coerceGen schemeGenId tyEnv' shared boundAsNorm
@@ -560,7 +561,7 @@ internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared srcType 
             setGenNodeSchemes schemeGenId [bodyNode]
             pure (bodyNode, shared2)
 
-        NSTBottom -> do
+        STBottom -> do
             varNode <- allocVar
             pure (varNode, shared)
 
@@ -591,34 +592,34 @@ registerTyConArity con arity = do
         _ -> modify' $ \st ->
             st { bsTyConArity = Map.insert con arity (bsTyConArity st) }
 
--- | Convert a 'StructBound' back to 'NormSrcType' for recursive internalization.
+-- | Convert a structural bound into normalized type shape for recursive internalization.
 structBoundToNormSrcType :: StructBound -> NormSrcType
 structBoundToNormSrcType sb = case sb of
-    SBArrow dom cod -> NSTArrow dom cod
-    SBBase name -> NSTBase name
-    SBCon name args -> NSTCon name args
-    SBForall v mb body -> NSTForall v mb body
-    SBBottom -> NSTBottom
+    STArrow dom cod -> STArrow dom cod
+    STBase name -> STBase name
+    STCon name args -> STCon name args
+    STForall v mb body -> STForall v mb body
+    STBottom -> STBottom
 
 -- | Check if a type variable name occurs free in a 'StructBound'.
 structBoundFreeVars :: StructBound -> Set.Set String
 structBoundFreeVars = go Set.empty
   where
     go bound sb = case sb of
-        SBArrow dom cod -> normFreeVars bound dom <> normFreeVars bound cod
-        SBBase _ -> Set.empty
-        SBCon _ args -> foldMap (normFreeVars bound) args
-        SBForall v mb body ->
+        STArrow dom cod -> normFreeVars bound dom <> normFreeVars bound cod
+        STBase _ -> Set.empty
+        STCon _ args -> foldMap (normFreeVars bound) args
+        STForall v mb body ->
             let bound' = Set.insert v bound
-            in maybe Set.empty (go bound) mb <> normFreeVars bound' body
-        SBBottom -> Set.empty
+            in maybe Set.empty (go bound . unNormBound) mb <> normFreeVars bound' body
+        STBottom -> Set.empty
 
     normFreeVars bound ty = case ty of
-        NSTVar v -> if Set.member v bound then Set.empty else Set.singleton v
-        NSTArrow dom cod -> normFreeVars bound dom <> normFreeVars bound cod
-        NSTBase _ -> Set.empty
-        NSTCon _ args -> foldMap (normFreeVars bound) args
-        NSTForall v mb body ->
+        STVar v -> if Set.member v bound then Set.empty else Set.singleton v
+        STArrow dom cod -> normFreeVars bound dom <> normFreeVars bound cod
+        STBase _ -> Set.empty
+        STCon _ args -> foldMap (normFreeVars bound) args
+        STForall v mb body ->
             let bound' = Set.insert v bound
-            in maybe Set.empty (go bound) mb <> normFreeVars bound' body
-        NSTBottom -> Set.empty
+            in maybe Set.empty (go bound . unNormBound) mb <> normFreeVars bound' body
+        STBottom -> Set.empty

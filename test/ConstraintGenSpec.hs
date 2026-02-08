@@ -277,7 +277,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
         it "respects instance bounds in annotated lambda parameters (coercion)" $ do
             -- λ(x : ∀(a ⩾ Int). a). x desugars to a let-binding with a coercion term.
             -- Uses of x in the body go through the coercion result type.
-            let ann = STForall "a" (Just (STBase "Int")) (STVar "a")
+            let ann = STForall "a" (Just (mkSrcBound (STBase "Int"))) (STVar "a")
                 expr = ELamAnn "x" ann (EVar "x")
             expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let constraint = crConstraint result
@@ -307,6 +307,20 @@ spec = describe "Phase 1 — Constraint generation" $ do
                                     other -> expectationFailure $ "Expected TyVar scheme root node, saw " ++ show other
                             other -> expectationFailure $ "Expected let-body for desugared ELamAnn, saw " ++ show other
                     other -> expectationFailure $ "Expected ALam annotation, saw " ++ show other
+
+        it "internalizes normalized forall bounds using indexed StructBound alias" $ do
+            let ann :: NormSrcType
+                ann = STForall "a" (Just (mkNormBound (STBase "Int"))) (STVar "a")
+                expr :: NormSurfaceExpr
+                expr = EAnn (ELit (LInt 1)) ann
+            expectRight (inferConstraintGraph Set.empty expr) $ \result -> do
+                let nodes = cNodes (crConstraint result)
+                    hasIntBound =
+                        [ ()
+                        | TyVar { tnBound = Just boundId } <- nodeMapElems nodes
+                        , Just TyBase { tnBase = BaseTy "Int" } <- [lookupNodeMaybe nodes boundId]
+                        ]
+                hasIntBound `shouldSatisfy` (not . null)
 
         it "internalizes Bottom type" $ do
             -- λ(x : ⊥). x desugars through a let-binding with scheme ⊥.
@@ -968,7 +982,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
         it "alias self-bound ∀(a ⩾ a) caught by normalization as SelfBoundVariable" $ do
             -- ∀(a ⩾ a). a - alias self-bound is rejected at normalization,
             -- before reaching constraint generation.
-            let ann = STForall "a" (Just (STVar "a")) (STVar "a")
+            let ann = STForall "a" (Just (mkSrcBound (STVar "a"))) (STVar "a")
                 expr = EAnn (ELit (LInt 1)) ann
             case normalizeExpr expr of
                 Left (SelfBoundVariable name _) -> name `shouldBe` "a"
@@ -978,7 +992,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
             -- ∀(a ⩾ List a). a - the binder 'a' occurs nested in a structural bound.
             -- Normalization passes this through (structural bound, not alias), so
             -- constraint generation catches it via ForallBoundMentionsBinder.
-            let ann = STForall "a" (Just (STCon "List" (STVar "a" :| []))) (STVar "a")
+            let ann = STForall "a" (Just (mkSrcBound (STCon "List" (STVar "a" :| [])))) (STVar "a")
                 expr = EAnn (ELit (LInt 1)) ann
             case inferConstraintGraphDefault expr of
                 Left (ForallBoundMentionsBinder name) -> name `shouldBe` "a"
@@ -987,14 +1001,14 @@ spec = describe "Phase 1 — Constraint generation" $ do
 
         it "allows binder in body but not in bound" $ do
             -- ∀(a ⩾ Int). a - valid: 'a' is in body but not in bound
-            let ann = STForall "a" (Just (STBase "Int")) (STVar "a")
+            let ann = STForall "a" (Just (mkSrcBound (STBase "Int"))) (STVar "a")
                 expr = EAnn (ELit (LInt 1)) ann
             expectRight (inferConstraintGraphDefault expr) $ \_ -> pure ()
 
         it "alias bound ∀(b ⩾ a) inlined by normalization before constraint gen" $ do
             -- ∀(b ⩾ a). b → a is an alias bound: normalization inlines b := a,
             -- producing a → a. Constraint generation never sees the alias bound.
-            let ann = STForall "b" (Just (STVar "a")) (STArrow (STVar "b") (STVar "a"))
+            let ann = STForall "b" (Just (mkSrcBound (STVar "a"))) (STArrow (STVar "b") (STVar "a"))
                 expr = EAnn (ELit (LInt 1)) ann
             expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let nodes = cNodes (crConstraint result)
