@@ -462,6 +462,15 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                                     assertTypeEq "runPipelineElab vs runPipelineElabChecked" expr ty tyChecked
                                     assertTypeEq "runPipelineElabChecked vs typeCheck(term)" expr tyChecked checkedTy
 
+runPipelineWithPresolution :: SurfaceExpr -> Either String (PresolutionResult, AnnExpr)
+runPipelineWithPresolution expr = do
+    ConstraintResult{ crConstraint = c0, crAnnotated = ann } <-
+        firstShowE (generateConstraints defaultPolySyms (unsafeNormalizeExpr expr))
+    let c1 = normalize c0
+    acyc <- firstShowE (checkAcyclicity c1)
+    pres <- firstShowE (computePresolution defaultTraceConfig acyc c1)
+    pure (pres, ann)
+
 canonical :: IntMap.IntMap NodeId -> NodeId -> NodeId
 canonical uf nid =
     case IntMap.lookup (getNodeId nid) uf of
