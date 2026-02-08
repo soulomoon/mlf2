@@ -56,6 +56,7 @@ import SpecUtil
     , nodeMapFromList
     , requireRight
     , rootedConstraint
+    , unsafeNormalizeExpr
     , mkForalls
     )
 
@@ -99,10 +100,7 @@ requirePipeline expr =
         Right normExpr -> requireRight (Elab.runPipelineElab Set.empty normExpr)
 
 generateConstraintsDefault :: SurfaceExpr -> Either ConstraintError ConstraintResult
-generateConstraintsDefault expr =
-    case normalizeExpr expr of
-        Left err -> error ("normalizeExpr failed in test: " ++ show err)
-        Right normExpr -> generateConstraints Set.empty normExpr
+generateConstraintsDefault expr = generateConstraints Set.empty (unsafeNormalizeExpr expr)
 
 -- | Normalize a surface expression, failing the test on normalization error.
 unsafeNormalize :: SurfaceExpr -> NormSurfaceExpr

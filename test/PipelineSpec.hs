@@ -33,7 +33,7 @@ import MLF.Constraint.Types.Graph
 import qualified MLF.Binding.Tree as Binding
 import MLF.Elab.Run.Provenance (buildTraceCopyMap, collectBaseNamedKeys)
 import MLF.Elab.Run.Util (makeCanonicalizer)
-import SpecUtil (collectVarNodes, defaultTraceConfig, mkForalls)
+import SpecUtil (collectVarNodes, defaultTraceConfig, mkForalls, runToSolvedDefault)
 import MLF.Types.Elab (Ty(..))
 import MLF.Reify.Core (reifyType)
 import Data.List.NonEmpty (NonEmpty(..))
@@ -142,11 +142,11 @@ spec = describe "Pipeline (Phases 1-5)" $ do
     describe "Integration Tests" $ do
         it "solves let-bound id applied to Bool" $ do
             let expr = ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (ELit (LBool True)))
-            case runPipeline expr of
+            case runToSolvedDefault defaultPolySyms expr of
                 Left err -> expectationFailure err
-                Right (res, _root) -> do
-                    validateStrict res
-                    let nodes = cNodes (srConstraint res)
+                Right solved -> do
+                    validateStrict solved
+                    let nodes = cNodes (srConstraint solved)
                     baseNames nodes `shouldContain` [BaseTy "Bool"]
                     noExpNodes nodes
 

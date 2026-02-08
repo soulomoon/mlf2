@@ -18,6 +18,7 @@ import MLF.Frontend.ConstraintGen (AnnExpr (..))
 import MyLib hiding (normalize, lookupNode)
 import SpecUtil
     ( expectRight
+    , firstShowE
     , lookupNode
     , lookupNodeMaybe
     , nodeMapElems
@@ -711,13 +712,10 @@ spec = describe "Phase 1 — Constraint generation" $ do
 
                 runToPresolution :: SurfaceExpr -> Either String PresolutionResult
                 runToPresolution e = do
-                    ConstraintResult { crConstraint = c0 } <- firstShow (inferConstraintGraphDefault e)
+                    ConstraintResult { crConstraint = c0 } <- firstShowE (inferConstraintGraphDefault e)
                     let c1 = normalize c0
-                    acyc <- firstShow (checkAcyclicity c1)
-                    firstShow (computePresolution defaultTraceConfig acyc c1)
-
-                firstShow :: Show err => Either err a -> Either String a
-                firstShow = either (Left . show) Right
+                    acyc <- firstShowE (checkAcyclicity c1)
+                    firstShowE (computePresolution defaultTraceConfig acyc c1)
 
             pres <- requireRight (runToPresolution expr)
             let eliminated = cEliminatedVars (prConstraint pres)
