@@ -10,7 +10,7 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Set as Set
 
-import MLF.Frontend.Syntax (SurfaceExpr, NormSurfaceExpr, Expr(..), Lit(..), SrcType(..))
+import MLF.Frontend.Syntax (SurfaceExpr, NormSurfaceExpr, Expr(..), Lit(..), SrcTy(..), SrcType, NormSrcType, mkSrcBound)
 import MLF.Frontend.Normalize (normalizeExpr)
 import qualified MLF.Elab.Pipeline as Elab
 import qualified MLF.Elab.Phi.TestOnly as ElabTest
@@ -159,6 +159,15 @@ shouldAlphaEqType actual expected =
 
 spec :: Spec
 spec = describe "Phase 6 — Elaborate (xMLF)" $ do
+    describe "SrcTy indexed aliases compile shape" $ do
+        it "supports raw and normalized aliases from one SrcTy family" $ do
+            let rawTy :: SrcType
+                rawTy = STForall "a" Nothing (STArrow (STVar "a") (STVar "a"))
+                normTy :: NormSrcType
+                normTy = STForall "a" Nothing (STArrow (STVar "a") (STVar "a"))
+            show rawTy `shouldNotBe` ""
+            show normTy `shouldNotBe` ""
+
     describe "Basic elaboration" $ do
         it "elaborates integer literal" $ do
             let expr = ELit (LInt 1)
@@ -760,8 +769,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
         it "parses and represents bounded STForall" $ do
             let bound = STArrow (STBase "Int") (STBase "Int")
-                st = STForall "a" (Just bound) (STVar "a")
-            st `shouldBe` STForall "a" (Just bound) (STVar "a")
+                st = STForall "a" (Just (mkSrcBound bound)) (STVar "a")
+            st `shouldBe` STForall "a" (Just (mkSrcBound bound)) (STVar "a")
 
         it "parses and represents STBottom" $ do
             STBottom `shouldBe` STBottom
@@ -772,7 +781,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 st = mkForalls binds body
             st `shouldBe`
                 STForall "a" Nothing
-                    (STForall "b" (Just (STBase "Int")) body)
+                    (STForall "b" (Just (mkSrcBound (STBase "Int"))) body)
 
     describe "Expansion to Instantiation conversion" $ do
         it "converts ExpIdentity to InstId" $ do
@@ -2444,7 +2453,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
         it "explicit forall annotation preserves foralls in bounds" $ do
             let ann =
                     STForall "a"
-                        (Just (STForall "b" Nothing (STArrow (STVar "b") (STVar "b"))))
+                        (Just (mkSrcBound (STForall "b" Nothing (STArrow (STVar "b") (STVar "b")))))
                         (STArrow (STVar "a") (STVar "a"))
                 expr = EAnn (ELam "x" (EVar "x")) ann
 

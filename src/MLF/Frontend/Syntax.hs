@@ -1,9 +1,12 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveTraversable #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE ViewPatterns #-}
 module MLF.Frontend.Syntax (
     VarName,
     Lit (..),
@@ -16,13 +19,32 @@ module MLF.Frontend.Syntax (
     NormSurfaceExpr,
     NormCoreExpr,
     -- * Raw source types (parser output)
-    SrcType (..),
+    SrcTy (..),
+    SrcType,
     SrcTypeF (..),
     -- * Staged frontend types
-    TypeStage (..),
-    NormSrcType (..),
-    StructBound (..),
+    SrcNorm (..),
+    SrcTopVar (..),
+    SrcBound (..),
+    BoundTopVar,
+    mkSrcBound,
+    mkNormBound,
+    unNormBound,
+    NormSrcType,
+    StructBound,
     RawSrcType,
+    -- * Backward-compatible normalized patterns
+    pattern NSTVar,
+    pattern NSTArrow,
+    pattern NSTBase,
+    pattern NSTCon,
+    pattern NSTForall,
+    pattern NSTBottom,
+    pattern SBArrow,
+    pattern SBBase,
+    pattern SBCon,
+    pattern SBForall,
+    pattern SBBottom,
     -- * Metadata
     AnnotatedExpr (..),
     BindingSite (..)
@@ -92,86 +114,111 @@ data Lit
 
 {- Note [Staged frontend types]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Frontend types come in two stages, tracked by 'TypeStage':
+Frontend types use one indexed AST ('SrcTy'), tracked by two indices:
 
-  - 'Raw' ('SrcType'): Produced by the parser. Forall bounds can be any type,
+  - stage ('SrcNorm'):
+      * 'RawN' ('SrcType'): Produced by the parser. Forall bounds can be any type,
     including bare variable aliases like @∀(b ⩾ a). body@.
+      * 'NormN' ('NormSrcType'): Produced by 'MLF.Frontend.Normalize'. Alias
+        bounds have been inlined via capture-avoiding substitution.
+  - top-level bound root policy ('SrcTopVar'):
+      * 'TopVarAllowed': type root may be a variable.
+      * 'TopVarDisallowed': type root must be structural.
 
-  - 'Normalized' ('NormSrcType'): Produced by 'MLF.Frontend.Normalize'. Alias
-    bounds have been inlined via capture-avoiding substitution. The bound of a
-    forall is always structural (arrow, base, constructor, forall, or bottom) —
-    never a bare variable. This invariant is enforced by construction:
-    'NormSrcType' uses 'StructBound' for forall bounds, and 'StructBound' has
-    no variable constructor.
+Forall bounds are wrapped in 'SrcBound' so stage-specific root policy is
+captured in one place via 'BoundTopVar':
+  - raw bounds: 'BoundTopVar' 'RawN' ~ 'TopVarAllowed'
+  - normalized bounds: 'BoundTopVar' 'NormN' ~ 'TopVarDisallowed'
 
-'SrcType' is the original (unchanged) data type used throughout the codebase.
-'NormSrcType' is a new type introduced for the normalized stage. The alias
-@RawSrcType = SrcType@ is provided for symmetry.
+This enforces the normalized invariant by construction: a normalized forall
+bound root cannot be a bare variable.
 -}
 
--- | Normalization stage for frontend types.
-data TypeStage = Raw | Normalized
+-- | Normalization stage for source types.
+data SrcNorm = RawN | NormN
     deriving (Eq, Show)
 
--- | Source-level type syntax for annotations (raw / parser output).
---
--- This corresponds closely to the type language presented in
--- `papers/these-finale-english.txt` (see `papers/xmlf.txt`):
---
---   - type variables (written !α in the paper; we use names like "a")
---   - arrows (τ → σ)
---   - bounded quantification ∀(α ⩾ τ). σ
---   - bottom type ⊥ (the default bound for unbounded quantification)
---
--- We add a small convenience notationally:
---
---   - In @STForall v Nothing body@, the missing bound means "bound = ⊥", i.e.
---     the common unbounded form ∀(v). body.
---
--- Examples:
---   - @Int → Bool@
---   - @∀α. α → α@ (standard polymorphism)
---   - @∀(α ⩾ Int → Int). α@ (α must be at least as general as Int → Int)
---   - @∀(α ⩾ ∀β. β → β). α → α@ (α must be at least as general as polymorphic identity)
-data SrcType
-    = STVar String                              -- ^ Type variable: α
-    | STArrow SrcType SrcType                   -- ^ Arrow type: τ → σ
-    | STBase String                             -- ^ Base type: Int, Bool, ...
-    | STCon String (NonEmpty SrcType)           -- ^ Constructor application: C σ…
-    | STForall String (Maybe SrcType) SrcType   -- ^ Bounded quantification: ∀(α ⩾ τ?). σ
-    | STBottom                                  -- ^ Bottom type: ⊥
+-- | Whether a source type root may be a variable.
+data SrcTopVar = TopVarAllowed | TopVarDisallowed
     deriving (Eq, Show)
+
+type family BoundTopVar (n :: SrcNorm) :: SrcTopVar where
+    BoundTopVar 'RawN = 'TopVarAllowed
+    BoundTopVar 'NormN = 'TopVarDisallowed
+
+-- | Wrapper for forall bounds, indexed by stage.
+newtype SrcBound (n :: SrcNorm) = SrcBound
+    { unSrcBound :: SrcTy n (BoundTopVar n)
+    }
+    deriving (Eq, Show)
+
+mkSrcBound :: SrcTy n (BoundTopVar n) -> SrcBound n
+mkSrcBound = SrcBound
+
+-- | Source-level type syntax for annotations, indexed by stage and root policy.
+data SrcTy (n :: SrcNorm) (v :: SrcTopVar) where
+    STVar :: String -> SrcTy n 'TopVarAllowed
+    STArrow :: SrcTy n 'TopVarAllowed -> SrcTy n 'TopVarAllowed -> SrcTy n v
+    STBase :: String -> SrcTy n v
+    STCon :: String -> NonEmpty (SrcTy n 'TopVarAllowed) -> SrcTy n v
+    STForall :: String -> Maybe (SrcBound n) -> SrcTy n 'TopVarAllowed -> SrcTy n v
+    STBottom :: SrcTy n v
+
+deriving instance Eq (SrcTy n v)
+deriving instance Show (SrcTy n v)
+
+type SrcType = SrcTy 'RawN 'TopVarAllowed
+type NormSrcType = SrcTy 'NormN 'TopVarAllowed
+type StructBound = SrcTy 'NormN 'TopVarDisallowed
 
 -- | Backward-compatible alias: 'RawSrcType' = 'SrcType'.
 type RawSrcType = SrcType
 
--- | Normalized source-level type syntax.
---
--- Like 'SrcType' but forall bounds use 'StructBound' instead of @Maybe SrcType@,
--- ensuring that alias bounds (∀(b ⩾ a). body) are unrepresentable by
--- construction. See Note [Staged frontend types].
-data NormSrcType
-    = NSTVar String                                         -- ^ Type variable: α
-    | NSTArrow NormSrcType NormSrcType                      -- ^ Arrow type: τ → σ
-    | NSTBase String                                        -- ^ Base type: Int, Bool, ...
-    | NSTCon String (NonEmpty NormSrcType)                  -- ^ Constructor application: C σ…
-    | NSTForall String (Maybe StructBound) NormSrcType      -- ^ Bounded quantification: ∀(α ⩾ τ?). σ
-    | NSTBottom                                             -- ^ Bottom type: ⊥
-    deriving (Eq, Show)
+mkNormBound :: StructBound -> SrcBound 'NormN
+mkNormBound = SrcBound
 
--- | Structural bound for normalized forall types.
---
--- This type mirrors 'NormSrcType' but intentionally omits a variable
--- constructor, ensuring that alias bounds (∀(b ⩾ a). body) are
--- unrepresentable after normalization. A forall bound in normalized form is
--- always structural: arrow, base, constructor, nested forall, or bottom.
-data StructBound
-    = SBArrow NormSrcType NormSrcType                       -- ^ Arrow bound: τ → σ
-    | SBBase String                                         -- ^ Base type bound: Int, Bool, ...
-    | SBCon String (NonEmpty NormSrcType)                   -- ^ Constructor bound: C σ…
-    | SBForall String (Maybe StructBound) NormSrcType       -- ^ Nested forall bound: ∀(α ⩾ τ?). σ
-    | SBBottom                                              -- ^ Bottom bound: ⊥
-    deriving (Eq, Show)
+unNormBound :: SrcBound 'NormN -> StructBound
+unNormBound (SrcBound b) = b
+
+pattern NSTVar :: String -> NormSrcType
+pattern NSTVar v = STVar v
+
+pattern NSTArrow :: NormSrcType -> NormSrcType -> NormSrcType
+pattern NSTArrow a b = STArrow a b
+
+pattern NSTBase :: String -> NormSrcType
+pattern NSTBase b = STBase b
+
+pattern NSTCon :: String -> NonEmpty NormSrcType -> NormSrcType
+pattern NSTCon c args = STCon c args
+
+pattern NSTForall :: String -> Maybe StructBound -> NormSrcType -> NormSrcType
+pattern NSTForall v mb body <- STForall v (fmap unNormBound -> mb) body
+  where
+    NSTForall v mb body = STForall v (fmap mkNormBound mb) body
+
+pattern NSTBottom :: NormSrcType
+pattern NSTBottom = STBottom
+
+pattern SBArrow :: NormSrcType -> NormSrcType -> StructBound
+pattern SBArrow a b = STArrow a b
+
+pattern SBBase :: String -> StructBound
+pattern SBBase b = STBase b
+
+pattern SBCon :: String -> NonEmpty NormSrcType -> StructBound
+pattern SBCon c args = STCon c args
+
+pattern SBForall :: String -> Maybe StructBound -> NormSrcType -> StructBound
+pattern SBForall v mb body <- STForall v (fmap unNormBound -> mb) body
+  where
+    SBForall v mb body = STForall v (fmap mkNormBound mb) body
+
+pattern SBBottom :: StructBound
+pattern SBBottom = STBottom
+
+{-# COMPLETE NSTVar, NSTArrow, NSTBase, NSTCon, NSTForall, NSTBottom #-}
+{-# COMPLETE SBArrow, SBBase, SBCon, SBForall, SBBottom #-}
 
 data SrcTypeF a
     = STVarF String
@@ -182,24 +229,24 @@ data SrcTypeF a
     | STBottomF
     deriving (Eq, Show, Functor, Foldable, Traversable)
 
-type instance Base SrcType = SrcTypeF
+type instance Base (SrcTy 'RawN 'TopVarAllowed) = SrcTypeF
 
-instance Recursive SrcType where
+instance Recursive (SrcTy 'RawN 'TopVarAllowed) where
     project ty = case ty of
         STVar v -> STVarF v
         STArrow a b -> STArrowF a b
         STBase b -> STBaseF b
         STCon c args -> STConF c args
-        STForall v mb body -> STForallF v mb body
+        STForall v mb body -> STForallF v (fmap unSrcBound mb) body
         STBottom -> STBottomF
 
-instance Corecursive SrcType where
+instance Corecursive (SrcTy 'RawN 'TopVarAllowed) where
     embed ty = case ty of
         STVarF v -> STVar v
         STArrowF a b -> STArrow a b
         STBaseF b -> STBase b
         STConF c args -> STCon c args
-        STForallF v mb body -> STForall v mb body
+        STForallF v mb body -> STForall v (fmap mkSrcBound mb) body
         STBottomF -> STBottom
 
 data ExprStage = Surface | Core
