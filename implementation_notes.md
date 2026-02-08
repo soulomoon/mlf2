@@ -37,6 +37,13 @@
   - `test/XMLFPrettySpec.hs`
 - Updated existing elaboration pretty-output expectations in `test/ElaborationSpec.hs` to canonical syntax forms.
 
+### 2026-02-08 solved-order shadow cutover semantics
+
+- Generalize now treats solved-order as the solved-authoritative output order for reification/quantifier emission.
+- The base path remains only as a shadow compare path (`base shadow`) and is not authoritative for emitted results.
+- Any solved/base ordering mismatch is a hard-fail: `ValidationFailed` is raised with a context payload for debugging.
+- Full removal of the base path is gated on 5 consecutive green runs of the shadow comparator suite.
+
 ### 2026-02-08 approved plan: staged frontend normalization + structural RaiseMerge gating (pending implementation)
 
 - This section records **locked design decisions and implementation direction**. It is not yet the current runtime behavior.
