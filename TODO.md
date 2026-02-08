@@ -176,6 +176,7 @@ Files: `test/ElaborationSpec.hs`, `test/Presolution/WitnessSpec.hs`, `test/Pipel
 - [ ] `A7 (P2)` Consolidate duplicated binding/scope/pipeline helper logic into shared abstractions.
 AC: Binding path/children/scope-graph helpers are single-sourced; ConstraintGen scope+binder wiring uses shared combinators; repeated test pipeline harness steps (`unsafeNormalize`, `firstShow`, solve chain) are centralized in shared test utilities.
 Files: `src/MLF/Binding/Queries.hs`, `src/MLF/Binding/Validation.hs`, `src/MLF/Binding/Tree.hs`, `src/MLF/Binding/Canonicalization.hs`, `src/MLF/Frontend/ConstraintGen/Translate.hs`, `src/MLF/Elab/Run/Annotation.hs`, `src/MLF/Elab/Run/Debug.hs`, `test/SpecUtil.hs`, `test/PipelineSpec.hs`, `test/ElaborationSpec.hs`, `test/ConstraintGenSpec.hs`
+Progress (2026-02-08, Group 1): duplicated binding-core helpers are now single-sourced in `MLF.Binding.Path`, `MLF.Binding.NodeRefs`, `MLF.Binding.ScopeGraph`, and `MLF.Binding.Children`; migration landed in `MLF.Binding.Queries`, `MLF.Binding.Validation`, `MLF.Binding.Tree`, `MLF.Binding.Canonicalization`, `MLF.Constraint.BindingUtil`, and `MLF.Constraint.Presolution.Base`. Remaining A7 work is the non-binding portions in the AC (`ConstraintGen`/pipeline test-harness consolidation).
 
 ---
 

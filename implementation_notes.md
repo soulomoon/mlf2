@@ -4,6 +4,18 @@
 
 **Current vs target:** The current pipeline records presolution witnesses and produces explicit generalization plans in `MLF.Constraint.Presolution.Plan`; elaboration applies these plans via `MLF.Elab.Generalize` without re-solving. The remaining paper-faithfulness deltas are tracked in `.kiro/specs/paper-faithfulness-remaining-deltas/` (constructor types `Cσ` and stricter translatability validation for Φ).
 
+### 2026-02-08 A7 Group 1 binding-core shared-helper consolidation (docs sync)
+
+- [x] Removed duplicated binding-path traversal helpers; canonical module is `MLF.Binding.Path` (`bindingPathToRootWithLookup`, `bindingPathToRoot`, `bindingPathToRootLocal`, `firstGenAncestorFromPath`).
+- [x] Removed duplicated node-ref enumeration/existence helpers; canonical module is `MLF.Binding.NodeRefs` (`allNodeRefs`, `nodeRefExists`).
+- [x] Removed duplicated scope-graph helper logic; canonical module is `MLF.Binding.ScopeGraph` (`buildTypeEdgesFrom`, `buildScopeNodesFromPaths`, `rootsForScope`).
+- [x] Removed duplicated bound-child collection loops; canonical module is `MLF.Binding.Children` (`collectBoundChildrenWithFlag`, `collectBoundChildren`).
+- Migration landing points:
+  - `MLF.Binding.Queries`, `MLF.Binding.Validation`, `MLF.Binding.Tree`, and `MLF.Binding.Canonicalization` now import the canonical helper modules.
+  - `MLF.Constraint.BindingUtil.firstGenAncestorFrom` now delegates to `MLF.Binding.Path.firstGenAncestorFromPath`.
+  - `MLF.Constraint.Presolution.Base.bindingPathToRootUnderM` now delegates to `MLF.Binding.Path.bindingPathToRootLocal` after quotient bind-parent canonicalization.
+- Behavioral impact: none intended; this was an abstraction-only consolidation.
+
 ### 2026-02-06 strict checked-authoritative follow-up
 
 - `runPipelineElab` now uses checked type authority end-to-end while keeping reconstruction paths for diagnostics only.
