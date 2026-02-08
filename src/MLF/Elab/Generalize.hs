@@ -628,8 +628,8 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
                 | scopeHasStructuralScheme && null bindings =
                     reifyTypeWithNamesNoFallbackOnConstraint
                         constraint
-                        adjustedSubstForReify
-                        adjustedTypeRootForReify
+                        solvedSubstForReify
+                        solvedTypeRootForReify
                 | Just _ <- mbBindParentsGa = reifyTypeWithSolvedBinders
                 | otherwise = reifyTypeWithOrderedBinders
     ty0Raw <- reifySchemeType

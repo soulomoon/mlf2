@@ -40,7 +40,7 @@ import MLF.Constraint.Acyclicity (checkAcyclicity)
 import MLF.Constraint.Presolution
     ( PresolutionResult(..)
     , EdgeTrace(..)
-    , GaBindParents
+    , GaBindParents(..)
     , computePresolution
     , defaultPlanBuilder
     , fromListInterior
@@ -263,6 +263,43 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             ty `shouldBe`
                 Elab.TForall "t13" Nothing
                     (Elab.TArrow (Elab.TVar "a") (Elab.TVar "t13"))
+
+        it "generalizeAt fallback reifies from solved root even when base mapping points elsewhere" $ do
+            let rootGen = GenNodeId 0
+                solvedRoot = NodeId 1
+                baseMappedRoot = NodeId 2
+                solvedConstraint =
+                    emptyConstraint
+                        { cNodes = nodeMapFromList
+                            [ (getNodeId solvedRoot, TyBase solvedRoot (BaseTy "Int"))
+                            , (getNodeId baseMappedRoot, TyBase baseMappedRoot (BaseTy "Bool"))
+                            ]
+                        , cBindParents = IntMap.fromList
+                            [ (nodeRefKey (typeRef solvedRoot), (genRef rootGen, BindFlex))
+                            ]
+                        , cGenNodes = fromListGen
+                            [ (rootGen, GenNode rootGen [solvedRoot, baseMappedRoot]) ]
+                        }
+                solved =
+                    SolveResult
+                        { srConstraint = solvedConstraint
+                        , srUnionFind = IntMap.empty
+                        }
+                gaParents =
+                    GaBindParents
+                        { gaBindParentsBase = cBindParents solvedConstraint
+                        , gaBaseConstraint = solvedConstraint
+                        , gaBaseToSolved = IntMap.fromList
+                            [ (getNodeId baseMappedRoot, solvedRoot)
+                            , (getNodeId solvedRoot, solvedRoot)
+                            ]
+                        , gaSolvedToBase = IntMap.singleton (getNodeId solvedRoot) baseMappedRoot
+                        }
+
+            (Elab.Forall binds ty, _subst) <-
+                requireRight (generalizeAtWith (Just gaParents) solved (genRef rootGen) solvedRoot)
+            binds `shouldBe` []
+            ty `shouldBe` Elab.TBase (BaseTy "Int")
 
         it "elaborates dual instantiation in application" $ do
             -- let id = \x. x in id id
