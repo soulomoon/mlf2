@@ -1,0 +1,32 @@
+# Findings: A7 Group 2 Frontend/Elab Abstractions
+
+## 2026-02-08
+- Loaded implementation plan; tasks are concrete and include targeted verification commands.
+- Skill workflow requires checkpointed batching and per-task two-stage review (spec compliance, then code quality).
+- Current worktree branch is `codex/a7-frontend-elab-abstractions` (safe to proceed, not main/master).
+- Task 1 implemented in commit `cb1de5c04214e3b0d88b79d6a86a95d36cdc448d` with local scope helper abstractions in `Translate.hs` and a new binding-tree invariant test in `ConstraintGenSpec.hs`.
+- Task 1 red-test command unexpectedly passed against baseline (invariant already held); treated as regression coverage, then confirmed post-refactor command pass.
+- Task 1 passed both review gates: spec compliance and code quality.
+- Task 2 implemented in commit `fab9c09459c82f6dc08f31f669f73f854f74e427`; root cause was incomplete node rewrite coverage in annotation traversal (especially `ALet` scheme-root handling).
+- New shared `mapAnnNodes` traversal now powers both `applyRedirectsToAnn` and `canonicalizeAnn`, reducing drift risk between these operations.
+- Task 2 red-test command failed before refactor and passed after refactor; full `Pipeline` targeted run also passed.
+- Task 2 passed both review gates: spec compliance and code quality.
+- Task 3 implemented in commit `9a61519cfdeb24e2faeafc5d8b86709f2964ae8c` with deeper dedup across remaining `Translate.hs` scope-wiring regions (`ELet`, `buildCoerce`, and `internalizeCoercionCopy` branches).
+- Added nested forall/coercion regression in `ConstraintGenSpec` and complementary elaboration regression in `ElaborationSpec`.
+- Task 3 target “red” command was already green on baseline; treated as regression preservation rather than bug-exposure.
+- Task 3 passed both review gates: spec compliance and code quality.
+- Task 4 implemented in commit `305fc4435afc977aa03c72309951ba2562e847ea` with documentation updates in `implementation_notes.md` and `CHANGELOG.md`.
+- Full verification gate run reported success (`cabal build all && cabal test`: 576 examples, 0 failures).
+- Targeted `Pipeline|ConstraintGen|Elaboration` command exited successfully but matched 0 examples under the provided regex.
+- Task 4 passed both review gates: spec compliance and code quality.
+- Final branch-completion verification (`cabal test`) passed with 576 examples and 0 failures.
+- Base branch for integration is `master` (merge-base found against `master`).
+- Follow-up: `PipelineSpec` already rewrites every node via `applyRedirectsToAnn` and `canonicalizeAnn` (covering ALet scheme roots), but the plan’s phased verification command needed a concrete, multi-`--test-option` invocation; reran rewrite regression + the new targeted filter (173 examples) plus full `cabal test` (576 examples) to close the loop.
+- Follow-up implementation landed in two commits:
+  - `2d5da6e8a5460792d4bafdcd44feccb02973701b` (`test+docs: close A7 group 2 follow-up verification gaps`)
+  - `3cd21903c782f40ffe5c27c9b72da9f9f849ad28` (`test(elab): use production canonicalizeAnn in pipeline regression`)
+- Spec review required one correction pass: initial follow-up used a local rewrite helper; final state now exports/reuses production `canonicalizeAnn` in tests.
+- Final follow-up verification confirmed:
+  - rewrite regression: 1 example, 0 failures
+  - updated targeted command: 173 examples, 0 failures
+  - full suite: 576 examples, 0 failures
