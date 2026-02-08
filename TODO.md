@@ -173,6 +173,10 @@ Files: `src/MLF/Frontend/ConstraintGen/Translate.hs`, `mlf2.cabal`, `test/Main.h
 AC: Added targeted tests for strict translatability invariants and elaboration/type-check parity; references to thesis anchors included in spec names/comments.
 Files: `test/ElaborationSpec.hs`, `test/Presolution/WitnessSpec.hs`, `test/PipelineSpec.hs`, `test/TypeCheckSpec.hs`, `test/ReduceSpec.hs`
 
+- [ ] `A7 (P2)` Consolidate duplicated binding/scope/pipeline helper logic into shared abstractions.
+AC: Binding path/children/scope-graph helpers are single-sourced; ConstraintGen scope+binder wiring uses shared combinators; repeated test pipeline harness steps (`unsafeNormalize`, `firstShow`, solve chain) are centralized in shared test utilities.
+Files: `src/MLF/Binding/Queries.hs`, `src/MLF/Binding/Validation.hs`, `src/MLF/Binding/Tree.hs`, `src/MLF/Binding/Canonicalization.hs`, `src/MLF/Frontend/ConstraintGen/Translate.hs`, `src/MLF/Elab/Run/Annotation.hs`, `src/MLF/Elab/Run/Debug.hs`, `test/SpecUtil.hs`, `test/PipelineSpec.hs`, `test/ElaborationSpec.hs`, `test/ConstraintGenSpec.hs`
+
 ---
 
 ## Stretch Goals / Future Work
