@@ -4,26 +4,6 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 
 ## Open
 
-### BUG-2026-02-08-001
-- Status: Open
-- Priority: High
-- Discovered: 2026-02-08
-- Summary: Task 7 verification gate is blocked by deterministic `shadow reify mismatch` failures in Phase 6 fallback generalization.
-- Reproducer (test command):
-  - `cabal test --test-show-details=direct --test-options='--match=redirected --skip=instantiation'`
-- Reproducer (surface expression from failing property):
-  - `ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (EVar "id"))`
-- Expected:
-  - `cabal build all && cabal test` passes, and solved-order/base-path shadow comparison accepts the elaborated identity shape.
-- Actual:
-  - Verification fails with Phase 6 `ValidationFailed ["shadow reify mismatch", ... "solved=t14 -> t14", "base=a -> a"]`, producing `506 examples, 4 failures`.
-- Suspected area:
-  - `/Users/ares/.config/superpowers/worktrees/mlf4/solved-order-shadow-cutover/src/MLF/Elab/Generalize.hs`
-  - `/Users/ares/.config/superpowers/worktrees/mlf4/solved-order-shadow-cutover/src/MLF/Constraint/Presolution/Plan/ReifyPlan.hs`
-  - `/Users/ares/.config/superpowers/worktrees/mlf4/solved-order-shadow-cutover/src/MLF/Constraint/Presolution/Plan/Finalize.hs`
-- Thesis impact:
-  - Blocks the thesis-faithful elaboration path for let-polymorphic self-application (`id id`) due solved/base shadow disagreement in the fallback scheme route.
-
 ### BUG-2026-02-06-001
 - Status: Open
 - Priority: High
@@ -131,4 +111,27 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 
 ## Resolved
 
-- None yet.
+### BUG-2026-02-08-001
+- Status: Resolved
+- Priority: High
+- Discovered: 2026-02-08
+- Resolved: 2026-02-08
+- Summary: Phase 6 fallback generalization shadow comparison rejected semantically equivalent solved/base reifications when names diverged (`t14 -> t14` vs `a -> a`).
+- Root cause:
+  - `shadowCompareTypes` in `/Users/ares/.config/superpowers/worktrees/mlf4/solved-order-shadow-cutover/src/MLF/Elab/Generalize.hs` only used `alphaEqType`, which permits bound-variable renaming but rejects free-name-only renaming from solved/base reify paths.
+  - Fallback comparison in `generalizeAt:fallbackSchemeType` compares solved reification (`rpSubst`) against base-path shadow reification (`rpSubstBaseByKey`), and those maps can assign different names to the same shape.
+- Fix:
+  - Added a bijective variable-renaming comparator (`alphaEqTypeModuloVarRenaming`) and used it in `shadowCompareTypes`.
+  - Added regression coverage in `/Users/ares/.config/superpowers/worktrees/mlf4/solved-order-shadow-cutover/test/GeneralizeSpec.hs` for:
+    - accepting same-structure free-name divergence
+    - rejecting inconsistent (non-bijective) reuse
+- Reproducer now passes:
+  - `cabal test --test-show-details=direct --test-options='--match=redirected --skip=instantiation'`
+- Regression checks:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match="US-004"'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match="id y should have type"'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match="mapped-base elaboration"'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match="redirected let-use"'`
+  - `cabal build all && cabal test`
+- Thesis impact:
+  - Restores thesis-faithful elaboration for redirected let-use identity without weakening mismatch detection for structurally different types.

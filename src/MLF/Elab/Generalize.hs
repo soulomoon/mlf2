@@ -28,6 +28,7 @@ module MLF.Elab.Generalize (
 
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
+import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
@@ -81,7 +82,7 @@ shadowCompareTypes context solvedTy baseTy =
 
 shadowCompareTypesWithDetails :: String -> [String] -> ElabType -> ElabType -> Either ElabError ()
 shadowCompareTypesWithDetails context detailLines solvedTy baseTy
-    | alphaEqType solvedTy baseTy = Right ()
+    | alphaEqType solvedTy baseTy || alphaEqTypeModuloVarRenaming solvedTy baseTy = Right ()
     | otherwise =
         Left $
             ValidationFailed
@@ -93,6 +94,114 @@ shadowCompareTypesWithDetails context detailLines solvedTy baseTy
                        , "base=" ++ pretty baseTy
                        ]
                 )
+
+data RenameEnv = RenameEnv
+    { reForward :: Map.Map String String
+    , reBackward :: Map.Map String String
+    }
+
+alphaEqTypeModuloVarRenaming :: ElabType -> ElabType -> Bool
+alphaEqTypeModuloVarRenaming tyL tyR =
+    case goType (RenameEnv Map.empty Map.empty) tyL tyR of
+        Just _ -> True
+        Nothing -> False
+  where
+    goType :: RenameEnv -> ElabType -> ElabType -> Maybe RenameEnv
+    goType env t1 t2 = case (t1, t2) of
+        (TVar v1, TVar v2) ->
+            matchVar env v1 v2
+        (TArrow a1 b1, TArrow a2 b2) -> do
+            env' <- goType env a1 a2
+            goType env' b1 b2
+        (TCon c1 args1, TCon c2 args2)
+            | c1 == c2 ->
+                goTypes env (NonEmpty.toList args1) (NonEmpty.toList args2)
+        (TBase b1, TBase b2)
+            | b1 == b2 ->
+                Just env
+        (TBottom, TBottom) ->
+            Just env
+        (TForall v1 mb1 body1, TForall v2 mb2 body2) -> do
+            env' <- goMaybeBound env mb1 mb2
+            withScopedVar env' v1 v2 (\scoped -> goType scoped body1 body2)
+        _ ->
+            Nothing
+
+    goBound :: RenameEnv -> BoundType -> BoundType -> Maybe RenameEnv
+    goBound env b1 b2 = case (b1, b2) of
+        (TArrow a1 b1', TArrow a2 b2') -> do
+            env' <- goType env a1 a2
+            goType env' b1' b2'
+        (TCon c1 args1, TCon c2 args2)
+            | c1 == c2 ->
+                goTypes env (NonEmpty.toList args1) (NonEmpty.toList args2)
+        (TBase base1, TBase base2)
+            | base1 == base2 ->
+                Just env
+        (TBottom, TBottom) ->
+            Just env
+        (TForall v1 mb1 body1, TForall v2 mb2 body2) -> do
+            env' <- goMaybeBound env mb1 mb2
+            withScopedVar env' v1 v2 (\scoped -> goType scoped body1 body2)
+        _ ->
+            Nothing
+
+    goTypes :: RenameEnv -> [ElabType] -> [ElabType] -> Maybe RenameEnv
+    goTypes env left right = case (left, right) of
+        ([], []) -> Just env
+        (l:ls, r:rs) -> do
+            env' <- goType env l r
+            goTypes env' ls rs
+        _ -> Nothing
+
+    goMaybeBound :: RenameEnv -> Maybe BoundType -> Maybe BoundType -> Maybe RenameEnv
+    goMaybeBound env mb1 mb2 = case (mb1, mb2) of
+        (Nothing, Nothing) -> Just env
+        (Just b1, Just b2) -> goBound env b1 b2
+        _ -> Nothing
+
+    matchVar :: RenameEnv -> String -> String -> Maybe RenameEnv
+    matchVar env@RenameEnv{ reForward = forward, reBackward = backward } v1 v2 =
+        case (Map.lookup v1 forward, Map.lookup v2 backward) of
+            (Just mappedV2, Just mappedV1)
+                | mappedV2 == v2 && mappedV1 == v1 ->
+                    Just env
+            (Just mappedV2, Nothing)
+                | mappedV2 == v2 ->
+                    Just env { reBackward = Map.insert v2 v1 backward }
+            (Nothing, Just mappedV1)
+                | mappedV1 == v1 ->
+                    Just env { reForward = Map.insert v1 v2 forward }
+            (Nothing, Nothing) ->
+                Just env
+                    { reForward = Map.insert v1 v2 forward
+                    , reBackward = Map.insert v2 v1 backward
+                    }
+            _ ->
+                Nothing
+
+    withScopedVar
+        :: RenameEnv
+        -> String
+        -> String
+        -> (RenameEnv -> Maybe RenameEnv)
+        -> Maybe RenameEnv
+    withScopedVar env@RenameEnv{ reForward = forward, reBackward = backward } v1 v2 runScoped = do
+        let oldForward = Map.lookup v1 forward
+            oldBackward = Map.lookup v2 backward
+            scopedEnv =
+                env
+                    { reForward = Map.insert v1 v2 forward
+                    , reBackward = Map.insert v2 v1 backward
+                    }
+            restore key oldValue m = case oldValue of
+                Just value -> Map.insert key value m
+                Nothing -> Map.delete key m
+        scopedResult <- runScoped scopedEnv
+        pure scopedResult
+            { reForward = restore v1 oldForward (reForward scopedResult)
+            , reBackward = restore v2 oldBackward (reBackward scopedResult)
+            }
 
 selectSolvedOrderWithShadow :: String -> ElabType -> Maybe ElabType -> Either ElabError ElabType
 selectSolvedOrderWithShadow context solvedTy mbBaseTy =

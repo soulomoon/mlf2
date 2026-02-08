@@ -18,6 +18,20 @@ spec = do
                 baseTy = TForall "b" Nothing (TVar "b")
             shadowCompareTypesTestOnly "ctx" solvedTy baseTy `shouldBe` Right ()
 
+        it "accepts same structure when solved/base free names differ" $ do
+            let solvedTy = TArrow (TVar "t14") (TVar "t14")
+                baseTy = TArrow (TVar "a") (TVar "a")
+            shadowCompareTypesTestOnly "ctx" solvedTy baseTy `shouldBe` Right ()
+
+        it "rejects inconsistent free-variable reuse under renaming" $ do
+            let solvedTy = TArrow (TVar "a") (TVar "b")
+                baseTy = TArrow (TVar "x") (TVar "x")
+            case shadowCompareTypesTestOnly "ctx" solvedTy baseTy of
+                Left (ValidationFailed msgs) ->
+                    msgs `shouldSatisfy` any (isInfixOf "shadow reify mismatch")
+                other ->
+                    expectationFailure ("Expected ValidationFailed shadow mismatch, got: " ++ show other)
+
         it "rejects semantic mismatch with shadow reify mismatch diagnostics" $ do
             let solvedTy = TForall "a" Nothing (TArrow (TVar "a") (TVar "a"))
                 baseTy = TForall "a" Nothing (TArrow (TVar "a") (TBase (BaseTy "Int")))
