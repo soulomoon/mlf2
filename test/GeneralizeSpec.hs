@@ -41,3 +41,17 @@ spec = do
                     msgs `shouldSatisfy` any (isInfixOf "shadow reify mismatch")
                 other ->
                     expectationFailure ("Expected ValidationFailed shadow mismatch, got: " ++ show other)
+
+        it "reports context and normalized type diagnostics on mismatch" $ do
+            let solvedTy = TVar "a"
+                baseTy = TBase (BaseTy "Int")
+            case selectSolvedOrderWithShadowTestOnly "generalizeAt:caseX" solvedTy (Just baseTy) of
+                Left (ValidationFailed msgs) -> do
+                    msgs `shouldSatisfy` any (isInfixOf "context=generalizeAt:caseX")
+                    msgs `shouldSatisfy` any (isInfixOf "scopeRootC=")
+                    msgs `shouldSatisfy` any (isInfixOf "typeRoot=")
+                    msgs `shouldSatisfy` any (isInfixOf "binders=")
+                    msgs `shouldSatisfy` any (isInfixOf "solved=")
+                    msgs `shouldSatisfy` any (isInfixOf "base=")
+                other ->
+                    expectationFailure ("Expected ValidationFailed diagnostics, got: " ++ show other)

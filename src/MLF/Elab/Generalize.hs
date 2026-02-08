@@ -76,24 +76,47 @@ buildForallType binds body = foldr (\(n, b) t -> TForall n b t) body binds
 
 -- | Validate that solved-order and base-path shadow reification are semantically equivalent.
 shadowCompareTypes :: String -> ElabType -> ElabType -> Either ElabError ()
-shadowCompareTypes context solvedTy baseTy
+shadowCompareTypes context solvedTy baseTy =
+    shadowCompareTypesWithDetails context defaultShadowDetails solvedTy baseTy
+
+shadowCompareTypesWithDetails :: String -> [String] -> ElabType -> ElabType -> Either ElabError ()
+shadowCompareTypesWithDetails context detailLines solvedTy baseTy
     | alphaEqType solvedTy baseTy = Right ()
     | otherwise =
         Left $
             ValidationFailed
-                [ "shadow reify mismatch"
-                , "context=" ++ context
-                , "solved=" ++ pretty solvedTy
-                , "base=" ++ pretty baseTy
-                ]
+                ( [ "shadow reify mismatch"
+                  , "context=" ++ context
+                  ]
+                    ++ detailLines
+                    ++ [ "solved=" ++ pretty solvedTy
+                       , "base=" ++ pretty baseTy
+                       ]
+                )
 
 selectSolvedOrderWithShadow :: String -> ElabType -> Maybe ElabType -> Either ElabError ElabType
 selectSolvedOrderWithShadow context solvedTy mbBaseTy =
+    selectSolvedOrderWithShadowWithDetails context defaultShadowDetails solvedTy mbBaseTy
+
+selectSolvedOrderWithShadowWithDetails
+    :: String
+    -> [String]
+    -> ElabType
+    -> Maybe ElabType
+    -> Either ElabError ElabType
+selectSolvedOrderWithShadowWithDetails context detailLines solvedTy mbBaseTy =
     case mbBaseTy of
         Nothing -> Right solvedTy
         Just baseTy -> do
-            shadowCompareTypes context solvedTy baseTy
+            shadowCompareTypesWithDetails context detailLines solvedTy baseTy
             Right solvedTy
+
+defaultShadowDetails :: [String]
+defaultShadowDetails =
+    [ "scopeRootC=<unknown>"
+    , "typeRoot=<unknown>"
+    , "binders=[]"
+    ]
 
 -- | Inline rigid type variables by substituting them with their bounds.
 -- Uses cycle detection to prevent infinite loops when bounds reference each other.
@@ -504,7 +527,14 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
             reifyWithGaBase ga = do
                 solvedTy <- reifyTypeWithSolvedBinders
                 mbBaseTy <- reifyShadowBaseType ga
-                selectSolvedOrderWithShadow "generalizeAt:fallbackSchemeType" solvedTy mbBaseTy
+                selectSolvedOrderWithShadowWithDetails
+                    "generalizeAt:fallbackSchemeType"
+                    [ "scopeRootC=" ++ show scopeRootC
+                    , "typeRoot=" ++ show typeRoot
+                    , "binders=" ++ show orderedBinders
+                    ]
+                    solvedTy
+                    mbBaseTy
               where
                 reifyShadowBaseType ga' =
                     case IntMap.lookup (getNodeId (canonical typeRoot)) solvedToBasePrefPlan of
