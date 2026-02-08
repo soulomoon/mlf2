@@ -63,7 +63,7 @@
       ],
       "priority": 4,
       "passes": true,
-      "notes": "Added parseRawEmlfExpr/parseRawEmlfType (raw entrypoints returning SrcType/SurfaceExpr) and parseNormEmlfExpr/parseNormEmlfType (normalized entrypoints that parse raw then normalize, returning NormSrcType/NormSurfaceExpr). Added NormParseError sum type and renderNormParseError. Legacy parseEmlfExpr/parseEmlfType kept as aliases. All exports added to MLF.API. FrontendParseSpec updated with 17 new tests covering raw, normalized, legacy, and error rendering paths. All 543 tests pass."
+      "notes": "Added parseRawEmlfExpr/parseRawEmlfType (raw entrypoints returning SrcType/SurfaceExpr) and parseNormEmlfExpr/parseNormEmlfType (normalized entrypoints that parse raw then normalize, returning NormSrcType/NormSurfaceExpr). Added NormParseError sum type and renderNormParseError. Follow-up clean-break correction removed legacy parseEmlfExpr/parseEmlfType aliases from Parse/API exports. FrontendParseSpec now covers raw, normalized, and error rendering paths only."
     },
     {
       "id": "US-005",

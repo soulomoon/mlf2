@@ -25,7 +25,7 @@
   - `src/MLF/XMLF/Parse.hs`
   - `src/MLF/XMLF/Pretty.hs`
 - Added public xMLF API module: `src-public/MLF/XMLF.hs`.
-- Extended `MLF.API` with eMLF parse/pretty entry points (`parseEmlfExpr`, `parseEmlfType`, `prettyEmlfExpr`, `prettyEmlfType`) and parse error rendering helpers.
+- Extended `MLF.API` with explicit eMLF parse/pretty entry points (`parseRawEmlfExpr`, `parseRawEmlfType`, `parseNormEmlfExpr`, `parseNormEmlfType`, `prettyEmlfExpr`, `prettyEmlfType`) and parse error rendering helpers.
 - Added canonical syntax spec document: `docs/syntax.md` (legacy output, canonical target grammar, migration deltas, normalization rules, and implementation extensions).
 - Migrated `MLF.Elab.Types` pretty-printing to syntax-driven rendering through `MLF.XMLF.Pretty`/`MLF.XMLF.Syntax` conversion helpers:
   - canonical xMLF computation forms are now printed (`ε`, `⊲σ`, `α⊳`, explicit `∀(⩾ ϕ)`/`∀(α ⩾) ϕ`, and derived `InstApp` as `∀(⩾ ⊲σ); N`);
@@ -52,8 +52,8 @@
   - Backward-compatible aliases remain: `SrcType`, `NormSrcType`, `StructBound`, `RawSrcType`.
   - Forall bounds use `SrcBound n`; normalized bounds unwrap to `StructBound` via `unNormBound`.
 - Implemented explicit normalization boundary:
-  - `MLF.Frontend.Normalize` provides `normalizeType`/`normalizeExpr` with capture-avoiding alias inlining and explicit `SelfBoundVariable` errors.
-  - Parser API now has explicit raw and normalized entrypoints (`parseRaw*`, `parseNorm*`).
+  - `MLF.Frontend.Normalize` provides `normalizeType`/`normalizeExpr` with capture-avoiding alias inlining and explicit typed errors (`SelfBoundVariable`, `NonStructuralBoundInStructContext`) instead of runtime crashes.
+  - Parser API has explicit raw and normalized entrypoints only (`parseRaw*`, `parseNorm*`); legacy compatibility aliases were removed for clean-break alignment.
 - Implemented normalized-only compiler contracts:
   - `desugarSurface`, `generateConstraints`, and pipeline graph/elaboration entrypoints accept normalized expressions only.
 - Implemented structural RaiseMerge gating:

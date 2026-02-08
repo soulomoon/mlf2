@@ -38,6 +38,9 @@ capture a free variable in the replacement, binders are alpha-renamed.
 data NormalizationError
     = SelfBoundVariable String SrcType
     -- ^ @SelfBoundVariable v body@: ∀(v ⩾ v). body is invalid.
+    | NonStructuralBoundInStructContext SrcType
+    -- ^ A bound expected to normalize into 'StructBound' still contains a
+    -- bare variable subtree (for example after nested alias inlining).
     deriving (Eq, Show)
 
 -- ---------------------------------------------------------------------------
@@ -149,13 +152,8 @@ normalizeType = go
 
     normalizeBound :: SrcType -> Either NormalizationError StructBound
     normalizeBound = \case
-        STVar _ ->
-            -- This case is handled above in the STForall branch;
-            -- if we reach here it means a variable appeared as a nested
-            -- bound component, which is fine — it stays as a NormSrcType var.
-            -- But StructBound has no variable constructor, so this is
-            -- unreachable from the STForall handler (which peels off STVar).
-            error "normalizeBound: unreachable — STVar handled in STForall branch"
+        STVar v ->
+            Left (NonStructuralBoundInStructContext (STVar v))
         STArrow a b -> STArrow <$> go a <*> go b
         STBase b -> Right (STBase b)
         STCon c args -> STCon c <$> traverse go args

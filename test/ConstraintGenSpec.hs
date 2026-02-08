@@ -986,6 +986,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 expr = EAnn (ELit (LInt 1)) ann
             case normalizeExpr expr of
                 Left (SelfBoundVariable name _) -> name `shouldBe` "a"
+                Left other -> expectationFailure $ "Expected SelfBoundVariable, saw " ++ show other
                 Right _ -> expectationFailure "Expected SelfBoundVariable error"
 
         it "structural self-reference ∀(a ⩾ List a) caught by ForallBoundMentionsBinder" $ do

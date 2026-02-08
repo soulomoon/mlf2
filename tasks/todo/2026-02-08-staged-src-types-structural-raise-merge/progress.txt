@@ -71,7 +71,7 @@
 - Files changed: src/MLF/Frontend/Normalize.hs (new), test/FrontendNormalizeSpec.hs (new), mlf2.cabal, test/Main.hs
 - **Learnings for future iterations:**
   - The `freshNameLike` pattern (base, base1, base2, ...) works well for alpha-renaming; use pattern match instead of `head` to avoid `-Wx-partial` warning
-  - `StructBound` has no variable constructor, so `normalizeBound` for `STVar` is unreachable from the `STForall` handler — the alias case is peeled off before calling `normalizeBound`
+  - `StructBound` has no variable constructor, so when nested alias inlining leaves an `STVar` in bound context it must return a typed normalization error (no runtime crash path)
   - Normalization of nested alias bounds in structural positions requires recursive re-normalization after inlining
   - All 526 tests pass (27 new), no warnings
 ---
@@ -82,12 +82,12 @@
   - Added `parseNormEmlfExpr` / `parseNormEmlfType` that parse raw then normalize via `MLF.Frontend.Normalize`
   - Added `NormParseError` sum type (`NormParseErr EmlfParseError | NormNormErr NormalizationError`)
   - Added `renderNormParseError` for human-readable error rendering of both parse and normalization errors
-  - Kept `parseEmlfExpr` / `parseEmlfType` as backward-compatible legacy aliases for raw entrypoints
+  - Follow-up clean-break correction removed legacy aliases (`parseEmlfExpr` / `parseEmlfType`) and kept only explicit raw/normalized parser names
   - Updated `MLF.API` exports: raw entrypoints, normalized entrypoints, `NormParseError(..)`, `renderNormParseError`, plus `NormalizationError(..)`, `normalizeType`, `normalizeExpr`
   - Updated `FrontendParseSpec` with 17 new tests:
     - 8 normalized type tests (variable, arrow, unbounded forall, structural bound, alias inlining, self-bound rejection, base, constructor)
     - 4 normalized expression tests (unannotated, annotation, annotated lambda, self-bound rejection)
-    - 2 legacy alias equivalence tests
+    - Legacy alias equivalence tests removed in clean-break follow-up
     - 3 error rendering tests (raw parse error, normalized parse error, normalization error)
 - Files changed: src/MLF/Frontend/Parse.hs, src-public/MLF/API.hs, test/FrontendParseSpec.hs
 - **Learnings for future iterations:**

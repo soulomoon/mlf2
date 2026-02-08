@@ -126,6 +126,14 @@ normalizeTypeSpec = describe "normalizeType" $ do
                         (STArrow (STVar "a")
                             (STArrow (STVar "a") (STVar "a"))))
 
+    it "rejects nested alias bound that normalizes to a non-structural variable bound" $
+        let input =
+                STForall "x"
+                    (Just (mkSrcBound (STForall "b" (Just (mkSrcBound (STVar "a"))) (STVar "b"))))
+                    (STVar "x")
+        in normalizeType input
+            `shouldBe` Left (NonStructuralBoundInStructContext (STVar "a"))
+
     it "rejects self-bound variable" $
         let input = STForall "a" (Just (mkSrcBound (STVar "a"))) (STVar "a")
         in normalizeType input

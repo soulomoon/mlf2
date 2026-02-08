@@ -41,6 +41,53 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 
 ## Resolved
 
+### BUG-2026-02-08-006
+- Status: Resolved
+- Priority: High
+- Discovered: 2026-02-08
+- Resolved: 2026-02-08
+- Summary: Parser clean-break drift left legacy wrapper API (`parseEmlfExpr` / `parseEmlfType`) publicly exported.
+- Reproducer:
+  - `rg -n "\\bparseEmlfExpr\\b|\\bparseEmlfType\\b" /Volumes/src/mlf4/src/MLF/Frontend/Parse.hs /Volumes/src/mlf4/src-public/MLF/API.hs /Volumes/src/mlf4/test/FrontendParseSpec.hs`
+- Expected:
+  - Clean-break parser API exposes explicit staged entrypoints only (`parseRaw*`, `parseNorm*`), with no compatibility wrappers.
+- Actual:
+  - Legacy aliases remained exported and tests explicitly preserved them.
+- Suspected area:
+  - `/Volumes/src/mlf4/src/MLF/Frontend/Parse.hs`
+  - `/Volumes/src/mlf4/src-public/MLF/API.hs`
+  - `/Volumes/src/mlf4/test/FrontendParseSpec.hs`
+- Fix:
+  - Removed `parseEmlfExpr`/`parseEmlfType` exports and alias definitions from parser/API modules.
+  - Updated frontend parse/pretty specs to use explicit raw parser entrypoints only.
+- Regression tests:
+  - `/Volumes/src/mlf4/test/FrontendParseSpec.hs`
+  - `/Volumes/src/mlf4/test/FrontendPrettySpec.hs`
+- Thesis impact:
+  - Restores the locked staged-boundary migration decision (clean break, no compatibility wrappers), reducing ambiguity in raw-vs-normalized phase entry.
+
+### BUG-2026-02-08-005
+- Status: Resolved
+- Priority: High
+- Discovered: 2026-02-08
+- Resolved: 2026-02-08
+- Summary: `normalizeType` had a reachable runtime crash in nested alias-bound normalization (`error "normalizeBound: unreachable"`).
+- Reproducer (source type):
+  - `STForall "x" (Just (STForall "b" (Just (STVar "a")) (STVar "b"))) (STVar "x")`
+- Expected:
+  - Total normalization through `Either NormalizationError ...` (typed `Left`), never process crash.
+- Actual:
+  - Runtime exception from `normalizeBound` `STVar` branch.
+- Suspected area:
+  - `/Volumes/src/mlf4/src/MLF/Frontend/Normalize.hs`
+- Fix:
+  - Added `NonStructuralBoundInStructContext SrcType` to `NormalizationError`.
+  - Replaced the `STVar` crash path in `normalizeBound` with `Left (NonStructuralBoundInStructContext subtree)`.
+- Regression test:
+  - `/Volumes/src/mlf4/test/FrontendNormalizeSpec.hs` case `rejects nested alias bound that normalizes to a non-structural variable bound`
+- Thesis impact:
+  - Preserves deterministic, total frontend normalization at the raw→normalized boundary, matching the explicit `Either`-based failure model.
+
 ### BUG-2026-02-06-001
 - Status: Resolved
 - Priority: High
