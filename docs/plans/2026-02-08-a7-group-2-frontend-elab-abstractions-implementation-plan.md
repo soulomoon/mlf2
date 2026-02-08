@@ -201,7 +201,7 @@ Add concise entries describing:
 
 **Step 4: Re-run targeted tests**
 
-Run: `cabal test mlf2-test --test-show-details=direct --test-option='-m' --test-option='Pipeline' --test-option='-m' --test-option='Phase 1 — Constraint generation' --test-option='-m' --test-option='Phase 6 — Elaborate (xMLF)'`
+Run: `cabal test mlf2-test --test-show-details=direct --test-option=-m --test-option='Pipeline (Phases 1-5)' --test-option=-m --test-option='Phase 1' --test-option=-m --test-option='Phase 6'`
 Expected: PASS.
 
 **Step 5: Commit**
