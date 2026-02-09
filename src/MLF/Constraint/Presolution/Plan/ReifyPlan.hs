@@ -132,6 +132,7 @@ buildReifyPlan ReifyPlanInput{..} =
                 , not (IntMap.member aliasKeyC substBaseLocal)
                 , not (IntMap.member aliasKeyC substAliasesLocal)
                 ]
+        typeRootReachable = rpiReachableFromWithBounds rpiTypeRoot
         substAliasesFromBaseLocal =
             IntMap.fromList
                 [ (solvedKey, name)
@@ -141,6 +142,8 @@ buildReifyPlan ReifyPlanInput{..} =
                 , Just name <- [IntMap.lookup repKey substBaseLocal]
                 , solvedKey /= repKey
                 , not (IntSet.member solvedKey rpiNestedSchemeInteriorSet)
+                    || (not (IntSet.member baseKey rpiNestedSchemeInteriorSet)
+                        && IntSet.member solvedKey typeRootReachable)
                 ]
         substLocal =
             IntMap.unions

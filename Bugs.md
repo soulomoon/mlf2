@@ -13,15 +13,22 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
   - `ELet "make" (ELam "x" (ELam "y" (EVar "x"))) (ELet "c1" (EApp (EVar "make") (ELit (LInt (-4)))) (EApp (EVar "c1") (ELit (LBool True))))`
 - Expected:
   - Pipeline elaborates and typechecks successfully (result should be `Int`).
+  - `make` should have principal scheme `forall a b. a -> b -> a`.
+  - `c1` (after applying `make` to `-4`) should have scheme `forall b. b -> Int`.
 - Actual:
-  - Current reproducer behavior on 2026-02-08:
-    - `Phase 7 (type checking): TCLetTypeMismatch (TForall "a" Nothing (TForall "b" Nothing (TArrow (TVar "a") (TArrow (TVar "t23") (TVar "a"))))) (TForall "a" Nothing (TForall "b" Nothing (TArrow (TVar "a") (TArrow (TVar "b") (TBase Int)))))`
-  - Diagnostic trace shows let scheme for `make` is reified as `∀a b. a -> b -> Int` while elaborated RHS term still has shape `a -> t23 -> a`.
+  - Current reproducer behavior on 2026-02-09 (latest checkpoint):
+    - `Phase 7 (type checking): TCLetTypeMismatch (TForall "b" Nothing (TArrow TBottom (TBase Int))) (TForall "b" Nothing (TArrow (TVar "b") (TBase Int)))`.
+  - Phase-2 replay on 2026-02-09 reconfirms a generalization-preprocessing ownership drift path:
+    - `instCopyMap` includes `(25 -> NodeId 0)` and `p2CopyOverrides` mirrors it.
+    - bind-parent ownership for node `25` transitions `GenNodeId 2 -> GenNodeId 4 -> GenNodeId 1` across Phase-3/Phase-4/final constraint assembly.
+  - With presolution write-back pollution blocked, Phase 6 no longer fails at `OpGraft ... binder not found`; instead, edge-0 Φ translation still emits `InstBot ⊥` segments that force let-RHS shape toward `∀b. ⊥ -> Int`.
+  - Focused regressions remain green in the current blocked state (`make const`, redirected let-use polymorphism, `BUG-2026-02-08-004` sentinel).
 - Suspected area:
-  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/Plan/BinderPlan/Build.hs`
-  - `/Volumes/src/mlf4/src/MLF/Elab/Run/Generalize/Phase2.hs`
-  - `/Volumes/src/mlf4/src/MLF/Elab/Run/Generalize/Finalize.hs`
-  - `/Volumes/src/mlf4/src/MLF/Elab/Run/Provenance.hs`
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/EdgeUnify.hs` (fixed anti-pollution gate now in place)
+  - `/Volumes/src/mlf4/src/MLF/Elab/Run/Generalize/Phase3.hs` (copy-parent grafting from `instCopyMap`)
+  - `/Volumes/src/mlf4/src/MLF/Elab/Run/Generalize/Phase4.hs` (scheme-interior owner realignment of inst-copy nodes)
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/Plan/Finalize.hs` (scheme anti-drift logic coupled with this path)
+  - `/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs` (remaining edge-0 Φ translation fidelity issue)
 - Thesis impact:
   - Valid let-polymorphic factory path remains non-elaboratable end-to-end under thesis-aligned generalization semantics.
 

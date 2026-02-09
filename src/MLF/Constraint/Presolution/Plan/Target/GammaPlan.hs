@@ -260,9 +260,10 @@ buildGammaPlan GammaPlanInput{..} =
                                 , solvedUnderScope baseKey
                                 ]
                         solvedToBasePrefLocal =
-                            IntMap.union qAlignSolvedToBaseLocal $
-                                IntMap.union identityGammaScoped
-                                    (IntMap.union preferGamma (IntMap.union solvedToBase identityGamma))
+                            IntMap.union identityGammaScoped $
+                                IntMap.union preferGamma $
+                                    IntMap.union solvedToBase $
+                                        IntMap.union qAlignSolvedToBaseLocal identityGamma
                         solvedByBasePref =
                             IntMap.fromListWith
                                 (++)
@@ -390,7 +391,16 @@ buildGammaPlan GammaPlanInput{..} =
                         solvedBinderKeys =
                             IntSet.fromList (map getNodeId solvedBindersUnderScope)
                         alignPrefer =
-                            IntMap.filterWithKey (\k _ -> IntSet.member k solvedBinderKeys) alignSolvedToBase
+                            IntMap.filterWithKey
+                                (\k v -> IntSet.member k solvedBinderKeys
+                                    && case IntMap.lookup k solvedToBase of
+                                        Just baseN
+                                            | baseN /= v
+                                            , IntSet.member (getNodeId baseN) baseGammaSetLocal
+                                            , getNodeId baseN /= k -> False
+                                        _ -> True
+                                )
+                                alignSolvedToBase
                         solvedToBasePrefLocal' =
                             IntMap.union alignPrefer
                                 (IntMap.union scopeAliasOverrides solvedToBasePrefLocal)
