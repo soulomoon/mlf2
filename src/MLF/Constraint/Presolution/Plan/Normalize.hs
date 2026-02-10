@@ -108,8 +108,11 @@ simplifySchemeBindings inlineBaseBounds namedBinders binds ty =
                                     && isVarBound bound
                                     && not isNamedBinder
                                     && not boundMentionsNamed
+                            canInlineStructured =
+                                not (isBaseBound bound)
+                                    && not (isVarBound bound)
                         in if not boundMentionsSelf
-                            && (canInlineBase || canInlineNonBase)
+                            && (canInlineBase || canInlineNonBase || canInlineStructured)
                             then
                                 let replacement = boundElab
                                     bodySub = substType v replacement body

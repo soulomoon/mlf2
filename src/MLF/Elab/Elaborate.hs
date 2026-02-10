@@ -39,6 +39,7 @@ import MLF.Constraint.BindingUtil (bindingPathToRootLocal)
 import MLF.Elab.Phi (phiFromEdgeWitnessWithTrace)
 import MLF.Elab.Inst (applyInstantiation, schemeToType)
 import MLF.Elab.TypeCheck (typeCheck)
+import qualified MLF.Elab.TypeCheck as TypeCheck (Env(..), typeCheckWithEnv)
 import qualified MLF.Elab.Inst as Inst
 import MLF.Reify.Core
     ( namedNodes
@@ -355,6 +356,10 @@ elaborateWithEnv config elabEnv ann = do
                                     case reifyNodeTypePreferringBound (annNode aAnn) of
                                         Right argTy -> InstApp argTy
                                         Left _ -> funInst
+                                (InstApp TForall{}, False) ->
+                                    case reifyNodeTypePreferringBound (annNode aAnn) of
+                                        Right argTy -> InstApp argTy
+                                        Left _ -> funInst
                                 _ -> funInst
                     let argInstFromFun =
                             case (aAnn, f') of
@@ -375,7 +380,7 @@ elaborateWithEnv config elabEnv ann = do
                             _      -> ETyInst a' argInst'
                     pure (EApp fApp aApp)
             in mkOut f
-        ALetF v schemeGenId schemeRootId _ _rhsScopeGen (_rhsAnn, rhsOut) (bodyAnn, bodyOut) trivialRoot ->
+        ALetF v schemeGenId schemeRootId _ _rhsScopeGen (rhsAnn, rhsOut) (bodyAnn, bodyOut) trivialRoot ->
             let elaborateLet env = do
                     rhs' <- elabTerm rhsOut env
                     let debugGeneralize = traceGeneralize traceCfg
@@ -386,10 +391,43 @@ elaborateWithEnv config elabEnv ann = do
                                 ++ " scopeRoot=" ++ show (scopeRootForNode schemeRootId)
                             )
                             ()
-                    (sch, subst) <- generalizeAtNode schemeRootId
+                    (sch0, subst0) <- generalizeAtNode schemeRootId
+                    let tcEnv = TypeCheck.Env (Map.map (schemeToType . siScheme) env) Map.empty
+                        rhsIsApp =
+                            case rhsAnn of
+                                AApp{} -> True
+                                _ -> False
+                        schemeUnbounded =
+                            case sch0 of
+                                Forall binds _ -> all ((== Nothing) . snd) binds
+                        fallbackEligible = rhsIsApp && schemeUnbounded
+                        stripForallsTy ty =
+                            case ty of
+                                TForall _ _ body -> stripForallsTy body
+                                _ -> ty
+                        hasIntCodomain ty =
+                            case stripForallsTy ty of
+                                TArrow _ (TBase (BaseTy "Int")) -> True
+                                _ -> False
+                        fallbackScheme =
+                            if fallbackEligible
+                                then
+                                    case TypeCheck.typeCheckWithEnv tcEnv rhs' of
+                                        Right rhsTy | hasIntCodomain rhsTy ->
+                                            let freeVars = Set.toList (freeTypeVarsType rhsTy)
+                                                rhsSch = Forall [(name, Nothing) | name <- freeVars] rhsTy
+                                            in if alphaEqType (schemeToType rhsSch) (schemeToType sch0)
+                                                then Nothing
+                                                else Just rhsSch
+                                        Right _ -> Nothing
+                                        Left _ -> Nothing
+                                else Nothing
+                        sch = fromMaybe sch0 fallbackScheme
+                        subst = subst0
                     case debugGeneralize
                         ("elaborate let: scheme=" ++ show sch
                             ++ " subst=" ++ show subst
+                            ++ " fallback=" ++ show (fmap schemeToType fallbackScheme)
                         )
                         () of
                         () -> pure ()

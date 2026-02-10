@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+* BUG-2026-02-06-002: retained C18/C21/C21.1 elaboration-path fixes (`Phi.Omega` delayed graft/weaken handling + `Elaborate` let-scheme/app-inst repair), graduated the 4-case sentinel matrix to strict assertions, and brought the full `BUG-2026-02-06-002` matcher to green (`10 examples, 0 failures`).
+* Elaboration/typecheck: fixed H15 lambda-parameter source selection in `MLF.Elab.Elaborate` so unannotated nested lambdas no longer leak solved-node names (e.g. `t23`) into let-RHS types; added `PipelineSpec` regression `does not leak solved-node names in make let mismatch`.
+* Planning/docs: selected Option 1 (upstream witness-shape correction) for `BUG-2026-02-06-002`, added design/execution plans under `docs/plans/2026-02-09-*witness-shape-correction*`, and kept the 4-case bug sentinel matrix explicitly pending until strict closure tests are green.
 * Binding/docs: documented A7 Group 1 shared-helper consolidation; duplicated binding path/node-ref/scope/children helpers are canonicalized in `MLF.Binding.Path`, `MLF.Binding.NodeRefs`, `MLF.Binding.ScopeGraph`, and `MLF.Binding.Children`, with migrations in `MLF.Binding.Queries`, `MLF.Binding.Validation`, `MLF.Binding.Tree`, `MLF.Binding.Canonicalization`, `MLF.Constraint.BindingUtil`, and `MLF.Constraint.Presolution.Base`.
 * Tests: finalized A7 shared harness dedup by centralizing shared pipeline test helpers in `test/SpecUtil.hs` and removing duplicate helper paths across `PipelineSpec`, `ElaborationSpec`, and `ConstraintGenSpec` without behavior changes.
 * Tests/docs: `PipelineSpec` rewrite regression now exercises both `applyRedirectsToAnn` and `canonicalizeAnn` so every node occurrence (including `ALet` scheme roots) is rewritten, and `docs/plans/2026-02-08-a7-group-2-frontend-elab-abstractions-implementation-plan.md` now lists a single Hspec filter that hits Pipeline/Phase 1/Phase 6 examples.

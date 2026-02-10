@@ -93,6 +93,36 @@ spec = do
                         , StepOmega (OpWeaken binderId)
                         ]
 
+        it "suppresses OpWeaken for rigid binders during ExpInstantiate witness emission" $ do
+            let expNodeId = NodeId 0
+                forallId = NodeId 1
+                binderId = NodeId 2
+                argId = NodeId 3
+                nodes = nodeMapFromList
+                    [ (0, TyExp expNodeId (ExpVarId 0) forallId)
+                    , (1, TyForall forallId binderId)
+                    , (2, TyVar { tnId = binderId, tnBound = Nothing })
+                    , (3, TyVar { tnId = argId, tnBound = Nothing })
+                    ]
+                bindParents0 = inferBindParents nodes
+                bindParents =
+                    IntMap.insert
+                        (nodeRefKey (typeRef binderId))
+                        (typeRef forallId, BindRigid)
+                        bindParents0
+                constraint =
+                    rootedConstraint emptyConstraint
+                        { cNodes = nodes
+                        , cBindParents = bindParents
+                        }
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 4 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
+                expansion = ExpInstantiate [argId]
+
+            case runPresolutionM defaultTraceConfig st0 (witnessFromExpansion expNodeId (nodeAt nodes 0) expansion) of
+                Left err -> expectationFailure ("witnessFromExpansion failed: " ++ show err)
+                Right (steps, _) ->
+                    steps `shouldBe`
+                        [ StepOmega (OpGraft argId binderId) ]
         it "emits StepIntro per binder in ForallSpec" $ do
             let expNodeId = NodeId 0
                 bodyId = NodeId 1
@@ -184,6 +214,72 @@ spec = do
                 env = mkNormalizeEnv c root (IntSet.fromList [getNodeId n])
                 ops0 = [OpWeaken n, OpGraft arg n]
             normalizeInstanceOpsFull env ops0 `shouldBe` Right [OpWeaken n, OpGraft arg n]
+
+        describe "graft-weaken canonical alignment (H16 upstream target)" $ do
+            it "normalizes graft-weaken pairs with canonical binder/arg alignment" $ do
+                let c = mkNormalizeConstraint
+                    root = NodeId 0
+                    canonicalMap nid =
+                        case getNodeId nid of
+                            20 -> NodeId 2
+                            30 -> NodeId 3
+                            _ -> nid
+                    env =
+                        (mkNormalizeEnv c root (IntSet.fromList [getNodeId (NodeId 2)]))
+                            { canonical = canonicalMap
+                            , binderArgs = IntMap.fromList [(2, NodeId 3)]
+                            }
+                    ops0 = [OpGraft (NodeId 30) (NodeId 20), OpWeaken (NodeId 20)]
+                normalizeInstanceOpsFull env ops0
+                    `shouldBe` Right [OpGraft (NodeId 3) (NodeId 2), OpWeaken (NodeId 2)]
+
+            it "rejects ambiguous graft-weaken mapping after canonicalization" $ do
+                let c = mkNormalizeConstraint
+                    root = NodeId 0
+                    canonicalMap nid =
+                        case getNodeId nid of
+                            20 -> NodeId 2
+                            21 -> NodeId 2
+                            30 -> NodeId 3
+                            31 -> NodeId 1
+                            _ -> nid
+                    env =
+                        (mkNormalizeEnv c root (IntSet.fromList [getNodeId (NodeId 2)]))
+                            { canonical = canonicalMap
+                            , binderArgs = IntMap.fromList [(2, NodeId 3)]
+                            }
+                    ops0 =
+                        [ OpGraft (NodeId 30) (NodeId 20)
+                        , OpWeaken (NodeId 20)
+                        , OpGraft (NodeId 31) (NodeId 21)
+                        , OpWeaken (NodeId 21)
+                        ]
+                    isLeftResult = either (const True) (const False)
+                normalizeInstanceOpsFull env ops0 `shouldSatisfy` isLeftResult
+
+            it "is idempotent for graft-weaken-heavy normalization" $ do
+                let c = mkNormalizeConstraint
+                    root = NodeId 0
+                    canonicalMap nid =
+                        case getNodeId nid of
+                            20 -> NodeId 2
+                            30 -> NodeId 3
+                            31 -> NodeId 1
+                            _ -> nid
+                    env =
+                        (mkNormalizeEnv c root (IntSet.fromList [getNodeId (NodeId 2)]))
+                            { canonical = canonicalMap
+                            , binderArgs = IntMap.fromList [(2, NodeId 3)]
+                            }
+                    ops0 =
+                        [ OpGraft (NodeId 30) (NodeId 20)
+                        , OpWeaken (NodeId 20)
+                        , OpGraft (NodeId 30) (NodeId 20)
+                        , OpWeaken (NodeId 20)
+                        ]
+                case normalizeInstanceOpsFull env ops0 of
+                    Left err -> expectationFailure ("Expected normalization success, got: " ++ show err)
+                    Right ops1 -> normalizeInstanceOpsFull env ops1 `shouldBe` Right ops1
 
         it "does not drop Graft/Weaken when a binder is eliminated by Merge" $ do
             let c = mkNormalizeConstraint

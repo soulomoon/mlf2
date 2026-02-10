@@ -47,6 +47,7 @@ data OmegaNormalizeError
     | RigidOperandMismatch InstanceOp NodeId NodeId
     | NotTransitivelyFlexBound InstanceOp NodeId NodeId
     | MalformedRaiseMerge [InstanceOp]
+    | AmbiguousGraftWeaken NodeId [NodeId]
     deriving (Eq, Show)
 
 compareNodesByOrderKeyM :: OmegaNormalizeEnv -> NodeId -> NodeId -> Either OmegaNormalizeError Ordering

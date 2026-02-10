@@ -16,6 +16,27 @@
   - `MLF.Constraint.Presolution.Base.bindingPathToRootUnderM` now delegates to `MLF.Binding.Path.bindingPathToRootLocal` after quotient bind-parent canonicalization.
 - Behavioral impact: none intended; this was an abstraction-only consolidation.
 
+### 2026-02-09 H15 lambda-parameter source guard (implemented)
+
+- Context:
+  - After H13+H14, the `make` reproducer still failed in Phase 7 with a naming mismatch (`t23` vs `b`) even though let-scheme generalization was already correct (`forall a b. a -> b -> a`).
+- Root cause:
+  - In `MLF.Elab.Elaborate` (`ALam` case), unannotated lambdas could source parameter type reification from `resolvedLambdaParamNode lamNodeId` (copy-derived solved nodes) rather than lexical `paramNode`.
+  - In the failing path this produced `ELam "y" (TVar "t23") ...`, while the let scheme stayed `... (TVar "b") ...`, causing `TCLetTypeMismatch`.
+- Implemented fix:
+  - Added `hasInformativeVarBound` and guarded param-source selection:
+    - annotated-lambda desugaring keeps resolved-node behavior;
+    - unannotated lambdas use resolved node only when its bound-chain reaches a non-`TyVar` bound (informative structural/base bound);
+    - otherwise fall back to lexical `paramNode`.
+  - This avoids solved-node-name leakage while preserving prior behavior for application typing paths that require resolved informative bounds.
+- Regression coverage:
+  - Added `PipelineSpec` test:
+    - `does not leak solved-node names in make let mismatch`.
+- Verification:
+  - `cabal test mlf2-test --test-options='--match "does not leak solved-node names in make let mismatch"' --test-show-details=direct`
+  - `cabal test mlf2-test --test-options='--match "runPipelineElab type matches typeCheck(term) and checked pipeline type"' --test-show-details=direct`
+  - `cabal build all && cabal test`
+
 ### 2026-02-08 A7 group 2 dedup checklist
 
 - [x] Frontend translate scope/parent wiring now routes through local helpers (`withScopedBuild`, `attachUnder`, `rebindScopeRoot`) across let/coercion/forall-internalization paths.
@@ -286,3 +307,14 @@ This repo’s design is primarily informed by:
 
 ## Kiro spec planning
 - Paper-faithfulness deltas are captured in `.kiro/specs/paper-faithfulness-remaining-deltas/`, including evidence pointers to the thesis and code, plus a concrete implementation plan.
+
+## 2026-02-10 BUG-2026-02-06-002 staged closure notes
+
+- `MLF.Elab.Phi.Omega` now treats delayed binder-local `OpGraft ... OpWeaken` pairs as a single binder application path when no intervening op touches that binder, and rescues binder-arg `TBottom` reification to binder TVar naming when available.
+- `MLF.Elab.Elaborate` let elaboration now computes an env-aware RHS type (`typeCheckWithEnv`) and uses a guarded fallback scheme only when the generalized scheme and RHS-derived generalized scheme are not alpha-equivalent.
+- `MLF.Elab.Elaborate` application elaboration extends non-polymorphic-arg repair to `InstApp TForall{}` fun-instantiation payloads, reifying argument type from the argument annotation node.
+- Current test evidence:
+  - `BUG-2026-02-06-002 strict target matrix`: green (`4/4`).
+  - `BUG-2026-02-06-002 thesis target`: green (checked + unchecked).
+  - focused guards (make-const generalization, redirected let-use polymorphism, H15 non-leak): green.
+  - sentinel matrix has been graduated to strict assertions (no pending cases under `BUG-2026-02-06-002`).

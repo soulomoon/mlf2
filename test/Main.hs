@@ -14,6 +14,7 @@ import qualified Presolution.RaiseSpec
 import qualified Presolution.WitnessSpec
 import qualified SolveSpec
 import qualified PipelineSpec
+import qualified ThesisFixDirectionSpec
 import qualified TypeCheckSpec
 import qualified ReduceSpec
 import qualified ElaborationSpec
@@ -42,6 +43,7 @@ main = hspec $ do
     Presolution.RaiseSpec.spec
     SolveSpec.spec
     PipelineSpec.spec
+    ThesisFixDirectionSpec.spec
     TypeCheckSpec.spec
     ReduceSpec.spec
     ElaborationSpec.spec

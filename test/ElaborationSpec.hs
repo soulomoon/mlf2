@@ -1018,6 +1018,118 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b")))
                 canonType out `shouldBe` canonType expected
 
+            it "rejects ambiguous repeated graft-weaken on the same non-front binder" $ do
+                let root = NodeId 0
+                    binderA = NodeId 1
+                    forallB = NodeId 2
+                    binderB = NodeId 3
+                    bodyNode = NodeId 4
+                    intNode = NodeId 5
+                    boolNode = NodeId 6
+                    nodes = nodeMapFromList
+                        [ (getNodeId root, TyForall root forallB)
+                        , (getNodeId binderA, TyVar { tnId = binderA, tnBound = Nothing })
+                        , (getNodeId forallB, TyForall forallB bodyNode)
+                        , (getNodeId binderB, TyVar { tnId = binderB, tnBound = Nothing })
+                        , (getNodeId bodyNode, TyArrow bodyNode binderA binderB)
+                        , (getNodeId intNode, TyBase intNode (BaseTy "Int"))
+                        , (getNodeId boolNode, TyBase boolNode (BaseTy "Bool"))
+                        ]
+                    bindParents =
+                        IntMap.fromList
+                            [ (nodeRefKey (typeRef binderA), (typeRef root, BindFlex))
+                            , (nodeRefKey (typeRef forallB), (typeRef root, BindFlex))
+                            , (nodeRefKey (typeRef binderB), (typeRef forallB, BindFlex))
+                            , (nodeRefKey (typeRef bodyNode), (typeRef forallB, BindFlex))
+                            ]
+                    constraint =
+                        rootedConstraint emptyConstraint
+                            { cNodes = nodes
+                            , cBindParents = bindParents
+                            }
+                    solved = SolveResult { srConstraint = constraint, srUnionFind = IntMap.empty }
+                    scheme =
+                        Elab.schemeFromType
+                            (Elab.TForall "a" Nothing (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))))
+                    subst =
+                        IntMap.fromList
+                            [ (getNodeId binderA, "a")
+                            , (getNodeId binderB, "b")
+                            ]
+                    si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = subst }
+                    ops =
+                        [ OpGraft intNode binderB
+                        , OpWeaken binderB
+                        , OpGraft boolNode binderB
+                        , OpWeaken binderB
+                        ]
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewSteps = map StepOmega ops
+                        , ewWitness = InstanceWitness ops
+                        }
+                case ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew of
+                    Left _ -> pure ()
+                    Right phi ->
+                        expectationFailure
+                            ("Expected ambiguity rejection, got Phi: " ++ Elab.pretty phi)
+
+            it "keeps non-front binder targeting stable after root graft" $ do
+                let root = NodeId 0
+                    binderA = NodeId 1
+                    forallB = NodeId 2
+                    binderB = NodeId 3
+                    bodyNode = NodeId 4
+                    intNode = NodeId 5
+                    boolNode = NodeId 6
+                    nodes = nodeMapFromList
+                        [ (getNodeId root, TyForall root forallB)
+                        , (getNodeId binderA, TyVar { tnId = binderA, tnBound = Nothing })
+                        , (getNodeId forallB, TyForall forallB bodyNode)
+                        , (getNodeId binderB, TyVar { tnId = binderB, tnBound = Nothing })
+                        , (getNodeId bodyNode, TyArrow bodyNode binderA binderB)
+                        , (getNodeId intNode, TyBase intNode (BaseTy "Int"))
+                        , (getNodeId boolNode, TyBase boolNode (BaseTy "Bool"))
+                        ]
+                    bindParents =
+                        IntMap.fromList
+                            [ (nodeRefKey (typeRef binderA), (typeRef root, BindFlex))
+                            , (nodeRefKey (typeRef forallB), (typeRef root, BindFlex))
+                            , (nodeRefKey (typeRef binderB), (typeRef forallB, BindFlex))
+                            , (nodeRefKey (typeRef bodyNode), (typeRef forallB, BindFlex))
+                            ]
+                    constraint =
+                        rootedConstraint emptyConstraint
+                            { cNodes = nodes
+                            , cBindParents = bindParents
+                            }
+                    solved = SolveResult { srConstraint = constraint, srUnionFind = IntMap.empty }
+                    scheme =
+                        Elab.schemeFromType
+                            (Elab.TForall "a" Nothing (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))))
+                    subst =
+                        IntMap.fromList
+                            [ (getNodeId binderA, "a")
+                            , (getNodeId binderB, "b")
+                            ]
+                    si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = subst }
+                    ops = [OpGraft intNode root, OpGraft boolNode binderB, OpWeaken binderB]
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewSteps = map StepOmega ops
+                        , ewWitness = InstanceWitness ops
+                        }
+                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
+                out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
+                let expected = Elab.TArrow (Elab.TBase (BaseTy "Int")) (Elab.TBase (BaseTy "Bool"))
+                canonType out `shouldBe` canonType expected
+
             it "empty Ω produces non-identity instantiation when binder order differs from <P" $ do
                 -- Three binders: <P order is a < b < c (left-to-right in nested arrows)
                 -- Scheme order is c, b, a. Φ should reorder to a, b, c.

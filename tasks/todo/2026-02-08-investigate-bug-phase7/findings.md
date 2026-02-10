@@ -290,3 +290,658 @@
   - Elaborated: `forall a b. a -> b -> a`
 - This is a separate issue: the let-scheme annotation uses internal name `t23` for the second binder instead of `b`. The scheme type itself is correct.
 - Next direction: investigate why the annotation path produces `t23` instead of `b` for the second binder.
+
+## 2026-02-09 Phase 3 Hypothesis Test (H15: why let annotation gets `t23` instead of `b`)
+
+- Goal:
+  - Determine why Phase 7 compares `forall a b. a -> t23 -> a` (RHS term) against `forall a b. a -> b -> a` (let scheme) after H13+H14.
+
+- Reproduction setup:
+  - Created `/tmp/repro_bug_h15.hs` using current API (`normalizeExpr` + `runPipelineElabCheckedWithConfig`) with `tcBinding/tcGeneralize/tcElab` traces.
+  - Captured full stdout+stderr traces in `/tmp/repro_bug_h15_full.out`.
+
+- Key evidence:
+  1. `generalizeAt` computes the `make` scheme correctly with binder names `a,b`:
+     - `generalizeAt: ty0Raw=TArrow (TVar "a") (TArrow (TVar "b") (TVar "a"))`
+     - let scheme trace: `Forall [("a",Nothing),("b",Nothing)] ...`
+     - subst: `fromList [(0,"a"),(1,"b"),(25,"a"),(26,"b")]`
+  2. Elaborated RHS term still carries `t23` on lambda parameter `y`:
+     - `pipeline elaborated term=... ELam "y" (TVar "t23") ...`
+  3. Phase 7 then fails at `ELet` type equality:
+     - `TCLetTypeMismatch ... (TArrow (TVar "a") (TArrow (TVar "t23") (TVar "a"))) ... (TArrow (TVar "a") (TArrow (TVar "b") (TVar "a")))`
+
+- Root-cause chain:
+  1. In `ALam` elaboration, parameter source is chosen as
+     - `paramSource = fromMaybe paramNode (resolvedLambdaParamNode lamNodeId)`
+     - (see `src/MLF/Elab/Elaborate.hs`, around line 302)
+  2. For this repro, `resolvedLambdaParamNode lamNodeId` resolves to copied var node `23` (not original binder node `1`).
+  3. Reifying from node `23` yields `TVar "t23"` for lambda `y` type.
+  4. Later closure/substitution only renames `TVar "tN"` when `N` exists in substitution map (`substInTy` + `parseNameId`):
+     - map for `make` contains `0,1,25,26`, but **not 23**.
+     - therefore `t23` survives into RHS type.
+  5. `ELet` typecheck compares RHS type with scheme type and fails (`TypeCheck.hs` let branch).
+
+- Single-hypothesis probe (temporary):
+  - Changed `paramSource` to `paramNode` (ignoring `resolvedLambdaParamNode`) in `Elaborate.hs`.
+  - Outcome:
+    - `ELam "y" (TVar "b")` observed (the `t23` symptom disappears).
+    - Phase 7 error shifts to downstream mismatch at `c1` (`TArrow TBottom Int` vs `TArrow b a`), i.e. different issue surfaces.
+  - Interpretation:
+    - Confirms H15 cause for the `t23` naming mismatch.
+    - Probe was reverted immediately (no retained source change).
+
+- Conclusion:
+  - H15 confirmed: `t23` is introduced by ALam param-source resolution to copied node 23, then preserved because closure substitution map does not include key 23.
+  - This is a naming/source-selection mismatch between ALam param reification and let-scheme substitution domain, not a scheme-generalization error.
+
+- Candidate fix direction (next step):
+  - Restrict `resolvedLambdaParamNode` usage to annotated-lambda path only (or guard it so resolved node must be name-mappable under current let-scheme substitution domain).
+
+## 2026-02-09 Phase 4 Implementation (H15 guard in ALam param-source selection)
+
+- TDD flow:
+  1. **RED**: added targeted regression in `test/PipelineSpec.hs`:
+     - `does not leak solved-node names in make let mismatch`
+     - asserts Phase-7 mismatch (if present) does not contain `t23`.
+  2. **GREEN (attempt 1)**: unannotated lambdas forced to `paramNode`.
+     - fixed `t23` leak but regressed unrelated application typing (`(\x.x) (-4)` produced `TCArgumentMismatch (TVar "t0") Int`).
+  3. **GREEN (final)**: introduced guarded resolved-node use for unannotated lambdas via `hasInformativeVarBound`:
+     - if resolved param's bound-chain reaches a non-`TyVar` node, use resolved node;
+     - otherwise keep lexical `paramNode`.
+
+- Retained code changes:
+  - `src/MLF/Elab/Elaborate.hs`
+    - added helper: `hasInformativeVarBound :: NodeId -> Bool`
+    - updated `ALam` `paramSource` selection:
+      - annotated-lambda path unchanged (`desugaredAnnLambdaInfo` still uses resolved param fallback);
+      - unannotated path now uses resolved node only when informative, else lexical binder node.
+  - `test/PipelineSpec.hs`
+    - added H15 regression spec: `does not leak solved-node names in make let mismatch`.
+
+- Post-fix behavior:
+  - `make` trace no longer leaks `t23`; elaborated term shows `ELam "y" (TVar "b") ...`.
+  - Remaining failure in reproducer is now broader bug shape (`TBottom -> Int` vs expected `b -> a`), not the naming leak.
+
+- Verification evidence:
+  - Targeted RED check (before fix): new test fails with rendered error containing `t23`.
+  - Targeted GREEN checks:
+    - `--match "does not leak solved-node names in make let mismatch"` passes.
+    - `--match "runPipelineElab type matches typeCheck(term) and checked pipeline type"` passes (80/80).
+  - Full gate:
+    - `cabal build all && cabal test` passes (`585 examples, 0 failures`).
+
+## 2026-02-09 H16 investigation start (remaining `TBottom`/arrow mismatch)
+
+- Objective:
+  - Investigate the remaining mismatch after H15 where `make`-family paths fail with `TBottom` in arrow domain (`⊥ -> Int`) instead of expected polymorphic arrow (`b -> a`).
+
+- Reproduction matrix (`/tmp/repro_h16_matrix.hs`):
+  - `make-only`:
+    - `TCLetTypeMismatch` with nested forall shape drift.
+  - `make-app` (`let make = ... in make (-4)`):
+    - succeeds with type **`⊥ -> Int`**.
+  - `let-c1-return`:
+    - `TCLetTypeMismatch` (`forall a. ⊥ -> Int` vs `forall a. a`).
+  - `let-c1-apply-bool` (canonical bug path):
+    - `TCLetTypeMismatch` (`forall a b. ⊥ -> Int` vs `forall a b. b -> a`).
+
+- Key isolation result:
+  - The `TBottom` collapse occurs **before** introducing `let c1`; it is already visible in `make-app` result type (`⊥ -> Int`).
+  - Therefore H16 is rooted in function instantiation/elaboration for `make (-4)`, not specifically in let-annotation comparison.
+
+- Focused trace (`/tmp/repro_h16_make_app_trace.out`):
+  - Let scheme for `make` is still generalized correctly:
+    - `elaborate let: scheme=Forall [("a",Nothing),("b",Nothing)] a -> b -> a`.
+  - During edge-0 function instantiation, Φ includes nested `InstBot` applications:
+    - `InstInside (InstBot TBottom)` (twice), and later
++    - `InstInside (InstBot (TVar "t14"))` in sequence with `InstInside (InstBot Int)`.
+  - Final checked type for `make-app` is `⊥ -> Int`.
+
+- Comparison baseline (`/tmp/repro_h16_id_app_trace.out`):
+  - Simple identity app `((\x.x) (-4))` elaborates to `Int` and does **not** show the problematic `InstBot` chain.
+
+- Probable hot path for H16:
+  - `MLF.Elab.Phi.Omega.reifyTypeArg` and OpGraft handling in Φ→inst translation (`InstBot` emission around graft/under/inside sequences), especially where free variable args become `TVar "tN"` and feed into bot-instantiation paths.
+
+## H16 first hypothesis (next implementation candidate)
+
+- Hypothesis H16.1:
+  - In `MLF.Elab.Phi.Omega.reifyTypeArg`, when an argument reifies to an unconstrained fresh `TVar "tN"` (e.g. `t14`) and is used in an `OpGraft`/`OpGraft+OpWeaken` `InstBot` path, we should prefer binder-aligned naming/substitution (or avoid bot-instantiating that free TVar) to prevent domain collapse to `TBottom` in the resulting function type.
+
+- Why this is plausible from evidence:
+  - `make-app` trace shows `reifyTypeArg` returns `TVar "t14"` for arg node 14, and Φ then emits `InstInside (InstBot (TVar "t14"))` in the function-instantiation sequence.
+  - Final type becomes `⊥ -> Int`, indicating one polymorphic parameter is being effectively eliminated through bot-instantiation path.
+  - Working baseline (`(\x.x) (-4)`) does not produce this `InstBot (TVar "tN")` sequence.
+
+- Minimal-test patch direction (H16.1 probe):
+  - Add a narrow guard in `reifyTypeArg`/OpGraft translation to avoid introducing `InstBot` with unconstrained free TVar arguments in this path, favoring binder-aligned type from inferred maps when available.
+  - Keep change local to OpGraft/OpGraft+OpWeaken path to minimize risk.
+
+## 2026-02-09 H16.1 temporary probe (reifyTypeArg / InstBot TVar path)
+
+- Goal:
+  - Test whether preventing/retargeting `InstBot (TVar "tN")` argument flow in the OpGraft path fixes the `⊥ -> Int` collapse.
+
+- Step 0 (test hardening before probe):
+  - Added matrix sentinel tests in `test/PipelineSpec.hs` (`BUG-2026-02-06-002 sentinel matrix`):
+    1. `make-only` mismatch sentinel
+    2. `make-app` sentinel type `⊥ -> Int`
+    3. `let-c1-return` mismatch with `TBottom`
+    4. `let-c1-apply-bool` mismatch with `TBottom` and no `t23`
+  - Verified: all 4 sentinel tests pass.
+
+- Probe A (temporary):
+  - File: `src/MLF/Elab/Phi/Omega.hs` (`reifyTypeArg`).
+  - Change: introduced `chosenTy2` fallback to use `inferredSingleton` when `mbBinder=Just _` and `chosenTy1` is `TVar _`.
+  - Result: **no behavioral change**.
+    - `make-app` still inferred `Type: ⊥ -> Int`.
+
+- Probe B (temporary refinement):
+  - File: `src/MLF/Elab/Phi/Omega.hs` (`reifyTypeArg`).
+  - Change: introduced `chosenTy3` to force binder-name alignment (`TVar binderName`) for `(mbBinder, TVar _)`.
+  - Trace confirmed local effect:
+    - `arg=14`: `chosenTy3=TVar "b"` (was `TVar "t14"`/`TVar "c"`).
+  - Result: **still no behavioral change**.
+    - `make-app` remained `Type: ⊥ -> Int`.
+    - matrix outcomes unchanged.
+
+- Conclusion:
+  - H16.1 hypothesis rejected: this local `reifyTypeArg` TVar handling is not the root cause of bottom-domain collapse.
+  - All temporary `Omega.hs` probe edits were reverted.
+  - Sentinel tests remain in suite as regression guardrails and continue to pass.
+
+- Next likely direction (H16.2 candidate):
+  - Inspect OpGraft/OpGraft+OpWeaken translation decisions that emit `InstInside (InstBot TBottom)` before/around binder elimination, and how those interact with `syncIdsAcrossInstantiation`/binder-spine identity mapping.
+
+## 2026-02-10 H16.2 probe (OpGraft/OpWeaken `InstBot`/`InstElim` path)
+
+- Scope:
+  - Started H16.2 after confirming findings-listed regressions were already present in `test/PipelineSpec.hs`:
+    - H15 leak guard (`does not leak solved-node names in make let mismatch`)
+    - 4-case sentinel matrix (`BUG-2026-02-06-002 sentinel matrix`).
+  - Re-validated those targeted specs before probe.
+
+- Instrumentation focus:
+  - Added temporary trace instrumentation in `MLF.Elab.Phi.Omega` to log:
+    - operation classification (`OpGraft`, `OpWeaken`),
+    - `ids` spine before/after application,
+    - instantiation payloads at each `applyInst`,
+    - binder→arg lookup decisions for `OpWeaken`.
+
+- Confirmed baseline collapse mechanism:
+  - For edge 0 (`make-app`), Ω executes `OpGraft(13,16)`, `OpGraft(14,17)`, then `OpWeaken(16)`, `OpWeaken(17)`.
+  - Baseline translation weakens with `InstElim` twice, producing:
+    - after second weaken: `TArrow Int (TArrow TBottom Int)`
+    - final checked type: `⊥ -> Int`.
+  - Evidence:
+    - `/tmp/repro_h16_make_app_trace_h162.out`
+    - `/tmp/repro_h16_make_app_trace_h162_probe2.out`
+
+- H16.2 hypothesis test (temporary):
+  - Probe: when `OpWeaken` targets an unbounded/⊥-bounded binder, and we can recover the binder's graft argument, use `InstApp argTy` instead of raw `InstElim`.
+  - Initial failure mode:
+    - binder→arg recovery failed (`mbGraftArg=Nothing`) because trace binder ids are original (`0`,`1`) while Ω runs over copied ids (`16`,`17`).
+  - First refinement:
+    - matched via GA/base keys; this was incorrect for binder 17 because both trace binders mapped to same base key (`5`) in this context.
+    - symptom: binder 17 picked arg 13 instead of arg 14.
+  - Second refinement:
+    - matched binder→arg through `copyMap`/inverse-copy correspondence (original↔copy identity), which correctly resolved:
+      - binder 16 → arg 13
+      - binder 17 → arg 14
+    - evidence:
+      - `/tmp/repro_h16_make_app_trace_h162_probe6.out`
+
+- Observed effect under refined probe:
+  - `make-app` no longer collapsed to `⊥ -> Int`; it became polymorphic-domain arrow (`... b -> Int`) rather than `⊥`.
+  - `let-c1-return` mismatch changed from bottom-vs-var to var-vs-var (`b` vs expected `a`).
+  - Canonical `let-c1-apply-bool` mismatch still present (still a Phase 7 mismatch family).
+  - Matrix under probe:
+    - `/tmp/repro_h16_matrix_h162_probe7.out`
+  - Sentinel tests expectedly diverged from baseline (2 of 4 failed), so probe is not accepted as-is.
+
+- Conclusion (H16.2 status):
+  - **Partially confirmed**: the second-binder `⊥` collapse is linked to elimination behavior in `OpWeaken` after grafting, and binder/arg identity alignment matters.
+  - **Not sufficient**: replacing weaken-elim with graft-app alone does not restore expected `b -> a`; codomain remains specialized to `Int`, and extra quantification shape appears.
+  - Therefore, root cause is multi-part:
+    1. weaken/elimination policy for grafted unbounded binders, and
+    2. earlier/parallel specialization path (before final weaken), likely in the same edge’s OpGraft/OpRaise sequence.
+
+- Action taken:
+  - Reverted all temporary H16.2 `Omega.hs` edits after evidence collection.
+  - Baseline sentinel + H15 regression tests pass again.
+
+## 2026-02-10 H16.3 probe (OpWeaken identity-on-TVar-graft, temporary)
+
+- Hypothesis:
+  - If `OpWeaken` is immediately eliminating a binder whose graft argument reifies to unconstrained `TVar`, forcing `InstElim` may be the source of premature domain collapse (`⊥`).
+  - Temporary idea: in that narrow case, treat weaken as identity (skip elimination) to preserve polymorphism and avoid synthetic bottoming.
+
+- Probe implementation (temporary, reverted):
+  - In `MLF.Elab.Phi.Omega` `OpWeaken` branch:
+    - looked up binder's graft arg from trace via copy-map aligned binder matching,
+    - when binder bound is `Nothing`/`Just TBottom` and arg reifies to `TVar _`, skipped elimination for that weaken.
+
+- Observed behavior:
+  - `make-app` and `let-c1-return` no longer matched previous sentinel failure shape; they became `TCExpectedArrow` failures (higher-rank/forall arrow expectation mismatch).
+  - canonical `let-c1-apply-bool` mismatch remained unresolved.
+  - Matrix output under probe:
+    - `/tmp/repro_h16_matrix_h163_probe1.out`
+
+- Sentinel impact:
+  - `BUG-2026-02-06-002 sentinel matrix` failed 2/4 under probe:
+    - `make-app currently collapses to bottom-int arrow sentinel`
+    - `let-c1-return still reports bottom-vs-var mismatch sentinel`
+  - Therefore probe does **not** satisfy “improves behavior without regressing sentinel suite”.
+
+- Conclusion:
+  - H16.3 probe rejected.
+  - Skipping weaken-elimination for TVar grafts introduces type-shape regressions (`TCExpectedArrow`) and is not a valid direction.
+
+- Action taken:
+  - Reverted all H16.3 edits in `src/MLF/Elab/Phi/Omega.hs`.
+  - Revalidated baseline targeted tests (sentinel matrix + H15 leak guard) are green.
+
+## 2026-02-10 H16.4 probe (pre-weaken OpGraft/OpRaise specialization, stricter)
+
+- Goal:
+  - Keep `OpWeaken` semantics unchanged; probe only pre-weaken path (OpGraft/OpRaise neighborhood) to target remaining codomain `Int` lock-in.
+
+- Temporary probe applied:
+  - File: `src/MLF/Elab/Phi/Omega.hs`
+  - Scope: binder-path `OpGraft` branch only (`InstInside (InstBot argTy)` generation).
+  - Changes:
+    - switched arg source to `graftArgFor arg bv` for this branch,
+    - added temporary trace capture of `hasPendingWeaken` / `argTy` in `OpGraft(pre-weaken)`.
+  - `OpWeaken` branch left untouched.
+
+- Results:
+  - Focused `make-app` trace remained unchanged at outcome level:
+    - final type still `⊥ -> Int`.
+  - Matrix remained unchanged across 4 cases (same sentinel shapes as baseline).
+  - Sentinel suite remained green (4/4).
+
+- Interpretation:
+  - This stricter pre-weaken `OpGraft` adjustment does **not** affect the codomain `Int` lock-in or the `⊥` domain collapse.
+  - The remaining issue is likely outside this local arg-source tweak in binder-path `OpGraft`.
+
+- Action:
+  - Reverted all temporary H16.4 `Omega.hs` edits.
+  - Revalidated baseline targeted tests after revert.
+
+## 2026-02-10 Test policy update: known buggy-shape sentinels marked pending
+
+- Decision:
+  - Converted the `BUG-2026-02-06-002 sentinel matrix` examples to explicit `pendingWith` markers.
+- Rationale:
+  - These examples document known-bug behavior and should not appear as “passing behavior tests” while H16 remains unresolved.
+- Validation:
+  - Targeted sentinel run now reports `4 pending` (not passing assertions).
+
+## 2026-02-09 Planning outcome: selected Option 1 (upstream witness-shape correction)
+
+- User-selected strategy:
+  - **Option 1 — Upstream witness-shape correction (Recommended)**.
+
+- Why this direction:
+  - H16.1–H16.4 local probes in `MLF.Elab.Phi.Omega` either:
+    - did not change the `⊥ -> Int` lock-in, or
+    - shifted failure shape/regressed sentinel behavior.
+  - This indicates the durable correction point is likely upstream in witness-shape construction/normalization, not an Ω-local weaken heuristic.
+
+- Operational test policy retained:
+  - `BUG-2026-02-06-002 sentinel matrix` remains `pendingWith` while bug is open.
+  - A separate strict RED matrix is planned to drive implementation to closure without treating known-bug shapes as passing tests.
+
+- New planning artifacts:
+  - Design doc:
+    - `docs/plans/2026-02-09-bug-2026-02-06-002-upstream-witness-shape-correction-design.md`
+  - Execution plan:
+    - `docs/plans/2026-02-09-bug-2026-02-06-002-upstream-witness-shape-correction-implementation-plan.md`
+
+- Planned technical focus (H16 continuation):
+  1. Strengthen graft/weaken canonical alignment in witness normalization (`WitnessCanon`/`WitnessNorm`).
+  2. Keep Ω translation strict and minimal.
+  3. Convert pending buggy-shape sentinels to strict passing assertions only when fix is proven and regression gates stay green.
+
+## 2026-02-09 Phase 7 Task 1 result: strict RED matrix now locked
+
+- Added executable bug-target block in `test/PipelineSpec.hs`:
+  - `describe "BUG-2026-02-06-002 strict target matrix"`
+
+- Observed RED behavior (current baseline):
+  1. `make-only elaborates as polymorphic factory` fails with `TCLetTypeMismatch`.
+  2. `make-app keeps codomain Int without bottom-domain collapse` fails due `TBottom` domain.
+  3. `let-c1-return keeps second binder polymorphic` fails with `TCLetTypeMismatch` (`TArrow TBottom Int` artifact).
+  4. `let-c1-apply-bool typechecks to Int` fails with `TCLetTypeMismatch` (polymorphism lost).
+
+- Sentinel policy check remains intact:
+  - Existing `BUG-2026-02-06-002 sentinel matrix` remains `4 pending` by design.
+
+- Interpretation:
+  - The strict matrix now provides concrete closure targets for Option 1 implementation without conflating known-bug sentinels with passing behavior tests.
+
+## 2026-02-09 Phase 7 Task 2 result: witness-shape RED signal established
+
+- Added focused witness normalization tests in `test/Presolution/WitnessSpec.hs`:
+  - canonical alignment case (passes)
+  - ambiguous canonical mapping rejection case (currently fails)
+  - graft/weaken idempotence case (passes)
+
+- New RED evidence:
+  - `normalizeInstanceOpsFull` currently accepts an ambiguous canonicalized sequence where two distinct copied binders collapse to the same canonical binder with different graft args:
+    - observed output: `Right [OpGraft 3 2, OpWeaken 2, OpGraft 1 2, OpWeaken 2]`
+  - This supports the upstream fix direction: normalization currently lacks a guard against ambiguous graft/weaken canonical mapping.
+
+- Practical note:
+  - Hspec `--match` with alternation string (`a|b|c`) selected 0 examples in this harness; exact suite name matching works for targeted runs.
+
+## 2026-02-09 Phase 7 Task 3 result: Φ regressions added and stable
+
+- Added Φ translation coverage in `test/ElaborationSpec.hs` for two H16-related concerns:
+  1. ambiguous repeated graft/weaken operations on the same non-front binder are rejected,
+  2. non-front binder targeting remains stable even when preceded by a root graft.
+
+- Current behavior under new tests:
+  - ambiguity case currently rejects (passes expectation of failure path),
+  - root-graft + non-front-target case yields expected `Int -> Bool` shape (passes).
+
+- Interpretation:
+  - The immediate RED gap remains upstream in witness normalization (Task 2 failing case), while existing Φ translation behavior for these synthetic non-front scenarios is presently stable.
+
+## 2026-02-09 Phase 7 Task 4 result: upstream ambiguity guard implemented
+
+- Implemented in `WitnessCanon.normalizeInstanceOpsFull`:
+  - new `checkGraftWeakenAmbiguity` pass after canonicalization, before merge-direction/reorder validation.
+
+- Rule introduced:
+  - if a weakened binder key has more than one distinct canonical graft argument in the same op segment, normalization now fails with `AmbiguousGraftWeaken`.
+
+- Evidence:
+  - Task 2 failing witness regression now passes:
+    - `graft-weaken canonical alignment` suite: `3/3` green.
+
+- Scope/result:
+  - This addresses one upstream malformed-shape class.
+  - It does **not** yet fix the main pipeline strict matrix (`BUG-2026-02-06-002 strict target matrix` remains `4/4` failing), so additional upstream alignment (Task 5+) is required.
+
+## 2026-02-09 Task 5 investigation findings (wiring hypotheses rejected)
+
+- Diagnostic witness dump for `make-app` confirms problematic shape is still present upstream:
+  - edge-0 `ewSteps` include dual grafts + dual weakens with intervening raises.
+  - binder/arg trace pairing is present but does not prevent final `TBottom`-family mismatch.
+
+- Probe A (keep rewritten ids in normalized witnesses) was rejected:
+  - caused `OpWeaken targets non-binder node` translatability failures,
+  - did not improve strict target outcomes.
+
+- Probe B (convert unbounded-binder+unbounded-arg from graft/weaken to merge) was rejected:
+  - triggered presolution `mkOmegaExecEnv` missing-copy internal errors,
+  - unstable and non-viable for retention.
+
+- Practical conclusion:
+  - The retained upstream improvement is the ambiguity guard (`AmbiguousGraftWeaken`), but the main BUG-2026-02-06-002 failure path still needs a different correction point than the two Task 5 wiring probes above.
+
+## 2026-02-10 — Direction matrix baseline findings (Tasks 1-3)
+
+- New strict thesis-target spec (`BUG-2026-02-06-002 thesis target`) is now RED by construction:
+  - unchecked: fails with `Phase 7 (type checking): TCLetTypeMismatch ... TArrow TBottom Int ...`
+  - checked: same mismatch family
+- The mismatch shape confirms the remaining codomain `Int` lock-in + `TBottom` domain collapse remains unresolved in current codepath.
+- The new diagnostics harness confirms required trace observability is available for direction work:
+  - `generalizeAt:` lines present
+  - `elaborate let: scheme=` lines present
+  - `Phase` + `TCLetTypeMismatch` summaries present
+- Matrix control artifacts now exist for one-direction-at-a-time experiments:
+  - test gate: `test/ThesisFixDirectionSpec.hs`
+  - runner: `scripts/run-bug-2026-02-06-002-direction.sh`
+  - notes template: `docs/notes/2026-02-08-bug-2026-02-06-002-direction-matrix.md`
+
+- Harness quality refinement: a single combined `--match` regex under Hspec produced `0 examples`; explicit per-test `--match` invocations are now used in the direction runner to guarantee non-empty focused regression checks.
+
+## 2026-02-10 — Direction matrix experiments D1-D3 findings
+
+- D1 (binder representative filtering) did not move the strict target:
+  - thesis target remained `2/2` failures (`TCLetTypeMismatch` family).
+  - nearby focused regressions stayed green.
+
+- D2 (type-root fallback gating) did not move the strict target:
+  - gating `targetBoundUnderOtherGen` by gamma membership produced no thesis-target improvement.
+
+- D3 (solved/base mapping + provenance precedence) changed internals but not outcome:
+  - mapping/provenance deltas were visible in trace (`baseGammaSet` expansion, extra `t25` bound dependency),
+  - final let scheme still specialized codomain to `Int`, and thesis target remained red.
+
+- Cross-direction conclusion (D1-D3):
+  - None of the first three isolated directions satisfy hard gate 1.
+  - Next experiments should proceed to D4-D6 routing/closure/canonicalization directions.
+
+## 2026-02-10 — Resume of upstream witness-shape plan (Tasks 5-7)
+
+- A Task-5 wiring hypothesis in `WitnessNorm` (canonical binder-arg alignment + early ambiguous-map rejection in rewritten space) preserved witness tests but did not improve `BUG-2026-02-06-002 strict target matrix`.
+- A Task-6 Ω strictness probe (`graftArgFor = arg`) was non-improving on strict bug targets and was reverted.
+- Current Ω/Φ translation suites and H15 non-leak regression remain green.
+- Sentinel graduation remains blocked:
+  - strict bug matrix is still `4/4` failing,
+  - sentinel matrix remains `4 pending` by policy.
+- Additional diagnosis: `make-only` strict failure reproduces with no presolution edge witness for that shape, suggesting remaining root-cause extends beyond edge-witness normalization alone.
+
+## 2026-02-10 — Direction matrix D4-D6 findings
+
+- D4 (`Elaborate` let target reroute to `trivialRoot`) is not viable:
+  - It changes failure family from Phase 7 mismatch into Phase 6 `PhiInvariantError`.
+  - It breaks the nearby sentinel `redirected let-use sites keep polymorphic schemes`.
+  - This indicates current let-target routing participates in Φ binder identity invariants and cannot be switched naively.
+
+- D5 (always close RHS with `closeTermWithSchemeSubst`) is behaviorally neutral for the hard bug:
+  - Strict bug matrix remains `4/4` red with baseline mismatch shapes.
+  - Nearby focused regressions stay green.
+  - Conclusion: closure-trigger policy is not the dominant cause of BUG-2026-02-06-002.
+
+- D6 (`eeResPhi/eeResReify = solvedForGen`) is not viable:
+  - It produces Phase 6 `PhiTranslatabilityError` (`OpRaise (non-spine): missing computation context`) across strict bug shapes.
+  - It regresses `redirected let-use sites keep polymorphic schemes` with `PhiInvariantError`.
+  - This confirms mixed-state split (`solvedClean` for Φ/reify, `solvedForGen` for generalization) is currently load-bearing.
+
+- Consolidated post-D6 diagnosis:
+  - Remaining failure is likely a coupled issue with two distinct surfaces:
+    1. top-level `make-only` scheme body aliasing (`a -> c`) versus RHS inferred type (`a -> b -> a`), and
+    2. application-path Φ instantiation that emits `InstBot TBottom` in codomain-sensitive positions.
+
+## 2026-02-10 — Coupled follow-up finding (C1): structured alias inlining helps make-only
+
+- A focused change in `MLF.Constraint.Presolution.Plan.Normalize.simplifySchemeBindings` to inline structured alias bounds (not only var/base alias cases) partially resolves BUG-2026-02-06-002.
+- Observable effect:
+  - strict matrix improved from 4 failing shapes to 3 failing shapes.
+  - specifically, `make-only` now passes.
+- Interpretation:
+  - The `make-only` failure surface is tied to scheme-shape normalization/finalization (alias/body shape mismatch), not to edge-witness translation.
+- Remaining failure surface is now concentrated on application paths (`make-app`/`let-c1-*`) with codomain `Int` + `TBottom` domain collapse, likely still in Φ/instantiation reconstruction.
+
+## 2026-02-10 — C2 Ω probes after C1 (non-improving, reverted)
+
+- Probe C2.1 (`Omega.reifyTypeArg` binder fallback):
+  - mapped unresolved graft arg TVars to binder names when arg/binder are copy/bound-related.
+  - result: instantiation text changed (e.g., `InstBot (TVar "t14")` -> `InstBot (TVar "b")`) but strict matrix remained `3 failures`.
+
+- Probe C2.2 (`Omega.OpRaise(non-spine)` root-first preference):
+  - preferred root-inst branch before candidate insertion (`InstIntro + InstBot`) when available.
+  - result: no strict-matrix improvement; remaining failures unchanged.
+
+- Conclusion:
+  - neither Ω-local adjustment removed the residual `TBottom` lock-in for `make-app`/`let-c1-*`.
+  - keep C1 normalization win; continue searching upstream/downstream interaction causing application-path collapse.
+
+## 2026-02-10 — C3 target-binder fallback probe (reverted)
+
+- Hypothesis:
+  - empty `targetBinderKeys` in Φ translation was over-eliminating binders in application paths.
+- Patch tested:
+  - fallback keep-set in `Phi.Translate` based on `OpGraft/OpWeaken` and whether graft args reified to non-concrete types.
+- Result:
+  - no hard-gate improvement beyond C1 (`strict matrix` still `3 failures`).
+  - introduced a focused regression (`redirected let-use sites keep polymorphic schemes`) and changed failures to `TCExpectedArrow` in two shapes.
+- Conclusion:
+  - this keep-key fallback heuristic is not thesis-safe in current form; reverted.
+
+## 2026-02-10 — C4 finding: `InstInside` TVar-bound retention is non-improving
+
+- Hypothesis:
+  - residual application-path collapse might come from `InstInside` dropping `TVar` bounds to `Nothing`, which then feeds `InstElim` defaulting to `TBottom`.
+
+- Probe:
+  - in `MLF.Elab.Inst.instInsideFn`, retained `TVar` bounds (instead of dropping to `Nothing`) by allowing `elabToBound` conversion for the `TVar` case.
+
+- Result:
+  - strict bug matrix remained unchanged at `3` failures (post-C1 baseline):
+    - `make-app`, `let-c1-return`, `let-c1-apply-bool` still fail.
+  - focused regressions stayed green, sentinel policy stayed `4 pending`.
+
+- Conclusion:
+  - this is not the controlling collapse point for BUG-2026-02-06-002.
+  - patch was reverted; continue with another minimal hypothesis targeting the remaining OpGraft/OpRaise/OpWeaken interaction.
+
+## 2026-02-10 — C5/C6 findings + reification-root insight
+
+- C5 (`WitnessCanon`: skip weaken reordering) and C6 (`Omega.graftArgFor`: prefer `etBinderArgs`) were both non-improving and reverted.
+- A further temporary `Phi.Translate` alias-subst probe was also non-improving and reverted.
+
+- New high-value diagnostic finding:
+  - In the failing `let-c1-apply-bool` path, the problematic second graft arg node (`NodeId 23`) is an **unbounded `TyVar`** in solved constraint (`tnBound = Nothing`).
+  - Yet Φ translation still reifies that arg as `TBottom` (`reifyTypeArg ... ty=TBottom`).
+
+- Interpretation:
+  - The remaining collapse is not due to missing binder/arg pairing in presolution witnesses (`ewSteps` and `etBinderArgs` are aligned),
+  - but due to downstream reification/naming behavior in Φ translation (no-fallback naming path causing unbounded TyVars to collapse to `TBottom` under current context).
+
+- Practical direction update:
+  - Next hypothesis should target a thesis-safe naming/reification path that preserves unbounded graft-arg variables during Φ translation without leaking solved-node names (`H15` guard).
+
+- Additional C8 insight (2026-02-10):
+  - fixing trace binder-name lookup in `traceArgMap` fills inferred map entries (`a -> Int`, `b -> TBottom`) for the failing edge,
+  - but does not change strict outcomes because the second arg still concretely reifies to `TBottom`.
+  - This narrows the remaining issue further to how unbounded TyVars are reified under current no-fallback naming context (arg becomes `TBottom` rather than a reusable variable/name).
+
+- executing-plans batch gate note (2026-02-10):
+  - plan regex `OpGraft|OpWeaken|OpRaise|scheme-aware Φ` matched `0 examples` in this harness; explicit suite-name matches are required for reliable verification.
+  - explicit Ω/Φ + witness suites remain green, while BUG-2026-02-06-002 strict/thesis targets remain red.
+
+- C9 finding (2026-02-10):
+  - even when forcing unbounded graft-arg `TBottom` reification to binder variable (`TVar "b"`) in `reifyTypeArg`, strict bug shapes remain unchanged.
+  - This indicates the remaining lock-in is not solely due to that local `TBottom` token; earlier/later instantiation structure (not just arg naming) still drives the mismatch.
+
+### Post-C1 probe C10 finding (2026-02-10)
+
+- Hypothesis tested:
+  - unresolved codomain lock-in might come from `SchemeInfo` substitution remapping gaps between binder keys and argument keys in trace copy-map space.
+- Probe:
+  - expanded `Phi.Translate` remapping (`remapSchemeInfoM` + `remapSchemeInfo`) to synthesize binder-name aliases for canonicalized argument nodes using direct/copy/reverse-copy lookup and `etBinderArgs`.
+- Result:
+  - no strict-gate movement (`BUG-2026-02-06-002 strict target matrix` stayed `3` failures after C1).
+  - no focused regression and sentinel policy remained intact (`4 pending`).
+- Interpretation:
+  - copy-space alias propagation in `Translate` naming/remap is not the dominant blocker for remaining BUG-2026-02-06-002 shapes.
+  - remaining root cause likely sits earlier in Φ/Ω operation semantics (pre-translation), especially around `OpGraft`/`OpRaise` specialization and downstream codomain `TBottom` lock-in.
+- Action:
+  - reverted the C10 probe.
+
+### Post-C1 C11/C12 findings (2026-02-10)
+
+- High-confidence local mechanism for remaining failure:
+  - On failing edge-0, the codomain collapse to `TBottom` is introduced at the **final `OpWeaken`** elimination step, not at `OpRaise`.
+  - Operationally: `∀u1. Int -> u1 -> Int` is weakened to `Int -> ⊥ -> Int` when `u1` is eliminated while still unbounded and not marked keep.
+
+- New structural diagnosis:
+  - `keepBinderKeys` being empty on this path is likely the proximate trigger for the residual bug.
+  - However, naive broadening of keep-key selection from reachable target type nodes over-preserves polymorphism and regresses nearby let-use behavior.
+
+- Consequence for next probe design:
+  - any fix must be **narrow** and operation-aware (likely edge-local / step-local), preserving exactly the binder needed for application polymorphism without globally suppressing elimination semantics.
+
+### Post-C1 C13 finding (2026-02-10)
+
+- A narrow-looking weaken guard in Ω (`preserveByRigidAlias`) is still semantically over-broad in practice:
+  - it changes failure shape for BUG strict cases but does not produce a strict pass,
+  - and it regresses nearby let-use polymorphism/H15 guards.
+- Implication:
+  - direct local weakening suppression is not sufficient; final fix likely needs a more principled edge/phase contract (e.g., precise keep-set derivation tied to expected target arity/polymorphism, not structural alias heuristics alone).
+
+### Post-C1 C14 finding (2026-02-10)
+
+- Switching keep-key target-root from `ewRight` to `ewRoot` alone is behaviorally neutral for BUG-2026-02-06-002 strict gates.
+- Interpretation:
+  - root-anchor mismatch is not the dominant cause of residual codomain `TBottom` lock-in.
+  - remaining issue is likely in edge-local elimination policy (which binders may be safely weakened) rather than simple root choice for keep-key candidate enumeration.
+
+### Post-C1 C15 finding (2026-02-10)
+
+- Simply adding trace binder-arg nodes to Φ reification `namedSet` is too permissive.
+- It does not improve strict BUG-2026-02-06-002 targets and regresses nearby let-use polymorphism behavior.
+- Interpretation:
+  - residual issue is not a plain “arg nodes were hidden from naming” bug;
+  - fix likely requires a tighter contract between operation translation (`OpGraft/OpWeaken`) and per-edge keep/elimination policy, not global named-set broadening.
+
+### Post-C1 C16 finding (2026-02-10)
+
+- Narrow singleton-case weaken suppression (`OpWeaken`) is still too invasive for adjacent behavior.
+- Even with strict structural guards, local suppression of elimination in Ω causes focused regressions without strict-target improvement.
+- Interpretation:
+  - residual fix likely cannot be encoded as ad hoc weaken-skip policy; needs a principled upstream contract that yields correct keep/eliminate decisions before Ω translation.
+
+### Post-C1 C17 finding (2026-02-10)
+
+- Upstream witness normalization pruning of unbounded-var weaken steps is still too coarse.
+- Even on the upstream path (not Ω interpreter), it changes failure family (`TCExpectedArrow`) without strict-target improvement and regresses the H15 non-leak focused guard.
+- Interpretation:
+  - the residual bug is not solved by a simple “drop weaken on unbounded var graft” rule; required condition likely depends on richer edge-local typing context than witness-op shape alone.
+
+### Post-C1 C18 finding (2026-02-10)
+
+- A delayed `OpWeaken` for the same binder after `OpGraft` is a real remaining collapse source in BUG-2026-02-06-002 paths.
+- Treating that delayed pair as binder application (`InstApp`) plus consuming the delayed weaken improves strict outcomes:
+  - `make-app` moves from FAIL to PASS,
+  - strict target matrix improves from `3` to `2` failures,
+  - focused/H15 guards remain green,
+  - sentinel policy remains intact (`4 pending`).
+- Remaining failures are now concentrated in let-binding scheme mismatch forms:
+  - `let-c1-return`: `forall a. t16 -> Int` vs `forall a. a`
+  - `let-c1-apply-bool`: `forall a b. b -> Int` vs `forall a b. b -> a`
+
+### Post-C1 C19 finding (2026-02-10, reverted)
+
+- A local elaboration fallback that derives let schemes from elaborated RHS type when scheme mismatch is detected is non-viable.
+- It regresses the improved C18 state by reintroducing `make-app` failure as `TCInstantiationError InstElim ... expects forall`.
+- Interpretation:
+  - the residual issue is not safely fixable via ALet-local scheme fallback; root cause remains upstream in how let scheme roots/witness-shape interact under redirects/canonicalization.
+
+### Post-C1 C20 finding (2026-02-10, reverted)
+
+- An ALet-local fallback path can partially reduce strict BUG-2026-02-06-002 failures, but it is not stable under focused guard policy.
+- Variant with env-aware RHS checking reduced strict matrix to a single failing shape (`let-c1-apply-bool`), indicating useful signal about residual let-scheme mismatch.
+- However, the same variant changes the H15-focused mismatch behavior for the make-let guard (`TCArgumentMismatch`), which is treated as a regression.
+- Conclusion:
+  - ALet-local fallback remains too behavioral for acceptance.
+  - keep C18 as retained best state; continue upstream/Φ-path investigation for the final codomain/argument lock-in without changing H15 guard behavior.
+
+### Post-C1 C21/C21.1 finding (2026-02-10, retained)
+
+- Let-scheme mismatch can be corrected in a thesis-compatible way by:
+  1) using env-aware RHS typing (`typeCheckWithEnv`) to derive fallback let schemes only when generalized scheme is not alpha-equivalent (C21), and
+  2) keeping app-side monomorphic argument repair for `InstApp TForall{}` at `AApp` sites (C21.1).
+- Combined with C18, this clears strict BUG-2026-02-06-002 and thesis-target checks while preserving focused guards.
+- Key practical outcome:
+  - strict matrix and thesis-target examples now pass,
+  - sentinel matrix intentionally remains pending (`4 pending`) until formal sentinel graduation step.
+
+### 2026-02-10 step-1/2/3 batch finding
+
+- Sentinel graduation is complete: `BUG-2026-02-06-002` pending tests are now strict assertions and pass.
+- Bug-target evidence is now fully green:
+  - strict target matrix green,
+  - thesis-target checks green,
+  - full BUG matcher green (`10 examples, 0 failures`).
+- Full-project verification remains blocked by 5 broader regressions outside this bug-target matrix (current failing modules: `test/Presolution/WitnessSpec.hs`, `test/ElaborationSpec.hs`).
+
+### Post-C1 C21.2 finding (2026-02-10)
+
+- Narrowing fallback to app + unbounded-scheme + Int-codomain preserves BUG-2026-02-06-002 green status, but does not resolve broader pre-existing/full-suite blockers.
+- Conclusion: BUG-2026-02-06-002 matrix is now strict-green; remaining work should shift to non-target regressions surfaced by full-gate verification.

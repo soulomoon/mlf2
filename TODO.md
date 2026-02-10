@@ -27,6 +27,24 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - Runtime base-shadow cutover completed: `MLF.Elab.Generalize` fallback no longer reifies or compares base-path output at runtime; solved-order output is authoritative.
   - `BUG-2026-02-06-002` remains open: current debugging indicates binder-representative filtering in generalization can drop required factory binders (`make` path), causing scheme specialization drift or `SchemeFreeVars`.
 
+## Task 7 Verification Gate — 2026-02-09 (H15)
+
+- Command: `cabal build all && cabal test`
+- Gate status: **Passed** (H15 guard + regression test)
+- Scope:
+  - Added targeted regression `PipelineSpec` case for solved-name leakage (`t23`) in the `make` let-mismatch path.
+  - Implemented guarded ALam parameter-source selection in `MLF.Elab.Elaborate` (`hasInformativeVarBound`) to avoid copy-node name leakage while preserving informative resolved-node paths.
+- Follow-up:
+  - `BUG-2026-02-06-002` remains open for the broader polymorphic-factory behavior (`TBottom -> Int` vs expected `b -> a`) after H13/H14/H15.
+
+## Task 7 Priority Plan — 2026-02-09 (H16 continuation)
+
+- Selected strategy: **Option 1 — Upstream witness-shape correction**.
+- Design doc: `docs/plans/2026-02-09-bug-2026-02-06-002-upstream-witness-shape-correction-design.md`
+- Implementation plan: `docs/plans/2026-02-09-bug-2026-02-06-002-upstream-witness-shape-correction-implementation-plan.md`
+- Sentinel policy while bug remains open: keep `BUG-2026-02-06-002 sentinel matrix` as pending; drive fix with strict RED matrix + witness/Φ regressions, then graduate sentinels to strict assertions at closure.
+
+
 ---
 
 ## Phase 1 — Constraint Generation ✅
@@ -190,3 +208,7 @@ Progress (2026-02-08, Group 1): duplicated binding-core helpers are now single-s
 - [ ] Push toward removing the Legacy syntax (keep parser compatibility transition-only; remove legacy pretty forms from internal/debug paths)
 - [ ] Visualization of constraint graph (Graphviz / DOT)
 - [ ] REPL that prints the inferred type and the elaborated xMLF term
+
+## Active bug closures
+
+- [x] `BUG-2026-02-06-002`: graduate `BUG-2026-02-06-002 sentinel matrix` from `pendingWith` to strict assertions now that strict/thesis target matrix is green under retained C18/C21/C21.1 behavior.

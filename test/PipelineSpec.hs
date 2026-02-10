@@ -41,7 +41,7 @@ import SpecUtil
     , runToSolvedDefault
     , unsafeNormalizeExpr
     )
-import MLF.Types.Elab (Ty(..))
+import MLF.Types.Elab (Ty(..), containsArrowTy, containsForallTy)
 import MLF.Reify.Core (reifyType)
 import Data.List.NonEmpty (NonEmpty(..))
 
@@ -366,6 +366,126 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 cInstEdges c `shouldBe` []
                 cUnifyEdges c `shouldBe` []
 
+    it "does not leak solved-node names in make let mismatch" $ do
+        -- BUG-2026-02-06-002 / H15 focus:
+        -- let make = \x.\y.x in let c1 = make (-4) in c1 True
+        -- If this still fails, diagnostics should not expose internal names like t23.
+        let expr =
+                ELet "make" (ELam "x" (ELam "y" (EVar "x")))
+                    (ELet "c1" (EApp (EVar "make") (ELit (LInt (-4))))
+                        (EApp (EVar "c1") (ELit (LBool True))))
+        case runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr) of
+            Left err -> do
+                let rendered = renderPipelineError err
+                rendered `shouldSatisfy` ("TCLetTypeMismatch" `isInfixOf`)
+                rendered `shouldNotSatisfy` ("t23" `isInfixOf`)
+            Right _ -> pure ()
+
+    describe "BUG-2026-02-06-002 sentinel matrix" $ do
+        let makeFactory = ELam "x" (ELam "y" (EVar "x"))
+            makeOnlyExpr = ELet "make" makeFactory (EVar "make")
+            makeAppExpr = ELet "make" makeFactory (EApp (EVar "make") (ELit (LInt (-4))))
+            letC1ReturnExpr =
+                ELet "make" makeFactory
+                    (ELet "c1" (EApp (EVar "make") (ELit (LInt (-4))))
+                        (EVar "c1"))
+            letC1ApplyBoolExpr =
+                ELet "make" makeFactory
+                    (ELet "c1" (EApp (EVar "make") (ELit (LInt (-4))))
+                        (EApp (EVar "c1") (ELit (LBool True))))
+
+            runChecked expr =
+                runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr)
+
+            stripForallsTy ty =
+                case ty of
+                    TForall _ _ body -> stripForallsTy body
+                    _ -> ty
+
+            expectPolymorphicIntReturn ty =
+                case stripForallsTy ty of
+                    TArrow dom cod -> do
+                        dom `shouldNotBe` TBottom
+                        cod `shouldBe` TBase (BaseTy "Int")
+                    other ->
+                        expectationFailure
+                            ("Expected arrow return shape ending in Int, got: " ++ show other)
+
+        it "make-only still reports let mismatch sentinel" $
+            case runChecked makeOnlyExpr of
+                Left err -> expectationFailure ("Expected success, got error:\\n" ++ renderPipelineError err)
+                Right (_term, ty) -> do
+                    ty `shouldSatisfy` containsForallTy
+                    ty `shouldSatisfy` containsArrowTy
+                    show ty `shouldNotSatisfy` ("TBottom" `isInfixOf`)
+
+        it "make-app currently collapses to bottom-int arrow sentinel" $
+            case runChecked makeAppExpr of
+                Left err -> expectationFailure ("Expected success, got error:\\n" ++ renderPipelineError err)
+                Right (_term, ty) -> expectPolymorphicIntReturn ty
+
+        it "let-c1-return still reports bottom-vs-var mismatch sentinel" $
+            case runChecked letC1ReturnExpr of
+                Left err -> expectationFailure ("Expected success, got error:\\n" ++ renderPipelineError err)
+                Right (_term, ty) -> expectPolymorphicIntReturn ty
+
+        it "let-c1-apply-bool keeps post-H15 mismatch without t23 leakage" $
+            case runChecked letC1ApplyBoolExpr of
+                Left err -> expectationFailure ("Expected success, got error:\\n" ++ renderPipelineError err)
+                Right (_term, ty) -> ty `shouldBe` TBase (BaseTy "Int")
+
+    describe "BUG-2026-02-06-002 strict target matrix" $ do
+        let makeFactory = ELam "x" (ELam "y" (EVar "x"))
+            makeOnlyExpr = ELet "make" makeFactory (EVar "make")
+            makeAppExpr = ELet "make" makeFactory (EApp (EVar "make") (ELit (LInt (-4))))
+            letC1ReturnExpr =
+                ELet "make" makeFactory
+                    (ELet "c1" (EApp (EVar "make") (ELit (LInt (-4))))
+                        (EVar "c1"))
+            letC1ApplyBoolExpr =
+                ELet "make" makeFactory
+                    (ELet "c1" (EApp (EVar "make") (ELit (LInt (-4))))
+                        (EApp (EVar "c1") (ELit (LBool True))))
+
+            runChecked expr =
+                runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr)
+
+            stripForallsTy ty =
+                case ty of
+                    TForall _ _ body -> stripForallsTy body
+                    _ -> ty
+
+            expectPolymorphicIntReturn ty =
+                case stripForallsTy ty of
+                    TArrow dom cod -> do
+                        dom `shouldNotBe` TBottom
+                        cod `shouldBe` TBase (BaseTy "Int")
+                    other ->
+                        expectationFailure
+                            ("Expected arrow return shape ending in Int, got: " ++ show other)
+
+        it "make-only elaborates as polymorphic factory" $
+            case runChecked makeOnlyExpr of
+                Left err -> expectationFailure ("Expected success, got error:\n" ++ renderPipelineError err)
+                Right (_term, ty) -> do
+                    ty `shouldSatisfy` containsForallTy
+                    ty `shouldSatisfy` containsArrowTy
+                    show ty `shouldNotSatisfy` ("TBottom" `isInfixOf`)
+
+        it "make-app keeps codomain Int without bottom-domain collapse" $
+            case runChecked makeAppExpr of
+                Left err -> expectationFailure ("Expected success, got error:\n" ++ renderPipelineError err)
+                Right (_term, ty) -> expectPolymorphicIntReturn ty
+
+        it "let-c1-return keeps second binder polymorphic" $
+            case runChecked letC1ReturnExpr of
+                Left err -> expectationFailure ("Expected success, got error:\n" ++ renderPipelineError err)
+                Right (_term, ty) -> expectPolymorphicIntReturn ty
+
+        it "let-c1-apply-bool typechecks to Int" $
+            case runChecked letC1ApplyBoolExpr of
+                Left err -> expectationFailure ("Expected success, got error:\n" ++ renderPipelineError err)
+                Right (_term, ty) -> ty `shouldBe` TBase (BaseTy "Int")
     it "composes instantiate then forall when rebound at new level" $ do
         -- let id = \x -> x in let rebound = (let alias = id in alias) in let _ = rebound 1 in rebound True
         let expr =

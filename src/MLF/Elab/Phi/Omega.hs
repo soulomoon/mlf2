@@ -342,7 +342,14 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
                                     _ -> chosenTy0
                             Nothing -> chosenTy0
                     _ -> chosenTy0
-            chosenTy = substSchemeNames chosenTy1
+            chosenTy2 =
+                case (chosenTy1, mbBinder) of
+                    (TBottom, Just binder) ->
+                        case IntMap.lookup (getNodeId (canonicalNode binder)) substForTypes of
+                            Just binderName -> TVar binderName
+                            Nothing -> chosenTy1
+                    _ -> chosenTy1
+            chosenTy = substSchemeNames chosenTy2
         debugPhi
             ("reifyTypeArg(reify) arg=" ++ show arg
                 ++ " mbBinder=" ++ show mbBinder
@@ -352,6 +359,7 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
                 ++ " ty=" ++ show ty
                 ++ " chosenTy0=" ++ show chosenTy0
                 ++ " chosenTy1=" ++ show chosenTy1
+                ++ " chosenTy2=" ++ show chosenTy2
                 ++ " chosenTy=" ++ show chosenTy
             )
             (pure chosenTy)
@@ -684,6 +692,22 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
         (OpGraft arg bv : rest) -> do
             let bvC = canonicalNode bv
                 rootC = canonicalNode orderRoot
+                opTargets op = case op of
+                    OpGraft _ n -> [n]
+                    OpWeaken n -> [n]
+                    OpMerge n m -> [n, m]
+                    OpRaise n -> [n]
+                    OpRaiseMerge n m -> [n, m]
+                touchesBinder op = any ((== bvC) . canonicalNode) (opTargets op)
+                splitDelayedWeaken xs =
+                    let (prefix, suffix) = break isMatchingWeaken xs
+                    in case suffix of
+                        (w : rest') | all (not . touchesBinder) prefix -> Just (w, prefix ++ rest')
+                        _ -> Nothing
+                isMatchingWeaken op = case op of
+                    OpWeaken n -> canonicalNode n == bvC
+                    _ -> False
+                delayedWeaken = splitDelayedWeaken rest
                 isRootAdjacent =
                     case lookupBindParent (srConstraint res) (typeRef bvC) of
                         Just (TypeRef parent, _) ->
@@ -750,11 +774,19 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
                                                 , "  binder bound: " ++ show mbBound
                                                 ]
                                     else do
-                                        (inst, ids1) <- atBinderKeep binderKeys ids ty bv $ do
-                                            argTy <- reifyTypeArg namedSet' (Just bv) arg
-                                            pure (InstInside (InstBot argTy))
-                                        ty' <- applyInst "OpGraft" ty inst
-                                        go binderKeys keepBinderKeys' namedSet' ty' ids1 (composeInst phi inst) rest lookupBinder
+                                        case delayedWeaken of
+                                            Just (_weakenOp, restAfterDelayedWeaken) -> do
+                                                (inst, ids1) <- atBinder binderKeys ids ty bv $ do
+                                                    argTy <- reifyTypeArg namedSet' (Just bv) (graftArgFor arg bv)
+                                                    pure (InstApp argTy)
+                                                ty' <- applyInst "OpGraft(delayed+Weaken)" ty inst
+                                                go binderKeys keepBinderKeys' namedSet' ty' ids1 (composeInst phi inst) restAfterDelayedWeaken lookupBinder
+                                            Nothing -> do
+                                                (inst, ids1) <- atBinderKeep binderKeys ids ty bv $ do
+                                                    argTy <- reifyTypeArg namedSet' (Just bv) arg
+                                                    pure (InstInside (InstBot argTy))
+                                                ty' <- applyInst "OpGraft" ty inst
+                                                go binderKeys keepBinderKeys' namedSet' ty' ids1 (composeInst phi inst) rest lookupBinder
 
         (OpWeaken bv : rest) -> do
             let bvC = canonicalNode bv
