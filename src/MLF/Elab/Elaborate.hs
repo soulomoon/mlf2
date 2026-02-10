@@ -284,6 +284,25 @@ elaborateWithEnv config elabEnv ann = do
                     _ -> Nothing
             _ -> Nothing
 
+    hasInformativeVarBound :: NodeId -> Bool
+    hasInformativeVarBound nodeId =
+        let constraint = srConstraint resReify
+            chase seen nid0 =
+                let nid = canonical nid0
+                    nidKey = getNodeId nid
+                in if IntSet.member nidKey seen
+                    then False
+                    else case NodeAccess.lookupNode constraint nid of
+                        Just TyVar{ tnBound = Just bnd } ->
+                            let bndC = canonical bnd
+                                seen' = IntSet.insert nidKey seen
+                            in case NodeAccess.lookupNode constraint bndC of
+                                Just TyVar{} -> chase seen' bndC
+                                Just _ -> True
+                                Nothing -> False
+                        _ -> False
+        in chase IntSet.empty nodeId
+
     termStartsWithTypeAbstraction :: ElabTerm -> Bool
     termStartsWithTypeAbstraction term = case term of
         ETyAbs{} -> True
@@ -300,7 +319,15 @@ elaborateWithEnv config elabEnv ann = do
         ALamF v paramNode _ (bodyAnn, bodyOut) lamNodeId ->
             let f env = do
                     let mAnnLambda = desugaredAnnLambdaInfo v bodyAnn
-                        paramSource = fromMaybe paramNode (resolvedLambdaParamNode lamNodeId)
+                        resolvedParam = resolvedLambdaParamNode lamNodeId
+                        paramSource =
+                            case mAnnLambda of
+                                Just _ -> fromMaybe paramNode resolvedParam
+                                Nothing ->
+                                    case resolvedParam of
+                                        Just resolvedNode
+                                            | hasInformativeVarBound resolvedNode -> resolvedNode
+                                        _ -> paramNode
                         bodyElabOut =
                             case mAnnLambda of
                                 Just (_, innerBodyAnn) ->
@@ -397,6 +424,10 @@ elaborateWithEnv config elabEnv ann = do
                             case rhsAnn of
                                 AApp{} -> True
                                 _ -> False
+                        rhsIsLam =
+                            case rhsAnn of
+                                ALam{} -> True
+                                _ -> False
                         schemeUnbounded =
                             case sch0 of
                                 Forall binds _ -> all ((== Nothing) . snd) binds
@@ -409,21 +440,41 @@ elaborateWithEnv config elabEnv ann = do
                             case stripForallsTy ty of
                                 TArrow _ (TBase (BaseTy "Int")) -> True
                                 _ -> False
-                        fallbackScheme =
+                        fallbackFromRhsTy rhsTy =
+                            let freeVars = Set.toList (freeTypeVarsType rhsTy)
+                                rhsSch = Forall [(name, Nothing) | name <- freeVars] rhsTy
+                            in if alphaEqType (schemeToType rhsSch) (schemeToType sch0)
+                                then Nothing
+                                else Just rhsSch
+                        rhsTypeChecked = TypeCheck.typeCheckWithEnv tcEnv rhs'
+                        fallbackChoiceFromApp =
                             if fallbackEligible
                                 then
-                                    case TypeCheck.typeCheckWithEnv tcEnv rhs' of
+                                    case rhsTypeChecked of
                                         Right rhsTy | hasIntCodomain rhsTy ->
-                                            let freeVars = Set.toList (freeTypeVarsType rhsTy)
-                                                rhsSch = Forall [(name, Nothing) | name <- freeVars] rhsTy
-                                            in if alphaEqType (schemeToType rhsSch) (schemeToType sch0)
-                                                then Nothing
-                                                else Just rhsSch
+                                            case fallbackFromRhsTy rhsTy of
+                                                Just schApp -> Just (schApp, subst0)
+                                                Nothing -> Nothing
                                         Right _ -> Nothing
                                         Left _ -> Nothing
                                 else Nothing
-                        sch = fromMaybe sch0 fallbackScheme
-                        subst = subst0
+                        fallbackChoiceFromLam =
+                            if rhsIsLam
+                                then
+                                    case rhsTypeChecked of
+                                        Right rhsTy ->
+                                            case fallbackFromRhsTy rhsTy of
+                                                Just schLam -> Just (schLam, IntMap.empty)
+                                                Nothing -> Nothing
+                                        Left _ -> Nothing
+                                else Nothing
+                        fallbackChoice =
+                            case fallbackChoiceFromApp of
+                                Just appChoice -> Just appChoice
+                                Nothing -> fallbackChoiceFromLam
+                        fallbackScheme = fmap fst fallbackChoice
+                        sch = maybe sch0 fst fallbackChoice
+                        subst = maybe subst0 snd fallbackChoice
                     case debugGeneralize
                         ("elaborate let: scheme=" ++ show sch
                             ++ " subst=" ++ show subst

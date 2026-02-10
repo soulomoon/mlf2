@@ -16,7 +16,7 @@ module MLF.Constraint.Presolution.WitnessCanon (
 import Data.Functor.Foldable (ListF(..), ana, cata)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import Data.List (partition, sortBy)
+import Data.List (foldl', partition, sortBy)
 
 import MLF.Constraint.Types.Graph (NodeId(..), NodeRef(..), getNodeId, nodeRefFromKey, typeRef)
 import MLF.Constraint.Types.Witness (InstanceOp(..), InstanceStep(..))
@@ -262,17 +262,78 @@ reorderWeakenWithEnv env ops =
         emitQueue [] _ = Nil
         emitQueue (q:qs) remaining = Cons q (qs, remaining)
 
+coalesceDelayedGraftWeakenWithEnv :: OmegaNormalizeEnv -> [InstanceOp] -> Either OmegaNormalizeError [InstanceOp]
+coalesceDelayedGraftWeakenWithEnv env = go
+  where
+    canon = canonical env
+
+    opTargets op =
+        case op of
+            OpGraft _ n -> [n]
+            OpWeaken n -> [n]
+            OpMerge n m -> [n, m]
+            OpRaise n -> [n]
+            OpRaiseMerge n m -> [n, m]
+
+    protectedSetFor binder =
+        case Binding.interiorOf (constraint env) (typeRef (canon binder)) of
+            Left _ -> Nothing
+            Right s ->
+                let descendants =
+                        IntSet.fromList
+                            [ getNodeId (canon t)
+                            | key <- IntSet.toList s
+                            , TypeRef t <- [nodeRefFromKey key]
+                            ]
+                in Just (IntSet.insert (getNodeId (canon binder)) descendants)
+
+    touchesProtected protected op =
+        any
+            (\nodeId -> IntSet.member (getNodeId (canon nodeId)) protected)
+            (opTargets op)
+
+    splitDelayedWeaken binder ops =
+        case protectedSetFor binder of
+            Nothing -> Nothing
+            Just protected ->
+                let (prefix, suffix) = break isMatchingWeaken ops
+                    isMatchingWeaken op =
+                        case op of
+                            OpWeaken n -> canon n == canon binder
+                            _ -> False
+                in case suffix of
+                    (OpWeaken _ : rest)
+                        | all (not . touchesProtected protected) prefix -> Just (prefix, rest)
+                    _ -> Nothing
+
+    go [] = Right []
+    go (op : rest) =
+        case op of
+            OpGraft arg binder ->
+                case splitDelayedWeaken binder rest of
+                    Just (middle, restAfterWeaken) -> do
+                        suffix <- go (middle ++ restAfterWeaken)
+                        pure (OpGraft arg binder : OpWeaken (canon binder) : suffix)
+                    Nothing -> do
+                        suffix <- go rest
+                        pure (op : suffix)
+            _ -> do
+                suffix <- go rest
+                pure (op : suffix)
+
 -- | Normalize Ω by enforcing `papers/these-finale-english.txt` conditions
 -- (see `papers/xmlf.txt` conditions (1)–(5)) only.
 normalizeInstanceOpsFull :: OmegaNormalizeEnv -> [InstanceOp] -> Either OmegaNormalizeError [InstanceOp]
 normalizeInstanceOpsFull env ops0 = do
     let ops1 = stripExteriorOps env ops0
     ops2 <- canonicalizeOps ops1
-    ops3 <- coalesceRaiseMergeWithEnv env ops2
+    ops2' <- rejectAmbiguousGraftWeaken ops2
+    ops3 <- coalesceRaiseMergeWithEnv env ops2'
     let ops3' = dropRedundantOps ops3
     ops4 <- checkMergeDirection ops3'
     ops5 <- reorderWeakenWithEnv env ops4
-    let ops6 = dropRedundantOps ops5
+    ops5' <- coalesceDelayedGraftWeakenWithEnv env ops5
+    let ops6 = dropRedundantOps ops5'
     validateNormalizedWitness env ops6
     pure ops6
   where
@@ -287,6 +348,41 @@ normalizeInstanceOpsFull env ops0 = do
             OpRaise n -> OpRaise (canon n)
             OpWeaken n -> OpWeaken (canon n)
             OpRaiseMerge n m -> OpRaiseMerge (canon n) (canon m)
+
+    rejectAmbiguousGraftWeaken ops =
+        case ambiguousBinders of
+            ((binderKey, argSet) : _) ->
+                Left
+                    (AmbiguousGraftWeaken
+                        (NodeId binderKey)
+                        [NodeId argKey | argKey <- IntSet.toList argSet]
+                    )
+            [] -> Right ops
+      where
+        weakenedBinders =
+            IntSet.fromList
+                [ getNodeId n
+                | OpWeaken n <- ops
+                ]
+
+        graftArgsByBinder =
+            foldl' addGraft IntMap.empty ops
+
+        addGraft acc op =
+            case op of
+                OpGraft arg binder
+                    | IntSet.member (getNodeId binder) weakenedBinders ->
+                        IntMap.insertWith IntSet.union
+                            (getNodeId binder)
+                            (IntSet.singleton (getNodeId arg))
+                            acc
+                _ -> acc
+
+        ambiguousBinders =
+            [ (binderKey, argSet)
+            | (binderKey, argSet) <- IntMap.toList graftArgsByBinder
+            , IntSet.size argSet > 1
+            ]
 
     mergeKeyNode nid =
         case IntMap.lookup (getNodeId (canon nid)) (binderArgs env) of

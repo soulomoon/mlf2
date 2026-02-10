@@ -111,6 +111,7 @@ simplifySchemeBindings inlineBaseBounds namedBinders binds ty =
                             canInlineStructured =
                                 not (isBaseBound bound)
                                     && not (isVarBound bound)
+                                    && not isNamedBinder
                         in if not boundMentionsSelf
                             && (canInlineBase || canInlineNonBase || canInlineStructured)
                             then

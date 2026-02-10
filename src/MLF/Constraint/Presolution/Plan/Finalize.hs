@@ -253,13 +253,11 @@ finalizeScheme FinalizeInput{..} =
             | (k, name) <- IntMap.toList subst
             ]
         namedBinderNames =
-            Set.union
-                (Set.fromList
-                    [ name
-                    | (nidInt, name) <- IntMap.toList subst
-                    , IntSet.member nidInt namedUnderGaSetPlan
-                    ])
-                (Set.fromList [ name | (name, Just _) <- bindingsAdjusted ])
+            Set.fromList
+                [ name
+                | (nidInt, name) <- IntMap.toList subst
+                , IntSet.member nidInt namedUnderGaSetPlan
+                ]
         renameVars = cataIx alg
           where
             renameFromSubst v = case lookup v substNames of
