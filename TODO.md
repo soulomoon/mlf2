@@ -128,7 +128,8 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 - [x] Incremental unification inside presolution loop
 - [x] Tests: `test/PresolutionSpec.hs` covers identity, instantiate, forall-intro, and compose (instantiate→forall)
 - [ ] `A1 (P1)` Strict Ω normalization only (remove permissive fallback path in production).
-- [ ] `A6 (P2)` Add thesis-anchored witness normalization/translatability regression fixtures.
+- [x] `A6 (P2)` Add thesis-anchored witness normalization/translatability regression fixtures.
+  - 2026-02-10: added strict transitive-flex `OpRaise` regression fixtures in `test/Presolution/WitnessSpec.hs` and `test/Presolution/MergeEmissionSpec.hs` (direct validator + `normalizeEdgeWitnessesM` path).
 
 ## Phase 5 — Unification Solver ✅
 

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+* Witness normalization/translatability: enforced Fig. 15.3.4 transitive-flex guard for non-rigid `OpRaise` in `WitnessValidation`; added dedicated direct + presolution-path regressions, and updated merge-emission coverage to assert fast failure on non-translatable escaped bounded-binder raises.
 * BUG-2026-02-06-002: completed thesis-exact upstream graft/weaken closure (witness canonicalization + Ω localization + named-bound simplification guard + let-lambda fallback harmonization); strict bug matrix and full gate are green (`cabal build all && cabal test` => `604 examples, 0 failures`).
 * BUG-2026-02-08-004: fixed nested let + annotated-lambda checked-authoritative path in `MLF.Elab.Elaborate` by guarding `InstApp` against non-∀ function terms and by extending polymorphic-argument instantiation inference to typed post-instantiation function arrows; dedicated `PipelineSpec` sentinel now asserts thesis-green `Int` for unchecked + checked pipeline.
 * Witness normalization: condition-(5) delayed-weaken ordering now reports a dedicated `DelayedWeakenViolation` instead of overloading `OpUnderRigid`; added focused witness-spec regressions for delayed-weaken violation and delayed graft/weaken coalescing behavior.

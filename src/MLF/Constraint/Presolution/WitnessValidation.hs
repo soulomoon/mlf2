@@ -151,9 +151,9 @@ validateNormalizedWitness env ops = do
             OpRaise n ->
                 if isRigid n
                     then Right ()
-                    else if inInterior n
-                        then Right ()
-                        else Left (RaiseNotUnderRoot (canon n) rootC)
+                    else if not (inInterior n)
+                        then Left (RaiseNotUnderRoot (canon n) rootC)
+                        else requireTransitivelyFlexBoundToRoot op n
             OpRaiseMerge n m -> do
                 if isRigid n
                     then Right ()

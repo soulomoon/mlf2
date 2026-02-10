@@ -776,6 +776,88 @@ spec = do
                 validateNormalizedWitness env [op]
                     `shouldBe` Left (NotTransitivelyFlexBound op n root)
 
+            it "rejects OpRaise when target is not transitively flexibly bound to the root" $ do
+                let root = NodeId 0
+                    m = NodeId 1
+                    parent = NodeId 2
+                    n = NodeId 3
+                    c =
+                        rootedConstraint emptyConstraint
+                            { cNodes = nodeMapFromList
+                                    [ (getNodeId root, TyArrow root m parent)
+                                    , (getNodeId m, TyVar { tnId = m, tnBound = Nothing })
+                                    , (getNodeId parent, TyForall parent n)
+                                    , (getNodeId n, TyVar { tnId = n, tnBound = Nothing })
+                                    ]
+                            , cBindParents =
+                                bindParentsFromPairs
+                                    [ (m, root, BindFlex)
+                                    , (parent, root, BindRigid)
+                                    , (n, parent, BindFlex)
+                                    ]
+                            }
+                    env = mkNormalizeEnv c root (IntSet.fromList [getNodeId m, getNodeId parent, getNodeId n])
+                    op = OpRaise n
+                validateNormalizedWitness env [op]
+                    `shouldBe` Left (NotTransitivelyFlexBound op n root)
+
+            it "returns WitnessNormalizationError for OpRaise not transitively flex-bound via presolution" $ do
+                let root = NodeId 0
+                    m = NodeId 1
+                    parent = NodeId 2
+                    n = NodeId 3
+                    edgeId = 0
+                    nodes = nodeMapFromList
+                            [ (getNodeId root, TyArrow root m parent)
+                            , (getNodeId m, TyVar { tnId = m, tnBound = Nothing })
+                            , (getNodeId parent, TyForall parent n)
+                            , (getNodeId n, TyVar { tnId = n, tnBound = Nothing })
+                            ]
+                    bindParents =
+                        bindParentsFromPairs
+                            [ (m, root, BindFlex)
+                            , (parent, root, BindRigid)
+                            , (n, parent, BindFlex)
+                            ]
+                    constraint = rootedConstraint $ emptyConstraint
+                            { cNodes = nodes
+                            , cBindParents = bindParents
+                            }
+                    badOp = OpRaise n
+                    edgeWitness = EdgeWitness
+                            { ewEdgeId = EdgeId edgeId
+                            , ewLeft = m
+                            , ewRight = n
+                            , ewRoot = root
+                            , ewSteps = [StepOmega badOp]
+                            , ewWitness = InstanceWitness [badOp]
+                            }
+                    edgeTrace = EdgeTrace
+                            { etRoot = root
+                            , etBinderArgs = []
+                            , etInterior = InteriorNodes (IntSet.fromList [getNodeId m, getNodeId parent, getNodeId n])
+                            , etCopyMap = mempty
+                            }
+                    st0 = PresolutionState
+                            { psConstraint = constraint
+                            , psPresolution = Presolution IntMap.empty
+                            , psUnionFind = IntMap.empty
+                            , psNextNodeId = 4
+                            , psPendingWeakens = IntSet.empty
+                            , psBinderCache = IntMap.empty
+                            , psEdgeExpansions = IntMap.empty
+                            , psEdgeWitnesses = IntMap.fromList [(edgeId, edgeWitness)]
+                            , psEdgeTraces = IntMap.fromList [(edgeId, edgeTrace)]
+                            }
+                case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
+                    Left (WitnessNormalizationError (EdgeId eid) err) -> do
+                        eid `shouldBe` edgeId
+                        err `shouldBe` NotTransitivelyFlexBound badOp n root
+                    Left other ->
+                        expectationFailure $ "Expected WitnessNormalizationError NotTransitivelyFlexBound, got: " ++ show other
+                    Right _ ->
+                        expectationFailure "Expected WitnessNormalizationError for OpRaise non-transitive-flex case"
+
             it "returns WitnessNormalizationError for op outside interior via presolution" $ do
                 -- Set up a constraint with an edge whose witness contains an op
                 -- targeting a node outside the expansion interior I(r).

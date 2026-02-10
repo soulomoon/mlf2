@@ -42,5 +42,6 @@
   - [ ] 4.1 Ensure presolution can emit/normalize Raise operations on interior nodes where needed (or document deviation with rationale).
     - Files: `src/MLF/Constraint/Presolution/*`, `src/MLF/Constraint/Types/Witness.hs`
     - Tests: add witness normalization fixtures that include Raise/Weaken/Merge/Graft/RaiseMerge.
+    - Current status (2026-02-10): strict transitive-flex guard for `OpRaise` is implemented in normalized witness validation; regressions added in `test/Presolution/WitnessSpec.hs` and `test/Presolution/MergeEmissionSpec.hs` for direct + presolution-path failure.
     - _Requirements: 3.3_
     - **Verification:** `cabal test`
