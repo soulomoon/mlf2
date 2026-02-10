@@ -11,6 +11,7 @@ import qualified Presolution.ExpansionSpec
 import qualified Presolution.InstantiateSpec
 import qualified Presolution.MergeEmissionSpec
 import qualified Presolution.RaiseSpec
+import qualified Presolution.EdgePlannerSpec
 import qualified Presolution.WitnessSpec
 import qualified SolveSpec
 import qualified PipelineSpec
@@ -38,6 +39,7 @@ main = hspec $ do
     Presolution.InstantiateSpec.spec
     Presolution.EdgeTraceSpec.spec
     Presolution.MergeEmissionSpec.spec
+    Presolution.EdgePlannerSpec.spec
     Presolution.WitnessSpec.spec
     Presolution.ExpansionSpec.spec
     Presolution.RaiseSpec.spec
