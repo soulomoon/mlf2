@@ -115,6 +115,7 @@ library mlf2-internal
                       MLF.Constraint.Presolution.Driver,
                       MLF.Constraint.Presolution.EdgeUnify,
                       MLF.Constraint.Presolution.EdgeProcessing,
+                      MLF.Constraint.Presolution.EdgeProcessing.Solve,
                       MLF.Constraint.Presolution.EdgeProcessing.Unify,
                       MLF.Constraint.Presolution.EdgeProcessing.Witness,
                       MLF.Constraint.Presolution.Expansion,

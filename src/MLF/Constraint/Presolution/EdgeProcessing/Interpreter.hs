@@ -38,7 +38,7 @@ import MLF.Constraint.Presolution.EdgeProcessing.Witness (
     buildEdgeWitness,
     edgeWitnessPlan
     )
-import MLF.Constraint.Presolution.EdgeProcessing (
+import MLF.Constraint.Presolution.EdgeProcessing.Solve (
     unifyStructure,
     solveNonExpInstantiation,
     recordEdgeWitness,

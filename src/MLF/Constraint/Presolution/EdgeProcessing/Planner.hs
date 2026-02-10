@@ -19,12 +19,14 @@ module MLF.Constraint.Presolution.EdgeProcessing.Planner (
     planEdge,
 ) where
 
+import Control.Monad.Reader (ask)
 import qualified Data.IntSet as IntSet
 
+import MLF.Util.Trace (traceBindingM)
 import MLF.Constraint.Types
 import MLF.Constraint.Presolution.Base (PresolutionM)
 import MLF.Constraint.Presolution.StateAccess (getConstraintAndCanonical)
-import MLF.Constraint.Presolution.Ops (getNode, getCanonicalNode)
+import MLF.Constraint.Presolution.Ops (findRoot, getNode, getCanonicalNode)
 import MLF.Constraint.Presolution.EdgeProcessing.Plan
 
 -- | Classify an instantiation edge into a resolved plan.
@@ -34,6 +36,7 @@ import MLF.Constraint.Presolution.EdgeProcessing.Plan
 -- selects the execution mode based on the left node shape.
 planEdge :: InstEdge -> PresolutionM (EdgePlan 'StageResolved)
 planEdge edge = do
+    cfg <- ask
     (constraint0, canonical) <- getConstraintAndCanonical
     let edgeId = instEdgeId edge
         n1Id = instLeft edge
@@ -49,6 +52,38 @@ planEdge edge = do
             TyExp {} -> ExpansionMode
             _        -> LegacyDirectMode
 
+    traceBindingM cfg
+        ( "processInstEdge: edge="
+            ++ show edgeId
+            ++ " left="
+            ++ show n1Id
+            ++ " ("
+            ++ nodeTag n1Raw
+            ++ ") right="
+            ++ show n2Id
+            ++ " ("
+            ++ nodeTag n2
+            ++ ") letEdge="
+            ++ show allowTrivial
+        )
+    case (n1Raw, n2) of
+        (TyExp{}, TyArrow{ tnDom = dom, tnCod = cod }) -> do
+            domR <- findRoot dom
+            codR <- findRoot cod
+            traceBindingM cfg
+                ( "processInstEdge: edge="
+                    ++ show edgeId
+                    ++ " target arrow dom="
+                    ++ show dom
+                    ++ " domRoot="
+                    ++ show domR
+                    ++ " cod="
+                    ++ show cod
+                    ++ " codRoot="
+                    ++ show codR
+                )
+        _ -> pure ()
+
     pure EdgePlanResolved
         { eprEdge = edge
         , eprLeftNode = n1Raw
@@ -59,3 +94,13 @@ planEdge edge = do
         , eprAllowTrivial = allowTrivial
         , eprSuppressWeaken = suppressWeaken
         }
+
+nodeTag :: TyNode -> String
+nodeTag = \case
+    TyVar{} -> "TyVar"
+    TyBottom{} -> "TyBottom"
+    TyArrow{} -> "TyArrow"
+    TyBase{} -> "TyBase"
+    TyCon{} -> "TyCon"
+    TyForall{} -> "TyForall"
+    TyExp{} -> "TyExp"
