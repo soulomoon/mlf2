@@ -1382,3 +1382,29 @@
 - Effect:
   - `BUG-2026-02-06-002` strict/sentinel/thesis matcher remains fully green.
   - full-suite non-target failures in WitnessSpec/ElaborationSpec remain (5 total), indicating additional independent blockers.
+
+## 2026-02-10 closure run
+
+- Implemented `WitnessCanon` upstream fixes:
+  - `rejectAmbiguousGraftWeaken`
+  - `coalesceDelayedGraftWeakenWithEnv`
+- Refactored `Phi.Omega`:
+  - removed delayed non-local `OpGraft` look-ahead path,
+  - added local `rescueBottomAtBinder` in adjacent `OpGraft+OpWeaken` path.
+- Tightened named structured-bound simplification behavior:
+  - `simplifySchemeBindings` now blocks structured-bound inlining for named binders.
+- Harmonized ALet fallback behavior in `Elaborate`:
+  - added lam fallback branch using env-aware RHS type,
+  - when lam fallback replaces scheme, use `subst = IntMap.empty`.
+
+### Verification commands
+- `cabal test mlf2-test --test-options='--match "BUG-2026-02-06-002 strict target matrix"' --test-show-details=direct`
+- `cabal test mlf2-test --test-options='--match "rejects ambiguous graft-weaken mapping after canonicalization"' --test-show-details=direct`
+- `cabal test mlf2-test --test-options='--match "elaborates let with RHS term annotation (coercion) and flexible bound (Int -> Int)"' --test-show-details=direct`
+- `cabal test mlf2-test --test-options='--match "elaborates let with RHS term annotation (coercion) and polymorphic bound (Rank-2ish)"' --test-show-details=direct`
+- `cabal test mlf2-test --test-options='--match "generalizeAt respects binder bound dependencies (a ≺ b if b’s bound mentions a)"' --test-show-details=direct`
+- `cabal test mlf2-test --test-options='--match "explicit forall annotation preserves foralls in bounds"' --test-show-details=direct`
+- `cabal build all && cabal test`
+
+### Final result
+- Full gate PASS: `601 examples, 0 failures`.

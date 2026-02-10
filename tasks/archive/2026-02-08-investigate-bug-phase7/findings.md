@@ -945,3 +945,14 @@
 
 - Narrowing fallback to app + unbounded-scheme + Int-codomain preserves BUG-2026-02-06-002 green status, but does not resolve broader pre-existing/full-suite blockers.
 - Conclusion: BUG-2026-02-06-002 matrix is now strict-green; remaining work should shift to non-target regressions surfaced by full-gate verification.
+
+### 2026-02-10 closure finding — final root-cause split and stable fix set
+
+- The remaining full-suite blockers were split into two independent classes:
+  1. witness-shape/Ω locality mismatch (`OpGraft` delayed-weaken reliance), and
+  2. over-aggressive scheme simplification for named structured bounds.
+- Stable closure required fixing both layers:
+  - **Upstream witness normalization** must deliver adjacent/safe graft-weaken shape; Ω should remain local and deterministic.
+  - **Scheme normalization** must preserve explicit/named bound structure (no forced structured-bound inline for named binders).
+- After these were in place, a final let-lambda scheme mismatch was resolved by using a lambda fallback branch that resets substitution (`IntMap.empty`) when replacing scheme from env-aware RHS typing.
+- Net effect: bug matrix stays green while all non-target regressions are cleared.

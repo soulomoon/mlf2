@@ -458,3 +458,25 @@ Phase 7 (execution pending)
 - Narrowed ALet fallback eligibility (app RHS + unbounded scheme + Int codomain) to keep bug-target behavior focused.
 - BUG-2026-02-06-002 matcher remains green after narrowing.
 - Full-suite still reports 5 non-target failures; proceed with separate remediation track.
+
+## 2026-02-10 — closure checkpoint (H16 upstream + elaboration harmonization)
+
+- Phase 7 execution: **complete**.
+- Implemented and retained:
+  - upstream witness normalization hardening in `WitnessCanon`:
+    - canonical ambiguous graft/weaken rejection,
+    - delayed `OpGraft ... OpWeaken` coalescing with binder/descendant safety.
+  - Ω translation localization in `Phi.Omega`:
+    - removed non-local delayed-weaken look-ahead,
+    - scoped `TBottom -> TVar` rescue to adjacent `OpGraft+OpWeaken` path only.
+  - scheme finalization normalization guard:
+    - prevent structural-bound inlining for named binders in `simplifySchemeBindings`.
+  - elaboration let fallback harmonization:
+    - app fallback keeps prior behavior,
+    - lambda fallback uses env-aware RHS recheck with `subst = IntMap.empty` for replacement schemes.
+- Final verification:
+  - `BUG-2026-02-06-002 strict target matrix`: PASS (`4/4`).
+  - previously failing Phase 6 bounded/generalize/forall-bound cases: PASS.
+  - `cabal build all && cabal test`: PASS (`601 examples, 0 failures`).
+- Close-out decision:
+  - task is complete and ready to archive.

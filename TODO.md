@@ -4,6 +4,18 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 7 Verification Gate — 2026-02-10 (BUG-2026-02-06-002 closure)
+
+- Command: `cabal build all && cabal test`
+- Gate status: **Passed** (`601 examples, 0 failures`)
+- Closure summary:
+  - Upstream witness-shape correction finalized in `MLF.Constraint.Presolution.WitnessCanon` (ambiguous graft/weaken rejection + delayed pair coalescing).
+  - Ω translation made local in `MLF.Elab.Phi.Omega` (no delayed look-ahead; adjacent graft/weaken rescue only).
+  - Named structured-bound preservation corrected in `MLF.Constraint.Presolution.Plan.Normalize`.
+  - ALet fallback harmonized in `MLF.Elab.Elaborate` (lam replacement schemes use `IntMap.empty` substitution).
+- Follow-up:
+  - `BUG-2026-02-06-002` moves to resolved tracking (`/Volumes/src/mlf4/Bugs.md`).
+
 ## Task 7 Verification Gate — 2026-02-08
 
 - Command: `cabal build all && cabal test`

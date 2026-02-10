@@ -318,3 +318,20 @@ This repo’s design is primarily informed by:
   - `BUG-2026-02-06-002 thesis target`: green (checked + unchecked).
   - focused guards (make-const generalization, redirected let-use polymorphism, H15 non-leak): green.
   - sentinel matrix has been graduated to strict assertions (no pending cases under `BUG-2026-02-06-002`).
+
+
+## 2026-02-10 BUG-2026-02-06-002 final closure notes
+
+- Witness normalization now enforces thesis-shape upstream for graft/weaken interactions:
+  - canonical ambiguous mapping rejects multiple canonical graft args for one weakened binder,
+  - delayed graft/weaken pairs are coalesced safely before Ω translation.
+- Ω translation is local again:
+  - standalone `OpGraft` no longer performs delayed non-local weaken scan,
+  - binder `TBottom` rescue is scoped to adjacent `OpGraft+OpWeaken` only.
+- Scheme simplification preserves named structured bounds (`simplifySchemeBindings` blocks structured-bound inline for named binders), preventing Phase 6 dependency/bound erasure regressions.
+- ALet fallback now has two scoped branches:
+  - existing app/unbounded/Int-codomain path,
+  - lambda replacement path with env-aware RHS typing and `subst = IntMap.empty` when replacing the scheme.
+- Verification:
+  - `BUG-2026-02-06-002 strict target matrix`: PASS (`4/4`)
+  - full gate: `cabal build all && cabal test` => PASS (`601 examples, 0 failures`)
