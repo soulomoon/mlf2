@@ -233,6 +233,17 @@ Progress (2026-02-08, Group 1): duplicated binding-core helpers are now single-s
 - [ ] Visualization of constraint graph (Graphviz / DOT)
 - [ ] REPL that prints the inferred type and the elaborated xMLF term
 
+## Active master refactor plan — 2026-02-10
+
+- [ ] Execute the master 4-phase typed two-pass edge DSL plan:
+  - Plan: `docs/plans/2026-02-10-master-4-phase-typed-two-pass-edge-dsl-implementation-plan.md`
+  - Task folder: `tasks/todo/2026-02-10-master-4-phase-typed-two-pass-edge-dsl/`
+  - Scope highlights:
+    - Enforce Phase-2 paper-shaped residual instantiation edges (`TyExp <= τ`).
+    - Add Phase-4 fail-fast assertion on non-`TyExp` left inst edges.
+    - Introduce typed two-pass planner/interpreter for edge processing.
+    - Add matrix regressions and full verification (`cabal build all && cabal test`).
+
 ## Active bug closures
 
 - [x] `BUG-2026-02-06-002`: graduate `BUG-2026-02-06-002 sentinel matrix` from `pendingWith` to strict assertions now that strict/thesis target matrix is green under retained C18/C21/C21.1 behavior.
