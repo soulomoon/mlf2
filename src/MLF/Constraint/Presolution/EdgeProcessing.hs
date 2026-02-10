@@ -11,7 +11,13 @@ expansions for expansion variables.
 -}
 module MLF.Constraint.Presolution.EdgeProcessing (
     runPresolutionLoop,
-    processInstEdge
+    processInstEdge,
+    -- * Internals exported for interpreter
+    unifyStructure,
+    solveNonExpInstantiation,
+    recordEdgeWitness,
+    recordEdgeTrace,
+    canonicalizeEdgeTraceInteriorsM,
 ) where
 
 import Control.Monad.State
