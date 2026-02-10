@@ -130,6 +130,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 - [ ] `A1 (P1)` Strict Ω normalization only (remove permissive fallback path in production).
 - [x] `A6 (P2)` Add thesis-anchored witness normalization/translatability regression fixtures.
   - 2026-02-10: added strict transitive-flex `OpRaise` regression fixtures in `test/Presolution/WitnessSpec.hs` and `test/Presolution/MergeEmissionSpec.hs` (direct validator + `normalizeEdgeWitnessesM` path).
+  - 2026-02-10: completed Fig. 15.3.4 15-row witness matrix closure (`R-GRAFT-VALID-01`..`R-RAISEMERGE-NORM-15`) with row-labeled tests and green matrix/full gates.
 
 ## Phase 5 — Unification Solver ✅
 
@@ -184,6 +185,7 @@ Based on `papers/these-finale-english.txt`; see also `papers/xmlf.txt` §1 & §2
 - [x] Integrate quantifier reordering ϕR when `Typ` vs `Typexp` differ (Def. 15.3.4).
 - [x] Enforce translatable-presolution invariants for Φ (explicit `PhiTranslatabilityError` / `PhiInvariantError`; no silent non-spine `OpRaise` fallback).
 - [x] Confirm Ω normalization emits Fig. 15.3.4 operations for current coverage; document the remaining US-004 κσ deviation in `test/ElaborationSpec.hs`.
+  - 2026-02-10: Fig. 15.3.4 witness matrix closure gate is green (`cabal test mlf2-test --test-show-details=direct --test-options='--match R-'`), covering all 15 row IDs.
 - [ ] `A4 (P2)` Refresh paper-faithfulness docs to reflect implemented strict Φ/Σ behavior and list only unresolved deltas.
 
 See `.kiro/specs/paper-faithfulness-remaining-deltas/` for the audit and plan.

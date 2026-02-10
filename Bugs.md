@@ -52,6 +52,34 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 
 ## Resolved
 
+### BUG-2026-02-10-001
+- Status: Resolved
+- Priority: Medium
+- Discovered: 2026-02-10
+- Resolved: 2026-02-10
+- Summary: Fig. 15.3.4 witness normalization/emission closure lacked an explicit 15-row matrix contract with row-id evidence in tests/docs.
+- Reproducer (test command):
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match R-'`
+- Expected:
+  - Explicitly named and executable 15-row matrix coverage for `Graft`/`Weaken`/`Merge`/`Raise`/`RaiseMerge` valid/invalid/norm cases, with deterministic outcomes and green closure gate.
+- Actual (before fix):
+  - Fig. 15.3.4 witness coverage existed but was not fully represented as a row-ID closure matrix (`R-*-*-NN`) and Task 4 remained marked partial/open.
+- Suspected area:
+  - `/Volumes/src/mlf4/test/Presolution/WitnessSpec.hs`
+  - `/Volumes/src/mlf4/test/Presolution/MergeEmissionSpec.hs`
+  - `/Volumes/src/mlf4/.kiro/specs/paper-faithfulness-remaining-deltas/*`
+- Fix:
+  - Added/renamed row-labeled tests covering all 15 matrix rows (`R-GRAFT-VALID-01`..`R-RAISEMERGE-NORM-15`).
+  - Added missing Raise VALID/NORM row assertions with strict expected outcomes.
+  - Updated `.kiro` requirements/tasks status and supporting docs to reflect closure evidence.
+- Regression tests:
+  - `/Volumes/src/mlf4/test/Presolution/WitnessSpec.hs`
+  - `/Volumes/src/mlf4/test/Presolution/MergeEmissionSpec.hs`
+  - Matrix gate: `cabal test mlf2-test --test-show-details=direct --test-options='--match R-'`
+  - Full gate: `cabal build all && cabal test`
+- Thesis impact:
+  - Converts Fig. 15.3.4 witness alignment from partial coverage to explicit, auditable closure contract evidence without introducing behavior deviations.
+
 ### BUG-2026-02-08-006
 - Status: Resolved
 - Priority: High

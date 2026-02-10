@@ -36,7 +36,7 @@ import SpecUtil
 
 spec :: Spec
 spec = describe "Phase 2 — Merge/RaiseMerge emission" $ do
-    it "records Merge when two instantiation metas unify" $ do
+    it "R-MERGE-VALID-07: records Merge when two instantiation metas unify" $ do
         -- TyExp s · (∀@1. a -> b -> a) ≤ (t -> t -> t)
         --
         -- Instantiation introduces fresh metas for a and b. Unifying the instantiated
@@ -120,7 +120,7 @@ spec = describe "Phase 2 — Merge/RaiseMerge emission" $ do
                             )
                             eliminatedBinders
 
-    it "chooses Merge direction by ≺ (m ≺ n) rather than NodeId" $ do
+    it "R-MERGE-NORM-09: chooses Merge direction by ≺ (m ≺ n) rather than NodeId" $ do
         -- TyExp s · (∀@1. a -> b) ≤ (t -> t)
         --
         -- Unifying the instantiated result against the target forces the instantiation
@@ -178,7 +178,7 @@ spec = describe "Phase 2 — Merge/RaiseMerge emission" $ do
                         let InstanceWitness ops = ewWitness ew
                         ops `shouldSatisfy` any wants
 
-    it "fails normalization when escaped bounded-binder Raise is not transitively flex-bound" $ do
+    it "R-RAISE-INVALID-11: fails normalization when escaped bounded-binder Raise is not transitively flex-bound" $ do
         -- TyExp s · (∀(b ⩾ x). b -> b) ≤ (y -> y)
         --
         -- Here `b` is bounded (non-⊥ bound `x`). During edge solving, the
@@ -231,7 +231,7 @@ spec = describe "Phase 2 — Merge/RaiseMerge emission" $ do
             Right _ ->
                 expectationFailure "Expected computePresolution to fail with NotTransitivelyFlexBound"
 
-    it "records RaiseMerge for a live binder when a lower-≺ binder in bs was already eliminated" $ do
+    it "R-RAISEMERGE-VALID-13: records RaiseMerge for a live binder when a lower-≺ binder in bs was already eliminated" $ do
         -- TyExp s · (∀(a ⩾ b) (b ⩾ x). a -> b) ≤ (y -> y)
         --
         -- Base ω execution performs Merge(a, b), eliminating `a` before structural
@@ -300,7 +300,7 @@ spec = describe "Phase 2 — Merge/RaiseMerge emission" $ do
                 ops `shouldSatisfy` elem (OpMerge b y)
                 ops `shouldNotSatisfy` elem (OpMerge a y)
 
-    it "does not record Raise for unbounded binder metas (graft+weaken only)" $ do
+    it "R-WEAKEN-VALID-04: does not record Raise for unbounded binder metas (graft+weaken only)" $ do
         -- TyExp s · (∀b. b -> b) ≤ (y -> y)
         --
         -- Instantiation introduces a fresh meta for `b` at the inner quantifier level.
@@ -440,7 +440,7 @@ spec = describe "Phase 2 — Merge/RaiseMerge emission" $ do
                 -- 2) No UF merge: meta stays distinct from the instantiation argument.
                 meta `shouldNotBe` arg
 
-    it "orders base witness ops as Graft; Merge; Weaken for bounded binders" $ do
+    it "R-GRAFT-VALID-01: orders base witness ops as Graft; Merge; Weaken for bounded binders" $ do
         -- TyExp s · (∀@1. a -> b) ≤ (Int -> Int), with b ⩾ a.
         --
         -- The base witness should:

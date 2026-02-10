@@ -38,10 +38,10 @@
     - _Requirements: 3.2_
     - **Verification:** `cabal test`
 
-- [ ] 4. Align witness normalization with Fig. 15.3.4
-  - [ ] 4.1 Ensure presolution can emit/normalize Raise operations on interior nodes where needed (or document deviation with rationale).
+- [x] 4. Align witness normalization with Fig. 15.3.4
+  - [x] 4.1 Ensure presolution can emit/normalize Raise operations on interior nodes where needed (or document deviation with rationale).
     - Files: `src/MLF/Constraint/Presolution/*`, `src/MLF/Constraint/Types/Witness.hs`
     - Tests: add witness normalization fixtures that include Raise/Weaken/Merge/Graft/RaiseMerge.
-    - Current status (2026-02-10): strict transitive-flex guard for `OpRaise` is implemented in normalized witness validation; regressions added in `test/Presolution/WitnessSpec.hs` and `test/Presolution/MergeEmissionSpec.hs` for direct + presolution-path failure.
+    - Current status (2026-02-10): strict transitive-flex guard for `OpRaise` is implemented in normalized witness validation; Fig. 15.3.4 15-row matrix rows `R-GRAFT-VALID-01`..`R-RAISEMERGE-NORM-15` are explicitly named across `test/Presolution/WitnessSpec.hs` and `test/Presolution/MergeEmissionSpec.hs`; matrix closure gate and full gate are green (`cabal test mlf2-test --test-show-details=direct --test-options='--match R-'`, `cabal build all && cabal test`).
     - _Requirements: 3.3_
     - **Verification:** `cabal test`

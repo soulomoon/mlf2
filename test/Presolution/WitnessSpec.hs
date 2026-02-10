@@ -237,7 +237,7 @@ spec = do
                 normalizeInstanceOpsFull env ops0
                     `shouldBe` Right [OpGraft arg binder, OpWeaken binder, OpMerge n2 n1]
 
-            it "normalizes graft-weaken pairs with canonical binder/arg alignment" $ do
+            it "R-GRAFT-NORM-03: normalizes graft-weaken pairs with canonical binder/arg alignment" $ do
                 let c = mkNormalizeConstraint
                     root = NodeId 0
                     canonicalMap nid =
@@ -371,7 +371,7 @@ spec = do
                         , StepOmega (OpGraft arg2 root)
                         ]
 
-        it "normalizeInstanceStepsFull rejects wrong merge direction" $ do
+        it "R-MERGE-NORM-09: normalizeInstanceStepsFull rejects wrong merge direction" $ do
             let c = mkNormalizeConstraint
                 root = NodeId 0
                 (mLess, nGreater) = orderedPairByPrec c root
@@ -406,7 +406,7 @@ spec = do
                 `shouldBe` Right [OpRaiseMerge n m]
 
         describe "RaiseMerge coalescing (interior aware)" $ do
-            it "coalesces Raise; Merge when the target leaves the interior" $ do
+            it "R-RAISEMERGE-VALID-13: coalesces Raise; Merge when the target leaves the interior" $ do
                 let c = mkNormalizeConstraint
                     root = NodeId 0
                     n = NodeId 2
@@ -462,7 +462,7 @@ spec = do
                 c = rootedConstraint $ emptyConstraint { cNodes = nodes, cBindParents = bindParents }
                 env = mkNormalizeEnv c root (IntSet.fromList [getNodeId parent, getNodeId child, getNodeId sibling])
 
-            it "moves Weaken after descendant ops" $ do
+            it "R-WEAKEN-NORM-06: moves Weaken after descendant ops" $ do
                 let ops0 = [OpWeaken parent, OpGraft child child]
                 reorderWeakenWithEnv env ops0
                     `shouldBe` Right [OpGraft child child, OpWeaken parent]
@@ -513,6 +513,26 @@ spec = do
             normalizeInstanceOpsFull env ops0 `shouldBe` Right ops0
 
         describe "Witness normalization invariants (US-010 regression)" $ do
+            it "R-RAISE-VALID-10: accepts OpRaise for transitively flex-bound interior binder" $ do
+                let c = mkNormalizeConstraint
+                    root = NodeId 0
+                    n = NodeId 2
+                    env = mkNormalizeEnv c root (IntSet.fromList [getNodeId n])
+                validateNormalizedWitness env [OpRaise n]
+                    `shouldBe` Right ()
+
+            it "R-RAISE-NORM-12: normalizes duplicate Raise sequence deterministically" $ do
+                let c = mkNormalizeConstraint
+                    root = NodeId 0
+                    n = NodeId 2
+                    env = mkNormalizeEnv c root (IntSet.fromList [getNodeId n])
+                    ops0 = [OpRaise n, OpRaise n, OpRaise n]
+                case normalizeInstanceOpsFull env ops0 of
+                    Left err -> expectationFailure ("normalization failed: " ++ show err)
+                    Right ops1 -> do
+                        ops1 `shouldBe` [OpRaise n]
+                        normalizeInstanceOpsFull env ops1 `shouldBe` Right ops1
+
             it "OpRaise;OpMerge coalesces to OpRaiseMerge through full pipeline" $ do
                 let c = mkNormalizeConstraint
                     root = NodeId 0
@@ -595,7 +615,7 @@ spec = do
                             , StepOmega (OpGraft arg root)
                             ]
 
-            it "validated witnesses remain valid after idempotent re-normalization" $ do
+            it "R-RAISEMERGE-NORM-15: validated witnesses remain valid after idempotent re-normalization" $ do
                 let c = mkNormalizeConstraint
                     root = NodeId 0
                     n = NodeId 2
@@ -617,7 +637,7 @@ spec = do
                 validateNormalizedWitness env [op]
                     `shouldBe` Left (OpOutsideInterior op)
 
-            it "rejects Graft on non-bottom binder bounds" $ do
+            it "R-GRAFT-INVALID-02: rejects Graft on non-bottom binder bounds" $ do
                 let root = NodeId 0
                     binder = NodeId 1
                     bound = NodeId 2
@@ -642,7 +662,7 @@ spec = do
                 validateNormalizedWitness env [op]
                     `shouldBe` Left (GraftOnNonBottomBound binder bound)
 
-            it "allows Graft on the expansion root (root operation)" $ do
+            it "R-GRAFT-VALID-01: allows Graft on the expansion root (root operation)" $ do
                 let root = NodeId 0
                     arg = NodeId 1
                     c =
@@ -661,7 +681,7 @@ spec = do
                 validateNormalizedWitness env [op]
                     `shouldBe` Right ()
 
-            it "rejects Merge with wrong ≺ direction (condition 2)" $ do
+            it "R-MERGE-INVALID-08: rejects Merge with wrong ≺ direction (condition 2)" $ do
                 let c = mkNormalizeConstraint
                     root = NodeId 0
                     (mLess, nGreater) = orderedPairByPrec c root
@@ -679,7 +699,7 @@ spec = do
                 validateNormalizedWitness env [OpRaise n]
                     `shouldBe` Left (RaiseNotUnderRoot n root)
 
-            it "rejects RaiseMerge when the target stays inside the interior (condition 4)" $ do
+            it "R-RAISEMERGE-INVALID-14: rejects RaiseMerge when the target stays inside the interior (condition 4)" $ do
                 let c = mkNormalizeConstraint
                     root = NodeId 0
                     (mLess, nGreater) = orderedPairByPrec c root
@@ -689,7 +709,7 @@ spec = do
                 validateNormalizedWitness env [op]
                     `shouldBe` Left (RaiseMergeInsideInterior nGreater mLess)
 
-            it "rejects ops below a Weakened binder (condition 5)" $ do
+            it "R-WEAKEN-INVALID-05: rejects ops below a Weakened binder (condition 5)" $ do
                 let root = NodeId 0
                     parent = NodeId 1
                     child = NodeId 2
@@ -801,7 +821,7 @@ spec = do
                 validateNormalizedWitness env [op]
                     `shouldBe` Left (NotTransitivelyFlexBound op n root)
 
-            it "returns WitnessNormalizationError for OpRaise not transitively flex-bound via presolution" $ do
+            it "R-RAISE-INVALID-11: returns WitnessNormalizationError for OpRaise not transitively flex-bound via presolution" $ do
                 let root = NodeId 0
                     m = NodeId 1
                     parent = NodeId 2
