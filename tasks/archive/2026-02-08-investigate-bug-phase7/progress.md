@@ -1407,4 +1407,63 @@
 - `cabal build all && cabal test`
 
 ### Final result
-- Full gate PASS: `601 examples, 0 failures`.
+- Full gate PASS: `603 examples, 0 failures`.
+
+## 2026-02-10 — subagent-driven follow-up (Tasks 1-7 completion)
+
+### Task 1 — thesis-law RED lock-in tests
+- Added new witness-normalization coverage in `test/Presolution/WitnessSpec.hs`:
+  - `flags delayed-weakening violations when later ops touch strict descendants`
+  - `coalesces delayed graft-weaken pairs when middle ops are binder-disjoint`
+- Verification:
+  - `cabal test mlf2-test --test-options='--match "Phase 3 — Witness normalization"' --test-show-details=direct`
+  - result: PASS after fixture correction (`48 examples, 0 failures`).
+
+### Task 2 — explicit delayed-weaken validation error
+- Added `DelayedWeakenViolation NodeId NodeId` to `OmegaNormalizeError` in:
+  - `src/MLF/Constraint/Presolution/WitnessValidation.hs`
+- Updated weaken-order validation to return:
+  - `Left (DelayedWeakenViolation weakenedBinder offendingNode)`
+  instead of overloading `OpUnderRigid`.
+- Updated assertions in `test/Presolution/WitnessSpec.hs` condition-5 tests.
+- Verification:
+  - witness normalization/validation block: PASS
+  - `BUG-2026-02-06-002` matcher: PASS (`10 examples, 0 failures`).
+
+### Task 3 — upstream delayed pair normalization
+- Confirmed retained upstream implementation in `src/MLF/Constraint/Presolution/WitnessCanon.hs` is active and tested:
+  - `coalesceDelayedGraftWeakenWithEnv`
+  - integrated in `normalizeInstanceOpsFull` before final validation.
+- Additional quality cleanup:
+  - removed redundant `foldl'` import warning in `WitnessCanon`.
+
+### Task 4/5 — Ω local translation cleanup / rescue scoping
+- Confirmed retained Ω behavior aligns with plan goals:
+  - no non-local delayed-weaken look-ahead in standalone `OpGraft` path,
+  - local adjacent `OpGraft+OpWeaken` path performs binder-scoped rescue (`rescueBottomAtBinder`).
+- Verified focused guards remain green:
+  - `generalizes reused constructors via make const`: PASS
+  - `redirected let-use sites keep polymorphic schemes`: PASS
+  - `does not leak solved-node names in make let mismatch`: PASS
+
+### Task 6 — strict bug matrix + thesis target
+- Re-ran bug-target suites:
+  - `BUG-2026-02-06-002 strict target matrix`: PASS (`4/4`)
+  - `BUG-2026-02-06-002 thesis target`: PASS (`2/2`)
+  - full BUG matcher: PASS (`10 examples, 0 failures`)
+
+### Task 7 — final verification
+- Full gate run:
+  - `cabal build all && cabal test`
+  - result: PASS (`603 examples, 0 failures`).
+
+### Workspace state
+- Retained source changes from this follow-up:
+  - `src/MLF/Constraint/Presolution/WitnessValidation.hs`
+    - added `DelayedWeakenViolation`
+    - condition-5 check now reports delayed-weaken violation explicitly.
+  - `src/MLF/Constraint/Presolution/WitnessCanon.hs`
+    - removed redundant `foldl'` import (warning cleanup).
+  - `test/Presolution/WitnessSpec.hs`
+    - added delayed-weakening + delayed graft/weaken coalescing coverage,
+    - updated condition-5 expectations to `DelayedWeakenViolation`.

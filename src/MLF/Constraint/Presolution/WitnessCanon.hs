@@ -16,7 +16,7 @@ module MLF.Constraint.Presolution.WitnessCanon (
 import Data.Functor.Foldable (ListF(..), ana, cata)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import Data.List (foldl', partition, sortBy)
+import Data.List (partition, sortBy)
 
 import MLF.Constraint.Types.Graph (NodeId(..), NodeRef(..), getNodeId, nodeRefFromKey, typeRef)
 import MLF.Constraint.Types.Witness (InstanceOp(..), InstanceStep(..))

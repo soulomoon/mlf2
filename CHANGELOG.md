@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-* BUG-2026-02-06-002: completed thesis-exact upstream graft/weaken closure (witness canonicalization + Ω localization + named-bound simplification guard + let-lambda fallback harmonization); strict bug matrix and full gate are green (`cabal build all && cabal test` => `601 examples, 0 failures`).
+* BUG-2026-02-06-002: completed thesis-exact upstream graft/weaken closure (witness canonicalization + Ω localization + named-bound simplification guard + let-lambda fallback harmonization); strict bug matrix and full gate are green (`cabal build all && cabal test` => `603 examples, 0 failures`).
+* Witness normalization: condition-(5) delayed-weaken ordering now reports a dedicated `DelayedWeakenViolation` instead of overloading `OpUnderRigid`; added focused witness-spec regressions for delayed-weaken violation and delayed graft/weaken coalescing behavior.
 * BUG-2026-02-06-002: retained C18/C21/C21.1 elaboration-path fixes (`Phi.Omega` delayed graft/weaken handling + `Elaborate` let-scheme/app-inst repair), graduated the 4-case sentinel matrix to strict assertions, and brought the full `BUG-2026-02-06-002` matcher to green (`10 examples, 0 failures`).
 * Elaboration/typecheck: fixed H15 lambda-parameter source selection in `MLF.Elab.Elaborate` so unannotated nested lambdas no longer leak solved-node names (e.g. `t23`) into let-RHS types; added `PipelineSpec` regression `does not leak solved-node names in make let mismatch`.
 * Planning/docs: selected Option 1 (upstream witness-shape correction) for `BUG-2026-02-06-002`, added design/execution plans under `docs/plans/2026-02-09-*witness-shape-correction*`, and kept the 4-case bug sentinel matrix explicitly pending until strict closure tests are green.

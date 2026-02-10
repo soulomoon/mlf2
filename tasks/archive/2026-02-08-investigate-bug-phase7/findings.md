@@ -956,3 +956,16 @@
   - **Scheme normalization** must preserve explicit/named bound structure (no forced structured-bound inline for named binders).
 - After these were in place, a final let-lambda scheme mismatch was resolved by using a lambda fallback branch that resets substitution (`IntMap.empty`) when replacing scheme from env-aware RHS typing.
 - Net effect: bug matrix stays green while all non-target regressions are cleared.
+
+### 2026-02-10 subagent-driven follow-up finding — thesis delayed-weakening clarity
+
+- Condition (5) validation for delayed weakenings now has an explicit error surface:
+  - `DelayedWeakenViolation weakenedBinder offendingNode`.
+- Why this matters:
+  - previous `OpUnderRigid` overloading conflated rigid-path failures with delayed-weaken ordering failures;
+  - explicit constructor makes witness diagnostics and test intent match thesis Definition 11.5.2 semantics.
+- Added/updated regression evidence:
+  - `flags delayed-weakening violations when later ops touch strict descendants`.
+  - condition-5 tests now assert `DelayedWeakenViolation parent child`.
+- Additional quality note:
+  - removed redundant `foldl'` import in `WitnessCanon` to keep warning-free build status.

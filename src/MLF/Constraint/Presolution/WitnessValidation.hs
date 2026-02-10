@@ -42,6 +42,7 @@ data OmegaNormalizeError
     | RaiseMergeInsideInterior NodeId NodeId
     | GraftOnNonBottomBound NodeId NodeId
     | OpUnderRigid NodeId
+    | DelayedWeakenViolation NodeId NodeId
     | MissingOrderKey NodeId
     | RigidOperationInvalid InstanceOp NodeId
     | RigidOperandMismatch InstanceOp NodeId NodeId
@@ -202,5 +203,5 @@ validateNormalizedWitness env ops = do
                 desc <- descendantsOf n
                 case firstOffender desc rest of
                     Nothing -> checkWeakenOrdering rest
-                    Just offender -> Left (OpUnderRigid offender)
+                    Just offender -> Left (DelayedWeakenViolation (canon n) offender)
             _ -> checkWeakenOrdering rest

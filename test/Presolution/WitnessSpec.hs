@@ -197,6 +197,16 @@ spec = do
                         Nothing -> expectationFailure "No witness found for Edge 0"
 
     describe "Phase 3 — Witness normalization" $ do
+        it "flags delayed-weakening violations when later ops touch strict descendants" $ do
+            let c = mkNormalizeConstraint
+                root = NodeId 0
+                child = NodeId 1
+                arg = NodeId 10
+                env = mkNormalizeEnv c root (IntSet.fromList [getNodeId root, getNodeId child])
+                ops0 = [OpWeaken root, OpGraft arg child]
+                isLeftResult = either (const True) (const False)
+            validateNormalizedWitness env ops0 `shouldSatisfy` isLeftResult
+
         it "pushes Weaken after ops on strict descendants" $ do
             let c = mkNormalizeConstraint
                 root = NodeId 0
@@ -216,6 +226,17 @@ spec = do
             normalizeInstanceOpsFull env ops0 `shouldBe` Right [OpWeaken n, OpGraft arg n]
 
         describe "graft-weaken canonical alignment (H16 upstream target)" $ do
+            it "coalesces delayed graft-weaken pairs when middle ops are binder-disjoint" $ do
+                let c = mkNormalizeConstraint
+                    root = NodeId 0
+                    binder = NodeId 1
+                    arg = NodeId 2
+                    (n1, n2) = orderedPairByPrec c root
+                    env = mkNormalizeEnv c root (IntSet.fromList [getNodeId binder, getNodeId n1, getNodeId n2])
+                    ops0 = [OpGraft arg binder, OpMerge n2 n1, OpWeaken binder]
+                normalizeInstanceOpsFull env ops0
+                    `shouldBe` Right [OpGraft arg binder, OpWeaken binder, OpMerge n2 n1]
+
             it "normalizes graft-weaken pairs with canonical binder/arg alignment" $ do
                 let c = mkNormalizeConstraint
                     root = NodeId 0
@@ -686,7 +707,7 @@ spec = do
                     env = mkNormalizeEnv c root (IntSet.fromList [getNodeId parent, getNodeId child])
                     ops = [OpWeaken parent, OpGraft child child]
                 validateNormalizedWitness env ops
-                    `shouldBe` Left (OpUnderRigid child)
+                    `shouldBe` Left (DelayedWeakenViolation parent child)
 
             it "rejects ops below a Weakened binder when merge touches a descendant RHS" $ do
                 let root = NodeId 0
@@ -706,7 +727,7 @@ spec = do
                     env = mkNormalizeEnv c root (IntSet.fromList [getNodeId parent, getNodeId child])
                     ops = [OpWeaken parent, OpMerge parent child]
                 validateNormalizedWitness env ops
-                    `shouldBe` Left (OpUnderRigid child)
+                    `shouldBe` Left (DelayedWeakenViolation parent child)
 
             it "rejects Merge when only the non-operated endpoint is rigid" $ do
                 let root = NodeId 0

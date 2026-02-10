@@ -477,6 +477,23 @@ Phase 7 (execution pending)
 - Final verification:
   - `BUG-2026-02-06-002 strict target matrix`: PASS (`4/4`).
   - previously failing Phase 6 bounded/generalize/forall-bound cases: PASS.
-  - `cabal build all && cabal test`: PASS (`601 examples, 0 failures`).
+  - `cabal build all && cabal test`: PASS (`603 examples, 0 failures`).
 - Close-out decision:
   - task is complete and ready to archive.
+
+## 2026-02-10 — subagent-driven completion addendum
+
+- Additional thesis-exact hardening completed post-archive move:
+  - `OmegaNormalizeError` now includes `DelayedWeakenViolation NodeId NodeId`.
+  - `validateNormalizedWitness` condition-5 failure now reports delayed-weaken violations explicitly, instead of overloading `OpUnderRigid`.
+  - witness regression coverage extended for delayed weaken ordering and delayed graft/weaken coalescing.
+
+- Verification status:
+  - `Phase 3 — Witness normalization`: PASS
+  - `BUG-2026-02-06-002` matcher: PASS (`10 examples, 0 failures`)
+  - full gate: `cabal build all && cabal test` PASS (`603 examples, 0 failures`)
+
+- Final status:
+  - all planned tasks complete,
+  - no open blockers,
+  - archive state remains valid and up to date.

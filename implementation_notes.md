@@ -334,4 +334,13 @@ This repo’s design is primarily informed by:
   - lambda replacement path with env-aware RHS typing and `subst = IntMap.empty` when replacing the scheme.
 - Verification:
   - `BUG-2026-02-06-002 strict target matrix`: PASS (`4/4`)
-  - full gate: `cabal build all && cabal test` => PASS (`601 examples, 0 failures`)
+  - full gate: `cabal build all && cabal test` => PASS (`603 examples, 0 failures`)
+
+## 2026-02-10 delayed-weakening diagnostics alignment
+
+- Condition (5) (`delayed weakenings`, thesis Definition 11.5.2 in `papers/these-finale-english.txt`) is now surfaced explicitly in witness validation errors:
+  - `OmegaNormalizeError` adds `DelayedWeakenViolation weakenedBinder offendingNode`.
+- Previous behavior reused `OpUnderRigid` for this case, which conflated two independent failure modes:
+  - rigid-path interior failures, and
+  - delayed-weaken ordering failures.
+- The explicit constructor keeps normalization failure reporting paper-faithful and improves targeted regression assertions in `test/Presolution/WitnessSpec.hs`.
