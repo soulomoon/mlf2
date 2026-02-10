@@ -7,7 +7,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 ## Task 7 Verification Gate — 2026-02-10 (BUG-2026-02-06-002 closure)
 
 - Command: `cabal build all && cabal test`
-- Gate status: **Passed** (`603 examples, 0 failures`)
+- Gate status: **Passed** (`604 examples, 0 failures`)
 - Closure summary:
   - Upstream witness-shape correction finalized in `MLF.Constraint.Presolution.WitnessCanon` (ambiguous graft/weaken rejection + delayed pair coalescing).
   - Ω translation made local in `MLF.Elab.Phi.Omega` (no delayed look-ahead; adjacent graft/weaken rescue only).
@@ -15,6 +15,17 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - ALet fallback harmonized in `MLF.Elab.Elaborate` (lam replacement schemes use `IntMap.empty` substitution).
 - Follow-up:
   - `BUG-2026-02-06-002` moves to resolved tracking (`/Volumes/src/mlf4/Bugs.md`).
+
+## Task 8 Verification Gate — 2026-02-10 (BUG-2026-02-08-004 closure)
+
+- Command: `cabal build all && cabal test`
+- Gate status: **Passed** (`604 examples, 0 failures`)
+- Closure summary:
+  - Dedicated `BUG-2026-02-08-004` sentinel in `test/PipelineSpec.hs` now asserts thesis-expected success (`Int`) in both unchecked and checked pipelines.
+  - `MLF.Elab.Elaborate` `AApp` now suppresses witness-derived `InstApp` when the elaborated function term is not `∀`-typed, preventing invalid `InstElim` chains on monomorphic arrows.
+  - Polymorphic argument-instantiation inference now also runs for variable arguments when the (possibly instantiated) function term typechecks to an arrow, preserving κσ intent for annotated lambda parameters.
+- Follow-up:
+  - `BUG-2026-02-08-004` moved to **Resolved** in `/Volumes/src/mlf4/Bugs.md`.
 
 ## Task 7 Verification Gate — 2026-02-08
 

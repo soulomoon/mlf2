@@ -34,7 +34,7 @@
     - Files: `src/MLF/Elab/Phi/Omega.hs`
     - Tests: confirm error surfaced for invalid witness.
     - Current status: `OpRaise` non-spine fallback branches were removed; root/non-binder graft handling is explicit; non-translatable paths fail via `PhiTranslatabilityError`.
-    - Note: US-004 κσ remains a documented deviation (`test/ElaborationSpec.hs`: type inferred as `∀a. a`, expected `Int`).
+    - Note: US-004 κσ deviation is resolved (2026-02-10): `test/ElaborationSpec.hs` and `test/PipelineSpec.hs` now assert the thesis-expected `Int` behavior for annotated-lambda polymorphic-argument flow.
     - _Requirements: 3.2_
     - **Verification:** `cabal test`
 

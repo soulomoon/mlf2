@@ -128,7 +128,7 @@
 - Before the solved-order cutover, `MLF.Elab.Generalize.reifyWithGaBase` validated `solvedToBasePref` targets before any base-constraint reification.
 - After the cutover gate passed, runtime elaboration no longer depends on `reifyWithGaBase`; fallback now reifies from solved-order roots/substitutions.
 - The nested let + annotated-lambda reproducer remains covered by `test/ElaborationSpec.hs` and no longer crashes in Phase 6.
-- Remaining failure on the same program moved to Phase 7 (`TCLetTypeMismatch`) and is tracked separately as `BUG-2026-02-08-004`.
+- The follow-up Phase 7 mismatch path (`BUG-2026-02-08-004`) is now resolved (2026-02-10) with thesis-green checked/unchecked `Int` behavior.
 
 ## Module Structure (Post-Refactor)
 
@@ -334,7 +334,20 @@ This repo’s design is primarily informed by:
   - lambda replacement path with env-aware RHS typing and `subst = IntMap.empty` when replacing the scheme.
 - Verification:
   - `BUG-2026-02-06-002 strict target matrix`: PASS (`4/4`)
-  - full gate: `cabal build all && cabal test` => PASS (`603 examples, 0 failures`)
+  - full gate: `cabal build all && cabal test` => PASS (`604 examples, 0 failures`)
+
+## 2026-02-10 BUG-2026-02-08-004 thesis-green closure notes
+
+- Dedicated sentinel in `test/PipelineSpec.hs` was flipped from rejection-shape guarding to thesis-expected success (`Int`) for both `runPipelineElab` and `runPipelineElabChecked`.
+- Root-cause seam was in `MLF.Elab.Elaborate` application elaboration:
+  - witness-derived `InstApp` could survive onto a function term whose elaborated type was already monomorphic arrow, yielding invalid `InstElim` during type checking;
+  - polymorphic-argument repair previously only inferred args from syntactic `ELam`, missing equivalent typed-arrow cases after function-side instantiation.
+- Fix in `AApp`:
+  - guard `InstApp` by `typeCheckWithEnv` of the function term (`InstApp` kept only for `TForall{}`);
+  - extend arg-instantiation inference to variable arguments when the (possibly instantiated) function term typechecks to `TArrow paramTy _`.
+- Verification:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-2026-02-08-004"'` => PASS (`1 example, 0 failures`).
+  - `cabal build all && cabal test` => PASS (`604 examples, 0 failures`).
 
 ## 2026-02-10 delayed-weakening diagnostics alignment
 

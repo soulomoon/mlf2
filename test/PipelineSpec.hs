@@ -381,6 +381,22 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 rendered `shouldNotSatisfy` ("t23" `isInfixOf`)
             Right _ -> pure ()
 
+    describe "BUG-2026-02-08-004 sentinel" $ do
+        let expr =
+                ELet "id" (ELam "x" (EVar "x"))
+                    (ELet "use"
+                        (ELamAnn "f" (STArrow (STBase "Int") (STBase "Int"))
+                            (EApp (EVar "f") (ELit (LInt 0))))
+                        (EApp (EVar "use") (EVar "id")))
+
+        it "BUG-2026-02-08-004 nested let + annotated lambda typechecks to Int" $ do
+            case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
+                Left err -> expectationFailure ("Unchecked pipeline failed:\n" ++ renderPipelineError err)
+                Right (_term, ty) -> ty `shouldBe` TBase (BaseTy "Int")
+            case runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr) of
+                Left err -> expectationFailure ("Checked pipeline failed:\n" ++ renderPipelineError err)
+                Right (_term, ty) -> ty `shouldBe` TBase (BaseTy "Int")
+
     describe "BUG-2026-02-06-002 sentinel matrix" $ do
         let makeFactory = ELam "x" (ELam "y" (EVar "x"))
             makeOnlyExpr = ELet "make" makeFactory (EVar "make")

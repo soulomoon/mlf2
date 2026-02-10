@@ -377,23 +377,43 @@ elaborateWithEnv config elabEnv ann = do
                     a' <- elabTerm aOut env
                     funInst <- reifyInst namedSetReify env fAnn funEid
                     argInst <- reifyInst namedSetReify env aAnn argEid
+                    let tcEnv = TypeCheck.Env (Map.map (schemeToType . siScheme) env) Map.empty
+                        funInstByFunType =
+                            case (funInst, TypeCheck.typeCheckWithEnv tcEnv f') of
+                                (InstApp _, Right TForall{}) -> funInst
+                                (InstApp _, Right _) -> InstId
+                                _ -> funInst
                     let funInst' =
-                            case (funInst, sourceAnnIsPolymorphic env aAnn) of
+                            case (funInstByFunType, sourceAnnIsPolymorphic env aAnn) of
                                 (InstApp (TVar _), False) ->
                                     case reifyNodeTypePreferringBound (annNode aAnn) of
                                         Right argTy -> InstApp argTy
-                                        Left _ -> funInst
+                                        Left _ -> funInstByFunType
                                 (InstApp TForall{}, False) ->
                                     case reifyNodeTypePreferringBound (annNode aAnn) of
                                         Right argTy -> InstApp argTy
-                                        Left _ -> funInst
-                                _ -> funInst
+                                        Left _ -> funInstByFunType
+                                _ -> funInstByFunType
+                        fAppForArgInference = case funInst' of
+                            InstId -> f'
+                            _ -> ETyInst f' funInst'
+                        sourceVarName annExpr = case annExpr of
+                            AVar v _ -> Just v
+                            AAnn inner _ _ -> sourceVarName inner
+                            _ -> Nothing
                     let argInstFromFun =
-                            case (aAnn, f') of
-                                (AVar v _, ELam _ paramTy _) -> do
+                            case (sourceVarName aAnn, f') of
+                                (Just v, ELam _ paramTy _) -> do
                                     si <- Map.lookup v env
                                     args <- inferInstAppArgs (siScheme si) paramTy
                                     pure (instSeqApps (map (inlineBoundVarsType resReify) args))
+                                (Just v, _) -> do
+                                    si <- Map.lookup v env
+                                    case TypeCheck.typeCheckWithEnv tcEnv fAppForArgInference of
+                                        Right (TArrow paramTy _) -> do
+                                            args <- inferInstAppArgs (siScheme si) paramTy
+                                            pure (instSeqApps (map (inlineBoundVarsType resReify) args))
+                                        _ -> Nothing
                                 _ -> Nothing
                     let argInst' =
                             case (sourceAnnIsPolymorphic env aAnn, argInstFromFun) of

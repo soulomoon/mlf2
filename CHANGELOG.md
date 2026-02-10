@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-* BUG-2026-02-06-002: completed thesis-exact upstream graft/weaken closure (witness canonicalization + Ω localization + named-bound simplification guard + let-lambda fallback harmonization); strict bug matrix and full gate are green (`cabal build all && cabal test` => `603 examples, 0 failures`).
+* BUG-2026-02-06-002: completed thesis-exact upstream graft/weaken closure (witness canonicalization + Ω localization + named-bound simplification guard + let-lambda fallback harmonization); strict bug matrix and full gate are green (`cabal build all && cabal test` => `604 examples, 0 failures`).
+* BUG-2026-02-08-004: fixed nested let + annotated-lambda checked-authoritative path in `MLF.Elab.Elaborate` by guarding `InstApp` against non-∀ function terms and by extending polymorphic-argument instantiation inference to typed post-instantiation function arrows; dedicated `PipelineSpec` sentinel now asserts thesis-green `Int` for unchecked + checked pipeline.
 * Witness normalization: condition-(5) delayed-weaken ordering now reports a dedicated `DelayedWeakenViolation` instead of overloading `OpUnderRigid`; added focused witness-spec regressions for delayed-weaken violation and delayed graft/weaken coalescing behavior.
 * BUG-2026-02-06-002: retained C18/C21/C21.1 elaboration-path fixes (`Phi.Omega` delayed graft/weaken handling + `Elaborate` let-scheme/app-inst repair), graduated the 4-case sentinel matrix to strict assertions, and brought the full `BUG-2026-02-06-002` matcher to green (`10 examples, 0 failures`).
 * Elaboration/typecheck: fixed H15 lambda-parameter source selection in `MLF.Elab.Elaborate` so unannotated nested lambdas no longer leak solved-node names (e.g. `t23`) into let-RHS types; added `PipelineSpec` regression `does not leak solved-node names in make let mismatch`.
