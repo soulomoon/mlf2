@@ -82,6 +82,7 @@ library mlf2-internal
                       MLF.Constraint.Presolution,
                       MLF.Constraint.Presolution.Witness,
                       MLF.Constraint.Presolution.EdgeProcessing.Plan,
+                      MLF.Constraint.Presolution.EdgeProcessing.Planner,
                       MLF.Constraint.Solve,
                       MLF.Elab.Pipeline,
                       MLF.Elab.Phi.TestOnly,
