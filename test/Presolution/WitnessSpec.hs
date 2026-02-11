@@ -1181,6 +1181,58 @@ spec = do
                      in case normalizeInstanceOpsFull env ops of
                             Left _ -> property True  -- Normalization failure is acceptable
                             Right ops' -> property $ not (hasRedundantOps ops')
+
+    describe "Phase 4 regression matrix" $ do
+        it "keeps compose expansions aligned with interleaved witness steps" $ do
+            let srcVarId = NodeId 0
+                srcForallId = NodeId 1
+                tgtDomId = NodeId 2
+                tgtCodId = NodeId 3
+                tgtArrowId = NodeId 4
+                tgtForallId = NodeId 5
+                expNodeId = NodeId 6
+
+                nodes = nodeMapFromList
+                    [ (0, TyVar { tnId = srcVarId, tnBound = Nothing })
+                    , (1, TyForall srcForallId srcVarId)
+                    , (2, TyVar { tnId = tgtDomId, tnBound = Nothing })
+                    , (3, TyVar { tnId = tgtCodId, tnBound = Nothing })
+                    , (4, TyArrow tgtArrowId tgtDomId tgtCodId)
+                    , (5, TyForall tgtForallId tgtArrowId)
+                    , (6, TyExp expNodeId (ExpVarId 0) srcForallId)
+                    ]
+
+                edge = InstEdge (EdgeId 0) expNodeId tgtForallId
+                bindParents0 = inferBindParents nodes
+                bindParents =
+                    IntMap.insert (nodeRefKey (typeRef tgtDomId)) (typeRef tgtForallId, BindFlex) $
+                        IntMap.insert (nodeRefKey (typeRef tgtCodId)) (typeRef tgtForallId, BindFlex) bindParents0
+
+                constraint =
+                    rootedConstraint emptyConstraint
+                        { cNodes = nodes
+                        , cInstEdges = [edge]
+                        , cBindParents = bindParents
+                        }
+                acyclicityRes = AcyclicityResult { arSortedEdges = [edge], arDepGraph = undefined }
+
+                hasOmegaStep step = case step of
+                    StepOmega _ -> True
+                    StepIntro -> False
+
+            case computePresolution defaultTraceConfig acyclicityRes constraint of
+                Left err -> expectationFailure ("Presolution failed: " ++ show err)
+                Right PresolutionResult{ prEdgeExpansions = exps, prEdgeWitnesses = ews } -> do
+                    case IntMap.lookup 0 exps of
+                        Just (ExpCompose _) -> pure ()
+                        Just other -> expectationFailure ("Expected ExpCompose, got " ++ show other)
+                        Nothing -> expectationFailure "No expansion found for Edge 0"
+                    case IntMap.lookup 0 ews of
+                        Nothing -> expectationFailure "No witness found for Edge 0"
+                        Just ew -> do
+                            ewSteps ew `shouldSatisfy` any (== StepIntro)
+                            ewSteps ew `shouldSatisfy` any hasOmegaStep
+
   where
     isTotalOp :: InstanceOp -> Bool
     isTotalOp _ = True

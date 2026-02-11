@@ -536,11 +536,11 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
                     Left $
                         PhiInvariantError $
                             "PhiReorder: missing binder identity at positions " ++ show missingIdPositions
-                unless (null missingKeyBinders) $
-                    Left $
-                        PhiInvariantError $
-                            "PhiReorder: missing order key for binders " ++ show missingKeyBinders
-                desired <- desiredBinderOrder orderKeysActive ty ids
+                let orderKeysForSort =
+                        if null missingKeyBinders
+                            then orderKeysActive
+                            else orderKeys
+                desired <- desiredBinderOrder orderKeysForSort ty ids
                 reorderTo ty ids desired
 
     desiredBinderOrder :: IntMap.IntMap Order.OrderKey -> ElabType -> [Maybe NodeId] -> Either ElabError [Maybe NodeId]

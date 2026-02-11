@@ -45,9 +45,15 @@ import qualified MLF.Constraint.Traversal as Traversal
 import qualified MLF.Constraint.Unify.Core as UnifyCore
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Constraint.Types.Graph as Graph
+import MLF.Constraint.Types.SynthesizedExpVar
+    ( SynthExpVarSupply
+    , initSynthExpVarSupply
+    , takeSynthExpVar
+    )
 import MLF.Constraint.Types.Graph
     ( BindFlag(..)
     , Constraint(..)
+    , ExpVarId
     , GenNode(..)
     , InstEdge(..)
     , NodeId(..)
@@ -102,6 +108,9 @@ See also:
 data NormalizeState = NormalizeState
     { nsNextNodeId :: !Int
       -- ^ Counter for allocating fresh nodes during grafting.
+    , nsSynthExpVarSupply :: !SynthExpVarSupply
+      -- ^ Opaque allocator for synthesized-wrapper expansion variables in
+      -- a reserved negative-ID space.
     , nsUnionFind :: !(IntMap NodeId)
       -- ^ Union-find structure: maps node IDs to their canonical representative.
     , nsConstraint :: !Constraint
@@ -117,10 +126,11 @@ normalize c = nsConstraint finalState
   where
     initialState = NormalizeState
         { nsNextNodeId = maxNodeIdKeyOr0 c + 1
+        , nsSynthExpVarSupply = initSynthExpVarSupply c
         , nsUnionFind = IntMap.empty
         , nsConstraint = c
         }
-    finalState = execState normalizeLoop initialState
+    finalState = execState (normalizeLoop >> enforcePaperShapedInstEdges) initialState
 
 -- | Main normalization loop: apply transformations until fixed point.
 normalizeLoop :: NormalizeM ()
@@ -700,6 +710,14 @@ unionNodes from to = modify' $ \s ->
 findRoot :: IntMap NodeId -> NodeId -> NodeId
 findRoot = UnionFind.frWith
 
+-- | Allocate a fresh expansion variable for synthesized wrappers.
+freshSynthExpVarNorm :: NormalizeM ExpVarId
+freshSynthExpVarNorm = do
+    supply <- gets nsSynthExpVarSupply
+    let (expVar, supply') = takeSynthExpVar supply
+    modify' $ \st -> st { nsSynthExpVarSupply = supply' }
+    pure expVar
+
 -- | Apply the union-find substitution to all node references in the constraint.
 applyUnionFindToConstraint :: NormalizeM ()
 applyUnionFindToConstraint = do
@@ -793,4 +811,36 @@ applyToStructure uf node = case node of
     TyExp { tnId = nid, tnExpVar = ev, tnBody = body } ->
         TyExp { tnId = nid, tnExpVar = ev, tnBody = findRoot uf body }
 
--- Helper to get NodeId as Int
+-- | Post-loop pass: force residual instantiation edges to paper-shaped form.
+-- Every residual edge becomes `TyExp(s, body) ≤ τ` by wrapping non-`TyExp`
+-- left nodes in a synthesized expansion node.
+enforcePaperShapedInstEdges :: NormalizeM ()
+enforcePaperShapedInstEdges = do
+    c <- gets nsConstraint
+    wrappedEdges <- mapM wrapInstEdgeLeft (cInstEdges c)
+    modify' $ \st -> st { nsConstraint = (nsConstraint st) { cInstEdges = wrappedEdges } }
+
+-- | Wrap a residual edge's left node with a fresh `TyExp` node when needed.
+wrapInstEdgeLeft :: InstEdge -> NormalizeM InstEdge
+wrapInstEdgeLeft edge = do
+    nodes <- gets (cNodes . nsConstraint)
+    case lookupNodeIn nodes (instLeft edge) of
+        Just TyExp {} -> pure edge
+        _ -> do
+            wrapperNid <- freshNodeId
+            expVar <- freshSynthExpVarNorm
+            let bodyId = instLeft edge
+                wrapper = TyExp { tnId = wrapperNid, tnExpVar = expVar, tnBody = bodyId }
+            insertNode wrapper
+            inheritWrapperBindParent bodyId wrapperNid
+            pure edge { instLeft = wrapperNid }
+
+
+-- | Keep synthesized wrappers on the same binding-parent chain as their body.
+inheritWrapperBindParent :: NodeId -> NodeId -> NormalizeM ()
+inheritWrapperBindParent bodyId wrapperId = do
+    bindParents <- gets (cBindParents . nsConstraint)
+    case IntMap.lookup (nodeRefKey (typeRef bodyId)) bindParents of
+        Nothing -> pure ()
+        Just (parent, flag) ->
+            setBindParentRefNorm (typeRef wrapperId) parent flag

@@ -1,12 +1,13 @@
 module NormalizeSpec (spec) where
 
 import qualified Data.IntMap.Strict as IntMap
+import qualified Data.IntSet as IntSet
 import Data.List.NonEmpty (NonEmpty(..))
 import Test.Hspec
 
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Normalize
-import SpecUtil (emptyConstraint, nodeMapFromList, nodeMapSingleton, nodeMapSize)
+import SpecUtil (emptyConstraint, lookupNodeMaybe, nodeMapFromList, nodeMapSingleton, nodeMapSize)
 
 spec :: Spec
 spec = describe "Phase 2 — Normalization" $ do
@@ -737,3 +738,48 @@ spec = describe "Phase 2 — Normalization" $ do
             -- Either ≤ Either becomes α = Int, β = Bool, all merged
             cInstEdges result `shouldBe` []
             cUnifyEdges result `shouldBe` []
+
+    describe "Paper-shaped residual inst edges" $ do
+        it "wraps residual Var <= Var edges with TyExp-left form" $ do
+            let n0 = TyVar { tnId = NodeId 0, tnBound = Nothing }
+                n1 = TyVar { tnId = NodeId 1, tnBound = Nothing }
+                e = InstEdge (EdgeId 7) (NodeId 0) (NodeId 1)
+                c0 = emptyConstraint { cNodes = nodeMapFromList [(0, n0), (1, n1)], cInstEdges = [e] }
+                c1 = normalize c0
+            let [InstEdge eid l r] = cInstEdges c1
+            eid `shouldBe` EdgeId 7
+            r `shouldBe` NodeId 1
+            case lookupNodeMaybe (cNodes c1) l of
+                Just TyExp { tnBody = b } -> b `shouldBe` NodeId 0
+                other -> expectationFailure ("expected TyExp-left edge, got " ++ show other)
+
+        it "wraps residual type-error edges too" $ do
+            let base = TyBase (NodeId 0) (BaseTy "Int")
+                dom = TyVar { tnId = NodeId 2, tnBound = Nothing }
+                cod = TyVar { tnId = NodeId 3, tnBound = Nothing }
+                arr = TyArrow (NodeId 1) (NodeId 2) (NodeId 3)
+                e = InstEdge (EdgeId 9) (NodeId 0) (NodeId 1)
+                c0 = emptyConstraint
+                    { cNodes = nodeMapFromList [(0, base), (1, arr), (2, dom), (3, cod)]
+                    , cInstEdges = [e]
+                    }
+                c1 = normalize c0
+            let [InstEdge _ l _] = cInstEdges c1
+            case lookupNodeMaybe (cNodes c1) l of
+                Just TyExp {} -> pure ()
+                other -> expectationFailure ("expected TyExp-left error edge, got " ++ show other)
+
+        it "allocates distinct ExpVarIds for synthesized wrappers" $ do
+            let n0 = TyVar { tnId = NodeId 0, tnBound = Nothing }
+                n1 = TyVar { tnId = NodeId 1, tnBound = Nothing }
+                n2 = TyVar { tnId = NodeId 2, tnBound = Nothing }
+                e0 = InstEdge (EdgeId 1) (NodeId 0) (NodeId 1)
+                e1 = InstEdge (EdgeId 2) (NodeId 0) (NodeId 2)
+                c1 = normalize (emptyConstraint { cNodes = nodeMapFromList [(0,n0),(1,n1),(2,n2)], cInstEdges = [e0,e1] })
+                expVars =
+                    [ s
+                    | InstEdge _ l _ <- cInstEdges c1
+                    , Just TyExp { tnExpVar = s } <- [lookupNodeMaybe (cNodes c1) l]
+                    ]
+            length expVars `shouldBe` 2
+            IntSet.size (IntSet.fromList (map getExpVarId expVars)) `shouldBe` 2

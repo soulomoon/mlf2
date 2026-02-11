@@ -1,7 +1,7 @@
 {-# LANGUAGE PatternSynonyms #-}
 module PipelineSpec (spec) where
 
-import Control.Monad (unless)
+import Control.Monad (forM_, unless)
 import Data.List (isInfixOf)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
@@ -29,6 +29,7 @@ import MLF.Constraint.Canonicalizer (canonicalizeNode)
 import MLF.Constraint.Presolution
 import MLF.Constraint.Solve
 import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Witness (EdgeWitness(..), InstanceOp(..), InstanceStep(..))
 import qualified MLF.Binding.Tree as Binding
 import MLF.Elab.Run.Provenance (buildTraceCopyMap, collectBaseNamedKeys)
 import MLF.Elab.Run.Util (makeCanonicalizer)
@@ -598,6 +599,103 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                                     assertTypeEq "runPipelineElab vs runPipelineElabChecked" expr ty tyChecked
                                     assertTypeEq "runPipelineElabChecked vs typeCheck(term)" expr tyChecked checkedTy
 
+    describe "Phase 3 atomic wrapping equivalence gates" $ do
+        let bugExpr :: SurfaceExpr
+            bugExpr =
+                ELet "make" (ELam "x" (ELam "y" (EVar "x")))
+                    (ELet "c1" (EApp (EVar "make") (ELit (LInt (-4))))
+                        (EApp (EVar "c1") (ELit (LBool True))))
+
+            lambdaLetIdExpr :: SurfaceExpr
+            lambdaLetIdExpr =
+                ELam "y"
+                    (ELet "id" (ELam "x" (EVar "x"))
+                        (EApp (EVar "id") (EVar "y")))
+
+            expectForallSelfArrow :: ElabType -> Expectation
+            expectForallSelfArrow ty =
+                case ty of
+                    TForall _ _ body ->
+                        case body of
+                            TArrow dom cod -> dom `shouldBe` cod
+                            other ->
+                                expectationFailure
+                                    ("Expected forall-arrow body, got: " ++ show other)
+                    other ->
+                        expectationFailure
+                            ("Expected forall type, got: " ++ show other)
+
+        it "gate: make let mismatch does not leak solved-node names" $
+            case runPipelineElabChecked Set.empty (unsafeNormalizeExpr bugExpr) of
+                Left err -> do
+                    let rendered = renderPipelineError err
+                    rendered `shouldSatisfy` ("TCLetTypeMismatch" `isInfixOf`)
+                    rendered `shouldNotSatisfy` ("t23" `isInfixOf`)
+                Right (_term, ty) -> ty `shouldBe` TBase (BaseTy "Int")
+
+        it "gate: let-c1-apply-bool sentinel matrix returns Int" $
+            case runPipelineElabChecked Set.empty (unsafeNormalizeExpr bugExpr) of
+                Left err -> expectationFailure ("checked sentinel failed: " ++ renderPipelineError err)
+                Right (_term, ty) -> ty `shouldBe` TBase (BaseTy "Int")
+
+        it "gate: let-c1-apply-bool strict target matrix returns Int" $
+            case runPipelineElabChecked Set.empty (unsafeNormalizeExpr bugExpr) of
+                Left err -> expectationFailure ("checked strict-target failed: " ++ renderPipelineError err)
+                Right (_term, ty) -> ty `shouldBe` TBase (BaseTy "Int")
+
+        it "gate: checked-authoritative invariant" $
+            case runPipelineElab Set.empty (unsafeNormalizeExpr bugExpr) of
+                Left err -> expectationFailure ("runPipelineElab failed: " ++ renderPipelineError err)
+                Right (term, ty) -> do
+                    checkedTy <-
+                        case typeCheck term of
+                            Left tcErr -> expectationFailure ("typeCheck failed: " ++ show tcErr) >> fail "typeCheck failed"
+                            Right out -> pure out
+                    assertTypeEq "gate runPipelineElab vs typeCheck(term)" bugExpr ty checkedTy
+                    case runPipelineElabChecked Set.empty (unsafeNormalizeExpr bugExpr) of
+                        Left errChecked -> expectationFailure ("runPipelineElabChecked failed: " ++ renderPipelineError errChecked)
+                        Right (_termChecked, tyChecked) -> do
+                            assertTypeEq "gate runPipelineElab vs runPipelineElabChecked" bugExpr ty tyChecked
+                            assertTypeEq "gate runPipelineElabChecked vs typeCheck(term)" bugExpr tyChecked checkedTy
+
+        it "gate: thesis target unchecked pipeline returns Int" $
+            case runPipelineElab Set.empty (unsafeNormalizeExpr bugExpr) of
+                Left err -> expectationFailure ("unchecked pipeline failed: " ++ renderPipelineError err)
+                Right (_term, ty) -> ty `shouldBe` TBase (BaseTy "Int")
+
+        it "gate: thesis target checked pipeline returns Int" $
+            case runPipelineElabChecked Set.empty (unsafeNormalizeExpr bugExpr) of
+                Left err -> expectationFailure ("checked pipeline failed: " ++ renderPipelineError err)
+                Right (_term, ty) -> ty `shouldBe` TBase (BaseTy "Int")
+
+        it "gate: \\y. let id = (\\x. x) in id y keeps forall self-arrow shape" $
+            case runPipelineElab Set.empty (unsafeNormalizeExpr lambdaLetIdExpr) of
+                Left err -> expectationFailure ("pipeline failed: " ++ renderPipelineError err)
+                Right (_term, ty) -> expectForallSelfArrow ty
+
+
+    describe "Phase 4 regression matrix" $ do
+        it "suppresses OpWeaken on annotation edges while preserving expansion assignments" $ do
+            let annTy = mkForalls [] (STArrow (STBase "Int") (STBase "Int"))
+                expr =
+                    ELet "f" (EAnn (ELam "x" (EVar "x")) annTy)
+                        (EApp (EVar "f") (ELit (LInt 1)))
+
+                hasWeakenStep step = case step of
+                    StepOmega (OpWeaken _) -> True
+                    _ -> False
+
+            case runPipelineWithPresolution expr of
+                Left err -> expectationFailure ("Pipeline failed: " ++ err)
+                Right (PresolutionResult{ prConstraint = cPres, prEdgeExpansions = exps, prEdgeWitnesses = ews }, _ann) -> do
+                    let annEdges = IntSet.toList (cAnnEdges cPres)
+                    annEdges `shouldSatisfy` (not . null)
+                    forM_ annEdges $ \eid -> do
+                        IntMap.member eid exps `shouldBe` True
+                        case IntMap.lookup eid ews of
+                            Nothing -> expectationFailure ("Missing witness for annotation edge " ++ show eid)
+                            Just EdgeWitness{ ewSteps = steps } ->
+                                steps `shouldSatisfy` all (not . hasWeakenStep)
 runPipelineWithPresolution :: SurfaceExpr -> Either String (PresolutionResult, AnnExpr)
 runPipelineWithPresolution expr = do
     ConstraintResult{ crConstraint = c0, crAnnotated = ann } <-
