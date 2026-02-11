@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+* Tests/bug-tracking: added systematic variant matrix coverage in `test/ElaborationSpec.hs` (`BUG-002-V*`, `BUG-003-V*`, `BUG-004-V*`) and `test/Presolution/WitnessSpec.hs` (`US-010-V*`); confirmed new regressions on extended factory/bounded-alias/annotated-call-site paths and opened `BUG-2026-02-11-002`..`004` in `Bugs.md` with sentinel assertions and repro commands.
 * Tests/bug-tracking: hardened `Phase 3 atomic wrapping equivalence gates` by removing permissive mismatch fallback and enforcing explicit `forall a. a -> a` identity-shape assertions; revalidated targeted bug suites plus full gate (`633 examples, 0 failures`) and synced `BUG-2026-02-06-002`/`BUG-2026-02-08-004` to resolved in `Bugs.md`.
 * Cleanup: removed the single-constructor `EdgeStage` phantom index and `edgePlanStage`; `EdgePlan` is now a concrete resolved record with simplified planner/interpreter signatures, with no behavior change.
 * Phase 6 bridge-removal polish: removed the dedicated synthesized-wrapper interpreter bridge function in favor of a unified TyExp expansion execution path, added wrapper-identity characterization coverage, and re-validated Phase-3 equivalence gates plus full suite (`631 examples, 0 failures`).

@@ -2527,18 +2527,166 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             assertNoElabFailure "runPipelineElab" (Elab.runPipelineElab Set.empty (unsafeNormalize expr))
             assertNoElabFailure "runPipelineElabChecked" (Elab.runPipelineElabChecked Set.empty (unsafeNormalize expr))
 
-    describe "Explicit forall annotation edge cases" $ do
-        it "explicit forall annotation round-trips on let-bound variables" $ do
-            let ann = STForall "a" Nothing (STArrow (STVar "a") (STVar "a"))
-                expr =
-                    ELet "id" (ELam "x" (EVar "x"))
-                        (EAnn (EVar "id") ann)
+        describe "Systematic bug variants (2026-02-11 matrix)" $ do
+            let makeFactory = ELam "x" (ELam "y" (EVar "x"))
 
-            (_term, ty) <- requirePipeline expr
-            let expected =
-                    Elab.TForall "a" Nothing
-                        (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
-            ty `shouldAlphaEqType` expected
+                assertBothPipelinesMono expr expected = do
+                    (_uncheckedTerm, uncheckedTy) <- requireRight (Elab.runPipelineElab Set.empty (unsafeNormalize expr))
+                    (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalize expr))
+                    uncheckedTy `shouldBe` expected
+                    checkedTy `shouldBe` expected
+
+                assertBothPipelinesErrorContains expr needle = do
+                    let check label runner =
+                            case runner Set.empty (unsafeNormalize expr) of
+                                Left err ->
+                                    show err `shouldSatisfy` (needle `isInfixOf`)
+                                Right (_term, ty) ->
+                                    expectationFailure
+                                        (label ++ " unexpectedly succeeded with type: " ++ show ty)
+                    check "runPipelineElab" Elab.runPipelineElab
+                    check "runPipelineElabChecked" Elab.runPipelineElabChecked
+
+            it "BUG-002-V1: factory twice with mixed instantiations sentinel reproduces known Phi invariant failure" $ do
+                let expr =
+                        ELet "make" makeFactory
+                            (ELet "c1" (EApp (EVar "make") (ELit (LInt 1)))
+                                (ELet "c2" (EApp (EVar "make") (ELit (LBool True)))
+                                    (EApp (EVar "c1") (ELit (LBool False)))))
+                -- Expected target behavior: elaborates to Int without Φ failure.
+                assertBothPipelinesErrorContains expr "OpGraft+OpWeaken(non-binder,bot): InstBot expects"
+
+            it "BUG-002-V2: alias indirection sentinel reproduces known Phi invariant failure" $ do
+                let expr =
+                        ELet "make" makeFactory
+                            (ELet "f" (EVar "make")
+                                (ELet "c1" (EApp (EVar "f") (ELit (LInt 3)))
+                                    (EApp (EVar "c1") (ELit (LBool True)))))
+                -- Expected target behavior: same success as BUG-002-V1.
+                assertBothPipelinesErrorContains expr "OpGraft(non-binder): InstBot expects"
+
+            it "BUG-002-V3: intermediate annotation sentinel reproduces known Phi invariant failure" $ do
+                let expr =
+                        ELet "make" makeFactory
+                            (ELet "c1"
+                                (EAnn
+                                    (EApp (EVar "make") (ELit (LInt 7)))
+                                    (STArrow (STBase "Bool") (STBase "Int")))
+                                (EApp (EVar "c1") (ELit (LBool False))))
+                -- Expected target behavior: typechecks to Int.
+                assertBothPipelinesErrorContains expr "OpGraft(non-binder,bot): InstBot expects"
+
+            it "BUG-002-V4: factory-under-lambda sentinel reproduces known Phi translatability failure" $ do
+                let expr =
+                        ELam "k"
+                            (ELet "make" makeFactory
+                                (ELet "c1" (EApp (EVar "make") (EVar "k"))
+                                    (EApp (EVar "c1") (ELit (LBool True)))))
+                -- Expected target behavior: ∀a. a -> a with no Phase-6 Φ failure.
+                assertBothPipelinesErrorContains expr "OpWeaken targets non-binder node"
+
+            it "BUG-004-V1: bool analog of annotated-lambda consumer accepts polymorphic id" $ do
+                let expr =
+                        ELet "id" (ELam "x" (EVar "x"))
+                            (ELet "use"
+                                (ELamAnn "f" (STArrow (STBase "Bool") (STBase "Bool"))
+                                    (EApp (EVar "f") (ELit (LBool True))))
+                                (EApp (EVar "use") (EVar "id")))
+                assertBothPipelinesMono expr (Elab.TBase (BaseTy "Bool"))
+
+            it "BUG-004-V2: call-site annotation sentinel reproduces known PhiReorder failure" $ do
+                let intArrow = STArrow (STBase "Int") (STBase "Int")
+                    expr =
+                        ELet "id" (ELam "x" (EVar "x"))
+                            (ELet "use"
+                                (ELamAnn "f" intArrow
+                                    (EApp (EVar "f") (ELit (LInt 0))))
+                                (EApp (EVar "use") (EAnn (EVar "id") intArrow)))
+                -- Expected target behavior: explicit monomorphic instance accepted.
+                assertBothPipelinesErrorContains expr "PhiReorder: missing binder identity"
+
+            it "BUG-004-V3: dual annotated consumers reuse one let-polymorphic id in checked and unchecked" $ do
+                let useInt =
+                        ELamAnn "f" (STArrow (STBase "Int") (STBase "Int"))
+                            (EApp (EVar "f") (ELit (LInt 0)))
+                    useBool =
+                        ELamAnn "f" (STArrow (STBase "Bool") (STBase "Bool"))
+                            (EApp (EVar "f") (ELit (LBool True)))
+                    expr =
+                        ELet "id" (ELam "x" (EVar "x"))
+                            (ELet "useI" useInt
+                                (ELet "useB" useBool
+                                    (ELet "_" (EApp (EVar "useI") (EVar "id"))
+                                        (EApp (EVar "useB") (EVar "id")))))
+                assertBothPipelinesMono expr (Elab.TBase (BaseTy "Bool"))
+
+            it "BUG-004-V4: annotated parameter + inner let sentinel reproduces known InstBot mismatch" $ do
+                let expr =
+                        EApp
+                            (ELamAnn "seed" (STBase "Int")
+                                (ELet "id" (ELam "x" (EVar "x"))
+                                    (ELet "use"
+                                        (ELamAnn "f" (STArrow (STBase "Int") (STBase "Int"))
+                                            (EApp (EVar "f") (EVar "seed")))
+                                        (EApp (EVar "use") (EVar "id")))))
+                            (ELit (LInt 1))
+                -- Expected target behavior: remains Int after moving `id` into annotated scope.
+                assertBothPipelinesErrorContains expr "InstBot expects TBottom, got Int -> Int"
+
+            it "BUG-003-V1: triple bounded chain sentinel reproduces known Phi invariant failure" $ do
+                let rhs = ELam "x" (ELam "y" (ELam "z" (EVar "x")))
+                    schemeTy =
+                        mkForalls
+                            [ ("a", Nothing)
+                            , ("b", Just (STVar "a"))
+                            , ("c", Just (STVar "b"))
+                            ]
+                            (STArrow (STVar "a")
+                                (STArrow (STVar "b")
+                                    (STArrow (STVar "c") (STVar "a"))))
+                    ann =
+                        STForall "a" Nothing
+                            (STArrow (STVar "a")
+                                (STArrow (STVar "a")
+                                    (STArrow (STVar "a") (STVar "a"))))
+                    expr =
+                        ELet "c" (EAnn rhs schemeTy) (EAnn (EVar "c") ann)
+                -- Expected target behavior: checked and unchecked both produce ∀a. a -> a -> a -> a.
+                assertBothPipelinesErrorContains expr "OpGraft(non-binder): InstBot expects"
+
+            it "BUG-003-V2: dual-alias sentinel reproduces known Phi invariant failure" $ do
+                let rhs = ELam "x" (ELam "y" (ELam "z" (EVar "x")))
+                    schemeTy =
+                        mkForalls
+                            [ ("a", Nothing)
+                            , ("b", Just (STVar "a"))
+                            , ("c", Just (STVar "a"))
+                            ]
+                            (STArrow (STVar "a")
+                                (STArrow (STVar "b")
+                                    (STArrow (STVar "c") (STVar "a"))))
+                    ann =
+                        STForall "a" Nothing
+                            (STArrow (STVar "a")
+                                (STArrow (STVar "a")
+                                    (STArrow (STVar "a") (STVar "a"))))
+                    expr =
+                        ELet "c" (EAnn rhs schemeTy) (EAnn (EVar "c") ann)
+                -- Expected target behavior: no RaiseMerge translatability regression.
+                assertBothPipelinesErrorContains expr "OpGraft(non-binder): InstBot expects"
+
+        describe "Explicit forall annotation edge cases" $ do
+            it "explicit forall annotation round-trips on let-bound variables" $ do
+                let ann = STForall "a" Nothing (STArrow (STVar "a") (STVar "a"))
+                    expr =
+                        ELet "id" (ELam "x" (EVar "x"))
+                            (EAnn (EVar "id") ann)
+
+                (_term, ty) <- requirePipeline expr
+                let expected =
+                        Elab.TForall "a" Nothing
+                            (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+                ty `shouldAlphaEqType` expected
 
         it "explicit forall coercion in let RHS elaborates through use-site application" $ do
             let ann = STForall "a" Nothing (STArrow (STVar "a") (STVar "a"))

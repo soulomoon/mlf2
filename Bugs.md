@@ -4,7 +4,66 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 
 ## Open
 
-No open bugs currently.
+### BUG-2026-02-11-002
+- Status: Open
+- Priority: High
+- Discovered: 2026-02-11
+- Summary: Extended polymorphic-factory variants (`BUG-002-V1..V4`) still fail in both unchecked and checked pipelines with Φ invariant/translatability errors.
+- Minimal reproducers (surface express  ions):
+  - `ELet "make" (ELam "x" (ELam "y" (EVar "x"))) (ELet "c1" (EApp (EVar "make") (ELit (LInt 1))) (ELet "c2" (EApp (EVar "make") (ELit (LBool True))) (EApp (EVar "c1") (ELit (LBool False)))))`
+  - `ELam "k" (ELet "make" (ELam "x" (ELam "y" (EVar "x"))) (ELet "c1" (EApp (EVar "make") (EVar "k")) (EApp (EVar "c1") (ELit (LBool True)))))`
+- Reproducer command:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-002-V"'`
+- Expected vs actual:
+  - Expected: V1..V3 elaborate to `Int`; V4 elaborates to `∀a. a -> a`; no `PhiTranslatabilityError`/`PhiInvariantError`.
+  - Actual: both pipelines fail with `PhiInvariantError` (`OpGraft... InstBot expects ⊥`) and `PhiTranslatabilityError` (`OpWeaken targets non-binder node`).
+- Suspected/owning area:
+  - `/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs`
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/WitnessCanon.hs`
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/EdgeProcessing/Witness.hs`
+- Thesis impact:
+  - Reopens a let-polymorphic factory generalization/Φ-translation faithfulness gap beyond the previously resolved baseline reproducer.
+
+### BUG-2026-02-11-003
+- Status: Open
+- Priority: High
+- Discovered: 2026-02-11
+- Summary: Additional nested annotation variants for BUG-004 (`V2`, `V4`) fail with Φ reorder and instantiation-bottom mismatches.
+- Minimal reproducers (surface expressions):
+  - `ELet "id" (ELam "x" (EVar "x")) (ELet "use" (ELamAnn "f" (STArrow (STBase "Int") (STBase "Int")) (EApp (EVar "f") (ELit (LInt 0)))) (EApp (EVar "use") (EAnn (EVar "id") (STArrow (STBase "Int") (STBase "Int")))))`
+  - `EApp (ELamAnn "seed" (STBase "Int") (ELet "id" (ELam "x" (EVar "x")) (ELet "use" (ELamAnn "f" (STArrow (STBase "Int") (STBase "Int")) (EApp (EVar "f") (EVar "seed"))) (EApp (EVar "use") (EVar "id"))))) (ELit (LInt 1))`
+- Reproducer command:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-004-V2"'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-004-V4"'`
+- Expected vs actual:
+  - Expected: checked-authoritative acceptance of explicit monomorphic call-site instantiation and inner-let annotated-parameter path; result `Int`.
+  - Actual: both pipelines fail with `PhiInvariantError "PhiReorder: missing binder identity..."` (V2) and `TCInstantiationError "InstBot expects TBottom, got Int -> Int"` (V4).
+- Suspected/owning area:
+  - `/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs`
+  - `/Volumes/src/mlf4/src/MLF/Elab/Run/ResultType/Ann.hs`
+  - `/Volumes/src/mlf4/src/MLF/Elab/Inst.hs`
+- Thesis impact:
+  - Violates κσ-style annotated-parameter instantiation expectations on deeper annotation nesting paths.
+
+### BUG-2026-02-11-004
+- Status: Open
+- Priority: High
+- Discovered: 2026-02-11
+- Summary: Higher-arity bounded alias chains (`BUG-003-V1`, `BUG-003-V2`) fail in both pipelines with `OpGraft(non-binder)` `InstBot` Φ invariant errors.
+- Minimal reproducers (surface expressions):
+  - `ELet "c" (EAnn (ELam "x" (ELam "y" (ELam "z" (EVar "x")))) (mkForalls [("a",Nothing),("b",Just (STVar "a")),("c",Just (STVar "b"))] (STArrow (STVar "a") (STArrow (STVar "b") (STArrow (STVar "c") (STVar "a")))))) (EAnn (EVar "c") (STForall "a" Nothing (STArrow (STVar "a") (STArrow (STVar "a") (STArrow (STVar "a") (STVar "a"))))))`
+  - `ELet "c" (EAnn (ELam "x" (ELam "y" (ELam "z" (EVar "x")))) (mkForalls [("a",Nothing),("b",Just (STVar "a")),("c",Just (STVar "a"))] (STArrow (STVar "a") (STArrow (STVar "b") (STArrow (STVar "c") (STVar "a")))))) (EAnn (EVar "c") (STForall "a" Nothing (STArrow (STVar "a") (STArrow (STVar "a") (STArrow (STVar "a") (STVar "a"))))))`
+- Reproducer command:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-003-V"'`
+- Expected vs actual:
+  - Expected: checked and unchecked both elaborate to `∀a. a -> a -> a -> a`.
+  - Actual: both pipelines fail with `PhiInvariantError` containing `OpGraft(non-binder): InstBot expects ⊥`.
+- Suspected/owning area:
+  - `/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs`
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/EdgeUnify.hs`
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/WitnessNorm.hs`
+- Thesis impact:
+  - Leaves bounded-alias/raise-merge reconstruction incomplete for multi-binder, higher-arity aliasing chains.
 
 ## Resolved
 

@@ -615,6 +615,45 @@ spec = do
                             , StepOmega (OpGraft arg root)
                             ]
 
+            it "US-010-V1: coalesces repeated Raise;Merge with surrounding StepIntro boundaries" $ do
+                let c = mkNormalizeConstraint
+                    root = NodeId 0
+                    n = NodeId 2
+                    m = NodeId 3
+                    env = mkNormalizeEnv c root (IntSet.fromList [getNodeId root, getNodeId n])
+                    steps0 =
+                        [ StepIntro
+                        , StepIntro
+                        , StepOmega (OpRaise n)
+                        , StepOmega (OpRaise n)
+                        , StepOmega (OpMerge n m)
+                        , StepIntro
+                        , StepIntro
+                        ]
+                normalizeInstanceStepsFull env steps0
+                    `shouldBe`
+                        Right
+                            [ StepIntro
+                            , StepIntro
+                            , StepOmega (OpRaiseMerge n m)
+                            , StepIntro
+                            , StepIntro
+                            ]
+
+            it "US-010-V2: single-binder binderArgs does not widen interior for Raise;Merge" $ do
+                let c = mkNormalizeConstraint
+                    root = NodeId 0
+                    n = NodeId 2
+                    m = NodeId 3
+                    env0 = mkNormalizeEnv c root (IntSet.fromList [getNodeId m])
+                    env = env0 { binderArgs = IntMap.singleton (getNodeId n) m }
+                    steps0 =
+                        [ StepOmega (OpRaise n)
+                        , StepOmega (OpMerge n m)
+                        ]
+                normalizeInstanceStepsFull env steps0
+                    `shouldBe` Left (OpOutsideInterior (OpMerge n m))
+
             it "R-RAISEMERGE-NORM-15: validated witnesses remain valid after idempotent re-normalization" $ do
                 let c = mkNormalizeConstraint
                     root = NodeId 0
