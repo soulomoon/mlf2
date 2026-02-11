@@ -4,6 +4,21 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 10 Variant Matrix Scan — 2026-02-11 (new bug variants triage)
+
+- Added systematic variant coverage:
+  - `test/ElaborationSpec.hs` (`BUG-002-V1..V4`, `BUG-003-V1..V2`, `BUG-004-V1..V4`)
+  - `test/Presolution/WitnessSpec.hs` (`US-010-V1..V2`)
+- Targeted validation:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Systematic bug variants (2026-02-11 matrix)"'` (`10 examples, 0 failures`)
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "US-010-V"'` (`2 examples, 0 failures`)
+- Outcome:
+  - New open regressions discovered and tracked:
+    - `BUG-2026-02-11-002` (extended BUG-002 factory variants)
+    - `BUG-2026-02-11-003` (BUG-004 V2/V4 annotation-nesting variants)
+    - `BUG-2026-02-11-004` (BUG-003 higher-arity bounded-alias variants)
+  - Variant tests are now sentinel-guarded against current failure classes until strict expected-success closure.
+
 ## Task 9 Verification Gate — 2026-02-11 (Phase-3 gate hardening + tracker sync)
 
 - Command: `cabal build all && cabal test`
