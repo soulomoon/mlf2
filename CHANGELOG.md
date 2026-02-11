@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+* BUG-2026-02-11-003: resolved BUG-004 nested-annotation variants by preserving quantified binder names in scheme finalization (`MLF.Constraint.Presolution.Plan.Finalize`), tightening Φ reorder identity checks to scheme-owned binders (`MLF.Elab.Phi.Omega`), narrowing desugared annotated-lambda bounded-identity collapse to closed bounds (`MLF.Elab.Elaborate`), and accepting alpha-equal equal-bound `InstBot` in checked type instantiation (`MLF.Elab.TypeCheck`); `BUG-004-V2/V4` are now strict-success regressions.
 * Tests/bug-tracking: added systematic variant matrix coverage in `test/ElaborationSpec.hs` (`BUG-002-V*`, `BUG-003-V*`, `BUG-004-V*`) and `test/Presolution/WitnessSpec.hs` (`US-010-V*`); confirmed new regressions on extended factory/bounded-alias/annotated-call-site paths and opened `BUG-2026-02-11-002`..`004` in `Bugs.md` with sentinel assertions and repro commands.
 * Tests/bug-tracking: hardened `Phase 3 atomic wrapping equivalence gates` by removing permissive mismatch fallback and enforcing explicit `forall a. a -> a` identity-shape assertions; revalidated targeted bug suites plus full gate (`633 examples, 0 failures`) and synced `BUG-2026-02-06-002`/`BUG-2026-02-08-004` to resolved in `Bugs.md`.
 * Cleanup: removed the single-constructor `EdgeStage` phantom index and `edgePlanStage`; `EdgePlan` is now a concrete resolved record with simplified planner/interpreter signatures, with no behavior change.

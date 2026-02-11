@@ -13,11 +13,11 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Systematic bug variants (2026-02-11 matrix)"'` (`10 examples, 0 failures`)
   - `cabal test mlf2-test --test-show-details=direct --test-options='--match "US-010-V"'` (`2 examples, 0 failures`)
 - Outcome:
-  - New open regressions discovered and tracked:
+  - Open regressions currently tracked:
     - `BUG-2026-02-11-002` (extended BUG-002 factory variants)
-    - `BUG-2026-02-11-003` (BUG-004 V2/V4 annotation-nesting variants)
     - `BUG-2026-02-11-004` (BUG-003 higher-arity bounded-alias variants)
-  - Variant tests are now sentinel-guarded against current failure classes until strict expected-success closure.
+  - `BUG-2026-02-11-003` is resolved; `BUG-004-V2` and `BUG-004-V4` are now strict success assertions (`Int`) in both checked and unchecked pipelines.
+  - Remaining variant tests for open bugs stay sentinel-guarded until strict expected-success closure.
 
 ## Task 9 Verification Gate — 2026-02-11 (Phase-3 gate hardening + tracker sync)
 

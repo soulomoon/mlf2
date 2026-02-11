@@ -518,12 +518,18 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
     reorderBindersByPrec :: ElabType -> [Maybe NodeId] -> Either ElabError (Instantiation, ElabType, [Maybe NodeId])
     reorderBindersByPrec ty ids = do
         let (qs, _) = splitForalls ty
+            schemeArity = case siScheme si of
+                Forall binds _ -> length binds
         when (length qs /= length ids) $
             Left (PhiInvariantError "PhiReorder: binder spine / identity list length mismatch")
         if length qs < 2
             then Right (InstId, ty, ids)
             else do
-                let missingIdPositions = [i | (i, Nothing) <- zip [(0::Int)..] ids]
+                let missingRequiredIdPositions =
+                        [ i
+                        | (i, Nothing) <- zip [(0::Int)..] ids
+                        , i < schemeArity
+                        ]
                     sourceBinders = [ canonicalNode nid | Just nid <- ids, isSchemeBinder nid ]
                     orderKeysActive = orderKeysForBinders sourceBinders
                     missingKeyBinders =
@@ -532,10 +538,10 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
                         , isSchemeBinder nid
                         , not (IntMap.member (getNodeId (canonicalNode nid)) orderKeysActive)
                         ]
-                unless (null missingIdPositions) $
+                unless (null missingRequiredIdPositions) $
                     Left $
                         PhiInvariantError $
-                            "PhiReorder: missing binder identity at positions " ++ show missingIdPositions
+                            "PhiReorder: missing binder identity at positions " ++ show missingRequiredIdPositions
                 let orderKeysForSort =
                         if null missingKeyBinders
                             then orderKeysActive

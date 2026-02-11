@@ -2594,7 +2594,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 (EApp (EVar "use") (EVar "id")))
                 assertBothPipelinesMono expr (Elab.TBase (BaseTy "Bool"))
 
-            it "BUG-004-V2: call-site annotation sentinel reproduces known PhiReorder failure" $ do
+            it "BUG-004-V2: call-site annotation accepts explicit monomorphic instance" $ do
                 let intArrow = STArrow (STBase "Int") (STBase "Int")
                     expr =
                         ELet "id" (ELam "x" (EVar "x"))
@@ -2602,8 +2602,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 (ELamAnn "f" intArrow
                                     (EApp (EVar "f") (ELit (LInt 0))))
                                 (EApp (EVar "use") (EAnn (EVar "id") intArrow)))
-                -- Expected target behavior: explicit monomorphic instance accepted.
-                assertBothPipelinesErrorContains expr "PhiReorder: missing binder identity"
+                assertBothPipelinesMono expr (Elab.TBase (BaseTy "Int"))
 
             it "BUG-004-V3: dual annotated consumers reuse one let-polymorphic id in checked and unchecked" $ do
                 let useInt =
@@ -2620,7 +2619,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                         (EApp (EVar "useB") (EVar "id")))))
                 assertBothPipelinesMono expr (Elab.TBase (BaseTy "Bool"))
 
-            it "BUG-004-V4: annotated parameter + inner let sentinel reproduces known InstBot mismatch" $ do
+            it "BUG-004-V4: annotated parameter + inner let preserves Int result" $ do
                 let expr =
                         EApp
                             (ELamAnn "seed" (STBase "Int")
@@ -2630,8 +2629,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                             (EApp (EVar "f") (EVar "seed")))
                                         (EApp (EVar "use") (EVar "id")))))
                             (ELit (LInt 1))
-                -- Expected target behavior: remains Int after moving `id` into annotated scope.
-                assertBothPipelinesErrorContains expr "InstBot expects TBottom, got Int -> Int"
+                assertBothPipelinesMono expr (Elab.TBase (BaseTy "Int"))
 
             it "BUG-003-V1: triple bounded chain sentinel reproduces known Phi invariant failure" $ do
                 let rhs = ELam "x" (ELam "y" (ELam "z" (EVar "x")))

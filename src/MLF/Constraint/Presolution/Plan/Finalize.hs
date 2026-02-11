@@ -26,7 +26,7 @@ import MLF.Constraint.Presolution.Plan.Normalize
     , isBaseBound
     , isVarBound
     )
-import MLF.Reify.TypeOps (freeTypeVarsFrom, freeTypeVarsType, stripForallsType)
+import MLF.Reify.TypeOps (freeTypeVarsFrom, freeTypeVarsType, splitForalls, stripForallsType)
 import MLF.Types.Elab
     ( BoundType
     , ElabScheme
@@ -279,9 +279,13 @@ finalizeScheme FinalizeInput{..} =
             simplifySchemeBindings inlineBaseBounds namedBinderNames bindingsAdjusted ty0
         (bindingsNorm1, tyNorm1) = promoteArrowAlias bindingsNorm0 tyNorm0
         (bindingsNorm, tyNorm) = (bindingsNorm1, tyNorm1)
+        quantifiedNames =
+            let (qs, _) = splitForalls tyNorm
+            in Set.fromList (map fst qs)
         usedNames =
             Set.unions
-                ( freeTypeVarsFrom Set.empty tyNorm
+                ( quantifiedNames
+                    : freeTypeVarsFrom Set.empty tyNorm
                     : [freeTypeVarsType b | (_, Just b) <- bindingsNorm]
                 )
         bindingsFinal =

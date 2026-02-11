@@ -78,6 +78,7 @@ checkInstantiation env ty inst = snd <$> evalInstantiationWith spec inst (0, env
     spec = InstEvalSpec
         { instBot = \tArg (k, _env', t) -> case t of
             TBottom -> Right (k, tArg)
+            _ | alphaEqType t tArg -> Right (k, t)
             _ -> Left (TCInstantiationError (InstBot tArg) t ("InstBot expects TBottom, got " ++ pretty t))
         , instAbstr = \v (k, env', t) ->
             case Map.lookup v (typeEnv env') of

@@ -24,27 +24,6 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 - Thesis impact:
   - Reopens a let-polymorphic factory generalization/Φ-translation faithfulness gap beyond the previously resolved baseline reproducer.
 
-### BUG-2026-02-11-003
-- Status: Open
-- Priority: High
-- Discovered: 2026-02-11
-- Summary: Additional nested annotation variants for BUG-004 (`V2`, `V4`) fail with Φ reorder and instantiation-bottom mismatches.
-- Minimal reproducers (surface expressions):
-  - `ELet "id" (ELam "x" (EVar "x")) (ELet "use" (ELamAnn "f" (STArrow (STBase "Int") (STBase "Int")) (EApp (EVar "f") (ELit (LInt 0)))) (EApp (EVar "use") (EAnn (EVar "id") (STArrow (STBase "Int") (STBase "Int")))))`
-  - `EApp (ELamAnn "seed" (STBase "Int") (ELet "id" (ELam "x" (EVar "x")) (ELet "use" (ELamAnn "f" (STArrow (STBase "Int") (STBase "Int")) (EApp (EVar "f") (EVar "seed"))) (EApp (EVar "use") (EVar "id"))))) (ELit (LInt 1))`
-- Reproducer command:
-  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-004-V2"'`
-  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-004-V4"'`
-- Expected vs actual:
-  - Expected: checked-authoritative acceptance of explicit monomorphic call-site instantiation and inner-let annotated-parameter path; result `Int`.
-  - Actual: both pipelines fail with `PhiInvariantError "PhiReorder: missing binder identity..."` (V2) and `TCInstantiationError "InstBot expects TBottom, got Int -> Int"` (V4).
-- Suspected/owning area:
-  - `/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs`
-  - `/Volumes/src/mlf4/src/MLF/Elab/Run/ResultType/Ann.hs`
-  - `/Volumes/src/mlf4/src/MLF/Elab/Inst.hs`
-- Thesis impact:
-  - Violates κσ-style annotated-parameter instantiation expectations on deeper annotation nesting paths.
-
 ### BUG-2026-02-11-004
 - Status: Open
 - Priority: High
@@ -66,6 +45,30 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
   - Leaves bounded-alias/raise-merge reconstruction incomplete for multi-binder, higher-arity aliasing chains.
 
 ## Resolved
+
+### BUG-2026-02-11-003
+- Status: Resolved
+- Priority: High
+- Discovered: 2026-02-11
+- Resolved: 2026-02-11
+- Summary: Nested annotation variants for BUG-004 (`V2`, `V4`) now accept checked/unchecked elaboration with `Int` result.
+- Minimal reproducers (surface expressions):
+  - `ELet "id" (ELam "x" (EVar "x")) (ELet "use" (ELamAnn "f" (STArrow (STBase "Int") (STBase "Int")) (EApp (EVar "f") (ELit (LInt 0)))) (EApp (EVar "use") (EAnn (EVar "id") (STArrow (STBase "Int") (STBase "Int")))))`
+  - `EApp (ELamAnn "seed" (STBase "Int") (ELet "id" (ELam "x" (EVar "x")) (ELet "use" (ELamAnn "f" (STArrow (STBase "Int") (STBase "Int")) (EApp (EVar "f") (EVar "seed"))) (EApp (EVar "use") (EVar "id"))))) (ELit (LInt 1))`
+- Root cause:
+  - V2: scheme finalization/reorder identity drift around quantified binder ownership (`PhiReorder` false positives).
+  - V4: desugared annotated-lambda bounded identity + strict `InstBot` handling caused no-op bound updates to fail (`InstBot expects TBottom`).
+- Fix:
+  - Preserve quantified names during scheme finalization (`Finalize.usedNames` includes quantified spine names).
+  - Keep Φ reorder identity strictness to scheme-owned quantifier positions.
+  - Collapse only closed bounded-identity parameter types (`∀a⩾τ.a` with closed `τ`) in desugared annotated-lambda parameter recovery.
+  - Accept alpha-equal equal-bound `InstBot` in `TypeCheck` (aligned with `applyInstantiation` equal-bound no-op behavior).
+- Regression tests:
+  - `/Volumes/src/mlf4/test/ElaborationSpec.hs` (`BUG-004-V2`, `BUG-004-V4`)
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-004-V"'` (`4 examples, 0 failures`)
+  - Validation gate: `cabal build all && cabal test`
+- Thesis impact:
+  - Restores κσ-style annotation-nesting behavior for explicit monomorphic call-site and inner-let annotated-parameter flows without regressing checked-authoritative baseline gates.
 
 ### BUG-2026-02-06-002
 - Status: Resolved

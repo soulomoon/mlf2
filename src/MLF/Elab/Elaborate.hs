@@ -11,6 +11,7 @@ module MLF.Elab.Elaborate (
     elaborateWithEnv
 ) where
 
+import Control.Applicative ((<|>))
 import Data.Functor.Foldable (para)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
@@ -23,6 +24,7 @@ import MLF.Reify.TypeOps
     , freeTypeVarsType
     , inlineBaseBoundsType
     , matchType
+    , substTypeCapture
     )
 
 import MLF.Frontend.Syntax (VarName)
@@ -308,6 +310,14 @@ elaborateWithEnv config elabEnv ann = do
         ETyAbs{} -> True
         _ -> False
 
+    collapseClosedBoundedIdentity :: ElabType -> ElabType
+    collapseClosedBoundedIdentity ty0 = case ty0 of
+        TForall v (Just bnd) body
+            | body == TVar v
+            , Set.null (freeTypeVarsType (tyToElab bnd)) ->
+                tyToElab bnd
+        _ -> ty0
+
     mkOut :: (Env -> Either ElabError ElabTerm) -> ElabOut
     mkOut f = ElabOut f f
 
@@ -338,7 +348,7 @@ elaborateWithEnv config elabEnv ann = do
                         Just (annNodeId, _) ->
                             case generalizeAtNode annNodeId of
                                 Right (paramSch, _subst) ->
-                                    let paramTy0 = schemeToType paramSch
+                                    let paramTy0 = collapseClosedBoundedIdentity (schemeToType paramSch)
                                     in pure
                                         ( paramTy0
                                         , SchemeInfo
@@ -349,7 +359,7 @@ elaborateWithEnv config elabEnv ann = do
                                 Left (BindingTreeError GenSchemeFreeVars{}) -> do
                                     -- Some coercion codomain roots are outside the scheme
                                     -- ownership checks; recover the term-level type directly.
-                                    paramTy0 <- reifyNodeTypePreferringBound annNodeId
+                                    paramTy0 <- fmap collapseClosedBoundedIdentity (reifyNodeTypePreferringBound annNodeId)
                                     pure
                                         ( paramTy0
                                         , SchemeInfo
@@ -647,22 +657,43 @@ elaborateWithEnv config elabEnv ann = do
                             Nothing -> True
                 instFromTrace <- case (allowFallbackFromTrace, phi, mExpansion, mSchemeInfo) of
                     (True, InstId, Just (ExpInstantiate args), mSi) -> do
-                        let argNodes =
+                        let binderArity =
+                                case mSi of
+                                    Just si ->
+                                        case siScheme si of
+                                            Forall binds _ -> Just (length binds)
+                                    Nothing -> Nothing
+                            traceArgs =
                                 case mTrace of
                                     Just tr | not (null (etBinderArgs tr)) ->
                                         map snd (etBinderArgs tr)
-                                    _ -> args
+                                    _ -> []
+                        let argNodes =
+                                case binderArity of
+                                    Just arity
+                                        | length traceArgs == arity ->
+                                            traceArgs
+                                        | otherwise ->
+                                            args
+                                    Nothing ->
+                                        if null traceArgs
+                                            then args
+                                            else traceArgs
                         let targetArgs =
                                 case mSi of
                                     Just si ->
+                                        let fallbackFromSchemeBound =
+                                                case siScheme si of
+                                                    Forall [(name, Just bnd)] body
+                                                        | body == TVar name ->
+                                                            Just [tyToElab bnd]
+                                                    _ -> Nothing
+                                        in
                                         case reifyTargetType namedSetReify ew si of
                                             Right targetTy ->
-                                                case inferInstAppArgs (siScheme si) targetTy of
-                                                    Just inferred
-                                                        | length inferred == length argNodes ->
-                                                            Just inferred
-                                                    _ -> Nothing
-                                            Left _ -> Nothing
+                                                inferInstAppArgs (siScheme si) targetTy
+                                                    <|> fallbackFromSchemeBound
+                                            Left _ -> fallbackFromSchemeBound
                                     Nothing -> Nothing
                         case debugGeneralize
                             ("reifyInst fallback edge=" ++ show eid
@@ -684,14 +715,35 @@ elaborateWithEnv config elabEnv ann = do
                             Just inferred -> pure inferred
                             Nothing -> mapM reifyArg argNodes
                         let argTys' = map (inlineBoundVarsType resReify) argTys
+                            binderNames =
+                                case mSi of
+                                    Just si ->
+                                        case siScheme si of
+                                            Forall binds _ -> map fst binds
+                                    Nothing -> []
+                            alignWithSingleBinder binderName ty0 =
+                                case filter (/= binderName) (Set.toList (freeTypeVarsType ty0)) of
+                                    [fv] -> substTypeCapture fv (TVar binderName) ty0
+                                    _ -> ty0
+                            argTys'' =
+                                case binderNames of
+                                    [binderName] -> map (alignWithSingleBinder binderName) argTys'
+                                    _ -> argTys'
                         case debugGeneralize
                             ("reifyInst fallback edge=" ++ show eid
                                 ++ " argTys=" ++ show argTys
                                 ++ " argTys'=" ++ show argTys'
+                                ++ " argTys''=" ++ show argTys''
                             )
                             () of
                             () -> pure ()
-                        pure (Just (instSeqApps argTys'))
+                        let arityOk =
+                                case binderArity of
+                                    Just arity -> arity == length argTys''
+                                    Nothing -> True
+                        if arityOk
+                            then pure (Just (instSeqApps argTys''))
+                            else pure Nothing
                     _ -> pure Nothing
                 case instFromTrace of
                     Just inst -> Right inst
