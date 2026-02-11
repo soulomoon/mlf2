@@ -1,4 +1,3 @@
-{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE LambdaCase #-}
 {- |
 Module      : MLF.Constraint.Presolution.EdgeProcessing.Planner
@@ -7,11 +6,7 @@ Copyright   : (c) 2024
 License     : BSD-3-Clause
 
 The planner (pass A of the two-pass architecture) resolves each instantiation
-edge's operands and classifies it into an 'EdgePlan' with the appropriate
-'EdgePlanMode':
-
-* 'ExpansionMode' when the left node is 'TyExp'
-* 'LegacyDirectMode' otherwise
+edge's operands and enforces the invariant that the left node is 'TyExp'.
 
 The resulting plan is consumed by the interpreter (pass B).
 -}
@@ -19,22 +14,23 @@ module MLF.Constraint.Presolution.EdgeProcessing.Planner (
     planEdge,
 ) where
 
+import Control.Monad.Except (throwError)
 import Control.Monad.Reader (ask)
 import qualified Data.IntSet as IntSet
 
-import MLF.Util.Trace (traceBindingM)
-import MLF.Constraint.Types
-import MLF.Constraint.Presolution.Base (PresolutionM)
-import MLF.Constraint.Presolution.StateAccess (getConstraintAndCanonical)
-import MLF.Constraint.Presolution.Ops (findRoot, getNode, getCanonicalNode)
+import MLF.Constraint.Presolution.Base (PresolutionError (..), PresolutionM)
 import MLF.Constraint.Presolution.EdgeProcessing.Plan
+import MLF.Constraint.Presolution.Ops (findRoot, getCanonicalNode, getNode)
+import MLF.Constraint.Presolution.StateAccess (getConstraintAndCanonical)
+import MLF.Constraint.Types
+import MLF.Util.Trace (traceBindingM)
 
--- | Classify an instantiation edge into a resolved plan.
+-- | Resolve an instantiation edge into a typed plan.
 --
 -- Reads the canonicalized left and right nodes and per-edge flags
 -- ('cLetEdges', 'cAnnEdges') from the presolution state, then
--- selects the execution mode based on the left node shape.
-planEdge :: InstEdge -> PresolutionM (EdgePlan 'StageResolved)
+-- rejects non-`TyExp` left nodes (fail-fast invariant).
+planEdge :: InstEdge -> PresolutionM EdgePlan
 planEdge edge = do
     cfg <- ask
     (constraint0, canonical) <- getConstraintAndCanonical
@@ -46,11 +42,15 @@ planEdge edge = do
         suppressWeaken = IntSet.member eidInt (cAnnEdges constraint0)
 
     n1Raw <- getNode n1Id
-    n2 <- getCanonicalNode n2Id
+    leftTyExp <- case mkResolvedTyExp n1Raw of
+        Just leftExp -> pure leftExp
+        Nothing ->
+            throwError
+                ( PlanError
+                    (ExpectedTyExpLeftInPlanner edgeId n1Raw)
+                )
 
-    let mode = case n1Raw of
-            TyExp {} -> ExpansionMode
-            _        -> LegacyDirectMode
+    n2 <- getCanonicalNode n2Id
 
     traceBindingM cfg
         ( "processInstEdge: edge="
@@ -58,7 +58,7 @@ planEdge edge = do
             ++ " left="
             ++ show n1Id
             ++ " ("
-            ++ nodeTag n1Raw
+            ++ nodeTag (resolvedTyExpNode leftTyExp)
             ++ ") right="
             ++ show n2Id
             ++ " ("
@@ -66,8 +66,8 @@ planEdge edge = do
             ++ ") letEdge="
             ++ show allowTrivial
         )
-    case (n1Raw, n2) of
-        (TyExp{}, TyArrow{ tnDom = dom, tnCod = cod }) -> do
+    case n2 of
+        TyArrow { tnDom = dom, tnCod = cod } -> do
             domR <- findRoot dom
             codR <- findRoot cod
             traceBindingM cfg
@@ -86,11 +86,10 @@ planEdge edge = do
 
     pure EdgePlanResolved
         { eprEdge = edge
-        , eprLeftNode = n1Raw
+        , eprLeftTyExp = leftTyExp
         , eprRightNode = n2
         , eprLeftCanonical = canonical n1Id
         , eprRightCanonical = canonical n2Id
-        , eprMode = mode
         , eprAllowTrivial = allowTrivial
         , eprSuppressWeaken = suppressWeaken
         }

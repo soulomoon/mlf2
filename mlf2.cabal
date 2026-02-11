@@ -109,6 +109,7 @@ library mlf2-internal
                       MLF.Reify.Core
 
     other-modules:    MLF.Constraint.Types.Ids,
+                      MLF.Constraint.Types.SynthesizedExpVar,
                       MLF.Constraint.Presolution.Base,
                       MLF.Constraint.Presolution.Core,
                       MLF.Constraint.Presolution.Copy,

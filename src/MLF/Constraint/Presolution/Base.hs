@@ -101,6 +101,10 @@ data PresolutionError
     | BindingTreeError BindingError          -- ^ Invalid binding tree when binding edges are in use
     | NonTranslatablePresolution [TranslatabilityIssue]
     | WitnessNormalizationError EdgeId OmegaNormalizeError  -- ^ Normalized witness violates Fig. 15.3.4 invariants
+    | ExpectedTyExpLeftInPlanner EdgeId TyNode
+      -- ^ Planner expected normalized `TyExp <= τ` but saw a different left node.
+    | PlanError PresolutionError             -- ^ Error surfaced during planner pass
+    | ExecError PresolutionError             -- ^ Error surfaced during interpreter pass
     | InternalError String                   -- ^ Unexpected internal state
     deriving (Eq, Show)
 

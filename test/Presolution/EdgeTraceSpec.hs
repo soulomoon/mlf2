@@ -6,6 +6,7 @@ import qualified Data.IntSet as IntSet
 
 import MLF.Constraint.Types.Presolution (Presolution(..))
 import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Witness (Expansion(..))
 import MLF.Constraint.Presolution
     ( EdgeTrace(..)
     , PresolutionResult(..)
@@ -304,3 +305,41 @@ spec = describe "EdgeTrace" $ do
                                     , TypeRef nid <- [nodeRefFromKey key]
                                     ]
                         interiorNodes `shouldBe` etInterior tr
+
+    it "records identity expansion with empty binder-argument trace" $ do
+        let body = NodeId 10
+            target = NodeId 11
+            expNode = NodeId 12
+            nBody = TyBase body (BaseTy "Int")
+            nTarget = TyBase target (BaseTy "Int")
+            nExp = TyExp expNode (ExpVarId 42) body
+            edge = InstEdge (EdgeId 9) expNode target
+            constraint =
+                rootedConstraint emptyConstraint
+                    { cNodes = nodeMapFromList
+                        [ (getNodeId body, nBody)
+                        , (getNodeId target, nTarget)
+                        , (getNodeId expNode, nExp)
+                        ]
+                    , cInstEdges = [edge]
+                    , cBindParents = bindParentsFromPairs
+                        [ (body, expNode, BindFlex)
+                        , (target, expNode, BindFlex)
+                        ]
+                    }
+            st0 =
+                PresolutionState constraint (Presolution IntMap.empty)
+                    IntMap.empty
+                    13
+                    IntSet.empty
+                    IntMap.empty
+                    IntMap.empty
+                    IntMap.empty
+                    IntMap.empty
+        case runPresolutionM defaultTraceConfig st0 (processInstEdge edge) of
+            Left err -> expectationFailure ("processInstEdge failed: " ++ show err)
+            Right (_, st1) -> do
+                IntMap.lookup 9 (psEdgeExpansions st1) `shouldBe` Just ExpIdentity
+                case IntMap.lookup 9 (psEdgeTraces st1) of
+                    Nothing -> expectationFailure "Expected EdgeTrace for EdgeId 9"
+                    Just tr -> etBinderArgs tr `shouldBe` []

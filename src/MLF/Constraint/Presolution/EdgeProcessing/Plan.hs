@@ -1,89 +1,81 @@
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE GADTs #-}
-{-# LANGUAGE KindSignatures #-}
-{-# LANGUAGE StandaloneDeriving #-}
 {- |
 Module      : MLF.Constraint.Presolution.EdgeProcessing.Plan
-Description : Stage-indexed edge plan types with dual-mode discriminator
+Description : Edge plan types for presolution edge execution
 Copyright   : (c) 2024
 License     : BSD-3-Clause
 
 Typed plan model for the two-pass edge processing architecture.
-Each instantiation edge is classified into an 'EdgePlanMode' that
-determines which execution path the interpreter uses:
-
-* 'ExpansionMode' — left node is TyExp; use decideMinimalExpansion + unifyStructure.
-* 'LegacyDirectMode' — left node is non-TyExp; use solveNonExpInstantiation.
-
-The plan progresses through stages ('EdgeStage') from resolution to commitment.
+After planner fail-fast, all valid plans reaching execution are TyExp-left and
+run through expansion semantics.
 -}
 module MLF.Constraint.Presolution.EdgeProcessing.Plan (
-    -- * Mode discriminator
-    EdgePlanMode (..),
-    -- * Stage index
-    EdgeStage (..),
-    -- * Stage-indexed plan
+    -- * Refined TyExp-left payload
+    ResolvedTyExp (..),
+    mkResolvedTyExp,
+    resolvedTyExpNode,
+    -- * Resolved plan
     EdgePlan (..),
     -- * Helpers
-    edgePlanStage,
-    edgePlanMode,
     edgePlanEdge,
     mkEmptyResolvedPlan,
 ) where
 
-import MLF.Constraint.Types (InstEdge, TyNode, NodeId)
+import MLF.Constraint.Types (ExpVarId, InstEdge, NodeId, TyNode (..))
 
--- | Execution mode for an edge plan.
-data EdgePlanMode
-    = ExpansionMode
-    -- ^ Left node is TyExp. Use decideMinimalExpansion + unifyStructure.
-    | LegacyDirectMode
-    -- ^ Left node is non-TyExp. Use solveNonExpInstantiation.
-    deriving (Eq, Ord, Show)
+-- | Refined TyExp payload used by resolved edge plans.
+data ResolvedTyExp = ResolvedTyExp
+    { rteNodeId :: NodeId
+    , rteExpVar :: ExpVarId
+    , rteBodyId :: NodeId
+    }
+    deriving (Eq, Show)
 
--- | Processing stage for an edge plan.
-data EdgeStage
-    = StageResolved
-    -- ^ Edge operands resolved, mode classified, ready for execution.
-    deriving (Eq, Ord, Show)
+-- | Refine a raw node into a TyExp payload.
+mkResolvedTyExp :: TyNode -> Maybe ResolvedTyExp
+mkResolvedTyExp TyExp { tnId = nid, tnExpVar = s, tnBody = body } =
+    Just ResolvedTyExp
+        { rteNodeId = nid
+        , rteExpVar = s
+        , rteBodyId = body
+        }
+mkResolvedTyExp _ = Nothing
 
--- | A stage-indexed edge plan.
-data EdgePlan (s :: EdgeStage) where
-    EdgePlanResolved ::
-        { eprEdge :: InstEdge
-        , eprLeftNode :: TyNode
-        , eprRightNode :: TyNode
-        , eprLeftCanonical :: NodeId
-        , eprRightCanonical :: NodeId
-        , eprMode :: EdgePlanMode
-        , eprAllowTrivial :: Bool
-        , eprSuppressWeaken :: Bool
-        } -> EdgePlan 'StageResolved
+-- | Recover the corresponding raw TyExp node.
+resolvedTyExpNode :: ResolvedTyExp -> TyNode
+resolvedTyExpNode ResolvedTyExp { rteNodeId = nid, rteExpVar = s, rteBodyId = body } =
+    TyExp { tnId = nid, tnExpVar = s, tnBody = body }
 
-deriving instance Eq (EdgePlan s)
-deriving instance Show (EdgePlan s)
-
--- | Extract the stage tag from a plan.
-edgePlanStage :: EdgePlan s -> EdgeStage
-edgePlanStage EdgePlanResolved {} = StageResolved
-
--- | Extract the mode from a plan.
-edgePlanMode :: EdgePlan s -> EdgePlanMode
-edgePlanMode (EdgePlanResolved { eprMode = m }) = m
+-- | Resolved edge plan consumed by the interpreter.
+data EdgePlan = EdgePlanResolved
+    { eprEdge :: InstEdge
+    , eprLeftTyExp :: ResolvedTyExp
+    , eprRightNode :: TyNode
+    , eprLeftCanonical :: NodeId
+    , eprRightCanonical :: NodeId
+    , eprAllowTrivial :: Bool
+    , eprSuppressWeaken :: Bool
+    }
+    deriving (Eq, Show)
 
 -- | Extract the original edge from a plan.
-edgePlanEdge :: EdgePlan s -> InstEdge
+edgePlanEdge :: EdgePlan -> InstEdge
 edgePlanEdge (EdgePlanResolved { eprEdge = e }) = e
 
 -- | Construct a minimal resolved plan for testing.
-mkEmptyResolvedPlan :: InstEdge -> TyNode -> TyNode -> NodeId -> NodeId -> EdgePlanMode -> EdgePlan 'StageResolved
-mkEmptyResolvedPlan edge leftNode rightNode leftCan rightCan mode = EdgePlanResolved
-    { eprEdge = edge
-    , eprLeftNode = leftNode
-    , eprRightNode = rightNode
-    , eprLeftCanonical = leftCan
-    , eprRightCanonical = rightCan
-    , eprMode = mode
-    , eprAllowTrivial = True
-    , eprSuppressWeaken = False
-    }
+mkEmptyResolvedPlan ::
+    InstEdge ->
+    ResolvedTyExp ->
+    TyNode ->
+    NodeId ->
+    NodeId ->
+    EdgePlan
+mkEmptyResolvedPlan edge leftTyExp rightNode leftCan rightCan =
+    EdgePlanResolved
+        { eprEdge = edge
+        , eprLeftTyExp = leftTyExp
+        , eprRightNode = rightNode
+        , eprLeftCanonical = leftCan
+        , eprRightCanonical = rightCan
+        , eprAllowTrivial = True
+        , eprSuppressWeaken = False
+        }

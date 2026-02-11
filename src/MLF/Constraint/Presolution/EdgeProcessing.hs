@@ -10,15 +10,14 @@ expansions for expansion variables.
 
 The two-pass architecture delegates to:
 * Pass A (Planner): classifies edges into typed plans
-* Pass B (Interpreter): executes plans via dual-mode dispatch
+* Pass B (Interpreter): executes TyExp-left plans with expansion semantics
 * Shared helpers (Solve): unify/solve operations used by both passes
 -}
 module MLF.Constraint.Presolution.EdgeProcessing (
     runPresolutionLoop,
     processInstEdge,
-    -- * Re-exports from Solve (used by interpreter and tests)
+    -- * Re-exports from Solve
     unifyStructure,
-    solveNonExpInstantiation,
     recordEdgeWitness,
     recordEdgeTrace,
     canonicalizeEdgeTraceInteriorsM,
@@ -32,7 +31,6 @@ import MLF.Constraint.Presolution.EdgeProcessing.Planner (planEdge)
 import MLF.Constraint.Presolution.EdgeProcessing.Interpreter (executeEdgePlan)
 import MLF.Constraint.Presolution.EdgeProcessing.Solve (
     unifyStructure,
-    solveNonExpInstantiation,
     recordEdgeWitness,
     recordEdgeTrace,
     canonicalizeEdgeTraceInteriorsM,

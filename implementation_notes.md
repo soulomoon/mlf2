@@ -1,8 +1,70 @@
 # Implementation Notes
 
+### 2026-02-11 EdgePlan cleanup (remove `EdgeStage`)
+
+- `MLF.Constraint.Presolution.EdgeProcessing.Plan` now exposes a concrete resolved `EdgePlan` record.
+  - Removed the single-constructor stage index (`EdgeStage`) and the `edgePlanStage` helper.
+- `planEdge` and interpreter entrypoints now use `EdgePlan` directly (no phantom stage parameter).
+- `EdgePlannerSpec` now checks concrete plan fields instead of a stage-tag assertion.
+- Rationale: the stage index had no real transition boundary in production code (only `StageResolved`), so removing it tightens abstraction without semantic impact.
+- Verification:
+  - `cabal build mlf2-test` => pass.
+  - `cabal build all && cabal test` => 631 examples, 0 failures.
+
+### 2026-02-11 Phase 6 unified execution (wrapper-bridge removal)
+
+- `MLF.Constraint.Presolution.EdgeProcessing.Interpreter` now runs one expansion-oriented execution function for all TyExp-left plans.
+  - The prior separate synthesized-wrapper bridge function was removed.
+- Wrapper semantics are preserved in the unified path:
+  - synthesized wrappers still force `ExpIdentity` for their `ExpVarId`;
+  - wrapper body/target instantiation pairs still use direct instantiation solving (`solveNonExpInstantiation`).
+- Added characterization regression in `EdgeInterpreterSpec` for synthesized wrapper + forall target, asserting identity expansion assignment retention.
+- Verification:
+  - `Edge interpreter` matcher: 4 examples, 0 failures.
+  - `Phase 3 atomic wrapping equivalence gates`: 7 examples, 0 failures.
+  - Full gate remains green after bridge removal (`cabal build all && cabal test` => 631 examples, 0 failures).
+
+### 2026-02-11 Phase 5 abstraction polish (type-level invariants + ID boundary)
+
+- Resolved edge-plan payload now carries a refined `ResolvedTyExp` value; `eprMode`/`EdgePlanMode` were removed.
+  - Effect: resolved plans encode TyExp-left shape directly instead of carrying a redundant runtime mode tag.
+- Planner fail-fast is now structured, not stringly:
+  - Added `ExpectedTyExpLeftInPlanner EdgeId TyNode` in `PresolutionError`.
+  - Planner emits `PlanError (ExpectedTyExpLeftInPlanner edgeId leftNode)` for invariant violations.
+- Synthesized wrapper `ExpVarId` allocation/checks are centralized in `MLF.Constraint.Types.SynthesizedExpVar`:
+  - `initSynthExpVarSupply`, `takeSynthExpVar`, and `isSynthesizedExpVar`.
+  - `Normalize` and interpreter now share this boundary instead of ad hoc negative-ID helpers.
+- Verification:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Edge plan types"'` => 7 examples, 0 failures.
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Edge interpreter"'` => 3 examples, 0 failures.
+  - Full gate remains green after polish changes.
+
+### 2026-02-11 Phase 4 error-tag + regression-matrix completion
+
+- Presolution phase boundaries now expose explicit error context:
+  - `PlanError` wraps planner-surface failures (e.g. non-`TyExp` edge invariant).
+  - `ExecError` wraps interpreter/runtime failures while preserving inner payloads.
+- Added Phase 4 regression-matrix checks across presolution + pipeline suites:
+  - expansion constructor coverage (identity / instantiate / forall-intro / compose),
+  - identity trace-shape assertion,
+  - compose witness-step shape assertion,
+  - annotation-edge weaken suppression with preserved expansion assignments.
+- One pre-existing occurs-check assertion was widened to accept wrapped errors (`PlanError`/`ExecError`) without changing semantic expectation.
+- Verification: full suite is green after Phase 4 (`cabal build all && cabal test` => 630 examples, 0 failures).
+
 ## Summary of Changes
 
 **Current vs target:** The current pipeline records presolution witnesses and produces explicit generalization plans in `MLF.Constraint.Presolution.Plan`; elaboration applies these plans via `MLF.Elab.Generalize` without re-solving. The remaining paper-faithfulness deltas are tracked in `.kiro/specs/paper-faithfulness-remaining-deltas/` (constructor types `Cσ` and stricter translatability validation for Φ).
+
+### 2026-02-11 Phase 3 wrapping equivalence recovery
+
+- Normalization now stamps synthesized wrapper `TyExp` nodes with reserved negative `ExpVarId`s.
+  - Rationale: preserve strict paper-shaped `TyExp <= τ` residual-edge invariant while retaining an unambiguous wrapper discriminator.
+- Edge interpreter now dispatches synthesized-wrapper behavior by `ExpVarId < 0`, not TyExp body shape.
+  - This prevents frontend TyExp edges from being misclassified as wrappers, restoring expansion-bearing semantics on real TyExp paths.
+- Φ binder reorder now uses full order-key fallback when narrowed binder-key maps are incomplete.
+  - Rationale: avoid false invariant failures (`PhiReorder: missing order key ...`) observed only under wrapped normalization shape, while keeping deterministic ordering via existing order-key comparison.
+- Verification: Phase 3 equivalence gate suite (7/7) and full validation (`cabal build all && cabal test`, 626 examples) are green.
 
 ### 2026-02-08 A7 Group 1 binding-core shared-helper consolidation (docs sync)
 

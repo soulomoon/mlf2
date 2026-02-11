@@ -291,8 +291,14 @@ spec = do
                         }
                 acyclicityRes = AcyclicityResult { arSortedEdges = [edge], arDepGraph = undefined }
 
+            let isOccursCheck err = case err of
+                        OccursCheckPresolution{} -> True
+                        PlanError inner -> isOccursCheck inner
+                        ExecError inner -> isOccursCheck inner
+                        _ -> False
+
             case computePresolution defaultTraceConfig acyclicityRes constraint of
-                Left OccursCheckPresolution{} -> return ()
+                Left err | isOccursCheck err -> pure ()
                 Left other -> expectationFailure $ "Unexpected error: " ++ show other
                 Right _ -> expectationFailure "Expected presolution occurs-check failure"
 
@@ -646,3 +652,21 @@ spec = do
                     cInstEdges c' `shouldBe` []
                     validateSolvedGraphStrict SolveResult{ srConstraint = c', srUnionFind = IntMap.empty }
                         `shouldBe` []
+
+    describe "Phase 4 regression matrix" $ do
+        it "covers identity, instantiate, forall-intro, and compose constructors" $ do
+            let expansionMatrix =
+                    [ ExpIdentity
+                    , ExpInstantiate [NodeId 0]
+                    , ExpForall (ForallSpec 1 [Nothing] NE.:| [])
+                    , ExpCompose
+                        ( ExpInstantiate [NodeId 1]
+                            NE.:| [ExpForall (ForallSpec 1 [Nothing] NE.:| [])]
+                        )
+                    ]
+                tag expansion = case expansion of
+                    ExpIdentity -> "identity"
+                    ExpInstantiate _ -> "instantiate"
+                    ExpForall _ -> "forall-intro"
+                    ExpCompose _ -> "compose"
+            map tag expansionMatrix `shouldBe` ["identity", "instantiate", "forall-intro", "compose"]

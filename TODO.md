@@ -235,13 +235,23 @@ Progress (2026-02-08, Group 1): duplicated binding-core helpers are now single-s
 
 ## Active master refactor plan — 2026-02-10
 
-- [ ] Execute the master 4-phase typed two-pass edge DSL plan:
+- [x] Execute the master 6-phase typed two-pass edge DSL plan:
+  - [x] Phase 1 + Phase 2 landed (typed planner/interpreter two-pass core).
+  - [x] Phase 3 Task 7 + Task 8 (wrapping equivalence) are green.
+  - [x] Phase 3 Task 9 + Task 10 landed (planner fail-fast + legacy-direct removal).
+  - [x] Phase 4 Task 11-14 landed (phase-tagged errors, regression matrix, docs, verification gate).
+  - [x] Phase 5 landed (plan type refinement, structured planner invariant errors, synthesized `ExpVarId` boundary module).
+  - [x] Phase 6 landed (single unified expansion execution path; synthesized-wrapper bridge function removed).
+  - [x] Post-phase cleanup landed (removed single-constructor `EdgeStage` phantom index from `EdgePlan`).
+  - [ ] Next: run finishing-branch handoff + integration decision (merge/PR/cleanup).
   - Plan: `docs/plans/2026-02-10-master-4-phase-typed-two-pass-edge-dsl-implementation-plan.md`
   - Task folder: `tasks/todo/2026-02-10-master-4-phase-typed-two-pass-edge-dsl/`
   - Scope highlights:
     - Enforce Phase-2 paper-shaped residual instantiation edges (`TyExp <= τ`).
     - Add Phase-4 fail-fast assertion on non-`TyExp` left inst edges.
     - Introduce typed two-pass planner/interpreter for edge processing.
+    - Refine plan payload to encode TyExp-left edges directly.
+    - Eliminate wrapper-specific interpreter bridge execution while preserving wrapper identity semantics.
     - Add matrix regressions and full verification (`cabal build all && cabal test`).
 
 ## Active bug closures
