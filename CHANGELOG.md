@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+* Tests/bug-tracking: hardened `Phase 3 atomic wrapping equivalence gates` by removing permissive mismatch fallback and enforcing explicit `forall a. a -> a` identity-shape assertions; revalidated targeted bug suites plus full gate (`633 examples, 0 failures`) and synced `BUG-2026-02-06-002`/`BUG-2026-02-08-004` to resolved in `Bugs.md`.
 * Cleanup: removed the single-constructor `EdgeStage` phantom index and `edgePlanStage`; `EdgePlan` is now a concrete resolved record with simplified planner/interpreter signatures, with no behavior change.
 * Phase 6 bridge-removal polish: removed the dedicated synthesized-wrapper interpreter bridge function in favor of a unified TyExp expansion execution path, added wrapper-identity characterization coverage, and re-validated Phase-3 equivalence gates plus full suite (`631 examples, 0 failures`).
 * Phase 5 abstraction polish: removed runtime edge-plan mode tagging in favor of refined `ResolvedTyExp` payloads, replaced planner TyExp-left invariant strings with structured `ExpectedTyExpLeftInPlanner` errors, centralized synthesized-wrapper `ExpVarId` allocation/checks in `MLF.Constraint.Types.SynthesizedExpVar`, and kept gate verification green.

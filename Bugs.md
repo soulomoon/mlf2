@@ -4,53 +4,69 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 
 ## Open
 
-### BUG-2026-02-06-002
-- Status: Open
-- Priority: High
-- Discovered: 2026-02-06
-- Summary: Polymorphic factory (`make`) elaboration/generalization drifts; let scheme specializes while RHS remains polymorphic.
-- Reproducer (surface expression):
-  - `ELet "make" (ELam "x" (ELam "y" (EVar "x"))) (ELet "c1" (EApp (EVar "make") (ELit (LInt (-4)))) (EApp (EVar "c1") (ELit (LBool True))))`
-- Expected:
-  - Pipeline elaborates and typechecks successfully (result should be `Int`).
-  - `make` should have principal scheme `forall a b. a -> b -> a`.
-  - `c1` (after applying `make` to `-4`) should have scheme `forall b. b -> Int`.
-- Actual:
-  - Current reproducer behavior on 2026-02-09 (latest checkpoint):
-    - `Phase 7 (type checking): TCLetTypeMismatch (TForall "b" Nothing (TArrow TBottom (TBase Int))) (TForall "b" Nothing (TArrow (TVar "b") (TBase Int)))`.
-  - Phase-2 replay on 2026-02-09 reconfirms a generalization-preprocessing ownership drift path:
-    - `instCopyMap` includes `(25 -> NodeId 0)` and `p2CopyOverrides` mirrors it.
-    - bind-parent ownership for node `25` transitions `GenNodeId 2 -> GenNodeId 4 -> GenNodeId 1` across Phase-3/Phase-4/final constraint assembly.
-  - With presolution write-back pollution blocked, Phase 6 no longer fails at `OpGraft ... binder not found`; instead, edge-0 Φ translation still emits `InstBot ⊥` segments that force let-RHS shape toward `∀b. ⊥ -> Int`.
-  - Focused regressions remain green in the current blocked state (`make const`, redirected let-use polymorphism, `BUG-2026-02-08-004` sentinel).
-- Suspected area:
-  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/EdgeUnify.hs` (fixed anti-pollution gate now in place)
-  - `/Volumes/src/mlf4/src/MLF/Elab/Run/Generalize/Phase3.hs` (copy-parent grafting from `instCopyMap`)
-  - `/Volumes/src/mlf4/src/MLF/Elab/Run/Generalize/Phase4.hs` (scheme-interior owner realignment of inst-copy nodes)
-  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/Plan/Finalize.hs` (scheme anti-drift logic coupled with this path)
-  - `/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs` (remaining edge-0 Φ translation fidelity issue)
-- Thesis impact:
-  - Valid let-polymorphic factory path remains non-elaboratable end-to-end under thesis-aligned generalization semantics.
-
-### BUG-2026-02-08-004
-- Status: Open
-- Priority: High
-- Discovered: 2026-02-08
-- Summary: Nested let + annotated-lambda application now reaches Phase 7 but fails with `TCLetTypeMismatch`.
-- Reproducer (surface expression):
-  - `ELet "id" (ELam "x" (EVar "x")) (ELet "use" (ELamAnn "f" (STArrow (STBase "Int") (STBase "Int")) (EApp (EVar "f") (ELit (LInt 0)))) (EApp (EVar "use") (EVar "id")))`
-- Expected:
-  - Pipeline elaborates and typechecks successfully (result `Int`).
-- Actual:
-  - `Phase 7 (type checking): TCLetTypeMismatch (TForall "a" Nothing (TArrow (TArrow Int Int) Int)) (TForall "a" Nothing (TArrow (TVar "a") Int))`.
-- Suspected area:
-  - `/Volumes/src/mlf4/src/MLF/Elab/Elaborate.hs`
-  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/Plan/Target/GammaPlan.hs`
-  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/Plan/ReifyPlan.hs`
-- Thesis impact:
-  - Valid coercion/annotation flow still does not typecheck under checked-authoritative semantics.
+No open bugs currently.
 
 ## Resolved
+
+### BUG-2026-02-06-002
+- Status: Resolved
+- Priority: High
+- Discovered: 2026-02-06
+- Resolved: 2026-02-11
+- Summary: Polymorphic factory (`make`) elaboration/generalization drift no longer reproduces; checked and unchecked pipelines now return `Int`.
+- Reproducer (surface expression):
+  - `ELet "make" (ELam "x" (ELam "y" (EVar "x"))) (ELet "c1" (EApp (EVar "make") (ELit (LInt (-4)))) (EApp (EVar "c1") (ELit (LBool True))))`
+- Final expected/actual:
+  - Expected: Pipeline elaborates and typechecks successfully (result `Int`) with polymorphic `make`/`c1` behavior.
+  - Actual (2026-02-11 verification): both unchecked and checked pipelines return `Int`; targeted regression suite passes and full gate is green (`633 examples, 0 failures`).
+- Regression tests:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-2026-02-06-002"'` (`10 examples, 0 failures`)
+  - Validation gate: `cabal build all && cabal test` (`633 examples, 0 failures`)
+- Thesis impact:
+  - Restores thesis-aligned let-polymorphic factory behavior for the guarded `make` path.
+
+### BUG-2026-02-08-004
+- Status: Resolved
+- Priority: High
+- Discovered: 2026-02-08
+- Resolved: 2026-02-11
+- Summary: Nested let + annotated-lambda application no longer fails with `TCLetTypeMismatch`; checked and unchecked pipelines now typecheck to `Int`.
+- Reproducer (surface expression):
+  - `ELet "id" (ELam "x" (EVar "x")) (ELet "use" (ELamAnn "f" (STArrow (STBase "Int") (STBase "Int")) (EApp (EVar "f") (ELit (LInt 0)))) (EApp (EVar "use") (EVar "id")))`
+- Final expected/actual:
+  - Expected: Pipeline elaborates and typechecks successfully (result `Int`).
+  - Actual (2026-02-11 verification): both unchecked and checked pipelines return `Int`; full gate is green (`633 examples, 0 failures`).
+- Regression tests:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-2026-02-08-004"'` (`1 example, 0 failures`)
+  - Validation gate: `cabal build all && cabal test` (`633 examples, 0 failures`)
+- Thesis impact:
+  - Restores checked-authoritative behavior for the guarded nested let + annotated-lambda path.
+
+### BUG-2026-02-11-001
+- Status: Resolved
+- Priority: High
+- Discovered: 2026-02-11
+- Resolved: 2026-02-11
+- Summary: Phase 3 paper-shaped residual-edge wrapping regressed elaboration/typechecking due synthesized-wrapper misclassification and strict Phi reorder keying.
+- Reproducer (test command):
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Phase 3 atomic wrapping equivalence gates"'`
+- Expected:
+  - Gate suite remains equivalent to the Phase 2 baseline (all 7 gate cases pass) under strict paper-shaped wrapping.
+- Actual (before fix):
+  - Gate suite failed with `SchemeFreeVars`, `TCTypeAbsVarInScope`, then `PhiInvariantError "PhiReorder: missing order key ..."` depending on intermediate fixes.
+- Suspected/owning area:
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Normalize.hs`
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/EdgeProcessing/Interpreter.hs`
+  - `/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs`
+- Fix:
+  - Reserved negative `ExpVarId` space for synthesized wrappers in normalization.
+  - Switched synthesized-wrapper dispatch to `ExpVarId < 0` (instead of TyExp-body-shape heuristic), preserving real expansion semantics for frontend TyExp edges.
+  - Added Phi reorder fallback to full order-key map when narrowed binder-key map is incomplete.
+- Regression tests:
+  - `/Volumes/src/mlf4/test/PipelineSpec.hs` (`describe "Phase 3 atomic wrapping equivalence gates"`)
+  - Validation gate: `cabal build all && cabal test`
+- Thesis impact:
+  - Restores strict paper-shaped residual-edge representation without changing elaboration outcomes on the guarded thesis target matrix.
 
 ### BUG-2026-02-10-001
 - Status: Resolved
@@ -140,7 +156,7 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 - Regression test:
   - `/Volumes/src/mlf4/test/ElaborationSpec.hs` (`nested let + annotated lambda application does not crash in Phase 6 (BUG-2026-02-06-001)`).
 - Follow-up:
-  - Remaining type-checking failure for the same surface program is tracked as `BUG-2026-02-08-004`.
+  - The prior type-checking follow-up for the same surface program is now resolved as `BUG-2026-02-08-004` (2026-02-11).
 
 ### BUG-2026-02-06-003
 - Status: Resolved

@@ -612,25 +612,18 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     (ELet "id" (ELam "x" (EVar "x"))
                         (EApp (EVar "id") (EVar "y")))
 
-            expectForallSelfArrow :: ElabType -> Expectation
-            expectForallSelfArrow ty =
+            expectForallIdentityArrow :: ElabType -> Expectation
+            expectForallIdentityArrow ty =
                 case ty of
-                    TForall _ _ body ->
-                        case body of
-                            TArrow dom cod -> dom `shouldBe` cod
-                            other ->
-                                expectationFailure
-                                    ("Expected forall-arrow body, got: " ++ show other)
+                    TForall v Nothing (TArrow dom cod)
+                        | dom == TVar v && cod == TVar v -> pure ()
                     other ->
                         expectationFailure
-                            ("Expected forall type, got: " ++ show other)
+                            ("Expected forall identity arrow (forall a. a -> a), got: " ++ show other)
 
-        it "gate: make let mismatch does not leak solved-node names" $
+        it "gate: make let-c1-apply-bool path typechecks to Int (no mismatch fallback)" $
             case runPipelineElabChecked Set.empty (unsafeNormalizeExpr bugExpr) of
-                Left err -> do
-                    let rendered = renderPipelineError err
-                    rendered `shouldSatisfy` ("TCLetTypeMismatch" `isInfixOf`)
-                    rendered `shouldNotSatisfy` ("t23" `isInfixOf`)
+                Left err -> expectationFailure ("checked pipeline failed: " ++ renderPipelineError err)
                 Right (_term, ty) -> ty `shouldBe` TBase (BaseTy "Int")
 
         it "gate: let-c1-apply-bool sentinel matrix returns Int" $
@@ -668,10 +661,10 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 Left err -> expectationFailure ("checked pipeline failed: " ++ renderPipelineError err)
                 Right (_term, ty) -> ty `shouldBe` TBase (BaseTy "Int")
 
-        it "gate: \\y. let id = (\\x. x) in id y keeps forall self-arrow shape" $
+        it "gate: \\y. let id = (\\x. x) in id y has type forall a. a -> a" $
             case runPipelineElab Set.empty (unsafeNormalizeExpr lambdaLetIdExpr) of
                 Left err -> expectationFailure ("pipeline failed: " ++ renderPipelineError err)
-                Right (_term, ty) -> expectForallSelfArrow ty
+                Right (_term, ty) -> expectForallIdentityArrow ty
 
 
     describe "Phase 4 regression matrix" $ do

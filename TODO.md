@@ -4,6 +4,22 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 9 Verification Gate — 2026-02-11 (Phase-3 gate hardening + tracker sync)
+
+- Command: `cabal build all && cabal test`
+- Gate status: **Passed** (`633 examples, 0 failures`)
+- Closure summary:
+  - Hardened `Phase 3 atomic wrapping equivalence gates` in `test/PipelineSpec.hs`:
+    - removed permissive checked mismatch fallback for `make` path
+    - enforced explicit `forall a. a -> a` identity-arrow shape for `\y. let id = (\x. x) in id y`
+  - Revalidated targeted suites:
+    - `--match "Phase 3 atomic wrapping equivalence gates"` (`7 examples, 0 failures`)
+    - `--match "BUG-2026-02-06-002"` (`10 examples, 0 failures`)
+    - `--match "BUG-2026-02-08-004"` (`1 example, 0 failures`)
+  - Synced bug tracker status:
+    - `BUG-2026-02-06-002` and `BUG-2026-02-08-004` marked **Resolved** in `/Volumes/src/mlf4/Bugs.md`
+    - open bug list currently empty
+
 ## Task 7 Verification Gate — 2026-02-10 (BUG-2026-02-06-002 closure)
 
 - Command: `cabal build all && cabal test`
