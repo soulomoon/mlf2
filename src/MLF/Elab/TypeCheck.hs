@@ -15,6 +15,8 @@ import MLF.Elab.Types
 import MLF.Reify.TypeOps
     ( alphaEqType
     , freeTypeVarsType
+    , matchType
+    , splitForalls
     )
 import MLF.Frontend.Syntax (Lit(..))
 
@@ -45,14 +47,14 @@ typeCheckWithEnv env term = case term of
         aTy <- typeCheckWithEnv env a
         case fTy of
             TArrow argTy resTy ->
-                if alphaEqType argTy aTy
+                if argTy == TBottom || alphaEqType argTy aTy
                     then Right resTy
                     else Left (TCArgumentMismatch argTy aTy)
             _ -> Left (TCExpectedArrow fTy)
     ELet v sch rhs body -> do
         rhsTy <- typeCheckWithEnv env rhs
         let schTy = schemeToType sch
-        if alphaEqType rhsTy schTy
+        if letSchemeAccepts rhsTy schTy
             then do
                 let env' = env { termEnv = Map.insert v rhsTy (termEnv env) }
                 typeCheckWithEnv env' body
@@ -111,3 +113,25 @@ freeTypeVarsEnv env =
     Set.union
         (Set.unions (map freeTypeVarsType (Map.elems (termEnv env))))
         (Set.unions (map freeTypeVarsType (Map.elems (typeEnv env))))
+
+letSchemeAccepts :: ElabType -> ElabType -> Bool
+letSchemeAccepts rhsTy schTy =
+    alphaEqType rhsTy schTy || rhsIsInstanceOfScheme rhsTy schTy
+
+rhsIsInstanceOfScheme :: ElabType -> ElabType -> Bool
+rhsIsInstanceOfScheme rhsTy schTy =
+    let (schBinds, schBody) = splitForalls schTy
+        (rhsBinds, rhsBody) = splitForalls rhsTy
+        schBinderNames = map fst schBinds
+        sameBinderSpine =
+            length schBinds == length rhsBinds
+                && alphaEqType
+                    (rebuildForalls schBinds (TVar "_rhs_instance"))
+                    (rebuildForalls rhsBinds (TVar "_rhs_instance"))
+    in sameBinderSpine
+        && case matchType (Set.fromList schBinderNames) schBody rhsBody of
+            Right _ -> True
+            Left _ -> False
+
+rebuildForalls :: [(String, Maybe BoundType)] -> ElabType -> ElabType
+rebuildForalls binds body = foldr (\(v, bnd) t -> TForall v bnd t) body binds

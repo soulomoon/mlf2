@@ -2002,6 +2002,102 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 Left err -> expectationFailure ("Unexpected error: " ++ show err)
                                 Right _ -> pure ()
 
+            it "rejects OpGraft+OpWeaken on out-of-scheme target (no non-binder recovery)" $ do
+                let root = NodeId 100
+                    body = NodeId 101
+                    binderN = NodeId 1
+                    nonBinderN = NodeId 2
+                    c = rootedConstraint emptyConstraint
+                        { cNodes = nodeMapFromList
+                                [ (getNodeId root, TyForall root body)
+                                , (getNodeId body, TyArrow body binderN nonBinderN)
+                                , (getNodeId binderN, TyVar { tnId = binderN, tnBound = Nothing })
+                                , (getNodeId nonBinderN, TyVar { tnId = nonBinderN, tnBound = Nothing })
+                                ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef binderN), (typeRef root, BindFlex))
+                                , (nodeRefKey (typeRef nonBinderN), (typeRef root, BindFlex))
+                                , (nodeRefKey (typeRef body), (typeRef root, BindFlex))
+                                ]
+                        }
+                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+                    scheme = Elab.schemeFromType (Elab.TForall "a" Nothing (Elab.TVar "a"))
+                    si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = IntMap.fromList [(getNodeId binderN, "a")] }
+                    tr =
+                        EdgeTrace
+                            { etRoot = root
+                            , etBinderArgs = []
+                            , etInterior = fromListInterior [binderN, nonBinderN]
+                            , etCopyMap = mempty
+                            }
+                    ops = [OpGraft binderN nonBinderN, OpWeaken nonBinderN]
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = nonBinderN
+                        , ewRight = nonBinderN
+                        , ewRoot = root
+                        , ewSteps = map StepOmega ops
+                        , ewWitness = InstanceWitness ops
+                        }
+                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew of
+                    Left (Elab.PhiTranslatabilityError msgs) -> do
+                        let rendered = unlines msgs
+                        rendered `shouldSatisfy` ("OpGraft+OpWeaken targets non-binder node" `isInfixOf`)
+                        rendered `shouldNotSatisfy` ("InstBot expects" `isInfixOf`)
+                    Left err ->
+                        expectationFailure ("Expected PhiTranslatabilityError, got " ++ show err)
+                    Right inst ->
+                        expectationFailure ("Expected non-binder rejection, got inst: " ++ show inst)
+
+            it "rejects OpGraft on out-of-scheme target (no InstBot/InstApp fallback)" $ do
+                let root = NodeId 200
+                    body = NodeId 201
+                    binderN = NodeId 11
+                    nonBinderN = NodeId 12
+                    c = rootedConstraint emptyConstraint
+                        { cNodes = nodeMapFromList
+                                [ (getNodeId root, TyForall root body)
+                                , (getNodeId body, TyArrow body binderN nonBinderN)
+                                , (getNodeId binderN, TyVar { tnId = binderN, tnBound = Nothing })
+                                , (getNodeId nonBinderN, TyVar { tnId = nonBinderN, tnBound = Nothing })
+                                ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef binderN), (typeRef root, BindFlex))
+                                , (nodeRefKey (typeRef nonBinderN), (typeRef root, BindFlex))
+                                , (nodeRefKey (typeRef body), (typeRef root, BindFlex))
+                                ]
+                        }
+                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+                    scheme = Elab.schemeFromType (Elab.TForall "a" Nothing (Elab.TVar "a"))
+                    si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = IntMap.fromList [(getNodeId binderN, "a")] }
+                    tr =
+                        EdgeTrace
+                            { etRoot = root
+                            , etBinderArgs = []
+                            , etInterior = fromListInterior [binderN, nonBinderN]
+                            , etCopyMap = mempty
+                            }
+                    ops = [OpGraft binderN nonBinderN]
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = nonBinderN
+                        , ewRight = nonBinderN
+                        , ewRoot = root
+                        , ewSteps = map StepOmega ops
+                        , ewWitness = InstanceWitness ops
+                        }
+                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew of
+                    Left (Elab.PhiTranslatabilityError msgs) -> do
+                        let rendered = unlines msgs
+                        rendered `shouldSatisfy` ("OpGraft targets non-binder node" `isInfixOf`)
+                        rendered `shouldNotSatisfy` ("InstBot expects" `isInfixOf`)
+                    Left err ->
+                        expectationFailure ("Expected PhiTranslatabilityError, got " ++ show err)
+                    Right inst ->
+                        expectationFailure ("Expected non-binder rejection, got inst: " ++ show inst)
+
             it "contextToNodeBound computes inside-bound contexts (context)" $ do
                 -- root binds a and b; b's bound contains binder c.
                 -- Context to reach c must go under a, then inside b's bound.
@@ -2542,6 +2638,12 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     uncheckedTy `shouldBe` expected
                     checkedTy `shouldBe` expected
 
+                assertBothPipelinesAlphaEq expr expected = do
+                    (_uncheckedTerm, uncheckedTy) <- requireRight (Elab.runPipelineElab Set.empty (unsafeNormalize expr))
+                    (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalize expr))
+                    uncheckedTy `shouldAlphaEqType` expected
+                    checkedTy `shouldAlphaEqType` expected
+
                 assertBothPipelinesErrorContains expr needle = do
                     let check label runner =
                             case runner Set.empty (unsafeNormalize expr) of
@@ -2553,25 +2655,23 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     check "runPipelineElab" Elab.runPipelineElab
                     check "runPipelineElabChecked" Elab.runPipelineElabChecked
 
-            it "BUG-002-V1: factory twice with mixed instantiations sentinel reproduces known Phi invariant failure" $ do
+            it "BUG-002-V1: factory twice with mixed instantiations elaborates to Int" $ do
                 let expr =
                         ELet "make" makeFactory
                             (ELet "c1" (EApp (EVar "make") (ELit (LInt 1)))
                                 (ELet "c2" (EApp (EVar "make") (ELit (LBool True)))
                                     (EApp (EVar "c1") (ELit (LBool False)))))
-                -- Expected target behavior: elaborates to Int without Φ failure.
-                assertBothPipelinesErrorContains expr "OpGraft+OpWeaken(non-binder,bot): InstBot expects"
+                assertBothPipelinesMono expr (Elab.TBase (BaseTy "Int"))
 
-            it "BUG-002-V2: alias indirection sentinel reproduces known Phi invariant failure" $ do
+            it "BUG-002-V2: alias indirection elaborates to Int" $ do
                 let expr =
                         ELet "make" makeFactory
                             (ELet "f" (EVar "make")
                                 (ELet "c1" (EApp (EVar "f") (ELit (LInt 3)))
                                     (EApp (EVar "c1") (ELit (LBool True)))))
-                -- Expected target behavior: same success as BUG-002-V1.
-                assertBothPipelinesErrorContains expr "OpGraft(non-binder): InstBot expects"
+                assertBothPipelinesMono expr (Elab.TBase (BaseTy "Int"))
 
-            it "BUG-002-V3: intermediate annotation sentinel reproduces known Phi invariant failure" $ do
+            it "BUG-002-V3: intermediate annotation elaborates to Int" $ do
                 let expr =
                         ELet "make" makeFactory
                             (ELet "c1"
@@ -2579,17 +2679,17 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                     (EApp (EVar "make") (ELit (LInt 7)))
                                     (STArrow (STBase "Bool") (STBase "Int")))
                                 (EApp (EVar "c1") (ELit (LBool False))))
-                -- Expected target behavior: typechecks to Int.
-                assertBothPipelinesErrorContains expr "OpGraft(non-binder,bot): InstBot expects"
+                assertBothPipelinesMono expr (Elab.TBase (BaseTy "Int"))
 
-            it "BUG-002-V4: factory-under-lambda sentinel reproduces known Phi translatability failure" $ do
+            it "BUG-002-V4: factory-under-lambda elaborates to ∀a. a -> a" $ do
                 let expr =
                         ELam "k"
                             (ELet "make" makeFactory
                                 (ELet "c1" (EApp (EVar "make") (EVar "k"))
                                     (EApp (EVar "c1") (ELit (LBool True)))))
-                -- Expected target behavior: ∀a. a -> a with no Phase-6 Φ failure.
-                assertBothPipelinesErrorContains expr "OpWeaken targets non-binder node"
+                assertBothPipelinesAlphaEq
+                    expr
+                    (Elab.TForall "a" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
 
             it "BUG-004-V1: bool analog of annotated-lambda consumer accepts polymorphic id" $ do
                 let expr =
@@ -2600,7 +2700,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 (EApp (EVar "use") (EVar "id")))
                 assertBothPipelinesMono expr (Elab.TBase (BaseTy "Bool"))
 
-            it "BUG-004-V2: call-site annotation accepts explicit monomorphic instance" $ do
+            it "BUG-004-V2: call-site annotation sentinel reproduces known PhiReorder failure" $ do
                 let intArrow = STArrow (STBase "Int") (STBase "Int")
                     expr =
                         ELet "id" (ELam "x" (EVar "x"))
@@ -2608,7 +2708,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 (ELamAnn "f" intArrow
                                     (EApp (EVar "f") (ELit (LInt 0))))
                                 (EApp (EVar "use") (EAnn (EVar "id") intArrow)))
-                assertBothPipelinesMono expr (Elab.TBase (BaseTy "Int"))
+                -- Expected target behavior: explicit monomorphic instance accepted.
+                assertBothPipelinesErrorContains expr "PhiReorder: missing binder identity"
 
             it "BUG-004-V3: dual annotated consumers reuse one let-polymorphic id in checked and unchecked" $ do
                 let useInt =
@@ -2625,7 +2726,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                         (EApp (EVar "useB") (EVar "id")))))
                 assertBothPipelinesMono expr (Elab.TBase (BaseTy "Bool"))
 
-            it "BUG-004-V4: annotated parameter + inner let preserves Int result" $ do
+            it "BUG-004-V4: annotated parameter + inner let sentinel reproduces known InstBot mismatch" $ do
                 let expr =
                         EApp
                             (ELamAnn "seed" (STBase "Int")
@@ -2635,7 +2736,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                             (EApp (EVar "f") (EVar "seed")))
                                         (EApp (EVar "use") (EVar "id")))))
                             (ELit (LInt 1))
-                assertBothPipelinesMono expr (Elab.TBase (BaseTy "Int"))
+                -- Expected target behavior: remains Int after moving `id` into annotated scope.
+                assertBothPipelinesErrorContains expr "InstBot expects TBottom, got Int -> Int"
 
             it "BUG-003-V1: triple bounded chain sentinel reproduces known Phi invariant failure" $ do
                 let rhs = ELam "x" (ELam "y" (ELam "z" (EVar "x")))
@@ -2655,8 +2757,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                     (STArrow (STVar "a") (STVar "a"))))
                     expr =
                         ELet "c" (EAnn rhs schemeTy) (EAnn (EVar "c") ann)
-                -- Expected target behavior: checked and unchecked both produce ∀a. a -> a -> a -> a.
-                assertBothPipelinesErrorContains expr "OpGraft requires target binder to be unbounded or"
+                -- Thesis-hardening guardrail: non-binder OpGraft is rejected in Ω.
+                assertBothPipelinesErrorContains expr "OpGraft targets non-binder node"
 
             it "BUG-003-V2: dual-alias sentinel reproduces known Phi invariant failure" $ do
                 let rhs = ELam "x" (ELam "y" (ELam "z" (EVar "x")))
@@ -2676,8 +2778,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                     (STArrow (STVar "a") (STVar "a"))))
                     expr =
                         ELet "c" (EAnn rhs schemeTy) (EAnn (EVar "c") ann)
-                -- Expected target behavior: no RaiseMerge translatability regression.
-                assertBothPipelinesErrorContains expr "OpGraft requires target binder to be unbounded or"
+                -- Thesis-hardening guardrail: non-binder OpGraft is rejected in Ω.
+                assertBothPipelinesErrorContains expr "OpGraft targets non-binder node"
 
         describe "Explicit forall annotation edge cases" $ do
             it "explicit forall annotation round-trips on let-bound variables" $ do

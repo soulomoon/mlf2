@@ -42,7 +42,7 @@ import MLF.Elab.Phi.Context (contextToNodeBoundWithOrderKeys)
 import MLF.Elab.Sigma (bubbleReorderTo)
 import MLF.Elab.Types
 import MLF.Reify.Core (reifyBoundWithNames, reifyTypeWithNamedSetNoFallback)
-import MLF.Reify.TypeOps (freeTypeVarsList, inlineAliasBoundsWithBy, inlineBaseBoundsType, matchType, substTypeCapture)
+import MLF.Reify.TypeOps (alphaEqType, freeTypeVarsList, inlineAliasBoundsWithBy, inlineBaseBoundsType, matchType, substTypeCapture)
 import MLF.Util.Graph (topoSortBy)
 import MLF.Util.Trace (TraceConfig, traceGeneralize)
 import MLF.Util.Names (parseNameId)
@@ -309,8 +309,8 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
                         mb' = fmap (\f -> runApplyFun f bound) mb
                     in TForall v mb' (runApplyFun body bound')
 
-    binderArgType :: IntSet.IntSet -> NodeId -> Maybe ElabType
-    binderArgType namedSet' binder = do
+    _binderArgType :: IntSet.IntSet -> NodeId -> Maybe ElabType
+    _binderArgType namedSet' binder = do
         name <- IntMap.lookup (getNodeId (canonicalNode binder)) substForTypes
         Map.lookup name (inferredArgMap namedSet')
 
@@ -518,18 +518,12 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
     reorderBindersByPrec :: ElabType -> [Maybe NodeId] -> Either ElabError (Instantiation, ElabType, [Maybe NodeId])
     reorderBindersByPrec ty ids = do
         let (qs, _) = splitForalls ty
-            schemeArity = case siScheme si of
-                Forall binds _ -> length binds
         when (length qs /= length ids) $
             Left (PhiInvariantError "PhiReorder: binder spine / identity list length mismatch")
         if length qs < 2
             then Right (InstId, ty, ids)
             else do
-                let missingRequiredIdPositions =
-                        [ i
-                        | (i, Nothing) <- zip [(0::Int)..] ids
-                        , i < schemeArity
-                        ]
+                let missingIdPositions = [i | (i, Nothing) <- zip [(0::Int)..] ids]
                     sourceBinders = [ canonicalNode nid | Just nid <- ids, isSchemeBinder nid ]
                     orderKeysActive = orderKeysForBinders sourceBinders
                     missingKeyBinders =
@@ -538,10 +532,10 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
                         , isSchemeBinder nid
                         , not (IntMap.member (getNodeId (canonicalNode nid)) orderKeysActive)
                         ]
-                unless (null missingRequiredIdPositions) $
+                unless (null missingIdPositions) $
                     Left $
                         PhiInvariantError $
-                            "PhiReorder: missing binder identity at positions " ++ show missingRequiredIdPositions
+                            "PhiReorder: missing binder identity at positions " ++ show missingIdPositions
                 let orderKeysForSort =
                         if null missingKeyBinders
                             then orderKeysActive
@@ -616,16 +610,6 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
             | bv == bv' -> do
                 let bvC = canonicalNode bv
                     rootC = canonicalNode orderRoot
-                    isRootAdjacent =
-                        case lookupBindParent (srConstraint res) (typeRef bvC) of
-                            Just (TypeRef parent, _) ->
-                                let parentC = canonicalNode parent
-                                in parentC == rootC
-                                    || case NodeAccess.lookupNode (srConstraint res) parentC of
-                                        Just TyForall{} -> True
-                                        _ -> False
-                            Just (GenRef _, _) -> True
-                            _ -> False
                 -- Note: A binder can be rigid in the *final* presolution constraint
                 -- (e.g. due to later rigidification), even though this ω step was
                 -- executed while the binder was still instantiable. We must still
@@ -638,7 +622,10 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
                         if null qs
                             then do
                                 argTy <- reifyTypeArg namedSet' Nothing (graftArgFor arg bv)
-                                let inst = InstBot argTy
+                                let inst =
+                                        if ty == TBottom || alphaEqType ty argTy
+                                            then InstBot argTy
+                                            else InstId
                                 ty' <- applyInst "OpGraft+OpWeaken(root,bot)" ty inst
                                 go binderKeys keepBinderKeys' namedSet' ty' ids (composeInst phi inst) rest lookupBinder
                             else do
@@ -646,20 +633,6 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
                                 let inst = InstApp argTy
                                 (ty', ids') <- applyInstAndSyncIds "OpGraft+OpWeaken(root)" ty ids inst
                                 go binderKeys keepBinderKeys' namedSet' ty' ids' (composeInst phi inst) rest lookupBinder
-                    else if not (isBinderNode binderKeys bv) && isRootAdjacent
-                        then do
-                            let (qs, _) = splitForalls ty
-                            if null qs
-                                then do
-                                    argTy <- reifyTypeArg namedSet' Nothing (graftArgFor arg bv)
-                                    let inst = InstBot argTy
-                                    ty' <- applyInst "OpGraft+OpWeaken(non-binder,bot)" ty inst
-                                    go binderKeys keepBinderKeys' namedSet' ty' ids (composeInst phi inst) rest lookupBinder
-                                else do
-                                    argTy <- reifyTypeArg namedSet' Nothing (graftArgFor arg bv)
-                                    let inst = InstApp argTy
-                                    (ty', ids') <- applyInstAndSyncIds "OpGraft+OpWeaken(non-binder)" ty ids inst
-                                    go binderKeys keepBinderKeys' namedSet' ty' ids' (composeInst phi inst) rest lookupBinder
                     else if not (isBinderNode binderKeys bv)
                         then Left $ PhiTranslatabilityError
                             [ "OpGraft+OpWeaken targets non-binder node"
@@ -679,14 +652,24 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
                                         Left (PhiInvariantError "OpGraft+OpWeaken: binder spine / identity list length mismatch")
                                     let mbBound = snd (qs !! i)
                                     if mbBound /= Just TBottom && mbBound /= Nothing
-                                        then
-                                            Left $
-                                                PhiTranslatabilityError
-                                                    [ "OpGraft+OpWeaken requires target binder to be unbounded or ⊥-bounded"
-                                                    , "  target node: " ++ show bv
-                                                    , "  canonical: " ++ show bvC
-                                                    , "  binder bound: " ++ show mbBound
-                                                    ]
+                                        then do
+                                            argTy <- reifyTypeArg namedSet' Nothing (graftArgFor arg bv)
+                                            let boundTy = maybe TBottom tyToElab mbBound
+                                            if argTy == TBottom || alphaEqType argTy boundTy
+                                                then do
+                                                    let chosenArg = if argTy == TBottom then boundTy else argTy
+                                                    (inst, ids1) <- atBinder binderKeys ids ty bv (pure (InstApp chosenArg))
+                                                    ty' <- applyInst "OpGraft+OpWeaken(bound-match)" ty inst
+                                                    go binderKeys keepBinderKeys' namedSet' ty' ids1 (composeInst phi inst) rest lookupBinder
+                                                else
+                                                    Left $
+                                                        PhiTranslatabilityError
+                                                            [ "OpGraft+OpWeaken requires target binder to be unbounded/⊥-bounded or match its explicit bound"
+                                                            , "  target node: " ++ show bv
+                                                            , "  canonical: " ++ show bvC
+                                                            , "  binder bound: " ++ show mbBound
+                                                            , "  graft arg: " ++ show argTy
+                                                            ]
                                         else do
                                             (inst, ids1) <- atBinder binderKeys ids ty bv $ do
                                                 argTy0 <- reifyTypeArg namedSet' Nothing (graftArgFor arg bv)
@@ -700,23 +683,16 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
         (OpGraft arg bv : rest) -> do
             let bvC = canonicalNode bv
                 rootC = canonicalNode orderRoot
-                isRootAdjacent =
-                    case lookupBindParent (srConstraint res) (typeRef bvC) of
-                        Just (TypeRef parent, _) ->
-                            let parentC = canonicalNode parent
-                            in parentC == rootC
-                                || case NodeAccess.lookupNode (srConstraint res) parentC of
-                                    Just TyForall{} -> True
-                                    _ -> False
-                        Just (GenRef _, _) -> True
-                        _ -> False
             if bvC == rootC
                 then do
                     let (qs, _) = splitForalls ty
                     if null qs
                         then do
                             argTy <- reifyTypeArg namedSet' Nothing (graftArgFor arg bv)
-                            let inst = InstBot argTy
+                            let inst =
+                                    if ty == TBottom || alphaEqType ty argTy
+                                        then InstBot argTy
+                                        else InstId
                             ty' <- applyInst "OpGraft(root,bot)" ty inst
                             go binderKeys keepBinderKeys' namedSet' ty' ids (composeInst phi inst) rest lookupBinder
                         else do
@@ -724,20 +700,6 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
                             let inst = InstApp argTy
                             (ty', ids') <- applyInstAndSyncIds "OpGraft(root)" ty ids inst
                             go binderKeys keepBinderKeys' namedSet' ty' ids' (composeInst phi inst) rest lookupBinder
-                else if not (isBinderNode binderKeys bv) && isRootAdjacent
-                    then do
-                        let (qs, _) = splitForalls ty
-                        if null qs
-                            then do
-                                argTy <- reifyTypeArg namedSet' Nothing (graftArgFor arg bv)
-                                let inst = InstBot argTy
-                                ty' <- applyInst "OpGraft(non-binder,bot)" ty inst
-                                go binderKeys keepBinderKeys' namedSet' ty' ids (composeInst phi inst) rest lookupBinder
-                            else do
-                                argTy <- reifyTypeArg namedSet' Nothing (graftArgFor arg bv)
-                                let inst = InstApp argTy
-                                (ty', ids') <- applyInstAndSyncIds "OpGraft(non-binder)" ty ids inst
-                                go binderKeys keepBinderKeys' namedSet' ty' ids' (composeInst phi inst) rest lookupBinder
                 else if not (isBinderNode binderKeys bv)
                     then Left $ PhiTranslatabilityError
                         [ "OpGraft targets non-binder node"
@@ -757,14 +719,21 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
                                     Left (PhiInvariantError "OpGraft: binder spine / identity list length mismatch")
                                 let mbBound = snd (qs !! i)
                                 if mbBound /= Just TBottom && mbBound /= Nothing
-                                    then
-                                        Left $
-                                            PhiTranslatabilityError
-                                                [ "OpGraft requires target binder to be unbounded or ⊥-bounded"
-                                                , "  target node: " ++ show bv
-                                                , "  canonical: " ++ show bvC
-                                                , "  binder bound: " ++ show mbBound
-                                                ]
+                                    then do
+                                        argTy <- reifyTypeArg namedSet' Nothing arg
+                                        let boundTy = maybe TBottom tyToElab mbBound
+                                        if argTy == TBottom || alphaEqType argTy boundTy
+                                            then
+                                                go binderKeys keepBinderKeys' namedSet' ty ids phi rest lookupBinder
+                                            else
+                                                Left $
+                                                    PhiTranslatabilityError
+                                                        [ "OpGraft requires target binder to be unbounded/⊥-bounded or match its explicit bound"
+                                                        , "  target node: " ++ show bv
+                                                        , "  canonical: " ++ show bvC
+                                                        , "  binder bound: " ++ show mbBound
+                                                        , "  graft arg: " ++ show argTy
+                                                        ]
                                     else do
                                         (inst, ids1) <- atBinderKeep binderKeys ids ty bv $ do
                                             argTy <- reifyTypeArg namedSet' Nothing arg

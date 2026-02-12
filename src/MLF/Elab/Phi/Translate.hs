@@ -43,7 +43,7 @@ module MLF.Elab.Phi.Translate (
 import Control.Applicative ((<|>))
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import Data.Maybe (listToMaybe)
+import Data.Maybe (fromMaybe, listToMaybe)
 
 import MLF.Constraint.Types
 import MLF.Elab.Types
@@ -72,12 +72,30 @@ remapSchemeInfoM :: EdgeTrace -> SchemeInfo -> PhiM SchemeInfo
 remapSchemeInfoM tr si = do
     canonical <- askCanonical
     let traceCopyMap = getCopyMapping (etCopyMap tr)
+        remapByCopy nid =
+            let key = getNodeId nid
+                direct = IntMap.lookup key traceCopyMap
+                reverseMapped =
+                    IntMap.foldrWithKey
+                        (\src dst acc ->
+                            case acc of
+                                Just _ -> acc
+                                Nothing ->
+                                    if canonical dst == canonical nid
+                                        then Just (NodeId src)
+                                        else Nothing
+                        )
+                        Nothing
+                        traceCopyMap
+            in case direct of
+                Just mapped -> mapped
+                Nothing -> fromMaybe nid reverseMapped
         subst' =
             IntMap.fromList
                 [ (getNodeId (canonical mapped), name)
                 | (k, name) <- IntMap.toList (siSubst si)
                 , let nid = NodeId k
-                      mapped = IntMap.findWithDefault nid k traceCopyMap
+                      mapped = remapByCopy nid
                 ]
     pure $ si { siSubst = subst' }
 
@@ -290,12 +308,30 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
     remapSchemeInfo :: EdgeTrace -> SchemeInfo -> SchemeInfo
     remapSchemeInfo tr si =
         let traceCopyMap = getCopyMapping (etCopyMap tr)
+            remapByCopy nid =
+                let key = getNodeId nid
+                    direct = IntMap.lookup key traceCopyMap
+                    reverseMapped =
+                        IntMap.foldrWithKey
+                            (\src dst acc ->
+                                case acc of
+                                    Just _ -> acc
+                                    Nothing ->
+                                        if canonicalNode dst == canonicalNode nid
+                                            then Just (NodeId src)
+                                            else Nothing
+                            )
+                            Nothing
+                            traceCopyMap
+                in case direct of
+                    Just mapped -> mapped
+                    Nothing -> fromMaybe nid reverseMapped
             subst' =
                 IntMap.fromList
                     [ (getNodeId (canonicalNode mapped), name)
                     | (k, name) <- IntMap.toList (siSubst si)
                     , let nid = NodeId k
-                          mapped = IntMap.findWithDefault nid k traceCopyMap
+                          mapped = remapByCopy nid
                     ]
         in si { siSubst = subst' }
 
