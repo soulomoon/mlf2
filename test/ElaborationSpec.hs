@@ -731,6 +731,12 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 Left _ -> pure ()
                 Right t -> expectationFailure ("Expected failure, got: " ++ show t)
 
+        it "fails InstBot when argument equals non-bottom input type" $ do
+            let ty = Elab.TArrow (Elab.TBase (BaseTy "Int")) (Elab.TBase (BaseTy "Int"))
+            case Elab.applyInstantiation ty (Elab.InstBot ty) of
+                Left _ -> pure ()
+                Right t -> expectationFailure ("Expected strict InstBot failure, got: " ++ show t)
+
     describe "xMLF terms" $ do
         it "pretty prints type abstraction with bound" $ do
             let bound = Elab.TArrow (Elab.TVar "b") (Elab.TVar "b")

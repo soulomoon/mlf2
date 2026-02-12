@@ -54,3 +54,10 @@ spec = describe "Phase 7 typecheck" $ do
         let idTyAbs = ETyAbs "a" Nothing (ELam "x" (TVar "a") (EVar "x"))
             term = ETyAbs "b" Nothing (ETyInst idTyAbs (InstApp (TVar "b")))
         typeCheck term `shouldBe` Right (TForall "b" Nothing (TArrow (TVar "b") (TVar "b")))
+
+    it "rejects InstBot on alpha-equal non-bottom type (checker strictness)" $ do
+        let poly = ETyAbs "a" (Just intTy) (ELam "x" (TVar "a") (EVar "x"))
+            polyTy = TForall "a" (Just intTy) (TArrow (TVar "a") (TVar "a"))
+        case typeCheck (ETyInst poly (InstBot polyTy)) of
+            Left TCInstantiationError{} -> pure ()
+            other -> expectationFailure ("Expected strict InstBot rejection, got: " ++ show other)

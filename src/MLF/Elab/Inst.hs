@@ -120,7 +120,6 @@ applyInstantiation ty inst = snd <$> evalInstantiationWith spec inst (0, (), ty)
     spec = InstEvalSpec
         { instBot = \tArg (k, _env', t) -> case t of
             TBottom -> Right (k, tArg)
-            _ | t == tArg -> Right (k, t)
             _ -> Left (InstantiationError ("InstBot expects ⊥, got: " ++ pretty t))
         , instAbstr = \v (k, _env', _t) -> Right (k, TVar v)
         , instElimError = \_inst0 t ->
