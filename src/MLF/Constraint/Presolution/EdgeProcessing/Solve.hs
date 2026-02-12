@@ -30,7 +30,8 @@ import MLF.Constraint.Types
 import MLF.Constraint.Presolution.Base
 import MLF.Constraint.Presolution.StateAccess (
     getCanonical,
-    getConstraintAndCanonical
+    getConstraintAndCanonical,
+    findSchemeIntroducerM
     )
 import MLF.Constraint.Presolution.Ops (
     findRoot,
@@ -105,6 +106,8 @@ unifyStructure n1 n2 = do
   where
     unifyExpansionNode :: TyNode -> NodeId -> PresolutionM ()
     unifyExpansionNode expNode targetId = do
+        (c0, canonical) <- getConstraintAndCanonical
+        gid <- findSchemeIntroducerM canonical c0 (tnBody expNode)
         targetNode <- getCanonicalNode targetId
         currentExp <- getExpansion (tnExpVar expNode)
         debugBindParents
@@ -117,7 +120,7 @@ unifyStructure n1 n2 = do
                 ++ " targetNode="
                 ++ nodeTag targetNode
             )
-        (reqExp, unifications) <- decideMinimalExpansion True expNode targetNode
+        (reqExp, unifications) <- decideMinimalExpansion gid True expNode targetNode
         debugBindParents
             ( "unifyExpansionNode: expNode="
                 ++ show (tnId expNode)
@@ -139,7 +142,7 @@ unifyStructure n1 n2 = do
             ExpIdentity ->
                 unifyStructure (tnBody expNode) targetId
             _ -> do
-                (resNodeId, (copyMap, _interior, frontier)) <- applyExpansionEdgeTraced finalExp expNode
+                (resNodeId, (copyMap, _interior, frontier)) <- applyExpansionEdgeTraced gid finalExp expNode
                 _targetBinder <- bindExpansionRootLikeTarget resNodeId targetId
                 canonical <- getCanonical
                 let copyMapCanon =
@@ -152,7 +155,7 @@ unifyStructure n1 n2 = do
                     case IntMap.lookup nidInt copyMapCanon of
                         Nothing -> pure ()
                         Just copy -> setBindParentIfUpper copy _targetBinder
-                bas <- binderArgsFromExpansion expNode finalExp
+                bas <- binderArgsFromExpansion gid expNode finalExp
                 bindExpansionArgs resNodeId bas
                 forM_ (IntSet.toList frontier) $ \nidInt -> do
                     case IntMap.lookup nidInt copyMapCanon of

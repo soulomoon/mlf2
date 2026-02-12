@@ -37,6 +37,7 @@ import qualified Data.List.NonEmpty as NE
 import MLF.Constraint.Types.Graph
     ( BindFlag(..)
     , GenNode(..)
+    , GenNodeId
     , NodeId
     , NodeRef(..)
     , TyNode(..)
@@ -53,10 +54,10 @@ import MLF.Constraint.Presolution.WitnessCanon (normalizeInstanceStepsFull, norm
 import qualified MLF.Binding.Tree as Binding
 import MLF.Util.RecursionSchemes (cataM)
 
-binderArgsFromExpansion :: TyNode -> Expansion -> PresolutionM [(NodeId, NodeId)]
-binderArgsFromExpansion leftRaw expn = do
+binderArgsFromExpansion :: GenNodeId -> TyNode -> Expansion -> PresolutionM [(NodeId, NodeId)]
+binderArgsFromExpansion gid leftRaw expn = do
     let instantiationBinders nid = do
-            (_bodyRoot, binders) <- instantiationBindersM nid
+            (_bodyRoot, binders) <- instantiationBindersM gid nid
             pure binders
     let alg layer = case layer of
             ExpIdentityF -> pure []
@@ -81,8 +82,8 @@ binderArgsFromExpansion leftRaw expn = do
     cataM alg expn
 
 -- | Convert a presolution expansion recipe into interleaved witness steps.
-witnessFromExpansion :: NodeId -> TyNode -> Expansion -> PresolutionM [InstanceStep]
-witnessFromExpansion _root leftRaw expn = do
+witnessFromExpansion :: GenNodeId -> NodeId -> TyNode -> Expansion -> PresolutionM [InstanceStep]
+witnessFromExpansion gid _root leftRaw expn = do
     let (_hasForall, stepper) = cata (witnessAlg leftRaw) expn
     stepper False
   where
@@ -102,7 +103,7 @@ witnessFromExpansion _root leftRaw expn = do
                 -- that `applyExpansion` uses (binding-edge Q(n) via `orderedBinders`).
                 case lr of
                     TyExp{ tnBody = b } -> do
-                        (_bodyRoot, boundVars) <- instantiationBindersM b
+                        (_bodyRoot, boundVars) <- instantiationBindersM gid b
                         if null boundVars
                             then pure []
                         else if length boundVars > length args

@@ -26,7 +26,7 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified MLF.Util.UnionFind as UnionFind
 import MLF.Constraint.Types
 import MLF.Constraint.Presolution.Base
-import MLF.Constraint.Presolution.StateAccess (getConstraintAndCanonical)
+import MLF.Constraint.Presolution.StateAccess (getConstraintAndCanonical, findSchemeIntroducerM)
 import MLF.Constraint.Presolution.Expansion (
     applyExpansion,
     getExpansion
@@ -40,9 +40,11 @@ materializeExpansions = do
     fmap IntMap.fromList $ forM exps $ \expNode -> do
         let eid = tnId expNode
         expn <- getExpansion (tnExpVar expNode)
+        (c0', canonical') <- getConstraintAndCanonical
+        gid <- findSchemeIntroducerM canonical' c0' (tnBody expNode)
         nid' <- case expn of
             -- Identity expansions are erased by rewriting the wrapper to its body.
-            ExpIdentity -> applyExpansion expn expNode
+            ExpIdentity -> applyExpansion gid expn expNode
             -- For non-identity expansions, `processInstEdge` should already have
             -- materialized and unified the `TyExp` with its expansion result. Reuse
             -- that representative to avoid duplicating fresh nodes here.
@@ -50,7 +52,7 @@ materializeExpansions = do
                 let root = canonical eid
                 in if root /= eid
                     then pure root
-                    else applyExpansion expn expNode
+                    else applyExpansion gid expn expNode
         pure (getNodeId eid, nid')
 
 -- | Read-only chase like Solve.frWith

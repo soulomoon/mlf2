@@ -128,7 +128,7 @@ expansionCopySetsM bodyId = do
         IntSet.empty
         reachableSchemeGens
     let interiorAll = IntSet.union interiorAll0' interiorAllExtra
-    (_root, binders) <- instantiationBindersM bodyC
+    (_root, binders) <- instantiationBindersM gid bodyC
     let binderKeys =
             IntSet.fromList
                 [ nodeRefKey (typeRef (canonical b))

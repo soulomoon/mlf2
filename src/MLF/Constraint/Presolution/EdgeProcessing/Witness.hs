@@ -24,8 +24,7 @@ import MLF.Constraint.Presolution.Base (
     FrontierSet,
     InteriorSet,
     PresolutionM,
-    fromListInterior,
-    traceInteriorRootRef
+    fromListInterior
     )
 import MLF.Constraint.Presolution.Ops (findRoot)
 import MLF.Constraint.Presolution.StateAccess (
@@ -65,12 +64,12 @@ data EdgeWitnessPlan = EdgeWitnessPlan
     , ewpBaseOps :: [InstanceOp]
     }
 
-edgeWitnessPlan :: Bool -> NodeId -> TyNode -> Expansion -> PresolutionM EdgeWitnessPlan
-edgeWitnessPlan suppressWeaken leftId leftRaw expn = do
+edgeWitnessPlan :: GenNodeId -> Bool -> NodeId -> TyNode -> Expansion -> PresolutionM EdgeWitnessPlan
+edgeWitnessPlan gid suppressWeaken leftId leftRaw expn = do
     let root = case leftRaw of
             TyExp{ tnBody = b } -> b
             _ -> leftId
-    baseSteps0 <- witnessFromExpansion root leftRaw expn
+    baseSteps0 <- witnessFromExpansion gid root leftRaw expn
     let baseSteps = if suppressWeaken then dropWeakenSteps baseSteps0 else baseSteps0
         baseOps = [op | StepOmega op <- baseSteps]
     pure EdgeWitnessPlan { ewpBaseSteps = baseSteps, ewpBaseOps = baseOps }
@@ -110,21 +109,22 @@ dropWeakenSteps = filter (not . isWeakenStep)
 
 -- | Build an edge trace.
 buildEdgeTrace
-    :: EdgeId
+    :: GenNodeId
+    -> EdgeId
     -> NodeId
     -> TyNode
     -> Expansion
     -> (CopyMap, InteriorSet, FrontierSet)
     -> PresolutionM EdgeTrace
-buildEdgeTrace _eid left leftRaw expn (copyMap0, _interior0, _frontier0) = do
-    bas <- binderArgsFromExpansion leftRaw expn
+buildEdgeTrace gid _eid left leftRaw expn (copyMap0, _interior0, _frontier0) = do
+    bas <- binderArgsFromExpansion gid leftRaw expn
     -- Paper root `r` for Φ/Σ is the TyExp body, not the TyExp wrapper itself.
     let rootSeed = case leftRaw of
             TyExp{ tnBody = b } -> b
             _ -> left
     root <- findRoot rootSeed
     (c0, canonical) <- getConstraintAndCanonical
-    let interiorRootRef = traceInteriorRootRef canonical c0 root
+    let interiorRootRef = genRef gid
     interiorRaw <- do
         s <- liftBindingError $ Binding.interiorOfUnder canonical c0 interiorRootRef
         pure

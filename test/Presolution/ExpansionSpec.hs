@@ -432,7 +432,7 @@ spec = do
                 st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 2 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
                 expansion = ExpInstantiate [NodeId 2] -- dummy arg
 
-            case runPresolutionM defaultTraceConfig st0 (applyExpansion expansion (nodeAt nodes 0)) of
+            case runPresolutionM defaultTraceConfig st0 (applyExpansion (GenNodeId 0) expansion (nodeAt nodes 0)) of
                 Left (InstantiateOnNonForall nid) -> nid `shouldBe` bodyId
                 Left err -> expectationFailure $ "Expected InstantiateOnNonForall, got " ++ show err
                 Right _ -> expectationFailure "Expected failure"
@@ -455,7 +455,7 @@ spec = do
                 -- Forall has 1 bound var, but we provide 2 args
                 expansion = ExpInstantiate [NodeId 3, NodeId 4]
 
-            case runPresolutionM defaultTraceConfig st0 (applyExpansion expansion (nodeAt nodes 0)) of
+            case runPresolutionM defaultTraceConfig st0 (applyExpansion (GenNodeId 0) expansion (nodeAt nodes 0)) of
                 Left (ArityMismatch ctx expected actual) -> do
                     ctx `shouldBe` "applyExpansion"
                     expected `shouldBe` 1
@@ -475,7 +475,7 @@ spec = do
                 -- This will trigger the ExpCompose branch in applyExpansionOverNode
                 expansion = ExpCompose (ExpForall (ForallSpec 0 [] NE.:| []) NE.:| [ExpIdentity])
 
-            case runPresolutionM defaultTraceConfig st0 (applyExpansion expansion (nodeAt nodes 0)) of
+            case runPresolutionM defaultTraceConfig st0 (applyExpansion (GenNodeId 0) expansion (nodeAt nodes 0)) of
                 Right (resId, _) -> do
                     -- Should wrap in Forall and then identity
                     -- TyBase -> TyForall(TyBase)
@@ -520,7 +520,7 @@ spec = do
                         }
                 expansion = ExpForall (forallSpec NE.:| [])
 
-            case runPresolutionM defaultTraceConfig st0 (applyExpansion expansion (nodeAt nodes (getNodeId expNodeId))) of
+            case runPresolutionM defaultTraceConfig st0 (applyExpansion (GenNodeId 0) expansion (nodeAt nodes (getNodeId expNodeId))) of
                 Left err -> expectationFailure $ "Expansion failed: " ++ show err
                 Right (forallId, st1) -> do
                     let c1 = psConstraint st1

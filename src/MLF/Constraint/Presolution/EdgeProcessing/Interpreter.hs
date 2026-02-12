@@ -69,12 +69,13 @@ executeUnifiedExpansionPath plan = do
         s = rteExpVar leftTyExp
         bodyId = rteBodyId leftTyExp
         isSynth = isSynthesizedExpVar s
+        schemeGen = eprSchemeOwnerGen plan
 
     currentExp <- getExpansion s
     (reqExp, unifications) <-
         if isSynth
             then pure (ExpIdentity, [(bodyId, n2Id)])
-            else decideMinimalExpansion (eprAllowTrivial plan) n1Raw n2
+            else decideMinimalExpansion schemeGen (eprAllowTrivial plan) n1Raw n2
 
     finalExp <-
         if isSynth
@@ -90,15 +91,15 @@ executeUnifiedExpansionPath plan = do
                 else uncurry unifyStructure
     mapM_ applyInstantiationUnification unifications
 
-    witnessPlan <- edgeWitnessPlan (eprSuppressWeaken plan) n1Id n1Raw finalExp
+    witnessPlan <- edgeWitnessPlan schemeGen (eprSuppressWeaken plan) n1Id n1Raw finalExp
     expansionResult <-
         if finalExp == ExpIdentity
             then pure EdgeExpansionResult { eerTrace = emptyTrace, eerExtraOps = [] }
-            else runExpansionUnify edgeId n1Raw n2 finalExp (ewpBaseOps witnessPlan)
+            else runExpansionUnify schemeGen edgeId n1Raw n2 finalExp (ewpBaseOps witnessPlan)
 
     let expTrace = eerTrace expansionResult
         extraOps = eerExtraOps expansionResult
-    tr <- buildEdgeTrace edgeId n1Id n1Raw finalExp expTrace
+    tr <- buildEdgeTrace schemeGen edgeId n1Id n1Raw finalExp expTrace
     recordEdgeTrace edgeId tr
     w <- buildEdgeWitness edgeId n1Id n2Id n1Raw (ewpBaseSteps witnessPlan) extraOps
     recordEdgeWitness edgeId w

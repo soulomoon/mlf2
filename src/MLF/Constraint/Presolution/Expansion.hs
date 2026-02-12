@@ -195,9 +195,9 @@ nearestGenAncestor nid0 = do
                         go (IntSet.insert (nodeRefKey ref) visited) (typeRef (canonical parent))
     go IntSet.empty start
 
-decideMinimalExpansion :: Bool -> TyNode -> TyNode -> PresolutionM (Expansion, [(NodeId, NodeId)])
-decideMinimalExpansion allowTrivial (TyExp { tnBody = bodyId }) targetNode = do
-    (bodyRoot, boundVars) <- instantiationBindersM bodyId
+decideMinimalExpansion :: GenNodeId -> Bool -> TyNode -> TyNode -> PresolutionM (Expansion, [(NodeId, NodeId)])
+decideMinimalExpansion gid allowTrivial (TyExp { tnBody = bodyId }) targetNode = do
+    (bodyRoot, boundVars) <- instantiationBindersM gid bodyId
     debugExpansion
         ( "decideMinimalExpansion: bodyId="
             ++ show bodyId
@@ -270,7 +270,7 @@ decideMinimalExpansion allowTrivial (TyExp { tnBody = bodyId }) targetNode = do
                         return (expn, [])
                     _ -> return (ExpIdentity, [(bodyRoot, tnId targetNode)])
 
-decideMinimalExpansion _ _ _ = return (ExpIdentity, [])
+decideMinimalExpansion _ _ _ _ = return (ExpIdentity, [])
 
 debugExpansion :: String -> PresolutionM ()
 debugExpansion msg = do
@@ -283,8 +283,8 @@ debugExpansion msg = do
 --     plus the unifications it triggers) so later edges see the refined graph.
 --   • materializeExpansions: after all edges are processed, rewrite the graph to
 --     erase TyExp nodes and clear inst edges before Solve.
-applyExpansion :: Expansion -> TyNode -> PresolutionM NodeId
-applyExpansion expansion expNode =
+applyExpansion :: GenNodeId -> Expansion -> TyNode -> PresolutionM NodeId
+applyExpansion gid expansion expNode =
     let start =
             case expNode of
                 TyExp { tnBody = b } -> b
@@ -317,7 +317,7 @@ applyExpansion expansion expNode =
                 \node _ ->
                     case node of
                         TyExp{ tnBody = b } -> do
-                            (bodyRoot, boundVars) <- instantiationBindersM b
+                            (bodyRoot, boundVars) <- instantiationBindersM gid b
                             if null boundVars
                                 then
                                     if null args
@@ -327,7 +327,7 @@ applyExpansion expansion expNode =
                                 then throwError $ ArityMismatch "applyExpansion" (length boundVars) (length args)
                                 else instantiateScheme bodyRoot (zip boundVars args)
                         _ -> do
-                            (bodyRoot, boundVars) <- instantiationBindersM (tnId node)
+                            (bodyRoot, boundVars) <- instantiationBindersM gid (tnId node)
                             if null boundVars
                                 then
                                     if null args
@@ -340,8 +340,8 @@ applyExpansion expansion expNode =
 -- | Apply an expansion like 'applyExpansion', but also return a (coarse) trace
 -- of the expansion interior I(r): instantiation args, copied nodes, and any
 -- freshly introduced ∀ wrappers.
-applyExpansionTraced :: Expansion -> TyNode -> PresolutionM (NodeId, (CopyMap, InteriorSet, FrontierSet))
-applyExpansionTraced expansion expNode =
+applyExpansionTraced :: GenNodeId -> Expansion -> TyNode -> PresolutionM (NodeId, (CopyMap, InteriorSet, FrontierSet))
+applyExpansionTraced gid expansion expNode =
     let start =
             case expNode of
                 TyExp { tnBody = b } -> b
@@ -375,7 +375,7 @@ applyExpansionTraced expansion expNode =
                 \node _ ->
                     case node of
                         TyExp{ tnBody = b } -> do
-                            (bodyRoot, boundVars) <- instantiationBindersM b
+                            (bodyRoot, boundVars) <- instantiationBindersM gid b
                             if null boundVars
                                 then
                                     if null args
@@ -387,7 +387,7 @@ applyExpansionTraced expansion expNode =
                                     (root, cmap, interior, frontier) <- instantiateSchemeWithTrace bodyRoot (zip boundVars args)
                                     pure (root, (cmap, interior, frontier))
                         _ -> do
-                            (bodyRoot, boundVars) <- instantiationBindersM (tnId node)
+                            (bodyRoot, boundVars) <- instantiationBindersM gid (tnId node)
                             if null boundVars
                                 then
                                     if null args
@@ -405,8 +405,8 @@ applyExpansionTraced expansion expNode =
     -- In particular, `ExpInstantiate` copies the body by substituting binders with
     -- fresh binder-meta variables, and copies their instance bounds onto the
     -- instantiation arguments (via `MLF.Constraint.VarStore`).
-applyExpansionEdgeTraced :: Expansion -> TyNode -> PresolutionM (NodeId, (CopyMap, InteriorSet, FrontierSet))
-applyExpansionEdgeTraced expansion expNode =
+applyExpansionEdgeTraced :: GenNodeId -> Expansion -> TyNode -> PresolutionM (NodeId, (CopyMap, InteriorSet, FrontierSet))
+applyExpansionEdgeTraced gid expansion expNode =
     let start =
             case expNode of
                 TyExp { tnBody = b } -> b
@@ -444,35 +444,7 @@ applyExpansionEdgeTraced expansion expNode =
                 \node _ ->
                     case node of
                         TyExp{ tnBody = b } -> do
-                            (bodyRoot, boundVars) <- instantiationBindersM b
-                            if null boundVars
-                                then
-                                    if null args
-                                        then pure (bodyRoot, emptyTrace)
-                                        else throwError $ InstantiateOnNonForall (tnId node)
-                            else if length boundVars /= length args
-                                then
-                                    if length boundVars == 1 && length args > 1
-                                        then case args of
-                                            [] -> throwError $ ArityMismatch "applyExpansionEdgeTraced" (length boundVars) (length args)
-                                            (arg0:rest) -> do
-                                                mapM_ (unifyAcyclic arg0) rest
-                                                metas <- zipWithM binderMetaAt [arg0] boundVars
-                                                let binderMetas = zip boundVars metas
-                                                    binderArgs = zip boundVars [arg0]
-                                                (root, cmap0, interior0, frontier0) <- instantiateSchemeWithTrace bodyRoot binderMetas
-                                                (cmapB, interiorB, frontierB) <- copyBinderBounds binderMetas binderArgs
-                                                pure (root, (cmap0 <> cmapB, IntSet.union interior0 interiorB, IntSet.union frontier0 frontierB))
-                                        else throwError $ ArityMismatch "applyExpansionEdgeTraced" (length boundVars) (length args)
-                            else do
-                                metas <- zipWithM binderMetaAt args boundVars
-                                let binderMetas = zip boundVars metas
-                                    binderArgs = zip boundVars args
-                                (root, cmap0, interior0, frontier0) <- instantiateSchemeWithTrace bodyRoot binderMetas
-                                (cmapB, interiorB, frontierB) <- copyBinderBounds binderMetas binderArgs
-                                pure (root, (cmap0 <> cmapB, IntSet.union interior0 interiorB, IntSet.union frontier0 frontierB))
-                        _ -> do
-                            (bodyRoot, boundVars) <- instantiationBindersM (tnId node)
+                            (bodyRoot, boundVars) <- instantiationBindersM gid b
                             if null boundVars
                                 then
                                     if null args
@@ -500,8 +472,35 @@ applyExpansionEdgeTraced expansion expNode =
                                 (root, cmap0, interior0, frontier0) <- instantiateSchemeWithTrace bodyRoot binderMetas
                                 (cmapB, interiorB, frontierB) <- copyBinderBounds binderMetas binderArgs
                                 pure (root, (cmap0 <> cmapB, IntSet.union interior0 interiorB, IntSet.union frontier0 frontierB))
-
--- | Copy (and re-bind) instance bounds from original binders onto fresh binder-metas.
+                        _ -> do
+                            (bodyRoot, boundVars) <- instantiationBindersM gid (tnId node)
+                            if null boundVars
+                                then
+                                    if null args
+                                        then pure (bodyRoot, emptyTrace)
+                                        else
+                                            throwError $ InstantiateOnNonForall (tnId node)
+                            else if length boundVars /= length args
+                                then
+                                    if length boundVars == 1 && length args > 1
+                                        then case args of
+                                            [] -> throwError $ ArityMismatch "applyExpansionEdgeTraced" (length boundVars) (length args)
+                                            (arg0:rest) -> do
+                                                mapM_ (unifyAcyclic arg0) rest
+                                                metas <- zipWithM binderMetaAt [arg0] boundVars
+                                                let binderMetas = zip boundVars metas
+                                                    binderArgs = zip boundVars [arg0]
+                                                (root, cmap0, interior0, frontier0) <- instantiateSchemeWithTrace bodyRoot binderMetas
+                                                (cmapB, interiorB, frontierB) <- copyBinderBounds binderMetas binderArgs
+                                                pure (root, (cmap0 <> cmapB, IntSet.union interior0 interiorB, IntSet.union frontier0 frontierB))
+                                        else throwError $ ArityMismatch "applyExpansionEdgeTraced" (length boundVars) (length args)
+                            else do
+                                metas <- zipWithM binderMetaAt args boundVars
+                                let binderMetas = zip boundVars metas
+                                    binderArgs = zip boundVars args
+                                (root, cmap0, interior0, frontier0) <- instantiateSchemeWithTrace bodyRoot binderMetas
+                                (cmapB, interiorB, frontierB) <- copyBinderBounds binderMetas binderArgs
+                                pure (root, (cmap0 <> cmapB, IntSet.union interior0 interiorB, IntSet.union frontier0 frontierB))
 copyBinderBounds :: [(NodeId, NodeId)] -> [(NodeId, NodeId)] -> PresolutionM (CopyMap, InteriorSet, FrontierSet)
 copyBinderBounds binderMetas binderArgs = do
     let binderMetaMap = IntMap.fromList [(getNodeId bv, meta) | (bv, meta) <- binderMetas]

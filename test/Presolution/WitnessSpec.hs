@@ -84,7 +84,7 @@ spec = do
                     ExpCompose
                         (ExpForall (ForallSpec 1 [Nothing] NE.:| []) NE.:| [ExpInstantiate [argId]])
 
-            case runPresolutionM defaultTraceConfig st0 (witnessFromExpansion expNodeId (nodeAt nodes 0) expansion) of
+            case runPresolutionM defaultTraceConfig st0 (witnessFromExpansion (GenNodeId 0) expNodeId (nodeAt nodes 0) expansion) of
                 Left err -> expectationFailure ("witnessFromExpansion failed: " ++ show err)
                 Right (steps, _) ->
                     steps `shouldBe`
@@ -118,7 +118,7 @@ spec = do
                 st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 4 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
                 expansion = ExpInstantiate [argId]
 
-            case runPresolutionM defaultTraceConfig st0 (witnessFromExpansion expNodeId (nodeAt nodes 0) expansion) of
+            case runPresolutionM defaultTraceConfig st0 (witnessFromExpansion (GenNodeId 0) expNodeId (nodeAt nodes 0) expansion) of
                 Left err -> expectationFailure ("witnessFromExpansion failed: " ++ show err)
                 Right (steps, _) ->
                     steps `shouldBe`
@@ -138,7 +138,7 @@ spec = do
                 st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 2 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
                 expansion = ExpForall (ForallSpec 2 [Nothing, Nothing] NE.:| [])
 
-            case runPresolutionM defaultTraceConfig st0 (witnessFromExpansion expNodeId (nodeAt nodes 0) expansion) of
+            case runPresolutionM defaultTraceConfig st0 (witnessFromExpansion (GenNodeId 0) expNodeId (nodeAt nodes 0) expansion) of
                 Left err -> expectationFailure ("witnessFromExpansion failed: " ++ show err)
                 Right (steps, _) ->
                     steps `shouldBe` [StepIntro, StepIntro]

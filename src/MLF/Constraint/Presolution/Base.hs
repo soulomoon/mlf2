@@ -42,7 +42,7 @@ import Control.Applicative ((<|>))
 import Control.Monad.State (StateT, get, gets, modify', put, runStateT)
 import Control.Monad.Reader (ReaderT, ask, lift, runReaderT)
 import Control.Monad.Except (throwError)
-import Control.Monad (forM_, unless, when)
+import Control.Monad (forM_, when)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
@@ -514,8 +514,8 @@ orderedBindersRawM binder0 = do
 
 -- | Resolve the instantiation binders for a node, skipping vacuous ∀ nodes.
 -- Returns the body root to instantiate and the ordered binder list.
-instantiationBindersM :: NodeId -> PresolutionM (NodeId, [NodeId])
-instantiationBindersM nid0 = do
+instantiationBindersM :: GenNodeId -> NodeId -> PresolutionM (NodeId, [NodeId])
+instantiationBindersM gid nid0 = do
     st <- get
     let c0 = psConstraint st
         uf0 = psUnionFind st
@@ -546,7 +546,7 @@ instantiationBindersM nid0 = do
                 TyForall { tnId = forallId, tnBody = inner } -> do
                     binders <- orderedBindersRawM forallId
                     if null binders
-                        then instantiationBindersM inner
+                        then instantiationBindersM gid inner
                         else do
                             when (not (null binders)) $
                                 modify' $ \st1 ->
@@ -556,38 +556,15 @@ instantiationBindersM nid0 = do
                                     in st1 { psBinderCache = cache3 }
                             pure (inner, binders)
                 _ -> do
-                    binders <- implicitBindersM canonical c0 nid
-                    if null binders
-                        then case VarStore.lookupVarBound c0 nid of
-                            Just bnd -> do
-                                binders' <- implicitBindersM canonical c0 (canonical bnd)
-                                if null binders'
-                                    then pure (nid, binders)
-                                    else do
-                                        when (not (null binders')) $
-                                            modify' $ \st1 ->
-                                                let cache1 = psBinderCache st1
-                                                    cache2 = IntMap.insert (getNodeId nid) binders' cache1
-                                                    cache3 = IntMap.insert (getNodeId (canonical bnd)) binders' cache2
-                                                in st1 { psBinderCache = cache3 }
-                                        pure (canonical bnd, binders')
-                            Nothing -> pure (nid, binders)
-                        else do
-                            let root =
-                                    nid
-                            let debugMsg =
-                                    "instantiationBindersM: nid="
-                                        ++ show nid
-                                        ++ " root="
-                                        ++ show root
-                            debugBinders debugMsg
-                            when (not (null binders)) $
-                                modify' $ \st1 ->
-                                    let cache1 = psBinderCache st1
-                                        cache2 = IntMap.insert (getNodeId nid) binders cache1
-                                        cache3 = IntMap.insert (getNodeId root) binders cache2
-                                    in st1 { psBinderCache = cache3 }
-                            pure (root, binders)
+                    -- Explicit provenance: use gen node scope instead of heuristic
+                    (bodyRoot, binders) <- instantiationBindersFromGenM gid nid
+                    when (not (null binders)) $
+                        modify' $ \st1 ->
+                            let cache1 = psBinderCache st1
+                                cache2 = IntMap.insert (getNodeId nid) binders cache1
+                                cache3 = IntMap.insert (getNodeId bodyRoot) binders cache2
+                            in st1 { psBinderCache = cache3 }
+                    pure (bodyRoot, binders)
 
 -- | Compute instantiation binders from explicit scheme provenance.
 --
@@ -659,138 +636,6 @@ instantiationBindersFromGenM gid bodyRoot0 = do
                 else sorted
 
     pure (bodyC, candidates)
-
-implicitBindersM :: (NodeId -> NodeId) -> Constraint -> NodeId -> PresolutionM [NodeId]
-implicitBindersM canonical c0 root0 = do
-    let root = canonical root0
-        schemeOwner =
-            listToMaybe
-                [ gnId gen
-                | gen <- NodeAccess.allGenNodes c0
-                , any (\r -> canonical r == root) (gnSchemes gen)
-                ]
-        schemeOwnerByBody =
-            listToMaybe
-                [ gnId gen
-                | gen <- NodeAccess.allGenNodes c0
-                , any
-                    (\r ->
-                        case VarStore.lookupVarBound c0 (canonical r) of
-                            Just bnd -> canonical bnd == root
-                            Nothing -> False
-                    )
-                    (gnSchemes gen)
-                ]
-    path <- bindingPathToRootUnderM canonical c0 (typeRef root)
-    case schemeOwner <|> schemeOwnerByBody <|> listToMaybe [gid | GenRef gid <- path] of
-        Nothing -> pure []
-        Just gid -> do
-            let schemeRoots =
-                    case NodeAccess.lookupGenNode c0 gid of
-                        Just gen -> map canonical (gnSchemes gen)
-                        Nothing -> []
-                schemeRootSet =
-                    IntSet.fromList (map (getNodeId . canonical) schemeRoots)
-                isSchemeRoot = IntSet.member (getNodeId root) schemeRootSet
-                rootIsWrapper =
-                    case NodeAccess.lookupNode c0 root of
-                        Just TyVar{ tnBound = Just _ } -> not isSchemeRoot
-                        _ -> False
-            bindersFromGen <- case Binding.boundFlexChildrenUnder canonical c0 (genRef gid) of
-                Left err -> throwError (BindingTreeError err)
-                Right bs -> pure bs
-            bindersFromRoot <- case Binding.boundFlexChildrenUnder canonical c0 (typeRef root) of
-                Left _ -> pure []
-                Right bs -> pure bs
-            let binders0 =
-                    IntMap.elems $
-                        IntMap.fromList
-                            [ (getNodeId b, b)
-                            | b <- bindersFromGen ++ bindersFromRoot
-                            ]
-            let binders1 =
-                    filter (\b -> not (IntSet.member (getNodeId (canonical b)) schemeRootSet)) binders0
-                binders2 =
-                    if rootIsWrapper
-                        then filter (/= root) binders1
-                        else binders1
-                nodes = cNodes c0
-                reachable = reachableFromWithBounds nodes root
-                bindersReachable =
-                    [ canonical b
-                    | b <- binders2
-                    , IntSet.member (getNodeId (canonical b)) reachable
-                    ]
-                bindersCanon =
-                    IntMap.elems $
-                        IntMap.fromList
-                            [ (getNodeId b, b)
-                            | b <- bindersReachable
-                            ]
-                orderKeys = Order.orderKeysFromConstraintWith canonical c0 root Nothing
-                missing =
-                    [ b
-                    | b <- bindersCanon
-                    , not (IntMap.member (getNodeId b) orderKeys)
-                    ]
-            unless (null missing) $
-                throwError $
-                    InternalError ("implicitBindersM: missing order keys for " ++ show missing)
-            orderBindersByDeps orderKeys bindersCanon
-  where
-    orderBindersByDeps
-        :: IntMap.IntMap Order.OrderKey
-        -> [NodeId]
-        -> PresolutionM [NodeId]
-    orderBindersByDeps orderKeys binders =
-        let binderSet = IntSet.fromList (map getNodeId binders)
-            depsFor b =
-                case VarStore.lookupVarBound c0 b of
-                    Nothing -> IntSet.empty
-                    Just bnd ->
-                        IntSet.delete
-                            (getNodeId b)
-                            (IntSet.intersection binderSet (reachableFromWithBounds (cNodes c0) bnd))
-            depsMap =
-                IntMap.fromList
-                    [ (getNodeId b, depsFor b)
-                    | b <- binders
-                    ]
-            go :: IntSet.IntSet -> [NodeId] -> [NodeId] -> PresolutionM [NodeId]
-            go _ [] acc = pure acc
-            go done remaining acc =
-                let ready =
-                        [ b
-                        | b <- remaining
-                        , let deps = IntMap.findWithDefault IntSet.empty (getNodeId b) depsMap
-                        , IntSet.isSubsetOf deps done
-                        ]
-                in if null ready
-                    then
-                        throwError $
-                            InternalError "implicitBindersM: cycle in bound dependencies"
-                    else case Order.sortByOrderKey orderKeys ready of
-                        Left err ->
-                            throwError $
-                                InternalError ("implicitBindersM: order key error: " ++ show err)
-                        Right readySorted ->
-                            let readySet = IntSet.fromList (map getNodeId readySorted)
-                                done' = IntSet.union done readySet
-                                remaining' = filter (\b -> not (IntSet.member (getNodeId b) readySet)) remaining
-                            in go done' remaining' (acc ++ readySorted)
-        in go IntSet.empty binders []
-
-    reachableFromWithBounds
-        :: NodeMap TyNode
-        -> NodeId
-        -> IntSet.IntSet
-    reachableFromWithBounds nodes root =
-        Traversal.reachableFromNodes canonical children [root]
-      where
-        children nid =
-            case Types.lookupNode nid nodes of
-                Nothing -> []
-                Just node -> structuralChildrenWithBounds node
 
 forallSpecM :: NodeId -> PresolutionM ForallSpec
 forallSpecM binder0 = do

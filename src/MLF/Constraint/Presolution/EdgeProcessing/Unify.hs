@@ -85,16 +85,17 @@ data EdgeExpansionResult = EdgeExpansionResult
 
 -- | Apply an expansion and run edge-local unification for a single edge.
 runExpansionUnify
-    :: EdgeId
+    :: GenNodeId
+    -> EdgeId
     -> TyNode
     -> TyNode
     -> Expansion
     -> [InstanceOp]
     -> PresolutionM EdgeExpansionResult
-runExpansionUnify edgeId leftRaw target expn baseOps =
+runExpansionUnify gid edgeId leftRaw target expn baseOps =
     case leftRaw of
         TyExp{ tnBody = _bodyId } -> do
-            (resNodeId, (copyMap0, interior0, frontier0)) <- applyExpansionEdgeTraced expn leftRaw
+            (resNodeId, (copyMap0, interior0, frontier0)) <- applyExpansionEdgeTraced gid expn leftRaw
             debugBindParents
                 ( "processInstEdge: expansion result resNodeId="
                     ++ show resNodeId
@@ -127,7 +128,7 @@ runExpansionUnify edgeId leftRaw target expn baseOps =
                     Nothing -> pure ()
                     Just copy -> setBindParentIfUpper copy targetBinder
 
-            bas <- binderArgsFromExpansion leftRaw expn
+            bas <- binderArgsFromExpansion gid leftRaw expn
             binderMetas <- forM bas $ \(bv, _arg) ->
                 case lookupCopy bv copyMap0 of
                     Just meta -> pure (bv, meta)
