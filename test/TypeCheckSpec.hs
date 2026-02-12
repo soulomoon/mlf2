@@ -61,3 +61,24 @@ spec = describe "Phase 7 typecheck" $ do
         case typeCheck (ETyInst poly (InstBot polyTy)) of
             Left TCInstantiationError{} -> pure ()
             other -> expectationFailure ("Expected strict InstBot rejection, got: " ++ show other)
+
+    -- BUG-004 strict InstBot regressions
+    it "accepts InstInside(InstBot) updating unbounded forall's bound" $ do
+        -- ∀(a ⩾ ⊥).a→a  with InstInside(InstBot Int) → ∀(a ⩾ Int).a→a
+        let poly = ETyAbs "a" Nothing (ELam "x" (TVar "a") (EVar "x"))
+        typeCheck (ETyInst poly (InstInside (InstBot intTy)))
+            `shouldBe` Right (TForall "a" (Just intTy) (TArrow (TVar "a") (TVar "a")))
+
+    it "rejects InstInside(InstBot) when bound is already non-bottom" $ do
+        -- ∀(a ⩾ Int).a→a  with InstInside(InstBot Int) — bound is Int, not ⊥
+        let poly = ETyAbs "a" (Just intTy) (ELam "x" (TVar "a") (EVar "x"))
+        case typeCheck (ETyInst poly (InstInside (InstBot intTy))) of
+            Left TCInstantiationError{} -> pure ()
+            other -> expectationFailure ("Expected strict InstBot rejection, got: " ++ show other)
+
+    it "rejects bare InstBot on non-bottom bound even when types match" $ do
+        -- ∀(a:Int).a→a  with InstBot Int — the forall type itself is not ⊥
+        let poly = ETyAbs "a" (Just intTy) (ELam "x" (TVar "a") (EVar "x"))
+        case typeCheck (ETyInst poly (InstBot intTy)) of
+            Left TCInstantiationError{} -> pure ()
+            other -> expectationFailure ("Expected strict InstBot rejection, got: " ++ show other)
