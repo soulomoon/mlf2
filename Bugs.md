@@ -4,26 +4,6 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 
 ## Open
 
-### BUG-2026-02-11-002
-- Status: Open
-- Priority: High
-- Discovered: 2026-02-11
-- Summary: Extended polymorphic-factory variants (`BUG-002-V1..V4`) still fail in both unchecked and checked pipelines with Φ invariant/translatability errors.
-- Minimal reproducers (surface express  ions):
-  - `ELet "make" (ELam "x" (ELam "y" (EVar "x"))) (ELet "c1" (EApp (EVar "make") (ELit (LInt 1))) (ELet "c2" (EApp (EVar "make") (ELit (LBool True))) (EApp (EVar "c1") (ELit (LBool False)))))`
-  - `ELam "k" (ELet "make" (ELam "x" (ELam "y" (EVar "x"))) (ELet "c1" (EApp (EVar "make") (EVar "k")) (EApp (EVar "c1") (ELit (LBool True)))))`
-- Reproducer command:
-  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-002-V"'`
-- Expected vs actual:
-  - Expected: V1..V3 elaborate to `Int`; V4 elaborates to `∀a. a -> a`; no `PhiTranslatabilityError`/`PhiInvariantError`.
-  - Actual: both pipelines fail with `PhiInvariantError` (`OpGraft... InstBot expects ⊥`) and `PhiTranslatabilityError` (`OpWeaken targets non-binder node`).
-- Suspected/owning area:
-  - `/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs`
-  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/WitnessCanon.hs`
-  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/EdgeProcessing/Witness.hs`
-- Thesis impact:
-  - Reopens a let-polymorphic factory generalization/Φ-translation faithfulness gap beyond the previously resolved baseline reproducer.
-
 ### BUG-2026-02-11-004
 - Status: Open
 - Priority: High
@@ -46,34 +26,51 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 
 ## Resolved
 
+### BUG-2026-02-11-002
+- Status: Resolved
+- Priority: High
+- Discovered: 2026-02-11
+- Resolved: 2026-02-11
+- Summary: Thesis-hardening completion for extended polymorphic-factory variants (`BUG-002-V1..V4`) with strict Ω non-binder rejection guardrails.
+- Minimal reproducers (surface expressions):
+  - `ELet "make" (ELam "x" (ELam "y" (EVar "x"))) (ELet "c1" (EApp (EVar "make") (ELit (LInt 1))) (ELet "c2" (EApp (EVar "make") (ELit (LBool True))) (EApp (EVar "c1") (ELit (LBool False)))))`
+  - `ELam "k" (ELet "make" (ELam "x" (ELam "y" (EVar "x"))) (ELet "c1" (EApp (EVar "make") (EVar "k")) (EApp (EVar "c1") (ELit (LBool True)))))`
+- Final expected/actual:
+  - Expected: V1..V3 elaborate to `Int`; V4 elaborates to `∀a. a -> a`; Ω rejects out-of-scheme/non-binder targets instead of fallback translation.
+  - Actual (2026-02-11 verification): `BUG-002-V1..V4` pass in checked/unchecked pipelines; strict reject diagnostics for non-binder/out-of-scheme targets are preserved; full validation gate is green (`647 examples, 0 failures`).
+- Regression tests:
+  - `/Volumes/src/mlf4/test/ElaborationSpec.hs` (`BUG-002-V1..V4`, `BUG-003-V1`, `BUG-003-V2`)
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-002-V"'` (`4 examples, 0 failures`)
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "out-of-scheme target"'` (`2 examples, 0 failures`)
+  - Validation gate: `cabal build all && cabal test` (`647 examples, 0 failures`)
+- Thesis impact:
+  - Restores thesis-aligned Φ/Ω translatability behavior for polymorphic-factory paths and removes non-binder fallback translation in favor of strict rejection.
+
 ### BUG-2026-02-11-003
 - Status: Resolved (Thesis-exact)
 - Priority: High
 - Discovered: 2026-02-11
-- Resolved: 2026-02-11
+- Resolved: 2026-02-12
 - Summary: Nested annotation variants for BUG-004 (`V2`, `V4`) now pass under strict-only elaboration/typechecking with no compatibility fallback paths.
 - Minimal reproducers (surface expressions):
   - `ELet "id" (ELam "x" (EVar "x")) (ELet "use" (ELamAnn "f" (STArrow (STBase "Int") (STBase "Int")) (EApp (EVar "f") (ELit (LInt 0)))) (EApp (EVar "use") (EAnn (EVar "id") (STArrow (STBase "Int") (STBase "Int")))))`
   - `EApp (ELamAnn "seed" (STBase "Int") (ELet "id" (ELam "x" (EVar "x")) (ELet "use" (ELamAnn "f" (STArrow (STBase "Int") (STBase "Int")) (EApp (EVar "f") (EVar "seed"))) (EApp (EVar "use") (EVar "id"))))) (ELit (LInt 1))`
 - Root cause:
   - V2: call-site annotation elaborated to a bounded-forall term and then received an additional inferred `InstApp`; strict `InstBot` rejects `InstApp` on already bounded foralls (`InstBot expects TBottom`).
-  - V4: desugared annotated-lambda parameter recovery used a broad bounded-identity collapse heuristic instead of explicit coercion-domain structure matching.
+  - V4: `generalizeAtNode` wrapped monomorphic annotations in trivially bounded foralls (`∀(a:Int→Int).a`), causing downstream `InstApp` to fail on non-⊥ bounds.
 - Fix:
-  - Preserve quantified names during scheme finalization (`Finalize.usedNames` includes quantified spine names).
-  - Keep Φ reorder identity strictness to scheme-owned quantifier positions.
-  - Remove non-thesis `reifyInst` fallback synthesis; witness translation now stays on `phiFromEdgeWitnessWithTrace` only.
-  - Use explicit coercion-domain extraction for desugared `ELamAnn` parameter recovery: only `∀(v ⩾ b). v` maps to `b`.
-  - Normalize inferred argument instantiation from `InstApp τ` to `InstElim` when the argument is already `∀(⩾ τ) ...`.
-  - Remove compat InstBot API/behavior (`InstBotMode`, mode toggles, equal-bound no-op fallback); strict InstBot is now the only contract in checker/runtime.
+  - Omega.hs: tightened bare `InstBot` production to require `TBottom` input (changed `ty == TBottom || alphaEqType ty argTy` to `alphaEqType ty TBottom`).
+  - Elaborate.hs ALamF: collapse trivially bounded foralls `∀(name:B).name` to bound type `B` for annotated lambda parameters.
+  - Elaborate.hs AAppF: normalize inferred argument instantiation to `InstElim` when argument is already `∀(⩾ τ)` (annotation updated the bound), and `InstId` when argument is already monomorphic.
+  - PhiReorder: restrict reorder identity to scheme-owned binder positions only.
 - Regression tests:
-  - `/Volumes/src/mlf4/test/ElaborationSpec.hs` (`BUG-004-V2`, `BUG-004-V4`, strict-shadow checks)
-  - `/Volumes/src/mlf4/test/TypeCheckSpec.hs` (`strict InstBot harness (red-first)`)
-  - `cabal test mlf2-test --test-show-details=direct --test-options='--match strict'` (`15 examples, 0 failures`)
-  - `cabal test mlf2-test --test-show-details=direct --test-options='--match BUG-004-V2'` (`2 examples, 0 failures`)
-  - `cabal test mlf2-test --test-show-details=direct --test-options='--match BUG-004-V4'` (`2 examples, 0 failures`)
-  - Validation gate: `cabal build all && cabal test`
+  - `/Volumes/src/mlf4/test/ElaborationSpec.hs` (`BUG-004-V1..V4`)
+  - `/Volumes/src/mlf4/test/TypeCheckSpec.hs` (strict InstBot regressions: `InstInside(InstBot)` accept/reject, bare `InstBot` reject)
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-004"'` (`4 examples, 0 failures`)
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Phase 7 typecheck"'` (`13 examples, 0 failures`)
+  - Validation gate: `cabal build all && cabal test` (`652 examples, 0 failures`)
 - Thesis impact:
-  - Restores κσ-style annotation-nesting behavior for explicit monomorphic call-site and inner-let annotated-parameter flows using strict paper-faithful instantiation semantics and no non-thesis fallback paths.
+  - Strict `InstBot` checker semantics are unchanged; only instantiation *production* was corrected. The checker still rejects `InstBot` on any non-⊥ input. This is thesis-exact: the paper's `⊥ ← τ` rule requires the input to be `⊥`.
 
 ### BUG-2026-02-06-002
 - Status: Resolved

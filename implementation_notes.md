@@ -1,5 +1,15 @@
 # Implementation Notes
 
+### 2026-02-12 BUG-004-V2/V4 strict InstBot production fix (thesis-exact)
+
+- Strict `InstBot` checker semantics are unchanged: `instBot` in `TypeCheck.hs` still requires the input type to be `TBottom`. This matches the paper's `⊥ ← τ` rule exactly.
+- Only instantiation *production* was corrected in three places:
+  1. `Omega.hs`: bare `InstBot argTy` was produced when `ty == TBottom || alphaEqType ty argTy`; tightened to `alphaEqType ty TBottom` so bare `InstBot` is only emitted when the input is actually `⊥`.
+  2. `Elaborate.hs` ALamF: `generalizeAtNode` wraps monomorphic annotations in trivially bounded foralls (`∀(a:B).a`); these are now collapsed to the bound type `B` before use as lambda parameter types.
+  3. `Elaborate.hs` AAppF: when an annotation has already updated a forall's bound from `⊥` to `τ`, the inferred argument instantiation is normalized to `InstElim` (which substitutes the bound without calling `instBot`) instead of `InstApp` (which would call `instBot` on the now-non-⊥ bound).
+- The `InstInside(InstBot(t))` pattern (used by `instInsideFromArgsWithBounds` for unbounded binders) remains correct: `InstInside` enters the forall, then `InstBot` operates on the bound which IS `⊥`.
+- Verification: `652 examples, 0 failures` including 3 new strict InstBot regression tests.
+
 ### 2026-02-11 EdgePlan cleanup (remove `EdgeStage`)
 
 - `MLF.Constraint.Presolution.EdgeProcessing.Plan` now exposes a concrete resolved `EdgePlan` record.
