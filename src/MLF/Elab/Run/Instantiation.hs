@@ -12,7 +12,7 @@ module MLF.Elab.Run.Instantiation (
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
-import MLF.Reify.TypeOps (matchType, stripForallsType)
+import MLF.Reify.TypeOps (alphaEqType, matchType, stripForallsType)
 import MLF.Elab.Types
 
 newtype SubstFun (i :: TopVar) =
@@ -127,19 +127,30 @@ substTypeSelective binderSet subst ty0 = runSubstFun (cataIx alg ty0) Set.empty
                     body' = runSubstFun body bound'
                 in TForall v mb' body'
 
-instInsideFromArgsWithBounds :: [(String, Maybe BoundType)] -> [ElabType] -> Instantiation
-instInsideFromArgsWithBounds binds args = case (binds, args) of
-    ([], _) -> InstId
-    (_, []) -> InstId
-    ((n, mbBound):ns, t:ts) ->
-        let rest = instInsideFromArgsWithBounds ns ts
-            inst =
-                case mbBound of
-                    Just bound | containsForallTy bound -> InstInside (InstApp t)
-                    _ -> InstInside (InstBot t)
-        in if rest == InstId
-            then inst
-            else InstSeq inst (InstUnder n rest)
+instInsideFromArgsWithBounds :: [(String, Maybe BoundType)] -> [ElabType] -> Maybe Instantiation
+instInsideFromArgsWithBounds binds args = go binds args
+  where
+    go [] _ = Just InstId
+    go _ [] = Just InstId
+    go ((n, mbBound):ns) (t:ts) = do
+        rest <- go ns ts
+        inst <- instFor mbBound t
+        pure $ case (inst, rest) of
+            (InstId, InstId) -> InstId
+            (InstId, _) -> InstUnder n rest
+            (_, InstId) -> inst
+            _ -> InstSeq inst (InstUnder n rest)
+
+    instFor :: Maybe BoundType -> ElabType -> Maybe Instantiation
+    instFor mbBound t = case mbBound of
+        Nothing -> Just (InstInside (InstBot t))
+        Just bound
+            | containsForallTy bound -> Just (InstInside (InstApp t))
+            | alphaEqType boundTy TBottom -> Just (InstInside (InstBot t))
+            | alphaEqType boundTy t -> Just InstId
+            | otherwise -> Nothing
+          where
+            boundTy = tyToElab bound
 
 containsForallType :: ElabType -> Bool
 containsForallType = cataIxConst alg

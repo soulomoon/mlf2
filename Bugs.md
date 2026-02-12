@@ -47,28 +47,33 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 ## Resolved
 
 ### BUG-2026-02-11-003
-- Status: Resolved
+- Status: Resolved (Thesis-exact)
 - Priority: High
 - Discovered: 2026-02-11
 - Resolved: 2026-02-11
-- Summary: Nested annotation variants for BUG-004 (`V2`, `V4`) now accept checked/unchecked elaboration with `Int` result.
+- Summary: Nested annotation variants for BUG-004 (`V2`, `V4`) now pass under strict-only elaboration/typechecking with no compatibility fallback paths.
 - Minimal reproducers (surface expressions):
   - `ELet "id" (ELam "x" (EVar "x")) (ELet "use" (ELamAnn "f" (STArrow (STBase "Int") (STBase "Int")) (EApp (EVar "f") (ELit (LInt 0)))) (EApp (EVar "use") (EAnn (EVar "id") (STArrow (STBase "Int") (STBase "Int")))))`
   - `EApp (ELamAnn "seed" (STBase "Int") (ELet "id" (ELam "x" (EVar "x")) (ELet "use" (ELamAnn "f" (STArrow (STBase "Int") (STBase "Int")) (EApp (EVar "f") (EVar "seed"))) (EApp (EVar "use") (EVar "id"))))) (ELit (LInt 1))`
 - Root cause:
-  - V2: scheme finalization/reorder identity drift around quantified binder ownership (`PhiReorder` false positives).
-  - V4: desugared annotated-lambda bounded identity + strict `InstBot` handling caused no-op bound updates to fail (`InstBot expects TBottom`).
+  - V2: call-site annotation elaborated to a bounded-forall term and then received an additional inferred `InstApp`; strict `InstBot` rejects `InstApp` on already bounded foralls (`InstBot expects TBottom`).
+  - V4: desugared annotated-lambda parameter recovery used a broad bounded-identity collapse heuristic instead of explicit coercion-domain structure matching.
 - Fix:
   - Preserve quantified names during scheme finalization (`Finalize.usedNames` includes quantified spine names).
   - Keep Φ reorder identity strictness to scheme-owned quantifier positions.
-  - Collapse only closed bounded-identity parameter types (`∀a⩾τ.a` with closed `τ`) in desugared annotated-lambda parameter recovery.
-  - Accept alpha-equal equal-bound `InstBot` in `TypeCheck` (aligned with `applyInstantiation` equal-bound no-op behavior).
+  - Remove non-thesis `reifyInst` fallback synthesis; witness translation now stays on `phiFromEdgeWitnessWithTrace` only.
+  - Use explicit coercion-domain extraction for desugared `ELamAnn` parameter recovery: only `∀(v ⩾ b). v` maps to `b`.
+  - Normalize inferred argument instantiation from `InstApp τ` to `InstElim` when the argument is already `∀(⩾ τ) ...`.
+  - Remove compat InstBot API/behavior (`InstBotMode`, mode toggles, equal-bound no-op fallback); strict InstBot is now the only contract in checker/runtime.
 - Regression tests:
-  - `/Volumes/src/mlf4/test/ElaborationSpec.hs` (`BUG-004-V2`, `BUG-004-V4`)
-  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-004-V"'` (`4 examples, 0 failures`)
+  - `/Volumes/src/mlf4/test/ElaborationSpec.hs` (`BUG-004-V2`, `BUG-004-V4`, strict-shadow checks)
+  - `/Volumes/src/mlf4/test/TypeCheckSpec.hs` (`strict InstBot harness (red-first)`)
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match strict'` (`15 examples, 0 failures`)
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match BUG-004-V2'` (`2 examples, 0 failures`)
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match BUG-004-V4'` (`2 examples, 0 failures`)
   - Validation gate: `cabal build all && cabal test`
 - Thesis impact:
-  - Restores κσ-style annotation-nesting behavior for explicit monomorphic call-site and inner-let annotated-parameter flows without regressing checked-authoritative baseline gates.
+  - Restores κσ-style annotation-nesting behavior for explicit monomorphic call-site and inner-let annotated-parameter flows using strict paper-faithful instantiation semantics and no non-thesis fallback paths.
 
 ### BUG-2026-02-06-002
 - Status: Resolved

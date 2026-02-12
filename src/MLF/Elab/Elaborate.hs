@@ -11,7 +11,6 @@ module MLF.Elab.Elaborate (
     elaborateWithEnv
 ) where
 
-import Control.Applicative ((<|>))
 import Data.Functor.Foldable (para)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
@@ -24,7 +23,6 @@ import MLF.Reify.TypeOps
     , freeTypeVarsType
     , inlineBaseBoundsType
     , matchType
-    , substTypeCapture
     )
 
 import MLF.Frontend.Syntax (VarName)
@@ -34,7 +32,7 @@ import MLF.Constraint.Solve (SolveResult(..))
 import MLF.Elab.Types
 import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Elab.Legacy (expansionToInst)
-import MLF.Elab.TermClosure (closeTermWithSchemeSubstIfNeeded)
+import MLF.Elab.TermClosure (closeTermWithSchemeSubstIfNeeded, substInTerm)
 import MLF.Elab.Run.TypeOps (inlineBoundVarsType)
 import MLF.Elab.Run.Annotation (adjustAnnotationInst)
 import MLF.Constraint.BindingUtil (bindingPathToRootLocal)
@@ -46,14 +44,12 @@ import qualified MLF.Elab.Inst as Inst
 import MLF.Reify.Core
     ( namedNodes
     , reifyType
-    , reifyBoundWithNames
     , reifyTypeWithNamedSetNoFallback
     )
 import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Constraint.Solve as Solve (frWith)
 import MLF.Constraint.Presolution
     ( EdgeTrace
-    , etBinderArgs
     )
 import MLF.Frontend.ConstraintGen.Types (AnnExpr(..), AnnExprF(..))
 
@@ -310,13 +306,12 @@ elaborateWithEnv config elabEnv ann = do
         ETyAbs{} -> True
         _ -> False
 
-    collapseClosedBoundedIdentity :: ElabType -> ElabType
-    collapseClosedBoundedIdentity ty0 = case ty0 of
+    coercionDomainTy :: ElabType -> Maybe ElabType
+    coercionDomainTy ty0 = case ty0 of
         TForall v (Just bnd) body
-            | body == TVar v
-            , Set.null (freeTypeVarsType (tyToElab bnd)) ->
-                tyToElab bnd
-        _ -> ty0
+            | body == TVar v ->
+                Just (tyToElab bnd)
+        _ -> Nothing
 
     mkOut :: (Env -> Either ElabError ElabTerm) -> ElabOut
     mkOut f = ElabOut f f
@@ -348,7 +343,8 @@ elaborateWithEnv config elabEnv ann = do
                         Just (annNodeId, _) ->
                             case generalizeAtNode annNodeId of
                                 Right (paramSch, _subst) ->
-                                    let paramTy0 = collapseClosedBoundedIdentity (schemeToType paramSch)
+                                    let paramTyRaw = schemeToType paramSch
+                                        paramTy0 = fromMaybe paramTyRaw (coercionDomainTy paramTyRaw)
                                     in pure
                                         ( paramTy0
                                         , SchemeInfo
@@ -359,7 +355,8 @@ elaborateWithEnv config elabEnv ann = do
                                 Left (BindingTreeError GenSchemeFreeVars{}) -> do
                                     -- Some coercion codomain roots are outside the scheme
                                     -- ownership checks; recover the term-level type directly.
-                                    paramTy0 <- fmap collapseClosedBoundedIdentity (reifyNodeTypePreferringBound annNodeId)
+                                    paramTyRaw <- reifyNodeTypePreferringBound annNodeId
+                                    let paramTy0 = fromMaybe paramTyRaw (coercionDomainTy paramTyRaw)
                                     pure
                                         ( paramTy0
                                         , SchemeInfo
@@ -393,36 +390,56 @@ elaborateWithEnv config elabEnv ann = do
                                 (InstApp _, Right TForall{}) -> funInst
                                 (InstApp _, Right _) -> InstId
                                 _ -> funInst
-                    let funInst' =
-                            case (funInstByFunType, sourceAnnIsPolymorphic env aAnn) of
-                                (InstApp (TVar _), False) ->
-                                    case reifyNodeTypePreferringBound (annNode aAnn) of
-                                        Right argTy -> InstApp argTy
-                                        Left _ -> funInstByFunType
-                                (InstApp TForall{}, False) ->
-                                    case reifyNodeTypePreferringBound (annNode aAnn) of
-                                        Right argTy -> InstApp argTy
-                                        Left _ -> funInstByFunType
-                                _ -> funInstByFunType
-                        fAppForArgInference = case funInst' of
-                            InstId -> f'
-                            _ -> ETyInst f' funInst'
                         sourceVarName annExpr = case annExpr of
                             AVar v _ -> Just v
                             AAnn inner _ _ -> sourceVarName inner
                             _ -> Nothing
+                        funInstFromArg =
+                            case funInstByFunType of
+                                InstId -> do
+                                    v <- sourceVarName fAnn
+                                    si <- Map.lookup v env
+                                    argTy <- either (const Nothing) Just (TypeCheck.typeCheckWithEnv tcEnv a')
+                                    args <- inferFunInstArgsForArg (siScheme si) argTy
+                                    pure (instSeqApps (map (inlineBoundVarsType resReify) args))
+                                _ -> Nothing
+                        funInstSeed =
+                            case funInstFromArg of
+                                Just inst -> inst
+                                Nothing -> funInstByFunType
+                    let funInst' =
+                            case (funInstSeed, sourceAnnIsPolymorphic env aAnn) of
+                                (InstApp (TVar _), False) ->
+                                    case reifyNodeTypePreferringBound (annNode aAnn) of
+                                        Right argTy -> InstApp argTy
+                                        Left _ -> funInstSeed
+                                (InstApp TForall{}, False) ->
+                                    case reifyNodeTypePreferringBound (annNode aAnn) of
+                                        Right argTy -> InstApp argTy
+                                        Left _ -> funInstSeed
+                                _ -> funInstSeed
+                        fAppForArgInference = case funInst' of
+                            InstId -> f'
+                            _ -> ETyInst f' funInst'
                     let argInstFromFun =
-                            case (sourceVarName aAnn, f') of
+                            let argTyChecked = TypeCheck.typeCheckWithEnv tcEnv a'
+                                normalizeInferredInst inst0 =
+                                    case (inst0, argTyChecked) of
+                                        (InstApp argTy, Right (TForall _ (Just bnd) _))
+                                            | alphaEqType (tyToElab bnd) argTy ->
+                                                InstElim
+                                        _ -> inst0
+                            in case (sourceVarName aAnn, f') of
                                 (Just v, ELam _ paramTy _) -> do
                                     si <- Map.lookup v env
                                     args <- inferInstAppArgs (siScheme si) paramTy
-                                    pure (instSeqApps (map (inlineBoundVarsType resReify) args))
+                                    pure (normalizeInferredInst (instSeqApps (map (inlineBoundVarsType resReify) args)))
                                 (Just v, _) -> do
                                     si <- Map.lookup v env
                                     case TypeCheck.typeCheckWithEnv tcEnv fAppForArgInference of
                                         Right (TArrow paramTy _) -> do
                                             args <- inferInstAppArgs (siScheme si) paramTy
-                                            pure (instSeqApps (map (inlineBoundVarsType resReify) args))
+                                            pure (normalizeInferredInst (instSeqApps (map (inlineBoundVarsType resReify) args)))
                                         _ -> Nothing
                                 _ -> Nothing
                     let argInst' =
@@ -536,19 +553,33 @@ elaborateWithEnv config elabEnv ann = do
                 { elabTerm = \env -> do
                     expr' <- elabTerm exprOut env
                     inst <- reifyInst namedSetReify env exprAnn eid
+                    let mSourceSchemeInfo = schemeInfoForAnnExpr env exprAnn
+                        sourceHeadBound =
+                            case mSourceSchemeInfo of
+                                Just SchemeInfo { siScheme = Forall ((_, mbBound) : _) _ } ->
+                                    Just (maybe TBottom tyToElab mbBound)
+                                _ -> Nothing
                     mExpectedBound <- case generalizeAtNode annNodeId of
                         Right (Forall ((_, Just bnd) : _) _, _) -> pure (Just (tyToElab bnd))
                         Left _ -> pure Nothing
                         _ -> pure Nothing
                     let instAdjusted0 = adjustAnnotationInst inst
                         instAdjusted =
-                            case (mExpectedBound, instAdjusted0) of
-                                (Just expectedBound, InstInside (InstBot _)) ->
+                            case (mExpectedBound, instAdjusted0, sourceHeadBound) of
+                                (Just expectedBound, InstInside (InstBot _), _) ->
                                     InstInside (InstBot expectedBound)
+                                (Just expectedBound, InstId, Just sourceBound)
+                                    | alphaEqType sourceBound TBottom ->
+                                        InstInside (InstBot expectedBound)
+                                    | alphaEqType sourceBound expectedBound ->
+                                        InstId
                                 _ -> instAdjusted0
                     exprClosed <-
                         if instAdjusted == InstId
-                            then pure expr'
+                            then pure $
+                                case mSourceSchemeInfo of
+                                    Just si -> substInTerm (siSubst si) expr'
+                                    Nothing -> expr'
                             else
                                 if termStartsWithTypeAbstraction expr' || sourceAnnIsPolymorphic env exprAnn
                                     then pure expr'
@@ -583,6 +614,23 @@ elaborateWithEnv config elabEnv ann = do
             AAnn inner _ _ -> sourceAnnIsPolymorphic env inner
             _ -> False
 
+    schemeInfoForAnnExpr :: Env -> AnnExpr -> Maybe SchemeInfo
+    schemeInfoForAnnExpr env sourceAnn =
+        let generalizedSchemeInfo =
+                case generalizeAtNode (annNode sourceAnn) of
+                    Right (sch, subst) ->
+                        Just SchemeInfo
+                            { siScheme = sch
+                            , siSubst = subst
+                            }
+                    Left _ -> Nothing
+        in case sourceAnn of
+            AVar v _ ->
+                case Map.lookup v env of
+                    Just si -> Just si
+                    Nothing -> generalizedSchemeInfo
+            _ -> generalizedSchemeInfo
+
     desugaredAnnLambdaInfo :: VarName -> AnnExpr -> Maybe (NodeId, AnnExpr)
     desugaredAnnLambdaInfo param bodyAnn =
         case bodyAnn of
@@ -607,7 +655,7 @@ elaborateWithEnv config elabEnv ann = do
     -- (and the NodeId→name substitution from `generalizeAt`) to support Σ(g)
     -- reordering and targeted instantiation.
     reifyInst :: IntSet.IntSet -> Env -> AnnExpr -> EdgeId -> Either ElabError Instantiation
-    reifyInst namedSetReify env funAnn (EdgeId eid) =
+    reifyInst _namedSetReify env funAnn (EdgeId eid) =
         let debugGeneralize :: String -> a -> a
             debugGeneralize = traceGeneralize traceCfg
             dbg =
@@ -626,10 +674,7 @@ elaborateWithEnv config elabEnv ann = do
                     (Right InstId)
             Just ew -> do
                 let mTrace = IntMap.lookup eid edgeTraces
-                    mExpansion = IntMap.lookup eid edgeExpansions
-                let mSchemeInfo = case funAnn of
-                        AVar v _ -> Map.lookup v env
-                        _ -> Nothing
+                let mSchemeInfo = schemeInfoForAnnExpr env funAnn
                     mSchemeInfo' =
                         case mSchemeInfo of
                             Just si
@@ -649,112 +694,7 @@ elaborateWithEnv config elabEnv ann = do
                     ("reifyInst phi edge=" ++ show eid ++ " phi=" ++ show phi)
                     () of
                     () -> pure ()
-                let allowFallbackFromTrace =
-                        case mSchemeInfo of
-                            Just si ->
-                                case siScheme si of
-                                    Forall binds _ -> not (null binds)
-                            Nothing -> True
-                instFromTrace <- case (allowFallbackFromTrace, phi, mExpansion, mSchemeInfo) of
-                    (True, InstId, Just (ExpInstantiate args), mSi) -> do
-                        let binderArity =
-                                case mSi of
-                                    Just si ->
-                                        case siScheme si of
-                                            Forall binds _ -> Just (length binds)
-                                    Nothing -> Nothing
-                            traceArgs =
-                                case mTrace of
-                                    Just tr | not (null (etBinderArgs tr)) ->
-                                        map snd (etBinderArgs tr)
-                                    _ -> []
-                        let argNodes =
-                                case binderArity of
-                                    Just arity
-                                        | length traceArgs == arity ->
-                                            traceArgs
-                                        | otherwise ->
-                                            args
-                                    Nothing ->
-                                        if null traceArgs
-                                            then args
-                                            else traceArgs
-                        let targetArgs =
-                                case mSi of
-                                    Just si ->
-                                        let fallbackFromSchemeBound =
-                                                case siScheme si of
-                                                    Forall [(name, Just bnd)] body
-                                                        | body == TVar name ->
-                                                            Just [tyToElab bnd]
-                                                    _ -> Nothing
-                                        in
-                                        case reifyTargetType namedSetReify ew si of
-                                            Right targetTy ->
-                                                inferInstAppArgs (siScheme si) targetTy
-                                                    <|> fallbackFromSchemeBound
-                                            Left _ -> fallbackFromSchemeBound
-                                    Nothing -> Nothing
-                        case debugGeneralize
-                            ("reifyInst fallback edge=" ++ show eid
-                                ++ " argNodes=" ++ show argNodes
-                                ++ " targetArgs=" ++ show targetArgs
-                            )
-                            () of
-                            () -> pure ()
-                        let substForArgs =
-                                case mSi of
-                                    Just si -> siSubst si
-                                    Nothing -> IntMap.empty
-                            constraint = srConstraint resReify
-                            reifyArg arg =
-                                case VarStore.lookupVarBound constraint arg of
-                                    Just bnd -> reifyBoundWithNames resReify substForArgs bnd
-                                    Nothing -> reifyTypeWithNamedSetNoFallback resReify substForArgs namedSetReify arg
-                        argTys <- case targetArgs of
-                            Just inferred -> pure inferred
-                            Nothing -> mapM reifyArg argNodes
-                        let argTys' = map (inlineBoundVarsType resReify) argTys
-                            binderNames =
-                                case mSi of
-                                    Just si ->
-                                        case siScheme si of
-                                            Forall binds _ -> map fst binds
-                                    Nothing -> []
-                            alignWithSingleBinder binderName ty0 =
-                                case filter (/= binderName) (Set.toList (freeTypeVarsType ty0)) of
-                                    [fv] -> substTypeCapture fv (TVar binderName) ty0
-                                    _ -> ty0
-                            argTys'' =
-                                case binderNames of
-                                    [binderName] -> map (alignWithSingleBinder binderName) argTys'
-                                    _ -> argTys'
-                        case debugGeneralize
-                            ("reifyInst fallback edge=" ++ show eid
-                                ++ " argTys=" ++ show argTys
-                                ++ " argTys'=" ++ show argTys'
-                                ++ " argTys''=" ++ show argTys''
-                            )
-                            () of
-                            () -> pure ()
-                        let arityOk =
-                                case binderArity of
-                                    Just arity -> arity == length argTys''
-                                    Nothing -> True
-                        if arityOk
-                            then pure (Just (instSeqApps argTys''))
-                            else pure Nothing
-                    _ -> pure Nothing
-                case instFromTrace of
-                    Just inst -> Right inst
-                    Nothing -> Right phi
-
-    reifyTargetType :: IntSet.IntSet -> EdgeWitness -> SchemeInfo -> Either ElabError ElabType
-    reifyTargetType namedSetReify ew si =
-        let subst = siSubst si
-        in case VarStore.lookupVarBound (srConstraint resReify) (ewRight ew) of
-            Just bnd -> reifyTypeWithNamedSetNoFallback resReify subst namedSetReify bnd
-            Nothing -> reifyTypeWithNamedSetNoFallback resReify subst namedSetReify (ewRight ew)
+                Right phi
 
     inferInstAppArgs :: ElabScheme -> ElabType -> Maybe [ElabType]
     inferInstAppArgs scheme targetTy =
@@ -766,6 +706,26 @@ elaborateWithEnv config elabEnv ann = do
                 if all (`Map.member` subst) binderNames
                     then Just [ty | name <- binderNames, Just ty <- [Map.lookup name subst]]
                     else Nothing
+
+    inferFunInstArgsForArg :: ElabScheme -> ElabType -> Maybe [ElabType]
+    inferFunInstArgsForArg scheme argTy =
+        let (binds, body) = Inst.splitForalls (schemeToType scheme)
+            binderNames = map fst binds
+            binderSet = Set.fromList binderNames
+        in case body of
+            TArrow paramTy _ ->
+                case matchType binderSet paramTy argTy of
+                    Left _ -> Nothing
+                    Right subst ->
+                        let present = map (`Map.member` subst) binderNames
+                            prefixLen = length (takeWhile id present)
+                            hasOutOfOrder = or (drop prefixLen present)
+                            prefixNames = take prefixLen binderNames
+                            args = [ty | name <- prefixNames, Just ty <- [Map.lookup name subst]]
+                        in if hasOutOfOrder || null args
+                            then Nothing
+                            else Just args
+            _ -> Nothing
 
 instSeqApps :: [ElabType] -> Instantiation
 instSeqApps tys = case map InstApp tys of

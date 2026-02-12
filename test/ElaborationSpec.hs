@@ -2650,7 +2650,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     expr =
                         ELet "c" (EAnn rhs schemeTy) (EAnn (EVar "c") ann)
                 -- Expected target behavior: checked and unchecked both produce ∀a. a -> a -> a -> a.
-                assertBothPipelinesErrorContains expr "OpGraft(non-binder): InstBot expects"
+                assertBothPipelinesErrorContains expr "OpGraft requires target binder to be unbounded or"
 
             it "BUG-003-V2: dual-alias sentinel reproduces known Phi invariant failure" $ do
                 let rhs = ELam "x" (ELam "y" (ELam "z" (EVar "x")))
@@ -2671,7 +2671,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     expr =
                         ELet "c" (EAnn rhs schemeTy) (EAnn (EVar "c") ann)
                 -- Expected target behavior: no RaiseMerge translatability regression.
-                assertBothPipelinesErrorContains expr "OpGraft(non-binder): InstBot expects"
+                assertBothPipelinesErrorContains expr "OpGraft requires target binder to be unbounded or"
 
         describe "Explicit forall annotation edge cases" $ do
             it "explicit forall annotation round-trips on let-bound variables" $ do

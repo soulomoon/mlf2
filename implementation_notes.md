@@ -428,11 +428,16 @@ This repo’s design is primarily informed by:
 - V2 closure aligns scheme/finalization identity ownership with Φ reorder requirements:
   - `MLF.Constraint.Presolution.Plan.Finalize` now includes quantified binder names in `usedNames`, preserving binder identity through scheme finalization.
   - `MLF.Elab.Phi.Omega` reorder identity checks now require identity only for scheme-owned quantifier positions.
-- V4 closure avoids over-generalized desugared-lambda parameter recovery:
-  - `MLF.Elab.Elaborate` collapses only closed bounded-identity parameter shapes (`∀a ⩾ τ. a` where `τ` is closed) when recovering desugared `ELamAnn` parameter types.
-  - `MLF.Elab.TypeCheck` accepts alpha-equal equal-bound `InstBot` as a no-op (matching `MLF.Elab.Inst.applyInstantiation` equal-bound behavior).
+- Removed non-thesis compatibility paths:
+  - `MLF.Elab.Elaborate.reifyInst` no longer synthesizes fallback instantiation sequences from expansion traces when `phi == InstId`; elaboration uses `phiFromEdgeWitnessWithTrace` only.
+  - `MLF.Elab.TypeCheck` / `MLF.Elab.Inst` are strict-only for `InstBot` (`InstBotMode`/mode APIs removed).
+- Producer-side annotation/elaboration shaping is now explicit:
+  - Desugared `ELamAnn` parameter recovery uses coercion-domain form matching only (`∀(v ⩾ b). v` → `b`) instead of broad bounded-identity collapse.
+  - In `AApp`, inferred `InstApp τ` is normalized to `InstElim` when the argument term is already `∀(⩾ τ) ...`, avoiding strict-instantiation failure on bounded-forall terms.
 - Guardrail from debugging iteration:
   - broad Omega relaxations (empty-binder-key short-circuit, weaken keep-all on empty keep-set, graft skip outside keep-set) were reverted after they regressed legacy make/Φ suites.
 - Verification:
-  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-004-V"'` => `4 examples, 0 failures`.
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "strict"'` => `15 examples, 0 failures`.
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-004-V2"'` => `2 examples, 0 failures`.
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-004-V4"'` => `2 examples, 0 failures`.
   - `cabal build all && cabal test` => pass.

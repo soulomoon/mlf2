@@ -16,7 +16,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - Open regressions currently tracked:
     - `BUG-2026-02-11-002` (extended BUG-002 factory variants)
     - `BUG-2026-02-11-004` (BUG-003 higher-arity bounded-alias variants)
-  - `BUG-2026-02-11-003` is resolved; `BUG-004-V2` and `BUG-004-V4` are now strict success assertions (`Int`) in both checked and unchecked pipelines.
+  - `BUG-2026-02-11-003` is resolved thesis-exact: `BUG-004-V2`/`V4` are strict success assertions (`Int`) in both checked and unchecked pipelines, with compat InstBot and reify fallback paths removed.
   - Remaining variant tests for open bugs stay sentinel-guarded until strict expected-success closure.
 
 ## Task 9 Verification Gate — 2026-02-11 (Phase-3 gate hardening + tracker sync)

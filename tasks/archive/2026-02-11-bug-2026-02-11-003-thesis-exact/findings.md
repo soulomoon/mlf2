@@ -1,0 +1,31 @@
+# Findings
+
+- Initial finding: Existing fix commit `bb51ca4` resolved BUG-2026-02-11-003 pragmatically; follow-up aims to ensure thesis-exact semantics by removing compat/fallback paths and proving strict behavior.
+- Current `typeCheck` still accepts `InstApp Int` when binder bound is `Int` via `InstBot` equality fallback; strict-thesis expectation is to reject non-⊥ `InstBot`.
+- BUG-004 strict shadow assertions require a strict-check hook from elaborated-term checking (`typeCheckWithMode` or equivalent) and are staged as pending until Task 2 wiring exists.
+- Mode-aware API now exists and keeps default behavior backward-compatible:
+  - default `typeCheck`/`checkInstantiation` remain compat.
+  - strict behavior is available explicitly via `typeCheckWithMode InstBotStrict`.
+- `applyInstantiation` remains compat by default; strict runtime semantics can now be probed via `applyInstantiationWithMode InstBotStrict` without changing production behavior yet.
+- After cutover to strict defaults:
+  - `BUG-004-V2` regresses with `TCInstantiationError ... InstBot expects TBottom, got Int`, confirming dependence on compatibility fallback.
+  - `BUG-004-V4` remains green, suggesting it is already on a thesis-compatible path or avoids the strict-sensitive branch.
+- Removing `reifyInst` fallback synthesis did not change the BUG-004 split:
+  - V2 remains red under strict semantics.
+  - V4 remains green.
+- This points Task 5 at producer-side shape/annotation derivation specifically for V2 (and possibly strict shadow checks), rather than a global fallback dependency.
+- V2 root cause under strict mode: annotated argument elaborated to a bounded-forall term, then received an additional inferred `InstApp` from call-site argument inference; strict `InstApp` on bounded forall fails.
+- Producer-side fix that restored thesis-safe green behavior:
+  - normalize inferred `InstApp τ` to `InstElim` when the argument term is already `∀(⩾ τ)`.
+  - keep annotation elaboration on the witness path (no fallback re-synthesis).
+- BUG-004 V2/V4 now both pass with strict checker shadow assertions.
+- Compat InstBot API has been fully removed; strict InstBot semantics are now the only contract in both checker and runtime instantiation.
+- Follow-up root cause (post-strict cleanup): `ResultType.Ann` generated target-derived `InstInside (InstBot ...)` for binders already carrying non-⊥ bounds; strict InstBot correctly rejects this.
+  - Fix: `instInsideFromArgsWithBounds` now returns `Maybe Instantiation` and rejects unsafe non-⊥ bound rewrites instead of forcing `InstBot`.
+- Follow-up root cause (checked-authoritative generator): explicit forall annotation on a non-variable source (`EAnn (ELam ...) ...`) could keep `funInst == InstId`, leaving polymorphic function application uninstantiated in `AApp`.
+  - Fix: `AApp` now infers fun-side instantiation from argument type when the function source is a polymorphic variable and witness gave `InstId`.
+- Follow-up root cause (annotation closure): forcing full scheme closure when annotation instantiation is `InstId` introduced duplicated quantifiers for bounded-alias baseline.
+  - Fix: for `InstId` annotation paths, apply only `siSubst` to the elaborated source term (no additional wrapper introduction), while still allowing bound-directed `InstBot` adjustment when source head-bound is `⊥`.
+- Final audit status:
+  - Forbidden compatibility constructs absent (`rg -n "fallbackFromSchemeBound|allowFallbackFromTrace|alphaEqType t tArg|collapseClosedBoundedIdentity" src/MLF` returns no matches).
+  - Full gate passes (`cabal build all && cabal test`: 649 examples, 0 failures).

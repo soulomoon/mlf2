@@ -1,0 +1,66 @@
+# Progress Log
+
+- Initialized task folder and planning artifacts.
+- Copied thesis-exact implementation plan into worktree for execution tracking.
+- Created isolated worktree at `~/.config/superpowers/worktrees/mlf4/codex/bug003-thesis-exact` on branch `codex/bug003-thesis-exact`.
+- Ran baseline verification: `cabal build all && cabal test` (PASS, 645 examples, 0 failures).
+- Added Task 1 strict harness scaffold:
+  - `TypeCheckSpec`: red assertion that strict InstBot should reject non-bottom equal-bound InstApp.
+  - `ElaborationSpec`: pending strict shadow checks for BUG-004 V2/V4.
+  - `SpecUtil`: added `expectLeft` helper.
+- Ran targeted slice `--match strict`: FAIL as expected with 1 failure and 2 pending.
+- Task 2 (strict policy API) implemented:
+  - Added `InstBotMode = InstBotStrict | InstBotCompat`.
+  - Added `typeCheckWithMode` and `checkInstantiationWithMode` in `MLF.Elab.TypeCheck`.
+  - Added `applyInstantiationWithMode` in `MLF.Elab.Inst`.
+  - Re-exported mode-aware APIs in `MLF.Elab.Pipeline`.
+- Updated strict harness tests to call new mode-aware APIs.
+- Re-ran targeted strict slice: PASS (16 examples, 0 failures, 2 pending).
+- Task 3 cutover:
+  - Switched default `typeCheck`, `typeCheckWithEnv`, `checkInstantiation`, and `applyInstantiation` to strict mode.
+  - BUG-004 focused runs after strict cutover:
+    - `BUG-004-V2` now fails with `InstBot expects TBottom` (expected red signal).
+    - `BUG-004-V4` still passes.
+- Task 4 fallback removal:
+  - Deleted non-thesis `reifyInst` fallback synthesis path that fabricated `InstApp` sequences when `phi == InstId`.
+  - Kept only `phiFromEdgeWitnessWithTrace` as the reification source.
+  - Re-ran focused checks:
+    - `BUG-004-V2` still fails with strict `InstBot` error (expected red).
+    - `BUG-004-V4` still passes.
+- Task 5 producer-side fix:
+  - Replaced bounded-identity collapse heuristic with explicit coercion-domain extraction:
+    `∀(v ⩾ b). v  ↦  b` only for the exact coercion-domain form.
+  - In `AApp`, normalized inferred `InstApp τ` to `InstElim` when the argument term is already `∀(⩾ τ) ...`.
+  - Converted BUG-004 strict shadow checks from pending to concrete assertions using `typeCheckWithMode InstBotStrict`.
+  - Focused green checks passed:
+    - `BUG-004-V2` and strict shadow
+    - `BUG-004-V4` and strict shadow
+    - `solved-node` sentinel
+    - `StepIntro` witness slices
+    - `instantiations` witness slices
+- Task 6 strict-contract cleanup:
+  - Removed compat mode APIs (`InstBotMode`, `typeCheckWithMode`, `checkInstantiationWithMode`, `applyInstantiationWithMode`).
+  - `typeCheck`, `checkInstantiation`, and `applyInstantiation` are now strict-only.
+  - Updated tests to assert strict behavior via final APIs (no mode toggles).
+  - Targeted suite (`strict`, `BUG-004-V2`, `BUG-004-V4`) passes.
+- Systematic-debugging follow-up (post-Task 6 regressions):
+  - Reproduced minimal failing case: `elaborates term annotations` with `EAnn (ELam "x" (EVar "x")) (Int -> Int)` yielded strict `InstBot` failure.
+  - Traced data flow with debug script + traces:
+    - `ResultType.Ann` built target-derived instantiations that could emit `InstInside (InstBot ...)` against non-⊥ bounds.
+    - `AApp` could retain `funInst == InstId` for explicit-forall annotation sources, causing checked-authoritative `TCExpectedArrow` in generated let/app terms.
+  - Implemented fixes:
+    - `MLF.Elab.Run.Instantiation.instInsideFromArgsWithBounds` now returns `Maybe Instantiation` and refuses unsafe non-⊥ bound coercions.
+    - `MLF.Elab.Run.ResultType.Ann` consumes the `Maybe` and falls back to safe paths when target-derived instantiation is not valid.
+    - `MLF.Elab.Elaborate.AApp` now infers function-side `InstApp` from argument type when witness instantiation is `InstId`.
+    - `MLF.Elab.Elaborate` annotation `InstId` path now applies only source scheme substitution (`substInTerm`) rather than introducing duplicate closure wrappers.
+    - `MLF.Elab.Elaborate` annotation adjustment now inserts `InstInside (InstBot expectedBound)` only when source head-bound is `⊥`.
+  - Updated BUG-003 sentinel assertions to match the current failure signature (`OpGraft requires target binder to be unbounded or ...`) after strict translatability tightening.
+- Verification and audit commands:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "elaborates term annotations"'` => pass.
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "elaborates let with RHS term annotation"'` => pass.
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Checked-authoritative invariant"'` => pass.
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-004-V2"'` => pass.
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-004-V4"'` => pass.
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "strict"'` => pass (`15 examples, 0 failures`).
+  - `rg -n "fallbackFromSchemeBound|allowFallbackFromTrace|alphaEqType t tArg|collapseClosedBoundedIdentity" src/MLF` => no matches.
+  - Full gate: `cabal build all && cabal test` => pass (`649 examples, 0 failures`).

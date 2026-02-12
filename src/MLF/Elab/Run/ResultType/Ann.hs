@@ -240,7 +240,7 @@ computeResultTypeFromAnn ctx inner innerPre annNodeId eid = do
         phiFromTarget =
             case (sch, phiFromTargetArgs) of
                 (Forall binds _, Just args) ->
-                    Just (instInsideFromArgsWithBounds binds (map (inlineBoundVarsTypeForBound solvedForGen) args))
+                    instInsideFromArgsWithBounds binds (map (inlineBoundVarsTypeForBound solvedForGen) args)
                 _ -> Nothing
         phi =
             if annotationExplicit
