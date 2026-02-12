@@ -20,7 +20,7 @@ module MLF.Constraint.Presolution.EdgeProcessing.Plan (
     mkEmptyResolvedPlan,
 ) where
 
-import MLF.Constraint.Types (ExpVarId, InstEdge, NodeId, TyNode (..))
+import MLF.Constraint.Types (ExpVarId, GenNodeId, InstEdge, NodeId, TyNode (..))
 
 -- | Refined TyExp payload used by resolved edge plans.
 data ResolvedTyExp = ResolvedTyExp
@@ -54,6 +54,7 @@ data EdgePlan = EdgePlanResolved
     , eprRightCanonical :: NodeId
     , eprAllowTrivial :: Bool
     , eprSuppressWeaken :: Bool
+    , eprSchemeOwnerGen :: GenNodeId
     }
     deriving (Eq, Show)
 
@@ -68,8 +69,9 @@ mkEmptyResolvedPlan ::
     TyNode ->
     NodeId ->
     NodeId ->
+    GenNodeId ->
     EdgePlan
-mkEmptyResolvedPlan edge leftTyExp rightNode leftCan rightCan =
+mkEmptyResolvedPlan edge leftTyExp rightNode leftCan rightCan schemeGen =
     EdgePlanResolved
         { eprEdge = edge
         , eprLeftTyExp = leftTyExp
@@ -78,4 +80,5 @@ mkEmptyResolvedPlan edge leftTyExp rightNode leftCan rightCan =
         , eprRightCanonical = rightCan
         , eprAllowTrivial = True
         , eprSuppressWeaken = False
+        , eprSchemeOwnerGen = schemeGen
         }

@@ -21,7 +21,7 @@ import qualified Data.IntSet as IntSet
 import MLF.Constraint.Presolution.Base (PresolutionError (..), PresolutionM)
 import MLF.Constraint.Presolution.EdgeProcessing.Plan
 import MLF.Constraint.Presolution.Ops (findRoot, getCanonicalNode, getNode)
-import MLF.Constraint.Presolution.StateAccess (getConstraintAndCanonical)
+import MLF.Constraint.Presolution.StateAccess (findSchemeIntroducerM, getConstraintAndCanonical)
 import MLF.Constraint.Types
 import MLF.Util.Trace (traceBindingM)
 
@@ -49,6 +49,8 @@ planEdge edge = do
                 ( PlanError
                     (ExpectedTyExpLeftInPlanner edgeId n1Raw)
                 )
+
+    schemeGen <- findSchemeIntroducerM canonical constraint0 (rteBodyId leftTyExp)
 
     n2 <- getCanonicalNode n2Id
 
@@ -92,6 +94,7 @@ planEdge edge = do
         , eprRightCanonical = canonical n2Id
         , eprAllowTrivial = allowTrivial
         , eprSuppressWeaken = suppressWeaken
+        , eprSchemeOwnerGen = schemeGen
         }
 
 nodeTag :: TyNode -> String

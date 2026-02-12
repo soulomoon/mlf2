@@ -14,6 +14,7 @@ import MLF.Constraint.Types.Graph
     , Constraint(..)
     , EdgeId(..)
     , ExpVarId(..)
+    , GenNodeId(..)
     , InstEdge(..)
     , NodeId(..)
     , TyNode(..)
@@ -32,7 +33,7 @@ spec = describe "Edge plan types" $ do
                 }
             rightNode = TyVar { tnId = NodeId 1, tnBound = Nothing }
             edge = InstEdge (EdgeId 0) (NodeId 10) (NodeId 1)
-            plan = mkEmptyResolvedPlan edge leftTyExp rightNode (NodeId 10) (NodeId 1)
+            plan = mkEmptyResolvedPlan edge leftTyExp rightNode (NodeId 10) (NodeId 1) (GenNodeId 0)
         eprLeftCanonical plan `shouldBe` NodeId 10
 
     it "captures TyExp-left payload in resolved plans" $ do
@@ -43,7 +44,7 @@ spec = describe "Edge plan types" $ do
                 }
             rightNode = TyVar { tnId = NodeId 1, tnBound = Nothing }
             edge = InstEdge (EdgeId 1) (NodeId 10) (NodeId 1)
-            plan = mkEmptyResolvedPlan edge leftTyExp rightNode (NodeId 10) (NodeId 1)
+            plan = mkEmptyResolvedPlan edge leftTyExp rightNode (NodeId 10) (NodeId 1) (GenNodeId 0)
         eprLeftTyExp plan `shouldBe` leftTyExp
 
     it "preserves edge identity through plan" $ do
@@ -54,7 +55,7 @@ spec = describe "Edge plan types" $ do
                 }
             rightNode = TyVar { tnId = NodeId 1, tnBound = Nothing }
             edge = InstEdge (EdgeId 42) (NodeId 10) (NodeId 1)
-            plan = mkEmptyResolvedPlan edge leftTyExp rightNode (NodeId 10) (NodeId 1)
+            plan = mkEmptyResolvedPlan edge leftTyExp rightNode (NodeId 10) (NodeId 1) (GenNodeId 0)
         edgePlanEdge plan `shouldBe` edge
 
     describe "planner classification" $ do

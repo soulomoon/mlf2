@@ -14,6 +14,7 @@ import MLF.Constraint.Types.Graph
     , Constraint(..)
     , EdgeId(..)
     , ExpVarId(..)
+    , GenNodeId(..)
     , InstEdge(..)
     , NodeId(..)
     , TyNode(..)
@@ -83,7 +84,7 @@ spec = describe "Edge interpreter" $ do
                 , rteExpVar = ExpVarId (-1)
                 , rteBodyId = body
                 }
-            plan = mkEmptyResolvedPlan edge leftTyExp nTarget expNode target
+            plan = mkEmptyResolvedPlan edge leftTyExp nTarget expNode target (GenNodeId 0)
             constraint = rootedConstraint emptyConstraint
                 { cNodes = nodeMapFromList
                     [ (getNodeId body, nBody)
@@ -116,7 +117,7 @@ spec = describe "Edge interpreter" $ do
                 , rteExpVar = ExpVarId (-2)
                 , rteBodyId = body
                 }
-            plan = mkEmptyResolvedPlan edge leftTyExp nTargetForall expNode targetForall
+            plan = mkEmptyResolvedPlan edge leftTyExp nTargetForall expNode targetForall (GenNodeId 0)
             constraint = rootedConstraint emptyConstraint
                 { cNodes = nodeMapFromList
                     [ (getNodeId body, nBody)
