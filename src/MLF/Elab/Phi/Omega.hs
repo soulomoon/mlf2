@@ -523,7 +523,14 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
         if length qs < 2
             then Right (InstId, ty, ids)
             else do
-                let missingIdPositions = [i | (i, Nothing) <- zip [(0::Int)..] ids]
+                let missingIdPositions =
+                        [ i
+                        | (i, Nothing) <- zip [(0::Int)..] ids
+                        , i < schemeArity
+                        ]
+                      where
+                        schemeArity = case siScheme si of
+                            Forall binds _ -> length binds
                     sourceBinders = [ canonicalNode nid | Just nid <- ids, isSchemeBinder nid ]
                     orderKeysActive = orderKeysForBinders sourceBinders
                     missingKeyBinders =
