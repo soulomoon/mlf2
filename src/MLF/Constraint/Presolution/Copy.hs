@@ -39,6 +39,7 @@ import MLF.Constraint.Presolution.Ops (
     setBindParentM
     )
 import MLF.Constraint.Presolution.StateAccess (
+    findSchemeIntroducerM,
     getConstraintAndCanonical,
     liftBindingError,
     lookupBindParentM
@@ -53,17 +54,6 @@ data CopyState = CopyState
     , csCopyMap :: IntMap NodeId
     , csInterior :: IntSet.IntSet
     }
-
-findSchemeIntroducerM :: (NodeId -> NodeId) -> Constraint -> NodeId -> PresolutionM GenNodeId
-findSchemeIntroducerM canonical c0 root0 = do
-    let root = canonical root0
-    -- The scheme introducer is the nearest gen node on the binding path.
-    path <- bindingPathToRootUnderM canonical c0 (typeRef root)
-    case [gid | GenRef gid <- path] of
-        (gid:_) -> pure gid
-        [] ->
-            throwError
-                (InternalError ("scheme introducer not found for " ++ show root))
 
 expansionCopySetsM :: NodeId -> PresolutionM (GenNodeId, IntSet.IntSet, IntSet.IntSet)
 expansionCopySetsM bodyId = do

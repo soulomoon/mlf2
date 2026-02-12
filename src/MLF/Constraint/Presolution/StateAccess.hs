@@ -66,6 +66,9 @@ module MLF.Constraint.Presolution.StateAccess (
     lookupGenNodeCanonM,
     getCanonicalNodeM,
 
+    -- * Scheme provenance
+    findSchemeIntroducerM,
+
     -- * Convenience re-exports
     liftBindingError
 ) where
@@ -84,7 +87,8 @@ import MLF.Constraint.Presolution.Base (
     MonadPresolution(throwPresolutionError),
     PresolutionM,
     PresolutionError(..),
-    PresolutionState(..)
+    PresolutionState(..),
+    bindingPathToRootUnderM
     )
 
 -- -----------------------------------------------------------------------------
@@ -354,3 +358,22 @@ lookupBindParentR ref = do
     c <- askConstraint
     canonical <- askCanonical
     liftBindingErrorR $ Binding.lookupBindParentUnder canonical c ref
+
+-- -----------------------------------------------------------------------------
+-- Scheme provenance
+-- -----------------------------------------------------------------------------
+
+-- | Find the nearest gen-node ancestor on the binding path from a type node.
+--
+-- This is used to identify which ∀-scheme "owns" a given body root during
+-- instantiation.  The function canonicalizes the root, walks the binding path
+-- upward, and returns the first 'GenNodeId' encountered.
+findSchemeIntroducerM :: (NodeId -> NodeId) -> Constraint -> NodeId -> PresolutionM GenNodeId
+findSchemeIntroducerM canonical c0 root0 = do
+    let root = canonical root0
+    path <- bindingPathToRootUnderM canonical c0 (typeRef root)
+    case [gid | GenRef gid <- path] of
+        (gid:_) -> pure gid
+        [] ->
+            throwError
+                (InternalError ("scheme introducer not found for " ++ show root))
