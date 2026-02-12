@@ -630,7 +630,7 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
                             then do
                                 argTy <- reifyTypeArg namedSet' Nothing (graftArgFor arg bv)
                                 let inst =
-                                        if ty == TBottom || alphaEqType ty argTy
+                                        if alphaEqType ty TBottom
                                             then InstBot argTy
                                             else InstId
                                 ty' <- applyInst "OpGraft+OpWeaken(root,bot)" ty inst
@@ -697,7 +697,7 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
                         then do
                             argTy <- reifyTypeArg namedSet' Nothing (graftArgFor arg bv)
                             let inst =
-                                    if ty == TBottom || alphaEqType ty argTy
+                                    if alphaEqType ty TBottom
                                         then InstBot argTy
                                         else InstId
                             ty' <- applyInst "OpGraft(root,bot)" ty inst

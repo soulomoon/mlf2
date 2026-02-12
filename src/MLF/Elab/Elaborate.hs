@@ -431,7 +431,16 @@ elaborateWithEnv config elabEnv ann = do
                         Just (annNodeId, _) ->
                             case generalizeAtNode annNodeId of
                                 Right (paramSch, _subst) ->
-                                    let paramTy0 = schemeToType paramSch
+                                    -- When the generalized scheme is a trivially bounded
+                                    -- forall ∀(a:B).a (body is just the binder variable),
+                                    -- collapse to the bound type B.  This avoids wrapping
+                                    -- monomorphic annotations in bounded foralls, which
+                                    -- would produce InstApp on non-⊥ bounds that the
+                                    -- strict type checker rejects.
+                                    let paramTy0 = case paramSch of
+                                            Forall [(name, Just bnd)] bodyTy
+                                                | bodyTy == TVar name -> tyToElab bnd
+                                            _ -> schemeToType paramSch
                                     in pure
                                         ( paramTy0
                                         , SchemeInfo
@@ -547,12 +556,25 @@ elaborateWithEnv config elabEnv ann = do
                             case (sourceAnnIsPolymorphic env aAnn, argInstFromFun) of
                                 (True, Just inst) -> inst
                                 _ -> argInst
+                        -- When the elaborated argument is a forall with a non-⊥
+                        -- bound (e.g. an annotation updated the bound), use
+                        -- InstElim to eliminate the forall by substituting the
+                        -- bound.  This avoids applying InstApp/InstBot to a
+                        -- non-⊥ bound which the strict type checker rejects.
+                        -- When the argument is already monomorphic, skip the
+                        -- instantiation entirely.
+                        argInstFinal = case argInst' of
+                            InstId -> InstId
+                            _ -> case TypeCheck.typeCheckWithEnv tcEnv a' of
+                                Right (TForall _ (Just _) _) -> InstElim
+                                Right TForall{} -> argInst'
+                                _ -> InstId
                     let fApp = case funInstRecovered of
                             InstId -> f'
                             _      -> ETyInst f' funInstRecovered
-                        aApp = case argInst' of
+                        aApp = case argInstFinal of
                             InstId -> a'
-                            _      -> ETyInst a' argInst'
+                            _      -> ETyInst a' argInstFinal
                     pure (EApp fApp aApp)
             in mkOut f
         ALetF v schemeGenId schemeRootId _ _rhsScopeGen (rhsAnn, rhsOut) (bodyAnn, bodyOut) trivialRoot ->
