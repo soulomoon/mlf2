@@ -33,6 +33,7 @@ module MLF.Constraint.Presolution.Base (
     edgeInteriorExact,
     traceInteriorRootRef,
     instantiationBindersM,
+    instantiationBindersFromGenM,
     forallSpecM,
     dropTrivialSchemeEdges
 ) where
@@ -587,6 +588,77 @@ instantiationBindersM nid0 = do
                                         cache3 = IntMap.insert (getNodeId root) binders cache2
                                     in st1 { psBinderCache = cache3 }
                             pure (root, binders)
+
+-- | Compute instantiation binders from explicit scheme provenance.
+--
+-- Given the owning gen node and the scheme body root, enumerate binders
+-- using the binding tree scope of the gen node — matching the thesis
+-- definition where binders come from the gen node's scope (s = hg·i).
+--
+-- This replaces the heuristic @implicitBindersM@ with explicit provenance.
+instantiationBindersFromGenM :: GenNodeId -> NodeId -> PresolutionM (NodeId, [NodeId])
+instantiationBindersFromGenM gid bodyRoot0 = do
+    st <- get
+    let c0 = psConstraint st
+        uf0 = psUnionFind st
+        canonical = UnionFind.frWith uf0
+        bodyC = canonical bodyRoot0
+        nodes = cNodes c0
+
+    -- 1. Get flex children under the gen node's scope
+    bindersUnderGen <- case Binding.boundFlexChildrenUnder canonical c0 (genRef gid) of
+        Left err -> throwError (BindingTreeError err)
+        Right bs -> pure bs
+
+    -- 2. Compute reachability from the body root
+    let reachable =
+            Traversal.reachableFromUnderLenient
+                canonical
+                (lookupNodeIn nodes)
+                bodyC
+
+    -- 3. Filter to live TyVar nodes reachable from body
+    let isLiveVar nid =
+            case lookupNodeIn nodes nid of
+                Just TyVar{} -> not (VarStore.isEliminatedVar c0 nid)
+                _ -> False
+
+        bindersReachable =
+            [ canonical b
+            | b <- bindersUnderGen
+            , IntSet.member (getNodeId (canonical b)) reachable
+            , isLiveVar (canonical b)
+            ]
+
+    -- 4. Deduplicate by canonical ID
+    let bindersCanon =
+            IntMap.elems $
+                IntMap.fromList
+                    [ (getNodeId b, b)
+                    | b <- bindersReachable
+                    ]
+
+    -- 5. Sort by order keys (leftmost-lowermost, paper <P)
+    let orderKeys = Order.orderKeysFromRootWith canonical nodes bodyC Nothing
+
+    sorted <- case Order.sortByOrderKey orderKeys bindersCanon of
+        Left err -> throwError $ InternalError ("instantiationBindersFromGenM: order key error: " ++ show err)
+        Right s -> pure s
+
+    -- 6. Exclude wrapper body if it's a bound variable
+    let bodyIsWrapper =
+            case lookupNodeIn nodes bodyC of
+                Just TyVar{} ->
+                    case VarStore.lookupVarBound c0 bodyC of
+                        Just _ -> True
+                        Nothing -> False
+                _ -> False
+        candidates =
+            if bodyIsWrapper
+                then filter (/= bodyC) sorted
+                else sorted
+
+    pure (bodyC, candidates)
 
 implicitBindersM :: (NodeId -> NodeId) -> Constraint -> NodeId -> PresolutionM [NodeId]
 implicitBindersM canonical c0 root0 = do
