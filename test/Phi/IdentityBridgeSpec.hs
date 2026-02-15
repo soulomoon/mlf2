@@ -161,3 +161,56 @@ spec = describe "IdentityBridge" $ do
             let ib = mkIdentityBridge idCanonical Nothing IntMap.empty
                 binderKeys = IntSet.fromList [99]
             isBinderNode ib binderKeys (NodeId 5) `shouldBe` False
+
+    -- ---------------------------------------------------------------
+    -- lookupBinderIndex
+    -- ---------------------------------------------------------------
+    describe "lookupBinderIndex" $ do
+
+        it "exact source-key match at spine position 0 returns Just 0" $ do
+            let ib = mkIdentityBridge idCanonical Nothing IntMap.empty
+                binderKeys = IntSet.fromList [10]
+                spine = [Just (NodeId 10)]
+            lookupBinderIndex ib binderKeys spine (NodeId 10) `shouldBe` Just 0
+
+        it "exact match beats canonical alias match" $ do
+            -- canonical: 30 -> 10, 20 -> 10
+            -- binderKeys = {20, 30}, target = NodeId 30
+            -- targetKeys = [30] (only 30 in binderKeys ∩ sourceKeys(30))
+            -- Spine pos 0 (node 20): alias match only (canonical 30 == canonical 20 == 10)
+            -- Spine pos 1 (node 30): exact match (30 in sourceKeys(30))
+            -- Exact (matchClass 0) at pos 1 beats alias (matchClass 1) at pos 0
+            let threeWayCanonical (NodeId 30) = NodeId 10
+                threeWayCanonical (NodeId 20) = NodeId 10
+                threeWayCanonical nid = nid
+                ib = mkIdentityBridge threeWayCanonical Nothing IntMap.empty
+                binderKeys = IntSet.fromList [20, 30]
+                spine = [Just (NodeId 20), Just (NodeId 30)]
+            lookupBinderIndex ib binderKeys spine (NodeId 30) `shouldBe` Just 1
+
+        it "deterministic tie-break by trace order when two positions have exact matches" $ do
+            -- Trace: binder 20 at ix=0, binder 10 at ix=1
+            -- Copy map: 20 -> NodeId 10 (so sourceKeys(10) includes both 10 and 20)
+            -- Target = NodeId 10, targetKeys = [10, 20]
+            -- Spine pos 0 (node 10): exact matches [10, 20], chooseBestKey -> 20 (trace ix=0)
+            -- Spine pos 1 (node 20): exact match [20], key 20
+            -- Rank: (0, (0,20), 0) vs (0, (0,20), 1) -> pos 0 wins by index
+            let tr = mkTrace [(20, 200), (10, 201)] [(20, 10)]
+                copyMap = IntMap.fromList [(20, NodeId 10)]
+                ib = mkIdentityBridge idCanonical (Just tr) copyMap
+                binderKeys = IntSet.fromList [10, 20]
+                spine = [Just (NodeId 10), Just (NodeId 20)]
+            lookupBinderIndex ib binderKeys spine (NodeId 10) `shouldBe` Just 0
+
+        it "no match returns Nothing" $ do
+            -- Target is a binder node but no spine position shares its key.
+            let ib = mkIdentityBridge idCanonical Nothing IntMap.empty
+                binderKeys = IntSet.fromList [10, 50]
+                spine = [Just (NodeId 50), Nothing]
+            lookupBinderIndex ib binderKeys spine (NodeId 10) `shouldBe` Nothing
+
+        it "non-binder node returns Nothing (isBinderNode gate)" $ do
+            let ib = mkIdentityBridge idCanonical Nothing IntMap.empty
+                binderKeys = IntSet.fromList [99]
+                spine = [Just (NodeId 5)]
+            lookupBinderIndex ib binderKeys spine (NodeId 5) `shouldBe` Nothing

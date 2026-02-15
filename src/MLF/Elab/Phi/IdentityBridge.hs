@@ -17,9 +17,11 @@ module MLF.Elab.Phi.IdentityBridge (
     sourceKeysForNode,
     sourceBinderKeysForNode,
     isBinderNode,
+    lookupBinderIndex,
 ) where
 
 import Data.List (sortOn)
+import Data.Maybe (mapMaybe)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
@@ -134,3 +136,77 @@ sourceBinderKeysForNode ib binderKeys nid =
 isBinderNode :: IdentityBridge -> IntSet.IntSet -> NodeId -> Bool
 isBinderNode ib binderKeys nid =
     not (null (sourceBinderKeysForNode ib binderKeys nid))
+
+-- | Look up the spine index for a binder node.
+--
+-- Given a binder key set, a spine of @[Maybe NodeId]@ (one per quantifier
+-- position), and a target node, return the index of the best-matching spine
+-- position, or 'Nothing' if the target is not a binder node or no spine
+-- position matches.
+--
+-- Ranking: exact source-key match (matchClass 0) beats canonical-alias
+-- match (matchClass 1).  Within a match class, the key with the best
+-- trace-order rank wins; ties are broken by spine index (lower wins).
+lookupBinderIndex
+    :: IdentityBridge -> IntSet.IntSet -> [Maybe NodeId] -> NodeId -> Maybe Int
+lookupBinderIndex ib binderKeys ids nid
+    | not (isBinderNode ib binderKeys nid) = Nothing
+    | otherwise =
+        case sortOn rankCandidate candidates of
+            [] -> Nothing
+            ((ix, _matchClass, _key) : _) -> Just ix
+  where
+    keyRank :: Int -> (Int, Int)
+    keyRank key = (IntMap.findWithDefault maxBound key (ibBinderOrderIx ib), key)
+
+    canonicalKey :: Int -> Int
+    canonicalKey key = getNodeId (ibCanonical ib (NodeId key))
+
+    targetKeys :: [Int]
+    targetKeys =
+        filter (`IntSet.member` binderKeys) (sourceKeysForNode ib nid)
+
+    targetKeySet :: IntSet.IntSet
+    targetKeySet = IntSet.fromList targetKeys
+
+    chooseBestKey :: [Int] -> Int
+    chooseBestKey keys =
+        case sortOn keyRank keys of
+            [] -> maxBound
+            k : _ -> k
+
+    candidateFor :: Int -> Maybe NodeId -> Maybe (Int, Int, Int)
+    candidateFor _ Nothing = Nothing
+    candidateFor ix (Just nid') =
+        let idKeys =
+                filter (`IntSet.member` binderKeys) (sourceKeysForNode ib nid')
+            idKeySet = IntSet.fromList idKeys
+            idCanonSet = IntSet.fromList (map canonicalKey idKeys)
+            exactMatches =
+                filter (`IntSet.member` idKeySet) targetKeys
+            aliasMatches =
+                [ key
+                | key <- targetKeys
+                , not (IntSet.member key idKeySet)
+                , IntSet.member (canonicalKey key) idCanonSet
+                ]
+            matchPick =
+                if not (null exactMatches)
+                    then Just (0, chooseBestKey exactMatches)
+                    else if not (null aliasMatches)
+                        then Just (1, chooseBestKey aliasMatches)
+                        else Nothing
+        in case matchPick of
+            Nothing -> Nothing
+            Just (matchClass, key) ->
+                if IntSet.member key targetKeySet
+                    then Just (ix, matchClass, key)
+                    else Nothing
+
+    candidates :: [(Int, Int, Int)]
+    candidates =
+        mapMaybe (uncurry candidateFor) (zip [0 :: Int ..] ids)
+
+    rankCandidate :: (Int, Int, Int) -> (Int, (Int, Int), Int)
+    rankCandidate (ix, matchClass, key) =
+        (matchClass, keyRank key, ix)
