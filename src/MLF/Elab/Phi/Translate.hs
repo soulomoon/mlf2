@@ -43,7 +43,9 @@ module MLF.Elab.Phi.Translate (
 import Control.Applicative ((<|>))
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import Data.Maybe (fromMaybe, listToMaybe)
+import qualified Data.Map.Strict as Map
+import Data.List (sortOn)
+import Data.Maybe (listToMaybe)
 
 import MLF.Constraint.Types
 import MLF.Elab.Types
@@ -58,6 +60,7 @@ import qualified MLF.Binding.Tree as Binding
 import MLF.Binding.Tree (checkBindingTree, checkNoGenFallback, checkSchemeClosureUnder)
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Elab.Phi.Env (PhiM, askCanonical, askResult)
+import MLF.Elab.Phi.IdentityBridge (mkIdentityBridge, sourceKeysForNode, traceOrderRank)
 import MLF.Elab.Phi.Omega (OmegaContext(..), phiWithSchemeOmega)
 import MLF.Util.Trace (TraceConfig, traceGeneralize)
 
@@ -71,33 +74,163 @@ canonicalNodeM nid = do
 remapSchemeInfoM :: EdgeTrace -> SchemeInfo -> PhiM SchemeInfo
 remapSchemeInfoM tr si = do
     canonical <- askCanonical
+    pure (remapSchemeInfoByTrace canonical tr si)
+
+-- | Re-key scheme substitutions into the EdgeTrace source-ID domain.
+--
+-- Source IDs in `etBinderArgs` are authoritative for Phi binder membership.
+-- We therefore map each substitution key to the best source-ID candidate using:
+--   1) binder IDs in trace order (preferred),
+--   2) reverse lookup in `etCopyMap`,
+--   3) original key as deterministic fallback.
+remapSchemeInfoByTrace :: (NodeId -> NodeId) -> EdgeTrace -> SchemeInfo -> SchemeInfo
+remapSchemeInfoByTrace canonical tr si =
     let traceCopyMap = getCopyMapping (etCopyMap tr)
-        remapByCopy nid =
-            let key = getNodeId nid
-                direct = IntMap.lookup key traceCopyMap
-                reverseMapped =
-                    IntMap.foldrWithKey
-                        (\src dst acc ->
-                            case acc of
-                                Just _ -> acc
-                                Nothing ->
-                                    if canonical dst == canonical nid
-                                        then Just (NodeId src)
-                                        else Nothing
+        binderOrder = map fst (etBinderArgs tr)
+        schemeNames = case siScheme si of
+            Forall binds _ -> map fst binds
+        -- Build bridge for ranking/dedup
+        ib = mkIdentityBridge canonical (Just tr) traceCopyMap
+        traceBindersInOrder =
+            let sourceSeeds =
+                    if null binderOrder
+                        then map NodeId (IntMap.keys traceCopyMap)
+                        else binderOrder
+                (_, rev) =
+                    foldl'
+                        (\(seen, acc) binder ->
+                            let k = getNodeId binder
+                            in if IntSet.member k seen
+                                then (seen, acc)
+                                else (IntSet.insert k seen, binder : acc)
                         )
-                        Nothing
-                        traceCopyMap
-            in case direct of
-                Just mapped -> mapped
-                Nothing -> fromMaybe nid reverseMapped
-        subst' =
-            IntMap.fromList
-                [ (getNodeId (canonical mapped), name)
-                | (k, name) <- IntMap.toList (siSubst si)
-                , let nid = NodeId k
-                      mapped = remapByCopy nid
+                        (IntSet.empty, [])
+                        sourceSeeds
+            in reverse rev
+        -- Name-based preferred candidates (higher-level, stays in Translate)
+        traceBinderByName =
+            Map.fromList
+                [ (name, binder)
+                | (name, binder) <- zip schemeNames traceBindersInOrder
                 ]
-    pure $ si { siSubst = subst' }
+        -- Use bridge's sourceKeysForNode for candidate ranking
+        rankedCandidateKeys nid =
+            map NodeId (sourceKeysForNode ib nid)
+        remapExisting =
+            fst $
+                foldl'
+                    (\(acc, usedKeys) (k, name) ->
+                        let preferredByName = Map.lookup name traceBinderByName
+                            candidates = maybe id (:) preferredByName
+                                            (rankedCandidateKeys (NodeId k))
+                            pickSource =
+                                case filter (\n -> not (IntSet.member (getNodeId n) usedKeys)) candidates of
+                                    src : _ -> src
+                                    [] ->
+                                        case candidates of
+                                            src : _ -> src
+                                            [] -> NodeId k
+                            srcKey = getNodeId pickSource
+                        in ( IntMap.insert srcKey name acc
+                           , IntSet.insert srcKey usedKeys
+                           )
+                    )
+                    (IntMap.empty, IntSet.empty)
+                    (IntMap.toList (siSubst si))
+        synthFromScheme =
+            let (_, pairsRev) =
+                    foldl'
+                        (\(usedKeys, acc) (name, binder) ->
+                            let binderKey = getNodeId binder
+                            in if IntSet.member binderKey usedKeys
+                                then (usedKeys, acc)
+                                else (IntSet.insert binderKey usedKeys, (binderKey, name) : acc)
+                        )
+                        (IntSet.empty, [])
+                        (zip schemeNames traceBindersInOrder)
+            in IntMap.fromList (reverse pairsRev)
+        subst' =
+            if IntMap.null (siSubst si)
+                then synthFromScheme
+                else remapExisting
+    in si { siSubst = subst' }
+
+-- | Hydrate substitutions using traced binder order when remapped substitutions
+-- under-cover scheme binders. This preserves source-ID provenance instead of
+-- dropping scheme info on arity mismatch.
+hydrateSchemeInfoByTrace :: (NodeId -> NodeId) -> EdgeTrace -> SchemeInfo -> SchemeInfo
+hydrateSchemeInfoByTrace canonical tr si =
+    let schemeNames =
+            case siScheme si of
+                Forall binds _ -> map fst binds
+        schemeNameSet =
+            Map.fromList [(name, ()) | name <- schemeNames]
+        traceCopyMap = getCopyMapping (etCopyMap tr)
+        -- Build bridge for ranking/dedup
+        ib = mkIdentityBridge canonical (Just tr) traceCopyMap
+        traceBinderKeys =
+            let (_, rev) =
+                    foldl'
+                        (\(seen, acc) (binder, _arg) ->
+                            let key = getNodeId binder
+                            in if IntSet.member key seen
+                                then (seen, acc)
+                                else (IntSet.insert key seen, key : acc)
+                        )
+                        (IntSet.empty, [])
+                        (etBinderArgs tr)
+            in reverse rev
+        -- Use bridge's traceOrderRank for key ranking
+        keyRank key = traceOrderRank ib key
+        traceByName = Map.fromList (zip schemeNames traceBinderKeys)
+        chooseBetterKey new old =
+            if keyRank new < keyRank old
+                then new
+                else old
+        existingByName =
+            foldl'
+                (\acc (key, name) ->
+                    if Map.member name schemeNameSet
+                        then Map.insertWith chooseBetterKey name key acc
+                        else acc
+                )
+                Map.empty
+                (IntMap.toList (siSubst si))
+        uniqueKeys =
+            reverse
+                . snd
+                . foldl'
+                    (\(seen, acc) key ->
+                        if IntSet.member key seen
+                            then (seen, acc)
+                            else (IntSet.insert key seen, key : acc)
+                    )
+                    (IntSet.empty, [])
+        (pairsRev, _) =
+            foldl'
+                (\(acc, usedKeys) name ->
+                    let candidates =
+                            sortOn keyRank $
+                                uniqueKeys
+                                    ( maybe [] pure (Map.lookup name existingByName)
+                                    ++ maybe [] pure (Map.lookup name traceByName)
+                                    )
+                        mbPick =
+                            listToMaybe
+                                [ key
+                                | key <- candidates
+                                , not (IntSet.member key usedKeys)
+                                ]
+                    in case mbPick of
+                        Nothing -> (acc, usedKeys)
+                        Just key ->
+                            ( (key, name) : acc
+                            , IntSet.insert key usedKeys
+                            )
+                )
+                ([], IntSet.empty)
+                schemeNames
+    in si { siSubst = IntMap.fromList (reverse pairsRev) }
 
 -- | Translate a recorded per-edge graph witness to an xMLF instantiation.
 type GeneralizeAtWith =
@@ -194,24 +327,10 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
                         else IntSet.intersection namedSet1 interior
             in IntSet.delete rootKey base
     let InstanceWitness ops = ewWitness ew
-        remapNode nid =
-            let nidC = canonicalNode nid
-            in if isTyVarNode nidC
-                then IntMap.findWithDefault nidC (getNodeId nidC) copyMap
-                else nidC
-        remapOp op = case op of
-            OpGraft arg bv -> OpGraft (remapNode arg) (remapNode bv)
-            OpWeaken bv -> OpWeaken (remapNode bv)
-            OpRaise n -> OpRaise (remapNode n)
-            OpMerge n m -> OpMerge (remapNode n) (remapNode m)
-            OpRaiseMerge n m -> OpRaiseMerge (remapNode n) (remapNode m)
-        remapStep step = case step of
-            StepOmega op -> StepOmega (remapOp op)
-            StepIntro -> StepIntro
         steps0Raw =
             case ewSteps ew of
-                [] -> map StepOmega (map remapOp ops)
-                xs -> map remapStep xs
+                [] -> map StepOmega ops
+                xs -> xs
         steps0 =
             debugPhi
                 ("phi steps edge=" ++ show (ewEdgeId ew)
@@ -222,7 +341,14 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
                 steps0Raw
     let mSchemeInfo' =
             case (mSchemeInfo, mTrace) of
-                (Just si, Just tr) -> Just (remapSchemeInfo tr si)
+                (Just si, Just tr) ->
+                    let si' = remapAndHydrateSchemeInfo tr si
+                        schemeArity =
+                            case siScheme si' of
+                                Forall binds _ -> length binds
+                    in if schemeArity == 0 && traceBinderArity tr > 0
+                        then Nothing
+                        else Just si'
                 _ -> mSchemeInfo
     case debugPhi
         ("phi scheme subst edge=" ++ show (ewEdgeId ew)
@@ -235,17 +361,25 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
             (Just _, Just si) -> do
                 let subst = siSubst si
                     targetRootC = canonicalNode (ewRight ew)
-                    schemeKeys = IntSet.fromList (IntMap.keys subst)
+                    schemeSourceKeys = IntMap.keys subst
                 targetBinders <-
                     case bindingToElab (Binding.orderedBinders canonicalNode (srConstraint res) (typeRef targetRootC)) of
                         Right bs -> pure bs
                         Left _ -> pure []
-                let targetKeys =
+                let targetCanonKeys =
                         IntSet.fromList
                             [ getNodeId (canonicalNode binder)
                             | binder <- targetBinders
                             ]
-                    keepKeys = IntSet.intersection schemeKeys targetKeys
+                    keepKeys0 =
+                        IntSet.fromList
+                            [ sourceKey
+                            | sourceKey <- schemeSourceKeys
+                            , IntSet.member
+                                (getNodeId (canonicalNode (NodeId sourceKey)))
+                                targetCanonKeys
+                            ]
+                    keepKeys = keepKeys0
                 debugPhi
                     ("phi target binders=" ++ show targetBinders
                         ++ " keep-keys=" ++ show (IntSet.toList keepKeys)
@@ -259,11 +393,10 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
                 targetBinderKeysRaw
     case mSchemeInfo' of
         Nothing -> do
-            let schemeRootNode = ewRoot ew
-            si0 <- schemeInfoForRoot schemeRootNode
+            si0 <- schemeInfoForRoot (ewRoot ew)
             let si1 =
                     case mTrace of
-                        Just tr -> remapSchemeInfo tr si0
+                        Just tr -> remapAndHydrateSchemeInfo tr si0
                         Nothing -> si0
             phiWithSchemeOmega (omegaCtx (Just si1)) namedSet targetBinderKeys si1 steps0
         Just si -> do
@@ -306,34 +439,19 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
     canonicalNode = Solve.frWith (srUnionFind res)
 
     remapSchemeInfo :: EdgeTrace -> SchemeInfo -> SchemeInfo
-    remapSchemeInfo tr si =
-        let traceCopyMap = getCopyMapping (etCopyMap tr)
-            remapByCopy nid =
-                let key = getNodeId nid
-                    direct = IntMap.lookup key traceCopyMap
-                    reverseMapped =
-                        IntMap.foldrWithKey
-                            (\src dst acc ->
-                                case acc of
-                                    Just _ -> acc
-                                    Nothing ->
-                                        if canonicalNode dst == canonicalNode nid
-                                            then Just (NodeId src)
-                                            else Nothing
-                            )
-                            Nothing
-                            traceCopyMap
-                in case direct of
-                    Just mapped -> mapped
-                    Nothing -> fromMaybe nid reverseMapped
-            subst' =
-                IntMap.fromList
-                    [ (getNodeId (canonicalNode mapped), name)
-                    | (k, name) <- IntMap.toList (siSubst si)
-                    , let nid = NodeId k
-                          mapped = remapByCopy nid
-                    ]
-        in si { siSubst = subst' }
+    remapSchemeInfo tr si = remapSchemeInfoByTrace canonicalNode tr si
+
+    remapAndHydrateSchemeInfo :: EdgeTrace -> SchemeInfo -> SchemeInfo
+    remapAndHydrateSchemeInfo tr =
+        hydrateSchemeInfoByTrace canonicalNode tr . remapSchemeInfo tr
+
+    traceBinderArity :: EdgeTrace -> Int
+    traceBinderArity tr =
+        IntSet.size $
+            IntSet.fromList
+                [ getNodeId binder
+                | (binder, _arg) <- etBinderArgs tr
+                ]
 
     schemeInfoForRoot :: NodeId -> Either ElabError SchemeInfo
     schemeInfoForRoot root0 = do
@@ -398,10 +516,3 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
         case mTrace of
             Nothing -> IntMap.empty
             Just tr -> getCopyMapping (etCopyMap tr)
-
-    isTyVarNode :: NodeId -> Bool
-    isTyVarNode nid =
-        let key = getNodeId (canonicalNode nid)
-        in case NodeAccess.lookupNode (srConstraint res) (NodeId key) of
-            Just TyVar{} -> True
-            _ -> False

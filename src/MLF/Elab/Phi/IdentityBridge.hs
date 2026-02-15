@@ -18,6 +18,7 @@ module MLF.Elab.Phi.IdentityBridge (
     sourceBinderKeysForNode,
     isBinderNode,
     lookupBinderIndex,
+    traceOrderRank,
 ) where
 
 import Data.List (sortOn)
@@ -210,3 +211,10 @@ lookupBinderIndex ib binderKeys ids nid
     rankCandidate :: (Int, Int, Int) -> (Int, (Int, Int), Int)
     rankCandidate (ix, matchClass, key) =
         (matchClass, keyRank key, ix)
+
+-- | Trace-order rank for a raw key: @(trace-index, key)@ suitable for
+-- 'Data.List.sortOn'.  Keys absent from the trace receive @maxBound@ as
+-- their index, so they sort last.
+traceOrderRank :: IdentityBridge -> Int -> (Int, Int)
+traceOrderRank ib key =
+    (IntMap.findWithDefault maxBound key (ibBinderOrderIx ib), key)
