@@ -20,9 +20,9 @@ import Control.Monad (foldM, unless, when)
 import Data.Functor.Foldable (cata)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import Data.List (elemIndex, findIndex)
+import Data.List (elemIndex)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (catMaybes, fromMaybe, listToMaybe, mapMaybe)
+import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
 import qualified Data.Set as Set
 import Text.Read (readMaybe)
 
@@ -39,6 +39,7 @@ import MLF.Binding.Tree (lookupBindParent)
 import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Elab.Inst (applyInstantiation, composeInst, instMany, schemeToType, splitForalls)
 import MLF.Elab.Phi.Context (contextToNodeBoundWithOrderKeys)
+import qualified MLF.Elab.Phi.IdentityBridge as IB
 import MLF.Elab.Sigma (bubbleReorderTo)
 import MLF.Elab.Types
 import MLF.Reify.Core (reifyBoundWithNames, reifyTypeWithNamedSetNoFallback)
@@ -82,18 +83,11 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
     copyMap :: IntMap.IntMap NodeId
     copyMap = ocCopyMap ctx
 
-    invCopyMap :: IntMap.IntMap NodeId
-    invCopyMap =
-        IntMap.fromList
-            [ (getNodeId v, NodeId k)
-            | (k, v) <- IntMap.toList copyMap
-            ]
-
-    mbGaParents :: Maybe GaBindParents
-    mbGaParents = ocGaParents ctx
-
     mTrace :: Maybe EdgeTrace
     mTrace = ocTrace ctx
+
+    ib :: IB.IdentityBridge
+    ib = IB.mkIdentityBridge canonicalNode mTrace copyMap
 
     mSchemeInfo :: Maybe SchemeInfo
     mSchemeInfo = ocSchemeInfo ctx
@@ -1126,9 +1120,7 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
         pure (underContext prefix inner, ids)
 
     isBinderNode :: IntSet.IntSet -> NodeId -> Bool
-    isBinderNode binderKeys nid =
-        let key = getNodeId (canonicalNode nid)
-        in IntSet.member key binderKeys
+    isBinderNode binderKeys nid = IB.isBinderNode ib binderKeys nid
 
     -- | Check if a node is bound rigidly. Some ω operations treat rigid targets as
     -- ε/identity (thesis Fig. 15.3.4), but not all (see the OpGraft/OpWeaken note).
@@ -1139,24 +1131,7 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
             _ -> False
 
     lookupBinderIndex :: IntSet.IntSet -> [Maybe NodeId] -> NodeId -> Maybe Int
-    lookupBinderIndex binderKeys ids nid
-        | not (isBinderNode binderKeys nid) = Nothing
-        | otherwise = findIndex matches ids
-      where
-        baseKeyFor n =
-            let key0 = getNodeId (canonicalNode n)
-            in case mbGaParents of
-                Just ga -> maybe key0 getNodeId (IntMap.lookup key0 (gaSolvedToBase ga))
-                Nothing -> key0
-        nC = canonicalNode nid
-        key = getNodeId nC
-        candidateKeys = IntSet.fromList $
-            baseKeyFor nid
-            : catMaybes [ baseKeyFor <$> IntMap.lookup key copyMap
-                        , baseKeyFor <$> IntMap.lookup key invCopyMap
-                        ]
-        matches (Just nid') = IntSet.member (baseKeyFor nid') candidateKeys
-        matches Nothing = False
+    lookupBinderIndex binderKeys ids nid = IB.lookupBinderIndex ib binderKeys ids nid
 
     binderIndex :: IntSet.IntSet -> [Maybe NodeId] -> NodeId -> Either ElabError Int
     binderIndex binderKeys ids nid =
