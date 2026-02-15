@@ -87,6 +87,11 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
     mTrace = ocTrace ctx
 
     ib :: IB.IdentityBridge
+    -- Note [gaSolvedToBase subsumption]: The bridge's source-key expansion
+    -- (copy-map reverse, trace reverse, canonical alias) subsumes the old
+    -- gaSolvedToBase lookup for all known cases.  If future binder-index
+    -- resolution failures surface, consider integrating GaBindParents into
+    -- the bridge rather than re-adding local resolution here.
     ib = IB.mkIdentityBridge canonicalNode mTrace copyMap
 
     mSchemeInfo :: Maybe SchemeInfo

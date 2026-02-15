@@ -69,6 +69,10 @@ spec = describe "MLF.Constraint.Canonicalizer" $ do
             canon = makeCanonicalizer IntMap.empty redirects
             canonNode = canonicalizeNode canon
 
+        -- Split-domain contract: canonicalization maps ALL node IDs
+        -- (structural, witness-op targets, trace binder/copy fields) through
+        -- the canonical function.  Source-ID authority is enforced at the Phi
+        -- translation layer (IdentityBridge), not at the canonicalization layer.
         it "canonicalizes edge witnesses" $ do
             let ops0 = [OpMerge (NodeId 1) (NodeId 2), OpWeaken (NodeId 3)]
                 steps0 =
