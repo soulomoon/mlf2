@@ -87,6 +87,7 @@ library mlf2-internal
                       MLF.Constraint.Solve,
                       MLF.Elab.Pipeline,
                       MLF.Elab.Phi.TestOnly,
+                      MLF.Elab.Phi.IdentityBridge,
                       MLF.Elab.Run.Provenance,
                       MLF.Elab.Run.Util,
                       MLF.Binding.Tree,
@@ -305,6 +306,7 @@ test-suite mlf2-test
                       FrontendNormalizeSpec,
                       XMLFParseSpec,
                       XMLFPrettySpec,
+                      Phi.IdentityBridgeSpec,
                       SpecUtil,
 
     -- LANGUAGE extensions used by modules in this package.

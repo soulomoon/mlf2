@@ -30,6 +30,7 @@ import qualified FrontendPrettySpec
 import qualified FrontendNormalizeSpec
 import qualified XMLFParseSpec
 import qualified XMLFPrettySpec
+import qualified Phi.IdentityBridgeSpec
 
 main :: IO ()
 main = hspec $ do
@@ -61,3 +62,4 @@ main = hspec $ do
     FrontendNormalizeSpec.spec
     XMLFParseSpec.spec
     XMLFPrettySpec.spec
+    Phi.IdentityBridgeSpec.spec
