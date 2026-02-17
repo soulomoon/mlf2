@@ -1,5 +1,187 @@
 # Implementation Notes
 
+### 2026-02-17 BUG-2026-02-17-001 Φ keep-key + Graft/Raise/Weaken stabilization
+
+- Root-cause cluster:
+  - `MLF.Elab.Phi.Translate.computeTargetBinderKeys` retained replay keys when the target binder set was empty, suppressing `OpWeaken` elimination in edge traces that should discharge binders.
+  - Ω translation emitted over-complex instantiations for unbounded same-binder triples `OpGraft -> OpRaise -> OpWeaken`, which drifted paper baselines (`id y`, annotation instantiation shapes).
+  - Annotation handling needed a localized `InstId` fallback in `AAnnF` for non-variable annotation sources with explicit expected bounds.
+- Implemented behavior:
+  - `MLF.Elab.Phi.Translate`:
+    - keep-keys are now strict intersection with target binders (no empty-target “keep everything” fallback).
+  - `MLF.Elab.Phi.Omega`:
+    - preserve spine Raise alias/eliminate behavior for empty intermediate contexts,
+    - collapse unbounded same-binder `OpGraft -> OpRaise -> OpWeaken` triples to direct `InstApp`,
+    - retain conservative bound normalization for explicit bounds while avoiding destructive collapse for inferred unbounded variable cases.
+  - `MLF.Elab.Elaborate` (`AAnnF`):
+    - maintain strict generic `reifyInst` fallback policy (`Nothing -> False`),
+    - add local non-variable annotation fallback from `InstId` to `InstInside (InstBot expectedBound)`.
+- Verification snapshot:
+  - PASS: `id y should have type`, `elaborates polymorphic instantiation`, `elaborates term annotations`, `term annotation can instantiate a polymorphic result`, `explicit forall annotation preserves foralls in bounds`.
+  - PASS: `BUG-002-V` (seed `1593170056`), `BUG-003-V` (seed `1925916871`), `BUG-004` (seed `1593170056`), OpRaise source-domain interior guard.
+  - `cabal build all` passes.
+  - Full `cabal test`: reduced to 3 remaining failures in unrelated open buckets (pipeline ann-redirect invariant + two Φ contract tests).
+
+### 2026-02-17 BUG-2026-02-17-001 closure pass (remaining 3 buckets)
+
+- Residual failures closed:
+  - `MLF.Elab.Phi.Omega.resolveTraceBinderTarget` now enforces binder-domain fail-fast for trace-source operands when replay binder candidates are absent (`PhiInvariantError "trace/replay binder key-space mismatch"`), matching the strict Φ/Ω contract tests.
+  - Non-spine `OpRaise` no longer rejects non-`⊥` bounds when a valid `C^m_n` context is available; Ω now executes the context-path intro/bot/alias translation directly in that case.
+  - `PipelineSpec` canonicalization sentinel now asserts non-empty canonicalized scheme roots only when solve produced non-empty `union-find`; stale-node/root canonicalization checks remain strict.
+- Verification snapshot:
+  - PASS: `/Phase 6 — Elaborate (xMLF)/.../fails fast when OpWeaken targets a trace binder source with no replay binder mapping/`
+  - PASS: `/Phase 6 — Elaborate (xMLF)/.../Φ translates non-spine OpRaise using binding edges and ≺ ordering (non-spine)/`
+  - PASS: `/Pipeline (Phases 1-5)/applyRedirectsToAnn and canonicalizeAnn rewrite every node occurrence consistently/`
+  - PASS: `cabal build all && cabal test` (`678 examples, 0 failures`).
+
+### 2026-02-16 BUG-2026-02-11-004/010 hybrid bridge follow-up (presolution replay hints + positional replay seeding)
+
+- Extended edge trace metadata (`MLF.Constraint.Presolution.Base.EdgeTrace`) with:
+  - `etBinderReplayHints :: IntMap NodeId`
+  - Contract: source binder key -> replay-domain binder candidate (live TyVar only).
+- Presolution now derives and persists replay hints during witness normalization:
+  - `MLF.Constraint.Presolution.WitnessNorm` computes deterministic source/rewrite hint maps from canonicalized binder args + solved-node liveness.
+  - normalized traces in `psEdgeTraces` now carry `etBinderReplayHints`.
+- Witness validation now carries replay hints in normalization env (`binderReplayHints`) and rejects hinted operands that are not live TyVars (`HintedOperandNotLiveTyVar`), preventing silent replay through dead source keys when hints exist.
+- Φ bridge construction now consumes hints + positional replay seeding:
+  - `MLF.Elab.Phi.Translate.computeTraceBinderReplayBridge` now:
+    - prefers hint candidates where valid,
+    - adds positional source→replay seed from trace-order source binders and replay-subst keys,
+    - keeps name-based/alias-based deterministic fallback.
+  - Ω diagnostics include hint-domain payload in binder target mismatch errors.
+- Verification snapshot:
+  - PASS:
+    - `fails fast when OpWeaken targets a trace binder source with no replay binder mapping`
+    - `OpRaise accepts source-domain interior membership even when etCopyMap aliases the target`
+    - bounded-alias baseline (`b ⩾ a`) anchors
+    - strict matrix guard: `make-app keeps codomain Int without bottom-domain collapse`
+  - FAIL (still open):
+    - `BUG-003-V1/V2` remain deterministic `TCLetTypeMismatch` (`∀a. ⊥ -> t1 -> ⊥ -> ⊥` vs expected `∀a. a -> a -> a -> a`).
+  - Full gate in current workspace remains red (`674 examples, 33 failures`), so BUG-2026-02-11-004 and BUG-2026-02-16-010 remain open.
+
+### 2026-02-16 BUG-2026-02-11-004 Φ/Ω source→replay binder bridge (contract hardening)
+
+- Implemented the planned bridge at the Φ→Ω boundary:
+  - `MLF.Elab.Phi.Translate` now computes, once per edge (after `siForOmega` finalization),:
+    - `traceBinderSources :: IntSet` (deduped `etBinderArgs` binder keys, trace order)
+    - `traceBinderReplayMap :: IntMap NodeId` (source binder key -> replay binder key)
+  - mapping remains deterministic and name-driven:
+    - scheme names come from `siScheme`,
+    - replay keys come from `siSubst` with per-name key selection ranked by `traceOrderRank` (`IdentityBridge`),
+    - pairing is `zip` of scheme binder names with trace binder sources.
+- `OmegaContext` now carries the bridge contract explicitly:
+  - `ocTraceBinderSources`
+  - `ocTraceBinderReplayMap`
+- `MLF.Elab.Phi.Omega` now resolves binder-target operands before execution for:
+  - `OpGraft _ bv`
+  - `OpWeaken bv`
+  - `OpRaise n` (execution target only)
+  - `OpMerge n m`
+  - `OpRaiseMerge n m`
+- Thesis-preserving split retained:
+  - `OpRaise` translatability/interior checks continue to use raw source key (`nSource`) for `I(r)` checks.
+  - replay execution paths use the resolved replay key.
+- New fail-fast invariant:
+  - If an Ω binder-target key is a trace binder source but has no replay-key mapping, Φ now returns `PhiInvariantError` with edge/op/raw-key/source-set/replay-domain/scheme-keys diagnostics.
+  - This replaces prior silent drift into non-binder/bottomized behavior.
+- Focused validation status:
+  - PASS: new fail-fast regression (`OpWeaken` unmapped trace binder target).
+  - PASS: source-domain interior alias regression (`OpRaise accepts source-domain interior membership ...`).
+  - PASS: bounded alias baseline (`b ⩾ a`) non-regression anchors.
+  - STILL RED: `BUG-003-V1/V2` remain in `TCLetTypeMismatch` (`∀a. ⊥ -> t1 -> ⊥ -> ⊥` vs expected `∀a. a -> a -> a -> a`).
+  - Full gate remains red in broader open buckets (`cabal build all && cabal test`: `674 examples, 47 failures` in current workspace state).
+
+### 2026-02-16 BUG-2026-02-16-007/008 `SchemeFreeVars` sentinel-drift closure
+
+- Root cause:
+  - BUG-003-V1/V2 hit plain `SchemeFreeVars (NodeId 27) ["__rigid24"]` in pipeline/result-type generalization paths.
+  - Those paths retried only `BindingTreeError GenSchemeFreeVars`, so plain `SchemeFreeVars` escaped as a top-level `PipelineElabError` and masked the underlying strict-instantiation failure bucket.
+- Fix:
+  - `MLF.Elab.Run.Pipeline`: root generalization fallback now treats `SchemeFreeVars` and `BindingTreeError GenSchemeFreeVars` uniformly (`GA -> non-GA -> reifyType`).
+  - `MLF.Elab.Run.ResultType.Util`: `generalizeWithPlan` now mirrors the same fallback policy.
+  - `test/ElaborationSpec.hs`: BUG-003-V1/V2 sentinels now assert the stabilized strict-instantiation class (`InstBot expects TBottom`) instead of the transient `SchemeFreeVars` class.
+- Result:
+  - BUG-003 sentinel variants no longer fail with `SchemeFreeVars/__rigid24`.
+  - Both variants are back in the shared bounded-alias failure bucket tracked by BUG-2026-02-11-004.
+- Verification snapshot (2026-02-16):
+  - PASS:
+    - `cabal test mlf2-test --test-show-details=direct --test-options='--match "/Phase 6 — Elaborate (xMLF)/Paper alignment baselines/Systematic bug variants (2026-02-11 matrix)/BUG-003-V1: triple bounded chain sentinel reproduces known Phi invariant failure/" --seed 1481579064'`
+    - `cabal test mlf2-test --test-show-details=direct --test-options='--match "/Phase 6 — Elaborate (xMLF)/Paper alignment baselines/Systematic bug variants (2026-02-11 matrix)/BUG-003-V2: dual-alias sentinel reproduces known Phi invariant failure/" --seed 1481579064'`
+    - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-003-V" --seed 1481579064'`
+
+### 2026-02-16 BUG-2026-02-16-009 non-spine `OpRaise` context fallback
+
+- Root cause:
+  - In `MLF.Elab.Phi.Omega`, non-spine `OpRaise` adopted source targets through `etCopyMap` before context reconstruction.
+  - For explicit-forall let-bound annotation baseline, source target had a valid `C^r_n` path while adopted target had none, causing `PhiTranslatabilityError "OpRaise (non-spine): missing computation context"`.
+- Fix:
+  - `OpRaise` now computes both adopted and source-domain raise/context targets.
+  - Non-spine translation keeps adopted-target handling as primary.
+  - If adopted-target non-spine context/root insertion cannot be constructed, Ω retries root-context insertion using the source-domain target.
+- Result:
+  - Restores explicit-forall round-trip baseline without regressing BUG-004/BUG-002 targeted anchors.
+  - Preserves strict context behavior (`contextToNodeBound` still does not descend via forall-body fallback).
+- Verification snapshot (2026-02-16):
+  - PASS:
+    - explicit-forall round-trip baseline
+    - `BUG-004`
+    - `BUG-002-V4`
+    - strict target matrix
+    - `contextToNodeBound does not descend through forall body fallback`
+  - Full gate remains red in separate open buckets (`cabal build all && cabal test`: `672 examples, 4 failures`).
+
+### 2026-02-16 BUG-2026-02-14-003 source-domain `I(r)` contract (surgical Omega/Translate)
+
+- `MLF.Elab.Phi.Omega` now enforces `OpRaise` admissibility against trace-domain `I(r)` directly:
+  - `etInterior` is consumed as-is (no canonical/copy-map remap in membership checks).
+  - If an `OpRaise` source target is absent from `etInterior` but present only via a copy-map alias, Φ now raises a contract-level `PhiInvariantError` (identity-domain mismatch) instead of silently treating alias-domain membership as valid.
+- `OpRaise` semantic execution now adopts the copied target when `etCopyMap` provides a source→copied mapping, while keeping the admissibility check in source-ID space. This preserves the source-domain contract and avoids over-specialization regressions on BUG-004 call-site annotation paths.
+- `MLF.Elab.Phi.Translate` keeps trace semantics unchanged, but canonicalizes `etInterior` keys only for `namedSet` intersection because `namedSet0` is canonical-node keyed.
+- New regressions:
+  - `test/ElaborationSpec.hs`: `OpRaise accepts source-domain interior membership even when etCopyMap aliases the target`.
+  - `test/PipelineSpec.hs`: `BUG-002-V4 keeps OpRaise targets inside etInterior after witness/trace canonicalization`.
+- Verification snapshot (2026-02-16):
+  - Targeted anchors pass: `BUG-002-V4`, `BUG-2026-02-06-002 strict target matrix`, `BUG-004`, copy-map anchor, canonicalizer contract, and both new regressions.
+  - Full gate still reports unrelated/open buckets (`cabal build all && cabal test`: `672 examples, 9 failures`).
+
+### 2026-02-16 BUG-2026-02-16-003 (`id id`) instantiation over-specialization fix
+
+- Root cause (Phase 1 evidence):
+  - In `MLF.Elab.Elaborate` (`AAppF`), `argInstFromFun` inferred an instantiation argument from function parameter type correctly, but then applied `inlineBoundVarsType` to the inferred argument list.
+  - On `let id = \\x. x in id id`, this rewrote the inferred meta-var argument (`t18`) into a concrete arrow bound (`t14 -> t14`), over-specializing the argument-side `id` and triggering `TCArgumentMismatch`.
+- Fix:
+  - Keep inferred arguments unchanged in `argInstFromFun` (`instSeqApps args`), removing bound-variable inlining at this point.
+  - No change to `inferInstAppArgs`, witness translation, or strict checker rules.
+- Impact:
+  - Restores let-polymorphic dual-instantiation behavior for the `id id` class while preserving previously fixed strict-target BUG-002 anchors.
+- Verification snapshot (2026-02-16):
+  - PASS:
+    - `/Pipeline (Phases 1-5)/redirected let-use sites keep polymorphic schemes/`
+    - `/Pipeline (Phases 1-5)/Checked-authoritative invariant/runPipelineElab type matches typeCheck(term) and checked pipeline type/`
+    - `/Phase 6 — Elaborate (xMLF)/Polymorphism and Generalization/elaborates dual instantiation in application/`
+    - `id id should have type`
+    - `BUG-002-V2`, `BUG-002-V4`, strict target matrix, and `BUG-002-V4` OpRaise interior canonicalization gate
+  - Full gate remains red in separate open buckets (`cabal build all && cabal test`: `672 examples, 5 failures`).
+
+### 2026-02-17 BUG-2026-02-16-001/002 planner scheme-owner fallback (targeted closure)
+
+- Context:
+  - `EdgePlan` carries `eprSchemeOwnerGen`, resolved in planner.
+  - planner classification tests for let/ann flags used synthesized wrappers (`ExpVarId < 0`) with sparse bind-parent maps.
+- Root cause:
+  - `MLF.Constraint.Presolution.EdgeProcessing.Planner.planEdge` resolved scheme owner strictly from TyExp body root.
+  - For synthesized-wrapper topology, wrapper root can be in gen scope while body root path has no direct `GenRef`; strict body lookup threw `InternalError "scheme introducer not found ..."`.
+- Implemented fix:
+  - Added `resolveSchemeOwnerGen` in planner:
+    - non-synth TyExp path remains strict body-root lookup (`findSchemeIntroducerM`),
+    - synth-wrapper path does body-first lookup with wrapper-root fallback (`firstGenOnPath` + `bindingPathToRootUnderM`).
+  - Strengthened `test/Presolution/EdgePlannerSpec.hs` repros to assert both flag threading and concrete scheme-owner resolution (`GenNodeId 0`).
+- Verification snapshot (2026-02-17):
+  - PASS `threads let-edge flag into allowTrivial` (seed `1481579064`)
+  - PASS `threads ann-edge flag into suppressWeaken` (seed `1481579064`)
+  - PASS `Edge plan types` matcher (`7 examples, 0 failures`)
+  - PASS `Edge interpreter` matcher (`4 examples, 0 failures`)
+
 ### 2026-02-12 BUG-004-V2/V4 strict InstBot production fix (thesis-exact)
 
 - Strict `InstBot` checker semantics are unchanged: `instBot` in `TypeCheck.hs` still requires the input type to be `TBottom`. This matches the paper's `⊥ ← τ` rule exactly.
@@ -451,3 +633,102 @@ This repo’s design is primarily informed by:
   - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-004-V2"'` => `2 examples, 0 failures`.
   - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-004-V4"'` => `2 examples, 0 failures`.
   - `cabal build all && cabal test` => pass.
+
+## 2026-02-16 BUG-003 normalization-side deterministic graft+weaken contract (in progress)
+
+- Implemented an annotation-edge-only pre-normalization pass in `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/WitnessNorm.hs`:
+  - scope: Ω-segment local (`StepIntro` boundaries preserved),
+  - trigger: ambiguous multi-graft/no-weaken shape,
+  - action: synthesize exactly one deterministic `OpGraft+OpWeaken` pair for the replay binder.
+- Added explicit fail-fast surface for synthesis dead ends:
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/WitnessValidation.hs` now includes `DeterministicGraftWeakenSynthesisFailed NodeId [NodeId]`.
+- Deterministic chooser provenance:
+  - source ordering from `etBinderArgs`,
+  - source->replay mapping from normalized replay hints (`etBinderReplayHints` bridge path),
+  - arg selection from trace args rewritten into normalization space.
+- Added targeted regressions in `/Volumes/src/mlf4/test/Presolution/WitnessSpec.hs`:
+  - synthesis success on annotation-edge ambiguous shape,
+  - fail-fast on missing live candidate args,
+  - non-annotation guard (no synthesis).
+- Verification outcomes for this pass:
+  - targeted synthesis tests: green,
+  - strict anchors + BUG-010 matrix reproducer: green,
+  - `BUG-003-V1/V2`: still red (now in a stricter replay key-space mismatch bucket on synthesized `OpGraft+OpWeaken` targeting source key `6`),
+  - full gate remains red (`677 examples, 33 failures`) in this workspace.
+
+## 2026-02-16 BUG-003 replay-bridge follow-up (in progress)
+
+- Applied a focused replay-bridge candidate expansion in `/Volumes/src/mlf4/src/MLF/Elab/Phi/Translate.hs`:
+  - `computeTraceBinderReplayBridge` now seeds alias candidates from source binders that share the same replay-hint class (`etBinderReplayHints`) before final replay-map selection.
+  - This closes the synthesized-key under-coverage case where BUG-003 edge-0 source key `6` had no replay-map entry despite sharing hint provenance with mapped sources.
+- Applied a strict Ω bounded-branch correction in `/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs`:
+  - `OpGraft+OpWeaken(bound-match)` now emits binder elimination (`InstElim`) instead of bounded `InstApp`, avoiding the `InstBot expects ⊥` invariant violation for non-`⊥` bounds.
+  - This keeps strict `InstBot` behavior unchanged while aligning bounded graft+weaken semantics with elimination.
+- Verification (current workspace):
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-003-V" --seed 1481579064'`
+    - now returns to the baseline strict bucket: `PipelineTypeCheckError (TCLetTypeMismatch ...)` (no replay key-space mismatch, no `InstBot` invariant crash).
+  - PASS:
+    - `--match "fails fast when OpWeaken targets a trace binder source with no replay binder mapping"`
+    - `--match "OpRaise accepts source-domain interior membership even when etCopyMap aliases the target"`
+    - `--match "does not require Merge for bounded aliasing (b ⩾ a)"`
+    - `--match "bounded aliasing (b ⩾ a) elaborates to ∀a. a -> a -> a in unchecked and checked pipelines"`
+    - `--match "make-app keeps codomain Int without bottom-domain collapse"`
+    - synthesis regressions in `test/Presolution/WitnessSpec.hs` (3/3)
+  - Full gate remains red: `cabal build all && cabal test` => `677 examples, 33 failures`.
+- Root-cause evidence from traced BUG-003 edge-0 replay:
+  - replay map now includes source key `6` (`traceBinderReplayMap=[(0,4),(1,8),(2,38),(4,4),(6,4)]`),
+  - edge-0 Φ becomes `InstElim` (instead of failing earlier on key-space mismatch),
+  - elaborated RHS remains bottomized (`∀a. ⊥ -> t1 -> ⊥ -> ⊥`), so BUG-003 strict-success closure is still open in the original semantic bucket.
+
+## 2026-02-16 BUG-003 baseline trace: why bounds are bottomized before Φ
+
+- Additional edge-local tracing isolated the first irreversible drift before Φ translation:
+  - during edge `0` presolution execution (`runExpansionUnify`), extra χe ops include:
+    - `OpRaise 2 ; OpMerge 2 2`
+    - `OpRaise 0 ; OpMerge 0 0`
+  - at the same point, copied binder metas become self-bound and eliminated:
+    - `35 = TyVar { tnBound = Just 35 }`
+    - `37 = TyVar { tnBound = Just 37 }`.
+- Copy provenance confirms source->meta mapping for these binders:
+  - edge-0 `etCopyMap` includes `(0 -> 35)` and `(2 -> 37)`.
+- Presolution/solve state chain:
+  - `prConstraint` already contains:
+    - edge-0 expansion rewritten as `ExpInstantiate [30,35,32,33,34]` (arg `31 -> 35`),
+    - `cEliminatedVars = {35}`,
+    - bound-arrow nodes referencing `35` (for example nodes `7`, `10`).
+  - `solveUnify` rewrites eliminated self-bound `35` to `TyBottom 46`, yielding bottomized bounds in those arrows (`7 dom=46`, `10 dom/cod=46`).
+- Consequence:
+  - edge-0 scheme bounds are semantically bottomized in presolution+solve transitions, so Φ replay starts from an already-bottomized graph for BUG-003.
+
+## 2026-02-17 BUG-003 thesis-exact closure: edge self-merge/self-bound guards
+
+- Implemented surgical presolution guards in `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/EdgeUnify.hs`:
+  - RaiseMerge emission now skips same-UF-class endpoints before recording/writing (`repRoot == extRoot` => no-op).
+  - Edge-local bound writes now skip canonical same-root writes in `setVarBoundM` (`findRoot nid == findRoot bnd` => no-op), preventing `n -> n` self-bound artifacts.
+- Added focused regression in `/Volumes/src/mlf4/test/ElaborationSpec.hs`:
+  - `BUG-003-PRES: edge-0 presolution does not leave self-bound binder metas`.
+  - Test inspects edge-0 trace (`etBinderArgs` + `etCopyMap`) and asserts no surviving binder-meta in `prConstraint` is `TyVar { tnBound = Just self }`.
+- Verification (sequential, targeted):
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-003-PRES"'` -> PASS
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-003-V" --seed 1481579064'` -> PASS (`2 examples, 0 failures`)
+  - strict anchors -> PASS:
+    - `fails fast when OpWeaken targets a trace binder source with no replay binder mapping`
+    - `OpRaise accepts source-domain interior membership even when etCopyMap aliases the target`
+    - `does not require Merge for bounded aliasing (b ⩾ a)`
+    - `bounded aliasing (b ⩾ a) elaborates to ∀a. a -> a -> a in unchecked and checked pipelines`
+- Outcome:
+  - BUG-003 V1/V2 now elaborate to the thesis-expected type (`∀a. a -> a -> a -> a`).
+  - Presolution no longer leaves edge-0 self-bound binder metas for the BUG-003 shape.
+
+## 2026-02-17 BUG-002 replay-key contract completion
+
+- Replay-key normalization contract is now enforced across all three layers involved in Φ replay:
+  - presolution trace/hint restoration (`MLF.Constraint.Presolution.WitnessNorm`),
+  - bridge construction (`MLF.Elab.Phi.Translate`),
+  - Ω binder target lookup (`MLF.Elab.Phi.Omega`).
+- Bridge resolution now prefers replay-binder-domain keys derived from replay scheme metadata and rejects non-binder drift for binder-target ops.
+- Reify-time scheme-bound normalization (`MLF.Constraint.Presolution.Plan.ReifyPlan`) now rewrites binder self-references inside bounds to `⊥` before bound admission:
+  - removes illegal self-bound forms (`∀(a ⩾ a)`),
+  - preserves structural information for bounded shapes (for example `b -> a` becomes `⊥ -> a` for binder `b`),
+  - keeps strict alias-bound rejection (`∀(b ⩾ a)`) intact.
+- Deterministic BUG-002 matrix (`BUG-002-V1..V4`, seed `1593170056`) is green in this workspace after this pass.

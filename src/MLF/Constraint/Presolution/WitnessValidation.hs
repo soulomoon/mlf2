@@ -33,6 +33,7 @@ data OmegaNormalizeEnv = OmegaNormalizeEnv
     , canonical :: NodeId -> NodeId
     , constraint :: Constraint
     , binderArgs :: IntMap.IntMap NodeId
+    , binderReplayHints :: IntMap.IntMap NodeId
     }
 
 data OmegaNormalizeError
@@ -49,6 +50,8 @@ data OmegaNormalizeError
     | NotTransitivelyFlexBound InstanceOp NodeId NodeId
     | MalformedRaiseMerge [InstanceOp]
     | AmbiguousGraftWeaken NodeId [NodeId]
+    | DeterministicGraftWeakenSynthesisFailed NodeId [NodeId]
+    | HintedOperandNotLiveTyVar InstanceOp NodeId NodeId
     deriving (Eq, Show)
 
 compareNodesByOrderKeyM :: OmegaNormalizeEnv -> NodeId -> NodeId -> Either OmegaNormalizeError Ordering
@@ -119,6 +122,20 @@ validateNormalizedWitness env ops = do
             Just TyBottom{} -> True
             _ -> False
 
+    isLiveTyVar nid =
+        case NodeAccess.lookupNode (constraint env) (canon nid) of
+            Just TyVar{} -> True
+            _ -> False
+
+    requireHintedOperandLive op nid =
+        case IntMap.lookup (getNodeId (canon nid)) (binderReplayHints env) of
+            Nothing -> Right ()
+            Just hinted ->
+                let hintedC = canon hinted
+                in if isLiveTyVar nid
+                    then Right ()
+                    else Left (HintedOperandNotLiveTyVar op (canon nid) hintedC)
+
     requireGraftTarget n =
         let nC = canon n
             trackedByExpansion = IntMap.member (getNodeId nC) (binderArgs env)
@@ -132,38 +149,40 @@ validateNormalizedWitness env ops = do
                     _ -> Right ()
 
     checkOp op =
-        case op of
-            OpGraft _ n ->
-                requireInterior op n >> requireGraftTarget n
-            OpWeaken n ->
-                requireInterior op n
-            OpMerge n m -> do
-                if isRigid n
-                    then Right ()
+        do
+            mapM_ (requireHintedOperandLive op) (opTargets op)
+            case op of
+                OpGraft _ n ->
+                    requireInterior op n >> requireGraftTarget n
+                OpWeaken n ->
+                    requireInterior op n
+                OpMerge n m -> do
+                    if isRigid n
+                        then Right ()
+                        else if isRigid m
+                            then Left (RigidOperandMismatch op (canon n) (canon m))
+                            else do
+                                requireInterior op n
+                                requireInterior op m
+                                checkMergeDirection n m
+                                requireTransitivelyFlexBoundToRoot op n
+                                requireTransitivelyFlexBoundToRoot op m
+                OpRaise n ->
+                    if isRigid n
+                        then Right ()
+                        else if not (inInterior n)
+                            then Left (RaiseNotUnderRoot (canon n) rootC)
+                            else requireTransitivelyFlexBoundToRoot op n
+                OpRaiseMerge n m -> do
+                    if isRigid n
+                        then Right ()
                     else if isRigid m
                         then Left (RigidOperandMismatch op (canon n) (canon m))
-                        else do
-                            requireInterior op n
-                            requireInterior op m
-                            checkMergeDirection n m
-                            requireTransitivelyFlexBoundToRoot op n
-                            requireTransitivelyFlexBoundToRoot op m
-            OpRaise n ->
-                if isRigid n
-                    then Right ()
                     else if not (inInterior n)
-                        then Left (RaiseNotUnderRoot (canon n) rootC)
-                        else requireTransitivelyFlexBoundToRoot op n
-            OpRaiseMerge n m -> do
-                if isRigid n
-                    then Right ()
-                else if isRigid m
-                    then Left (RigidOperandMismatch op (canon n) (canon m))
-                else if not (inInterior n)
-                    then Left (OpOutsideInterior op)
-                    else if inInterior m
-                        then Left (RaiseMergeInsideInterior (canon n) (canon m))
-                        else Right ()
+                        then Left (OpOutsideInterior op)
+                        else if inInterior m
+                            then Left (RaiseMergeInsideInterior (canon n) (canon m))
+                            else Right ()
 
     opTargets op =
         case op of

@@ -13,16 +13,12 @@ import qualified Data.List.NonEmpty as NE
 import MLF.Constraint.Canonicalizer (Canonicalizer, canonicalizeNode, chaseRedirectsStable)
 import qualified MLF.Constraint.Canonicalizer as Canonicalizer
 import MLF.Constraint.Presolution (EdgeTrace(..))
-import MLF.Constraint.Presolution.Base (CopyMapping(..), fromListInterior, toListInterior)
-import MLF.Constraint.Types.Graph (NodeId(..), getNodeId)
+import MLF.Constraint.Types.Graph (NodeId(..))
 import MLF.Constraint.Types.Witness
     ( BoundRef(..)
     , EdgeWitness(..)
     , Expansion(..)
     , ForallSpec(..)
-    , InstanceOp(..)
-    , InstanceStep(..)
-    , InstanceWitness(..)
     )
 
 -- | Chase redirects through the map until stable or missing.
@@ -36,46 +32,29 @@ makeCanonicalizer = Canonicalizer.makeCanonicalizer
 canonicalizeWitness :: Canonicalizer -> EdgeWitness -> EdgeWitness
 canonicalizeWitness canon w =
     let canonNode = canonicalizeNode canon
-        canonOp op = case op of
-            OpGraft a b -> OpGraft (canonNode a) (canonNode b)
-            OpMerge a b -> OpMerge (canonNode a) (canonNode b)
-            OpRaise n -> OpRaise (canonNode n)
-            OpWeaken n -> OpWeaken (canonNode n)
-            OpRaiseMerge a b -> OpRaiseMerge (canonNode a) (canonNode b)
-        canonStep step = case step of
-            StepOmega op -> StepOmega (canonOp op)
-            StepIntro -> StepIntro
-        InstanceWitness ops = ewWitness w
+        -- Contract: preserve source-domain provenance (`ewSteps`, `ewWitness`)
+        -- and canonicalize only structural lookup fields.
     in w
         { ewLeft = canonNode (ewLeft w)
         , ewRight = canonNode (ewRight w)
         , ewRoot = canonNode (ewRoot w)
-        , ewSteps = map canonStep (ewSteps w)
-        , ewWitness = InstanceWitness (map canonOp ops)
+        , ewSteps = ewSteps w
+        , ewWitness = ewWitness w
         }
 
 canonicalizeTrace :: Canonicalizer -> EdgeTrace -> EdgeTrace
 canonicalizeTrace canon tr =
     let canonNode = canonicalizeNode canon
-        canonPair (a, b) = (canonNode a, canonNode b)
-        canonInterior =
-            fromListInterior
-                [ canonNode i
-                | i <- toListInterior (etInterior tr)
-                ]
-        canonCopyMap =
-            CopyMapping $
-                IntMap.fromListWith min
-                    [ ( getNodeId (canonNode (NodeId k))
-                      , canonNode v
-                      )
-                    | (k, v) <- IntMap.toList (getCopyMapping (etCopyMap tr))
-                    ]
+        -- Contract: preserve source-domain provenance in `etBinderArgs`,
+        -- `etInterior`, and `etCopyMap` for Φ/Omega. Preserve replay-hint
+        -- metadata in `etBinderReplayHints`. `etRoot` is structural and may be
+        -- canonicalized for solved-graph lookup.
     in tr
         { etRoot = canonNode (etRoot tr)
-        , etBinderArgs = map canonPair (etBinderArgs tr)
-        , etInterior = canonInterior
-        , etCopyMap = canonCopyMap
+        , etBinderArgs = etBinderArgs tr
+        , etInterior = etInterior tr
+        , etBinderReplayHints = etBinderReplayHints tr
+        , etCopyMap = etCopyMap tr
         }
 
 canonicalizeExpansion :: Canonicalizer -> Expansion -> Expansion

@@ -1,0 +1,47 @@
+# Findings: BUG-2026-02-14-002
+
+## 2026-02-14
+- Reproduced failures with seed `2031802399`:
+  - `/Phase 4 — OpRaise for interior nodes/records OpRaise for exactly the raised node (no spray across the UF class)/`
+    - expected `[OpRaise 1]`, got `[]`.
+  - `/Phase 4 — OpRaise for interior nodes/records OpRaise for a non-binder interior node (non-binder)/`
+    - witness ops contained `[OpGraft ..., OpWeaken ...]` but no `OpRaise`.
+  - `/Phase 4 — OpRaise for interior nodes/does not record OpRaise for raised nodes outside I(r) (OpRaise outside)/`
+    - expected to include `OpRaise a`, got no raise ops.
+  - `/Property tests for OpRaise on interior nodes/replay: applying recorded OpRaise reproduces presolution binding parents/`
+    - replay mismatch at one node parent (expected root `0`, got `1`), consistent with missing raise op.
+- Pattern comparison:
+  - Passing sanity test `returns a non-empty OpRaise trace when harmonization raises` confirms raw harmonization still returns raise trace.
+  - Failing path is specifically witness emission in `EdgeUnify.recordRaisesFromTrace`.
+- High-confidence regression candidate:
+  - Recent change in `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/EdgeUnify.hs` added `targetsBinderClass` gating in `recordRaisesFromTrace`.
+  - This gate requires raised node/root to be binder-related and suppresses all other interior raises.
+  - `runEdgeUnifyForTest` initializes with empty binder metadata, so the gate makes `OpRaise` impossible there (`[]`), directly explaining failures #1 and #3.
+  - Non-binder interior raise case (#2) is also suppressed by the same gate.
+- Working hypothesis:
+  - `recordRaisesFromTrace` should emit raises for any interior node in raise trace (subject to locked/eliminated checks), not only binder-class nodes.
+- Additional root-cause evidence (BUG-003 interaction):
+  - Dumping BUG-003-V1 presolution witnesses showed edge `1` contained:
+    - `OpGraft ... binder13`
+    - `OpRaise 15`
+    - `OpRaise 14`
+  - Φ failed on `OpRaise 14` with `OpRaise (non-spine): missing computation context`.
+  - This proved the initial “emit all interior raises” fix for BUG-002 over-produced non-spine raises on BUG-003 paths.
+- Final fix strategy:
+  - Keep broad interior raise recording needed by BUG-002.
+  - Add edge-unify guardrails:
+    - binder-scope-aware raise gating for production vs test helper paths,
+    - class-aware base-graft suppression,
+    - shape guard (`containsTyVarInShape`) so raises on fully bottomed structure nodes are skipped.
+  - Add witness normalization prune:
+    - in `WitnessNorm`, remove nested `OpRaise` where the parent is also raised (on restored node ids, under finalized binding tree).
+- Verified outcomes:
+  - BUG-002 anchors:
+    - `Phase 4 — OpRaise for interior nodes` -> `7 examples, 0 failures`.
+    - property replay matcher -> `1 example, 0 failures`.
+  - BUG-003 guard:
+    - `--match "BUG-003-V"` -> `2 examples, 0 failures`.
+  - BUG-004 guard:
+    - `--match "BUG-004"` -> `4 examples, 0 failures`.
+  - Full suite snapshot:
+    - `cabal test` -> `652 examples, 37 failures` (from `41` before this bugfix pass).

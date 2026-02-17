@@ -4,6 +4,137 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 17 BUG-2026-02-17-001 Φ keep-key + Graft/Raise/Weaken drift — 2026-02-17
+
+- Root cause (deterministic seed `529747475`):
+  - `computeTargetBinderKeys` retained replay keys even when target binders were empty.
+  - Unbounded same-binder `OpGraft -> OpRaise -> OpWeaken` triples in Ω expanded into over-complex instantiations that bottomized identity-shaped baselines.
+  - Annotation baselines also needed localized fallback when `AAnnF` sees `inst == InstId` with an expected bound for non-variable annotation sources.
+- Implemented fixes:
+  - `MLF.Elab.Phi.Translate`: strict keep-key intersection with actual target binders.
+  - `MLF.Elab.Phi.Omega`:
+    - preserve spine Raise alias/eliminate behavior in empty-context cases,
+    - collapse unbounded same-binder `OpGraft -> OpRaise -> OpWeaken` triples to direct `InstApp`,
+    - refine spine Raise bound handling for inferred-variable cases.
+  - `MLF.Elab.Elaborate` (`AAnnF`):
+    - keep generic non-var fallback disabled in `reifyInst`,
+    - add non-variable annotation-local fallback from `InstId` to `InstInside (InstBot expectedBound)`.
+- Verification (green):
+  - `id y should have type`, `elaborates polymorphic instantiation`, `elaborates term annotations`,
+    `term annotation can instantiate a polymorphic result`, `explicit forall annotation preserves foralls in bounds`.
+  - `BUG-002-V` (`seed 1593170056`), `BUG-003-V` (`seed 1925916871`), `BUG-004` (`seed 1593170056`), OpRaise interior guard repro.
+  - `cabal build all` passes.
+- Full-gate closure:
+  - residual failures were closed with:
+    - `MLF.Elab.Phi.Omega.resolveTraceBinderTarget` fail-fast invariant for trace-source binder ops with no replay binder candidate,
+    - non-spine `OpRaise` context-path translation for non-`⊥` bounds when `C^m_n` is available,
+    - `PipelineSpec` canonicalization assertion tightened to require non-empty rewrites only when solve `union-find` is non-empty.
+  - verification: `cabal build all && cabal test` passes (`678 examples, 0 failures`).
+
+## Task 16 BUG-2026-02-11-004 regression reopen (bounded-alias strict-success) — 2026-02-17
+
+- Targeted closure landed:
+  - `MLF.Elab.Phi.Translate`: trace-free `computeTargetBinderKeys` now returns empty keep-key set (`mTrace = Nothing`), restoring StepIntro + weaken interleaving behavior.
+  - `MLF.Elab.Elaborate`: removed variable-annotation conversion `InstInside (InstBot t) -> InstApp t` in `AAnnF`; this was producing `InstApp TBottom` for BUG-003 use sites.
+- Current targeted matrix (seed `1925916871`) is green:
+  - `BUG-003-V` (V1/V2) => PASS
+  - `BUG-003-PRES` => PASS
+  - `interleaves StepIntro with Omega ops in Φ translation` => PASS
+  - `BUG-004` (V1..V4) => PASS
+- Follow-up closure:
+  - full gate is green (`cabal build all && cabal test`), and BUG tracker entries are closed in `/Volumes/src/mlf4/Bugs.md`.
+
+## Task 15 BUG-2026-02-16-001/002 planner scheme-introducer crash closure — 2026-02-17
+
+- Root cause:
+  - `planEdge` resolved `eprSchemeOwnerGen` strictly from TyExp body root.
+  - For synthesized-wrapper fixtures (`ExpVarId < 0`) with sparse bind-parent topology, body root had no direct `GenRef` ancestor while wrapper root did, causing:
+    - `InternalError "scheme introducer not found for NodeId {getNodeId = 0}"`.
+- Implemented fix:
+  - `MLF.Constraint.Presolution.EdgeProcessing.Planner` now uses `resolveSchemeOwnerGen`:
+    - non-synth TyExp path remains strict (`findSchemeIntroducerM` on body root),
+    - synthesized-wrapper path falls back from body-root lookup to wrapper-root lookup.
+  - Added helper `firstGenOnPath` (via `bindingPathToRootUnderM`).
+  - `test/Presolution/EdgePlannerSpec.hs` let/ann bug repros now also assert `eprSchemeOwnerGen == GenNodeId 0`.
+- Verification (green):
+  - `--match "/Edge plan types/planner classification/threads let-edge flag into allowTrivial/" --seed 1481579064`
+  - `--match "/Edge plan types/planner classification/threads ann-edge flag into suppressWeaken/" --seed 1481579064`
+  - `--match "Edge plan types" --seed 1481579064`
+  - `--match "Edge interpreter" --seed 1481579064`
+- Tracker sync:
+  - moved `BUG-2026-02-16-001` and `BUG-2026-02-16-002` to **Resolved** in `/Volumes/src/mlf4/Bugs.md`.
+
+## Task 14 BUG-2026-02-16-010 bridge-domain regression follow-up — 2026-02-16
+
+- Bridge hardening + replay-hint/positional replay seeding landed for Φ→Ω binder-target dispatch.
+- Progress update:
+  - strict matrix `make-app keeps codomain Int without bottom-domain collapse` is green again.
+  - full gate still shows remaining replay-domain under-coverage in other phase-6 matrix paths (`BUG-002-V2`, `BUG-004-V2`, etc.).
+- Immediate follow-up priorities:
+  - characterize replay-map under-coverage cases (`traceBinderSources` includes keys that are semantically valid targets but absent from replay-map domain);
+  - refine bridge-map construction/eligibility so fail-fast only fires on true contract violations;
+  - keep BUG-003 bridge contract test and source-domain `OpRaise` interior alias regression green while restoring remaining affected anchors.
+- Verification target:
+  - green targeted matrix for BUG-002/BUG-004 + strict target matrix;
+  - then rerun full gate: `cabal build all && cabal test`.
+- 2026-02-17 investigation update (systematic-debugging, BUG-002):
+  - deterministic slice remains red (`5 examples, 4 failures`) with buckets: `BUG-002-V1` spine mismatch, `BUG-002-V2/V3` replay key-space mismatch, and `PipelineSpec BUG-002-V4` interior guard regression.
+  - root mismatch is cross-domain: presolution trace/hint identity space vs replay substitution key-space used by Ω binder lookup.
+  - four minimal bridge-map hypotheses were tested and reverted; next step should be an architecture-level replay-domain normalization pass before additional local fixes.
+- 2026-02-17 completion update:
+  - replay-key normalization contract landed across trace/hint restoration, bridge construction, and Ω binder lookup.
+  - deterministic `BUG-002-V` slice is now green with seed `1593170056` (`5 examples, 0 failures`).
+  - follow-up bound normalization in `ReifyPlan` now rewrites binder self-references in bounds to `⊥`, removing residual V2 alias-finalization drift while keeping strict alias-bound rejection.
+  - residual cross-link remains: `BUG-004-V2` is still red in this workspace (`TCArgumentMismatch`), so BUG-2026-02-16-010 stays open as a narrowed follow-up.
+
+## Task 13 BUG-2026-02-16-007/008 sentinel drift closure — 2026-02-16
+
+- Implemented generalization fallback alignment for plain `SchemeFreeVars`:
+  - `MLF.Elab.Run.Pipeline` root generalization now retries `SchemeFreeVars` the same as `BindingTreeError GenSchemeFreeVars` and falls back to direct reification.
+  - `MLF.Elab.Run.ResultType.Util.generalizeWithPlan` now uses the same fallback policy.
+- Updated BUG-003-V1/V2 sentinels in `test/ElaborationSpec.hs` to track the stabilized strict-instantiation failure class (`InstBot expects TBottom`) rather than transient `SchemeFreeVars (__rigid24)`.
+- Targeted verification (green):
+  - exact BUG-003-V1 repro command (seed `1481579064`)
+  - exact BUG-003-V2 repro command (seed `1481579064`)
+  - `--match "BUG-003-V"` matrix slice (`2 examples, 0 failures`)
+- Tracker sync:
+  - `BUG-2026-02-16-007` and `BUG-2026-02-16-008` moved to resolved in `/Volumes/src/mlf4/Bugs.md`.
+  - `BUG-2026-02-11-004` remains open as the underlying bounded-alias thesis-faithfulness gap.
+
+## Task 11 Source-domain `I(r)` closure — 2026-02-16 (BUG-2026-02-14-003)
+
+- Implemented surgical Ω/Φ domain contract fix:
+  - `MLF.Elab.Phi.Omega`: `OpRaise` admissibility checks now use source-domain `etInterior` directly.
+  - Added invariant diagnostic for alias-only membership (`source target ∉ I(r)` but copy-map alias ∈ `I(r)`).
+  - `OpRaise` semantic execution now adopts source->copied node (`etCopyMap`) before canonicalization.
+  - `MLF.Elab.Phi.Translate`: canonicalize `etInterior` only for `namedSet` intersection.
+- Added regressions:
+  - `ElaborationSpec`: source-domain `OpRaise` + copy-map alias no longer fails `outside I(r)`.
+  - `PipelineSpec`: BUG-002-V4 OpRaise targets remain members of `etInterior` after witness/trace canonicalization.
+- Targeted verification (all green):
+  - `BUG-002-V4`
+  - `BUG-2026-02-06-002 strict target matrix`
+  - `BUG-004`
+  - `tracks instantiation copy maps for named binders`
+  - `witness/trace/expansion canonicalization`
+- Full gate:
+  - `cabal build all && cabal test` => `672 examples, 9 failures` (open buckets outside this surgical scope).
+
+## Task 12 Non-spine OpRaise context fallback — 2026-02-16 (BUG-2026-02-16-009)
+
+- Implemented targeted Φ/Ω non-spine context fix:
+  - `MLF.Elab.Phi.Omega`: `OpRaise` now tracks both adopted and source-domain raise targets.
+  - When adopted-target non-spine context/root insertion is unavailable, Ω retries root-context insertion using the source-domain raise target.
+  - Adopted-target path remains primary to preserve previously fixed BUG-004 call-site behavior.
+- Verification (green):
+  - `/Phase 6 — Elaborate (xMLF)/Paper alignment baselines/Explicit forall annotation edge cases/explicit forall annotation round-trips on let-bound variables/`
+  - `BUG-004`
+  - `BUG-002-V4`
+  - `BUG-2026-02-06-002 strict target matrix`
+  - `contextToNodeBound does not descend through forall body fallback`
+- Full gate:
+  - `cabal build all && cabal test` => `672 examples, 4 failures` (historical snapshot before BUG-007/008 closure; current open trackers center on `BUG-2026-02-16-001/002` and umbrella `BUG-2026-02-11-004`).
+
 ## Task 10 Variant Matrix Scan — 2026-02-11 (new bug variants triage)
 
 - Added systematic variant coverage:

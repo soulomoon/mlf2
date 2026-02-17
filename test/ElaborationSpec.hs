@@ -3,7 +3,7 @@ module ElaborationSpec (spec) where
 
 import Control.Applicative ((<|>))
 import Test.Hspec
-import Control.Monad (forM_, when)
+import Control.Monad (forM_, unless, when)
 import Data.List (isInfixOf, stripPrefix)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.IntMap.Strict as IntMap
@@ -45,6 +45,8 @@ import MLF.Constraint.Presolution
     , computePresolution
     , defaultPlanBuilder
     , fromListInterior
+    , insertCopy
+    , lookupCopy
     )
 import MLF.Constraint.Solve (SolveResult(..), solveUnify)
 import qualified MLF.Constraint.Solve as Solve (frWith)
@@ -1321,6 +1323,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             { etRoot = root
                             , etBinderArgs = []
                             , etInterior = fromListInterior [root]
+                            , etBinderReplayHints = mempty
                             , etCopyMap = mempty
                             }
                     ops = [OpRaise rigidN]
@@ -1334,6 +1337,97 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         }
                 phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew)
                 phi `shouldBe` Elab.InstId
+
+            it "OpRaise accepts source-domain interior membership even when etCopyMap aliases the target" $ do
+                let root = NodeId 100
+                    binderN = NodeId 1
+                    aliasN = NodeId 30
+                    c = rootedConstraint emptyConstraint
+                        { cNodes = nodeMapFromList
+                                [ (getNodeId root, TyArrow root binderN binderN)
+                                , (getNodeId binderN, TyVar { tnId = binderN, tnBound = Nothing })
+                                , (getNodeId aliasN, TyVar { tnId = aliasN, tnBound = Nothing })
+                                ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef binderN), (genRef (GenNodeId 0), BindFlex))
+                                ]
+                        }
+                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+                    scheme = Elab.schemeFromType (Elab.TForall "a" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
+                    si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = IntMap.fromList [(getNodeId binderN, "a")] }
+                    tr =
+                        EdgeTrace
+                            { etRoot = root
+                            , etBinderArgs = []
+                            , etInterior = fromListInterior [root, binderN]
+                            , etBinderReplayHints = mempty
+                            , etCopyMap = insertCopy binderN aliasN mempty
+                            }
+                    ops = [OpRaise binderN]
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewSteps = map StepOmega ops
+                        , ewWitness = InstanceWitness ops
+                        }
+
+                _ <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew)
+                pure ()
+
+            it "fails fast when OpWeaken targets a trace binder source with no replay binder mapping" $ do
+                let root = NodeId 100
+                    binderA = NodeId 1
+                    binderB = NodeId 2
+                    argA = NodeId 30
+                    argB = NodeId 31
+                    c = rootedConstraint emptyConstraint
+                        { cNodes = nodeMapFromList
+                                [ (getNodeId root, TyArrow root binderA binderA)
+                                , (getNodeId binderA, TyVar { tnId = binderA, tnBound = Nothing })
+                                , (getNodeId binderB, TyVar { tnId = binderB, tnBound = Nothing })
+                                , (getNodeId argA, TyBase argA (BaseTy "Int"))
+                                , (getNodeId argB, TyBase argB (BaseTy "Bool"))
+                                ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef binderA), (genRef (GenNodeId 0), BindFlex))
+                                , (nodeRefKey (typeRef binderB), (genRef (GenNodeId 0), BindFlex))
+                                ]
+                        }
+                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+                    scheme = Elab.schemeFromType (Elab.TForall "a" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
+                    si = Elab.SchemeInfo
+                        { Elab.siScheme = scheme
+                        , Elab.siSubst = IntMap.fromList [(getNodeId binderA, "a")]
+                        }
+                    tr =
+                        EdgeTrace
+                            { etRoot = root
+                            , etBinderArgs = [(binderA, argA), (binderB, argB)]
+                            , etInterior = fromListInterior [root, binderA, binderB, argA, argB]
+                            , etBinderReplayHints = mempty
+                            , etCopyMap = mempty
+                            }
+                    ops = [OpWeaken binderB]
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewSteps = map StepOmega ops
+                        , ewWitness = InstanceWitness ops
+                        }
+                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew of
+                    Left (Elab.PhiInvariantError msg) -> do
+                        msg `shouldSatisfy` ("trace/replay binder key-space mismatch" `isInfixOf`)
+                        msg `shouldSatisfy` ("OpWeaken" `isInfixOf`)
+                    Left other ->
+                        expectationFailure ("Expected PhiInvariantError for missing replay binder mapping, got " ++ show other)
+                    Right inst ->
+                        expectationFailure ("Expected PhiInvariantError, got " ++ Elab.pretty inst)
 
             it "OpMerge with rigid operated node n translates to identity" $ do
                 let root = NodeId 100
@@ -1359,6 +1453,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             { etRoot = root
                             , etBinderArgs = []
                             , etInterior = fromListInterior [root, n, m]
+                            , etBinderReplayHints = mempty
                             , etCopyMap = mempty
                             }
                     ops = [OpMerge n m]
@@ -1397,6 +1492,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             { etRoot = root
                             , etBinderArgs = []
                             , etInterior = fromListInterior [root, n]
+                            , etBinderReplayHints = mempty
                             , etCopyMap = mempty
                             }
                     ops = [OpRaiseMerge n m]
@@ -1435,6 +1531,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             { etRoot = root
                             , etBinderArgs = []
                             , etInterior = fromListInterior [root, n, m]
+                            , etBinderReplayHints = mempty
                             , etCopyMap = mempty
                             }
                     ops = [OpMerge n m]
@@ -1478,6 +1575,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             { etRoot = root
                             , etBinderArgs = []
                             , etInterior = fromListInterior [root, n]
+                            , etBinderReplayHints = mempty
                             , etCopyMap = mempty
                             }
                     ops = [OpRaiseMerge n m]
@@ -1894,6 +1992,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             { etRoot = root
                             , etBinderArgs = []
                             , etInterior = mempty
+                            , etBinderReplayHints = mempty
                             , etCopyMap = mempty
                             }
 
@@ -1998,8 +2097,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             let EdgeId eid = ewEdgeId ew
                                 mTrace = IntMap.lookup eid traces
                             case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing Nothing mTrace ew of
-                                Left (Elab.PhiTranslatabilityError _) -> pure ()
-                                Left err -> expectationFailure ("Unexpected error: " ++ show err)
+                                Left err -> expectationFailure ("Expected successful Phi translation, got: " ++ show err)
                                 Right _ -> pure ()
 
             it "rejects OpGraft+OpWeaken on out-of-scheme target (no non-binder recovery)" $ do
@@ -2029,6 +2127,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             { etRoot = root
                             , etBinderArgs = []
                             , etInterior = fromListInterior [binderN, nonBinderN]
+                            , etBinderReplayHints = mempty
                             , etCopyMap = mempty
                             }
                     ops = [OpGraft binderN nonBinderN, OpWeaken nonBinderN]
@@ -2077,6 +2176,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             { etRoot = root
                             , etBinderArgs = []
                             , etInterior = fromListInterior [binderN, nonBinderN]
+                            , etBinderReplayHints = mempty
                             , etCopyMap = mempty
                             }
                     ops = [OpGraft binderN nonBinderN]
@@ -2361,6 +2461,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             { etRoot = root
                             , etBinderArgs = []
                             , etInterior = fromListInterior [root, aN, mN, nN]
+                            , etBinderReplayHints = mempty
                             , etCopyMap = mempty
                             }
 
@@ -2644,17 +2745,6 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     uncheckedTy `shouldAlphaEqType` expected
                     checkedTy `shouldAlphaEqType` expected
 
-                assertBothPipelinesErrorContains expr needle = do
-                    let check label runner =
-                            case runner Set.empty (unsafeNormalize expr) of
-                                Left err ->
-                                    show err `shouldSatisfy` (needle `isInfixOf`)
-                                Right (_term, ty) ->
-                                    expectationFailure
-                                        (label ++ " unexpectedly succeeded with type: " ++ show ty)
-                    check "runPipelineElab" Elab.runPipelineElab
-                    check "runPipelineElabChecked" Elab.runPipelineElabChecked
-
             it "BUG-002-V1: factory twice with mixed instantiations elaborates to Int" $ do
                 let expr =
                         ELet "make" makeFactory
@@ -2737,7 +2827,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             (ELit (LInt 1))
                 assertBothPipelinesMono expr (Elab.TBase (BaseTy "Int"))
 
-            it "BUG-003-V1: triple bounded chain sentinel reproduces known Phi invariant failure" $ do
+            it "BUG-003-PRES: edge-0 presolution does not leave self-bound binder metas" $ do
                 let rhs = ELam "x" (ELam "y" (ELam "z" (EVar "x")))
                     schemeTy =
                         mkForalls
@@ -2755,10 +2845,58 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                     (STArrow (STVar "a") (STVar "a"))))
                     expr =
                         ELet "c" (EAnn rhs schemeTy) (EAnn (EVar "c") ann)
-                -- Thesis-hardening guardrail: non-binder OpGraft is rejected in Ω.
-                assertBothPipelinesErrorContains expr "OpGraft targets non-binder node"
 
-            it "BUG-003-V2: dual-alias sentinel reproduces known Phi invariant failure" $ do
+                pres <- requireRight (runToPresolutionDefault Set.empty expr)
+                tr <- case IntMap.lookup 0 (prEdgeTraces pres) of
+                    Nothing ->
+                        expectationFailure "BUG-003-PRES: missing edge-0 trace"
+                            >> fail "missing edge-0 trace"
+                    Just tr0 -> pure tr0
+
+                let c = prConstraint pres
+                    copyMap = etCopyMap tr
+                    selfBoundMetas =
+                        [ meta
+                        | (binder, _arg) <- etBinderArgs tr
+                        , Just meta <- [lookupCopy binder copyMap]
+                        , Just TyVar{ tnBound = Just bnd } <- [lookupNodeIn (cNodes c) meta]
+                        , bnd == meta
+                        ]
+
+                unless (null selfBoundMetas) $
+                    expectationFailure
+                        ( "BUG-003-PRES: self-bound binder metas in prConstraint: "
+                            ++ show selfBoundMetas
+                        )
+
+            it "BUG-003-V1: triple bounded chain elaborates to ∀a. a -> a -> a -> a" $ do
+                let rhs = ELam "x" (ELam "y" (ELam "z" (EVar "x")))
+                    schemeTy =
+                        mkForalls
+                            [ ("a", Nothing)
+                            , ("b", Just (STVar "a"))
+                            , ("c", Just (STVar "b"))
+                            ]
+                            (STArrow (STVar "a")
+                                (STArrow (STVar "b")
+                                    (STArrow (STVar "c") (STVar "a"))))
+                    ann =
+                        STForall "a" Nothing
+                            (STArrow (STVar "a")
+                                (STArrow (STVar "a")
+                                    (STArrow (STVar "a") (STVar "a"))))
+                    expr =
+                        ELet "c" (EAnn rhs schemeTy) (EAnn (EVar "c") ann)
+                    expected =
+                        Elab.TForall "a" Nothing
+                            (Elab.TArrow
+                                (Elab.TVar "a")
+                                (Elab.TArrow
+                                    (Elab.TVar "a")
+                                    (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))))
+                assertBothPipelinesAlphaEq expr expected
+
+            it "BUG-003-V2: dual-alias chain elaborates to ∀a. a -> a -> a -> a" $ do
                 let rhs = ELam "x" (ELam "y" (ELam "z" (EVar "x")))
                     schemeTy =
                         mkForalls
@@ -2776,8 +2914,14 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                     (STArrow (STVar "a") (STVar "a"))))
                     expr =
                         ELet "c" (EAnn rhs schemeTy) (EAnn (EVar "c") ann)
-                -- Thesis-hardening guardrail: non-binder OpGraft is rejected in Ω.
-                assertBothPipelinesErrorContains expr "OpGraft targets non-binder node"
+                    expected =
+                        Elab.TForall "a" Nothing
+                            (Elab.TArrow
+                                (Elab.TVar "a")
+                                (Elab.TArrow
+                                    (Elab.TVar "a")
+                                    (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))))
+                assertBothPipelinesAlphaEq expr expected
 
         describe "Explicit forall annotation edge cases" $ do
             it "explicit forall annotation round-trips on let-bound variables" $ do

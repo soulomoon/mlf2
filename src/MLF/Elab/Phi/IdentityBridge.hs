@@ -14,7 +14,11 @@ module MLF.Elab.Phi.IdentityBridge (
     mkIdentityBridge,
     bridgeCanonical,
     bridgeCopyMap,
+    traceBinderKeysInOrder,
+    canonicalKeyForNode,
+    canonicalKeyForSource,
     sourceKeysForNode,
+    safeSourceCandidatesForCanonicalBinder,
     sourceBinderKeysForNode,
     isBinderNode,
     lookupBinderIndex,
@@ -35,6 +39,7 @@ import MLF.Constraint.Presolution.Base (EdgeTrace(..))
 -- a copy map, and a scheme-binder key set.  All helpers are pure.
 data IdentityBridge = IdentityBridge
     { ibCanonical              :: NodeId -> NodeId
+    , ibTraceBinderOrder       :: [Int]
     , ibBinderOrderIx          :: IntMap.IntMap Int
     , ibReverseCopyByCanonical :: IntMap.IntMap [Int]
       -- ^ Copy-map source keys grouped by canonical(destination)
@@ -52,6 +57,15 @@ bridgeCanonical = ibCanonical
 bridgeCopyMap :: IdentityBridge -> IntMap.IntMap NodeId
 bridgeCopyMap = ibCopyMap
 
+traceBinderKeysInOrder :: IdentityBridge -> [Int]
+traceBinderKeysInOrder = ibTraceBinderOrder
+
+canonicalKeyForNode :: IdentityBridge -> NodeId -> Int
+canonicalKeyForNode ib nid = getNodeId (ibCanonical ib nid)
+
+canonicalKeyForSource :: IdentityBridge -> Int -> Int
+canonicalKeyForSource ib key = canonicalKeyForNode ib (NodeId key)
+
 -- | Build an 'IdentityBridge' from the canonical function, an optional
 -- 'EdgeTrace', and the raw copy map.
 mkIdentityBridge
@@ -62,6 +76,7 @@ mkIdentityBridge
 mkIdentityBridge canonical mTrace copyMap =
     IdentityBridge
         { ibCanonical              = canonical
+        , ibTraceBinderOrder       = traceBinderOrder
         , ibBinderOrderIx          = binderOrderIx
         , ibReverseCopyByCanonical = reverseCopyByCanonical
         , ibReverseTraceByCanonical = reverseTraceByCanonical
@@ -69,15 +84,25 @@ mkIdentityBridge canonical mTrace copyMap =
         , ibCopyMap                = copyMap
         }
   where
-    binderOrderIx :: IntMap.IntMap Int
-    binderOrderIx =
+    traceBinderOrder :: [Int]
+    traceBinderOrder =
         case mTrace of
-            Nothing -> IntMap.empty
+            Nothing -> []
             Just tr ->
-                IntMap.fromList
-                    [ (getNodeId binder, ix)
-                    | (ix, (binder, _arg)) <- zip [0 :: Int ..] (etBinderArgs tr)
-                    ]
+                reverse $
+                    snd $
+                        foldl'
+                            (\(seen, acc) (binder, _arg) ->
+                                let key = getNodeId binder
+                                in if IntSet.member key seen
+                                    then (seen, acc)
+                                    else (IntSet.insert key seen, key : acc)
+                            )
+                            (IntSet.empty, [])
+                            (etBinderArgs tr)
+
+    binderOrderIx :: IntMap.IntMap Int
+    binderOrderIx = IntMap.fromList (zip traceBinderOrder [0 :: Int ..])
 
     reverseCopyByCanonical :: IntMap.IntMap [Int]
     reverseCopyByCanonical =
@@ -112,6 +137,8 @@ sourceKeysForNode ib nid =
     let canonical = ibCanonical ib
         keyRaw   = getNodeId nid
         keyCanon = getNodeId (canonical nid)
+        fwdRaw   = maybe [] (pure . getNodeId) (IntMap.lookup keyRaw (ibCopyMap ib))
+        fwdCanon = map (getNodeId . canonical . NodeId) fwdRaw
         invRaw   = maybe [] (pure . getNodeId) (IntMap.lookup keyRaw (ibInvCopyMap ib))
         invCanon = maybe [] (pure . getNodeId) (IntMap.lookup keyCanon (ibInvCopyMap ib))
         copyCanon  = IntMap.findWithDefault [] keyCanon (ibReverseCopyByCanonical ib)
@@ -125,8 +152,17 @@ sourceKeysForNode ib nid =
                         else (IntSet.insert key seenAcc, key : acc)
                 )
                 (IntSet.empty, [])
-                (keyRaw : keyCanon : invRaw ++ invCanon ++ copyCanon ++ traceCanon)
+                (keyRaw : keyCanon : fwdRaw ++ fwdCanon ++ invRaw ++ invCanon ++ copyCanon ++ traceCanon)
     in sortOn rank (reverse keysRev)
+
+-- | Candidate source keys for a canonical binder, ranked deterministically
+-- and constrained to that canonical binder identity.
+safeSourceCandidatesForCanonicalBinder :: IdentityBridge -> NodeId -> [Int]
+safeSourceCandidatesForCanonicalBinder ib binderCanonical =
+    let canonKey = canonicalKeyForNode ib binderCanonical
+    in filter
+        (\key -> canonicalKeyForSource ib key == canonKey)
+        (sourceKeysForNode ib (NodeId canonKey))
 
 -- | Source keys filtered to membership in the given binder key set.
 sourceBinderKeysForNode :: IdentityBridge -> IntSet.IntSet -> NodeId -> [Int]
@@ -211,6 +247,7 @@ lookupBinderIndex ib binderKeys ids nid
     rankCandidate :: (Int, Int, Int) -> (Int, (Int, Int), Int)
     rankCandidate (ix, matchClass, key) =
         (matchClass, keyRank key, ix)
+
 
 -- | Trace-order rank for a raw key: @(trace-index, key)@ suitable for
 -- 'Data.List.sortOn'.  Keys absent from the trace receive @maxBound@ as

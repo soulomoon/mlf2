@@ -471,6 +471,32 @@ bindingFor env plan (name, nidInt) = do
                 let mb' = fmap (substAliasBound boundSet) mb
                     body' = substAliasTy (Set.insert v boundSet) body
                 in TForall v mb' body'
+        normalizeSelfTy selfName = goTy Set.empty
+          where
+            goTy shadow ty = case ty of
+                TVar v
+                    | v == selfName
+                    , not (Set.member v shadow) -> TBottom
+                    | otherwise -> TVar v
+                TArrow a b -> TArrow (goTy shadow a) (goTy shadow b)
+                TCon c args -> TCon c (fmap (goTy shadow) args)
+                TBase _ -> ty
+                TBottom -> ty
+                TForall v mb body ->
+                    let shadow' = Set.insert v shadow
+                        mb' = fmap (goBound shadow') mb
+                        body' = goTy shadow' body
+                    in TForall v mb' body'
+            goBound shadow bound = case bound of
+                TArrow a b -> TArrow (goTy shadow a) (goTy shadow b)
+                TCon c args -> TCon c (fmap (goTy shadow) args)
+                TBase _ -> bound
+                TBottom -> bound
+                TForall v mb body ->
+                    let shadow' = Set.insert v shadow
+                        mb' = fmap (goBound shadow') mb
+                        body' = goTy shadow' body
+                    in TForall v mb' body'
         boundTy0' =
             case (boundTy0, mbBoundNode) of
                 (TBottom, Just _)
@@ -491,6 +517,7 @@ bindingFor env plan (name, nidInt) = do
                 then TBottom
                 else boundTy0'
         boundTy0Aliased = substAliasTy Set.empty boundTy0''
+        boundTy0Normalized = normalizeSelfTy name boundTy0Aliased
         extraBoundNames =
             let isAliasBound nm =
                     case parseNameIdFn nm of
@@ -499,7 +526,7 @@ bindingFor env plan (name, nidInt) = do
                                 repKey = IntMap.findWithDefault keyC keyC gammaAlias
                             in IntMap.member repKey substForBound'
                         Nothing -> False
-                freeNames = Set.toList (freeTypeVarsType boundTy0Aliased)
+                freeNames = Set.toList (freeTypeVarsType boundTy0Normalized)
             in [ nm
                | nm <- freeNames
                , not (Set.member nm substNameSetForBound)
@@ -508,7 +535,7 @@ bindingFor env plan (name, nidInt) = do
         boundTy =
             foldr
                 (\v acc -> TForall v Nothing acc)
-                boundTy0Aliased
+                boundTy0Normalized
                 (sort extraBoundNames)
     traceGeneralizeM
         ( "generalizeAt: boundExtras binder="
@@ -555,8 +582,11 @@ bindingFor env plan (name, nidInt) = do
             boundIsFreeVar && not binderIsNamed
         boundIsSelfVar =
             case boundTy of
-                TVar v -> isNothing mbBoundNode && v == name
+                -- Normalize tautological bounds (e.g. ∀(a ⩾ a)) away.
+                TVar v -> v == name
                 _ -> False
+        boundMentionsBinderVar =
+            Set.member name (freeTypeVarsType boundTy)
         boundIsSchemeRootNode =
             case mbBoundNode of
                 Just bnd -> IntSet.member (getNodeId (canonical bnd)) schemeRootKeySet
@@ -577,10 +607,10 @@ bindingFor env plan (name, nidInt) = do
         mbBound =
             if IntSet.member (getNodeId bNodeC) aliasBinderBases
                 then
-                    if boundTy == TBottom
+                    if boundTy == TBottom || boundMentionsBinderVar
                         then Nothing
                         else Just boundTy
-                else if boundTy == TBottom || boundIsFreeVar' || boundIsSelfVar || not boundAllowed
+                else if boundTy == TBottom || boundIsFreeVar' || boundIsSelfVar || boundMentionsBinderVar || not boundAllowed
                     then Nothing
                     else Just boundTy
         mbBoundTyped = case mbBound of

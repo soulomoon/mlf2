@@ -28,6 +28,7 @@ mkTrace binderArgs copyPairs =
         { etRoot = NodeId 0
         , etBinderArgs = [(NodeId b, NodeId a) | (b, a) <- binderArgs]
         , etInterior = InteriorNodes IntSet.empty
+        , etBinderReplayHints = mempty
         , etCopyMap = CopyMapping (IntMap.fromList [(k, NodeId v) | (k, v) <- copyPairs])
         }
 

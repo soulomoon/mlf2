@@ -135,16 +135,22 @@ runPipelineElabWith traceCfg genConstraints expr = do
                 bindingToElab $
                     resolveCanonicalScope c1 solvedForGen (prRedirects pres) (annNode ann)
             let rootTarget = schemeBodyTarget solvedForGen (annNode annCanon)
+            let generalizeNeedsFallback err = case err of
+                    BindingTreeError GenSchemeFreeVars{} -> True
+                    SchemeFreeVars{} -> True
+                    _ -> False
             (rootScheme, rootSubst) <- fromElabError $
                 case generalizeAtWith (Just bindParentsGa) solvedForGen rootScope rootTarget of
                     Right out -> Right out
-                    Left (BindingTreeError GenSchemeFreeVars{}) ->
-                        case generalizeAtWith Nothing solvedForGen rootScope rootTarget of
-                            Right out -> Right out
-                            Left (BindingTreeError GenSchemeFreeVars{}) -> do
-                                tyFallback <- reifyType solvedForGen rootTarget
-                                pure (schemeFromType tyFallback, IntMap.empty)
-                            Left err -> Left err
+                    Left err
+                        | generalizeNeedsFallback err ->
+                            case generalizeAtWith Nothing solvedForGen rootScope rootTarget of
+                                Right out -> Right out
+                                Left err2
+                                    | generalizeNeedsFallback err2 -> do
+                                        tyFallback <- reifyType solvedForGen rootTarget
+                                        pure (schemeFromType tyFallback, IntMap.empty)
+                                Left err2 -> Left err2
                     Left err -> Left err
             let termSubst = substInTerm rootSubst term
                 termClosed =

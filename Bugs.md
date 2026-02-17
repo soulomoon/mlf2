@@ -4,27 +4,321 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 
 ## Open
 
+- None currently.
+
+## Resolved
+
+### BUG-2026-02-17-001
+- Status: Resolved
+- Priority: High
+- Discovered: 2026-02-17
+- Resolved: 2026-02-17
+- Summary: Φ translation over-retained keep-keys for empty target-binder sets and mishandled unbounded `OpGraft -> OpRaise -> OpWeaken` triples, causing bottomization/over-quantification in paper baseline identity + annotation programs.
+- Minimal reproducers:
+  - `\y. let id = (\x. x) in id y` should elaborate to `∀a. a -> a`, but regressed to codomain `⊥`.
+  - `(\x. x) : Int -> Int` and annotation-baseline variants regressed with extra bounded foralls or solver-name leakage.
+- Reproducer commands:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "id y should have type" --seed 529747475'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "elaborates polymorphic instantiation"'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "elaborates term annotations"'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "term annotation can instantiate a polymorphic result"'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "explicit forall annotation preserves foralls in bounds"'`
+- Expected vs actual:
+  - Expected: paper baselines remain thesis-exact (`∀a. a -> a` identity shape; bounded-forall annotation forms preserved).
+  - Actual before fix: identity codomain collapsed to `⊥`; annotation paths accumulated extra bounded foralls and leaked solver vars (`t0`).
+  - Current (2026-02-17): targeted repros above are green and full gate is green (`cabal build all && cabal test`).
+- Suspected/owning area:
+  - `/Volumes/src/mlf4/src/MLF/Elab/Phi/Translate.hs` (`computeTargetBinderKeys`)
+  - `/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs` (`OpGraft`/`OpRaise`/`OpWeaken` translation)
+  - `/Volumes/src/mlf4/src/MLF/Elab/Elaborate.hs` (`AAnnF` inst-adjustment)
+- Thesis impact:
+  - Directly affects Def. 15.3.4/Fig. 10 Φ behavior and κσ-style term-annotation instantiation in paper-alignment baselines.
+- Fix:
+  - `/Volumes/src/mlf4/src/MLF/Elab/Phi/Translate.hs`
+    - `computeTargetBinderKeys` now keeps replay keys only by strict intersection with target binders.
+  - `/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs`
+    - preserves alias/eliminate behavior for empty-context spine `Raise`.
+    - collapses unbounded same-binder `OpGraft -> OpRaise -> OpWeaken` triples to direct `InstApp`.
+    - refines bound handling for spine `Raise` to avoid destructive alias-bound collapse in inferred-variable cases.
+  - `/Volumes/src/mlf4/src/MLF/Elab/Elaborate.hs`
+    - keeps non-var fallback disabled in generic `reifyInst`.
+    - adds localized `AAnnF` fallback for non-variable annotation sources when `inst == InstId` and `expectedBound` is available.
+- Regression tests:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "id y should have type" --seed 1070685141'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "elaborates polymorphic instantiation"'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "elaborates term annotations"'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "term annotation can instantiate a polymorphic result"'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "explicit forall annotation preserves foralls in bounds"'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-003-V" --seed 1925916871'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-002-V" --seed 1593170056'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-004" --seed 1593170056'`
+
+### BUG-2026-02-16-010
+- Status: Resolved
+- Priority: High
+- Discovered: 2026-02-16
+- Resolved: 2026-02-17
+- Summary: Replay-key normalization contract across presolution traces/hints, Φ bridge, and Ω lookup is implemented, including fail-fast behavior for missing replay binder mappings.
+- Minimal reproducers:
+  - Phase-6 matrix variants can still hit replay-domain under-coverage, for example:
+    - `PhiInvariantError "trace/replay binder key-space mismatch ... op: OpGraft ... raw key: NodeId 1 ... replay-map domain: [] ... scheme keys: [0,10]"`
+  - Reproducer commands:
+    - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-002-V" --seed 1593170056'`
+    - `cabal test mlf2-test --test-show-details=direct --test-options='--match "/Phase 6 — Elaborate (xMLF)/Paper alignment baselines/Systematic bug variants (2026-02-11 matrix)/BUG-002-V2: alias indirection elaborates to Int/" --seed 1593170056'`
+    - `cabal test mlf2-test --test-show-details=direct --test-options='--match "/Phase 6 — Elaborate (xMLF)/Paper alignment baselines/Systematic bug variants (2026-02-11 matrix)/BUG-002-V3: intermediate annotation elaborates to Int/" --seed 1593170056'`
+    - `cabal test mlf2-test --test-show-details=direct --test-options='--match "fails fast when OpWeaken targets a trace binder source with no replay binder mapping"'`
+- Expected vs actual:
+  - Expected: replay mapping is total for semantically valid trace-binder targets; fail-fast triggers only for true contract drift.
+  - Actual (2026-02-17):
+    - fixed/green with deterministic seed `1593170056`: `BUG-002-V1..V4`, `BUG-002-V2`, `BUG-002-V3`, `BUG-004-V2`.
+    - missing-replay fail-fast now emits the expected invariant class (`PhiInvariantError` with `trace/replay binder key-space mismatch`) via `resolveTraceBinderTarget`.
+- Suspected/owning area:
+  - `/Volumes/src/mlf4/src/MLF/Elab/Phi/Translate.hs` (`computeTraceBinderReplayBridge`)
+  - `/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs` (`resolveTraceBinderTarget`)
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/WitnessNorm.hs` (hint derivation coverage)
+- Thesis impact:
+  - Source→replay bridge direction and missing-replay fail-fast behavior are thesis-aligned for strict-paper baseline variants.
+
+### BUG-2026-02-14-003
+- Status: Resolved
+- Priority: High
+- Discovered: 2026-02-14
+- Resolved: 2026-02-17
+- Summary: `OpRaise` source target could be falsely rejected as outside thesis `I(r)` because Φ/Omega remapped `etInterior` keys through copy/canonical aliases before membership checks.
+- Minimal reproducers:
+  - Synthetic Φ regression:
+    - `OpRaise` target in `etInterior` source domain with `etCopyMap` alias (`1 -> 30`) must not be rejected.
+  - Pipeline thesis anchor:
+    - BUG-002-V4 (`factory-under-lambda`) where source-domain `OpRaise` must remain admissible against trace `I(r)`.
+- Reproducer commands:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "OpRaise accepts source-domain interior membership even when etCopyMap aliases the target"'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-002-V4"'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-004"'`
+- Expected vs actual:
+  - Expected: `OpRaise` admissibility checks use source-domain `I(r)` directly; alias-only membership is treated as contract drift; BUG-002/BUG-004 anchors remain green.
+  - Actual before fix: `PhiTranslatabilityError "OpRaise target outside I(r)"` with remapped interiors (for example `interiorSet=[30,100]` for `OpRaise 1`).
+  - Current (2026-02-17): targeted source-domain guards remain green (`OpRaise accepts source-domain interior membership ...`, `BUG-002-V4`, `BUG-004`) and full gate is green (`cabal build all && cabal test`).
+- Suspected/owning area:
+  - `/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs`
+  - `/Volumes/src/mlf4/src/MLF/Elab/Phi/Translate.hs`
+- Thesis impact:
+  - Directly affects Def. 15.3.4/Fig. 10 translatability around source-domain `I(r)` membership for `Raise`.
+  - Fix preserves strict outside-`I(r)` rejection while preventing false negatives caused by identity-domain drift.
+
 ### BUG-2026-02-11-004
-- Status: Open
+- Status: Resolved
 - Priority: High
 - Discovered: 2026-02-11
-- Summary: Higher-arity bounded alias chains (`BUG-003-V1`, `BUG-003-V2`) fail in both pipelines with `OpGraft(non-binder)` `InstBot` Φ invariant errors.
+- Resolved: 2026-02-17 (reopened and reclosed on 2026-02-17)
+- Summary: Higher-arity bounded alias chains (`BUG-003-V1`, `BUG-003-V2`) regressed to bottomized elaboration; target behavior is restored by removing variable-annotation `InstInside(InstBot)->InstApp` conversion and restoring trace-free Φ keep-key behavior.
 - Minimal reproducers (surface expressions):
   - `ELet "c" (EAnn (ELam "x" (ELam "y" (ELam "z" (EVar "x")))) (mkForalls [("a",Nothing),("b",Just (STVar "a")),("c",Just (STVar "b"))] (STArrow (STVar "a") (STArrow (STVar "b") (STArrow (STVar "c") (STVar "a")))))) (EAnn (EVar "c") (STForall "a" Nothing (STArrow (STVar "a") (STArrow (STVar "a") (STArrow (STVar "a") (STVar "a"))))))`
   - `ELet "c" (EAnn (ELam "x" (ELam "y" (ELam "z" (EVar "x")))) (mkForalls [("a",Nothing),("b",Just (STVar "a")),("c",Just (STVar "a"))] (STArrow (STVar "a") (STArrow (STVar "b") (STArrow (STVar "c") (STVar "a")))))) (EAnn (EVar "c") (STForall "a" Nothing (STArrow (STVar "a") (STArrow (STVar "a") (STArrow (STVar "a") (STVar "a"))))))`
 - Reproducer command:
   - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-003-V"'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-003-V" --seed 1925916871'`
 - Expected vs actual:
   - Expected: checked and unchecked both elaborate to `∀a. a -> a -> a -> a`.
-  - Actual: both pipelines fail with `PhiInvariantError` containing `OpGraft(non-binder): InstBot expects ⊥`.
+  - Historical actual (2026-02-16): both pipelines failed with `PipelineTypeCheckError (TCLetTypeMismatch ...)`; elaborated RHS remained bottomized (`∀a. ⊥ -> t1 -> ⊥ -> ⊥`) instead of `∀a. a -> a -> a -> a`.
+  - Actual (2026-02-16, normalization deterministic-graft pass): failure class on BUG-003 currently shifts earlier to `PipelineElabError (PhiInvariantError "trace/replay binder key-space mismatch ... op: OpGraft+OpWeaken ... raw key: NodeId 6 ... replay-map domain: [0,1,2,4] ...")`.
+  - Actual (2026-02-16, replay-bridge follow-up): source-key `6` replay under-coverage is repaired (`traceBinderReplayMap` now includes `6`), and the temporary `OpGraft+OpWeaken(bound-match)` `InstBot expects ⊥` invariant crash is removed; BUG-003 returns to the baseline strict failure bucket (`PipelineTypeCheckError (TCLetTypeMismatch ...)` with bottomized RHS).
+  - Additional evidence (2026-02-16): BUG-003 edge-0 trace binder keys are `{0,1,2,4,6}`, but edge-0 scheme/subst is keyed only by `{4,8,38}`. Operations still target `0` (`OpGraft ... 0`, `OpRaise 0`) even though binder key `0` is absent in solved nodes and absent from the scheme key-space.
+  - Bridge status (2026-02-16): Φ had explicit source→replay bridge metadata and fail-fast contracts, but BUG-003 still remained in the bottomized mismatch bucket.
+  - Closure actual (2026-02-17): `BUG-003-V1/V2` pass (`∀a. a -> a -> a -> a`) and edge-0 presolution leaves no self-bound binder metas (`BUG-003-PRES` pass).
+  - Regression actual (2026-02-17, current workspace): deterministic seeded repro fails again with
+    - `BUG-003-V1`: expected `∀a. a -> a -> a -> a`, got `⊥ -> ⊥ -> ⊥ -> ⊥`
+    - `BUG-003-V2`: expected `∀a. a -> a -> a -> a`, got `⊥ -> ⊥ -> ⊥ -> ⊥`
+  - Companion drift evidence (2026-02-17): Φ-step interleaving regression is also present in this workspace
+    - `interleaves StepIntro with Omega ops in Φ translation`: expected `"O; ∀(u0 ⩾) N"`, got `"O"`.
+  - Current actual (2026-02-17, post-fix): targeted repros are green again
+    - `BUG-003-V1/V2` pass (`∀a. a -> a -> a -> a`) with seed `1925916871`.
+    - `BUG-003-PRES` remains pass (no self-bound edge-0 metas).
+    - StepIntro companion sentinel also passes after trace-free keep-key fix.
+  - Root-cause update (2026-02-17):
+    - `MLF.Elab.Elaborate` (`AAnnF`) converted variable-annotation `InstInside (InstBot t)` into `InstApp t`; BUG-003 then instantiated `c` with `InstApp TBottom`.
+    - `MLF.Elab.Phi.Translate.computeTargetBinderKeys` retained keep-keys for `mTrace = Nothing`, suppressing weaken in trace-free Φ tests.
 - Suspected/owning area:
   - `/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs`
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/Plan/Target/GammaPlan.hs`
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/Plan/BinderPlan/Build.hs`
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/Plan/ReifyPlan.hs`
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/Plan/Finalize.hs`
   - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/EdgeUnify.hs`
   - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/WitnessNorm.hs`
 - Thesis impact:
-  - Leaves bounded-alias/raise-merge reconstruction incomplete for multi-binder, higher-arity aliasing chains.
+  - Target-fixed in scoped matrix: bounded-alias higher-arity chains and edge-0 self-bound invariants now align with thesis expectations again.
+- Fix:
+  - `/Volumes/src/mlf4/src/MLF/Elab/Elaborate.hs`
+    - removed variable-annotation conversion of `InstInside (InstBot t)` to `InstApp t` in `AAnnF` inst-adjustment.
+  - `/Volumes/src/mlf4/src/MLF/Elab/Phi/Translate.hs`
+    - restored trace-free behavior in `computeTargetBinderKeys` (`mTrace = Nothing` now returns empty keep-key set).
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/EdgeUnify.hs`
+    - added same-UF-class guard before RaiseMerge emission writes,
+    - added edge-local same-root no-op guard for bound writes (`setVarBoundM`) to prevent canonical `n -> n` artifacts.
+  - `/Volumes/src/mlf4/test/ElaborationSpec.hs`
+    - added `BUG-003-PRES` regression to assert no self-bound edge-0 binder metas remain in `prConstraint`.
+- Regression tests:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "interleaves StepIntro with Omega ops in Φ translation" --seed 1925916871'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-003-V" --seed 1925916871'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-003-PRES"'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-003-V" --seed 1481579064'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-004" --seed 1925916871'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "fails fast when OpWeaken targets a trace binder source with no replay binder mapping"'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "OpRaise accepts source-domain interior membership even when etCopyMap aliases the target"'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "does not require Merge for bounded aliasing (b ⩾ a)"'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "bounded aliasing (b ⩾ a) elaborates to ∀a. a -> a -> a in unchecked and checked pipelines"'`
 
-## Resolved
+### BUG-2026-02-16-001
+- Status: Resolved
+- Priority: High
+- Discovered: 2026-02-16
+- Resolved: 2026-02-17
+- Summary: Edge planner let-edge classification no longer crashes on synthesized-wrapper fixtures with sparse body-root bind-parent ancestry.
+- Root cause:
+  - `planEdge` unconditionally resolved `eprSchemeOwnerGen` from TyExp body root (`rteBodyId`).
+  - For synthesized wrappers, test/fixture topology may place the wrapper under a gen root while body-root ancestry lacks a direct `GenRef`, triggering `InternalError "scheme introducer not found ..."`.
+- Fix:
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/EdgeProcessing/Planner.hs`
+    - added `resolveSchemeOwnerGen`:
+      - non-synth TyExp path remains strict body-root lookup via `findSchemeIntroducerM`,
+      - synthesized-wrapper path uses body-first lookup with wrapper-root fallback.
+    - added `firstGenOnPath` helper using `bindingPathToRootUnderM`.
+  - `/Volumes/src/mlf4/test/Presolution/EdgePlannerSpec.hs`
+    - strengthened let-edge classification regression to also assert `eprSchemeOwnerGen == GenNodeId 0`.
+- Regression tests:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "/Edge plan types/planner classification/threads let-edge flag into allowTrivial/" --seed 1481579064'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Edge plan types" --seed 1481579064'`
+- Thesis impact:
+  - Restores deterministic χe planning for let-edge flag classification without loosening frontend TyExp scheme-owner strictness.
+
+### BUG-2026-02-16-002
+- Status: Resolved
+- Priority: High
+- Discovered: 2026-02-16
+- Resolved: 2026-02-17
+- Summary: Edge planner annotation-edge classification no longer crashes in the same missing-introducer bucket as BUG-2026-02-16-001.
+- Resolution linkage:
+  - Resolved by BUG-2026-02-16-001 planner scheme-owner fallback in:
+    - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/EdgeProcessing/Planner.hs`
+    - `/Volumes/src/mlf4/test/Presolution/EdgePlannerSpec.hs`
+- Regression tests:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "/Edge plan types/planner classification/threads ann-edge flag into suppressWeaken/" --seed 1481579064'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Edge plan types" --seed 1481579064'`
+- Thesis impact:
+  - Restores robust χe planning for annotation-edge policy flags.
+
+### BUG-2026-02-16-007
+- Status: Resolved
+- Priority: High
+- Discovered: 2026-02-16
+- Resolved: 2026-02-16
+- Summary: BUG-003-V1 sentinel no longer regresses to `SchemeFreeVars` (`__rigid24`); failure class is stabilized in the strict `InstBot` invariant bucket.
+- Root cause:
+  - Pipeline/result-type generalization fallback handled `BindingTreeError GenSchemeFreeVars` only, not plain `SchemeFreeVars`.
+  - BUG-003-V1 therefore aborted early with `PipelineElabError (SchemeFreeVars ...)` before reaching the known strict-instantiation failure bucket.
+- Fix:
+  - `MLF.Elab.Run.Pipeline`: root generalization fallback now treats plain `SchemeFreeVars` the same as `BindingTreeError GenSchemeFreeVars` and falls back to direct `reifyType` when both GA and non-GA attempts are in the same fallback class.
+  - `MLF.Elab.Run.ResultType.Util`: `generalizeWithPlan` now mirrors elaboration fallback semantics for both `BindingTreeError GenSchemeFreeVars` and `SchemeFreeVars`, including reify fallback.
+  - `test/ElaborationSpec.hs` BUG-003 sentinels now assert the stabilized strict-instantiation failure string (`InstBot expects TBottom`) instead of the transient `SchemeFreeVars` class.
+- Regression tests:
+  - `/Volumes/src/mlf4/test/ElaborationSpec.hs` (`BUG-003-V1: triple bounded chain sentinel reproduces known Phi invariant failure`)
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "/Phase 6 — Elaborate (xMLF)/Paper alignment baselines/Systematic bug variants (2026-02-11 matrix)/BUG-003-V1: triple bounded chain sentinel reproduces known Phi invariant failure/" --seed 1481579064'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-003-V" --seed 1481579064'`
+- Thesis impact:
+  - Removes a generalization-closure drift (`SchemeFreeVars`) that masked the underlying thesis-faithfulness bounded-alias gap tracked by BUG-2026-02-11-004.
+
+### BUG-2026-02-16-008
+- Status: Resolved
+- Priority: High
+- Discovered: 2026-02-16
+- Resolved: 2026-02-16
+- Summary: BUG-003-V2 sentinel now matches the same stabilized strict-instantiation failure class as V1 instead of `SchemeFreeVars` (`__rigid24`).
+- Resolution linkage:
+  - Resolved by BUG-2026-02-16-007 fallback-alignment fix in:
+    - `/Volumes/src/mlf4/src/MLF/Elab/Run/Pipeline.hs`
+    - `/Volumes/src/mlf4/src/MLF/Elab/Run/ResultType/Util.hs`
+    - `/Volumes/src/mlf4/test/ElaborationSpec.hs`
+- Regression tests:
+  - `/Volumes/src/mlf4/test/ElaborationSpec.hs` (`BUG-003-V2: dual-alias sentinel reproduces known Phi invariant failure`)
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "/Phase 6 — Elaborate (xMLF)/Paper alignment baselines/Systematic bug variants (2026-02-11 matrix)/BUG-003-V2: dual-alias sentinel reproduces known Phi invariant failure/" --seed 1481579064'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-003-V" --seed 1481579064'`
+- Thesis impact:
+  - Clears mirrored sentinel drift for the dual-alias shape while preserving BUG-2026-02-11-004 as the active higher-arity bounded-alias thesis gap.
+
+### BUG-2026-02-16-009
+- Status: Resolved
+- Priority: High
+- Discovered: 2026-02-16
+- Resolved: 2026-02-16
+- Summary: Explicit forall annotation baseline now round-trips; Φ no longer fails non-spine `OpRaise` after copy-map adoption.
+- Root cause:
+  - In `/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs`, non-spine `OpRaise` unconditionally adopted `etCopyMap` source→copied targets before context reconstruction.
+  - For the failing edge, source target had a valid context (`C^r_n`) but the adopted target did not, so Ω raised `PhiTranslatabilityError "OpRaise (non-spine): missing computation context"`.
+- Fix:
+  - Kept adopted-target handling as primary path.
+  - Added source-target root-context fallback in non-spine `OpRaise`: when adopted-target context/root insertion is unavailable, retry root-context insertion using the source-domain raise target.
+  - This preserves BUG-004 behavior while restoring the explicit-forall paper baseline.
+- Regression tests:
+  - `/Volumes/src/mlf4/test/ElaborationSpec.hs` (`explicit forall annotation round-trips on let-bound variables`)
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "/Phase 6 — Elaborate (xMLF)/Paper alignment baselines/Explicit forall annotation edge cases/explicit forall annotation round-trips on let-bound variables/" --seed 1481579064'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-004" --seed 1481579064'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-002-V4" --seed 1481579064'`
+- Thesis impact:
+  - Restores Def. 15.3.4 non-spine `Raise` computation-context reconstruction for explicit-forall let-bound annotation baselines.
+
+### BUG-2026-02-16-003
+- Status: Resolved
+- Priority: High
+- Discovered: 2026-02-16
+- Resolved: 2026-02-16
+- Summary: Redirected let-use polymorphism (`let id = \\x.x in id id`) no longer regresses to `TCArgumentMismatch`.
+- Root cause:
+  - `AAppF.argInstFromFun` in `/Volumes/src/mlf4/src/MLF/Elab/Elaborate.hs` inlined inferred instantiation arguments via `inlineBoundVarsType`, which expanded inferred meta-vars (e.g. `t18`) into concrete bound arrows (e.g. `t14 -> t14`) and over-specialized the argument-side `id` instantiation.
+- Fix:
+  - Removed `inlineBoundVarsType` from `argInstFromFun` inferred-argument construction, preserving the solver variable chosen by `inferInstAppArgs`.
+- Regression tests:
+  - `/Volumes/src/mlf4/test/PipelineSpec.hs` (`redirected let-use sites keep polymorphic schemes`)
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "/Pipeline (Phases 1-5)/redirected let-use sites keep polymorphic schemes/" --seed 1481579064'`
+- Thesis impact:
+  - Restores paper-baseline let-polymorphic dual instantiation behavior (`id id`).
+
+### BUG-2026-02-16-004
+- Status: Resolved
+- Priority: High
+- Discovered: 2026-02-16
+- Resolved: 2026-02-16
+- Summary: Checked-authoritative property replay for generated `let id = \\x.x in id id` now passes.
+- Resolution linkage:
+  - Resolved by BUG-2026-02-16-003 root-cause fix in `/Volumes/src/mlf4/src/MLF/Elab/Elaborate.hs`.
+- Regression tests:
+  - `/Volumes/src/mlf4/test/PipelineSpec.hs` (`Checked-authoritative invariant`)
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "/Pipeline (Phases 1-5)/Checked-authoritative invariant/runPipelineElab type matches typeCheck(term) and checked pipeline type/" --seed 1481579064'`
+
+### BUG-2026-02-16-005
+- Status: Resolved
+- Priority: High
+- Discovered: 2026-02-16
+- Resolved: 2026-02-16
+- Summary: Phase 6 dual-instantiation elaboration case (`id id`) now elaborates/typechecks.
+- Resolution linkage:
+  - Resolved by BUG-2026-02-16-003 root-cause fix in `/Volumes/src/mlf4/src/MLF/Elab/Elaborate.hs`.
+- Regression tests:
+  - `/Volumes/src/mlf4/test/ElaborationSpec.hs` (`elaborates dual instantiation in application`)
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "/Phase 6 — Elaborate (xMLF)/Polymorphism and Generalization/elaborates dual instantiation in application/" --seed 1481579064'`
+
+### BUG-2026-02-16-006
+- Status: Resolved
+- Priority: High
+- Discovered: 2026-02-16
+- Resolved: 2026-02-16
+- Summary: Paper baseline `let id = (\\x. x) in id id` again elaborates to `∀a. a -> a`.
+- Resolution linkage:
+  - Resolved by BUG-2026-02-16-003 root-cause fix in `/Volumes/src/mlf4/src/MLF/Elab/Elaborate.hs`.
+- Regression tests:
+  - `/Volumes/src/mlf4/test/ElaborationSpec.hs` (`let id = (\\x. x) in id id should have type ∀a. a -> a`)
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "id id should have type" --seed 1481579064'`
+- Thesis impact:
+  - Restores a central thesis/paper baseline program.
 
 ### BUG-2026-02-11-002
 - Status: Resolved

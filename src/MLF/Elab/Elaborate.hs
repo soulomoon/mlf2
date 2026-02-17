@@ -53,7 +53,10 @@ import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Constraint.Solve as Solve (frWith)
 import MLF.Constraint.Presolution
     ( EdgeTrace
+    , CopyMapping(..)
     , etBinderArgs
+    , etCopyMap
+    , lookupCopy
     )
 import MLF.Frontend.ConstraintGen.Types (AnnExpr(..), AnnExprF(..))
 
@@ -531,25 +534,37 @@ elaborateWithEnv config elabEnv ann = do
                                                 _ -> funInstNorm
                                         _ -> funInstNorm
                                 _ -> funInstNorm
-                        fAppForArgInference = case funInst' of
+                        fAppForArgInference = case funInstRecovered of
                             InstId -> f'
-                            _ -> ETyInst f' funInst'
+                            _ -> ETyInst f' funInstRecovered
                         sourceVarName annExpr = case annExpr of
                             AVar v _ -> Just v
                             AAnn inner _ _ -> sourceVarName inner
                             _ -> Nothing
                     let argInstFromFun =
-                            case (sourceVarName aAnn, f') of
+                            let shouldInlineParamTy =
+                                    case (sourceVarName fAnn, sourceVarName aAnn) of
+                                        (Just fName, Just argName) -> fName /= argName
+                                        _ -> False
+                            in case (sourceVarName aAnn, f') of
                                 (Just v, ELam _ paramTy _) -> do
                                     si <- Map.lookup v env
-                                    args <- inferInstAppArgs (siScheme si) paramTy
-                                    pure (instSeqApps (map (inlineBoundVarsType resReify) args))
+                                    let paramTy' =
+                                            if shouldInlineParamTy
+                                                then inlineBoundVarsType resGen paramTy
+                                                else paramTy
+                                    args <- inferInstAppArgs (siScheme si) paramTy'
+                                    pure (instSeqApps args)
                                 (Just v, _) -> do
                                     si <- Map.lookup v env
                                     case TypeCheck.typeCheckWithEnv tcEnv fAppForArgInference of
                                         Right (TArrow paramTy _) -> do
-                                            args <- inferInstAppArgs (siScheme si) paramTy
-                                            pure (instSeqApps (map (inlineBoundVarsType resReify) args))
+                                            let paramTy' =
+                                                    if shouldInlineParamTy
+                                                        then inlineBoundVarsType resGen paramTy
+                                                        else paramTy
+                                            args <- inferInstAppArgs (siScheme si) paramTy'
+                                            pure (instSeqApps args)
                                         _ -> Nothing
                                 _ -> Nothing
                     let argInst' =
@@ -828,9 +843,17 @@ elaborateWithEnv config elabEnv ann = do
                         Left _ -> pure Nothing
                         _ -> pure Nothing
                     let instAdjusted0 = adjustAnnotationInst inst
+                        sourceAnnIsVar annExpr =
+                            case annExpr of
+                                AVar _ _ -> True
+                                AAnn inner _ _ -> sourceAnnIsVar inner
+                                _ -> False
                         instAdjusted =
                             case (mExpectedBound, instAdjusted0) of
                                 (Just expectedBound, InstInside (InstBot _)) ->
+                                    InstInside (InstBot expectedBound)
+                                (Just expectedBound, InstId)
+                                    | not (sourceAnnIsVar exprAnn) ->
                                     InstInside (InstBot expectedBound)
                                 _ -> instAdjusted0
                     exprClosed <-
@@ -934,14 +957,43 @@ elaborateWithEnv config elabEnv ann = do
                             Just si ->
                                 case siScheme si of
                                     Forall binds _ -> not (null binds)
-                            Nothing -> True
+                            Nothing -> False
                 instFromTrace <- case (allowFallbackFromTrace, phi, mExpansion, mSchemeInfo) of
                     (True, InstId, Just (ExpInstantiate args), mSi) -> do
-                        let argNodes =
+                        let traceArgNodes =
                                 case mTrace of
                                     Just tr | not (null (etBinderArgs tr)) ->
-                                        map snd (etBinderArgs tr)
-                                    _ -> args
+                                        Just (map snd (etBinderArgs tr))
+                                    _ -> Nothing
+                            argNodesPrimary = fromMaybe args traceArgNodes
+                            resolvedPrimary = resolveFallbackArgNodes mTrace argNodesPrimary
+                            (argNodes, resolvedArgNodes) =
+                                case (traceArgNodes, resolvedPrimary) of
+                                    (Just _, Nothing) ->
+                                        (args, resolveFallbackArgNodes mTrace args)
+                                    _ -> (argNodesPrimary, resolvedPrimary)
+                            fallbackOk =
+                                fallbackProvenanceArityOk mTrace mSi argNodes
+                                    && isJust resolvedArgNodes
+                            tracePairCount =
+                                case mTrace of
+                                    Just tr -> length (etBinderArgs tr)
+                                    Nothing -> 0
+                            traceBinderArity =
+                                case mTrace of
+                                    Just tr ->
+                                        IntSet.size $
+                                            IntSet.fromList
+                                                [ getNodeId binder
+                                                | (binder, _arg) <- etBinderArgs tr
+                                                ]
+                                    Nothing -> 0
+                            schemeArity =
+                                case mSi of
+                                    Just si ->
+                                        case siScheme si of
+                                            Forall binds _ -> length binds
+                                    Nothing -> 0
                         let targetArgs =
                                 case mSi of
                                     Just si ->
@@ -957,31 +1009,41 @@ elaborateWithEnv config elabEnv ann = do
                         case debugGeneralize
                             ("reifyInst fallback edge=" ++ show eid
                                 ++ " argNodes=" ++ show argNodes
+                                ++ " fallbackOk=" ++ show fallbackOk
+                                ++ " tracePairCount=" ++ show tracePairCount
+                                ++ " traceBinderArity=" ++ show traceBinderArity
+                                ++ " schemeArity=" ++ show schemeArity
+                                ++ " resolvedArgNodes=" ++ show resolvedArgNodes
                                 ++ " targetArgs=" ++ show targetArgs
                             )
                             () of
                             () -> pure ()
-                        let substForArgs =
-                                case mSi of
-                                    Just si -> siSubst si
-                                    Nothing -> IntMap.empty
-                            constraint = srConstraint resReify
-                            reifyArg arg =
-                                case VarStore.lookupVarBound constraint arg of
-                                    Just bnd -> reifyBoundWithNames resReify substForArgs bnd
-                                    Nothing -> reifyTypeWithNamedSetNoFallback resReify substForArgs namedSetReify arg
-                        argTys <- case targetArgs of
-                            Just inferred -> pure inferred
-                            Nothing -> mapM reifyArg argNodes
-                        let argTys' = map (inlineBoundVarsType resReify) argTys
-                        case debugGeneralize
-                            ("reifyInst fallback edge=" ++ show eid
-                                ++ " argTys=" ++ show argTys
-                                ++ " argTys'=" ++ show argTys'
-                            )
-                            () of
-                            () -> pure ()
-                        pure (Just (instSeqApps argTys'))
+                        if not fallbackOk
+                            then pure Nothing
+                            else do
+                                let argNodes' = fromMaybe argNodes resolvedArgNodes
+                                let substForArgs =
+                                        case mSi of
+                                            Just si -> siSubst si
+                                            Nothing -> IntMap.empty
+                                    constraint = srConstraint resReify
+                                    reifyArg arg =
+                                        let argC = canonical arg
+                                        in case VarStore.lookupVarBound constraint argC of
+                                            Just bnd -> reifyBoundWithNames resReify substForArgs bnd
+                                            Nothing -> reifyTypeWithNamedSetNoFallback resReify substForArgs namedSetReify argC
+                                argTys <- case targetArgs of
+                                    Just inferred -> pure inferred
+                                    Nothing -> mapM reifyArg argNodes'
+                                let argTys' = map (inlineBoundVarsType resReify) argTys
+                                case debugGeneralize
+                                    ("reifyInst fallback edge=" ++ show eid
+                                        ++ " argTys=" ++ show argTys
+                                        ++ " argTys'=" ++ show argTys'
+                                    )
+                                    () of
+                                    () -> pure ()
+                                pure (Just (instSeqApps argTys'))
                     _ -> pure Nothing
                 case instFromTrace of
                     Just inst -> Right inst
@@ -1004,6 +1066,83 @@ elaborateWithEnv config elabEnv ann = do
                 if all (`Map.member` subst) binderNames
                     then Just [ty | name <- binderNames, Just ty <- [Map.lookup name subst]]
                     else Nothing
+
+    fallbackProvenanceArityOk :: Maybe EdgeTrace -> Maybe SchemeInfo -> [NodeId] -> Bool
+    fallbackProvenanceArityOk mTrace mSi argNodes =
+        case mTrace of
+            Just tr
+                | not (null (etBinderArgs tr)) ->
+                    let pairCount = length (etBinderArgs tr)
+                        binderArity =
+                            IntSet.size $
+                                IntSet.fromList
+                                    [ getNodeId binder
+                                    | (binder, _arg) <- etBinderArgs tr
+                                    ]
+                        schemeArityOk =
+                            case mSi of
+                                Nothing -> True
+                                Just si ->
+                                    case siScheme si of
+                                        Forall binds _ -> length binds == binderArity
+                    in pairCount == binderArity
+                        && length argNodes == binderArity
+                        && schemeArityOk
+            _ ->
+                case mSi of
+                    Nothing -> True
+                    Just si ->
+                        case siScheme si of
+                            Forall binds _ -> length argNodes == length binds
+
+    resolveFallbackArgNodes :: Maybe EdgeTrace -> [NodeId] -> Maybe [NodeId]
+    resolveFallbackArgNodes mTrace = mapM (resolveFallbackArgNode mTrace)
+
+    resolveFallbackArgNode :: Maybe EdgeTrace -> NodeId -> Maybe NodeId
+    resolveFallbackArgNode mTrace arg =
+        listToMaybe
+            [ canonical cand
+            | cand <- fallbackArgCandidates mTrace arg
+            , nodeExists cand
+            ]
+      where
+        nodeExists nid =
+            isJust (NodeAccess.lookupNode (srConstraint resReify) (canonical nid))
+
+    fallbackArgCandidates :: Maybe EdgeTrace -> NodeId -> [NodeId]
+    fallbackArgCandidates mTrace arg =
+        reverse candidatesRev
+      where
+        key = getNodeId arg
+        keyC = getNodeId (canonical arg)
+        traceForward nid =
+            case mTrace of
+                Nothing -> []
+                Just tr -> maybe [] pure (lookupCopy nid (etCopyMap tr))
+        traceReverseByKey k =
+            case mTrace of
+                Nothing -> []
+                Just tr ->
+                    [ NodeId src
+                    | (src, dst) <- IntMap.toList (getCopyMapping (etCopyMap tr))
+                    , getNodeId dst == k
+                    ]
+        rawCandidates =
+            [arg, canonical arg]
+                ++ traceForward arg
+                ++ traceForward (canonical arg)
+                ++ traceReverseByKey key
+                ++ traceReverseByKey keyC
+        (candidatesRev, _) =
+            foldl'
+                (\(acc, seen) nid ->
+                    let k = getNodeId nid
+                    in if IntSet.member k seen
+                        then (acc, seen)
+                        else (nid : acc, IntSet.insert k seen)
+                )
+                ([], IntSet.empty)
+                rawCandidates
 
 instSeqApps :: [ElabType] -> Instantiation
 instSeqApps tys = case map InstApp tys of

@@ -895,6 +895,7 @@ spec = do
                             { etRoot = root
                             , etBinderArgs = []
                             , etInterior = InteriorNodes (IntSet.fromList [getNodeId m, getNodeId parent, getNodeId n])
+                            , etBinderReplayHints = mempty
                             , etCopyMap = mempty
                             }
                     st0 = PresolutionState
@@ -958,6 +959,7 @@ spec = do
                             { etRoot = root
                             , etBinderArgs = []
                             , etInterior = InteriorNodes (IntSet.fromList [getNodeId interiorNode])
+                            , etBinderReplayHints = mempty
                             , etCopyMap = mempty
                             }
                     st0 = PresolutionState
@@ -1020,6 +1022,7 @@ spec = do
                             { etRoot = root
                             , etBinderArgs = []
                             , etInterior = InteriorNodes (IntSet.fromList [getNodeId mLess, getNodeId nGreater])
+                            , etBinderReplayHints = mempty
                             , etCopyMap = mempty
                             }
                     st0 = PresolutionState
@@ -1074,6 +1077,7 @@ spec = do
                             { etRoot = root
                             , etBinderArgs = []
                             , etInterior = InteriorNodes (IntSet.fromList [getNodeId interiorNode, getNodeId outsideNode])
+                            , etBinderReplayHints = mempty
                             , etCopyMap = mempty
                             }
                     st0 = PresolutionState
@@ -1095,6 +1099,232 @@ spec = do
                         expectationFailure $ "Expected WitnessNormalizationError MissingOrderKey, got: " ++ show other
                     Right _ ->
                         expectationFailure "Expected WitnessNormalizationError for missing order key"
+
+            it "synthesizes one deterministic OpGraft+OpWeaken pair for annotation-edge ambiguous multi-graft" $ do
+                let root = NodeId 0
+                    binder = NodeId 2
+                    sourceB1 = NodeId 20
+                    sourceB2 = NodeId 21
+                    arg1 = NodeId 30
+                    arg2 = NodeId 31
+                    edgeId = 0
+                    nodes = nodeMapFromList
+                            [ (getNodeId root, TyForall root binder)
+                            , (getNodeId binder, TyVar { tnId = binder, tnBound = Nothing })
+                            , (getNodeId arg1, TyBase arg1 (BaseTy "Int"))
+                            , (getNodeId arg2, TyBase arg2 (BaseTy "Bool"))
+                            ]
+                    bindParents =
+                        bindParentsFromPairs
+                            [ (binder, root, BindFlex)
+                            , (arg1, root, BindFlex)
+                            , (arg2, root, BindFlex)
+                            ]
+                    constraint = rootedConstraint $ emptyConstraint
+                            { cNodes = nodes
+                            , cBindParents = bindParents
+                            , cAnnEdges = IntSet.singleton edgeId
+                            }
+                    uf = IntMap.empty
+                    ops0 =
+                        [ OpGraft arg2 binder
+                        , OpGraft arg1 binder
+                        ]
+                    edgeWitness = EdgeWitness
+                            { ewEdgeId = EdgeId edgeId
+                            , ewLeft = root
+                            , ewRight = binder
+                            , ewRoot = root
+                            , ewSteps = map StepOmega ops0
+                            , ewWitness = InstanceWitness ops0
+                            }
+                    edgeTrace = EdgeTrace
+                            { etRoot = root
+                            , etBinderArgs = [(sourceB1, arg1), (sourceB2, arg2)]
+                            , etInterior = InteriorNodes (IntSet.fromList [getNodeId binder])
+                            , etBinderReplayHints =
+                                IntMap.fromList
+                                    [ (getNodeId sourceB1, binder)
+                                    , (getNodeId sourceB2, binder)
+                                    ]
+                            , etCopyMap = mempty
+                            }
+                    st0 = PresolutionState
+                            { psConstraint = constraint
+                            , psPresolution = Presolution IntMap.empty
+                            , psUnionFind = uf
+                            , psNextNodeId = 32
+                            , psPendingWeakens = IntSet.empty
+                            , psBinderCache = IntMap.empty
+                            , psEdgeExpansions = IntMap.empty
+                            , psEdgeWitnesses = IntMap.fromList [(edgeId, edgeWitness)]
+                            , psEdgeTraces = IntMap.fromList [(edgeId, edgeTrace)]
+                            }
+                case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
+                    Left err ->
+                        expectationFailure $ "Expected synthesized OpGraft+OpWeaken pair, got: " ++ show err
+                    Right (_, st1) ->
+                        case IntMap.lookup edgeId (psEdgeWitnesses st1) of
+                            Nothing ->
+                                expectationFailure "Missing normalized witness for annotation edge"
+                            Just ew1 -> do
+                                let steps = ewSteps ew1
+                                    grafts =
+                                        [ (arg, n)
+                                        | StepOmega (OpGraft arg n) <- steps
+                                        ]
+                                    weakens =
+                                        [ n
+                                        | StepOmega (OpWeaken n) <- steps
+                                        ]
+                                grafts `shouldBe` [(arg1, binder)]
+                                weakens `shouldBe` [binder]
+
+            it "fails fast when annotation-edge deterministic graft-weaken synthesis has no live candidate arg" $ do
+                let root = NodeId 0
+                    binder = NodeId 2
+                    sourceB1 = NodeId 20
+                    sourceB2 = NodeId 21
+                    missingArg1 = NodeId 30
+                    missingArg2 = NodeId 31
+                    edgeId = 0
+                    nodes = nodeMapFromList
+                            [ (getNodeId root, TyForall root binder)
+                            , (getNodeId binder, TyVar { tnId = binder, tnBound = Nothing })
+                            ]
+                    bindParents =
+                        bindParentsFromPairs
+                            [ (binder, root, BindFlex)
+                            ]
+                    constraint = rootedConstraint $ emptyConstraint
+                            { cNodes = nodes
+                            , cBindParents = bindParents
+                            , cAnnEdges = IntSet.singleton edgeId
+                            }
+                    uf = IntMap.empty
+                    ops0 =
+                        [ OpGraft missingArg2 binder
+                        , OpGraft missingArg1 binder
+                        ]
+                    edgeWitness = EdgeWitness
+                            { ewEdgeId = EdgeId edgeId
+                            , ewLeft = root
+                            , ewRight = binder
+                            , ewRoot = root
+                            , ewSteps = map StepOmega ops0
+                            , ewWitness = InstanceWitness ops0
+                            }
+                    edgeTrace = EdgeTrace
+                            { etRoot = root
+                            , etBinderArgs = [(sourceB1, missingArg1), (sourceB2, missingArg2)]
+                            , etInterior = InteriorNodes (IntSet.fromList [getNodeId binder])
+                            , etBinderReplayHints =
+                                IntMap.fromList
+                                    [ (getNodeId sourceB1, binder)
+                                    , (getNodeId sourceB2, binder)
+                                    ]
+                            , etCopyMap = mempty
+                            }
+                    st0 = PresolutionState
+                            { psConstraint = constraint
+                            , psPresolution = Presolution IntMap.empty
+                            , psUnionFind = uf
+                            , psNextNodeId = 4
+                            , psPendingWeakens = IntSet.empty
+                            , psBinderCache = IntMap.empty
+                            , psEdgeExpansions = IntMap.empty
+                            , psEdgeWitnesses = IntMap.fromList [(edgeId, edgeWitness)]
+                            , psEdgeTraces = IntMap.fromList [(edgeId, edgeTrace)]
+                            }
+                case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
+                    Left (WitnessNormalizationError (EdgeId eid) (DeterministicGraftWeakenSynthesisFailed b cands)) -> do
+                        eid `shouldBe` edgeId
+                        b `shouldBe` binder
+                        cands `shouldBe` [missingArg1, missingArg2]
+                    Left other ->
+                        expectationFailure $
+                            "Expected deterministic synthesis fail-fast error, got: " ++ show other
+                    Right _ ->
+                        expectationFailure "Expected deterministic synthesis fail-fast error, but normalization succeeded"
+
+            it "does not synthesize deterministic graft-weaken pair on non-annotation edges" $ do
+                let root = NodeId 0
+                    binder = NodeId 2
+                    sourceB1 = NodeId 20
+                    sourceB2 = NodeId 21
+                    arg1 = NodeId 30
+                    arg2 = NodeId 31
+                    edgeId = 0
+                    nodes = nodeMapFromList
+                            [ (getNodeId root, TyForall root binder)
+                            , (getNodeId binder, TyVar { tnId = binder, tnBound = Nothing })
+                            , (getNodeId arg1, TyBase arg1 (BaseTy "Int"))
+                            , (getNodeId arg2, TyBase arg2 (BaseTy "Bool"))
+                            ]
+                    bindParents =
+                        bindParentsFromPairs
+                            [ (binder, root, BindFlex)
+                            , (arg1, root, BindFlex)
+                            , (arg2, root, BindFlex)
+                            ]
+                    constraint = rootedConstraint $ emptyConstraint
+                            { cNodes = nodes
+                            , cBindParents = bindParents
+                            }
+                    uf = IntMap.empty
+                    ops0 =
+                        [ OpGraft arg2 binder
+                        , OpGraft arg1 binder
+                        ]
+                    edgeWitness = EdgeWitness
+                            { ewEdgeId = EdgeId edgeId
+                            , ewLeft = root
+                            , ewRight = binder
+                            , ewRoot = root
+                            , ewSteps = map StepOmega ops0
+                            , ewWitness = InstanceWitness ops0
+                            }
+                    edgeTrace = EdgeTrace
+                            { etRoot = root
+                            , etBinderArgs = [(sourceB1, arg1), (sourceB2, arg2)]
+                            , etInterior = InteriorNodes (IntSet.fromList [getNodeId binder])
+                            , etBinderReplayHints =
+                                IntMap.fromList
+                                    [ (getNodeId sourceB1, binder)
+                                    , (getNodeId sourceB2, binder)
+                                    ]
+                            , etCopyMap = mempty
+                            }
+                    st0 = PresolutionState
+                            { psConstraint = constraint
+                            , psPresolution = Presolution IntMap.empty
+                            , psUnionFind = uf
+                            , psNextNodeId = 32
+                            , psPendingWeakens = IntSet.empty
+                            , psBinderCache = IntMap.empty
+                            , psEdgeExpansions = IntMap.empty
+                            , psEdgeWitnesses = IntMap.fromList [(edgeId, edgeWitness)]
+                            , psEdgeTraces = IntMap.fromList [(edgeId, edgeTrace)]
+                            }
+                case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
+                    Left err ->
+                        expectationFailure $ "Expected non-annotation edge to keep current behavior, got: " ++ show err
+                    Right (_, st1) ->
+                        case IntMap.lookup edgeId (psEdgeWitnesses st1) of
+                            Nothing ->
+                                expectationFailure "Missing normalized witness for non-annotation edge"
+                            Just ew1 -> do
+                                let steps = ewSteps ew1
+                                    grafts =
+                                        [ (arg, n)
+                                        | StepOmega (OpGraft arg n) <- steps
+                                        ]
+                                    weakens =
+                                        [ n
+                                        | StepOmega (OpWeaken n) <- steps
+                                        ]
+                                grafts `shouldBe` [(arg2, binder), (arg1, binder)]
+                                weakens `shouldBe` []
 
         describe "Inert-locked detection" $ do
             it "does not mark nodes with flex path to ⊥ as inert-locked" $ do

@@ -133,4 +133,10 @@ buildEdgeTrace gid _eid left leftRaw expn (copyMap0, _interior0, _frontier0) = d
             , TypeRef nid <- [nodeRefFromKey key]
             ]
     let interior = fromListInterior (map canonical interiorRaw)
-    pure EdgeTrace { etRoot = root, etBinderArgs = bas, etInterior = interior, etCopyMap = copyMap0 }
+    pure EdgeTrace
+        { etRoot = root
+        , etBinderArgs = bas
+        , etInterior = interior
+        , etBinderReplayHints = mempty
+        , etCopyMap = copyMap0
+        }

@@ -133,6 +133,21 @@ data PresolutionState = PresolutionState
 
 -- | Per-edge provenance for instantiation-related operations.
 --
+-- Source-ID contract (consumed by Φ):
+--   * `EdgeWitness.ewSteps` / legacy `ewWitness` operation node IDs
+--   * `etBinderArgs`
+--   * `etCopyMap` keys
+--   * `etInterior`
+-- all live in one source-ID domain.
+--
+-- Replay-hint contract:
+--   * `etBinderReplayHints` maps source binder keys to replay-domain binder
+--     candidates (solved TyVar binders). This map is advisory metadata used to
+--     reduce source/replay ambiguity at Φ translation time.
+--
+-- Canonical IDs are derived locally at lookup sites. Global canonicalization
+-- must not rewrite provenance collections across this boundary.
+--
 -- This is an internal aid for gradually aligning presolution witnesses with
 -- `papers/these-finale-english.txt`’s normalized instance-operation language
 -- (see `papers/xmlf.txt` Fig. 10). For now, we only track the binder↦argument
@@ -141,6 +156,7 @@ data EdgeTrace = EdgeTrace
     { etRoot :: NodeId
     , etBinderArgs :: [(NodeId, NodeId)] -- ^ (binder node, instantiation argument node)
     , etInterior :: InteriorNodes -- ^ Nodes in I(r) (exact, from the binding tree).
+    , etBinderReplayHints :: IntMap NodeId -- ^ source binder key -> replay-domain binder candidate
     , etCopyMap :: CopyMapping -- ^ Provenance: original node -> copied/replaced node
     }
     deriving (Eq, Show)
@@ -589,7 +605,7 @@ instantiationBindersFromGenM gid bodyRoot0 = do
 
     -- 2. Compute reachability from the body root
     let reachable =
-            Traversal.reachableFromUnderLenient
+            Traversal.reachableFromWithBounds
                 canonical
                 (lookupNodeIn nodes)
                 bodyC
@@ -616,7 +632,7 @@ instantiationBindersFromGenM gid bodyRoot0 = do
                     ]
 
     -- 5. Sort by order keys (leftmost-lowermost, paper <P)
-    let orderKeys = Order.orderKeysFromRootWith canonical nodes bodyC Nothing
+    let orderKeys = Order.orderKeysFromConstraintWith canonical c0 bodyC Nothing
 
     sorted <- case Order.sortByOrderKey orderKeys bindersCanon of
         Left err -> throwError $ InternalError ("instantiationBindersFromGenM: order key error: " ++ show err)

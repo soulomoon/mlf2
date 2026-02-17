@@ -56,7 +56,7 @@ typeCheckWithEnv env term = case term of
         let schTy = schemeToType sch
         if letSchemeAccepts rhsTy schTy
             then do
-                let env' = env { termEnv = Map.insert v rhsTy (termEnv env) }
+                let env' = env { termEnv = Map.insert v schTy (termEnv env) }
                 typeCheckWithEnv env' body
             else Left (TCLetTypeMismatch rhsTy schTy)
     ETyAbs v mbBound body -> do

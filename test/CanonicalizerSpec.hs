@@ -3,15 +3,14 @@ module CanonicalizerSpec (spec) where
 
 import Control.Monad (forM)
 import qualified Data.IntMap.Strict as IntMap
-import qualified Data.IntSet as IntSet
 import qualified Data.List.NonEmpty as NE
 import Data.Maybe (catMaybes)
 import Test.Hspec
 import Test.QuickCheck
 
 import MLF.Constraint.Canonicalizer
-import MLF.Constraint.Presolution (CopyMapping(..), EdgeTrace(..), fromListInterior, toListInterior)
-import MLF.Constraint.Types.Graph (EdgeId(..), NodeId(..), getNodeId)
+import MLF.Constraint.Presolution (CopyMapping(..), EdgeTrace(..), fromListInterior)
+import MLF.Constraint.Types.Graph (EdgeId(..), NodeId(..))
 import MLF.Constraint.Types.Witness
     ( BoundRef(..)
     , EdgeWitness(..)
@@ -69,11 +68,9 @@ spec = describe "MLF.Constraint.Canonicalizer" $ do
             canon = makeCanonicalizer IntMap.empty redirects
             canonNode = canonicalizeNode canon
 
-        -- Split-domain contract: canonicalization maps ALL node IDs
-        -- (structural, witness-op targets, trace binder/copy fields) through
-        -- the canonical function.  Source-ID authority is enforced at the Phi
-        -- translation layer (IdentityBridge), not at the canonicalization layer.
-        it "canonicalizes edge witnesses" $ do
+        -- Source-ID contract: keep witness/trace provenance in source domain.
+        -- Canonicalization is only for structural lookup fields.
+        it "canonicalizes witness structural fields and preserves source-domain witness ops" $ do
             let ops0 = [OpMerge (NodeId 1) (NodeId 2), OpWeaken (NodeId 3)]
                 steps0 =
                     [ StepOmega (OpGraft (NodeId 1) (NodeId 3))
@@ -89,43 +86,29 @@ spec = describe "MLF.Constraint.Canonicalizer" $ do
                     , ewWitness = InstanceWitness ops0
                     }
                 w1 = canonicalizeWitness canon w0
-                mapOp op = case op of
-                    OpGraft a b -> OpGraft (canonNode a) (canonNode b)
-                    OpMerge a b -> OpMerge (canonNode a) (canonNode b)
-                    OpRaise n -> OpRaise (canonNode n)
-                    OpWeaken n -> OpWeaken (canonNode n)
-                    OpRaiseMerge a b -> OpRaiseMerge (canonNode a) (canonNode b)
-                mapStep step = case step of
-                    StepOmega op -> StepOmega (mapOp op)
-                    StepIntro -> StepIntro
             ewLeft w1 `shouldBe` canonNode (ewLeft w0)
             ewRight w1 `shouldBe` canonNode (ewRight w0)
             ewRoot w1 `shouldBe` canonNode (ewRoot w0)
-            ewSteps w1 `shouldBe` map mapStep steps0
+            ewSteps w1 `shouldBe` steps0
             let InstanceWitness ops1 = ewWitness w1
-            ops1 `shouldBe` map mapOp ops0
+            ops1 `shouldBe` ops0
 
-        it "canonicalizes edge traces and expansions" $ do
+        it "canonicalizes trace root and preserves source-domain provenance fields" $ do
             let tr0 = EdgeTrace
                     { etRoot = NodeId 1
                     , etBinderArgs = [(NodeId 1, NodeId 3), (NodeId 2, NodeId 4)]
                     , etInterior = fromListInterior [NodeId 1, NodeId 2, NodeId 3]
+                    , etBinderReplayHints = mempty
                     , etCopyMap = CopyMapping (IntMap.fromList [(1, NodeId 2), (3, NodeId 4)])
                     }
                 tr1 = canonicalizeTrace canon tr0
-                interior1 = IntSet.fromList (map getNodeId (toListInterior (etInterior tr1)))
-                interiorExpected =
-                    IntSet.fromList (map (getNodeId . canonNode) (toListInterior (etInterior tr0)))
             etRoot tr1 `shouldBe` canonNode (etRoot tr0)
-            etBinderArgs tr1
-                `shouldBe` map (\(a, b) -> (canonNode a, canonNode b)) (etBinderArgs tr0)
-            interior1 `shouldBe` interiorExpected
+            etBinderArgs tr1 `shouldBe` etBinderArgs tr0
+            etInterior tr1 `shouldBe` etInterior tr0
             let CopyMapping cmap = etCopyMap tr1
-            IntMap.lookup (getNodeId (canonNode (NodeId 1))) cmap
-                `shouldBe` Just (canonNode (NodeId 2))
-            IntMap.lookup (getNodeId (canonNode (NodeId 3))) cmap
-                `shouldBe` Just (canonNode (NodeId 4))
+            cmap `shouldBe` IntMap.fromList [(1, NodeId 2), (3, NodeId 4)]
 
+        it "canonicalizes expansions" $ do
             let spec0 = ForallSpec
                     { fsBinderCount = 1
                     , fsBounds = [Just (BoundNode (NodeId 1)), Just (BoundBinder 0)]

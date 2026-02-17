@@ -132,8 +132,9 @@ spec = describe "Edge plan types" $ do
                     IntMap.empty IntMap.empty IntMap.empty
             case runPresolutionM defaultTraceConfig st0 (planEdge edge) of
                 Left err -> expectationFailure ("planEdge failed: " ++ show err)
-                Right (plan, _) ->
+                Right (plan, _) -> do
                     eprAllowTrivial plan `shouldBe` True
+                    eprSchemeOwnerGen plan `shouldBe` GenNodeId 0
 
         it "threads ann-edge flag into suppressWeaken" $ do
             let body = NodeId 0
@@ -153,5 +154,6 @@ spec = describe "Edge plan types" $ do
                     IntMap.empty IntMap.empty IntMap.empty
             case runPresolutionM defaultTraceConfig st0 (planEdge edge) of
                 Left err -> expectationFailure ("planEdge failed: " ++ show err)
-                Right (plan, _) ->
+                Right (plan, _) -> do
                     eprSuppressWeaken plan `shouldBe` True
+                    eprSchemeOwnerGen plan `shouldBe` GenNodeId 0

@@ -140,7 +140,15 @@ instance MonadEdgeUnify EdgeUnifyM where
     findRootM nid = lift $ Ops.findRoot nid
     unifyAcyclicRawWithRaiseTracePreferM prefer n1 n2 = lift $ Unify.unifyAcyclicRawWithRaiseTracePrefer prefer n1 n2
     lookupVarBoundM nid = lift $ Ops.lookupVarBound nid
-    setVarBoundM nid mb = lift $ Ops.setVarBound nid mb
+    setVarBoundM nid mb =
+        case mb of
+            Nothing -> lift $ Ops.setVarBound nid Nothing
+            Just bnd -> do
+                nidRoot <- findRootM nid
+                bndRoot <- findRootM bnd
+                if nidRoot == bndRoot
+                    then pure ()
+                    else lift $ Ops.setVarBound nid (Just bnd)
     dropVarBindM nid = lift $ Ops.dropVarBind nid
     throwPresolutionErrorM err = lift $ throwError err
     isBoundAboveInBindingTreeM edgeRoot ext = liftPresolution $ isBoundAboveInBindingTree edgeRoot ext
@@ -478,6 +486,10 @@ nodes that were actually raised. When binder metas become aliased we emit
 exterior TyVar class, we emit RaiseMerge as an explicit Raise followed by Merge
 so that `normalizeInstanceOpsFull` can coalesce it later. See
 `papers/these-finale-english.txt` and `papers/xmlf.txt` section 3.4 / Fig. 10.
+
+Invariant: RaiseMerge emission is forbidden for self-class merges. If operated
+`n` and target `m` are already in the same UF class, the operation is a no-op
+and must not record/source-write `OpMerge n n` side effects.
 -}
 
 unifyAcyclicEdge :: NodeId -> NodeId -> EdgeUnifyM ()
@@ -547,24 +559,36 @@ unifyAcyclicEdge n1 n2 = do
             when (not (IntSet.null live)) $ do
                 repBinderId <- pickRepBinderId live
                 let repBinder = NodeId repBinderId
+                    recordRaiseMergeUnlessSelf extCandidate = do
+                        repRoot <- findRootM repBinder
+                        extRoot <- findRootM extCandidate
+                        if repRoot == extRoot
+                            then
+                                debugEdgeUnify
+                                    ( "raise-merge skipped: self-class merge binder="
+                                        ++ show repBinder
+                                        ++ " ext="
+                                        ++ show extCandidate
+                                        ++ " root="
+                                        ++ show repRoot
+                                    )
+                            else do
+                                -- Paper-shaped RaiseMerge is a sequence (Raise(n))^k; Merge(n, m).
+                                -- We record it in that explicit form and let `normalizeInstanceOpsFull`
+                                -- coalesce it back to `OpRaiseMerge`.
+                                recordOp (OpRaise repBinder)
+                                recordOp (OpMerge repBinder extCandidate)
+                                setVarBoundM repBinder (Just extCandidate)
+                                recordEliminate repBinder
                 case (IntSet.null bs1, IntSet.null bs2) of
                     (False, True) | inInt1 && not inInt2 -> do
                         should <- shouldRecordRaiseMerge repBinder root2
-                        when should $ do
-                            -- Paper-shaped RaiseMerge is a sequence (Raise(n))^k; Merge(n, m).
-                            -- We record it in that explicit form and let `normalizeInstanceOpsFull`
-                            -- coalesce it back to `OpRaiseMerge`.
-                            recordOp (OpRaise repBinder)
-                            recordOp (OpMerge repBinder root2)
-                            setVarBoundM repBinder (Just root2)
-                            recordEliminate repBinder
+                        when should $
+                            recordRaiseMergeUnlessSelf root2
                     (True, False) | inInt2 && not inInt1 -> do
                         should <- shouldRecordRaiseMerge repBinder root1
-                        when should $ do
-                            recordOp (OpRaise repBinder)
-                            recordOp (OpMerge repBinder root1)
-                            setVarBoundM repBinder (Just root1)
-                            recordEliminate repBinder
+                        when should $
+                            recordRaiseMergeUnlessSelf root1
                     _ -> pure ()
 
 -- | Decide whether to record a RaiseMerge(binder, ext) operation.

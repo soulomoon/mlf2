@@ -1,0 +1,69 @@
+# Progress Log: BUG-002 Replay-Bridge Undercoverage
+
+## 2026-02-17
+- Initialized task folder and planning files.
+- Located active BUG-002 linkage in `Bugs.md` under open `BUG-2026-02-16-010`.
+- Next: run deterministic BUG-002 reproducer and capture root-cause evidence.
+- Ran deterministic open-bug repro from tracker:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "/Phase 6 — Elaborate (xMLF)/Paper alignment baselines/Systematic bug variants (2026-02-11 matrix)/BUG-002-V2: alias indirection elaborates to Int/" --seed 1593170056'`
+  - Result: deterministic `PhiInvariantError` (trace/replay binder key-space mismatch on `OpRaise`, source key `5`).
+- Confirmed adjacent strict anchor failure from same bucket:
+  - `BUG-004-V2` with the same seed fails in the same invariant class (empty replay-map domain).
+- Ran scope slice:
+  - `cabal test ... --match "BUG-002-V" --seed 1593170056`
+  - Current workspace status: 5 examples / 4 failures (`PipelineSpec BUG-002-V4` + `V1/V2/V3`).
+- Added instrumentation-driven evidence collection via trace-enabled GHCi harness (`cabal repl mlf2-test --repl-no-load`):
+  - Captured `phi scheme replay-subst`, `phi scheme source-subst`, `phi traceBinderSources`, `phi traceBinderReplayMap`, and `OpRaise` path.
+  - Captured V2 edge-0 trace/hints/copy-map directly from `prEdgeTraces`.
+- Hypothesis tests attempted (all reverted; no durable fix landed):
+  - H1: Relax bridge live-key filtering to include all scheme keys.
+    - Outcome: mismatch bucket changed but did not close BUG-002; introduced validation drift (`alias bounds survived scheme finalization`).
+  - H2: Keep live filtering but make positional seeding total (reuse last live key when arity under-covers).
+    - Outcome: reduced one mismatch bucket transiently, but unresolved failures remained (`V1` spine mismatch, `V2` validation failure, `PipelineSpec` guard).
+  - H3: Prefer copy/hint-ranked replay keys and key-space fallback.
+    - Outcome: regressed additional BUG-002 variants (`OpRaise: binder spine / identity list length mismatch`).
+  - H4: Preserve raw replay-key space (avoid canonical collapse in bridge candidates) plus fallback.
+    - Outcome: did not close matrix; returned to multiple failures (including V1 spine mismatch and V3 dead/bottom alias bucket).
+- Restored bridge logic back to baseline workspace behavior after each hypothesis; final status matches initial deterministic 4-failure BUG-002 slice.
+- Implemented replay-key normalization contract updates across:
+  - `src/MLF/Elab/Phi/Translate.hs`
+  - `src/MLF/Elab/Phi/Omega.hs`
+  - `src/MLF/Constraint/Presolution/WitnessNorm.hs`
+  - `src/MLF/Elab/Phi/IdentityBridge.hs` (import cleanup)
+- Reproduced and validated with deterministic command:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-002-V" --seed 1593170056'`
+- Verification results after landing contract changes:
+  - before: 2 failures (`V2`, `V4`)
+  - after: 1 failure (`V2` only)
+- Confirmed fixed buckets:
+  - no more `OpGraft+OpWeaken targets non-binder node` for `V2`
+  - `PipelineSpec BUG-002-V4` interior guard passes
+- Remaining failure bucket:
+  - `PipelineElabError (ValidationFailed ["alias bounds survived scheme finalization: [\"a\"]"])` on `BUG-002-V2`
+
+### 2026-02-17 continued execution (completion pass)
+- Reconfirmed deterministic residual:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-002-V" --seed 1593170056'`
+  - status at start of this pass: only `BUG-002-V2` failing.
+- Root-cause isolation:
+  - temporarily tagged alias-bound error sites (`ReifyPlan` vs `Finalize`) and reran `BUG-002-V2`.
+  - confirmed failure originated in `ReifyPlan.bindingFor`.
+- Captured failing binder evidence (temporary diagnostics):
+  - binder key `34`, bound root `30`, reified bound `TVar "a"` for binder `"a"`.
+  - indicated self/alias normalization drift in bound reification.
+- First fix attempt:
+  - dropped self `TVar` bounds via broader `boundIsSelfVar`.
+  - outcome: removed alias-bound error but regressed V2 to `forall a1. a1` (`TCTypeAbsBoundMentionsVar` then wrong final type).
+- Refined fix (kept):
+  - in `ReifyPlan.bindingFor`, normalize binder self references inside bound types to `⊥` after alias substitution.
+  - preserved strict alias-bound rejection while retaining useful structured bound shape.
+- Verification commands/results:
+  - PASS: `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-002-V2" --seed 1593170056'`
+  - PASS: `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-002-V" --seed 1593170056'` (5/5)
+  - PASS: `cabal test mlf2-test --test-show-details=direct --test-options='--match "generalizeAt rejects alias bounds" --seed 1593170056'`
+  - PASS: `... --match "...BUG-002-V3..." --seed 1593170056`
+  - FAIL (residual cross-link): `... --match "...BUG-004-V2..." --seed 1593170056` -> `PipelineTypeCheckError (TCArgumentMismatch ...)`
+- Full gate run:
+  - `cabal build all && cabal test` -> FAIL in this workspace with many existing/open failures (planner/witness/pipeline/elab buckets).
+- Note:
+  - one parallel test invocation attempt caused cabal artifact contention (`package.conf.inplace already exists`); reran affected commands sequentially.

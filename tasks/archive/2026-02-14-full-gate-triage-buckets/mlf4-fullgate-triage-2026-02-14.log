@@ -1,0 +1,296 @@
+Build profile: -w ghc-9.12.2 -O1
+In order, the following will be built (use -v for more details):
+ - mlf2-0.2.0.0 (test:mlf2-test) (ephemeral targets)
+Preprocessing test suite 'mlf2-test' for mlf2-0.2.0.0...
+Building test suite 'mlf2-test' for mlf2-0.2.0.0...
+Running 1 test suites...
+Test suite mlf2-test: RUNNING...
+
+Failures:
+
+  test/ConstraintGenSpec.hs:740:24: 
+  1) Phase 1 — Constraint generation, Binding edges, elimination rewrite removes eliminated binders from Q(n)
+       predicate failed on: fromList []
+
+  To rerun use: --match "/Phase 1 — Constraint generation/Binding edges/elimination rewrite removes eliminated binders from Q(n)/" --seed 1715612721
+
+  test/Presolution/RaiseSpec.hs:138:25: 
+  2) Phase 4 — OpRaise for interior nodes records OpRaise for exactly the raised node (no spray across the UF class)
+       expected: [OpRaise (NodeId {getNodeId = 1})]
+        but got: []
+
+  To rerun use: --match "/Phase 4 — OpRaise for interior nodes/records OpRaise for exactly the raised node (no spray across the UF class)/" --seed 1715612721
+
+  test/Presolution/RaiseSpec.hs:391:25: 
+  3) Phase 4 — OpRaise for interior nodes records OpRaise for a non-binder interior node (non-binder)
+       predicate failed on: [OpGraft (NodeId {getNodeId = 10}) (NodeId {getNodeId = 1}),OpWeaken (NodeId {getNodeId = 1})]
+
+  To rerun use: --match "/Phase 4 — OpRaise for interior nodes/records OpRaise for a non-binder interior node (non-binder)/" --seed 1715612721
+
+  test/Presolution/RaiseSpec.hs:446:25: 
+  4) Phase 4 — OpRaise for interior nodes does not record OpRaise for raised nodes outside I(r) (OpRaise outside)
+       predicate failed on: []
+
+  To rerun use: --match "/Phase 4 — OpRaise for interior nodes/does not record OpRaise for raised nodes outside I(r) (OpRaise outside)/" --seed 1715612721
+
+  test/Presolution/RaiseSpec.hs:607:54: 
+  5) Property tests for OpRaise on interior nodes replay: applying recorded OpRaise reproduces presolution binding parents
+       Falsifiable (after 1 test):
+         4
+         7
+       expected: fromList [(0,(GenRef (GenNodeId {getGenNodeId = 0}),BindFlex)),(2,(TypeRef (NodeId {getNodeId = 0}),BindFlex)),(4,(TypeRef (NodeId {getNodeId = 1}),BindFlex)),(6,(TypeRef (NodeId {getNodeId = 2}),BindFlex)),(8,(TypeRef (NodeId {getNodeId = 3}),BindFlex)),(12,(TypeRef (NodeId {getNodeId = 0}),BindFlex)),(14,(TypeRef (NodeId {getNodeId = 6}),BindFlex)),(16,(TypeRef (NodeId {getNodeId = 7}),BindFlex)),(18,(TypeRef (NodeId {getNodeId = 8}),BindFlex)),(20,(TypeRef (NodeId {getNodeId = 9}),BindFlex)),(22,(TypeRef (NodeId {getNodeId = 10}),BindFlex)),(24,(TypeRef (NodeId {getNodeId = 11}),BindFlex)),(26,(TypeRef (NodeId {getNodeId = 0}),BindFlex))]
+        but got: fromList [(0,(GenRef (GenNodeId {getGenNodeId = 0}),BindFlex)),(2,(TypeRef (NodeId {getNodeId = 0}),BindFlex)),(4,(TypeRef (NodeId {getNodeId = 1}),BindFlex)),(6,(TypeRef (NodeId {getNodeId = 2}),BindFlex)),(8,(TypeRef (NodeId {getNodeId = 3}),BindFlex)),(12,(TypeRef (NodeId {getNodeId = 0}),BindFlex)),(14,(TypeRef (NodeId {getNodeId = 6}),BindFlex)),(16,(TypeRef (NodeId {getNodeId = 7}),BindFlex)),(18,(TypeRef (NodeId {getNodeId = 8}),BindFlex)),(20,(TypeRef (NodeId {getNodeId = 9}),BindFlex)),(22,(TypeRef (NodeId {getNodeId = 10}),BindFlex)),(24,(TypeRef (NodeId {getNodeId = 11}),BindFlex)),(26,(TypeRef (NodeId {getNodeId = 4}),BindFlex))]
+
+  To rerun use: --match "/Property tests for OpRaise on interior nodes/replay: applying recorded OpRaise reproduces presolution binding parents/" --seed 1715612721
+
+  test/PipelineSpec.hs:89:35: 
+  6) Pipeline (Phases 1-5), Elaboration helpers, reifies type with flexible bound
+       predicate failed on: "t10"
+
+  To rerun use: --match "/Pipeline (Phases 1-5)/Elaboration helpers/reifies type with flexible bound/" --seed 1715612721
+
+  test/PipelineSpec.hs:232:43: 
+  7) Pipeline (Phases 1-5), Integration Tests, tracks instantiation copy maps for named binders
+       predicate failed on: []
+
+  To rerun use: --match "/Pipeline (Phases 1-5)/Integration Tests/tracks instantiation copy maps for named binders/" --seed 1715612721
+
+  test/PipelineSpec.hs:260:33: 
+  8) Pipeline (Phases 1-5) handles higher-order polymorphic apply used twice
+       [BaseTy {getBaseName = "Int"}] does not contain [BaseTy {getBaseName = "Bool"}]
+
+  To rerun use: --match "/Pipeline (Phases 1-5)/handles higher-order polymorphic apply used twice/" --seed 1715612721
+
+  test/PipelineSpec.hs:290:25: 
+  9) Pipeline (Phases 1-5) redirected let-use sites keep polymorphic schemes
+       Phase 7 (type checking): TCLetTypeMismatch (TForall "t2" Nothing (TArrow (TArrow (TArrow (TVar "a") (TVar "a")) (TArrow (TVar "a") (TVar "a"))) (TArrow (TArrow (TVar "a") (TVar "a")) (TArrow (TVar "a") (TVar "a"))))) (TForall "t211" Nothing (TArrow (TArrow (TArrow (TVar "t21") (TVar "t21")) (TArrow (TVar "t21") (TVar "t21"))) (TArrow (TArrow (TVar "t21") (TVar "t21")) (TArrow (TVar "t21") (TVar "t21")))))
+
+  To rerun use: --match "/Pipeline (Phases 1-5)/redirected let-use sites keep polymorphic schemes/" --seed 1715612721
+
+  test/PipelineSpec.hs:340:50: 
+  10) Pipeline (Phases 1-5) applyRedirectsToAnn and canonicalizeAnn rewrite every node occurrence consistently
+       predicate failed on: []
+
+  To rerun use: --match "/Pipeline (Phases 1-5)/applyRedirectsToAnn and canonicalizeAnn rewrite every node occurrence consistently/" --seed 1715612721
+
+  test/PipelineSpec.hs:446:29: 
+  11) Pipeline (Phases 1-5), BUG-2026-02-06-002 sentinel matrix, let-c1-return still reports bottom-vs-var mismatch sentinel
+       Expected success, got error:\nPhase 6 (elaboration): PhiInvariantError "PhiReorder: missing binder identity at positions [0]"
+
+  To rerun use: --match "/Pipeline (Phases 1-5)/BUG-2026-02-06-002 sentinel matrix/let-c1-return still reports bottom-vs-var mismatch sentinel/" --seed 1715612721
+
+  test/PipelineSpec.hs:451:29: 
+  12) Pipeline (Phases 1-5), BUG-2026-02-06-002 sentinel matrix, let-c1-apply-bool keeps post-H15 mismatch without t23 leakage
+       Expected success, got error:\nPhase 7 (type checking): TCLetTypeMismatch (TForall "a" (Just (TForall "t9" Nothing (TArrow (TVar "b") (TVar "t9")))) (TArrow (TBase (BaseTy {getBaseName = "Int"})) (TArrow (TVar "b") (TBase (BaseTy {getBaseName = "Int"}))))) (TForall "a" (Just (TForall "t9" Nothing (TArrow (TVar "b") (TVar "t9")))) (TArrow (TVar "b") (TVar "a")))
+
+  To rerun use: --match "/Pipeline (Phases 1-5)/BUG-2026-02-06-002 sentinel matrix/let-c1-apply-bool keeps post-H15 mismatch without t23 leakage/" --seed 1715612721
+
+  test/PipelineSpec.hs:499:29: 
+  13) Pipeline (Phases 1-5), BUG-2026-02-06-002 strict target matrix, let-c1-return keeps second binder polymorphic
+       Expected success, got error:
+       Phase 6 (elaboration): PhiInvariantError "PhiReorder: missing binder identity at positions [0]"
+
+  To rerun use: --match "/Pipeline (Phases 1-5)/BUG-2026-02-06-002 strict target matrix/let-c1-return keeps second binder polymorphic/" --seed 1715612721
+
+  test/PipelineSpec.hs:504:29: 
+  14) Pipeline (Phases 1-5), BUG-2026-02-06-002 strict target matrix, let-c1-apply-bool typechecks to Int
+       Expected success, got error:
+       Phase 7 (type checking): TCLetTypeMismatch (TForall "a" (Just (TForall "t9" Nothing (TArrow (TVar "b") (TVar "t9")))) (TArrow (TBase (BaseTy {getBaseName = "Int"})) (TArrow (TVar "b") (TBase (BaseTy {getBaseName = "Int"}))))) (TForall "a" (Just (TForall "t9" Nothing (TArrow (TVar "b") (TVar "t9")))) (TArrow (TVar "b") (TVar "a")))
+
+  To rerun use: --match "/Pipeline (Phases 1-5)/BUG-2026-02-06-002 strict target matrix/let-c1-apply-bool typechecks to Int/" --seed 1715612721
+
+  test/PipelineSpec.hs:568:29: 
+  15) Pipeline (Phases 1-5), Checked-authoritative invariant, runPipelineElab type matches typeCheck(term) and checked pipeline type
+       Falsifiable (after 2 tests):
+         ELet "id" (ELam "x" (EVar "x")) (ELet "_" (EApp (EVar "id") (ELit (LInt 3))) (EApp (EVar "id") (ELit (LBool True))))
+       runPipelineElab failed for generated expression:
+       ELet "id" (ELam "x" (EVar "x")) (ELet "_" (EApp (EVar "id") (ELit (LInt 3))) (EApp (EVar "id") (ELit (LBool True))))
+       error: Phase 7 (type checking): TCArgumentMismatch (TBase (BaseTy {getBaseName = "Int"})) (TBase (BaseTy {getBaseName = "Bool"}))
+
+  To rerun use: --match "/Pipeline (Phases 1-5)/Checked-authoritative invariant/runPipelineElab type matches typeCheck(term) and checked pipeline type/" --seed 1715612721
+
+  test/PipelineSpec.hs:626:29: 
+  16) Pipeline (Phases 1-5), Phase 3 atomic wrapping equivalence gates, gate: make let-c1-apply-bool path typechecks to Int (no mismatch fallback)
+       checked pipeline failed: Phase 7 (type checking): TCLetTypeMismatch (TForall "a" (Just (TForall "t9" Nothing (TArrow (TVar "b") (TVar "t9")))) (TArrow (TBase (BaseTy {getBaseName = "Int"})) (TArrow (TVar "b") (TBase (BaseTy {getBaseName = "Int"}))))) (TForall "a" (Just (TForall "t9" Nothing (TArrow (TVar "b") (TVar "t9")))) (TArrow (TVar "b") (TVar "a")))
+
+  To rerun use: --match "/Pipeline (Phases 1-5)/Phase 3 atomic wrapping equivalence gates/gate: make let-c1-apply-bool path typechecks to Int (no mismatch fallback)/" --seed 1715612721
+
+  test/PipelineSpec.hs:631:29: 
+  17) Pipeline (Phases 1-5), Phase 3 atomic wrapping equivalence gates, gate: let-c1-apply-bool sentinel matrix returns Int
+       checked sentinel failed: Phase 7 (type checking): TCLetTypeMismatch (TForall "a" (Just (TForall "t9" Nothing (TArrow (TVar "b") (TVar "t9")))) (TArrow (TBase (BaseTy {getBaseName = "Int"})) (TArrow (TVar "b") (TBase (BaseTy {getBaseName = "Int"}))))) (TForall "a" (Just (TForall "t9" Nothing (TArrow (TVar "b") (TVar "t9")))) (TArrow (TVar "b") (TVar "a")))
+
+  To rerun use: --match "/Pipeline (Phases 1-5)/Phase 3 atomic wrapping equivalence gates/gate: let-c1-apply-bool sentinel matrix returns Int/" --seed 1715612721
+
+  test/PipelineSpec.hs:636:29: 
+  18) Pipeline (Phases 1-5), Phase 3 atomic wrapping equivalence gates, gate: let-c1-apply-bool strict target matrix returns Int
+       checked strict-target failed: Phase 7 (type checking): TCLetTypeMismatch (TForall "a" (Just (TForall "t9" Nothing (TArrow (TVar "b") (TVar "t9")))) (TArrow (TBase (BaseTy {getBaseName = "Int"})) (TArrow (TVar "b") (TBase (BaseTy {getBaseName = "Int"}))))) (TForall "a" (Just (TForall "t9" Nothing (TArrow (TVar "b") (TVar "t9")))) (TArrow (TVar "b") (TVar "a")))
+
+  To rerun use: --match "/Pipeline (Phases 1-5)/Phase 3 atomic wrapping equivalence gates/gate: let-c1-apply-bool strict target matrix returns Int/" --seed 1715612721
+
+  test/PipelineSpec.hs:641:29: 
+  19) Pipeline (Phases 1-5), Phase 3 atomic wrapping equivalence gates, gate: checked-authoritative invariant
+       runPipelineElab failed: Phase 7 (type checking): TCLetTypeMismatch (TForall "a" (Just (TForall "t9" Nothing (TArrow (TVar "b") (TVar "t9")))) (TArrow (TBase (BaseTy {getBaseName = "Int"})) (TArrow (TVar "b") (TBase (BaseTy {getBaseName = "Int"}))))) (TForall "a" (Just (TForall "t9" Nothing (TArrow (TVar "b") (TVar "t9")))) (TArrow (TVar "b") (TVar "a")))
+
+  To rerun use: --match "/Pipeline (Phases 1-5)/Phase 3 atomic wrapping equivalence gates/gate: checked-authoritative invariant/" --seed 1715612721
+
+  test/PipelineSpec.hs:656:29: 
+  20) Pipeline (Phases 1-5), Phase 3 atomic wrapping equivalence gates, gate: thesis target unchecked pipeline returns Int
+       unchecked pipeline failed: Phase 7 (type checking): TCLetTypeMismatch (TForall "a" (Just (TForall "t9" Nothing (TArrow (TVar "b") (TVar "t9")))) (TArrow (TBase (BaseTy {getBaseName = "Int"})) (TArrow (TVar "b") (TBase (BaseTy {getBaseName = "Int"}))))) (TForall "a" (Just (TForall "t9" Nothing (TArrow (TVar "b") (TVar "t9")))) (TArrow (TVar "b") (TVar "a")))
+
+  To rerun use: --match "/Pipeline (Phases 1-5)/Phase 3 atomic wrapping equivalence gates/gate: thesis target unchecked pipeline returns Int/" --seed 1715612721
+
+  test/PipelineSpec.hs:661:29: 
+  21) Pipeline (Phases 1-5), Phase 3 atomic wrapping equivalence gates, gate: thesis target checked pipeline returns Int
+       checked pipeline failed: Phase 7 (type checking): TCLetTypeMismatch (TForall "a" (Just (TForall "t9" Nothing (TArrow (TVar "b") (TVar "t9")))) (TArrow (TBase (BaseTy {getBaseName = "Int"})) (TArrow (TVar "b") (TBase (BaseTy {getBaseName = "Int"}))))) (TForall "a" (Just (TForall "t9" Nothing (TArrow (TVar "b") (TVar "t9")))) (TArrow (TVar "b") (TVar "a")))
+
+  To rerun use: --match "/Pipeline (Phases 1-5)/Phase 3 atomic wrapping equivalence gates/gate: thesis target checked pipeline returns Int/" --seed 1715612721
+
+  test/PipelineSpec.hs:666:29: 
+  22) Pipeline (Phases 1-5), Phase 3 atomic wrapping equivalence gates, gate: \y. let id = (\x. x) in id y has type forall a. a -> a
+       pipeline failed: Phase 7 (type checking): TCTypeAbsVarInScope "t4"
+
+  To rerun use: --match "/Pipeline (Phases 1-5)/Phase 3 atomic wrapping equivalence gates/gate: \\y. let id = (\\x. x) in id y has type forall a. a -> a/" --seed 1715612721
+
+  test/ThesisFixDirectionSpec.hs:23:21: 
+  23) BUG-2026-02-06-002 thesis target unchecked pipeline returns Int
+       unchecked pipeline failed: Phase 7 (type checking): TCLetTypeMismatch (TForall "a" (Just (TForall "t9" Nothing (TArrow (TVar "b") (TVar "t9")))) (TArrow (TBase (BaseTy {getBaseName = "Int"})) (TArrow (TVar "b") (TBase (BaseTy {getBaseName = "Int"}))))) (TForall "a" (Just (TForall "t9" Nothing (TArrow (TVar "b") (TVar "t9")))) (TArrow (TVar "b") (TVar "a")))
+
+  To rerun use: --match "/BUG-2026-02-06-002 thesis target/unchecked pipeline returns Int/" --seed 1715612721
+
+  test/ThesisFixDirectionSpec.hs:23:21: 
+  24) BUG-2026-02-06-002 thesis target checked pipeline returns Int
+       checked pipeline failed: Phase 7 (type checking): TCLetTypeMismatch (TForall "a" (Just (TForall "t9" Nothing (TArrow (TVar "b") (TVar "t9")))) (TArrow (TBase (BaseTy {getBaseName = "Int"})) (TArrow (TVar "b") (TBase (BaseTy {getBaseName = "Int"}))))) (TForall "a" (Just (TForall "t9" Nothing (TArrow (TVar "b") (TVar "t9")))) (TArrow (TVar "b") (TVar "a")))
+
+  To rerun use: --match "/BUG-2026-02-06-002 thesis target/checked pipeline returns Int/" --seed 1715612721
+
+  test/ElaborationSpec.hs:221:37: 
+  25) Phase 6 — Elaborate (xMLF), Polymorphism and Generalization, elaborates polymorphic instantiation
+       expected: "let id : ∀(a ⩾ ⊥) a -> a = Λ(a ⩾ ⊥) λ(x : a) x in id[∀(⩾ ⊲Int); N] 1"
+        but got: "let id : ∀(a ⩾ ⊥) Int -> Int = Λ(a ⩾ ⊥) λ(x : Int) x in id[ε; N] 1"
+
+  To rerun use: --match "/Phase 6 — Elaborate (xMLF)/Polymorphism and Generalization/elaborates polymorphic instantiation/" --seed 1715612721
+
+  test/ElaborationSpec.hs:253:21: 
+  26) Phase 6 — Elaborate (xMLF), Polymorphism and Generalization, generalizeAt quantifies vars bound under the scope root
+       Expected two binders, got [("a",Nothing)]
+
+  To rerun use: --match "/Phase 6 — Elaborate (xMLF)/Polymorphism and Generalization/generalizeAt quantifies vars bound under the scope root/" --seed 1715612721
+
+  test/SpecUtil.hs:150:30: 
+  27) Phase 6 — Elaborate (xMLF), Polymorphism and Generalization, elaborates dual instantiation in application
+       PipelineTypeCheckError (TCLetTypeMismatch (TForall "t2" Nothing (TArrow (TArrow (TArrow (TVar "a") (TVar "a")) (TArrow (TVar "a") (TVar "a"))) (TArrow (TArrow (TVar "a") (TVar "a")) (TArrow (TVar "a") (TVar "a"))))) (TForall "t211" Nothing (TArrow (TArrow (TArrow (TVar "t21") (TVar "t21")) (TArrow (TVar "t21") (TVar "t21"))) (TArrow (TArrow (TVar "t21") (TVar "t21")) (TArrow (TVar "t21") (TVar "t21"))))))
+
+  To rerun use: --match "/Phase 6 — Elaborate (xMLF)/Polymorphism and Generalization/elaborates dual instantiation in application/" --seed 1715612721
+
+  test/SpecUtil.hs:150:30: 
+  28) Phase 6 — Elaborate (xMLF), Polymorphism and Generalization, elaborates usage of polymorphic let (instantiated at different types)
+       PipelineTypeCheckError (TCArgumentMismatch (TBase (BaseTy {getBaseName = "Int"})) (TBase (BaseTy {getBaseName = "Bool"})))
+
+  To rerun use: --match "/Phase 6 — Elaborate (xMLF)/Polymorphism and Generalization/elaborates usage of polymorphic let (instantiated at different types)/" --seed 1715612721
+
+  test/ElaborationSpec.hs:397:21: 
+  29) Phase 6 — Elaborate (xMLF), Polymorphism and Generalization, elaborates term annotations
+       Expected bounded forall, got TArrow (TBase (BaseTy {getBaseName = "Int"})) (TBase (BaseTy {getBaseName = "Int"}))
+
+  To rerun use: --match "/Phase 6 — Elaborate (xMLF)/Polymorphism and Generalization/elaborates term annotations/" --seed 1715612721
+
+  test/ElaborationSpec.hs:158:22: 
+  30) Phase 6 — Elaborate (xMLF), Elaboration of Bounded Quantification (Flexible Bounds), elaborates let with RHS term annotation (coercion) and polymorphic bound (Rank-2ish)
+       expected: TForall "a0" (Just (TForall "a0" Nothing (TArrow (TVar "a0") (TVar "a0")))) (TArrow (TVar "a0") (TVar "a0"))
+        but got: TForall "a0" (Just (TForall "a0" Nothing (TArrow (TVar "a0") (TVar "a0")))) (TForall "a1" (Just (TForall "a1" Nothing (TArrow (TVar "a1") (TVar "a1")))) (TArrow (TArrow (TVar "t4") (TVar "t4")) (TArrow (TVar "t4") (TVar "t4"))))
+
+  To rerun use: --match "/Phase 6 — Elaborate (xMLF)/Elaboration of Bounded Quantification (Flexible Bounds)/elaborates let with RHS term annotation (coercion) and polymorphic bound (Rank-2ish)/" --seed 1715612721
+
+  test/SpecUtil.hs:150:30: 
+  31) Phase 6 — Elaborate (xMLF), Elaboration of Bounded Quantification (Flexible Bounds), elaborates lambda with rank-2 argument (US-004)
+       PipelineElabError (PhiTranslatabilityError ["OpGraft+OpWeaken targets non-binder node","  target node: NodeId {getNodeId = 3}","  canonical: NodeId {getNodeId = 3}"])
+
+  To rerun use: --match "/Phase 6 — Elaborate (xMLF)/Elaboration of Bounded Quantification (Flexible Bounds)/elaborates lambda with rank-2 argument (US-004)/" --seed 1715612721
+
+  test/SpecUtil.hs:150:30: 
+  32) Phase 6 — Elaborate (xMLF), Paper alignment baselines, let id = (\x. x) in id id should have type ∀a. a -> a
+       PipelineTypeCheckError (TCLetTypeMismatch (TForall "t2" Nothing (TArrow (TArrow (TArrow (TVar "a") (TVar "a")) (TArrow (TVar "a") (TVar "a"))) (TArrow (TArrow (TVar "a") (TVar "a")) (TArrow (TVar "a") (TVar "a"))))) (TForall "t211" Nothing (TArrow (TArrow (TArrow (TVar "t21") (TVar "t21")) (TArrow (TVar "t21") (TVar "t21"))) (TArrow (TArrow (TVar "t21") (TVar "t21")) (TArrow (TVar "t21") (TVar "t21"))))))
+
+  To rerun use: --match "/Phase 6 — Elaborate (xMLF)/Paper alignment baselines/let id = (\\x. x) in id id should have type ∀a. a -> a/" --seed 1715612721
+
+  test/SpecUtil.hs:150:30: 
+  33) Phase 6 — Elaborate (xMLF), Paper alignment baselines, \y. let id = (\x. x) in id y should have type ∀a. a -> a
+       PipelineTypeCheckError (TCTypeAbsVarInScope "t4")
+
+  To rerun use: --match "/Phase 6 — Elaborate (xMLF)/Paper alignment baselines/\\y. let id = (\\x. x) in id y should have type ∀a. a -> a/" --seed 1715612721
+
+  test/ElaborationSpec.hs:158:22: 
+  34) Phase 6 — Elaborate (xMLF), Paper alignment baselines, term annotation can instantiate a polymorphic result
+       expected: TForall "a0" (Just (TBase BaseTy {
+                   getBaseName = "Int"
+                 })) (TArrow (TVar "a0") (TForall "a1" Nothing (TArrow (TVar "a1") (TVar "a1"))))
+        but got: TArrow (TBase BaseTy {
+                   getBaseName = "Int"
+                 }) (TArrow (TBase BaseTy {
+                   getBaseName = "Int"
+                 }) (TBase BaseTy {
+                   getBaseName = "Int"
+                 }))
+
+  To rerun use: --match "/Phase 6 — Elaborate (xMLF)/Paper alignment baselines/term annotation can instantiate a polymorphic result/" --seed 1715612721
+
+  test/SpecUtil.hs:150:30: 
+  35) Phase 6 — Elaborate (xMLF), Paper alignment baselines, BUG-2026-02-06-001 mapped-base elaboration remains Int for nested let + annotated lambda
+       PipelineElabError (MissingNode (NodeId {getNodeId = 4}))
+
+  To rerun use: --match "/Phase 6 — Elaborate (xMLF)/Paper alignment baselines/BUG-2026-02-06-001 mapped-base elaboration remains Int for nested let + annotated lambda/" --seed 1715612721
+
+  test/SpecUtil.hs:150:30: 
+  36) Phase 6 — Elaborate (xMLF), Paper alignment baselines, Systematic bug variants (2026-02-11 matrix), BUG-002-V1: factory twice with mixed instantiations elaborates to Int
+       PipelineTypeCheckError (TCLetTypeMismatch (TForall "a" (Just (TForall "t9" Nothing (TArrow (TVar "b") (TVar "t9")))) (TArrow (TBase (BaseTy {getBaseName = "Int"})) (TArrow (TVar "b") (TBase (BaseTy {getBaseName = "Int"}))))) (TForall "a" (Just (TForall "t9" Nothing (TArrow (TVar "b") (TVar "t9")))) (TArrow (TVar "b") (TVar "a"))))
+
+  To rerun use: --match "/Phase 6 — Elaborate (xMLF)/Paper alignment baselines/Systematic bug variants (2026-02-11 matrix)/BUG-002-V1: factory twice with mixed instantiations elaborates to Int/" --seed 1715612721
+
+  test/SpecUtil.hs:150:30: 
+  37) Phase 6 — Elaborate (xMLF), Paper alignment baselines, Systematic bug variants (2026-02-11 matrix), BUG-002-V2: alias indirection elaborates to Int
+       PipelineTypeCheckError (TCInstantiationError (InstBot (TArrow (TVar "a1") (TArrow (TVar "t1") (TBase (BaseTy {getBaseName = "Int"}))))) (TBase (BaseTy {getBaseName = "Int"})) "InstBot expects TBottom, got Int")
+
+  To rerun use: --match "/Phase 6 — Elaborate (xMLF)/Paper alignment baselines/Systematic bug variants (2026-02-11 matrix)/BUG-002-V2: alias indirection elaborates to Int/" --seed 1715612721
+
+  test/SpecUtil.hs:150:30: 
+  38) Phase 6 — Elaborate (xMLF), Paper alignment baselines, Systematic bug variants (2026-02-11 matrix), BUG-002-V3: intermediate annotation elaborates to Int
+       PipelineTypeCheckError (TCInstantiationError InstElim (TArrow (TBase (BaseTy {getBaseName = "Bool"})) (TBase (BaseTy {getBaseName = "Int"}))) "InstElim expects forall, got Bool -> Int")
+
+  To rerun use: --match "/Phase 6 — Elaborate (xMLF)/Paper alignment baselines/Systematic bug variants (2026-02-11 matrix)/BUG-002-V3: intermediate annotation elaborates to Int/" --seed 1715612721
+
+  test/SpecUtil.hs:150:30: 
+  39) Phase 6 — Elaborate (xMLF), Paper alignment baselines, Systematic bug variants (2026-02-11 matrix), BUG-002-V4: factory-under-lambda elaborates to ∀a. a -> a
+       PipelineElabError (InstantiationError "PhiReorder: cycle in bound dependencies")
+
+  To rerun use: --match "/Phase 6 — Elaborate (xMLF)/Paper alignment baselines/Systematic bug variants (2026-02-11 matrix)/BUG-002-V4: factory-under-lambda elaborates to ∀a. a -> a/" --seed 1715612721
+
+  test/SpecUtil.hs:150:30: 
+  40) Phase 6 — Elaborate (xMLF), Paper alignment baselines, Explicit forall annotation edge cases, explicit forall annotation round-trips on let-bound variables
+       PipelineElabError (SchemeFreeVars (NodeId {getNodeId = 6}) ["__rigid5"])
+
+  To rerun use: --match "/Phase 6 — Elaborate (xMLF)/Paper alignment baselines/Explicit forall annotation edge cases/explicit forall annotation round-trips on let-bound variables/" --seed 1715612721
+
+  test/SpecUtil.hs:150:30: 
+  41) Phase 6 — Elaborate (xMLF), Paper alignment baselines, explicit forall coercion in let RHS elaborates through use-site application
+       PipelineTypeCheckError (TCArgumentMismatch (TVar "t3") (TBase (BaseTy {getBaseName = "Int"})))
+
+  To rerun use: --match "/Phase 6 — Elaborate (xMLF)/Paper alignment baselines/explicit forall coercion in let RHS elaborates through use-site application/" --seed 1715612721
+
+  test/SpecUtil.hs:150:30: 
+  42) Phase 6 — Elaborate (xMLF), Paper alignment baselines, explicit forall annotation preserves foralls in bounds
+       PipelineElabError (InstantiationError "InstBot expects \8869, got: \8704(t4 \10878 \8869) t4 -> t4")
+
+  To rerun use: --match "/Phase 6 — Elaborate (xMLF)/Paper alignment baselines/explicit forall annotation preserves foralls in bounds/" --seed 1715612721
+
+Randomized with seed 1715612721
+
+Finished in 0.1989 seconds
+652 examples, 42 failures
+
+Test suite mlf2-test: FAIL
+Test suite logged to:
+/Volumes/src/mlf4/./dist-newstyle/build/aarch64-osx/ghc-9.12.2/mlf2-0.2.0.0/t/mlf2-test/test/mlf2-0.2.0.0-mlf2-test.log
+0 of 1 test suites (0 of 1 test cases) passed.
+Error: [Cabal-7125]
+Tests failed for test:mlf2-test from mlf2-0.2.0.0.
+

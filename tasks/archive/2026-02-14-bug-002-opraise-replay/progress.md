@@ -1,0 +1,36 @@
+# Progress Log: BUG-2026-02-14-002
+
+## 2026-02-14
+- Initialized task tracking files.
+- Next: reproduce RaiseSpec failures with deterministic seed and inspect OpRaise recording/replay path.
+- Reproduced targeted failures with deterministic seed:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "/Phase 4 — OpRaise for interior nodes/records OpRaise for exactly the raised node (no spray across the UF class)/" --seed 2031802399'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "/Property tests for OpRaise on interior nodes/replay: applying recorded OpRaise reproduces presolution binding parents/" --seed 2031802399'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Phase 4 — OpRaise for interior nodes" --seed 2031802399'` -> `7 examples, 3 failures`.
+- Inspected relevant modules/tests:
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/EdgeUnify.hs`
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/EdgeProcessing/Unify.hs`
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/WitnessNorm.hs`
+  - `/Volumes/src/mlf4/test/Presolution/RaiseSpec.hs`
+- Found likely regression in `recordRaisesFromTrace`: added binder-class gating (`targetsBinderClass`) suppresses interior raises in test and non-binder paths.
+- Verified supporting pattern:
+  - `returns a non-empty OpRaise trace when harmonization raises` still passes.
+  - Initial attempt to run multiple `cabal test` commands in parallel caused package-cache path race; reran sequentially.
+- Implemented minimal code fix in `EdgeUnify.recordRaisesFromTrace` to remove binder-class suppression while preserving interior/locked/eliminated/base-graft constraints.
+- Observed immediate pass on BUG-002 anchors, but BUG-003 regressed with:
+  - `PhiTranslatabilityError "OpRaise (non-spine): missing computation context"` on `BUG-003-V1/V2`.
+- Added targeted hardening in `EdgeUnify`:
+  - `eusAllowUnscopedRaises` flag to keep `runEdgeUnifyForTest` permissive while production edges remain scope-aware.
+  - class-aware base-graft suppression and shape-based raise guard (`containsTyVarInShape`).
+  - attempted parent-raised filtering in emission path (insufficient alone).
+- Gathered direct evidence with GHCi dump:
+  - BUG-003 edge witness had `[OpGraft ..., OpRaise 15, OpRaise 14]`.
+- Added normalization-side fix in `WitnessNorm`:
+  - prune nested `OpRaise` after restore to original ids when parent raise is present under final binding tree.
+- Verification:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-003-V" --seed 1612813344'` -> `2 examples, 0 failures`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Phase 4 — OpRaise for interior nodes" --seed 2031802399'` -> `7 examples, 0 failures`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "/Property tests for OpRaise on interior nodes/replay: applying recorded OpRaise reproduces presolution binding parents/" --seed 2031802399'` -> `1 example, 0 failures`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-004" --seed 298969168'` -> `4 examples, 0 failures`
+  - `cabal test` -> `652 examples, 37 failures` (down from `41` pre-fix).
+- Updated tracker/docs (`Bugs.md`, `CHANGELOG.md`, `implementation_notes.md`) and archived task folder to `tasks/archive/2026-02-14-bug-002-opraise-replay`.

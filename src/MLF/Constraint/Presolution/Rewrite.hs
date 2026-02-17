@@ -37,7 +37,7 @@ import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Canonicalizer (Canonicalizer, canonicalizeNode)
 import qualified MLF.Constraint.Canonicalize as Canonicalize
 import MLF.Constraint.Types
-import MLF.Constraint.Presolution.Base (CopyMapping(..), EdgeTrace(..), PresolutionError(..), PresolutionM, fromListInterior, toListInterior)
+import MLF.Constraint.Presolution.Base (EdgeTrace(..), PresolutionError(..), PresolutionM)
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Util.Trace (traceBindingM)
 
@@ -72,13 +72,14 @@ canonicalizeStep canon = \case
 -- | Canonicalize an edge witness.
 canonicalizeWitness :: Canonicalizer -> EdgeWitness -> EdgeWitness
 canonicalizeWitness canon w =
-    let InstanceWitness ops = ewWitness w
+    let -- Contract: preserve source-domain provenance (`ewSteps`, `ewWitness`)
+        -- and canonicalize only structural lookup fields.
     in w
         { ewLeft = canonical (ewLeft w)
         , ewRight = canonical (ewRight w)
         , ewRoot = canonical (ewRoot w)
-        , ewSteps = map (canonicalizeStep canon) (ewSteps w)
-        , ewWitness = InstanceWitness (map (canonicalizeOp canon) ops)
+        , ewSteps = ewSteps w
+        , ewWitness = ewWitness w
         }
   where
     canonical = canonicalizeNode canon
@@ -87,25 +88,16 @@ canonicalizeWitness canon w =
 canonicalizeTrace :: Canonicalizer -> EdgeTrace -> EdgeTrace
 canonicalizeTrace canon tr =
     let canonical = canonicalizeNode canon
-        canonPair (a, b) = (canonical a, canonical b)
-        canonInterior =
-            fromListInterior
-                [ canonical i
-                | i <- toListInterior (etInterior tr)
-                ]
-        canonCopyMap =
-            CopyMapping $
-                IntMap.fromListWith min
-                    [ ( getNodeId (canonical (NodeId k))
-                      , canonical v
-                      )
-                    | (k, v) <- IntMap.toList (getCopyMapping (etCopyMap tr))
-                    ]
+        -- Contract: preserve source-domain provenance in `etBinderArgs`,
+        -- `etInterior`, and `etCopyMap`; preserve replay-hint metadata in
+        -- `etBinderReplayHints`; `etRoot` is structural and may be
+        -- canonicalized for solved-graph lookup.
     in tr
         { etRoot = canonical (etRoot tr)
-        , etBinderArgs = map canonPair (etBinderArgs tr)
-        , etInterior = canonInterior
-        , etCopyMap = canonCopyMap
+        , etBinderArgs = etBinderArgs tr
+        , etInterior = etInterior tr
+        , etBinderReplayHints = etBinderReplayHints tr
+        , etCopyMap = etCopyMap tr
         }
 
 -- | Rewrite a node through canonicalization.

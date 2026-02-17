@@ -1,7 +1,7 @@
 {-# LANGUAGE PatternSynonyms #-}
 module PipelineSpec (spec) where
 
-import Control.Monad (forM_, unless)
+import Control.Monad (forM_, unless, when)
 import Data.List (isInfixOf)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
@@ -32,13 +32,14 @@ import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Witness (EdgeWitness(..), InstanceOp(..), InstanceStep(..))
 import qualified MLF.Binding.Tree as Binding
 import MLF.Elab.Run.Provenance (buildTraceCopyMap, collectBaseNamedKeys)
-import MLF.Elab.Run.Util (makeCanonicalizer)
+import MLF.Elab.Run.Util (canonicalizeTrace, canonicalizeWitness, makeCanonicalizer)
 import SpecUtil
     ( collectVarNodes
     , defaultTraceConfig
     , emptyConstraint
     , firstShowE
     , mkForalls
+    , requireRight
     , runToSolvedDefault
     , unsafeNormalizeExpr
     )
@@ -243,6 +244,38 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                                 baseCopyPairs
                         vs -> expectationFailure ("validateSolvedGraph failed:\n" ++ unlines vs)
 
+        it "BUG-002-V4 keeps OpRaise targets inside etInterior after witness/trace canonicalization" $ do
+            let makeFactory = ELam "x" (ELam "y" (EVar "x"))
+                expr =
+                    ELam "k"
+                        (ELet "make" makeFactory
+                            (ELet "c1" (EApp (EVar "make") (EVar "k"))
+                                (EApp (EVar "c1") (ELit (LBool True)))))
+            case runPipelineWithPresolution expr of
+                Left err -> expectationFailure err
+                Right (pres, _) -> do
+                    solved <- requireRight (firstShowE (solveUnify defaultTraceConfig (prConstraint pres)))
+                    let canon = makeCanonicalizer (srUnionFind solved) (prRedirects pres)
+                        edgeWitnesses = IntMap.map (canonicalizeWitness canon) (prEdgeWitnesses pres)
+                        edgeTraces = IntMap.map (canonicalizeTrace canon) (prEdgeTraces pres)
+                        raisesForEdge (eid, ew) =
+                            [ (eid, n)
+                            | StepOmega (OpRaise n) <- ewSteps ew
+                            ]
+                        raiseTargets = concatMap raisesForEdge (IntMap.toList edgeWitnesses)
+                    raiseTargets `shouldSatisfy` (not . null)
+                    forM_ raiseTargets $ \(eid, n) ->
+                        case IntMap.lookup eid edgeTraces of
+                            Nothing ->
+                                expectationFailure ("Missing trace for edge with OpRaise: " ++ show eid)
+                            Just tr -> do
+                                let interiorKeys =
+                                        IntSet.fromList
+                                            [ getNodeId nid
+                                            | nid <- toListInterior (etInterior tr)
+                                            ]
+                                IntSet.member (getNodeId n) interiorKeys `shouldBe` True
+
     it "handles higher-order polymorphic apply used twice" $ do
         -- let apply f x = f x; let id = \y. y; let a = apply id 1 in apply id True
         let expr =
@@ -331,13 +364,15 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                                 | nid <- annLetSchemeRoots annRedirected
                                 , canonicalize nid /= nid
                                 ]
+                            hasCanonicalizationWork = not (IntMap.null (srUnionFind solved))
                             annCanonical = canonicalizeAnn canonicalize annRedirected
                             staleCanonicalNodes =
                                 [ nid
                                 | nid <- annNodeOccurrences annCanonical
                                 , canonicalize nid /= nid
                                 ]
-                        canonicalizedSchemeRoots `shouldSatisfy` (not . null)
+                        when hasCanonicalizationWork $
+                            canonicalizedSchemeRoots `shouldSatisfy` (not . null)
                         staleCanonicalNodes `shouldBe` []
                         annRootNode annCanonical `shouldSatisfy` (\nid -> canonicalize nid == nid)
         case runPipelineElab Set.empty canonicalizePathExpr of
@@ -367,20 +402,16 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 cInstEdges c `shouldBe` []
                 cUnifyEdges c `shouldBe` []
 
-    it "does not leak solved-node names in make let mismatch" $ do
-        -- BUG-2026-02-06-002 / H15 focus:
+    it "make let-c1-apply-bool path typechecks to Int (strict success)" $ do
+        -- BUG-2026-02-06-002 / H15 follow-up:
         -- let make = \x.\y.x in let c1 = make (-4) in c1 True
-        -- If this still fails, diagnostics should not expose internal names like t23.
         let expr =
                 ELet "make" (ELam "x" (ELam "y" (EVar "x")))
                     (ELet "c1" (EApp (EVar "make") (ELit (LInt (-4))))
                         (EApp (EVar "c1") (ELit (LBool True))))
         case runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr) of
-            Left err -> do
-                let rendered = renderPipelineError err
-                rendered `shouldSatisfy` ("TCLetTypeMismatch" `isInfixOf`)
-                rendered `shouldNotSatisfy` ("t23" `isInfixOf`)
-            Right _ -> pure ()
+            Left err -> expectationFailure ("Expected success, got error:\n" ++ renderPipelineError err)
+            Right (_term, ty) -> ty `shouldBe` TBase (BaseTy "Int")
 
     describe "BUG-2026-02-08-004 sentinel" $ do
         let expr =
