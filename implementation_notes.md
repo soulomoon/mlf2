@@ -1,5 +1,17 @@
 # Implementation Notes
 
+### 2026-02-17 A4 paper-faithfulness doc/spec sync
+
+- Synced `.kiro/specs/paper-faithfulness-remaining-deltas/` to current state:
+  - `requirements.md`: all semantic requirements in this spec are now marked present with evidence.
+  - `design.md`: removed stale wording that described still-open Φ/witness semantic deltas; added explicit non-semantic remaining deltas only.
+  - `tasks.md`: added closure note marking semantic plan complete and redirecting remaining backlog to `TODO.md`.
+- Synced `TODO.md` A4 entries to done with dated closure note.
+- Current residual non-thesis-exact scope is non-semantic:
+  - proof/formalization debt,
+  - full formal Phase-7 linkage to thesis proof obligations,
+  - broader regression/docs/API cleanup backlog items tracked outside semantic bug tracking.
+
 ### 2026-02-17 BUG-2026-02-17-001 Φ keep-key + Graft/Raise/Weaken stabilization
 
 - Root-cause cluster:

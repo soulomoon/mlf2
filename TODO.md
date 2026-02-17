@@ -348,7 +348,8 @@ Based on `papers/these-finale-english.txt`; see also `papers/xmlf.txt` §1 & §2
 - [x] Enforce translatable-presolution invariants for Φ (explicit `PhiTranslatabilityError` / `PhiInvariantError`; no silent non-spine `OpRaise` fallback).
 - [x] Confirm Ω normalization emits Fig. 15.3.4 operations for current coverage; document the remaining US-004 κσ deviation in `test/ElaborationSpec.hs`.
   - 2026-02-10: Fig. 15.3.4 witness matrix closure gate is green (`cabal test mlf2-test --test-show-details=direct --test-options='--match R-'`), covering all 15 row IDs.
-- [ ] `A4 (P2)` Refresh paper-faithfulness docs to reflect implemented strict Φ/Σ behavior and list only unresolved deltas.
+- [x] `A4 (P2)` Refresh paper-faithfulness docs to reflect implemented strict Φ/Σ behavior and list only unresolved deltas.
+  - 2026-02-17: synced `.kiro/specs/paper-faithfulness-remaining-deltas/{requirements,design,tasks}.md` with current implementation state (semantic deltas closed; remaining items are non-semantic assurance/docs debt).
 
 See `.kiro/specs/paper-faithfulness-remaining-deltas/` for the audit and plan.
 
@@ -368,7 +369,8 @@ Files: `src/MLF/Elab/Run/Pipeline.hs`, `src/MLF/Elab/Run/ResultType/Fallback.hs`
 AC: Legacy conversion helper is not exposed from public pipeline exports used by downstream clients.
 Files: `src/MLF/Elab/Pipeline.hs`, `src/MLF/Elab/Legacy.hs`, `src-public/MLF/API.hs`, `src-public/MLF/Pipeline.hs`
 
-- [ ] `A4 (P2)` Sync paper-faithfulness docs/specs with current strict Φ/Σ behavior and remaining true deltas only.
+- [x] `A4 (P2)` Sync paper-faithfulness docs/specs with current strict Φ/Σ behavior and remaining true deltas only.
+AC status (2026-02-17): `.kiro` paper-faithfulness status lines now reflect closed semantic deltas; remaining true deltas are explicitly scoped to formalization/assurance and broader non-semantic backlog.
 AC: `.kiro` paper-faithfulness status lines reflect current implementation; remaining open items are explicit and non-contradictory.
 Files: `.kiro/specs/paper-faithfulness-remaining-deltas/requirements.md`, `.kiro/specs/paper-faithfulness-remaining-deltas/tasks.md`, `implementation_notes.md`
 

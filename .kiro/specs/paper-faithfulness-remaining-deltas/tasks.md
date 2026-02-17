@@ -1,5 +1,10 @@
 # Implementation Plan
 
+## Closure Note (2026-02-17)
+- This spec’s semantic paper-faithfulness tasks are complete.
+- Keep this artifact as historical closure evidence for A4 doc sync.
+- Remaining open work is outside this spec’s semantic scope (proof formalization, broader regression breadth, API/harness cleanup), tracked in `/Volumes/src/mlf4/TODO.md`.
+
 - [x] 1. Add constructor types to xMLF AST
   - [x] 1.1 Extend `Ty`/`TyIF` with a constructor type (e.g., `TCon`) and update folds/pretty printers.
     - Files: `src/MLF/Types/Elab.hs`, `src/MLF/Elab/Types.hs`
