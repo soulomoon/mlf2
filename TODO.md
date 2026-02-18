@@ -260,7 +260,8 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 - [x] Expansion variables shared across multiple uses of same binding
 - [x] Variable shadowing / lexical scoping
 - [x] Unknown variable error reporting
-- [ ] `A5 (P3)` Totalize STCon coercion-copy path and remove remaining partial failure branch.
+- [x] `A5 (P3)` Totalize STCon coercion-copy path and remove remaining partial failure branch.
+  - 2026-02-18: refactored STCon coercion-copy argument traversal to total `internalizeConArgs` (`NonEmpty`-structured recursion), replaced bare-coercion stringly internal failure with typed `UnexpectedBareCoercionConst`, and added regression coverage (`bare ECoerceConst rejects ...`, `STCon coercion-copy failures surface as typed errors`, `nested STCon coercion-copy preserves binding-tree validity`).
 
 **Tests:** 23 examples, all passing (`cabal test`)
 
@@ -390,9 +391,10 @@ AC status (2026-02-17): `.kiro` paper-faithfulness status lines now reflect clos
 AC: `.kiro` paper-faithfulness status lines reflect current implementation; remaining open items are explicit and non-contradictory.
 Files: `.kiro/specs/paper-faithfulness-remaining-deltas/requirements.md`, `.kiro/specs/paper-faithfulness-remaining-deltas/tasks.md`, `implementation_notes.md`
 
-- [ ] `A5 (P3)` Remove remaining totality/harness footguns.
+- [x] `A5 (P3)` Remove remaining totality/harness footguns.
+AC status (2026-02-18): Confirmed. Frontend coercion-copy no longer uses stringly internal error for bare coercion constants (`UnexpectedBareCoercionConst`), STCon coercion-copy traversal is totalized via `internalizeConArgs`, and the test harness now wires presolution only through `PresolutionSpec` with an explicit fail-fast wiring guard in `test/Main.hs` (`die` if umbrella marker not set).
 AC: No partial `error` in frontend STCon path; test-suite wiring cannot silently omit presolution umbrella spec.
-Files: `src/MLF/Frontend/ConstraintGen/Translate.hs`, `mlf2.cabal`, `test/Main.hs`
+Files: `src/MLF/Frontend/ConstraintGen/Types.hs`, `src/MLF/Frontend/ConstraintGen/Translate.hs`, `src/MLF/Frontend/ConstraintGen.hs`, `test/ConstraintGenSpec.hs`, `test/PresolutionSpec.hs`, `test/Main.hs`
 
 - [x] `A6 (P2)` Expand thesis-anchored regression matrix for translatability, bounded coercions, and checked-vs-unchecked parity.
 AC status (2026-02-17): Added bounded/coercion-heavy parity regressions in `PipelineSpec`, `TypeCheckSpec`, and `ReduceSpec`, with existing `ElaborationSpec` matrix coverage retained; verified by focused A6 matcher and full gate (`cabal build all && cabal test`).

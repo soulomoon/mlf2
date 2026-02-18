@@ -1,5 +1,28 @@
 # Implementation Notes
 
+### 2026-02-18 A5 (P3) totality/harness hardening closure
+
+- Frontend coercion-copy failure typing:
+  - Added `UnexpectedBareCoercionConst` to `MLF.Frontend.ConstraintGen.Types.ConstraintError`.
+  - `MLF.Frontend.ConstraintGen.Translate.buildExprRaw` now rejects bare `ECoerceConst` with the typed constructor instead of stringly `InternalConstraintError`.
+- STCon coercion-copy totalization:
+  - Refactored constructor-argument internalization into `internalizeConArgs` (`NonEmpty` recursion) and removed in-branch `NE.head`/`NE.tail` + ad hoc accumulator plumbing from `STCon` handling.
+  - Preserved existing sharing/rebinding semantics (`SharedEnv` threading and rigid child rebind behavior remain unchanged).
+- Harness wiring hardening:
+  - `test/Main.hs` now wires presolution via `PresolutionSpec.spec` only (single-source umbrella).
+  - Added fail-fast wiring guard: `IORef` marker is set at presolution wiring and checked immediately after; test binary aborts if presolution umbrella wiring is removed.
+- Regression coverage added/updated:
+  - `test/ConstraintGenSpec.hs`:
+    - `bare ECoerceConst rejects with typed UnexpectedBareCoercionConst (not InternalConstraintError string)`
+    - `STCon coercion-copy failures surface as typed errors`
+    - `nested STCon coercion-copy preserves binding-tree validity`
+  - `test/PresolutionSpec.hs` + `test/Main.hs`: umbrella wiring consolidation and guard path.
+- Verification snapshot:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "bare ECoerceConst rejects"'` (PASS)
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "STCon coercion-copy failures surface as typed errors"'` (PASS)
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Phase 4 — Principal Presolution"'` (PASS)
+  - `cabal build all && cabal test` (PASS)
+
 ### 2026-02-17 BUG-2026-02-17-002 applied bounded/coercion A6 closure
 
 - Root-cause chain (systematic-debugging):

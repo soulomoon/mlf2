@@ -1,65 +1,59 @@
 module Main (main) where
 
+import Control.Monad (unless)
+import Data.IORef (newIORef, readIORef, writeIORef)
+import System.Exit (die)
 import Test.Hspec
 
-import qualified ConstraintGenSpec
-import qualified NormalizeSpec
 import qualified AcyclicitySpec
-import qualified Presolution.EdgeTraceSpec
-import qualified Presolution.EnforcementSpec
-import qualified Presolution.ExpansionSpec
-import qualified Presolution.InstantiateSpec
-import qualified Presolution.MergeEmissionSpec
-import qualified Presolution.RaiseSpec
-import qualified Presolution.EdgePlannerSpec
-import qualified Presolution.EdgeInterpreterSpec
-import qualified Presolution.WitnessSpec
-import qualified SolveSpec
-import qualified PipelineSpec
-import qualified ThesisFixDirectionSpec
-import qualified TypeCheckSpec
-import qualified ReduceSpec
-import qualified ElaborationSpec
-import qualified GeneralizeSpec
-import qualified BindingSpec
 import qualified BindingSharedAbstractionSpec
-import qualified GraphOpsSpec
+import qualified BindingSpec
 import qualified CanonicalizerSpec
+import qualified ConstraintGenSpec
+import qualified ElaborationSpec
+import qualified FrontendNormalizeSpec
 import qualified FrontendParseSpec
 import qualified FrontendPrettySpec
-import qualified FrontendNormalizeSpec
+import qualified GeneralizeSpec
+import qualified GraphOpsSpec
+import qualified NormalizeSpec
+import qualified PipelineSpec
+import qualified Phi.IdentityBridgeSpec
+import qualified PresolutionSpec
+import qualified ReduceSpec
+import qualified SolveSpec
+import qualified ThesisFixDirectionSpec
+import qualified TypeCheckSpec
 import qualified XMLFParseSpec
 import qualified XMLFPrettySpec
-import qualified Phi.IdentityBridgeSpec
 
 main :: IO ()
-main = hspec $ do
-    ConstraintGenSpec.spec
-    NormalizeSpec.spec
-    AcyclicitySpec.spec
-    Presolution.EnforcementSpec.spec
-    Presolution.InstantiateSpec.spec
-    Presolution.EdgeTraceSpec.spec
-    Presolution.MergeEmissionSpec.spec
-    Presolution.EdgePlannerSpec.spec
-    Presolution.EdgeInterpreterSpec.spec
-    Presolution.WitnessSpec.spec
-    Presolution.ExpansionSpec.spec
-    Presolution.RaiseSpec.spec
-    SolveSpec.spec
-    PipelineSpec.spec
-    ThesisFixDirectionSpec.spec
-    TypeCheckSpec.spec
-    ReduceSpec.spec
-    ElaborationSpec.spec
-    GeneralizeSpec.spec
-    BindingSpec.spec
-    BindingSharedAbstractionSpec.spec
-    GraphOpsSpec.spec
-    CanonicalizerSpec.spec
-    FrontendParseSpec.spec
-    FrontendPrettySpec.spec
-    FrontendNormalizeSpec.spec
-    XMLFParseSpec.spec
-    XMLFPrettySpec.spec
-    Phi.IdentityBridgeSpec.spec
+main = do
+    presolutionMarker <- newIORef False
+    hspec $ do
+        ConstraintGenSpec.spec
+        NormalizeSpec.spec
+        AcyclicitySpec.spec
+        runIO (writeIORef presolutionMarker True)
+        PresolutionSpec.spec
+        runIO $ do
+            wasPresolutionWired <- readIORef presolutionMarker
+            unless wasPresolutionWired $
+                die "PresolutionSpec was not wired into the test harness."
+        SolveSpec.spec
+        PipelineSpec.spec
+        ThesisFixDirectionSpec.spec
+        TypeCheckSpec.spec
+        ReduceSpec.spec
+        ElaborationSpec.spec
+        GeneralizeSpec.spec
+        BindingSpec.spec
+        BindingSharedAbstractionSpec.spec
+        GraphOpsSpec.spec
+        CanonicalizerSpec.spec
+        FrontendParseSpec.spec
+        FrontendPrettySpec.spec
+        FrontendNormalizeSpec.spec
+        XMLFParseSpec.spec
+        XMLFPrettySpec.spec
+        Phi.IdentityBridgeSpec.spec

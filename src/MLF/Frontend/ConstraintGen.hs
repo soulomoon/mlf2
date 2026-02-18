@@ -2,13 +2,14 @@ module MLF.Frontend.ConstraintGen (
     ConstraintError (..),
     ConstraintResult (..),
     AnnExpr (..),
-    generateConstraints
+    generateConstraints,
+    generateConstraintsCore
 ) where
 
 import Data.Functor.Foldable (cata)
 import qualified Data.IntSet as IntSet
 
-import MLF.Frontend.Syntax (NormSurfaceExpr)
+import MLF.Frontend.Syntax (NormCoreExpr, NormSurfaceExpr)
 import MLF.Frontend.Desugar (desugarSurface)
 import MLF.Constraint.Types.Graph (NodeId, PolySyms, cAnnEdges, getEdgeId)
 import MLF.Frontend.ConstraintGen.Types
@@ -93,11 +94,19 @@ Paper references:
 -}
 
 generateConstraints :: PolySyms -> NormSurfaceExpr -> Either ConstraintError ConstraintResult
-generateConstraints polySyms expr = do
-    let expr' = desugarSurface expr
+generateConstraints polySyms expr =
+    generateConstraintsCore polySyms (desugarSurface expr)
+
+-- | Generate constraints from a normalized core expression.
+--
+-- This is primarily useful for regression tests that need to exercise
+-- core-only forms (for example bare coercion constants) that are not
+-- constructible through the surface parser/normalizer pipeline.
+generateConstraintsCore :: PolySyms -> NormCoreExpr -> Either ConstraintError ConstraintResult
+generateConstraintsCore polySyms expr = do
     let initialState = mkInitialStateWithPolySyms polySyms
     ((_rootGen, rootNode, annRoot), finalState) <-
-        runConstraintM (buildRootExpr expr') initialState
+        runConstraintM (buildRootExpr expr) initialState
     let annEdges = collectAnnEdges annRoot
         constraint = (buildConstraint finalState) { cAnnEdges = annEdges }
     pure ConstraintResult

@@ -3,7 +3,6 @@ module MLF.Frontend.ConstraintGen.Translate (
     buildRootExpr
 ) where
 
-import Control.Monad (foldM)
 import Control.Monad.Except (MonadError (throwError))
 import Control.Monad.State.Strict (gets, modify')
 import Data.List.NonEmpty (NonEmpty(..))
@@ -229,7 +228,7 @@ buildExprRaw env scopeRoot expr =
         -- We only expect coercion constants to appear in an application position,
         -- i.e. as the result of desugaring @(a : τ)@ to @cτ a@.
         ECoerceConst{} ->
-            throwError (InternalConstraintError "buildExprRaw: unexpected bare ECoerceConst")
+            throwError UnexpectedBareCoercionConst
 
 -- | Translate a coercion application @cτ a@ (surface form @(a : τ)@).
 --
@@ -473,6 +472,27 @@ internalizeCoercionType coerceGen ty = do
         internalizeCoercionCopy BindFlex True coerceGen coerceGen Map.empty shared1 ty
     pure (domainNode, codomainNode)
 
+-- | Internalize constructor arguments left-to-right while threading
+-- coercion-copy sharing.
+internalizeConArgs
+    :: BindFlag
+    -> Bool
+    -> GenNodeId
+    -> GenNodeId
+    -> TyEnv
+    -> SharedEnv
+    -> NonEmpty NormSrcType
+    -> ConstraintM (NonEmpty NodeId, SharedEnv)
+internalizeConArgs bindFlag wrap coerceGen currentGen tyEnv shared (argTy :| rest) = do
+    (argNode, shared1) <-
+        internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared argTy
+    case rest of
+        [] -> pure (argNode :| [], shared1)
+        nextArg : remainingArgs -> do
+            (nextNodes, sharedFinal) <-
+                internalizeConArgs bindFlag wrap coerceGen currentGen tyEnv shared1 (nextArg :| remainingArgs)
+            pure (argNode :| NE.toList nextNodes, sharedFinal)
+
 -- | Internalize a coercion copy with a given binding flag (rigid/flex),
 -- optional wrapping, and shared existentials.
 internalizeCoercionCopy
@@ -517,18 +537,10 @@ internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared srcType 
         STCon name args -> do
             let arity = NE.length args
             registerTyConArity (BaseTy name) arity
-            (headNode, shared1) <-
-                internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared (NE.head args)
-            (tailNodes, sharedFinal) <- foldM
-                (\(accNodes, accShared) argTy -> do
-                    (argNode, newShared) <-
-                        internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv accShared argTy
-                    pure (accNodes ++ [argNode], newShared))
-                ([], shared1)
-                (NE.tail args)
-            let argNodes = headNode : tailNodes
-            conNode <- allocCon (BaseTy name) (headNode :| tailNodes)
-            rebindChildrenIfRigid bindFlag conNode (genRef currentGen) argNodes
+            (argNodes, sharedFinal) <-
+                internalizeConArgs bindFlag wrap coerceGen currentGen tyEnv shared args
+            conNode <- allocCon (BaseTy name) argNodes
+            rebindChildrenIfRigid bindFlag conNode (genRef currentGen) (NE.toList argNodes)
             withWrappedNode bindFlag wrap currentGen conNode sharedFinal
 
         STForall var mBound body -> do

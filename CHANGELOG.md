@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+* A5 (P3) totality/harness hardening: replaced bare-coercion stringly internal failure with typed `UnexpectedBareCoercionConst`, totalized STCon coercion-copy argument traversal via `internalizeConArgs` (`NonEmpty` recursion), consolidated presolution harness wiring through `PresolutionSpec`, and added fail-fast harness guard in `test/Main.hs` so omitted umbrella wiring aborts test execution.
 * BUG-2026-02-17-002 closure: fixed applied bounded/coercion A6 mismatch by aligning annotated-lambda let fallback and application instantiation recovery in `MLF.Elab.Elaborate`; converted the `PipelineSpec` sentinel into a strict success assertion (`Int`) and moved the bug to resolved in `Bugs.md`.
 * A6 (P2) parity/regression coverage: expanded bounded/coercion-heavy checked-vs-unchecked parity tests in `test/PipelineSpec.hs`, `test/TypeCheckSpec.hs`, and `test/ReduceSpec.hs`, including `typeCheck` agreement and normalization-preservation checks for elaborated terms.
 * A3 (P2) API cleanup: quarantined legacy elaboration conversion by removing `expansionToInst` from `MLF.Elab.Pipeline` exports; legacy helper remains in `MLF.Elab.Legacy`, with public client surfaces unchanged (`MLF.API`, `MLF.Pipeline`).

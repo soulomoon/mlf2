@@ -12,7 +12,7 @@ import Test.Hspec
 import MLF.Binding.Tree (boundFlexChildren, checkBindingTree, isUnderRigidBinder, nodeKind, NodeKind(..))
 import MLF.Constraint.Presolution (PresolutionResult(..))
 import MLF.Constraint.Solve (SolveResult(..), solveUnify)
-import MLF.Frontend.ConstraintGen (AnnExpr (..))
+import MLF.Frontend.ConstraintGen (AnnExpr (..), generateConstraintsCore)
 import MyLib hiding (normalize, lookupNode)
 import SpecUtil
     ( expectRight
@@ -702,6 +702,20 @@ spec = describe "Phase 1 — Constraint generation" $ do
             result <- requireRight (inferConstraintGraphDefault expr)
             checkBindingTree (crConstraint result) `shouldBe` Right ()
 
+        it "nested STCon coercion-copy preserves binding-tree validity" $ do
+            let nested =
+                    STCon "Either"
+                        ( STCon "List" (STBase "Int" :| [])
+                        :| [STCon "Maybe" (STBase "Bool" :| [])]
+                        )
+                ann = STArrow nested nested
+                expr =
+                    ELet "f"
+                        (EAnn (ELam "x" (EVar "x")) ann)
+                        (EVar "f")
+            result <- requireRight (inferConstraintGraphDefault expr)
+            checkBindingTree (crConstraint result) `shouldBe` Right ()
+
         it "nested forall coercion paths preserve valid binding tree" $ do
             let ann = STForall "a" Nothing (STArrow (STVar "a") (STVar "a"))
                 expr = ELet "f" (EAnn (ELam "x" (EVar "x")) ann) (EApp (EVar "f") (ELit (LInt 1)))
@@ -952,6 +966,28 @@ spec = describe "Phase 1 — Constraint generation" $ do
                                     other -> expectationFailure $ "Expected Int base, saw " ++ show other
                             other -> expectationFailure $ "Expected TyVar arg, saw " ++ show other
                     _ -> expectationFailure "Expected TyCon nodes"
+
+    describe "Typed coercion error regressions" $ do
+        it "bare ECoerceConst rejects with typed UnexpectedBareCoercionConst (not InternalConstraintError string)" $ do
+            case generateConstraintsCore Set.empty (ECoerceConst (STBase "Int")) of
+                Left UnexpectedBareCoercionConst -> pure ()
+                Left (InternalConstraintError msg) ->
+                    expectationFailure $ "expected typed bare-coercion error, got internal string path: " ++ msg
+                other ->
+                    expectationFailure $ "expected typed bare-coercion error, got: " ++ show other
+
+        it "STCon coercion-copy failures surface as typed errors" $ do
+            let ann =
+                    STArrow
+                        (STCon "List" (STBase "Int" :| []))
+                        (STCon "List" (STBase "Int" :| [STBase "Bool"]))
+                expr = EAnn (ELit (LInt 1)) ann
+            case inferConstraintGraphDefault expr of
+                Left (TypeConstructorArityMismatch _ _ _) -> pure ()
+                Left (InternalConstraintError msg) ->
+                    expectationFailure $ "unexpected internal path: " ++ msg
+                other ->
+                    expectationFailure $ "unexpected result: " ++ show other
 
     describe "Type constructor arity validation" $ do
         it "throws TypeConstructorArityMismatch on conflicting arities" $ do

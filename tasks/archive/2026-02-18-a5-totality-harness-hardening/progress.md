@@ -1,0 +1,55 @@
+# Progress Log: A5 (P3) Totality and Harness Hardening
+
+## 2026-02-18
+- Reviewed `TODO.md` around lines 263 and 393 to confirm A5 acceptance criteria.
+- Inspected:
+  - `src/MLF/Frontend/ConstraintGen/Translate.hs`
+  - `src/MLF/Frontend/ConstraintGen/Types.hs`
+  - `test/Main.hs`
+  - `test/PresolutionSpec.hs`
+  - `mlf2.cabal`
+- Confirmed harness omission risk: `PresolutionSpec` is listed in Cabal but not wired in `test/Main.hs`.
+- Drafted detailed execution plan:
+  - `docs/plans/2026-02-18-a5-totality-harness-hardening-implementation-plan.md`
+- Initialized task tracking files under:
+  - `tasks/todo/2026-02-18-a5-totality-harness-hardening/`
+
+## 2026-02-18 execution log (implementation)
+- Baseline isolation/worktree setup:
+  - Created `~/.config/superpowers/worktrees/mlf4/codex-a5-totality-harness-hardening` on branch `codex/a5-totality-harness-hardening`.
+  - Baseline `cabal test` in worktree: PASS (`684 examples, 0 failures`).
+- Task 1 (RED tests):
+  - Added typed coercion regression block in `test/ConstraintGenSpec.hs`.
+  - RED confirmation command:
+    - `cabal test mlf2-test --test-show-details=direct --test-options='--match "bare ECoerceConst|STCon coercion-copy failures surface as typed errors"'`
+    - Initial RED compile failure: `UnexpectedBareCoercionConst` not in scope.
+  - Fixed bare-coercion test to execute runtime path (not hard-coded `Left`).
+- Task 2 (typed error implementation):
+  - Added `UnexpectedBareCoercionConst` in `src/MLF/Frontend/ConstraintGen/Types.hs`.
+  - Replaced bare-coercion throw site in `src/MLF/Frontend/ConstraintGen/Translate.hs` with typed constructor.
+  - Added core-only test entrypoint `generateConstraintsCore` in `src/MLF/Frontend/ConstraintGen.hs` to exercise bare `ECoerceConst` path from tests.
+  - Focused passes:
+    - `--match "bare ECoerceConst rejects"` => PASS (1 example)
+    - `--match "STCon coercion-copy failures surface as typed errors"` => PASS (1 example)
+- Task 3 (STCon totalization):
+  - Added `internalizeConArgs` helper (`NonEmpty` recursion) in `Translate.hs`.
+  - STCon branch now delegates to helper; removed inline `NE.head`/`NE.tail` plumbing.
+  - Added `nested STCon coercion-copy preserves binding-tree validity` test in `ConstraintGenSpec`.
+  - Focused passes:
+    - `--match "Constructor types"` => PASS (3 examples)
+    - `--match "coercion and let scope wiring preserve single-parent invariant"` => PASS (1 example)
+    - `--match "nested STCon coercion-copy preserves binding-tree validity"` => PASS (1 example)
+- Task 4 (umbrella wiring):
+  - Expanded `test/PresolutionSpec.hs` to include planner/interpreter children.
+  - Rewired `test/Main.hs` from direct `Presolution.*` children to single `PresolutionSpec.spec`.
+  - Focused passes:
+    - `--match "Phase 4 — Principal Presolution"` => PASS (127 examples)
+    - `--match "R-"` => PASS (19 examples)
+- Task 5 (harness guard):
+  - Implemented fail-fast umbrella wiring guard in `test/Main.hs` via marker + `runIO` check + `die`.
+  - Kept `PresolutionSpec` API minimal (`spec` only) and marker wiring local to `Main`.
+  - Focused passes:
+    - `--match "Phase 4 — Principal Presolution"` => PASS (127 examples)
+    - `--match "Frontend eMLF parser"` => PASS (29 examples)
+- Full verification:
+  - `cabal build all && cabal test` => PASS.
