@@ -30,7 +30,6 @@ module MLF.Elab.Pipeline (
     reifyTypeWithNamedSet,
     reifyBoundWithNames,
     generalizeAtWithBuilder,
-    expansionToInst,
     schemeToType,
     applyInstantiation,
     schemeFromType,
@@ -63,7 +62,6 @@ module MLF.Elab.Pipeline (
 
 import MLF.Elab.Types
 import MLF.Elab.Elaborate (elaborate)
-import MLF.Elab.Legacy (expansionToInst)
 import MLF.Elab.PipelineConfig (PipelineConfig(..), defaultPipelineConfig)
 import MLF.Elab.PipelineError
     ( PipelineError(..)

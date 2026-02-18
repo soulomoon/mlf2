@@ -33,6 +33,7 @@ import MLF.Frontend.Syntax (NormSurfaceExpr, NormSrcType, StructBound)
 import MLF.Frontend.Normalize (NormalizationError(..), normalizeExpr, normalizeType)
 import MLF.Frontend.ConstraintGen (ConstraintError, ConstraintResult, generateConstraints)
 import MLF.Constraint.Types.Graph (BaseTy(..), PolySyms)
+-- Keep legacy elaboration conversion helpers quarantined in MLF.Elab.Legacy.
 import MLF.Elab.Pipeline
     ( PipelineConfig(..)
     , PipelineError(..)

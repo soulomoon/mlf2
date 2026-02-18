@@ -4,6 +4,19 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 18 BUG-2026-02-17-002 A6 applied bounded/coercion expected-pass gap — 2026-02-17
+
+- Scope:
+  - Close the applied bounded/coercion-heavy A6 variant so it typechecks to thesis-expected `Int`.
+- Current status:
+  - Resolved in `/Volumes/src/mlf4/Bugs.md` (`BUG-2026-02-17-002`, resolved 2026-02-17).
+  - Regression now asserts strict success in `/Volumes/src/mlf4/test/PipelineSpec.hs`:
+    - `BUG-2026-02-17-002: applied bounded-coercion path elaborates to Int in unchecked and checked pipelines`.
+- Verification (green):
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-2026-02-17-002"'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "A6 parity"'`
+  - `cabal build all && cabal test`
+
 ## Task 17 BUG-2026-02-17-001 Φ keep-key + Graft/Raise/Weaken drift — 2026-02-17
 
 - Root cause (deterministic seed `529747475`):
@@ -289,7 +302,8 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 - [x] `applyExpansion`/`instantiateScheme` to realize expansions and graft fresh nodes
 - [x] Incremental unification inside presolution loop
 - [x] Tests: `test/PresolutionSpec.hs` covers identity, instantiate, forall-intro, and compose (instantiate→forall)
-- [ ] `A1 (P1)` Strict Ω normalization only (remove permissive fallback path in production).
+- [x] `A1 (P1)` Strict Ω normalization only (remove permissive fallback path in production).
+  - 2026-02-17: closure audit confirmed strict production fail-fast for malformed merge direction (`MergeDirectionInvalid`) with targeted + full gate evidence (`--match R-MERGE-NORM-09`, `--match "fails fast with MergeDirectionInvalid via presolution normalization"`, `cabal build all && cabal test`).
 - [x] `A6 (P2)` Add thesis-anchored witness normalization/translatability regression fixtures.
   - 2026-02-10: added strict transitive-flex `OpRaise` regression fixtures in `test/Presolution/WitnessSpec.hs` and `test/Presolution/MergeEmissionSpec.hs` (direct validator + `normalizeEdgeWitnessesM` path).
   - 2026-02-10: completed Fig. 15.3.4 15-row witness matrix closure (`R-GRAFT-VALID-01`..`R-RAISEMERGE-NORM-15`) with row-labeled tests and green matrix/full gates.
@@ -322,8 +336,8 @@ Based on `papers/these-finale-english.txt`; see also `papers/xmlf.txt` §3.
     - [x] Elaboration basics (id, const) + let-polymorphism
     - [x] Φ/Σ unit tests + instantiation-soundness checks
 - [x] `A2 (P1)` Align pipeline-reported result type with checked type as authoritative.
-- [ ] `A3 (P2)` Remove legacy helper from public elaboration API surface.
-- [ ] `A6 (P2)` Add checked-vs-unchecked elaboration parity tests (incl. US-004-style paths).
+- [x] `A3 (P2)` Remove legacy helper from public elaboration API surface.
+- [x] `A6 (P2)` Add checked-vs-unchecked elaboration parity tests (incl. US-004-style paths).
 
 ---
 
@@ -337,7 +351,7 @@ Based on `papers/these-finale-english.txt`; see also `papers/xmlf.txt` §1 & §2
 - [x] **Evaluator** (`src/MLF/Elab/Reduce.hs`)
     - [x] Implement small-step reduction `a ⟶ a'`
     - [x] Implement instantiation reduction rules (e.g., `(Λ...) N ⟶ ...`)
-- [ ] `A6 (P2)` Add regression cases ensuring typecheck confirms elaboration parity for bounded/coercion-heavy terms.
+- [x] `A6 (P2)` Add regression cases ensuring typecheck confirms elaboration parity for bounded/coercion-heavy terms.
 
 ---
 
@@ -357,7 +371,8 @@ See `.kiro/specs/paper-faithfulness-remaining-deltas/` for the audit and plan.
 
 ## Audit Backlog — 2026-02-06
 
-- [ ] `A1 (P1)` Enforce strict Ω normalization in production witness path (no permissive fallback on merge-direction errors).
+- [x] `A1 (P1)` Enforce strict Ω normalization in production witness path (no permissive fallback on merge-direction errors).
+AC status (2026-02-17): Confirmed. `normalizeInstanceOpsFull` rejects malformed merge direction with `MergeDirectionInvalid`; `normalizeEdgeWitnessesM` propagates as `WitnessNormalizationError` (no fallback acceptance). Targeted and full verification gates are green.
 AC: Presolution witness normalization fails fast on malformed merge direction; no fallback acceptance in production path.
 Files: `src/MLF/Constraint/Presolution/WitnessCanon.hs`, `src/MLF/Constraint/Presolution/WitnessNorm.hs`, `test/Presolution/WitnessSpec.hs`
 
@@ -365,7 +380,8 @@ Files: `src/MLF/Constraint/Presolution/WitnessCanon.hs`, `src/MLF/Constraint/Pre
 AC: `runPipelineElab` and checked pipeline type outcomes are aligned for known divergence cases (including US-004-style scenarios).
 Files: `src/MLF/Elab/Run/Pipeline.hs`, `src/MLF/Elab/Run/ResultType/Fallback.hs`, `test/ElaborationSpec.hs`
 
-- [ ] `A3 (P2)` Quarantine legacy elaboration helpers from public API surface.
+- [x] `A3 (P2)` Quarantine legacy elaboration helpers from public API surface.
+AC status (2026-02-17): `expansionToInst` remains isolated in `MLF.Elab.Legacy`; `MLF.Elab.Pipeline` no longer re-exports it, and downstream public entry modules (`MLF.API`, `MLF.Pipeline`) do not expose legacy conversion helpers.
 AC: Legacy conversion helper is not exposed from public pipeline exports used by downstream clients.
 Files: `src/MLF/Elab/Pipeline.hs`, `src/MLF/Elab/Legacy.hs`, `src-public/MLF/API.hs`, `src-public/MLF/Pipeline.hs`
 
@@ -378,7 +394,8 @@ Files: `.kiro/specs/paper-faithfulness-remaining-deltas/requirements.md`, `.kiro
 AC: No partial `error` in frontend STCon path; test-suite wiring cannot silently omit presolution umbrella spec.
 Files: `src/MLF/Frontend/ConstraintGen/Translate.hs`, `mlf2.cabal`, `test/Main.hs`
 
-- [ ] `A6 (P2)` Expand thesis-anchored regression matrix for translatability, bounded coercions, and checked-vs-unchecked parity.
+- [x] `A6 (P2)` Expand thesis-anchored regression matrix for translatability, bounded coercions, and checked-vs-unchecked parity.
+AC status (2026-02-17): Added bounded/coercion-heavy parity regressions in `PipelineSpec`, `TypeCheckSpec`, and `ReduceSpec`, with existing `ElaborationSpec` matrix coverage retained; verified by focused A6 matcher and full gate (`cabal build all && cabal test`).
 AC: Added targeted tests for strict translatability invariants and elaboration/type-check parity; references to thesis anchors included in spec names/comments.
 Files: `test/ElaborationSpec.hs`, `test/Presolution/WitnessSpec.hs`, `test/PipelineSpec.hs`, `test/TypeCheckSpec.hs`, `test/ReduceSpec.hs`
 

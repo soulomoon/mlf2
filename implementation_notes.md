@@ -1,5 +1,33 @@
 # Implementation Notes
 
+### 2026-02-17 BUG-2026-02-17-002 applied bounded/coercion A6 closure
+
+- Root-cause chain (systematic-debugging):
+  - `MLF.Elab.Elaborate` `ALetF` fallback shape checks only recognized raw `ALam`/`AApp`; annotated lambdas (`AAnn (ALam ...)`) skipped the lambda fallback path and retained mismatch-prone let scheme shaping.
+  - `MLF.Elab.Elaborate` `AAppF` recovery upgraded `InstApp` only when the argument source was a named variable; literal arguments fell back to `InstElim`, bottomizing applications through unbounded binders.
+- Implemented behavior:
+  - `ALetF` now unwraps `AAnn` when classifying RHS shape (`rhsIsLam`/`rhsIsApp`).
+  - Lambda fallback candidates now use `IntMap.empty` substitution and avoid extra RHS closure wrapping when a fallback scheme is selected.
+  - `AAppF` `funInstRecovered` now permits non-variable arguments to drive `InstApp` recovery using checked argument type (still constrained by existing binder-shape guards).
+- Result:
+  - The applied A6 bounded/coercion variant now elaborates to `Int` in both unchecked and checked pipelines.
+  - Regression sentinel was upgraded to strict success assertion in `test/PipelineSpec.hs`.
+- Verification snapshot:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-2026-02-17-002"'` (PASS)
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "A6 parity"'` (PASS)
+  - `cabal build all && cabal test` (PASS)
+
+### 2026-02-17 A1 strict Ω normalization closure audit
+
+- Audited A1 acceptance criteria against production witness normalization:
+  - `MLF.Constraint.Presolution.WitnessCanon.normalizeInstanceOpsFull` rejects malformed merge direction as `MergeDirectionInvalid`.
+  - `MLF.Constraint.Presolution.WitnessNorm.normalizeEdgeWitnessesM` surfaces normalization failures as `WitnessNormalizationError` without permissive fallback acceptance.
+- Verification evidence:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match R-MERGE-NORM-09'` (PASS)
+  - `cabal test mlf2-test --test-show-details=direct --test-options=\"--match=\\\"fails fast with MergeDirectionInvalid via presolution normalization\\\"\"` (PASS)
+  - `cabal build all && cabal test` (PASS)
+- Synced tracker closure in `TODO.md` (`A1 (P1)` entries now closed with dated AC status).
+
 ### 2026-02-17 A4 paper-faithfulness doc/spec sync
 
 - Synced `.kiro/specs/paper-faithfulness-remaining-deltas/` to current state:
@@ -502,7 +530,7 @@ Legacy code is isolated in `MLF.Elab.Legacy` (e.g., `expansionToInst`).
 - `phiFromEdgeWitnessWithTrace` targets binders using `InstUnder` contexts (`C{·}`) and prefixes Ω-translation with the ≺-based reordering ϕR/Σ(g) when `Typ` vs `Typexp` disagree (thesis Def. 15.3.4); missing non-spine contexts are errors, and normalized ω ops that violate translatability (e.g. `OpRaise` outside `I(r)`, non-transitive-flex `OpRaise` targets, non-binder targets, rigid-only-on-non-operated-endpoint for Merge/RaiseMerge) are rejected rather than silently skipped. Rigid identity behavior follows the literal thesis condition on operated node `n` for Raise/Merge/RaiseMerge.
   - Implemented explicit quantifier reordering instantiations (`sigmaReorder`) using adjacent swaps per `papers/these-finale-english.txt` (see `papers/xmlf.txt` §3.4).
   - Implemented `applyInstantiation` (in `MLF.Elab.Inst`, reexported via `MLF.Elab.Pipeline`) to check/apply xMLF instantiations to xMLF types (see `papers/these-finale-english.txt`; `papers/xmlf.txt` Fig. 3), used by tests to validate that `Φ(e)` transforms the source type into the target type.
-- **`expansionToInst`**: Kept as a legacy/debug conversion from `Expansion` to `Instantiation` (no longer the main path for elaboration).
+- **`expansionToInst`**: Kept as a legacy/debug conversion from `Expansion` to `Instantiation` (no longer the main path for elaboration, and no longer re-exported via `MLF.Elab.Pipeline`).
 - **`runPipelineElab`**: Generalizes the top-level result using the nearest gen ancestor of the expression root (root gen node for top-level), keeps reconstruction checks for diagnostics, and reports the type-checker result as the authoritative pipeline type.
 
 ## Testing

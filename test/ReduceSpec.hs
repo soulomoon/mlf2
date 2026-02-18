@@ -2,12 +2,25 @@
 module ReduceSpec (spec) where
 
 import Control.Monad (forM_)
+import qualified Data.Set as Set
 import Test.Hspec
 
 import MLF.Constraint.Types.Graph (BaseTy(..))
-import MLF.Elab.Pipeline (ElabTerm(..), Ty(..), Instantiation(..), normalize, schemeFromType, step, typeCheck)
+import MLF.Elab.Pipeline
+    ( ElabTerm(..)
+    , Ty(..)
+    , Instantiation(..)
+    , normalize
+    , renderPipelineError
+    , runPipelineElab
+    , runPipelineElabChecked
+    , schemeFromType
+    , step
+    , typeCheck
+    )
 import MLF.Frontend.Syntax (Lit(..))
-import SpecUtil (requireRight)
+import qualified MLF.Frontend.Syntax as Surf (Expr(..), SrcTy(..))
+import SpecUtil (mkForalls, requireRight, unsafeNormalizeExpr)
 
 spec :: Spec
 spec = do
@@ -76,3 +89,79 @@ spec = do
                 let term' = normalize term
                 ty' <- requireRight (typeCheck term')
                 ty' `shouldBe` ty
+
+    describe "Phase 7 bounded/coercion-heavy parity regressions (A6)" $ do
+        it "normalization preserves parity for bounded-alias coercion path" $ do
+            let rhs = Surf.ELam "x" (Surf.ELam "y" (Surf.EVar "x"))
+                schemeTy =
+                    mkForalls
+                        [ ("a", Nothing)
+                        , ("b", Just (Surf.STVar "a"))
+                        ]
+                        (Surf.STArrow (Surf.STVar "a") (Surf.STArrow (Surf.STVar "b") (Surf.STVar "a")))
+                ann =
+                    Surf.STForall "a" Nothing
+                        (Surf.STArrow (Surf.STVar "a") (Surf.STArrow (Surf.STVar "a") (Surf.STVar "a")))
+                expr =
+                    Surf.ELet "c" (Surf.EAnn rhs schemeTy)
+                        (Surf.EAnn (Surf.EVar "c") ann)
+                normExpr = unsafeNormalizeExpr expr
+                isPolyBinaryId ty =
+                    case ty of
+                        TForall v Nothing (TArrow dom (TArrow dom' cod)) ->
+                            dom == TVar v && dom' == TVar v && cod == TVar v
+                        _ -> False
+
+            uncheckedRes <- case runPipelineElab Set.empty normExpr of
+                Left err -> expectationFailure ("Unchecked pipeline failed:\n" ++ renderPipelineError err) >> fail "unchecked pipeline failed"
+                Right out -> pure out
+            checkedRes <- case runPipelineElabChecked Set.empty normExpr of
+                Left err -> expectationFailure ("Checked pipeline failed:\n" ++ renderPipelineError err) >> fail "checked pipeline failed"
+                Right out -> pure out
+
+            let (uncheckedTerm, uncheckedTy) = uncheckedRes
+                (checkedTerm, checkedTy) = checkedRes
+                uncheckedNorm = normalize uncheckedTerm
+                checkedNorm = normalize checkedTerm
+
+            uncheckedTy `shouldSatisfy` isPolyBinaryId
+            checkedTy `shouldSatisfy` isPolyBinaryId
+            uncheckedTy `shouldBe` checkedTy
+            uncheckedNormTy <- requireRight (typeCheck uncheckedNorm)
+            checkedNormTy <- requireRight (typeCheck checkedNorm)
+            uncheckedNormTy `shouldSatisfy` isPolyBinaryId
+            checkedNormTy `shouldSatisfy` isPolyBinaryId
+
+        it "normalization preserves parity for dual annotated coercion consumers" $ do
+            let useInt =
+                    Surf.ELamAnn "f" (Surf.STArrow (Surf.STBase "Int") (Surf.STBase "Int"))
+                        (Surf.EApp (Surf.EVar "f") (Surf.ELit (LInt 0)))
+                useBool =
+                    Surf.ELamAnn "f" (Surf.STArrow (Surf.STBase "Bool") (Surf.STBase "Bool"))
+                        (Surf.EApp (Surf.EVar "f") (Surf.ELit (LBool True)))
+                expr =
+                    Surf.ELet "id" (Surf.ELam "x" (Surf.EVar "x"))
+                        (Surf.ELet "useI" useInt
+                            (Surf.ELet "useB" useBool
+                                (Surf.ELet "_" (Surf.EApp (Surf.EVar "useI") (Surf.EVar "id"))
+                                    (Surf.EApp (Surf.EVar "useB") (Surf.EVar "id")))))
+                expected = TBase (BaseTy "Bool")
+                normExpr = unsafeNormalizeExpr expr
+
+            uncheckedRes <- case runPipelineElab Set.empty normExpr of
+                Left err -> expectationFailure ("Unchecked pipeline failed:\n" ++ renderPipelineError err) >> fail "unchecked pipeline failed"
+                Right out -> pure out
+            checkedRes <- case runPipelineElabChecked Set.empty normExpr of
+                Left err -> expectationFailure ("Checked pipeline failed:\n" ++ renderPipelineError err) >> fail "checked pipeline failed"
+                Right out -> pure out
+
+            let (uncheckedTerm, uncheckedTy) = uncheckedRes
+                (checkedTerm, checkedTy) = checkedRes
+                uncheckedNorm = normalize uncheckedTerm
+                checkedNorm = normalize checkedTerm
+
+            uncheckedTy `shouldBe` expected
+            checkedTy `shouldBe` expected
+            uncheckedTy `shouldBe` checkedTy
+            typeCheck uncheckedNorm `shouldBe` Right expected
+            typeCheck checkedNorm `shouldBe` Right expected

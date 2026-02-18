@@ -78,6 +78,7 @@ import MLF.Frontend.Pretty
     )
 import MLF.Constraint.Types.Graph (BaseTy (..), PolySyms)
 import MLF.Frontend.ConstraintGen (ConstraintError (..), ConstraintResult (..))
+-- Keep legacy elaboration conversion helpers quarantined in MLF.Elab.Legacy.
 import MLF.Elab.Pipeline
     ( ElabError (..)
     , ElabScheme

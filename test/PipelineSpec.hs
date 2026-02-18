@@ -429,6 +429,79 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 Left err -> expectationFailure ("Checked pipeline failed:\n" ++ renderPipelineError err)
                 Right (_term, ty) -> ty `shouldBe` TBase (BaseTy "Int")
 
+    it "A6 parity: bounded alias + coercion-heavy path agrees across unchecked, checked, and typeCheck" $ do
+        let rhs = ELam "x" (ELam "y" (EVar "x"))
+            schemeTy =
+                mkForalls
+                    [ ("a", Nothing)
+                    , ("b", Just (STVar "a"))
+                    ]
+                    (STArrow (STVar "a") (STArrow (STVar "b") (STVar "a")))
+            ann =
+                STForall "a" Nothing
+                    (STArrow (STVar "a") (STArrow (STVar "a") (STVar "a")))
+            expr =
+                ELet "c" (EAnn rhs schemeTy)
+                    (EAnn (EVar "c") ann)
+            normExpr = unsafeNormalizeExpr expr
+            expectPolyBinaryId ty =
+                case ty of
+                    TForall v Nothing (TArrow dom (TArrow dom' cod))
+                        | dom == TVar v && dom' == TVar v && cod == TVar v -> pure ()
+                    other ->
+                        expectationFailure
+                            ("Expected forall a. a -> a -> a, got: " ++ show other)
+
+        case runPipelineElab Set.empty normExpr of
+            Left err -> expectationFailure ("Unchecked pipeline failed:\n" ++ renderPipelineError err)
+            Right (term, ty) -> do
+                expectPolyBinaryId ty
+                checkedFromUnchecked <-
+                    case typeCheck term of
+                        Left tcErr -> expectationFailure ("typeCheck(unchecked term) failed: " ++ show tcErr) >> fail "typeCheck failed"
+                        Right out -> pure out
+                expectPolyBinaryId checkedFromUnchecked
+                case runPipelineElabChecked Set.empty normExpr of
+                    Left errChecked -> expectationFailure ("Checked pipeline failed:\n" ++ renderPipelineError errChecked)
+                    Right (termChecked, tyChecked) -> do
+                        expectPolyBinaryId tyChecked
+                        checkedFromUnchecked `shouldBe` tyChecked
+                        case typeCheck termChecked of
+                            Left tcErr -> expectationFailure ("typeCheck(checked term) failed: " ++ show tcErr)
+                            Right out -> out `shouldBe` tyChecked
+
+    it "BUG-2026-02-17-002: applied bounded-coercion path elaborates to Int in unchecked and checked pipelines" $ do
+        let rhs = ELam "x" (ELam "y" (EVar "x"))
+            schemeTy =
+                mkForalls
+                    [ ("a", Nothing)
+                    , ("b", Just (STVar "a"))
+                    ]
+                    (STArrow (STVar "a") (STArrow (STVar "b") (STVar "a")))
+            ann =
+                STForall "a" Nothing
+                    (STArrow (STVar "a") (STArrow (STVar "a") (STVar "a")))
+            expr =
+                ELet "c" (EAnn rhs schemeTy)
+                    (EApp
+                        (EApp (EAnn (EVar "c") ann) (ELit (LInt 1)))
+                        (ELit (LInt 2)))
+            normExpr = unsafeNormalizeExpr expr
+            expectedTy = TBase (BaseTy "Int")
+        case runPipelineElab Set.empty normExpr of
+            Left err ->
+                expectationFailure ("Unchecked pipeline failed:\n" ++ renderPipelineError err)
+            Right (term, ty) -> do
+                ty `shouldBe` expectedTy
+                typeCheck term `shouldBe` Right expectedTy
+                case runPipelineElabChecked Set.empty normExpr of
+                    Left errChecked ->
+                        expectationFailure ("Checked pipeline failed:\n" ++ renderPipelineError errChecked)
+                    Right (termChecked, tyChecked) -> do
+                        tyChecked `shouldBe` expectedTy
+                        tyChecked `shouldBe` ty
+                        typeCheck termChecked `shouldBe` Right expectedTy
+
     describe "BUG-2026-02-06-002 sentinel matrix" $ do
         let makeFactory = ELam "x" (ELam "y" (EVar "x"))
             makeOnlyExpr = ELet "make" makeFactory (EVar "make")

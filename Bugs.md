@@ -8,6 +8,30 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 
 ## Resolved
 
+### BUG-2026-02-17-002
+- Status: Resolved
+- Priority: High
+- Discovered: 2026-02-17
+- Resolved: 2026-02-17
+- Summary: Applied bounded/coercion-heavy A6 path now typechecks to `Int` in both unchecked and checked pipelines.
+- Minimal reproducer (surface expression):
+  - `ELet "c" (EAnn (ELam "x" (ELam "y" (EVar "x"))) (mkForalls [("a", Nothing), ("b", Just (STVar "a"))] (STArrow (STVar "a") (STArrow (STVar "b") (STVar "a"))))) (EApp (EApp (EAnn (EVar "c") (STForall "a" Nothing (STArrow (STVar "a") (STArrow (STVar "a") (STVar "a"))))) (ELit (LInt 1))) (ELit (LInt 2)))`
+- Root cause:
+  - `MLF.Elab.Elaborate` let-fallback classification only treated raw `ALam` as lambda RHS, so annotated lambdas skipped the lambda fallback path and preserved a mismatch-prone let scheme/closure shape.
+  - `MLF.Elab.Elaborate` application recovery only promoted to `InstApp` when the argument source was a named variable; literal arguments stayed on `InstElim` fallback and bottomized polymorphic application.
+- Fix:
+  - `/Volumes/src/mlf4/src/MLF/Elab/Elaborate.hs`
+    - let fallback now recognizes `AAnn`-wrapped lambdas/apps for RHS-shape checks.
+    - lambda fallback candidates use coherent empty substitution and avoid unnecessary RHS closure wrapping when fallback is selected.
+    - application recovery now allows non-variable arguments to drive `InstApp` selection from checked argument type.
+  - `/Volumes/src/mlf4/test/PipelineSpec.hs`
+    - converted sentinel into strict success regression: `BUG-2026-02-17-002: applied bounded-coercion path elaborates to Int in unchecked and checked pipelines`.
+- Regression tests:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-2026-02-17-002"'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "A6 parity"'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-2026-02-06-002 strict target matrix"'`
+  - `cabal build all && cabal test`
+
 ### BUG-2026-02-17-001
 - Status: Resolved
 - Priority: High

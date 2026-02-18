@@ -517,22 +517,25 @@ elaborateWithEnv config elabEnv ann = do
                                     InstId -> f'
                                     _ -> ETyInst f' funInstNorm
                             in case (TypeCheck.typeCheckWithEnv tcEnv (EApp fApp0 a'), sourceVarName fAnn, sourceVarName aAnn, TypeCheck.typeCheckWithEnv tcEnv a') of
-                                (Right (TArrow _ TBottom), Just fName, Just argName, Right argTy) ->
-                                    case (Map.lookup fName env, Map.lookup argName env) of
-                                        (Just fSi, Just argSi) ->
-                                            let (fBinds, fBodyTy) = Inst.splitForalls (schemeToType (siScheme fSi))
+                                (Right (TArrow _ TBottom), Just fName, mArgName, Right argTy) ->
+                                    case Map.lookup fName env of
+                                        Just fSi ->
+                                            let argTyPreferred =
+                                                    case mArgName >>= (`Map.lookup` env) of
+                                                        Just argSi ->
+                                                            case Inst.splitForalls (schemeToType (siScheme argSi)) of
+                                                                ([], monoTy) -> monoTy
+                                                                _ -> argTy
+                                                        Nothing -> argTy
+                                                (fBinds, fBodyTy) = Inst.splitForalls (schemeToType (siScheme fSi))
                                                 fBinderNames = map fst fBinds
-                                                argTyPreferred =
-                                                    case Inst.splitForalls (schemeToType (siScheme argSi)) of
-                                                        ([], monoTy) -> monoTy
-                                                        _ -> argTy
                                             in case fBodyTy of
                                                 TArrow (TVar headBinder) retTy
                                                     | headBinder `elem` fBinderNames
                                                         && Set.member headBinder (freeTypeVarsType retTy) ->
                                                             normalizeFunInst (InstApp argTyPreferred)
                                                 _ -> funInstNorm
-                                        _ -> funInstNorm
+                                        Nothing -> funInstNorm
                                 _ -> funInstNorm
                         fAppForArgInference = case funInstRecovered of
                             InstId -> f'
@@ -605,14 +608,18 @@ elaborateWithEnv config elabEnv ann = do
                             ()
                     (sch0Raw, subst0Raw) <- generalizeAtNode schemeRootId
                     let tcEnv = TypeCheck.Env (Map.map (schemeToType . siScheme) env) Map.empty
-                        rhsIsApp =
-                            case rhsAnn of
+                        annIsApp annExpr =
+                            case annExpr of
                                 AApp{} -> True
+                                AAnn inner _ _ -> annIsApp inner
                                 _ -> False
-                        rhsIsLam =
-                            case rhsAnn of
+                        rhsIsApp = annIsApp rhsAnn
+                        annIsLam annExpr =
+                            case annExpr of
                                 ALam{} -> True
+                                AAnn inner _ _ -> annIsLam inner
                                 _ -> False
+                        rhsIsLam = annIsLam rhsAnn
                         binderCount scheme0 =
                             let (binds, _) = Inst.splitForalls (schemeToType scheme0)
                             in length binds
@@ -704,7 +711,7 @@ elaborateWithEnv config elabEnv ann = do
                                                 Just schLam
                                                     | containsBottomTy (schemeToType schLam) -> Nothing
                                                     | binderCount schLam < binderCount sch0 -> Nothing
-                                                    | otherwise -> Just (schLam, subst0)
+                                                    | otherwise -> Just (schLam, IntMap.empty)
                                                 Nothing -> Nothing
                                         Left _ -> Nothing
                                 else Nothing
@@ -737,7 +744,10 @@ elaborateWithEnv config elabEnv ann = do
                                 else schemeFromType (simplifyAnnotationType (schemeToType schChosen))
                         (schBase, substBase) = normalizeSchemeSubstPair (schSimplified, substChosen)
                         rhsAbsBase =
-                            if fallbackFromVarSelected || (rhsIsApp && rhsAppArgIsVar rhsAnn)
+                            if
+                                fallbackFromVarSelected
+                                    || (rhsIsApp && rhsAppArgIsVar rhsAnn)
+                                    || (rhsIsLam && isJust fallbackChoice)
                                 then rhs'
                                 else closeTermWithSchemeSubstIfNeeded substBase schBase rhs'
                         lamAligned =
