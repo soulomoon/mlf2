@@ -1,5 +1,25 @@
 # Implementation Notes
 
+### 2026-02-18 Thesis conformance gate command/profile
+
+- Added canonical gate entrypoint:
+  - `/Volumes/src/mlf4/scripts/thesis-conformance-gate.sh`
+- Gate behavior:
+  - Runs thesis-anchor focused test slices with deterministic matcher strings.
+  - Enforces minimum matched-example thresholds per slice so stale matcher strings cannot silently pass with `0 examples`.
+  - Current thresholds:
+    - `R-` matrix rows: min `15` examples
+    - `A6 parity`: min `3`
+    - `BUG-2026-02-17-002`: min `1`
+    - `Phase 3 atomic wrapping equivalence gates`: min `7`
+    - `has type forall a. a -> a`: min `1`
+- CI enforcement:
+  - Added `/Volumes/src/mlf4/.github/workflows/thesis-conformance.yml`.
+  - CI job builds all targets (`cabal build all`) and then runs `./scripts/thesis-conformance-gate.sh`.
+- Verification snapshot:
+  - `./scripts/thesis-conformance-gate.sh` (PASS)
+  - `cabal build all && cabal test` (PASS)
+
 ### 2026-02-18 A5 (P3) totality/harness hardening closure
 
 - Frontend coercion-copy failure typing:

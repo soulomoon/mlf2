@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+* Thesis conformance gate: added canonical thesis-anchor command `scripts/thesis-conformance-gate.sh` (Φ/Ω `R-` matrix rows, A6 parity, BUG-2026-02-17-002 strict success, phase-3 equivalence gates, representative theorem baseline) with minimum matched-example thresholds, and added required CI workflow `.github/workflows/thesis-conformance.yml` to enforce `cabal build all` + gate command on push/PR.
 * A5 (P3) totality/harness hardening: replaced bare-coercion stringly internal failure with typed `UnexpectedBareCoercionConst`, totalized STCon coercion-copy argument traversal via `internalizeConArgs` (`NonEmpty` recursion), consolidated presolution harness wiring through `PresolutionSpec`, and added fail-fast harness guard in `test/Main.hs` so omitted umbrella wiring aborts test execution.
 * BUG-2026-02-17-002 closure: fixed applied bounded/coercion A6 mismatch by aligning annotated-lambda let fallback and application instantiation recovery in `MLF.Elab.Elaborate`; converted the `PipelineSpec` sentinel into a strict success assertion (`Int`) and moved the bug to resolved in `Bugs.md`.
 * A6 (P2) parity/regression coverage: expanded bounded/coercion-heavy checked-vs-unchecked parity tests in `test/PipelineSpec.hs`, `test/TypeCheckSpec.hs`, and `test/ReduceSpec.hs`, including `typeCheck` agreement and normalization-preservation checks for elaborated terms.

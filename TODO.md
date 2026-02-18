@@ -4,6 +4,25 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 19 Thesis Conformance Gate Command/Profile — 2026-02-18
+
+- Scope:
+  - Add one canonical thesis-anchor gate command and a required CI profile that continuously enforces paper anchors.
+- Implemented:
+  - Added gate command:
+    - `/Volumes/src/mlf4/scripts/thesis-conformance-gate.sh`
+  - Added required CI workflow:
+    - `/Volumes/src/mlf4/.github/workflows/thesis-conformance.yml`
+  - Gate anchors enforced by focused matcher runs with minimum example-count checks:
+    - Φ/Ω translatability matrix rows (`--match "R-"`, min 15)
+    - A6 parity regressions (`--match "A6 parity"`, min 3)
+    - strict A6 bug closure (`--match "BUG-2026-02-17-002"`, min 1)
+    - representative theorem baseline (`--match "has type forall a. a -> a"`, min 1)
+    - phase-3 equivalence guard (`--match "Phase 3 atomic wrapping equivalence gates"`, min 7)
+- Verification:
+  - `./scripts/thesis-conformance-gate.sh`
+  - `cabal build all && cabal test`
+
 ## Task 18 BUG-2026-02-17-002 A6 applied bounded/coercion expected-pass gap — 2026-02-17
 
 - Scope:

@@ -27,6 +27,7 @@ Useful variants:
 
 ```bash
 cabal test --test-show-details=direct
+./scripts/thesis-conformance-gate.sh
 cabal run mlf2
 cabal repl mlf2
 cabal repl mlf2-test
