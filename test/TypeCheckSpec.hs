@@ -23,6 +23,43 @@ spec :: Spec
 spec = describe "Phase 7 typecheck" $ do
     let intTy = TBase (BaseTy "Int")
 
+    describe "Formal obligations ledger anchors (Chapter 14 typing/instance)" $ do
+        it "O14-WF-EMPTY O14-WF-TVAR O14-WF-VAR: environment well-formedness proxies" $ do
+            typeCheck (ELit (LInt 0)) `shouldBe` Right intTy
+            case typeCheck (ETyAbs "a" (Just (TArrow (TVar "a") intTy)) (ELit (LInt 1))) of
+                Left (TCTypeAbsBoundMentionsVar "a") -> pure ()
+                other -> expectationFailure ("Expected bound self-reference rejection, got: " ++ show other)
+            case typeCheck (EVar "missing") of
+                Left (TCUnboundVar "missing") -> pure ()
+                other -> expectationFailure ("Expected unbound variable rejection, got: " ++ show other)
+
+        it "O14-T-VAR O14-T-ABS O14-T-APP O14-T-TABS O14-T-TAPP O14-T-LET: typing-rule anchors" $ do
+            typeCheck (ELam "x" intTy (EVar "x")) `shouldBe` Right (TArrow intTy intTy)
+            typeCheck (EApp (ELam "x" intTy (EVar "x")) (ELit (LInt 1))) `shouldBe` Right intTy
+            typeCheck
+                (ELet "x" (schemeFromType intTy) (ELit (LInt 1)) (EVar "x"))
+                `shouldBe` Right intTy
+            let polyId = ETyAbs "a" Nothing (ELam "x" (TVar "a") (EVar "x"))
+            typeCheck polyId `shouldBe` Right (TForall "a" Nothing (TArrow (TVar "a") (TVar "a")))
+            typeCheck (ETyInst polyId (InstApp intTy)) `shouldBe` Right (TArrow intTy intTy)
+
+        it "O14-INST-REFLEX O14-INST-TRANS O14-INST-BOT O14-INST-HYP O14-INST-INNER O14-INST-OUTER O14-INST-QUANT-ELIM O14-INST-QUANT-INTRO: instantiation-rule anchors" $ do
+            let polyId = ETyAbs "a" Nothing (ELam "x" (TVar "a") (EVar "x"))
+                boundArrow = TArrow TBottom TBottom
+                polyOuterHyp =
+                    ETyAbs "a" (Just boundArrow) (ELam "x" TBottom (EVar "x"))
+            typeCheck (ETyInst (ELit (LInt 1)) InstId) `shouldBe` Right intTy
+            typeCheck (ETyInst (ELit (LInt 1)) (InstSeq InstIntro InstElim)) `shouldBe` Right intTy
+            typeCheck (ETyInst (ELit (LInt 1)) InstIntro) `shouldBe` Right (TForall "u0" Nothing intTy)
+            typeCheck (ETyInst polyId InstElim) `shouldBe` Right (TArrow TBottom TBottom)
+            typeCheck (ETyInst polyId (InstInside (InstBot intTy)))
+                `shouldBe` Right (TForall "a" (Just intTy) (TArrow (TVar "a") (TVar "a")))
+            typeCheck (ETyInst polyOuterHyp (InstUnder "x" (InstAbstr "x")))
+                `shouldBe` Right (TForall "a" (Just boundArrow) (TVar "a"))
+            case typeCheck (ETyInst (ELit (LInt 1)) (InstBot intTy)) of
+                Left TCInstantiationError{} -> pure ()
+                other -> expectationFailure ("Expected InstBot rejection on non-bottom term type, got: " ++ show other)
+
     it "reports unbound variables" $ do
         case typeCheck (EVar "x") of
             Left (TCUnboundVar "x") -> pure ()

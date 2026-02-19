@@ -10,8 +10,7 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Set as Set
 
-import MLF.Frontend.Syntax (SurfaceExpr, NormSurfaceExpr, Expr(..), Lit(..), SrcTy(..), SrcType, NormSrcType, mkSrcBound)
-import MLF.Frontend.Normalize (normalizeExpr)
+import MLF.Frontend.Syntax (SurfaceExpr, Expr(..), Lit(..), SrcTy(..), SrcType, NormSrcType, mkSrcBound)
 import qualified MLF.Elab.Pipeline as Elab
 import qualified MLF.Elab.Phi.TestOnly as ElabTest
 import qualified MLF.Util.Order as Order
@@ -35,14 +34,10 @@ import MLF.Constraint.Types.Graph
     )
 import MLF.Constraint.Types.Witness (InstanceOp(..), InstanceStep(..), InstanceWitness(..), EdgeWitness(..))
 import qualified MLF.Binding.Tree as Binding
-import MLF.Frontend.ConstraintGen (ConstraintError, ConstraintResult(..), generateConstraints)
-import MLF.Constraint.Normalize (normalize)
-import MLF.Constraint.Acyclicity (checkAcyclicity)
 import MLF.Constraint.Presolution
     ( PresolutionResult(..)
     , EdgeTrace(..)
     , GaBindParents(..)
-    , computePresolution
     , defaultPlanBuilder
     , fromListInterior
     , insertCopy
@@ -55,11 +50,13 @@ import SpecUtil
     , collectVarNodes
     , defaultTraceConfig
     , emptyConstraint
-    , firstShowE
+    , PipelineArtifacts(..)
     , nodeMapFromList
     , requireRight
     , rootedConstraint
+    , runPipelineArtifactsDefault
     , runToPresolutionDefault
+    , runToPresolutionWithAnnDefault
     , unsafeNormalizeExpr
     , mkForalls
     )
@@ -99,19 +96,7 @@ generalizeAt = generalizeAtWith Nothing
 
 requirePipeline :: SurfaceExpr -> IO (Elab.ElabTerm, Elab.ElabType)
 requirePipeline expr =
-    case normalizeExpr expr of
-        Left err -> error ("normalizeExpr failed in test: " ++ show err)
-        Right normExpr -> requireRight (Elab.runPipelineElab Set.empty normExpr)
-
-generateConstraintsDefault :: SurfaceExpr -> Either ConstraintError ConstraintResult
-generateConstraintsDefault expr = generateConstraints Set.empty (unsafeNormalizeExpr expr)
-
--- | Normalize a surface expression, failing the test on normalization error.
-unsafeNormalize :: SurfaceExpr -> NormSurfaceExpr
-unsafeNormalize expr =
-    case normalizeExpr expr of
-        Left err -> error ("normalizeExpr failed in test: " ++ show err)
-        Right normExpr -> normExpr
+    requireRight (Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr))
 
 fInstantiations :: String -> [String]
 fInstantiations = go
@@ -183,19 +168,19 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             Elab.prettyDisplay term `shouldBe` "true"
             Elab.prettyDisplay ty `shouldBe` "Bool"
 
-        it "elaborates lambda" $ do
+        it "O15-ELAB-LAMBDA-VAR O15-ELAB-ABS: elaborates lambda" $ do
             let expr = ELam "x" (EVar "x")
             (_, ty) <- requirePipeline expr
             -- Result is generalized at top level
             Elab.prettyDisplay ty `shouldBe` "∀(a ⩾ ⊥) a -> a"
 
-        it "elaborates application" $ do
+        it "O15-ELAB-APP: elaborates application" $ do
             let expr = EApp (ELam "x" (EVar "x")) (ELit (LInt 42))
             (_, ty) <- requirePipeline expr
             Elab.prettyDisplay ty `shouldBe` "Int"
 
     describe "Polymorphism and Generalization" $ do
-        it "elaborates polymorphic let-binding" $ do
+        it "O15-ELAB-LET: elaborates polymorphic let-binding" $ do
             -- let id = \x. x in id
             let expr = ELet "id" (ELam "x" (EVar "x")) (EVar "id")
             (term, ty) <- requirePipeline expr
@@ -208,7 +193,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     Elab.TForall "a" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
             ty `shouldAlphaEqType` expected
 
-        it "elaborates monomorphic let without extra instantiation" $ do
+        it "O15-ELAB-LET-VAR: elaborates monomorphic let without extra instantiation" $ do
             -- let x = 1 in x
             let expr = ELet "x" (ELit (LInt 1)) (EVar "x")
             (term, ty) <- requirePipeline expr
@@ -401,11 +386,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
     describe "Binding tree coverage" $ do
         let runSolvedWithScope :: SurfaceExpr -> Either String (SolveResult, NodeRef, NodeId)
             runSolvedWithScope e = do
-                ConstraintResult { crConstraint = c0, crRoot = root } <- firstShowE (generateConstraintsDefault e)
-                let c1 = normalize c0
-                acyc <- firstShowE (checkAcyclicity c1)
-                pres <- firstShowE (computePresolution defaultTraceConfig acyc c1)
-                solved <- firstShowE (solveUnify defaultTraceConfig (prConstraint pres))
+                PipelineArtifacts{ paPresolution = pres, paSolved = solved, paRoot = root } <-
+                    runPipelineArtifactsDefault Set.empty e
                 let root' = Elab.chaseRedirects (prRedirects pres) root
                 scopeRoot <- case Binding.bindingRoots (srConstraint solved) of
                     [rootRef] -> Right rootRef
@@ -547,7 +529,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         (Elab.TForall "a" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
                         (Elab.TBase (BaseTy "Int"))
             ty `shouldAlphaEqType` expected
-            (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalize expr))
+            (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
             checkedTy `shouldAlphaEqType` ty
 
     describe "Elaboration bookkeeping (eliminated vars)" $ do
@@ -685,7 +667,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             Elab.pretty inst `shouldBe` "⊲Int"
 
     describe "xMLF instantiation semantics (applyInstantiation)" $ do
-        it "InstElim substitutes the binder with its bound (default ⊥)" $ do
+        it "O14-APPLY-N: InstElim substitutes the binder with its bound (default ⊥)" $ do
             let ty = Elab.TForall "a" Nothing (Elab.TVar "a")
             out <- requireRight (Elab.applyInstantiation ty Elab.InstElim)
             out `shouldBe` Elab.TBottom
@@ -695,22 +677,42 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             out <- requireRight (Elab.applyInstantiation ty Elab.InstElim)
             out `shouldBe` Elab.TBase (BaseTy "Int")
 
-        it "InstInside can update a ⊥ bound to a concrete bound" $ do
+        it "O14-APPLY-INNER: InstInside can update a ⊥ bound to a concrete bound" $ do
             let ty = Elab.TForall "a" Nothing (Elab.TVar "a")
                 inst = Elab.InstInside (Elab.InstBot (Elab.TBase (BaseTy "Int")))
             out <- requireRight (Elab.applyInstantiation ty inst)
             out `shouldBe` Elab.TForall "a" (Just (boundFromType (Elab.TBase (BaseTy "Int")))) (Elab.TVar "a")
 
-        it "InstUnder applies to the body and renames the instantiation binder" $ do
+        it "O14-APPLY-OUTER O14-APPLY-HYP: InstUnder applies to the body and renames the instantiation binder" $ do
             let ty = Elab.TForall "a" Nothing (Elab.TVar "zzz")
                 inst = Elab.InstUnder "x" (Elab.InstAbstr "x")
             out <- requireRight (Elab.applyInstantiation ty inst)
             out `shouldBe` Elab.TForall "a" Nothing (Elab.TVar "a")
 
-        it "InstApp behaves like (∀(⩾ τ); N) on the outermost quantifier" $ do
+        it "O14-APPLY-SEQ: InstApp behaves like (∀(⩾ τ); N) on the outermost quantifier" $ do
             let ty = Elab.TForall "a" Nothing (Elab.TVar "a")
             out <- requireRight (Elab.applyInstantiation ty (Elab.InstApp (Elab.TBase (BaseTy "Int"))))
             out `shouldBe` Elab.TBase (BaseTy "Int")
+
+        it "O14-APPLY-ID: InstId leaves the input type unchanged" $ do
+            let ty = Elab.TArrow (Elab.TBase (BaseTy "Int")) (Elab.TBase (BaseTy "Bool"))
+            out <- requireRight (Elab.applyInstantiation ty Elab.InstId)
+            out `shouldBe` ty
+
+        it "O14-APPLY-O: InstIntro introduces a trivial quantification" $ do
+            out <- requireRight (Elab.applyInstantiation (Elab.TBase (BaseTy "Int")) Elab.InstIntro)
+            case out of
+                Elab.TForall _ Nothing body ->
+                    body `shouldBe` Elab.TBase (BaseTy "Int")
+                other ->
+                    expectationFailure ("Expected forall-introduced type, got: " ++ show other)
+
+        it "14.2.1/14.2.7 determinism proxy: InstApp equals InstInside;InstElim application" $ do
+            let src = Elab.TForall "a" Nothing (Elab.TVar "a")
+                tgt = Elab.TBase (BaseTy "Int")
+            lhs <- requireRight (Elab.applyInstantiation src (Elab.InstApp tgt))
+            rhs <- requireRight (Elab.applyInstantiation src (Elab.InstSeq (Elab.InstInside (Elab.InstBot tgt)) Elab.InstElim))
+            lhs `shouldBe` rhs
 
         it "fails InstElim on a non-∀ type" $ do
             case Elab.applyInstantiation (Elab.TBase (BaseTy "Int")) Elab.InstElim of
@@ -728,7 +730,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 Left _ -> pure ()
                 Right t -> expectationFailure ("Expected failure, got: " ++ show t)
 
-        it "fails InstBot on a non-⊥ type" $ do
+        it "O14-APPLY-BOT: fails InstBot on a non-⊥ type" $ do
             case Elab.applyInstantiation (Elab.TBase (BaseTy "Int")) (Elab.InstBot (Elab.TBase (BaseTy "Bool"))) of
                 Left _ -> pure ()
                 Right t -> expectationFailure ("Expected failure, got: " ++ show t)
@@ -901,7 +903,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
     describe "Witness translation (Φ/Σ)" $ do
         describe "Σ(g) quantifier reordering" $ do
-            it "commutes two adjacent quantifiers" $ do
+            it "O15-REORDER-IDENTITY: commutes two adjacent quantifiers" $ do
                 let src =
                         Elab.TForall "a" Nothing
                             (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b")))
@@ -915,6 +917,13 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         case Elab.applyInstantiation src sig of
                             Left err -> expectationFailure (show err)
                             Right out -> canonType out `shouldBe` canonType tgt
+
+            it "O15-REORDER-IDENTITY: returns ε when source and target already match" $ do
+                let src =
+                        Elab.TForall "a" Nothing
+                            (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b")))
+                sig <- requireRight (Elab.sigmaReorder src src)
+                sig `shouldBe` Elab.InstId
 
             it "commutes two adjacent bounded quantifiers (bounds preserved)" $ do
                 let intTy = Elab.TBase (BaseTy "Int")
@@ -959,7 +968,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     Left _ -> pure ()
                     Right sig -> expectationFailure ("Expected failure, got: " ++ show sig)
 
-            it "applies Σ reordering even without Raise when Typ/Typexp differ" $ do
+            it "O15-REORDER-REQUIRED: applies Σ reordering even without Raise when Typ/Typexp differ" $ do
                 -- Thesis Def. 15.3.4: ϕR (aka Σ(g)) is required whenever the scheme
                 -- type Typ(a′) and the expansion type Typexp(a′) disagree in binder
                 -- order. This can happen even when Ω contains no Raise steps, so Φ
@@ -1138,7 +1147,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 let expected = Elab.TArrow (Elab.TBase (BaseTy "Int")) (Elab.TBase (BaseTy "Bool"))
                 canonType out `shouldBe` canonType expected
 
-            it "empty Ω produces non-identity instantiation when binder order differs from <P" $ do
+            it "O15-TR-SEQ-EMPTY: empty Ω produces non-identity instantiation when binder order differs from <P" $ do
                 -- Three binders: <P order is a < b < c (left-to-right in nested arrows)
                 -- Scheme order is c, b, a. Φ should reorder to a, b, c.
                 let rootGen = GenNodeId 0
@@ -1281,17 +1290,14 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
         describe "Φ translation soundness" $ do
             let runToSolved :: SurfaceExpr -> Either String (SolveResult, IntMap.IntMap EdgeWitness, IntMap.IntMap EdgeTrace)
                 runToSolved e = do
-                    pres <- runToPresolutionDefault Set.empty e
-                    solved <- firstShowE (solveUnify defaultTraceConfig (prConstraint pres))
+                    PipelineArtifacts{ paPresolution = pres, paSolved = solved } <-
+                        runPipelineArtifactsDefault Set.empty e
                     pure (solved, prEdgeWitnesses pres, prEdgeTraces pres)
 
             it "elaboration fails when a witness has no trace entry" $ do
                 let expr = ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (ELit (LInt 1)))
-                ConstraintResult { crConstraint = c0, crAnnotated = ann } <- requireRight (generateConstraintsDefault expr)
-                let c1 = normalize c0
-                acyc <- requireRight (checkAcyclicity c1)
-                pres <- requireRight (computePresolution defaultTraceConfig acyc c1)
-                solved <- requireRight (solveUnify defaultTraceConfig (prConstraint pres))
+                PipelineArtifacts{ paPresolution = pres, paSolved = solved, paAnnotated = ann } <-
+                    requireRight (runPipelineArtifactsDefault Set.empty expr)
                 case IntMap.lookupMin (prEdgeWitnesses pres) of
                     Nothing -> expectationFailure "Expected at least one edge witness"
                     Just (eid, _) -> do
@@ -1302,7 +1308,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             Left err -> expectationFailure ("Expected MissingEdgeTrace, got " ++ show err)
                             Right _ -> expectationFailure "Expected elaboration to fail due to missing trace"
 
-            it "OpRaise on a rigid node outside I(r) translates to identity" $ do
+            it "O15-TR-RIGID-RAISE: OpRaise on a rigid node outside I(r) translates to identity" $ do
                 let root = NodeId 100
                     rigidN = NodeId 1
                     c = rootedConstraint emptyConstraint
@@ -1429,7 +1435,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     Right inst ->
                         expectationFailure ("Expected PhiInvariantError, got " ++ Elab.pretty inst)
 
-            it "OpMerge with rigid operated node n translates to identity" $ do
+            it "O15-TR-RIGID-MERGE: OpMerge with rigid operated node n translates to identity" $ do
                 let root = NodeId 100
                     n = NodeId 1
                     m = NodeId 2
@@ -1468,7 +1474,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew)
                 phi `shouldBe` Elab.InstId
 
-            it "OpRaiseMerge with rigid operated node n translates to identity" $ do
+            it "O15-TR-RIGID-RAISEMERGE: OpRaiseMerge with rigid operated node n translates to identity" $ do
                 let root = NodeId 100
                     n = NodeId 1
                     m = NodeId 2
@@ -1713,7 +1719,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             (Elab.TArrow (Elab.TVar "a") (Elab.TBase (BaseTy "Int")))
                 canonType out `shouldBe` canonType expected
 
-            it "interleaves StepIntro with Omega ops in Φ translation" $ do
+            it "O15-TR-SEQ-CONS: interleaves StepIntro with Omega ops in Φ translation" $ do
                 let root = NodeId 0
                     binder = NodeId 1
                     nodes = nodeMapFromList
@@ -2016,7 +2022,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                     (Elab.TArrow (Elab.TVar "b") (Elab.TArrow (Elab.TVar "u0") (Elab.TVar "a")))))
                 canonType out `shouldBe` canonType expected
 
-            it "witness instantiation matches solved edge types (id @ Int)" $ do
+            it "O15-EDGE-TRANSLATION: witness instantiation matches solved edge types (id @ Int)" $ do
                 let expr = ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (ELit (LInt 1)))
                 case runToSolved expr of
                     Left err -> expectationFailure err
@@ -2198,7 +2204,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     Right inst ->
                         expectationFailure ("Expected non-binder rejection, got inst: " ++ show inst)
 
-            it "contextToNodeBound computes inside-bound contexts (context)" $ do
+            it "O15-CONTEXT-FIND: contextToNodeBound computes inside-bound contexts (context)" $ do
                 -- root binds a and b; b's bound contains binder c.
                 -- Context to reach c must go under a, then inside b's bound.
                 let root = NodeId 100
@@ -2316,7 +2322,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 steps <- requireRight (Elab.contextToNodeBound solved root domN)
                 steps `shouldBe` Nothing
 
-            it "contextToNodeBound does not descend through forall body fallback" $ do
+            it "O15-CONTEXT-REJECT: contextToNodeBound does not descend through forall body fallback" $ do
                 let root = NodeId 100
                     body = NodeId 101
                     aN = NodeId 1
@@ -2536,10 +2542,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             let expr =
                     ELet "id" (ELam "x" (EVar "x"))
                         (EApp (EVar "id") (EVar "id"))
-            ConstraintResult { crConstraint = c0, crAnnotated = ann } <- requireRight (generateConstraintsDefault expr)
-            let c1 = normalize c0
-            acyc <- requireRight (checkAcyclicity c1)
-            pres <- requireRight (computePresolution defaultTraceConfig acyc c1)
+            (pres, ann) <- requireRight (runToPresolutionWithAnnDefault Set.empty expr)
             let redirects = prRedirects pres
                 varNodes = collectVarNodes "id" ann
                 redirected =
@@ -2640,8 +2643,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             (Elab.TVar "a")
                             (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
 
-            (_uncheckedTerm, uncheckedTy) <- requireRight (Elab.runPipelineElab Set.empty (unsafeNormalize expr))
-            (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalize expr))
+            (_uncheckedTerm, uncheckedTy) <- requireRight (Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr))
+            (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
             uncheckedTy `shouldAlphaEqType` expected
             checkedTy `shouldAlphaEqType` expected
 
@@ -2675,7 +2678,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         (ELamAnn "x" (STBase "Int") (EVar "x"))
                         (ELit (LInt 1))
             _ <- requirePipeline expr
-            _ <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalize expr))
+            _ <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
             pure ()
 
         it "BUG-2026-02-06-001 mapped-base elaboration remains Int for nested let + annotated lambda" $ do
@@ -2688,7 +2691,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 (EVar "id")))
             (_term, ty) <- requirePipeline expr
             ty `shouldBe` Elab.TBase (BaseTy "Int")
-            (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalize expr))
+            (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
             checkedTy `shouldBe` Elab.TBase (BaseTy "Int")
 
         it "annotated lambda parameter should accept a polymorphic argument via κσ (US-004)" $ do
@@ -2710,7 +2713,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             checkedFromUnchecked <- requireRight (Elab.typeCheck term)
             checkedFromUnchecked `shouldBe` Elab.TBase (BaseTy "Int")
             ty `shouldBe` Elab.TBase (BaseTy "Int")
-            (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalize expr))
+            (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
             checkedTy `shouldBe` Elab.TBase (BaseTy "Int")
             checkedTy `shouldBe` ty
 
@@ -2727,21 +2730,21 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             expectationFailure (label ++ " failed in Phase 6: " ++ show err)
                         _ -> pure ()
 
-            assertNoElabFailure "runPipelineElab" (Elab.runPipelineElab Set.empty (unsafeNormalize expr))
-            assertNoElabFailure "runPipelineElabChecked" (Elab.runPipelineElabChecked Set.empty (unsafeNormalize expr))
+            assertNoElabFailure "runPipelineElab" (Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr))
+            assertNoElabFailure "runPipelineElabChecked" (Elab.runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
 
         describe "Systematic bug variants (2026-02-11 matrix)" $ do
             let makeFactory = ELam "x" (ELam "y" (EVar "x"))
 
                 assertBothPipelinesMono expr expected = do
-                    (_uncheckedTerm, uncheckedTy) <- requireRight (Elab.runPipelineElab Set.empty (unsafeNormalize expr))
-                    (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalize expr))
+                    (_uncheckedTerm, uncheckedTy) <- requireRight (Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr))
+                    (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
                     uncheckedTy `shouldBe` expected
                     checkedTy `shouldBe` expected
 
                 assertBothPipelinesAlphaEq expr expected = do
-                    (_uncheckedTerm, uncheckedTy) <- requireRight (Elab.runPipelineElab Set.empty (unsafeNormalize expr))
-                    (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalize expr))
+                    (_uncheckedTerm, uncheckedTy) <- requireRight (Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr))
+                    (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
                     uncheckedTy `shouldAlphaEqType` expected
                     checkedTy `shouldAlphaEqType` expected
 
@@ -2946,7 +2949,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             checkedFromUnchecked <- requireRight (Elab.typeCheck term)
             checkedFromUnchecked `shouldBe` Elab.TBase (BaseTy "Int")
             ty `shouldBe` Elab.TBase (BaseTy "Int")
-            (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalize expr))
+            (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
             checkedTy `shouldBe` Elab.TBase (BaseTy "Int")
 
         it "explicit forall annotation preserves foralls in bounds" $ do

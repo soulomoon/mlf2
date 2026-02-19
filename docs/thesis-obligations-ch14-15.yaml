@@ -1,0 +1,869 @@
+---
+version: 1
+scope:
+  chapters:
+  - '14.2'
+  - '14.3'
+  - '15.2'
+  - '15.3'
+  policy: Operational rules only
+  total_expected_obligations: 61
+obligations:
+- id: O14-WF-EMPTY
+  chapter: 14
+  section: '14.2'
+  figure_or_definition: Figure 14.2.4
+  thesis_rule_label: wf-empty
+  judgment_or_equation: wf(Γ)
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/TypeCheck.hs#typeCheckWithEnv"
+  - "/Volumes/src/mlf4/src/MLF/Elab/TypeCheck.hs#freeTypeVarsEnv"
+  test_anchor:
+    matcher: O14-WF-EMPTY
+    file: "/Volumes/src/mlf4/test/TypeCheckSpec.hs"
+    rationale: Grouped environment well-formedness proxy anchors in typechecker tests.
+  status: anchored
+- id: O14-WF-TVAR
+  chapter: 14
+  section: '14.2'
+  figure_or_definition: Figure 14.2.4
+  thesis_rule_label: wf-tvar
+  judgment_or_equation: wf(Γ)
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/TypeCheck.hs#typeCheckWithEnv"
+  - "/Volumes/src/mlf4/src/MLF/Elab/TypeCheck.hs#freeTypeVarsEnv"
+  test_anchor:
+    matcher: O14-WF-TVAR
+    file: "/Volumes/src/mlf4/test/TypeCheckSpec.hs"
+    rationale: Grouped environment well-formedness proxy anchors in typechecker tests.
+  status: anchored
+- id: O14-WF-VAR
+  chapter: 14
+  section: '14.2'
+  figure_or_definition: Figure 14.2.4
+  thesis_rule_label: wf-var
+  judgment_or_equation: wf(Γ)
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/TypeCheck.hs#typeCheckWithEnv"
+  - "/Volumes/src/mlf4/src/MLF/Elab/TypeCheck.hs#freeTypeVarsEnv"
+  test_anchor:
+    matcher: O14-WF-VAR
+    file: "/Volumes/src/mlf4/test/TypeCheckSpec.hs"
+    rationale: Grouped environment well-formedness proxy anchors in typechecker tests.
+  status: anchored
+- id: O14-INST-REFLEX
+  chapter: 14
+  section: 14.2.2
+  figure_or_definition: Figure 14.2.6
+  thesis_rule_label: Inst-Reflex
+  judgment_or_equation: 'Γ ⊢ ε : σ ≤ σ'
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/TypeCheck.hs#checkInstantiation"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Inst.hs#evalInstantiationWith"
+  test_anchor:
+    matcher: O14-INST-REFLEX
+    file: "/Volumes/src/mlf4/test/TypeCheckSpec.hs"
+    rationale: Grouped instantiation-rule anchor test exercises the checker path.
+  status: anchored
+- id: O14-INST-TRANS
+  chapter: 14
+  section: 14.2.2
+  figure_or_definition: Figure 14.2.6
+  thesis_rule_label: Inst-Trans
+  judgment_or_equation: 'Γ ⊢ ϕ1;ϕ2 : σ1 ≤ σ3'
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/TypeCheck.hs#checkInstantiation"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Inst.hs#evalInstantiationWith"
+  test_anchor:
+    matcher: O14-INST-TRANS
+    file: "/Volumes/src/mlf4/test/TypeCheckSpec.hs"
+    rationale: Grouped instantiation-rule anchor test exercises the checker path.
+  status: anchored
+- id: O14-INST-BOT
+  chapter: 14
+  section: 14.2.2
+  figure_or_definition: Figure 14.2.6
+  thesis_rule_label: Inst-Bot
+  judgment_or_equation: 'Γ ⊢ ⊲σ : ⊥ ≤ σ'
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/TypeCheck.hs#checkInstantiation"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Inst.hs#evalInstantiationWith"
+  test_anchor:
+    matcher: O14-INST-BOT
+    file: "/Volumes/src/mlf4/test/TypeCheckSpec.hs"
+    rationale: Grouped instantiation-rule anchor test exercises the checker path.
+  status: anchored
+- id: O14-INST-HYP
+  chapter: 14
+  section: 14.2.2
+  figure_or_definition: Figure 14.2.6
+  thesis_rule_label: Inst-Hyp
+  judgment_or_equation: 'Γ ⊢ α⊳ : σ ≤ α'
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/TypeCheck.hs#checkInstantiation"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Inst.hs#evalInstantiationWith"
+  test_anchor:
+    matcher: O14-INST-HYP
+    file: "/Volumes/src/mlf4/test/TypeCheckSpec.hs"
+    rationale: Grouped instantiation-rule anchor test exercises the checker path.
+  status: anchored
+- id: O14-INST-INNER
+  chapter: 14
+  section: 14.2.2
+  figure_or_definition: Figure 14.2.6
+  thesis_rule_label: Inst-Inner
+  judgment_or_equation: 'Γ ⊢ ∀(⩾ϕ) : ∀(α⩾σ1)σ ≤ ∀(α⩾σ2)σ'
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/TypeCheck.hs#checkInstantiation"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Inst.hs#evalInstantiationWith"
+  test_anchor:
+    matcher: O14-INST-INNER
+    file: "/Volumes/src/mlf4/test/TypeCheckSpec.hs"
+    rationale: Grouped instantiation-rule anchor test exercises the checker path.
+  status: anchored
+- id: O14-INST-OUTER
+  chapter: 14
+  section: 14.2.2
+  figure_or_definition: Figure 14.2.6
+  thesis_rule_label: Inst-Outer
+  judgment_or_equation: 'Γ ⊢ ∀(α⩾)ϕ : ∀(α⩾σ)σ1 ≤ ∀(α⩾σ)σ2'
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/TypeCheck.hs#checkInstantiation"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Inst.hs#evalInstantiationWith"
+  test_anchor:
+    matcher: O14-INST-OUTER
+    file: "/Volumes/src/mlf4/test/TypeCheckSpec.hs"
+    rationale: Grouped instantiation-rule anchor test exercises the checker path.
+  status: anchored
+- id: O14-INST-QUANT-ELIM
+  chapter: 14
+  section: 14.2.2
+  figure_or_definition: Figure 14.2.6
+  thesis_rule_label: Inst-Quant-Elim
+  judgment_or_equation: 'Γ ⊢ N : ∀(α⩾σ)σ′ ≤ σ′{α←σ}'
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/TypeCheck.hs#checkInstantiation"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Inst.hs#evalInstantiationWith"
+  test_anchor:
+    matcher: O14-INST-QUANT-ELIM
+    file: "/Volumes/src/mlf4/test/TypeCheckSpec.hs"
+    rationale: Grouped instantiation-rule anchor test exercises the checker path.
+  status: anchored
+- id: O14-INST-QUANT-INTRO
+  chapter: 14
+  section: 14.2.2
+  figure_or_definition: Figure 14.2.6
+  thesis_rule_label: Inst-Quant-Intro
+  judgment_or_equation: 'Γ ⊢ O : σ ≤ ∀(α⩾⊥)σ'
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/TypeCheck.hs#checkInstantiation"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Inst.hs#evalInstantiationWith"
+  test_anchor:
+    matcher: O14-INST-QUANT-INTRO
+    file: "/Volumes/src/mlf4/test/TypeCheckSpec.hs"
+    rationale: Grouped instantiation-rule anchor test exercises the checker path.
+  status: anchored
+- id: O14-T-VAR
+  chapter: 14
+  section: 14.2.3
+  figure_or_definition: Figure 14.2.8
+  thesis_rule_label: Var
+  judgment_or_equation: 'Γ ⊢ x : σ'
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/TypeCheck.hs#typeCheckWithEnv"
+  test_anchor:
+    matcher: O14-T-VAR
+    file: "/Volumes/src/mlf4/test/TypeCheckSpec.hs"
+    rationale: Grouped typing-rule anchor test validates all Figure 14.2.8 cases.
+  status: anchored
+- id: O14-T-ABS
+  chapter: 14
+  section: 14.2.3
+  figure_or_definition: Figure 14.2.8
+  thesis_rule_label: Abs
+  judgment_or_equation: 'Γ ⊢ λ(x:σ)a : σ→σ′'
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/TypeCheck.hs#typeCheckWithEnv"
+  test_anchor:
+    matcher: O14-T-ABS
+    file: "/Volumes/src/mlf4/test/TypeCheckSpec.hs"
+    rationale: Grouped typing-rule anchor test validates all Figure 14.2.8 cases.
+  status: anchored
+- id: O14-T-APP
+  chapter: 14
+  section: 14.2.3
+  figure_or_definition: Figure 14.2.8
+  thesis_rule_label: App
+  judgment_or_equation: 'Γ ⊢ a1 a2 : σ1'
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/TypeCheck.hs#typeCheckWithEnv"
+  test_anchor:
+    matcher: O14-T-APP
+    file: "/Volumes/src/mlf4/test/TypeCheckSpec.hs"
+    rationale: Grouped typing-rule anchor test validates all Figure 14.2.8 cases.
+  status: anchored
+- id: O14-T-TABS
+  chapter: 14
+  section: 14.2.3
+  figure_or_definition: Figure 14.2.8
+  thesis_rule_label: TAbs
+  judgment_or_equation: 'Γ ⊢ Λ(α⩾σ′)a : ∀(α⩾σ′)σ'
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/TypeCheck.hs#typeCheckWithEnv"
+  test_anchor:
+    matcher: O14-T-TABS
+    file: "/Volumes/src/mlf4/test/TypeCheckSpec.hs"
+    rationale: Grouped typing-rule anchor test validates all Figure 14.2.8 cases.
+  status: anchored
+- id: O14-T-TAPP
+  chapter: 14
+  section: 14.2.3
+  figure_or_definition: Figure 14.2.8
+  thesis_rule_label: TApp
+  judgment_or_equation: 'Γ ⊢ a[ϕ] : σ′'
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/TypeCheck.hs#typeCheckWithEnv"
+  test_anchor:
+    matcher: O14-T-TAPP
+    file: "/Volumes/src/mlf4/test/TypeCheckSpec.hs"
+    rationale: Grouped typing-rule anchor test validates all Figure 14.2.8 cases.
+  status: anchored
+- id: O14-T-LET
+  chapter: 14
+  section: 14.2.3
+  figure_or_definition: Figure 14.2.8
+  thesis_rule_label: Let
+  judgment_or_equation: 'Γ ⊢ let x=a in a′ : σ′'
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/TypeCheck.hs#typeCheckWithEnv"
+  test_anchor:
+    matcher: O14-T-LET
+    file: "/Volumes/src/mlf4/test/TypeCheckSpec.hs"
+    rationale: Grouped typing-rule anchor test validates all Figure 14.2.8 cases.
+  status: anchored
+- id: O14-RED-BETA
+  chapter: 14
+  section: '14.3'
+  figure_or_definition: Figure 14.3.1
+  thesis_rule_label: "(β)"
+  judgment_or_equation: "(λ(x:σ)a1) a2 → a1{x←a2}"
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/Reduce.hs#step"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Reduce.hs#reduceInst"
+  test_anchor:
+    matcher: O14-RED-BETA
+    file: "/Volumes/src/mlf4/test/ReduceSpec.hs"
+    rationale: Grouped reduction anchor test covers expression + type-reduction steps
+      and erasure proxy.
+  status: anchored
+- id: O14-RED-BETALET
+  chapter: 14
+  section: '14.3'
+  figure_or_definition: Figure 14.3.1
+  thesis_rule_label: "(βLet)"
+  judgment_or_equation: let x = a2 in a1 → a1{x←a2}
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/Reduce.hs#step"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Reduce.hs#reduceInst"
+  test_anchor:
+    matcher: O14-RED-BETALET
+    file: "/Volumes/src/mlf4/test/ReduceSpec.hs"
+    rationale: Grouped reduction anchor test covers expression + type-reduction steps
+      and erasure proxy.
+  status: anchored
+- id: O14-RED-REFLEX
+  chapter: 14
+  section: '14.3'
+  figure_or_definition: Figure 14.3.1
+  thesis_rule_label: Reflex
+  judgment_or_equation: a[ε] → a
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/Reduce.hs#step"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Reduce.hs#reduceInst"
+  test_anchor:
+    matcher: O14-RED-REFLEX
+    file: "/Volumes/src/mlf4/test/ReduceSpec.hs"
+    rationale: Grouped reduction anchor test covers expression + type-reduction steps
+      and erasure proxy.
+  status: anchored
+- id: O14-RED-TRANS
+  chapter: 14
+  section: '14.3'
+  figure_or_definition: Figure 14.3.1
+  thesis_rule_label: Trans
+  judgment_or_equation: a[ϕ;ϕ′] → a[ϕ][ϕ′]
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/Reduce.hs#step"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Reduce.hs#reduceInst"
+  test_anchor:
+    matcher: O14-RED-TRANS
+    file: "/Volumes/src/mlf4/test/ReduceSpec.hs"
+    rationale: Grouped reduction anchor test covers expression + type-reduction steps
+      and erasure proxy.
+  status: anchored
+- id: O14-RED-QUANT-INTRO
+  chapter: 14
+  section: '14.3'
+  figure_or_definition: Figure 14.3.1
+  thesis_rule_label: Quant-Intro
+  judgment_or_equation: a[O] → Λ(α⩾⊥)a
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/Reduce.hs#step"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Reduce.hs#reduceInst"
+  test_anchor:
+    matcher: O14-RED-QUANT-INTRO
+    file: "/Volumes/src/mlf4/test/ReduceSpec.hs"
+    rationale: Grouped reduction anchor test covers expression + type-reduction steps
+      and erasure proxy.
+  status: anchored
+- id: O14-RED-QUANT-ELIM
+  chapter: 14
+  section: '14.3'
+  figure_or_definition: Figure 14.3.1
+  thesis_rule_label: Quant-Elim
+  judgment_or_equation: "(Λ(α⩾σ)a)[N] → a{α⊳←ε}{α←σ}"
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/Reduce.hs#step"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Reduce.hs#reduceInst"
+  test_anchor:
+    matcher: O14-RED-QUANT-ELIM
+    file: "/Volumes/src/mlf4/test/ReduceSpec.hs"
+    rationale: Grouped reduction anchor test covers expression + type-reduction steps
+      and erasure proxy.
+  status: anchored
+- id: O14-RED-INNER
+  chapter: 14
+  section: '14.3'
+  figure_or_definition: Figure 14.3.1
+  thesis_rule_label: Inner
+  judgment_or_equation: "(Λ(α⩾σ)a)[∀(⩾ϕ)] → Λ(α⩾σ[ϕ])a{α⊳←ϕ;α⊳}"
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/Reduce.hs#step"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Reduce.hs#reduceInst"
+  test_anchor:
+    matcher: O14-RED-INNER
+    file: "/Volumes/src/mlf4/test/ReduceSpec.hs"
+    rationale: Grouped reduction anchor test covers expression + type-reduction steps
+      and erasure proxy.
+  status: anchored
+- id: O14-RED-OUTER
+  chapter: 14
+  section: '14.3'
+  figure_or_definition: Figure 14.3.1
+  thesis_rule_label: Outer
+  judgment_or_equation: "(Λ(α⩾σ)a)[∀(α⩾)ϕ] → Λ(α⩾σ)(a[ϕ])"
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/Reduce.hs#step"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Reduce.hs#reduceInst"
+  test_anchor:
+    matcher: O14-RED-OUTER
+    file: "/Volumes/src/mlf4/test/ReduceSpec.hs"
+    rationale: Grouped reduction anchor test covers expression + type-reduction steps
+      and erasure proxy.
+  status: anchored
+- id: O14-RED-CONTEXT
+  chapter: 14
+  section: '14.3'
+  figure_or_definition: Figure 14.3.1
+  thesis_rule_label: Context
+  judgment_or_equation: if a→a′ then E{a}→E{a′}
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/Reduce.hs#step"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Reduce.hs#reduceInst"
+  test_anchor:
+    matcher: O14-RED-CONTEXT
+    file: "/Volumes/src/mlf4/test/ReduceSpec.hs"
+    rationale: Grouped reduction anchor test covers expression + type-reduction steps
+      and erasure proxy.
+  status: anchored
+- id: O14-APPLY-N
+  chapter: 14
+  section: 14.2.2.2
+  figure_or_definition: Figure 14.2.7
+  thesis_rule_label: Type computation application
+  judgment_or_equation: "(∀(α⩾σ)σ′)[N]=σ′{α←σ}"
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/Inst.hs#applyInstantiation"
+  test_anchor:
+    matcher: O14-APPLY-N
+    file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
+    rationale: applyInstantiation semantics anchors for Figure 14.2.7 equations.
+  status: anchored
+- id: O14-APPLY-O
+  chapter: 14
+  section: 14.2.2.2
+  figure_or_definition: Figure 14.2.7
+  thesis_rule_label: Type computation application
+  judgment_or_equation: σ[O]=∀(α⩾⊥)σ
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/Inst.hs#applyInstantiation"
+  test_anchor:
+    matcher: O14-APPLY-O
+    file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
+    rationale: applyInstantiation semantics anchors for Figure 14.2.7 equations.
+  status: anchored
+- id: O14-APPLY-SEQ
+  chapter: 14
+  section: 14.2.2.2
+  figure_or_definition: Figure 14.2.7
+  thesis_rule_label: Type computation application
+  judgment_or_equation: σ[ϕ1;ϕ2]=(σ[ϕ1])[ϕ2]
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/Inst.hs#applyInstantiation"
+  test_anchor:
+    matcher: O14-APPLY-SEQ
+    file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
+    rationale: applyInstantiation semantics anchors for Figure 14.2.7 equations.
+  status: anchored
+- id: O14-APPLY-INNER
+  chapter: 14
+  section: 14.2.2.2
+  figure_or_definition: Figure 14.2.7
+  thesis_rule_label: Type computation application
+  judgment_or_equation: "(∀(α⩾σ)σ′)[∀(⩾ϕ)]=∀(α⩾σ[ϕ])σ′"
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/Inst.hs#applyInstantiation"
+  test_anchor:
+    matcher: O14-APPLY-INNER
+    file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
+    rationale: applyInstantiation semantics anchors for Figure 14.2.7 equations.
+  status: anchored
+- id: O14-APPLY-OUTER
+  chapter: 14
+  section: 14.2.2.2
+  figure_or_definition: Figure 14.2.7
+  thesis_rule_label: Type computation application
+  judgment_or_equation: "(∀(α⩾σ)σ′)[∀(α⩾)ϕ]=∀(α⩾σ)σ′[ϕ]"
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/Inst.hs#applyInstantiation"
+  test_anchor:
+    matcher: O14-APPLY-OUTER
+    file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
+    rationale: applyInstantiation semantics anchors for Figure 14.2.7 equations.
+  status: anchored
+- id: O14-APPLY-HYP
+  chapter: 14
+  section: 14.2.2.2
+  figure_or_definition: Figure 14.2.7
+  thesis_rule_label: Type computation application
+  judgment_or_equation: σ[α⊳]=α
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/Inst.hs#applyInstantiation"
+  test_anchor:
+    matcher: O14-APPLY-HYP
+    file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
+    rationale: applyInstantiation semantics anchors for Figure 14.2.7 equations.
+  status: anchored
+- id: O14-APPLY-BOT
+  chapter: 14
+  section: 14.2.2.2
+  figure_or_definition: Figure 14.2.7
+  thesis_rule_label: Type computation application
+  judgment_or_equation: "⊥[⊲σ]=σ"
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/Inst.hs#applyInstantiation"
+  test_anchor:
+    matcher: O14-APPLY-BOT
+    file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
+    rationale: applyInstantiation semantics anchors for Figure 14.2.7 equations.
+  status: anchored
+- id: O14-APPLY-ID
+  chapter: 14
+  section: 14.2.2.2
+  figure_or_definition: Figure 14.2.7
+  thesis_rule_label: Type computation application
+  judgment_or_equation: σ[ε]=σ
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/Inst.hs#applyInstantiation"
+  test_anchor:
+    matcher: O14-APPLY-ID
+    file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
+    rationale: applyInstantiation semantics anchors for Figure 14.2.7 equations.
+  status: anchored
+- id: O15-TRANS-NO-INERT-LOCKED
+  chapter: 15
+  section: 15.2.7
+  figure_or_definition: Definition 15.2.10
+  thesis_rule_label: Definition 15.2.10(1)
+  judgment_or_equation: χp contains no inert-locked nodes
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Constraint/Presolution/Validation.hs#validateTranslatablePresolution"
+  test_anchor:
+    matcher: O15-TRANS-NO-INERT-LOCKED
+    file: "/Volumes/src/mlf4/test/Presolution/EnforcementSpec.hs"
+    rationale: Explicit validation + rigidification anchors for translatability conditions.
+  status: anchored
+- id: O15-TRANS-SCHEME-ROOT-RIGID
+  chapter: 15
+  section: 15.2.7
+  figure_or_definition: Definition 15.2.10
+  thesis_rule_label: Definition 15.2.10(2)
+  judgment_or_equation: non-degenerate type scheme roots are rigid
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Constraint/Presolution/Validation.hs#validateTranslatablePresolution"
+  test_anchor:
+    matcher: O15-TRANS-SCHEME-ROOT-RIGID
+    file: "/Volumes/src/mlf4/test/Presolution/EnforcementSpec.hs"
+    rationale: Explicit validation + rigidification anchors for translatability conditions.
+  status: anchored
+- id: O15-TRANS-ARROW-RIGID
+  chapter: 15
+  section: 15.2.7
+  figure_or_definition: Definition 15.2.10
+  thesis_rule_label: Definition 15.2.10(3)
+  judgment_or_equation: application/abstraction arrow nodes are rigid
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Constraint/Presolution/Validation.hs#validateTranslatablePresolution"
+  test_anchor:
+    matcher: O15-TRANS-ARROW-RIGID
+    file: "/Volumes/src/mlf4/test/Presolution/EnforcementSpec.hs"
+    rationale: Explicit validation + rigidification anchors for translatability conditions.
+  status: anchored
+- id: O15-TRANS-NON-INTERIOR-RIGID
+  chapter: 15
+  section: 15.2.7
+  figure_or_definition: Definition 15.2.10
+  thesis_rule_label: Definition 15.2.10(4)
+  judgment_or_equation: non-interior nodes bound on gen nodes are rigid
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Constraint/Presolution/Validation.hs#validateTranslatablePresolution"
+  test_anchor:
+    matcher: O15-TRANS-NON-INTERIOR-RIGID
+    file: "/Volumes/src/mlf4/test/Presolution/EnforcementSpec.hs"
+    rationale: Explicit validation + rigidification anchors for translatability conditions.
+  status: anchored
+- id: O15-REORDER-REQUIRED
+  chapter: 15
+  section: 15.3.4
+  figure_or_definition: Definition 15.3.4
+  thesis_rule_label: O15-REORDER-REQUIRED
+  judgment_or_equation: ϕR is applied when Typ(a′) and Typexp(a′) differ
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/Pipeline.hs#sigmaReorder"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Context.hs#contextToNodeBound"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Sigma.hs#sigmaReorder"
+  test_anchor:
+    matcher: O15-REORDER-REQUIRED
+    file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
+    rationale: Direct Φ/Σ/context anchors in elaboration tests.
+  status: anchored
+- id: O15-REORDER-IDENTITY
+  chapter: 15
+  section: 15.3.4
+  figure_or_definition: Definition 15.3.4
+  thesis_rule_label: O15-REORDER-IDENTITY
+  judgment_or_equation: ϕR = ε when binder ordering already matches
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/Pipeline.hs#sigmaReorder"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Context.hs#contextToNodeBound"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Sigma.hs#sigmaReorder"
+  test_anchor:
+    matcher: O15-REORDER-IDENTITY
+    file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
+    rationale: Direct Φ/Σ/context anchors in elaboration tests.
+  status: anchored
+- id: O15-CONTEXT-FIND
+  chapter: 15
+  section: 15.3.4
+  figure_or_definition: Computation contexts
+  thesis_rule_label: O15-CONTEXT-FIND
+  judgment_or_equation: C^{r→n} is found for reachable/translatable targets
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/Pipeline.hs#contextToNodeBound"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Context.hs#contextToNodeBound"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Sigma.hs#sigmaReorder"
+  test_anchor:
+    matcher: O15-CONTEXT-FIND
+    file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
+    rationale: Direct Φ/Σ/context anchors in elaboration tests.
+  status: anchored
+- id: O15-CONTEXT-REJECT
+  chapter: 15
+  section: 15.3.4
+  figure_or_definition: Computation contexts
+  thesis_rule_label: O15-CONTEXT-REJECT
+  judgment_or_equation: Context search rejects fallback-only/non-translatable targets
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/Pipeline.hs#contextToNodeBound"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Context.hs#contextToNodeBound"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Sigma.hs#sigmaReorder"
+  test_anchor:
+    matcher: O15-CONTEXT-REJECT
+    file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
+    rationale: Direct Φ/Σ/context anchors in elaboration tests.
+  status: anchored
+- id: O15-EDGE-TRANSLATION
+  chapter: 15
+  section: 15.3.5
+  figure_or_definition: Definition 15.3.12
+  thesis_rule_label: O15-EDGE-TRANSLATION
+  judgment_or_equation: Translate edge witness into xMLF instantiation
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/Pipeline.hs#phiFromEdgeWitnessWithTrace"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Context.hs#contextToNodeBound"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Sigma.hs#sigmaReorder"
+  test_anchor:
+    matcher: O15-EDGE-TRANSLATION
+    file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
+    rationale: Direct Φ/Σ/context anchors in elaboration tests.
+  status: anchored
+- id: O15-ELAB-LAMBDA-VAR
+  chapter: 15
+  section: 15.3.6
+  figure_or_definition: Figure 15.3.5
+  thesis_rule_label: Elaboration case LAMBDA-VAR
+  judgment_or_equation: T(x) for λ-bound variables
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/Elaborate.hs#elaborate"
+  test_anchor:
+    matcher: O15-ELAB-LAMBDA-VAR
+    file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
+    rationale: Surface elaboration anchors for Figure 15.3.5 case split.
+  status: anchored
+- id: O15-ELAB-LET-VAR
+  chapter: 15
+  section: 15.3.6
+  figure_or_definition: Figure 15.3.5
+  thesis_rule_label: Elaboration case LET-VAR
+  judgment_or_equation: T(x) for let-bound variables
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/Elaborate.hs#elaborate"
+  test_anchor:
+    matcher: O15-ELAB-LET-VAR
+    file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
+    rationale: Surface elaboration anchors for Figure 15.3.5 case split.
+  status: anchored
+- id: O15-ELAB-ABS
+  chapter: 15
+  section: 15.3.6
+  figure_or_definition: Figure 15.3.5
+  thesis_rule_label: Elaboration case ABS
+  judgment_or_equation: T(λ(x) a)
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/Elaborate.hs#elaborate"
+  test_anchor:
+    matcher: O15-ELAB-ABS
+    file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
+    rationale: Surface elaboration anchors for Figure 15.3.5 case split.
+  status: anchored
+- id: O15-ELAB-APP
+  chapter: 15
+  section: 15.3.6
+  figure_or_definition: Figure 15.3.5
+  thesis_rule_label: Elaboration case APP
+  judgment_or_equation: T(a1 a2)
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/Elaborate.hs#elaborate"
+  test_anchor:
+    matcher: O15-ELAB-APP
+    file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
+    rationale: Surface elaboration anchors for Figure 15.3.5 case split.
+  status: anchored
+- id: O15-ELAB-LET
+  chapter: 15
+  section: 15.3.6
+  figure_or_definition: Figure 15.3.5
+  thesis_rule_label: Elaboration case LET
+  judgment_or_equation: T(let x = a in b)
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/Elaborate.hs#elaborate"
+  test_anchor:
+    matcher: O15-ELAB-LET
+    file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
+    rationale: Surface elaboration anchors for Figure 15.3.5 case split.
+  status: anchored
+- id: O15-TR-SEQ-EMPTY
+  chapter: 15
+  section: 15.3.5
+  figure_or_definition: Figure 15.3.4
+  thesis_rule_label: Trχ row SEQ-EMPTY
+  judgment_or_equation: Trχ() = ε
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#phiWithSchemeOmega"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#resolveTraceBinderTarget"
+  test_anchor:
+    matcher: O15-TR-SEQ-EMPTY
+    file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
+    rationale: Mapped to row-labeled R-* witness/merge tests and Φ/Ω rigid/sequence
+      regressions.
+  status: anchored
+- id: O15-TR-SEQ-CONS
+  chapter: 15
+  section: 15.3.5
+  figure_or_definition: Figure 15.3.4
+  thesis_rule_label: Trχ row SEQ-CONS
+  judgment_or_equation: Trχ(o;I) = Trχ(o);Tro(χ)(I)
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#phiWithSchemeOmega"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#resolveTraceBinderTarget"
+  test_anchor:
+    matcher: O15-TR-SEQ-CONS
+    file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
+    rationale: Mapped to row-labeled R-* witness/merge tests and Φ/Ω rigid/sequence
+      regressions.
+  status: anchored
+- id: O15-TR-RIGID-RAISE
+  chapter: 15
+  section: 15.3.5
+  figure_or_definition: Figure 15.3.4
+  thesis_rule_label: Trχ row RIGID-RAISE
+  judgment_or_equation: Rigid Raise translates to ε under rigid condition
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#phiWithSchemeOmega"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#resolveTraceBinderTarget"
+  test_anchor:
+    matcher: O15-TR-RIGID-RAISE
+    file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
+    rationale: Mapped to row-labeled R-* witness/merge tests and Φ/Ω rigid/sequence
+      regressions.
+  status: anchored
+- id: O15-TR-RIGID-MERGE
+  chapter: 15
+  section: 15.3.5
+  figure_or_definition: Figure 15.3.4
+  thesis_rule_label: Trχ row RIGID-MERGE
+  judgment_or_equation: Rigid Merge translates to ε under rigid condition
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#phiWithSchemeOmega"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#resolveTraceBinderTarget"
+  test_anchor:
+    matcher: O15-TR-RIGID-MERGE
+    file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
+    rationale: Mapped to row-labeled R-* witness/merge tests and Φ/Ω rigid/sequence
+      regressions.
+  status: anchored
+- id: O15-TR-RIGID-RAISEMERGE
+  chapter: 15
+  section: 15.3.5
+  figure_or_definition: Figure 15.3.4
+  thesis_rule_label: Trχ row RIGID-RAISEMERGE
+  judgment_or_equation: Rigid RaiseMerge translates to ε under rigid condition
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#phiWithSchemeOmega"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#resolveTraceBinderTarget"
+  test_anchor:
+    matcher: O15-TR-RIGID-RAISEMERGE
+    file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
+    rationale: Mapped to row-labeled R-* witness/merge tests and Φ/Ω rigid/sequence
+      regressions.
+  status: anchored
+- id: O15-TR-ROOT-GRAFT
+  chapter: 15
+  section: 15.3.5
+  figure_or_definition: Figure 15.3.4
+  thesis_rule_label: Trχ row ROOT-GRAFT
+  judgment_or_equation: Root Graft translates to ⊲S(τ)
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#phiWithSchemeOmega"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#resolveTraceBinderTarget"
+  test_anchor:
+    matcher: O15-TR-ROOT-GRAFT
+    file: "/Volumes/src/mlf4/test/Presolution/WitnessSpec.hs"
+    rationale: Mapped to row-labeled R-* witness/merge tests and Φ/Ω rigid/sequence
+      regressions.
+  status: anchored
+- id: O15-TR-ROOT-RAISEMERGE
+  chapter: 15
+  section: 15.3.5
+  figure_or_definition: Figure 15.3.4
+  thesis_rule_label: Trχ row ROOT-RAISEMERGE
+  judgment_or_equation: Root RaiseMerge translates to abstraction
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#phiWithSchemeOmega"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#resolveTraceBinderTarget"
+  test_anchor:
+    matcher: O15-TR-ROOT-RAISEMERGE
+    file: "/Volumes/src/mlf4/test/Presolution/MergeEmissionSpec.hs"
+    rationale: Mapped to row-labeled R-* witness/merge tests and Φ/Ω rigid/sequence
+      regressions.
+  status: anchored
+- id: O15-TR-ROOT-WEAKEN
+  chapter: 15
+  section: 15.3.5
+  figure_or_definition: Figure 15.3.4
+  thesis_rule_label: Trχ row ROOT-WEAKEN
+  judgment_or_equation: Root Weaken translates to ε
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#phiWithSchemeOmega"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#resolveTraceBinderTarget"
+  test_anchor:
+    matcher: O15-TR-ROOT-WEAKEN
+    file: "/Volumes/src/mlf4/test/Presolution/MergeEmissionSpec.hs"
+    rationale: Mapped to row-labeled R-* witness/merge tests and Φ/Ω rigid/sequence
+      regressions.
+  status: anchored
+- id: O15-TR-NODE-GRAFT
+  chapter: 15
+  section: 15.3.5
+  figure_or_definition: Figure 15.3.4
+  thesis_rule_label: Trχ row NODE-GRAFT
+  judgment_or_equation: Node Graft translates through C^{r→n}(∀(⩾⊲S(τ)))
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#phiWithSchemeOmega"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#resolveTraceBinderTarget"
+  test_anchor:
+    matcher: O15-TR-NODE-GRAFT
+    file: "/Volumes/src/mlf4/test/Presolution/WitnessSpec.hs"
+    rationale: Mapped to row-labeled R-* witness/merge tests and Φ/Ω rigid/sequence
+      regressions.
+  status: anchored
+- id: O15-TR-NODE-MERGE
+  chapter: 15
+  section: 15.3.5
+  figure_or_definition: Figure 15.3.4
+  thesis_rule_label: Trχ row NODE-MERGE
+  judgment_or_equation: Node Merge translates through C^{r→n}(∀(⩾αn′⊳);N)
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#phiWithSchemeOmega"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#resolveTraceBinderTarget"
+  test_anchor:
+    matcher: O15-TR-NODE-MERGE
+    file: "/Volumes/src/mlf4/test/Presolution/WitnessSpec.hs"
+    rationale: Mapped to row-labeled R-* witness/merge tests and Φ/Ω rigid/sequence
+      regressions.
+  status: anchored
+- id: O15-TR-NODE-RAISEMERGE
+  chapter: 15
+  section: 15.3.5
+  figure_or_definition: Figure 15.3.4
+  thesis_rule_label: Trχ row NODE-RAISEMERGE
+  judgment_or_equation: Node RaiseMerge translation mirrors merge context path
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#phiWithSchemeOmega"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#resolveTraceBinderTarget"
+  test_anchor:
+    matcher: O15-TR-NODE-RAISEMERGE
+    file: "/Volumes/src/mlf4/test/Presolution/WitnessSpec.hs"
+    rationale: Mapped to row-labeled R-* witness/merge tests and Φ/Ω rigid/sequence
+      regressions.
+  status: anchored
+- id: O15-TR-NODE-WEAKEN
+  chapter: 15
+  section: 15.3.5
+  figure_or_definition: Figure 15.3.4
+  thesis_rule_label: Trχ row NODE-WEAKEN
+  judgment_or_equation: Node Weaken translates through C^{r→n}(N)
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#phiWithSchemeOmega"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#resolveTraceBinderTarget"
+  test_anchor:
+    matcher: O15-TR-NODE-WEAKEN
+    file: "/Volumes/src/mlf4/test/Presolution/WitnessSpec.hs"
+    rationale: Mapped to row-labeled R-* witness/merge tests and Φ/Ω rigid/sequence
+      regressions.
+  status: anchored
+- id: O15-TR-NODE-RAISE
+  chapter: 15
+  section: 15.3.5
+  figure_or_definition: Figure 15.3.4
+  thesis_rule_label: Trχ row NODE-RAISE
+  judgment_or_equation: Node Raise translates via O/inside/under context composition
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#phiWithSchemeOmega"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#resolveTraceBinderTarget"
+  test_anchor:
+    matcher: O15-TR-NODE-RAISE
+    file: "/Volumes/src/mlf4/test/Presolution/WitnessSpec.hs"
+    rationale: Mapped to row-labeled R-* witness/merge tests and Φ/Ω rigid/sequence
+      regressions.
+  status: anchored

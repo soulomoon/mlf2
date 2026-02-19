@@ -40,7 +40,9 @@ module MLF.Constraint.Presolution (
     instantiateSchemeWithTrace,
     mergeExpansions,
     applyExpansion,
-    normalizeEdgeWitnessesM
+    normalizeEdgeWitnessesM,
+    -- * Validation helpers (exported for obligations testing)
+    validateTranslatablePresolution
 ) where
 
 import MLF.Constraint.Presolution.Base (
@@ -72,6 +74,7 @@ import MLF.Constraint.Presolution.Core (
     unifyAcyclicRawWithRaiseTrace
     )
 import MLF.Constraint.Presolution.WitnessNorm (normalizeEdgeWitnessesM)
+import MLF.Constraint.Presolution.Validation (validateTranslatablePresolution)
 import MLF.Constraint.Presolution.Plan (buildGeneralizePlans)
 import MLF.Constraint.Presolution.Plan.Context (GaBindParents(..))
 import MLF.Util.Trace (TraceConfig)

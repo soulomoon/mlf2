@@ -7,6 +7,19 @@ This document maps sections of `papers/these-finale-english.txt` (thesis) to the
 - **Thesis**: `papers/these-finale-english.txt` — primary source for xMLF and elaboration
 - **Supplement**: `papers/xmlf.txt` — figure numbering and additional xMLF details
 
+## Canonical Obligations Ledger (Ch. 14/15)
+
+- Canonical rule inventory (source of truth):
+  - `/Volumes/src/mlf4/docs/thesis-obligations-ch14-15.yaml`
+- Generated human-readable view:
+  - `/Volumes/src/mlf4/docs/thesis-obligations-ch14-15.md`
+- Enforced checker:
+  - `/Volumes/src/mlf4/scripts/check-thesis-obligations-ledger.sh`
+- Renderer:
+  - `/Volumes/src/mlf4/scripts/render-thesis-obligations-ledger.rb`
+
+This ledger is the canonical rule-to-code-to-test index for thesis Chapter 14 (`14.2`-`14.3`) and Chapter 15 (`15.2`-`15.3`) operational obligations. The thesis conformance gate requires all 61 obligations to be present, uniquely mapped, `status=anchored`, and backed by at least one passing executable anchor matcher.
+
 ## Notation Mapping
 
 | Paper | Meaning | Repo Types/Modules |

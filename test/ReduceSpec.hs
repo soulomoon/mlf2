@@ -35,6 +35,38 @@ spec = do
             TBottom -> TBottom
             TForall v mb body -> TForall v mb body
 
+        erase :: ElabTerm -> String
+        erase term = case term of
+            EVar v -> "v:" ++ v
+            ELit l -> "lit:" ++ show l
+            ELam v _ body -> "lam:" ++ v ++ "(" ++ erase body ++ ")"
+            EApp f a -> "app(" ++ erase f ++ "," ++ erase a ++ ")"
+            ELet v _ rhs body -> "let:" ++ v ++ "(" ++ erase rhs ++ "," ++ erase body ++ ")"
+            ETyAbs _ _ body -> erase body
+            ETyInst e _ -> erase e
+
+    describe "Formal obligations ledger anchors (Chapter 14 reduction)" $ do
+        it "O14-RED-BETA O14-RED-BETALET O14-RED-REFLEX O14-RED-TRANS O14-RED-QUANT-INTRO O14-RED-QUANT-ELIM O14-RED-INNER O14-RED-OUTER O14-RED-CONTEXT: reduction-rule anchors and erasure proxy" $ do
+            step (EApp idLam (ELit (LInt 1))) `shouldBe` Just (ELit (LInt 1))
+            step (ELet "x" (schemeFromType intTy) (ELit (LInt 1)) (EVar "x")) `shouldBe` Just (ELit (LInt 1))
+
+            let reflTerm = ETyInst (ELit (LInt 1)) InstId
+            step reflTerm `shouldBe` Just (ELit (LInt 1))
+            fmap erase (step reflTerm) `shouldBe` Just (erase reflTerm)
+
+            step (ETyInst (ELit (LInt 1)) (InstSeq InstIntro InstElim))
+                `shouldBe` Just (ETyInst (ETyInst (ELit (LInt 1)) InstIntro) InstElim)
+            step (ETyInst (ELit (LInt 1)) InstIntro)
+                `shouldBe` Just (ETyAbs "u0" Nothing (ELit (LInt 1)))
+            step (ETyInst (ETyAbs "a" Nothing (ELam "x" (TVar "a") (EVar "x"))) InstElim)
+                `shouldBe` Just (ELam "x" TBottom (EVar "x"))
+            step (ETyInst (ETyAbs "a" Nothing (EVar "x")) (InstInside (InstBot intTy)))
+                `shouldBe` Just (ETyAbs "a" (Just (boundFromType intTy)) (EVar "x"))
+            step (ETyInst (ETyAbs "a" Nothing (ELam "x" (TVar "a") (EVar "x"))) (InstUnder "b" (InstApp intTy)))
+                `shouldBe` Just (ETyAbs "a" Nothing (ETyInst (ELam "x" (TVar "a") (EVar "x")) (InstApp intTy)))
+            step (EApp idLam (EApp (ELam "y" intTy (EVar "y")) (ELit (LInt 1))))
+                `shouldBe` Just (EApp idLam (ELit (LInt 1)))
+
     describe "Phase 7 reduce" $ do
         it "beta-reduces lambda applications" $ do
             let term = EApp idLam (ELit (LInt 1))

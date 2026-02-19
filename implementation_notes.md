@@ -1,5 +1,25 @@
 # Implementation Notes
 
+### 2026-02-19 Formal obligations ledger (thesis Ch. 14/15) hard-fail enforcement
+
+- Added canonical obligations ledger source:
+  - `/Volumes/src/mlf4/docs/thesis-obligations-ch14-15.yaml`
+- Added generated Markdown view:
+  - `/Volumes/src/mlf4/docs/thesis-obligations-ch14-15.md`
+- Added ledger tooling:
+  - `/Volumes/src/mlf4/scripts/render-thesis-obligations-ledger.rb`
+  - `/Volumes/src/mlf4/scripts/check-thesis-obligations-ledger.sh`
+- Added mandatory gate stage:
+  - `/Volumes/src/mlf4/scripts/thesis-conformance-gate.sh` now calls `check-thesis-obligations-ledger.sh` before legacy anchor slices.
+- Scope/contract:
+  - Covers Chapter 14 (`14.2`-`14.3`) and Chapter 15 (`15.2`-`15.3`) operational obligations only.
+  - Exact obligation inventory is fixed at `61` IDs.
+  - Checker hard-fails on count/id drift, missing/duplicate/unmapped obligations, non-anchored status, missing code/test anchors, markdown drift, zero-example matchers, or failing matched examples.
+- Verification snapshot:
+  - `./scripts/check-thesis-obligations-ledger.sh` (PASS)
+  - `./scripts/thesis-conformance-gate.sh` (PASS)
+  - `cabal build all && cabal test` (PASS)
+
 ### 2026-02-18 Thesis conformance gate command/profile
 
 - Added canonical gate entrypoint:
@@ -379,6 +399,18 @@
 - [x] Frontend translate scope/parent wiring now routes through local helpers (`withScopedBuild`, `attachUnder`, `rebindScopeRoot`) across let/coercion/forall-internalization paths.
 - [x] Elab run annotation node rewriting now routes through shared `mapAnnNodes`, reused by `applyRedirectsToAnn`, `canonicalizeAnn`, and debug edge-origin traversal.
 - Result: duplicated control-flow wiring was collapsed into shared local helpers without changing behavior.
+
+### 2026-02-18 A7 non-binding dedup closure (test harness)
+
+- Added shared pipeline-stage helpers in `test/SpecUtil.hs`:
+  - `runConstraintDefault`
+  - `runToPresolutionWithAnnDefault`
+  - `runPipelineArtifactsDefault` (`PipelineArtifacts` record for normalized constraint + presolution + solved + annotation + root).
+- Migrated remaining non-binding harness duplication to shared helpers:
+  - `test/PipelineSpec.hs`: replaced local pipeline setup chains and removed local `runPipelineWithPresolution`.
+  - `test/ElaborationSpec.hs`: removed local `unsafeNormalize`/`generateConstraintsDefault`; moved binding-coverage + Φ-soundness setup to `runPipelineArtifactsDefault` and `runToPresolutionWithAnnDefault`.
+  - `test/ConstraintGenSpec.hs`: default graph inference now reuses shared `unsafeNormalizeExpr`.
+- Behavioral impact: none intended; this is consolidation-only refactoring to keep the solve chain single-sourced for A7 acceptance criteria.
 
 ### 2026-02-06 strict checked-authoritative follow-up
 

@@ -231,7 +231,7 @@ spec = describe "Phase 2 — Merge/RaiseMerge emission" $ do
             Right _ ->
                 expectationFailure "Expected computePresolution to fail with NotTransitivelyFlexBound"
 
-    it "R-RAISEMERGE-VALID-13: records RaiseMerge for a live binder when a lower-≺ binder in bs was already eliminated" $ do
+    it "O15-TR-ROOT-RAISEMERGE R-RAISEMERGE-VALID-13: records RaiseMerge for a live binder when a lower-≺ binder in bs was already eliminated" $ do
         -- TyExp s · (∀(a ⩾ b) (b ⩾ x). a -> b) ≤ (y -> y)
         --
         -- Base ω execution performs Merge(a, b), eliminating `a` before structural
@@ -300,7 +300,7 @@ spec = describe "Phase 2 — Merge/RaiseMerge emission" $ do
                 ops `shouldSatisfy` elem (OpMerge b y)
                 ops `shouldNotSatisfy` elem (OpMerge a y)
 
-    it "R-WEAKEN-VALID-04: does not record Raise for unbounded binder metas (graft+weaken only)" $ do
+    it "O15-TR-ROOT-WEAKEN R-WEAKEN-VALID-04: does not record Raise for unbounded binder metas (graft+weaken only)" $ do
         -- TyExp s · (∀b. b -> b) ≤ (y -> y)
         --
         -- Instantiation introduces a fresh meta for `b` at the inner quantifier level.

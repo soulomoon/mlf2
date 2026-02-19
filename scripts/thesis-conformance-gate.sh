@@ -55,6 +55,8 @@ run_anchor() {
 main() {
   echo "[thesis-gate] Running thesis conformance anchors"
 
+  ./scripts/check-thesis-obligations-ledger.sh
+
   run_anchor "Phi/Omega translatability matrix rows" "R-" 15
   run_anchor "A6 parity regressions" "A6 parity" 3
   run_anchor "A6 strict success regression" "BUG-2026-02-17-002" 1

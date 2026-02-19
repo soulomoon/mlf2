@@ -237,7 +237,7 @@ spec = do
                 normalizeInstanceOpsFull env ops0
                     `shouldBe` Right [OpGraft arg binder, OpWeaken binder, OpMerge n2 n1]
 
-            it "R-GRAFT-NORM-03: normalizes graft-weaken pairs with canonical binder/arg alignment" $ do
+            it "O15-TR-NODE-GRAFT R-GRAFT-NORM-03: normalizes graft-weaken pairs with canonical binder/arg alignment" $ do
                 let c = mkNormalizeConstraint
                     root = NodeId 0
                     canonicalMap nid =
@@ -371,7 +371,7 @@ spec = do
                         , StepOmega (OpGraft arg2 root)
                         ]
 
-        it "R-MERGE-NORM-09: normalizeInstanceStepsFull rejects wrong merge direction" $ do
+        it "O15-TR-NODE-MERGE R-MERGE-NORM-09: normalizeInstanceStepsFull rejects wrong merge direction" $ do
             let c = mkNormalizeConstraint
                 root = NodeId 0
                 (mLess, nGreater) = orderedPairByPrec c root
@@ -406,7 +406,7 @@ spec = do
                 `shouldBe` Right [OpRaiseMerge n m]
 
         describe "RaiseMerge coalescing (interior aware)" $ do
-            it "R-RAISEMERGE-VALID-13: coalesces Raise; Merge when the target leaves the interior" $ do
+            it "O15-TR-NODE-RAISEMERGE R-RAISEMERGE-VALID-13: coalesces Raise; Merge when the target leaves the interior" $ do
                 let c = mkNormalizeConstraint
                     root = NodeId 0
                     n = NodeId 2
@@ -462,7 +462,7 @@ spec = do
                 c = rootedConstraint $ emptyConstraint { cNodes = nodes, cBindParents = bindParents }
                 env = mkNormalizeEnv c root (IntSet.fromList [getNodeId parent, getNodeId child, getNodeId sibling])
 
-            it "R-WEAKEN-NORM-06: moves Weaken after descendant ops" $ do
+            it "O15-TR-NODE-WEAKEN R-WEAKEN-NORM-06: moves Weaken after descendant ops" $ do
                 let ops0 = [OpWeaken parent, OpGraft child child]
                 reorderWeakenWithEnv env ops0
                     `shouldBe` Right [OpGraft child child, OpWeaken parent]
@@ -513,7 +513,7 @@ spec = do
             normalizeInstanceOpsFull env ops0 `shouldBe` Right ops0
 
         describe "Witness normalization invariants (US-010 regression)" $ do
-            it "R-RAISE-VALID-10: accepts OpRaise for transitively flex-bound interior binder" $ do
+            it "O15-TR-NODE-RAISE R-RAISE-VALID-10: accepts OpRaise for transitively flex-bound interior binder" $ do
                 let c = mkNormalizeConstraint
                     root = NodeId 0
                     n = NodeId 2
@@ -701,7 +701,7 @@ spec = do
                 validateNormalizedWitness env [op]
                     `shouldBe` Left (GraftOnNonBottomBound binder bound)
 
-            it "R-GRAFT-VALID-01: allows Graft on the expansion root (root operation)" $ do
+            it "O15-TR-ROOT-GRAFT R-GRAFT-VALID-01: allows Graft on the expansion root (root operation)" $ do
                 let root = NodeId 0
                     arg = NodeId 1
                     c =

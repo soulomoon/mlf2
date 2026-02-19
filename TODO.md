@@ -4,6 +4,35 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 20 Formal Obligations Ledger (Chapters 14/15) — 2026-02-19
+
+- Scope:
+  - Build and enforce a canonical thesis rule-to-code-to-test ledger for Chapter 14 (`14.2`-`14.3`) and Chapter 15 (`15.2`-`15.3`) operational obligations.
+- Implemented:
+  - Added canonical YAML ledger:
+    - `/Volumes/src/mlf4/docs/thesis-obligations-ch14-15.yaml`
+  - Added generated Markdown ledger:
+    - `/Volumes/src/mlf4/docs/thesis-obligations-ch14-15.md`
+  - Added renderer/checker scripts:
+    - `/Volumes/src/mlf4/scripts/render-thesis-obligations-ledger.rb`
+    - `/Volumes/src/mlf4/scripts/check-thesis-obligations-ledger.sh`
+  - Wired checker as a required stage in:
+    - `/Volumes/src/mlf4/scripts/thesis-conformance-gate.sh`
+  - Added/updated stable `O*` anchor matchers across:
+    - `/Volumes/src/mlf4/test/TypeCheckSpec.hs`
+    - `/Volumes/src/mlf4/test/ReduceSpec.hs`
+    - `/Volumes/src/mlf4/test/ElaborationSpec.hs`
+    - `/Volumes/src/mlf4/test/Presolution/EnforcementSpec.hs`
+    - `/Volumes/src/mlf4/test/Presolution/WitnessSpec.hs`
+    - `/Volumes/src/mlf4/test/Presolution/MergeEmissionSpec.hs`
+- Closure criteria status:
+  - [x] 61 obligations present and uniquely mapped.
+  - [x] All obligations marked `status=anchored`.
+  - [x] Executable matcher anchors required and passing.
+  - [x] Markdown drift checked from YAML source.
+  - [x] Thesis conformance gate includes obligations stage.
+  - [x] Full verification green (`cabal build all && cabal test`).
+
 ## Task 19 Thesis Conformance Gate Command/Profile — 2026-02-18
 
 - Scope:
@@ -420,7 +449,8 @@ AC status (2026-02-17): Added bounded/coercion-heavy parity regressions in `Pipe
 AC: Added targeted tests for strict translatability invariants and elaboration/type-check parity; references to thesis anchors included in spec names/comments.
 Files: `test/ElaborationSpec.hs`, `test/Presolution/WitnessSpec.hs`, `test/PipelineSpec.hs`, `test/TypeCheckSpec.hs`, `test/ReduceSpec.hs`
 
-- [ ] `A7 (P2)` Consolidate duplicated binding/scope/pipeline helper logic into shared abstractions.
+- [x] `A7 (P2)` Consolidate duplicated binding/scope/pipeline helper logic into shared abstractions.
+AC status (2026-02-18): Confirmed. Non-binding dedup is now single-sourced in test harness utilities (`runConstraintDefault`, `runToPresolutionWithAnnDefault`, `runPipelineArtifactsDefault`, `runToSolvedDefault` in `test/SpecUtil.hs`), with `PipelineSpec`, `ElaborationSpec`, and `ConstraintGenSpec` migrated off local normalize/solve-chain wrappers; frontend scope/binder wiring remains shared via `ConstraintGen.Translate` combinators (`withScopedBuild`, `withScopedRebind`, `attachUnder`, `rebindScopeRoot`).
 AC: Binding path/children/scope-graph helpers are single-sourced; ConstraintGen scope+binder wiring uses shared combinators; repeated test pipeline harness steps (`unsafeNormalize`, `firstShow`, solve chain) are centralized in shared test utilities.
 Files: `src/MLF/Binding/Queries.hs`, `src/MLF/Binding/Validation.hs`, `src/MLF/Binding/Tree.hs`, `src/MLF/Binding/Canonicalization.hs`, `src/MLF/Frontend/ConstraintGen/Translate.hs`, `src/MLF/Elab/Run/Annotation.hs`, `src/MLF/Elab/Run/Debug.hs`, `test/SpecUtil.hs`, `test/PipelineSpec.hs`, `test/ElaborationSpec.hs`, `test/ConstraintGenSpec.hs`
 Progress (2026-02-08, Group 1): duplicated binding-core helpers are now single-sourced in `MLF.Binding.Path`, `MLF.Binding.NodeRefs`, `MLF.Binding.ScopeGraph`, and `MLF.Binding.Children`; migration landed in `MLF.Binding.Queries`, `MLF.Binding.Validation`, `MLF.Binding.Tree`, `MLF.Binding.Canonicalization`, `MLF.Constraint.BindingUtil`, and `MLF.Constraint.Presolution.Base`. Remaining A7 work is the non-binding portions in the AC (`ConstraintGen`/pipeline test-harness consolidation).
