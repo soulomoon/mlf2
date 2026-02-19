@@ -13,7 +13,11 @@ module SpecUtil (
     defaultTraceConfig,
     unsafeNormalizeExpr,
     firstShowE,
+    PipelineArtifacts(..),
+    runConstraintDefault,
     runToPresolutionDefault,
+    runToPresolutionWithAnnDefault,
+    runPipelineArtifactsDefault,
     runToSolvedDefault,
     expectRight,
     requireRight,
@@ -158,13 +162,59 @@ unsafeNormalizeExpr expr =
 firstShowE :: Show e => Either e a -> Either String a
 firstShowE = either (Left . show) Right
 
-runToPresolutionDefault :: PolySyms -> SurfaceExpr -> Either String PresolutionResult
-runToPresolutionDefault poly expr = do
-    ConstraintResult{ crConstraint = c0 } <-
-        firstShowE (generateConstraints poly (unsafeNormalizeExpr expr))
+data PipelineArtifacts = PipelineArtifacts
+    { paConstraintNorm :: Constraint
+    , paPresolution :: PresolutionResult
+    , paSolved :: SolveResult
+    , paAnnotated :: AnnExpr
+    , paRoot :: NodeId
+    }
+
+runConstraintDefault :: PolySyms -> SurfaceExpr -> Either String ConstraintResult
+runConstraintDefault poly expr =
+    firstShowE (generateConstraints poly (unsafeNormalizeExpr expr))
+
+runToPresolutionDetailedDefault
+    :: PolySyms
+    -> SurfaceExpr
+    -> Either String (ConstraintResult, Constraint, PresolutionResult)
+runToPresolutionDetailedDefault poly expr = do
+    result@ConstraintResult{ crConstraint = c0 } <- runConstraintDefault poly expr
     let c1 = normalize c0
     acyc <- firstShowE (checkAcyclicity c1)
-    firstShowE (computePresolution defaultTraceConfig acyc c1)
+    pres <- firstShowE (computePresolution defaultTraceConfig acyc c1)
+    pure (result, c1, pres)
+
+runToPresolutionDefault :: PolySyms -> SurfaceExpr -> Either String PresolutionResult
+runToPresolutionDefault poly expr = do
+    (_, _, pres) <- runToPresolutionDetailedDefault poly expr
+    pure pres
+
+runToPresolutionWithAnnDefault
+    :: PolySyms
+    -> SurfaceExpr
+    -> Either String (PresolutionResult, AnnExpr)
+runToPresolutionWithAnnDefault poly expr = do
+    (ConstraintResult{ crAnnotated = ann }, _, pres) <-
+        runToPresolutionDetailedDefault poly expr
+    pure (pres, ann)
+
+runPipelineArtifactsDefault
+    :: PolySyms
+    -> SurfaceExpr
+    -> Either String PipelineArtifacts
+runPipelineArtifactsDefault poly expr = do
+    (ConstraintResult{ crAnnotated = ann, crRoot = root }, c1, pres) <-
+        runToPresolutionDetailedDefault poly expr
+    solved <- firstShowE (solveUnify defaultTraceConfig (prConstraint pres))
+    pure
+        PipelineArtifacts
+            { paConstraintNorm = c1
+            , paPresolution = pres
+            , paSolved = solved
+            , paAnnotated = ann
+            , paRoot = root
+            }
 
 runToSolvedDefault :: PolySyms -> SurfaceExpr -> Either String SolveResult
 runToSolvedDefault poly expr = do

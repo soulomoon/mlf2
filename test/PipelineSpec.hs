@@ -23,8 +23,6 @@ import MLF.Elab.Pipeline
     )
 import MLF.Frontend.Syntax
 import MLF.Frontend.ConstraintGen
-import MLF.Constraint.Normalize
-import MLF.Constraint.Acyclicity (checkAcyclicity)
 import MLF.Constraint.Canonicalizer (canonicalizeNode)
 import MLF.Constraint.Presolution
 import MLF.Constraint.Solve
@@ -32,14 +30,20 @@ import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Witness (EdgeWitness(..), InstanceOp(..), InstanceStep(..))
 import qualified MLF.Binding.Tree as Binding
 import MLF.Elab.Run.Provenance (buildTraceCopyMap, collectBaseNamedKeys)
-import MLF.Elab.Run.Util (canonicalizeTrace, canonicalizeWitness, makeCanonicalizer)
+import MLF.Elab.Run.Util
+    ( canonicalizeTrace
+    , canonicalizeWitness
+    , chaseRedirects
+    , makeCanonicalizer
+    )
 import SpecUtil
     ( collectVarNodes
     , defaultTraceConfig
     , emptyConstraint
-    , firstShowE
+    , PipelineArtifacts(..)
     , mkForalls
-    , requireRight
+    , runPipelineArtifactsDefault
+    , runToPresolutionWithAnnDefault
     , runToSolvedDefault
     , unsafeNormalizeExpr
     )
@@ -60,21 +64,12 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     let schemeTy = mkForalls [] ann
                     in ELet "f" (EAnn (ELam "x" (EVar "x")) schemeTy) (EVar "f")
 
-            let pipelineParts = do
-                    ConstraintResult{ crConstraint = c0, crRoot = root } <-
-                        firstShowE (generateConstraints defaultPolySyms (unsafeNormalizeExpr expr))
-                    let c1 = normalize c0
-                    acyc <- firstShowE (checkAcyclicity c1)
-                    pres <- firstShowE (computePresolution defaultTraceConfig acyc c1)
-                    res <- firstShowE (solveUnify defaultTraceConfig (prConstraint pres))
-                    case validateSolvedGraphStrict res of
-                        [] -> do
-                            let rootRedirected = chaseRedirects (prRedirects pres) root
-                                root' = canonical (srUnionFind res) rootRedirected
-                            pure (res, root')
-                        vs -> Left ("validateSolvedGraph failed:\n" ++ unlines vs)
-            case pipelineParts of
-                Right (res, root) -> do
+            case runPipelineArtifactsDefault defaultPolySyms expr of
+                Left err -> expectationFailure err
+                Right PipelineArtifacts{ paPresolution = pres, paSolved = res, paRoot = root } -> do
+                    validateStrict res
+                    let rootRedirected = chaseRedirects (prRedirects pres) root
+                        root' = canonical (srUnionFind res) rootRedirected
                     -- With coercion-only semantics, f's type is inferred (not declared)
                     -- The coercion ensures the RHS has the annotated type.
                     let scopeRoot =
@@ -82,7 +77,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                                 [GenRef gid] -> genRef gid
                                 roots -> error ("PipelineSpec: unexpected binding roots " ++ show roots)
                     let generalizeAt = generalizeAtWithBuilder (defaultPlanBuilder defaultTraceConfig) Nothing
-                    case generalizeAt res scopeRoot root of
+                    case generalizeAt res scopeRoot root' of
                         Right (Forall binds ty, _subst) -> do
                             binds `shouldBe` []
                             let tyStr = pretty ty
@@ -90,27 +85,17 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                             tyStr `shouldSatisfy` ("∀" `isInfixOf`)
                             tyStr `shouldSatisfy` ("->" `isInfixOf`)
                         Left err -> expectationFailure $ "Generalize error: " ++ show err
-                Left err -> expectationFailure err
 
         it "generalizes at binding site" $ do
              -- let id = \x. x in id
              let expr = ELet "id" (ELam "x" (EVar "x")) (EVar "id")
 
              -- We intercept the pipeline after solve to test generalizeAt on the 'id' binding
-             let pipelineParts = do
-                     ConstraintResult{ crConstraint = c0, crAnnotated = ann } <-
-                         firstShowE (generateConstraints defaultPolySyms (unsafeNormalizeExpr expr))
-                     let c1 = normalize c0
-                     acyc <- firstShowE (checkAcyclicity c1)
-                     pres <- firstShowE (computePresolution defaultTraceConfig acyc c1)
-                     res <- firstShowE (solveUnify defaultTraceConfig (prConstraint pres))
-                     case validateSolvedGraphStrict res of
-                         [] -> do
-                             let ann' = applyRedirectsToAnn (prRedirects pres) ann
-                             pure (res, ann')
-                         vs -> Left ("validateSolvedGraph failed:\n" ++ unlines vs)
-             case pipelineParts of
-                 Right (res, ann) -> do
+             case runPipelineArtifactsDefault defaultPolySyms expr of
+                 Left err -> expectationFailure err
+                 Right PipelineArtifacts{ paPresolution = pres, paSolved = res, paAnnotated = ann0 } -> do
+                     validateStrict res
+                     let ann = applyRedirectsToAnn (prRedirects pres) ann0
                      case ann of
                          ALet _ schemeGen schemeRoot _ _ _ _ _ -> do
                              let generalizeAt = generalizeAtWithBuilder (defaultPlanBuilder defaultTraceConfig) Nothing
@@ -118,7 +103,6 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                                  Right scheme -> show scheme `shouldSatisfy` ("Forall" `isInfixOf`)
                                  Left err -> expectationFailure $ "Generalize error: " ++ show err
                          _ -> expectationFailure "Expected ALet annotation"
-                 Left err -> expectationFailure err
 
         it "reifies TyCon nodes to TCon in elaborated types" $ do
             -- Test that a constraint containing TyCon nodes reifies correctly to TCon
@@ -204,17 +188,9 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     ELet "id" (ELam "x" (EVar "x"))
                         (ELet "a" (EApp (EVar "id") (ELit (LInt 1)))
                             (EApp (EVar "id") (ELit (LBool True))))
-            let pipelineParts = do
-                    ConstraintResult{ crConstraint = c0 } <-
-                        firstShowE (generateConstraints defaultPolySyms (unsafeNormalizeExpr expr))
-                    let c1 = normalize c0
-                    acyc <- firstShowE (checkAcyclicity c1)
-                    pres <- firstShowE (computePresolution defaultTraceConfig acyc c1)
-                    solved <- firstShowE (solveUnify defaultTraceConfig (prConstraint pres))
-                    pure (c1, pres, solved)
-            case pipelineParts of
+            case runPipelineArtifactsDefault defaultPolySyms expr of
                 Left err -> expectationFailure err
-                Right (c1, pres, solved) ->
+                Right PipelineArtifacts{ paConstraintNorm = c1, paPresolution = pres, paSolved = solved } ->
                     case validateSolvedGraphStrict solved of
                         [] -> do
                             let canon = makeCanonicalizer (srUnionFind solved) (prRedirects pres)
@@ -251,10 +227,9 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                         (ELet "make" makeFactory
                             (ELet "c1" (EApp (EVar "make") (EVar "k"))
                                 (EApp (EVar "c1") (ELit (LBool True)))))
-            case runPipelineWithPresolution expr of
+            case runPipelineArtifactsDefault defaultPolySyms expr of
                 Left err -> expectationFailure err
-                Right (pres, _) -> do
-                    solved <- requireRight (firstShowE (solveUnify defaultTraceConfig (prConstraint pres)))
+                Right PipelineArtifacts{ paPresolution = pres, paSolved = solved } -> do
                     let canon = makeCanonicalizer (srUnionFind solved) (prRedirects pres)
                         edgeWitnesses = IntMap.map (canonicalizeWitness canon) (prEdgeWitnesses pres)
                         edgeTraces = IntMap.map (canonicalizeTrace canon) (prEdgeTraces pres)
@@ -300,14 +275,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         let expr =
                 ELet "id" (ELam "x" (EVar "x"))
                     (EApp (EVar "id") (EVar "id"))
-        let pipelineParts = do
-                ConstraintResult{ crConstraint = c0, crAnnotated = ann } <-
-                    firstShowE (generateConstraints defaultPolySyms (unsafeNormalizeExpr expr))
-                let c1 = normalize c0
-                acyc <- firstShowE (checkAcyclicity c1)
-                pres <- firstShowE (computePresolution defaultTraceConfig acyc c1)
-                pure (pres, ann)
-        case pipelineParts of
+        case runToPresolutionWithAnnDefault defaultPolySyms expr of
             Left err -> expectationFailure err
             Right (pres, ann) -> do
                 let redirects = prRedirects pres
@@ -332,13 +300,13 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                             (EApp (EVar "f") (ELit (LBool True)))))
             -- Separately exercise the production canonicalizeAnn path via pipeline run.
             canonicalizePathExpr =
-                ELet "id" (ELam "x" (EVar "x"))
+                    ELet "id" (ELam "x" (EVar "x"))
                     (ELet "a" (EApp (EVar "id") (ELit (LInt 1)))
                         (EApp (EVar "id") (ELit (LBool True)))
                     )
-        case runPipelineWithPresolution rewriteExpr of
+        case runPipelineArtifactsDefault defaultPolySyms rewriteExpr of
             Left err -> expectationFailure err
-            Right (pres, ann) -> do
+            Right PipelineArtifacts{ paPresolution = pres, paSolved = solved, paAnnotated = ann } -> do
                 let redirects = prRedirects pres
                     redirectedSchemeRoots =
                         [ nid
@@ -354,27 +322,24 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 redirectedSchemeRoots `shouldSatisfy` (not . null)
                 staleRedirectNodes `shouldBe` []
                 annRootNode annRedirected `shouldSatisfy` (\nid -> chaseRedirects redirects nid == nid)
-                case solveUnify defaultTraceConfig (prConstraint pres) of
-                    Left err -> expectationFailure ("solveUnify failed: " ++ show err)
-                    Right solved -> do
-                        validateStrict solved
-                        let canonicalize = canonicalizeNode (makeCanonicalizer (srUnionFind solved) redirects)
-                            canonicalizedSchemeRoots =
-                                [ nid
-                                | nid <- annLetSchemeRoots annRedirected
-                                , canonicalize nid /= nid
-                                ]
-                            hasCanonicalizationWork = not (IntMap.null (srUnionFind solved))
-                            annCanonical = canonicalizeAnn canonicalize annRedirected
-                            staleCanonicalNodes =
-                                [ nid
-                                | nid <- annNodeOccurrences annCanonical
-                                , canonicalize nid /= nid
-                                ]
-                        when hasCanonicalizationWork $
-                            canonicalizedSchemeRoots `shouldSatisfy` (not . null)
-                        staleCanonicalNodes `shouldBe` []
-                        annRootNode annCanonical `shouldSatisfy` (\nid -> canonicalize nid == nid)
+                validateStrict solved
+                let canonicalize = canonicalizeNode (makeCanonicalizer (srUnionFind solved) redirects)
+                    canonicalizedSchemeRoots =
+                        [ nid
+                        | nid <- annLetSchemeRoots annRedirected
+                        , canonicalize nid /= nid
+                        ]
+                    hasCanonicalizationWork = not (IntMap.null (srUnionFind solved))
+                    annCanonical = canonicalizeAnn canonicalize annRedirected
+                    staleCanonicalNodes =
+                        [ nid
+                        | nid <- annNodeOccurrences annCanonical
+                        , canonicalize nid /= nid
+                        ]
+                when hasCanonicalizationWork $
+                    canonicalizedSchemeRoots `shouldSatisfy` (not . null)
+                staleCanonicalNodes `shouldBe` []
+                annRootNode annCanonical `shouldSatisfy` (\nid -> canonicalize nid == nid)
         case runPipelineElab Set.empty canonicalizePathExpr of
             Left err -> expectationFailure (renderPipelineError err)
             Right (_term, ty) ->
@@ -782,7 +747,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     StepOmega (OpWeaken _) -> True
                     _ -> False
 
-            case runPipelineWithPresolution expr of
+            case runToPresolutionWithAnnDefault defaultPolySyms expr of
                 Left err -> expectationFailure ("Pipeline failed: " ++ err)
                 Right (PresolutionResult{ prConstraint = cPres, prEdgeExpansions = exps, prEdgeWitnesses = ews }, _ann) -> do
                     let annEdges = IntSet.toList (cAnnEdges cPres)
@@ -793,25 +758,12 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                             Nothing -> expectationFailure ("Missing witness for annotation edge " ++ show eid)
                             Just EdgeWitness{ ewSteps = steps } ->
                                 steps `shouldSatisfy` all (not . hasWeakenStep)
-runPipelineWithPresolution :: SurfaceExpr -> Either String (PresolutionResult, AnnExpr)
-runPipelineWithPresolution expr = do
-    ConstraintResult{ crConstraint = c0, crAnnotated = ann } <-
-        firstShowE (generateConstraints defaultPolySyms (unsafeNormalizeExpr expr))
-    let c1 = normalize c0
-    acyc <- firstShowE (checkAcyclicity c1)
-    pres <- firstShowE (computePresolution defaultTraceConfig acyc c1)
-    pure (pres, ann)
 
 canonical :: IntMap.IntMap NodeId -> NodeId -> NodeId
 canonical uf nid =
     case IntMap.lookup (getNodeId nid) uf of
         Nothing -> nid
         Just p -> canonical uf p
-
-chaseRedirects :: IntMap.IntMap NodeId -> NodeId -> NodeId
-chaseRedirects redirects nid = case IntMap.lookup (getNodeId nid) redirects of
-    Just n' -> if n' == nid then nid else chaseRedirects redirects n'
-    Nothing -> nid
 
 annNodeOccurrences :: AnnExpr -> [NodeId]
 annNodeOccurrences expr = case expr of

@@ -23,13 +23,12 @@ import SpecUtil
     , requireRight
     , mkForalls
     , runToPresolutionDefault
+    , unsafeNormalizeExpr
     )
 
 inferConstraintGraphDefault :: SurfaceExpr -> Either ConstraintError ConstraintResult
 inferConstraintGraphDefault expr =
-    case normalizeExpr expr of
-        Left err -> error ("normalizeExpr failed in test: " ++ show err)
-        Right normExpr -> inferConstraintGraph Set.empty normExpr
+    inferConstraintGraph Set.empty (unsafeNormalizeExpr expr)
 
 spec :: Spec
 spec = describe "Phase 1 — Constraint generation" $ do
