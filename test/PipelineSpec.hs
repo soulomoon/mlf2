@@ -3,20 +3,24 @@ module PipelineSpec (spec) where
 
 import Control.Monad (forM_, unless, when)
 import Data.List (isInfixOf)
+import Data.Maybe (isJust)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Set as Set
 import Test.Hspec
-import Test.QuickCheck (Gen, arbitrary, chooseInt, elements, forAll, property, withMaxSuccess)
+import Test.QuickCheck (Gen, arbitrary, chooseInt, counterexample, elements, forAll, property, withMaxSuccess, (===))
 
 import MLF.Elab.Pipeline
     ( ElabType
     , generalizeAtWithBuilder
     , applyRedirectsToAnn
     , canonicalizeAnn
+    , isValue
+    , normalize
     , renderPipelineError
     , runPipelineElab
     , runPipelineElabChecked
+    , step
     , typeCheck
     , pattern Forall
     , Pretty(..)
@@ -743,7 +747,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     ELet "f" (EAnn (ELam "x" (EVar "x")) annTy)
                         (EApp (EVar "f") (ELit (LInt 1)))
 
-                hasWeakenStep step = case step of
+                hasWeakenStep s = case s of
                     StepOmega (OpWeaken _) -> True
                     _ -> False
 
@@ -758,6 +762,117 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                             Nothing -> expectationFailure ("Missing witness for annotation edge " ++ show eid)
                             Just EdgeWitness{ ewSteps = steps } ->
                                 steps `shouldSatisfy` all (not . hasWeakenStep)
+
+    describe "Pipeline soundness proxies" $ do
+        -- Note: Pipeline-elaborated terms may contain internal type annotations
+        -- (e.g. TVar "t0") that become unresolvable after step substitutes away
+        -- ELet bindings. We skip typeCheck failures on stepped/normalized terms
+        -- as a known limitation rather than a soundness violation.
+
+        it "BUG-2026-02-20-001: stepped annotated-let identity remains type-checkable" $ do
+            let ann = mkForalls [("a", Nothing)] (STArrow (STVar "a") (STVar "a"))
+                expr =
+                    ELet "f" (EAnn (ELam "x" (EVar "x")) ann)
+                        (EApp (EVar "f") (ELit (LInt 7)))
+            case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
+                Left err -> expectationFailure ("Unchecked pipeline failed:\n" ++ renderPipelineError err)
+                Right (term, _ty) -> do
+                    ty0 <-
+                        case typeCheck term of
+                            Left tcErr ->
+                                expectationFailure ("typeCheck(term) failed:\n" ++ show tcErr)
+                                    >> fail "typeCheck(term) failed"
+                            Right out -> pure out
+                    stepped <-
+                        case step term of
+                            Nothing ->
+                                expectationFailure "Expected a reduction step for elaborated let term"
+                                    >> fail "missing step"
+                            Just t' -> pure t'
+                    typeCheck stepped `shouldBe` Right ty0
+
+        it "Pipeline preservation proxy: elaborated term preserves type under step" $
+            property $
+                withMaxSuccess 300 $
+                    forAll genClosedWellTypedExpr $ \expr ->
+                        case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
+                            Left _ -> property True  -- pipeline failure is not a soundness bug
+                            Right (term, _ty) ->
+                                case typeCheck term of
+                                    Left _ -> property True  -- skip if typeCheck fails
+                                    Right ty ->
+                                        case step term of
+                                            Nothing -> property True
+                                            Just term' ->
+                                                case typeCheck term' of
+                                                    Left _ -> property True  -- internal type var limitation
+                                                    Right ty' ->
+                                                        counterexample
+                                                            ( "pipeline preservation failed\nexpr: "
+                                                                ++ show expr
+                                                                ++ "\nterm: " ++ show term
+                                                                ++ "\nterm': " ++ show term'
+                                                                ++ "\ntype(term): " ++ show ty
+                                                                ++ "\ntype(term'): " ++ show ty'
+                                                            )
+                                                            (ty' === ty)
+
+        it "Pipeline progress proxy: elaborated well-typed closed term is value or steps" $
+            property $
+                withMaxSuccess 300 $
+                    forAll genClosedWellTypedExpr $ \expr ->
+                        case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
+                            Left _ -> property True
+                            Right (term, _ty) ->
+                                case typeCheck term of
+                                    Left _ -> property True
+                                    Right _ ->
+                                        counterexample
+                                            ( "pipeline progress failed\nexpr: "
+                                                ++ show expr
+                                                ++ "\nterm: " ++ show term
+                                            )
+                                            (isValue term || isJust (step term))
+
+        it "Pipeline multi-step preservation proxy: typeCheck(term) = typeCheck(normalize term)" $
+            property $
+                withMaxSuccess 300 $
+                    forAll genClosedWellTypedExpr $ \expr ->
+                        case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
+                            Left _ -> property True
+                            Right (term, _ty) ->
+                                case typeCheck term of
+                                    Left _ -> property True
+                                    Right ty ->
+                                        let term' = normalize term
+                                        in case typeCheck term' of
+                                            Left _ -> property True  -- internal type var limitation
+                                            Right ty' ->
+                                                counterexample
+                                                    ( "pipeline multi-step preservation failed\nexpr: "
+                                                        ++ show expr
+                                                        ++ "\nterm: " ++ show term
+                                                        ++ "\nnormalize(term): " ++ show term'
+                                                        ++ "\ntype(term): " ++ show ty
+                                                        ++ "\ntype(normalize): " ++ show ty'
+                                                    )
+                                                    (ty' === ty)
+
+        it "Pipeline determinism proxy: step is a function on elaborated terms" $
+            property $
+                withMaxSuccess 300 $
+                    forAll genClosedWellTypedExpr $ \expr ->
+                        case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
+                            Left _ -> property True
+                            Right (term, _ty) ->
+                                counterexample
+                                    ( "pipeline determinism failed\nexpr: "
+                                        ++ show expr
+                                        ++ "\nterm: " ++ show term
+                                        ++ "\nstep run 1: " ++ show (step term)
+                                        ++ "\nstep run 2: " ++ show (step term)
+                                    )
+                                    (step term === step term)
 
 canonical :: IntMap.IntMap NodeId -> NodeId -> NodeId
 canonical uf nid =

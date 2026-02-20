@@ -8,6 +8,28 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 
 ## Resolved
 
+### BUG-2026-02-20-001
+- Status: Resolved
+- Priority: High
+- Discovered: 2026-02-20
+- Resolved: 2026-02-20
+- Summary: Stepping elaborated `let` terms from RHS-coercion identities could expose unresolvable internal type names (`t0`) after substitution.
+- Minimal reproducer (surface expression):
+  - `ELet "f" (EAnn (ELam "x" (EVar "x")) (mkForalls [("a", Nothing)] (STArrow (STVar "a") (STVar "a")))) (EApp (EVar "f") (ELit (LInt 7)))`
+- Expected vs actual:
+  - Expected: `typeCheck term == typeCheck (step term)` for the elaborated result.
+  - Actual before fix: `typeCheck term` succeeded, but `typeCheck (step term)` failed with `TCArgumentMismatch (TVar "t0") ...`.
+- Root cause:
+  - `MLF.Elab.Elaborate` (`deriveLambdaBinderSubst`) suppressed alternate node-key entries when they mapped to the same binder name, so the substitution map kept only one key and missed the `t0` key used in elaborated lambda parameter annotations.
+- Fix:
+  - `/Volumes/src/mlf4/src/MLF/Elab/Elaborate.hs`
+    - `deriveLambdaBinderSubst` now augments key aliases for lambda binder substitution when binder/parameter arity matches and binders are unbounded, instead of discarding same-name alternate keys.
+  - `/Volumes/src/mlf4/test/PipelineSpec.hs`
+    - added regression `BUG-2026-02-20-001: stepped annotated-let identity remains type-checkable`.
+- Regression tests:
+  - `cabal test mlf2-test --allow-newer=base --test-show-details=direct --test-options='--match "BUG-2026-02-20-001"'`
+  - `cabal test mlf2-test --allow-newer=base --test-show-details=direct`
+
 ### BUG-2026-02-17-002
 - Status: Resolved
 - Priority: High

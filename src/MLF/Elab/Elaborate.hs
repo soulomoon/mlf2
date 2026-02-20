@@ -631,18 +631,22 @@ elaborateWithEnv config elabEnv ann = do
                         deriveLambdaBinderSubst scheme0 subst0' =
                             let (binds, _) = Inst.splitForalls (schemeToType scheme0)
                                 binderNames = map fst binds
+                                binderBounds = map snd binds
                                 paramNodes = lambdaParamNodes rhsAnn
                                 binderPairs = zip binderNames paramNodes
-                            in foldl'
-                                (\acc (name, paramNode) ->
-                                    if name `elem` IntMap.elems acc
-                                        then acc
-                                        else
+                                canAugment =
+                                    length binderNames == length paramNodes
+                                        && all (== Nothing) binderBounds
+                            in if canAugment
+                                then
+                                    foldl'
+                                        (\acc (name, paramNode) ->
                                             let key = getNodeId (canonical paramNode)
                                             in IntMap.insertWith (\_ old -> old) key name acc
-                                )
-                                subst0'
-                                binderPairs
+                                        )
+                                        subst0'
+                                        binderPairs
+                                else subst0'
                         (sch0Norm, subst0Norm) = normalizeSchemeSubstPair (sch0Raw, subst0Raw)
                         sch0 = sch0Norm
                         subst0 = deriveLambdaBinderSubst sch0Norm subst0Norm

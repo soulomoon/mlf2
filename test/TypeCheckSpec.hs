@@ -1,3 +1,5 @@
+-- Convention: Promote minimized QuickCheck counterexamples from
+-- TypeSoundnessSpec / PipelineSpec into fixed regression tests here.
 module TypeCheckSpec (spec) where
 
 import qualified Data.Set as Set

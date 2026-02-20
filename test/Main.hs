@@ -24,6 +24,7 @@ import qualified ReduceSpec
 import qualified SolveSpec
 import qualified ThesisFixDirectionSpec
 import qualified TypeCheckSpec
+import qualified TypeSoundnessSpec
 import qualified XMLFParseSpec
 import qualified XMLFPrettySpec
 
@@ -44,6 +45,7 @@ main = do
         PipelineSpec.spec
         ThesisFixDirectionSpec.spec
         TypeCheckSpec.spec
+        TypeSoundnessSpec.spec
         ReduceSpec.spec
         ElaborationSpec.spec
         GeneralizeSpec.spec

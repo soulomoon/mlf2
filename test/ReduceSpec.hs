@@ -1,4 +1,6 @@
 {-# LANGUAGE GADTs #-}
+-- Convention: Promote minimized QuickCheck counterexamples from
+-- TypeSoundnessSpec / PipelineSpec into fixed regression tests here.
 module ReduceSpec (spec) where
 
 import Control.Monad (forM_)

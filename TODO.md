@@ -4,6 +4,27 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 21 Phase 7 theorem obligations executable proxies — 2026-02-19
+
+- Scope:
+  - Address formalization debt by making Phase 7 theorem obligations executable via property-style proxies.
+- Implemented:
+  - Added `/Volumes/src/mlf4/test/TypeSoundnessSpec.hs` with:
+    - preservation proxy property:
+      - if `typeCheck t = Right tau` and `step t = Just t'`, then `typeCheck t' = Right tau`
+    - progress proxy property for closed terms:
+      - if `typeCheck t = Right tau` and `t` is closed, then `isValue t || isJust (step t)`
+  - Wired `TypeSoundnessSpec` into:
+    - `/Volumes/src/mlf4/mlf2.cabal` (`test-suite mlf2-test` `other-modules`)
+    - `/Volumes/src/mlf4/test/Main.hs`
+  - Added thesis gate anchor:
+    - `/Volumes/src/mlf4/scripts/thesis-conformance-gate.sh`
+    - matcher `--match "Phase 7 theorem obligations"` with minimum `2` matched examples.
+- Verification:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Phase 7 theorem obligations"'`
+  - `./scripts/thesis-conformance-gate.sh`
+  - `cabal build all && cabal test`
+
 ## Task 20 Formal Obligations Ledger (Chapters 14/15) — 2026-02-19
 
 - Scope:

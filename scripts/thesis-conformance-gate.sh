@@ -61,6 +61,7 @@ main() {
   run_anchor "A6 parity regressions" "A6 parity" 3
   run_anchor "A6 strict success regression" "BUG-2026-02-17-002" 1
   run_anchor "Phase 3 atomic wrapping equivalence gates" "Phase 3 atomic wrapping equivalence gates" 7
+  run_anchor "Phase 7 theorem obligations" "Phase 7 theorem obligations" 4
   run_anchor "Representative theorem baseline" "has type forall a. a -> a" 1
 
   echo

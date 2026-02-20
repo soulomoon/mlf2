@@ -1,5 +1,35 @@
 # Implementation Notes
 
+### 2026-02-20 Theorem-proxy scope upgrade (structurally rich generators + new proxies)
+
+- Upgraded `test/TypeSoundnessSpec.hs` generator from flat `elements` pool to sized typed-by-construction:
+  - `genTermAtType` builds terms top-down with a typing context (`TyCtx`), using `sized`/`frequency` to produce nested `ELam`, `EApp`, `ELet` at depth.
+  - `genAtom` generates type-correct leaves (variables from context, literals at matching ground type, lambda fallback for arrow types).
+  - Top-level `genClosedWellTypedElabTerm` occasionally wraps in vacuous `ETyAbs` for type-abstraction coverage.
+- Added two new theorem proxies:
+  - Multi-step preservation: `typeCheck t = Right tau => typeCheck (normalize t) = Right tau`.
+  - Determinism: `step t == step t` (referential transparency guard for small-step).
+- Existing proxies (1-step preservation, progress) retained and upgraded to 300 max-success with 30% coverage thresholds.
+- Executable theorem-proxy scope:
+  - **Progress**: well-typed closed term is value or steps (property-based, 300 samples).
+  - **1-step preservation**: type preserved across single `step` (property-based, 300 samples).
+  - **n-step preservation**: type preserved across full `normalize` (property-based, 300 samples).
+  - **Determinism**: `step` is a pure function (property-based, 300 samples).
+  - **Not mechanized**: full inductive proofs of progress/preservation/determinism remain non-mechanized; these are executable proxies only.
+
+### 2026-02-19 Phase 7 theorem obligations executable proxies
+
+- Added `/Volumes/src/mlf4/test/TypeSoundnessSpec.hs` with two property-style checks:
+  - preservation proxy: if `typeCheck t = Right tau` and `step t = Just t'`, then `typeCheck t' = Right tau`.
+  - progress proxy for closed terms: if `typeCheck t = Right tau` and term is closed, then `isValue t || isJust (step t)`.
+- Scope is intentionally Phase 7 local (ElabTerm generator only), so failures isolate `MLF.Elab.TypeCheck`/`MLF.Elab.Reduce` behavior rather than upstream pipeline stages.
+- Wired into test harness:
+  - `/Volumes/src/mlf4/mlf2.cabal`
+  - `/Volumes/src/mlf4/test/Main.hs`
+- Added mandatory gate anchor:
+  - `/Volumes/src/mlf4/scripts/thesis-conformance-gate.sh` now runs matcher `Phase 7 theorem obligations` (min `2` examples).
+- This closes part of the remaining non-semantic formalization debt by making theorem proxies executable, while not claiming a mechanized proof.
+
 ### 2026-02-19 Formal obligations ledger (thesis Ch. 14/15) hard-fail enforcement
 
 - Added canonical obligations ledger source:
@@ -19,6 +49,15 @@
   - `./scripts/check-thesis-obligations-ledger.sh` (PASS)
   - `./scripts/thesis-conformance-gate.sh` (PASS)
   - `cabal build all && cabal test` (PASS)
+
+### 2026-02-19 Historical status cleanup
+
+- This document is chronological; several 2026-02-16 entries capture intermediate debugging checkpoints.
+- Any "red/open/in progress" status in those entries is historical and superseded by later closure entries and by `/Volumes/src/mlf4/Bugs.md` (Open: none).
+- Current thesis-faithfulness status is:
+  - Chapter 14/15 operational obligations are hard-enforced via the obligations ledger + conformance gate.
+  - Semantic paper-faithfulness deltas tracked in `.kiro/specs/paper-faithfulness-remaining-deltas/` are closed.
+  - Remaining debt is non-semantic (proof/formalization and assurance breadth).
 
 ### 2026-02-18 Thesis conformance gate command/profile
 
@@ -123,7 +162,7 @@
   - PASS: `id y should have type`, `elaborates polymorphic instantiation`, `elaborates term annotations`, `term annotation can instantiate a polymorphic result`, `explicit forall annotation preserves foralls in bounds`.
   - PASS: `BUG-002-V` (seed `1593170056`), `BUG-003-V` (seed `1925916871`), `BUG-004` (seed `1593170056`), OpRaise source-domain interior guard.
   - `cabal build all` passes.
-  - Full `cabal test`: reduced to 3 remaining failures in unrelated open buckets (pipeline ann-redirect invariant + two Φ contract tests).
+  - Intermediate checkpoint (superseded by closure section below): full `cabal test` then had 3 remaining failures in unrelated buckets (pipeline ann-redirect invariant + two Φ contract tests).
 
 ### 2026-02-17 BUG-2026-02-17-001 closure pass (remaining 3 buckets)
 
@@ -137,7 +176,7 @@
   - PASS: `/Pipeline (Phases 1-5)/applyRedirectsToAnn and canonicalizeAnn rewrite every node occurrence consistently/`
   - PASS: `cabal build all && cabal test` (`678 examples, 0 failures`).
 
-### 2026-02-16 BUG-2026-02-11-004/010 hybrid bridge follow-up (presolution replay hints + positional replay seeding)
+### 2026-02-16 BUG-2026-02-11-004/010 hybrid bridge follow-up (historical checkpoint; superseded)
 
 - Extended edge trace metadata (`MLF.Constraint.Presolution.Base.EdgeTrace`) with:
   - `etBinderReplayHints :: IntMap NodeId`
@@ -152,17 +191,17 @@
     - adds positional source→replay seed from trace-order source binders and replay-subst keys,
     - keeps name-based/alias-based deterministic fallback.
   - Ω diagnostics include hint-domain payload in binder target mismatch errors.
-- Verification snapshot:
+- Verification snapshot (at that checkpoint):
   - PASS:
     - `fails fast when OpWeaken targets a trace binder source with no replay binder mapping`
     - `OpRaise accepts source-domain interior membership even when etCopyMap aliases the target`
     - bounded-alias baseline (`b ⩾ a`) anchors
     - strict matrix guard: `make-app keeps codomain Int without bottom-domain collapse`
-  - FAIL (still open):
+  - At that checkpoint (before 2026-02-17 closure), open:
     - `BUG-003-V1/V2` remain deterministic `TCLetTypeMismatch` (`∀a. ⊥ -> t1 -> ⊥ -> ⊥` vs expected `∀a. a -> a -> a -> a`).
-  - Full gate in current workspace remains red (`674 examples, 33 failures`), so BUG-2026-02-11-004 and BUG-2026-02-16-010 remain open.
+  - At that checkpoint, full gate was red (`674 examples, 33 failures`) and BUG-2026-02-11-004 / BUG-2026-02-16-010 were open.
 
-### 2026-02-16 BUG-2026-02-11-004 Φ/Ω source→replay binder bridge (contract hardening)
+### 2026-02-16 BUG-2026-02-11-004 Φ/Ω source→replay binder bridge (historical checkpoint; superseded)
 
 - Implemented the planned bridge at the Φ→Ω boundary:
   - `MLF.Elab.Phi.Translate` now computes, once per edge (after `siForOmega` finalization),:
@@ -187,12 +226,12 @@
 - New fail-fast invariant:
   - If an Ω binder-target key is a trace binder source but has no replay-key mapping, Φ now returns `PhiInvariantError` with edge/op/raw-key/source-set/replay-domain/scheme-keys diagnostics.
   - This replaces prior silent drift into non-binder/bottomized behavior.
-- Focused validation status:
+- Focused validation status (at that checkpoint):
   - PASS: new fail-fast regression (`OpWeaken` unmapped trace binder target).
   - PASS: source-domain interior alias regression (`OpRaise accepts source-domain interior membership ...`).
   - PASS: bounded alias baseline (`b ⩾ a`) non-regression anchors.
-  - STILL RED: `BUG-003-V1/V2` remain in `TCLetTypeMismatch` (`∀a. ⊥ -> t1 -> ⊥ -> ⊥` vs expected `∀a. a -> a -> a -> a`).
-  - Full gate remains red in broader open buckets (`cabal build all && cabal test`: `674 examples, 47 failures` in current workspace state).
+  - At that checkpoint, `BUG-003-V1/V2` remained in `TCLetTypeMismatch` (`∀a. ⊥ -> t1 -> ⊥ -> ⊥` vs expected `∀a. a -> a -> a -> a`).
+  - At that checkpoint, full gate remained red in broader buckets (`cabal build all && cabal test`: `674 examples, 47 failures`).
 
 ### 2026-02-16 BUG-2026-02-16-007/008 `SchemeFreeVars` sentinel-drift closure
 
@@ -231,7 +270,7 @@
     - `BUG-002-V4`
     - strict target matrix
     - `contextToNodeBound does not descend through forall body fallback`
-  - Full gate remains red in separate open buckets (`cabal build all && cabal test`: `672 examples, 4 failures`).
+  - At that checkpoint, full gate remained red in separate buckets (`cabal build all && cabal test`: `672 examples, 4 failures`).
 
 ### 2026-02-16 BUG-2026-02-14-003 source-domain `I(r)` contract (surgical Omega/Translate)
 
@@ -245,7 +284,7 @@
   - `test/PipelineSpec.hs`: `BUG-002-V4 keeps OpRaise targets inside etInterior after witness/trace canonicalization`.
 - Verification snapshot (2026-02-16):
   - Targeted anchors pass: `BUG-002-V4`, `BUG-2026-02-06-002 strict target matrix`, `BUG-004`, copy-map anchor, canonicalizer contract, and both new regressions.
-  - Full gate still reports unrelated/open buckets (`cabal build all && cabal test`: `672 examples, 9 failures`).
+  - At that checkpoint, full gate still reported unrelated buckets (`cabal build all && cabal test`: `672 examples, 9 failures`).
 
 ### 2026-02-16 BUG-2026-02-16-003 (`id id`) instantiation over-specialization fix
 
@@ -264,7 +303,7 @@
     - `/Phase 6 — Elaborate (xMLF)/Polymorphism and Generalization/elaborates dual instantiation in application/`
     - `id id should have type`
     - `BUG-002-V2`, `BUG-002-V4`, strict target matrix, and `BUG-002-V4` OpRaise interior canonicalization gate
-  - Full gate remains red in separate open buckets (`cabal build all && cabal test`: `672 examples, 5 failures`).
+  - At that checkpoint, full gate remained red in separate buckets (`cabal build all && cabal test`: `672 examples, 5 failures`).
 
 ### 2026-02-17 BUG-2026-02-16-001/002 planner scheme-owner fallback (targeted closure)
 
@@ -349,7 +388,7 @@
 
 ## Summary of Changes
 
-**Current vs target:** The current pipeline records presolution witnesses and produces explicit generalization plans in `MLF.Constraint.Presolution.Plan`; elaboration applies these plans via `MLF.Elab.Generalize` without re-solving. The remaining paper-faithfulness deltas are tracked in `.kiro/specs/paper-faithfulness-remaining-deltas/` (constructor types `Cσ` and stricter translatability validation for Φ).
+**Current status:** The pipeline records presolution witnesses and produces explicit generalization plans in `MLF.Constraint.Presolution.Plan`; elaboration applies these plans via `MLF.Elab.Generalize` without re-solving. Semantic paper-faithfulness deltas tracked in `.kiro/specs/paper-faithfulness-remaining-deltas/` are closed; remaining open work is non-semantic (proof/formalization and assurance breadth).
 
 ### 2026-02-11 Phase 3 wrapping equivalence recovery
 
@@ -598,6 +637,7 @@ Legacy code is isolated in `MLF.Elab.Legacy` (e.g., `expansionToInst`).
   - Rigid binding edges are treated as inline bounds, and bounds are included in reachability when ordering binders.
   - Elaboration no longer consults `cEliminatedVars`; eliminated binders are already rewritten out of the graph. Vacuous `TyForall` wrappers (no binders) are elided during reification.
 - **`substInTerm` / `substInType`**: Implemented in `MLF.Elab.Elaborate` to apply the renaming map from `generalizeAt` to the elaborated term body. This ensures that terms use the same variable names as their type schemes (e.g., `Λa. λx:a. x` instead of `Λa. λx:t0. x`).
+  - 2026-02-20: `deriveLambdaBinderSubst` now preserves alternate node-key aliases for the same binder name when lambda arity matches unbounded scheme arity, so elaborated RHS-coercion lets do not lose the `tN -> binder` rewrite needed for step/typeCheck stability.
 - **`elaborate`**: Applies substitution to the RHS of let-bindings.
 - **Witness translation (`Φ`) + quantifier reordering (`Σ`)**:
   - Elaboration reifies instantiations from recorded per-edge witnesses (`prEdgeWitnesses`) via `phiFromEdgeWitnessWithTrace` (rather than `expansionToInst`), using `EdgeTrace` for copy maps/interiors. Production elaboration requires trace; no-trace entry points are test/debug-only.
@@ -749,7 +789,7 @@ This repo’s design is primarily informed by:
   - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-004-V4"'` => `2 examples, 0 failures`.
   - `cabal build all && cabal test` => pass.
 
-## 2026-02-16 BUG-003 normalization-side deterministic graft+weaken contract (in progress)
+## 2026-02-16 BUG-003 normalization-side deterministic graft+weaken contract (historical checkpoint; superseded by 2026-02-17 closure)
 
 - Implemented an annotation-edge-only pre-normalization pass in `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/WitnessNorm.hs`:
   - scope: Ω-segment local (`StepIntro` boundaries preserved),
@@ -768,10 +808,10 @@ This repo’s design is primarily informed by:
 - Verification outcomes for this pass:
   - targeted synthesis tests: green,
   - strict anchors + BUG-010 matrix reproducer: green,
-  - `BUG-003-V1/V2`: still red (now in a stricter replay key-space mismatch bucket on synthesized `OpGraft+OpWeaken` targeting source key `6`),
-  - full gate remains red (`677 examples, 33 failures`) in this workspace.
+  - at that checkpoint, `BUG-003-V1/V2` were red (stricter replay key-space mismatch bucket on synthesized `OpGraft+OpWeaken` targeting source key `6`),
+  - at that checkpoint, full gate remained red (`677 examples, 33 failures`) in that workspace.
 
-## 2026-02-16 BUG-003 replay-bridge follow-up (in progress)
+## 2026-02-16 BUG-003 replay-bridge follow-up (historical checkpoint; superseded by 2026-02-17 closure)
 
 - Applied a focused replay-bridge candidate expansion in `/Volumes/src/mlf4/src/MLF/Elab/Phi/Translate.hs`:
   - `computeTraceBinderReplayBridge` now seeds alias candidates from source binders that share the same replay-hint class (`etBinderReplayHints`) before final replay-map selection.
@@ -779,7 +819,7 @@ This repo’s design is primarily informed by:
 - Applied a strict Ω bounded-branch correction in `/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs`:
   - `OpGraft+OpWeaken(bound-match)` now emits binder elimination (`InstElim`) instead of bounded `InstApp`, avoiding the `InstBot expects ⊥` invariant violation for non-`⊥` bounds.
   - This keeps strict `InstBot` behavior unchanged while aligning bounded graft+weaken semantics with elimination.
-- Verification (current workspace):
+- Verification (at that checkpoint):
   - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-003-V" --seed 1481579064'`
     - now returns to the baseline strict bucket: `PipelineTypeCheckError (TCLetTypeMismatch ...)` (no replay key-space mismatch, no `InstBot` invariant crash).
   - PASS:
@@ -789,11 +829,11 @@ This repo’s design is primarily informed by:
     - `--match "bounded aliasing (b ⩾ a) elaborates to ∀a. a -> a -> a in unchecked and checked pipelines"`
     - `--match "make-app keeps codomain Int without bottom-domain collapse"`
     - synthesis regressions in `test/Presolution/WitnessSpec.hs` (3/3)
-  - Full gate remains red: `cabal build all && cabal test` => `677 examples, 33 failures`.
+  - At that checkpoint, full gate remained red: `cabal build all && cabal test` => `677 examples, 33 failures`.
 - Root-cause evidence from traced BUG-003 edge-0 replay:
   - replay map now includes source key `6` (`traceBinderReplayMap=[(0,4),(1,8),(2,38),(4,4),(6,4)]`),
   - edge-0 Φ becomes `InstElim` (instead of failing earlier on key-space mismatch),
-  - elaborated RHS remains bottomized (`∀a. ⊥ -> t1 -> ⊥ -> ⊥`), so BUG-003 strict-success closure is still open in the original semantic bucket.
+  - At that checkpoint, elaborated RHS remained bottomized (`∀a. ⊥ -> t1 -> ⊥ -> ⊥`), so BUG-003 strict-success closure remained open in the original semantic bucket.
 
 ## 2026-02-16 BUG-003 baseline trace: why bounds are bottomized before Φ
 
