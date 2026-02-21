@@ -310,6 +310,8 @@ test-suite mlf2-test
                       XMLFPrettySpec,
                       Phi.IdentityBridgeSpec,
                       TranslatablePresolutionSpec,
+                      PhiSoundnessSpec,
+                      ExpansionMinimalitySpec,
                       SpecUtil,
 
     -- LANGUAGE extensions used by modules in this package.

@@ -29,6 +29,8 @@ import qualified TypeSoundnessSpec
 import qualified XMLFParseSpec
 import qualified XMLFPrettySpec
 import qualified TranslatablePresolutionSpec
+import qualified PhiSoundnessSpec
+import qualified ExpansionMinimalitySpec
 
 main :: IO ()
 main = do
@@ -63,3 +65,5 @@ main = do
         XMLFPrettySpec.spec
         Phi.IdentityBridgeSpec.spec
         TranslatablePresolutionSpec.spec
+        PhiSoundnessSpec.spec
+        ExpansionMinimalitySpec.spec
