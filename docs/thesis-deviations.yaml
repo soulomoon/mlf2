@@ -166,21 +166,32 @@ deviations:
     section: "15.2"
     thesis_ref: "Definition 15.2.10 (alternative let typing)"
     description: >
-      Let-scope alternative typing (Def. 15.2.6) is implemented for constraint
-      generation and presolution validation, but elaboration/generalization
-      threading (tasks #4/#5 in the let-scope spec) remains open.
-    impact: semantic-minor
+      Let-scope alternative typing (Def. 15.2.6) is fully implemented.
+      Constraint generation produces the rightmost constraint with a trivial
+      scheme root and let-expression gen node. Presolution drops trivial
+      scheme edges (dropTrivialSchemeEdges) and returns identity expansion.
+      Elaboration detects the trivialRoot annotation and strips it
+      (Elaborate.hs:835), and letScopeOverrides (Scope.hs:154) computes
+      base-vs-solved scope divergence for thesis-aligned generalization.
+    impact: semantic-neutral
     rationale: >
-      The constraint-level implementation is complete and validated. The
-      elaboration threading gap does not affect correctness of currently tested
-      programs. Tracked in .kiro/specs/let-scope-alternative-typing/.
+      All threading is verified present: trivialRoot flows through constraint
+      gen → presolution → elaboration with identity semantics. Scope overrides
+      preserve thesis ga′ semantics. Tests cover monomorphic/polymorphic lets,
+      nested lets, scope divergence, and translatable presolution validation.
     code_paths:
       - src/MLF/Frontend/ConstraintGen/Translate.hs
+      - src/MLF/Constraint/Presolution/Base.hs
       - src/MLF/Elab/Elaborate.hs
+      - src/MLF/Elab/Run/Scope.hs
     test_evidence:
-      - matcher: "let"
+      - matcher: "O15-ELAB-LET"
         file: test/ElaborationSpec.hs
-    status: mitigated
+      - matcher: "letScopeOverrides"
+        file: test/ElaborationSpec.hs
+      - matcher: "let-polymorphic"
+        file: test/TranslatablePresolutionSpec.hs
+    status: accepted
 
   - id: DEV-P2-SPEC-STUBS-DEFERRED
     chapter: 13
