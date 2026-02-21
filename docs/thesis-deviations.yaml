@@ -134,21 +134,32 @@ deviations:
     section: "15.3"
     thesis_ref: "Section 15.3.1 (Q(g) computation)"
     description: >
-      Gen-ancestor fallback is still present in some binder enumeration paths.
-      The thesis computes Q(g) strictly from direct flexible children; the
-      implementation sometimes falls back to gen-ancestor traversal.
-    impact: semantic-minor
+      Gen-ancestor fallback is guarded and inert. The pipeline rejects
+      fallback-dependent constraints via checkNoGenFallback (Binding/Validation.hs)
+      before Φ translation. Q(g) is computed explicitly: parentRefForBinders
+      (Reify/Core.hs) routes scheme roots to GenRef, and bindersForGen
+      (Selection.hs) enumerates direct gen-node children. The anticipated
+      fallback functions (closestGenAncestor, immediateGen, bindersFromGen)
+      never existed in the codebase. tryBound in Phi/Context.hs is
+      thesis-correct bound-descent (∀(⩾ C)), not gen-ancestor fallback.
+    impact: semantic-neutral
     rationale: >
-      The fallback produces correct results for all tested cases but is not
-      thesis-exact. Tracked in .kiro/specs/thesis-exact-gen-fallback-removal/
-      for future removal.
+      checkNoGenFallback rejects any constraint that would require gen-ancestor
+      fallback. All 766 tests pass through this gate. Q(g) routing is explicit
+      via parentRefForBinders and bindersForGen. No gen-ancestor fallback code
+      paths remain active.
     code_paths:
-      - src/MLF/Elab/Generalize.hs
-      - src/MLF/Elab/Phi.hs
+      - src/MLF/Binding/Validation.hs
+      - src/MLF/Elab/Phi/Translate.hs
+      - src/MLF/Reify/Core.hs
     test_evidence:
-      - matcher: "Phase 6"
+      - matcher: "Q(g) returns direct flex children"
         file: test/ElaborationSpec.hs
-    status: mitigated
+      - matcher: "rejects fallback-dependent binders"
+        file: test/ElaborationSpec.hs
+      - matcher: "O15-CONTEXT-REJECT"
+        file: test/ElaborationSpec.hs
+    status: accepted
 
   - id: DEV-LET-SCOPE-THREADING-PARTIAL
     chapter: 15

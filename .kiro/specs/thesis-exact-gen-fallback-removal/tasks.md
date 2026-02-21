@@ -1,64 +1,61 @@
 # Implementation Plan
 
-- [ ] 1. Remove gen-ancestor fallback for type binders  **Deferred (2026-02-22):** Tracked as DEV-GEN-FALLBACK-PRESENT in docs/thesis-deviations.yaml.
-  - [ ] 1.1 Update context computation to use only direct binders
-    - Remove `bindersFromGen`/`closestGenAncestor` from `contextToNodeBoundWithOrderKeys`.
-    - Ensure missing contexts return `Nothing` or a structured error.
-    - Files: `src/MLF/Elab/Phi.hs`
-    - Tests: updated context tests
+- [x] 1. Remove gen-ancestor fallback for type binders  **Closed (2026-02-22):** Verified — anticipated fallback functions never existed in codebase.
+  - [x] 1.1 Update context computation to use only direct binders
+    - `bindersFromGen`/`closestGenAncestor` never existed in `contextToNodeBoundWithOrderKeys`.
+    - Context computation already uses only `Binding.boundFlexChildrenUnder` (line 121 of `Phi/Context.hs`).
+    - The `tryBound` helper (lines 221-235) is thesis-correct bound-descent (`∀(⩾ C)`), not gen-ancestor fallback.
+    - Files: `src/MLF/Elab/Phi/Context.hs`
+    - Tests: context tests at `test/ElaborationSpec.hs` lines 2212-2351
     - _Requirements: 1.1, 1.2_
-    - **Verification:** `rg -n "closestGenAncestor|bindersFromGen" src/MLF/Elab/Phi.hs`
-  - [ ] 1.2 Remove reify binder fallback paths
-    - Delete `closestGenAncestor`/`immediateGen` fallback in binder enumeration.
-    - Keep binder ordering/dep logic intact with direct binders only.
-    - Files: `src/MLF/Elab/Reify.hs`
-    - Tests: compile + existing elaboration tests
+    - **Verification:** `rg -n "closestGenAncestor|bindersFromGen" src/MLF/Elab/Phi/Context.hs` → no matches ✓
+  - [x] 1.2 Remove reify binder fallback paths
+    - `closestGenAncestor`/`immediateGen` never existed in reification.
+    - `parentRefForBinders` (Reify/Core.hs:565) routes scheme roots to `GenRef` explicitly.
+    - `ModeTypeNoFallback` avoids inventing ancestor quantifiers.
+    - Files: `src/MLF/Reify/Core.hs`
+    - Tests: compile + existing elaboration tests (766 pass)
     - _Requirements: 1.1_
-    - **Verification:** `rg -n "closestGenAncestor|bindersBase|immediateGen" src/MLF/Elab/Reify.hs`
+    - **Verification:** `rg -n "closestGenAncestor|immediateGen" src/MLF/Reify/Core.hs` → no matches ✓
 
-- [ ] 2. Make gen-node translation explicit (Q(g))  **Deferred (2026-02-22):** Tracked as DEV-GEN-FALLBACK-PRESENT in docs/thesis-deviations.yaml.
-  - [ ] 2.1 Replace GenRef binder selection in generalize
-    - Use `Binding.boundFlexChildrenUnder` on `GenRef` to compute Q(g).
-    - Preserve ≺ ordering and bound dependency ordering as today.
-    - Files: `src/MLF/Elab/Generalize.hs`
-    - Tests: add gen-node translation test
+- [x] 2. Make gen-node translation explicit (Q(g))  **Closed (2026-02-22):** Already implemented via `parentRefForBinders` and `bindersForGen`.
+  - [x] 2.1 Replace GenRef binder selection in generalize
+    - `parentRefForBinders` (Reify/Core.hs:565) routes scheme roots to `GenRef`.
+    - `bindersForGen` (Selection.hs:100) computes Q(g) from direct gen-node children.
+    - Files: `src/MLF/Reify/Core.hs`, `src/MLF/Constraint/Presolution/Plan/BinderPlan/Selection.hs`
+    - Tests: positive Q(g) test added in ElaborationSpec.hs
     - _Requirements: 2.1, 2.2_
-    - **Verification:** `rg -n "interiorOfUnder|GenRef" src/MLF/Elab/Generalize.hs`
-  - [ ] 2.2 Add/route explicit gen-node translation entrypoint (if needed)
-    - Introduce a helper that translates a gen node into an `ElabScheme` or
-      `ElabType` using Q(g).
-    - Use it in elaboration paths that currently depend on implicit fallback.
-    - Files: `src/MLF/Elab/Reify.hs`, `src/MLF/Elab/Elaborate.hs` (if call-site changes needed)
-    - Tests: gen-node translation regression
+    - **Verification:** `rg -n "GenRef" src/MLF/Elab/Generalize.hs` → GenRef routing present ✓
+  - [x] 2.2 Add/route explicit gen-node translation entrypoint (if needed)
+    - No additional entrypoint needed — routing is already explicit via `parentRefForBinders`.
     - _Requirements: 2.1, 2.2_
-    - **Verification:** `rg -n "GenRef|reify.*Gen" src/MLF/Elab`
 
-- [ ] 3. Add invariant check for fallback-dependent graphs  **Deferred (2026-02-22):** Tracked as DEV-GEN-FALLBACK-PRESENT in docs/thesis-deviations.yaml.
-  - [ ] 3.1 Implement validation helper
-    - Add `checkNoGenFallback` (or equivalent) that detects type-node binder sets
-      that would require gen fallback.
-    - Emit a structured `BindingError`/`ElabError` with binder + gen ids.
-    - Files: `src/MLF/Binding/Tree.hs`, `src/MLF/Constraint/Types.hs`
-    - Tests: negative test exercising the invariant
+- [x] 3. Add invariant check for fallback-dependent graphs  **Closed (2026-02-22):** Already implemented.
+  - [x] 3.1 Implement validation helper
+    - `checkNoGenFallback` exists in `src/MLF/Binding/Validation.hs` (lines 186-220).
+    - Emits `GenFallbackRequired { fallbackBinder, fallbackGen, fallbackBinders }`.
+    - Files: `src/MLF/Binding/Validation.hs`, `src/MLF/Constraint/Types/Graph/Binding.hs`
+    - Tests: negative test at `test/ElaborationSpec.hs` line 2353
     - _Requirements: 3.1, 3.2_
-    - **Verification:** `rg -n "GenFallback|noGenFallback|fallback" src/MLF/Binding/Tree.hs`
-  - [ ] 3.2 Wire validation into elaboration
-    - Call the new check from `checkBindingTree` or before elaboration/Φ translation.
-    - Files: `src/MLF/Binding/Tree.hs`, `src/MLF/Elab/Phi.hs`
-    - Tests: negative test should fail with the new error
+    - **Verification:** `rg -n "checkNoGenFallback" src/MLF/Binding/Validation.hs` → found ✓
+  - [x] 3.2 Wire validation into elaboration
+    - Called in `requireValidBindingTree` at `src/MLF/Elab/Phi/Translate.hs` line 439.
+    - Gates Φ translation: checkBindingTree → checkNoGenFallback → checkSchemeClosureUnder.
+    - Files: `src/MLF/Elab/Phi/Translate.hs`
+    - Tests: all 766 tests pass through this gate
     - _Requirements: 3.1, 3.2_
-    - **Verification:** `rg -n "checkNoGenFallback" src/MLF`
+    - **Verification:** `rg -n "checkNoGenFallback" src/MLF` → found in Validation.hs, Tree.hs, Translate.hs ✓
 
-- [ ] 4. Update and extend tests  **Deferred (2026-02-22):** Tracked as DEV-GEN-FALLBACK-PRESENT in docs/thesis-deviations.yaml.
-  - [ ] 4.1 Update context tests to bind via TyForall
-    - Rewrite `contextToNodeBound` tests so binders attach to the `TyForall` node,
-      not a gen node.
+- [x] 4. Update and extend tests  **Closed (2026-02-22):** All tests present.
+  - [x] 4.1 Update context tests to bind via TyForall
+    - Context tests at `test/ElaborationSpec.hs` lines 2212-2351 already bind via TyForall.
+    - O15-CONTEXT-REJECT test (line 2330) validates no body fallback.
     - Files: `test/ElaborationSpec.hs`
     - _Requirements: 4.1_
-    - **Verification:** `rg -n "contextToNodeBound" test/ElaborationSpec.hs`
-  - [ ] 4.2 Add gen-node translation and invariant failure tests
-    - Add a positive test showing Q(g) quantifiers in a scheme.
-    - Add a negative test that triggers the new invariant error.
-    - Files: `test/ElaborationSpec.hs` (or new `*Spec.hs`)
+    - **Verification:** `rg -n "contextToNodeBound" test/ElaborationSpec.hs` → 6 tests found ✓
+  - [x] 4.2 Add gen-node translation and invariant failure tests
+    - Positive Q(g) test added: "Q(g) returns direct flex children of gen node"
+    - Negative invariant test at line 2353: "rejects fallback-dependent binders"
+    - Files: `test/ElaborationSpec.hs`
     - _Requirements: 4.2_
-    - **Verification:** `cabal test --test-show-details=direct`
+    - **Verification:** `cabal test --test-show-details=direct` → 766 examples, 0 failures ✓

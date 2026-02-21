@@ -2378,6 +2378,47 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     Right () ->
                         expectationFailure "Expected GenFallbackRequired, got success"
 
+            it "Q(g) returns direct flex children of gen node (positive)" $ do
+                -- Gen node owns schemeRoot (TyForall) and aN (TyVar).
+                -- schemeRoot owns bN and cN (TyVar).
+                -- Q(g) = [aN], Q(schemeRoot) = [bN, cN].
+                -- checkNoGenFallback passes because schemeRoot has direct binders.
+                let rootGen = GenNodeId 0
+                    schemeRoot = NodeId 100
+                    body = NodeId 101
+                    aN = NodeId 1
+                    bN = NodeId 2
+                    cN = NodeId 3
+                    nodes = nodeMapFromList
+                        [ (getNodeId schemeRoot, TyForall schemeRoot body)
+                        , (getNodeId body, TyArrow body bN cN)
+                        , (getNodeId aN, TyVar { tnId = aN, tnBound = Nothing })
+                        , (getNodeId bN, TyVar { tnId = bN, tnBound = Nothing })
+                        , (getNodeId cN, TyVar { tnId = cN, tnBound = Nothing })
+                        ]
+                    bindParents = IntMap.fromList
+                        [ (nodeRefKey (typeRef schemeRoot), (genRef rootGen, BindFlex))
+                        , (nodeRefKey (typeRef aN), (genRef rootGen, BindFlex))
+                        , (nodeRefKey (typeRef bN), (typeRef schemeRoot, BindFlex))
+                        , (nodeRefKey (typeRef cN), (typeRef schemeRoot, BindFlex))
+                        ]
+                    constraint = emptyConstraint
+                        { cNodes = nodes
+                        , cBindParents = bindParents
+                        , cGenNodes = fromListGen [(rootGen, GenNode rootGen [schemeRoot])]
+                        }
+
+                -- Q(g): direct flex TyVar children of gen node
+                genBinders <- requireRight (Binding.boundFlexChildren constraint (genRef rootGen))
+                genBinders `shouldBe` [aN]
+
+                -- Q(n): direct flex TyVar children of schemeRoot
+                forallBinders <- requireRight (Binding.boundFlexChildren constraint (typeRef schemeRoot))
+                forallBinders `shouldBe` [bN, cN]
+
+                -- checkNoGenFallback passes (schemeRoot has direct binders)
+                Binding.checkNoGenFallback constraint `shouldBe` Right ()
+
             it "rejects schemes that reach named nodes outside their gen scope" $ do
                 let rootGen = GenNodeId 0
                     innerGen = GenNodeId 1
