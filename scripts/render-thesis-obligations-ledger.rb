@@ -5,8 +5,8 @@ require 'optparse'
 require 'yaml'
 
 ROOT = '/Volumes/src/mlf4'
-LEDGER_PATH = File.join(ROOT, 'docs/thesis-obligations-ch14-15.yaml')
-OUTPUT_PATH = File.join(ROOT, 'docs/thesis-obligations-ch14-15.md')
+LEDGER_PATH = File.join(ROOT, 'docs/thesis-obligations.yaml')
+OUTPUT_PATH = File.join(ROOT, 'docs/thesis-obligations.md')
 
 def expected_ids
   ids = []
@@ -68,7 +68,7 @@ def render_markdown(obligations)
   status_counts = sorted.group_by { |o| o['status'] }.transform_values(&:size)
 
   lines = []
-  lines << '# Thesis Obligations Ledger (Chapters 14/15)'
+  lines << '# Thesis Obligations Ledger'
   lines << ''
   lines << "Generated from `#{LEDGER_PATH}` by `scripts/render-thesis-obligations-ledger.rb`."
   lines << ''

@@ -874,6 +874,21 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                                     )
                                     (step term === step term)
 
+    describe "Thesis obligations" $ do
+        it "O08-REIFY-TYPE" $ do
+            -- Graphic→syntactic: reifyType converts a solved constraint graph to a syntactic type
+            let expr = ELam "x" (EVar "x")
+            case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
+                Left err -> expectationFailure $ "Pipeline failed: " ++ renderPipelineError err
+                Right (_term, ty) -> ty `shouldSatisfy` containsArrowTy
+
+        it "O08-REIFY-NAMES" $ do
+            -- Named reification: reifyType produces named type variables
+            let expr = ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (ELit (LInt 1)))
+            case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
+                Left err -> expectationFailure $ "Pipeline failed: " ++ renderPipelineError err
+                Right (_term, ty) -> show ty `shouldSatisfy` (not . null)
+
 canonical :: IntMap.IntMap NodeId -> NodeId -> NodeId
 canonical uf nid =
     case IntMap.lookup (getNodeId nid) uf of

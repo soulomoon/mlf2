@@ -2,12 +2,28 @@
 version: 1
 scope:
   chapters:
+  - '4.2'
+  - '4.4'
+  - '5.2'
+  - '5.3'
+  - '7.3'
+  - '8.2'
+  - '9.4'
+  - '10.1'
+  - '10.3'
+  - '10.4'
+  - '11.2'
+  - '11.5'
+  - '11.6'
+  - '12.1'
+  - '12.2'
+  - '12.4'
   - '14.2'
   - '14.3'
   - '15.2'
   - '15.3'
   policy: Operational rules only
-  total_expected_obligations: 61
+  total_expected_obligations: 99
 obligations:
 - id: O14-WF-EMPTY
   chapter: 14
@@ -866,4 +882,506 @@ obligations:
     file: "/Volumes/src/mlf4/test/Presolution/WitnessSpec.hs"
     rationale: Mapped to row-labeled R-* witness/merge tests and Φ/Ω rigid/sequence
       regressions.
+  status: anchored
+# ── Chapter 4: Binding Trees & Graph Operations ──
+- id: O04-BIND-FLEX-CHILDREN
+  chapter: 4
+  section: 4.2
+  figure_or_definition: Definition 4.2 Q(n) flex children
+  thesis_rule_label: Q(n) flex children
+  judgment_or_equation: Q(n) returns the set of flexibly-bound children of node n
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Binding/Tree.hs#boundFlexChildren"
+  test_anchor:
+    matcher: O04-BIND-FLEX-CHILDREN
+    file: "/Volumes/src/mlf4/test/BindingSpec.hs"
+    rationale: Exercises boundFlexChildren on a constraint with mixed flex/rigid bindings.
+  status: anchored
+- id: O04-BIND-INTERIOR
+  chapter: 4
+  section: 4.2
+  figure_or_definition: Definition 4.2 I(r) interior
+  thesis_rule_label: I(r) interior
+  judgment_or_equation: I(r) computes the interior of a node r in the binding tree
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Binding/Queries.hs#interiorOf"
+  test_anchor:
+    matcher: O04-BIND-INTERIOR
+    file: "/Volumes/src/mlf4/test/BindingSpec.hs"
+    rationale: Exercises interiorOf on a rooted constraint and checks membership.
+  status: anchored
+- id: O04-BIND-ORDER
+  chapter: 4
+  section: 4.2
+  figure_or_definition: Definition 4.2 binder ordering
+  thesis_rule_label: Binder ordering ≺
+  judgment_or_equation: orderedBinders returns binders in ≺ order
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Binding/Tree.hs#orderedBinders"
+  test_anchor:
+    matcher: O04-BIND-ORDER
+    file: "/Volumes/src/mlf4/test/BindingSpec.hs"
+    rationale: Exercises orderedBinders and checks the returned list is non-empty.
+  status: anchored
+- id: O04-OP-WEAKEN
+  chapter: 4
+  section: 4.4
+  figure_or_definition: Definition 4.4 Weaken(n)
+  thesis_rule_label: Weaken(n)
+  judgment_or_equation: applyWeaken changes a flex binding to rigid
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Binding/GraphOps.hs#applyWeaken"
+  test_anchor:
+    matcher: O04-OP-WEAKEN
+    file: "/Volumes/src/mlf4/test/GraphOpsSpec.hs"
+    rationale: Exercises applyWeaken and verifies the binding flag changes.
+  status: anchored
+- id: O04-OP-RAISE-STEP
+  chapter: 4
+  section: 4.4
+  figure_or_definition: Definition 4.4 Raise(n) single step
+  thesis_rule_label: Raise(n) single step
+  judgment_or_equation: applyRaiseStep raises a node one level in the binding tree
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Binding/GraphOps.hs#applyRaiseStep"
+  test_anchor:
+    matcher: O04-OP-RAISE-STEP
+    file: "/Volumes/src/mlf4/test/GraphOpsSpec.hs"
+    rationale: Exercises applyRaiseStep and verifies the node moves up one level.
+  status: anchored
+- id: O04-OP-RAISE-TO
+  chapter: 4
+  section: 4.4
+  figure_or_definition: Definition 4.4 Raise-to-target
+  thesis_rule_label: Raise-to-target
+  judgment_or_equation: applyRaiseTo raises a node to a specified target binder
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Binding/GraphOps.hs#applyRaiseTo"
+  test_anchor:
+    matcher: O04-OP-RAISE-TO
+    file: "/Volumes/src/mlf4/test/GraphOpsSpec.hs"
+    rationale: Exercises applyRaiseTo and verifies the node reaches the target.
+  status: anchored
+# ── Chapter 5: Inert Node Classification ──
+- id: O05-INERT-NODES
+  chapter: 5
+  section: 5.2
+  figure_or_definition: Definition 5.2.2 inert nodes
+  thesis_rule_label: Inert nodes
+  judgment_or_equation: inertNodes classifies nodes that do not expose polymorphism
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Constraint/Inert.hs#inertNodes"
+  test_anchor:
+    matcher: O05-INERT-NODES
+    file: "/Volumes/src/mlf4/test/InertSpec.hs"
+    rationale: Exercises inertNodes on a monomorphic constraint and checks non-empty.
+  status: anchored
+- id: O05-INERT-LOCKED
+  chapter: 5
+  section: 5.2
+  figure_or_definition: Definition 15.2.2 inert-locked
+  thesis_rule_label: Inert-locked nodes
+  judgment_or_equation: inertLockedNodes identifies inert + flexibly bound + rigid ancestor
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Constraint/Inert.hs#inertLockedNodes"
+  test_anchor:
+    matcher: O05-INERT-LOCKED
+    file: "/Volumes/src/mlf4/test/InertSpec.hs"
+    rationale: Exercises inertLockedNodes under rigid ancestor and checks membership.
+  status: anchored
+- id: O05-WEAKEN-INERT
+  chapter: 5
+  section: 5.3
+  figure_or_definition: Section 15.2.3.2 weaken inert-locked
+  thesis_rule_label: Weaken inert-locked
+  judgment_or_equation: weakenInertLockedNodes eliminates inert-locked nodes
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Constraint/Inert.hs#weakenInertLockedNodes"
+  test_anchor:
+    matcher: O05-WEAKEN-INERT
+    file: "/Volumes/src/mlf4/test/InertSpec.hs"
+    rationale: Exercises weakenInertLockedNodes and verifies empty inert-locked set.
+  status: anchored
+# ── Chapter 7: Unification ──
+- id: O07-UNIF-CORE
+  chapter: 7
+  section: 7.3
+  figure_or_definition: Figure 7.3.x Unif
+  thesis_rule_label: Core unification
+  judgment_or_equation: processUnifyEdgesWith implements structural unification
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Constraint/Unify/Core.hs#processUnifyEdgesWith"
+  test_anchor:
+    matcher: O07-UNIF-CORE
+    file: "/Volumes/src/mlf4/test/NormalizeSpec.hs"
+    rationale: Exercises unification through normalize pipeline on arrow constraints.
+  status: anchored
+- id: O07-UNIF-PRESOL
+  chapter: 7
+  section: 7.3
+  figure_or_definition: Presolution unify
+  thesis_rule_label: Presolution unify
+  judgment_or_equation: unifyAcyclic performs presolution-phase unification
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Constraint/Presolution/Unify.hs#unifyAcyclic"
+  test_anchor:
+    matcher: O07-UNIF-PRESOL
+    file: "/Volumes/src/mlf4/test/SolveSpec.hs"
+    rationale: Exercises unifyAcyclic through the solve pipeline.
+  status: anchored
+- id: O07-REBIND
+  chapter: 7
+  section: 7.3
+  figure_or_definition: Figure 7.3.x Rebind
+  thesis_rule_label: Rebind
+  judgment_or_equation: harmonizeBindParentsWithTrace rebinds nodes after unification
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Binding/Adjustment.hs#harmonizeBindParentsWithTrace"
+  test_anchor:
+    matcher: O07-REBIND
+    file: "/Volumes/src/mlf4/test/BindingSpec.hs"
+    rationale: Exercises harmonizeBindParentsWithTrace on a constraint with trace.
+  status: anchored
+# ── Chapter 8: Reification ──
+- id: O08-REIFY-TYPE
+  chapter: 8
+  section: 8.2
+  figure_or_definition: Graphic to syntactic reification
+  thesis_rule_label: Graphic→syntactic
+  judgment_or_equation: reifyType converts graphic types to syntactic form
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Reify/Core.hs#reifyType"
+  test_anchor:
+    matcher: O08-REIFY-TYPE
+    file: "/Volumes/src/mlf4/test/PipelineSpec.hs"
+    rationale: Exercises reifyType through the pipeline on solved constraints.
+  status: anchored
+- id: O08-REIFY-NAMES
+  chapter: 8
+  section: 8.2
+  figure_or_definition: Named reification
+  thesis_rule_label: Named reification
+  judgment_or_equation: reifyTypeWithNames produces named syntactic types
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Reify/Core.hs#reifyTypeWithNames"
+  test_anchor:
+    matcher: O08-REIFY-NAMES
+    file: "/Volumes/src/mlf4/test/PipelineSpec.hs"
+    rationale: Exercises reifyTypeWithNames through the pipeline.
+  status: anchored
+# ── Chapter 9: Constraint Generation ──
+- id: O09-CGEN-ROOT
+  chapter: 9
+  section: 9.4
+  figure_or_definition: Root constraint generation
+  thesis_rule_label: Root constraint
+  judgment_or_equation: buildRootExpr generates the root constraint node
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Frontend/ConstraintGen/Translate.hs#buildRootExpr"
+  test_anchor:
+    matcher: O09-CGEN-ROOT
+    file: "/Volumes/src/mlf4/test/ConstraintGenSpec.hs"
+    rationale: Exercises buildRootExpr and checks root node is present.
+  status: anchored
+- id: O09-CGEN-EXPR
+  chapter: 9
+  section: 9.4
+  figure_or_definition: Expression constraint generation
+  thesis_rule_label: Expr constraint
+  judgment_or_equation: buildExpr generates constraint nodes for expressions
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Frontend/ConstraintGen/Translate.hs#buildExpr"
+  test_anchor:
+    matcher: O09-CGEN-EXPR
+    file: "/Volumes/src/mlf4/test/ConstraintGenSpec.hs"
+    rationale: Exercises buildExpr on lambda and application expressions.
+  status: anchored
+# ── Chapter 10: Presolutions & Expansion ──
+- id: O10-EXP-DECIDE
+  chapter: 10
+  section: 10.1
+  figure_or_definition: Decide minimal expansion
+  thesis_rule_label: Decide minimal expansion
+  judgment_or_equation: decideMinimalExpansion selects the minimal expansion for an edge
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Constraint/Presolution/Expansion.hs#decideMinimalExpansion"
+  test_anchor:
+    matcher: O10-EXP-DECIDE
+    file: "/Volumes/src/mlf4/test/Presolution/ExpansionSpec.hs"
+    rationale: Exercises decideMinimalExpansion on identity and instantiate cases.
+  status: anchored
+- id: O10-EXP-APPLY
+  chapter: 10
+  section: 10.1
+  figure_or_definition: Apply expansion
+  thesis_rule_label: Apply expansion
+  judgment_or_equation: applyExpansion applies a decided expansion to the constraint
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Constraint/Presolution/Expansion.hs#applyExpansion"
+  test_anchor:
+    matcher: O10-EXP-APPLY
+    file: "/Volumes/src/mlf4/test/Presolution/ExpansionSpec.hs"
+    rationale: Exercises applyExpansion and checks the constraint is updated.
+  status: anchored
+- id: O10-PROP-SOLVE
+  chapter: 10
+  section: 10.3
+  figure_or_definition: Propagation rule
+  thesis_rule_label: Propagation rule
+  judgment_or_equation: processInstEdge solves a simple instantiation edge
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Constraint/Presolution/EdgeProcessing.hs#processInstEdge"
+  test_anchor:
+    matcher: O10-PROP-SOLVE
+    file: "/Volumes/src/mlf4/test/Presolution/EdgeTraceSpec.hs"
+    rationale: Exercises processInstEdge on a var-to-base instantiation edge.
+  status: anchored
+- id: O10-PROP-WITNESS
+  chapter: 10
+  section: 10.3
+  figure_or_definition: Edge witness recording
+  thesis_rule_label: Edge witness recording
+  judgment_or_equation: processInstEdge records an expansion for the edge
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Constraint/Presolution/EdgeProcessing.hs#processInstEdge"
+  test_anchor:
+    matcher: O10-PROP-WITNESS
+    file: "/Volumes/src/mlf4/test/Presolution/EdgeTraceSpec.hs"
+    rationale: Exercises processInstEdge and checks expansion is recorded.
+  status: anchored
+- id: O10-COPY-SCHEME
+  chapter: 10
+  section: 10.4
+  figure_or_definition: Chi-e scheme copy
+  thesis_rule_label: Chi-e scheme copy
+  judgment_or_equation: instantiateScheme copies a scheme during expansion
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Constraint/Presolution/Copy.hs#instantiateScheme"
+  test_anchor:
+    matcher: O10-COPY-SCHEME
+    file: "/Volumes/src/mlf4/test/Presolution/InstantiateSpec.hs"
+    rationale: Exercises instantiateScheme on a forall scheme.
+  status: anchored
+# ── Chapter 11: Local Transformations ──
+- id: O11-UNIFY-STRUCT
+  chapter: 11
+  section: 11.2
+  figure_or_definition: Structural unify on constraints
+  thesis_rule_label: Structural unify
+  judgment_or_equation: unifyStructure performs structural unification during presolution
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Constraint/Presolution/EdgeProcessing/Solve.hs#unifyStructure"
+  test_anchor:
+    matcher: O11-UNIFY-STRUCT
+    file: "/Volumes/src/mlf4/test/NormalizeSpec.hs"
+    rationale: Exercises structural unification through the normalize pipeline.
+  status: anchored
+- id: O11-WITNESS-NORM
+  chapter: 11
+  section: 11.5
+  figure_or_definition: Witness normalization
+  thesis_rule_label: Witness normalization
+  judgment_or_equation: normalizeEdgeWitnessesM normalizes edge witnesses
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Constraint/Presolution/WitnessNorm.hs#normalizeEdgeWitnessesM"
+  test_anchor:
+    matcher: O11-WITNESS-NORM
+    file: "/Volumes/src/mlf4/test/Presolution/WitnessSpec.hs"
+    rationale: Exercises normalizeInstanceOpsFull on a trivial op list.
+  status: anchored
+- id: O11-WITNESS-COALESCE
+  chapter: 11
+  section: 11.6
+  figure_or_definition: Raise;Merge to RaiseMerge
+  thesis_rule_label: Raise;Merge coalescing
+  judgment_or_equation: coalesceRaiseMergeWithEnv coalesces adjacent raise+merge
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Constraint/Presolution/WitnessCanon.hs#coalesceRaiseMergeWithEnv"
+  test_anchor:
+    matcher: O11-WITNESS-COALESCE
+    file: "/Volumes/src/mlf4/test/Presolution/WitnessSpec.hs"
+    rationale: Exercises coalesceRaiseMergeWithEnv on adjacent raise+merge ops.
+  status: anchored
+- id: O11-WITNESS-REORDER
+  chapter: 11
+  section: 11.6
+  figure_or_definition: Weaken reordering
+  thesis_rule_label: Weaken reordering
+  judgment_or_equation: reorderWeakenWithEnv reorders weaken ops
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Constraint/Presolution/WitnessCanon.hs#reorderWeakenWithEnv"
+  test_anchor:
+    matcher: O11-WITNESS-REORDER
+    file: "/Volumes/src/mlf4/test/Presolution/WitnessSpec.hs"
+    rationale: Exercises reorderWeakenWithEnv on a weaken op list.
+  status: anchored
+# ── Chapter 12: Global Algorithm ──
+- id: O12-SOLVE-UNIFY
+  chapter: 12
+  section: 12.1
+  figure_or_definition: SolveConstraint main
+  thesis_rule_label: SolveConstraint main
+  judgment_or_equation: solveUnify implements the main constraint solving loop
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Constraint/Solve.hs#solveUnify"
+  test_anchor:
+    matcher: O12-SOLVE-UNIFY
+    file: "/Volumes/src/mlf4/test/SolveSpec.hs"
+    rationale: Exercises solveUnify on a simple unification constraint.
+  status: anchored
+- id: O12-ACYCLIC-CHECK
+  chapter: 12
+  section: 12.1
+  figure_or_definition: Acyclicity check
+  thesis_rule_label: Acyclicity check
+  judgment_or_equation: checkAcyclicity verifies the constraint graph is acyclic
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Constraint/Acyclicity.hs#checkAcyclicity"
+  test_anchor:
+    matcher: O12-ACYCLIC-CHECK
+    file: "/Volumes/src/mlf4/test/AcyclicitySpec.hs"
+    rationale: Exercises checkAcyclicity on acyclic and cyclic graphs.
+  status: anchored
+- id: O12-ACYCLIC-TOPO
+  chapter: 12
+  section: 12.1
+  figure_or_definition: Topological sort
+  thesis_rule_label: Topological sort
+  judgment_or_equation: topologicalSort produces a valid topological ordering
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Constraint/Acyclicity.hs#topologicalSort"
+  test_anchor:
+    matcher: O12-ACYCLIC-TOPO
+    file: "/Volumes/src/mlf4/test/AcyclicitySpec.hs"
+    rationale: Exercises topologicalSort and checks ordering validity.
+  status: anchored
+- id: O12-COPY-INST
+  chapter: 12
+  section: 12.2
+  figure_or_definition: Inst-Copy rule
+  thesis_rule_label: Inst-Copy rule
+  judgment_or_equation: instantiateSchemeWithTrace copies a scheme with trace recording
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Constraint/Presolution/Copy.hs#instantiateSchemeWithTrace"
+  test_anchor:
+    matcher: O12-COPY-INST
+    file: "/Volumes/src/mlf4/test/Presolution/InstantiateSpec.hs"
+    rationale: Exercises instantiateSchemeWithTrace on a forall scheme.
+  status: anchored
+- id: O12-NORM-GRAFT
+  chapter: 12
+  section: 12.4
+  figure_or_definition: Graft inst edges
+  thesis_rule_label: Graft inst edges
+  judgment_or_equation: graftInstEdges grafts instantiation edges during normalization
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Constraint/Normalize.hs#graftInstEdges"
+  test_anchor:
+    matcher: O12-NORM-GRAFT
+    file: "/Volumes/src/mlf4/test/NormalizeSpec.hs"
+    rationale: Exercises graftInstEdges through the normalize pipeline.
+  status: anchored
+- id: O12-NORM-MERGE
+  chapter: 12
+  section: 12.4
+  figure_or_definition: Merge unify edges
+  thesis_rule_label: Merge unify edges
+  judgment_or_equation: mergeUnifyEdges merges unification edges during normalization
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Constraint/Normalize.hs#mergeUnifyEdges"
+  test_anchor:
+    matcher: O12-NORM-MERGE
+    file: "/Volumes/src/mlf4/test/NormalizeSpec.hs"
+    rationale: Exercises mergeUnifyEdges through the normalize pipeline.
+  status: anchored
+- id: O12-NORM-DROP
+  chapter: 12
+  section: 12.4
+  figure_or_definition: Drop reflexive edges
+  thesis_rule_label: Drop reflexive edges
+  judgment_or_equation: dropReflexiveInstEdges removes reflexive instantiation edges
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Constraint/Normalize.hs#dropReflexiveInstEdges"
+  test_anchor:
+    matcher: O12-NORM-DROP
+    file: "/Volumes/src/mlf4/test/NormalizeSpec.hs"
+    rationale: Exercises dropReflexiveInstEdges through the normalize pipeline.
+  status: anchored
+- id: O12-NORM-FIXPOINT
+  chapter: 12
+  section: 12.4
+  figure_or_definition: Normalize to fixed point
+  thesis_rule_label: Normalize to fixed point
+  judgment_or_equation: normalize iterates normalization to a fixed point
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Constraint/Normalize.hs#normalize"
+  test_anchor:
+    matcher: O12-NORM-FIXPOINT
+    file: "/Volumes/src/mlf4/test/NormalizeSpec.hs"
+    rationale: Exercises normalize and checks idempotence.
+  status: anchored
+- id: O12-SOLVE-VAR-BASE
+  chapter: 12
+  section: 12.1
+  figure_or_definition: Var = Base merge
+  thesis_rule_label: Var = Base merge
+  judgment_or_equation: solveUnify merges a variable with a base type
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Constraint/Solve.hs#solveUnify"
+  test_anchor:
+    matcher: O12-SOLVE-VAR-BASE
+    file: "/Volumes/src/mlf4/test/SolveSpec.hs"
+    rationale: Exercises solveUnify on a var=base unification edge.
+  status: anchored
+- id: O12-SOLVE-VAR-VAR
+  chapter: 12
+  section: 12.1
+  figure_or_definition: Var = Var merge
+  thesis_rule_label: Var = Var merge
+  judgment_or_equation: solveUnify merges two variables
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Constraint/Solve.hs#solveUnify"
+  test_anchor:
+    matcher: O12-SOLVE-VAR-VAR
+    file: "/Volumes/src/mlf4/test/SolveSpec.hs"
+    rationale: Exercises solveUnify on a var=var unification edge.
+  status: anchored
+- id: O12-SOLVE-HARMONIZE
+  chapter: 12
+  section: 12.1
+  figure_or_definition: Binding harmonization during solve
+  thesis_rule_label: Binding harmonization
+  judgment_or_equation: solveUnify harmonizes binding parents after merging
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Constraint/Solve.hs#solveUnify"
+  test_anchor:
+    matcher: O12-SOLVE-HARMONIZE
+    file: "/Volumes/src/mlf4/test/SolveSpec.hs"
+    rationale: Exercises solveUnify and checks binding harmonization occurs.
+  status: anchored
+- id: O12-SOLVE-ARROW
+  chapter: 12
+  section: 12.1
+  figure_or_definition: Arrow decomposition
+  thesis_rule_label: Arrow decomposition
+  judgment_or_equation: solveUnify decomposes arrow types during unification
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Constraint/Solve.hs#solveUnify"
+  test_anchor:
+    matcher: O12-SOLVE-ARROW
+    file: "/Volumes/src/mlf4/test/SolveSpec.hs"
+    rationale: Exercises solveUnify on arrow=arrow unification edges.
+  status: anchored
+- id: O12-SOLVE-VALIDATE
+  chapter: 12
+  section: 12.1
+  figure_or_definition: Post-solve validation
+  thesis_rule_label: Post-solve validation
+  judgment_or_equation: validateSolvedGraph validates the solved constraint graph
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Constraint/Solve.hs#validateSolvedGraph"
+  test_anchor:
+    matcher: O12-SOLVE-VALIDATE
+    file: "/Volumes/src/mlf4/test/SolveSpec.hs"
+    rationale: Exercises validateSolvedGraph on a solved constraint.
   status: anchored

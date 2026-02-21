@@ -1,4 +1,5 @@
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE LambdaCase #-}
 module GraphOpsSpec (spec) where
 
 import Control.Monad (forM)
@@ -392,6 +393,66 @@ spec = describe "MLF.Binding.GraphOps" $ do
                             other -> expectationFailure $ 
                                 "Expected OperationOnLockedNode, got: " ++ show other
                     Left err -> expectationFailure $ "Weaken failed: " ++ show err
+
+    describe "Thesis obligations (Chapter 4)" $ do
+        it "O04-OP-WEAKEN" $ do
+            -- Weaken(n): applyWeaken detaches a node from its binding parent
+            let nodes = nodeMapFromList
+                    [ (0, TyForall (NodeId 0) (NodeId 1))
+                    , (1, TyVar { tnId = NodeId 1, tnBound = Nothing })
+                    ]
+                c = attachRootGen (NodeId 0) $ emptyConstraint
+                    { cNodes = nodes
+                    , cBindParents = IntMap.fromList [(nodeRefKey (typeRef (NodeId 1)), (typeRef (NodeId 0), BindFlex))]
+                    }
+            case applyWeaken (typeRef (NodeId 1)) c of
+                Right (c', _ops) ->
+                    lookupBindParent c' (typeRef (NodeId 1)) `shouldBe` Just (typeRef (NodeId 0), BindRigid)
+                Left err -> expectationFailure $ "applyWeaken failed: " ++ show err
+
+        it "O04-OP-RAISE-STEP" $ do
+            -- Raise(n) single step: applyRaiseStep moves a node one level up
+            let nodes = nodeMapFromList
+                    [ (0, TyForall (NodeId 0) (NodeId 1))
+                    , (1, TyForall (NodeId 1) (NodeId 2))
+                    , (2, TyVar { tnId = NodeId 2, tnBound = Nothing })
+                    ]
+                c = attachRootGen (NodeId 0) $ emptyConstraint
+                    { cNodes = nodes
+                    , cBindParents = IntMap.fromList
+                        [ (nodeRefKey (typeRef (NodeId 1)), (typeRef (NodeId 0), BindFlex))
+                        , (nodeRefKey (typeRef (NodeId 2)), (typeRef (NodeId 1), BindFlex))
+                        ]
+                    }
+            case applyRaiseStep (typeRef (NodeId 2)) c of
+                Right (c', _ops) -> do
+                    let parent = lookupBindParent c' (typeRef (NodeId 2))
+                    parent `shouldSatisfy` \case
+                        Just (p, _) -> p == typeRef (NodeId 0)
+                        Nothing -> False
+                Left err -> expectationFailure $ "applyRaiseStep failed: " ++ show err
+
+        it "O04-OP-RAISE-TO" $ do
+            -- Raise-to-target: applyRaiseTo raises a node to a specific target
+            let nodes = nodeMapFromList
+                    [ (0, TyForall (NodeId 0) (NodeId 1))
+                    , (1, TyForall (NodeId 1) (NodeId 2))
+                    , (2, TyVar { tnId = NodeId 2, tnBound = Nothing })
+                    ]
+                c = attachRootGen (NodeId 0) $ emptyConstraint
+                    { cNodes = nodes
+                    , cBindParents = IntMap.fromList
+                        [ (nodeRefKey (typeRef (NodeId 1)), (typeRef (NodeId 0), BindFlex))
+                        , (nodeRefKey (typeRef (NodeId 2)), (typeRef (NodeId 1), BindFlex))
+                        ]
+                    }
+            case applyRaiseTo (typeRef (NodeId 2)) (typeRef (NodeId 0)) c of
+                Right (c', _ops) -> do
+                    let parent = lookupBindParent c' (typeRef (NodeId 2))
+                    parent `shouldSatisfy` \case
+                        Just (p, _) -> p == typeRef (NodeId 0)
+                        Nothing -> False
+                Left err -> expectationFailure $ "applyRaiseTo failed: " ++ show err
 
 -- | Check if a node has a non-root parent
 hasNonRootParent :: Constraint -> NodeRef -> Bool

@@ -3,7 +3,7 @@
 set -euo pipefail
 
 ROOT="/Volumes/src/mlf4"
-LEDGER="${ROOT}/docs/thesis-obligations-ch14-15.yaml"
+LEDGER="${ROOT}/docs/thesis-obligations.yaml"
 RENDER="${ROOT}/scripts/render-thesis-obligations-ledger.rb"
 
 if [[ ! -f "${LEDGER}" ]]; then
@@ -30,11 +30,29 @@ ledger_path = ARGV.fetch(0)
 doc = YAML.load_file(ledger_path)
 
 expected_ids = []
+# Chapter 4: Binding Trees & Graph Operations
+expected_ids.concat(%w[BIND-FLEX-CHILDREN BIND-INTERIOR BIND-ORDER OP-WEAKEN OP-RAISE-STEP OP-RAISE-TO].map { |s| "O04-#{s}" })
+# Chapter 5: Inert Node Classification
+expected_ids.concat(%w[INERT-NODES INERT-LOCKED WEAKEN-INERT].map { |s| "O05-#{s}" })
+# Chapter 7: Unification
+expected_ids.concat(%w[UNIF-CORE UNIF-PRESOL REBIND].map { |s| "O07-#{s}" })
+# Chapter 8: Reification
+expected_ids.concat(%w[REIFY-TYPE REIFY-NAMES].map { |s| "O08-#{s}" })
+# Chapter 9: Constraint Generation
+expected_ids.concat(%w[CGEN-ROOT CGEN-EXPR].map { |s| "O09-#{s}" })
+# Chapter 10: Presolutions & Expansion
+expected_ids.concat(%w[EXP-DECIDE EXP-APPLY PROP-SOLVE PROP-WITNESS COPY-SCHEME].map { |s| "O10-#{s}" })
+# Chapter 11: Local Transformations
+expected_ids.concat(%w[UNIFY-STRUCT WITNESS-NORM WITNESS-COALESCE WITNESS-REORDER].map { |s| "O11-#{s}" })
+# Chapter 12: Global Algorithm
+expected_ids.concat(%w[SOLVE-UNIFY ACYCLIC-CHECK ACYCLIC-TOPO COPY-INST NORM-GRAFT NORM-MERGE NORM-DROP NORM-FIXPOINT SOLVE-VAR-BASE SOLVE-VAR-VAR SOLVE-HARMONIZE SOLVE-ARROW SOLVE-VALIDATE].map { |s| "O12-#{s}" })
+# Chapter 14
 expected_ids.concat(%w[EMPTY TVAR VAR].map { |s| "O14-WF-#{s}" })
 expected_ids.concat(%w[REFLEX TRANS BOT HYP INNER OUTER QUANT-ELIM QUANT-INTRO].map { |s| "O14-INST-#{s}" })
 expected_ids.concat(%w[VAR ABS APP TABS TAPP LET].map { |s| "O14-T-#{s}" })
 expected_ids.concat(%w[BETA BETALET REFLEX TRANS QUANT-INTRO QUANT-ELIM INNER OUTER CONTEXT].map { |s| "O14-RED-#{s}" })
 expected_ids.concat(%w[N O SEQ INNER OUTER HYP BOT ID].map { |s| "O14-APPLY-#{s}" })
+# Chapter 15
 expected_ids.concat(%w[NO-INERT-LOCKED SCHEME-ROOT-RIGID ARROW-RIGID NON-INTERIOR-RIGID].map { |s| "O15-TRANS-#{s}" })
 expected_ids.concat(%w[REQUIRED IDENTITY].map { |s| "O15-REORDER-#{s}" })
 expected_ids.concat(%w[FIND REJECT].map { |s| "O15-CONTEXT-#{s}" })
@@ -78,8 +96,8 @@ groups = {
   'invalid-code-anchors' => []
 }
 
-if obligations.size != 61
-  groups['count'] << "expected 61 obligations, got #{obligations.size}"
+if obligations.size != 99
+  groups['count'] << "expected 99 obligations, got #{obligations.size}"
 end
 
 missing = expected_ids - ids

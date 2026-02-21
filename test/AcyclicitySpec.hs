@@ -10,7 +10,8 @@ import MLF.Constraint.Acyclicity
 import SpecUtil (emptyConstraint, nodeMapFromList, nodeMapSingleton)
 
 spec :: Spec
-spec = describe "Phase 3 — Acyclicity Check" $ do
+spec = do
+  describe "Phase 3 — Acyclicity Check" $ do
     describe "Trivial cases" $ do
         it "empty constraint is acyclic" $ do
             let constraint = emptyConstraint
@@ -575,6 +576,8 @@ spec = describe "Phase 3 — Acyclicity Check" $ do
                     (IntMap.fromList [(0, [EdgeId 1]), (1, [EdgeId 0])])
             findCycle g `shouldSatisfy` isJust
 
+  acyclicityObligationsSpec
+
 -- Helper functions
 
 isRight :: Either a b -> Bool
@@ -599,3 +602,25 @@ findIndex x xs = go 0 xs
 
 intSetFromList :: [Int] -> IntSet.IntSet
 intSetFromList = foldr IntSet.insert IntSet.empty
+
+acyclicityObligationsSpec :: Spec
+acyclicityObligationsSpec = describe "Thesis obligations (Chapter 12)" $ do
+    it "O12-ACYCLIC-CHECK" $ do
+        -- Acyclicity check: checkAcyclicity accepts acyclic constraints
+        let nodes = nodeMapFromList
+                [ (0, TyVar { tnId = NodeId 0, tnBound = Nothing })
+                , (1, TyVar { tnId = NodeId 1, tnBound = Nothing })
+                ]
+            edge = InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)
+            constraint = emptyConstraint { cNodes = nodes, cInstEdges = [edge] }
+        checkAcyclicity constraint `shouldSatisfy` isRight
+
+    it "O12-ACYCLIC-TOPO" $ do
+        -- Topological sort: topologicalSort orders edges without cycles
+        let depGraph = DepGraph
+                { dgVertices = [EdgeId 0, EdgeId 1]
+                , dgEdges = IntMap.fromList [(0, [EdgeId 1])]
+                }
+        case topologicalSort depGraph of
+            Right order -> order `shouldSatisfy` (not . null)
+            Left _cycle -> expectationFailure "Expected acyclic graph"

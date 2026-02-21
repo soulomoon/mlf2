@@ -16,6 +16,7 @@ import qualified FrontendParseSpec
 import qualified FrontendPrettySpec
 import qualified GeneralizeSpec
 import qualified GraphOpsSpec
+import qualified InertSpec
 import qualified NormalizeSpec
 import qualified PipelineSpec
 import qualified Phi.IdentityBridgeSpec
@@ -52,6 +53,7 @@ main = do
         BindingSpec.spec
         BindingSharedAbstractionSpec.spec
         GraphOpsSpec.spec
+        InertSpec.spec
         CanonicalizerSpec.spec
         FrontendParseSpec.spec
         FrontendPrettySpec.spec

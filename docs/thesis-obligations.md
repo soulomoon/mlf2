@@ -1,12 +1,90 @@
-# Thesis Obligations Ledger (Chapters 14/15)
+# Thesis Obligations Ledger
 
-Generated from `/Volumes/src/mlf4/docs/thesis-obligations-ch14-15.yaml` by `scripts/render-thesis-obligations-ledger.rb`.
+Generated from `/Volumes/src/mlf4/docs/thesis-obligations.yaml` by `scripts/render-thesis-obligations-ledger.rb`.
 
 ## Summary
 
-- Total obligations: **61**
-- Status counts: `anchored`=61
-- Chapters covered: 14, 15
+- Total obligations: **99**
+- Status counts: `anchored`=99
+- Chapters covered: 4, 5, 7, 8, 9, 10, 11, 12, 14, 15
+
+## Chapter 4
+
+| ID | Section | Figure/Def | Rule | Test Matcher | Test File |
+|---|---|---|---|---|---|
+| `O04-BIND-FLEX-CHILDREN` | `4.2` | `Definition 4.2 Q(n) flex children` | Q(n) flex children | `O04-BIND-FLEX-CHILDREN` | `/Volumes/src/mlf4/test/BindingSpec.hs` |
+| `O04-BIND-INTERIOR` | `4.2` | `Definition 4.2 I(r) interior` | I(r) interior | `O04-BIND-INTERIOR` | `/Volumes/src/mlf4/test/BindingSpec.hs` |
+| `O04-BIND-ORDER` | `4.2` | `Definition 4.2 binder ordering` | Binder ordering ≺ | `O04-BIND-ORDER` | `/Volumes/src/mlf4/test/BindingSpec.hs` |
+| `O04-OP-RAISE-STEP` | `4.4` | `Definition 4.4 Raise(n) single step` | Raise(n) single step | `O04-OP-RAISE-STEP` | `/Volumes/src/mlf4/test/GraphOpsSpec.hs` |
+| `O04-OP-RAISE-TO` | `4.4` | `Definition 4.4 Raise-to-target` | Raise-to-target | `O04-OP-RAISE-TO` | `/Volumes/src/mlf4/test/GraphOpsSpec.hs` |
+| `O04-OP-WEAKEN` | `4.4` | `Definition 4.4 Weaken(n)` | Weaken(n) | `O04-OP-WEAKEN` | `/Volumes/src/mlf4/test/GraphOpsSpec.hs` |
+
+## Chapter 5
+
+| ID | Section | Figure/Def | Rule | Test Matcher | Test File |
+|---|---|---|---|---|---|
+| `O05-INERT-LOCKED` | `5.2` | `Definition 15.2.2 inert-locked` | Inert-locked nodes | `O05-INERT-LOCKED` | `/Volumes/src/mlf4/test/InertSpec.hs` |
+| `O05-INERT-NODES` | `5.2` | `Definition 5.2.2 inert nodes` | Inert nodes | `O05-INERT-NODES` | `/Volumes/src/mlf4/test/InertSpec.hs` |
+| `O05-WEAKEN-INERT` | `5.3` | `Section 15.2.3.2 weaken inert-locked` | Weaken inert-locked | `O05-WEAKEN-INERT` | `/Volumes/src/mlf4/test/InertSpec.hs` |
+
+## Chapter 7
+
+| ID | Section | Figure/Def | Rule | Test Matcher | Test File |
+|---|---|---|---|---|---|
+| `O07-REBIND` | `7.3` | `Figure 7.3.x Rebind` | Rebind | `O07-REBIND` | `/Volumes/src/mlf4/test/BindingSpec.hs` |
+| `O07-UNIF-CORE` | `7.3` | `Figure 7.3.x Unif` | Core unification | `O07-UNIF-CORE` | `/Volumes/src/mlf4/test/NormalizeSpec.hs` |
+| `O07-UNIF-PRESOL` | `7.3` | `Presolution unify` | Presolution unify | `O07-UNIF-PRESOL` | `/Volumes/src/mlf4/test/SolveSpec.hs` |
+
+## Chapter 8
+
+| ID | Section | Figure/Def | Rule | Test Matcher | Test File |
+|---|---|---|---|---|---|
+| `O08-REIFY-NAMES` | `8.2` | `Named reification` | Named reification | `O08-REIFY-NAMES` | `/Volumes/src/mlf4/test/PipelineSpec.hs` |
+| `O08-REIFY-TYPE` | `8.2` | `Graphic to syntactic reification` | Graphic→syntactic | `O08-REIFY-TYPE` | `/Volumes/src/mlf4/test/PipelineSpec.hs` |
+
+## Chapter 9
+
+| ID | Section | Figure/Def | Rule | Test Matcher | Test File |
+|---|---|---|---|---|---|
+| `O09-CGEN-EXPR` | `9.4` | `Expression constraint generation` | Expr constraint | `O09-CGEN-EXPR` | `/Volumes/src/mlf4/test/ConstraintGenSpec.hs` |
+| `O09-CGEN-ROOT` | `9.4` | `Root constraint generation` | Root constraint | `O09-CGEN-ROOT` | `/Volumes/src/mlf4/test/ConstraintGenSpec.hs` |
+
+## Chapter 10
+
+| ID | Section | Figure/Def | Rule | Test Matcher | Test File |
+|---|---|---|---|---|---|
+| `O10-EXP-APPLY` | `10.1` | `Apply expansion` | Apply expansion | `O10-EXP-APPLY` | `/Volumes/src/mlf4/test/Presolution/ExpansionSpec.hs` |
+| `O10-EXP-DECIDE` | `10.1` | `Decide minimal expansion` | Decide minimal expansion | `O10-EXP-DECIDE` | `/Volumes/src/mlf4/test/Presolution/ExpansionSpec.hs` |
+| `O10-PROP-SOLVE` | `10.3` | `Propagation rule` | Propagation rule | `O10-PROP-SOLVE` | `/Volumes/src/mlf4/test/Presolution/EdgeTraceSpec.hs` |
+| `O10-PROP-WITNESS` | `10.3` | `Edge witness recording` | Edge witness recording | `O10-PROP-WITNESS` | `/Volumes/src/mlf4/test/Presolution/EdgeTraceSpec.hs` |
+| `O10-COPY-SCHEME` | `10.4` | `Chi-e scheme copy` | Chi-e scheme copy | `O10-COPY-SCHEME` | `/Volumes/src/mlf4/test/Presolution/InstantiateSpec.hs` |
+
+## Chapter 11
+
+| ID | Section | Figure/Def | Rule | Test Matcher | Test File |
+|---|---|---|---|---|---|
+| `O11-UNIFY-STRUCT` | `11.2` | `Structural unify on constraints` | Structural unify | `O11-UNIFY-STRUCT` | `/Volumes/src/mlf4/test/NormalizeSpec.hs` |
+| `O11-WITNESS-NORM` | `11.5` | `Witness normalization` | Witness normalization | `O11-WITNESS-NORM` | `/Volumes/src/mlf4/test/Presolution/WitnessSpec.hs` |
+| `O11-WITNESS-COALESCE` | `11.6` | `Raise;Merge to RaiseMerge` | Raise;Merge coalescing | `O11-WITNESS-COALESCE` | `/Volumes/src/mlf4/test/Presolution/WitnessSpec.hs` |
+| `O11-WITNESS-REORDER` | `11.6` | `Weaken reordering` | Weaken reordering | `O11-WITNESS-REORDER` | `/Volumes/src/mlf4/test/Presolution/WitnessSpec.hs` |
+
+## Chapter 12
+
+| ID | Section | Figure/Def | Rule | Test Matcher | Test File |
+|---|---|---|---|---|---|
+| `O12-ACYCLIC-CHECK` | `12.1` | `Acyclicity check` | Acyclicity check | `O12-ACYCLIC-CHECK` | `/Volumes/src/mlf4/test/AcyclicitySpec.hs` |
+| `O12-ACYCLIC-TOPO` | `12.1` | `Topological sort` | Topological sort | `O12-ACYCLIC-TOPO` | `/Volumes/src/mlf4/test/AcyclicitySpec.hs` |
+| `O12-SOLVE-ARROW` | `12.1` | `Arrow decomposition` | Arrow decomposition | `O12-SOLVE-ARROW` | `/Volumes/src/mlf4/test/SolveSpec.hs` |
+| `O12-SOLVE-HARMONIZE` | `12.1` | `Binding harmonization during solve` | Binding harmonization | `O12-SOLVE-HARMONIZE` | `/Volumes/src/mlf4/test/SolveSpec.hs` |
+| `O12-SOLVE-UNIFY` | `12.1` | `SolveConstraint main` | SolveConstraint main | `O12-SOLVE-UNIFY` | `/Volumes/src/mlf4/test/SolveSpec.hs` |
+| `O12-SOLVE-VALIDATE` | `12.1` | `Post-solve validation` | Post-solve validation | `O12-SOLVE-VALIDATE` | `/Volumes/src/mlf4/test/SolveSpec.hs` |
+| `O12-SOLVE-VAR-BASE` | `12.1` | `Var = Base merge` | Var = Base merge | `O12-SOLVE-VAR-BASE` | `/Volumes/src/mlf4/test/SolveSpec.hs` |
+| `O12-SOLVE-VAR-VAR` | `12.1` | `Var = Var merge` | Var = Var merge | `O12-SOLVE-VAR-VAR` | `/Volumes/src/mlf4/test/SolveSpec.hs` |
+| `O12-COPY-INST` | `12.2` | `Inst-Copy rule` | Inst-Copy rule | `O12-COPY-INST` | `/Volumes/src/mlf4/test/Presolution/InstantiateSpec.hs` |
+| `O12-NORM-DROP` | `12.4` | `Drop reflexive edges` | Drop reflexive edges | `O12-NORM-DROP` | `/Volumes/src/mlf4/test/NormalizeSpec.hs` |
+| `O12-NORM-FIXPOINT` | `12.4` | `Normalize to fixed point` | Normalize to fixed point | `O12-NORM-FIXPOINT` | `/Volumes/src/mlf4/test/NormalizeSpec.hs` |
+| `O12-NORM-GRAFT` | `12.4` | `Graft inst edges` | Graft inst edges | `O12-NORM-GRAFT` | `/Volumes/src/mlf4/test/NormalizeSpec.hs` |
+| `O12-NORM-MERGE` | `12.4` | `Merge unify edges` | Merge unify edges | `O12-NORM-MERGE` | `/Volumes/src/mlf4/test/NormalizeSpec.hs` |
 
 ## Chapter 14
 

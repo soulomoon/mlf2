@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 module Presolution.EdgeTraceSpec (spec) where
 
 import Test.Hspec
@@ -343,3 +344,53 @@ spec = describe "EdgeTrace" $ do
                 case IntMap.lookup 9 (psEdgeTraces st1) of
                     Nothing -> expectationFailure "Expected EdgeTrace for EdgeId 9"
                     Just tr -> etBinderArgs tr `shouldBe` []
+
+    describe "Thesis obligations" $ do
+        it "O10-PROP-SOLVE" $ do
+            -- Propagation rule: processInstEdge solves a simple inst edge
+            let bodyNode = NodeId 0
+                targetNode = NodeId 1
+                expNode = NodeId 2
+                body = TyBase bodyNode (BaseTy "Int")
+                target = TyBase targetNode (BaseTy "Int")
+                tyExp = TyExp expNode (ExpVarId 0) bodyNode
+                edge = InstEdge (EdgeId 0) expNode targetNode
+                nodes = nodeMapFromList [(0, body), (1, target), (2, tyExp)]
+                constraint = rootedConstraint $ emptyConstraint
+                    { cNodes = nodes
+                    , cInstEdges = [edge]
+                    , cBindParents = IntMap.fromList
+                        [ (nodeRefKey (typeRef expNode), (typeRef targetNode, BindFlex))
+                        , (nodeRefKey (typeRef bodyNode), (typeRef expNode, BindFlex))
+                        ]
+                    }
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 10 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
+            case runPresolutionM defaultTraceConfig st0 (processInstEdge edge) of
+                Right _ -> pure ()
+                Left err -> expectationFailure $ "processInstEdge failed: " ++ show err
+
+        it "O10-PROP-WITNESS" $ do
+            -- Edge witness recording: processInstEdge records an expansion for the edge
+            let bodyNode = NodeId 0
+                targetNode = NodeId 1
+                expNode = NodeId 2
+                body = TyBase bodyNode (BaseTy "Int")
+                target = TyBase targetNode (BaseTy "Int")
+                tyExp = TyExp expNode (ExpVarId 0) bodyNode
+                edge = InstEdge (EdgeId 0) expNode targetNode
+                nodes = nodeMapFromList [(0, body), (1, target), (2, tyExp)]
+                constraint = rootedConstraint $ emptyConstraint
+                    { cNodes = nodes
+                    , cInstEdges = [edge]
+                    , cBindParents = IntMap.fromList
+                        [ (nodeRefKey (typeRef expNode), (typeRef targetNode, BindFlex))
+                        , (nodeRefKey (typeRef bodyNode), (typeRef expNode, BindFlex))
+                        ]
+                    }
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 10 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
+            case runPresolutionM defaultTraceConfig st0 (processInstEdge edge) of
+                Right (_, st1) ->
+                    IntMap.lookup 0 (psEdgeExpansions st1) `shouldSatisfy` \case
+                        Just _ -> True
+                        Nothing -> False
+                Left err -> expectationFailure $ "processInstEdge failed: " ++ show err

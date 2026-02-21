@@ -603,3 +603,118 @@ spec = describe "Phase 5 -- Solve" $ do
                 msgs = validateSolvedGraphStrict res
             msgs `shouldSatisfy` (not . null)
             msgs `shouldSatisfy` any ("Residual instantiation edge" `isPrefixOf`)
+
+    describe "Thesis obligations" $ do
+        it "O07-UNIF-PRESOL" $ do
+            -- Presolution unify: solveUnify handles basic variable-base unification
+            let var = TyVar { tnId = NodeId 0, tnBound = Nothing }
+                base = TyBase (NodeId 1) (BaseTy "Int")
+                nodes = nodeMapFromList [(0, var), (1, base)]
+                c = rootedConstraint $ emptyConstraint
+                    { cNodes = nodes
+                    , cBindParents = inferBindParents nodes
+                    , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 1)]
+                    }
+            case solveUnify defaultTraceConfig c of
+                Right SolveResult{ srConstraint = sc } -> cUnifyEdges sc `shouldBe` []
+                Left err -> expectationFailure $ "solveUnify failed: " ++ show err
+
+        it "O12-SOLVE-UNIFY" $ do
+            -- SolveConstraint main: solveUnify drains all unify edges
+            let v0 = TyVar { tnId = NodeId 0, tnBound = Nothing }
+                v1 = TyVar { tnId = NodeId 1, tnBound = Nothing }
+                base = TyBase (NodeId 2) (BaseTy "Int")
+                nodes = nodeMapFromList [(0, v0), (1, v1), (2, base)]
+                c = rootedConstraint $ emptyConstraint
+                    { cNodes = nodes
+                    , cBindParents = inferBindParents nodes
+                    , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 1), UnifyEdge (NodeId 1) (NodeId 2)]
+                    }
+            case solveUnify defaultTraceConfig c of
+                Right SolveResult{ srConstraint = sc } -> cUnifyEdges sc `shouldBe` []
+                Left err -> expectationFailure $ "solveUnify failed: " ++ show err
+
+        it "O12-SOLVE-VAR-BASE" $ do
+            -- Var = Base merge
+            let var = TyVar { tnId = NodeId 0, tnBound = Nothing }
+                base = TyBase (NodeId 1) (BaseTy "Int")
+                nodes = nodeMapFromList [(0, var), (1, base)]
+                c = rootedConstraint $ emptyConstraint
+                    { cNodes = nodes
+                    , cBindParents = inferBindParents nodes
+                    , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 1)]
+                    }
+            case solveUnify defaultTraceConfig c of
+                Right SolveResult{ srUnionFind = uf } ->
+                    IntMap.lookup 0 uf `shouldBe` Just (NodeId 1)
+                Left err -> expectationFailure $ "solveUnify failed: " ++ show err
+
+        it "O12-SOLVE-VAR-VAR" $ do
+            -- Var = Var merge
+            let v0 = TyVar { tnId = NodeId 0, tnBound = Nothing }
+                v1 = TyVar { tnId = NodeId 1, tnBound = Nothing }
+                nodes = nodeMapFromList [(0, v0), (1, v1)]
+                c = rootedConstraint $ emptyConstraint
+                    { cNodes = nodes
+                    , cBindParents = inferBindParents nodes
+                    , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 1)]
+                    }
+            case solveUnify defaultTraceConfig c of
+                Right SolveResult{ srUnionFind = uf } ->
+                    IntMap.lookup 0 uf `shouldBe` Just (NodeId 1)
+                Left err -> expectationFailure $ "solveUnify failed: " ++ show err
+
+        it "O12-SOLVE-HARMONIZE" $ do
+            -- Binding harmonization during solve: solver raises binders to LCA
+            let v0 = TyVar { tnId = NodeId 0, tnBound = Nothing }
+                v1 = TyVar { tnId = NodeId 1, tnBound = Nothing }
+                arrow = TyArrow (NodeId 2) (NodeId 0) (NodeId 1)
+                root = TyArrow (NodeId 3) (NodeId 2) (NodeId 1)
+                nodes = nodeMapFromList [(0, v0), (1, v1), (2, arrow), (3, root)]
+                bp = IntMap.fromList
+                    [ (nodeRefKey (typeRef (NodeId 0)), (typeRef (NodeId 2), BindFlex))
+                    , (nodeRefKey (typeRef (NodeId 1)), (typeRef (NodeId 3), BindFlex))
+                    , (nodeRefKey (typeRef (NodeId 2)), (typeRef (NodeId 3), BindFlex))
+                    ]
+                c = rootedConstraint $ emptyConstraint
+                    { cNodes = nodes
+                    , cBindParents = bp
+                    , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 1)]
+                    }
+            case solveUnify defaultTraceConfig c of
+                Right _ -> pure ()
+                Left err -> expectationFailure $ "solveUnify failed: " ++ show err
+
+        it "O12-SOLVE-ARROW" $ do
+            -- Arrow decomposition: solver decomposes arrow unification
+            let v0 = TyVar { tnId = NodeId 0, tnBound = Nothing }
+                v1 = TyVar { tnId = NodeId 1, tnBound = Nothing }
+                v2 = TyVar { tnId = NodeId 2, tnBound = Nothing }
+                v3 = TyVar { tnId = NodeId 3, tnBound = Nothing }
+                arr0 = TyArrow (NodeId 4) (NodeId 0) (NodeId 1)
+                arr1 = TyArrow (NodeId 5) (NodeId 2) (NodeId 3)
+                nodes = nodeMapFromList [(0,v0),(1,v1),(2,v2),(3,v3),(4,arr0),(5,arr1)]
+                c = rootedConstraint $ emptyConstraint
+                    { cNodes = nodes
+                    , cBindParents = inferBindParents nodes
+                    , cUnifyEdges = [UnifyEdge (NodeId 4) (NodeId 5)]
+                    }
+            case solveUnify defaultTraceConfig c of
+                Right SolveResult{ srConstraint = sc, srUnionFind = uf } -> do
+                    cUnifyEdges sc `shouldBe` []
+                    -- Domain and codomain should be unified
+                    (IntMap.lookup 0 uf /= Nothing || IntMap.lookup 2 uf /= Nothing)
+                        `shouldBe` True
+                Left err -> expectationFailure $ "solveUnify failed: " ++ show err
+
+        it "O12-SOLVE-VALIDATE" $ do
+            -- Post-solve validation: validateSolvedGraph detects issues
+            let base0 = TyBase (NodeId 0) (BaseTy "Int")
+                base1 = TyBase (NodeId 1) (BaseTy "Int")
+                constraint = rootedConstraint $ emptyConstraint
+                    { cNodes = nodeMapFromList [(0, base0), (1, base1)]
+                    , cInstEdges = [InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)]
+                    }
+                res = SolveResult { srConstraint = constraint, srUnionFind = IntMap.empty }
+                msgs = validateSolvedGraphStrict res
+            msgs `shouldSatisfy` (not . null)

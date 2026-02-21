@@ -107,7 +107,8 @@ library mlf2-internal
                       MLF.Constraint.NodeAccess,
                       MLF.Util.UnionFind,
                       MLF.Types.Elab,
-                      MLF.Reify.Core
+                      MLF.Reify.Core,
+                      MLF.Elab.Run.Scope
 
     other-modules:    MLF.Constraint.Types.Ids,
                       MLF.Constraint.Types.SynthesizedExpVar,
@@ -196,7 +197,6 @@ library mlf2-internal
                       MLF.Elab.Run.ResultType.Fallback,
                       MLF.Elab.Run.ResultType.Types,
                       MLF.Elab.Run.ResultType.Util,
-                      MLF.Elab.Run.Scope,
                       MLF.Elab.Run.TypeOps,
                       MLF.Elab.Sigma,
                       MLF.Elab.TypeCheck,
@@ -301,6 +301,7 @@ test-suite mlf2-test
                       BindingSpec,
                       BindingSharedAbstractionSpec,
                       GraphOpsSpec,
+                      InertSpec,
                       CanonicalizerSpec,
                       FrontendParseSpec,
                       FrontendPrettySpec,

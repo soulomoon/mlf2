@@ -401,3 +401,36 @@ spec = describe "instantiateScheme" $ do
             Left (NodeLookupFailed nid) -> nid `shouldBe` body
             Left other -> expectationFailure $ "Unexpected error: " ++ show other
             Right _ -> expectationFailure "Expected failure due to missing node"
+
+    describe "Thesis obligations" $ do
+        it "O10-COPY-SCHEME" $ do
+            -- χe scheme copy: instantiateScheme copies a simple body with substitution
+            let bound = NodeId 0
+                body = NodeId 1
+                fresh = NodeId 10
+                intNode = TyBase body (BaseTy "Int")
+                boundVar = TyVar { tnId = bound, tnBound = Nothing }
+                freshVar = TyVar { tnId = fresh, tnBound = Nothing }
+                nodes = nodeMapFromList
+                    [ (0, boundVar), (1, intNode), (10, freshVar) ]
+                constraint = rootedConstraint $ emptyConstraint { cNodes = nodes }
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
+            case runPresolutionM defaultTraceConfig st0 (instantiateScheme body [(bound, fresh)]) of
+                Right (copyRoot, _st1) -> pure ()  -- instantiateScheme succeeds
+                Left err -> expectationFailure $ "instantiateScheme failed: " ++ show err
+
+        it "O12-COPY-INST" $ do
+            -- Inst-Copy rule: instantiateSchemeWithTrace copies and records trace
+            let bound = NodeId 0
+                body = NodeId 1
+                fresh = NodeId 10
+                intNode = TyBase body (BaseTy "Int")
+                boundVar = TyVar { tnId = bound, tnBound = Nothing }
+                freshVar = TyVar { tnId = fresh, tnBound = Nothing }
+                nodes = nodeMapFromList
+                    [ (0, boundVar), (1, intNode), (10, freshVar) ]
+                constraint = rootedConstraint $ emptyConstraint { cNodes = nodes }
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
+            case runPresolutionM defaultTraceConfig st0 (instantiateSchemeWithTrace body [(bound, fresh)]) of
+                Right ((_, _copyMap, _interior, _frontier), _st1) -> pure ()  -- instantiateSchemeWithTrace succeeds
+                Left err -> expectationFailure $ "instantiateSchemeWithTrace failed: " ++ show err

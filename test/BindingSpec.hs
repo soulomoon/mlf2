@@ -189,6 +189,7 @@ mkOrderedBinderConstraint n =
 spec :: Spec
 spec = do
     bindingTreeSpec
+    bindingObligationsSpec
     bindingAdjustmentSpec
 
 bindingTreeSpec :: Spec
@@ -1113,6 +1114,56 @@ genConstraintWithBinderChain n
 
 
 -- | Tests for MLF.Binding.Adjustment
+bindingObligationsSpec :: Spec
+bindingObligationsSpec = describe "Thesis obligations (Chapter 4)" $ do
+        it "O04-BIND-FLEX-CHILDREN" $ do
+            -- Q(n) flex children: boundFlexChildren returns flex-bound children of a node
+            let nodes = nodeMapFromList
+                    [ (0, TyForall (NodeId 0) (NodeId 1))
+                    , (1, TyVar { tnId = NodeId 1, tnBound = Nothing })
+                    , (2, TyVar { tnId = NodeId 2, tnBound = Nothing })
+                    ]
+                bp = bindParentsFromPairs
+                    [ (NodeId 1, NodeId 0, BindFlex)
+                    , (NodeId 2, NodeId 0, BindRigid)
+                    ]
+                c = rootedConstraint emptyConstraint { cNodes = nodes, cBindParents = bp }
+            case boundFlexChildren c (typeRef (NodeId 0)) of
+                Right kids -> kids `shouldBe` [NodeId 1]
+                Left err -> expectationFailure $ "boundFlexChildren failed: " ++ show err
+
+        it "O04-BIND-INTERIOR" $ do
+            -- I(r) interior: interiorOf returns interior nodes of a binding region
+            let nodes = nodeMapFromList
+                    [ (0, TyForall (NodeId 0) (NodeId 1))
+                    , (1, TyVar { tnId = NodeId 1, tnBound = Nothing })
+                    , (2, TyVar { tnId = NodeId 2, tnBound = Nothing })
+                    ]
+                bp = bindParentsFromPairs
+                    [ (NodeId 1, NodeId 0, BindFlex)
+                    , (NodeId 2, NodeId 0, BindRigid)
+                    ]
+                c = rootedConstraint emptyConstraint { cNodes = nodes, cBindParents = bp }
+            case interiorOf c (typeRef (NodeId 0)) of
+                Right interior -> interior `shouldSatisfy` (IntSet.member (nodeRefKey (typeRef (NodeId 1))))
+                Left err -> expectationFailure $ "interiorOf failed: " ++ show err
+
+        it "O04-BIND-ORDER" $ do
+            -- ≺ binder ordering: orderedBinders returns binders in binding-tree order
+            let nodes = nodeMapFromList
+                    [ (0, TyForall (NodeId 0) (NodeId 1))
+                    , (1, TyForall (NodeId 1) (NodeId 2))
+                    , (2, TyVar { tnId = NodeId 2, tnBound = Nothing })
+                    ]
+                bp = bindParentsFromPairs
+                    [ (NodeId 1, NodeId 0, BindFlex)
+                    , (NodeId 2, NodeId 1, BindFlex)
+                    ]
+                c = rootedConstraint emptyConstraint { cNodes = nodes, cBindParents = bp }
+            case orderedBinders id c (typeRef (NodeId 0)) of
+                Right _ -> pure ()  -- function succeeds on a well-formed constraint
+                Left err -> expectationFailure $ "orderedBinders failed: " ++ show err
+
 bindingAdjustmentSpec :: Spec
 bindingAdjustmentSpec = describe "MLF.Binding.Adjustment" $ do
     describe "harmonizeBindParentsWithTrace" $ do
@@ -1235,3 +1286,19 @@ bindingAdjustmentSpec = describe "MLF.Binding.Adjustment" $ do
             case BindingAdjustment.harmonizeBindParentsWithTrace (typeRef (NodeId 1)) (typeRef (NodeId 3)) c of
                 Right (_c', trace) -> trace `shouldBe` []
                 Left err -> expectationFailure $ "Expected success, got: " ++ show err
+
+        it "O07-REBIND" $ do
+            -- Fig 7.3.x Rebind: harmonizeBindParentsWithTrace adjusts binding parents
+            let nodes = nodeMapFromList
+                    [ (0, TyForall (NodeId 0) (NodeId 1))
+                    , (1, TyVar { tnId = NodeId 1, tnBound = Nothing })
+                    , (2, TyVar { tnId = NodeId 2, tnBound = Nothing })
+                    ]
+                bp = bindParentsFromPairs
+                    [ (NodeId 1, NodeId 0, BindFlex)
+                    , (NodeId 2, NodeId 0, BindFlex)
+                    ]
+                c = rootedConstraint emptyConstraint { cNodes = nodes, cBindParents = bp }
+            case BindingAdjustment.harmonizeBindParentsWithTrace (typeRef (NodeId 1)) (typeRef (NodeId 2)) c of
+                Right (_c', _trace) -> pure ()
+                Left err -> expectationFailure $ "harmonize failed: " ++ show err

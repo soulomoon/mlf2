@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 module NormalizeSpec (spec) where
 
 import qualified Data.IntMap.Strict as IntMap
@@ -783,3 +784,74 @@ spec = describe "Phase 2 — Normalization" $ do
                     ]
             length expVars `shouldBe` 2
             IntSet.size (IntSet.fromList (map getExpVarId expVars)) `shouldBe` 2
+
+    describe "Thesis obligations" $ do
+        it "O07-UNIF-CORE" $ do
+            -- Fig 7.3.x Unif: normalize processes unify edges
+            let n0 = TyBase (NodeId 0) (BaseTy "Int")
+                n1 = TyBase (NodeId 1) (BaseTy "Int")
+                c = emptyConstraint
+                    { cNodes = nodeMapFromList [(0, n0), (1, n1)]
+                    , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 1)]
+                    }
+                c' = normalize c
+            cUnifyEdges c' `shouldBe` []
+
+        it "O11-UNIFY-STRUCT" $ do
+            -- Structural unify on constraints: normalize merges structurally equal nodes
+            let n0 = TyBase (NodeId 0) (BaseTy "Bool")
+                n1 = TyBase (NodeId 1) (BaseTy "Bool")
+                c = emptyConstraint
+                    { cNodes = nodeMapFromList [(0, n0), (1, n1)]
+                    , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 1)]
+                    }
+                c' = normalize c
+            cUnifyEdges c' `shouldBe` []
+
+        it "O12-NORM-GRAFT" $ do
+            -- Graft inst edges: normalize converts var≤base inst edges to unify edges
+            let var = TyVar { tnId = NodeId 0, tnBound = Nothing }
+                base = TyBase (NodeId 1) (BaseTy "Int")
+                edge = InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)
+                c = emptyConstraint
+                    { cNodes = nodeMapFromList [(0, var), (1, base)]
+                    , cInstEdges = [edge]
+                    }
+                c' = normalize c
+            -- After grafting, the inst edge is consumed (converted to unify edge and resolved)
+            cInstEdges c' `shouldBe` []
+
+        it "O12-NORM-MERGE" $ do
+            -- Merge unify edges: normalize eliminates unify edges
+            let n0 = TyVar { tnId = NodeId 0, tnBound = Nothing }
+                n1 = TyVar { tnId = NodeId 1, tnBound = Nothing }
+                c = emptyConstraint
+                    { cNodes = nodeMapFromList [(0, n0), (1, n1)]
+                    , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 1)]
+                    }
+                c' = normalize c
+            cUnifyEdges c' `shouldBe` []
+
+        it "O12-NORM-DROP" $ do
+            -- Drop reflexive edges: normalize removes reflexive inst edges
+            let node = TyVar { tnId = NodeId 0, tnBound = Nothing }
+                reflexiveEdge = InstEdge (EdgeId 0) (NodeId 0) (NodeId 0)
+                c = emptyConstraint
+                    { cNodes = nodeMapSingleton 0 node
+                    , cInstEdges = [reflexiveEdge]
+                    }
+            cInstEdges (normalize c) `shouldBe` []
+
+        it "O12-NORM-FIXPOINT" $ do
+            -- Normalize to fixed point: applying normalize twice yields same result
+            let n0 = TyVar { tnId = NodeId 0, tnBound = Nothing }
+                n1 = TyBase (NodeId 1) (BaseTy "Int")
+                edge = InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)
+                c = emptyConstraint
+                    { cNodes = nodeMapFromList [(0, n0), (1, n1)]
+                    , cInstEdges = [edge]
+                    }
+                c1 = normalize c
+                c2 = normalize c1
+            cInstEdges c1 `shouldBe` cInstEdges c2
+            cUnifyEdges c1 `shouldBe` cUnifyEdges c2

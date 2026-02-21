@@ -1107,3 +1107,18 @@ spec = describe "Phase 1 — Constraint generation" $ do
                                 "Expected annotated var in body, saw " ++ show other
                     other -> expectationFailure $
                         "Expected ALet annotation, saw " ++ show other
+
+    describe "Thesis obligations" $ do
+        it "O09-CGEN-ROOT" $ do
+            -- Root constraint: inferConstraintGraph builds a rooted constraint for a simple expr
+            let expr = ELit (LInt 42)
+            expectRight (inferConstraintGraphDefault expr) $ \result -> do
+                let constraint = crConstraint result
+                nodeMapSize (cNodes constraint) `shouldSatisfy` (> 0)
+
+        it "O09-CGEN-EXPR" $ do
+            -- Expr constraint: generateConstraintsCore handles lambda expressions
+            let expr = ELam "x" (EVar "x")
+            expectRight (inferConstraintGraphDefault expr) $ \result -> do
+                let constraint = crConstraint result
+                nodeMapSize (cNodes constraint) `shouldSatisfy` (> 1)

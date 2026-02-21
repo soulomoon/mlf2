@@ -670,3 +670,50 @@ spec = do
                     ExpForall _ -> "forall-intro"
                     ExpCompose _ -> "compose"
             map tag expansionMatrix `shouldBe` ["identity", "instantiate", "forall-intro", "compose"]
+
+    describe "Thesis obligations" $ do
+        it "O10-EXP-DECIDE" $ do
+            -- Decide minimal expansion: computePresolution decides an expansion for a simple inst edge
+            let bodyNode = NodeId 0
+                intNode = TyBase (NodeId 1) (BaseTy "Int")
+                forallNode = TyForall (NodeId 2) (NodeId 1)
+                expNode = TyExp (NodeId 3) (ExpVarId 0) (NodeId 2)
+                edge = InstEdge (EdgeId 0) (NodeId 3) (NodeId 1)
+                nodes = nodeMapFromList [(0, TyVar { tnId = bodyNode, tnBound = Nothing }), (1, intNode), (2, forallNode), (3, expNode)]
+                constraint = rootedConstraint $ emptyConstraint
+                    { cNodes = nodes
+                    , cInstEdges = [edge]
+                    , cBindParents = IntMap.fromList
+                        [ (nodeRefKey (typeRef (NodeId 3)), (typeRef (NodeId 1), BindFlex))
+                        , (nodeRefKey (typeRef (NodeId 2)), (typeRef (NodeId 3), BindFlex))
+                        , (nodeRefKey (typeRef (NodeId 0)), (typeRef (NodeId 2), BindFlex))
+                        ]
+                    }
+                acyclicityRes = AcyclicityResult { arSortedEdges = [edge], arDepGraph = undefined }
+            case computePresolution defaultTraceConfig acyclicityRes constraint of
+                Right PresolutionResult{ prEdgeExpansions = exps } ->
+                    IntMap.size exps `shouldSatisfy` (> 0)
+                Left err -> expectationFailure $ "Presolution failed: " ++ show err
+
+        it "O10-EXP-APPLY" $ do
+            -- Apply expansion: computePresolution applies decided expansions and produces witnesses
+            let bodyNode = NodeId 0
+                intNode = TyBase (NodeId 1) (BaseTy "Int")
+                forallNode = TyForall (NodeId 2) (NodeId 1)
+                expNode = TyExp (NodeId 3) (ExpVarId 0) (NodeId 2)
+                edge = InstEdge (EdgeId 0) (NodeId 3) (NodeId 1)
+                nodes = nodeMapFromList [(0, TyVar { tnId = bodyNode, tnBound = Nothing }), (1, intNode), (2, forallNode), (3, expNode)]
+                constraint = rootedConstraint $ emptyConstraint
+                    { cNodes = nodes
+                    , cInstEdges = [edge]
+                    , cBindParents = IntMap.fromList
+                        [ (nodeRefKey (typeRef (NodeId 3)), (typeRef (NodeId 1), BindFlex))
+                        , (nodeRefKey (typeRef (NodeId 2)), (typeRef (NodeId 3), BindFlex))
+                        , (nodeRefKey (typeRef (NodeId 0)), (typeRef (NodeId 2), BindFlex))
+                        ]
+                    }
+                acyclicityRes = AcyclicityResult { arSortedEdges = [edge], arDepGraph = undefined }
+            case computePresolution defaultTraceConfig acyclicityRes constraint of
+                Right PresolutionResult{ prEdgeWitnesses = ews } ->
+                    IntMap.size ews `shouldSatisfy` (> 0)
+                Left err -> expectationFailure $ "Presolution failed: " ++ show err
