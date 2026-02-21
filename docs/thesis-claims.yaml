@@ -23,7 +23,8 @@ claims:
       code_paths:
         - src/MLF/Frontend/ConstraintGen/Translate.hs#buildExprRaw
         - src/MLF/Constraint/Types.hs#Constraint
-    deviations: []
+    deviations:
+      - DEV-CONSTRAINT-REPR-SIMPLIFIED
     status: defended
     notes: ""
 
@@ -62,7 +63,8 @@ claims:
           kind: quickcheck
       code_paths:
         - src/MLF/Constraint/Presolution/Expansion.hs#decideMinimalExpansion
-    deviations: []
+    deviations:
+      - DEV-TYEXP-OCCURRENCE-REPR
     status: partial
     notes: "Property test pending Task 7"
 
@@ -79,7 +81,7 @@ claims:
         - O10-COPY-SCHEME
       property_tests: []
       code_paths:
-        - src/MLF/Constraint/Presolution/Driver.hs#computePresolutionM
+        - src/MLF/Constraint/Presolution/Driver.hs#computePresolution
     deviations: []
     status: defended
     notes: ""
@@ -442,6 +444,7 @@ claims:
     deviations:
       - DEV-GEN-FALLBACK-PRESENT
       - DEV-LET-SCOPE-THREADING-PARTIAL
+      - DEV-INTERIOR-WIDENING
     status: defended
     notes: ""
 
@@ -472,7 +475,7 @@ claims:
           kind: gate-anchor
       code_paths:
         - src/MLF/Elab/Phi/Translate.hs#phiFromEdgeWitnessWithTrace
-        - src/MLF/Elab/Phi/Omega.hs#translateOmegaOp
+        - src/MLF/Elab/Phi/Omega.hs#phiWithSchemeOmega
     deviations: []
     status: defended
     notes: ""
