@@ -46,18 +46,16 @@
     - `test -d .kiro/specs/generalized-unification`
   - _Requirements: 1.2, 2.3, 3.1_
 
-- [ ] 4. Create new spec stubs for P2 backlog items
+- [x] 4. Create new spec stubs for P2 backlog items
   - Steps:
     - Add `.kiro/specs/constraint-simplification-rules`.
-    - Add `.kiro/specs/emlf-imlf-translation`.
+    - ~~Add `.kiro/specs/emlf-imlf-translation`.~~ Not needed — eMLF/iMLF
+      translation is not required for the current pipeline.
   - Files: new spec directories with requirements/design/tasks.
   - Tests: N/A (spec authoring).
   - Verification:
     - `test -d .kiro/specs/constraint-simplification-rules`
-    - `test -d .kiro/specs/emlf-imlf-translation`
   - _Requirements: 1.2, 2.3, 3.1_
-  - **Deferred (2026-02-22):** P2 items are low priority. Registered as
-    DEV-P2-SPEC-STUBS-DEFERRED in docs/thesis-deviations.yaml.
 
 - [ ] 5. Record xmlf conflicts as they are discovered
   - Steps:
