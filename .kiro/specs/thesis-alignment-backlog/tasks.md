@@ -56,6 +56,8 @@
     - `test -d .kiro/specs/constraint-simplification-rules`
     - `test -d .kiro/specs/emlf-imlf-translation`
   - _Requirements: 1.2, 2.3, 3.1_
+  - **Deferred (2026-02-22):** P2 items are low priority. Registered as
+    DEV-P2-SPEC-STUBS-DEFERRED in docs/thesis-deviations.yaml.
 
 - [ ] 5. Record xmlf conflicts as they are discovered
   - Steps:
@@ -64,3 +66,5 @@
   - Tests: N/A (documentation updates).
   - Verification: `rg -n "Conflict" .kiro/specs/thesis-alignment-backlog/design.md`
   - _Requirements: 1.3, 3.2_
+  - **Deferred (2026-02-22):** Ongoing documentation task. No conflicts
+    discovered yet; will be recorded as they arise during future work.

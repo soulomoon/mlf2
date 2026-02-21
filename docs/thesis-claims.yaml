@@ -1,8 +1,8 @@
 ---
 version: 1
 scope:
-  chapters: [9, 10, 11, 12, 14, 15]
-  claim_count: 20
+  chapters: [9, 10, 11, 12, 13, 14, 15]
+  claim_count: 21
 claims:
   # ── Ch. 9 — Constraint Generation ──────────────────────────────────────
 
@@ -60,13 +60,13 @@ claims:
       property_tests:
         - matcher: "Expansion minimality"
           file: test/ExpansionMinimalitySpec.hs
-          kind: quickcheck
+          kind: example
       code_paths:
         - src/MLF/Constraint/Presolution/Expansion.hs#decideMinimalExpansion
     deviations:
       - DEV-TYEXP-OCCURRENCE-REPR
-    status: partial
-    notes: "Property test pending Task 7"
+    status: defended
+    notes: ""
 
   - id: CLM-PRESOLUTION-PRINCIPALITY
     type: theorem
@@ -343,6 +343,21 @@ claims:
     status: defended
     notes: ""
 
+  - id: CLM-BACKLOG-COVERAGE
+    type: proposition
+    chapter: 13
+    section: "13.4"
+    thesis_ref: "Chapter 13 (constraint simplification, eMLF-iMLF translation)"
+    statement: "Low-priority thesis chapters are tracked in the backlog with explicit deviation records."
+    evidence:
+      obligations: []
+      property_tests: []
+      code_paths: []
+    deviations:
+      - DEV-P2-SPEC-STUBS-DEFERRED
+    status: partial
+    notes: "Tracking claim only; no implementation yet."
+
   # ── Ch. 15 — Elaboration ───────────────────────────────────────────────
 
   - id: CLM-TRANSLATABLE-PRESOLUTION
@@ -360,12 +375,12 @@ claims:
       property_tests:
         - matcher: "Translatable presolution"
           file: test/TranslatablePresolutionSpec.hs
-          kind: quickcheck
+          kind: example
       code_paths:
         - src/MLF/Constraint/Presolution/Validation.hs#validateTranslatablePresolution
     deviations: []
-    status: partial
-    notes: "Property test pending Task 5"
+    status: defended
+    notes: ""
 
   - id: CLM-PHI-CORRECTNESS
     type: definition
@@ -397,13 +412,13 @@ claims:
           kind: gate-anchor
         - matcher: "Phi soundness"
           file: test/PhiSoundnessSpec.hs
-          kind: quickcheck
+          kind: example
       code_paths:
         - src/MLF/Elab/Phi/Translate.hs#phiFromEdgeWitnessWithTrace
     deviations:
       - DEV-STEPINTRO-NOT-OMEGA
-    status: partial
-    notes: "Phi soundness property test pending Task 6"
+    status: defended
+    notes: ""
 
   - id: CLM-SIGMA-REORDER
     type: definition

@@ -35,7 +35,7 @@
   - Verification: `rg -n "translatable" src/MLF/Constraint/Presolution -S`
   - _Requirements: 2.1, 2.2_
 
-- [ ] 4. Thread let-expression schemes through elaboration/generalization
+- [ ] 4. Thread let-expression schemes through elaboration/generalization  **Deferred (2026-02-22):** Tracked as DEV-LET-SCOPE-THREADING-PARTIAL in docs/thesis-deviations.yaml.
   - Steps:
     - Ensure elaboration treats the trivial scheme edge as identity (drop the AAnn wrapper).
     - Remove any presolution special-casing that forces identity unification for the trivial edge.
@@ -45,7 +45,7 @@
   - Verification: `rg -n "ELet" src/MLF/Elab -S`
   - _Requirements: 1.2_
 
-- [ ] 5. Add tests
+- [ ] 5. Add tests  **Deferred (2026-02-22):** Tracked as DEV-LET-SCOPE-THREADING-PARTIAL in docs/thesis-deviations.yaml.
   - Steps:
     - Add let-scoping regression tests (rightmost constraint + trivial scheme edge).
     - Update existing let tests for the extra trivial scheme edge and bounded schemes.

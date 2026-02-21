@@ -1,6 +1,6 @@
 # Implementation Plan
 
-- [ ] 1. Remove gen-ancestor fallback for type binders
+- [ ] 1. Remove gen-ancestor fallback for type binders  **Deferred (2026-02-22):** Tracked as DEV-GEN-FALLBACK-PRESENT in docs/thesis-deviations.yaml.
   - [ ] 1.1 Update context computation to use only direct binders
     - Remove `bindersFromGen`/`closestGenAncestor` from `contextToNodeBoundWithOrderKeys`.
     - Ensure missing contexts return `Nothing` or a structured error.
@@ -16,7 +16,7 @@
     - _Requirements: 1.1_
     - **Verification:** `rg -n "closestGenAncestor|bindersBase|immediateGen" src/MLF/Elab/Reify.hs`
 
-- [ ] 2. Make gen-node translation explicit (Q(g))
+- [ ] 2. Make gen-node translation explicit (Q(g))  **Deferred (2026-02-22):** Tracked as DEV-GEN-FALLBACK-PRESENT in docs/thesis-deviations.yaml.
   - [ ] 2.1 Replace GenRef binder selection in generalize
     - Use `Binding.boundFlexChildrenUnder` on `GenRef` to compute Q(g).
     - Preserve ≺ ordering and bound dependency ordering as today.
@@ -33,7 +33,7 @@
     - _Requirements: 2.1, 2.2_
     - **Verification:** `rg -n "GenRef|reify.*Gen" src/MLF/Elab`
 
-- [ ] 3. Add invariant check for fallback-dependent graphs
+- [ ] 3. Add invariant check for fallback-dependent graphs  **Deferred (2026-02-22):** Tracked as DEV-GEN-FALLBACK-PRESENT in docs/thesis-deviations.yaml.
   - [ ] 3.1 Implement validation helper
     - Add `checkNoGenFallback` (or equivalent) that detects type-node binder sets
       that would require gen fallback.
@@ -49,7 +49,7 @@
     - _Requirements: 3.1, 3.2_
     - **Verification:** `rg -n "checkNoGenFallback" src/MLF`
 
-- [ ] 4. Update and extend tests
+- [ ] 4. Update and extend tests  **Deferred (2026-02-22):** Tracked as DEV-GEN-FALLBACK-PRESENT in docs/thesis-deviations.yaml.
   - [ ] 4.1 Update context tests to bind via TyForall
     - Rewrite `contextToNodeBound` tests so binders attach to the `TyForall` node,
       not a gen node.

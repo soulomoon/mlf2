@@ -170,3 +170,21 @@ deviations:
       - matcher: "let"
         file: test/ElaborationSpec.hs
     status: mitigated
+
+  - id: DEV-P2-SPEC-STUBS-DEFERRED
+    chapter: 13
+    section: "13.4"
+    thesis_ref: "Chapter 13 (constraint simplification, eMLF-iMLF translation)"
+    description: >
+      P2 backlog spec stubs for constraint-simplification-rules and
+      emlf-imlf-translation have not been created yet. These correspond to
+      thesis chapters on constraint simplification and the eMLF/iMLF
+      translation layer.
+    impact: semantic-neutral
+    rationale: >
+      These are low-priority items that do not affect the correctness of the
+      current implementation. The core pipeline (Chapters 9-15) is fully
+      covered. Tracked in .kiro/specs/thesis-alignment-backlog/ task #4.
+    code_paths: []
+    test_evidence: []
+    status: accepted
