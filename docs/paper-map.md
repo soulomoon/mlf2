@@ -98,20 +98,14 @@ This ledger is the canonical rule-to-code-to-test index for thesis Chapter 14 (`
 
 ## Known Deviations
 
-1. **Quantifier introduction (`O`)**: In the thesis, `O` is not part of Ω. The repo records these as `StepIntro` entries in `EdgeWitness.ewSteps` (from `ExpForall`) and translates them interleaved with Ω segments when constructing Φ(e).
+Canonical deviation register: [`docs/thesis-deviations.yaml`](thesis-deviations.yaml)
 
-2. **Witness normalization**: The repo implements witness normalization/ordering (`normalizeEdgeWitnessesM`) but this is not yet backed by formal proofs from the thesis.
-
-3. **Constraint representation**: The repo mirrors the paper's term-DAG + binding tree split (`cNodes` + `cBindParents` with `BindFlex`/`BindRigid`). Some paper machinery is simplified (e.g., fallback-removal relies on regression tests).
-
-4. **xMLF Phase 7**: The repo includes type-checking and reduction (`MLF.Elab.TypeCheck`, `MLF.Elab.Reduce`) but lacks a fully formalized connection to the thesis presentation.
+Enforced by: `scripts/check-thesis-claims.sh` (no `status: open` deviations, no orphans, all cross-linked to claims).
 
 ## Audit Checklist
 
-When verifying paper alignment:
+Canonical claims registry: [`docs/thesis-claims.yaml`](thesis-claims.yaml)
 
-- [ ] Check `MLF.Constraint.Presolution.EdgeProcessing` for Raise/Merge/Weaken handling
-- [ ] Verify `MLF.Elab.Pipeline.phiFromEdgeWitness` against Figure 10
-- [ ] Confirm `MLF.Binding.Adjustment` implements paper `Raise(n)` correctly
-- [ ] Validate `MLF.Elab.Generalize` follows `/)(g) = Λ(Q(g))` structure
-- [ ] Check that `sigmaReorder` implements adjacent swaps per §3.4
+Each claim carries evidence chains (obligations, property tests, code paths) and is continuously enforced by `scripts/thesis-conformance-gate.sh`.
+
+To verify all claims: `./scripts/check-thesis-claims.sh`

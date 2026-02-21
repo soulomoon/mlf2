@@ -56,6 +56,7 @@ main() {
   echo "[thesis-gate] Running thesis conformance anchors"
 
   ./scripts/check-thesis-obligations-ledger.sh
+  ./scripts/check-thesis-claims.sh
 
   run_anchor "Phi/Omega translatability matrix rows" "R-" 15
   run_anchor "A6 parity regressions" "A6 parity" 3
@@ -64,6 +65,9 @@ main() {
   run_anchor "Phase 7 theorem obligations" "Phase 7 theorem obligations" 4
   run_anchor "Representative theorem baseline" "has type forall a. a -> a" 1
   run_anchor "ga′ redirect stability hardening" "ga′ redirect stability" 8
+  run_anchor "Translatable presolution invariant" "Translatable presolution" 2
+  run_anchor "Phi soundness property" "Phi soundness" 2
+  run_anchor "Expansion minimality property" "Expansion minimality" 3
 
   echo
   echo "[thesis-gate] PASS: thesis conformance anchors are green"
