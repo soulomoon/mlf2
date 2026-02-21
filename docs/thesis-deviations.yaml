@@ -1,0 +1,172 @@
+---
+version: 1
+deviations:
+  - id: DEV-STEPINTRO-NOT-OMEGA
+    chapter: 15
+    section: "15.3"
+    thesis_ref: "Definition 15.3.4 (Φ translation)"
+    description: >
+      Quantifier introduction (O) is not part of Ω in the thesis. The repo
+      records these as StepIntro entries in EdgeWitness.ewSteps (from ExpForall)
+      and translates them interleaved with Ω segments when constructing Φ(e).
+    impact: semantic-neutral
+    rationale: >
+      Interleaving O with Ω in ewSteps simplifies the single-pass Φ translation
+      without changing the resulting instantiation. The 15-row witness matrix
+      (R-*) validates that the combined translation produces correct results.
+    code_paths:
+      - src/MLF/Constraint/Types/Witness.hs
+      - src/MLF/Elab/Phi/Translate.hs
+    test_evidence:
+      - matcher: "R-"
+        file: test/Presolution/WitnessSpec.hs
+    status: accepted
+
+  - id: DEV-WITNESS-NORM-NO-PROOF
+    chapter: 11
+    section: "11.5"
+    thesis_ref: "Definition 11.5.2 (witness normalization)"
+    description: >
+      Witness normalization is implemented and tested but not backed by formal
+      proofs from the thesis. The implementation follows the thesis conditions
+      (weaken-last, no delayed weaken, coalescing) but correctness is
+      established by executable tests, not mechanized proof.
+    impact: semantic-neutral
+    rationale: >
+      Executable property proxies and the 15-row witness matrix provide strong
+      evidence. Full mechanization is future work.
+    code_paths:
+      - src/MLF/Constraint/Presolution/WitnessNorm.hs
+      - src/MLF/Constraint/Presolution/WitnessCanon.hs
+    test_evidence:
+      - matcher: "R-"
+        file: test/Presolution/WitnessSpec.hs
+      - matcher: "Phase 7 theorem obligations"
+        file: test/TypeSoundnessSpec.hs
+    status: accepted
+
+  - id: DEV-CONSTRAINT-REPR-SIMPLIFIED
+    chapter: 9
+    section: "9.2"
+    thesis_ref: "Definition 9.2.1 (constraint representation)"
+    description: >
+      The constraint representation mirrors the paper's term-DAG + binding tree
+      split (cNodes + cBindParents with BindFlex/BindRigid). Some paper
+      machinery is simplified — for example, fallback-removal relies on
+      regression tests rather than a separate formal verification step.
+    impact: semantic-neutral
+    rationale: >
+      The representation preserves all semantic information from the thesis.
+      Simplifications are covered by regression tests.
+    code_paths:
+      - src/MLF/Constraint/Types.hs
+      - src/MLF/Constraint/Types/Graph.hs
+    test_evidence:
+      - matcher: "Phase 1"
+        file: test/ConstraintGenSpec.hs
+    status: accepted
+
+  - id: DEV-PHASE7-NO-FORMAL-LINK
+    chapter: 14
+    section: "14.3"
+    thesis_ref: "Theorems 14.3.1-14.3.2 (preservation, progress)"
+    description: >
+      The repo includes type-checking and reduction for xMLF
+      terms/instantiations (MLF.Elab.TypeCheck, MLF.Elab.Reduce) but lacks a
+      fully formalized/verified connection to the thesis proof obligations.
+      Evidence is via executable property proxies (preservation, progress,
+      determinism, canonical forms) with QuickCheck.
+    impact: semantic-neutral
+    rationale: >
+      Property-based testing with structurally rich generators provides strong
+      coverage. Full mechanization (e.g., Agda/Liquid Haskell) is future work.
+    code_paths:
+      - src/MLF/Elab/TypeCheck.hs
+      - src/MLF/Elab/Reduce.hs
+    test_evidence:
+      - matcher: "Phase 7 theorem obligations"
+        file: test/TypeSoundnessSpec.hs
+    status: accepted
+
+  - id: DEV-TYEXP-OCCURRENCE-REPR
+    chapter: 10
+    section: "10.1"
+    thesis_ref: "Definition 10.1.1 (expansion variables)"
+    description: >
+      Expansion variables are represented as TyExp occurrence nodes in the
+      constraint graph rather than constructing a separate expansion graph per
+      instantiation edge. Presolution materializes and removes them.
+    impact: semantic-neutral
+    rationale: >
+      This is a representation choice that preserves semantics. TyExp nodes
+      carry the same ExpVarId and are materialized/eliminated during presolution
+      exactly as the thesis describes.
+    code_paths:
+      - src/MLF/Constraint/Types.hs
+      - src/MLF/Constraint/Presolution/Driver.hs
+    test_evidence:
+      - matcher: "Phase 4"
+        file: test/PresolutionSpec.hs
+    status: accepted
+
+  - id: DEV-INTERIOR-WIDENING
+    chapter: 15
+    section: "15.3"
+    thesis_ref: "Section 15.3 (elaboration)"
+    description: >
+      Interior set (I(r)) is widened with reachable scheme interiors to keep
+      explicit-forall binders inside instantiation copies. This is a
+      preservation measure not stated in the thesis text.
+    impact: semantic-minor
+    rationale: >
+      Without widening, explicit-forall binders can fall outside the interior
+      after copy operations, causing Φ translation failures. The widening
+      preserves the thesis invariant that operated binders are interior.
+    code_paths:
+      - src/MLF/Constraint/Presolution/Copy.hs
+    test_evidence:
+      - matcher: "explicit forall annotation"
+        file: test/ElaborationSpec.hs
+    status: accepted
+
+  - id: DEV-GEN-FALLBACK-PRESENT
+    chapter: 15
+    section: "15.3"
+    thesis_ref: "Section 15.3.1 (Q(g) computation)"
+    description: >
+      Gen-ancestor fallback is still present in some binder enumeration paths.
+      The thesis computes Q(g) strictly from direct flexible children; the
+      implementation sometimes falls back to gen-ancestor traversal.
+    impact: semantic-minor
+    rationale: >
+      The fallback produces correct results for all tested cases but is not
+      thesis-exact. Tracked in .kiro/specs/thesis-exact-gen-fallback-removal/
+      for future removal.
+    code_paths:
+      - src/MLF/Elab/Generalize.hs
+      - src/MLF/Elab/Phi.hs
+    test_evidence:
+      - matcher: "Phase 6"
+        file: test/ElaborationSpec.hs
+    status: mitigated
+
+  - id: DEV-LET-SCOPE-THREADING-PARTIAL
+    chapter: 15
+    section: "15.2"
+    thesis_ref: "Definition 15.2.10 (alternative let typing)"
+    description: >
+      Let-scope alternative typing (Def. 15.2.6) is implemented for constraint
+      generation and presolution validation, but elaboration/generalization
+      threading (tasks #4/#5 in the let-scope spec) remains open.
+    impact: semantic-minor
+    rationale: >
+      The constraint-level implementation is complete and validated. The
+      elaboration threading gap does not affect correctness of currently tested
+      programs. Tracked in .kiro/specs/let-scope-alternative-typing/.
+    code_paths:
+      - src/MLF/Frontend/ConstraintGen/Translate.hs
+      - src/MLF/Elab/Elaborate.hs
+    test_evidence:
+      - matcher: "let"
+        file: test/ElaborationSpec.hs
+    status: mitigated
