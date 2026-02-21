@@ -4,6 +4,25 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 22 Defensible Exactness — 2026-02-22
+
+- Scope:
+  - Move from "tested" to "defensible exactness": every thesis claim has a traceable evidence chain (thesis clause -> claim -> code path -> test -> gate) continuously enforced by CI.
+- Implemented:
+  - Machine-checked thesis claims registry (`docs/thesis-claims.yaml`, 21 claims across Ch. 7-15).
+  - Deviation register (`docs/thesis-deviations.yaml`, 9 deviations) with cross-link validation.
+  - Claims checker script (`scripts/check-thesis-claims.sh`) enforcing schema, cross-links, code paths, and orphan detection.
+  - Obligations ledger `supports_claims` back-links.
+  - Three new test modules: `TranslatablePresolutionSpec` (Def. 15.2.10), `PhiSoundnessSpec` (Def. 15.3.4), `ExpansionMinimalitySpec` (Def. 10.1.1).
+  - Conformance gate upgraded with claims checker and three new anchor matchers.
+  - Paper-map migrated to reference machine-checked artifacts.
+  - Spec drift closed: all open `.kiro` spec tasks annotated with deferred notes and deviation cross-references.
+  - Three claims upgraded from `partial` to `defended`.
+- Verification:
+  - `cabal build all && cabal test` (765 examples, 0 failures)
+  - `./scripts/thesis-conformance-gate.sh` (PASS)
+  - `./scripts/check-thesis-claims.sh` (PASS)
+
 ## Task 21 Phase 7 theorem obligations executable proxies — 2026-02-19
 
 - Scope:
