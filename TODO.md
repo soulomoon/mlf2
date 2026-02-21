@@ -47,12 +47,12 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 ## Task 20 Formal Obligations Ledger (Chapters 14/15) — 2026-02-19
 
 - Scope:
-  - Build and enforce a canonical thesis rule-to-code-to-test ledger for Chapter 14 (`14.2`-`14.3`) and Chapter 15 (`15.2`-`15.3`) operational obligations.
+  - Build and enforce a canonical thesis rule-to-code-to-test ledger for Chapters 4–15 operational obligations (originally scoped to Ch. 14/15, expanded to cover sections `4.2`–`15.3`).
 - Implemented:
   - Added canonical YAML ledger:
-    - `/Volumes/src/mlf4/docs/thesis-obligations-ch14-15.yaml`
+    - `/Volumes/src/mlf4/docs/thesis-obligations.yaml`
   - Added generated Markdown ledger:
-    - `/Volumes/src/mlf4/docs/thesis-obligations-ch14-15.md`
+    - `/Volumes/src/mlf4/docs/thesis-obligations.md`
   - Added renderer/checker scripts:
     - `/Volumes/src/mlf4/scripts/render-thesis-obligations-ledger.rb`
     - `/Volumes/src/mlf4/scripts/check-thesis-obligations-ledger.sh`
@@ -66,7 +66,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
     - `/Volumes/src/mlf4/test/Presolution/WitnessSpec.hs`
     - `/Volumes/src/mlf4/test/Presolution/MergeEmissionSpec.hs`
 - Closure criteria status:
-  - [x] 61 obligations present and uniquely mapped.
+  - [x] 99 obligations present and uniquely mapped (scope expanded from Ch. 14/15 to Ch. 4–15).
   - [x] All obligations marked `status=anchored`.
   - [x] Executable matcher anchors required and passing.
   - [x] Markdown drift checked from YAML source.

@@ -2,7 +2,7 @@
 
 - Note: Implementation may touch any file needed to preserve thesis-exact binding trees and explicit-forall scoping.
 - Status (2026-02-04): `cabal test --test-show-details=direct` passes (419 examples, 0 failures, 1 pending).
-- Pending: κσ / annotated-lambda parameter semantics (`test/ElaborationSpec.hs` has an `xit` for US-004).
+- Resolved: κσ / annotated-lambda parameter semantics (US-004) — test is active and passing in `test/ElaborationSpec.hs` (lines 525, 2702).
 
 - [x] 1. Encode explicit `STForall` as gen-bound named nodes
   - Update `internalizeSrcTypeWith` to create a gen node for each explicit forall and bind its variable under that gen.
@@ -168,13 +168,13 @@
   - Requirements: 1.7, 1.9
   - Verification: `rg -n "bound deps|freeNamedDeps|orderBinderCandidates" src/MLF/Constraint/Presolution/Plan/BinderPlan src/MLF/Reify/Core.hs && cabal test --test-show-details=direct`
 
-- [ ] 26. Decide/implement κσ for annotated lambda parameters (US-004)
-  - Enable the pending test: `annotated lambda parameter should accept a polymorphic argument via κσ (US-004)` (currently `xit`).
-  - Decide whether `ELamAnn` remains desugared to `let` + coercion (current constraint-gen behavior) or is translated directly to preserve the expected κσ behavior.
-  - Keep scheme closure strict (do not “rewrite around” `GenSchemeFreeVars`).
+- [x] 26. Decide/implement κσ for annotated lambda parameters (US-004)
+  - Test is active and passing: `annotated lambda parameter should accept a polymorphic argument via κσ (US-004)` at `test/ElaborationSpec.hs:2702`.
+  - Rank-2 argument test also active: `elaborates lambda with rank-2 argument (US-004)` at `test/ElaborationSpec.hs:525`.
+  - `ELamAnn` desugars to `let` + coercion; checked-authoritative pipeline produces thesis-expected `Int`.
   - Files: `src/MLF/Frontend/ConstraintGen/Translate.hs`, `src/MLF/Elab/Run/ResultType/*.hs`, `test/ConstraintGenSpec.hs`, `test/ElaborationSpec.hs`
   - Requirements: 1.5, 1.8, 1.10
-  - Verification: `rg -n "κσ|ELamAnn|annotated lambda parameter" test/ElaborationSpec.hs test/ConstraintGenSpec.hs && cabal test --test-show-details=direct`
+  - Verification: `cabal test mlf2-test --test-show-details=direct --test-options='--match “US-004”'`
 
 - [x] 27. Tighten bound scoping for explicit-forall binders (thesis-exact ga′)
   - Covered by Tasks 17–18: nested bound schemes keep their own gen scope; Γa does not capture nested explicit-forall binders.

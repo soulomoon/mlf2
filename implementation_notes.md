@@ -44,20 +44,20 @@
   - `/Volumes/src/mlf4/scripts/thesis-conformance-gate.sh` now runs matcher `Phase 7 theorem obligations` (min `2` examples).
 - This closes part of the remaining non-semantic formalization debt by making theorem proxies executable, while not claiming a mechanized proof.
 
-### 2026-02-19 Formal obligations ledger (thesis Ch. 14/15) hard-fail enforcement
+### 2026-02-19 Formal obligations ledger (thesis Ch. 4–15) hard-fail enforcement
 
 - Added canonical obligations ledger source:
-  - `/Volumes/src/mlf4/docs/thesis-obligations-ch14-15.yaml`
+  - `/Volumes/src/mlf4/docs/thesis-obligations.yaml`
 - Added generated Markdown view:
-  - `/Volumes/src/mlf4/docs/thesis-obligations-ch14-15.md`
+  - `/Volumes/src/mlf4/docs/thesis-obligations.md`
 - Added ledger tooling:
   - `/Volumes/src/mlf4/scripts/render-thesis-obligations-ledger.rb`
   - `/Volumes/src/mlf4/scripts/check-thesis-obligations-ledger.sh`
 - Added mandatory gate stage:
   - `/Volumes/src/mlf4/scripts/thesis-conformance-gate.sh` now calls `check-thesis-obligations-ledger.sh` before legacy anchor slices.
 - Scope/contract:
-  - Covers Chapter 14 (`14.2`-`14.3`) and Chapter 15 (`15.2`-`15.3`) operational obligations only.
-  - Exact obligation inventory is fixed at `61` IDs.
+  - Covers Chapters 4–15 operational obligations (sections `4.2`–`4.4`, `5.2`–`5.3`, `7.3`, `8.2`, `9.4`, `10.1`–`10.4`, `11.2`–`11.6`, `12.1`–`12.4`, `14.2`–`14.3`, `15.2`–`15.3`).
+  - Exact obligation inventory is fixed at `99` IDs (scope: Ch. 4–15 operational rules).
   - Checker hard-fails on count/id drift, missing/duplicate/unmapped obligations, non-anchored status, missing code/test anchors, markdown drift, zero-example matchers, or failing matched examples.
 - Verification snapshot:
   - `./scripts/check-thesis-obligations-ledger.sh` (PASS)
