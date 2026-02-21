@@ -1,0 +1,478 @@
+---
+version: 1
+scope:
+  chapters: [9, 10, 11, 12, 14, 15]
+  claim_count: 20
+claims:
+  # ── Ch. 9 — Constraint Generation ──────────────────────────────────────
+
+  - id: CLM-CGEN-SHAPE
+    type: definition
+    chapter: 9
+    section: "9.2"
+    thesis_ref: "Definition 9.2.1 (Constraint graph shape)"
+    statement: "A constraint graph is a term-DAG augmented with binding edges and bind flags."
+    evidence:
+      obligations:
+        - O09-CGEN-ROOT
+        - O09-CGEN-EXPR
+        - O04-BIND-FLEX-CHILDREN
+        - O04-BIND-INTERIOR
+        - O04-BIND-ORDER
+      property_tests: []
+      code_paths:
+        - src/MLF/Frontend/ConstraintGen/Translate.hs#buildExprRaw
+        - src/MLF/Constraint/Types.hs#Constraint
+    deviations: []
+    status: defended
+    notes: ""
+
+  - id: CLM-CGEN-SCOPING
+    type: proposition
+    chapter: 9
+    section: "9.1"
+    thesis_ref: "Proposition 9.1.2 (Scoping correctness)"
+    statement: "Application, abstraction, and let scoping in the generated constraint graph are correct."
+    evidence:
+      obligations:
+        - O09-CGEN-ROOT
+        - O09-CGEN-EXPR
+      property_tests: []
+      code_paths:
+        - src/MLF/Frontend/ConstraintGen/Translate.hs#buildExprRaw
+    deviations: []
+    status: defended
+    notes: ""
+
+  # ── Ch. 10 — Expansion & Presolution ───────────────────────────────────
+
+  - id: CLM-EXPANSION-MINIMALITY
+    type: definition
+    chapter: 10
+    section: "10.1"
+    thesis_ref: "Definition 10.1.1 (Minimal expansion)"
+    statement: "Expansion is minimal: only the necessary nodes are expanded."
+    evidence:
+      obligations:
+        - O10-EXP-DECIDE
+        - O10-EXP-APPLY
+      property_tests:
+        - matcher: "Expansion minimality"
+          file: test/ExpansionMinimalitySpec.hs
+          kind: quickcheck
+      code_paths:
+        - src/MLF/Constraint/Presolution/Expansion.hs#decideMinimalExpansion
+    deviations: []
+    status: partial
+    notes: "Property test pending Task 7"
+
+  - id: CLM-PRESOLUTION-PRINCIPALITY
+    type: theorem
+    chapter: 10
+    section: "10.4"
+    thesis_ref: "Theorem 10.4.1 (Presolution principality)"
+    statement: "The presolution computed by the algorithm is principal."
+    evidence:
+      obligations:
+        - O10-PROP-SOLVE
+        - O10-PROP-WITNESS
+        - O10-COPY-SCHEME
+      property_tests: []
+      code_paths:
+        - src/MLF/Constraint/Presolution/Driver.hs#computePresolutionM
+    deviations: []
+    status: defended
+    notes: ""
+
+  # ── Ch. 11 — Local Transformations ─────────────────────────────────────
+
+  - id: CLM-WITNESS-NORMALIZATION
+    type: definition
+    chapter: 11
+    section: "11.5"
+    thesis_ref: "Definition 11.5.2 (Witness normalization conditions)"
+    statement: "Witness normalization satisfies coalescing, reordering, and structural unification conditions."
+    evidence:
+      obligations:
+        - O11-WITNESS-NORM
+        - O11-WITNESS-COALESCE
+        - O11-WITNESS-REORDER
+        - O11-UNIFY-STRUCT
+      property_tests:
+        - matcher: "R-"
+          file: test/Presolution/WitnessSpec.hs
+          kind: gate-anchor
+      code_paths:
+        - src/MLF/Constraint/Presolution/WitnessNorm.hs#normalizeEdgeWitnessesM
+        - src/MLF/Constraint/Presolution/WitnessCanon.hs#normalizeInstanceOpsFull
+    deviations:
+      - DEV-WITNESS-NORM-NO-PROOF
+    status: defended
+    notes: ""
+
+  # ── Ch. 12 — Global Algorithm ──────────────────────────────────────────
+
+  - id: CLM-ACYCLICITY
+    type: proposition
+    chapter: 12
+    section: "12.1"
+    thesis_ref: "Proposition 12.1 (Acyclicity)"
+    statement: "The instantiation graph is acyclic."
+    evidence:
+      obligations:
+        - O12-ACYCLIC-CHECK
+        - O12-ACYCLIC-TOPO
+      property_tests: []
+      code_paths:
+        - src/MLF/Constraint/Acyclicity.hs#checkAcyclicity
+    deviations: []
+    status: defended
+    notes: ""
+
+  - id: CLM-SOLVER-CORRECTNESS
+    type: theorem
+    chapter: 12
+    section: "12.4"
+    thesis_ref: "Theorem 12.4 (Solver correctness)"
+    statement: "The solver produces a valid presolution."
+    evidence:
+      obligations:
+        - O12-SOLVE-UNIFY
+        - O12-SOLVE-VAR-BASE
+        - O12-SOLVE-VAR-VAR
+        - O12-SOLVE-HARMONIZE
+        - O12-SOLVE-ARROW
+        - O12-SOLVE-VALIDATE
+        - O12-NORM-GRAFT
+        - O12-NORM-MERGE
+        - O12-NORM-DROP
+        - O12-NORM-FIXPOINT
+        - O12-COPY-INST
+      property_tests: []
+      code_paths:
+        - src/MLF/Constraint/Solve.hs#solveUnify
+    deviations: []
+    status: defended
+    notes: ""
+
+  - id: CLM-UNIFICATION
+    type: definition
+    chapter: 7
+    section: "7.3"
+    thesis_ref: "Definition 7.3 (Structural unification)"
+    statement: "Structural unification is correct."
+    evidence:
+      obligations:
+        - O07-UNIF-CORE
+        - O07-UNIF-PRESOL
+        - O07-REBIND
+      property_tests: []
+      code_paths:
+        - src/MLF/Constraint/Unify/Core.hs#processUnifyEdgesWith
+    deviations: []
+    status: defended
+    notes: ""
+
+  # ── Ch. 14 — xMLF Type System ──────────────────────────────────────────
+
+  - id: CLM-PRESERVATION
+    type: theorem
+    chapter: 14
+    section: "14.3"
+    thesis_ref: "Theorem 14.3.1 (Subject reduction)"
+    statement: "If a well-typed xMLF term reduces, the reduct is well-typed at the same type."
+    evidence:
+      obligations:
+        - O14-RED-BETA
+        - O14-RED-BETALET
+        - O14-RED-REFLEX
+        - O14-RED-TRANS
+        - O14-RED-QUANT-INTRO
+        - O14-RED-QUANT-ELIM
+        - O14-RED-INNER
+        - O14-RED-OUTER
+        - O14-RED-CONTEXT
+      property_tests:
+        - matcher: "Phase 7 theorem obligations"
+          file: test/TypeSoundnessSpec.hs
+          kind: quickcheck
+      code_paths:
+        - src/MLF/Elab/TypeCheck.hs#typeCheckWithEnv
+        - src/MLF/Elab/Reduce.hs#step
+    deviations:
+      - DEV-PHASE7-NO-FORMAL-LINK
+    status: defended
+    notes: "Property proxy only; not mechanized."
+
+  - id: CLM-PROGRESS
+    type: theorem
+    chapter: 14
+    section: "14.3"
+    thesis_ref: "Theorem 14.3.2 (Progress)"
+    statement: "A well-typed closed xMLF term is either a value or can take a reduction step."
+    evidence:
+      obligations:
+        - O14-RED-BETA
+        - O14-RED-BETALET
+        - O14-RED-CONTEXT
+      property_tests:
+        - matcher: "Phase 7 theorem obligations"
+          file: test/TypeSoundnessSpec.hs
+          kind: quickcheck
+      code_paths:
+        - src/MLF/Elab/Reduce.hs#step
+        - src/MLF/Elab/Reduce.hs#isValue
+    deviations:
+      - DEV-PHASE7-NO-FORMAL-LINK
+    status: defended
+    notes: "Property proxy only; not mechanized."
+
+  - id: CLM-DETERMINISM
+    type: proposition
+    chapter: 14
+    section: "14.3"
+    thesis_ref: "Proposition 14.3 (Determinism)"
+    statement: "xMLF reduction is deterministic."
+    evidence:
+      obligations: []
+      property_tests:
+        - matcher: "Phase 7 theorem obligations"
+          file: test/TypeSoundnessSpec.hs
+          kind: quickcheck
+      code_paths:
+        - src/MLF/Elab/Reduce.hs#step
+    deviations:
+      - DEV-PHASE7-NO-FORMAL-LINK
+    status: defended
+    notes: ""
+
+  - id: CLM-INST-CORRECTNESS
+    type: definition
+    chapter: 14
+    section: "14.2"
+    thesis_ref: "Figure 14.2.6 (Instantiation judgment rules)"
+    statement: "The instantiation judgment rules are correctly implemented."
+    evidence:
+      obligations:
+        - O14-INST-REFLEX
+        - O14-INST-TRANS
+        - O14-INST-BOT
+        - O14-INST-HYP
+        - O14-INST-INNER
+        - O14-INST-OUTER
+        - O14-INST-QUANT-ELIM
+        - O14-INST-QUANT-INTRO
+      property_tests: []
+      code_paths:
+        - src/MLF/Elab/TypeCheck.hs#checkInstantiation
+        - src/MLF/Elab/Inst.hs#evalInstantiationWith
+    deviations: []
+    status: defended
+    notes: ""
+
+  - id: CLM-TYPING-RULES
+    type: definition
+    chapter: 14
+    section: "14.2"
+    thesis_ref: "Figure 14.2.5 (xMLF typing rules)"
+    statement: "The xMLF typing rules are correctly implemented."
+    evidence:
+      obligations:
+        - O14-T-VAR
+        - O14-T-ABS
+        - O14-T-APP
+        - O14-T-TABS
+        - O14-T-TAPP
+        - O14-T-LET
+        - O14-WF-EMPTY
+        - O14-WF-TVAR
+        - O14-WF-VAR
+      property_tests: []
+      code_paths:
+        - src/MLF/Elab/TypeCheck.hs#typeCheckWithEnv
+    deviations: []
+    status: defended
+    notes: ""
+
+  - id: CLM-REDUCTION-RULES
+    type: definition
+    chapter: 14
+    section: "14.2"
+    thesis_ref: "Figure 14.2.7 (xMLF reduction rules)"
+    statement: "The xMLF reduction rules are correctly implemented."
+    evidence:
+      obligations:
+        - O14-RED-BETA
+        - O14-RED-BETALET
+        - O14-RED-REFLEX
+        - O14-RED-TRANS
+        - O14-RED-QUANT-INTRO
+        - O14-RED-QUANT-ELIM
+        - O14-RED-INNER
+        - O14-RED-OUTER
+        - O14-RED-CONTEXT
+      property_tests: []
+      code_paths:
+        - src/MLF/Elab/Reduce.hs#step
+    deviations: []
+    status: defended
+    notes: ""
+
+  - id: CLM-INST-APPLICATION
+    type: definition
+    chapter: 14
+    section: "14.2"
+    thesis_ref: "Figure 14.2.3 (Instantiation-as-function on types)"
+    statement: "Instantiation application on types is correctly implemented."
+    evidence:
+      obligations:
+        - O14-APPLY-N
+        - O14-APPLY-O
+        - O14-APPLY-SEQ
+        - O14-APPLY-INNER
+        - O14-APPLY-OUTER
+        - O14-APPLY-HYP
+        - O14-APPLY-BOT
+        - O14-APPLY-ID
+      property_tests: []
+      code_paths:
+        - src/MLF/Elab/Inst.hs#evalInstantiationWith
+    deviations: []
+    status: defended
+    notes: ""
+
+  # ── Ch. 15 — Elaboration ───────────────────────────────────────────────
+
+  - id: CLM-TRANSLATABLE-PRESOLUTION
+    type: definition
+    chapter: 15
+    section: "15.2"
+    thesis_ref: "Definition 15.2.10 (Translatable presolution)"
+    statement: "The presolution satisfies all translation preconditions."
+    evidence:
+      obligations:
+        - O15-TRANS-NO-INERT-LOCKED
+        - O15-TRANS-SCHEME-ROOT-RIGID
+        - O15-TRANS-ARROW-RIGID
+        - O15-TRANS-NON-INTERIOR-RIGID
+      property_tests:
+        - matcher: "Translatable presolution"
+          file: test/TranslatablePresolutionSpec.hs
+          kind: quickcheck
+      code_paths:
+        - src/MLF/Constraint/Presolution/Validation.hs#validateTranslatablePresolution
+    deviations: []
+    status: partial
+    notes: "Property test pending Task 5"
+
+  - id: CLM-PHI-CORRECTNESS
+    type: definition
+    chapter: 15
+    section: "15.3"
+    thesis_ref: "Definition 15.3.4 (Phi translation)"
+    statement: "The Phi translation from witness sequences to instantiations is correct."
+    evidence:
+      obligations:
+        - O15-TR-SEQ-EMPTY
+        - O15-TR-SEQ-CONS
+        - O15-TR-RIGID-RAISE
+        - O15-TR-RIGID-MERGE
+        - O15-TR-RIGID-RAISEMERGE
+        - O15-TR-ROOT-GRAFT
+        - O15-TR-ROOT-RAISEMERGE
+        - O15-TR-ROOT-WEAKEN
+        - O15-TR-NODE-GRAFT
+        - O15-TR-NODE-MERGE
+        - O15-TR-NODE-RAISEMERGE
+        - O15-TR-NODE-WEAKEN
+        - O15-TR-NODE-RAISE
+        - O15-EDGE-TRANSLATION
+        - O15-CONTEXT-FIND
+        - O15-CONTEXT-REJECT
+      property_tests:
+        - matcher: "R-"
+          file: test/Presolution/WitnessSpec.hs
+          kind: gate-anchor
+        - matcher: "Phi soundness"
+          file: test/PhiSoundnessSpec.hs
+          kind: quickcheck
+      code_paths:
+        - src/MLF/Elab/Phi/Translate.hs#phiFromEdgeWitnessWithTrace
+    deviations:
+      - DEV-STEPINTRO-NOT-OMEGA
+    status: partial
+    notes: "Phi soundness property test pending Task 6"
+
+  - id: CLM-SIGMA-REORDER
+    type: definition
+    chapter: 15
+    section: "15.3"
+    thesis_ref: "Definition 15.3.4 (Sigma quantifier reordering)"
+    statement: "Sigma(g) quantifier reordering is correctly implemented."
+    evidence:
+      obligations:
+        - O15-REORDER-REQUIRED
+        - O15-REORDER-IDENTITY
+      property_tests: []
+      code_paths:
+        - src/MLF/Elab/Sigma.hs#sigmaReorder
+    deviations: []
+    status: defended
+    notes: ""
+
+  - id: CLM-ELABORATION-CORRECTNESS
+    type: theorem
+    chapter: 15
+    section: "15.3"
+    thesis_ref: "Theorem 15.3.1 (Elaboration correctness)"
+    statement: "The elaborated term is well-typed in xMLF."
+    evidence:
+      obligations:
+        - O15-ELAB-LAMBDA-VAR
+        - O15-ELAB-LET-VAR
+        - O15-ELAB-ABS
+        - O15-ELAB-APP
+        - O15-ELAB-LET
+        - O08-REIFY-TYPE
+        - O08-REIFY-NAMES
+      property_tests: []
+      code_paths:
+        - src/MLF/Elab/Elaborate.hs#elaborate
+        - src/MLF/Elab/Run/Pipeline.hs#runPipelineElab
+    deviations:
+      - DEV-GEN-FALLBACK-PRESENT
+      - DEV-LET-SCOPE-THREADING-PARTIAL
+    status: defended
+    notes: ""
+
+  - id: CLM-WITNESS-TRANSLATION
+    type: definition
+    chapter: 15
+    section: "15.3"
+    thesis_ref: "Figure 15.3.4 (15-row witness translation matrix)"
+    statement: "The 15-row witness translation matrix is correctly implemented."
+    evidence:
+      obligations:
+        - O15-TR-SEQ-EMPTY
+        - O15-TR-SEQ-CONS
+        - O15-TR-RIGID-RAISE
+        - O15-TR-RIGID-MERGE
+        - O15-TR-RIGID-RAISEMERGE
+        - O15-TR-ROOT-GRAFT
+        - O15-TR-ROOT-RAISEMERGE
+        - O15-TR-ROOT-WEAKEN
+        - O15-TR-NODE-GRAFT
+        - O15-TR-NODE-MERGE
+        - O15-TR-NODE-RAISEMERGE
+        - O15-TR-NODE-WEAKEN
+        - O15-TR-NODE-RAISE
+      property_tests:
+        - matcher: "R-"
+          file: test/Presolution/WitnessSpec.hs
+          kind: gate-anchor
+      code_paths:
+        - src/MLF/Elab/Phi/Translate.hs#phiFromEdgeWitnessWithTrace
+        - src/MLF/Elab/Phi/Omega.hs#translateOmegaOp
+    deviations: []
+    status: defended
+    notes: ""
