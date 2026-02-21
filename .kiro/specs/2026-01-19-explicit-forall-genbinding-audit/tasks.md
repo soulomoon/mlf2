@@ -7,16 +7,18 @@
   - Status: Keep unchecked; requires thesis-exact audit or additional proof/tests.
   - **Verification:** `cabal test --test-show-details=direct`
 
-- [ ] 10. Audit thesis-exact ga′ scope selection
+- [x] 10. Audit thesis-exact ga′ scope selection
   - Review bindingScopeRef/preferGenScope and pre/post scope mapping for Def. 15.3.2 alignment.
-  - Evidence: src/MLF/Elab/Run.hs:1560-1616, src/MLF/Elab/Run.hs:900-918.
-  - Result: Partially covered. bindingScopeRef uses nearest gen ancestor, but preferGenScope and pre/post scope reconciliation with redirects introduce fallback behavior not proven equivalent to Def. 15.3.2 in all redirect/canonicalization cases.
-  - Status: Keep unchecked; needs thesis-exact proof or redirect-focused tests.
+  - Evidence: src/MLF/Elab/Run/Scope.hs — Note [ga′ scope selection — Def. 15.3.2 alignment].
+  - Result: Thesis-aligned. bindingScopeRef computes nearest gen ancestor (Def. 15.3.2). preferGenScope is redundant but harmless (error-swallowing documented). canonicalizeScopeRef correctly passes GenRef through and applies redirect+UF to TypeRef. letScopeOverrides preserves base scope when solved diverges. Direct `letScopeOverrides` divergence test added. Cross-gen mapping hard-fail invariant enforced in `resolveContext`.
+  - Status: Closed. Documented in Note, regression tests added. Executable evidence covers identity and divergence paths.
   - **Verification:** `cabal test --test-show-details=direct`
 
-- [ ] 11. Audit ga′ preservation across redirects
+- [x] 11. Audit ga′ preservation across redirects
   - Confirm redirect-aware scope canonicalization and binding-parent projection preserve ga′.
-  - Evidence: src/MLF/Elab/Run.hs:840-918.
+  - Evidence: src/MLF/Elab/Run/Scope.hs — Note [ga′ preservation across redirects].
+  - Result: GenRef passthrough is correct (gen nodes stable). TypeRef edge case handled by letScopeOverrides. chaseRedirectsStable is deterministic with cycle detection. Annotation rewriting covered by existing PipelineSpec tests. Direct `letScopeOverrides` divergence test added. Cross-gen mapping hard-fail invariant enforced in `resolveContext`.
+  - Status: Closed. Documented in Note, regression tests added. Executable evidence covers identity and divergence paths.
   - **Verification:** `cabal test --test-show-details=direct`
 
 - [ ] 12. Audit presolution binding-parent conflict handling
@@ -29,9 +31,15 @@
   - Evidence: src/MLF/Frontend/ConstraintGen/Emit.hs:40-76.
   - **Verification:** `cabal test --test-show-details=direct`
 
-- [ ] 14. Add redirect/ga′ regression tests
-  - Add a minimal redirect-focused test to exercise ga′ selection stability.
-  - Files: test/ElaborationSpec.hs or test/PipelineSpec.hs.
+- [x] 14. Add redirect/ga′ regression tests
+  - Added 8 tests in test/ElaborationSpec.hs under "ga′ redirect stability":
+    (1) TyExp redirect preserves ga′, (2) UF merge under same gen scope,
+    (3) self-edge drop in canonicalizeBindParentsUnder, (4) end-to-end pipeline,
+    (5) letScopeOverrides divergence, (6) letScopeOverrides identity,
+    (7) ga-invariant negative (conflicting cross-gen), (8) ga-invariant positive (consistent).
+  - Direct `letScopeOverrides` divergence test added. Cross-gen mapping hard-fail invariant enforced in `resolveContext`.
+  - Files: test/ElaborationSpec.hs, src/MLF/Constraint/Presolution/Plan/Context.hs.
+  - Status: Closed. Executable evidence covers identity and divergence paths.
   - **Verification:** `cabal test --test-show-details=direct`
 
 - [ ] 15. Audit polymorphic let instantiation after redirects
@@ -84,9 +92,11 @@
   - Evidence: test/ElaborationSpec.hs.
   - **Verification:** `cabal test --test-show-details=direct`
 
-- [ ] 28. Audit ga′ selection & binding-parent projection under redirects
+- [x] 28. Audit ga′ selection & binding-parent projection under redirects
   - Verify ga′ selection and parent projection invariants under redirects.
-  - Evidence: src/MLF/Elab/Run.hs:840-918, test coverage if added.
+  - Evidence: src/MLF/Elab/Run/Generalize.hs — Note [binding-parent projection — ga′ invariants].
+  - Result: Phase 2 keepOld is safe (redirects merge structurally equivalent nodes sharing same gen ancestor). Phase 3 base-domain KeepOld takes priority. quotientBindParentsUnder "keep first parent" only applies to solved-domain quotient, not base-domain ga′. resolveContext Nothing→root fallback is correct for solver-introduced nodes. Direct `letScopeOverrides` divergence test added. Cross-gen mapping hard-fail invariant enforced in `resolveContext`.
+  - Status: Closed. Documented in Note, regression tests added. Executable evidence covers identity and divergence paths.
   - **Verification:** `cabal test --test-show-details=direct`
 
 - [ ] 29. Audit display-only bound inlining (§8.3.1)

@@ -63,6 +63,7 @@ main() {
   run_anchor "Phase 3 atomic wrapping equivalence gates" "Phase 3 atomic wrapping equivalence gates" 7
   run_anchor "Phase 7 theorem obligations" "Phase 7 theorem obligations" 4
   run_anchor "Representative theorem baseline" "has type forall a. a -> a" 1
+  run_anchor "ga′ redirect stability hardening" "ga′ redirect stability" 8
 
   echo
   echo "[thesis-gate] PASS: thesis conformance anchors are green"

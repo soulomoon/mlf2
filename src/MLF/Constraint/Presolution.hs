@@ -16,6 +16,7 @@ module MLF.Constraint.Presolution (
     defaultPlanBuilder,
     PresolutionError(..),
     GaBindParents(..),
+    validateCrossGenMapping,
 
     -- * Internal types (exported for testing)
     PresolutionState(..),
@@ -76,7 +77,7 @@ import MLF.Constraint.Presolution.Core (
 import MLF.Constraint.Presolution.WitnessNorm (normalizeEdgeWitnessesM)
 import MLF.Constraint.Presolution.Validation (validateTranslatablePresolution)
 import MLF.Constraint.Presolution.Plan (buildGeneralizePlans)
-import MLF.Constraint.Presolution.Plan.Context (GaBindParents(..))
+import MLF.Constraint.Presolution.Plan.Context (GaBindParents(..), validateCrossGenMapping)
 import MLF.Util.Trace (TraceConfig)
 
 defaultPlanBuilder :: TraceConfig -> PresolutionPlanBuilder

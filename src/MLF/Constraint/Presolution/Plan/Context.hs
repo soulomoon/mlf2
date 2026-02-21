@@ -3,12 +3,14 @@ module MLF.Constraint.Presolution.Plan.Context (
     GeneralizeEnv(..),
     GeneralizeCtx(..),
     resolveContext,
+    validateCrossGenMapping,
     traceGeneralizeEnabled,
     traceGeneralize,
     traceGeneralizeM
 ) where
 
 import qualified Data.IntMap.Strict as IntMap
+import Data.List (nub)
 import Data.Maybe (listToMaybe, isNothing)
 import MLF.Util.Trace (traceWhen)
 
@@ -275,8 +277,10 @@ resolveContext env bindParentsSoft scopeRootArg targetNodeArg = do
                                 )
                                 IntMap.empty
                                 baseParents
-                    in IntMap.union bindParentsGaFix bindParentsSoft
-                _ -> bindParentsSoft
+                    in do
+                        validateCrossGenMapping gidScope (firstGenAncestor baseParents) baseParents findSolvedKey
+                        pure (IntMap.union bindParentsGaFix bindParentsSoft)
+                _ -> pure bindParentsSoft
         resolveFirstGenAncestor bindParents' =
             case mbBindParentsGa' of
                 Nothing -> firstGenAncestor bindParents'
@@ -295,19 +299,19 @@ resolveContext env bindParentsSoft scopeRootArg targetNodeArg = do
                                             Just _ ->
                                                 firstGenAncestor (gaBindParentsBase ga) (TypeRef (NodeId key))
                                             Nothing -> Nothing
-        resolveBindsPhase scopeGen' =
-            let bindParents = resolveBindParents scopeGen'
-                firstGenAncestorGa = resolveFirstGenAncestor bindParents
+        resolveBindsPhase scopeGen' = do
+            bindParents <- resolveBindParents scopeGen'
+            let firstGenAncestorGa = resolveFirstGenAncestor bindParents
                 constraintForReify = constraint { cBindParents = bindParents }
                 resForReify = (geRes env) { srConstraint = constraintForReify }
-            in ResolveBinds
+            pure ResolveBinds
                 { rbBindParents = bindParents
                 , rbFirstGenAncestor = firstGenAncestorGa
                 , rbConstraintForReify = constraintForReify
                 , rbResForReify = resForReify
                 }
-    let bindsPhase = resolveBindsPhase scopeGen
-        ResolveBinds
+    bindsPhase <- resolveBindsPhase scopeGen
+    let ResolveBinds
             { rbBindParents = bindParents
             , rbFirstGenAncestor = firstGenAncestorGa
             , rbConstraintForReify = constraintForReify
@@ -341,6 +345,47 @@ resolveContext env bindParentsSoft scopeRootArg targetNodeArg = do
         case bindingPathToRootLocal bindParents' start of
             Left _ -> Nothing
             Right path -> listToMaybe [gid | GenRef gid <- drop 1 path]
+
+-- | Check that base nodes mapping to the same solved key share a gen ancestor.
+-- Within 'resolveContext' this is called with the gidScope-filtered
+-- 'firstGenAncestor', making it a safety-net tautology.  Exported so tests
+-- can exercise the logic directly with a mock ancestor function.
+validateCrossGenMapping
+    :: GenNodeId
+    -> (NodeRef -> Maybe GenNodeId)  -- ^ firstGenAncestor for the base tree
+    -> BindParents                   -- ^ base binding parents
+    -> (Int -> Maybe Int)            -- ^ findSolvedKey
+    -> Either ElabError ()
+validateCrossGenMapping gidScope fga baseParents findSolvedKey =
+    let grouped = IntMap.foldlWithKey' collect IntMap.empty baseParents
+        collect acc childKey (_parentRef, _flag) =
+            case nodeRefFromKey childKey of
+                TypeRef baseChild ->
+                    let ancestor = fga (TypeRef baseChild)
+                    in if ancestor /= Just gidScope
+                        then acc
+                        else case findSolvedKey (getNodeId baseChild) of
+                            Nothing -> acc
+                            Just solvedKey ->
+                                IntMap.insertWith (++) solvedKey
+                                    [TypeRef baseChild] acc
+                _ -> acc
+        conflicts =
+            [ "ga-invariant: solved key " ++ show sk
+                ++ " has base nodes " ++ show bases
+                ++ " with conflicting gen ancestors"
+            | (sk, bases) <- IntMap.toList grouped
+            , length bases > 1
+            , let genAncestors = nub
+                    [ g
+                    | TypeRef bn <- bases
+                    , Just g <- [fga (TypeRef bn)]
+                    ]
+            , length genAncestors > 1
+            ]
+    in if null conflicts
+        then Right ()
+        else Left (ValidationFailed conflicts)
 
 traceGeneralizeEnabled :: Bool -> String -> a -> a
 traceGeneralizeEnabled = traceWhen

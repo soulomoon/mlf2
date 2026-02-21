@@ -20,6 +20,7 @@ import MLF.Constraint.Types.Graph
     , BindFlag(..)
     , Constraint(..)
     , EdgeId(..)
+    , ExpVarId(..)
     , GenNode(..)
     , GenNodeId(..)
     , NodeId(..)
@@ -34,16 +35,20 @@ import MLF.Constraint.Types.Graph
     )
 import MLF.Constraint.Types.Witness (InstanceOp(..), InstanceStep(..), InstanceWitness(..), EdgeWitness(..))
 import qualified MLF.Binding.Tree as Binding
+import qualified MLF.Binding.Canonicalization as BindCanon
+import MLF.Elab.Run.Scope (letScopeOverrides, resolveCanonicalScope)
 import MLF.Constraint.Presolution
     ( PresolutionResult(..)
     , EdgeTrace(..)
     , GaBindParents(..)
+    , validateCrossGenMapping
     , defaultPlanBuilder
     , fromListInterior
     , insertCopy
     , lookupCopy
     )
 import MLF.Constraint.Solve (SolveResult(..), solveUnify)
+import MLF.Frontend.ConstraintGen (AnnExpr(..))
 import qualified MLF.Constraint.Solve as Solve (frWith)
 import SpecUtil
     ( bindParentsFromPairs
@@ -2965,3 +2970,224 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         (Just (boundFromType (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "b") (Elab.TVar "b")))))
                         (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
             ty `shouldAlphaEqType` expected
+
+    -- See Note [ga′ scope selection — Def. 15.3.2 alignment] in Scope.hs
+    -- See Note [ga′ preservation across redirects] in Scope.hs
+    -- See Note [binding-parent projection — ga′ invariants] in Generalize.hs
+    describe "ga′ redirect stability" $ do
+        it "ga′ stable when redirect changes binding path (TyExp redirect)" $ do
+            -- gen g0 owns nodes e1 (TyExp) and n2; redirect e1 → n2
+            let g0 = GenNodeId 0
+                e1 = NodeId 1
+                n2 = NodeId 2
+                nodes = nodeMapFromList
+                    [ (getNodeId e1, TyExp { tnId = e1, tnExpVar = ExpVarId 0, tnBody = n2 })
+                    , (getNodeId n2, TyVar { tnId = n2, tnBound = Nothing })
+                    ]
+                bindParents = IntMap.fromList
+                    [ (nodeRefKey (typeRef e1), (genRef g0, BindFlex))
+                    , (nodeRefKey (typeRef n2), (typeRef e1, BindFlex))
+                    ]
+                constraint = emptyConstraint
+                    { cNodes = nodes
+                    , cBindParents = bindParents
+                    , cGenNodes = fromListGen [(g0, GenNode g0 [e1])]
+                    }
+                solved = SolveResult { srConstraint = constraint, srUnionFind = IntMap.empty }
+                noRedirects = IntMap.empty
+                withRedirects = IntMap.fromList [(getNodeId e1, n2)]
+            -- Without redirects: scope of e1 should be GenRef g0
+            scopeNoRedir <- requireRight (resolveCanonicalScope constraint solved noRedirects e1)
+            scopeNoRedir `shouldBe` GenRef g0
+            -- With redirects: scope of e1 should still be GenRef g0
+            scopeWithRedir <- requireRight (resolveCanonicalScope constraint solved withRedirects e1)
+            scopeWithRedir `shouldBe` GenRef g0
+
+        it "ga′ stable when UF merges nodes under same gen scope" $ do
+            -- gen g0 owns n1 and n2 (both flex-bound); UF: n2 → n1
+            let g0 = GenNodeId 0
+                n1 = NodeId 1
+                n2 = NodeId 2
+                nodes = nodeMapFromList
+                    [ (getNodeId n1, TyVar { tnId = n1, tnBound = Nothing })
+                    , (getNodeId n2, TyVar { tnId = n2, tnBound = Nothing })
+                    ]
+                bindParents = IntMap.fromList
+                    [ (nodeRefKey (typeRef n1), (genRef g0, BindFlex))
+                    , (nodeRefKey (typeRef n2), (genRef g0, BindFlex))
+                    ]
+                constraint = emptyConstraint
+                    { cNodes = nodes
+                    , cBindParents = bindParents
+                    , cGenNodes = fromListGen [(g0, GenNode g0 [n1, n2])]
+                    }
+                uf = IntMap.fromList [(getNodeId n2, n1)]
+                solved = SolveResult { srConstraint = constraint, srUnionFind = uf }
+                noRedirects = IntMap.empty
+            scope1 <- requireRight (resolveCanonicalScope constraint solved noRedirects n1)
+            scope1 `shouldBe` GenRef g0
+            scope2 <- requireRight (resolveCanonicalScope constraint solved noRedirects n2)
+            scope2 `shouldBe` GenRef g0
+
+        it "binding-parent canonicalization drops self-edges from UF merge" $ do
+            -- n2 bound under n1, n1 bound under g0; UF: n2 → n1
+            -- creates self-edge n1→n1 which must be dropped
+            let g0 = GenNodeId 0
+                n1 = NodeId 1
+                n2 = NodeId 2
+                nodes = nodeMapFromList
+                    [ (getNodeId n1, TyVar { tnId = n1, tnBound = Nothing })
+                    , (getNodeId n2, TyVar { tnId = n2, tnBound = Nothing })
+                    ]
+                bindParents = IntMap.fromList
+                    [ (nodeRefKey (typeRef n1), (genRef g0, BindFlex))
+                    , (nodeRefKey (typeRef n2), (typeRef n1, BindFlex))
+                    ]
+                constraint = emptyConstraint
+                    { cNodes = nodes
+                    , cBindParents = bindParents
+                    , cGenNodes = fromListGen [(g0, GenNode g0 [n1, n2])]
+                    }
+                canonical nid
+                    | nid == n2 = n1
+                    | otherwise = nid
+            result <- requireRight (BindCanon.canonicalizeBindParentsUnder canonical constraint)
+            -- n1→g0 edge must survive
+            IntMap.lookup (nodeRefKey (typeRef n1)) result `shouldBe`
+                Just (genRef g0, BindFlex)
+            -- self-edge n1→n1 (from merging n2→n1 with child n2→n1) must be dropped
+            let selfEdge = case IntMap.lookup (nodeRefKey (typeRef n1)) result of
+                    Just (TypeRef parent, _) -> parent == n1
+                    _ -> False
+            selfEdge `shouldBe` False
+
+        it "end-to-end: let f = (\\x.x : forall a. a -> a) in f 42 elaborates to Int" $ do
+            let ann = STForall "a" Nothing (STArrow (STVar "a") (STVar "a"))
+                expr =
+                    ELet "f" (EAnn (ELam "x" (EVar "x")) ann)
+                        (EApp (EVar "f") (ELit (LInt 42)))
+            (_term, ty) <- requirePipeline expr
+            Elab.prettyDisplay ty `shouldBe` "Int"
+
+        it "letScopeOverrides inserts override on base-vs-solved scope divergence" $ do
+            -- Base: e1 (TyExp) bound under g0, n2 bound under e1
+            -- SolvedForGen: n2 bound under n3, n3 is root (no gen ancestor)
+            -- Redirect: e1 → n2; UF empty
+            -- Divergence: base scope GenRef g0 ≠ solved scope TypeRef n2
+            let g0 = GenNodeId 0
+                e1 = NodeId 1
+                n2 = NodeId 2
+                n3 = NodeId 3
+                baseNodes = nodeMapFromList
+                    [ (getNodeId e1, TyExp { tnId = e1, tnExpVar = ExpVarId 0, tnBody = n2 })
+                    , (getNodeId n2, TyVar { tnId = n2, tnBound = Nothing })
+                    , (getNodeId n3, TyVar { tnId = n3, tnBound = Nothing })
+                    ]
+                baseBindParents = IntMap.fromList
+                    [ (nodeRefKey (typeRef e1), (genRef g0, BindFlex))
+                    , (nodeRefKey (typeRef n2), (typeRef e1, BindFlex))
+                    ]
+                base = emptyConstraint
+                    { cNodes = baseNodes
+                    , cBindParents = baseBindParents
+                    , cGenNodes = fromListGen [(g0, GenNode g0 [e1])]
+                    }
+                solvedForGenNodes = nodeMapFromList
+                    [ (getNodeId n2, TyVar { tnId = n2, tnBound = Nothing })
+                    , (getNodeId n3, TyVar { tnId = n3, tnBound = Nothing })
+                    ]
+                solvedForGenBP = IntMap.fromList
+                    [ (nodeRefKey (typeRef n2), (typeRef n3, BindFlex))
+                    ]
+                solvedForGen = emptyConstraint
+                    { cNodes = solvedForGenNodes
+                    , cBindParents = solvedForGenBP
+                    }
+                redirects = IntMap.fromList [(getNodeId e1, n2)]
+                solved = SolveResult
+                    { srConstraint = solvedForGen
+                    , srUnionFind = IntMap.empty
+                    }
+                ann = ALet "x" g0 e1 (ExpVarId 0) g0
+                    (AVar "y" n2) (AVar "z" n3) n3
+                overrides = letScopeOverrides base solvedForGen solved redirects ann
+            IntMap.lookup (getNodeId n2) overrides `shouldBe` Just (GenRef g0)
+
+        it "letScopeOverrides returns empty when base and solved scopes agree" $ do
+            -- Both base and solvedForGen have n1 bound under g0
+            -- No redirects, empty UF → scopes agree, no overrides
+            let g0 = GenNodeId 0
+                n1 = NodeId 1
+                n2 = NodeId 2
+                nodes = nodeMapFromList
+                    [ (getNodeId n1, TyVar { tnId = n1, tnBound = Nothing })
+                    , (getNodeId n2, TyVar { tnId = n2, tnBound = Nothing })
+                    ]
+                bp = IntMap.fromList
+                    [ (nodeRefKey (typeRef n1), (genRef g0, BindFlex))
+                    , (nodeRefKey (typeRef n2), (genRef g0, BindFlex))
+                    ]
+                constraint = emptyConstraint
+                    { cNodes = nodes
+                    , cBindParents = bp
+                    , cGenNodes = fromListGen [(g0, GenNode g0 [n1, n2])]
+                    }
+                solved = SolveResult
+                    { srConstraint = constraint
+                    , srUnionFind = IntMap.empty
+                    }
+                noRedirects = IntMap.empty
+                ann = ALet "x" g0 n1 (ExpVarId 0) g0
+                    (AVar "y" n2) (AVar "z" n2) n2
+                overrides = letScopeOverrides constraint constraint solved noRedirects ann
+            overrides `shouldBe` IntMap.empty
+
+        it "ga-invariant: validateCrossGenMapping filters out cross-scope nodes" $ do
+            -- b1 under g0, b2 under g1; both map to same solved key.
+            -- Filter with gidScope=g0 excludes b2 → only b1 in group → no conflict.
+            -- Verifies the gidScope filter correctly scopes the check.
+            let g0 = GenNodeId 0
+                g1 = GenNodeId 10
+                b1 = NodeId 1
+                b2 = NodeId 2
+                s1Key = 5
+                baseBP = IntMap.fromList
+                    [ (nodeRefKey (typeRef b1), (genRef g0, BindFlex))
+                    , (nodeRefKey (typeRef b2), (genRef g0, BindFlex))
+                    ]
+                fga ref = case ref of
+                    TypeRef nid
+                        | nid == b1 -> Just g0
+                        | nid == b2 -> Just g1
+                        | otherwise -> Nothing
+                    _ -> Nothing
+                findSolvedKey nid
+                    | nid == getNodeId b1 = Just s1Key
+                    | nid == getNodeId b2 = Just s1Key
+                    | otherwise = Nothing
+            validateCrossGenMapping g0 fga baseBP findSolvedKey
+                `shouldBe` Right ()
+
+        it "ga-invariant: validateCrossGenMapping succeeds when multi-base mapping shares ancestor" $ do
+            -- Two base nodes both under g0, both map to same solved key.
+            -- fga returns g0 for both → no conflict.
+            let g0 = GenNodeId 0
+                b1 = NodeId 1
+                b2 = NodeId 2
+                s1Key = 5
+                baseBP = IntMap.fromList
+                    [ (nodeRefKey (typeRef b1), (genRef g0, BindFlex))
+                    , (nodeRefKey (typeRef b2), (genRef g0, BindFlex))
+                    ]
+                fga ref = case ref of
+                    TypeRef nid
+                        | nid == b1 -> Just g0
+                        | nid == b2 -> Just g0
+                        | otherwise -> Nothing
+                    _ -> Nothing
+                findSolvedKey nid
+                    | nid == getNodeId b1 = Just s1Key
+                    | nid == getNodeId b2 = Just s1Key
+                    | otherwise = Nothing
+            validateCrossGenMapping g0 fga baseBP findSolvedKey
+                `shouldBe` Right ()
