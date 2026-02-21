@@ -4,7 +4,7 @@
 require 'optparse'
 require 'yaml'
 
-ROOT = '/Volumes/src/mlf4'
+ROOT = File.expand_path('..', __dir__)
 LEDGER_PATH = File.join(ROOT, 'docs/thesis-obligations.yaml')
 OUTPUT_PATH = File.join(ROOT, 'docs/thesis-obligations.md')
 
@@ -40,7 +40,7 @@ def validate_schema!(doc)
   fail_validation('missing `obligations` list') unless obligations.is_a?(Array)
 
   required_fields = %w[
-    id chapter section figure_or_definition thesis_rule_label judgment_or_equation code_anchors test_anchor status
+    id chapter section figure_or_definition thesis_rule_label judgment_or_equation code_anchors test_anchor status supports_claims
   ]
   required_test_anchor_fields = %w[matcher file rationale]
 
@@ -82,16 +82,18 @@ def render_markdown(obligations)
   by_chapter.keys.sort.each do |chapter|
     lines << "## Chapter #{chapter}"
     lines << ''
-    lines << '| ID | Section | Figure/Def | Rule | Test Matcher | Test File |'
-    lines << '|---|---|---|---|---|---|'
+    lines << '| ID | Section | Figure/Def | Rule | Test Matcher | Test File | Claims |'
+    lines << '|---|---|---|---|---|---|---|'
     by_chapter[chapter].sort_by { |o| [o['section'].to_s, o['id'].to_s] }.each do |o|
+      claims = (o['supports_claims'] || []).map { |c| "`#{c}`" }.join(', ')
       lines << [
         "| `#{o['id']}`",
         "`#{o['section']}`",
         "`#{o['figure_or_definition']}`",
         o['thesis_rule_label'],
         "`#{o.dig('test_anchor', 'matcher')}`",
-        "`#{o.dig('test_anchor', 'file')}` |"
+        "`#{o.dig('test_anchor', 'file')}`",
+        "#{claims} |"
       ].join(' | ')
     end
     lines << ''

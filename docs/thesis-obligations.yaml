@@ -39,6 +39,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/TypeCheckSpec.hs"
     rationale: Grouped environment well-formedness proxy anchors in typechecker tests.
   status: anchored
+  supports_claims: [CLM-TYPING-RULES]
 - id: O14-WF-TVAR
   chapter: 14
   section: '14.2'
@@ -53,6 +54,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/TypeCheckSpec.hs"
     rationale: Grouped environment well-formedness proxy anchors in typechecker tests.
   status: anchored
+  supports_claims: [CLM-TYPING-RULES]
 - id: O14-WF-VAR
   chapter: 14
   section: '14.2'
@@ -67,6 +69,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/TypeCheckSpec.hs"
     rationale: Grouped environment well-formedness proxy anchors in typechecker tests.
   status: anchored
+  supports_claims: [CLM-TYPING-RULES]
 - id: O14-INST-REFLEX
   chapter: 14
   section: 14.2.2
@@ -81,6 +84,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/TypeCheckSpec.hs"
     rationale: Grouped instantiation-rule anchor test exercises the checker path.
   status: anchored
+  supports_claims: [CLM-INST-CORRECTNESS]
 - id: O14-INST-TRANS
   chapter: 14
   section: 14.2.2
@@ -95,6 +99,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/TypeCheckSpec.hs"
     rationale: Grouped instantiation-rule anchor test exercises the checker path.
   status: anchored
+  supports_claims: [CLM-INST-CORRECTNESS]
 - id: O14-INST-BOT
   chapter: 14
   section: 14.2.2
@@ -109,6 +114,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/TypeCheckSpec.hs"
     rationale: Grouped instantiation-rule anchor test exercises the checker path.
   status: anchored
+  supports_claims: [CLM-INST-CORRECTNESS]
 - id: O14-INST-HYP
   chapter: 14
   section: 14.2.2
@@ -123,6 +129,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/TypeCheckSpec.hs"
     rationale: Grouped instantiation-rule anchor test exercises the checker path.
   status: anchored
+  supports_claims: [CLM-INST-CORRECTNESS]
 - id: O14-INST-INNER
   chapter: 14
   section: 14.2.2
@@ -137,6 +144,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/TypeCheckSpec.hs"
     rationale: Grouped instantiation-rule anchor test exercises the checker path.
   status: anchored
+  supports_claims: [CLM-INST-CORRECTNESS]
 - id: O14-INST-OUTER
   chapter: 14
   section: 14.2.2
@@ -151,6 +159,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/TypeCheckSpec.hs"
     rationale: Grouped instantiation-rule anchor test exercises the checker path.
   status: anchored
+  supports_claims: [CLM-INST-CORRECTNESS]
 - id: O14-INST-QUANT-ELIM
   chapter: 14
   section: 14.2.2
@@ -165,6 +174,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/TypeCheckSpec.hs"
     rationale: Grouped instantiation-rule anchor test exercises the checker path.
   status: anchored
+  supports_claims: [CLM-INST-CORRECTNESS]
 - id: O14-INST-QUANT-INTRO
   chapter: 14
   section: 14.2.2
@@ -179,6 +189,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/TypeCheckSpec.hs"
     rationale: Grouped instantiation-rule anchor test exercises the checker path.
   status: anchored
+  supports_claims: [CLM-INST-CORRECTNESS]
 - id: O14-T-VAR
   chapter: 14
   section: 14.2.3
@@ -192,6 +203,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/TypeCheckSpec.hs"
     rationale: Grouped typing-rule anchor test validates all Figure 14.2.8 cases.
   status: anchored
+  supports_claims: [CLM-TYPING-RULES]
 - id: O14-T-ABS
   chapter: 14
   section: 14.2.3
@@ -205,6 +217,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/TypeCheckSpec.hs"
     rationale: Grouped typing-rule anchor test validates all Figure 14.2.8 cases.
   status: anchored
+  supports_claims: [CLM-TYPING-RULES]
 - id: O14-T-APP
   chapter: 14
   section: 14.2.3
@@ -218,6 +231,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/TypeCheckSpec.hs"
     rationale: Grouped typing-rule anchor test validates all Figure 14.2.8 cases.
   status: anchored
+  supports_claims: [CLM-TYPING-RULES]
 - id: O14-T-TABS
   chapter: 14
   section: 14.2.3
@@ -231,6 +245,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/TypeCheckSpec.hs"
     rationale: Grouped typing-rule anchor test validates all Figure 14.2.8 cases.
   status: anchored
+  supports_claims: [CLM-TYPING-RULES]
 - id: O14-T-TAPP
   chapter: 14
   section: 14.2.3
@@ -244,6 +259,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/TypeCheckSpec.hs"
     rationale: Grouped typing-rule anchor test validates all Figure 14.2.8 cases.
   status: anchored
+  supports_claims: [CLM-TYPING-RULES]
 - id: O14-T-LET
   chapter: 14
   section: 14.2.3
@@ -257,6 +273,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/TypeCheckSpec.hs"
     rationale: Grouped typing-rule anchor test validates all Figure 14.2.8 cases.
   status: anchored
+  supports_claims: [CLM-TYPING-RULES]
 - id: O14-RED-BETA
   chapter: 14
   section: '14.3'
@@ -272,6 +289,7 @@ obligations:
     rationale: Grouped reduction anchor test covers expression + type-reduction steps
       and erasure proxy.
   status: anchored
+  supports_claims: [CLM-PRESERVATION, CLM-REDUCTION-RULES]
 - id: O14-RED-BETALET
   chapter: 14
   section: '14.3'
@@ -287,6 +305,7 @@ obligations:
     rationale: Grouped reduction anchor test covers expression + type-reduction steps
       and erasure proxy.
   status: anchored
+  supports_claims: [CLM-PRESERVATION, CLM-REDUCTION-RULES]
 - id: O14-RED-REFLEX
   chapter: 14
   section: '14.3'
@@ -302,6 +321,7 @@ obligations:
     rationale: Grouped reduction anchor test covers expression + type-reduction steps
       and erasure proxy.
   status: anchored
+  supports_claims: [CLM-PRESERVATION, CLM-REDUCTION-RULES]
 - id: O14-RED-TRANS
   chapter: 14
   section: '14.3'
@@ -317,6 +337,7 @@ obligations:
     rationale: Grouped reduction anchor test covers expression + type-reduction steps
       and erasure proxy.
   status: anchored
+  supports_claims: [CLM-PRESERVATION, CLM-REDUCTION-RULES]
 - id: O14-RED-QUANT-INTRO
   chapter: 14
   section: '14.3'
@@ -332,6 +353,7 @@ obligations:
     rationale: Grouped reduction anchor test covers expression + type-reduction steps
       and erasure proxy.
   status: anchored
+  supports_claims: [CLM-PRESERVATION, CLM-REDUCTION-RULES]
 - id: O14-RED-QUANT-ELIM
   chapter: 14
   section: '14.3'
@@ -347,6 +369,7 @@ obligations:
     rationale: Grouped reduction anchor test covers expression + type-reduction steps
       and erasure proxy.
   status: anchored
+  supports_claims: [CLM-PRESERVATION, CLM-REDUCTION-RULES]
 - id: O14-RED-INNER
   chapter: 14
   section: '14.3'
@@ -362,6 +385,7 @@ obligations:
     rationale: Grouped reduction anchor test covers expression + type-reduction steps
       and erasure proxy.
   status: anchored
+  supports_claims: [CLM-PRESERVATION, CLM-REDUCTION-RULES]
 - id: O14-RED-OUTER
   chapter: 14
   section: '14.3'
@@ -377,6 +401,7 @@ obligations:
     rationale: Grouped reduction anchor test covers expression + type-reduction steps
       and erasure proxy.
   status: anchored
+  supports_claims: [CLM-PRESERVATION, CLM-REDUCTION-RULES]
 - id: O14-RED-CONTEXT
   chapter: 14
   section: '14.3'
@@ -392,6 +417,7 @@ obligations:
     rationale: Grouped reduction anchor test covers expression + type-reduction steps
       and erasure proxy.
   status: anchored
+  supports_claims: [CLM-PRESERVATION, CLM-REDUCTION-RULES]
 - id: O14-APPLY-N
   chapter: 14
   section: 14.2.2.2
@@ -405,6 +431,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
     rationale: applyInstantiation semantics anchors for Figure 14.2.7 equations.
   status: anchored
+  supports_claims: [CLM-INST-APPLICATION]
 - id: O14-APPLY-O
   chapter: 14
   section: 14.2.2.2
@@ -418,6 +445,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
     rationale: applyInstantiation semantics anchors for Figure 14.2.7 equations.
   status: anchored
+  supports_claims: [CLM-INST-APPLICATION]
 - id: O14-APPLY-SEQ
   chapter: 14
   section: 14.2.2.2
@@ -431,6 +459,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
     rationale: applyInstantiation semantics anchors for Figure 14.2.7 equations.
   status: anchored
+  supports_claims: [CLM-INST-APPLICATION]
 - id: O14-APPLY-INNER
   chapter: 14
   section: 14.2.2.2
@@ -444,6 +473,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
     rationale: applyInstantiation semantics anchors for Figure 14.2.7 equations.
   status: anchored
+  supports_claims: [CLM-INST-APPLICATION]
 - id: O14-APPLY-OUTER
   chapter: 14
   section: 14.2.2.2
@@ -457,6 +487,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
     rationale: applyInstantiation semantics anchors for Figure 14.2.7 equations.
   status: anchored
+  supports_claims: [CLM-INST-APPLICATION]
 - id: O14-APPLY-HYP
   chapter: 14
   section: 14.2.2.2
@@ -470,6 +501,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
     rationale: applyInstantiation semantics anchors for Figure 14.2.7 equations.
   status: anchored
+  supports_claims: [CLM-INST-APPLICATION]
 - id: O14-APPLY-BOT
   chapter: 14
   section: 14.2.2.2
@@ -483,6 +515,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
     rationale: applyInstantiation semantics anchors for Figure 14.2.7 equations.
   status: anchored
+  supports_claims: [CLM-INST-APPLICATION]
 - id: O14-APPLY-ID
   chapter: 14
   section: 14.2.2.2
@@ -496,6 +529,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
     rationale: applyInstantiation semantics anchors for Figure 14.2.7 equations.
   status: anchored
+  supports_claims: [CLM-INST-APPLICATION]
 - id: O15-TRANS-NO-INERT-LOCKED
   chapter: 15
   section: 15.2.7
@@ -509,6 +543,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/Presolution/EnforcementSpec.hs"
     rationale: Explicit validation + rigidification anchors for translatability conditions.
   status: anchored
+  supports_claims: [CLM-TRANSLATABLE-PRESOLUTION]
 - id: O15-TRANS-SCHEME-ROOT-RIGID
   chapter: 15
   section: 15.2.7
@@ -522,6 +557,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/Presolution/EnforcementSpec.hs"
     rationale: Explicit validation + rigidification anchors for translatability conditions.
   status: anchored
+  supports_claims: [CLM-TRANSLATABLE-PRESOLUTION]
 - id: O15-TRANS-ARROW-RIGID
   chapter: 15
   section: 15.2.7
@@ -535,6 +571,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/Presolution/EnforcementSpec.hs"
     rationale: Explicit validation + rigidification anchors for translatability conditions.
   status: anchored
+  supports_claims: [CLM-TRANSLATABLE-PRESOLUTION]
 - id: O15-TRANS-NON-INTERIOR-RIGID
   chapter: 15
   section: 15.2.7
@@ -548,6 +585,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/Presolution/EnforcementSpec.hs"
     rationale: Explicit validation + rigidification anchors for translatability conditions.
   status: anchored
+  supports_claims: [CLM-TRANSLATABLE-PRESOLUTION]
 - id: O15-REORDER-REQUIRED
   chapter: 15
   section: 15.3.4
@@ -563,6 +601,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
     rationale: Direct Φ/Σ/context anchors in elaboration tests.
   status: anchored
+  supports_claims: [CLM-SIGMA-REORDER]
 - id: O15-REORDER-IDENTITY
   chapter: 15
   section: 15.3.4
@@ -578,6 +617,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
     rationale: Direct Φ/Σ/context anchors in elaboration tests.
   status: anchored
+  supports_claims: [CLM-SIGMA-REORDER]
 - id: O15-CONTEXT-FIND
   chapter: 15
   section: 15.3.4
@@ -593,6 +633,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
     rationale: Direct Φ/Σ/context anchors in elaboration tests.
   status: anchored
+  supports_claims: [CLM-PHI-CORRECTNESS]
 - id: O15-CONTEXT-REJECT
   chapter: 15
   section: 15.3.4
@@ -608,6 +649,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
     rationale: Direct Φ/Σ/context anchors in elaboration tests.
   status: anchored
+  supports_claims: [CLM-PHI-CORRECTNESS]
 - id: O15-EDGE-TRANSLATION
   chapter: 15
   section: 15.3.5
@@ -623,6 +665,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
     rationale: Direct Φ/Σ/context anchors in elaboration tests.
   status: anchored
+  supports_claims: [CLM-PHI-CORRECTNESS]
 - id: O15-ELAB-LAMBDA-VAR
   chapter: 15
   section: 15.3.6
@@ -636,6 +679,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
     rationale: Surface elaboration anchors for Figure 15.3.5 case split.
   status: anchored
+  supports_claims: [CLM-ELABORATION-CORRECTNESS]
 - id: O15-ELAB-LET-VAR
   chapter: 15
   section: 15.3.6
@@ -649,6 +693,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
     rationale: Surface elaboration anchors for Figure 15.3.5 case split.
   status: anchored
+  supports_claims: [CLM-ELABORATION-CORRECTNESS]
 - id: O15-ELAB-ABS
   chapter: 15
   section: 15.3.6
@@ -662,6 +707,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
     rationale: Surface elaboration anchors for Figure 15.3.5 case split.
   status: anchored
+  supports_claims: [CLM-ELABORATION-CORRECTNESS]
 - id: O15-ELAB-APP
   chapter: 15
   section: 15.3.6
@@ -675,6 +721,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
     rationale: Surface elaboration anchors for Figure 15.3.5 case split.
   status: anchored
+  supports_claims: [CLM-ELABORATION-CORRECTNESS]
 - id: O15-ELAB-LET
   chapter: 15
   section: 15.3.6
@@ -688,6 +735,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
     rationale: Surface elaboration anchors for Figure 15.3.5 case split.
   status: anchored
+  supports_claims: [CLM-ELABORATION-CORRECTNESS]
 - id: O15-TR-SEQ-EMPTY
   chapter: 15
   section: 15.3.5
@@ -703,6 +751,7 @@ obligations:
     rationale: Mapped to row-labeled R-* witness/merge tests and Φ/Ω rigid/sequence
       regressions.
   status: anchored
+  supports_claims: [CLM-PHI-CORRECTNESS, CLM-WITNESS-TRANSLATION]
 - id: O15-TR-SEQ-CONS
   chapter: 15
   section: 15.3.5
@@ -718,6 +767,7 @@ obligations:
     rationale: Mapped to row-labeled R-* witness/merge tests and Φ/Ω rigid/sequence
       regressions.
   status: anchored
+  supports_claims: [CLM-PHI-CORRECTNESS, CLM-WITNESS-TRANSLATION]
 - id: O15-TR-RIGID-RAISE
   chapter: 15
   section: 15.3.5
@@ -733,6 +783,7 @@ obligations:
     rationale: Mapped to row-labeled R-* witness/merge tests and Φ/Ω rigid/sequence
       regressions.
   status: anchored
+  supports_claims: [CLM-PHI-CORRECTNESS, CLM-WITNESS-TRANSLATION]
 - id: O15-TR-RIGID-MERGE
   chapter: 15
   section: 15.3.5
@@ -748,6 +799,7 @@ obligations:
     rationale: Mapped to row-labeled R-* witness/merge tests and Φ/Ω rigid/sequence
       regressions.
   status: anchored
+  supports_claims: [CLM-PHI-CORRECTNESS, CLM-WITNESS-TRANSLATION]
 - id: O15-TR-RIGID-RAISEMERGE
   chapter: 15
   section: 15.3.5
@@ -763,6 +815,7 @@ obligations:
     rationale: Mapped to row-labeled R-* witness/merge tests and Φ/Ω rigid/sequence
       regressions.
   status: anchored
+  supports_claims: [CLM-PHI-CORRECTNESS, CLM-WITNESS-TRANSLATION]
 - id: O15-TR-ROOT-GRAFT
   chapter: 15
   section: 15.3.5
@@ -778,6 +831,7 @@ obligations:
     rationale: Mapped to row-labeled R-* witness/merge tests and Φ/Ω rigid/sequence
       regressions.
   status: anchored
+  supports_claims: [CLM-PHI-CORRECTNESS, CLM-WITNESS-TRANSLATION]
 - id: O15-TR-ROOT-RAISEMERGE
   chapter: 15
   section: 15.3.5
@@ -793,6 +847,7 @@ obligations:
     rationale: Mapped to row-labeled R-* witness/merge tests and Φ/Ω rigid/sequence
       regressions.
   status: anchored
+  supports_claims: [CLM-PHI-CORRECTNESS, CLM-WITNESS-TRANSLATION]
 - id: O15-TR-ROOT-WEAKEN
   chapter: 15
   section: 15.3.5
@@ -808,6 +863,7 @@ obligations:
     rationale: Mapped to row-labeled R-* witness/merge tests and Φ/Ω rigid/sequence
       regressions.
   status: anchored
+  supports_claims: [CLM-PHI-CORRECTNESS, CLM-WITNESS-TRANSLATION]
 - id: O15-TR-NODE-GRAFT
   chapter: 15
   section: 15.3.5
@@ -823,6 +879,7 @@ obligations:
     rationale: Mapped to row-labeled R-* witness/merge tests and Φ/Ω rigid/sequence
       regressions.
   status: anchored
+  supports_claims: [CLM-PHI-CORRECTNESS, CLM-WITNESS-TRANSLATION]
 - id: O15-TR-NODE-MERGE
   chapter: 15
   section: 15.3.5
@@ -838,6 +895,7 @@ obligations:
     rationale: Mapped to row-labeled R-* witness/merge tests and Φ/Ω rigid/sequence
       regressions.
   status: anchored
+  supports_claims: [CLM-PHI-CORRECTNESS, CLM-WITNESS-TRANSLATION]
 - id: O15-TR-NODE-RAISEMERGE
   chapter: 15
   section: 15.3.5
@@ -853,6 +911,7 @@ obligations:
     rationale: Mapped to row-labeled R-* witness/merge tests and Φ/Ω rigid/sequence
       regressions.
   status: anchored
+  supports_claims: [CLM-PHI-CORRECTNESS, CLM-WITNESS-TRANSLATION]
 - id: O15-TR-NODE-WEAKEN
   chapter: 15
   section: 15.3.5
@@ -868,6 +927,7 @@ obligations:
     rationale: Mapped to row-labeled R-* witness/merge tests and Φ/Ω rigid/sequence
       regressions.
   status: anchored
+  supports_claims: [CLM-PHI-CORRECTNESS, CLM-WITNESS-TRANSLATION]
 - id: O15-TR-NODE-RAISE
   chapter: 15
   section: 15.3.5
@@ -883,6 +943,7 @@ obligations:
     rationale: Mapped to row-labeled R-* witness/merge tests and Φ/Ω rigid/sequence
       regressions.
   status: anchored
+  supports_claims: [CLM-PHI-CORRECTNESS, CLM-WITNESS-TRANSLATION]
 # ── Chapter 4: Binding Trees & Graph Operations ──
 - id: O04-BIND-FLEX-CHILDREN
   chapter: 4
@@ -897,6 +958,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/BindingSpec.hs"
     rationale: Exercises boundFlexChildren on a constraint with mixed flex/rigid bindings.
   status: anchored
+  supports_claims: [CLM-CGEN-SHAPE]
 - id: O04-BIND-INTERIOR
   chapter: 4
   section: 4.2
@@ -910,6 +972,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/BindingSpec.hs"
     rationale: Exercises interiorOf on a rooted constraint and checks membership.
   status: anchored
+  supports_claims: [CLM-CGEN-SHAPE]
 - id: O04-BIND-ORDER
   chapter: 4
   section: 4.2
@@ -923,6 +986,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/BindingSpec.hs"
     rationale: Exercises orderedBinders and checks the returned list is non-empty.
   status: anchored
+  supports_claims: [CLM-CGEN-SHAPE]
 - id: O04-OP-WEAKEN
   chapter: 4
   section: 4.4
@@ -936,6 +1000,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/GraphOpsSpec.hs"
     rationale: Exercises applyWeaken and verifies the binding flag changes.
   status: anchored
+  supports_claims: [CLM-CGEN-SHAPE]
 - id: O04-OP-RAISE-STEP
   chapter: 4
   section: 4.4
@@ -949,6 +1014,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/GraphOpsSpec.hs"
     rationale: Exercises applyRaiseStep and verifies the node moves up one level.
   status: anchored
+  supports_claims: [CLM-CGEN-SHAPE]
 - id: O04-OP-RAISE-TO
   chapter: 4
   section: 4.4
@@ -962,6 +1028,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/GraphOpsSpec.hs"
     rationale: Exercises applyRaiseTo and verifies the node reaches the target.
   status: anchored
+  supports_claims: [CLM-CGEN-SHAPE]
 # ── Chapter 5: Inert Node Classification ──
 - id: O05-INERT-NODES
   chapter: 5
@@ -976,6 +1043,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/InertSpec.hs"
     rationale: Exercises inertNodes on a monomorphic constraint and checks non-empty.
   status: anchored
+  supports_claims: [CLM-TRANSLATABLE-PRESOLUTION]
 - id: O05-INERT-LOCKED
   chapter: 5
   section: 5.2
@@ -989,6 +1057,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/InertSpec.hs"
     rationale: Exercises inertLockedNodes under rigid ancestor and checks membership.
   status: anchored
+  supports_claims: [CLM-TRANSLATABLE-PRESOLUTION]
 - id: O05-WEAKEN-INERT
   chapter: 5
   section: 5.3
@@ -1002,6 +1071,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/InertSpec.hs"
     rationale: Exercises weakenInertLockedNodes and verifies empty inert-locked set.
   status: anchored
+  supports_claims: [CLM-TRANSLATABLE-PRESOLUTION]
 # ── Chapter 7: Unification ──
 - id: O07-UNIF-CORE
   chapter: 7
@@ -1016,6 +1086,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/NormalizeSpec.hs"
     rationale: Exercises unification through normalize pipeline on arrow constraints.
   status: anchored
+  supports_claims: [CLM-UNIFICATION]
 - id: O07-UNIF-PRESOL
   chapter: 7
   section: 7.3
@@ -1029,6 +1100,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/SolveSpec.hs"
     rationale: Exercises unifyAcyclic through the solve pipeline.
   status: anchored
+  supports_claims: [CLM-UNIFICATION]
 - id: O07-REBIND
   chapter: 7
   section: 7.3
@@ -1042,6 +1114,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/BindingSpec.hs"
     rationale: Exercises harmonizeBindParentsWithTrace on a constraint with trace.
   status: anchored
+  supports_claims: [CLM-UNIFICATION]
 # ── Chapter 8: Reification ──
 - id: O08-REIFY-TYPE
   chapter: 8
@@ -1056,6 +1129,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/PipelineSpec.hs"
     rationale: Exercises reifyType through the pipeline on solved constraints.
   status: anchored
+  supports_claims: [CLM-ELABORATION-CORRECTNESS]
 - id: O08-REIFY-NAMES
   chapter: 8
   section: 8.2
@@ -1069,6 +1143,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/PipelineSpec.hs"
     rationale: Exercises reifyTypeWithNames through the pipeline.
   status: anchored
+  supports_claims: [CLM-ELABORATION-CORRECTNESS]
 # ── Chapter 9: Constraint Generation ──
 - id: O09-CGEN-ROOT
   chapter: 9
@@ -1083,6 +1158,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/ConstraintGenSpec.hs"
     rationale: Exercises buildRootExpr and checks root node is present.
   status: anchored
+  supports_claims: [CLM-CGEN-SHAPE, CLM-CGEN-SCOPING]
 - id: O09-CGEN-EXPR
   chapter: 9
   section: 9.4
@@ -1096,6 +1172,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/ConstraintGenSpec.hs"
     rationale: Exercises buildExpr on lambda and application expressions.
   status: anchored
+  supports_claims: [CLM-CGEN-SHAPE, CLM-CGEN-SCOPING]
 # ── Chapter 10: Presolutions & Expansion ──
 - id: O10-EXP-DECIDE
   chapter: 10
@@ -1110,6 +1187,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/Presolution/ExpansionSpec.hs"
     rationale: Exercises decideMinimalExpansion on identity and instantiate cases.
   status: anchored
+  supports_claims: [CLM-EXPANSION-MINIMALITY, CLM-PRESOLUTION-PRINCIPALITY]
 - id: O10-EXP-APPLY
   chapter: 10
   section: 10.1
@@ -1123,6 +1201,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/Presolution/ExpansionSpec.hs"
     rationale: Exercises applyExpansion and checks the constraint is updated.
   status: anchored
+  supports_claims: [CLM-EXPANSION-MINIMALITY, CLM-PRESOLUTION-PRINCIPALITY]
 - id: O10-PROP-SOLVE
   chapter: 10
   section: 10.3
@@ -1136,6 +1215,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/Presolution/EdgeTraceSpec.hs"
     rationale: Exercises processInstEdge on a var-to-base instantiation edge.
   status: anchored
+  supports_claims: [CLM-EXPANSION-MINIMALITY, CLM-PRESOLUTION-PRINCIPALITY]
 - id: O10-PROP-WITNESS
   chapter: 10
   section: 10.3
@@ -1149,6 +1229,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/Presolution/EdgeTraceSpec.hs"
     rationale: Exercises processInstEdge and checks expansion is recorded.
   status: anchored
+  supports_claims: [CLM-EXPANSION-MINIMALITY, CLM-PRESOLUTION-PRINCIPALITY]
 - id: O10-COPY-SCHEME
   chapter: 10
   section: 10.4
@@ -1162,6 +1243,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/Presolution/InstantiateSpec.hs"
     rationale: Exercises instantiateScheme on a forall scheme.
   status: anchored
+  supports_claims: [CLM-EXPANSION-MINIMALITY, CLM-PRESOLUTION-PRINCIPALITY]
 # ── Chapter 11: Local Transformations ──
 - id: O11-UNIFY-STRUCT
   chapter: 11
@@ -1176,6 +1258,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/NormalizeSpec.hs"
     rationale: Exercises structural unification through the normalize pipeline.
   status: anchored
+  supports_claims: [CLM-WITNESS-NORMALIZATION]
 - id: O11-WITNESS-NORM
   chapter: 11
   section: 11.5
@@ -1189,6 +1272,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/Presolution/WitnessSpec.hs"
     rationale: Exercises normalizeInstanceOpsFull on a trivial op list.
   status: anchored
+  supports_claims: [CLM-WITNESS-NORMALIZATION]
 - id: O11-WITNESS-COALESCE
   chapter: 11
   section: 11.6
@@ -1202,6 +1286,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/Presolution/WitnessSpec.hs"
     rationale: Exercises coalesceRaiseMergeWithEnv on adjacent raise+merge ops.
   status: anchored
+  supports_claims: [CLM-WITNESS-NORMALIZATION]
 - id: O11-WITNESS-REORDER
   chapter: 11
   section: 11.6
@@ -1215,6 +1300,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/Presolution/WitnessSpec.hs"
     rationale: Exercises reorderWeakenWithEnv on a weaken op list.
   status: anchored
+  supports_claims: [CLM-WITNESS-NORMALIZATION]
 # ── Chapter 12: Global Algorithm ──
 - id: O12-SOLVE-UNIFY
   chapter: 12
@@ -1229,6 +1315,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/SolveSpec.hs"
     rationale: Exercises solveUnify on a simple unification constraint.
   status: anchored
+  supports_claims: [CLM-SOLVER-CORRECTNESS]
 - id: O12-ACYCLIC-CHECK
   chapter: 12
   section: 12.1
@@ -1242,6 +1329,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/AcyclicitySpec.hs"
     rationale: Exercises checkAcyclicity on acyclic and cyclic graphs.
   status: anchored
+  supports_claims: [CLM-ACYCLICITY]
 - id: O12-ACYCLIC-TOPO
   chapter: 12
   section: 12.1
@@ -1255,6 +1343,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/AcyclicitySpec.hs"
     rationale: Exercises topologicalSort and checks ordering validity.
   status: anchored
+  supports_claims: [CLM-ACYCLICITY]
 - id: O12-COPY-INST
   chapter: 12
   section: 12.2
@@ -1268,6 +1357,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/Presolution/InstantiateSpec.hs"
     rationale: Exercises instantiateSchemeWithTrace on a forall scheme.
   status: anchored
+  supports_claims: [CLM-SOLVER-CORRECTNESS, CLM-PRESOLUTION-PRINCIPALITY]
 - id: O12-NORM-GRAFT
   chapter: 12
   section: 12.4
@@ -1281,6 +1371,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/NormalizeSpec.hs"
     rationale: Exercises graftInstEdges through the normalize pipeline.
   status: anchored
+  supports_claims: [CLM-SOLVER-CORRECTNESS]
 - id: O12-NORM-MERGE
   chapter: 12
   section: 12.4
@@ -1294,6 +1385,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/NormalizeSpec.hs"
     rationale: Exercises mergeUnifyEdges through the normalize pipeline.
   status: anchored
+  supports_claims: [CLM-SOLVER-CORRECTNESS]
 - id: O12-NORM-DROP
   chapter: 12
   section: 12.4
@@ -1307,6 +1399,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/NormalizeSpec.hs"
     rationale: Exercises dropReflexiveInstEdges through the normalize pipeline.
   status: anchored
+  supports_claims: [CLM-SOLVER-CORRECTNESS]
 - id: O12-NORM-FIXPOINT
   chapter: 12
   section: 12.4
@@ -1320,6 +1413,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/NormalizeSpec.hs"
     rationale: Exercises normalize and checks idempotence.
   status: anchored
+  supports_claims: [CLM-SOLVER-CORRECTNESS]
 - id: O12-SOLVE-VAR-BASE
   chapter: 12
   section: 12.1
@@ -1333,6 +1427,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/SolveSpec.hs"
     rationale: Exercises solveUnify on a var=base unification edge.
   status: anchored
+  supports_claims: [CLM-SOLVER-CORRECTNESS]
 - id: O12-SOLVE-VAR-VAR
   chapter: 12
   section: 12.1
@@ -1346,6 +1441,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/SolveSpec.hs"
     rationale: Exercises solveUnify on a var=var unification edge.
   status: anchored
+  supports_claims: [CLM-SOLVER-CORRECTNESS]
 - id: O12-SOLVE-HARMONIZE
   chapter: 12
   section: 12.1
@@ -1359,6 +1455,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/SolveSpec.hs"
     rationale: Exercises solveUnify and checks binding harmonization occurs.
   status: anchored
+  supports_claims: [CLM-SOLVER-CORRECTNESS]
 - id: O12-SOLVE-ARROW
   chapter: 12
   section: 12.1
@@ -1372,6 +1469,7 @@ obligations:
     file: "/Volumes/src/mlf4/test/SolveSpec.hs"
     rationale: Exercises solveUnify on arrow=arrow unification edges.
   status: anchored
+  supports_claims: [CLM-SOLVER-CORRECTNESS]
 - id: O12-SOLVE-VALIDATE
   chapter: 12
   section: 12.1
@@ -1385,3 +1483,4 @@ obligations:
     file: "/Volumes/src/mlf4/test/SolveSpec.hs"
     rationale: Exercises validateSolvedGraph on a solved constraint.
   status: anchored
+  supports_claims: [CLM-SOLVER-CORRECTNESS]
