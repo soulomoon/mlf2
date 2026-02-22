@@ -543,13 +543,6 @@ solveUnify traceCfg c0 = do
             Right True -> throwSolveError (OccursCheckFailed varRoot targetRoot)
             Right False -> pure ()
 
-    harmonize :: NodeId -> NodeId -> SolveM ()
-    harmonize lRoot rRoot = do
-        cBefore <- gets suConstraint
-        case BindingAdjustment.harmonizeBindParentsWithTrace (typeRef lRoot) (typeRef rRoot) cBefore of
-            Left err -> throwSolveError (BindingTreeError err)
-            Right (c', _trace) -> modify' $ \s -> s { suConstraint = c' }
-
 -- | Rewrite every node/edge to UF representatives and collapse duplicates,
 -- preferring structured nodes when both sides share an id.
 applyUFConstraint :: IntMap NodeId -> Constraint -> Constraint
