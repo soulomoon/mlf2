@@ -32,6 +32,7 @@ module MLF.Binding.Adjustment (
     -- * Main API
     harmonizeBindParentsWithTrace,
     harmonizeBindParents,
+    harmonizeBindParentsMulti,
     -- * Lower-level operations
     raiseToParent,
     raiseToParentWithCount,
@@ -107,6 +108,54 @@ harmonizeBindParents n1 n2 c =
     case harmonizeBindParentsWithTrace n1 n2 c of
         Right (c', _) -> c'
         Left _ -> c
+
+-- | Harmonize binding parents for multiple nodes simultaneously.
+--
+-- Given a list of NodeRefs (members of an equivalence class), compute the
+-- LCA of all their bind parents and raise every member to that LCA.
+-- This is the generalized Rebind from thesis Section 7.6.2: one Rebind
+-- per equivalence class instead of one per pair.
+--
+-- Returns the updated constraint and the combined raise trace.
+harmonizeBindParentsMulti
+    :: [NodeRef] -> Constraint
+    -> Either BindingError (Constraint, [NodeId])
+harmonizeBindParentsMulti [] c = Right (c, [])
+harmonizeBindParentsMulti [_] c = Right (c, [])
+harmonizeBindParentsMulti refs c0 = do
+    -- Collect all bind parents
+    let parents =
+            [ p
+            | ref <- refs
+            , Just (p, _) <- [lookupBindParent c0 ref]
+            ]
+        roots = [ref | ref <- refs, Nothing == lookupBindParent c0 ref]
+    case (parents, roots) of
+        -- All are roots: nothing to do
+        ([], _) -> Right (c0, [])
+        -- Some are roots: raise all non-roots to root level
+        (_, (_:_)) -> do
+            let nonRoots = [ref | ref <- refs, Nothing /= lookupBindParent c0 ref]
+            go c0 [] nonRoots
+        -- All have parents: fold LCA pairwise, then raise all to it
+        (p1:pRest, []) -> do
+            lca <- foldLCA p1 pRest
+            goRaise c0 [] refs lca
+  where
+    go c trace [] = Right (c, trace)
+    go c trace (ref:rest) = do
+        (c', t) <- raiseToRoot ref c
+        go c' (trace ++ t) rest
+
+    goRaise c trace [] _ = Right (c, trace)
+    goRaise c trace (ref:rest) lca = do
+        (c', t) <- raiseToParentWithCount ref lca c
+        goRaise c' (trace ++ t) rest lca
+
+    foldLCA start [] = Right start
+    foldLCA start (p:ps) = do
+        lca <- bindingLCA c0 start p
+        foldLCA lca ps
 
 -- | Raise a node until its parent is the target.
 --

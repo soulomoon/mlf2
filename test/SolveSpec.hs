@@ -750,3 +750,34 @@ spec = describe "Phase 5 -- Solve" $ do
                 Right SolveResult{ srConstraint = sc } -> do
                     -- All three vars should end up unified, queue drained
                     cUnifyEdges sc `shouldBe` []
+
+        it "multi-node harmonize raises all members to LCA" $ do
+            -- Four nodes: v0 bound to inner, v1 bound to inner, v2 bound to root.
+            -- inner bound to root. Unify all three: v0=v1=v2.
+            -- Multi-node LCA should be root; all should be raised there.
+            let v0 = TyVar { tnId = NodeId 0, tnBound = Nothing }
+                v1 = TyVar { tnId = NodeId 1, tnBound = Nothing }
+                v2 = TyVar { tnId = NodeId 2, tnBound = Nothing }
+                inner = TyArrow (NodeId 3) (NodeId 0) (NodeId 1)
+                root = TyArrow (NodeId 4) (NodeId 3) (NodeId 2)
+                nodes = nodeMapFromList
+                    [ (0, v0), (1, v1), (2, v2)
+                    , (3, inner), (4, root)
+                    ]
+                constraint = rootedConstraint $ emptyConstraint
+                    { cNodes = nodes
+                    , cBindParents = IntMap.fromList
+                        [ (nodeRefKey (typeRef (NodeId 0)), (typeRef (NodeId 3), BindFlex))
+                        , (nodeRefKey (typeRef (NodeId 1)), (typeRef (NodeId 3), BindFlex))
+                        , (nodeRefKey (typeRef (NodeId 2)), (typeRef (NodeId 4), BindFlex))
+                        , (nodeRefKey (typeRef (NodeId 3)), (typeRef (NodeId 4), BindFlex))
+                        ]
+                    , cUnifyEdges =
+                        [ UnifyEdge (NodeId 0) (NodeId 1)
+                        , UnifyEdge (NodeId 1) (NodeId 2)
+                        ]
+                    }
+            case solveUnify defaultTraceConfig constraint of
+                Left err -> expectationFailure $ "Unexpected solve error: " ++ show err
+                Right SolveResult{ srConstraint = sc } -> do
+                    cUnifyEdges sc `shouldBe` []
