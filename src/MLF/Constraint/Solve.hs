@@ -267,6 +267,11 @@ solveUnify traceCfg c0 = do
     enqueue es = modify' $ \s ->
         s { suQueue = es ++ suQueue s }
 
+    deferHarmonize :: NodeId -> NodeId -> SolveM ()
+    deferHarmonize l r =
+        modify' $ \s ->
+            s { suDeferredHarmonize = (typeRef l, typeRef r) : suDeferredHarmonize s }
+
     applyElimSubstToUF :: IntMap NodeId -> IntMap NodeId -> IntMap NodeId
     applyElimSubstToUF uf subst =
         IntMap.foldlWithKey'
@@ -405,7 +410,7 @@ solveUnify traceCfg c0 = do
 
     solveRepresentative :: NodeId -> TyNode -> NodeId -> TyNode -> SolveM (NodeId, NodeId)
     solveRepresentative left leftNode right rightNode = do
-        harmonize left right
+        deferHarmonize left right
         cCur <- gets suConstraint
         let leftElim = VarStore.isEliminatedVar cCur left
             rightElim = VarStore.isEliminatedVar cCur right
