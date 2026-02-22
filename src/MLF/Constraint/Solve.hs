@@ -114,7 +114,7 @@ import Control.Monad.State.Strict
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import Data.List (find, group, sort)
+import Data.List (find)
 import Data.Maybe (catMaybes, fromMaybe, isNothing)
 import qualified Data.List.NonEmpty as NE
 
@@ -181,7 +181,6 @@ data SolveState = SolveState
     { suConstraint :: Constraint
     , suUnionFind :: IntMap NodeId
     , suQueue :: [UnifyEdge]
-    , suDeferredHarmonize :: [(NodeRef, NodeRef)]
     }
 
 type SolveM = StateT SolveState (Either SolveError)
@@ -226,7 +225,7 @@ solveUnify traceCfg c0 = do
     case Binding.checkBindingTree c0' of
         Left err -> Left (BindingTreeError err)
         Right () -> do
-            let st = SolveState { suConstraint = c0', suUnionFind = IntMap.empty, suQueue = cUnifyEdges c0', suDeferredHarmonize = [] }
+            let st = SolveState { suConstraint = c0', suUnionFind = IntMap.empty, suQueue = cUnifyEdges c0' }
             final <- execStateT (loop >> batchHarmonize) st
             let uf = suUnionFind final
                 c' = applyUFConstraint uf (suConstraint final) { cUnifyEdges = [] }
@@ -267,29 +266,35 @@ solveUnify traceCfg c0 = do
     enqueue es = modify' $ \s ->
         s { suQueue = es ++ suQueue s }
 
-    deferHarmonize :: NodeId -> NodeId -> SolveM ()
-    deferHarmonize l r =
-        modify' $ \s ->
-            s { suDeferredHarmonize = (typeRef l, typeRef r) : suDeferredHarmonize s }
+    -- | Compute equivalence classes from the union-find map.
+    -- Returns a list of lists, where each inner list contains all NodeIds
+    -- that share the same canonical representative.
+    equivalenceClasses :: IntMap NodeId -> Constraint -> [[NodeId]]
+    equivalenceClasses uf c =
+        let canonical = UnionFind.frWith uf
+            allNodeIds = map fst (toListNode (cNodes c))
+            grouped = IntMap.toList $
+                foldl'
+                    (\acc nid ->
+                        let rep = canonical nid
+                        in IntMap.insertWith (++) (getNodeId rep) [nid] acc
+                    )
+                    IntMap.empty
+                    allNodeIds
+        in [ members | (_, members) <- grouped, length members > 1 ]
 
     batchHarmonize :: SolveM ()
     batchHarmonize = do
-        pairs <- gets suDeferredHarmonize
-        -- Harmonize using original refs — the constraint hasn't been
-        -- UF-rewritten yet, so original NodeIds are still valid.
-        -- (Canonicalizing would collapse all pairs since both sides
-        -- share a UF rep after the worklist loop.)
-        let dedupPairs = map head . group . sort $
-                [ if l <= r then (l, r) else (r, l)
-                | (l, r) <- pairs
-                , l /= r
-                ]
-        mapM_ harmonizePair dedupPairs
+        uf <- gets suUnionFind
+        c <- gets suConstraint
+        let classes = equivalenceClasses uf c
+        mapM_ harmonizeClass classes
 
-    harmonizePair :: (NodeRef, NodeRef) -> SolveM ()
-    harmonizePair (l, r) = do
+    harmonizeClass :: [NodeId] -> SolveM ()
+    harmonizeClass members = do
         cBefore <- gets suConstraint
-        case BindingAdjustment.harmonizeBindParentsWithTrace l r cBefore of
+        let refs = map typeRef members
+        case BindingAdjustment.harmonizeBindParentsMulti refs cBefore of
             Left err -> throwSolveError (BindingTreeError err)
             Right (c', _trace) -> modify' $ \s -> s { suConstraint = c' }
 
@@ -431,7 +436,6 @@ solveUnify traceCfg c0 = do
 
     solveRepresentative :: NodeId -> TyNode -> NodeId -> TyNode -> SolveM (NodeId, NodeId)
     solveRepresentative left leftNode right rightNode = do
-        deferHarmonize left right
         cCur <- gets suConstraint
         let leftElim = VarStore.isEliminatedVar cCur left
             rightElim = VarStore.isEliminatedVar cCur right
