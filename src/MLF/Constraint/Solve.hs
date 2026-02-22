@@ -114,7 +114,7 @@ import Control.Monad.State.Strict
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import Data.List (find)
+import Data.List (find, group, sort)
 import Data.Maybe (catMaybes, fromMaybe, isNothing)
 import qualified Data.List.NonEmpty as NE
 
@@ -227,7 +227,7 @@ solveUnify traceCfg c0 = do
         Left err -> Left (BindingTreeError err)
         Right () -> do
             let st = SolveState { suConstraint = c0', suUnionFind = IntMap.empty, suQueue = cUnifyEdges c0', suDeferredHarmonize = [] }
-            final <- execStateT loop st
+            final <- execStateT (loop >> batchHarmonize) st
             let uf = suUnionFind final
                 c' = applyUFConstraint uf (suConstraint final) { cUnifyEdges = [] }
             (c'', elimSubst) <- case rewriteEliminatedBinders c' of
@@ -271,6 +271,27 @@ solveUnify traceCfg c0 = do
     deferHarmonize l r =
         modify' $ \s ->
             s { suDeferredHarmonize = (typeRef l, typeRef r) : suDeferredHarmonize s }
+
+    batchHarmonize :: SolveM ()
+    batchHarmonize = do
+        pairs <- gets suDeferredHarmonize
+        -- Harmonize using original refs — the constraint hasn't been
+        -- UF-rewritten yet, so original NodeIds are still valid.
+        -- (Canonicalizing would collapse all pairs since both sides
+        -- share a UF rep after the worklist loop.)
+        let dedupPairs = map head . group . sort $
+                [ if l <= r then (l, r) else (r, l)
+                | (l, r) <- pairs
+                , l /= r
+                ]
+        mapM_ harmonizePair dedupPairs
+
+    harmonizePair :: (NodeRef, NodeRef) -> SolveM ()
+    harmonizePair (l, r) = do
+        cBefore <- gets suConstraint
+        case BindingAdjustment.harmonizeBindParentsWithTrace l r cBefore of
+            Left err -> throwSolveError (BindingTreeError err)
+            Right (c', _trace) -> modify' $ \s -> s { suConstraint = c' }
 
     applyElimSubstToUF :: IntMap NodeId -> IntMap NodeId -> IntMap NodeId
     applyElimSubstToUF uf subst =
