@@ -669,6 +669,8 @@ debugBinders msg = do
     traceBindingM cfg msg
 
 -- | Drop trivial scheme edges (let edges) from the result maps.
+--
+-- See Note [Constraint simplification: Var-Let (Ch 12.4.1)]
 dropTrivialSchemeEdges
     :: Constraint
     -> IntMap EdgeWitness
@@ -682,6 +684,35 @@ dropTrivialSchemeEdges constraint witnesses traces expansions =
         traces' = IntMap.filterWithKey (\eid _ -> keepEdge eid) traces
         expansions' = IntMap.filterWithKey (\eid _ -> keepEdge eid) expansions
     in (witnesses', traces', expansions')
+
+{- Note [Constraint simplification: Var-Let (Ch 12.4.1)]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The thesis (§12.4.1, Lemma 12.4.2) defines the Var-Let simplification rule:
+gen nodes introduced for let-bound variable occurrences are superfluous because
+they only create indirections — instantiating a scheme and immediately using it.
+Var-Let removes these intermediate gen nodes by connecting the instantiation
+edge directly to the scheme root.
+
+We apply Var-Let on-the-fly (§12.4.3): during constraint generation, let-bound
+variable occurrences get expansion nodes (via `allocExpNode` in the `EVar` case
+of `buildExprRaw` in Translate.hs) rather than full gen nodes. After presolution resolves expansions, this function
+drops the trivial let-edge witnesses/traces/expansions from the result maps,
+since those edges served only as indirections and carry no elaboration content.
+
+See also Note [Lambda Translation] in ConstraintGen/Translate.hs for the
+companion Var-Abs rule.
+-}
+
+{- Note [ML-Extrude omitted (Ch 12.4.2)]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The thesis (§12.4.2, Lemma 12.4.3) defines the ML-Extrude rule: in ML
+constraints, binding edges can be raised from inside a gen node to an ancestor
+without loss of generality. This is intentionally not implemented because it
+only preserves solutions for ML constraints. In MLF, raising a node outside a
+gen interior prevents it from being reset during expansion, resulting in either
+untypable constraints or weaker principal solutions (thesis line ~13400:
+"the equivalence only holds in ML").
+-}
 
 -- | MonadPresolution instance for ReaderT, allowing presolution operations
 -- to be used within ReaderT transformers without explicit lift.

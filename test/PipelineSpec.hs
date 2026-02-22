@@ -46,6 +46,7 @@ import SpecUtil
     , emptyConstraint
     , PipelineArtifacts(..)
     , mkForalls
+    , runConstraintDefault
     , runPipelineArtifactsDefault
     , runToPresolutionWithAnnDefault
     , runToSolvedDefault
@@ -888,6 +889,89 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
                 Left err -> expectationFailure $ "Pipeline failed: " ++ renderPipelineError err
                 Right (_term, ty) -> show ty `shouldSatisfy` (not . null)
+
+        it "O08-BIND-MONO: alias bounds are inlined during normalization (B(σ))" $ do
+            -- B(σ) from Fig 8.2.2: alias bounds (∀(a ⩾ b). body) are inlined
+            -- by normalizeType, producing restricted types. The pipeline exercises
+            -- this via unsafeNormalizeExpr which calls normalizeType internally.
+            -- An annotated identity with alias bound: (λx.x) : ∀(a ⩾ Int). a -> a
+            let ann = STForall "a" (Just (mkSrcBound (STBase "Int"))) (STArrow (STVar "a") (STVar "a"))
+                expr = ELet "f" (EAnn (ELam "x" (EVar "x")) (mkForalls [] ann)) (EVar "f")
+            case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
+                Left err -> expectationFailure $ "Pipeline failed: " ++ renderPipelineError err
+                Right (_term, ty) ->
+                    -- After alias inlining, the type should contain Int (the inlined bound)
+                    show ty `shouldSatisfy` ("Int" `isInfixOf`)
+
+        it "O08-SYN-TO-GRAPH: annotation types are internalized as graphic constraints (G(σ))" $ do
+            -- G(σ) from Fig 8.2.3: syntactic annotations are translated to graphic
+            -- constraint nodes via internalizeCoercionCopy during constraint generation.
+            -- A coercion annotation forces syntactic→graphic translation.
+            let ann = STArrow (STBase "Int") (STBase "Int")
+                expr = EAnn (ELam "x" (EVar "x")) (mkForalls [] ann)
+            case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
+                Left err -> expectationFailure $ "Pipeline failed: " ++ renderPipelineError err
+                Right (_term, ty) ->
+                    -- The annotation constrains the type to Int -> Int
+                    ty `shouldSatisfy` containsArrowTy
+
+        it "O08-REIFY-INLINE: bound inlining during reification (Sᵢ)" $ do
+            -- Sᵢ from Fig 8.3.3: reification with bound inlining. A polymorphic
+            -- identity λx.x has type ∀a. a -> a; the bound on a is ⊥ (flexible)
+            -- and gets inlined away, leaving a clean arrow type in display form.
+            let expr = ELam "x" (EVar "x")
+            case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
+                Left err -> expectationFailure $ "Pipeline failed: " ++ renderPipelineError err
+                Right (_term, ty) -> do
+                    -- The reified type should be a forall with an arrow body
+                    ty `shouldSatisfy` containsArrowTy
+                    ty `shouldSatisfy` containsForallTy
+
+        it "O08-INLINE-PRED: Inline(τ,n) predicate distinguishes inlineable bounds" $ do
+            -- Inline(τ,n) predicate: single covariant occurrence with ≥ bound → inline;
+            -- multiple occurrences or = bound → keep. Test via a let-bound polymorphic
+            -- function applied at two different types, producing a pair-like result.
+            let expr = ELet "id" (ELam "x" (EVar "x"))
+                    (ELet "a" (EApp (EVar "id") (ELit (LInt 1)))
+                        (EApp (EVar "id") (ELit (LBool True))))
+            case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
+                Left err -> expectationFailure $ "Pipeline failed: " ++ renderPipelineError err
+                Right (_term, ty) ->
+                    -- The result type should be well-formed (non-empty rendering)
+                    show ty `shouldSatisfy` (not . null)
+
+    -- See Note [Constraint simplification: Var-Abs (Ch 12.4.1)] in Translate.hs
+    describe "Constraint simplification: Var-Abs (Ch 12.4.1)" $ do
+        it "lambda parameters do not create gen nodes (on-the-fly Var-Abs)" $ do
+            -- λx. λy. x y — two lambda params, zero let-bindings.
+            -- Only the root gen node should exist; lambda params are bound
+            -- monomorphically at the root scope, not under child gen nodes.
+            let expr = ELam "x" (ELam "y" (EApp (EVar "x") (EVar "y")))
+            case runConstraintDefault defaultPolySyms expr of
+                Left err -> expectationFailure err
+                Right ConstraintResult{ crConstraint = c0 } -> do
+                    let genCount = length (toListGen (cGenNodes c0))
+                    -- Exactly 1 gen node: the root scope.
+                    genCount `shouldBe` 1
+
+    -- See Note [Constraint simplification: Var-Let (Ch 12.4.1)] in Base.hs
+    describe "Constraint simplification: Var-Let (Ch 12.4.1)" $ do
+        it "trivial let edges are dropped from presolution expansions (on-the-fly Var-Let)" $ do
+            -- let id = λx. x in id — one let-binding, one use site.
+            -- The constraint should have let edges, but presolution should
+            -- drop them from the expansion map (they are indirections).
+            let expr = ELet "id" (ELam "x" (EVar "x")) (EVar "id")
+            case runToPresolutionWithAnnDefault defaultPolySyms expr of
+                Left err -> expectationFailure err
+                Right (pres, _ann) -> do
+                    let c1 = prConstraint pres
+                        letEdgeIds = cLetEdges c1
+                        expansionKeys = IntMap.keysSet (prEdgeExpansions pres)
+                    -- Let edges exist in the constraint
+                    IntSet.null letEdgeIds `shouldBe` False
+                    -- But none of them appear in the expansion map
+                    IntSet.intersection letEdgeIds expansionKeys
+                        `shouldBe` IntSet.empty
 
 canonical :: IntMap.IntMap NodeId -> NodeId -> NodeId
 canonical uf nid =

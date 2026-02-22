@@ -146,6 +146,11 @@ Decision cases (as implemented):
     (degenerate ∀), reuse the body and just unify; otherwise allocate fresh
     nodes for each bound var and return ExpInstantiate. Unifications connect
     the exposed body to τ′ when appropriate.
+    [Constraint simplification: Var-Abs (Ch 12.4.1)] — the degenerate-∀ sub-case
+    is the presolution residual of Var-Abs: gen nodes that would have been
+    degenerate are already avoided during constraint generation (see Note
+    [Lambda Translation] in ConstraintGen/Translate.hs), but degenerate foralls
+    arising from other sources are handled here by identity expansion.
 
 3. Structure ≤ ∀: generalize to meet the target by wrapping the source body in
     ExpForall at the target level, while unifying the underlying body with the

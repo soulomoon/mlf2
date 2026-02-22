@@ -308,6 +308,28 @@ Example:
 
 Note that all variables are under the same binding node — no generalization happens
 inside a lambda body unless there's a nested let.
+
+See Note [Constraint simplification: Var-Abs (Ch 12.4.1)].
+-}
+
+{- Note [Constraint simplification: Var-Abs (Ch 12.4.1)]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The thesis (§9.4, Figure 9.4.1) generates a gen node for each lambda-bound
+variable, then removes it via the Var-Abs simplification rule (Lemma 12.4.1)
+because lambda parameters can only be typed monomorphically — the gen node is
+always degenerate.
+
+We apply Var-Abs on-the-fly during constraint generation (§12.4.3: "they can
+be performed on-the-fly during the generation of typing constraints. From an
+algorithmic standpoint, the second approach is actually simpler.") by never
+creating the gen node in the first place: the parameter is bound directly at
+the current scope with `Binding argNode Nothing`, and variable references skip
+expansion (the `Nothing` branch of `bindingGen` in `buildExprRaw`).
+
+See also Note [Minimal Expansion Decision] in Presolution/Expansion.hs for the
+degenerate-forall case (case 2: "If there are no bound vars (degenerate ∀),
+reuse the body and just unify"), which handles the residual Var-Abs scenario
+during presolution.
 -}
 
 {- Note [Application and Instantiation Edges]
