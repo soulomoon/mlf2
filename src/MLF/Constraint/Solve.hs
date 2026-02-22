@@ -96,6 +96,31 @@ Phase 2 (`processUnifyEdges` in `MLF.Normalize`) vs Phase 5 (`processEdge` here)
     it applies UF to the constraint once per normalize iteration. Solve compresses
     paths on find and rewrites the whole constraint at the end, preferring structured
     representatives over variables when collapsing duplicates.
+
+Note [Generalized unification (Ch 7.6)]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The thesis (Section 7.6) defines generalized unification problems as
+simultaneous unification of multiple equivalence classes on the same type.
+The key insight: instead of calling Rebind per-pair during the worklist,
+we do all first-order unification in one pass (the worklist loop), then
+call Rebind once per equivalence class via `batchHarmonize`.
+
+This is both more efficient (k pairs → 1 LCA per class) and handles cases
+where sequential per-pair admissibility checking would fail but simultaneous
+checking succeeds (Figure 7.6.1 in the thesis).
+
+Implementation:
+  1. Worklist loop: standard first-order unification (union-find, decompose,
+     occurs-check) with NO harmonization.
+  2. batchHarmonize: compute equivalence classes from the final UF, then call
+     `harmonizeBindParentsMulti` once per class.
+  3. applyUFConstraint: rewrite to canonical reps as before.
+
+Paper references:
+  • Definition 7.6.1: generalized unification problem
+  • Definition 7.6.2: generalized admissibility
+  • Section 7.6.2: generalized algorithm
+  • Lemma 7.6.3: soundness, completeness, principality
 -}
 module MLF.Constraint.Solve (
     SolveError(..),
