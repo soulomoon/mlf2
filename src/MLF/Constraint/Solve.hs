@@ -181,6 +181,7 @@ data SolveState = SolveState
     { suConstraint :: Constraint
     , suUnionFind :: IntMap NodeId
     , suQueue :: [UnifyEdge]
+    , suDeferredHarmonize :: [(NodeRef, NodeRef)]
     }
 
 type SolveM = StateT SolveState (Either SolveError)
@@ -225,7 +226,7 @@ solveUnify traceCfg c0 = do
     case Binding.checkBindingTree c0' of
         Left err -> Left (BindingTreeError err)
         Right () -> do
-            let st = SolveState { suConstraint = c0', suUnionFind = IntMap.empty, suQueue = cUnifyEdges c0' }
+            let st = SolveState { suConstraint = c0', suUnionFind = IntMap.empty, suQueue = cUnifyEdges c0', suDeferredHarmonize = [] }
             final <- execStateT loop st
             let uf = suUnionFind final
                 c' = applyUFConstraint uf (suConstraint final) { cUnifyEdges = [] }
