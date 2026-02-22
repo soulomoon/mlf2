@@ -285,9 +285,10 @@ checkSchemeClosureUnder canonical c0 = do
                 , TypeRef child <- [nodeRefFromKey childKey]
                 ]
         -- After solving, type edges may cross gen boundaries (e.g. domain/codomain
-        -- body nodes unify, or let-aliased gens share nodes).  A named node under
-        -- a child gen that has scheme roots is a legitimate part of the constraint;
-        -- walk up through scheme-owning gens to find an allowed ancestor.
+        -- body nodes unify, or let-aliased gens share nodes).  Walk up through
+        -- ancestor gens to find an allowed non-root gen.  The root gen is excluded
+        -- from walk-up targets because every gen eventually reaches it, which would
+        -- make the check trivially pass.  Direct membership still allows root gen.
         genParentMap =
             IntMap.fromList
                 [ (getGenNodeId gid, getGenNodeId pgid)
@@ -295,17 +296,23 @@ checkSchemeClosureUnder canonical c0 = do
                 , GenRef gid <- [nodeRefFromKey childKey]
                 , GenRef pgid <- [parent]
                 ]
-        genHasSchemes gid =
-            not (IntSet.null (IntMap.findWithDefault IntSet.empty gid schemeRootsByGen))
         boundUnderGen allowedGens nid =
             case IntMap.lookup (getNodeId (canonical nid)) allCanonicalGenParents of
-                Just gids -> any (walkUpAllowed allowedGens) (IntSet.toList gids)
+                Just gids -> any checkGen (IntSet.toList gids)
                 Nothing -> True
-        walkUpAllowed allowedGens gid
-            | IntSet.member gid allowedGens = True
-            | not (genHasSchemes gid) = False
-            | otherwise = case IntMap.lookup gid genParentMap of
-                Just parentGid -> walkUpAllowed allowedGens parentGid
+          where
+            -- Non-root gens in the allowed set: valid walk-up targets.
+            -- Root gens (no parent in genParentMap) are excluded from walk-up
+            -- targets because every gen eventually reaches the root, which
+            -- would make the check trivially pass.
+            nonRootAllowed = IntSet.filter (`IntMap.member` genParentMap) allowedGens
+            checkGen gid
+                | IntSet.member gid allowedGens = True  -- direct (includes root)
+                | otherwise = walkUp gid                -- walk up to non-root target
+            walkUp gid = case IntMap.lookup gid genParentMap of
+                Just parentGid
+                    | IntSet.member parentGid nonRootAllowed -> True
+                    | otherwise -> walkUp parentGid
                 Nothing -> False
 
     let schemeRoots =
