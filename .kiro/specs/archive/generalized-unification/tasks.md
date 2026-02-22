@@ -1,6 +1,6 @@
 # Implementation Plan
 
-- [ ] 1. Audit current unification logic
+- [x] 1. Audit current unification logic
   - Steps:
     - Identify current entry points for unification in presolution/solve.
     - Map existing cases to Chapter 7.6 rules.
@@ -9,7 +9,7 @@
   - Verification: `rg -n "unify" src/MLF/Constraint -S`
   - _Requirements: 1.1_
 
-- [ ] 2. Implement generalized unification rules
+- [x] 2. Implement generalized unification rules
   - Steps:
     - Add rule handling for generalized cases from Chapter 7.6.
     - Introduce a specific error for generalized failures.
@@ -18,7 +18,7 @@
   - Verification: `rg -n "Generalized" src/MLF/Constraint -S`
   - _Requirements: 1.1, 1.2_
 
-- [ ] 3. Integrate into presolution
+- [x] 3. Integrate into presolution
   - Steps:
     - Ensure the generalized path runs before standard unification.
     - Preserve existing behavior when rules do not apply.
@@ -27,7 +27,7 @@
   - Verification: `rg -n "generalized" src/MLF/Constraint/Presolution/Unify.hs`
   - _Requirements: 2.1, 2.2_
 
-- [ ] 4. Add tests
+- [x] 4. Add tests
   - Steps:
     - Add generalized unification tests and a regression case.
   - Files: `test/SolveSpec.hs` or `test/PresolutionSpec.hs`
