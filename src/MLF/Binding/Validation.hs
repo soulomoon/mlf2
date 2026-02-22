@@ -271,12 +271,42 @@ checkSchemeClosureUnder canonical c0 = do
                                     ]
                             in go visited' (kids ++ rest)
             in go IntSet.empty [canonical root0]
-        firstGenAncestorFor nid =
-            firstGenAncestorFromPath (bindingPathToRootLocal bindParents) (typeRef (canonical nid))
+        -- When canonicalization unifies two type nodes that were under different
+        -- gen parents (e.g. domain/codomain copies of the same forall variable),
+        -- the merged binding parents keep only one parent, losing the other.
+        -- Build a map from canonical type node IDs to ALL their pre-canonical
+        -- gen parents so boundUnderGen can check any of them.
+        allCanonicalGenParents =
+            IntMap.fromListWith
+                IntSet.union
+                [ (getNodeId (canonical child), IntSet.singleton (getGenNodeId gid))
+                | (childKey, (parent, _flag)) <- IntMap.toList (cBindParents c0)
+                , GenRef gid <- [parent]
+                , TypeRef child <- [nodeRefFromKey childKey]
+                ]
+        -- After solving, type edges may cross gen boundaries (e.g. domain/codomain
+        -- body nodes unify, or let-aliased gens share nodes).  A named node under
+        -- a child gen that has scheme roots is a legitimate part of the constraint;
+        -- walk up through scheme-owning gens to find an allowed ancestor.
+        genParentMap =
+            IntMap.fromList
+                [ (getGenNodeId gid, getGenNodeId pgid)
+                | (childKey, (parent, _flag)) <- IntMap.toList bindParents
+                , GenRef gid <- [nodeRefFromKey childKey]
+                , GenRef pgid <- [parent]
+                ]
+        genHasSchemes gid =
+            not (IntSet.null (IntMap.findWithDefault IntSet.empty gid schemeRootsByGen))
         boundUnderGen allowedGens nid =
-            case firstGenAncestorFor nid of
-                Just gid' -> IntSet.member (getGenNodeId gid') allowedGens
+            case IntMap.lookup (getNodeId (canonical nid)) allCanonicalGenParents of
+                Just gids -> any (walkUpAllowed allowedGens) (IntSet.toList gids)
                 Nothing -> True
+        walkUpAllowed allowedGens gid
+            | IntSet.member gid allowedGens = True
+            | not (genHasSchemes gid) = False
+            | otherwise = case IntMap.lookup gid genParentMap of
+                Just parentGid -> walkUpAllowed allowedGens parentGid
+                Nothing -> False
 
     let schemeRoots =
             [ NodeId nid

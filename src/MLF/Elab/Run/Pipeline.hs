@@ -136,7 +136,6 @@ runPipelineElabWith traceCfg genConstraints expr = do
                     resolveCanonicalScope c1 solvedForGen (prRedirects pres) (annNode ann)
             let rootTarget = schemeBodyTarget solvedForGen (annNode annCanon)
             let generalizeNeedsFallback err = case err of
-                    BindingTreeError GenSchemeFreeVars{} -> True
                     SchemeFreeVars{} -> True
                     _ -> False
             (rootScheme, rootSubst) <- fromElabError $

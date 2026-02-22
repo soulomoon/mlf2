@@ -37,7 +37,6 @@ generalizeWithPlan
     -> Either ElabError (ElabScheme, IntMap.IntMap String)
 generalizeWithPlan planBuilder bindParentsGa res scopeRoot targetNode =
     let generalizeNeedsFallback err = case err of
-            BindingTreeError GenSchemeFreeVars{} -> True
             SchemeFreeVars{} -> True
             _ -> False
         fallbackToReify = do

@@ -3110,6 +3110,18 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             (_term, ty) <- requirePipeline expr
             Elab.prettyDisplay ty `shouldBe` "Int"
 
+        it "explicit-forall closure: checkSchemeClosureUnder passes without GenSchemeFreeVars exemption" $ do
+            -- Regression: forall binders in annotations previously triggered
+            -- GenSchemeFreeVars because domain/codomain copy gens created
+            -- cross-branch type edges after solving.  The fix in
+            -- checkSchemeClosureUnder walks up through scheme-owning gens.
+            let ann = STForall "a" Nothing (STArrow (STVar "a") (STVar "a"))
+                expr =
+                    ELet "f" (EAnn (ELam "x" (EVar "x")) ann)
+                        (EApp (EVar "f") (ELit (LInt 42)))
+            result <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+            snd result `shouldBe` Elab.TBase (BaseTy "Int")
+
         it "letScopeOverrides inserts override on base-vs-solved scope divergence" $ do
             -- Base: e1 (TyExp) bound under g0, n2 bound under e1
             -- SolvedForGen: n2 bound under n3, n3 is root (no gen ancestor)

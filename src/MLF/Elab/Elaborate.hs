@@ -225,7 +225,6 @@ elaborateWithEnv config elabEnv ann = do
         -> Either ElabError (ElabScheme, IntMap.IntMap String)
     generalizeNeedsFallback :: ElabError -> Bool
     generalizeNeedsFallback err = case err of
-        BindingTreeError GenSchemeFreeVars{} -> True
         SchemeFreeVars{} -> True
         _ -> False
 
@@ -445,17 +444,6 @@ elaborateWithEnv config elabEnv ann = do
                                                 | bodyTy == TVar name -> tyToElab bnd
                                             _ -> schemeToType paramSch
                                     in pure
-                                        ( paramTy0
-                                        , SchemeInfo
-                                            { siScheme = schemeFromType paramTy0
-                                            , siSubst = IntMap.empty
-                                            }
-                                        )
-                                Left (BindingTreeError GenSchemeFreeVars{}) -> do
-                                    -- Some coercion codomain roots are outside the scheme
-                                    -- ownership checks; recover the term-level type directly.
-                                    paramTy0 <- reifyNodeTypePreferringBound annNodeId
-                                    pure
                                         ( paramTy0
                                         , SchemeInfo
                                             { siScheme = schemeFromType paramTy0
