@@ -2,7 +2,7 @@
 version: 1
 scope:
   chapters: [9, 10, 11, 12, 13, 14, 15]
-  claim_count: 21
+  claim_count: 22
 claims:
   # ── Ch. 9 — Constraint Generation ──────────────────────────────────────
 
@@ -171,6 +171,27 @@ claims:
       property_tests: []
       code_paths:
         - src/MLF/Constraint/Unify/Core.hs#processUnifyEdgesWith
+    deviations: []
+    status: defended
+    notes: ""
+
+  - id: CLM-GEN-UNIFICATION
+    type: definition
+    chapter: 7
+    section: "7.6"
+    thesis_ref: "Definition 7.6.1, Definition 7.6.2, Section 7.6.2, Lemma 7.6.3"
+    statement: "Generalized unification: batch Rebind after first-order unification handles simultaneous equivalence classes correctly."
+    evidence:
+      obligations:
+        - O07-GENUNIF
+        - O07-REBIND
+      property_tests:
+        - matcher: "Generalized unification (Ch 7.6)"
+          file: test/SolveSpec.hs
+          kind: example
+      code_paths:
+        - src/MLF/Constraint/Solve.hs#batchHarmonize
+        - src/MLF/Binding/Adjustment.hs#harmonizeBindParentsMulti
     deviations: []
     status: defended
     notes: ""

@@ -7,6 +7,7 @@ scope:
   - '5.2'
   - '5.3'
   - '7.3'
+  - '7.6'
   - '8.2'
   - '9.4'
   - '10.1'
@@ -1115,6 +1116,21 @@ obligations:
     rationale: Exercises harmonizeBindParentsWithTrace on a constraint with trace.
   status: anchored
   supports_claims: [CLM-UNIFICATION]
+- id: O07-GENUNIF
+  chapter: 7
+  section: '7.6'
+  figure_or_definition: Definition 7.6.1, Definition 7.6.2, Section 7.6.2, Lemma 7.6.3
+  thesis_rule_label: Generalized unification
+  judgment_or_equation: Batch Rebind after first-order unification in Solve phase
+  code_anchors:
+  - "src/MLF/Constraint/Solve.hs#batchHarmonize"
+  - "src/MLF/Binding/Adjustment.hs#harmonizeBindParentsMulti"
+  test_anchor:
+    matcher: "Generalized unification (Ch 7.6)"
+    file: "test/SolveSpec.hs"
+    rationale: Exercises batch harmonize via equivalence classes after worklist drains.
+  status: anchored
+  supports_claims: [CLM-UNIFICATION, CLM-GEN-UNIFICATION]
 # ── Chapter 8: Reification ──
 - id: O08-REIFY-TYPE
   chapter: 8
