@@ -699,6 +699,17 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             out <- requireRight (Elab.applyInstantiation ty (Elab.InstApp (Elab.TBase (BaseTy "Int"))))
             out `shouldBe` Elab.TBase (BaseTy "Int")
 
+        it "InstApp accepts arg matching explicit bound on ∀(a ≥ Int). a" $ do
+            let ty = Elab.TForall "a" (Just (boundFromType (Elab.TBase (BaseTy "Int")))) (Elab.TVar "a")
+            out <- requireRight (Elab.applyInstantiation ty (Elab.InstApp (Elab.TBase (BaseTy "Int"))))
+            out `shouldBe` Elab.TBase (BaseTy "Int")
+
+        it "InstApp rejects arg not matching explicit bound on ∀(a ≥ Int). a" $ do
+            let ty = Elab.TForall "a" (Just (boundFromType (Elab.TBase (BaseTy "Int")))) (Elab.TVar "a")
+            case Elab.applyInstantiation ty (Elab.InstApp (Elab.TBase (BaseTy "Bool"))) of
+                Left _ -> pure ()
+                Right t -> expectationFailure ("Expected failure, got: " ++ show t)
+
         it "O14-APPLY-ID: InstId leaves the input type unchanged" $ do
             let ty = Elab.TArrow (Elab.TBase (BaseTy "Int")) (Elab.TBase (BaseTy "Bool"))
             out <- requireRight (Elab.applyInstantiation ty Elab.InstId)
@@ -745,6 +756,27 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             case Elab.applyInstantiation ty (Elab.InstBot ty) of
                 Left _ -> pure ()
                 Right t -> expectationFailure ("Expected strict InstBot failure, got: " ++ show t)
+
+        it "normalizeInst roundtrip: rule 3 prefix-arg collapse preserves applyInstantiation" $ do
+            -- Build an instantiation that matches rule 3: prefix ; intro ; app ; under beta (abstr beta ; elim) ; elim
+            let tArg = Elab.TBase (BaseTy "Int")
+                prefix = Elab.InstInside (Elab.InstBot tArg)
+                appArg = Elab.InstInside (Elab.InstBot tArg)
+                original = Elab.InstSeq
+                    (Elab.InstSeq prefix
+                        (Elab.InstSeq Elab.InstIntro
+                            (Elab.InstSeq appArg
+                                (Elab.InstUnder "b"
+                                    (Elab.InstSeq (Elab.InstInside (Elab.InstAbstr "b")) Elab.InstElim)))))
+                    Elab.InstElim
+                normalized = ElabTest.normalizeInstTestOnly original
+                ty = Elab.TForall "a" Nothing (Elab.TVar "a")
+            -- normalizeInst should collapse this to InstApp tArg
+            normalized `shouldBe` Elab.InstApp tArg
+            -- And both should produce the same result when applied
+            lhs <- requireRight (Elab.applyInstantiation ty original)
+            rhs <- requireRight (Elab.applyInstantiation ty normalized)
+            lhs `shouldBe` rhs
 
     describe "xMLF terms" $ do
         it "pretty prints type abstraction with bound" $ do

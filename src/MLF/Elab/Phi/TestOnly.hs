@@ -9,12 +9,14 @@ module MLF.Elab.Phi.TestOnly (
     phiFromEdgeWitnessNoTrace,
     phiFromEdgeWitness,
     shadowCompareTypesTestOnly,
-    selectSolvedOrderWithShadowTestOnly
+    selectSolvedOrderWithShadowTestOnly,
+    normalizeInstTestOnly
 ) where
 
 import MLF.Elab.Generalize (shadowCompareTypes, selectSolvedOrderWithShadow)
 import MLF.Elab.Phi.Translate (phiFromEdgeWitness, phiFromEdgeWitnessNoTrace)
-import MLF.Elab.Types (ElabError, ElabType)
+import MLF.Elab.Phi.Omega (normalizeInst)
+import MLF.Elab.Types (ElabError, ElabType, Instantiation)
 
 shadowCompareTypesTestOnly :: String -> ElabType -> ElabType -> Either ElabError ()
 shadowCompareTypesTestOnly = shadowCompareTypes
@@ -25,3 +27,6 @@ selectSolvedOrderWithShadowTestOnly
     -> Maybe ElabType
     -> Either ElabError ElabType
 selectSolvedOrderWithShadowTestOnly = selectSolvedOrderWithShadow
+
+normalizeInstTestOnly :: Instantiation -> Instantiation
+normalizeInstTestOnly = normalizeInst
