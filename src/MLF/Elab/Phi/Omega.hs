@@ -359,6 +359,13 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
                             Nothing -> chosenTy0
                     _ -> chosenTy0
             chosenTy = substSchemeNames chosenTy1
+            rescuedTy =
+                case (mbBinder, chosenTy) of
+                    (Just binder, TBottom) ->
+                        case IntMap.lookup (getNodeId (canonicalNode binder)) substForTypes of
+                            Just binderName -> TVar binderName
+                            Nothing -> chosenTy
+                    _ -> chosenTy
         debugPhi
             ("reifyTypeArg(reify) arg=" ++ show arg
                 ++ " mbBinder=" ++ show mbBinder
@@ -369,17 +376,9 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
                 ++ " chosenTy0=" ++ show chosenTy0
                 ++ " chosenTy1=" ++ show chosenTy1
                 ++ " chosenTy=" ++ show chosenTy
+                ++ " rescuedTy=" ++ show rescuedTy
             )
-            (pure chosenTy)
-
-    rescueBottomAtBinder :: NodeId -> ElabType -> ElabType
-    rescueBottomAtBinder binder argTy =
-        case argTy of
-            TBottom ->
-                case IntMap.lookup (getNodeId (canonicalNode binder)) substForTypes of
-                    Just binderName -> TVar binderName
-                    Nothing -> argTy
-            _ -> argTy
+            (pure rescuedTy)
 
     substSchemeNames :: ElabType -> ElabType
     substSchemeNames = cataIx alg
@@ -823,8 +822,7 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
                                                             ]
                                         else do
                                             (inst, ids1) <- atBinder binderKeys ids ty bvReplay $ do
-                                                argTy0 <- reifyTypeArg namedSet' Nothing (graftArgFor arg bv)
-                                                let argTy = rescueBottomAtBinder bvReplay argTy0
+                                                argTy <- reifyTypeArg namedSet' (Just bvReplay) (graftArgFor arg bv)
                                                 pure (InstApp argTy)
                                             ty' <- applyInst "OpGraft+OpWeaken" ty inst
                                             go binderKeys keepBinderKeys' namedSet' ty' ids1 (composeInst phi inst) rest lookupBinder
