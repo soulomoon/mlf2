@@ -88,4 +88,64 @@ deviations:
         file: test/PresolutionSpec.hs
     status: implementation-choice
 
+  - id: DEV-PHI-WITNESS-WEAKEN-SUPPRESSION
+    chapter: 15
+    section: "15.3"
+    thesis_ref: "Definition 15.3.4 / Figure 10 (Phi witness translation)"
+    description: >
+      Witness emission suppresses some OpWeaken generation based on local
+      scheme structure (`suppressWeaken`) and whether the graft argument is a
+      gen-bound alias (`argIsGenBound`). The thesis does not add these
+      structure-sensitive guards.
+    impact: semantic-minor
+    rationale: >
+      This guard is load-bearing for translatability. Without it, witness
+      emission can produce weaken operations that are not translatable in the
+      current xMLF reconstruction pipeline.
+    code_paths:
+      - src/MLF/Constraint/Presolution/Witness.hs
+    test_evidence:
+      - matcher: "suppresses OpWeaken for rigid binders during ExpInstantiate witness emission"
+        file: test/Presolution/WitnessSpec.hs
+    status: implementation-choice
+
+  - id: DEV-PHI-KEEP-BINDER-WEAKEN-SUPPRESSION
+    chapter: 15
+    section: "15.3"
+    thesis_ref: "Definition 15.3.4 / Figure 10 (OpWeaken translation)"
+    description: >
+      Omega translation suppresses elimination for selected OpWeaken steps when
+      the binder is in `keepBinderKeys`. The thesis presentation treats every
+      weaken as producing the corresponding elimination shape.
+    impact: semantic-minor
+    rationale: >
+      This behavior is load-bearing in the implementation to preserve binder
+      identities across replay contexts where dropping the binder would make
+      later witness steps non-translatable.
+    code_paths:
+      - src/MLF/Elab/Phi/Omega.hs
+    test_evidence:
+      - matcher: "Witness translation (Φ/Σ)"
+        file: test/ElaborationSpec.hs
+    status: implementation-choice
+
+  - id: DEV-PHI-STANDALONE-GRAFT-EXTENSION
+    chapter: 15
+    section: "15.3"
+    thesis_ref: "Figure 10 (graft paired with weaken)"
+    description: >
+      The implementation supports translating standalone OpGraft operations
+      (without an immediately paired OpWeaken) as an explicit in-binder bottom
+      update. The thesis only defines the canonical paired graft/weaken shape.
+    impact: semantic-minor
+    rationale: >
+      This extension is load-bearing for multi-step normalized witnesses where
+      graft and weaken are separated by other legal operations but must still be
+      replayed into valid xMLF instantiations.
+    code_paths:
+      - src/MLF/Elab/Phi/Omega.hs
+    test_evidence:
+      - matcher: "rejects OpGraft on out-of-scheme target (no InstBot/InstApp fallback)"
+        file: test/ElaborationSpec.hs
+    status: implementation-choice
 
