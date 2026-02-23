@@ -32,13 +32,13 @@ makeCanonicalizer = Canonicalizer.makeCanonicalizer
 canonicalizeWitness :: Canonicalizer -> EdgeWitness -> EdgeWitness
 canonicalizeWitness canon w =
     let canonNode = canonicalizeNode canon
-        -- Contract: preserve source-domain provenance (`ewSteps`, `ewWitness`)
+        -- Contract: preserve source-domain provenance (`ewWitness`)
         -- and canonicalize only structural lookup fields.
     in w
         { ewLeft = canonNode (ewLeft w)
         , ewRight = canonNode (ewRight w)
         , ewRoot = canonNode (ewRoot w)
-        , ewSteps = ewSteps w
+        , ewForallIntros = ewForallIntros w
         , ewWitness = ewWitness w
         }
 

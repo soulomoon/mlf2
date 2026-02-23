@@ -1,27 +1,6 @@
 ---
 version: 1
 deviations:
-  - id: DEV-STEPINTRO-NOT-OMEGA
-    chapter: 15
-    section: "15.3"
-    thesis_ref: "Definition 15.3.4 (Φ translation)"
-    description: >
-      Quantifier introduction (O) is not part of Ω in the thesis. The repo
-      records these as StepIntro entries in EdgeWitness.ewSteps (from ExpForall)
-      and translates them interleaved with Ω segments when constructing Φ(e).
-    impact: semantic-neutral
-    rationale: >
-      Interleaving O with Ω in ewSteps simplifies the single-pass Φ translation
-      without changing the resulting instantiation. The 15-row witness matrix
-      (R-*) validates that the combined translation produces correct results.
-    code_paths:
-      - src/MLF/Constraint/Types/Witness.hs
-      - src/MLF/Elab/Phi/Translate.hs
-    test_evidence:
-      - matcher: "R-"
-        file: test/Presolution/WitnessSpec.hs
-    status: implementation-choice
-
   - id: DEV-WITNESS-NORM-NO-PROOF
     chapter: 11
     section: "11.5"

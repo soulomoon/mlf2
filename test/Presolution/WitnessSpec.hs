@@ -13,7 +13,6 @@ import MLF.Constraint.Types.Witness
     , Expansion(..)
     , ForallSpec(..)
     , InstanceOp(..)
-    , InstanceStep(..)
     , InstanceWitness(..)
     )
 import MLF.Constraint.Presolution.Witness
@@ -22,7 +21,6 @@ import MLF.Constraint.Presolution.Witness
     , coalesceRaiseMergeWithEnv
     , integratePhase2Ops
     , normalizeInstanceOpsFull
-    , normalizeInstanceStepsFull
     , reorderWeakenWithEnv
     , validateNormalizedWitness
     , witnessFromExpansion
@@ -64,7 +62,7 @@ import Presolution.Util
 spec :: Spec
 spec = do
     describe "Expansion witness steps" $ do
-        it "preserves ExpCompose ordering with StepIntro" $ do
+        it "preserves ExpCompose ordering with forall intros" $ do
             let expNodeId = NodeId 0
                 forallId = NodeId 1
                 binderId = NodeId 2
@@ -86,11 +84,11 @@ spec = do
 
             case runPresolutionM defaultTraceConfig st0 (witnessFromExpansion (GenNodeId 0) expNodeId (nodeAt nodes 0) expansion) of
                 Left err -> expectationFailure ("witnessFromExpansion failed: " ++ show err)
-                Right (steps, _) ->
-                    steps `shouldBe`
-                        [ StepIntro
-                        , StepOmega (OpGraft argId binderId)
-                        , StepOmega (OpWeaken binderId)
+                Right ((introCount, ops), _) -> do
+                    introCount `shouldBe` 1
+                    ops `shouldBe`
+                        [ OpGraft argId binderId
+                        , OpWeaken binderId
                         ]
 
         it "suppresses OpWeaken for rigid binders during ExpInstantiate witness emission" $ do
@@ -120,10 +118,11 @@ spec = do
 
             case runPresolutionM defaultTraceConfig st0 (witnessFromExpansion (GenNodeId 0) expNodeId (nodeAt nodes 0) expansion) of
                 Left err -> expectationFailure ("witnessFromExpansion failed: " ++ show err)
-                Right (steps, _) ->
-                    steps `shouldBe`
-                        [ StepOmega (OpGraft argId binderId) ]
-        it "emits StepIntro per binder in ForallSpec" $ do
+                Right ((introCount, ops), _) -> do
+                    introCount `shouldBe` 0
+                    ops `shouldBe`
+                        [ OpGraft argId binderId ]
+        it "emits forall intros per binder in ForallSpec" $ do
             let expNodeId = NodeId 0
                 bodyId = NodeId 1
                 nodes = nodeMapFromList
@@ -140,10 +139,11 @@ spec = do
 
             case runPresolutionM defaultTraceConfig st0 (witnessFromExpansion (GenNodeId 0) expNodeId (nodeAt nodes 0) expansion) of
                 Left err -> expectationFailure ("witnessFromExpansion failed: " ++ show err)
-                Right (steps, _) ->
-                    steps `shouldBe` [StepIntro, StepIntro]
+                Right ((introCount, ops), _) -> do
+                    introCount `shouldBe` 2
+                    ops `shouldBe` []
 
-        it "does not emit StepIntro for forall <= non-forall level mismatch" $ do
+        it "does not emit forall intros for forall <= non-forall level mismatch" $ do
             let srcBinderId = NodeId 0
                 srcForallId = NodeId 1
                 expNodeId = NodeId 2
@@ -193,7 +193,7 @@ spec = do
                         Just other -> expectationFailure $ "Expected ExpInstantiate, got " ++ show other
                         Nothing -> expectationFailure "No expansion found for Edge 0"
                     case IntMap.lookup edgeId ews of
-                        Just ew -> ewSteps ew `shouldSatisfy` all (/= StepIntro)
+                        Just ew -> ewForallIntros ew `shouldBe` 0
                         Nothing -> expectationFailure "No witness found for Edge 0"
 
     describe "Phase 3 — Witness normalization" $ do
@@ -349,35 +349,27 @@ spec = do
                 ops0 = [OpGraft arg child]
             normalizeInstanceOpsFull env ops0 `shouldBe` Right ops0
 
-        it "normalizes omega segments without moving StepIntro" $ do
+        it "normalizes omega ops within a segment" $ do
             let c = mkNormalizeConstraint
                 root = NodeId 0
                 child = NodeId 2
                 arg = NodeId 10
                 arg2 = NodeId 11
                 env = mkNormalizeEnv c root (IntSet.fromList [getNodeId root, getNodeId child])
-                steps0 =
-                    [ StepOmega (OpWeaken root)
-                    , StepOmega (OpGraft arg child)
-                    , StepIntro
-                    , StepOmega (OpGraft arg2 root)
-                    ]
-            normalizeInstanceStepsFull env steps0
-                `shouldBe`
-                    Right
-                        [ StepOmega (OpGraft arg child)
-                        , StepOmega (OpWeaken root)
-                        , StepIntro
-                        , StepOmega (OpGraft arg2 root)
-                        ]
+                seg1 = [OpWeaken root, OpGraft arg child]
+                seg2 = [OpGraft arg2 root]
+            normalizeInstanceOpsFull env seg1
+                `shouldBe` Right [OpGraft arg child, OpWeaken root]
+            normalizeInstanceOpsFull env seg2
+                `shouldBe` Right [OpGraft arg2 root]
 
-        it "O15-TR-NODE-MERGE R-MERGE-NORM-09: normalizeInstanceStepsFull rejects wrong merge direction" $ do
+        it "O15-TR-NODE-MERGE R-MERGE-NORM-09: normalizeInstanceOpsFull rejects wrong merge direction" $ do
             let c = mkNormalizeConstraint
                 root = NodeId 0
                 (mLess, nGreater) = orderedPairByPrec c root
                 env = mkNormalizeEnv c root (IntSet.fromList [getNodeId mLess, getNodeId nGreater])
-                steps0 = [StepOmega (OpMerge mLess nGreater)]
-            normalizeInstanceStepsFull env steps0 `shouldBe` Left (MergeDirectionInvalid mLess nGreater)
+                ops0 = [OpMerge mLess nGreater]
+            normalizeInstanceOpsFull env ops0 `shouldBe` Left (MergeDirectionInvalid mLess nGreater)
 
         it "preserves Graft/Weaken when a later Merge eliminates the binder during emission" $ do
             let a = NodeId 2
@@ -594,51 +586,25 @@ spec = do
                     op = OpRaiseMerge n m
                 validateNormalizedWitness env [op] `shouldBe` Right ()
 
-            it "normalizeInstanceStepsFull preserves RaiseMerge coalescing across StepIntro boundaries" $ do
+            it "normalizeInstanceOpsFull preserves RaiseMerge coalescing" $ do
                 let c = mkNormalizeConstraint
                     root = NodeId 0
                     n = NodeId 2
                     m = NodeId 3
-                    arg = NodeId 10
                     env = mkNormalizeEnv c root (IntSet.fromList [getNodeId root, getNodeId n])
-                    steps0 =
-                        [ StepOmega (OpRaise n)
-                        , StepOmega (OpMerge n m)
-                        , StepIntro
-                        , StepOmega (OpGraft arg root)
-                        ]
-                normalizeInstanceStepsFull env steps0
-                    `shouldBe`
-                        Right
-                            [ StepOmega (OpRaiseMerge n m)
-                            , StepIntro
-                            , StepOmega (OpGraft arg root)
-                            ]
+                    ops0 = [OpRaise n, OpMerge n m]
+                normalizeInstanceOpsFull env ops0
+                    `shouldBe` Right [OpRaiseMerge n m]
 
-            it "US-010-V1: coalesces repeated Raise;Merge with surrounding StepIntro boundaries" $ do
+            it "US-010-V1: coalesces repeated Raise;Merge into RaiseMerge" $ do
                 let c = mkNormalizeConstraint
                     root = NodeId 0
                     n = NodeId 2
                     m = NodeId 3
                     env = mkNormalizeEnv c root (IntSet.fromList [getNodeId root, getNodeId n])
-                    steps0 =
-                        [ StepIntro
-                        , StepIntro
-                        , StepOmega (OpRaise n)
-                        , StepOmega (OpRaise n)
-                        , StepOmega (OpMerge n m)
-                        , StepIntro
-                        , StepIntro
-                        ]
-                normalizeInstanceStepsFull env steps0
-                    `shouldBe`
-                        Right
-                            [ StepIntro
-                            , StepIntro
-                            , StepOmega (OpRaiseMerge n m)
-                            , StepIntro
-                            , StepIntro
-                            ]
+                    ops0 = [OpRaise n, OpRaise n, OpMerge n m]
+                normalizeInstanceOpsFull env ops0
+                    `shouldBe` Right [OpRaiseMerge n m]
 
             it "US-010-V2: single-binder binderArgs does not widen interior for Raise;Merge" $ do
                 let c = mkNormalizeConstraint
@@ -647,11 +613,8 @@ spec = do
                     m = NodeId 3
                     env0 = mkNormalizeEnv c root (IntSet.fromList [getNodeId m])
                     env = env0 { binderArgs = IntMap.singleton (getNodeId n) m }
-                    steps0 =
-                        [ StepOmega (OpRaise n)
-                        , StepOmega (OpMerge n m)
-                        ]
-                normalizeInstanceStepsFull env steps0
+                    ops0 = [OpRaise n, OpMerge n m]
+                normalizeInstanceOpsFull env ops0
                     `shouldBe` Left (OpOutsideInterior (OpMerge n m))
 
             it "R-RAISEMERGE-NORM-15: validated witnesses remain valid after idempotent re-normalization" $ do
@@ -888,7 +851,7 @@ spec = do
                             , ewLeft = m
                             , ewRight = n
                             , ewRoot = root
-                            , ewSteps = [StepOmega badOp]
+                            , ewForallIntros = 0
                             , ewWitness = InstanceWitness [badOp]
                             }
                     edgeTrace = EdgeTrace
@@ -951,7 +914,7 @@ spec = do
                             , ewLeft = root
                             , ewRight = exteriorNode
                             , ewRoot = root
-                            , ewSteps = [StepOmega badOp]
+                            , ewForallIntros = 0
                             , ewWitness = InstanceWitness [badOp]
                             }
                     -- Create an edge trace with interior that does NOT include exteriorNode
@@ -1015,7 +978,7 @@ spec = do
                             , ewLeft = leftNode
                             , ewRight = rightNode
                             , ewRoot = root
-                            , ewSteps = [StepOmega badOp]
+                            , ewForallIntros = 0
                             , ewWitness = InstanceWitness [badOp]
                             }
                     edgeTrace = EdgeTrace
@@ -1070,7 +1033,7 @@ spec = do
                             , ewLeft = root
                             , ewRight = outsideNode
                             , ewRoot = root
-                            , ewSteps = [StepOmega badOp]
+                            , ewForallIntros = 0
                             , ewWitness = InstanceWitness [badOp]
                             }
                     edgeTrace = EdgeTrace
@@ -1135,7 +1098,7 @@ spec = do
                             , ewLeft = root
                             , ewRight = binder
                             , ewRoot = root
-                            , ewSteps = map StepOmega ops0
+                            , ewForallIntros = 0
                             , ewWitness = InstanceWitness ops0
                             }
                     edgeTrace = EdgeTrace
@@ -1168,14 +1131,14 @@ spec = do
                             Nothing ->
                                 expectationFailure "Missing normalized witness for annotation edge"
                             Just ew1 -> do
-                                let steps = ewSteps ew1
+                                let ops = getInstanceOps (ewWitness ew1)
                                     grafts =
                                         [ (arg, n)
-                                        | StepOmega (OpGraft arg n) <- steps
+                                        | OpGraft arg n <- ops
                                         ]
                                     weakens =
                                         [ n
-                                        | StepOmega (OpWeaken n) <- steps
+                                        | OpWeaken n <- ops
                                         ]
                                 grafts `shouldBe` [(arg1, binder)]
                                 weakens `shouldBe` [binder]
@@ -1211,7 +1174,7 @@ spec = do
                             , ewLeft = root
                             , ewRight = binder
                             , ewRoot = root
-                            , ewSteps = map StepOmega ops0
+                            , ewForallIntros = 0
                             , ewWitness = InstanceWitness ops0
                             }
                     edgeTrace = EdgeTrace
@@ -1281,7 +1244,7 @@ spec = do
                             , ewLeft = root
                             , ewRight = binder
                             , ewRoot = root
-                            , ewSteps = map StepOmega ops0
+                            , ewForallIntros = 0
                             , ewWitness = InstanceWitness ops0
                             }
                     edgeTrace = EdgeTrace
@@ -1314,14 +1277,14 @@ spec = do
                             Nothing ->
                                 expectationFailure "Missing normalized witness for non-annotation edge"
                             Just ew1 -> do
-                                let steps = ewSteps ew1
+                                let ops = getInstanceOps (ewWitness ew1)
                                     grafts =
                                         [ (arg, n)
-                                        | StepOmega (OpGraft arg n) <- steps
+                                        | OpGraft arg n <- ops
                                         ]
                                     weakens =
                                         [ n
-                                        | StepOmega (OpWeaken n) <- steps
+                                        | OpWeaken n <- ops
                                         ]
                                 grafts `shouldBe` [(arg2, binder), (arg1, binder)]
                                 weakens `shouldBe` []
@@ -1485,10 +1448,6 @@ spec = do
                         }
                 acyclicityRes = AcyclicityResult { arSortedEdges = [edge], arDepGraph = undefined }
 
-                hasOmegaStep step = case step of
-                    StepOmega _ -> True
-                    StepIntro -> False
-
             case computePresolution defaultTraceConfig acyclicityRes constraint of
                 Left err -> expectationFailure ("Presolution failed: " ++ show err)
                 Right PresolutionResult{ prEdgeExpansions = exps, prEdgeWitnesses = ews } -> do
@@ -1499,8 +1458,8 @@ spec = do
                     case IntMap.lookup 0 ews of
                         Nothing -> expectationFailure "No witness found for Edge 0"
                         Just ew -> do
-                            ewSteps ew `shouldSatisfy` any (== StepIntro)
-                            ewSteps ew `shouldSatisfy` any hasOmegaStep
+                            ewForallIntros ew > 0 `shouldBe` True
+                            not (null (getInstanceOps (ewWitness ew))) `shouldBe` True
 
     describe "Thesis obligations" $ do
         it "O11-WITNESS-NORM" $ do

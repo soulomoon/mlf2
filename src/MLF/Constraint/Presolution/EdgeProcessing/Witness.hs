@@ -11,7 +11,7 @@ module MLF.Constraint.Presolution.EdgeProcessing.Witness (
     edgeWitnessPlan,
     buildEdgeWitness,
     buildEdgeTrace,
-    dropWeakenSteps
+    dropWeakenOps
 ) where
 
 import qualified Data.IntSet as IntSet
@@ -40,14 +40,14 @@ import MLF.Constraint.Presolution.Witness (
 {- Note [Edge witness emission]
 The edge witness combines two sources of information:
 
-  - the Omega steps induced directly by the chosen expansion recipe, and
+  - the Omega ops and forall-intro count induced directly by the chosen
+    expansion recipe, and
   - the Phase-2 instance ops (Raise/Merge/Weaken variants) emitted by
     edge-local unification.
 
-We keep both the interleaved step list (`ewSteps`) and the Omega-only
-projection (`ewWitness`) so that later normalization can reconcile them in a
-paper-faithful way (see `papers/these-finale-english.txt` and
-`papers/xmlf.txt` Fig. 10).
+We keep the forall-intro count (`ewForallIntros`) separate from the Omega-only
+ops (`ewWitness`) so that later Phi translation can apply O as a prefix of
+InstIntro steps, then replay Omega ops independently (thesis Def. 15.3.4).
 -}
 
 {- Note [Weaken suppression on annotation edges]
@@ -58,9 +58,9 @@ annotated paths. EdgeProcessing decides when to suppress and threads the flag
 into `edgeWitnessPlan`.
 -}
 
--- | Precompute the base (Omega) steps and ops for a witness.
+-- | Precompute the base forall-intro count and ops for a witness.
 data EdgeWitnessPlan = EdgeWitnessPlan
-    { ewpBaseSteps :: [InstanceStep]
+    { ewpForallIntros :: Int
     , ewpBaseOps :: [InstanceOp]
     }
 
@@ -69,10 +69,9 @@ edgeWitnessPlan gid suppressWeaken leftId leftRaw expn = do
     let root = case leftRaw of
             TyExp{ tnBody = b } -> b
             _ -> leftId
-    baseSteps0 <- witnessFromExpansion gid root leftRaw expn
-    let baseSteps = if suppressWeaken then dropWeakenSteps baseSteps0 else baseSteps0
-        baseOps = [op | StepOmega op <- baseSteps]
-    pure EdgeWitnessPlan { ewpBaseSteps = baseSteps, ewpBaseOps = baseOps }
+    (introCount, baseOps0) <- witnessFromExpansion gid root leftRaw expn
+    let baseOps = if suppressWeaken then dropWeakenOps baseOps0 else baseOps0
+    pure EdgeWitnessPlan { ewpForallIntros = introCount, ewpBaseOps = baseOps }
 
 -- | Build an edge witness from the chosen expansion recipe and extra ops.
 buildEdgeWitness
@@ -80,31 +79,31 @@ buildEdgeWitness
     -> NodeId
     -> NodeId
     -> TyNode
-    -> [InstanceStep]
+    -> Int
+    -> [InstanceOp]
     -> [InstanceOp]
     -> PresolutionM EdgeWitness
-buildEdgeWitness eid left right leftRaw baseSteps extraOps = do
+buildEdgeWitness eid left right leftRaw introCount baseOps extraOps = do
     let root = case leftRaw of
             TyExp{ tnBody = b } -> b
             _ -> left
-        steps0 = integratePhase2Steps baseSteps extraOps
-        ops = [op | StepOmega op <- steps0]
+        (intros, ops) = integratePhase2Steps (introCount, baseOps) extraOps
         iw = InstanceWitness ops
     pure EdgeWitness
         { ewEdgeId = eid
         , ewLeft = left
         , ewRight = right
         , ewRoot = root
-        , ewSteps = steps0
+        , ewForallIntros = intros
         , ewWitness = iw
         }
 
--- | Remove Weaken steps from a witness step list.
-dropWeakenSteps :: [InstanceStep] -> [InstanceStep]
-dropWeakenSteps = filter (not . isWeakenStep)
+-- | Remove Weaken ops from an op list.
+dropWeakenOps :: [InstanceOp] -> [InstanceOp]
+dropWeakenOps = filter (not . isWeakenOp)
   where
-    isWeakenStep step = case step of
-        StepOmega OpWeaken{} -> True
+    isWeakenOp op = case op of
+        OpWeaken{} -> True
         _ -> False
 
 -- | Build an edge trace.

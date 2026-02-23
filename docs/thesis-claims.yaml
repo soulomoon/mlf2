@@ -422,8 +422,7 @@ claims:
           kind: example
       code_paths:
         - src/MLF/Elab/Phi/Translate.hs#phiFromEdgeWitnessWithTrace
-    deviations:
-      - DEV-STEPINTRO-NOT-OMEGA
+    deviations: []
     status: defended
     notes: ""
 

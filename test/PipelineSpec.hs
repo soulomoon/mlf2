@@ -31,7 +31,7 @@ import MLF.Constraint.Canonicalizer (canonicalizeNode)
 import MLF.Constraint.Presolution
 import MLF.Constraint.Solve
 import MLF.Constraint.Types.Graph
-import MLF.Constraint.Types.Witness (EdgeWitness(..), InstanceOp(..), InstanceStep(..))
+import MLF.Constraint.Types.Witness (EdgeWitness(..), InstanceOp(..), InstanceWitness(..))
 import qualified MLF.Binding.Tree as Binding
 import MLF.Elab.Run.Provenance (buildTraceCopyMap, collectBaseNamedKeys)
 import MLF.Elab.Run.Util
@@ -240,7 +240,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                         edgeTraces = IntMap.map (canonicalizeTrace canon) (prEdgeTraces pres)
                         raisesForEdge (eid, ew) =
                             [ (eid, n)
-                            | StepOmega (OpRaise n) <- ewSteps ew
+                            | OpRaise n <- getInstanceOps (ewWitness ew)
                             ]
                         raiseTargets = concatMap raisesForEdge (IntMap.toList edgeWitnesses)
                     raiseTargets `shouldSatisfy` (not . null)
@@ -748,8 +748,8 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     ELet "f" (EAnn (ELam "x" (EVar "x")) annTy)
                         (EApp (EVar "f") (ELit (LInt 1)))
 
-                hasWeakenStep s = case s of
-                    StepOmega (OpWeaken _) -> True
+                hasWeakenOp op = case op of
+                    OpWeaken _ -> True
                     _ -> False
 
             case runToPresolutionWithAnnDefault defaultPolySyms expr of
@@ -761,8 +761,8 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                         IntMap.member eid exps `shouldBe` True
                         case IntMap.lookup eid ews of
                             Nothing -> expectationFailure ("Missing witness for annotation edge " ++ show eid)
-                            Just EdgeWitness{ ewSteps = steps } ->
-                                steps `shouldSatisfy` all (not . hasWeakenStep)
+                            Just ew ->
+                                getInstanceOps (ewWitness ew) `shouldSatisfy` all (not . hasWeakenOp)
 
     describe "Pipeline soundness proxies" $ do
         -- Note: Pipeline-elaborated terms may contain internal type annotations

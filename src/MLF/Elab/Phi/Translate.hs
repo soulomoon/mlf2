@@ -326,19 +326,17 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
                         then namedSet1
                         else IntSet.intersection namedSet1 interior
             in IntSet.delete rootKey base
-    let InstanceWitness ops = ewWitness ew
-        steps0Raw =
-            case ewSteps ew of
-                [] -> map StepOmega ops
-                xs -> xs
-        steps0 =
+    let introCount = ewForallIntros ew
+        ops = getInstanceOps (ewWitness ew)
+        _ops0Debug =
             debugPhi
-                ("phi steps edge=" ++ show (ewEdgeId ew)
+                ("phi ops edge=" ++ show (ewEdgeId ew)
                     ++ " root=" ++ show (ewRoot ew)
                     ++ " right=" ++ show (ewRight ew)
-                    ++ " steps=" ++ show steps0Raw
+                    ++ " introCount=" ++ show introCount
+                    ++ " ops=" ++ show ops
                 )
-                steps0Raw
+                ops
     let mSchemeInfoReplaySeed =
             case mSchemeInfo of
                 Just si ->
@@ -399,7 +397,8 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
         namedSet
         targetBinderKeys
         siReplay
-        steps0
+        introCount
+        ops
   where
     debugPhi :: String -> a -> a
     debugPhi = traceGeneralize traceCfg

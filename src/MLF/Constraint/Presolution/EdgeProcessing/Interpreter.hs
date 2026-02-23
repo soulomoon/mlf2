@@ -101,6 +101,6 @@ executeUnifiedExpansionPath plan = do
         extraOps = eerExtraOps expansionResult
     tr <- buildEdgeTrace schemeGen edgeId n1Id n1Raw finalExp expTrace
     recordEdgeTrace edgeId tr
-    w <- buildEdgeWitness edgeId n1Id n2Id n1Raw (ewpBaseSteps witnessPlan) extraOps
+    w <- buildEdgeWitness edgeId n1Id n2Id n1Raw (ewpForallIntros witnessPlan) (ewpBaseOps witnessPlan) extraOps
     recordEdgeWitness edgeId w
     canonicalizeEdgeTraceInteriorsM

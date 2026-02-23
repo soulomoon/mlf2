@@ -51,7 +51,6 @@ module MLF.Constraint.Types (
     Expansion (..),
     ExpansionF (..),
     InstanceOp(..),
-    InstanceStep(..),
     InstanceWitness(..),
     EdgeWitness(..),
     Presolution (..),
@@ -73,6 +72,5 @@ import MLF.Constraint.Types.Witness
     , ExpansionF(..)
     , ForallSpec(..)
     , InstanceOp(..)
-    , InstanceStep(..)
     , InstanceWitness(..)
     )

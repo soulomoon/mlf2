@@ -1,11 +1,11 @@
 # Thesis Obligations Ledger
 
-Generated from `/Users/ares/.config/superpowers/worktrees/mlf4/defensible-exactness/docs/thesis-obligations.yaml` by `scripts/render-thesis-obligations-ledger.rb`.
+Generated from `docs/thesis-obligations.yaml` by `scripts/render-thesis-obligations-ledger.rb`.
 
 ## Summary
 
-- Total obligations: **99**
-- Status counts: `anchored`=99
+- Total obligations: **104**
+- Status counts: `anchored`=104
 - Chapters covered: 4, 5, 7, 8, 9, 10, 11, 12, 14, 15
 
 ## Chapter 4
@@ -34,13 +34,18 @@ Generated from `/Users/ares/.config/superpowers/worktrees/mlf4/defensible-exactn
 | `O07-REBIND` | `7.3` | `Figure 7.3.x Rebind` | Rebind | `O07-REBIND` | `/Volumes/src/mlf4/test/BindingSpec.hs` | `CLM-UNIFICATION` |
 | `O07-UNIF-CORE` | `7.3` | `Figure 7.3.x Unif` | Core unification | `O07-UNIF-CORE` | `/Volumes/src/mlf4/test/NormalizeSpec.hs` | `CLM-UNIFICATION` |
 | `O07-UNIF-PRESOL` | `7.3` | `Presolution unify` | Presolution unify | `O07-UNIF-PRESOL` | `/Volumes/src/mlf4/test/SolveSpec.hs` | `CLM-UNIFICATION` |
+| `O07-GENUNIF` | `7.6` | `Definition 7.6.1, Definition 7.6.2, Section 7.6.2, Lemma 7.6.3` | Generalized unification | `Generalized unification (Ch 7.6)` | `test/SolveSpec.hs` | `CLM-UNIFICATION`, `CLM-GEN-UNIFICATION` |
 
 ## Chapter 8
 
 | ID | Section | Figure/Def | Rule | Test Matcher | Test File | Claims |
 |---|---|---|---|---|---|---|
+| `O08-BIND-MONO` | `8.2` | `Figure 8.2.2` | B(σ) binding monomorphic subtypes | `O08-BIND-MONO` | `/Volumes/src/mlf4/test/PipelineSpec.hs` | `CLM-ELABORATION-CORRECTNESS` |
 | `O08-REIFY-NAMES` | `8.2` | `Named reification` | Named reification | `O08-REIFY-NAMES` | `/Volumes/src/mlf4/test/PipelineSpec.hs` | `CLM-ELABORATION-CORRECTNESS` |
 | `O08-REIFY-TYPE` | `8.2` | `Graphic to syntactic reification` | Graphic→syntactic | `O08-REIFY-TYPE` | `/Volumes/src/mlf4/test/PipelineSpec.hs` | `CLM-ELABORATION-CORRECTNESS` |
+| `O08-SYN-TO-GRAPH` | `8.2` | `Figure 8.2.3` | G(σ) syntactic to graphic | `O08-SYN-TO-GRAPH` | `/Volumes/src/mlf4/test/PipelineSpec.hs` | `CLM-ELABORATION-CORRECTNESS` |
+| `O08-INLINE-PRED` | `8.3` | `Inline(τ,n) predicate` | Inline predicate | `O08-INLINE-PRED` | `/Volumes/src/mlf4/test/PipelineSpec.hs` | `CLM-ELABORATION-CORRECTNESS` |
+| `O08-REIFY-INLINE` | `8.3` | `Figure 8.3.3` | Sᵢ(τ) reification with inlining | `O08-REIFY-INLINE` | `/Volumes/src/mlf4/test/PipelineSpec.hs` | `CLM-ELABORATION-CORRECTNESS` |
 
 ## Chapter 9
 

@@ -24,9 +24,9 @@ Part I: Graphic types and type instance (Ch 3-8)
   - Code: `src/MLF/Constraint/Presolution/Unify.hs`,
     `src/MLF/Constraint/Unify/Decompose.hs`.
   - Gaps: generalized unification (7.6), unification modulo similarity (7.4.6).
-- Ch 8 (syntactic and graphic translation, bound inlining): Partial.
-  - Code: `src/MLF/Elab/Reify.hs`.
-  - Gaps: complete translation coverage and bound-inlining rules.
+- Ch 8 (syntactic and graphic translation, bound inlining): Complete.
+  - Code: `src/MLF/Elab/Reify.hs`, `src/MLF/Frontend/Normalize.hs`, `src/MLF/Elab/Types.hs`.
+  - Obligations: O08-REIFY-TYPE, O08-REIFY-NAMES, O08-BIND-MONO, O08-SYN-TO-GRAPH, O08-REIFY-INLINE, O08-INLINE-PRED.
 
 Part II: Graphic constraints (Ch 9-13)
 - Ch 9 (constraint definition, interiors): Partial.
@@ -82,15 +82,16 @@ P1 (important for full coverage)
 - P1/M: Alternative let scoping and translatable presolutions (Ch 15.2.6-15.2.7).
   - New spec: `.kiro/specs/let-scope-alternative-typing`.
 - P1/M: Syntactic <-> graphic translation and bound inlining rules (Ch 8).
-  - New spec: `.kiro/specs/syntactic-graphic-translation`.
+  - DONE: obligations O08-BIND-MONO, O08-SYN-TO-GRAPH, O08-REIFY-INLINE, O08-INLINE-PRED added.
+  - Archived: `.kiro/specs-archive/syntactic-graphic-translation`.
 - P1/L: Constraints up to similarity or abstraction (Ch 13) — doc-only unless implementing iMLF tooling.
   - Spec + audit: `.kiro/specs/constraint-similarity-abstraction/`.
 - P1/M: Generalized unification (Ch 7.6).
-  - New spec: `.kiro/specs/generalized-unification`.
+  - DONE: archived at `.kiro/specs/archive/generalized-unification`.
 
 P2 (follow-up or doc-heavy)
 - P2/M: Simplification rules and ML constraint specifics (Ch 12.2, 12.4).
-  - New spec: `.kiro/specs/constraint-simplification-rules`.
+  - DONE: archived at `.kiro/specs-archive/constraint-simplification-rules`.
 - P2/L: eMLF and iMLF translation variants (Ch 13.3, 15.5).
   - New spec: `.kiro/specs/emlf-imlf-translation`.
 - P2/S: Document-only notes for proof-only chapters (Ch 14.4-14.6, Ch 16-17).

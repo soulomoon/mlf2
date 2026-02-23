@@ -24,7 +24,7 @@ scope:
   - '15.2'
   - '15.3'
   policy: Operational rules only
-  total_expected_obligations: 99
+  total_expected_obligations: 104
 obligations:
 - id: O14-WF-EMPTY
   chapter: 14
@@ -1158,6 +1158,63 @@ obligations:
     matcher: O08-REIFY-NAMES
     file: "/Volumes/src/mlf4/test/PipelineSpec.hs"
     rationale: Exercises reifyTypeWithNames through the pipeline.
+  status: anchored
+  supports_claims: [CLM-ELABORATION-CORRECTNESS]
+- id: O08-BIND-MONO
+  chapter: 8
+  section: 8.2
+  figure_or_definition: Figure 8.2.2
+  thesis_rule_label: B(σ) binding monomorphic subtypes
+  judgment_or_equation: normalizeType inlines alias bounds producing restricted types
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Frontend/Normalize.hs#normalizeType"
+  test_anchor:
+    matcher: O08-BIND-MONO
+    file: "/Volumes/src/mlf4/test/PipelineSpec.hs"
+    rationale: Exercises normalizeType alias-bound inlining through the pipeline.
+  status: anchored
+  supports_claims: [CLM-ELABORATION-CORRECTNESS]
+- id: O08-SYN-TO-GRAPH
+  chapter: 8
+  section: 8.2
+  figure_or_definition: Figure 8.2.3
+  thesis_rule_label: G(σ) syntactic to graphic
+  judgment_or_equation: internalizeCoercionCopy translates syntactic types to graphic form
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Frontend/ConstraintGen/Translate.hs#internalizeCoercionCopy"
+  test_anchor:
+    matcher: O08-SYN-TO-GRAPH
+    file: "/Volumes/src/mlf4/test/PipelineSpec.hs"
+    rationale: Exercises syntactic-to-graphic translation via coercion annotations.
+  status: anchored
+  supports_claims: [CLM-ELABORATION-CORRECTNESS]
+- id: O08-REIFY-INLINE
+  chapter: 8
+  section: 8.3
+  figure_or_definition: Figure 8.3.3
+  thesis_rule_label: Sᵢ(τ) reification with inlining
+  judgment_or_equation: shouldInline decides bound inlining during reification
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Reify/Core.hs#reifyWith"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Types.hs#inlineBoundsForDisplay"
+  test_anchor:
+    matcher: O08-REIFY-INLINE
+    file: "/Volumes/src/mlf4/test/PipelineSpec.hs"
+    rationale: Exercises bound inlining during reification.
+  status: anchored
+  supports_claims: [CLM-ELABORATION-CORRECTNESS]
+- id: O08-INLINE-PRED
+  chapter: 8
+  section: 8.3
+  figure_or_definition: Inline(τ,n) predicate
+  thesis_rule_label: Inline predicate
+  judgment_or_equation: inlineBoundsForDisplay applies Inline(τ,n) conditions for display
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/Types.hs#inlineBoundsForDisplay"
+  test_anchor:
+    matcher: O08-INLINE-PRED
+    file: "/Volumes/src/mlf4/test/PipelineSpec.hs"
+    rationale: Exercises Inline predicate conditions on display types.
   status: anchored
   supports_claims: [CLM-ELABORATION-CORRECTNESS]
 # ── Chapter 9: Constraint Generation ──

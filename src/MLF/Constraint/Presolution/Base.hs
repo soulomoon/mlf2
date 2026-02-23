@@ -134,7 +134,7 @@ data PresolutionState = PresolutionState
 -- | Per-edge provenance for instantiation-related operations.
 --
 -- Source-ID contract (consumed by Φ):
---   * `EdgeWitness.ewSteps` / legacy `ewWitness` operation node IDs
+--   * `EdgeWitness.ewWitness` operation node IDs
 --   * `etBinderArgs`
 --   * `etCopyMap` keys
 --   * `etInterior`

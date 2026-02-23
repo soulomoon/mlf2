@@ -12,7 +12,6 @@ module MLF.Constraint.Presolution.Rewrite (
     -- * Canonicalization
     canonicalizeExpansion,
     canonicalizeOp,
-    canonicalizeStep,
     canonicalizeWitness,
     canonicalizeTrace,
     -- * Bind parent reconstruction
@@ -63,22 +62,16 @@ canonicalizeOp canon = \case
   where
     canonical = canonicalizeNode canon
 
--- | Canonicalize an instance step.
-canonicalizeStep :: Canonicalizer -> InstanceStep -> InstanceStep
-canonicalizeStep canon = \case
-    StepOmega op -> StepOmega (canonicalizeOp canon op)
-    StepIntro -> StepIntro
-
 -- | Canonicalize an edge witness.
 canonicalizeWitness :: Canonicalizer -> EdgeWitness -> EdgeWitness
 canonicalizeWitness canon w =
-    let -- Contract: preserve source-domain provenance (`ewSteps`, `ewWitness`)
+    let -- Contract: preserve source-domain provenance (`ewWitness`)
         -- and canonicalize only structural lookup fields.
     in w
         { ewLeft = canonical (ewLeft w)
         , ewRight = canonical (ewRight w)
         , ewRoot = canonical (ewRoot w)
-        , ewSteps = ewSteps w
+        , ewForallIntros = ewForallIntros w
         , ewWitness = ewWitness w
         }
   where

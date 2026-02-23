@@ -33,7 +33,7 @@ import MLF.Constraint.Types.Graph
     , nodeRefKey
     , typeRef
     )
-import MLF.Constraint.Types.Witness (InstanceOp(..), InstanceStep(..), InstanceWitness(..), EdgeWitness(..))
+import MLF.Constraint.Types.Witness (InstanceOp(..), InstanceWitness(..), EdgeWitness(..))
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Binding.Canonicalization as BindCanon
 import MLF.Elab.Run.Scope (letScopeOverrides, resolveCanonicalScope)
@@ -1025,7 +1025,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewRight = arrow
                         -- Expansion root r (TyExp body); order keys derived from this.
                         , ewRoot = arrow
-                        , ewSteps = []
+                        , ewForallIntros = 0
                         , ewWitness = InstanceWitness []
                         }
 
@@ -1090,7 +1090,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewLeft = root
                         , ewRight = root
                         , ewRoot = root
-                        , ewSteps = map StepOmega ops
+                        , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
                 case ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew of
@@ -1144,7 +1144,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewLeft = root
                         , ewRight = root
                         , ewRoot = root
-                        , ewSteps = map StepOmega ops
+                        , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
                 phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
@@ -1211,7 +1211,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewLeft = arrow
                         , ewRight = arrow
                         , ewRoot = arrow
-                        , ewSteps = []
+                        , ewForallIntros = 0
                         , ewWitness = InstanceWitness []
                         }
 
@@ -1278,7 +1278,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewLeft = arrow
                         , ewRight = arrow
                         , ewRoot = arrow
-                        , ewSteps = []
+                        , ewForallIntros = 0
                         , ewWitness = InstanceWitness []
                         }
 
@@ -1343,7 +1343,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewLeft = root
                         , ewRight = root
                         , ewRoot = root
-                        , ewSteps = map StepOmega ops
+                        , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
                 phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew)
@@ -1381,7 +1381,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewLeft = root
                         , ewRight = root
                         , ewRoot = root
-                        , ewSteps = map StepOmega ops
+                        , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
 
@@ -1428,7 +1428,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewLeft = root
                         , ewRight = root
                         , ewRoot = root
-                        , ewSteps = map StepOmega ops
+                        , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
                 case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew of
@@ -1473,7 +1473,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewLeft = root
                         , ewRight = root
                         , ewRoot = root
-                        , ewSteps = map StepOmega ops
+                        , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
                 phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew)
@@ -1512,7 +1512,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewLeft = root
                         , ewRight = root
                         , ewRoot = root
-                        , ewSteps = map StepOmega ops
+                        , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
                 phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew)
@@ -1551,7 +1551,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewLeft = root
                         , ewRight = root
                         , ewRoot = root
-                        , ewSteps = map StepOmega ops
+                        , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
                 case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew of
@@ -1595,7 +1595,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewLeft = root
                         , ewRight = root
                         , ewRoot = root
-                        , ewSteps = map StepOmega ops
+                        , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
                 case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew of
@@ -1651,7 +1651,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewLeft = root
                         , ewRight = root
                         , ewRoot = root
-                        , ewSteps = map StepOmega ops
+                        , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
 
@@ -1709,7 +1709,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewLeft = root
                         , ewRight = root
                         , ewRoot = root
-                        , ewSteps = map StepOmega ops
+                        , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
 
@@ -1724,7 +1724,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             (Elab.TArrow (Elab.TVar "a") (Elab.TBase (BaseTy "Int")))
                 canonType out `shouldBe` canonType expected
 
-            it "O15-TR-SEQ-CONS: interleaves StepIntro with Omega ops in Φ translation" $ do
+            it "O15-TR-SEQ-CONS: counts forall intros in Φ translation" $ do
                 let root = NodeId 0
                     binder = NodeId 1
                     nodes = nodeMapFromList
@@ -1746,13 +1746,12 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = subst }
 
                     ops = [OpWeaken binder]
-                    steps = [StepIntro, StepOmega (OpWeaken binder)]
                     ew = EdgeWitness
                         { ewEdgeId = EdgeId 0
                         , ewLeft = root
                         , ewRight = root
                         , ewRoot = root
-                        , ewSteps = steps
+                        , ewForallIntros = 1
                         , ewWitness = InstanceWitness ops
                         }
 
@@ -1801,7 +1800,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewLeft = root
                         , ewRight = root
                         , ewRoot = root
-                        , ewSteps = map StepOmega ops
+                        , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
 
@@ -1853,7 +1852,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewLeft = root
                         , ewRight = root
                         , ewRoot = root
-                        , ewSteps = map StepOmega ops
+                        , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
 
@@ -1897,7 +1896,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewLeft = root
                         , ewRight = root
                         , ewRoot = root
-                        , ewSteps = map StepOmega ops
+                        , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
 
@@ -1949,7 +1948,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewLeft = root
                         , ewRight = root
                         , ewRoot = root
-                        , ewSteps = map StepOmega ops
+                        , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
 
@@ -2013,7 +2012,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewLeft = NodeId 0
                         , ewRight = NodeId 0
                         , ewRoot = root
-                        , ewSteps = map StepOmega ops
+                        , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
 
@@ -2103,7 +2102,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     Right (solved, ews, traces) -> do
                         IntMap.size ews `shouldSatisfy` (> 0)
                         forM_ (IntMap.elems ews) $ \ew -> do
-                            let ops = [op | StepOmega op <- ewSteps ew]
+                            let ops = getInstanceOps (ewWitness ew)
                             checkNoDupRaises ops
                             let EdgeId eid = ewEdgeId ew
                                 mTrace = IntMap.lookup eid traces
@@ -2147,7 +2146,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewLeft = nonBinderN
                         , ewRight = nonBinderN
                         , ewRoot = root
-                        , ewSteps = map StepOmega ops
+                        , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
                 case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew of
@@ -2196,7 +2195,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewLeft = nonBinderN
                         , ewRight = nonBinderN
                         , ewRoot = root
-                        , ewSteps = map StepOmega ops
+                        , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
                 case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew of
@@ -2523,7 +2522,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewLeft = NodeId 0
                         , ewRight = NodeId 0
                         , ewRoot = root
-                        , ewSteps = map StepOmega ops
+                        , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
 

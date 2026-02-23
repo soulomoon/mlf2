@@ -17,7 +17,6 @@ module MLF.Constraint.Types.Witness (
     Expansion(..),
     ExpansionF(..),
     InstanceOp(..),
-    InstanceStep(..),
     InstanceWitness(..),
     EdgeWitness(..)
 ) where
@@ -133,30 +132,23 @@ data InstanceOp
 newtype InstanceWitness = InstanceWitness { getInstanceOps :: [InstanceOp] }
     deriving (Eq, Show)
 
--- | A witness step that can interleave quantifier introductions with Ω ops.
-data InstanceStep
-    = StepOmega InstanceOp
-    | StepIntro
-    deriving (Eq, Show)
-
 -- | Per-instantiation-edge witness metadata.
 --
 -- This is the data that Phase 6 uses to reconstruct an xMLF instantiation for
 -- an application site.
 --
--- Paper mapping (`papers/these-finale-english.txt`; see `papers/xmlf.txt` §3.4):
---   - `ewWitness` corresponds to a (normalized) witness Ω.
---   - `ewRoot` corresponds to the expansion root `r` in χₑ.
---   - `ewLeft`/`ewRight` are the endpoints of the original instantiation edge.
---   - The paper’s Φ(e) is Σ(g); Φχe(Ω). Our elaborator computes the Σ(g) part
---     using scheme information (binder order), and then translates Ω.
+-- Paper mapping:
+--   - @ewForallIntros@ is the count of quantifier introductions (O phase).
+--   - @ewWitness@ corresponds to a (normalized) witness (Omega).
+--   - @ewRoot@ corresponds to the expansion root @r@.
+--   - @ewLeft@/@ewRight@ are the endpoints of the original instantiation edge.
 data EdgeWitness = EdgeWitness
     { ewEdgeId :: EdgeId
     , ewLeft :: NodeId
     , ewRight :: NodeId
     , ewRoot :: NodeId
-    , ewSteps :: [InstanceStep]
-        -- ^ Interleaved witness steps for this edge, in expansion order.
+    , ewForallIntros :: Int
+        -- ^ Number of quantifier introductions (O phase, thesis Def. 15.3.4).
     , ewWitness :: InstanceWitness
     }
     deriving (Eq, Show)

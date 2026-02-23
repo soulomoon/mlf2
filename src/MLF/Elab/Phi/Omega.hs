@@ -74,9 +74,10 @@ phiWithSchemeOmega
     -> IntSet.IntSet
     -> IntSet.IntSet
     -> SchemeInfo
-    -> [InstanceStep]
+    -> Int            -- ^ forall intro count (O phase)
+    -> [InstanceOp]   -- ^ omega ops
     -> Either ElabError Instantiation
-phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
+phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithScheme
   where
     res :: SolveResult
     res = ocResult ctx
@@ -452,10 +453,10 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
                     then Just [ty | name <- binderNames, Just ty <- [Map.lookup name subst]]
                     else Nothing
 
-    -- | Paper Def. 15.3.4 / Fig. 15.3.5: Φ(e) = Σ prefix then Φχe(Ω).
-    -- We always attempt binder reordering via Σ(g), independent of whether Ω
-    -- contains Raise operations. When no reorder is needed, reorderBindersByPrec
-    -- returns InstId.
+    -- | Paper Def. 15.3.4 / Fig. 15.3.5: Φ(e) = Σ; O; Φχe(Ω).
+    -- Thesis treats quantifier introduction (O) and witness replay (Ω) as
+    -- separate phases. The intro count drives O as a prefix of InstIntro
+    -- steps, then the omega ops are replayed via `go`.
     phiWithScheme :: Either ElabError Instantiation
     phiWithScheme = do
         let ty0 = schemeToType (siScheme si)
@@ -465,8 +466,20 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
             binderKeys = IntSet.fromList (IntMap.keys subst)
         -- Always attempt Σ(g) / ϕR at the start (thesis Def. 15.3.4), even if Ω has no Raise steps.
         (sigma, ty1, ids1) <- reorderBindersByPrec ty0 ids0
-        (_, _, phiOps) <- goSteps binderKeys keepBinderKeys namedSet ty1 ids1 InstId steps lookupBinder
-        pure (normalizeInst (instMany [sigma, phiOps]))
+        -- Phase O: apply all quantifier introductions up front.
+        (ty2, ids2) <- applyIntros introCount ty1 ids1
+        let phiIntro = instMany (replicate introCount InstIntro)
+        -- Phase Ω: replay witness operations on the intro-extended type.
+        (_, _, phiOmega) <- go binderKeys keepBinderKeys namedSet ty2 ids2 InstId omegaOps lookupBinder
+        pure (normalizeInst (instMany [sigma, phiIntro, phiOmega]))
+
+
+    -- | Apply n quantifier introductions, prepending Nothing to ids each time.
+    applyIntros :: Int -> ElabType -> [Maybe NodeId] -> Either ElabError (ElabType, [Maybe NodeId])
+    applyIntros 0 ty ids = Right (ty, ids)
+    applyIntros n ty ids = do
+        ty' <- applyInst "applyIntros" ty InstIntro
+        applyIntros (n - 1) ty' (Nothing : ids)
 
     applyInst :: String -> ElabType -> Instantiation -> Either ElabError ElabType
     applyInst label ty0 inst = case applyInstantiation ty0 inst of
@@ -504,31 +517,6 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si steps = phiWithScheme
         let idsAfter = syncIdsAcrossInstantiation tyBefore idsBefore tyAfter
         pure (tyAfter, idsAfter)
 
-    goSteps
-        :: IntSet.IntSet
-        -> IntSet.IntSet
-        -> IntSet.IntSet
-        -> ElabType
-        -> [Maybe NodeId]
-        -> Instantiation
-        -> [InstanceStep]
-        -> (NodeId -> Maybe String)
-        -> Either ElabError (ElabType, [Maybe NodeId], Instantiation)
-    goSteps binderKeys keepBinderKeys' namedSet' ty ids phi steps' lookupBinder = case steps' of
-        [] -> Right (ty, ids, phi)
-        StepIntro : rest -> do
-            ty' <- applyInst "StepIntro" ty InstIntro
-            let ids' = Nothing : ids
-            goSteps binderKeys keepBinderKeys' namedSet' ty' ids' (composeInst phi InstIntro) rest lookupBinder
-        _ -> do
-            let (omegaSteps, rest) = span isOmegaStep steps'
-                ops = [op | StepOmega op <- omegaSteps]
-            (ty', ids', phi') <- go binderKeys keepBinderKeys' namedSet' ty ids phi ops lookupBinder
-            goSteps binderKeys keepBinderKeys' namedSet' ty' ids' phi' rest lookupBinder
-
-    isOmegaStep :: InstanceStep -> Bool
-    isOmegaStep StepOmega{} = True
-    isOmegaStep _ = False
 
     reorderBindersByPrec :: ElabType -> [Maybe NodeId] -> Either ElabError (Instantiation, ElabType, [Maybe NodeId])
     reorderBindersByPrec ty ids = do

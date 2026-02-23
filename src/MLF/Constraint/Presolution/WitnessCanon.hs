@@ -7,7 +7,6 @@ This module provides canonicalization and normalization functions for
 instance operation witnesses, enforcing the conditions from the MLF thesis.
 -}
 module MLF.Constraint.Presolution.WitnessCanon (
-    normalizeInstanceStepsFull,
     normalizeInstanceOpsFull,
     coalesceRaiseMergeWithEnv,
     reorderWeakenWithEnv
@@ -19,7 +18,7 @@ import qualified Data.IntSet as IntSet
 import Data.List (partition, sortBy)
 
 import MLF.Constraint.Types.Graph (NodeId(..), NodeRef(..), getNodeId, nodeRefFromKey, typeRef)
-import MLF.Constraint.Types.Witness (InstanceOp(..), InstanceStep(..))
+import MLF.Constraint.Types.Witness (InstanceOp(..))
 import qualified MLF.Binding.Tree as Binding
 import MLF.Util.Order (compareNodesByOrderKey)
 import MLF.Constraint.Presolution.WitnessValidation (OmegaNormalizeEnv(..), OmegaNormalizeError(..), validateNormalizedWitness, compareNodesByOrderKeyM)
@@ -48,37 +47,6 @@ stripExteriorOps env =
     touchesInterior op = any inInterior (opTargets op)
 
     keepOp op = touchesInterior op
-
-normalizeInstanceStepsWith
-    :: (OmegaNormalizeEnv -> [InstanceOp] -> Either OmegaNormalizeError [InstanceOp])
-    -> OmegaNormalizeEnv
-    -> [InstanceStep]
-    -> Either OmegaNormalizeError [InstanceStep]
-normalizeInstanceStepsWith normalizeOps env steps =
-    let stepper = cata (normalizeAlg env) steps
-    in stepper []
-  where
-    normalizeAlg
-        :: OmegaNormalizeEnv
-        -> ListF InstanceStep ([InstanceOp] -> Either OmegaNormalizeError [InstanceStep])
-        -> ([InstanceOp] -> Either OmegaNormalizeError [InstanceStep])
-    normalizeAlg env' = \case
-        Nil -> flush env'
-        Cons step restFn ->
-            case step of
-                StepOmega op -> \acc -> restFn (op : acc)
-                StepIntro -> \acc -> do
-                    ops <- flush env' acc
-                    rest' <- restFn []
-                    pure (ops ++ [StepIntro] ++ rest')
-
-    flush env' opsRev =
-        if null opsRev
-            then Right []
-            else map StepOmega <$> normalizeOps env' (reverse opsRev)
-
-normalizeInstanceStepsFull :: OmegaNormalizeEnv -> [InstanceStep] -> Either OmegaNormalizeError [InstanceStep]
-normalizeInstanceStepsFull = normalizeInstanceStepsWith normalizeInstanceOpsFull
 
 coalesceRaiseMergeWithEnv :: OmegaNormalizeEnv -> [InstanceOp] -> Either OmegaNormalizeError [InstanceOp]
 coalesceRaiseMergeWithEnv env ops =

@@ -35,9 +35,9 @@ expected_ids.concat(%w[BIND-FLEX-CHILDREN BIND-INTERIOR BIND-ORDER OP-WEAKEN OP-
 # Chapter 5: Inert Node Classification
 expected_ids.concat(%w[INERT-NODES INERT-LOCKED WEAKEN-INERT].map { |s| "O05-#{s}" })
 # Chapter 7: Unification
-expected_ids.concat(%w[UNIF-CORE UNIF-PRESOL REBIND].map { |s| "O07-#{s}" })
+expected_ids.concat(%w[UNIF-CORE UNIF-PRESOL REBIND GENUNIF].map { |s| "O07-#{s}" })
 # Chapter 8: Reification
-expected_ids.concat(%w[REIFY-TYPE REIFY-NAMES].map { |s| "O08-#{s}" })
+expected_ids.concat(%w[REIFY-TYPE REIFY-NAMES BIND-MONO SYN-TO-GRAPH REIFY-INLINE INLINE-PRED].map { |s| "O08-#{s}" })
 # Chapter 9: Constraint Generation
 expected_ids.concat(%w[CGEN-ROOT CGEN-EXPR].map { |s| "O09-#{s}" })
 # Chapter 10: Presolutions & Expansion
@@ -96,8 +96,8 @@ groups = {
   'invalid-code-anchors' => []
 }
 
-if obligations.size != 99
-  groups['count'] << "expected 99 obligations, got #{obligations.size}"
+if obligations.size != 104
+  groups['count'] << "expected 104 obligations, got #{obligations.size}"
 end
 
 missing = expected_ids - ids

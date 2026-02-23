@@ -26,7 +26,7 @@ import MLF.Constraint.Presolution.Base
 import MLF.Constraint.Presolution.StateAccess (getConstraintAndCanonical)
 import MLF.Constraint.Presolution.Validation (translatableWeakenedNodes)
 import MLF.Constraint.Presolution.Witness (
-    normalizeInstanceStepsFull,
+    normalizeInstanceOpsFull,
     OmegaNormalizeEnv(OmegaNormalizeEnv, oneRoot),
     validateNormalizedWitness,
     )
@@ -56,7 +56,7 @@ normalizeEdgeWitnessesM = do
                 [ getNodeId (canonical (rewriteNodeWith copyMap n))
                 | (eid, w0) <- IntMap.toList witnesses0
                 , let copyMap = maybe mempty etCopyMap (IntMap.lookup eid traces)
-                , StepOmega (OpWeaken n) <- ewSteps w0
+                , OpWeaken n <- getInstanceOps (ewWitness w0)
                 ]
         weakened =
             IntSet.union weakenedOps (translatableWeakenedNodes c0)
@@ -94,10 +94,6 @@ normalizeEdgeWitnessesM = do
                     OpRaise n -> OpRaise (rewriteNode n)
                     OpWeaken n -> OpWeaken (rewriteNode n)
                     OpRaiseMerge n m -> OpRaiseMerge (rewriteNode n) (rewriteNode m)
-            rewriteStep step =
-                case step of
-                    StepOmega op -> StepOmega (rewriteOp op)
-                    StepIntro -> StepIntro
             restoreOp op =
                 case op of
                     OpGraft sigma n -> OpGraft (restoreNode sigma) (restoreNode n)
@@ -105,10 +101,6 @@ normalizeEdgeWitnessesM = do
                     OpRaise n -> OpRaise (restoreNode n)
                     OpWeaken n -> OpWeaken (restoreNode n)
                     OpRaiseMerge n m -> OpRaiseMerge (restoreNode n) (restoreNode m)
-            restoreStep step =
-                case step of
-                    StepOmega op -> StepOmega (restoreOp op)
-                    StepIntro -> StepIntro
             isLiveTyVar nid =
                 case NodeAccess.lookupNode c0 (canonical nid) of
                     Just TyVar{} -> True
@@ -235,9 +227,6 @@ normalizeEdgeWitnessesM = do
                 any
                     (\sourceBinder -> canonical (rewriteNode sourceBinder) /= replayBinder)
                     (sourceBindersForReplay replayBinder)
-            isOmegaStep = \case
-                StepOmega{} -> True
-                StepIntro -> False
             hasExplicitWeaken binder ops =
                 any
                     (\case
@@ -296,25 +285,15 @@ normalizeEdgeWitnessesM = do
                             (prefix, suffix) = splitAt firstIdx opsDropped
                         pure (prefix ++ [OpGraft chosen binder, OpWeaken binder] ++ suffix)
                     [] -> Right ops
-            synthesizeAmbiguousAnnotationGraftWeaken steps
-                | not isAnnEdge = Right steps
-                | otherwise = go steps
-              where
-                go [] = Right []
-                go (StepIntro : rest) =
-                    (StepIntro :) <$> go rest
-                go xs =
-                    let (omegaSeg, rest) = span isOmegaStep xs
-                        ops0 = [op | StepOmega op <- omegaSeg]
-                        binders0 = ambiguousReplayBinders ops0
-                    in do
-                        ops1 <- foldM synthesizeOneBinder ops0 binders0
-                        rest' <- go rest
-                        pure (map StepOmega ops1 ++ rest')
-        steps0 <- case synthesizeAmbiguousAnnotationGraftWeaken (map rewriteStep (ewSteps w0)) of
+            synthesizeAmbiguousAnnotationGraftWeaken ops
+                | not isAnnEdge = Right ops
+                | otherwise = do
+                    let binders0 = ambiguousReplayBinders ops
+                    foldM synthesizeOneBinder ops binders0
+        ops0 <- case synthesizeAmbiguousAnnotationGraftWeaken (map rewriteOp (getInstanceOps (ewWitness w0))) of
             Left err ->
                 throwError (WitnessNormalizationError (EdgeId eid) err)
-            Right steps' -> pure steps'
+            Right ops' -> pure ops'
         let
             orderKeys0 = Order.orderKeysFromConstraintWith canonical c0 (canonical orderRoot) Nothing
             orderKeys = orderKeys0
@@ -329,34 +308,32 @@ normalizeEdgeWitnessesM = do
                     , Witness.binderArgs = binderArgs
                     , Witness.binderReplayHints = replayHintsRewritten
                     }
-        steps <- case normalizeInstanceStepsFull env steps0 of
-            Right steps' -> pure steps'
+        opsNorm <- case normalizeInstanceOpsFull env ops0 of
+            Right ops' -> pure ops'
             Left err ->
                 throwError (WitnessNormalizationError (EdgeId eid) err)
         -- Validate normalized ops against Fig. 15.3.4 invariants (thesis-exact).
         -- IMPORTANT: Validate BEFORE restoring to original node space, since
-        -- interiorNorm is in the rewritten node space (matching the normalized steps).
-        let opsRewritten = [op | StepOmega op <- steps]
-        case validateNormalizedWitness env opsRewritten of
+        -- interiorNorm is in the rewritten node space (matching the normalized ops).
+        case validateNormalizedWitness env opsNorm of
             Left valErr -> throwError (WitnessNormalizationError (EdgeId eid) valErr)
             Right () -> pure ()
         let interiorSourceKeys =
                 case traceInterior of
                     InteriorNodes s -> s
-            normalizeRaiseTarget step =
-                case step of
-                    StepOmega (OpRaise n)
+            normalizeRaiseTarget op =
+                case op of
+                    OpRaise n
                         | IntSet.member (getNodeId n) interiorSourceKeys ->
-                            Just (StepOmega (OpRaise n))
+                            Just (OpRaise n)
                         | IntSet.member (getNodeId (canonical n)) interiorSourceKeys ->
-                            Just (StepOmega (OpRaise (canonical n)))
+                            Just (OpRaise (canonical n))
                         | otherwise ->
                             Nothing
-                    _ -> Just step
-            stepsFinal = mapMaybe (normalizeRaiseTarget . restoreStep) steps
-            ops = [op | StepOmega op <- stepsFinal]
+                    _ -> Just op
+            opsFinal = mapMaybe (normalizeRaiseTarget . restoreOp) opsNorm
             trace' = fmap (\tr -> tr { etBinderReplayHints = replayHintsSource }) mbTrace
-        pure (eid, w0 { ewSteps = stepsFinal, ewWitness = InstanceWitness ops }, trace')
+        pure (eid, w0 { ewForallIntros = ewForallIntros w0, ewWitness = InstanceWitness opsFinal }, trace')
     let witnessMap =
             IntMap.fromList
                 [ (eid, witness)

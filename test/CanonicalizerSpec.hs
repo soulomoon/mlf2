@@ -17,7 +17,6 @@ import MLF.Constraint.Types.Witness
     , Expansion(..)
     , ForallSpec(..)
     , InstanceOp(..)
-    , InstanceStep(..)
     , InstanceWitness(..)
     )
 import MLF.Elab.Run.Util (canonicalizeExpansion, canonicalizeTrace, canonicalizeWitness)
@@ -72,24 +71,19 @@ spec = describe "MLF.Constraint.Canonicalizer" $ do
         -- Canonicalization is only for structural lookup fields.
         it "canonicalizes witness structural fields and preserves source-domain witness ops" $ do
             let ops0 = [OpMerge (NodeId 1) (NodeId 2), OpWeaken (NodeId 3)]
-                steps0 =
-                    [ StepOmega (OpGraft (NodeId 1) (NodeId 3))
-                    , StepIntro
-                    , StepOmega (OpRaise (NodeId 2))
-                    ]
                 w0 = EdgeWitness
                     { ewEdgeId = EdgeId 0
                     , ewLeft = NodeId 1
                     , ewRight = NodeId 2
                     , ewRoot = NodeId 3
-                    , ewSteps = steps0
+                    , ewForallIntros = 1
                     , ewWitness = InstanceWitness ops0
                     }
                 w1 = canonicalizeWitness canon w0
             ewLeft w1 `shouldBe` canonNode (ewLeft w0)
             ewRight w1 `shouldBe` canonNode (ewRight w0)
             ewRoot w1 `shouldBe` canonNode (ewRoot w0)
-            ewSteps w1 `shouldBe` steps0
+            ewForallIntros w1 `shouldBe` 1
             let InstanceWitness ops1 = ewWitness w1
             ops1 `shouldBe` ops0
 

@@ -2,11 +2,13 @@
 # frozen_string_literal: true
 
 require 'optparse'
+require 'pathname'
 require 'yaml'
 
 ROOT = File.expand_path('..', __dir__)
 LEDGER_PATH = File.join(ROOT, 'docs/thesis-obligations.yaml')
 OUTPUT_PATH = File.join(ROOT, 'docs/thesis-obligations.md')
+LEDGER_DISPLAY_PATH = Pathname.new(LEDGER_PATH).relative_path_from(Pathname.new(ROOT)).to_s
 
 def expected_ids
   ids = []
@@ -70,7 +72,7 @@ def render_markdown(obligations)
   lines = []
   lines << '# Thesis Obligations Ledger'
   lines << ''
-  lines << "Generated from `#{LEDGER_PATH}` by `scripts/render-thesis-obligations-ledger.rb`."
+  lines << "Generated from `#{LEDGER_DISPLAY_PATH}` by `scripts/render-thesis-obligations-ledger.rb`."
   lines << ''
   lines << '## Summary'
   lines << ''

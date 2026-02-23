@@ -11,14 +11,12 @@ shrink into a driver/wiring layer over time.
 -}
 module MLF.Constraint.Presolution.Witness (
     binderArgsFromExpansion,
-    forallIntroSuffixCount,
     integratePhase2Ops,
     integratePhase2Steps,
     witnessFromExpansion,
-    normalizeInstanceStepsFull,
+    normalizeInstanceOpsFull,
     coalesceRaiseMergeWithEnv,
     reorderWeakenWithEnv,
-    normalizeInstanceOpsFull,
     validateNormalizedWitness,
     OmegaNormalizeEnv(..),
     OmegaNormalizeError(..)
@@ -26,7 +24,7 @@ module MLF.Constraint.Presolution.Witness (
 
 import Control.Monad (foldM, zipWithM)
 import Control.Monad.Except (throwError)
-import Data.Functor.Foldable (ListF(..), cata)
+import Data.Functor.Foldable (cata)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
@@ -44,13 +42,13 @@ import MLF.Constraint.Types.Graph
     , getNodeId
     , typeRef
     )
-import MLF.Constraint.Types.Witness (Expansion(..), ExpansionF(..), ForallSpec(..), InstanceOp(..), InstanceStep(..))
+import MLF.Constraint.Types.Witness (Expansion(..), ExpansionF(..), ForallSpec(..), InstanceOp(..))
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Presolution.Base (PresolutionM, PresolutionError(..), instantiationBindersM)
 import MLF.Constraint.Presolution.Ops (getCanonicalNode, lookupVarBound)
 import MLF.Constraint.Presolution.StateAccess (getConstraintAndCanonical)
 import MLF.Constraint.Presolution.WitnessValidation (OmegaNormalizeEnv(..), OmegaNormalizeError(..), validateNormalizedWitness)
-import MLF.Constraint.Presolution.WitnessCanon (normalizeInstanceStepsFull, normalizeInstanceOpsFull, coalesceRaiseMergeWithEnv, reorderWeakenWithEnv)
+import MLF.Constraint.Presolution.WitnessCanon (normalizeInstanceOpsFull, coalesceRaiseMergeWithEnv, reorderWeakenWithEnv)
 import qualified MLF.Binding.Tree as Binding
 import MLF.Util.RecursionSchemes (cataM)
 
@@ -81,22 +79,25 @@ binderArgsFromExpansion gid leftRaw expn = do
                             else pure (zip binders (take (length binders) args))
     cataM alg expn
 
--- | Convert a presolution expansion recipe into interleaved witness steps.
-witnessFromExpansion :: GenNodeId -> NodeId -> TyNode -> Expansion -> PresolutionM [InstanceStep]
+-- | Convert a presolution expansion recipe into a forall-intro count and omega ops.
+witnessFromExpansion :: GenNodeId -> NodeId -> TyNode -> Expansion -> PresolutionM (Int, [InstanceOp])
 witnessFromExpansion gid _root leftRaw expn = do
     let (_hasForall, stepper) = cata (witnessAlg leftRaw) expn
-    stepper False
+    steps <- stepper False
+    let introCount = fst steps
+        ops = snd steps
+    pure (introCount, ops)
   where
     witnessAlg
         :: TyNode
-        -> ExpansionF (Bool, Bool -> PresolutionM [InstanceStep])
-        -> (Bool, Bool -> PresolutionM [InstanceStep])
+        -> ExpansionF (Bool, Bool -> PresolutionM (Int, [InstanceOp]))
+        -> (Bool, Bool -> PresolutionM (Int, [InstanceOp]))
     witnessAlg lr layer = case layer of
         ExpIdentityF ->
-            (False, \_ -> pure [])
+            (False, \_ -> pure (0, []))
         ExpForallF ls ->
             let count = sum (map fsBinderCount (NE.toList ls))
-            in (True, \_ -> pure (replicate count StepIntro))
+            in (True, \_ -> pure (count, []))
         ExpInstantiateF args ->
             (False, \suppressWeaken -> do
                 -- If the TyExp body is a forall, instantiate its binders in the same order
@@ -105,7 +106,7 @@ witnessFromExpansion gid _root leftRaw expn = do
                     TyExp{ tnBody = b } -> do
                         (_bodyRoot, boundVars) <- instantiationBindersM gid b
                         if null boundVars
-                            then pure []
+                            then pure (0, [])
                         else if length boundVars > length args
                             then throwError (ArityMismatch "witnessFromExpansion/ExpInstantiate" (length boundVars) (length args))
                             else do
@@ -120,18 +121,20 @@ witnessFromExpansion gid _root leftRaw expn = do
                                 -- This is closer to `papers/these-finale-english.txt`
                                 -- (see `papers/xmlf.txt` Fig. 10), and avoids emitting
                                 -- invalid grafts under non-⊥ bounds (e.g. bounded variables).
-                                pure (map StepOmega (grafts ++ merges ++ weakens))
+                                pure (0, grafts ++ merges ++ weakens)
                     _ -> do
                         -- Instantiating a non-TyExp is unexpected in current pipeline; treat as empty.
-                        pure [])
+                        pure (0, []))
         ExpComposeF es ->
             let children = NE.toList es
                 childHas = map fst children
                 hasForall = or childHas
             in (hasForall, \rightHasForall -> do
                 let suffixFlags = drop 1 (scanr (||) rightHasForall childHas)
-                steps <- zipWithM (\flag (_, childStep) -> childStep flag) suffixFlags children
-                pure (concat steps))
+                results <- zipWithM (\flag (_, childStep) -> childStep flag) suffixFlags children
+                let totalIntros = sum (map fst results)
+                    allOps = concatMap snd results
+                pure (totalIntros, allOps))
 
     classify
         :: Bool
@@ -193,34 +196,6 @@ witnessFromExpansion gid _root leftRaw expn = do
                     Left _err -> pure False
                     Right (Just (GenRef gid', BindFlex)) -> pure (gid' == gid)
                     _ -> pure False
-
-forallIntroSuffixCount :: Expansion -> PresolutionM Int
-forallIntroSuffixCount expn =
-    let parts = flatten expn
-        (prefix, suffix) = splitTrailing isForall parts
-    in if any isForall prefix
-        then throwError (InternalError "forallIntroSuffixCount: ExpForall appears in non-suffix position")
-        else pure (sum (map forallCount suffix))
-  where
-    isForall = \case
-        ExpForall{} -> True
-        _ -> False
-
-    forallCount = \case
-        ExpForall ls -> length (NE.toList ls)
-        _ -> 0
-
-    flatten = cata alg
-      where
-        alg layer = case layer of
-            ExpComposeF es -> concat (NE.toList es)
-            ExpIdentityF -> [ExpIdentity]
-            ExpForallF specs -> [ExpForall specs]
-            ExpInstantiateF args -> [ExpInstantiate args]
-
-    splitTrailing p xs =
-        let (sufRev, preRev) = span p (reverse xs)
-        in (reverse preRev, reverse sufRev)
 
 integratePhase2Ops :: [InstanceOp] -> [InstanceOp] -> [InstanceOp]
 integratePhase2Ops baseOps extraOps =
@@ -329,48 +304,8 @@ integratePhase2Ops baseOps extraOps =
         leftoverRaises = concat (IntMap.elems raisesAfterWeakens)
     in grafts ++ mergesSorted ++ others ++ leftoverRaises ++ weakensWithRaises ++ afterBarrier
 
-integratePhase2Steps :: [InstanceStep] -> [InstanceOp] -> [InstanceStep]
-integratePhase2Steps steps extraOps =
-    let (prefix, suffix) = splitOnLastIntro steps
-        prefix' = integrateSegments prefix
-        suffixOps = integratePhase2Ops (omegaOps suffix) extraOps
-    in prefix' ++ map StepOmega suffixOps
-  where
-    omegaOps xs = [op | StepOmega op <- xs]
-
-    splitOnLastIntro xs =
-        case findLastIndex isIntro xs of
-            Nothing -> ([], xs)
-            Just idx -> splitAt (idx + 1) xs
-
-    findLastIndex p = cata alg
-      where
-        alg = \case
-            Nil -> Nothing
-            Cons y mbTail ->
-                case mbTail of
-                    Just i -> Just (i + 1)
-                    Nothing ->
-                        if p y
-                            then Just 0
-                            else Nothing
-
-    isIntro = \case
-        StepIntro -> True
-        _ -> False
-
-    integrateSegments segmentSteps =
-        let stepper = cata integrateAlg segmentSteps
-        in stepper []
-      where
-        integrateAlg = \case
-            Nil -> flush
-            Cons step restFn ->
-                case step of
-                    StepOmega op -> \acc -> restFn (op : acc)
-                    StepIntro -> \acc -> flush acc ++ [StepIntro] ++ restFn []
-
-        flush opsRev =
-            if null opsRev
-                then []
-                else map StepOmega (integratePhase2Ops (reverse opsRev) [])
+-- | Integrate phase-2 ops into a witness. The intro count passes through
+-- unchanged; phase-2 ops are merged into the ops list.
+integratePhase2Steps :: (Int, [InstanceOp]) -> [InstanceOp] -> (Int, [InstanceOp])
+integratePhase2Steps (introCount, baseOps) extraOps =
+    (introCount, integratePhase2Ops baseOps extraOps)
