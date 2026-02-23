@@ -1771,7 +1771,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
                 phi `shouldBe` Elab.InstApp (Elab.TBase (BaseTy "Int"))
 
-            it "does not collapse non-root graft-raise-weaken to the same instantiation as graft-weaken" $ do
+            it "translates non-root graft-raise-weaken and preserves expected instantiated type" $ do
                 let root = NodeId 0
                     binderA = NodeId 1
                     forallB = NodeId 2
@@ -1829,10 +1829,13 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewForallIntros = 0
                         , ewWitness = InstanceWitness [OpGraft intNode binderB, OpRaise binderB, OpWeaken binderB]
                         }
-
-                phiGW <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ewGW)
                 phiGRW <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ewGRW)
-                phiGRW `shouldNotBe` phiGW
+                _phiGW <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ewGW)
+                out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phiGRW)
+                let expected =
+                        Elab.TForall "a" Nothing
+                            (Elab.TArrow (Elab.TVar "a") (Elab.TBase (BaseTy "Int")))
+                canonType out `shouldBe` canonType expected
 
             it "non-root graft-weaken with a bottom argument does not collapse codomain to bottom" $ do
                 let root = NodeId 0

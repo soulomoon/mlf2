@@ -804,13 +804,25 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
                                         then do
                                             argTy <- reifyTypeArg namedSet' Nothing (graftArgFor arg bv)
                                             let boundTy = maybe TBottom tyToElab mbBound
-                                            if argTy == TBottom || alphaEqType argTy boundTy
+                                            if alphaEqType argTy boundTy
                                                 then do
-                                                    -- For bounded binders, bound-match grafting followed by weaken
-                                                    -- is semantically equivalent to eliminating the binder.
-                                                    (inst, ids1) <- atBinder binderKeys ids ty bvReplay (pure InstElim)
-                                                    ty' <- applyInst "OpGraft+OpWeaken(bound-match)" ty inst
-                                                    go binderKeys keepBinderKeys' namedSet' ty' ids1 (composeInst phi inst) rest lookupBinder
+                                                    -- Emit the literal thesis shape (`InstApp boundTy`) in Φ.
+                                                    -- For internal type-state replay, keep using the
+                                                    -- semantically equivalent elimination form to avoid the
+                                                    -- bounded-InstBot invariant in `applyInstantiation`.
+                                                    (instEmit, ids1) <- atBinder binderKeys ids ty bvReplay (pure (InstApp boundTy))
+                                                    (instReplay, ids1') <- atBinder binderKeys ids ty bvReplay (pure InstElim)
+                                                    when (ids1 /= ids1') $
+                                                        Left (PhiInvariantError "OpGraft+OpWeaken(bound-match): inconsistent binder identity updates")
+                                                    ty' <- applyInst "OpGraft+OpWeaken(bound-match)" ty instReplay
+                                                    go binderKeys keepBinderKeys' namedSet' ty' ids1 (composeInst phi instEmit) rest lookupBinder
+                                                else if argTy == TBottom
+                                                    then do
+                                                        -- Conservative fallback: keep elimination semantics
+                                                        -- when reification still reports ⊥ under an explicit bound.
+                                                        (inst, ids1) <- atBinder binderKeys ids ty bvReplay (pure InstElim)
+                                                        ty' <- applyInst "OpGraft+OpWeaken(bound-match,bottom-fallback)" ty inst
+                                                        go binderKeys keepBinderKeys' namedSet' ty' ids1 (composeInst phi inst) rest lookupBinder
                                                 else
                                                     Left $
                                                         PhiTranslatabilityError
@@ -886,7 +898,7 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
                                                         ]
                                     else do
                                         (inst, ids1) <- atBinderKeep binderKeys ids ty bvReplay $ do
-                                            argTy <- reifyTypeArg namedSet' Nothing (graftArgFor arg bv)
+                                            argTy <- reifyTypeArg namedSet' (Just bvReplay) (graftArgFor arg bv)
                                             pure (InstInside (InstBot argTy))
                                         ty' <- applyInst "OpGraft" ty inst
                                         go binderKeys keepBinderKeys' namedSet' ty' ids1 (composeInst phi inst) rest lookupBinder
@@ -1478,10 +1490,31 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
     normalizeInst :: Instantiation -> Instantiation
     normalizeInst = cata alg
       where
+        instArgTy :: Instantiation -> Maybe ElabType
+        instArgTy inst0 = case inst0 of
+            InstInside (InstBot t) -> Just t
+            InstApp t -> Just t
+            _ -> Nothing
+
         alg inst = case inst of
             InstSeqF a b ->
                 case (a, b) of
                     (InstInside (InstBot t), InstElim) -> InstApp t
+                    ( InstSeq InstIntro (InstSeq (InstInside (InstBot t)) (InstUnder beta (InstSeq (InstInside (InstAbstr beta')) InstElim)))
+                        , InstElim
+                        )
+                            | beta == beta' ->
+                                InstApp t
+                    ( InstSeq
+                        prefix
+                        (InstSeq InstIntro (InstSeq appArg (InstUnder beta (InstSeq (InstInside (InstAbstr beta')) InstElim))))
+                        , InstElim
+                        )
+                            | beta == beta'
+                            , Just tPrefix <- instArgTy prefix
+                            , Just tArg <- instArgTy appArg
+                            , alphaEqType tPrefix tArg ->
+                                InstApp tArg
                     (InstId, x) -> x
                     (x, InstId) -> x
                     _ -> InstSeq a b

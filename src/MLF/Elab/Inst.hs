@@ -13,7 +13,7 @@ module MLF.Elab.Inst (
 import Data.Functor.Foldable (para)
 
 import MLF.Elab.Types
-import MLF.Reify.TypeOps (freeTypeVarsType, freshTypeNameFromCounter, substTypeCapture, splitForalls)
+import MLF.Reify.TypeOps (alphaEqType, freeTypeVarsType, freshTypeNameFromCounter, substTypeCapture, splitForalls)
 
 -- | Turn a scheme into its corresponding type (nested `∀`).
 schemeToType :: ElabScheme -> ElabType
@@ -66,12 +66,17 @@ evalInstantiationWith spec inst = eval inst
 
     -- InstApp applies a concrete type argument directly to the front forall,
     -- but first validates it against the binder bound via instBot semantics.
-    -- This preserves variable arguments (e.g. TVar) while still rejecting
-    -- arguments that violate explicit bounds.
+    -- For explicit non-bottom bounds, a bound-matching InstApp is accepted
+    -- directly and substitutes the binder with that bound type.
     instAppFn argTy (k, env', t) = case t of
         TForall v mbBound body -> do
             let b0 = maybe TBottom tyToElab mbBound
-            (k1, checkedArg) <- instBot spec argTy (k, env', b0)
+            (k1, checkedArg) <-
+                case mbBound of
+                    Just _ | alphaEqType argTy b0 ->
+                        Right (k, b0)
+                    _ ->
+                        instBot spec argTy (k, env', b0)
             Right (k1, substTypeCapture v checkedArg body)
         _ ->
             Left
