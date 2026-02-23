@@ -1,0 +1,63 @@
+# Progress Log
+
+## 2026-02-23
+- Created isolated worktree: `/Users/ares/.config/superpowers/worktrees/mlf4/codex/phi-thesis-purity-followup-2026-02-23`
+- Initialized task folder and planning files under `tasks/todo/2026-02-23-phi-thesis-purity-followup/`
+- Imported implementation plan as `plan_source.md`
+- Baseline verification in isolated worktree:
+  - `cabal build all && cabal test` => PASS (`775 examples, 0 failures`)
+- Task 1 complete:
+  - Added 3 implementation-choice deviations (Chapter 15 Phi/Witness)
+  - Linked deviations from `CLM-PHI-CORRECTNESS`
+  - `./scripts/check-thesis-claims.sh` => PASS
+- Task 2 complete (tests-first):
+  - Added tests in `test/ElaborationSpec.hs`:
+    - bounded bound-match emits `InstApp` literal shape (RED)
+    - non-root `OpGraft;OpRaise;OpWeaken` not collapsed to graft-weaken shape
+    - bottom-argument regression guard (non-bottom codomain)
+  - RED evidence:
+    - `--match "bounded bound-match"` fails (`expected InstApp ... got InstElim`)
+    - `--match "graft-raise-weaken"` fails pre-change
+- Task 3 complete (remove fusion):
+  - Removed `mergeIntoApp` peephole in `MLF.Elab.Phi.Omega`
+  - Verification:
+    - `--match "graft-raise-weaken"` => PASS
+    - `--match "bottom argument"` => PASS
+    - `--match "bounded bound-match"` => still FAIL (expected; Task 5)
+- Execution note:
+  - Parallel `cabal test` invocations conflicted on `dist-newstyle`; switched to serial test runs.
+- Task 4 complete (reification-layer rescue):
+  - Moved binder-aware `TBottom -> TVar binder` rescue into `reifyTypeArg`
+  - Removed standalone `rescueBottomAtBinder`
+  - Updated graft-weaken call site to pass `Just bvReplay`
+  - Verification:
+    - `--match "BUG-003"` => PASS (3 examples)
+    - `--match "BUG-004"` => PASS (4 examples)
+    - `--match "OpGraft+OpWeaken"` => PASS (2 examples)
+    - `--match "bottom argument"` => PASS (1 example)
+- Task 5 implemented (bound-match `InstApp` emission):
+  - In bounded `OpGraft+OpWeaken`, emit `InstApp boundTy` into Φ when graft arg alpha-matches explicit bound.
+  - Keep replay-state type updates via `InstElim` to preserve current `applyInstantiation` bounded-`InstBot` invariant.
+  - Added invariant check that emitted/replay binder-ID updates are identical.
+  - Added conservative fallback to `InstElim` when reification still reports `TBottom` under explicit bound.
+- Regression discovered and resolved while validating Task 5:
+  - Removing `mergeIntoApp` exposed a de-fused left-associated shape that could collapse to `a -> ⊥` for variable graft args (`\\y. let id = (\\x.x) in id y`).
+  - Confirmed the issue reproduces on committed `HEAD` (without Task 5 WIP) via stash-run-pop isolation.
+  - Added `normalizeInst` canonicalization for the de-fused left-associated sequence (`prefix; OpRaise-shape; OpWeaken`) when prefix/app-arg represent the same graft arg.
+- Additional test updates:
+  - Changed non-root `OpGraft;OpRaise;OpWeaken` regression assertion from syntactic inequality to semantic instantiated-type preservation.
+  - Added/kept bounded bound-match literal-shape test expecting `InstApp boundTy`.
+- Verification after fix:
+  - `cabal test ... --match "id y should have type"` => PASS
+  - `cabal test ... --match "elaborates polymorphic instantiation"` => PASS
+  - `cabal test ... --match "bounded bound-match"` => PASS
+  - `cabal test ... --match "BUG-002-V2"` => PASS
+  - `cabal test ... --match "Phase 6"` => PASS (`145 examples, 0 failures`)
+- Task 6 complete (docs + full verification):
+  - Updated `implementation_notes.md` (2026-02-23 section) with deviation sync + Omega follow-up behavior notes.
+  - Added Unreleased entry to `CHANGELOG.md` for this follow-up.
+  - Full gate validation:
+    - `cabal build all && cabal test` => PASS (`778 examples, 0 failures`)
+    - `./scripts/check-thesis-claims.sh` => PASS
+- Task 7 (optional safety net):
+  - Dedicated optional slice not run separately; full `cabal test` run includes `Phi soundness` section and it passed.

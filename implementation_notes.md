@@ -1,5 +1,18 @@
 # Implementation Notes
 
+### 2026-02-23 Phi thesis-purity follow-up (deviation sync + Omega alignment)
+
+- Registered three load-bearing Chapter 15.3 implementation choices in `docs/thesis-deviations.yaml` and linked them from `CLM-PHI-CORRECTNESS` in `docs/thesis-claims.yaml`:
+  - `DEV-PHI-WITNESS-WEAKEN-SUPPRESSION`
+  - `DEV-PHI-KEEP-BINDER-WEAKEN-SUPPRESSION`
+  - `DEV-PHI-STANDALONE-GRAFT-EXTENSION`
+- Removed the `OpGraft; OpRaise; OpWeaken` `mergeIntoApp` peephole from the operation replay loop in `MLF.Elab.Phi.Omega` so operations are replayed de-fused.
+- Moved binder-aware bottom rescue (`TBottom -> TVar binder`) into `reifyTypeArg`; call sites now pass binder context directly instead of post-reify rescue helpers.
+- Updated bounded `OpGraft+OpWeaken` bound-match behavior:
+  - Φ now emits literal thesis-shaped `InstApp boundTy` when graft arg matches explicit bound.
+  - Internal replay-state evolution still uses elimination for type-state compatibility; mismatch path remains fail-fast.
+- Added/adjusted Omega normalization for de-fused left-associated `OpGraft;OpRaise;OpWeaken` shapes so historical elaboration baselines (notably `\y. let id = (\x. x) in id y`) do not bottom-collapse.
+
 ### 2026-02-22 Defensible exactness (traceable evidence chains)
 
 - Added machine-checked thesis claims registry (`docs/thesis-claims.yaml`, 21 claims across Ch. 7-15) and deviation register (`docs/thesis-deviations.yaml`, 9 deviations) with cross-link validation via `scripts/check-thesis-claims.sh`.
