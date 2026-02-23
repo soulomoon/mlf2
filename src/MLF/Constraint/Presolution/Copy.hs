@@ -106,39 +106,7 @@ expansionCopySetsM bodyId = do
             Traversal.reachableFromNodes canonical children [bodyC]
         reachFromSKeys =
             IntSet.fromList [typeRefKey (NodeId nid) | nid <- IntSet.toList reachFromS]
-    {- Note [Interior widening for explicit foralls]
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    The thesis's Def 9.2.16 defines I(r) without accounting for nested scheme
-    gens introduced by explicit-forall annotations. When such annotations create
-    scheme gens whose roots are structurally reachable from the copy body, their
-    interiors must be included in the copy set to keep explicit-forall binders
-    inside instantiation copies. This is a defense-in-depth extension: removal
-    does not break any current test (775 examples), but it prevents potential
-    Φ translation failures when explicit-forall binders would otherwise fall
-    outside the copied interior.
-    -}
-    pathRefs <- bindingPathToRootUnderM canonical c0 (typeRef bodyC)
-    let pathGenIds =
-            IntSet.fromList
-                [ getGenNodeId gidPath
-                | GenRef gidPath <- pathRefs
-                ]
-        reachableSchemeGens =
-            [ gnId gen
-            | gen <- NodeAccess.allGenNodes c0
-            , not (IntSet.member (getGenNodeId (gnId gen)) pathGenIds)
-            , any
-                (\root -> IntSet.member (typeRefKey (canonical root)) reachFromSKeys)
-                (gnSchemes gen)
-            ]
-    interiorAllExtra <- foldM
-        (\acc gidExtra -> do
-            extra <- liftBindingError $ Binding.interiorOfUnder canonical c0 (genRef gidExtra)
-            pure (IntSet.union acc extra)
-        )
-        IntSet.empty
-        reachableSchemeGens
-    let interiorAll = IntSet.union interiorAll0' interiorAllExtra
+    let interiorAll = interiorAll0'
     (_root, binders) <- instantiationBindersM gid bodyC
     let binderKeys =
             IntSet.fromList

@@ -467,8 +467,7 @@ claims:
       code_paths:
         - src/MLF/Elab/Elaborate.hs#elaborate
         - src/MLF/Elab/Run/Pipeline.hs#runPipelineElab
-    deviations:
-      - DEV-INTERIOR-WIDENING
+    deviations: []
     status: defended
     notes: ""
 

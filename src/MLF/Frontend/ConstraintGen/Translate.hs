@@ -111,17 +111,11 @@ attachForallChild
     -> SharedEnv
     -> NodeId
     -> ConstraintM ()
-attachForallChild bindFlag schemeGenId varNode mOwner shared node =
+attachForallChild bindFlag schemeGenId _varNode mOwner shared node =
     unlessShared shared node $
         case mOwner of
-            Just owner ->
-                attachUnder (typeRef node) (genRef owner) bindFlag
-            Nothing ->
-                case bindFlag of
-                    BindRigid ->
-                        attachUnder (typeRef node) (genRef schemeGenId) bindFlag
-                    BindFlex ->
-                        attachUnder (typeRef node) (typeRef varNode) bindFlag
+            Just owner -> attachUnder (typeRef node) (genRef owner) bindFlag
+            Nothing    -> attachUnder (typeRef node) (genRef schemeGenId) bindFlag
 
 buildExprRaw :: Env -> GenNodeId -> NormCoreExpr -> ConstraintM (NodeId, AnnExpr)
 buildExprRaw env scopeRoot expr =
@@ -596,7 +590,7 @@ internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared srcType 
                             Just gid -> do
                                 rebindScopeRoot (genRef gid) boundNode boundScope
                                 setGenNodeSchemes gid [boundNode]
-                            Nothing -> rebindScopeRoot (typeRef varNode) boundNode boundScope
+                            Nothing -> rebindScopeRoot (genRef schemeGenId) boundNode boundScope
                         attachForallChild bindFlag schemeGenId varNode mbBoundOwner shared2 boundNode
                         pure (Just boundNode, shared2)
 
