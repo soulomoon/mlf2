@@ -887,25 +887,11 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
                                                         , "  graft arg: " ++ show argTy
                                                         ]
                                     else do
-                                        let mergeIntoApp =
-                                                case rest of
-                                                    (OpRaise n : OpWeaken n' : rest2)
-                                                        | n == bv && n' == bv -> Just rest2
-                                                    _ -> Nothing
-                                        case mergeIntoApp of
-                                            Just rest2 -> do
-                                                (inst, ids1) <- atBinder binderKeys ids ty bvReplay $ do
-                                                    argTy0 <- reifyTypeArg namedSet' Nothing (graftArgFor arg bv)
-                                                    let argTy = rescueBottomAtBinder bvReplay argTy0
-                                                    pure (InstApp argTy)
-                                                ty' <- applyInst "OpGraft+OpRaise+OpWeaken" ty inst
-                                                go binderKeys keepBinderKeys' namedSet' ty' ids1 (composeInst phi inst) rest2 lookupBinder
-                                            Nothing -> do
-                                                (inst, ids1) <- atBinderKeep binderKeys ids ty bvReplay $ do
-                                                    argTy <- reifyTypeArg namedSet' Nothing (graftArgFor arg bv)
-                                                    pure (InstInside (InstBot argTy))
-                                                ty' <- applyInst "OpGraft" ty inst
-                                                go binderKeys keepBinderKeys' namedSet' ty' ids1 (composeInst phi inst) rest lookupBinder
+                                        (inst, ids1) <- atBinderKeep binderKeys ids ty bvReplay $ do
+                                            argTy <- reifyTypeArg namedSet' Nothing (graftArgFor arg bv)
+                                            pure (InstInside (InstBot argTy))
+                                        ty' <- applyInst "OpGraft" ty inst
+                                        go binderKeys keepBinderKeys' namedSet' ty' ids1 (composeInst phi inst) rest lookupBinder
 
         (OpWeaken bv : rest) -> do
             bvReplay <- resolveTraceBinderTarget True "OpWeaken" bv

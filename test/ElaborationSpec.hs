@@ -1724,6 +1724,171 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             (Elab.TArrow (Elab.TVar "a") (Elab.TBase (BaseTy "Int")))
                 canonType out `shouldBe` canonType expected
 
+            it "bounded bound-match graft-weaken emits InstApp boundTy (literal thesis shape)" $ do
+                let root = NodeId 0
+                    binder = NodeId 1
+                    bodyNode = NodeId 2
+                    bound = NodeId 3
+                    argInt = NodeId 4
+                    nodes = nodeMapFromList
+                        [ (getNodeId root, TyForall root bodyNode)
+                        , (getNodeId binder, TyVar { tnId = binder, tnBound = Just bound })
+                        , (getNodeId bodyNode, TyArrow bodyNode binder argInt)
+                        , (getNodeId bound, TyBase bound (BaseTy "Int"))
+                        , (getNodeId argInt, TyBase argInt (BaseTy "Int"))
+                        ]
+                    bindParents =
+                        IntMap.fromList
+                            [ (nodeRefKey (typeRef binder), (typeRef root, BindFlex))
+                            , (nodeRefKey (typeRef bodyNode), (typeRef root, BindFlex))
+                            , (nodeRefKey (typeRef bound), (typeRef root, BindFlex))
+                            , (nodeRefKey (typeRef argInt), (typeRef bodyNode, BindFlex))
+                            ]
+                    constraint =
+                        rootedConstraint emptyConstraint
+                            { cNodes = nodes
+                            , cBindParents = bindParents
+                            }
+                    solved = SolveResult { srConstraint = constraint, srUnionFind = IntMap.empty }
+                    scheme =
+                        Elab.schemeFromType
+                            (Elab.TForall "a" (Just (Elab.TBase (BaseTy "Int"))) (Elab.TVar "a"))
+                    si =
+                        Elab.SchemeInfo
+                            { Elab.siScheme = scheme
+                            , Elab.siSubst = IntMap.fromList [(getNodeId binder, "a")]
+                            }
+                    ops = [OpGraft argInt binder, OpWeaken binder]
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewForallIntros = 0
+                        , ewWitness = InstanceWitness ops
+                        }
+
+                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
+                phi `shouldBe` Elab.InstApp (Elab.TBase (BaseTy "Int"))
+
+            it "does not collapse non-root graft-raise-weaken to the same instantiation as graft-weaken" $ do
+                let root = NodeId 0
+                    binderA = NodeId 1
+                    forallB = NodeId 2
+                    binderB = NodeId 3
+                    bodyNode = NodeId 4
+                    intNode = NodeId 5
+                    nodes = nodeMapFromList
+                        [ (getNodeId root, TyForall root forallB)
+                        , (getNodeId binderA, TyVar { tnId = binderA, tnBound = Nothing })
+                        , (getNodeId forallB, TyForall forallB bodyNode)
+                        , (getNodeId binderB, TyVar { tnId = binderB, tnBound = Nothing })
+                        , (getNodeId bodyNode, TyArrow bodyNode binderA binderB)
+                        , (getNodeId intNode, TyBase intNode (BaseTy "Int"))
+                        ]
+                    bindParents =
+                        IntMap.fromList
+                            [ (nodeRefKey (typeRef binderA), (typeRef root, BindFlex))
+                            , (nodeRefKey (typeRef forallB), (typeRef root, BindFlex))
+                            , (nodeRefKey (typeRef binderB), (typeRef forallB, BindFlex))
+                            , (nodeRefKey (typeRef bodyNode), (typeRef forallB, BindFlex))
+                            ]
+                    constraint =
+                        rootedConstraint emptyConstraint
+                            { cNodes = nodes
+                            , cBindParents = bindParents
+                            }
+                    solved = SolveResult { srConstraint = constraint, srUnionFind = IntMap.empty }
+                    scheme =
+                        Elab.schemeFromType
+                            (Elab.TForall "a" Nothing
+                                (Elab.TForall "b" Nothing
+                                    (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))))
+                    si =
+                        Elab.SchemeInfo
+                            { Elab.siScheme = scheme
+                            , Elab.siSubst =
+                                IntMap.fromList
+                                    [ (getNodeId binderA, "a")
+                                    , (getNodeId binderB, "b")
+                                    ]
+                            }
+                    ewGW = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewForallIntros = 0
+                        , ewWitness = InstanceWitness [OpGraft intNode binderB, OpWeaken binderB]
+                        }
+                    ewGRW = EdgeWitness
+                        { ewEdgeId = EdgeId 1
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewForallIntros = 0
+                        , ewWitness = InstanceWitness [OpGraft intNode binderB, OpRaise binderB, OpWeaken binderB]
+                        }
+
+                phiGW <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ewGW)
+                phiGRW <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ewGRW)
+                phiGRW `shouldNotBe` phiGW
+
+            it "non-root graft-weaken with a bottom argument does not collapse codomain to bottom" $ do
+                let root = NodeId 0
+                    binderA = NodeId 1
+                    forallB = NodeId 2
+                    binderB = NodeId 3
+                    bodyNode = NodeId 4
+                    botNode = NodeId 5
+                    nodes = nodeMapFromList
+                        [ (getNodeId root, TyForall root forallB)
+                        , (getNodeId binderA, TyVar { tnId = binderA, tnBound = Nothing })
+                        , (getNodeId forallB, TyForall forallB bodyNode)
+                        , (getNodeId binderB, TyVar { tnId = binderB, tnBound = Nothing })
+                        , (getNodeId bodyNode, TyArrow bodyNode binderA binderB)
+                        , (getNodeId botNode, TyBottom botNode)
+                        ]
+                    bindParents =
+                        IntMap.fromList
+                            [ (nodeRefKey (typeRef binderA), (typeRef root, BindFlex))
+                            , (nodeRefKey (typeRef forallB), (typeRef root, BindFlex))
+                            , (nodeRefKey (typeRef binderB), (typeRef forallB, BindFlex))
+                            , (nodeRefKey (typeRef bodyNode), (typeRef forallB, BindFlex))
+                            ]
+                    constraint =
+                        rootedConstraint emptyConstraint
+                            { cNodes = nodes
+                            , cBindParents = bindParents
+                            }
+                    solved = SolveResult { srConstraint = constraint, srUnionFind = IntMap.empty }
+                    scheme =
+                        Elab.schemeFromType
+                            (Elab.TForall "a" Nothing
+                                (Elab.TForall "b" Nothing
+                                    (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))))
+                    si =
+                        Elab.SchemeInfo
+                            { Elab.siScheme = scheme
+                            , Elab.siSubst =
+                                IntMap.fromList
+                                    [ (getNodeId binderA, "a")
+                                    , (getNodeId binderB, "b")
+                                    ]
+                            }
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewForallIntros = 0
+                        , ewWitness = InstanceWitness [OpGraft botNode binderB, OpWeaken binderB]
+                        }
+
+                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
+                out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
+                Elab.pretty out `shouldSatisfy` ("-> b" `isInfixOf`)
+
             it "O15-TR-SEQ-CONS: counts forall intros in Φ translation" $ do
                 let root = NodeId 0
                     binder = NodeId 1
