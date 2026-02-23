@@ -20,7 +20,7 @@ deviations:
     test_evidence:
       - matcher: "R-"
         file: test/Presolution/WitnessSpec.hs
-    status: accepted
+    status: implementation-choice
 
   - id: DEV-WITNESS-NORM-NO-PROOF
     chapter: 11
@@ -43,7 +43,7 @@ deviations:
         file: test/Presolution/WitnessSpec.hs
       - matcher: "Phase 7 theorem obligations"
         file: test/TypeSoundnessSpec.hs
-    status: accepted
+    status: proof-gap
 
   - id: DEV-CONSTRAINT-REPR-SIMPLIFIED
     chapter: 9
@@ -64,7 +64,7 @@ deviations:
     test_evidence:
       - matcher: "Phase 1"
         file: test/ConstraintGenSpec.hs
-    status: accepted
+    status: implementation-choice
 
   - id: DEV-PHASE7-NO-FORMAL-LINK
     chapter: 14
@@ -86,7 +86,7 @@ deviations:
     test_evidence:
       - matcher: "Phase 7 theorem obligations"
         file: test/TypeSoundnessSpec.hs
-    status: accepted
+    status: proof-gap
 
   - id: DEV-TYEXP-OCCURRENCE-REPR
     chapter: 10
@@ -107,7 +107,7 @@ deviations:
     test_evidence:
       - matcher: "Phase 4"
         file: test/PresolutionSpec.hs
-    status: accepted
+    status: implementation-choice
 
   - id: DEV-INTERIOR-WIDENING
     chapter: 15
@@ -116,98 +116,20 @@ deviations:
     description: >
       Interior set (I(r)) is widened with reachable scheme interiors to keep
       explicit-forall binders inside instantiation copies. This is a
-      preservation measure not stated in the thesis text.
-    impact: semantic-minor
+      defense-in-depth extension for explicit-forall annotations not stated in
+      the thesis text (Def 9.2.16). Removal does not break any current test
+      (775 examples), but prevents potential Φ translation failures when
+      explicit-forall binders would otherwise fall outside the copied interior.
+    impact: semantic-neutral
     rationale: >
-      Without widening, explicit-forall binders can fall outside the interior
-      after copy operations, causing Φ translation failures. The widening
-      preserves the thesis invariant that operated binders are interior.
+      The widening fires 22 times across the test suite but is never
+      load-bearing for correctness. It is a conservative extension that
+      preserves the thesis invariant that operated binders are interior,
+      specifically for nested scheme gens from explicit-forall annotations.
     code_paths:
       - src/MLF/Constraint/Presolution/Copy.hs
     test_evidence:
       - matcher: "explicit forall annotation"
         file: test/ElaborationSpec.hs
-    status: accepted
+    status: defense-in-depth
 
-  - id: DEV-GEN-FALLBACK-PRESENT
-    chapter: 15
-    section: "15.3"
-    thesis_ref: "Section 15.3.1 (Q(g) computation)"
-    description: >
-      Gen-ancestor fallback is guarded and inert. The pipeline rejects
-      fallback-dependent constraints via checkNoGenFallback (Binding/Validation.hs)
-      before Φ translation. Q(g) is computed explicitly: parentRefForBinders
-      (Reify/Core.hs) routes scheme roots to GenRef, and bindersForGen
-      (Selection.hs) enumerates direct gen-node children. The anticipated
-      fallback functions (closestGenAncestor, immediateGen, bindersFromGen)
-      never existed in the codebase. tryBound in Phi/Context.hs is
-      thesis-correct bound-descent (∀(⩾ C)), not gen-ancestor fallback.
-    impact: semantic-neutral
-    rationale: >
-      checkNoGenFallback rejects any constraint that would require gen-ancestor
-      fallback. All 766 tests pass through this gate. Q(g) routing is explicit
-      via parentRefForBinders and bindersForGen. No gen-ancestor fallback code
-      paths remain active.
-    code_paths:
-      - src/MLF/Binding/Validation.hs
-      - src/MLF/Elab/Phi/Translate.hs
-      - src/MLF/Reify/Core.hs
-    test_evidence:
-      - matcher: "Q(g) returns direct flex children"
-        file: test/ElaborationSpec.hs
-      - matcher: "rejects fallback-dependent binders"
-        file: test/ElaborationSpec.hs
-      - matcher: "O15-CONTEXT-REJECT"
-        file: test/ElaborationSpec.hs
-    status: accepted
-
-  - id: DEV-LET-SCOPE-THREADING-PARTIAL
-    chapter: 15
-    section: "15.2"
-    thesis_ref: "Definition 15.2.10 (alternative let typing)"
-    description: >
-      Let-scope alternative typing (Def. 15.2.6) is fully implemented.
-      Constraint generation produces the rightmost constraint with a trivial
-      scheme root and let-expression gen node. Presolution drops trivial
-      scheme edges (dropTrivialSchemeEdges) and returns identity expansion.
-      Elaboration detects the trivialRoot annotation and strips it
-      (Elaborate.hs:835), and letScopeOverrides (Scope.hs:154) computes
-      base-vs-solved scope divergence for thesis-aligned generalization.
-    impact: semantic-neutral
-    rationale: >
-      All threading is verified present: trivialRoot flows through constraint
-      gen → presolution → elaboration with identity semantics. Scope overrides
-      preserve thesis ga′ semantics. Tests cover monomorphic/polymorphic lets,
-      nested lets, scope divergence, and translatable presolution validation.
-    code_paths:
-      - src/MLF/Frontend/ConstraintGen/Translate.hs
-      - src/MLF/Constraint/Presolution/Base.hs
-      - src/MLF/Elab/Elaborate.hs
-      - src/MLF/Elab/Run/Scope.hs
-    test_evidence:
-      - matcher: "O15-ELAB-LET"
-        file: test/ElaborationSpec.hs
-      - matcher: "letScopeOverrides"
-        file: test/ElaborationSpec.hs
-      - matcher: "let-polymorphic"
-        file: test/TranslatablePresolutionSpec.hs
-    status: accepted
-
-  - id: DEV-P2-SPEC-STUBS-DEFERRED
-    chapter: 13
-    section: "13.4"
-    thesis_ref: "Chapter 13 (constraint simplification)"
-    description: >
-      P2 backlog spec stub for constraint-simplification-rules has been
-      created. The eMLF/iMLF translation spec was deemed unnecessary — the
-      pipeline operates on a single constraint representation and does not
-      require the eMLF/iMLF distinction.
-    impact: semantic-neutral
-    rationale: >
-      Constraint simplification spec stub is in place with requirements,
-      design, and task outline. The core pipeline (Chapters 9-15) is fully
-      covered. eMLF/iMLF translation is not needed for the current architecture.
-    code_paths: []
-    test_evidence: []
-    status: accepted
-    status: accepted

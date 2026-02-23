@@ -1,8 +1,8 @@
 ---
 version: 1
 scope:
-  chapters: [9, 10, 11, 12, 13, 14, 15]
-  claim_count: 22
+  chapters: [8, 9, 10, 11, 12, 14, 15]
+  claim_count: 21
 claims:
   # ── Ch. 9 — Constraint Generation ──────────────────────────────────────
 
@@ -364,20 +364,6 @@ claims:
     status: defended
     notes: ""
 
-  - id: CLM-BACKLOG-COVERAGE
-    type: proposition
-    chapter: 13
-    section: "13.4"
-    thesis_ref: "Chapter 13 (constraint simplification, eMLF-iMLF translation)"
-    statement: "Low-priority thesis chapters are tracked in the backlog with explicit deviation records."
-    evidence:
-      obligations: []
-      property_tests: []
-      code_paths: []
-    deviations:
-      - DEV-P2-SPEC-STUBS-DEFERRED
-    status: partial
-    notes: "Tracking claim only; no implementation yet."
 
   # ── Ch. 15 — Elaboration ───────────────────────────────────────────────
 
@@ -473,13 +459,15 @@ claims:
         - O15-ELAB-LET
         - O08-REIFY-TYPE
         - O08-REIFY-NAMES
+        - O08-BIND-MONO
+        - O08-SYN-TO-GRAPH
+        - O08-REIFY-INLINE
+        - O08-INLINE-PRED
       property_tests: []
       code_paths:
         - src/MLF/Elab/Elaborate.hs#elaborate
         - src/MLF/Elab/Run/Pipeline.hs#runPipelineElab
     deviations:
-      - DEV-GEN-FALLBACK-PRESENT
-      - DEV-LET-SCOPE-THREADING-PARTIAL
       - DEV-INTERIOR-WIDENING
     status: defended
     notes: ""

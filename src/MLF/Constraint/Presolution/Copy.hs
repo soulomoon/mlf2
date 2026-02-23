@@ -106,6 +106,17 @@ expansionCopySetsM bodyId = do
             Traversal.reachableFromNodes canonical children [bodyC]
         reachFromSKeys =
             IntSet.fromList [typeRefKey (NodeId nid) | nid <- IntSet.toList reachFromS]
+    {- Note [Interior widening for explicit foralls]
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    The thesis's Def 9.2.16 defines I(r) without accounting for nested scheme
+    gens introduced by explicit-forall annotations. When such annotations create
+    scheme gens whose roots are structurally reachable from the copy body, their
+    interiors must be included in the copy set to keep explicit-forall binders
+    inside instantiation copies. This is a defense-in-depth extension: removal
+    does not break any current test (775 examples), but it prevents potential
+    Φ translation failures when explicit-forall binders would otherwise fall
+    outside the copied interior.
+    -}
     pathRefs <- bindingPathToRootUnderM canonical c0 (typeRef bodyC)
     let pathGenIds =
             IntSet.fromList

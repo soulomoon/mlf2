@@ -182,6 +182,18 @@ validateGenNodesFlexiblyBound genNodes lookupParent rootRef =
                     InvalidBindingTree $
                         "Gen node " ++ show gref ++ " is rigidly bound"
 
+{- Note [checkNoGenFallback: defense-in-depth]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+This check is thesis-faithful, not a deviation. Q(g) is computed explicitly:
+parentRefForBinders (Reify/Core.hs) routes scheme roots to GenRef, and
+bindersForGen (Selection.hs) enumerates direct gen-node children. The
+anticipated fallback functions (closestGenAncestor, immediateGen,
+bindersFromGen) never existed in the codebase. tryBound in Phi/Context.hs
+is thesis-correct bound-descent (∀(⩾ C)), not gen-ancestor fallback.
+
+This check is kept as a regression guard: it rejects any constraint that
+would require gen-ancestor fallback before Φ translation begins.
+-}
 -- | Reject binding trees that would require a gen-ancestor fallback.
 checkNoGenFallback :: Constraint -> Either BindingError ()
 checkNoGenFallback c = do
