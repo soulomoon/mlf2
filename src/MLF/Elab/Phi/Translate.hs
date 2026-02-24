@@ -413,8 +413,7 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
     omegaCtx mSchemeInfoCtx traceBinderSources traceBinderReplayMap traceBinderHintDomain traceBinderSourceNames =
         OmegaContext
             { ocTraceConfig = traceCfg
-            , ocResult = Solved.toSolveResult res
-            , ocCanonicalNode = canonicalNode
+            , ocSolved = res
             , ocCopyMap = copyMap
             , ocGaParents = mbGaParents
             , ocTrace = mTrace

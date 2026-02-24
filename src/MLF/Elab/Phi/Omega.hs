@@ -33,11 +33,10 @@ import qualified MLF.Util.OrderKey as OrderKey
 import MLF.Constraint.Types
 import MLF.Constraint.Presolution (EdgeTrace(..))
 import MLF.Constraint.Presolution.Base (InteriorNodes(..))
-import MLF.Constraint.Solve (SolveResult(..))
+import MLF.Constraint.Solved (Solved)
+import qualified MLF.Constraint.Solved as Solved
 import qualified MLF.Constraint.NodeAccess as NodeAccess
-import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Binding.Tree as Binding
-import MLF.Binding.Tree (lookupBindParent)
 import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Elab.Inst (applyInstantiation, composeInst, instMany, schemeToType, splitForalls)
 import MLF.Elab.Phi.Context (contextToNodeBoundWithOrderKeys)
@@ -54,8 +53,7 @@ import MLF.Util.Names (parseNameId)
 -- | Shared context for Omega/Step interpretation.
 data OmegaContext = OmegaContext
     { ocTraceConfig :: TraceConfig
-    , ocResult :: SolveResult
-    , ocCanonicalNode :: NodeId -> NodeId
+    , ocSolved :: Solved
     , ocCopyMap :: IntMap.IntMap NodeId
     , ocGaParents :: Maybe GaBindParents
     , ocTrace :: Maybe EdgeTrace
@@ -82,11 +80,11 @@ phiWithSchemeOmega
     -> Either ElabError Instantiation
 phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithScheme
   where
-    res :: SolveResult
-    res = ocResult ctx
+    solved :: Solved
+    solved = ocSolved ctx
 
     canonicalNode :: NodeId -> NodeId
-    canonicalNode = ocCanonicalNode ctx
+    canonicalNode = Solved.canonical solved
 
     copyMap :: IntMap.IntMap NodeId
     copyMap = ocCopyMap ctx
@@ -138,7 +136,7 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
                     remapKey k =
                         let nidC = canonicalNode (NodeId k)
                             keyC = getNodeId nidC
-                        in case NodeAccess.lookupNode (srConstraint res) nidC of
+                        in case Solved.lookupNode solved nidC of
                             Just TyVar{} ->
                                 case IntMap.lookup keyC copyMap of
                                     Nothing -> keyC
@@ -155,7 +153,7 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
             Nothing -> edgeRoot
             Just tr -> etRoot tr
 
-    nodes = cNodes (srConstraint res)
+    nodes = cNodes (Solved.solvedConstraint solved)
 
     boundKids nid = case lookupNodeIn nodes nid of
         Just TyVar{ tnBound = Just bnd } -> [bnd]
@@ -164,7 +162,7 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
     schemeRootGenMap =
         IntMap.fromList
             [ (getNodeId (canonicalNode root), gnId gen)
-            | gen <- NodeAccess.allGenNodes (srConstraint res)
+            | gen <- NodeAccess.allGenNodes (Solved.solvedConstraint solved)
             , root <- gnSchemes gen
             ]
 
@@ -173,7 +171,7 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
             [ ( getGenNodeId gid
               , [canonicalNode child]
               )
-            | (childKey, (parentRef, _flag)) <- IntMap.toList (cBindParents (srConstraint res))
+            | (childKey, (parentRef, _flag)) <- IntMap.toList (Solved.bindParents solved)
             , GenRef gid <- [parentRef]
             , TypeRef child <- [nodeRefFromKey childKey]
             ]
@@ -181,7 +179,7 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
     bindKids rootC nid =
         let localChildren =
                 [ canonicalNode child
-                | (childKey, (parentRef, _flag)) <- IntMap.toList (cBindParents (srConstraint res))
+                | (childKey, (parentRef, _flag)) <- IntMap.toList (Solved.bindParents solved)
                 , TypeRef child <- [nodeRefFromKey childKey]
                 , parentRefCanon parentRef == TypeRef (canonicalNode nid)
                 ]
@@ -191,7 +189,7 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
                     Just gid -> IntMap.findWithDefault [] (getGenNodeId gid) genChildrenMap
             siblingGenChildren =
                 if canonicalNode nid == rootC
-                    then case lookupBindParent (srConstraint res) (typeRef (canonicalNode nid)) of
+                    then case Solved.lookupBindParent solved (typeRef (canonicalNode nid)) of
                         Just (GenRef gid, _) -> IntMap.findWithDefault [] (getGenNodeId gid) genChildrenMap
                         _ -> []
                     else []
@@ -213,12 +211,12 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
         case map (TypeRef . canonicalNode) binders of
             [] -> orderRoot
             (r0:rs) ->
-                case foldM (Binding.bindingLCA (srConstraint res)) r0 rs of
+                case foldM (Binding.bindingLCA (Solved.solvedConstraint solved)) r0 rs of
                     Left _ -> orderRoot
                     Right (TypeRef nid) -> canonicalNode nid
                     Right (GenRef gid) ->
                         fromMaybe orderRoot $ do
-                            gen <- NodeAccess.lookupGenNode (srConstraint res) gid
+                            gen <- NodeAccess.lookupGenNode (Solved.solvedConstraint solved) gid
                             listToMaybe (gnSchemes gen)
 
     orderKeys :: IntMap.IntMap Order.OrderKey
@@ -244,7 +242,7 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
     isSchemeBinder nid =
         let nidC = canonicalNode nid
         in IntSet.member (getNodeId nidC) schemeBinderKeys
-            && case NodeAccess.lookupNode (srConstraint res) nidC of
+            && case Solved.lookupNode solved nidC of
                 Just TyVar{} -> True
                 _ -> False
 
@@ -261,9 +259,9 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
                 let subst = siSubst si'
                     nameFor nid = IntMap.lookup (getNodeId (canonicalNode nid)) subst
                     reifyArg arg =
-                        case VarStore.lookupVarBound (srConstraint res) (canonicalNode arg) of
-                            Just bnd -> reifyBoundWithNames res subst bnd
-                            Nothing -> reifyTypeWithNamedSetNoFallback res subst namedSet' (canonicalNode arg)
+                        case Solved.lookupVarBound solved (canonicalNode arg) of
+                            Just bnd -> reifyBoundWithNames (Solved.toSolveResult solved) subst bnd
+                            Nothing -> reifyTypeWithNamedSetNoFallback (Solved.toSolveResult solved) subst namedSet' (canonicalNode arg)
                     entries =
                         [ (name, ty)
                         | (binder, arg) <- etBinderArgs tr
@@ -336,9 +334,9 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
     reifyTypeArg :: IntSet.IntSet -> Maybe NodeId -> NodeId -> Either ElabError ElabType
     reifyTypeArg namedSet' mbBinder arg = do
         let argC = canonicalNode arg
-        ty <- case VarStore.lookupVarBound (srConstraint res) argC of
-            Just bnd -> reifyTypeWithNamedSetNoFallback res substForTypes namedSet' bnd
-            Nothing -> reifyTypeWithNamedSetNoFallback res substForTypes namedSet' argC
+        ty <- case Solved.lookupVarBound solved argC of
+            Just bnd -> reifyTypeWithNamedSetNoFallback (Solved.toSolveResult solved) substForTypes namedSet' bnd
+            Nothing -> reifyTypeWithNamedSetNoFallback (Solved.toSolveResult solved) substForTypes namedSet' argC
         let inferredSingleton =
                 case Map.toList (inferredArgMapFromTarget namedSet') of
                     [(_name, inferredTy)] -> Just inferredTy
@@ -411,20 +409,20 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
         TForall _ mb body -> maybe False containsBottomTy mb || containsBottomTy body
 
     reifyBoundType :: NodeId -> Either ElabError ElabType
-    reifyBoundType = reifyBoundWithNames res substForTypes
+    reifyBoundType = reifyBoundWithNames (Solved.toSolveResult solved) substForTypes
 
     reifyTargetTypeForInst :: IntSet.IntSet -> NodeId -> Either ElabError ElabType
     reifyTargetTypeForInst namedSet' nid = do
         let nidC = canonicalNode nid
-        ty <- case VarStore.lookupVarBound (srConstraint res) nidC of
-            Just bnd -> reifyTypeWithNamedSetNoFallback res substForTypes namedSet' bnd
-            Nothing -> reifyTypeWithNamedSetNoFallback res substForTypes namedSet' nidC
+        ty <- case Solved.lookupVarBound solved nidC of
+            Just bnd -> reifyTypeWithNamedSetNoFallback (Solved.toSolveResult solved) substForTypes namedSet' bnd
+            Nothing -> reifyTypeWithNamedSetNoFallback (Solved.toSolveResult solved) substForTypes namedSet' nidC
         pure (inlineBaseBounds ty)
 
     inlineBaseBounds :: ElabType -> ElabType
     inlineBaseBounds =
         inlineBaseBoundsType
-            (srConstraint res)
+            (Solved.solvedConstraint solved)
             canonicalNode
 
     inlineAliasBounds :: ElabType -> ElabType
@@ -440,9 +438,9 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
         inlineAliasBoundsWithBy
             fallbackToBottom
             canonicalNode
-            (cNodes (srConstraint res))
-            (VarStore.lookupVarBound (srConstraint res))
-            (reifyBoundWithNames res substForTypes)
+            (cNodes (Solved.solvedConstraint solved))
+            (Solved.lookupVarBound solved)
+            (reifyBoundWithNames (Solved.toSolveResult solved) substForTypes)
 
     inferInstAppArgs :: ElabScheme -> ElabType -> Maybe [ElabType]
     inferInstAppArgs scheme targetTy =
@@ -581,13 +579,13 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
     -- which matters for operations like Merge that reference outer binders.
     nodeExists :: NodeId -> Bool
     nodeExists nid =
-        case NodeAccess.lookupNode (srConstraint res) (canonicalNode nid) of
+        case Solved.lookupNode solved (canonicalNode nid) of
             Just _ -> True
             Nothing -> False
 
     nodeIsBottom :: NodeId -> Bool
     nodeIsBottom nid =
-        case NodeAccess.lookupNode (srConstraint res) (canonicalNode nid) of
+        case Solved.lookupNode solved (canonicalNode nid) of
             Just TyBottom{} -> True
             _ -> False
 
@@ -863,9 +861,9 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
                 () of
                 () -> pure ()
             raiseTarget <-
-                case NodeAccess.lookupNode (srConstraint res) nOrig of
+                case Solved.lookupNode solved nOrig of
                     Just TyForall{ tnBody = body } -> do
-                        binders <- bindingToElab (Binding.orderedBinders canonicalNode (srConstraint res) (typeRef nOrig))
+                        binders <- bindingToElab (Binding.orderedBinders canonicalNode (Solved.solvedConstraint solved) (typeRef nOrig))
                         let bodyC = canonicalNode body
                         pure $ case binders of
                             (b:_) -> canonicalNode b
@@ -874,14 +872,14 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
             let nC = raiseTarget
             case debugPhi ("OpRaise: raiseTarget=" ++ show nC) () of
                 () -> pure ()
-            case debugPhi ("OpRaise: parent=" ++ show (lookupBindParent (srConstraint res) (typeRef nC))) () of
+            case debugPhi ("OpRaise: parent=" ++ show (Solved.lookupBindParent solved (typeRef nC))) () of
                 () -> pure ()
             nContextTarget <-
-                case NodeAccess.lookupNode (srConstraint res) nC of
+                case Solved.lookupNode solved nC of
                     Just TyExp{ tnBody = body } -> pure (canonicalNode body)
                     _ -> pure nC
             let shouldRigidSkip =
-                    case lookupBindParent (srConstraint res) (typeRef nC) of
+                    case Solved.lookupBindParent solved (typeRef nC) of
                         Just (_, BindRigid) -> True
                         _ -> False
             if shouldRigidSkip
@@ -1105,16 +1103,16 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
                         -- where `m = min-prec{...}`.
 
                         nodeTy0 <-
-                            case lookupBindParent (srConstraint res) (typeRef nC) of
+                            case Solved.lookupBindParent solved (typeRef nC) of
                                 Just (TypeRef parent, _) ->
-                                    case NodeAccess.lookupNode (srConstraint res) (canonicalNode parent) of
-                                        Just TyForall{} -> reifyTypeWithNamedSetNoFallback res substForTypes namedSet' nC
+                                    case Solved.lookupNode solved (canonicalNode parent) of
+                                        Just TyForall{} -> reifyTypeWithNamedSetNoFallback (Solved.toSolveResult solved) substForTypes namedSet' nC
                                         _ -> reifyBoundType nC
                                 _ -> reifyBoundType nC
                         let nodeTy = applyInferredArgs namedSet' (inlineAliasBounds nodeTy0)
                         nodeTyBound <-
-                            case VarStore.lookupVarBound (srConstraint res) (canonicalNode nC) of
-                                Just bnd -> reifyTypeWithNamedSetNoFallback res substForTypes namedSet' bnd
+                            case Solved.lookupVarBound solved (canonicalNode nC) of
+                                Just bnd -> reifyTypeWithNamedSetNoFallback (Solved.toSolveResult solved) substForTypes namedSet' bnd
                                 Nothing -> pure nodeTy
                         let nodeTyBound' = inlineAliasBounds nodeTyBound
 
@@ -1143,7 +1141,7 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
                                             contextToNodeBoundWithOrderKeys
                                                 canonicalNode
                                                 orderKeys
-                                                (srConstraint res)
+                                                (Solved.solvedConstraint solved)
                                                 namedSet'
                                                 (canonicalNode mNode)
                                                 nContextTarget
@@ -1156,18 +1154,18 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
                             contextToNodeBoundWithOrderKeys
                                 canonicalNode
                                 orderKeys
-                                (srConstraint res)
+                                (Solved.solvedConstraint solved)
                                 namedSet'
                                 (canonicalNode orderRoot)
                                 nContextTarget
                         let boundTyBot = inlineAliasBoundsAsBound nodeTy
                         let mbRootInst =
-                                case (rootCtx, lookupBindParent (srConstraint res) (typeRef nC)) of
+                                case (rootCtx, Solved.lookupBindParent solved (typeRef nC)) of
                                     (Just _, Just (TypeRef parent, _)) ->
                                         let parentC = canonicalNode parent
                                             rootC = canonicalNode orderRoot
                                         in if parentC == rootC
-                                            || case NodeAccess.lookupNode (srConstraint res) parentC of
+                                            || case Solved.lookupNode solved parentC of
                                                 Just TyForall{} -> True
                                                 _ -> False
                                             then
@@ -1229,7 +1227,7 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
                                                 , "  deps(Txi(n)): " ++ show deps
                                                 , "  nodeTy: " ++ show nodeTy
                                                 , "  ids: " ++ show ids
-                                                , "  bindParent: " ++ show (lookupBindParent (srConstraint res) (typeRef nC))
+                                                , "  bindParent: " ++ show (Solved.lookupBindParent solved (typeRef nC))
                                                 ]
 
     idsForStartType :: SchemeInfo -> ElabType -> [Maybe NodeId]
@@ -1276,7 +1274,7 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
     -- ε/identity (thesis Fig. 15.3.4), but not all (see the OpGraft/OpWeaken note).
     isRigidNode :: NodeId -> Bool
     isRigidNode nid =
-        case lookupBindParent (srConstraint res) (typeRef (canonicalNode nid)) of
+        case Solved.lookupBindParent solved (typeRef (canonicalNode nid)) of
             Just (_, BindRigid) -> True
             _ -> False
 
