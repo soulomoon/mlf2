@@ -185,6 +185,35 @@ spec = do
                     ops `shouldSatisfy` (OpGraft argId binderId `elem`)
                     ops `shouldSatisfy` (OpWeaken binderId `elem`)
 
+        it "emits OpWeaken but not OpGraft for structurally-bounded binder (thesis-exact)" $ do
+            let expNodeId = NodeId 0
+                forallId = NodeId 1
+                binderId = NodeId 2
+                argId = NodeId 3
+                boundId = NodeId 4
+                nodes = nodeMapFromList
+                    [ (0, TyExp expNodeId (ExpVarId 0) forallId)
+                    , (1, TyForall forallId binderId)
+                    , (2, TyVar { tnId = binderId, tnBound = Just boundId })
+                    , (3, TyVar { tnId = argId, tnBound = Nothing })
+                    , (4, TyBase boundId (BaseTy "Int"))
+                    ]
+                constraint =
+                    rootedConstraint emptyConstraint
+                        { cNodes = nodes
+                        , cBindParents = inferBindParents nodes
+                        }
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 5 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
+                expansion = ExpInstantiate [argId]
+
+            case runPresolutionM defaultTraceConfig st0 (witnessFromExpansion (GenNodeId 0) expNodeId (nodeAt nodes 0) expansion) of
+                Left err -> expectationFailure ("witnessFromExpansion failed: " ++ show err)
+                Right ((introCount, ops), _) -> do
+                    introCount `shouldBe` 0
+                    -- Thesis Def. 15.3.4: OpGraft suppressed (InstBot can't target
+                    -- non-⊥ bound), but OpWeaken emitted to eliminate the quantifier.
+                    ops `shouldBe` [OpWeaken binderId]
+
         it "emits forall intros per binder in ForallSpec" $ do
             let expNodeId = NodeId 0
                 bodyId = NodeId 1
