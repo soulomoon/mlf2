@@ -31,6 +31,7 @@ import qualified XMLFPrettySpec
 import qualified TranslatablePresolutionSpec
 import qualified PhiSoundnessSpec
 import qualified ExpansionMinimalitySpec
+import qualified Constraint.SolvedSpec
 
 main :: IO ()
 main = do
@@ -67,3 +68,4 @@ main = do
         TranslatablePresolutionSpec.spec
         PhiSoundnessSpec.spec
         ExpansionMinimalitySpec.spec
+        Constraint.SolvedSpec.spec

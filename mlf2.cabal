@@ -314,6 +314,7 @@ test-suite mlf2-test
                       TranslatablePresolutionSpec,
                       PhiSoundnessSpec,
                       ExpansionMinimalitySpec,
+                      Constraint.SolvedSpec,
                       SpecUtil,
 
     -- LANGUAGE extensions used by modules in this package.
