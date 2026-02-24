@@ -36,7 +36,8 @@ import MLF.Elab.Types
 import qualified MLF.Constraint.Traversal as Traversal
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.NodeAccess as NodeAccess
-import MLF.Constraint.Solve (SolveResult(..), frWith)
+import MLF.Constraint.Solved (Solved)
+import qualified MLF.Constraint.Solved as Solved
 import MLF.Reify.Core (namedNodes)
 
 -- | Compute an instantiation-context path from a root node to a target node.
@@ -52,19 +53,18 @@ import MLF.Reify.Core (namedNodes)
 -- that contains @target@.
 --
 -- Returns 'Nothing' when @target@ is not transitively bound to @root@.
-contextToNodeBound :: SolveResult -> NodeId -> NodeId -> Either ElabError (Maybe [ContextStep])
+contextToNodeBound :: Solved -> NodeId -> NodeId -> Either ElabError (Maybe [ContextStep])
 contextToNodeBound res root target = do
-    let c = srConstraint res
-        uf = srUnionFind res
-        canonical = frWith uf
+    let c = Solved.solvedConstraint res
+        canonical = Solved.canonical res
         rootC = canonical root
         targetC = canonical target
 
     if rootC == targetC
         then pure (Just [])
         else do
-            let keys = Order.orderKeysFromRoot res rootC
-            namedSet <- namedNodes res
+            let keys = Order.orderKeysFromRoot (Solved.toSolveResult res) rootC
+            namedSet <- namedNodes (Solved.toSolveResult res)
             contextToNodeBoundWithOrderKeys canonical keys c namedSet rootC targetC
 
 contextToNodeBoundWithOrderKeys

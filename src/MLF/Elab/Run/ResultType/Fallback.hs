@@ -12,6 +12,7 @@ import MLF.Frontend.ConstraintGen (AnnExpr(..))
 import MLF.Constraint.Presolution (EdgeTrace(..))
 import MLF.Constraint.Presolution.Base (CopyMapping(..), lookupCopy)
 import MLF.Constraint.Solve (SolveResult(..), frWith)
+import MLF.Constraint.Solved (fromSolveResult, toSolveResult)
 import MLF.Constraint.Types.Graph
     ( EdgeId(..)
     , GenNode(..)
@@ -171,7 +172,7 @@ computeResultTypeFallbackCore ctx annCanon ann = do
         c1 = rtcBaseConstraint ctx
         redirects = rtcRedirects ctx
         traceCfg = rtcTraceConfig ctx
-        generalizeAtWith = generalizeAtWithBuilder planBuilder
+        generalizeAtWith = \mbGa s -> generalizeAtWithBuilder planBuilder mbGa (toSolveResult s)
 
     let edgeTraceCounts =
             IntMap.fromListWith
@@ -262,7 +263,7 @@ computeResultTypeFallbackCore ctx annCanon ann = do
                 instAppBasesFromWitness funEid =
                     case IntMap.lookup (getEdgeId funEid) edgeWitnesses of
                         Just ew ->
-                            case phiFromEdgeWitnessWithTrace traceCfg generalizeAtWith solved (Just bindParentsGa) Nothing (IntMap.lookup (getEdgeId funEid) edgeTraces) ew of
+                            case phiFromEdgeWitnessWithTrace traceCfg generalizeAtWith (fromSolveResult solved) (Just bindParentsGa) Nothing (IntMap.lookup (getEdgeId funEid) edgeTraces) ew of
                                 Right inst ->
                                     IntSet.fromList
                                         [ getNodeId nid

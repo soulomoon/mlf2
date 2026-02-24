@@ -947,7 +947,7 @@ elaborateWithEnv config elabEnv ann = do
                     )
                     () of
                     () -> pure ()
-                phi <- phiFromEdgeWitnessWithTrace traceCfg (\mbGa sr -> generalizeAtWith mbGa (fromSolveResult sr)) (Solved.toSolveResult resReify) (Just gaParents) mSchemeInfo' mTrace ew
+                phi <- phiFromEdgeWitnessWithTrace traceCfg generalizeAtWith resReify (Just gaParents) mSchemeInfo' mTrace ew
                 case debugGeneralize
                     ("reifyInst phi edge=" ++ show eid ++ " phi=" ++ show phi)
                     () of

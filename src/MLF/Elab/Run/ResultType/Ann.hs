@@ -8,6 +8,7 @@ import qualified Data.IntSet as IntSet
 
 import MLF.Frontend.ConstraintGen (AnnExpr(..))
 import MLF.Constraint.Solve (SolveResult(..))
+import MLF.Constraint.Solved (fromSolveResult, toSolveResult)
 import MLF.Constraint.Types.Graph
     ( EdgeId(..)
     , NodeId(..)
@@ -79,7 +80,7 @@ computeResultTypeFromAnn ctx inner innerPre annNodeId eid = do
         c1 = rtcBaseConstraint ctx
         redirects = rtcRedirects ctx
         traceCfg = rtcTraceConfig ctx
-        generalizeAtWith = generalizeAtWithBuilder planBuilder
+        generalizeAtWith = \mbGa s -> generalizeAtWithBuilder planBuilder mbGa (toSolveResult s)
 
     let rootPre = annNode inner
         rootC = canonical rootPre
@@ -115,7 +116,7 @@ computeResultTypeFromAnn ctx inner innerPre annNodeId eid = do
         subst = subst0
         srcTy = schemeToType sch
         schemeInfo = SchemeInfo { siScheme = sch, siSubst = subst }
-    phi0 <- phiFromEdgeWitnessWithTrace traceCfg generalizeAtWith solvedForGen (Just bindParentsGa) (Just schemeInfo) mTrace ew
+    phi0 <- phiFromEdgeWitnessWithTrace traceCfg generalizeAtWith (fromSolveResult solvedForGen) (Just bindParentsGa) (Just schemeInfo) mTrace ew
     namedSetSolved <- namedNodes solvedForGen
     let annBound = VarStore.lookupVarBound (srConstraint solvedForGen) annNodeId
         annTargetNode0 =
