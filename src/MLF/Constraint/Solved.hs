@@ -38,6 +38,7 @@ module MLF.Constraint.Solved (
     lookupVarBound,
 
     -- * Escape hatches (Phase 1 only — removed in Phase 2)
+    toSolveResult,
     unionFind,
     solvedConstraint,
 
@@ -120,6 +121,11 @@ lookupVarBound s nid = NA.lookupVarBound (srConstraint (unSolved s)) (canonical 
 -- -----------------------------------------------------------------
 -- Escape hatches (Phase 1 only)
 -- -----------------------------------------------------------------
+
+-- | Extract the underlying 'SolveResult'. Escape hatch for callers
+-- not yet migrated to 'Solved' queries. Will be removed in Phase 2.
+toSolveResult :: Solved -> SolveResult
+toSolveResult = unSolved
 
 -- | Raw union-find map. Will be removed in Phase 2.
 unionFind :: Solved -> IntMap NodeId
