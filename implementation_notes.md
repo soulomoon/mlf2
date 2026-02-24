@@ -1,5 +1,14 @@
 # Implementation Notes
 
+### 2026-02-24 Eliminate DEV-PHI-STANDALONE-GRAFT-EXTENSION (thesis-exact standalone graft)
+
+- Retired DEV-PHI-STANDALONE-GRAFT-EXTENSION: deeper thesis analysis (Def. 15.3.4) reveals the standalone `OpGraft` handler (`atBinderKeep` + `InstInside(InstBot σ)`) IS thesis-exact — the deviation description was backwards. The paired `OpGraft+OpWeaken` handler producing `InstApp σ` is a sound optimization (equivalent by normalizeInst Rule 1).
+- Paired handler retained: deleting it breaks Omega's incremental type-state when multiple graft+weaken pairs interact (binder elimination via `atBinder` changes type-state for subsequent ops; `atBinderKeep` preserves it).
+- Added normalizeInst Rule 1b: collapses context-wrapped `InstSeq (InstUnder v (InstInside (InstBot t))) (InstUnder v InstElim)` → `InstUnder v (InstApp t)` for single-level non-front binders.
+- Added Rule 1b test in ElaborationSpec.
+- Deviation register 6 → 5 entries.
+- Verification: 786 examples, 0 failures; conformance gate green; claims checker green.
+
 ### 2026-02-24 DEV-PHI-STANDALONE-GRAFT-EXTENSION investigation (deviation retained)
 
 - Investigated eliminating DEV-PHI-STANDALONE-GRAFT-EXTENSION by reversing coalescing direction in `coalesceDelayedGraftWeakenWithEnv` (move graft forward instead of weaken backward).
@@ -33,7 +42,7 @@
 
 ### 2026-02-22 Defensible exactness (traceable evidence chains)
 
-- Added machine-checked thesis claims registry (`docs/thesis-claims.yaml`, 21 claims across Ch. 7-15) and deviation register (`docs/thesis-deviations.yaml`, 6 deviations) with cross-link validation via `scripts/check-thesis-claims.sh`.
+- Added machine-checked thesis claims registry (`docs/thesis-claims.yaml`, 21 claims across Ch. 7-15) and deviation register (`docs/thesis-deviations.yaml`, 5 deviations) with cross-link validation via `scripts/check-thesis-claims.sh`.
 - Added `supports_claims` back-links to obligations ledger (`docs/thesis-obligations.yaml`) so every obligation references the claims it supports.
 - Added three new test modules for thesis property coverage:
   - `test/TranslatablePresolutionSpec.hs` — Def. 15.2.10 translatable presolution (3 examples).

@@ -43,7 +43,6 @@ claims:
         - src/MLF/Frontend/ConstraintGen/Translate.hs#buildExprRaw
     deviations:
       - DEV-PHI-KEEP-BINDER-WEAKEN-SUPPRESSION
-      - DEV-PHI-STANDALONE-GRAFT-EXTENSION
     status: defended
     notes: ""
 

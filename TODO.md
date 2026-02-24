@@ -10,7 +10,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - Move from "tested" to "defensible exactness": every thesis claim has a traceable evidence chain (thesis clause -> claim -> code path -> test -> gate) continuously enforced by CI.
 - Implemented:
   - Machine-checked thesis claims registry (`docs/thesis-claims.yaml`, 21 claims across Ch. 7-15).
-  - Deviation register (`docs/thesis-deviations.yaml`, 6 deviations) with cross-link validation.
+  - Deviation register (`docs/thesis-deviations.yaml`, 5 deviations) with cross-link validation.
   - Claims checker script (`scripts/check-thesis-claims.sh`) enforcing schema, cross-links, code paths, and orphan detection.
   - Obligations ledger `supports_claims` back-links.
   - Three new test modules: `TranslatablePresolutionSpec` (Def. 15.2.10), `PhiSoundnessSpec` (Def. 15.3.4), `ExpansionMinimalitySpec` (Def. 10.1.1).

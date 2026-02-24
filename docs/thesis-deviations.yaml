@@ -108,33 +108,30 @@ deviations:
         file: test/ElaborationSpec.hs
     status: implementation-choice
 
-  - id: DEV-PHI-STANDALONE-GRAFT-EXTENSION
+  - id: DEV-PHI-WEAKEN-SOLVED-BINDER-SKIP
     chapter: 15
     section: "15.3"
-    thesis_ref: "Figure 10 (graft paired with weaken)"
+    thesis_ref: "Definition 15.3.4 (OpWeaken translation)"
     description: >
-      The implementation supports translating standalone OpGraft operations
-      (without an immediately paired OpWeaken) as an explicit in-binder bottom
-      update via atBinderKeep. The thesis only defines the canonical paired
-      graft/weaken shape. Standalone grafts arise when normalization
-      (reorderWeakenWithEnv) separates graft+weaken pairs by pushing the weaken
-      after descendant ops (condition 5), and coalescing cannot re-fuse them
-      because the intervening ops touch the binder's protected set.
-    impact: semantic-minor
+      Omega translation skips OpWeaken when the target binder was solved away
+      during constraint solving (no longer a binder in the replay type). The
+      thesis assumes all OpWeaken targets are live binders, but structurally-
+      bounded binders may be eliminated during solving, making the quantifier
+      already absent. The skip is semantically correct: there is nothing to
+      eliminate.
+    impact: semantic-neutral
     rationale: >
-      This extension is load-bearing: Omega's type-state evolution requires the
-      graft (InstInside) to be applied before descendant ops execute, so
-      reordering descendant ops before the graft produces incorrect
-      instantiations (proven by TCArgumentMismatch failures). The standalone
-      handler with atBinderKeep preserves the correct type-state ordering.
+      Closing the classify suppression gap (Witness.hs) now emits OpWeaken for
+      structurally-bounded binders (thesis-exact). When such a binder is solved
+      away, Omega treats the OpWeaken as a no-op rather than erroring, since the
+      quantifier elimination is already accomplished by solving.
     code_paths:
       - src/MLF/Elab/Phi/Omega.hs
+      - src/MLF/Constraint/Presolution/Witness.hs
     test_evidence:
-      - matcher: "rejects OpGraft on out-of-scheme target (no InstBot/InstApp fallback)"
+      - matcher: "structurally-bounded binder"
+        file: test/Presolution/WitnessSpec.hs
+      - matcher: "OpWeaken on trace binder source with no replay binder mapping"
         file: test/ElaborationSpec.hs
-      - matcher: "leaves graft standalone when middle ops touch protected set"
-        file: test/Presolution/WitnessSpec.hs
-      - matcher: "rejects standalone graft with no matching weaken"
-        file: test/Presolution/WitnessSpec.hs
     status: implementation-choice
 
