@@ -1,5 +1,6 @@
 module MLF.Elab.Sigma (
     bubbleReorderTo,
+    bubbleReorderToFromSpine,
     sigmaReorder
 ) where
 
@@ -75,6 +76,48 @@ bubbleReorderTo context ty0 ids0 desired0 = go InstId ty0 ids0 0
             ty' <- applyInstantiation ty sw
             let ids' = swapAdjacent (k - 1) ids
             bubbleLeft (composeInst acc sw) ty' ids' (k - 1) idx
+
+-- | Spine-based variant of 'bubbleReorderTo' that works on binder lists
+-- instead of 'ElabType'. Does not require 'applyInstantiation'.
+bubbleReorderToFromSpine
+    :: Eq a
+    => String
+    -> [(String, Maybe BoundType)]
+    -> [a]
+    -> [a]
+    -> Either ElabError (Instantiation, [(String, Maybe BoundType)], [a])
+bubbleReorderToFromSpine context binders0 ids0 desired0 = go InstId binders0 ids0 0
+  where
+    go acc binders ids idx
+        | idx >= length desired0 = Right (acc, binders, ids)
+        | length ids < length desired0 =
+            Left (InstantiationError (context ++ ": type has only " ++ show (length ids) ++ " binders"))
+        | ids !! idx == desired0 !! idx = go acc binders ids (idx + 1)
+        | otherwise =
+            case elemIndex (desired0 !! idx) (drop idx ids) of
+                Nothing ->
+                    Left (InstantiationError (context ++ ": desired binder not found in source"))
+                Just off -> do
+                    let k = idx + off
+                    (acc', binders', ids') <- bubbleLeft acc binders ids k idx
+                    go acc' binders' ids' (idx + 1)
+
+    bubbleLeft acc binders ids k idx
+        | k <= idx = Right (acc, binders, ids)
+        | otherwise = do
+            sw <- swapAtFromSpine (k - 1) binders
+            let binders' = swapAdjacent (k - 1) binders
+                ids' = swapAdjacent (k - 1) ids
+            bubbleLeft (composeInst acc sw) binders' ids' (k - 1) idx
+
+-- | Generate a swap instantiation at depth @i@ from a binder list.
+swapAtFromSpine :: Int -> [(String, Maybe BoundType)] -> Either ElabError Instantiation
+swapAtFromSpine i binders = case drop i binders of
+    (a : b : _) -> Right (underPrefix (take i binders) (swapFront a b))
+    _ -> Left (InstantiationError ("swapAtFromSpine: cannot swap at depth " ++ show i))
+  where
+    underPrefix [] inst = inst
+    underPrefix ((v, _) : rest) inst = InstUnder v (underPrefix rest inst)
 
 -- | Reorder the leading quantifier spine of `src` so its binder order matches `tgt`.
 -- Returns the instantiation Σ that performs the reordering.
