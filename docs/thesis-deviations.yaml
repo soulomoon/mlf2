@@ -88,27 +88,6 @@ deviations:
         file: test/PresolutionSpec.hs
     status: implementation-choice
 
-  - id: DEV-PHI-WITNESS-WEAKEN-SUPPRESSION
-    chapter: 15
-    section: "15.3"
-    thesis_ref: "Definition 15.3.4 / Figure 10 (Phi witness translation)"
-    description: >
-      Witness emission suppresses some OpWeaken generation based on local
-      scheme structure (`suppressWeaken`) and whether the graft argument is a
-      gen-bound alias (`argIsGenBound`). The thesis does not add these
-      structure-sensitive guards.
-    impact: semantic-minor
-    rationale: >
-      This guard is load-bearing for translatability. Without it, witness
-      emission can produce weaken operations that are not translatable in the
-      current xMLF reconstruction pipeline.
-    code_paths:
-      - src/MLF/Constraint/Presolution/Witness.hs
-    test_evidence:
-      - matcher: "suppresses OpWeaken for rigid binders during ExpInstantiate witness emission"
-        file: test/Presolution/WitnessSpec.hs
-    status: implementation-choice
-
   - id: DEV-PHI-KEEP-BINDER-WEAKEN-SUPPRESSION
     chapter: 15
     section: "15.3"

@@ -30,7 +30,7 @@ import MLF.Util.Trace (traceBindingM)
 -- | Resolve an instantiation edge into a typed plan.
 --
 -- Reads the canonicalized left and right nodes and per-edge flags
--- ('cLetEdges', 'cAnnEdges') from the presolution state, then
+-- ('cLetEdges') from the presolution state, then
 -- rejects non-`TyExp` left nodes (fail-fast invariant).
 planEdge :: InstEdge -> PresolutionM EdgePlan
 planEdge edge = do
@@ -41,7 +41,6 @@ planEdge edge = do
         n2Id = instRight edge
         eidInt = getEdgeId edgeId
         allowTrivial = IntSet.member eidInt (cLetEdges constraint0)
-        suppressWeaken = IntSet.member eidInt (cAnnEdges constraint0)
 
     n1Raw <- getNode n1Id
     leftTyExp <- case mkResolvedTyExp n1Raw of
@@ -95,7 +94,6 @@ planEdge edge = do
         , eprLeftCanonical = canonical n1Id
         , eprRightCanonical = canonical n2Id
         , eprAllowTrivial = allowTrivial
-        , eprSuppressWeaken = suppressWeaken
         , eprSchemeOwnerGen = schemeOwnerGen
         }
 

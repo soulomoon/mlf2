@@ -921,9 +921,16 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
                         if IntSet.member key keepBinderKeys'
                             then go binderKeys keepBinderKeys' namedSet' ty ids phi rest lookupBinder
                             else do
-                                (inst, ids1) <- atBinder binderKeys ids ty bvReplay (pure InstElim)
-                                ty' <- applyInst "OpWeaken" ty inst
-                                go binderKeys keepBinderKeys' namedSet' ty' ids1 (composeInst phi inst) rest lookupBinder
+                                case lookupBinderIndex binderKeys ids bvReplay of
+                                    Nothing ->
+                                        -- Binder already eliminated by a prior operation
+                                        -- (e.g., gen-bound arg consumed by OpGraft).
+                                        -- The weaken is semantically redundant — skip.
+                                        go binderKeys keepBinderKeys' namedSet' ty ids phi rest lookupBinder
+                                    Just _ -> do
+                                        (inst, ids1) <- atBinder binderKeys ids ty bvReplay (pure InstElim)
+                                        ty' <- applyInst "OpWeaken" ty inst
+                                        go binderKeys keepBinderKeys' namedSet' ty' ids1 (composeInst phi inst) rest lookupBinder
 
         (OpRaise n : rest) -> do
             nReplay <- resolveTraceBinderTarget False "OpRaise" n

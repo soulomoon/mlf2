@@ -91,7 +91,7 @@ executeUnifiedExpansionPath plan = do
                 else uncurry unifyStructure
     mapM_ applyInstantiationUnification unifications
 
-    witnessPlan <- edgeWitnessPlan schemeGen (eprSuppressWeaken plan) n1Id n1Raw finalExp
+    witnessPlan <- edgeWitnessPlan schemeGen n1Id n1Raw finalExp
     expansionResult <-
         if finalExp == ExpIdentity
             then pure EdgeExpansionResult { eerTrace = emptyTrace, eerExtraOps = [] }

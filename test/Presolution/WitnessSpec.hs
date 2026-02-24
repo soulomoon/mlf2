@@ -91,7 +91,36 @@ spec = do
                         , OpWeaken binderId
                         ]
 
-        it "suppresses OpWeaken for rigid binders during ExpInstantiate witness emission" $ do
+        it "emits OpWeaken for unbounded binders even when suffix has forall (thesis-exact)" $ do
+            let expNodeId = NodeId 0
+                forallId = NodeId 1
+                binderId = NodeId 2
+                argId = NodeId 3
+                nodes = nodeMapFromList
+                    [ (0, TyExp expNodeId (ExpVarId 0) forallId)
+                    , (1, TyForall forallId binderId)
+                    , (2, TyVar { tnId = binderId, tnBound = Nothing })
+                    ]
+                constraint =
+                    rootedConstraint emptyConstraint
+                        { cNodes = nodes
+                        , cBindParents = inferBindParents nodes
+                        }
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 4 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
+                -- Instantiate BEFORE forall: suffix has forall, so suppressWeaken fires today
+                expansion =
+                    ExpCompose
+                        (ExpInstantiate [argId] NE.:| [ExpForall (ForallSpec 1 [Nothing] NE.:| [])])
+
+            case runPresolutionM defaultTraceConfig st0 (witnessFromExpansion (GenNodeId 0) expNodeId (nodeAt nodes 0) expansion) of
+                Left err -> expectationFailure ("witnessFromExpansion failed: " ++ show err)
+                Right ((introCount, ops), _) -> do
+                    introCount `shouldBe` 1
+                    -- Thesis-exact: OpWeaken must be emitted even with suffix forall
+                    ops `shouldSatisfy` (OpWeaken binderId `elem`)
+                    ops `shouldSatisfy` (OpGraft argId binderId `elem`)
+
+        it "emits OpWeaken for unbounded binders (thesis-exact, no suppression)" $ do
             let expNodeId = NodeId 0
                 forallId = NodeId 1
                 binderId = NodeId 2
@@ -120,8 +149,11 @@ spec = do
                 Left err -> expectationFailure ("witnessFromExpansion failed: " ++ show err)
                 Right ((introCount, ops), _) -> do
                     introCount `shouldBe` 0
+                    -- Thesis-exact: OpWeaken emitted even when arg is gen-bound
                     ops `shouldBe`
-                        [ OpGraft argId binderId ]
+                        [ OpGraft argId binderId
+                        , OpWeaken binderId
+                        ]
         it "emits forall intros per binder in ForallSpec" $ do
             let expNodeId = NodeId 0
                 bodyId = NodeId 1

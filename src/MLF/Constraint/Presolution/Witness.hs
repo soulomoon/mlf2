@@ -22,7 +22,7 @@ module MLF.Constraint.Presolution.Witness (
     OmegaNormalizeError(..)
 ) where
 
-import Control.Monad (foldM, zipWithM)
+import Control.Monad (foldM)
 import Control.Monad.Except (throwError)
 import Data.Functor.Foldable (cata)
 import qualified Data.IntMap.Strict as IntMap
@@ -33,23 +33,16 @@ import Data.Ord (Down(..))
 import qualified Data.List.NonEmpty as NE
 
 import MLF.Constraint.Types.Graph
-    ( BindFlag(..)
-    , GenNode(..)
-    , GenNodeId
+    ( GenNodeId
     , NodeId
-    , NodeRef(..)
     , TyNode(..)
     , getNodeId
-    , typeRef
     )
 import MLF.Constraint.Types.Witness (Expansion(..), ExpansionF(..), ForallSpec(..), InstanceOp(..))
-import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Presolution.Base (PresolutionM, PresolutionError(..), instantiationBindersM)
 import MLF.Constraint.Presolution.Ops (getCanonicalNode, lookupVarBound)
-import MLF.Constraint.Presolution.StateAccess (getConstraintAndCanonical)
 import MLF.Constraint.Presolution.WitnessValidation (OmegaNormalizeEnv(..), OmegaNormalizeError(..), validateNormalizedWitness)
 import MLF.Constraint.Presolution.WitnessCanon (normalizeInstanceOpsFull, coalesceRaiseMergeWithEnv, reorderWeakenWithEnv)
-import qualified MLF.Binding.Tree as Binding
 import MLF.Util.RecursionSchemes (cataM)
 
 binderArgsFromExpansion :: GenNodeId -> TyNode -> Expansion -> PresolutionM [(NodeId, NodeId)]
@@ -83,25 +76,23 @@ binderArgsFromExpansion gid leftRaw expn = do
 witnessFromExpansion :: GenNodeId -> NodeId -> TyNode -> Expansion -> PresolutionM (Int, [InstanceOp])
 witnessFromExpansion gid _root leftRaw expn = do
     let (_hasForall, stepper) = cata (witnessAlg leftRaw) expn
-    steps <- stepper False
+    steps <- stepper
     let introCount = fst steps
         ops = snd steps
     pure (introCount, ops)
   where
     witnessAlg
         :: TyNode
-        -> ExpansionF (Bool, Bool -> PresolutionM (Int, [InstanceOp]))
-        -> (Bool, Bool -> PresolutionM (Int, [InstanceOp]))
+        -> ExpansionF (Bool, PresolutionM (Int, [InstanceOp]))
+        -> (Bool, PresolutionM (Int, [InstanceOp]))
     witnessAlg lr layer = case layer of
         ExpIdentityF ->
-            (False, \_ -> pure (0, []))
+            (False, pure (0, []))
         ExpForallF ls ->
             let count = sum (map fsBinderCount (NE.toList ls))
-            in (True, \_ -> pure (count, []))
+            in (True, pure (count, []))
         ExpInstantiateF args ->
-            (False, \suppressWeaken -> do
-                -- If the TyExp body is a forall, instantiate its binders in the same order
-                -- that `applyExpansion` uses (binding-edge Q(n) via `orderedBinders`).
+            (False, do
                 case lr of
                     TyExp{ tnBody = b } -> do
                         (_bodyRoot, boundVars) <- instantiationBindersM gid b
@@ -112,43 +103,27 @@ witnessFromExpansion gid _root leftRaw expn = do
                             else do
                                 let args' = take (length boundVars) args
                                     pairs = zip args' boundVars
-                                (grafts, merges, weakens) <- foldM (classify suppressWeaken boundVars) ([], [], []) pairs
-                                -- Order:
-                                --   • grafts first (update ⊥ bounds)
-                                --   • then merges (alias + eliminate)
-                                --   • then remaining weakens (eliminate using existing bounds)
-                                --
-                                -- This is closer to `papers/these-finale-english.txt`
-                                -- (see `papers/xmlf.txt` Fig. 10), and avoids emitting
-                                -- invalid grafts under non-⊥ bounds (e.g. bounded variables).
+                                (grafts, merges, weakens) <- foldM (classify boundVars) ([], [], []) pairs
                                 pure (0, grafts ++ merges ++ weakens)
                     _ -> do
-                        -- Instantiating a non-TyExp is unexpected in current pipeline; treat as empty.
                         pure (0, []))
         ExpComposeF es ->
             let children = NE.toList es
-                childHas = map fst children
-                hasForall = or childHas
-            in (hasForall, \rightHasForall -> do
-                let suffixFlags = drop 1 (scanr (||) rightHasForall childHas)
-                results <- zipWithM (\flag (_, childStep) -> childStep flag) suffixFlags children
+                hasForall = or (map fst children)
+            in (hasForall, do
+                results <- mapM snd children
                 let totalIntros = sum (map fst results)
                     allOps = concatMap snd results
                 pure (totalIntros, allOps))
 
     classify
-        :: Bool
-        -> [NodeId] -- binders at this instantiation site
+        :: [NodeId] -- binders at this instantiation site
         -> ([InstanceOp], [InstanceOp], [InstanceOp])
         -> (NodeId, NodeId) -- (arg, binder)
         -> PresolutionM ([InstanceOp], [InstanceOp], [InstanceOp])
-    classify suppressWeaken binders (gAcc, mAcc, wAcc) (arg, bv) = do
+    classify binders (gAcc, mAcc, wAcc) (arg, bv) = do
         mbBound <- binderBound bv
-        argGenBound <- argIsGenBound arg
-        let weakenOp =
-                if suppressWeaken || argGenBound
-                    then []
-                    else [OpWeaken bv]
+        let weakenOp = [OpWeaken bv]
         case mbBound of
             Nothing ->
                 -- Unbounded binder: graft then eliminate later via weaken.
@@ -178,24 +153,6 @@ witnessFromExpansion gid _root leftRaw expn = do
         pure $ case n of
             TyVar{} -> True
             _ -> False
-
-    argIsGenBound :: NodeId -> PresolutionM Bool
-    argIsGenBound nid = do
-        (c, canon) <- getConstraintAndCanonical
-        let nidC = canon nid
-            schemeParents =
-                IntMap.fromList
-                    [ (getNodeId (canon root), gnId gen)
-                    | gen <- NodeAccess.allGenNodes c
-                    , root <- gnSchemes gen
-                    ]
-        case IntMap.lookup (getNodeId nidC) schemeParents of
-            Nothing -> pure False
-            Just gid ->
-                case Binding.lookupBindParentUnder canon c (typeRef nidC) of
-                    Left _err -> pure False
-                    Right (Just (GenRef gid', BindFlex)) -> pure (gid' == gid)
-                    _ -> pure False
 
 integratePhase2Ops :: [InstanceOp] -> [InstanceOp] -> [InstanceOp]
 integratePhase2Ops baseOps extraOps =

@@ -1,5 +1,13 @@
 # Implementation Notes
 
+### 2026-02-24 Eliminate DEV-PHI-WITNESS-WEAKEN-SUPPRESSION (thesis-exact witness emission)
+
+- Witness emission now always emits `OpWeaken` for unbounded binders (thesis-exact Def. 15.3.4): removed `suppressWeaken` and `argIsGenBound` guards from `classify` in `Witness.hs`, simplified `witnessAlg` stepper signature (removed `Bool` parameter and suffix flag computation), deleted `argIsGenBound` helper.
+- Removed annotation-edge blanket weaken stripping: deleted `dropWeakenOps` from `EdgeProcessing/Witness.hs`, removed `suppressWeaken` parameter from `edgeWitnessPlan`, removed `eprSuppressWeaken` field from `EdgePlanResolved` in `Plan.hs`, updated `Planner.hs` and `Interpreter.hs` call sites.
+- Extended Omega translation to handle previously-suppressed weakens: added graceful skip in standalone `OpWeaken` case when binder is no longer in the identity list (already eliminated by prior operation).
+- Retired `DEV-PHI-WITNESS-WEAKEN-SUPPRESSION` from deviation register (7 → 6 entries).
+- Verification: 782 examples, 0 failures; conformance gate green; claims checker green.
+
 ### 2026-02-23 Phi thesis-purity follow-up (deviation sync + Omega alignment)
 
 - Registered three load-bearing Chapter 15.3 implementation choices in `docs/thesis-deviations.yaml` and linked them from `CLM-PHI-CORRECTNESS` in `docs/thesis-claims.yaml`:
@@ -15,7 +23,7 @@
 
 ### 2026-02-22 Defensible exactness (traceable evidence chains)
 
-- Added machine-checked thesis claims registry (`docs/thesis-claims.yaml`, 21 claims across Ch. 7-15) and deviation register (`docs/thesis-deviations.yaml`, 7 deviations) with cross-link validation via `scripts/check-thesis-claims.sh`.
+- Added machine-checked thesis claims registry (`docs/thesis-claims.yaml`, 21 claims across Ch. 7-15) and deviation register (`docs/thesis-deviations.yaml`, 6 deviations) with cross-link validation via `scripts/check-thesis-claims.sh`.
 - Added `supports_claims` back-links to obligations ledger (`docs/thesis-obligations.yaml`) so every obligation references the claims it supports.
 - Added three new test modules for thesis property coverage:
   - `test/TranslatablePresolutionSpec.hs` — Def. 15.2.10 translatable presolution (3 examples).

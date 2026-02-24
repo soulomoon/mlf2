@@ -53,7 +53,6 @@ data EdgePlan = EdgePlanResolved
     , eprLeftCanonical :: NodeId
     , eprRightCanonical :: NodeId
     , eprAllowTrivial :: Bool
-    , eprSuppressWeaken :: Bool
     , eprSchemeOwnerGen :: GenNodeId
     }
     deriving (Eq, Show)
@@ -79,6 +78,5 @@ mkEmptyResolvedPlan edge leftTyExp rightNode leftCan rightCan schemeGen =
         , eprLeftCanonical = leftCan
         , eprRightCanonical = rightCan
         , eprAllowTrivial = True
-        , eprSuppressWeaken = False
         , eprSchemeOwnerGen = schemeGen
         }

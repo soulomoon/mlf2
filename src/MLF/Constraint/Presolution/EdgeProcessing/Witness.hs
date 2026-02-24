@@ -10,8 +10,7 @@ module MLF.Constraint.Presolution.EdgeProcessing.Witness (
     EdgeWitnessPlan(..),
     edgeWitnessPlan,
     buildEdgeWitness,
-    buildEdgeTrace,
-    dropWeakenOps
+    buildEdgeTrace
 ) where
 
 import qualified Data.IntSet as IntSet
@@ -50,27 +49,18 @@ ops (`ewWitness`) so that later Phi translation can apply O as a prefix of
 InstIntro steps, then replay Omega ops independently (thesis Def. 15.3.4).
 -}
 
-{- Note [Weaken suppression on annotation edges]
-Some instantiation edges correspond to user annotations (recorded in
-`cAnnEdges`). For those edges we suppress `OpWeaken` steps derived from
-`ExpInstantiate` so the witness does not introduce implicit weakenings on
-annotated paths. EdgeProcessing decides when to suppress and threads the flag
-into `edgeWitnessPlan`.
--}
-
 -- | Precompute the base forall-intro count and ops for a witness.
 data EdgeWitnessPlan = EdgeWitnessPlan
     { ewpForallIntros :: Int
     , ewpBaseOps :: [InstanceOp]
     }
 
-edgeWitnessPlan :: GenNodeId -> Bool -> NodeId -> TyNode -> Expansion -> PresolutionM EdgeWitnessPlan
-edgeWitnessPlan gid suppressWeaken leftId leftRaw expn = do
+edgeWitnessPlan :: GenNodeId -> NodeId -> TyNode -> Expansion -> PresolutionM EdgeWitnessPlan
+edgeWitnessPlan gid leftId leftRaw expn = do
     let root = case leftRaw of
             TyExp{ tnBody = b } -> b
             _ -> leftId
-    (introCount, baseOps0) <- witnessFromExpansion gid root leftRaw expn
-    let baseOps = if suppressWeaken then dropWeakenOps baseOps0 else baseOps0
+    (introCount, baseOps) <- witnessFromExpansion gid root leftRaw expn
     pure EdgeWitnessPlan { ewpForallIntros = introCount, ewpBaseOps = baseOps }
 
 -- | Build an edge witness from the chosen expansion recipe and extra ops.
@@ -97,14 +87,6 @@ buildEdgeWitness eid left right leftRaw introCount baseOps extraOps = do
         , ewForallIntros = intros
         , ewWitness = iw
         }
-
--- | Remove Weaken ops from an op list.
-dropWeakenOps :: [InstanceOp] -> [InstanceOp]
-dropWeakenOps = filter (not . isWeakenOp)
-  where
-    isWeakenOp op = case op of
-        OpWeaken{} -> True
-        _ -> False
 
 -- | Build an edge trace.
 buildEdgeTrace

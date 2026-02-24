@@ -92,7 +92,6 @@ spec = describe "Edge plan types" $ do
                 Right (plan, _) -> do
                     eprLeftTyExp plan `shouldBe` leftTyExp
                     eprAllowTrivial plan `shouldBe` False
-                    eprSuppressWeaken plan `shouldBe` False
 
         it "adds planner tag for non-TyExp fail-fast invariant" $ do
             let n0 = TyVar { tnId = NodeId 0, tnBound = Nothing }
@@ -136,7 +135,7 @@ spec = describe "Edge plan types" $ do
                     eprAllowTrivial plan `shouldBe` True
                     eprSchemeOwnerGen plan `shouldBe` GenNodeId 0
 
-        it "threads ann-edge flag into suppressWeaken" $ do
+        it "recognizes annotation edges without special suppression" $ do
             let body = NodeId 0
                 target = NodeId 1
                 expNode = NodeId 2
@@ -155,5 +154,4 @@ spec = describe "Edge plan types" $ do
             case runPresolutionM defaultTraceConfig st0 (planEdge edge) of
                 Left err -> expectationFailure ("planEdge failed: " ++ show err)
                 Right (plan, _) -> do
-                    eprSuppressWeaken plan `shouldBe` True
                     eprSchemeOwnerGen plan `shouldBe` GenNodeId 0
