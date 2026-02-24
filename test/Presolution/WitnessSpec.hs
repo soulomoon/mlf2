@@ -154,6 +154,36 @@ spec = do
                         [ OpGraft argId binderId
                         , OpWeaken binderId
                         ]
+        it "annotation edges preserve OpWeaken in witness (thesis-exact)" $ do
+            -- Annotation edges previously had all OpWeaken stripped via dropWeakenOps
+            -- in edgeWitnessPlan. After eliminating DEV-PHI-WITNESS-WEAKEN-SUPPRESSION,
+            -- witnessFromExpansion emits OpWeaken unconditionally, and edgeWitnessPlan
+            -- (a thin wrapper) no longer strips them. Verify the underlying emission.
+            let expNodeId = NodeId 0
+                forallId = NodeId 1
+                binderId = NodeId 2
+                argId = NodeId 3
+                nodes = nodeMapFromList
+                    [ (0, TyExp expNodeId (ExpVarId 0) forallId)
+                    , (1, TyForall forallId binderId)
+                    , (2, TyVar { tnId = binderId, tnBound = Nothing })
+                    , (3, TyVar { tnId = argId, tnBound = Nothing })
+                    ]
+                constraint =
+                    rootedConstraint emptyConstraint
+                        { cNodes = nodes
+                        , cBindParents = inferBindParents nodes
+                        }
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 4 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
+                expansion = ExpInstantiate [argId]
+            case runPresolutionM defaultTraceConfig st0 (witnessFromExpansion (GenNodeId 0) expNodeId (nodeAt nodes 0) expansion) of
+                Left err -> expectationFailure ("witnessFromExpansion failed: " ++ show err)
+                Right ((introCount, ops), _) -> do
+                    introCount `shouldBe` 0
+                    -- Thesis-exact: OpWeaken preserved (no longer stripped for annotation edges)
+                    ops `shouldSatisfy` (OpGraft argId binderId `elem`)
+                    ops `shouldSatisfy` (OpWeaken binderId `elem`)
+
         it "emits forall intros per binder in ForallSpec" $ do
             let expNodeId = NodeId 0
                 bodyId = NodeId 1
