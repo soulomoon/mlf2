@@ -778,6 +778,14 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             rhs <- requireRight (Elab.applyInstantiation ty normalized)
             lhs `shouldBe` rhs
 
+        it "normalizeInst collapses context-wrapped graft+weaken to InstApp (Rule 1b)" $ do
+            let tArg = Elab.TBase (BaseTy "Int")
+                original = Elab.InstSeq
+                    (Elab.InstUnder "a" (Elab.InstInside (Elab.InstBot tArg)))
+                    (Elab.InstUnder "a" Elab.InstElim)
+                normalized = ElabTest.normalizeInstTestOnly original
+            normalized `shouldBe` Elab.InstUnder "a" (Elab.InstApp tArg)
+
     describe "xMLF terms" $ do
         it "pretty prints type abstraction with bound" $ do
             let bound = Elab.TArrow (Elab.TVar "b") (Elab.TVar "b")
@@ -1420,7 +1428,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 _ <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew)
                 pure ()
 
-            it "fails fast when OpWeaken targets a trace binder source with no replay binder mapping" $ do
+            it "OpWeaken on trace binder source with no replay binder mapping is no-op (solved-away binder)" $ do
                 let root = NodeId 100
                     binderA = NodeId 1
                     binderB = NodeId 2
@@ -1464,13 +1472,10 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
                 case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew of
-                    Left (Elab.PhiInvariantError msg) -> do
-                        msg `shouldSatisfy` ("trace/replay binder key-space mismatch" `isInfixOf`)
-                        msg `shouldSatisfy` ("OpWeaken" `isInfixOf`)
-                    Left other ->
-                        expectationFailure ("Expected PhiInvariantError for missing replay binder mapping, got " ++ show other)
+                    Left err ->
+                        expectationFailure ("Expected no-op (ε) for solved-away binder, got error: " ++ show err)
                     Right inst ->
-                        expectationFailure ("Expected PhiInvariantError, got " ++ Elab.pretty inst)
+                        Elab.pretty inst `shouldBe` "ε"
 
             it "O15-TR-RIGID-MERGE: OpMerge with rigid operated node n translates to identity" $ do
                 let root = NodeId 100
@@ -1756,7 +1761,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             (Elab.TArrow (Elab.TVar "a") (Elab.TBase (BaseTy "Int")))
                 canonType out `shouldBe` canonType expected
 
-            it "bounded bound-match graft-weaken emits InstApp boundTy (literal thesis shape)" $ do
+            it "bounded bound-match graft-weaken emits InstElim (thesis-exact individual ops)" $ do
                 let root = NodeId 0
                     binder = NodeId 1
                     bodyNode = NodeId 2
@@ -1801,7 +1806,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         }
 
                 phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
-                phi `shouldBe` Elab.InstApp (Elab.TBase (BaseTy "Int"))
+                phi `shouldBe` Elab.InstElim
 
             it "translates non-root graft-raise-weaken and preserves expected instantiated type" $ do
                 let root = NodeId 0
@@ -2310,7 +2315,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 Left err -> expectationFailure ("Expected successful Phi translation, got: " ++ show err)
                                 Right _ -> pure ()
 
-            it "rejects OpGraft+OpWeaken on out-of-scheme target (no non-binder recovery)" $ do
+            it "rejects OpGraft on out-of-scheme target (no non-binder recovery)" $ do
                 let root = NodeId 100
                     body = NodeId 101
                     binderN = NodeId 1
@@ -2352,7 +2357,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew of
                     Left (Elab.PhiTranslatabilityError msgs) -> do
                         let rendered = unlines msgs
-                        rendered `shouldSatisfy` ("OpGraft+OpWeaken targets non-binder node" `isInfixOf`)
+                        rendered `shouldSatisfy` ("OpGraft targets non-binder node" `isInfixOf`)
                         rendered `shouldNotSatisfy` ("InstBot expects" `isInfixOf`)
                     Left err ->
                         expectationFailure ("Expected PhiTranslatabilityError, got " ++ show err)
