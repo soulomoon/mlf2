@@ -18,6 +18,7 @@ import MLF.Constraint.Types.Witness
 import MLF.Constraint.Presolution.Witness
     ( OmegaNormalizeEnv(..)
     , OmegaNormalizeError(..)
+    , assertNoStandaloneGrafts
     , coalesceRaiseMergeWithEnv
     , integratePhase2Ops
     , normalizeInstanceOpsFull
@@ -298,6 +299,45 @@ spec = do
                     ops0 = [OpGraft arg binder, OpMerge n2 n1, OpWeaken binder]
                 normalizeInstanceOpsFull env ops0
                     `shouldBe` Right [OpGraft arg binder, OpWeaken binder, OpMerge n2 n1]
+
+            it "leaves graft standalone when middle ops touch protected set (Omega handles via atBinderKeep)" $ do
+                -- Build a constraint where 'descendant' is in binder's binding-tree interior.
+                -- The coalescing cannot move the weaken backward past the OpRaise on the
+                -- descendant (condition 5), so the graft stays standalone. Omega handles
+                -- this via atBinderKeep (DEV-PHI-STANDALONE-GRAFT-EXTENSION).
+                let root = NodeId 0
+                    binder = NodeId 1
+                    descendant = NodeId 2
+                    arg = NodeId 3
+                    c = rootedConstraint emptyConstraint
+                        { cNodes = nodeMapFromList
+                            [ (getNodeId root, TyForall root binder)
+                            , (getNodeId binder, TyForall binder descendant)
+                            , (getNodeId descendant, TyVar { tnId = descendant, tnBound = Nothing })
+                            , (getNodeId arg, TyVar { tnId = arg, tnBound = Nothing })
+                            ]
+                        , cBindParents = bindParentsFromPairs
+                            [ (binder, root, BindFlex)
+                            , (descendant, binder, BindFlex)
+                            , (arg, root, BindFlex)
+                            ]
+                        }
+                    env = mkNormalizeEnv c root
+                            (IntSet.fromList [getNodeId binder, getNodeId descendant, getNodeId arg])
+                    ops0 = [OpGraft arg binder, OpRaise descendant, OpWeaken binder]
+                -- Graft stays standalone; raise and weaken follow in descendant-first order
+                normalizeInstanceOpsFull env ops0
+                    `shouldBe` Right [OpGraft arg binder, OpRaise descendant, OpWeaken binder]
+
+            it "rejects standalone graft with no matching weaken" $ do
+                let root = NodeId 0
+                    binder = NodeId 1
+                    arg = NodeId 2
+                    c = mkNormalizeConstraint
+                    env = mkNormalizeEnv c root (IntSet.fromList [getNodeId binder])
+                    ops = [OpGraft arg binder]
+                assertNoStandaloneGrafts env ops
+                    `shouldBe` Left (StandaloneGraftRemaining binder)
 
             it "O15-TR-NODE-GRAFT R-GRAFT-NORM-03: normalizes graft-weaken pairs with canonical binder/arg alignment" $ do
                 let c = mkNormalizeConstraint

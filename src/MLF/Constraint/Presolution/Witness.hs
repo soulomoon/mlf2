@@ -17,6 +17,7 @@ module MLF.Constraint.Presolution.Witness (
     normalizeInstanceOpsFull,
     coalesceRaiseMergeWithEnv,
     reorderWeakenWithEnv,
+    assertNoStandaloneGrafts,
     validateNormalizedWitness,
     OmegaNormalizeEnv(..),
     OmegaNormalizeError(..)
@@ -42,7 +43,7 @@ import MLF.Constraint.Types.Witness (Expansion(..), ExpansionF(..), ForallSpec(.
 import MLF.Constraint.Presolution.Base (PresolutionM, PresolutionError(..), instantiationBindersM)
 import MLF.Constraint.Presolution.Ops (getCanonicalNode, lookupVarBound)
 import MLF.Constraint.Presolution.WitnessValidation (OmegaNormalizeEnv(..), OmegaNormalizeError(..), validateNormalizedWitness)
-import MLF.Constraint.Presolution.WitnessCanon (normalizeInstanceOpsFull, coalesceRaiseMergeWithEnv, reorderWeakenWithEnv)
+import MLF.Constraint.Presolution.WitnessCanon (normalizeInstanceOpsFull, coalesceRaiseMergeWithEnv, reorderWeakenWithEnv, assertNoStandaloneGrafts)
 import MLF.Util.RecursionSchemes (cataM)
 
 binderArgsFromExpansion :: GenNodeId -> TyNode -> Expansion -> PresolutionM [(NodeId, NodeId)]

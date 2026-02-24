@@ -52,6 +52,7 @@ data OmegaNormalizeError
     | AmbiguousGraftWeaken NodeId [NodeId]
     | DeterministicGraftWeakenSynthesisFailed NodeId [NodeId]
     | HintedOperandNotLiveTyVar InstanceOp NodeId NodeId
+    | StandaloneGraftRemaining NodeId
     deriving (Eq, Show)
 
 compareNodesByOrderKeyM :: OmegaNormalizeEnv -> NodeId -> NodeId -> Either OmegaNormalizeError Ordering

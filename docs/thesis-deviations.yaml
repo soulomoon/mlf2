@@ -115,16 +115,26 @@ deviations:
     description: >
       The implementation supports translating standalone OpGraft operations
       (without an immediately paired OpWeaken) as an explicit in-binder bottom
-      update. The thesis only defines the canonical paired graft/weaken shape.
+      update via atBinderKeep. The thesis only defines the canonical paired
+      graft/weaken shape. Standalone grafts arise when normalization
+      (reorderWeakenWithEnv) separates graft+weaken pairs by pushing the weaken
+      after descendant ops (condition 5), and coalescing cannot re-fuse them
+      because the intervening ops touch the binder's protected set.
     impact: semantic-minor
     rationale: >
-      This extension is load-bearing for multi-step normalized witnesses where
-      graft and weaken are separated by other legal operations but must still be
-      replayed into valid xMLF instantiations.
+      This extension is load-bearing: Omega's type-state evolution requires the
+      graft (InstInside) to be applied before descendant ops execute, so
+      reordering descendant ops before the graft produces incorrect
+      instantiations (proven by TCArgumentMismatch failures). The standalone
+      handler with atBinderKeep preserves the correct type-state ordering.
     code_paths:
       - src/MLF/Elab/Phi/Omega.hs
     test_evidence:
       - matcher: "rejects OpGraft on out-of-scheme target (no InstBot/InstApp fallback)"
         file: test/ElaborationSpec.hs
+      - matcher: "leaves graft standalone when middle ops touch protected set"
+        file: test/Presolution/WitnessSpec.hs
+      - matcher: "rejects standalone graft with no matching weaken"
+        file: test/Presolution/WitnessSpec.hs
     status: implementation-choice
 

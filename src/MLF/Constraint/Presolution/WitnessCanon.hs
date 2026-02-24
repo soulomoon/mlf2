@@ -9,7 +9,8 @@ instance operation witnesses, enforcing the conditions from the MLF thesis.
 module MLF.Constraint.Presolution.WitnessCanon (
     normalizeInstanceOpsFull,
     coalesceRaiseMergeWithEnv,
-    reorderWeakenWithEnv
+    reorderWeakenWithEnv,
+    assertNoStandaloneGrafts
 ) where
 
 import Data.Functor.Foldable (ListF(..), ana, cata)
@@ -264,11 +265,7 @@ coalesceDelayedGraftWeakenWithEnv env = go
         case protectedSetFor binder of
             Nothing -> Nothing
             Just protected ->
-                let (prefix, suffix) = break isMatchingWeaken ops
-                    isMatchingWeaken op =
-                        case op of
-                            OpWeaken n -> canon n == canon binder
-                            _ -> False
+                let (prefix, suffix) = break (\case OpWeaken n -> canon n == canon binder; _ -> False) ops
                 in case suffix of
                     (OpWeaken _ : rest)
                         | all (not . touchesProtected protected) prefix -> Just (prefix, rest)
@@ -288,6 +285,19 @@ coalesceDelayedGraftWeakenWithEnv env = go
             _ -> do
                 suffix <- go rest
                 pure (op : suffix)
+
+assertNoStandaloneGrafts :: OmegaNormalizeEnv -> [InstanceOp] -> Either OmegaNormalizeError ()
+assertNoStandaloneGrafts env = go
+  where
+    canon = canonical env
+    rootC = canon (oneRoot env)
+    go [] = Right ()
+    go (OpGraft _ bv : OpWeaken bv' : rest)
+        | canon bv == canon bv' = go rest
+    go (OpGraft _ bv : rest)
+        | canon bv == rootC = go rest  -- root grafts don't need weakens
+    go (OpGraft _ bv : _) = Left (StandaloneGraftRemaining (canon bv))
+    go (_ : rest) = go rest
 
 -- | Normalize Ω by enforcing `papers/these-finale-english.txt` conditions
 -- (see `papers/xmlf.txt` conditions (1)–(5)) only.

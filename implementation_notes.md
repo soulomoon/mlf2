@@ -1,5 +1,15 @@
 # Implementation Notes
 
+### 2026-02-24 DEV-PHI-STANDALONE-GRAFT-EXTENSION investigation (deviation retained)
+
+- Investigated eliminating DEV-PHI-STANDALONE-GRAFT-EXTENSION by reversing coalescing direction in `coalesceDelayedGraftWeakenWithEnv` (move graft forward instead of weaken backward).
+- Finding: moving descendant ops before the graft changes Omega's type-state evolution — the graft applies `InstInside(InstBot argTy)` which descendant ops depend on. Reordering produces incorrect instantiations (proven by `TCArgumentMismatch` failures on `\y. let id = (\x. x) in id y` and other baselines).
+- Conclusion: the standalone graft handler with `atBinderKeep` is semantically load-bearing. The deviation cannot be eliminated without redesigning Omega's incremental type-state translation.
+- Added `StandaloneGraftRemaining` error constructor to `WitnessValidation.hs` and `assertNoStandaloneGrafts` validation function to `WitnessCanon.hs` (exported for targeted testing).
+- Added characterization tests: "leaves graft standalone when middle ops touch protected set" and "rejects standalone graft with no matching weaken" in `WitnessSpec.hs`.
+- Updated deviation description in `thesis-deviations.yaml` with root-cause analysis and additional test evidence matchers.
+- Verification: 785 examples, 0 failures; conformance gate green; claims checker green.
+
 ### 2026-02-24 Eliminate DEV-PHI-WITNESS-WEAKEN-SUPPRESSION (thesis-exact witness emission)
 
 - Witness emission now always emits `OpWeaken` for unbounded binders (thesis-exact Def. 15.3.4): removed `suppressWeaken` and `argIsGenBound` guards from `classify` in `Witness.hs`, simplified `witnessAlg` stepper signature (removed `Bool` parameter and suffix flag computation), deleted `argIsGenBound` helper.
