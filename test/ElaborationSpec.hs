@@ -26,6 +26,7 @@ import MLF.Constraint.Types.Graph
     , NodeId(..)
     , NodeRef(..)
     , TyNode(..)
+    , UnifyEdge(..)
     , fromListGen
     , genRef
     , getNodeId
@@ -615,6 +616,51 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     show err `shouldSatisfy` isInfixOf "alias bounds survived"
                 Right _ ->
                     expectationFailure "Expected alias bounds to be rejected"
+
+        it "originalConstraint preserves solved-away binder after unification" $ do
+            -- Construct ∀α. α → α with a unify edge α = Int.
+            -- After solving, α is merged into Int in the union-find,
+            -- but originalConstraint should still have the TyVar for α.
+            let alpha = NodeId 1
+                intNode = NodeId 2
+                arrow = NodeId 3
+                forallNode = NodeId 4
+                c =
+                    rootedConstraint emptyConstraint
+                        { cNodes = nodeMapFromList
+                                [ (getNodeId alpha, TyVar { tnId = alpha, tnBound = Nothing })
+                                , (getNodeId intNode, TyBase intNode (BaseTy "Int"))
+                                , (getNodeId arrow, TyArrow arrow alpha alpha)
+                                , (getNodeId forallNode, TyForall forallNode arrow)
+                                ]
+                        , cBindParents =
+                            bindParentsFromPairs
+                                [ (arrow, forallNode, BindFlex)
+                                , (alpha, forallNode, BindFlex)
+                                , (intNode, forallNode, BindFlex)
+                                ]
+                        , cUnifyEdges = [UnifyEdge alpha intNode]
+                        }
+
+            solveOut <- requireRight (solveUnifyWithSnapshot defaultTraceConfig c)
+            solved <- requireRight (Solved.fromSolveOutput solveOut)
+
+            -- After solving, canonical(alpha) should be intNode
+            Solved.canonical solved alpha `shouldBe` intNode
+
+            -- originalConstraint should still have the TyVar for alpha
+            let origC = Solved.originalConstraint solved
+            case lookupNodeIn (cNodes origC) alpha of
+                Just TyVar{} -> pure ()
+                other -> expectationFailure $
+                    "Expected TyVar for alpha in originalConstraint, got: " ++ show other
+
+            -- solvedConstraint (canonical) should map alpha to Int
+            let solvedC = Solved.solvedConstraint solved
+            case lookupNodeIn (cNodes solvedC) (Solved.canonical solved alpha) of
+                Just (TyBase _ (BaseTy "Int")) -> pure ()
+                other -> expectationFailure $
+                    "Expected TyBase Int for canonical(alpha) in solvedConstraint, got: " ++ show other
 
     describe "xMLF types (instance bounds)" $ do
         it "pretty prints unbounded forall" $ do
