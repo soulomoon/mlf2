@@ -244,33 +244,33 @@ solvedConstraint (Solved EquivBackend { ebCanonicalConstraint = c }) = c
 
 -- | Look up a type node, canonicalizing the id first.
 lookupNode :: Solved -> NodeId -> Maybe TyNode
-lookupNode s@(Solved EquivBackend { ebCanonicalConstraint = c }) nid =
+lookupNode s@(Solved EquivBackend { ebOriginalConstraint = c }) nid =
     NA.lookupNode c (canonical s nid)
 
 -- | All type nodes in the solved constraint.
 allNodes :: Solved -> [TyNode]
-allNodes (Solved EquivBackend { ebCanonicalConstraint = c }) = NA.allNodes c
+allNodes (Solved EquivBackend { ebOriginalConstraint = c }) = NA.allNodes c
 
 -- | Look up the binding parent of a node reference.
 lookupBindParent :: Solved -> NodeRef -> Maybe (NodeRef, BindFlag)
-lookupBindParent (Solved EquivBackend { ebCanonicalConstraint = c }) ref =
+lookupBindParent (Solved EquivBackend { ebOriginalConstraint = c }) ref =
     NA.lookupBindParent c ref
 
 -- | The full bind-parents map.
 bindParents :: Solved -> BindParents
-bindParents (Solved EquivBackend { ebCanonicalConstraint = c }) = cBindParents c
+bindParents (Solved EquivBackend { ebOriginalConstraint = c }) = cBindParents c
 
 -- | All instantiation edges.
 instEdges :: Solved -> [InstEdge]
-instEdges (Solved EquivBackend { ebCanonicalConstraint = c }) = cInstEdges c
+instEdges (Solved EquivBackend { ebOriginalConstraint = c }) = cInstEdges c
 
 -- | The gen-node map.
 genNodes :: Solved -> GenNodeMap GenNode
-genNodes (Solved EquivBackend { ebCanonicalConstraint = c }) = cGenNodes c
+genNodes (Solved EquivBackend { ebOriginalConstraint = c }) = cGenNodes c
 
 -- | Look up the instance bound of a variable, canonicalizing the id first.
 lookupVarBound :: Solved -> NodeId -> Maybe NodeId
-lookupVarBound s@(Solved EquivBackend { ebCanonicalConstraint = c }) nid =
+lookupVarBound s@(Solved EquivBackend { ebOriginalConstraint = c }) nid =
     NA.lookupVarBound c (canonical s nid)
 
 -- -----------------------------------------------------------------
