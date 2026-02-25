@@ -12,7 +12,7 @@ import MLF.Constraint.Solve
     , SolveSnapshot(..)
     , solveUnifyWithSnapshot
     )
-import MLF.Constraint.Solved hiding (mkTestSolved)
+import MLF.Constraint.Solved
 import MLF.Frontend.Syntax
     ( Lit(..)
     , SrcTy(..)
@@ -58,8 +58,8 @@ import SpecUtil
 --   Bind parents: node 1 bound flex under node 2
 --   Inst edge: EdgeId 0, from 2 to 3
 --   Gen node: GenNodeId 0, scheme root [2]
-mkTestSolved :: Solved
-mkTestSolved =
+testSolved :: Solved
+testSolved =
     let var0  = TyVar { tnId = NodeId 0, tnBound = Nothing }
         base1 = TyBase (NodeId 1) (BaseTy "Int")
         arrow2 = TyArrow (NodeId 2) (NodeId 1) (NodeId 3)
@@ -78,7 +78,7 @@ mkTestSolved =
             , cGenNodes = fromListGen [(GenNodeId 0, gn)]
             }
         uf = IntMap.fromList [(0, NodeId 1)]
-    in mkSolved constraint uf
+    in mkTestSolved constraint uf
 
 snapshotLegacyAndEquiv :: Either String (Solved, Solved, [NodeId])
 snapshotLegacyAndEquiv =
@@ -115,7 +115,7 @@ snapshotLegacyAndEquiv =
 
 spec :: Spec
 spec = describe "MLF.Constraint.Solved" $ do
-    let s = mkTestSolved
+    let s = testSolved
 
     describe "Backend equivalence" $ do
         let idLam = ELam "x" (EVar "x")
@@ -228,8 +228,8 @@ spec = describe "MLF.Constraint.Solved" $ do
             cInstEdges c `shouldBe` [InstEdge (EdgeId 0) (NodeId 2) (NodeId 3)]
 
     describe "Degraded stubs (Phase 1)" $ do
-        it "classMembers returns singleton with canonical id" $ do
-            classMembers s (NodeId 0) `shouldBe` [NodeId 1]
+        it "classMembers returns equivalence class members" $ do
+            classMembers s (NodeId 0) `shouldMatchList` [NodeId 0, NodeId 1]
             classMembers s (NodeId 3) `shouldBe` [NodeId 3]
 
         it "wasOriginalBinder always returns False" $ do
@@ -237,9 +237,13 @@ spec = describe "MLF.Constraint.Solved" $ do
             wasOriginalBinder s (NodeId 1) `shouldBe` False
             wasOriginalBinder s (NodeId 2) `shouldBe` False
 
-        it "originalNode delegates to lookupNode" $ do
-            originalNode s (NodeId 0) `shouldBe` lookupNode s (NodeId 0)
-            originalNode s (NodeId 2) `shouldBe` lookupNode s (NodeId 2)
+        it "originalNode returns pre-merge node data" $ do
+            -- Node 0 is a TyVar that was merged into node 1 (TyBase "Int").
+            -- originalNode returns the pre-merge TyVar, not the canonical TyBase.
+            originalNode s (NodeId 0)
+                `shouldBe` Just (TyVar { tnId = NodeId 0, tnBound = Nothing })
+            originalNode s (NodeId 2)
+                `shouldBe` Just (TyArrow (NodeId 2) (NodeId 1) (NodeId 3))
             originalNode s (NodeId 99) `shouldBe` Nothing
 
         it "originalBindParent delegates to lookupBindParent" $ do
@@ -254,7 +258,7 @@ spec = describe "MLF.Constraint.Solved" $ do
                 base11 = TyBase (NodeId 11) (BaseTy "Int")
                 nodes = nodeMapFromList [(10, boundVar), (11, base11)]
                 c = emptyConstraint { cNodes = nodes }
-                s' = mkSolved c IntMap.empty
+                s' = mkTestSolved c IntMap.empty
             lookupVarBound s' (NodeId 10) `shouldBe` Just (NodeId 11)
 
     describe "fromPreRewriteState" $ do
