@@ -29,8 +29,7 @@ import MLF.Reify.TypeOps
 
 import MLF.Frontend.Syntax (VarName)
 import MLF.Constraint.Types
-import MLF.Constraint.Solve (SolveResult)
-import MLF.Constraint.Solved (Solved, fromSolveResult)
+import MLF.Constraint.Solved (Solved)
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Elab.Types
 import MLF.Elab.Generalize (GaBindParents(..))
@@ -61,7 +60,7 @@ import MLF.Frontend.ConstraintGen.Types (AnnExpr(..), AnnExprF(..))
 
 type GeneralizeAtWith =
     Maybe GaBindParents
-    -> SolveResult
+    -> Solved
     -> NodeRef
     -> NodeId
     -> Either ElabError (ElabScheme, IntMap.IntMap String)
@@ -72,9 +71,9 @@ data ElabConfig = ElabConfig
     }
 
 data ElabEnv = ElabEnv
-    { eeResPhi :: SolveResult
-    , eeResReify :: SolveResult
-    , eeResGen :: SolveResult
+    { eeResPhi :: Solved
+    , eeResReify :: Solved
+    , eeResGen :: Solved
     , eeGaParents :: GaBindParents
     , eeEdgeWitnesses :: IntMap.IntMap EdgeWitness
     , eeEdgeTraces :: IntMap.IntMap EdgeTrace
@@ -104,16 +103,15 @@ schemeBodyTarget res target =
 elaborate
     :: TraceConfig
     -> GeneralizeAtWith
-    -> SolveResult
-    -> SolveResult
+    -> Solved
+    -> Solved
     -> IntMap.IntMap EdgeWitness
     -> IntMap.IntMap EdgeTrace
     -> IntMap.IntMap Expansion
     -> AnnExpr
     -> Either ElabError ElabTerm
 elaborate traceCfg generalizeAtWith resPhi resGen edgeWitnesses edgeTraces edgeExpansions ann =
-    let resGenS = fromSolveResult resGen
-        constraint = Solved.originalConstraint resGenS
+    let constraint = Solved.originalConstraint resGen
         keys = map (getNodeId . fst) (toListNode (cNodes constraint))
         baseToSolved =
             IntMap.fromList
@@ -136,9 +134,9 @@ elaborate traceCfg generalizeAtWith resPhi resGen edgeWitnesses edgeTraces edgeE
 elaborateWithGen
     :: TraceConfig
     -> GeneralizeAtWith
-    -> SolveResult
-    -> SolveResult
-    -> SolveResult
+    -> Solved
+    -> Solved
+    -> Solved
     -> GaBindParents
     -> IntMap.IntMap EdgeWitness
     -> IntMap.IntMap EdgeTrace
@@ -151,9 +149,9 @@ elaborateWithGen traceCfg generalizeAtWith resPhi resReify resGen gaParents edge
 elaborateWithScope
     :: TraceConfig
     -> GeneralizeAtWith
-    -> SolveResult
-    -> SolveResult
-    -> SolveResult
+    -> Solved
+    -> Solved
+    -> Solved
     -> GaBindParents
     -> IntMap.IntMap EdgeWitness
     -> IntMap.IntMap EdgeTrace
@@ -185,8 +183,8 @@ elaborateWithEnv
     -> AnnExpr
     -> Either ElabError ElabTerm
 elaborateWithEnv config elabEnv ann = do
-    namedSetPhi <- namedNodes (Solved.toSolveResult resPhi)
-    namedSetReify <- namedNodes (Solved.toSolveResult resReify)
+    namedSetPhi <- namedNodes (resPhi)
+    namedSetReify <- namedNodes (resReify)
     let ElabOut { elabTerm = runElab } = para (elabAlg namedSetPhi namedSetReify) ann
     runElab Map.empty
   where
@@ -194,9 +192,9 @@ elaborateWithEnv config elabEnv ann = do
         { ecTraceConfig = traceCfg
         , ecGeneralizeAtWith = generalizeAtWithRaw
         } = config
-    resPhi = fromSolveResult (eeResPhi elabEnv)
-    resReify = fromSolveResult (eeResReify elabEnv)
-    resGen = fromSolveResult (eeResGen elabEnv)
+    resPhi = eeResPhi elabEnv
+    resReify = eeResReify elabEnv
+    resGen = eeResGen elabEnv
     gaParents = eeGaParents elabEnv
     edgeWitnesses = eeEdgeWitnesses elabEnv
     edgeTraces = eeEdgeTraces elabEnv
@@ -226,7 +224,7 @@ elaborateWithEnv config elabEnv ann = do
         _ -> False
 
     generalizeAtWith mbGa res scopeRoot targetNode =
-        let resSR = Solved.toSolveResult res
+        let resSR = res
         in case generalizeAtWithRaw mbGa resSR scopeRoot targetNode of
             Right out -> Right out
             Left err | generalizeNeedsFallback err ->
@@ -354,7 +352,7 @@ elaborateWithEnv config elabEnv ann = do
 
     reifyNodeTypePreferringBound :: NodeId -> Either ElabError ElabType
     reifyNodeTypePreferringBound nodeId = do
-        namedSet <- namedNodes (Solved.toSolveResult resReify)
+        namedSet <- namedNodes (resReify)
         let nodeC = canonical nodeId
         case Solved.lookupVarBound resReify nodeC of
             Just bnd -> reifyTypeForParam namedSet resReify bnd
@@ -540,7 +538,7 @@ elaborateWithEnv config elabEnv ann = do
                                     si <- Map.lookup v env
                                     let paramTy' =
                                             if shouldInlineParamTy
-                                                then inlineBoundVarsType (Solved.toSolveResult resGen) paramTy
+                                                then inlineBoundVarsType (resGen) paramTy
                                                 else paramTy
                                     args <- inferInstAppArgs (siScheme si) paramTy'
                                     pure (instSeqApps args)
@@ -550,7 +548,7 @@ elaborateWithEnv config elabEnv ann = do
                                         Right (TArrow paramTy _) -> do
                                             let paramTy' =
                                                     if shouldInlineParamTy
-                                                        then inlineBoundVarsType (Solved.toSolveResult resGen) paramTy
+                                                        then inlineBoundVarsType (resGen) paramTy
                                                         else paramTy
                                             args <- inferInstAppArgs (siScheme si) paramTy'
                                             pure (instSeqApps args)
@@ -1029,12 +1027,12 @@ elaborateWithEnv config elabEnv ann = do
                                     reifyArg arg =
                                         let argC = canonical arg
                                         in case Solved.lookupVarBound resReify argC of
-                                            Just bnd -> reifyBoundWithNames (Solved.toSolveResult resReify) substForArgs bnd
-                                            Nothing -> reifyTypeWithNamedSetNoFallback (Solved.toSolveResult resReify) substForArgs namedSetReify argC
+                                            Just bnd -> reifyBoundWithNames (resReify) substForArgs bnd
+                                            Nothing -> reifyTypeWithNamedSetNoFallback (resReify) substForArgs namedSetReify argC
                                 argTys <- case targetArgs of
                                     Just inferred -> pure inferred
                                     Nothing -> mapM reifyArg argNodes'
-                                let argTys' = map (inlineBoundVarsType (Solved.toSolveResult resReify)) argTys
+                                let argTys' = map (inlineBoundVarsType (resReify)) argTys
                                 case debugGeneralize
                                     ("reifyInst fallback edge=" ++ show eid
                                         ++ " argTys=" ++ show argTys
@@ -1052,8 +1050,8 @@ elaborateWithEnv config elabEnv ann = do
     reifyTargetType namedSetReify ew si =
         let subst = siSubst si
         in case Solved.lookupVarBound resReify (ewRight ew) of
-            Just bnd -> reifyTypeWithNamedSetNoFallback (Solved.toSolveResult resReify) subst namedSetReify bnd
-            Nothing -> reifyTypeWithNamedSetNoFallback (Solved.toSolveResult resReify) subst namedSetReify (ewRight ew)
+            Just bnd -> reifyTypeWithNamedSetNoFallback (resReify) subst namedSetReify bnd
+            Nothing -> reifyTypeWithNamedSetNoFallback (resReify) subst namedSetReify (ewRight ew)
 
     inferInstAppArgs :: ElabScheme -> ElabType -> Maybe [ElabType]
     inferInstAppArgs scheme targetTy =
@@ -1151,9 +1149,9 @@ instSeqApps tys = case map InstApp tys of
 
 reifyTypeForParam :: IntSet.IntSet -> Solved -> NodeId -> Either ElabError ElabType
 reifyTypeForParam namedSet res nid = do
-    ty <- reifyTypeWithNamedSetNoFallback (Solved.toSolveResult res) IntMap.empty namedSet nid
+    ty <- reifyTypeWithNamedSetNoFallback (res) IntMap.empty namedSet nid
     let ty' = inlineBaseBounds res ty
-    pure (inlineBoundVarsType (Solved.toSolveResult res) ty')
+    pure (inlineBoundVarsType (res) ty')
 
 inlineBaseBounds :: Solved -> ElabType -> ElabType
 inlineBaseBounds res =

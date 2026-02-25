@@ -63,7 +63,7 @@ import MLF.Util.Trace (TraceConfig, traceBindingM)
 import MLF.Constraint.Presolution.Plan (GeneralizePlan, ReifyPlan)
 import MLF.Constraint.Presolution.Plan.Context (GaBindParents)
 import MLF.Constraint.Presolution.WitnessValidation (OmegaNormalizeError)
-import MLF.Constraint.Solve (SolveResult)
+import MLF.Constraint.Solved (Solved)
 import MLF.Util.ElabError (ElabError)
 
 -- | Result of the presolution phase.
@@ -78,7 +78,7 @@ data PresolutionResult = PresolutionResult
 
 newtype PresolutionPlanBuilder = PresolutionPlanBuilder
     { ppbBuildGeneralizePlans
-        :: SolveResult
+        :: Solved
         -> Maybe GaBindParents
         -> NodeRef
         -> NodeId

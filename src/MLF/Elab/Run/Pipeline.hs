@@ -86,18 +86,20 @@ runPipelineElabWith traceCfg genConstraints expr = do
         generalizeAtWith = generalizeAtWithBuilder planBuilder
     solveOut <- fromSolveError (solveUnifyWithSnapshot traceCfg (prConstraint pres))
     solvedView <- fromSolveError (Solved.fromSolveOutput solveOut)
-    let solved = soResult solveOut
-        setSolvedConstraint res c' =
-            let solvedRes = Solved.fromSolveResult res
-                cCanon = rewriteConstraintWithUF (Solved.unionFind solvedRes) c'
-            in Solved.toSolveResult (Solved.rebuildWithConstraint solvedRes cCanon)
+    let setSolvedConstraint res c' =
+            let cCanon = rewriteConstraintWithUF (Solved.canonicalMap res) c'
+            in Solved.rebuildWithConstraint res cCanon
         solvedClean =
-            setSolvedConstraint solved
+            setSolvedConstraint solvedView
                 (pruneBindParentsConstraint (Solved.solvedConstraint solvedView))
-        solvedCleanView = Solved.fromSolveResult solvedClean
-    case validateSolvedGraphStrict solvedClean of
+        solvedCleanView = solvedClean
+        solvedCleanSR = SolveResult
+            { srConstraint = Solved.solvedConstraint solvedClean
+            , srUnionFind = Solved.canonicalMap solvedClean
+            }
+    case validateSolvedGraphStrict solvedCleanSR of
         [] -> do
-            let canonNode = makeCanonicalizer (Solved.unionFind solvedCleanView) (prRedirects pres)
+            let canonNode = makeCanonicalizer (Solved.canonicalMap solvedCleanView) (prRedirects pres)
                 adoptNode = canonicalizeNode canonNode
                 baseNodes = cNodes c1
                 edgeTracesForCopy =
@@ -118,7 +120,7 @@ runPipelineElabWith traceCfg genConstraints expr = do
                 (constraintForGen, bindParentsGa) =
                     constraintForGeneralization traceCfg solvedClean (prRedirects pres) instCopyNodes instCopyMapFull c1 ann
             let solvedForGen = setSolvedConstraint solvedClean constraintForGen
-                solvedForGenView = Solved.fromSolveResult solvedForGen
+                solvedForGenView = solvedForGen
             let ann' = applyRedirectsToAnn (prRedirects pres) ann
             let annCanon = canonicalizeAnn (canonicalizeNode canonNode) ann'
             let edgeWitnesses = IntMap.map (canonicalizeWitness canonNode) (prEdgeWitnesses pres)

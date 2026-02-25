@@ -11,7 +11,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
 import qualified MLF.Constraint.VarStore as VarStore
-import MLF.Constraint.Solve (SolveResult)
+import MLF.Constraint.Solved (Solved)
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types.Graph (TyNode(..), cNodes, fromListNode, toListNode)
 import MLF.Reify.Core (namedNodes, reifyTypeWithNamedSetNoFallback)
@@ -36,16 +36,16 @@ mapBound f bound = case bound of
         let mb' = fmap (mapBound f) mb
         in TForall v mb' (f body)
 
-inlineBoundVarsType :: SolveResult -> ElabType -> ElabType
+inlineBoundVarsType :: Solved -> ElabType -> ElabType
 inlineBoundVarsType = inlineBoundVarsTypeWith False
 
-inlineBoundVarsTypeForBound :: SolveResult -> ElabType -> ElabType
+inlineBoundVarsTypeForBound :: Solved -> ElabType -> ElabType
 inlineBoundVarsTypeForBound = inlineBoundVarsTypeWith True
 
 -- See Note [Scope-aware bound/alias inlining] in
 -- docs/notes/2026-01-27-elab-changes.md.
-inlineBoundVarsTypeWith :: Bool -> SolveResult -> ElabType -> ElabType
-inlineBoundVarsTypeWith unboundToBottom res =
+inlineBoundVarsTypeWith :: Bool -> Solved -> ElabType -> ElabType
+inlineBoundVarsTypeWith unboundToBottom solved =
     inlineAliasBoundsWithBySeen
         unboundToBottom
         canonical
@@ -53,10 +53,9 @@ inlineBoundVarsTypeWith unboundToBottom res =
         (VarStore.lookupVarBound constraint)
         reifyBoundWithSeen
   where
-    solved = Solved.fromSolveResult res
     constraint = Solved.solvedConstraint solved
     canonical = Solved.canonical solved
-    namedSet = either (const IntSet.empty) id (namedNodes res)
+    namedSet = either (const IntSet.empty) id (namedNodes solved)
     nodesVarOnly =
         fromListNode
             [ (nid, node)
@@ -68,7 +67,7 @@ inlineBoundVarsTypeWith unboundToBottom res =
         _ -> False
     reifyBoundWithSeen seen bnd = do
         let bndRoot = resolveBoundBodyConstraint canonical constraint seen bnd
-        t0 <- reifyTypeWithNamedSetNoFallback res IntMap.empty namedSet bndRoot
+        t0 <- reifyTypeWithNamedSetNoFallback solved IntMap.empty namedSet bndRoot
         pure (inlineBaseBoundsType constraint canonical t0)
 
 simplifyAnnotationType :: ElabType -> ElabType

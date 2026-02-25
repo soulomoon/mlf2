@@ -33,7 +33,7 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
 import qualified MLF.Binding.Tree as Binding
-import MLF.Constraint.Solve (SolveResult)
+import MLF.Constraint.Solved (Solved)
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types hiding (lookupNode)
 import qualified MLF.Constraint.NodeAccess as NodeAccess
@@ -86,7 +86,7 @@ lookupNodeInMap nodes nid = IntMap.lookup (getNodeId nid) nodes
 
 data PresolutionEnv = PresolutionEnv
     { peConstraint :: Constraint
-    , peSolveResult :: SolveResult
+    , peSolved :: Solved
     , peCanonical :: NodeId -> NodeId
     , peBindParents :: BindParents
     , peBindParentsGa :: Maybe GaBindParents
@@ -119,7 +119,7 @@ data ReifyPlan = ReifyPlan
 
 planGeneralizeAt :: PresolutionEnv -> Either ElabError GeneralizePlan
 planGeneralizeAt PresolutionEnv
-    { peSolveResult = res
+    { peSolved = res
     , peBindParentsGa = mbBindParentsGa
     , peScopeRoot = scopeRoot
     , peTargetNode = targetNode
@@ -736,19 +736,18 @@ planReify _ plan = do
 
 buildGeneralizePlans
     :: TraceConfig
-    -> SolveResult
+    -> Solved
     -> Maybe GaBindParents
     -> NodeRef
     -> NodeId
     -> Either ElabError (GeneralizePlan, ReifyPlan)
-buildGeneralizePlans traceCfg res mbBindParentsGa scopeRoot targetNode = do
-    let solved = Solved.fromSolveResult res
-        constraint = Solved.solvedConstraint solved
+buildGeneralizePlans traceCfg solved mbBindParentsGa scopeRoot targetNode = do
+    let constraint = Solved.solvedConstraint solved
         canonical = Solved.canonical solved
         presEnv =
             PresolutionEnv
                 { peConstraint = constraint
-                , peSolveResult = res
+                , peSolved = solved
                 , peCanonical = canonical
                 , peBindParents = cBindParents constraint
                 , peBindParentsGa = mbBindParentsGa
@@ -760,10 +759,9 @@ buildGeneralizePlans traceCfg res mbBindParentsGa scopeRoot targetNode = do
     reifyPlan <- planReify presEnv genPlan
     pure (genPlan, reifyPlan)
 
-mkGeneralizeEnv :: TraceConfig -> Maybe GaBindParents -> SolveResult -> GeneralizeEnv
-mkGeneralizeEnv traceCfg mbBindParentsGa res =
-    let solved = Solved.fromSolveResult res
-        constraint = Solved.solvedConstraint solved
+mkGeneralizeEnv :: TraceConfig -> Maybe GaBindParents -> Solved -> GeneralizeEnv
+mkGeneralizeEnv traceCfg mbBindParentsGa solved =
+    let constraint = Solved.solvedConstraint solved
         nodes =
             IntMap.fromList
                 [ (getNodeId nid, node)
@@ -795,7 +793,7 @@ mkGeneralizeEnv traceCfg mbBindParentsGa res =
         , geIsTyForallKey = isTyForallKey
         , geIsBaseLikeKey = isBaseLikeKey
         , geBindParentsGa = mbBindParentsGa
-        , geRes = res
+        , geRes = solved
         , geDebugEnabled = tcGeneralize traceCfg
         }
 

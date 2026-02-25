@@ -9,7 +9,7 @@ import MLF.Constraint.Types.Graph
 import MLF.Constraint.Solve
     ( SolveError(..)
     , SolveOutput(..)
-    , SolveResult
+    , SolveResult(..)
     , SolveSnapshot(..)
     , frWith
     , rewriteConstraintWithUF
@@ -17,17 +17,16 @@ import MLF.Constraint.Solve
     , solveUnifyWithSnapshot
     , validateSolvedGraphStrict
     )
-import qualified MLF.Constraint.Solved as Solved
 import SpecUtil (defaultTraceConfig, emptyConstraint, inferBindParents, lookupNodeMaybe, nodeMapFromList, nodeMapSize, rootedConstraint)
 
 resultConstraint :: SolveResult -> Constraint
-resultConstraint = Solved.originalConstraint . Solved.fromSolveResult
+resultConstraint = srConstraint
 
 resultUnionFind :: SolveResult -> IntMap.IntMap NodeId
-resultUnionFind = Solved.unionFind . Solved.fromSolveResult
+resultUnionFind = srUnionFind
 
 mkSolveResult :: Constraint -> IntMap.IntMap NodeId -> SolveResult
-mkSolveResult c uf = Solved.toSolveResult (Solved.mkTestSolved c uf)
+mkSolveResult c uf = SolveResult { srConstraint = c, srUnionFind = uf }
 
 spec :: Spec
 spec = describe "Phase 5 -- Solve" $ do

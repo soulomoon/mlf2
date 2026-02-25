@@ -19,7 +19,7 @@ import qualified Data.Set as Set
 
 import MLF.Constraint.Types
 import qualified MLF.Constraint.NodeAccess as NodeAccess
-import MLF.Constraint.Solve (SolveResult)
+import MLF.Constraint.Solved (Solved)
 import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.BindingUtil (bindingScopeFor)
@@ -98,7 +98,7 @@ data ReifyBindingEnv = ReifyBindingEnv
     , rbeNamedUnderGaSet :: IntSet.IntSet
     , rbeBinderSet :: IntSet.IntSet
     , rbeUniqueUnboundedName :: Maybe String
-    , rbeResForReify :: SolveResult
+    , rbeResForReify :: Solved
     , rbeBindParentsGa :: Maybe GaBindParentsInfo
     , rbeBindingScopeGen :: NodeId -> Maybe GenNodeId
     , rbeHasExplicitBound :: NodeId -> Bool

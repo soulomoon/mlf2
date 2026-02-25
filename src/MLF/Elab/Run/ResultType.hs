@@ -40,7 +40,7 @@ computeResultTypeFallback ctx annCanon ann = do
     let canonical = rtcCanonical ctx
         c1 = rtcBaseConstraint ctx
         solvedForGen = rtcSolvedForGen ctx
-        solvedForGenView = Solved.fromSolveResult solvedForGen
+        solvedForGenView = solvedForGen
 
     let schemeRootSet =
             let allGenNodes =

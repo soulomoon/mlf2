@@ -6,7 +6,7 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.List.NonEmpty as NE
 
 import MLF.Constraint.Types (Expansion, ExpansionF(..))
-import MLF.Constraint.Solve (SolveResult)
+import MLF.Constraint.Solved (Solved)
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Elab.Run.TypeOps (inlineBoundVarsTypeForBound)
 import MLF.Elab.Types (ElabError, Instantiation(..))
@@ -41,21 +41,20 @@ import MLF.Util.RecursionSchemes (cataM)
 --     of applications ⟨t⟩, assuming the elaboration context or a later pass
 --     refines this if explicit N is required.
 --     For now: ExpInstantiate [t] -> ⟨t⟩.
-expansionToInst :: SolveResult -> Expansion -> Either ElabError Instantiation
-expansionToInst res = cataM alg
+expansionToInst :: Solved -> Expansion -> Either ElabError Instantiation
+expansionToInst solved = cataM alg
   where
-    solved = Solved.fromSolveResult res
     constraint = Solved.solvedConstraint solved
     canonical = Solved.canonical solved
     resolveBaseBound = resolveBaseBoundForInstConstraint constraint canonical
     reifyArg arg =
         let argC = canonical arg
         in case resolveBaseBound argC of
-            Just baseC -> reifyTypeWithNamesNoFallback res IntMap.empty baseC
-            Nothing -> reifyTypeWithNamesNoFallback res IntMap.empty argC
+            Just baseC -> reifyTypeWithNamesNoFallback solved IntMap.empty baseC
+            Nothing -> reifyTypeWithNamesNoFallback solved IntMap.empty argC
     -- See Note [Instantiation arg sanitization] in
     -- docs/notes/2026-01-27-elab-changes.md.
-    sanitizeArg = inlineBoundVarsTypeForBound res
+    sanitizeArg = inlineBoundVarsTypeForBound solved
     alg layer = case layer of
         ExpIdentityF -> Right InstId
         ExpInstantiateF args -> do

@@ -11,7 +11,7 @@ import qualified MLF.Constraint.Canonicalize as Canonicalize
 import MLF.Constraint.Presolution
     ( PresolutionPlanBuilder(..)
     )
-import MLF.Constraint.Solve (SolveResult)
+import MLF.Constraint.Solved (Solved)
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types
     ( Constraint
@@ -84,7 +84,7 @@ policies are safe because (a) redirects merge structurally equivalent nodes
 sharing the same gen ancestor, and (b) the base-domain binding parents
 (which define ga′) are computed independently of the solved-domain quotient.
 -}
-constraintForGeneralization :: TraceConfig -> SolveResult -> IntMap.IntMap NodeId -> NodeKeySet -> IntMap.IntMap NodeId -> Constraint -> AnnExpr -> (Constraint, GaBindParents)
+constraintForGeneralization :: TraceConfig -> Solved -> IntMap.IntMap NodeId -> NodeKeySet -> IntMap.IntMap NodeId -> Constraint -> AnnExpr -> (Constraint, GaBindParents)
 constraintForGeneralization traceCfg solved redirects instCopyNodes instCopyMap base _ann =
     let env = buildGeneralizeEnv traceCfg solved redirects instCopyNodes instCopyMap base
         phase1 = restoreSchemeNodes env
@@ -95,16 +95,15 @@ constraintForGeneralization traceCfg solved redirects instCopyNodes instCopyMap 
 
 buildGeneralizeEnv
     :: TraceConfig
-    -> SolveResult
+    -> Solved
     -> IntMap.IntMap NodeId
     -> NodeKeySet
     -> IntMap.IntMap NodeId
     -> Constraint
     -> GeneralizeEnv
 buildGeneralizeEnv traceCfg solved redirects instCopyNodes instCopyMap base =
-    let solvedView = Solved.fromSolveResult solved
-        solvedConstraint = Solved.solvedConstraint solvedView
-        canonical = Solved.canonical solvedView
+    let solvedConstraint = Solved.solvedConstraint solved
+        canonical = Solved.canonical solved
         applyRedirectsToRef ref =
             case ref of
                 TypeRef nid -> TypeRef (chaseRedirects redirects nid)
@@ -131,14 +130,14 @@ buildGeneralizeEnv traceCfg solved redirects instCopyNodes instCopyMap base =
 generalizeAtWithBuilder
     :: PresolutionPlanBuilder
     -> Maybe GaBindParents
-    -> SolveResult
+    -> Solved
     -> NodeRef
     -> NodeId
     -> Either ElabError (ElabScheme, IntMap.IntMap String)
-generalizeAtWithBuilder planBuilder mbBindParentsGa res scopeRoot targetNode =
+generalizeAtWithBuilder planBuilder mbBindParentsGa solved scopeRoot targetNode =
     let PresolutionPlanBuilder buildPlans = planBuilder
         go mbGa res' scope target = do
             (genPlan, reifyPlan) <- buildPlans res' mbGa scope target
             let fallback scope' target' = fst <$> go mbGa res' scope' target'
             applyGeneralizePlan fallback genPlan reifyPlan
-    in go mbBindParentsGa res scopeRoot targetNode
+    in go mbBindParentsGa solved scopeRoot targetNode

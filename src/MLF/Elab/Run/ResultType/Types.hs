@@ -10,7 +10,7 @@ import MLF.Constraint.Presolution
     ( EdgeTrace(..)
     , PresolutionPlanBuilder(..)
     )
-import MLF.Constraint.Solve (SolveResult)
+import MLF.Constraint.Solved (Solved)
 import MLF.Constraint.Types.Witness (EdgeWitness(..), Expansion(..))
 import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Util.Trace (TraceConfig)
@@ -21,8 +21,8 @@ data ResultTypeContext = ResultTypeContext
     , rtcEdgeWitnesses :: IntMap.IntMap EdgeWitness
     , rtcEdgeTraces :: IntMap.IntMap EdgeTrace
     , rtcEdgeExpansions :: IntMap.IntMap Expansion
-    , rtcSolvedForGen :: SolveResult
-    , rtcSolvedClean :: SolveResult
+    , rtcSolvedForGen :: Solved
+    , rtcSolvedClean :: Solved
     , rtcBindParentsGa :: GaBindParents
     , rtcPlanBuilder :: PresolutionPlanBuilder
     , rtcBaseConstraint :: Constraint

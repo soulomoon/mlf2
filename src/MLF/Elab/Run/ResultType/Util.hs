@@ -13,7 +13,7 @@ import Data.Functor.Foldable (cata)
 import qualified Data.IntMap.Strict as IntMap
 
 import MLF.Constraint.Presolution (PresolutionPlanBuilder(..))
-import MLF.Constraint.Solve (SolveResult)
+import MLF.Constraint.Solved (Solved)
 import MLF.Constraint.Types.Graph
     ( NodeId(..)
     , NodeRef(..)
@@ -30,21 +30,21 @@ import MLF.Reify.Core (reifyType)
 generalizeWithPlan
     :: PresolutionPlanBuilder
     -> GaBindParents
-    -> SolveResult
+    -> Solved
     -> NodeRef
     -> NodeId
     -> Either ElabError (ElabScheme, IntMap.IntMap String)
-generalizeWithPlan planBuilder bindParentsGa res scopeRoot targetNode =
+generalizeWithPlan planBuilder bindParentsGa solved scopeRoot targetNode =
     let generalizeNeedsFallback err = case err of
             SchemeFreeVars{} -> True
             _ -> False
         fallbackToReify = do
-            ty <- reifyType res targetNode
+            ty <- reifyType solved targetNode
             pure (schemeFromType ty, IntMap.empty)
     in case generalizeAtWithBuilder
         planBuilder
         (Just bindParentsGa)
-        res
+        solved
         scopeRoot
         targetNode of
         Right out -> Right out
@@ -53,7 +53,7 @@ generalizeWithPlan planBuilder bindParentsGa res scopeRoot targetNode =
                 case generalizeAtWithBuilder
                     planBuilder
                     Nothing
-                    res
+                    solved
                     scopeRoot
                     targetNode of
                     Right out -> Right out

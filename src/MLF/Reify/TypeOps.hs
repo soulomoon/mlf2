@@ -33,7 +33,6 @@ import qualified Data.Set as Set
 import MLF.Constraint.Types
 import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Constraint.NodeAccess as NodeAccess
-import MLF.Constraint.Solve (SolveResult)
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Types.Elab
 import MLF.Util.ElabError (ElabError(..))
@@ -348,10 +347,9 @@ resolveBaseBoundForInstConstraint constraint canonical start =
                         _ -> Nothing
     in goResolve IntSet.empty start
 
-resolveBaseBoundForInstSolved :: SolveResult -> NodeId -> Maybe NodeId
-resolveBaseBoundForInstSolved res =
-    let solved = Solved.fromSolveResult res
-        constraint = Solved.solvedConstraint solved
+resolveBaseBoundForInstSolved :: Solved.Solved -> NodeId -> Maybe NodeId
+resolveBaseBoundForInstSolved solved =
+    let constraint = Solved.solvedConstraint solved
         canonical = Solved.canonical solved
     in resolveBaseBoundForInstConstraint constraint canonical
 

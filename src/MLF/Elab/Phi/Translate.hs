@@ -290,7 +290,7 @@ phiFromEdgeWitnessCore
     -> Either ElabError Instantiation
 phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTrace ew = do
     requireValidBindingTree
-    namedSet0 <- namedNodes (Solved.toSolveResult res)
+    namedSet0 <- namedNodes res
     case debugPhi
         ("phi ewLeft=" ++ show (ewLeft ew)
             ++ " ewRight=" ++ show (ewRight ew)
@@ -298,9 +298,9 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
         () of
         () -> pure ()
     case debugPhi
-        ("phi ewRootType=" ++ show (reifyType (Solved.toSolveResult res) (ewRoot ew))
-            ++ " ewLeftType=" ++ show (reifyType (Solved.toSolveResult res) (ewLeft ew))
-            ++ " ewRightType=" ++ show (reifyType (Solved.toSolveResult res) (ewRight ew))
+        ("phi ewRootType=" ++ show (reifyType res (ewRoot ew))
+            ++ " ewLeftType=" ++ show (reifyType res (ewLeft ew))
+            ++ " ewRightType=" ++ show (reifyType res (ewRight ew))
         )
         () of
         () -> pure ()

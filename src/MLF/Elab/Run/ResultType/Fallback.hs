@@ -171,13 +171,12 @@ computeResultTypeFallbackCore ctx annCanon ann = do
         c1 = rtcBaseConstraint ctx
         redirects = rtcRedirects ctx
         traceCfg = rtcTraceConfig ctx
-        solvedForGenView = Solved.fromSolveResult solvedForGen
-        solvedConstraintOf = Solved.solvedConstraint . Solved.fromSolveResult
-        canonicalOf = Solved.canonical . Solved.fromSolveResult
+        solvedForGenView = solvedForGen
+        solvedConstraintOf = Solved.solvedConstraint
+        canonicalOf = Solved.canonical
         setSolvedConstraint res c' =
-            Solved.toSolveResult $
-                Solved.rebuildWithConstraint (Solved.fromSolveResult res) c'
-        generalizeAtWith = \mbGa s -> generalizeAtWithBuilder planBuilder mbGa (Solved.toSolveResult s)
+            Solved.rebuildWithConstraint res c'
+        generalizeAtWith = \mbGa s -> generalizeAtWithBuilder planBuilder mbGa s
 
     let edgeTraceCounts =
             IntMap.fromListWith
@@ -268,7 +267,7 @@ computeResultTypeFallbackCore ctx annCanon ann = do
                 instAppBasesFromWitness funEid =
                     case IntMap.lookup (getEdgeId funEid) edgeWitnesses of
                         Just ew ->
-                            case phiFromEdgeWitnessWithTrace traceCfg generalizeAtWith (Solved.fromSolveResult solved) (Just bindParentsGa) Nothing (IntMap.lookup (getEdgeId funEid) edgeTraces) ew of
+                            case phiFromEdgeWitnessWithTrace traceCfg generalizeAtWith solved (Just bindParentsGa) Nothing (IntMap.lookup (getEdgeId funEid) edgeTraces) ew of
                                 Right inst ->
                                     IntSet.fromList
                                         [ getNodeId nid

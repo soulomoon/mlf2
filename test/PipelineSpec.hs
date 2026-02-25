@@ -29,7 +29,7 @@ import MLF.Frontend.Syntax
 import MLF.Frontend.ConstraintGen
 import MLF.Constraint.Canonicalizer (canonicalizerFrom, canonicalizeNode)
 import MLF.Constraint.Presolution
-import MLF.Constraint.Solve (validateSolvedGraphStrict)
+import MLF.Constraint.Solve (SolveResult(..), validateSolvedGraphStrict)
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Solved (Solved)
 import MLF.Constraint.Types.Graph
@@ -83,7 +83,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                                 [GenRef gid] -> genRef gid
                                 roots -> error ("PipelineSpec: unexpected binding roots " ++ show roots)
                     let generalizeAt = generalizeAtWithBuilder (defaultPlanBuilder defaultTraceConfig) Nothing
-                    case generalizeAt (Solved.toSolveResult res) scopeRoot root' of
+                    case generalizeAt (res) scopeRoot root' of
                         Right (Forall binds ty, _subst) -> do
                             binds `shouldBe` []
                             let tyStr = pretty ty
@@ -105,7 +105,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                      case ann of
                          ALet _ schemeGen schemeRoot _ _ _ _ _ -> do
                              let generalizeAt = generalizeAtWithBuilder (defaultPlanBuilder defaultTraceConfig) Nothing
-                             case generalizeAt (Solved.toSolveResult res) (genRef schemeGen) schemeRoot of
+                             case generalizeAt (res) (genRef schemeGen) schemeRoot of
                                  Right scheme -> show scheme `shouldSatisfy` ("Forall" `isInfixOf`)
                                  Left err -> expectationFailure $ "Generalize error: " ++ show err
                          _ -> expectationFailure "Expected ALet annotation"
@@ -121,7 +121,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 listNode = TyCon var1 listBase (var0 :| [])
                 nodes = fromListNode [(var0, baseNode), (var1, listNode)]
                 constraint = emptyConstraint { cNodes = nodes }
-                res = Solved.toSolveResult (Solved.mkSolved constraint IntMap.empty)
+                res = Solved.mkTestSolved constraint IntMap.empty
             case reifyType res var1 of
                 Right ty ->
                     case ty of
@@ -147,7 +147,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 listNode = TyCon var2 listBase (var1 :| [])
                 nodes = fromListNode [(var0, intNode), (var1, maybeNode), (var2, listNode)]
                 constraint = emptyConstraint { cNodes = nodes }
-                res = Solved.toSolveResult (Solved.mkSolved constraint IntMap.empty)
+                res = Solved.mkTestSolved constraint IntMap.empty
             case reifyType res var2 of
                 Right ty ->
                     case ty of
@@ -197,7 +197,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             case runPipelineArtifactsDefault defaultPolySyms expr of
                 Left err -> expectationFailure err
                 Right PipelineArtifacts{ paConstraintNorm = c1, paPresolution = pres, paSolved = solved } ->
-                    case validateSolvedGraphStrict (Solved.toSolveResult solved) of
+                    case validateSolvedGraphStrict (SolveResult { srConstraint = Solved.solvedConstraint solved, srUnionFind = Solved.canonicalMap solved }) of
                         [] -> do
                             let canon = canonicalizerFrom (\nid -> Solved.canonical solved (chaseRedirects (prRedirects pres) nid))
                                 adoptNode = canonicalizeNode canon
@@ -335,7 +335,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                         | nid <- annLetSchemeRoots annRedirected
                         , canonicalize nid /= nid
                         ]
-                    hasCanonicalizationWork = not (IntMap.null (Solved.unionFind solved))
+                    hasCanonicalizationWork = not (IntMap.null (Solved.canonicalMap solved))
                     annCanonical = canonicalizeAnn canonicalize annRedirected
                     staleCanonicalNodes =
                         [ nid
@@ -1007,7 +1007,8 @@ annRootNode expr = case expr of
 
 validateStrict :: Solved -> Expectation
 validateStrict s =
-    case validateSolvedGraphStrict (Solved.toSolveResult s) of
+    let sr = SolveResult { srConstraint = Solved.solvedConstraint s, srUnionFind = Solved.canonicalMap s }
+    in case validateSolvedGraphStrict sr of
         [] -> pure ()
         vs -> expectationFailure ("validateSolvedGraph failed:\n" ++ unlines vs)
 

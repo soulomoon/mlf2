@@ -126,7 +126,7 @@ module MLF.Constraint.Solve (
     SolveError(..),
     SolveSnapshot(..),
     SolveOutput(..),
-    SolveResult,
+    SolveResult(..),
     solveUnify,
     solveUnifyWithSnapshot,
     solveResultFromSnapshot,

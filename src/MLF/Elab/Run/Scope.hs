@@ -12,7 +12,7 @@ import qualified Data.IntMap.Strict as IntMap
 import Data.Maybe (listToMaybe)
 
 import qualified MLF.Binding.Tree as Binding
-import MLF.Constraint.Solve (SolveResult)
+import MLF.Constraint.Solved (Solved)
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types
     ( BindingError
@@ -79,10 +79,9 @@ preferGenScope constraint ref = case ref of
                     Nothing -> ref
             Left _ -> ref
 
-schemeBodyTarget :: SolveResult -> NodeId -> NodeId
-schemeBodyTarget res target =
-    let solved = Solved.fromSolveResult res
-        constraint = Solved.solvedConstraint solved
+schemeBodyTarget :: Solved -> NodeId -> NodeId
+schemeBodyTarget solved target =
+    let constraint = Solved.solvedConstraint solved
         canonical = Solved.canonical solved
         targetC = canonical target
         isSchemeRoot =
@@ -139,25 +138,23 @@ Redirect chasing and UF canonicalization preserve ga′ through the pipeline:
      Existing tests in PipelineSpec verify no stale (pre-redirect) nodes
      remain after annotation rewriting.
 -}
-canonicalizeScopeRef :: SolveResult -> IntMap.IntMap NodeId -> NodeRef -> NodeRef
+canonicalizeScopeRef :: Solved -> IntMap.IntMap NodeId -> NodeRef -> NodeRef
 canonicalizeScopeRef solved redirects scopeRef =
     case scopeRef of
         GenRef gid -> GenRef gid
         TypeRef nid ->
-            let solvedView = Solved.fromSolveResult solved
-                canonical = Solved.canonical solvedView
+            let canonical = Solved.canonical solved
             in TypeRef (canonical (chaseRedirects redirects nid))
 
-resolveCanonicalScope :: Constraint -> SolveResult -> IntMap.IntMap NodeId -> NodeId -> Either BindingError NodeRef
+resolveCanonicalScope :: Constraint -> Solved -> IntMap.IntMap NodeId -> NodeId -> Either BindingError NodeRef
 resolveCanonicalScope constraint solved redirects scopeRoot = do
     scope0 <- bindingScopeRef constraint scopeRoot
     let scopeBase = preferGenScope constraint scope0
     pure (canonicalizeScopeRef solved redirects scopeBase)
 
-letScopeOverrides :: Constraint -> Constraint -> SolveResult -> IntMap.IntMap NodeId -> AnnExpr -> IntMap.IntMap NodeRef
+letScopeOverrides :: Constraint -> Constraint -> Solved -> IntMap.IntMap NodeId -> AnnExpr -> IntMap.IntMap NodeRef
 letScopeOverrides base solvedForGen solved redirects ann =
-    let solvedView = Solved.fromSolveResult solved
-        canonical = Solved.canonical solvedView
+    let canonical = Solved.canonical solved
         addOverride acc schemeRootId =
             case bindingScopeRef base schemeRootId of
                 Right scope0 ->

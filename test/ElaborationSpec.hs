@@ -94,7 +94,7 @@ generalizeAtWith mbGa s =
     Elab.generalizeAtWithBuilder
         (defaultPlanBuilder defaultTraceConfig)
         mbGa
-        (Solved.toSolveResult s)
+        (s)
 
 generalizeAt
     :: Solved.Solved
@@ -1348,7 +1348,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     Just (eid, _) -> do
                         let edgeTraces' = IntMap.delete eid (prEdgeTraces pres)
                             generalizeAtWith' = Elab.generalizeAtWithBuilder (prPlanBuilder pres)
-                        case Elab.elaborate defaultTraceConfig generalizeAtWith' (Solved.toSolveResult solved) (Solved.toSolveResult solved) (prEdgeWitnesses pres) edgeTraces' (prEdgeExpansions pres) ann of
+                        case Elab.elaborate defaultTraceConfig generalizeAtWith' (solved) (solved) (prEdgeWitnesses pres) edgeTraces' (prEdgeExpansions pres) ann of
                             Left (Elab.MissingEdgeTrace (EdgeId eid')) -> eid' `shouldBe` eid
                             Left err -> expectationFailure ("Expected MissingEdgeTrace, got " ++ show err)
                             Right _ -> expectationFailure "Expected elaboration to fail due to missing trace"
@@ -3242,10 +3242,10 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 noRedirects = IntMap.empty
                 withRedirects = IntMap.fromList [(getNodeId e1, n2)]
             -- Without redirects: scope of e1 should be GenRef g0
-            scopeNoRedir <- requireRight (resolveCanonicalScope constraint (Solved.toSolveResult solved) noRedirects e1)
+            scopeNoRedir <- requireRight (resolveCanonicalScope constraint (solved) noRedirects e1)
             scopeNoRedir `shouldBe` GenRef g0
             -- With redirects: scope of e1 should still be GenRef g0
-            scopeWithRedir <- requireRight (resolveCanonicalScope constraint (Solved.toSolveResult solved) withRedirects e1)
+            scopeWithRedir <- requireRight (resolveCanonicalScope constraint (solved) withRedirects e1)
             scopeWithRedir `shouldBe` GenRef g0
 
         it "ga′ stable when UF merges nodes under same gen scope" $ do
@@ -3269,9 +3269,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 uf = IntMap.fromList [(getNodeId n2, n1)]
                 solved = Solved.mkTestSolved constraint uf
                 noRedirects = IntMap.empty
-            scope1 <- requireRight (resolveCanonicalScope constraint (Solved.toSolveResult solved) noRedirects n1)
+            scope1 <- requireRight (resolveCanonicalScope constraint (solved) noRedirects n1)
             scope1 `shouldBe` GenRef g0
-            scope2 <- requireRight (resolveCanonicalScope constraint (Solved.toSolveResult solved) noRedirects n2)
+            scope2 <- requireRight (resolveCanonicalScope constraint (solved) noRedirects n2)
             scope2 `shouldBe` GenRef g0
 
         it "binding-parent canonicalization drops self-edges from UF merge" $ do
@@ -3364,7 +3364,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 solved = Solved.mkTestSolved solvedForGen IntMap.empty
                 ann = ALet "x" g0 e1 (ExpVarId 0) g0
                     (AVar "y" n2) (AVar "z" n3) n3
-                overrides = letScopeOverrides base solvedForGen (Solved.toSolveResult solved) redirects ann
+                overrides = letScopeOverrides base solvedForGen (solved) redirects ann
             IntMap.lookup (getNodeId n2) overrides `shouldBe` Just (GenRef g0)
 
         it "letScopeOverrides returns empty when base and solved scopes agree" $ do
@@ -3390,7 +3390,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 noRedirects = IntMap.empty
                 ann = ALet "x" g0 n1 (ExpVarId 0) g0
                     (AVar "y" n2) (AVar "z" n2) n2
-                overrides = letScopeOverrides constraint constraint (Solved.toSolveResult solved) noRedirects ann
+                overrides = letScopeOverrides constraint constraint (solved) noRedirects ann
             overrides `shouldBe` IntMap.empty
 
         it "ga-invariant: validateCrossGenMapping filters out cross-scope nodes" $ do

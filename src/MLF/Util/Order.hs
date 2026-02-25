@@ -17,7 +17,6 @@ module MLF.Util.Order (
     orderKeysFromRootWith,
     orderKeysFromConstraintWith,
     orderKeysFromRoot,
-    orderKeysFromRootSolved,
     orderKeysFromRootRestricted,
     compareNodesByOrderKey,
     sortByOrderKey
@@ -26,7 +25,6 @@ module MLF.Util.Order (
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntSet as IntSet
 
-import MLF.Constraint.Solve (SolveResult)
 import MLF.Constraint.Solved (Solved)
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types.Graph
@@ -38,16 +36,14 @@ import MLF.Constraint.Types.Graph
 import MLF.Util.OrderKey (OrderKey(..), OrderKeyError(..), compareOrderKey, orderKeysFromRootWith, orderKeysFromRootWithExtra, compareNodesByOrderKey, sortByOrderKey)
 
 -- | Compute best order keys for all nodes reachable from @root@, using the
--- solved graph’s union-find canonicalization.
-orderKeysFromRoot :: SolveResult -> NodeId -> IntMap OrderKey
-orderKeysFromRoot res root0 =
-    let solved = Solved.fromSolveResult res
-    in orderKeysFromConstraintWith (Solved.canonical solved) (Solved.solvedConstraint solved) root0 Nothing
+-- solved graph’s canonicalization.
+orderKeysFromRoot :: Solved -> NodeId -> IntMap OrderKey
+orderKeysFromRoot solved root0 =
+    orderKeysFromConstraintWith (Solved.canonical solved) (Solved.solvedConstraint solved) root0 Nothing
 
-orderKeysFromRootRestricted :: SolveResult -> NodeId -> IntSet.IntSet -> IntMap OrderKey
-orderKeysFromRootRestricted res root0 allowed =
-    let solved = Solved.fromSolveResult res
-    in orderKeysFromConstraintWith (Solved.canonical solved) (Solved.solvedConstraint solved) root0 (Just allowed)
+orderKeysFromRootRestricted :: Solved -> NodeId -> IntSet.IntSet -> IntMap OrderKey
+orderKeysFromRootRestricted solved root0 allowed =
+    orderKeysFromConstraintWith (Solved.canonical solved) (Solved.solvedConstraint solved) root0 (Just allowed)
 
 -- | Compute order keys from a raw constraint using term-DAG structure plus
 -- instance-bound dependencies.
@@ -64,8 +60,3 @@ orderKeysFromConstraintWith canonical constraint root0 mbAllowed =
                 Just TyVar{ tnBound = Just bnd } -> [bnd]
                 _ -> []
     in orderKeysFromRootWithExtra canonical nodes extraChildren root0 mbAllowed
-
--- | 'orderKeysFromRoot' accepting 'Solved' directly (bridge wrapper).
-orderKeysFromRootSolved :: Solved -> NodeId -> IntMap OrderKey
-orderKeysFromRootSolved solved root0 =
-    orderKeysFromRoot (Solved.toSolveResult solved) root0
