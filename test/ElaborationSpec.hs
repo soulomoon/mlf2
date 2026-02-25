@@ -104,7 +104,7 @@ generalizeAt
 generalizeAt = generalizeAtWith Nothing
 
 mkSolved :: Constraint -> IntMap.IntMap NodeId -> Solved.Solved
-mkSolved = Solved.mkSolved
+mkSolved = Solved.mkTestSolved
 
 requirePipeline :: SurfaceExpr -> IO (Elab.ElabTerm, Elab.ElabType)
 requirePipeline expr =
@@ -3267,7 +3267,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     , cGenNodes = fromListGen [(g0, GenNode g0 [n1, n2])]
                     }
                 uf = IntMap.fromList [(getNodeId n2, n1)]
-                solved = Solved.mkSolved constraint uf
+                solved = Solved.mkTestSolved constraint uf
                 noRedirects = IntMap.empty
             scope1 <- requireRight (resolveCanonicalScope constraint (Solved.toSolveResult solved) noRedirects n1)
             scope1 `shouldBe` GenRef g0
@@ -3361,7 +3361,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     , cBindParents = solvedForGenBP
                     }
                 redirects = IntMap.fromList [(getNodeId e1, n2)]
-                solved = Solved.mkSolved solvedForGen IntMap.empty
+                solved = Solved.mkTestSolved solvedForGen IntMap.empty
                 ann = ALet "x" g0 e1 (ExpVarId 0) g0
                     (AVar "y" n2) (AVar "z" n3) n3
                 overrides = letScopeOverrides base solvedForGen (Solved.toSolveResult solved) redirects ann
@@ -3386,7 +3386,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     , cBindParents = bp
                     , cGenNodes = fromListGen [(g0, GenNode g0 [n1, n2])]
                     }
-                solved = Solved.mkSolved constraint IntMap.empty
+                solved = Solved.mkTestSolved constraint IntMap.empty
                 noRedirects = IntMap.empty
                 ann = ALet "x" g0 n1 (ExpVarId 0) g0
                     (AVar "y" n2) (AVar "z" n2) n2
