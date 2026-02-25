@@ -47,7 +47,7 @@ import MLF.Constraint.Presolution
     , insertCopy
     , lookupCopy
     )
-import MLF.Constraint.Solve (solveUnify)
+import MLF.Constraint.Solve (solveUnifyWithSnapshot)
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Frontend.ConstraintGen (AnnExpr(..))
 import SpecUtil
@@ -554,7 +554,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , cEliminatedVars = IntSet.singleton (getNodeId v)
                         }
 
-            solved <- Solved.fromSolveResult <$> requireRight (solveUnify defaultTraceConfig c)
+            solved <- Solved.fromSolveOutput <$> requireRight (solveUnifyWithSnapshot defaultTraceConfig c)
             (sch, _subst) <- requireRight (generalizeAt solved (typeRef forallNode) forallNode)
             sch `shouldBe`
                 Elab.schemeFromType (Elab.TArrow Elab.TBottom Elab.TBottom)
@@ -581,7 +581,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , cEliminatedVars = IntSet.singleton (getNodeId v)
                         }
 
-            solved <- Solved.fromSolveResult <$> requireRight (solveUnify defaultTraceConfig c)
+            solved <- Solved.fromSolveOutput <$> requireRight (solveUnifyWithSnapshot defaultTraceConfig c)
             (sch, _subst) <- requireRight (generalizeAt solved (typeRef forallNode) forallNode)
             Elab.prettyDisplay sch `shouldBe` "∀(a ⩾ ⊥) a -> a"
 
@@ -606,7 +606,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 ]
                         }
 
-            solved <- Solved.fromSolveResult <$> requireRight (solveUnify defaultTraceConfig c)
+            solved <- Solved.fromSolveOutput <$> requireRight (solveUnifyWithSnapshot defaultTraceConfig c)
             case generalizeAt solved (typeRef forallNode) forallNode of
                 Left err ->
                     show err `shouldSatisfy` isInfixOf "alias bounds survived"

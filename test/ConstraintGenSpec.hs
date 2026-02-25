@@ -11,8 +11,8 @@ import Test.Hspec
 
 import MLF.Binding.Tree (boundFlexChildren, checkBindingTree, isUnderRigidBinder, nodeKind, NodeKind(..))
 import MLF.Constraint.Presolution (PresolutionResult(..))
-import MLF.Constraint.Solve (solveUnify)
-import MLF.Constraint.Solved (fromSolveResult, solvedConstraint)
+import MLF.Constraint.Solve (solveUnifyWithSnapshot)
+import MLF.Constraint.Solved (fromSolveOutput, solvedConstraint)
 import MLF.Frontend.ConstraintGen (AnnExpr (..), generateConstraintsCore)
 import MyLib hiding (normalize, lookupNode)
 import SpecUtil
@@ -737,7 +737,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
                     ELet "c" (EAnn rhs schemeTy) (EAnn (EVar "c") ann)
 
             pres <- requireRight (runToPresolutionDefault Set.empty expr)
-            solved <- requireRight (fmap fromSolveResult (solveUnify defaultTraceConfig (prConstraint pres)))
+            solved <- requireRight (fmap fromSolveOutput (solveUnifyWithSnapshot defaultTraceConfig (prConstraint pres)))
             let cSolved = solvedConstraint solved
                 eliminated = cEliminatedVars (prConstraint pres)
                 schemeGens =

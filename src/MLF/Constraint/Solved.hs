@@ -10,21 +10,19 @@ entry point for post-solve access — downstream phases (elaboration, phi
 translation, omega) should use these queries instead of reaching into
 'SolveResult' internals directly.
 
-= Phase 1 (current runtime path)
+= Runtime path
 
-`fromSolveResult` and `mkSolved` still produce the legacy backend, so
-all runtime behavior is unchanged.
+`fromSolveResult` and `mkSolved` still produce the legacy backend for
+compatibility.
 
-= Phase 2 (staged)
-
-`Solved` now supports a second constructor (`EquivBackend`) for the
-equivalence-class representation. This backend is not wired into the
-solver output yet, but all API queries handle both constructors.
+`fromSolveOutput` consumes `solveUnifyWithSnapshot` output and constructs
+the equivalence-class backend from the pre-rewrite snapshot.
 -}
 module MLF.Constraint.Solved (
     -- * Opaque type
     Solved,
     fromSolveResult,
+    fromSolveOutput,
     mkSolved,
     fromPreRewriteState,
 
@@ -55,7 +53,13 @@ import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
-import MLF.Constraint.Solve (SolveResult, frWith, rewriteConstraintWithUF)
+import MLF.Constraint.Solve
+    ( SolveOutput(..)
+    , SolveResult
+    , SolveSnapshot(..)
+    , frWith
+    , rewriteConstraintWithUF
+    )
 import MLF.Constraint.Solve.Internal (SolveResult(..))
 import MLF.Constraint.Types.Graph
     ( BindFlag(..)
@@ -102,6 +106,21 @@ fromSolveResult sr =
         , lbUnionFind = srUnionFind sr
         }
 
+-- | Build a staged equivalence backend from snapshot-enabled solve output.
+fromSolveOutput :: SolveOutput -> Solved
+fromSolveOutput out =
+    let snapshot = soSnapshot out
+        result = soResult out
+        original = snapPreRewriteConstraint snapshot
+        canonicalMap = buildCanonicalMap (srUnionFind result) original
+        equivClasses = buildEquivClasses canonicalMap original
+    in Solved EquivBackend
+        { ebCanonicalMap = canonicalMap
+        , ebCanonicalConstraint = srConstraint result
+        , ebEquivClasses = equivClasses
+        , ebOriginalConstraint = original
+        }
+
 -- | Construct a 'Solved' directly from a constraint and union-find map.
 -- This avoids the need to import 'SolveResult(..)' in test code.
 mkSolved :: Constraint -> IntMap NodeId -> Solved
@@ -132,11 +151,42 @@ buildCanonicalMap :: IntMap NodeId -> Constraint -> IntMap NodeId
 buildCanonicalMap uf c =
     let nodeKeys = map (getNodeId . tnId) (NA.allNodes c)
         allKeys = IntSet.toList (IntSet.fromList (nodeKeys ++ IntMap.keys uf))
-        canonicalNode = frWith uf
+        -- Snapshot UF may contain parent cycles from intermediate states.
+        -- Use cycle-safe chasing to keep staged reconstruction total.
+        canonicalNode = chaseUfCanonical uf
     in IntMap.fromList
-        [ (k, canonicalNode (NodeId k))
+        [ (k, rep)
         | k <- allKeys
+        , let rep = canonicalNode (NodeId k)
+        , rep /= NodeId k
         ]
+
+chaseUfCanonical :: IntMap NodeId -> NodeId -> NodeId
+chaseUfCanonical uf = go IntSet.empty
+  where
+    step nid = IntMap.findWithDefault nid (nodeIdKey nid) uf
+
+    go seen current =
+        let next = step current
+        in if next == current
+            then current
+            else if IntSet.member (nodeIdKey next) seen
+                then cycleRepresentative next
+                else go (IntSet.insert (nodeIdKey current) seen) next
+
+    cycleRepresentative cycleStart = goCycle cycleStart cycleStart
+      where
+        goCycle minNode current =
+            let next = step current
+                minNode' = minByNodeId minNode next
+            in if next == cycleStart
+                then minNode'
+                else goCycle minNode' next
+
+    minByNodeId a b =
+        if nodeIdKey a <= nodeIdKey b
+            then a
+            else b
 
 buildEquivClasses :: IntMap NodeId -> Constraint -> IntMap [NodeId]
 buildEquivClasses canonMap c =

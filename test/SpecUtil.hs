@@ -60,7 +60,7 @@ import MLF.Constraint.Types.Graph
 import MLF.Constraint.Acyclicity (checkAcyclicity)
 import MLF.Constraint.Normalize (normalize)
 import MLF.Constraint.Presolution (PresolutionResult(..), computePresolution)
-import MLF.Constraint.Solve (solveUnify)
+import MLF.Constraint.Solve (solveUnifyWithSnapshot)
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Frontend.ConstraintGen (AnnExpr(..), ConstraintResult(..), generateConstraints)
 import MLF.Frontend.Normalize (normalizeExpr)
@@ -207,12 +207,12 @@ runPipelineArtifactsDefault
 runPipelineArtifactsDefault poly expr = do
     (ConstraintResult{ crAnnotated = ann, crRoot = root }, c1, pres) <-
         runToPresolutionDetailedDefault poly expr
-    solved <- firstShowE (solveUnify defaultTraceConfig (prConstraint pres))
+    solveOut <- firstShowE (solveUnifyWithSnapshot defaultTraceConfig (prConstraint pres))
     pure
         PipelineArtifacts
             { paConstraintNorm = c1
             , paPresolution = pres
-            , paSolved = Solved.fromSolveResult solved
+            , paSolved = Solved.fromSolveOutput solveOut
             , paAnnotated = ann
             , paRoot = root
             }
@@ -220,7 +220,7 @@ runPipelineArtifactsDefault poly expr = do
 runToSolvedDefault :: PolySyms -> SurfaceExpr -> Either String Solved.Solved
 runToSolvedDefault poly expr = do
     pres <- runToPresolutionDefault poly expr
-    fmap Solved.fromSolveResult (firstShowE (solveUnify defaultTraceConfig (prConstraint pres)))
+    fmap Solved.fromSolveOutput (firstShowE (solveUnifyWithSnapshot defaultTraceConfig (prConstraint pres)))
 
 inferBindParents :: NodeMap TyNode -> BindParents
 inferBindParents nodes =

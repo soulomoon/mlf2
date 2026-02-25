@@ -84,11 +84,13 @@ runPipelineElabWith traceCfg genConstraints expr = do
     pres <- fromPresolutionError (computePresolution traceCfg acyc c1)
     let planBuilder = prPlanBuilder pres
         generalizeAtWith = generalizeAtWithBuilder planBuilder
-    solved <- fromSolveError (solveUnify traceCfg (prConstraint pres))
-    let solvedView = Solved.fromSolveResult solved
+    solveOut <- fromSolveError (solveUnifyWithSnapshot traceCfg (prConstraint pres))
+    let solved = soResult solveOut
+        solvedView = Solved.fromSolveOutput solveOut
         setSolvedConstraint res c' =
-            Solved.toSolveResult $
-                Solved.mkSolved c' (Solved.unionFind (Solved.fromSolveResult res))
+            let uf = Solved.unionFind (Solved.fromSolveResult res)
+                cCanon = rewriteConstraintWithUF uf c'
+            in Solved.toSolveResult (Solved.mkSolved cCanon uf)
         solvedClean =
             setSolvedConstraint solved
                 (pruneBindParentsConstraint (Solved.solvedConstraint solvedView))

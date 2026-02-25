@@ -94,12 +94,8 @@ snapshotLegacyAndEquiv =
     in case solveUnifyWithSnapshot defaultTraceConfig constraint of
         Left err -> Left ("Unexpected solve error: " ++ show err)
         Right out ->
-            let snapshot = soSnapshot out
-                legacy = fromSolveResult (soResult out)
-                equiv =
-                    fromPreRewriteState
-                        (snapUnionFind snapshot)
-                        (snapPreRewriteConstraint snapshot)
+            let legacy = fromSolveResult (soResult out)
+                equiv = fromSolveOutput out
             in Right (legacy, equiv, ids)
 
 spec :: Spec
@@ -243,6 +239,17 @@ spec = describe "MLF.Constraint.Solved" $ do
                 Left err -> expectationFailure err
                 Right (legacy, staged, ids) ->
                     map (lookupNode staged) ids `shouldBe` map (lookupNode legacy) ids
+
+        it "fromSolveOutput matches explicit pre-rewrite snapshot construction" $ do
+            case solveUnifyWithSnapshot defaultTraceConfig (rootedConstraint emptyConstraint) of
+                Left err -> expectationFailure ("Unexpected solve error: " ++ show err)
+                Right out ->
+                    let snapshot = soSnapshot out
+                        explicit =
+                            fromPreRewriteState
+                                (snapUnionFind snapshot)
+                                (snapPreRewriteConstraint snapshot)
+                    in fromSolveOutput out `shouldBe` explicit
 
         it "keeps other legacy snapshot queries in sync" $ do
             case snapshotLegacyAndEquiv of
