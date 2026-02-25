@@ -1,14 +1,24 @@
 module Constraint.SolvedSpec (spec) where
 
+import Control.Monad (forM_)
+import Data.List (nub, sort)
 import Test.Hspec
 import qualified Data.IntMap.Strict as IntMap
+import qualified Data.Set as Set
 
+import MLF.Constraint.Presolution (PresolutionResult(..))
 import MLF.Constraint.Solve
     ( SolveOutput(..)
     , SolveSnapshot(..)
     , solveUnifyWithSnapshot
     )
 import MLF.Constraint.Solved
+import MLF.Frontend.Syntax
+    ( Lit(..)
+    , SrcTy(..)
+    , SurfaceExpr
+    , Expr(..)
+    )
 import MLF.Constraint.Types.Graph
     ( BaseTy(..)
     , BindFlag(..)
@@ -31,6 +41,7 @@ import SpecUtil
     , defaultTraceConfig
     , inferBindParents
     , nodeMapFromList
+    , runToPresolutionDefault
     , rootedConstraint
     )
 
@@ -101,6 +112,66 @@ snapshotLegacyAndEquiv =
 spec :: Spec
 spec = describe "MLF.Constraint.Solved" $ do
     let s = mkTestSolved
+
+    describe "Backend equivalence" $ do
+        let idLam = ELam "x" (EVar "x")
+            intTy = STBase "Int"
+            boolTy = STBase "Bool"
+            polyIdTy = STForall "a" Nothing (STArrow (STVar "a") (STVar "a"))
+            cases :: [(String, SurfaceExpr)]
+            cases =
+                [ ("lambda identity", idLam)
+                , ("application", EApp idLam (ELit (LInt 1)))
+                , ("let application", ELet "id" idLam (EApp (EVar "id") (ELit (LInt 2))))
+                , ("let polymorphic two-use", ELet "id" idLam (ELet "_" (EApp (EVar "id") (ELit (LInt 1))) (EApp (EVar "id") (ELit (LBool True)))))
+                , ("term annotation", EAnn idLam (STArrow intTy intTy))
+                , ("let annotated term", ELet "f" (EAnn idLam polyIdTy) (EApp (EVar "f") (ELit (LInt 3))))
+                , ("annotated lambda", ELamAnn "f" (STArrow intTy intTy) (EApp (EVar "f") (ELit (LInt 0))))
+                , ("annotated lambda polymorphic param", ELamAnn "x" polyIdTy (EApp (EVar "x") (ELit (LInt 1))))
+                , ("let annotation with bool", ELet "f" (EAnn idLam (STArrow boolTy boolTy)) (EApp (EVar "f") (ELit (LBool False))))
+                ]
+            collectNodeIds :: Solved -> Solved -> [NodeId]
+            collectNodeIds legacy equiv =
+                sort . nub $
+                    map tnId (allNodes legacy ++ allNodes equiv)
+                        ++ map NodeId (IntMap.keys (unionFind legacy))
+                        ++ IntMap.elems (unionFind legacy)
+                        ++ map NodeId (IntMap.keys (unionFind equiv))
+                        ++ IntMap.elems (unionFind equiv)
+            runCase :: (String, SurfaceExpr) -> Expectation
+            runCase (label, expr) =
+                case runToPresolutionDefault Set.empty expr of
+                    Left err ->
+                        expectationFailure
+                            ( "Presolution failed for backend equivalence case: "
+                                ++ label
+                                ++ "\nexpr: "
+                                ++ show expr
+                                ++ "\nerror: "
+                                ++ err
+                            )
+                    Right pres ->
+                        case solveUnifyWithSnapshot defaultTraceConfig (prConstraint pres) of
+                            Left err ->
+                                expectationFailure
+                                    ( "Solve failed for backend equivalence case: "
+                                        ++ label
+                                        ++ "\nexpr: "
+                                        ++ show expr
+                                        ++ "\nerror: "
+                                        ++ show err
+                                    )
+                            Right out -> do
+                                let legacy = fromSolveResult (soResult out)
+                                    equiv = fromSolveOutput out
+                                    ids = collectNodeIds legacy equiv
+                                map (canonical legacy) ids `shouldBe` map (canonical equiv) ids
+                                map (lookupNode legacy) ids `shouldBe` map (lookupNode equiv) ids
+                                instEdges legacy `shouldBe` instEdges equiv
+                                bindParents legacy `shouldBe` bindParents equiv
+        forM_ cases $ \(label, expr) ->
+            it ("matches legacy backend for " ++ label ++ " (" ++ show expr ++ ")") $
+                runCase (label, expr)
 
     describe "Core queries" $ do
         it "canonical chases the union-find" $ do
