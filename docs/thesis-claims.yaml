@@ -41,8 +41,7 @@ claims:
       property_tests: []
       code_paths:
         - src/MLF/Frontend/ConstraintGen/Translate.hs#buildExprRaw
-    deviations:
-      - DEV-PHI-KEEP-BINDER-WEAKEN-SUPPRESSION
+    deviations: []
     status: defended
     notes: ""
 

@@ -73,12 +73,11 @@ newtype ApplyFun i =
 phiWithSchemeOmega
     :: OmegaContext
     -> IntSet.IntSet
-    -> IntSet.IntSet
     -> SchemeInfo
     -> Int            -- ^ forall intro count (O phase)
     -> [InstanceOp]   -- ^ omega ops
     -> Either ElabError Instantiation
-phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithScheme
+phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
   where
     solved :: Solved
     solved = ocSolved ctx
@@ -471,7 +470,7 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
         let phiIntro = instMany (replicate introCount InstIntro)
         -- Phase Ω: replay witness operations on the intro-extended type.
         let vs2 = mkVSpine ty2 ids2
-        phiOmega <- go binderKeys keepBinderKeys namedSet vs2 [] omegaOps lookupBinder
+        phiOmega <- go binderKeys namedSet vs2 [] omegaOps lookupBinder
         pure (normalizeInst (instMany [sigma, phiIntro, phiOmega]))
 
 
@@ -713,9 +712,9 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
         replayCandidates = normalizedReplayCandidates rawTarget
         binderCandidates = normalizedBinderReplayCandidates rawTarget
 
-    go :: IntSet.IntSet -> IntSet.IntSet -> IntSet.IntSet -> VSpine -> [Instantiation] -> [InstanceOp] -> (NodeId -> Maybe String)
+    go :: IntSet.IntSet -> IntSet.IntSet -> VSpine -> [Instantiation] -> [InstanceOp] -> (NodeId -> Maybe String)
        -> Either ElabError Instantiation
-    go binderKeys keepBinderKeys' namedSet' vs accum ops lookupBinder = case ops of
+    go binderKeys namedSet' vs accum ops lookupBinder = case ops of
         [] -> Right (foldl' composeInst InstId (collapseAdjacentPairs (reverse accum)))
 
         (OpGraft arg bv : rest) -> do
@@ -732,12 +731,12 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
                                         then InstBot argTy
                                         else InstId
                                 vs' = if vsBody vs == BodyBottom then vs { vsBody = BodyNonBottom } else vs
-                            go binderKeys keepBinderKeys' namedSet' vs' (inst : accum) rest lookupBinder
+                            go binderKeys namedSet' vs' (inst : accum) rest lookupBinder
                         else do
                             argTy <- reifyTypeArg namedSet' Nothing (graftArgFor arg bv)
                             let inst = InstApp argTy
                                 vs' = vsDeleteAt 0 vs
-                            go binderKeys keepBinderKeys' namedSet' vs' (inst : accum) rest lookupBinder
+                            go binderKeys namedSet' vs' (inst : accum) rest lookupBinder
                 else if not (isBinderNode binderKeys bvReplay)
                     then Left $ PhiTranslatabilityError
                         [ "OpGraft targets non-binder node"
@@ -762,11 +761,11 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
                                                 -- Bounded-match: bound already equals graft arg, so
                                                 -- OpGraft is a no-op. The adjacent OpWeaken will emit
                                                 -- InstElim which substitutes the existing bound (thesis Def. 14.2.1).
-                                                go binderKeys keepBinderKeys' namedSet' vs accum rest lookupBinder
+                                                go binderKeys namedSet' vs accum rest lookupBinder
                                             else if argTy == TBottom
                                                 then
                                                     -- Bottom arg on bounded binder: no-op (OpWeaken will emit InstElim)
-                                                    go binderKeys keepBinderKeys' namedSet' vs accum rest lookupBinder
+                                                    go binderKeys namedSet' vs accum rest lookupBinder
                                             else
                                                 Left $
                                                     PhiTranslatabilityError
@@ -783,34 +782,30 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
                                         let inst = underContext prefix (InstInside (InstBot argTy))
                                             newBound = either (const Nothing) Just (elabToBound argTy)
                                             vs' = vsUpdateBound i' newBound vs
-                                        go binderKeys keepBinderKeys' namedSet' vs' (inst : accum) rest lookupBinder
+                                        go binderKeys namedSet' vs' (inst : accum) rest lookupBinder
 
         (OpWeaken bv : rest) -> do
             bvReplay <- resolveTraceBinderTarget False "OpWeaken" bv
             let bvC = canonicalNode bvReplay
                 rootC = canonicalNode orderRoot
             if bvC == rootC
-                then go binderKeys keepBinderKeys' namedSet' vs accum rest lookupBinder
+                then go binderKeys namedSet' vs accum rest lookupBinder
                 else if not (isBinderNode binderKeys bvReplay)
                     -- Structurally-bounded binder solved away during constraint
                     -- solving: the quantifier no longer exists in the replay type,
                     -- so OpWeaken is vacuously satisfied (no-op).
-                    then go binderKeys keepBinderKeys' namedSet' vs accum rest lookupBinder
+                    then go binderKeys namedSet' vs accum rest lookupBinder
                     else do
-                        let key = getNodeId bvC
-                        if IntSet.member key keepBinderKeys'
-                            then go binderKeys keepBinderKeys' namedSet' vs accum rest lookupBinder
-                            else do
                                 case lookupBinderIndex binderKeys (vSpineIds vs) bvReplay of
                                     Nothing ->
-                                        go binderKeys keepBinderKeys' namedSet' vs accum rest lookupBinder
+                                        go binderKeys namedSet' vs accum rest lookupBinder
                                     Just idx -> do
                                         -- Thesis-exact OpWeaken: always emit InstElim.
                                         -- For graft+weaken pairs, collapseAdjacentPairs merges
                                         -- the preceding InstInside(InstBot t) with this InstElim
                                         -- into InstApp t (thesis Def. 14.2.1).
                                         (inst, vs') <- atBinderWith False binderKeys vs bvReplay (pure InstElim)
-                                        go binderKeys keepBinderKeys' namedSet' vs' (inst : accum) rest lookupBinder
+                                        go binderKeys namedSet' vs' (inst : accum) rest lookupBinder
 
         (OpRaise n : rest) -> do
             nReplay <- resolveTraceBinderTarget False "OpRaise" n
@@ -885,11 +880,10 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
             if shouldRigidSkip
                 then
                     case debugPhi ("OpRaise: rigid skip target=" ++ show nC) () of
-                        () -> go binderKeys keepBinderKeys' namedSet' vs accum rest lookupBinder
+                        () -> go binderKeys namedSet' vs accum rest lookupBinder
                 else do
                     continueRaise
                         binderKeys
-                        keepBinderKeys'
                         namedSet'
                         vs
                         accum
@@ -906,7 +900,7 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
             mReplay <- resolveTraceBinderTarget True "OpMerge(m)" m
             if isRigidNode nReplay
                 then
-                    go binderKeys keepBinderKeys' namedSet' vs accum rest lookupBinder
+                    go binderKeys namedSet' vs accum rest lookupBinder
                 else if isRigidNode mReplay
                     then Left $ PhiTranslatabilityError
                         [ "OpMerge: rigid endpoint appears only on non-operated node"
@@ -926,19 +920,19 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
                         , "  canonical: " ++ show (canonicalNode mReplay)
                         ]
                 else if canonicalNode nReplay == canonicalNode mReplay
-                    then go binderKeys keepBinderKeys' namedSet' vs accum rest lookupBinder
+                    then go binderKeys namedSet' vs accum rest lookupBinder
                 else do
                     mName <- binderNameFor binderKeys vs mReplay lookupBinder
                     let hAbs = InstSeq (InstInside (InstAbstr mName)) InstElim
                     (inst, vs') <- atBinderWith False binderKeys vs nReplay (pure hAbs)
-                    go binderKeys keepBinderKeys' namedSet' vs' (inst : accum) rest lookupBinder
+                    go binderKeys namedSet' vs' (inst : accum) rest lookupBinder
 
         (OpRaiseMerge n m : rest) -> do
             nReplay <- resolveTraceBinderTarget True "OpRaiseMerge(n)" n
             mReplay <- resolveTraceBinderTarget True "OpRaiseMerge(m)" m
             -- Paper Fig. 15.3.4: rigid-node identity is conditioned on the operated node n.
             if isRigidNode nReplay
-                then go binderKeys keepBinderKeys' namedSet' vs accum rest lookupBinder
+                then go binderKeys namedSet' vs accum rest lookupBinder
                 else if isRigidNode mReplay
                     then Left $ PhiTranslatabilityError
                         [ "OpRaiseMerge: rigid endpoint appears only on non-operated node"
@@ -964,7 +958,7 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
                                 then do
                                     mName <- binderNameFor binderKeys vs mReplay lookupBinder
                                     let vs' = VSpine [] BodyNonBottom
-                                    go binderKeys keepBinderKeys' namedSet' vs' (InstAbstr mName : accum) rest lookupBinder
+                                    go binderKeys namedSet' vs' (InstAbstr mName : accum) rest lookupBinder
                                 else do
                                     case lookupBinderIndex binderKeys (vSpineIds vs) nReplay of
                                         Nothing ->
@@ -973,11 +967,10 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
                                             mName <- binderNameFor binderKeys vs mReplay lookupBinder
                                             let hAbs = InstSeq (InstInside (InstAbstr mName)) InstElim
                                             (inst, vs') <- atBinderWith False binderKeys vs nReplay (pure hAbs)
-                                            go binderKeys keepBinderKeys' namedSet' vs' (inst : accum) rest lookupBinder
+                                            go binderKeys namedSet' vs' (inst : accum) rest lookupBinder
 
     continueRaise
         :: IntSet.IntSet
-        -> IntSet.IntSet
         -> IntSet.IntSet
         -> VSpine
         -> [Instantiation]
@@ -991,7 +984,6 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
         -> Either ElabError Instantiation
     continueRaise
         binderKeys
-        keepBinderKeys'
         namedSet'
         vs
         accum
@@ -1090,7 +1082,7 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
                         let vsNoN = vsDeleteAt i vs
                             newBound = either (const Nothing) Just (elabToBound boundTy)
                             vs' = vsInsertAt insertIndex (vSpineNameAt vs i, newBound, Just nC) vsNoN
-                        go binderKeys keepBinderKeys' namedSet' vs' (inst : accum) rest lookupBinder
+                        go binderKeys namedSet' vs' (inst : accum) rest lookupBinder
 
                     Nothing -> do
                         -- Non-spine node case: select an insertion point `m = min-prec{...}` (Fig. 10)
@@ -1208,12 +1200,12 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
 
                                 let newBound = either (const Nothing) Just (elabToBound boundTyBot)
                                     vs' = vsInsertAt insertIdx ("β", newBound, Just nC) vs
-                                go binderKeys keepBinderKeys' namedSet' vs' (inst : accum) rest lookupBinder
+                                go binderKeys namedSet' vs' (inst : accum) rest lookupBinder
                             Nothing ->
                                 case mbRootInst of
                                     Just (inst, numToDelete) -> do
                                         let vs' = foldl' (\v _ -> vsDeleteAt minIdx v) vs [1..numToDelete]
-                                        go binderKeys keepBinderKeys' namedSet' vs' (inst : accum) rest lookupBinder
+                                        go binderKeys namedSet' vs' (inst : accum) rest lookupBinder
                                     Nothing ->
                                         Left $
                                             PhiTranslatabilityError

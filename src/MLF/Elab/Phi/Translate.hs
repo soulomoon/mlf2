@@ -387,15 +387,9 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
             debugPhi
                 ("phi traceBinderSourceNames=" ++ show (IntMap.toList traceBinderSourceNamesRaw))
                 traceBinderSourceNamesRaw
-    targetBinderKeysRaw <- computeTargetBinderKeys siReplay
-    let targetBinderKeys =
-            debugPhi
-                ("phi targetBinderKeys=" ++ show (IntSet.toList targetBinderKeysRaw))
-                targetBinderKeysRaw
     phiWithSchemeOmega
         (omegaCtx (Just siReplay) traceBinderSources traceBinderReplayMap traceBinderHintDomain traceBinderSourceNames)
         namedSet
-        targetBinderKeys
         siReplay
         introCount
         ops
@@ -676,40 +670,6 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
                             )
                             replayMap
                 in (traceBinderSourcesSet, replayMap', hintDomain, sourceNameByKey)
-
-    computeTargetBinderKeys :: SchemeInfo -> Either ElabError IntSet.IntSet
-    computeTargetBinderKeys siForKeys =
-        case mTrace of
-            -- Keep pre-bridge behavior for trace-free Φ tests/callers:
-            -- without an edge trace we should not retain binder targets.
-            Nothing -> pure IntSet.empty
-            Just _ -> do
-                let targetRootC = canonicalNode (ewRight ew)
-                    schemeReplayKeys = IntMap.keys (siSubst siForKeys)
-                targetBinders <-
-                    case bindingToElab (Binding.orderedBinders canonicalNode (Solved.originalConstraint res) (typeRef targetRootC)) of
-                        Right bs -> pure bs
-                        Left _ -> pure []
-                let targetCanonKeys =
-                        IntSet.fromList
-                            [ getNodeId (canonicalNode binder)
-                            | binder <- targetBinders
-                            ]
-                    keepFrom replayKeys =
-                        IntSet.fromList
-                            [ replayKey
-                            | replayKey <- replayKeys
-                            , IntSet.member
-                                (getNodeId (canonicalNode (NodeId replayKey)))
-                                targetCanonKeys
-                            ]
-                    keepKeys = keepFrom schemeReplayKeys
-                debugPhi
-                    ("phi target binders=" ++ show targetBinders
-                        ++ " keep-keys=" ++ show (IntSet.toList keepKeys)
-                    )
-                    (pure ())
-                pure keepKeys
 
     traceBinderArity :: EdgeTrace -> Int
     traceBinderArity tr =
