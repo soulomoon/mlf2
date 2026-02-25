@@ -21,7 +21,7 @@ import qualified MLF.Constraint.Solved as Solved
 import SpecUtil (defaultTraceConfig, emptyConstraint, inferBindParents, lookupNodeMaybe, nodeMapFromList, nodeMapSize, rootedConstraint)
 
 resultConstraint :: SolveResult -> Constraint
-resultConstraint = Solved.solvedConstraint . Solved.fromSolveResult
+resultConstraint = Solved.originalConstraint . Solved.fromSolveResult
 
 resultUnionFind :: SolveResult -> IntMap.IntMap NodeId
 resultUnionFind = Solved.unionFind . Solved.fromSolveResult

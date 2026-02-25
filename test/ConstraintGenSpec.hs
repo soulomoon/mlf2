@@ -12,7 +12,7 @@ import Test.Hspec
 import MLF.Binding.Tree (boundFlexChildren, checkBindingTree, isUnderRigidBinder, nodeKind, NodeKind(..))
 import MLF.Constraint.Presolution (PresolutionResult(..))
 import MLF.Constraint.Solve (solveUnifyWithSnapshot)
-import MLF.Constraint.Solved (fromSolveOutput, solvedConstraint)
+import MLF.Constraint.Solved (fromSolveOutput, originalConstraint)
 import MLF.Frontend.ConstraintGen (AnnExpr (..), generateConstraintsCore)
 import MyLib hiding (normalize, lookupNode)
 import SpecUtil
@@ -739,7 +739,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
             pres <- requireRight (runToPresolutionDefault Set.empty expr)
             solveOut <- requireRight (solveUnifyWithSnapshot defaultTraceConfig (prConstraint pres))
             solved <- requireRight (fromSolveOutput solveOut)
-            let cSolved = solvedConstraint solved
+            let cSolved = originalConstraint solved
                 eliminated = cEliminatedVars (prConstraint pres)
                 schemeGens =
                     [ gnId gen

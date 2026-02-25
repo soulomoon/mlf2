@@ -79,7 +79,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     -- With coercion-only semantics, f's type is inferred (not declared)
                     -- The coercion ensures the RHS has the annotated type.
                     let scopeRoot =
-                            case Binding.bindingRoots (Solved.solvedConstraint res) of
+                            case Binding.bindingRoots (Solved.originalConstraint res) of
                                 [GenRef gid] -> genRef gid
                                 roots -> error ("PipelineSpec: unexpected binding roots " ++ show roots)
                     let generalizeAt = generalizeAtWithBuilder (defaultPlanBuilder defaultTraceConfig) Nothing
@@ -170,7 +170,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 Left err -> expectationFailure err
                 Right solved -> do
                     validateStrict solved
-                    let nodes = cNodes (Solved.solvedConstraint solved)
+                    let nodes = cNodes (Solved.originalConstraint solved)
                     baseNames nodes `shouldContain` [BaseTy "Bool"]
                     noExpNodes nodes
 
@@ -184,7 +184,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 Left err -> expectationFailure err
                 Right res -> do
                     validateStrict res
-                    let nodes = cNodes (Solved.solvedConstraint res)
+                    let nodes = cNodes (Solved.originalConstraint res)
                     baseNames nodes `shouldContain` [BaseTy "Int"]
                     noExpNodes nodes
 
@@ -268,7 +268,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             Left err -> expectationFailure err
             Right res -> do
                 validateStrict res
-                let c = Solved.solvedConstraint res
+                let c = Solved.originalConstraint res
                     nodes = cNodes c
                 baseNames nodes `shouldContain` [BaseTy "Int"]
                 baseNames nodes `shouldContain` [BaseTy "Bool"]
@@ -365,7 +365,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             Left err -> expectationFailure err
             Right res -> do
                 validateStrict res
-                let c = Solved.solvedConstraint res
+                let c = Solved.originalConstraint res
                     nodes = cNodes c
                 baseNames nodes `shouldContain` [BaseTy "Int"]
                 baseNames nodes `shouldContain` [BaseTy "Bool"]
@@ -589,7 +589,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             Left err -> expectationFailure err
             Right res -> do
                 validateStrict res
-                let c = Solved.solvedConstraint res
+                let c = Solved.originalConstraint res
                     nodes = cNodes c
                 baseNames nodes `shouldContain` [BaseTy "Int"]
                 noExpNodes nodes
@@ -608,7 +608,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             Left err -> expectationFailure err
             Right res -> do
                 validateStrict res
-                let c = Solved.solvedConstraint res
+                let c = Solved.originalConstraint res
                     nodes = cNodes c
                 baseNames nodes `shouldContain` [BaseTy "Int"]
                 noExpNodes nodes
@@ -627,7 +627,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             Left err -> expectationFailure err
             Right res -> do
                 validateStrict res
-                let c = Solved.solvedConstraint res
+                let c = Solved.originalConstraint res
                     nodes = cNodes c
                 baseNames nodes `shouldContain` [BaseTy "Int"]
                 noExpNodes nodes

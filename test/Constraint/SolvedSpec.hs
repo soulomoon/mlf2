@@ -223,8 +223,8 @@ spec = describe "MLF.Constraint.Solved" $ do
             IntMap.lookup 0 uf `shouldBe` Just (NodeId 1)
             IntMap.size uf `shouldBe` 1
 
-        it "solvedConstraint returns the raw constraint" $ do
-            let c = solvedConstraint s
+        it "originalConstraint returns the raw constraint" $ do
+            let c = originalConstraint s
             cInstEdges c `shouldBe` [InstEdge (EdgeId 0) (NodeId 2) (NodeId 3)]
 
     describe "Degraded stubs (Phase 1)" $ do

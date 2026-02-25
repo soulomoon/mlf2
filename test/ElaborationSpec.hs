@@ -391,7 +391,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 PipelineArtifacts{ paPresolution = pres, paSolved = solved, paRoot = root } <-
                     runPipelineArtifactsDefault Set.empty e
                 let root' = Elab.chaseRedirects (prRedirects pres) root
-                scopeRoot <- case Binding.bindingRoots (Solved.solvedConstraint solved) of
+                scopeRoot <- case Binding.bindingRoots (Solved.originalConstraint solved) of
                     [rootRef] -> Right rootRef
                     roots -> Left ("Expected single binding root, got " ++ show roots)
                 pure (solved, scopeRoot, root')
@@ -419,7 +419,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
             freeVarsUnder :: Solved.Solved -> NodeId -> Either BindingError IntSet.IntSet
             freeVarsUnder s nid0 =
-                let constraint = Solved.solvedConstraint s
+                let constraint = Solved.originalConstraint s
                     nodes = cNodes constraint
                     canonical = Solved.canonical s
                     go bound visited nid =
@@ -462,7 +462,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 freeVars <- requireRight (freeVarsUnder solved typeRoot)
                 freeVars `shouldSatisfy` (not . IntSet.null)
                 let canonical = Solved.canonical solved
-                    constraint = Solved.solvedConstraint solved
+                    constraint = Solved.originalConstraint solved
                     scopeRootC = case scopeRoot of
                         TypeRef nid -> typeRef (canonical nid)
                         GenRef gid -> GenRef gid
@@ -2242,7 +2242,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 mTrace = IntMap.lookup eid traces
                                 canonical = Solved.canonical solved
                             let scopeRootFor nid = do
-                                    path <- Binding.bindingPathToRoot (Solved.solvedConstraint solved) (typeRef (canonical nid))
+                                    path <- Binding.bindingPathToRoot (Solved.originalConstraint solved) (typeRef (canonical nid))
                                     case drop 1 path of
                                         [] -> Right (typeRef (canonical nid))
                                         rest ->
@@ -2274,7 +2274,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 mTrace = IntMap.lookup eid traces
                                 canonical = Solved.canonical solved
                             let scopeRootFor nid = do
-                                    path <- Binding.bindingPathToRoot (Solved.solvedConstraint solved) (typeRef (canonical nid))
+                                    path <- Binding.bindingPathToRoot (Solved.originalConstraint solved) (typeRef (canonical nid))
                                     case drop 1 path of
                                         [] -> Right (typeRef (canonical nid))
                                         rest ->
