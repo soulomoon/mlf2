@@ -38,7 +38,7 @@ import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Solved (Solved)
 import qualified MLF.Constraint.Solved as Solved
-import MLF.Reify.Core (namedNodes)
+import MLF.Reify.Core (namedNodesSolved)
 
 -- | Compute an instantiation-context path from a root node to a target node.
 --
@@ -63,8 +63,8 @@ contextToNodeBound res root target = do
     if rootC == targetC
         then pure (Just [])
         else do
-            let keys = Order.orderKeysFromRoot (Solved.toSolveResult res) rootC
-            namedSet <- namedNodes (Solved.toSolveResult res)
+            let keys = Order.orderKeysFromRootSolved res rootC
+            namedSet <- namedNodesSolved res
             contextToNodeBoundWithOrderKeys canonical keys c namedSet rootC targetC
 
 contextToNodeBoundWithOrderKeys

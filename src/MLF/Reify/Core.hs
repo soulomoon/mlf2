@@ -12,7 +12,13 @@ module MLF.Reify.Core (
     reifyBoundWithNamesBound,
     reifyBoundWithNamesOnConstraintBound,
     freeVars,
-    namedNodes
+    namedNodes,
+    -- * Solved-based wrappers (bridge — still use toSolveResult internally)
+    reifyTypeWithNamesNoFallbackSolved,
+    reifyTypeWithNamedSetNoFallbackSolved,
+    reifyBoundWithNamesSolved,
+    reifyBoundWithNamesBoundSolved,
+    namedNodesSolved
 ) where
 
 import Control.Monad (foldM, unless)
@@ -841,3 +847,33 @@ freeVars res nid visited
         case lookupBindParent constraint (typeRef (canonical child)) of
             Just (_, BindRigid) -> freeVars res (canonical child) visited'
             _ -> IntSet.singleton (getNodeId (canonical child))
+
+-- ---------------------------------------------------------------------------
+-- Solved-based wrappers (bridge — still use toSolveResult internally;
+-- internals change in M5c)
+-- ---------------------------------------------------------------------------
+
+-- | 'reifyTypeWithNamesNoFallback' accepting 'Solved' directly.
+reifyTypeWithNamesNoFallbackSolved :: Solved.Solved -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
+reifyTypeWithNamesNoFallbackSolved solved subst nid =
+    reifyTypeWithNamesNoFallback (Solved.toSolveResult solved) subst nid
+
+-- | 'reifyTypeWithNamedSetNoFallback' accepting 'Solved' directly.
+reifyTypeWithNamedSetNoFallbackSolved :: Solved.Solved -> IntMap.IntMap String -> IntSet.IntSet -> NodeId -> Either ElabError ElabType
+reifyTypeWithNamedSetNoFallbackSolved solved subst namedSet nid =
+    reifyTypeWithNamedSetNoFallback (Solved.toSolveResult solved) subst namedSet nid
+
+-- | 'reifyBoundWithNames' accepting 'Solved' directly.
+reifyBoundWithNamesSolved :: Solved.Solved -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
+reifyBoundWithNamesSolved solved subst nid =
+    reifyBoundWithNames (Solved.toSolveResult solved) subst nid
+
+-- | 'reifyBoundWithNamesBound' accepting 'Solved' directly.
+reifyBoundWithNamesBoundSolved :: Solved.Solved -> IntMap.IntMap String -> NodeId -> Either ElabError BoundType
+reifyBoundWithNamesBoundSolved solved subst nid =
+    reifyBoundWithNamesBound (Solved.toSolveResult solved) subst nid
+
+-- | 'namedNodes' accepting 'Solved' directly.
+namedNodesSolved :: Solved.Solved -> Either ElabError IntSet.IntSet
+namedNodesSolved solved =
+    namedNodes (Solved.toSolveResult solved)

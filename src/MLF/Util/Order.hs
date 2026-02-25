@@ -17,6 +17,7 @@ module MLF.Util.Order (
     orderKeysFromRootWith,
     orderKeysFromConstraintWith,
     orderKeysFromRoot,
+    orderKeysFromRootSolved,
     orderKeysFromRootRestricted,
     compareNodesByOrderKey,
     sortByOrderKey
@@ -26,6 +27,7 @@ import Data.IntMap.Strict (IntMap)
 import qualified Data.IntSet as IntSet
 
 import MLF.Constraint.Solve (SolveResult)
+import MLF.Constraint.Solved (Solved)
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types.Graph
     ( Constraint(..)
@@ -62,3 +64,8 @@ orderKeysFromConstraintWith canonical constraint root0 mbAllowed =
                 Just TyVar{ tnBound = Just bnd } -> [bnd]
                 _ -> []
     in orderKeysFromRootWithExtra canonical nodes extraChildren root0 mbAllowed
+
+-- | 'orderKeysFromRoot' accepting 'Solved' directly (bridge wrapper).
+orderKeysFromRootSolved :: Solved -> NodeId -> IntMap OrderKey
+orderKeysFromRootSolved solved root0 =
+    orderKeysFromRoot (Solved.toSolveResult solved) root0

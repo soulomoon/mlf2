@@ -44,7 +44,7 @@ import qualified MLF.Elab.Phi.IdentityBridge as IB
 import MLF.Elab.Phi.VSpine (VSpine(..), BodyShape(..), mkVSpine, vSpineNames, vSpineBounds, vSpineIds, vSpineLength, vSpineNull, vSpineNameAt, vSpineBoundAt, vsDeleteAt, vsInsertAt, vsUpdateBound)
 import MLF.Elab.Sigma (bubbleReorderTo, bubbleReorderToFromSpine)
 import MLF.Elab.Types
-import MLF.Reify.Core (reifyBoundWithNames, reifyTypeWithNamedSetNoFallback)
+import MLF.Reify.Core (reifyBoundWithNamesSolved, reifyTypeWithNamedSetNoFallbackSolved)
 import MLF.Reify.TypeOps (alphaEqType, freeTypeVarsList, inlineAliasBoundsWithBy, inlineBaseBoundsType, matchType, substTypeCapture)
 import MLF.Util.Graph (topoSortBy)
 import MLF.Util.Trace (TraceConfig, traceGeneralize)
@@ -260,8 +260,8 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
                     nameFor nid = IntMap.lookup (getNodeId (canonicalNode nid)) subst
                     reifyArg arg =
                         case Solved.lookupVarBound solved (canonicalNode arg) of
-                            Just bnd -> reifyBoundWithNames (Solved.toSolveResult solved) subst bnd
-                            Nothing -> reifyTypeWithNamedSetNoFallback (Solved.toSolveResult solved) subst namedSet' (canonicalNode arg)
+                            Just bnd -> reifyBoundWithNamesSolved solved subst bnd
+                            Nothing -> reifyTypeWithNamedSetNoFallbackSolved solved subst namedSet' (canonicalNode arg)
                     entries =
                         [ (name, ty)
                         | (binder, arg) <- etBinderArgs tr
@@ -335,8 +335,8 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
     reifyTypeArg namedSet' mbBinder arg = do
         let argC = canonicalNode arg
         ty <- case Solved.lookupVarBound solved argC of
-            Just bnd -> reifyTypeWithNamedSetNoFallback (Solved.toSolveResult solved) substForTypes namedSet' bnd
-            Nothing -> reifyTypeWithNamedSetNoFallback (Solved.toSolveResult solved) substForTypes namedSet' argC
+            Just bnd -> reifyTypeWithNamedSetNoFallbackSolved solved substForTypes namedSet' bnd
+            Nothing -> reifyTypeWithNamedSetNoFallbackSolved solved substForTypes namedSet' argC
         let inferredSingleton =
                 case Map.toList (inferredArgMapFromTarget namedSet') of
                     [(_name, inferredTy)] -> Just inferredTy
@@ -409,14 +409,14 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
         TForall _ mb body -> maybe False containsBottomTy mb || containsBottomTy body
 
     reifyBoundType :: NodeId -> Either ElabError ElabType
-    reifyBoundType = reifyBoundWithNames (Solved.toSolveResult solved) substForTypes
+    reifyBoundType = reifyBoundWithNamesSolved solved substForTypes
 
     reifyTargetTypeForInst :: IntSet.IntSet -> NodeId -> Either ElabError ElabType
     reifyTargetTypeForInst namedSet' nid = do
         let nidC = canonicalNode nid
         ty <- case Solved.lookupVarBound solved nidC of
-            Just bnd -> reifyTypeWithNamedSetNoFallback (Solved.toSolveResult solved) substForTypes namedSet' bnd
-            Nothing -> reifyTypeWithNamedSetNoFallback (Solved.toSolveResult solved) substForTypes namedSet' nidC
+            Just bnd -> reifyTypeWithNamedSetNoFallbackSolved solved substForTypes namedSet' bnd
+            Nothing -> reifyTypeWithNamedSetNoFallbackSolved solved substForTypes namedSet' nidC
         pure (inlineBaseBounds ty)
 
     inlineBaseBounds :: ElabType -> ElabType
@@ -440,7 +440,7 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
             canonicalNode
             (cNodes (Solved.solvedConstraint solved))
             (Solved.lookupVarBound solved)
-            (reifyBoundWithNames (Solved.toSolveResult solved) substForTypes)
+            (reifyBoundWithNamesSolved solved substForTypes)
 
     inferInstAppArgs :: ElabScheme -> ElabType -> Maybe [ElabType]
     inferInstAppArgs scheme targetTy =
@@ -1106,13 +1106,13 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
                             case Solved.lookupBindParent solved (typeRef nC) of
                                 Just (TypeRef parent, _) ->
                                     case Solved.lookupNode solved (canonicalNode parent) of
-                                        Just TyForall{} -> reifyTypeWithNamedSetNoFallback (Solved.toSolveResult solved) substForTypes namedSet' nC
+                                        Just TyForall{} -> reifyTypeWithNamedSetNoFallbackSolved solved substForTypes namedSet' nC
                                         _ -> reifyBoundType nC
                                 _ -> reifyBoundType nC
                         let nodeTy = applyInferredArgs namedSet' (inlineAliasBounds nodeTy0)
                         nodeTyBound <-
                             case Solved.lookupVarBound solved (canonicalNode nC) of
-                                Just bnd -> reifyTypeWithNamedSetNoFallback (Solved.toSolveResult solved) substForTypes namedSet' bnd
+                                Just bnd -> reifyTypeWithNamedSetNoFallbackSolved solved substForTypes namedSet' bnd
                                 Nothing -> pure nodeTy
                         let nodeTyBound' = inlineAliasBounds nodeTyBound
 
