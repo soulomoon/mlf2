@@ -24,6 +24,7 @@ module MLF.Constraint.Solved (
     fromSolveResult,
     fromSolveOutput,
     mkSolved,
+    mkTestSolved,
     fromPreRewriteState,
 
     -- * Core queries
@@ -105,6 +106,21 @@ fromSolveResult sr =
     Solved LegacyBackend
         { lbConstraint = srConstraint sr
         , lbUnionFind = srUnionFind sr
+        }
+
+-- | Test helper: construct an EquivBackend from a constraint and
+-- union-find map. Same interface as 'mkSolved' but produces the
+-- EquivBackend. The constraint serves as both original and canonical
+-- (no pre-rewrite snapshot needed for tests with empty union-find).
+mkTestSolved :: Constraint -> IntMap NodeId -> Solved
+mkTestSolved c uf =
+    let canonicalMap = buildCanonicalMap uf c
+        equivClasses = buildEquivClasses canonicalMap c
+    in Solved EquivBackend
+        { ebCanonicalMap = canonicalMap
+        , ebCanonicalConstraint = c
+        , ebEquivClasses = equivClasses
+        , ebOriginalConstraint = c
         }
 
 -- | Build a staged equivalence backend from snapshot-enabled solve output.

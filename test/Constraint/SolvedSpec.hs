@@ -12,7 +12,7 @@ import MLF.Constraint.Solve
     , SolveSnapshot(..)
     , solveUnifyWithSnapshot
     )
-import MLF.Constraint.Solved
+import MLF.Constraint.Solved hiding (mkTestSolved)
 import MLF.Frontend.Syntax
     ( Lit(..)
     , SrcTy(..)
