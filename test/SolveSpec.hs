@@ -8,9 +8,13 @@ import Data.List.NonEmpty (NonEmpty(..))
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Solve
     ( SolveError(..)
+    , SolveOutput(..)
     , SolveResult
+    , SolveSnapshot(..)
     , frWith
+    , rewriteConstraintWithUF
     , solveUnify
+    , solveUnifyWithSnapshot
     , validateSolvedGraphStrict
     )
 import qualified MLF.Constraint.Solved as Solved
@@ -27,6 +31,39 @@ mkSolveResult c uf = Solved.toSolveResult (Solved.mkSolved c uf)
 
 spec :: Spec
 spec = describe "Phase 5 -- Solve" $ do
+    describe "Snapshot output" $ do
+        it "rewrites pre-rewrite snapshot to the same canonical constraint" $ do
+            let var0 = TyVar { tnId = NodeId 0, tnBound = Nothing }
+                base1 = TyBase (NodeId 1) (BaseTy "Int")
+                bool3 = TyBase (NodeId 3) (BaseTy "Bool")
+                arrow2 = TyArrow (NodeId 2) (NodeId 0) (NodeId 3)
+                nodes = nodeMapFromList
+                    [ (0, var0)
+                    , (1, base1)
+                    , (2, arrow2)
+                    , (3, bool3)
+                    ]
+                constraint = rootedConstraint $ emptyConstraint
+                    { cNodes = nodes
+                    , cBindParents = inferBindParents nodes
+                    , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 1)]
+                    , cInstEdges = [InstEdge (EdgeId 0) (NodeId 2) (NodeId 0)]
+                    }
+            case solveUnifyWithSnapshot defaultTraceConfig constraint of
+                Left err -> expectationFailure $ "Unexpected solve error: " ++ show err
+                Right out -> do
+                    let snapshot = soSnapshot out
+                        rewritten =
+                            rewriteConstraintWithUF
+                                (snapUnionFind snapshot)
+                                (snapPreRewriteConstraint snapshot)
+                        solved = resultConstraint (soResult out)
+                    cUnifyEdges (snapPreRewriteConstraint snapshot) `shouldBe` []
+                    lookupNodeMaybe (cNodes (snapPreRewriteConstraint snapshot)) (NodeId 0)
+                        `shouldBe` Just var0
+                    lookupNodeMaybe (cNodes solved) (NodeId 0) `shouldBe` Nothing
+                    rewritten `shouldBe` solved
+
     describe "Variables and structure" $ do
         it "merges a variable with a base type and rewrites to the canonical node" $ do
             let var = TyVar { tnId = NodeId 0, tnBound = Nothing }

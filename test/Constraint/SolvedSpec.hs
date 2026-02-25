@@ -3,6 +3,11 @@ module Constraint.SolvedSpec (spec) where
 import Test.Hspec
 import qualified Data.IntMap.Strict as IntMap
 
+import MLF.Constraint.Solve
+    ( SolveOutput(..)
+    , SolveSnapshot(..)
+    , solveUnifyWithSnapshot
+    )
 import MLF.Constraint.Solved
 import MLF.Constraint.Types.Graph
     ( BaseTy(..)
@@ -14,6 +19,7 @@ import MLF.Constraint.Types.Graph
     , InstEdge(..)
     , NodeId(..)
     , TyNode(..)
+    , UnifyEdge(..)
     , fromListGen
     , nodeRefKey
     , toListGen
@@ -22,7 +28,10 @@ import MLF.Constraint.Types.Graph
 
 import SpecUtil
     ( emptyConstraint
+    , defaultTraceConfig
+    , inferBindParents
     , nodeMapFromList
+    , rootedConstraint
     )
 
 -- | Build a small solved graph by hand:
@@ -141,3 +150,44 @@ spec = describe "MLF.Constraint.Solved" $ do
                 c = emptyConstraint { cNodes = nodes }
                 s' = mkSolved c IntMap.empty
             lookupVarBound s' (NodeId 10) `shouldBe` Just (NodeId 11)
+
+    describe "fromPreRewriteState" $ do
+        it "matches legacy core queries for solver snapshots" $ do
+            let var0 = TyVar { tnId = NodeId 0, tnBound = Nothing }
+                base1 = TyBase (NodeId 1) (BaseTy "Int")
+                arrow2 = TyArrow (NodeId 2) (NodeId 0) (NodeId 3)
+                bool3 = TyBase (NodeId 3) (BaseTy "Bool")
+                var4 = TyVar { tnId = NodeId 4, tnBound = Just (NodeId 0) }
+                nodes = nodeMapFromList
+                    [ (0, var0)
+                    , (1, base1)
+                    , (2, arrow2)
+                    , (3, bool3)
+                    , (4, var4)
+                    ]
+                constraint = rootedConstraint $ emptyConstraint
+                    { cNodes = nodes
+                    , cBindParents = inferBindParents nodes
+                    , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 1)]
+                    , cInstEdges =
+                        [ InstEdge (EdgeId 0) (NodeId 2) (NodeId 0)
+                        , InstEdge (EdgeId 1) (NodeId 4) (NodeId 3)
+                        ]
+                    }
+            case solveUnifyWithSnapshot defaultTraceConfig constraint of
+                Left err -> expectationFailure $ "Unexpected solve error: " ++ show err
+                Right out -> do
+                    let snapshot = soSnapshot out
+                        legacy = fromSolveResult (soResult out)
+                        staged =
+                            fromPreRewriteState
+                                (snapUnionFind snapshot)
+                                (snapPreRewriteConstraint snapshot)
+                        ids = [NodeId 0, NodeId 1, NodeId 2, NodeId 3, NodeId 4, NodeId 99]
+                    map (canonical staged) ids `shouldBe` map (canonical legacy) ids
+                    map (lookupNode staged) ids `shouldBe` map (lookupNode legacy) ids
+                    map (lookupVarBound staged) ids `shouldBe` map (lookupVarBound legacy) ids
+                    instEdges staged `shouldBe` instEdges legacy
+                    bindParents staged `shouldBe` bindParents legacy
+                    toListGen (genNodes staged) `shouldBe` toListGen (genNodes legacy)
+                    allNodes staged `shouldBe` allNodes legacy

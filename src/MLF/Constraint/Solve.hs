@@ -131,6 +131,7 @@ module MLF.Constraint.Solve (
     solveUnifyWithSnapshot,
     validateSolvedGraph,
     validateSolvedGraphStrict,
+    rewriteConstraintWithUF,
     frWith,
     MonadSolve(..),
     SolveM
@@ -269,7 +270,7 @@ solveUnifyWithSnapshot traceCfg c0 = do
             final <- execStateT (loop >> batchHarmonize) st
             let preRewrite = (suConstraint final) { cUnifyEdges = [] }
                 uf = suUnionFind final
-                c' = applyUFConstraint uf preRewrite
+                c' = rewriteConstraintWithUF uf preRewrite
             (c'', elimSubst) <- case rewriteEliminatedBinders c' of
                 Left err -> Left (BindingTreeError err)
                 Right out -> Right out
@@ -591,6 +592,9 @@ solveUnifyWithSnapshot traceCfg c0 = do
 
 -- | Rewrite every node/edge to UF representatives and collapse duplicates,
 -- preferring structured nodes when both sides share an id.
+rewriteConstraintWithUF :: IntMap NodeId -> Constraint -> Constraint
+rewriteConstraintWithUF = applyUFConstraint
+
 applyUFConstraint :: IntMap NodeId -> Constraint -> Constraint
 applyUFConstraint uf c =
     let canonical = frWith uf
