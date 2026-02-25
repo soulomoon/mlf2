@@ -54,11 +54,12 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
 import MLF.Constraint.Solve
-    ( SolveOutput(..)
+    ( SolveError
+    , SolveOutput(..)
     , SolveResult
     , SolveSnapshot(..)
     , frWith
-    , rewriteConstraintWithUF
+    , solveResultFromSnapshot
     )
 import MLF.Constraint.Solve.Internal (SolveResult(..))
 import MLF.Constraint.Types.Graph
@@ -107,19 +108,12 @@ fromSolveResult sr =
         }
 
 -- | Build a staged equivalence backend from snapshot-enabled solve output.
-fromSolveOutput :: SolveOutput -> Solved
+fromSolveOutput :: SolveOutput -> Either SolveError Solved
 fromSolveOutput out =
     let snapshot = soSnapshot out
-        result = soResult out
-        original = snapPreRewriteConstraint snapshot
-        canonicalMap = buildCanonicalMap (srUnionFind result) original
-        equivClasses = buildEquivClasses canonicalMap original
-    in Solved EquivBackend
-        { ebCanonicalMap = canonicalMap
-        , ebCanonicalConstraint = srConstraint result
-        , ebEquivClasses = equivClasses
-        , ebOriginalConstraint = original
-        }
+    in fromPreRewriteStateStrict
+        (snapUnionFind snapshot)
+        (snapPreRewriteConstraint snapshot)
 
 -- | Construct a 'Solved' directly from a constraint and union-find map.
 -- This avoids the need to import 'SolveResult(..)' in test code.
@@ -134,13 +128,23 @@ mkSolved c uf =
 --
 -- The input pair should come from solve after unification has converged:
 -- a pre-rewrite constraint and the final union-find map.
-fromPreRewriteState :: IntMap NodeId -> Constraint -> Solved
-fromPreRewriteState uf preRewrite =
-    let canonicalMap = buildCanonicalMap uf preRewrite
-        -- Keep snapshot canonicalization in lock-step with solve output rewriting.
-        canonicalConstraint = rewriteConstraintWithUF uf preRewrite
+fromPreRewriteState :: IntMap NodeId -> Constraint -> Either SolveError Solved
+fromPreRewriteState = fromPreRewriteStateStrict
+
+-- | Strict snapshot replay used by production solve output conversion.
+fromPreRewriteStateStrict :: IntMap NodeId -> Constraint -> Either SolveError Solved
+fromPreRewriteStateStrict uf preRewrite = do
+    let snapshot =
+            SolveSnapshot
+                { snapUnionFind = uf
+                , snapPreRewriteConstraint = preRewrite
+                }
+    replayed <- solveResultFromSnapshot snapshot
+    let
+        canonicalMap = buildCanonicalMap (srUnionFind replayed) preRewrite
+        canonicalConstraint = srConstraint replayed
         equivClasses = buildEquivClasses canonicalMap preRewrite
-    in Solved EquivBackend
+    pure $ Solved EquivBackend
         { ebCanonicalMap = canonicalMap
         , ebCanonicalConstraint = canonicalConstraint
         , ebEquivClasses = equivClasses

@@ -208,11 +208,12 @@ runPipelineArtifactsDefault poly expr = do
     (ConstraintResult{ crAnnotated = ann, crRoot = root }, c1, pres) <-
         runToPresolutionDetailedDefault poly expr
     solveOut <- firstShowE (solveUnifyWithSnapshot defaultTraceConfig (prConstraint pres))
+    solved <- firstShowE (Solved.fromSolveOutput solveOut)
     pure
         PipelineArtifacts
             { paConstraintNorm = c1
             , paPresolution = pres
-            , paSolved = Solved.fromSolveOutput solveOut
+            , paSolved = solved
             , paAnnotated = ann
             , paRoot = root
             }
@@ -220,7 +221,8 @@ runPipelineArtifactsDefault poly expr = do
 runToSolvedDefault :: PolySyms -> SurfaceExpr -> Either String Solved.Solved
 runToSolvedDefault poly expr = do
     pres <- runToPresolutionDefault poly expr
-    fmap Solved.fromSolveOutput (firstShowE (solveUnifyWithSnapshot defaultTraceConfig (prConstraint pres)))
+    solveOut <- firstShowE (solveUnifyWithSnapshot defaultTraceConfig (prConstraint pres))
+    firstShowE (Solved.fromSolveOutput solveOut)
 
 inferBindParents :: NodeMap TyNode -> BindParents
 inferBindParents nodes =

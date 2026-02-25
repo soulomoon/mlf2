@@ -31,6 +31,7 @@ import MLF.Constraint.Types.Graph
     , TyNode(..)
     , UnifyEdge(..)
     , fromListGen
+    , genRef
     , nodeRefKey
     , toListGen
     , typeRef
@@ -41,6 +42,7 @@ import SpecUtil
     , defaultTraceConfig
     , inferBindParents
     , nodeMapFromList
+    , requireRight
     , runToPresolutionDefault
     , rootedConstraint
     )
@@ -105,9 +107,11 @@ snapshotLegacyAndEquiv =
     in case solveUnifyWithSnapshot defaultTraceConfig constraint of
         Left err -> Left ("Unexpected solve error: " ++ show err)
         Right out ->
-            let legacy = fromSolveResult (soResult out)
-                equiv = fromSolveOutput out
-            in Right (legacy, equiv, ids)
+            case fromSolveOutput out of
+                Left err -> Left ("Unexpected solved conversion error: " ++ show err)
+                Right equiv ->
+                    let legacy = fromSolveResult (soResult out)
+                    in Right (legacy, equiv, ids)
 
 spec :: Spec
 spec = describe "MLF.Constraint.Solved" $ do
@@ -162,8 +166,8 @@ spec = describe "MLF.Constraint.Solved" $ do
                                         ++ show err
                                     )
                             Right out -> do
+                                equiv <- requireRight (fromSolveOutput out)
                                 let legacy = fromSolveResult (soResult out)
-                                    equiv = fromSolveOutput out
                                     ids = collectNodeIds legacy equiv
                                 map (canonical legacy) ids `shouldBe` map (canonical equiv) ids
                                 map (lookupNode legacy) ids `shouldBe` map (lookupNode equiv) ids
@@ -262,6 +266,7 @@ spec = describe "MLF.Constraint.Solved" $ do
             intNode = TyBase intNodeId (BaseTy "Int")
             alphaBody = TyVar { tnId = alphaBodyId, tnBound = Nothing }
             parentNode = TyArrow parentNodeId alphaNodeId intNodeId
+            rootGen = GenNode (GenNodeId 0) [parentNodeId]
             preRewriteNodes =
                 nodeMapFromList
                     [ (10, alphaNode)
@@ -275,25 +280,31 @@ spec = describe "MLF.Constraint.Solved" $ do
                     [ (nodeRefKey (typeRef alphaNodeId), (typeRef parentNodeId, BindFlex))
                     , (nodeRefKey (typeRef intNodeId), (typeRef parentNodeId, BindFlex))
                     , (nodeRefKey (typeRef alphaBodyId), (typeRef alphaNodeId, BindFlex))
+                    , (nodeRefKey (typeRef parentNodeId), (genRef (GenNodeId 0), BindFlex))
                     ]
+                , cGenNodes = fromListGen [(GenNodeId 0, rootGen)]
                 }
             uf = IntMap.fromList [(10, intNodeId)]
-            equiv = fromPreRewriteState uf preRewriteConstraint
+            equivE = fromPreRewriteState uf preRewriteConstraint
 
         it "classMembers returns all original nodes in class" $ do
+            equiv <- requireRight equivE
             classMembers equiv intNodeId `shouldMatchList` [alphaNodeId, intNodeId]
             classMembers equiv alphaNodeId `shouldMatchList` [alphaNodeId, intNodeId]
 
         it "wasOriginalBinder returns True for unified-away binder" $ do
+            equiv <- requireRight equivE
             wasOriginalBinder equiv intNodeId `shouldBe` True
             wasOriginalBinder equiv alphaNodeId `shouldBe` True
             wasOriginalBinder equiv alphaBodyId `shouldBe` False
 
         it "originalNode returns pre-solving node data" $ do
+            equiv <- requireRight equivE
             originalNode equiv alphaNodeId `shouldBe` Just alphaNode
             originalNode equiv intNodeId `shouldBe` Just intNode
 
         it "originalBindParent preserves pre-solving binding tree" $ do
+            equiv <- requireRight equivE
             originalBindParent equiv (typeRef alphaNodeId)
                 `shouldBe` Just (typeRef parentNodeId, BindFlex)
             originalBindParent equiv (typeRef alphaBodyId)
@@ -315,12 +326,44 @@ spec = describe "MLF.Constraint.Solved" $ do
             case solveUnifyWithSnapshot defaultTraceConfig (rootedConstraint emptyConstraint) of
                 Left err -> expectationFailure ("Unexpected solve error: " ++ show err)
                 Right out ->
-                    let snapshot = soSnapshot out
-                        explicit =
+                    do
+                        let snapshot = soSnapshot out
+                        explicit <- requireRight $
                             fromPreRewriteState
                                 (snapUnionFind snapshot)
                                 (snapPreRewriteConstraint snapshot)
-                    in fromSolveOutput out `shouldBe` explicit
+                        actual <- requireRight (fromSolveOutput out)
+                        actual `shouldBe` explicit
+
+        it "fromSolveOutput derives canonical constraint from snapshot, not soResult payload" $ do
+            let var0 = TyVar { tnId = NodeId 0, tnBound = Nothing }
+                base1 = TyBase (NodeId 1) (BaseTy "Int")
+                outputRootGen = GenNode (GenNodeId 0) [NodeId 1]
+                preRewriteForOutput = emptyConstraint
+                    { cNodes = nodeMapFromList [(0, var0), (1, base1)]
+                    , cBindParents =
+                        IntMap.fromList
+                            [ (nodeRefKey (typeRef (NodeId 0)), (genRef (GenNodeId 0), BindFlex))
+                            , (nodeRefKey (typeRef (NodeId 1)), (genRef (GenNodeId 0), BindFlex))
+                            ]
+                    , cGenNodes = fromListGen [(GenNodeId 0, outputRootGen)]
+                    }
+                snapshotUf = IntMap.fromList [(0, NodeId 1)]
+                poisonedUf = IntMap.fromList [(0, NodeId 0)]
+                poisonedConstraint = emptyConstraint
+                    { cNodes = nodeMapFromList [(99, TyBase (NodeId 99) (BaseTy "Poison"))] }
+                out =
+                    SolveOutput
+                        { soResult = toSolveResult (mkSolved poisonedConstraint poisonedUf)
+                        , soSnapshot =
+                            SolveSnapshot
+                                { snapUnionFind = snapshotUf
+                                , snapPreRewriteConstraint = preRewriteForOutput
+                                }
+                        }
+            explicit <- requireRight (fromPreRewriteState snapshotUf preRewriteForOutput)
+            actual <- requireRight (fromSolveOutput out)
+            actual `shouldBe` explicit
 
         it "keeps other legacy snapshot queries in sync" $ do
             case snapshotLegacyAndEquiv of

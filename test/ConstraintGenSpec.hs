@@ -737,7 +737,8 @@ spec = describe "Phase 1 — Constraint generation" $ do
                     ELet "c" (EAnn rhs schemeTy) (EAnn (EVar "c") ann)
 
             pres <- requireRight (runToPresolutionDefault Set.empty expr)
-            solved <- requireRight (fmap fromSolveOutput (solveUnifyWithSnapshot defaultTraceConfig (prConstraint pres)))
+            solveOut <- requireRight (solveUnifyWithSnapshot defaultTraceConfig (prConstraint pres))
+            solved <- requireRight (fromSolveOutput solveOut)
             let cSolved = solvedConstraint solved
                 eliminated = cEliminatedVars (prConstraint pres)
                 schemeGens =

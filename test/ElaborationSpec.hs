@@ -554,7 +554,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , cEliminatedVars = IntSet.singleton (getNodeId v)
                         }
 
-            solved <- Solved.fromSolveOutput <$> requireRight (solveUnifyWithSnapshot defaultTraceConfig c)
+            solveOut <- requireRight (solveUnifyWithSnapshot defaultTraceConfig c)
+            solved <- requireRight (Solved.fromSolveOutput solveOut)
             (sch, _subst) <- requireRight (generalizeAt solved (typeRef forallNode) forallNode)
             sch `shouldBe`
                 Elab.schemeFromType (Elab.TArrow Elab.TBottom Elab.TBottom)
@@ -581,7 +582,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , cEliminatedVars = IntSet.singleton (getNodeId v)
                         }
 
-            solved <- Solved.fromSolveOutput <$> requireRight (solveUnifyWithSnapshot defaultTraceConfig c)
+            solveOut <- requireRight (solveUnifyWithSnapshot defaultTraceConfig c)
+            solved <- requireRight (Solved.fromSolveOutput solveOut)
             (sch, _subst) <- requireRight (generalizeAt solved (typeRef forallNode) forallNode)
             Elab.prettyDisplay sch `shouldBe` "∀(a ⩾ ⊥) a -> a"
 
@@ -606,7 +608,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 ]
                         }
 
-            solved <- Solved.fromSolveOutput <$> requireRight (solveUnifyWithSnapshot defaultTraceConfig c)
+            solveOut <- requireRight (solveUnifyWithSnapshot defaultTraceConfig c)
+            solved <- requireRight (Solved.fromSolveOutput solveOut)
             case generalizeAt solved (typeRef forallNode) forallNode of
                 Left err ->
                     show err `shouldSatisfy` isInfixOf "alias bounds survived"
