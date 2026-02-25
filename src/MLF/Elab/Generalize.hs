@@ -271,6 +271,7 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
             } = plan
         GeneralizeEnv
             { geConstraint = constraint
+            , geOriginalConstraint = originalConstraint
             , geNodes = nodes
             , geCanonical = canonical
             , geBindParentsGa = mbBindParentsGa
@@ -399,12 +400,19 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
                                 ]
                         constraintAlias =
                             constraint { cNodes = NodeMap (IntMap.union aliasNodes nodes) }
+                        originalNodes =
+                            IntMap.fromList
+                                [ (getNodeId nid, node)
+                                | (nid, node) <- toListNode (cNodes originalConstraint)
+                                ]
+                        originalConstraintAlias =
+                            originalConstraint { cNodes = NodeMap (IntMap.union aliasNodes originalNodes) }
                         substAlias =
                             IntMap.union (IntMap.fromList aliasEntries) substBaseRigid
                         resAlias =
                             Solved.rebuildWithConstraint resForReify constraintAlias
-                    ty <- reifyWith bodyRoot substAlias constraintAlias resAlias
-                    inlineRigid substAlias constraintAlias resAlias ty
+                    ty <- reifyWithOrig originalConstraintAlias bodyRoot substAlias constraintAlias resAlias
+                    inlineRigidOrig originalConstraintAlias substAlias constraintAlias resAlias ty
           where
             -- Basic setup
             bodyRootC = canonical bodyRoot
@@ -424,13 +432,21 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
                     _ -> False
 
             -- Reification helpers
-            reifyWith substRoot substMap constraintArg resArg
-                | useConstraintReify = reifyTypeWithNamesNoFallbackOnConstraint constraintArg substMap substRoot
+            -- Note [Identity canonical for scheme reification]:
+            -- The OnConstraint path uses mkTestSolved with empty union-find
+            -- (identity canonical). We pass the original constraint so that
+            -- solved-away binders are preserved in scheme types.
+            reifyWithOrig origC substRoot substMap _constraintArg resArg
+                | useConstraintReify = reifyTypeWithNamesNoFallbackOnConstraint origC substMap substRoot
                 | otherwise = reifyTypeWithNamesNoFallback resArg substMap substRoot
 
-            reifyBoundWith substMap constraintArg resArg bndRoot
-                | useConstraintReify = reifyBoundWithNamesOnConstraint constraintArg substMap bndRoot
+            reifyBoundWithOrig origC substMap _constraintArg resArg bndRoot
+                | useConstraintReify = reifyBoundWithNamesOnConstraint origC substMap bndRoot
                 | otherwise = reifyBoundWithNames resArg substMap bndRoot
+
+            -- Convenience wrappers using the base original constraint
+            reifyWith = reifyWithOrig originalConstraint
+            reifyBoundWith = reifyBoundWithOrig originalConstraint
 
             -- Rigid type handling
             isReachableRigidVar nid =
@@ -486,7 +502,9 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
                 ty <- reifyWith root substMap constraint resForReify
                 inlineRigid substMap constraint resForReify ty
 
-            inlineRigid substMap constraintArg resArg ty
+            inlineRigid = inlineRigidOrig originalConstraint
+
+            inlineRigidOrig origC substMap constraintArg resArg ty
                 | null rigidNodeKeys = pure ty
                 | otherwise = do
                     let computeRigidBound key = do
@@ -502,7 +520,7 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
                             case lookupBound nid of
                                 Nothing -> pure (name, fallbackTy)
                                 Just bnd -> do
-                                    case reifyBoundWith substMap constraintArg resArg (canonical bnd) of
+                                    case reifyBoundWithOrig origC substMap constraintArg resArg (canonical bnd) of
                                         Left (MissingNode _) -> pure (name, fallbackTy)
                                         Left err -> Left err
                                         Right bndTy -> pure (name, bndTy)
@@ -628,7 +646,7 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
             fallbackSchemeType
                 | scopeHasStructuralScheme && null bindings =
                     reifyTypeWithNamesNoFallbackOnConstraint
-                        constraint
+                        originalConstraint
                         solvedSubstForReify
                         solvedTypeRootForReify
                 | Just _ <- mbBindParentsGa = reifyTypeWithSolvedBinders

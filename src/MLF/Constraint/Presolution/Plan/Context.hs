@@ -32,6 +32,10 @@ data GaBindParents = GaBindParents
 
 data GeneralizeEnv = GeneralizeEnv
     { geConstraint :: Constraint
+    , geOriginalConstraint :: Constraint
+    -- ^ The original (pre-solving) constraint with all binders intact.
+    -- Used by OnConstraint reification paths so that solved-away binders
+    -- are preserved in scheme types.
     , geNodes :: IntMap.IntMap TyNode
     , geCanonical :: NodeId -> NodeId
     , geCanonKey :: NodeId -> Int

@@ -785,6 +785,7 @@ mkGeneralizeEnv traceCfg mbBindParentsGa solved =
         isBaseLikeKey key = maybe False isBaseLikeNode (lookupNode key)
     in GeneralizeEnv
         { geConstraint = constraint
+        , geOriginalConstraint = Solved.originalConstraint solved
         , geNodes = nodes
         , geCanonical = canonical
         , geCanonKey = canonKey
