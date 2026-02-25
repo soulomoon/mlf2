@@ -127,7 +127,7 @@ runPipelineElabWith traceCfg genConstraints expr = do
             let scopeOverrides =
                     letScopeOverrides
                         c1
-                        (Solved.solvedConstraint solvedForGenView)
+                        (Solved.originalConstraint solvedForGenView)
                         solvedClean
                         (prRedirects pres)
                         annCanon

@@ -44,7 +44,7 @@ computeResultTypeFallback ctx annCanon ann = do
 
     let schemeRootSet =
             let allGenNodes =
-                    MLF.Constraint.NodeAccess.allGenNodes (Solved.solvedConstraint solvedForGenView)
+                    MLF.Constraint.NodeAccess.allGenNodes (Solved.originalConstraint solvedForGenView)
             in IntSet.fromList
                 [ getNodeId (canonical root)
                 | gen <- allGenNodes

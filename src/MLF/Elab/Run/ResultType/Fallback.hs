@@ -188,7 +188,7 @@ computeResultTypeFallbackCore ctx annCanon ann = do
     let schemeRootSet =
             IntSet.fromList
                 [ getNodeId (canonical root)
-                | gen <- NodeAccess.allGenNodes (Solved.solvedConstraint solvedForGenView)
+                | gen <- NodeAccess.allGenNodes (Solved.originalConstraint solvedForGenView)
                 , root <- gnSchemes gen
                 ]
         isSchemeRoot nid =

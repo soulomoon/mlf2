@@ -55,7 +55,7 @@ import MLF.Reify.Core (namedNodesSolved)
 -- Returns 'Nothing' when @target@ is not transitively bound to @root@.
 contextToNodeBound :: Solved -> NodeId -> NodeId -> Either ElabError (Maybe [ContextStep])
 contextToNodeBound res root target = do
-    let c = Solved.solvedConstraint res
+    let c = Solved.originalConstraint res
         canonical = Solved.canonical res
         rootC = canonical root
         targetC = canonical target

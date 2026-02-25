@@ -96,7 +96,7 @@ computeResultTypeFromAnn ctx inner innerPre annNodeId eid = do
         scopeRootNodePost = annNode inner
     scopeRootPre <- bindingToElab (resolveCanonicalScope c1 solvedForGen redirects scopeRootNodePre)
     let scopeRootPost =
-            case bindingScopeRef (Solved.solvedConstraint solvedForGenView) scopeRootNodePost of
+            case bindingScopeRef (Solved.originalConstraint solvedForGenView) scopeRootNodePost of
                 Right ref -> canonicalizeScopeRef solvedForGen redirects ref
                 Left _ -> scopeRootPre
         scopeRoot = scopeRootPre
@@ -289,7 +289,7 @@ computeResultTypeFromAnn ctx inner innerPre annNodeId eid = do
                     -- re-deriving a type solely from the witness-derived instantiation.
                     annScopeRoot <-
                         bindingToElab
-                            (resolveCanonicalScope (Solved.solvedConstraint solvedForGenView) solvedForGen redirects annTargetNode)
+                            (resolveCanonicalScope (Solved.originalConstraint solvedForGenView) solvedForGen redirects annTargetNode)
                     (annSch, _substAnn) <-
                         generalizeWithPlan planBuilder bindParentsGa solvedForGen annScopeRoot annTargetNode
                     pure (simplifyAnnotationType (schemeToType annSch))
@@ -300,7 +300,7 @@ computeResultTypeFromAnn ctx inner innerPre annNodeId eid = do
                     else do
                         annScopeRoot <-
                             bindingToElab
-                                (resolveCanonicalScope (Solved.solvedConstraint solvedForGenView) solvedForGen redirects annTargetNode)
+                                (resolveCanonicalScope (Solved.originalConstraint solvedForGenView) solvedForGen redirects annTargetNode)
                         (annSch, _substAnn) <-
                             generalizeWithPlan planBuilder bindParentsGa solvedForGen annScopeRoot annTargetNode
                         pure (simplifyAnnotationType (schemeToType annSch))
