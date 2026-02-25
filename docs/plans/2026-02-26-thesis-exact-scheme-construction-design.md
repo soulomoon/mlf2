@@ -211,26 +211,44 @@ Once scheme types are reified from the original constraint:
 
 ## Milestones
 
-### M5a: Original constraint as primary in Solved.hs
+### M5a: Remove LegacyBackend and escape hatches
 
-Migrate core Solved.hs queries to read from `ebOriginalConstraint`:
+Remove LegacyBackend first so all subsequent changes touch one code
+path. The EquivBackend is already the runtime backend (Milestone 4).
+
+1. Provide `mkTestSolved` helper that constructs EquivBackend from
+   a constraint and union-find map (same interface as `mkSolved`)
+2. Migrate all test code from `mkSolved`/`fromSolveResult` to new helpers
+3. Migrate production callers of `unionFind` to `Solved.canonical`
+4. Migrate production callers of `solvedConstraint` to Solved queries
+5. Remove `LegacyBackend` constructor from `SolvedBackend`
+6. Remove `fromSolveResult`, `mkSolved`
+7. Remove `toSolveResult`, `unionFind`, `solvedConstraint` escape hatches
+
+Test: full suite. No LegacyBackend references remain.
+
+### M5b: Original constraint as primary in Solved.hs
+
+With only EquivBackend remaining, migrate core queries to read from
+`ebOriginalConstraint`:
 
 1. Add `originalConstraint :: Solved -> Constraint` export
-2. Switch `lookupNode` EquivBackend branch to use `ebOriginalConstraint`
+2. Switch `lookupNode` to use `ebOriginalConstraint`
    (look up by raw nid, not canonical — canonical is for equivalence only)
-3. Switch `allNodes` EquivBackend branch to use `ebOriginalConstraint`
-4. Switch `lookupBindParent` EquivBackend branch to use `ebOriginalConstraint`
-5. Switch `bindParents` EquivBackend branch to use `ebOriginalConstraint`
-6. Switch `instEdges` EquivBackend branch to use `ebOriginalConstraint`
-7. Switch `genNodes` EquivBackend branch to use `ebOriginalConstraint`
-8. Switch `lookupVarBound` EquivBackend branch to use `ebOriginalConstraint`
+3. Switch `allNodes` to use `ebOriginalConstraint`
+4. Switch `lookupBindParent` to use `ebOriginalConstraint`
+5. Switch `bindParents` to use `ebOriginalConstraint`
+6. Switch `instEdges` to use `ebOriginalConstraint`
+7. Switch `genNodes` to use `ebOriginalConstraint`
+8. Switch `lookupVarBound` to use `ebOriginalConstraint`
 
-LegacyBackend branches remain unchanged (they have no original constraint).
+The `canonical` function remains unchanged — it provides equivalence
+class resolution.
 
-Test: full suite must pass. Expect some failures from callers that
-assumed canonical-view semantics — fix those callers.
+Test: full suite. Expect some failures from callers that assumed
+canonical-view semantics — fix those callers.
 
-### M5b: Original constraint in Generalize.hs and Reify
+### M5c: Original constraint in Generalize.hs and Reify
 
 1. Change the constraint passed to the reification environment from
    `solvedConstraint solved` to `originalConstraint solved`
@@ -240,19 +258,7 @@ assumed canonical-view semantics — fix those callers.
 4. Fix any test expectations that assumed solved-away binders were absent
 
 Test: full suite. Scheme types should now include all original quantifiers.
-
-### M5c: Remove LegacyBackend and escape hatches
-
-1. Remove `LegacyBackend` constructor from `SolvedBackend`
-2. Remove `fromSolveResult`, `mkSolved` (or rewrite to produce EquivBackend)
-3. Remove `toSolveResult`, `unionFind`, `solvedConstraint` escape hatches
-4. Provide `mkTestSolved` helper for tests that need minimal EquivBackend
-5. Migrate all test code from `mkSolved`/`fromSolveResult` to new helpers
-6. Migrate production callers of `unionFind` to `Solved.canonical`
-7. Migrate production callers of `solvedConstraint` to `originalConstraint`
-   or specific Solved queries
-
-Test: full suite. No LegacyBackend references remain.
+VSpine gets slots for solved-away binders. OpWeaken finds its target.
 
 ### M5d: Remove deviation and update documentation
 
@@ -264,18 +270,28 @@ Test: full suite. No LegacyBackend references remain.
 
 ## Risk Register
 
-### R1: lookupNode semantics change breaks phi translation
+### R1: Test churn from LegacyBackend removal (M5a)
+
+Many tests use `mkSolved emptyConstraint uf`. Removing LegacyBackend
+requires migrating all of them to EquivBackend-based helpers.
+
+Mitigation: Provide `mkTestSolved` that constructs a minimal
+EquivBackend from a constraint and union-find map (same interface,
+different backend). Migration is mechanical. Do this first (M5a)
+so all subsequent work touches one code path.
+
+### R2: lookupNode semantics change breaks phi translation (M5b)
 
 Phi translation currently calls `Solved.lookupNode` expecting the
 canonical (post-solve) view. Switching to original constraint means
 lookups return the pre-solve node. If phi translation relies on
 solved-away merges being visible in the node structure, it will break.
 
-Mitigation: M5a runs the full test suite after each query migration.
+Mitigation: M5b runs the full test suite after each query migration.
 If phi translation breaks, add `lookupCanonicalNode` that preserves
 the old behavior for specific callers.
 
-### R2: Binding tree queries return stale parents
+### R3: Binding tree queries return stale parents (M5b)
 
 The original constraint's binding tree may have entries that were
 invalidated by solving (e.g., a binder whose parent was merged).
@@ -285,16 +301,7 @@ Mitigation: The canonical function resolves equivalences. Callers
 that need "who is the effective parent" should canonicalize the
 parent after looking it up. This is the thesis model.
 
-### R3: Test churn from LegacyBackend removal
-
-Many tests use `mkSolved emptyConstraint uf`. Removing LegacyBackend
-requires migrating all of them to EquivBackend-based helpers.
-
-Mitigation: Provide `mkTestSolved` that constructs a minimal
-EquivBackend from a constraint and union-find map (same interface,
-different backend). Migration is mechanical.
-
-### R4: finalizeScheme drops solved-away binders
+### R4: finalizeScheme drops solved-away binders (M5c)
 
 If `finalizeScheme` filters binders by whether they appear as
 `TForall` in the reified type, and the original constraint has
@@ -304,4 +311,4 @@ link, the binder variable won't appear in the body.
 
 Mitigation: The reifier must use the original constraint for
 structure (binder is `TForall`) and canonical only for equivalence
-resolution when rendering type bodies. Verify in M5b.
+resolution when rendering type bodies. Verify in M5c.
