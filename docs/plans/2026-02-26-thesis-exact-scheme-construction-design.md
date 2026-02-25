@@ -2,13 +2,14 @@
 
 ## Goal
 
-Eliminate the DEV-PHI-WEAKEN-SOLVED-BINDER-SKIP deviation by including
-solved-away binders in scheme types. Remove the LegacyBackend entirely,
-leaving EquivBackend as the sole `Solved` representation. Remove all
-escape hatches (`unionFind`, `toSolveResult`, `solvedConstraint`).
+Eliminate the DEV-PHI-WEAKEN-SOLVED-BINDER-SKIP deviation by reifying
+scheme types from the original (pre-solving) constraint. Remove the
+LegacyBackend entirely, leaving EquivBackend as the sole `Solved`
+representation. Remove all escape hatches.
 
 This completes the equivalence-class abstraction layer: the solver
-produces thesis-aligned output where node identity is fully preserved.
+produces thesis-aligned output where node identity is fully preserved
+and scheme types reflect the original type structure.
 
 ## Background
 
@@ -20,135 +21,148 @@ graph. The scheme type becomes `Int → Int` instead of `∀α. α → α`.
 When the witness contains OpWeaken α, Omega can't find α in the VSpine
 and skips it (no-op). The thesis expects InstElim.
 
-### Root cause
+### Root cause: solving before graph ops
 
-The drop happens in the generalization pipeline:
+The thesis does not rewrite the constraint graph before applying witness
+operations. Solving produces equivalence classes (metadata about which
+nodes are equal), but the graph structure is preserved. Witness
+operations (OpWeaken, OpGraft, OpMerge, OpRaise) describe how to
+transform the original type to the target type.
 
-```
-orderedBinders (Binding/Tree.hs:235)
-  → queries cBindParents from SOLVED constraint
-  → solved-away binders have no binding-parent entry → DROPPED
-  → BinderPlan has only surviving binders
-  → scheme type missing quantifiers for solved-away binders
-  → VSpine has no slot → OpWeaken skips
-```
+Our pipeline rewrites the graph via `applyUFConstraint`, then builds
+schemes from the rewritten graph. By the time witness translation runs,
+solved-away binders are gone. The fix: build schemes from the original
+graph, as the thesis intends.
 
-### Why the fix is upstream
+### The EquivBackend already has what we need
 
-The thesis treats the scheme as the *original* type (pre-solving). The
-witness operations describe how to transform it to the solved type.
-Fixing Omega.hs is impossible — the VSpine is positionally indexed to
-the scheme type, and the scheme doesn't have the quantifier. The fix
-must ensure the scheme includes all original quantifiers.
+Milestone 4 built the EquivBackend which stores:
+- `ebOriginalConstraint` — the pre-solving constraint (all binders intact)
+- `ebCanonicalConstraint` — the post-solving constraint (for backward compat)
+- `ebEquivClasses` — which nodes were unified
+- `ebCanonicalMap` — original → canonical mapping
 
-## Approach: Hybrid Original/Solved Reification
+## Approach: Original Constraint as Primary, Everywhere
 
-### Key insight
+### Core principle
 
-The EquivBackend stores both the original constraint (`ebOriginalConstraint`)
-and the solved constraint (`ebCanonicalConstraint`). The reification process
-can walk the original constraint's node structure while using the solved
-constraint for non-binder nodes.
+In the thesis, solving produces equivalence classes — metadata about
+which nodes are equal. The constraint graph is NEVER rewritten. All
+post-solve operations (elaboration, generalization, phi translation,
+omega) work on the original graph structure + equivalence classes.
 
-### Reification rule
+Our pipeline should do the same. The `ebOriginalConstraint` is the
+primary constraint for ALL post-solve operations. The canonical
+function (`Solved.canonical`) provides equivalence-class resolution.
+The `ebCanonicalConstraint` exists only for backward compatibility
+during migration and is removed with the LegacyBackend.
 
-For each node encountered during type body reification:
+### What this means concretely
 
-1. If the node is a binder in the ordered binder list → render as `TVar name`
-   (use original node identity, don't canonicalize)
-2. If the node is NOT a binder → canonicalize and render from solved constraint
+| Operation | Current | Thesis-exact |
+|---|---|---|
+| Scheme reification | `solvedConstraint` | `originalConstraint` |
+| Bound reification | `solvedConstraint` | `originalConstraint` |
+| Phi translation node lookups | `Solved.lookupNode` (canonical view) | `Solved.originalNode` or lookups on original constraint |
+| Binding tree queries | `Solved.bindParents` (canonical) | `Solved.originalBindParent` / original binding tree |
+| Omega node lookups | `Solved.lookupNode` (canonical view) | Original constraint + canonical for equivalence |
+| VSpine construction | From solved scheme type | From original scheme type (all binders present) |
 
-Example: `∀α. α → Int` where α (NodeId 5) solved to Int (NodeId 10):
+The canonical function is still used everywhere — it tells us which
+nodes are equivalent. But the graph structure (node types, children,
+binding parents) comes from the original constraint.
 
-- Original constraint: `Arrow(NodeId 5, NodeId 10)`
-- Walk original: child 1 = NodeId 5 (binder) → `TVar "a"`
-- Walk original: child 2 = NodeId 10 (not binder) → canonicalize → `TBase "Int"`
-- Result: `∀a. a → Int` ✓
+### How it works
 
-### BinderPlan preservation
+1. All reification reads from `originalConstraint`
+2. All binding tree queries read from `originalConstraint`
+3. `Solved.canonical` resolves equivalence classes (unchanged)
+4. Binder list from BinderPlan has all binders (presolution, pre-solve)
+5. Scheme types include all original quantifiers
+6. VSpine has slots for all binders
+7. Witness operations (OpWeaken, OpGraft, etc.) find their targets
+8. No deviations from thesis semantics
 
-The BinderPlan is built during presolution (before solving) and already
-contains ALL binders, including ones that will be solved away. During
-elaboration, `applyGeneralizePlan` currently canonicalizes binder IDs,
-mapping solved-away binders to non-binder canonical representatives.
+### Verification cases
 
-Fix: when a BinderPlan binder ID canonicalizes to a non-binder, detect
-this via `wasOriginalBinder` and keep the original ID for reification.
-
-### finalizeScheme interaction
-
-`finalizeScheme` filters binders by usage in the type body. Since the
-body is reified from the original constraint, solved-away binder
-variables appear in the body. `finalizeScheme` naturally keeps them.
-No change needed.
+| Original type | Solving | Scheme (thesis-exact) | Witness |
+|---|---|---|---|
+| `∀α. α → α` | α = Int | `∀α. α → α` | OpGraft α Int, OpWeaken α |
+| `∀α. α → Int` | α = Int | `∀α. α → Int` | OpGraft α Int, OpWeaken α |
+| `∀α. ∀β. α → β` | α = β = Int | `∀α. ∀β. α → β` | OpMerge α β, OpGraft α Int, OpWeaken α |
+| `∀α. α → γ` | α = Int, γ free | `∀α. α → γ` | OpGraft α Int, OpWeaken α |
 
 ## Component Changes
 
-### 1. Reify/Core.hs — dual-constraint reification
+### 1. Solved.hs — original constraint becomes primary
 
-The reification functions need access to both constraints. Add a
-`ReifyMode` or extend the existing reification environment:
-
-```haskell
-data ReifySource = ReifySource
-    { rsCanonicalConstraint :: Constraint  -- solved view (for non-binder nodes)
-    , rsOriginalConstraint  :: Constraint  -- original view (for binder nodes)
-    , rsCanonical           :: NodeId -> NodeId
-    , rsSolvedAwayBinders   :: IntSet      -- binder IDs that were solved away
-    }
-```
-
-When walking the node graph:
-- Use `rsOriginalConstraint` to get the node structure (children)
-- For each child, check `rsSolvedAwayBinders`: if member, render as TVar
-- Otherwise, canonicalize and render from `rsCanonicalConstraint`
-
-When EquivBackend is not active (LegacyBackend during transition),
-`rsOriginalConstraint == rsCanonicalConstraint` and
-`rsSolvedAwayBinders == empty`, preserving current behavior.
-
-### 2. Generalize.hs — detect solved-away binders
-
-In `applyGeneralizePlan`, after receiving `bpOrderedBinderIds`:
+Migrate core queries to read from the original constraint:
 
 ```haskell
--- For each binder ID from the BinderPlan:
-let binderIdC = canonical binderId
-    isSolvedAway = wasOriginalBinder solved binderId
-                   && not (isTyForall (lookupNode solved binderIdC))
+-- | The original (pre-solving) constraint. Primary constraint for
+-- all post-solve operations (thesis-exact).
+originalConstraint :: Solved -> Constraint
+originalConstraint (Solved EquivBackend { ebOriginalConstraint = c }) = c
 ```
 
-Solved-away binders use their original ID (not canonical) for:
-- Name assignment (from original node)
-- Bound reification (from original constraint)
-- Type body reification (original node structure)
+Existing queries change their source:
+- `lookupNode` → look up in original constraint (not canonical)
+- `lookupBindParent` → read from original binding tree
+- `bindParents` → return original binding parents
+- `allNodes` → return original nodes
 
-### 3. Solved.hs — new query
+The `canonical` function remains unchanged — it provides equivalence
+class resolution. Consumers use `canonical` to determine which nodes
+are equal, and the original constraint for graph structure.
 
-```haskell
--- | Binder IDs from the original constraint that were solved away.
--- Returns empty for LegacyBackend.
-solvedAwayBinders :: Solved -> IntSet -> IntSet
-solvedAwayBinders solved binderPlanIds =
-    IntSet.filter isSolvedAway binderPlanIds
-  where
-    isSolvedAway nid =
-        wasOriginalBinder solved (NodeId nid)
-        && canonical solved (NodeId nid) /= NodeId nid
-```
+### 2. Generalize.hs — pass original constraint to reification
 
-### 4. Omega.hs — no changes
+Change the constraint passed to the reification environment from
+`solvedConstraint solved` to `originalConstraint solved`.
+
+The binder list from BinderPlan already has all binders (presolution
+builds it before solving). No filtering or augmentation needed.
+
+Bound reification also uses the original constraint: a solved-away
+binder's bound is its original bound (e.g., `⊥` for unbounded).
+The witness operations communicate the solved value.
+
+### 3. Reify/Core.hs — reads original graph
+
+The reification functions already accept a `Constraint` and a
+`canonical` function. The only change is what constraint is passed:
+
+- Before: `solvedConstraint solved` (post-solving, binders missing)
+- After: `originalConstraint solved` (pre-solving, all binders present)
+
+The `canonical` function is still `Solved.canonical solved` for
+equivalence-class resolution during rendering.
+
+### 4. Phi translation (Omega.hs, Translate.hs) — uses original
+
+Node lookups in phi translation switch to original constraint.
+Since `Solved.lookupNode` and `Solved.lookupBindParent` are migrated
+at the Solved.hs level (change 1), phi translation code needs no
+source-level changes — the API functions return original data.
+
+### 5. Omega.hs OpWeaken — no changes
 
 The VSpine is built from the scheme type via `mkVSpine`. Since the
-scheme now includes solved-away quantifiers, the VSpine naturally has
-slots for them. OpWeaken finds the binder and emits InstElim. The
-deviation disappears without touching Omega.
+scheme now includes all original quantifiers, the VSpine naturally
+has slots for solved-away binders. OpWeaken finds the binder and
+emits InstElim. The deviation disappears without touching Omega.
 
-### 5. Binding/Tree.hs — no changes
+### 6. Binding/Tree.hs — no changes
 
 `orderedBinders` is not called during elaboration for scheme
 construction. The BinderPlan (from presolution) provides the binder
-list. No change needed.
+list.
+
+### 7. finalizeScheme — no changes expected
+
+`finalizeScheme` filters binders by usage in the type body. Since
+the body is reified from the original constraint, all binder
+variables appear in the body. `finalizeScheme` naturally keeps them.
 
 ## LegacyBackend Removal
 
@@ -159,11 +173,10 @@ LegacyBackend exists only for:
 - `fromSolveResult` / `mkSolved` (test helpers, some production code)
 - `toSolveResult` escape hatch
 
-With thesis-exact scheme construction requiring the original constraint,
-LegacyBackend cannot support the new behavior (it has no original
-constraint). Keeping it means maintaining two code paths with different
-semantics. Removing it simplifies the codebase and enforces the
-thesis-aligned path.
+Thesis-exact scheme construction requires the original constraint,
+which LegacyBackend does not have. Keeping it means maintaining two
+code paths with different semantics. Removing it simplifies the
+codebase and enforces the thesis-aligned path.
 
 ### Migration path
 
@@ -174,7 +187,8 @@ thesis-aligned path.
    constructor that takes both constraints
 3. `toSolveResult` → remove (consumers use Solved API)
 4. `unionFind` → remove (consumers use `canonical`)
-5. `solvedConstraint` → remove (consumers use specific queries)
+5. `solvedConstraint` → remove (consumers use `originalConstraint`
+   or specific queries)
 6. Test code using `mkSolved emptyConstraint uf` → provide a test
    helper that constructs EquivBackend from minimal inputs
 
@@ -184,67 +198,110 @@ thesis-aligned path.
 |---|---|---|
 | `unionFind` | Canonicalizer, Generalize, Pipeline, Plan/Context, Fallback, tests | Use `Solved.canonical` or add targeted queries |
 | `toSolveResult` | Generalize test helper | Remove; tests use Solved API |
-| `solvedConstraint` | Omega, Translate (via Binding.orderedBinders) | Add `Solved.orderedBinders` or pass Solved to Binding |
+| `solvedConstraint` | Omega, Translate (via Binding.orderedBinders) | Use `originalConstraint` or pass Solved to Binding |
 
 ## Deviation Removal
 
-Once solved-away binders appear in scheme types:
-- OpWeaken finds them in the VSpine → emits InstElim
-- The deviation DEV-PHI-WEAKEN-SOLVED-BINDER-SKIP no longer applies
+Once scheme types are reified from the original constraint:
+- All binders present in VSpine → OpWeaken emits InstElim
+- DEV-PHI-WEAKEN-SOLVED-BINDER-SKIP no longer applies
 - Remove from `docs/thesis-deviations.yaml`
 - Update `docs/thesis-claims.yaml` if any claims reference it
+- Audit for other deviations resolved by original-constraint reification
 
 ## Milestones
 
-### M5a: Thesis-exact scheme construction (EquivBackend only)
+### M5a: Original constraint as primary in Solved.hs
 
-1. Add `solvedAwayBinders` query to Solved.hs
-2. Extend reification to accept dual-constraint source
-3. Update `applyGeneralizePlan` to detect solved-away binders
-4. Reify solved-away binder bounds from original constraint
-5. Reify type body using hybrid original/solved approach
-6. Verify: scheme types include solved-away quantifiers
-7. Verify: OpWeaken emits InstElim (no Omega changes)
-8. Update test expected outputs
+Migrate core Solved.hs queries to read from `ebOriginalConstraint`:
 
-### M5b: Remove LegacyBackend
+1. Add `originalConstraint :: Solved -> Constraint` export
+2. Switch `lookupNode` EquivBackend branch to use `ebOriginalConstraint`
+   (look up by raw nid, not canonical — canonical is for equivalence only)
+3. Switch `allNodes` EquivBackend branch to use `ebOriginalConstraint`
+4. Switch `lookupBindParent` EquivBackend branch to use `ebOriginalConstraint`
+5. Switch `bindParents` EquivBackend branch to use `ebOriginalConstraint`
+6. Switch `instEdges` EquivBackend branch to use `ebOriginalConstraint`
+7. Switch `genNodes` EquivBackend branch to use `ebOriginalConstraint`
+8. Switch `lookupVarBound` EquivBackend branch to use `ebOriginalConstraint`
+
+LegacyBackend branches remain unchanged (they have no original constraint).
+
+Test: full suite must pass. Expect some failures from callers that
+assumed canonical-view semantics — fix those callers.
+
+### M5b: Original constraint in Generalize.hs and Reify
+
+1. Change the constraint passed to the reification environment from
+   `solvedConstraint solved` to `originalConstraint solved`
+2. Verify BinderPlan already provides all binders (presolution)
+3. Verify `finalizeScheme` keeps solved-away binders (they appear in
+   the original-constraint type body)
+4. Fix any test expectations that assumed solved-away binders were absent
+
+Test: full suite. Scheme types should now include all original quantifiers.
+
+### M5c: Remove LegacyBackend and escape hatches
 
 1. Remove `LegacyBackend` constructor from `SolvedBackend`
-2. Remove `fromSolveResult` (or rewrite to use snapshot)
-3. Remove `mkSolved` (or rewrite)
-4. Remove `toSolveResult`
-5. Simplify all Solved API functions (no pattern match on backend)
-6. Update all test helpers to construct EquivBackend
-7. Verify: all tests pass with EquivBackend only
+2. Remove `fromSolveResult`, `mkSolved` (or rewrite to produce EquivBackend)
+3. Remove `toSolveResult`, `unionFind`, `solvedConstraint` escape hatches
+4. Provide `mkTestSolved` helper for tests that need minimal EquivBackend
+5. Migrate all test code from `mkSolved`/`fromSolveResult` to new helpers
+6. Migrate production callers of `unionFind` to `Solved.canonical`
+7. Migrate production callers of `solvedConstraint` to `originalConstraint`
+   or specific Solved queries
 
-### M5c: Remove escape hatches
+Test: full suite. No LegacyBackend references remain.
 
-1. Migrate `unionFind` consumers to Solved queries
-2. Remove `unionFind` export
-3. Remove `solvedConstraint` export
-4. Clean up Solved.hs API surface
-5. Verify: no consumer accesses Solved internals
+### M5d: Remove deviation and update documentation
 
-### M5d: Update documentation
-
-1. Remove DEV-PHI-WEAKEN-SOLVED-BINDER-SKIP from thesis-deviations.yaml
-2. Audit for other deviations resolved by node identity preservation
-3. Update thesis-claims.yaml
+1. Remove DEV-PHI-WEAKEN-SOLVED-BINDER-SKIP from `thesis-deviations.yaml`
+2. Update `thesis-claims.yaml` if any claims reference the deviation
+3. Update test expectations that assert the deviation behavior (e.g.,
+   OpWeaken producing ε instead of InstElim)
+4. Audit for other deviations resolved by original-constraint reification
 
 ## Risk Register
 
-| Risk | Likelihood | Impact | Mitigation |
-|---|---|---|---|
-| Reification produces wrong type when canonical appears for non-unification reasons | Medium | High | Hybrid approach: only use original constraint for binder nodes; comparison tests |
-| BinderPlan doesn't have solved-away binders | Low | High | Verify before implementing; fall back to augmenting BinderPlan from EquivBackend |
-| Test suite breakage from changed scheme types | High (expected) | Medium | Intentional behavior change; update expected outputs systematically |
-| `finalizeScheme` filters solved-away binders | Low | Medium | Body references binder variables; verify with test |
-| LegacyBackend removal breaks test infrastructure | Medium | Medium | Provide EquivBackend test helpers first |
-| Performance regression from dual-constraint reification | Low | Low | Original constraint already in memory; no extra allocation |
+### R1: lookupNode semantics change breaks phi translation
 
-## Rollback Strategy
+Phi translation currently calls `Solved.lookupNode` expecting the
+canonical (post-solve) view. Switching to original constraint means
+lookups return the pre-solve node. If phi translation relies on
+solved-away merges being visible in the node structure, it will break.
 
-- **M5a**: Revert scheme construction changes; deviation returns
-- **M5b**: Re-add LegacyBackend; `fromSolveResult` still works
-- **M5c**: Re-export escape hatches
-- Each milestone is independently revertible.
+Mitigation: M5a runs the full test suite after each query migration.
+If phi translation breaks, add `lookupCanonicalNode` that preserves
+the old behavior for specific callers.
+
+### R2: Binding tree queries return stale parents
+
+The original constraint's binding tree may have entries that were
+invalidated by solving (e.g., a binder whose parent was merged).
+Callers that walk the binding tree may hit unexpected structure.
+
+Mitigation: The canonical function resolves equivalences. Callers
+that need "who is the effective parent" should canonicalize the
+parent after looking it up. This is the thesis model.
+
+### R3: Test churn from LegacyBackend removal
+
+Many tests use `mkSolved emptyConstraint uf`. Removing LegacyBackend
+requires migrating all of them to EquivBackend-based helpers.
+
+Mitigation: Provide `mkTestSolved` that constructs a minimal
+EquivBackend from a constraint and union-find map (same interface,
+different backend). Migration is mechanical.
+
+### R4: finalizeScheme drops solved-away binders
+
+If `finalizeScheme` filters binders by whether they appear as
+`TForall` in the reified type, and the original constraint has
+the binder as `TForall`, this should work. But if the binder was
+unified with a concrete type and the reifier follows the canonical
+link, the binder variable won't appear in the body.
+
+Mitigation: The reifier must use the original constraint for
+structure (binder is `TForall`) and canonical only for equivalence
+resolution when rendering type bodies. Verify in M5b.
