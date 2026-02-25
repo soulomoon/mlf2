@@ -52,6 +52,7 @@ module MLF.Constraint.Solved (
 import Prelude hiding (lookup)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
+import qualified Data.IntSet as IntSet
 
 import MLF.Constraint.Solve (SolveResult, frWith)
 import MLF.Constraint.Solve.Internal (SolveResult(..))
@@ -112,6 +113,39 @@ mkSolved c uf =
 nodeIdKey :: NodeId -> Int
 nodeIdKey (NodeId k) = k
 
+-- | Chase Equiv canonical links to a fixed point.
+--
+-- Unlike legacy union-find canonicalization (`frWith`), Equiv canonical data is
+-- stored as direct links in `ebCanonicalMap`. We chase those links to a stable
+-- representative and break cycles deterministically by choosing the smallest
+-- `NodeId` in the cycle.
+equivCanonical :: IntMap NodeId -> NodeId -> NodeId
+equivCanonical canonMap = go IntSet.empty
+  where
+    step nid = IntMap.findWithDefault nid (nodeIdKey nid) canonMap
+
+    go seen current =
+        let next = step current
+        in if next == current
+            then current
+            else if IntSet.member (nodeIdKey next) seen
+                then cycleRepresentative next
+                else go (IntSet.insert (nodeIdKey current) seen) next
+
+    cycleRepresentative cycleStart = goCycle cycleStart cycleStart
+      where
+        goCycle minNode current =
+            let next = step current
+                minNode' = minByNodeId minNode next
+            in if next == cycleStart
+                then minNode'
+                else goCycle minNode' next
+
+    minByNodeId a b =
+        if nodeIdKey a <= nodeIdKey b
+            then a
+            else b
+
 -- -----------------------------------------------------------------
 -- Core queries
 -- -----------------------------------------------------------------
@@ -120,7 +154,7 @@ nodeIdKey (NodeId k) = k
 canonical :: Solved -> NodeId -> NodeId
 canonical (Solved LegacyBackend { lbUnionFind = uf }) nid = frWith uf nid
 canonical (Solved EquivBackend { ebCanonicalMap = canonMap }) nid =
-    IntMap.findWithDefault nid (nodeIdKey nid) canonMap
+    equivCanonical canonMap nid
 
 -- | Look up a type node, canonicalizing the id first.
 lookupNode :: Solved -> NodeId -> Maybe TyNode
@@ -198,8 +232,7 @@ classMembers :: Solved -> NodeId -> [NodeId]
 classMembers s@(Solved LegacyBackend {}) nid = [canonical s nid]
 classMembers s@(Solved EquivBackend { ebEquivClasses = classes }) nid =
     let nidC = canonical s nid
-        members = IntMap.findWithDefault [nidC] (nodeIdKey nidC) classes
-    in if null members then [nidC] else members
+    in IntMap.findWithDefault [] (nodeIdKey nidC) classes
 
 -- | Look up the /original/ (pre-merge) node.
 --
@@ -207,10 +240,8 @@ classMembers s@(Solved EquivBackend { ebEquivClasses = classes }) nid =
 -- Phase 2: returns the node as it existed before unification merges.
 originalNode :: Solved -> NodeId -> Maybe TyNode
 originalNode s@(Solved LegacyBackend {}) nid = lookupNode s nid
-originalNode s@(Solved EquivBackend { ebOriginalConstraint = c }) nid =
-    case NA.lookupNode c nid of
-        Just ty -> Just ty
-        Nothing -> lookupNode s nid
+originalNode (Solved EquivBackend { ebOriginalConstraint = c }) nid =
+    NA.lookupNode c nid
 
 -- | Look up the /original/ (pre-merge) binding parent.
 --
@@ -218,10 +249,8 @@ originalNode s@(Solved EquivBackend { ebOriginalConstraint = c }) nid =
 -- Phase 2: returns the binding parent from the pre-merge snapshot.
 originalBindParent :: Solved -> NodeRef -> Maybe (NodeRef, BindFlag)
 originalBindParent s@(Solved LegacyBackend {}) ref = lookupBindParent s ref
-originalBindParent s@(Solved EquivBackend { ebOriginalConstraint = c }) ref =
-    case NA.lookupBindParent c ref of
-        Just parent -> Just parent
-        Nothing -> lookupBindParent s ref
+originalBindParent (Solved EquivBackend { ebOriginalConstraint = c }) ref =
+    NA.lookupBindParent c ref
 
 -- | Was @nid@ a binder (forall body owner) before merges?
 --
