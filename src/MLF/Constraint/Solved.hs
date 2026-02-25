@@ -26,6 +26,7 @@ module MLF.Constraint.Solved (
     Solved,
     fromSolveResult,
     mkSolved,
+    fromPreRewriteState,
 
     -- * Core queries
     canonical,
@@ -53,19 +54,25 @@ import Prelude hiding (lookup)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
+import qualified Data.List.NonEmpty as NE
 
 import MLF.Constraint.Solve (SolveResult, frWith)
 import MLF.Constraint.Solve.Internal (SolveResult(..))
+import qualified MLF.Constraint.Canonicalize as Canonicalize
 import MLF.Constraint.Types.Graph
-    ( BindFlag
+    ( BindFlag(..)
     , BindParents
     , Constraint(..)
-    , GenNode
-    , GenNodeMap
+    , GenNode(..)
+    , GenNodeId(..)
+    , GenNodeMap(..)
     , InstEdge
+    , NodeMap(..)
     , NodeId(..)
-    , NodeRef
+    , NodeRef(..)
     , TyNode(..)
+    , genNodeKey
+    , nodeRefFromKey
     )
 import qualified MLF.Constraint.NodeAccess as NA
 
@@ -109,6 +116,137 @@ mkSolved c uf =
         { lbConstraint = c
         , lbUnionFind = uf
         }
+
+-- | Build a staged equivalence-backend snapshot from solver pre-rewrite state.
+--
+-- The input pair should come from solve after unification has converged:
+-- a pre-rewrite constraint and the final union-find map.
+fromPreRewriteState :: IntMap NodeId -> Constraint -> Solved
+fromPreRewriteState uf preRewrite =
+    let canonicalMap = buildCanonicalMap uf preRewrite
+        canonicalConstraint = rewriteSnapshotConstraint uf preRewrite
+        equivClasses = buildEquivClasses canonicalMap preRewrite
+    in Solved EquivBackend
+        { ebCanonicalMap = canonicalMap
+        , ebCanonicalConstraint = canonicalConstraint
+        , ebEquivClasses = equivClasses
+        , ebOriginalConstraint = preRewrite
+        }
+
+buildCanonicalMap :: IntMap NodeId -> Constraint -> IntMap NodeId
+buildCanonicalMap uf c =
+    let nodeKeys = map (getNodeId . tnId) (NA.allNodes c)
+        allKeys = IntSet.toList (IntSet.fromList (nodeKeys ++ IntMap.keys uf))
+        canonicalNode = frWith uf
+    in IntMap.fromList
+        [ (k, canonicalNode (NodeId k))
+        | k <- allKeys
+        ]
+
+buildEquivClasses :: IntMap NodeId -> Constraint -> IntMap [NodeId]
+buildEquivClasses canonMap c =
+    foldr addNode IntMap.empty (map tnId (NA.allNodes c))
+  where
+    addNode nid classes =
+        let rep = equivCanonical canonMap nid
+        in IntMap.insertWith (++) (nodeIdKey rep) [nid] classes
+
+-- Note [Snapshot canonical rewrite]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-- `fromPreRewriteState` must expose the same canonicalized graph view as the
+-- legacy backend. Keep this rewrite logic structurally aligned with
+-- `MLF.Constraint.Solve.applyUFConstraint`.
+rewriteSnapshotConstraint :: IntMap NodeId -> Constraint -> Constraint
+rewriteSnapshotConstraint uf c =
+    let canonicalNode = frWith uf
+        nodes' = IntMap.fromListWith Canonicalize.chooseRepNode (map rewriteNode (NA.allNodes c))
+        bindParents0 = cBindParents c
+        bindParentsAdjusted =
+            IntMap.mapWithKey
+                (\childKey (parent, flag) ->
+                    case nodeRefFromKey childKey of
+                        TypeRef nid
+                            | IntSet.member (getNodeId nid) (cEliminatedVars c) ->
+                                (parent, BindFlex)
+                        _ -> (parent, flag)
+                )
+                bindParents0
+        bindParents' =
+            Canonicalize.rewriteBindParentsLenient
+                canonicalNode
+                (\childC ->
+                    case childC of
+                        TypeRef nid -> IntMap.member (getNodeId nid) nodes'
+                        GenRef gid ->
+                            IntMap.member (getGenNodeId gid) (getGenNodeMap (cGenNodes c))
+                )
+                bindParentsAdjusted
+        eliminated' = rewriteEliminated canonicalNode nodes' (cEliminatedVars c)
+        weakened' = rewriteWeakened canonicalNode nodes' (cWeakenedVars c)
+        genNodes' = rewriteGenNodes canonicalNode nodes' (cGenNodes c)
+    in c
+        { cNodes = NodeMap nodes'
+        , cInstEdges = Canonicalize.rewriteInstEdges canonicalNode (cInstEdges c)
+        , cUnifyEdges = Canonicalize.rewriteUnifyEdges canonicalNode (cUnifyEdges c)
+        , cBindParents = bindParents'
+        , cEliminatedVars = eliminated'
+        , cWeakenedVars = weakened'
+        , cGenNodes = genNodes'
+        }
+  where
+    rewriteNode :: TyNode -> (Int, TyNode)
+    rewriteNode n =
+        let nid' = frWith uf (tnId n)
+        in (getNodeId nid', case n of
+            TyVar{ tnBound = mb } -> TyVar { tnId = nid', tnBound = fmap (frWith uf) mb }
+            TyBottom{} -> TyBottom nid'
+            TyArrow { tnDom = d, tnCod = cod } -> TyArrow nid' (frWith uf d) (frWith uf cod)
+            TyBase { tnBase = b } -> TyBase nid' b
+            TyForall { tnBody = b } -> TyForall nid' (frWith uf b)
+            TyExp { tnExpVar = s, tnBody = b } -> TyExp nid' s (frWith uf b)
+            TyCon { tnCon = con, tnArgs = args } -> TyCon nid' con (NE.map (frWith uf) args)
+            )
+
+    rewriteEliminated :: (NodeId -> NodeId) -> IntMap TyNode -> IntSet.IntSet -> IntSet.IntSet
+    rewriteEliminated canonicalNode nodes0 elims0 =
+        IntSet.fromList
+            [ getNodeId vC
+            | vid <- IntSet.toList elims0
+            , let vC = canonicalNode (NodeId vid)
+            , case IntMap.lookup (getNodeId vC) nodes0 of
+                Just TyVar{} -> True
+                _ -> False
+            ]
+
+    rewriteWeakened :: (NodeId -> NodeId) -> IntMap TyNode -> IntSet.IntSet -> IntSet.IntSet
+    rewriteWeakened canonicalNode nodes0 weakened0 =
+        IntSet.fromList
+            [ getNodeId vC
+            | vid <- IntSet.toList weakened0
+            , let vC = canonicalNode (NodeId vid)
+            , case IntMap.lookup (getNodeId vC) nodes0 of
+                Just TyVar{} -> True
+                _ -> False
+            ]
+
+    rewriteGenNodes :: (NodeId -> NodeId) -> IntMap TyNode -> GenNodeMap GenNode -> GenNodeMap GenNode
+    rewriteGenNodes canonicalNode nodes0 gen0 =
+        let rewriteOne g =
+                let (schemesRev, _seen) =
+                        foldl'
+                            (\(acc, seen) s ->
+                                let s' = canonicalNode s
+                                    key = getNodeId s'
+                                in if IntMap.member key nodes0 && not (IntSet.member key seen)
+                                    then (s' : acc, IntSet.insert key seen)
+                                    else (acc, seen)
+                            )
+                            ([], IntSet.empty)
+                            (gnSchemes g)
+                    schemes' = reverse schemesRev
+                in (genNodeKey (gnId g), g { gnSchemes = schemes' })
+        in GenNodeMap
+            (IntMap.fromListWith const (map rewriteOne (IntMap.elems (getGenNodeMap gen0))))
 
 nodeIdKey :: NodeId -> Int
 nodeIdKey (NodeId k) = k

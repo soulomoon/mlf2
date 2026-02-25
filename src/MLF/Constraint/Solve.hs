@@ -124,8 +124,11 @@ Paper references:
 -}
 module MLF.Constraint.Solve (
     SolveError(..),
+    SolveSnapshot(..),
+    SolveOutput(..),
     SolveResult,
     solveUnify,
+    solveUnifyWithSnapshot,
     validateSolvedGraph,
     validateSolvedGraphStrict,
     frWith,
@@ -167,6 +170,20 @@ data SolveError
     | ValidationFailed [String]         -- ^ Post-solve validation failures
     | TyConClash BaseTy BaseTy          -- ^ TyCon head mismatch
     | TyConArityMismatch BaseTy Int Int -- ^ TyCon arity mismatch (head, arity1, arity2)
+    deriving (Eq, Show)
+
+-- | Snapshot of solve state right before final canonical rewriting.
+data SolveSnapshot = SolveSnapshot
+    { snapUnionFind :: IntMap NodeId
+    , snapPreRewriteConstraint :: Constraint
+    }
+    deriving (Eq, Show)
+
+-- | Full solve output including the legacy rewritten result and pre-rewrite snapshot.
+data SolveOutput = SolveOutput
+    { soResult :: SolveResult
+    , soSnapshot :: SolveSnapshot
+    }
     deriving (Eq, Show)
 
 {-
@@ -228,7 +245,11 @@ instance MonadSolve SolveM where
 -- by earlier phases. Returns the rewritten constraint and the final UF map.
 -- See Note [Paper alignment: solveUnify] and Note [Algorithm sketch: solveUnify].
 solveUnify :: TraceConfig -> Constraint -> Either SolveError SolveResult
-solveUnify traceCfg c0 = do
+solveUnify traceCfg c0 = soResult <$> solveUnifyWithSnapshot traceCfg c0
+
+-- | `solveUnify` plus a pre-rewrite snapshot for staged equivalence-backend construction.
+solveUnifyWithSnapshot :: TraceConfig -> Constraint -> Either SolveError SolveOutput
+solveUnifyWithSnapshot traceCfg c0 = do
     let debugSolveBinding = traceBinding traceCfg
         c0' = repairNonUpperParents c0
         probeIds = [NodeId 2, NodeId 3]
@@ -246,8 +267,9 @@ solveUnify traceCfg c0 = do
         Right () -> do
             let st = SolveState { suConstraint = c0', suUnionFind = IntMap.empty, suQueue = cUnifyEdges c0' }
             final <- execStateT (loop >> batchHarmonize) st
-            let uf = suUnionFind final
-                c' = applyUFConstraint uf (suConstraint final) { cUnifyEdges = [] }
+            let preRewrite = (suConstraint final) { cUnifyEdges = [] }
+                uf = suUnionFind final
+                c' = applyUFConstraint uf preRewrite
             (c'', elimSubst) <- case rewriteEliminatedBinders c' of
                 Left err -> Left (BindingTreeError err)
                 Right out -> Right out
@@ -266,9 +288,14 @@ solveUnify traceCfg c0 = do
                     case debugSolveBinding ("solveUnify: post-check probe " ++ show probeInfo') () of
                         () -> pure ()
                     let res = SolveResult { srConstraint = c''', srUnionFind = uf' }
+                        snapshot =
+                            SolveSnapshot
+                                { snapUnionFind = uf'
+                                , snapPreRewriteConstraint = preRewrite
+                                }
                         violations = validateSolvedGraph res
                     if null violations
-                        then pure res
+                        then pure SolveOutput { soResult = res, soSnapshot = snapshot }
                         else Left (ValidationFailed violations)
   where
     loop :: SolveM ()
