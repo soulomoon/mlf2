@@ -8,7 +8,8 @@ import qualified Data.IntSet as IntSet
 
 import MLF.Constraint.Presolution (EdgeTrace(..))
 import MLF.Constraint.Presolution.Base (InteriorNodes(..), copiedNodes)
-import MLF.Constraint.Solve (SolveResult, frWith, srUnionFind)
+import MLF.Constraint.Solve (SolveResult)
+import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types
     ( Constraint
     , NodeId(..)
@@ -50,7 +51,7 @@ instantiationCopyNodes
     -> IntMap.IntMap EdgeTrace
     -> NodeKeySet
 instantiationCopyNodes solved redirects edgeTraces =
-    let canonical = frWith (srUnionFind solved)
+    let canonical = Solved.canonical (Solved.fromSolveResult solved)
         adoptNode nid = canonical (chaseRedirects redirects nid)
         collectTrace tr =
             let InteriorNodes interiorKeys = etInterior tr

@@ -10,7 +10,7 @@ import MLF.Constraint.Presolution
     ( EdgeTrace(..)
     , PresolutionPlanBuilder(..)
     )
-import MLF.Constraint.Solve (SolveResult(..))
+import MLF.Constraint.Solve (SolveResult)
 import MLF.Constraint.Types.Witness (EdgeWitness(..), Expansion(..))
 import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Util.Trace (TraceConfig)

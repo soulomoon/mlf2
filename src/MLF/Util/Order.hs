@@ -25,8 +25,8 @@ module MLF.Util.Order (
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntSet as IntSet
 
-import qualified MLF.Constraint.Solve as Solve (frWith)
-import MLF.Constraint.Solve (SolveResult(..))
+import MLF.Constraint.Solve (SolveResult)
+import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types.Graph
     ( Constraint(..)
     , NodeId(..)
@@ -39,11 +39,13 @@ import MLF.Util.OrderKey (OrderKey(..), OrderKeyError(..), compareOrderKey, orde
 -- solved graph’s union-find canonicalization.
 orderKeysFromRoot :: SolveResult -> NodeId -> IntMap OrderKey
 orderKeysFromRoot res root0 =
-    orderKeysFromConstraintWith (Solve.frWith (srUnionFind res)) (srConstraint res) root0 Nothing
+    let solved = Solved.fromSolveResult res
+    in orderKeysFromConstraintWith (Solved.canonical solved) (Solved.solvedConstraint solved) root0 Nothing
 
 orderKeysFromRootRestricted :: SolveResult -> NodeId -> IntSet.IntSet -> IntMap OrderKey
 orderKeysFromRootRestricted res root0 allowed =
-    orderKeysFromConstraintWith (Solve.frWith (srUnionFind res)) (srConstraint res) root0 (Just allowed)
+    let solved = Solved.fromSolveResult res
+    in orderKeysFromConstraintWith (Solved.canonical solved) (Solved.solvedConstraint solved) root0 (Just allowed)
 
 -- | Compute order keys from a raw constraint using term-DAG structure plus
 -- instance-bound dependencies.

@@ -53,7 +53,8 @@ module MLF.Constraint.Solved (
 import Prelude hiding (lookup)
 import Data.IntMap.Strict (IntMap)
 
-import MLF.Constraint.Solve (SolveResult(..), frWith)
+import MLF.Constraint.Solve (SolveResult, frWith)
+import MLF.Constraint.Solve.Internal (SolveResult(..))
 import MLF.Constraint.Types.Graph
     ( BindFlag
     , BindParents

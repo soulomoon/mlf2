@@ -11,7 +11,8 @@ import qualified MLF.Constraint.Canonicalize as Canonicalize
 import MLF.Constraint.Presolution
     ( PresolutionPlanBuilder(..)
     )
-import MLF.Constraint.Solve (SolveResult, frWith, srConstraint, srUnionFind)
+import MLF.Constraint.Solve (SolveResult)
+import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types
     ( Constraint
     , NodeId(..)
@@ -101,8 +102,9 @@ buildGeneralizeEnv
     -> Constraint
     -> GeneralizeEnv
 buildGeneralizeEnv traceCfg solved redirects instCopyNodes instCopyMap base =
-    let solvedConstraint = srConstraint solved
-        canonical = frWith (srUnionFind solved)
+    let solvedView = Solved.fromSolveResult solved
+        solvedConstraint = Solved.solvedConstraint solvedView
+        canonical = Solved.canonical solvedView
         applyRedirectsToRef ref =
             case ref of
                 TypeRef nid -> TypeRef (chaseRedirects redirects nid)

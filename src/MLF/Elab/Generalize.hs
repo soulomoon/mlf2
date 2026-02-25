@@ -36,7 +36,8 @@ import MLF.Constraint.Presolution.Plan
     ( GeneralizePlan(..)
     , ReifyPlan(..)
     )
-import MLF.Constraint.Solve (SolveResult(..))
+import MLF.Constraint.Solve (SolveResult)
+import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Constraint.VarStore as VarStore
@@ -401,7 +402,10 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
                             constraint { cNodes = NodeMap (IntMap.union aliasNodes nodes) }
                         substAlias =
                             IntMap.union (IntMap.fromList aliasEntries) substBaseRigid
-                        resAlias = resForReify { srConstraint = constraintAlias }
+                        resAlias =
+                            let solvedRes = Solved.fromSolveResult resForReify
+                            in Solved.toSolveResult
+                                (Solved.mkSolved constraintAlias (Solved.unionFind solvedRes))
                     ty <- reifyWith bodyRoot substAlias constraintAlias resAlias
                     inlineRigid substAlias constraintAlias resAlias ty
           where

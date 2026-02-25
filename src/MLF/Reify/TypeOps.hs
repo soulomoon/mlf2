@@ -33,8 +33,8 @@ import qualified Data.Set as Set
 import MLF.Constraint.Types
 import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Constraint.NodeAccess as NodeAccess
-import MLF.Constraint.Solve (SolveResult(..))
-import qualified MLF.Constraint.Solve as Solve (frWith)
+import MLF.Constraint.Solve (SolveResult)
+import qualified MLF.Constraint.Solved as Solved
 import MLF.Types.Elab
 import MLF.Util.ElabError (ElabError(..))
 import MLF.Util.Names (parseNameId)
@@ -350,8 +350,9 @@ resolveBaseBoundForInstConstraint constraint canonical start =
 
 resolveBaseBoundForInstSolved :: SolveResult -> NodeId -> Maybe NodeId
 resolveBaseBoundForInstSolved res =
-    let constraint = srConstraint res
-        canonical = Solve.frWith (srUnionFind res)
+    let solved = Solved.fromSolveResult res
+        constraint = Solved.solvedConstraint solved
+        canonical = Solved.canonical solved
     in resolveBaseBoundForInstConstraint constraint canonical
 
 resolveBoundBodyConstraint

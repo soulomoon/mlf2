@@ -12,7 +12,8 @@ import qualified Data.IntMap.Strict as IntMap
 import Data.Maybe (listToMaybe)
 
 import qualified MLF.Binding.Tree as Binding
-import MLF.Constraint.Solve (SolveResult, frWith, srConstraint, srUnionFind)
+import MLF.Constraint.Solve (SolveResult)
+import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types
     ( BindingError
     , Constraint
@@ -80,8 +81,9 @@ preferGenScope constraint ref = case ref of
 
 schemeBodyTarget :: SolveResult -> NodeId -> NodeId
 schemeBodyTarget res target =
-    let constraint = srConstraint res
-        canonical = frWith (srUnionFind res)
+    let solved = Solved.fromSolveResult res
+        constraint = Solved.solvedConstraint solved
+        canonical = Solved.canonical solved
         targetC = canonical target
         isSchemeRoot =
             any
@@ -142,7 +144,8 @@ canonicalizeScopeRef solved redirects scopeRef =
     case scopeRef of
         GenRef gid -> GenRef gid
         TypeRef nid ->
-            let canonical = frWith (srUnionFind solved)
+            let solvedView = Solved.fromSolveResult solved
+                canonical = Solved.canonical solvedView
             in TypeRef (canonical (chaseRedirects redirects nid))
 
 resolveCanonicalScope :: Constraint -> SolveResult -> IntMap.IntMap NodeId -> NodeId -> Either BindingError NodeRef
@@ -153,7 +156,8 @@ resolveCanonicalScope constraint solved redirects scopeRoot = do
 
 letScopeOverrides :: Constraint -> Constraint -> SolveResult -> IntMap.IntMap NodeId -> AnnExpr -> IntMap.IntMap NodeRef
 letScopeOverrides base solvedForGen solved redirects ann =
-    let canonical = frWith (srUnionFind solved)
+    let solvedView = Solved.fromSolveResult solved
+        canonical = Solved.canonical solvedView
         addOverride acc schemeRootId =
             case bindingScopeRef base schemeRootId of
                 Right scope0 ->

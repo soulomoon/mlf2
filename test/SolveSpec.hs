@@ -6,15 +6,24 @@ import Data.List (isPrefixOf)
 import Data.List.NonEmpty (NonEmpty(..))
 
 import MLF.Constraint.Types.Graph
--- White-box solver tests intentionally assert raw `SolveResult` internals.
 import MLF.Constraint.Solve
     ( SolveError(..)
-    , SolveResult(..)
+    , SolveResult
     , frWith
     , solveUnify
     , validateSolvedGraphStrict
     )
+import qualified MLF.Constraint.Solved as Solved
 import SpecUtil (defaultTraceConfig, emptyConstraint, inferBindParents, lookupNodeMaybe, nodeMapFromList, nodeMapSize, rootedConstraint)
+
+resultConstraint :: SolveResult -> Constraint
+resultConstraint = Solved.solvedConstraint . Solved.fromSolveResult
+
+resultUnionFind :: SolveResult -> IntMap.IntMap NodeId
+resultUnionFind = Solved.unionFind . Solved.fromSolveResult
+
+mkSolveResult :: Constraint -> IntMap.IntMap NodeId -> SolveResult
+mkSolveResult c uf = Solved.toSolveResult (Solved.mkSolved c uf)
 
 spec :: Spec
 spec = describe "Phase 5 -- Solve" $ do
@@ -30,7 +39,9 @@ spec = describe "Phase 5 -- Solve" $ do
                     }
             case solveUnify defaultTraceConfig constraint of
                 Left err -> expectationFailure $ "Unexpected solve error: " ++ show err
-                Right SolveResult{ srConstraint = sc, srUnionFind = uf } -> do
+                Right res -> do
+                    let sc = resultConstraint res
+                        uf = resultUnionFind res
                     cUnifyEdges sc `shouldBe` []
                     IntMap.lookup 0 uf `shouldBe` Just (NodeId 1)
                     lookupNodeMaybe (cNodes sc) (NodeId 1)
@@ -48,7 +59,9 @@ spec = describe "Phase 5 -- Solve" $ do
                     }
             case solveUnify defaultTraceConfig constraintVV of
                 Left err -> expectationFailure $ "Unexpected solve error: " ++ show err
-                Right SolveResult{ srConstraint = sc, srUnionFind = uf } -> do
+                Right res -> do
+                    let sc = resultConstraint res
+                        uf = resultUnionFind res
                     cUnifyEdges sc `shouldBe` []
                     IntMap.lookup 0 uf `shouldBe` Just (NodeId 1)
 
@@ -83,7 +96,8 @@ spec = describe "Phase 5 -- Solve" $ do
 
             case solveUnify defaultTraceConfig constraint of
                 Left err -> expectationFailure $ "Unexpected solve error: " ++ show err
-                Right SolveResult{ srConstraint = sc } -> do
+                Right res -> do
+                    let sc = resultConstraint res
                     IntMap.lookup (nodeRefKey (typeRef vInner)) (cBindParents sc)
                         `shouldBe` Just (typeRef root, BindFlex)
 
@@ -105,7 +119,9 @@ spec = describe "Phase 5 -- Solve" $ do
                     }
             case solveUnify defaultTraceConfig constraintVA of
                 Left err -> expectationFailure $ "Unexpected solve error: " ++ show err
-                Right SolveResult{ srConstraint = sc, srUnionFind = uf } -> do
+                Right res -> do
+                    let sc = resultConstraint res
+                        uf = resultUnionFind res
                     IntMap.lookup 0 uf `shouldBe` Just (NodeId 1)
                     lookupNodeMaybe (cNodes sc) (NodeId 1) `shouldBe` Just arrow
 
@@ -127,7 +143,9 @@ spec = describe "Phase 5 -- Solve" $ do
                     }
             case solveUnify defaultTraceConfig constraint of
                 Left err -> expectationFailure $ "Unexpected solve error: " ++ show err
-                Right SolveResult{ srConstraint = sc, srUnionFind = uf } -> do
+                Right res -> do
+                    let sc = resultConstraint res
+                        uf = resultUnionFind res
                     IntMap.lookup 0 uf `shouldBe` Just (NodeId 1)
                     lookupNodeMaybe (cNodes sc) (NodeId 1) `shouldBe` Just arrow
 
@@ -243,7 +261,9 @@ spec = describe "Phase 5 -- Solve" $ do
                     }
             case solveUnify defaultTraceConfig constraint of
                 Left err -> expectationFailure $ "Unexpected solve error: " ++ show err
-                Right SolveResult{ srConstraint = sc, srUnionFind = uf } -> do
+                Right res -> do
+                    let sc = resultConstraint res
+                        uf = resultUnionFind res
                     cUnifyEdges sc `shouldBe` []
                     -- α should be unified with Int
                     frWith uf (NodeId 0) `shouldBe` NodeId 1
@@ -271,7 +291,9 @@ spec = describe "Phase 5 -- Solve" $ do
                     }
             case solveUnify defaultTraceConfig constraint of
                 Left err -> expectationFailure $ "Unexpected solve error: " ++ show err
-                Right SolveResult{ srConstraint = sc, srUnionFind = uf } -> do
+                Right res -> do
+                    let sc = resultConstraint res
+                        uf = resultUnionFind res
                     cUnifyEdges sc `shouldBe` []
                     -- α should be unified with Int, β with Bool
                     frWith uf (NodeId 0) `shouldBe` NodeId 2
@@ -432,7 +454,8 @@ spec = describe "Phase 5 -- Solve" $ do
                     }
             case solveUnify defaultTraceConfig constraint of
                 Left err -> expectationFailure $ "Unexpected solve error: " ++ show err
-                Right SolveResult{ srConstraint = sc } ->
+                Right res ->
+                    let sc = resultConstraint res in
                     cUnifyEdges sc `shouldBe` []
 
         it "fails when forall arity matches but bodies clash" $ do
@@ -472,7 +495,8 @@ spec = describe "Phase 5 -- Solve" $ do
                     }
             case solveUnify defaultTraceConfig constraint of
                 Left err -> expectationFailure $ "Unexpected solve error: " ++ show err
-                Right SolveResult{ srConstraint = sc } ->
+                Right res ->
+                    let sc = resultConstraint res in
                     cUnifyEdges sc `shouldBe` []
 
     describe "Rewriting and errors" $ do
@@ -486,7 +510,9 @@ spec = describe "Phase 5 -- Solve" $ do
                     }
             case solveUnify defaultTraceConfig constraint of
                 Left err -> expectationFailure $ "Unexpected solve error: " ++ show err
-                Right SolveResult{ srConstraint = sc, srUnionFind = uf } -> do
+                Right res -> do
+                    let sc = resultConstraint res
+                        uf = resultUnionFind res
                     IntMap.lookup 0 uf `shouldBe` Just (NodeId 1)
                     cInstEdges sc `shouldBe` [InstEdge (EdgeId 0) (NodeId 1) (NodeId 1)]
 
@@ -507,7 +533,9 @@ spec = describe "Phase 5 -- Solve" $ do
                     }
             case solveUnify defaultTraceConfig constraint of
                 Left err -> expectationFailure $ "Unexpected solve error: " ++ show err
-                Right SolveResult{ srConstraint = sc, srUnionFind = uf } -> do
+                Right res -> do
+                    let sc = resultConstraint res
+                        uf = resultUnionFind res
                     IntMap.lookup 2 uf `shouldBe` Just (NodeId 4)
                     case lookupNodeMaybe (cNodes sc) (NodeId 1) of
                         Just (TyArrow _ dom' cod') -> do
@@ -556,7 +584,7 @@ spec = describe "Phase 5 -- Solve" $ do
                 -- NodeId 1 is missing
                 constraint = rootedConstraint $ emptyConstraint                    { cNodes = nodeMapFromList [(0, arrow), (2, cod)]
                     }
-                res = SolveResult { srConstraint = constraint, srUnionFind = IntMap.empty }
+                res = mkSolveResult constraint IntMap.empty 
                 msgs = validateSolvedGraphStrict res
             msgs `shouldSatisfy` any ("Missing child node" `isPrefixOf`)
 
@@ -565,7 +593,7 @@ spec = describe "Phase 5 -- Solve" $ do
             let base = TyBase (NodeId 1) (BaseTy "Int")
                 constraint = rootedConstraint $ emptyConstraint                    { cNodes = nodeMapFromList [(0, base)] -- Mismatch key vs id
                     }
-                res = SolveResult { srConstraint = constraint, srUnionFind = IntMap.empty }
+                res = mkSolveResult constraint IntMap.empty 
                 msgs = validateSolvedGraphStrict res
             msgs `shouldSatisfy` any ("Node key/id mismatch" `isPrefixOf`)
 
@@ -579,7 +607,7 @@ spec = describe "Phase 5 -- Solve" $ do
                 constraint = rootedConstraint $ emptyConstraint                    { cNodes = nodeMapFromList [(0, arrow), (1, alias), (2, base)]
                     }
                 uf = IntMap.fromList [(1, NodeId 2)]
-                res = SolveResult { srConstraint = constraint, srUnionFind = uf }
+                res = mkSolveResult constraint uf 
                 msgs = validateSolvedGraphStrict res
             -- Arrow child 1 is not canonical (should be 2)
             msgs `shouldSatisfy` any ("Non-canonical child id" `isPrefixOf`)
@@ -606,7 +634,7 @@ spec = describe "Phase 5 -- Solve" $ do
                         ]
                     , cInstEdges = [inst]
                     }
-                res = SolveResult { srConstraint = constraint, srUnionFind = IntMap.empty }
+                res = mkSolveResult constraint IntMap.empty 
                 msgs = validateSolvedGraphStrict res
             msgs `shouldSatisfy` (not . null)
             msgs `shouldSatisfy` any ("Residual instantiation edge" `isPrefixOf`)
@@ -623,7 +651,8 @@ spec = describe "Phase 5 -- Solve" $ do
                     , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 1)]
                     }
             case solveUnify defaultTraceConfig c of
-                Right SolveResult{ srConstraint = sc } -> cUnifyEdges sc `shouldBe` []
+                Right res ->
+                    let sc = resultConstraint res in cUnifyEdges sc `shouldBe` []
                 Left err -> expectationFailure $ "solveUnify failed: " ++ show err
 
         it "O12-SOLVE-UNIFY" $ do
@@ -638,7 +667,8 @@ spec = describe "Phase 5 -- Solve" $ do
                     , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 1), UnifyEdge (NodeId 1) (NodeId 2)]
                     }
             case solveUnify defaultTraceConfig c of
-                Right SolveResult{ srConstraint = sc } -> cUnifyEdges sc `shouldBe` []
+                Right res ->
+                    let sc = resultConstraint res in cUnifyEdges sc `shouldBe` []
                 Left err -> expectationFailure $ "solveUnify failed: " ++ show err
 
         it "O12-SOLVE-VAR-BASE" $ do
@@ -652,7 +682,8 @@ spec = describe "Phase 5 -- Solve" $ do
                     , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 1)]
                     }
             case solveUnify defaultTraceConfig c of
-                Right SolveResult{ srUnionFind = uf } ->
+                Right res ->
+                    let uf = resultUnionFind res in
                     IntMap.lookup 0 uf `shouldBe` Just (NodeId 1)
                 Left err -> expectationFailure $ "solveUnify failed: " ++ show err
 
@@ -667,7 +698,8 @@ spec = describe "Phase 5 -- Solve" $ do
                     , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 1)]
                     }
             case solveUnify defaultTraceConfig c of
-                Right SolveResult{ srUnionFind = uf } ->
+                Right res ->
+                    let uf = resultUnionFind res in
                     IntMap.lookup 0 uf `shouldBe` Just (NodeId 1)
                 Left err -> expectationFailure $ "solveUnify failed: " ++ show err
 
@@ -707,7 +739,9 @@ spec = describe "Phase 5 -- Solve" $ do
                     , cUnifyEdges = [UnifyEdge (NodeId 4) (NodeId 5)]
                     }
             case solveUnify defaultTraceConfig c of
-                Right SolveResult{ srConstraint = sc, srUnionFind = uf } -> do
+                Right res -> do
+                    let sc = resultConstraint res
+                        uf = resultUnionFind res
                     cUnifyEdges sc `shouldBe` []
                     -- Domain and codomain should be unified
                     (IntMap.lookup 0 uf /= Nothing || IntMap.lookup 2 uf /= Nothing)
@@ -722,7 +756,7 @@ spec = describe "Phase 5 -- Solve" $ do
                     { cNodes = nodeMapFromList [(0, base0), (1, base1)]
                     , cInstEdges = [InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)]
                     }
-                res = SolveResult { srConstraint = constraint, srUnionFind = IntMap.empty }
+                res = mkSolveResult constraint IntMap.empty 
                 msgs = validateSolvedGraphStrict res
             msgs `shouldSatisfy` (not . null)
 
@@ -754,7 +788,8 @@ spec = describe "Phase 5 -- Solve" $ do
                     }
             case solveUnify defaultTraceConfig constraint of
                 Left err -> expectationFailure $ "Unexpected solve error: " ++ show err
-                Right SolveResult{ srConstraint = sc } -> do
+                Right res -> do
+                    let sc = resultConstraint res
                     -- All three vars should end up unified, queue drained
                     cUnifyEdges sc `shouldBe` []
 
@@ -786,5 +821,6 @@ spec = describe "Phase 5 -- Solve" $ do
                     }
             case solveUnify defaultTraceConfig constraint of
                 Left err -> expectationFailure $ "Unexpected solve error: " ++ show err
-                Right SolveResult{ srConstraint = sc } -> do
+                Right res -> do
+                    let sc = resultConstraint res
                     cUnifyEdges sc `shouldBe` []

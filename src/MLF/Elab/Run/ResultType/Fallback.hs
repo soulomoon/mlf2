@@ -11,8 +11,7 @@ import Data.Functor.Foldable (cata)
 import MLF.Frontend.ConstraintGen (AnnExpr(..))
 import MLF.Constraint.Presolution (EdgeTrace(..))
 import MLF.Constraint.Presolution.Base (CopyMapping(..), lookupCopy)
-import MLF.Constraint.Solve (SolveResult(..), frWith)
-import MLF.Constraint.Solved (fromSolveResult, toSolveResult)
+import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types.Graph
     ( EdgeId(..)
     , GenNode(..)
@@ -172,7 +171,13 @@ computeResultTypeFallbackCore ctx annCanon ann = do
         c1 = rtcBaseConstraint ctx
         redirects = rtcRedirects ctx
         traceCfg = rtcTraceConfig ctx
-        generalizeAtWith = \mbGa s -> generalizeAtWithBuilder planBuilder mbGa (toSolveResult s)
+        solvedForGenView = Solved.fromSolveResult solvedForGen
+        solvedConstraintOf = Solved.solvedConstraint . Solved.fromSolveResult
+        canonicalOf = Solved.canonical . Solved.fromSolveResult
+        setSolvedConstraint res c' =
+            Solved.toSolveResult $
+                Solved.mkSolved c' (Solved.unionFind (Solved.fromSolveResult res))
+        generalizeAtWith = \mbGa s -> generalizeAtWithBuilder planBuilder mbGa (Solved.toSolveResult s)
 
     let edgeTraceCounts =
             IntMap.fromListWith
@@ -183,7 +188,7 @@ computeResultTypeFallbackCore ctx annCanon ann = do
     let schemeRootSet =
             IntSet.fromList
                 [ getNodeId (canonical root)
-                | gen <- NodeAccess.allGenNodes (srConstraint solvedForGen)
+                | gen <- NodeAccess.allGenNodes (Solved.solvedConstraint solvedForGenView)
                 , root <- gnSchemes gen
                 ]
         isSchemeRoot nid =
@@ -230,7 +235,7 @@ computeResultTypeFallbackCore ctx annCanon ann = do
             Left (ValidationFailed ["computeResultTypeFallback called with AAnn - use facade instead"])
         _ -> do
             let rootC = canonical rootForType
-                constraint = srConstraint solved
+                constraint = solvedConstraintOf solved
                 nodes = cNodes constraint
                 nodeList = map snd (toListNode nodes)
                 rootInstRoots =
@@ -263,7 +268,7 @@ computeResultTypeFallbackCore ctx annCanon ann = do
                 instAppBasesFromWitness funEid =
                     case IntMap.lookup (getEdgeId funEid) edgeWitnesses of
                         Just ew ->
-                            case phiFromEdgeWitnessWithTrace traceCfg generalizeAtWith (fromSolveResult solved) (Just bindParentsGa) Nothing (IntMap.lookup (getEdgeId funEid) edgeTraces) ew of
+                            case phiFromEdgeWitnessWithTrace traceCfg generalizeAtWith (Solved.fromSolveResult solved) (Just bindParentsGa) Nothing (IntMap.lookup (getEdgeId funEid) edgeTraces) ew of
                                 Right inst ->
                                     IntSet.fromList
                                         [ getNodeId nid
@@ -466,7 +471,8 @@ computeResultTypeFallbackCore ctx annCanon ann = do
                     case boundTarget of
                         Nothing -> resFinal
                         Just baseN ->
-                            let nodes0 = cNodes (srConstraint resFinal)
+                            let constraint0 = solvedConstraintOf resFinal
+                                nodes0 = cNodes constraint0
                                 adjustNode node =
                                     case node of
                                         TyVar{ tnId = nid, tnBound = Nothing } ->
@@ -477,12 +483,12 @@ computeResultTypeFallbackCore ctx annCanon ann = do
                                         [ (nid, if nid == rootC then adjustNode node else node)
                                         | (nid, node) <- toListNode nodes0
                                         ]
-                                constraint' = (srConstraint resFinal) { cNodes = nodes' }
-                            in resFinal { srConstraint = constraint' }
+                                constraint' = constraint0 { cNodes = nodes' }
+                            in setSolvedConstraint resFinal constraint'
             let scopeRootNodePre = rootForTypePre
             scopeRootPre <- bindingToElab (resolveCanonicalScope c1 resFinalBounded redirects scopeRootNodePre)
             let scopeRootPost =
-                    case bindingScopeRef (srConstraint resFinalBounded) rootC of
+                    case bindingScopeRef (solvedConstraintOf resFinalBounded) rootC of
                         Right ref -> canonicalizeScopeRef resFinalBounded redirects ref
                         Left _ -> scopeRootPre
                 scopeRoot = scopeRootPre
@@ -496,9 +502,10 @@ computeResultTypeFallbackCore ctx annCanon ann = do
                     ++ " postNode="
                     ++ show rootC
                 )
-            let canonicalFinal = frWith (srUnionFind resFinalBounded)
+            let constraintFinalBounded = solvedConstraintOf resFinalBounded
+                canonicalFinal = canonicalOf resFinalBounded
                 rootFinal = canonicalFinal rootC
-                nodesFinal = cNodes (srConstraint resFinalBounded)
+                nodesFinal = cNodes constraintFinalBounded
                 rootBound =
                     case lookupNodeIn nodesFinal rootFinal of
                         Just TyVar{ tnBound = Just bnd } -> Just (canonicalFinal bnd)
@@ -514,7 +521,7 @@ computeResultTypeFallbackCore ctx annCanon ann = do
                 rootIsSchemeRoot =
                     any
                         (\gen -> any (\root -> canonicalFinal root == rootFinal) (gnSchemes gen))
-                        (NodeAccess.allGenNodes (srConstraint resFinalBounded))
+                        (NodeAccess.allGenNodes constraintFinalBounded)
                 rootIsSchemeAlias =
                     rootIsSchemeRoot
                         && maybe False (const True) rootBound
@@ -523,13 +530,13 @@ computeResultTypeFallbackCore ctx annCanon ann = do
                 schemeRootSetFinal =
                     IntSet.fromList
                         [ getNodeId (canonicalFinal root)
-                        | gen <- NodeAccess.allGenNodes (srConstraint resFinalBounded)
+                        | gen <- NodeAccess.allGenNodes constraintFinalBounded
                         , root <- gnSchemes gen
                         ]
                 schemeRootOwnerFinal =
                     IntMap.fromList
                         [ (getNodeId (canonicalFinal root), gnId gen)
-                        | gen <- NodeAccess.allGenNodes (srConstraint resFinalBounded)
+                        | gen <- NodeAccess.allGenNodes constraintFinalBounded
                         , root <- gnSchemes gen
                         ]
                 boundHasForallFrom start0 =
@@ -625,10 +632,10 @@ computeResultTypeFallbackCore ctx annCanon ann = do
                                       , canonicalFinal (schemeBodyTarget resFinalBounded bnd)
                                       , boundHasForallFrom bnd
                                       )
-                                    | (childKey, (parentRef, _flag)) <- IntMap.toList (cBindParents (srConstraint resFinalBounded))
+                                    | (childKey, (parentRef, _flag)) <- IntMap.toList (cBindParents constraintFinalBounded)
                                     , parentRef == GenRef gid
                                     , TypeRef child <- [nodeRefFromKey childKey]
-                                    , Just bnd <- [VarStore.lookupVarBound (srConstraint resFinalBounded) (canonicalFinal child)]
+                                    , Just bnd <- [VarStore.lookupVarBound constraintFinalBounded (canonicalFinal child)]
                                     ]
                                 debugCandidates =
                                     if debugGaScopeEnabled traceCfg

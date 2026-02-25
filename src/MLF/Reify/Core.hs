@@ -29,7 +29,7 @@ import MLF.Util.ElabError (ElabError(..), bindingToElab)
 import qualified Data.List.NonEmpty as NE
 import MLF.Util.Graph (topoSortBy)
 import MLF.Constraint.Solve hiding (BindingTreeError, MissingNode)
-import qualified MLF.Constraint.Solve as Solve (frWith)
+import qualified MLF.Constraint.Solved as Solved
 import qualified MLF.Constraint.Traversal as Traversal
 import MLF.Binding.Tree (canonicalizeBindParentsUnder, lookupBindParent)
 import qualified MLF.Constraint.VarStore as VarStore
@@ -93,10 +93,10 @@ reifyWith _contextLabel res nameForVar isNamed rootMode nid =
             RootBound -> goBoundRoot
     in snd <$> start emptyCache (canonical nid)
   where
-    constraint = srConstraint res
+    solved = Solved.fromSolveResult res
+    constraint = Solved.solvedConstraint solved
     nodes = cNodes constraint
-    uf = srUnionFind res
-    canonical = Solve.frWith uf
+    canonical = Solved.canonical solved
     schemeRootSetRaw =
         IntSet.fromList
             [ getNodeId root
@@ -692,8 +692,7 @@ reifyTypeWithNames res subst nid = do
 -- docs/notes/2026-01-27-elab-changes.md.
 reifyTypeWithNamesNoFallback :: SolveResult -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
 reifyTypeWithNamesNoFallback res subst nid =
-    let uf = srUnionFind res
-        canonical = Solve.frWith uf
+    let canonical = Solved.canonical (Solved.fromSolveResult res)
         nameFor (NodeId i) = "t" ++ show i
 
         varNameFor v =
@@ -708,7 +707,7 @@ reifyTypeWithNamesNoFallback res subst nid =
 -- | Reify with an explicit constraint (Sχ′ on base graphs).
 reifyTypeWithNamesNoFallbackOnConstraint :: Constraint -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
 reifyTypeWithNamesNoFallbackOnConstraint constraint subst nid =
-    let resBase = SolveResult { srConstraint = constraint, srUnionFind = IntMap.empty }
+    let resBase = Solved.toSolveResult (Solved.mkSolved constraint IntMap.empty)
     in reifyTypeWithNamesNoFallback resBase subst nid
 
 -- | Reify with an explicit named-node set (Sχ′).
@@ -716,8 +715,7 @@ reifyTypeWithNamedSet :: SolveResult -> IntMap.IntMap String -> IntSet.IntSet ->
 reifyTypeWithNamedSet res subst namedSet =
     reifyWith "reifyTypeWithNames" res varNameFor isNamed RootType
   where
-    uf = srUnionFind res
-    canonical = Solve.frWith uf
+    canonical = Solved.canonical (Solved.fromSolveResult res)
 
     nameFor (NodeId i) = "t" ++ show i
 
@@ -733,8 +731,7 @@ reifyTypeWithNamedSetNoFallback :: SolveResult -> IntMap.IntMap String -> IntSet
 reifyTypeWithNamedSetNoFallback res subst namedSet =
     reifyWith "reifyTypeWithNamedSetNoFallback" res varNameFor isNamed RootTypeNoFallback
   where
-    uf = srUnionFind res
-    canonical = Solve.frWith uf
+    canonical = Solved.canonical (Solved.fromSolveResult res)
 
     nameFor (NodeId i) = "t" ++ show i
 
@@ -750,8 +747,7 @@ reifyBoundWithNames :: SolveResult -> IntMap.IntMap String -> NodeId -> Either E
 reifyBoundWithNames res subst =
     reifyWith "reifyBoundWithNames" res varNameFor isNamed RootBound
   where
-    uf = srUnionFind res
-    canonical = Solve.frWith uf
+    canonical = Solved.canonical (Solved.fromSolveResult res)
 
     nameFor (NodeId i) = "t" ++ show i
 
@@ -767,8 +763,7 @@ reifyBoundWithNamesBound res subst =
     reifyWithAs "reifyBoundWithNamesBound" res varNameFor isNamed RootBound
         (\ty -> either (Left . InstantiationError) Right (elabToBound ty))
   where
-    uf = srUnionFind res
-    canonical = Solve.frWith uf
+    canonical = Solved.canonical (Solved.fromSolveResult res)
 
     nameFor (NodeId i) = "t" ++ show i
 
@@ -782,18 +777,19 @@ reifyBoundWithNamesBound res subst =
 -- | Reify a node for use as a binder bound on an explicit constraint (Sχp on base graphs).
 reifyBoundWithNamesOnConstraint :: Constraint -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
 reifyBoundWithNamesOnConstraint constraint subst nid =
-    let resBase = SolveResult { srConstraint = constraint, srUnionFind = IntMap.empty }
+    let resBase = Solved.toSolveResult (Solved.mkSolved constraint IntMap.empty)
     in reifyBoundWithNames resBase subst nid
 
 reifyBoundWithNamesOnConstraintBound :: Constraint -> IntMap.IntMap String -> NodeId -> Either ElabError BoundType
 reifyBoundWithNamesOnConstraintBound constraint subst nid =
-    let resBase = SolveResult { srConstraint = constraint, srUnionFind = IntMap.empty }
+    let resBase = Solved.toSolveResult (Solved.mkSolved constraint IntMap.empty)
     in reifyBoundWithNamesBound resBase subst nid
 
 namedNodes :: SolveResult -> Either ElabError IntSet.IntSet
 namedNodes res = do
-    let constraint = srConstraint res
-        canonical = Solve.frWith (srUnionFind res)
+    let solved = Solved.fromSolveResult res
+        constraint = Solved.solvedConstraint solved
+        canonical = Solved.canonical solved
         nodes = cNodes constraint
     bindParents0 <- bindingToElab (canonicalizeBindParentsUnder canonical constraint)
     let bindParents = softenBindParents canonical constraint bindParents0
@@ -835,10 +831,10 @@ freeVars res nid visited
             Just TyExp{ tnBody = b } ->
                 freeVars res (canonical b) visited'
   where
-    constraint = srConstraint res
+    solved = Solved.fromSolveResult res
+    constraint = Solved.solvedConstraint solved
     nodes = cNodes constraint
-    uf = srUnionFind res
-    canonical = Solve.frWith uf
+    canonical = Solved.canonical solved
     key = getNodeId (canonical nid)
 
     freeVarsChild visited' child =

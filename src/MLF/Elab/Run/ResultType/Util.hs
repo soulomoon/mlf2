@@ -13,11 +13,10 @@ import Data.Functor.Foldable (cata)
 import qualified Data.IntMap.Strict as IntMap
 
 import MLF.Constraint.Presolution (PresolutionPlanBuilder(..))
-import MLF.Constraint.Solve (SolveResult(..))
+import MLF.Constraint.Solve (SolveResult)
 import MLF.Constraint.Types.Graph
     ( NodeId(..)
     , NodeRef(..)
-    , BindingError(..)
     )
 import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Elab.Run.Generalize (generalizeAtWithBuilder)

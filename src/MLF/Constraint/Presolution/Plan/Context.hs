@@ -15,7 +15,8 @@ import Data.Maybe (listToMaybe, isNothing)
 import MLF.Util.Trace (traceWhen)
 
 import MLF.Constraint.Types hiding (lookupNode)
-import MLF.Constraint.Solve (SolveResult(..))
+import MLF.Constraint.Solve (SolveResult)
+import qualified MLF.Constraint.Solved as Solved
 import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.BindingUtil (bindingPathToRootLocal, firstGenAncestorFrom)
 import MLF.Constraint.Presolution.Plan.BinderPlan (GaBindParentsInfo(..))
@@ -303,7 +304,10 @@ resolveContext env bindParentsSoft scopeRootArg targetNodeArg = do
             bindParents <- resolveBindParents scopeGen'
             let firstGenAncestorGa = resolveFirstGenAncestor bindParents
                 constraintForReify = constraint { cBindParents = bindParents }
-                resForReify = (geRes env) { srConstraint = constraintForReify }
+                solvedRes = Solved.fromSolveResult (geRes env)
+                resForReify =
+                    Solved.toSolveResult
+                        (Solved.mkSolved constraintForReify (Solved.unionFind solvedRes))
             pure ResolveBinds
                 { rbBindParents = bindParents
                 , rbFirstGenAncestor = firstGenAncestorGa

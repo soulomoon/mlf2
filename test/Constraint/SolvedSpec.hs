@@ -4,7 +4,6 @@ import Test.Hspec
 import qualified Data.IntMap.Strict as IntMap
 
 import MLF.Constraint.Solved
-import MLF.Constraint.Solve (SolveResult(..))
 import MLF.Constraint.Types.Graph
     ( BaseTy(..)
     , BindFlag(..)
@@ -57,8 +56,7 @@ mkTestSolved =
             , cGenNodes = fromListGen [(GenNodeId 0, gn)]
             }
         uf = IntMap.fromList [(0, NodeId 1)]
-        sr = SolveResult { srConstraint = constraint, srUnionFind = uf }
-    in fromSolveResult sr
+    in mkSolved constraint uf
 
 spec :: Spec
 spec = describe "MLF.Constraint.Solved" $ do
@@ -141,6 +139,5 @@ spec = describe "MLF.Constraint.Solved" $ do
                 base11 = TyBase (NodeId 11) (BaseTy "Int")
                 nodes = nodeMapFromList [(10, boundVar), (11, base11)]
                 c = emptyConstraint { cNodes = nodes }
-                sr = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
-                s' = fromSolveResult sr
+                s' = mkSolved c IntMap.empty
             lookupVarBound s' (NodeId 10) `shouldBe` Just (NodeId 11)

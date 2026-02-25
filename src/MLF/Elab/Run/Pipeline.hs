@@ -21,8 +21,9 @@ import MLF.Constraint.Presolution
     )
 import MLF.Constraint.Solve hiding (BindingTreeError, MissingNode)
 import qualified MLF.Constraint.Solve as Solve
+import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types.Graph (PolySyms)
-import MLF.Constraint.Types (BindingError(..), cNodes, lookupNodeIn)
+import MLF.Constraint.Types (cNodes, lookupNodeIn)
 import MLF.Elab.Elaborate (ElabConfig(..), ElabEnv(..), elaborateWithEnv)
 import MLF.Elab.PipelineConfig (PipelineConfig(..), defaultPipelineConfig)
 import MLF.Elab.PipelineError
@@ -84,10 +85,17 @@ runPipelineElabWith traceCfg genConstraints expr = do
     let planBuilder = prPlanBuilder pres
         generalizeAtWith = generalizeAtWithBuilder planBuilder
     solved <- fromSolveError (solveUnify traceCfg (prConstraint pres))
-    let solvedClean = solved { srConstraint = pruneBindParentsConstraint (srConstraint solved) }
+    let solvedView = Solved.fromSolveResult solved
+        setSolvedConstraint res c' =
+            Solved.toSolveResult $
+                Solved.mkSolved c' (Solved.unionFind (Solved.fromSolveResult res))
+        solvedClean =
+            setSolvedConstraint solved
+                (pruneBindParentsConstraint (Solved.solvedConstraint solvedView))
+        solvedCleanView = Solved.fromSolveResult solvedClean
     case validateSolvedGraphStrict solvedClean of
         [] -> do
-            let canonNode = makeCanonicalizer (srUnionFind solvedClean) (prRedirects pres)
+            let canonNode = makeCanonicalizer (Solved.unionFind solvedCleanView) (prRedirects pres)
                 adoptNode = canonicalizeNode canonNode
                 baseNodes = cNodes c1
                 edgeTracesForCopy =
@@ -107,13 +115,20 @@ runPipelineElabWith traceCfg genConstraints expr = do
                     in foldl' IntMap.union IntMap.empty traceMaps
                 (constraintForGen, bindParentsGa) =
                     constraintForGeneralization traceCfg solvedClean (prRedirects pres) instCopyNodes instCopyMapFull c1 ann
-            let solvedForGen = solvedClean { srConstraint = constraintForGen }
+            let solvedForGen = setSolvedConstraint solvedClean constraintForGen
+                solvedForGenView = Solved.fromSolveResult solvedForGen
             let ann' = applyRedirectsToAnn (prRedirects pres) ann
             let annCanon = canonicalizeAnn (canonicalizeNode canonNode) ann'
             let edgeWitnesses = IntMap.map (canonicalizeWitness canonNode) (prEdgeWitnesses pres)
                 edgeTraces = IntMap.map (canonicalizeTrace canonNode) (prEdgeTraces pres)
                 edgeExpansions = IntMap.map (canonicalizeExpansion canonNode) (prEdgeExpansions pres)
-            let scopeOverrides = letScopeOverrides c1 (srConstraint solvedForGen) solvedClean (prRedirects pres) annCanon
+            let scopeOverrides =
+                    letScopeOverrides
+                        c1
+                        (Solved.solvedConstraint solvedForGenView)
+                        solvedClean
+                        (prRedirects pres)
+                        annCanon
             let elabConfig = ElabConfig
                     { ecTraceConfig = traceCfg
                     , ecGeneralizeAtWith = generalizeAtWith
@@ -172,7 +187,7 @@ runPipelineElabWith traceCfg genConstraints expr = do
                     pure (termClosed, tyChecked)
 
             -- Build context for result type computation
-            let canonical = frWith (srUnionFind solvedClean)
+            let canonical = Solved.canonical solvedCleanView
                 resultTypeCtx = ResultTypeContext
                     { rtcCanonical = canonical
                     , rtcEdgeWitnesses = edgeWitnesses

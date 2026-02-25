@@ -17,7 +17,7 @@ import MLF.Constraint.Types.Graph
     , gnSchemes
     )
 import qualified MLF.Constraint.NodeAccess
-import MLF.Constraint.Solve (SolveResult(..))
+import qualified MLF.Constraint.Solved as Solved
 import MLF.Elab.Types (ElabType, ElabError)
 import MLF.Elab.Run.ResultType.Types (ResultTypeContext(..))
 import qualified MLF.Elab.Run.ResultType.Ann as Ann
@@ -40,9 +40,11 @@ computeResultTypeFallback ctx annCanon ann = do
     let canonical = rtcCanonical ctx
         c1 = rtcBaseConstraint ctx
         solvedForGen = rtcSolvedForGen ctx
+        solvedForGenView = Solved.fromSolveResult solvedForGen
 
     let schemeRootSet =
-            let allGenNodes = MLF.Constraint.NodeAccess.allGenNodes (srConstraint solvedForGen)
+            let allGenNodes =
+                    MLF.Constraint.NodeAccess.allGenNodes (Solved.solvedConstraint solvedForGenView)
             in IntSet.fromList
                 [ getNodeId (canonical root)
                 | gen <- allGenNodes

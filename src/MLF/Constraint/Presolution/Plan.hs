@@ -33,8 +33,8 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
 import qualified MLF.Binding.Tree as Binding
-import MLF.Constraint.Solve (SolveResult(..))
-import qualified MLF.Constraint.Solve as Solve
+import MLF.Constraint.Solve (SolveResult)
+import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types hiding (lookupNode)
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Constraint.VarStore as VarStore
@@ -742,8 +742,9 @@ buildGeneralizePlans
     -> NodeId
     -> Either ElabError (GeneralizePlan, ReifyPlan)
 buildGeneralizePlans traceCfg res mbBindParentsGa scopeRoot targetNode = do
-    let constraint = srConstraint res
-        canonical = Solve.frWith (srUnionFind res)
+    let solved = Solved.fromSolveResult res
+        constraint = Solved.solvedConstraint solved
+        canonical = Solved.canonical solved
         presEnv =
             PresolutionEnv
                 { peConstraint = constraint
@@ -761,14 +762,14 @@ buildGeneralizePlans traceCfg res mbBindParentsGa scopeRoot targetNode = do
 
 mkGeneralizeEnv :: TraceConfig -> Maybe GaBindParents -> SolveResult -> GeneralizeEnv
 mkGeneralizeEnv traceCfg mbBindParentsGa res =
-    let constraint = srConstraint res
+    let solved = Solved.fromSolveResult res
+        constraint = Solved.solvedConstraint solved
         nodes =
             IntMap.fromList
                 [ (getNodeId nid, node)
                 | (nid, node) <- toListNode (cNodes constraint)
                 ]
-        uf = srUnionFind res
-        canonical = Solve.frWith uf
+        canonical = Solved.canonical solved
         canonKey nid = getNodeId (canonical nid)
         lookupNode key = lookupNodeInMap nodes (NodeId key)
         isTyVarNode node = case node of

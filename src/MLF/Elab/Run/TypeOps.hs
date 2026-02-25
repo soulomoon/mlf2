@@ -11,7 +11,8 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
 import qualified MLF.Constraint.VarStore as VarStore
-import MLF.Constraint.Solve (SolveResult, frWith, srConstraint, srUnionFind)
+import MLF.Constraint.Solve (SolveResult)
+import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types.Graph (TyNode(..), cNodes, fromListNode, toListNode)
 import MLF.Reify.Core (namedNodes, reifyTypeWithNamedSetNoFallback)
 import MLF.Reify.TypeOps (
@@ -52,8 +53,9 @@ inlineBoundVarsTypeWith unboundToBottom res =
         (VarStore.lookupVarBound constraint)
         reifyBoundWithSeen
   where
-    constraint = srConstraint res
-    canonical = frWith (srUnionFind res)
+    solved = Solved.fromSolveResult res
+    constraint = Solved.solvedConstraint solved
+    canonical = Solved.canonical solved
     namedSet = either (const IntSet.empty) id (namedNodes res)
     nodesVarOnly =
         fromListNode

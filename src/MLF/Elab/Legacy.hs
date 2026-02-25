@@ -6,8 +6,8 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.List.NonEmpty as NE
 
 import MLF.Constraint.Types (Expansion, ExpansionF(..))
-import MLF.Constraint.Solve (SolveResult(..))
-import qualified MLF.Constraint.Solve as Solve (frWith)
+import MLF.Constraint.Solve (SolveResult)
+import qualified MLF.Constraint.Solved as Solved
 import MLF.Elab.Run.TypeOps (inlineBoundVarsTypeForBound)
 import MLF.Elab.Types (ElabError, Instantiation(..))
 import MLF.Reify.Core (reifyTypeWithNamesNoFallback)
@@ -44,8 +44,9 @@ import MLF.Util.RecursionSchemes (cataM)
 expansionToInst :: SolveResult -> Expansion -> Either ElabError Instantiation
 expansionToInst res = cataM alg
   where
-    constraint = srConstraint res
-    canonical = Solve.frWith (srUnionFind res)
+    solved = Solved.fromSolveResult res
+    constraint = Solved.solvedConstraint solved
+    canonical = Solved.canonical solved
     resolveBaseBound = resolveBaseBoundForInstConstraint constraint canonical
     reifyArg arg =
         let argC = canonical arg

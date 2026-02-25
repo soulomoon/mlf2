@@ -151,6 +151,7 @@ library mlf2-internal
                       MLF.Constraint.Presolution.WitnessCanon,
                       MLF.Constraint.Presolution.WitnessNorm,
                       MLF.Constraint.Presolution.WitnessValidation,
+                      MLF.Constraint.Solve.Internal,
                       MLF.Constraint.Canonicalize,
                       MLF.Constraint.Traversal,
                       MLF.Constraint.Unify.Core,

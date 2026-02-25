@@ -124,7 +124,7 @@ Paper references:
 -}
 module MLF.Constraint.Solve (
     SolveError(..),
-    SolveResult(..),
+    SolveResult,
     solveUnify,
     validateSolvedGraph,
     validateSolvedGraphStrict,
@@ -145,6 +145,7 @@ import qualified Data.List.NonEmpty as NE
 
 import qualified MLF.Binding.Adjustment as BindingAdjustment
 import qualified MLF.Binding.Tree as Binding
+import MLF.Constraint.Solve.Internal (SolveResult(..))
 import qualified MLF.Util.UnionFind as UnionFind
 import qualified MLF.Constraint.Canonicalize as Canonicalize
 import qualified MLF.Constraint.Traversal as Traversal
@@ -167,13 +168,6 @@ data SolveError
     | TyConClash BaseTy BaseTy          -- ^ TyCon head mismatch
     | TyConArityMismatch BaseTy Int Int -- ^ TyCon arity mismatch (head, arity1, arity2)
     deriving (Eq, Show)
-
--- | Successful unification result.
-data SolveResult = SolveResult
-        { srConstraint :: Constraint        -- ^ Constraint rewritten to canonical node ids; unify edges drained.
-        , srUnionFind :: IntMap NodeId      -- ^ Final union-find parent map.
-        }
-        deriving (Eq, Show)
 
 {-
 Note [SolveResult invariants]
