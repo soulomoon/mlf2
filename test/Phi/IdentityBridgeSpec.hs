@@ -5,7 +5,8 @@ import qualified Data.IntSet as IntSet
 import Test.Hspec
 
 import MLF.Constraint.Types.Graph (NodeId(..))
-import MLF.Constraint.Solved (Solved, mkSolved)
+import MLF.Constraint.Solved (Solved)
+import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Presolution
     ( EdgeTrace(..)
     , CopyMapping(..)
@@ -16,7 +17,7 @@ import SpecUtil (emptyConstraint)
 
 -- | Build a Solved with the given union-find for testing.
 mkTestSolved :: IntMap.IntMap NodeId -> Solved
-mkTestSolved uf = mkSolved emptyConstraint uf
+mkTestSolved uf = Solved.mkTestSolved emptyConstraint uf
 
 -- | Solved with identity canonical (empty union-find).
 idSolved :: Solved
