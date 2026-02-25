@@ -27,7 +27,7 @@ resultUnionFind :: SolveResult -> IntMap.IntMap NodeId
 resultUnionFind = Solved.unionFind . Solved.fromSolveResult
 
 mkSolveResult :: Constraint -> IntMap.IntMap NodeId -> SolveResult
-mkSolveResult c uf = Solved.toSolveResult (Solved.mkSolved c uf)
+mkSolveResult c uf = Solved.toSolveResult (Solved.mkTestSolved c uf)
 
 spec :: Spec
 spec = describe "Phase 5 -- Solve" $ do
