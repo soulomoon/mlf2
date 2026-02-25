@@ -10,17 +10,16 @@ entry point for post-solve access — downstream phases (elaboration, phi
 translation, omega) should use these queries instead of reaching into
 'SolveResult' internals directly.
 
-= Phase 1 (current)
+= Phase 1 (current runtime path)
 
-The internal representation is 'SolveResult'; all queries delegate directly.
-Escape hatches ('unionFind', 'solvedConstraint') are provided for callers
-not yet migrated.
+`fromSolveResult` and `mkSolved` still produce the legacy backend, so
+all runtime behavior is unchanged.
 
-= Phase 2 (planned)
+= Phase 2 (staged)
 
-The backend switches to equivalence classes. Escape hatches are removed,
-and 'classMembers' / 'originalNode' / 'originalBindParent' /
-'wasOriginalBinder' return real data instead of degraded stubs.
+`Solved` now supports a second constructor (`EquivBackend`) for the
+equivalence-class representation. This backend is not wired into the
+solver output yet, but all API queries handle both constructors.
 -}
 module MLF.Constraint.Solved (
     -- * Opaque type
@@ -52,6 +51,7 @@ module MLF.Constraint.Solved (
 
 import Prelude hiding (lookup)
 import Data.IntMap.Strict (IntMap)
+import qualified Data.IntMap.Strict as IntMap
 
 import MLF.Constraint.Solve (SolveResult, frWith)
 import MLF.Constraint.Solve.Internal (SolveResult(..))
@@ -62,9 +62,9 @@ import MLF.Constraint.Types.Graph
     , GenNode
     , GenNodeMap
     , InstEdge
-    , NodeId
+    , NodeId(..)
     , NodeRef
-    , TyNode
+    , TyNode(..)
     )
 import qualified MLF.Constraint.NodeAccess as NA
 
@@ -74,20 +74,43 @@ import qualified MLF.Constraint.NodeAccess as NA
 
 -- | Opaque handle to a solved constraint graph.
 --
--- In Phase 1 this is a thin wrapper around 'SolveResult'.
--- In Phase 2 the internal representation will switch to equivalence
--- classes; the query interface stays the same.
-newtype Solved = Solved { unSolved :: SolveResult }
+-- The runtime path still uses 'LegacyBackend' via 'fromSolveResult',
+-- but 'EquivBackend' is available for staged migration.
+data SolvedBackend
+    = LegacyBackend
+        { lbConstraint :: Constraint
+        , lbUnionFind :: IntMap NodeId
+        }
+    | EquivBackend
+        { ebCanonicalMap :: IntMap NodeId
+        , ebCanonicalConstraint :: Constraint
+        , ebEquivClasses :: IntMap [NodeId]
+        , ebOriginalConstraint :: Constraint
+        }
+    deriving (Eq, Show)
+
+newtype Solved = Solved { unSolved :: SolvedBackend }
     deriving (Eq, Show)
 
 -- | Wrap a 'SolveResult' into the opaque 'Solved' handle.
 fromSolveResult :: SolveResult -> Solved
-fromSolveResult = Solved
+fromSolveResult sr =
+    Solved LegacyBackend
+        { lbConstraint = srConstraint sr
+        , lbUnionFind = srUnionFind sr
+        }
 
 -- | Construct a 'Solved' directly from a constraint and union-find map.
 -- This avoids the need to import 'SolveResult(..)' in test code.
 mkSolved :: Constraint -> IntMap NodeId -> Solved
-mkSolved c uf = Solved SolveResult { srConstraint = c, srUnionFind = uf }
+mkSolved c uf =
+    Solved LegacyBackend
+        { lbConstraint = c
+        , lbUnionFind = uf
+        }
+
+nodeIdKey :: NodeId -> Int
+nodeIdKey (NodeId k) = k
 
 -- -----------------------------------------------------------------
 -- Core queries
@@ -95,35 +118,50 @@ mkSolved c uf = Solved SolveResult { srConstraint = c, srUnionFind = uf }
 
 -- | Chase the union-find to the canonical representative.
 canonical :: Solved -> NodeId -> NodeId
-canonical s = frWith (srUnionFind (unSolved s))
+canonical (Solved LegacyBackend { lbUnionFind = uf }) nid = frWith uf nid
+canonical (Solved EquivBackend { ebCanonicalMap = canonMap }) nid =
+    IntMap.findWithDefault nid (nodeIdKey nid) canonMap
 
 -- | Look up a type node, canonicalizing the id first.
 lookupNode :: Solved -> NodeId -> Maybe TyNode
-lookupNode s nid = NA.lookupNode (srConstraint (unSolved s)) (canonical s nid)
+lookupNode s@(Solved LegacyBackend { lbConstraint = c }) nid =
+    NA.lookupNode c (canonical s nid)
+lookupNode s@(Solved EquivBackend { ebCanonicalConstraint = c }) nid =
+    NA.lookupNode c (canonical s nid)
 
 -- | All type nodes in the solved constraint.
 allNodes :: Solved -> [TyNode]
-allNodes s = NA.allNodes (srConstraint (unSolved s))
+allNodes (Solved LegacyBackend { lbConstraint = c }) = NA.allNodes c
+allNodes (Solved EquivBackend { ebCanonicalConstraint = c }) = NA.allNodes c
 
 -- | Look up the binding parent of a node reference.
 lookupBindParent :: Solved -> NodeRef -> Maybe (NodeRef, BindFlag)
-lookupBindParent s ref = NA.lookupBindParent (srConstraint (unSolved s)) ref
+lookupBindParent (Solved LegacyBackend { lbConstraint = c }) ref =
+    NA.lookupBindParent c ref
+lookupBindParent (Solved EquivBackend { ebCanonicalConstraint = c }) ref =
+    NA.lookupBindParent c ref
 
 -- | The full bind-parents map.
 bindParents :: Solved -> BindParents
-bindParents s = cBindParents (srConstraint (unSolved s))
+bindParents (Solved LegacyBackend { lbConstraint = c }) = cBindParents c
+bindParents (Solved EquivBackend { ebCanonicalConstraint = c }) = cBindParents c
 
 -- | All instantiation edges.
 instEdges :: Solved -> [InstEdge]
-instEdges s = cInstEdges (srConstraint (unSolved s))
+instEdges (Solved LegacyBackend { lbConstraint = c }) = cInstEdges c
+instEdges (Solved EquivBackend { ebCanonicalConstraint = c }) = cInstEdges c
 
 -- | The gen-node map.
 genNodes :: Solved -> GenNodeMap GenNode
-genNodes s = cGenNodes (srConstraint (unSolved s))
+genNodes (Solved LegacyBackend { lbConstraint = c }) = cGenNodes c
+genNodes (Solved EquivBackend { ebCanonicalConstraint = c }) = cGenNodes c
 
 -- | Look up the instance bound of a variable, canonicalizing the id first.
 lookupVarBound :: Solved -> NodeId -> Maybe NodeId
-lookupVarBound s nid = NA.lookupVarBound (srConstraint (unSolved s)) (canonical s nid)
+lookupVarBound s@(Solved LegacyBackend { lbConstraint = c }) nid =
+    NA.lookupVarBound c (canonical s nid)
+lookupVarBound s@(Solved EquivBackend { ebCanonicalConstraint = c }) nid =
+    NA.lookupVarBound c (canonical s nid)
 
 -- -----------------------------------------------------------------
 -- Escape hatches (Phase 1 only)
@@ -132,16 +170,21 @@ lookupVarBound s nid = NA.lookupVarBound (srConstraint (unSolved s)) (canonical 
 -- | Extract the underlying 'SolveResult'. Escape hatch for callers
 -- not yet migrated to 'Solved' queries. Will be removed in Phase 2.
 toSolveResult :: Solved -> SolveResult
-toSolveResult = unSolved
+toSolveResult (Solved LegacyBackend { lbConstraint = c, lbUnionFind = uf }) =
+    SolveResult { srConstraint = c, srUnionFind = uf }
+toSolveResult (Solved EquivBackend { ebCanonicalConstraint = c, ebCanonicalMap = cm }) =
+    SolveResult { srConstraint = c, srUnionFind = cm }
 
 -- | Raw union-find map. Will be removed in Phase 2.
 unionFind :: Solved -> IntMap NodeId
-unionFind s = srUnionFind (unSolved s)
+unionFind (Solved LegacyBackend { lbUnionFind = uf }) = uf
+unionFind (Solved EquivBackend { ebCanonicalMap = cm }) = cm
 
 -- | Raw constraint. Will be removed in Phase 2 once all callers
 -- are migrated to 'Solved' queries.
 solvedConstraint :: Solved -> Constraint
-solvedConstraint s = srConstraint (unSolved s)
+solvedConstraint (Solved LegacyBackend { lbConstraint = c }) = c
+solvedConstraint (Solved EquivBackend { ebCanonicalConstraint = c }) = c
 
 -- -----------------------------------------------------------------
 -- Extended queries (degraded stubs — Phase 1)
@@ -152,25 +195,44 @@ solvedConstraint s = srConstraint (unSolved s)
 -- Phase 1: returns @[canonical s nid]@ (singleton).
 -- Phase 2: returns the full equivalence class.
 classMembers :: Solved -> NodeId -> [NodeId]
-classMembers s nid = [canonical s nid]
+classMembers s@(Solved LegacyBackend {}) nid = [canonical s nid]
+classMembers s@(Solved EquivBackend { ebEquivClasses = classes }) nid =
+    let nidC = canonical s nid
+        members = IntMap.findWithDefault [nidC] (nodeIdKey nidC) classes
+    in if null members then [nidC] else members
 
 -- | Look up the /original/ (pre-merge) node.
 --
 -- Phase 1: delegates to 'lookupNode' (no pre-merge snapshot yet).
 -- Phase 2: returns the node as it existed before unification merges.
 originalNode :: Solved -> NodeId -> Maybe TyNode
-originalNode = lookupNode
+originalNode s@(Solved LegacyBackend {}) nid = lookupNode s nid
+originalNode s@(Solved EquivBackend { ebOriginalConstraint = c }) nid =
+    case NA.lookupNode c nid of
+        Just ty -> Just ty
+        Nothing -> lookupNode s nid
 
 -- | Look up the /original/ (pre-merge) binding parent.
 --
 -- Phase 1: delegates to 'lookupBindParent'.
 -- Phase 2: returns the binding parent from the pre-merge snapshot.
 originalBindParent :: Solved -> NodeRef -> Maybe (NodeRef, BindFlag)
-originalBindParent = lookupBindParent
+originalBindParent s@(Solved LegacyBackend {}) ref = lookupBindParent s ref
+originalBindParent s@(Solved EquivBackend { ebOriginalConstraint = c }) ref =
+    case NA.lookupBindParent c ref of
+        Just parent -> Just parent
+        Nothing -> lookupBindParent s ref
 
 -- | Was @nid@ a binder (forall body owner) before merges?
 --
 -- Phase 1: always returns 'False' (no pre-merge data).
 -- Phase 2: returns the real answer from the snapshot.
 wasOriginalBinder :: Solved -> NodeId -> Bool
-wasOriginalBinder _s _nid = False
+wasOriginalBinder (Solved LegacyBackend {}) _nid = False
+wasOriginalBinder s@(Solved EquivBackend { ebOriginalConstraint = c }) nid =
+    any isForall (classMembers s nid)
+  where
+    isForall member =
+        case NA.lookupNode c member of
+            Just TyForall {} -> True
+            _ -> False
