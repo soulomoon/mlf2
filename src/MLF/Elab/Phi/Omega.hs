@@ -153,7 +153,7 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
             Nothing -> edgeRoot
             Just tr -> etRoot tr
 
-    nodes = cNodes (Solved.solvedConstraint solved)
+    nodes = cNodes (Solved.originalConstraint solved)
 
     boundKids nid = case lookupNodeIn nodes nid of
         Just TyVar{ tnBound = Just bnd } -> [bnd]
@@ -162,7 +162,7 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
     schemeRootGenMap =
         IntMap.fromList
             [ (getNodeId (canonicalNode root), gnId gen)
-            | gen <- NodeAccess.allGenNodes (Solved.solvedConstraint solved)
+            | gen <- NodeAccess.allGenNodes (Solved.originalConstraint solved)
             , root <- gnSchemes gen
             ]
 
@@ -211,12 +211,12 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
         case map (TypeRef . canonicalNode) binders of
             [] -> orderRoot
             (r0:rs) ->
-                case foldM (Binding.bindingLCA (Solved.solvedConstraint solved)) r0 rs of
+                case foldM (Binding.bindingLCA (Solved.originalConstraint solved)) r0 rs of
                     Left _ -> orderRoot
                     Right (TypeRef nid) -> canonicalNode nid
                     Right (GenRef gid) ->
                         fromMaybe orderRoot $ do
-                            gen <- NodeAccess.lookupGenNode (Solved.solvedConstraint solved) gid
+                            gen <- NodeAccess.lookupGenNode (Solved.originalConstraint solved) gid
                             listToMaybe (gnSchemes gen)
 
     orderKeys :: IntMap.IntMap Order.OrderKey
@@ -422,7 +422,7 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
     inlineBaseBounds :: ElabType -> ElabType
     inlineBaseBounds =
         inlineBaseBoundsType
-            (Solved.solvedConstraint solved)
+            (Solved.originalConstraint solved)
             canonicalNode
 
     inlineAliasBounds :: ElabType -> ElabType
@@ -438,7 +438,7 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
         inlineAliasBoundsWithBy
             fallbackToBottom
             canonicalNode
-            (cNodes (Solved.solvedConstraint solved))
+            (cNodes (Solved.originalConstraint solved))
             (Solved.lookupVarBound solved)
             (reifyBoundWithNamesSolved solved substForTypes)
 
@@ -863,7 +863,7 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
             raiseTarget <-
                 case Solved.lookupNode solved nOrig of
                     Just TyForall{ tnBody = body } -> do
-                        binders <- bindingToElab (Binding.orderedBinders canonicalNode (Solved.solvedConstraint solved) (typeRef nOrig))
+                        binders <- bindingToElab (Binding.orderedBinders canonicalNode (Solved.originalConstraint solved) (typeRef nOrig))
                         let bodyC = canonicalNode body
                         pure $ case binders of
                             (b:_) -> canonicalNode b
@@ -1141,7 +1141,7 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
                                             contextToNodeBoundWithOrderKeys
                                                 canonicalNode
                                                 orderKeys
-                                                (Solved.solvedConstraint solved)
+                                                (Solved.originalConstraint solved)
                                                 namedSet'
                                                 (canonicalNode mNode)
                                                 nContextTarget
@@ -1154,7 +1154,7 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
                             contextToNodeBoundWithOrderKeys
                                 canonicalNode
                                 orderKeys
-                                (Solved.solvedConstraint solved)
+                                (Solved.originalConstraint solved)
                                 namedSet'
                                 (canonicalNode orderRoot)
                                 nContextTarget

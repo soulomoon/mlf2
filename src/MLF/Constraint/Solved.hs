@@ -29,6 +29,7 @@ module MLF.Constraint.Solved (
 
     -- * Core queries
     canonical,
+    originalConstraint,
     lookupNode,
     allNodes,
     lookupBindParent,
@@ -264,6 +265,12 @@ canonical :: Solved -> NodeId -> NodeId
 canonical (Solved LegacyBackend { lbUnionFind = uf }) nid = frWith uf nid
 canonical (Solved EquivBackend { ebCanonicalMap = canonMap }) nid =
     equivCanonical canonMap nid
+
+-- | The original (pre-solving) constraint.  Primary accessor for all
+-- post-solve operations (thesis-exact).
+originalConstraint :: Solved -> Constraint
+originalConstraint (Solved EquivBackend { ebOriginalConstraint = c }) = c
+originalConstraint (Solved LegacyBackend { lbConstraint = c }) = c
 
 -- | Look up a type node, canonicalizing the id first.
 lookupNode :: Solved -> NodeId -> Maybe TyNode

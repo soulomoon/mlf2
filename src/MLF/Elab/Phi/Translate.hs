@@ -430,7 +430,7 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
     requireValidBindingTree :: Either ElabError ()
     requireValidBindingTree =
         let (constraintCheck, schemeConstraint, schemeCanonical) =
-                (Solved.solvedConstraint res, Solved.solvedConstraint res, canonicalNode)
+                (Solved.originalConstraint res, Solved.originalConstraint res, canonicalNode)
         in case checkBindingTree constraintCheck of
             Left err -> Left (BindingTreeError err)
             Right () ->
@@ -687,7 +687,7 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
                 let targetRootC = canonicalNode (ewRight ew)
                     schemeReplayKeys = IntMap.keys (siSubst siForKeys)
                 targetBinders <-
-                    case bindingToElab (Binding.orderedBinders canonicalNode (Solved.solvedConstraint res) (typeRef targetRootC)) of
+                    case bindingToElab (Binding.orderedBinders canonicalNode (Solved.originalConstraint res) (typeRef targetRootC)) of
                         Right bs -> pure bs
                         Left _ -> pure []
                 let targetCanonKeys =
@@ -735,7 +735,7 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
                 let rootC = canonicalNode root0
                     owners =
                         [ gnId gen
-                        | gen <- NodeAccess.allGenNodes (Solved.solvedConstraint res)
+                        | gen <- NodeAccess.allGenNodes (Solved.originalConstraint res)
                         , any (\root -> canonicalNode root == rootC) (gnSchemes gen)
                         ]
                 in case owners of
@@ -771,7 +771,7 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
             | IntSet.member (nodeRefKey ref) visited =
                 Right (typeRef (canonicalNode root0))
             | otherwise = do
-                mbParent <- bindingToElab (Binding.lookupBindParentUnder canonicalNode (Solved.solvedConstraint res) ref)
+                mbParent <- bindingToElab (Binding.lookupBindParentUnder canonicalNode (Solved.originalConstraint res) ref)
                 case mbParent of
                     Nothing -> Right (typeRef (canonicalNode root0))
                     Just (GenRef gid, _) -> Right (genRef gid)
