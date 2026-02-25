@@ -290,7 +290,7 @@ solveUnifyWithSnapshot traceCfg c0 = do
                     let res = SolveResult { srConstraint = c''', srUnionFind = uf' }
                         snapshot =
                             SolveSnapshot
-                                { snapUnionFind = uf'
+                                { snapUnionFind = uf
                                 , snapPreRewriteConstraint = preRewrite
                                 }
                         violations = validateSolvedGraph res
