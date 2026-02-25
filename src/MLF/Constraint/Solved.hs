@@ -37,6 +37,9 @@ module MLF.Constraint.Solved (
     genNodes,
     lookupVarBound,
 
+    -- * Constraint rebuilding
+    rebuildWithConstraint,
+
     -- * Escape hatches (Phase 1 only — removed in Phase 2)
     toSolveResult,
     unionFind,
@@ -302,6 +305,27 @@ lookupVarBound s@(Solved LegacyBackend { lbConstraint = c }) nid =
     NA.lookupVarBound c (canonical s nid)
 lookupVarBound s@(Solved EquivBackend { ebCanonicalConstraint = c }) nid =
     NA.lookupVarBound c (canonical s nid)
+
+-- -----------------------------------------------------------------
+-- Constraint rebuilding
+-- -----------------------------------------------------------------
+
+-- | Rebuild a Solved with a different constraint, preserving the
+-- canonical map. Used by callers that modify the constraint
+-- (e.g., alias insertion, canonicalization).
+rebuildWithConstraint :: Solved -> Constraint -> Solved
+rebuildWithConstraint (Solved EquivBackend { ebCanonicalMap = cm, ebEquivClasses = ec, ebOriginalConstraint = orig }) c =
+    Solved EquivBackend
+        { ebCanonicalMap = cm
+        , ebCanonicalConstraint = c
+        , ebEquivClasses = ec
+        , ebOriginalConstraint = orig
+        }
+rebuildWithConstraint (Solved LegacyBackend { lbUnionFind = uf }) c =
+    Solved LegacyBackend
+        { lbConstraint = c
+        , lbUnionFind = uf
+        }
 
 -- -----------------------------------------------------------------
 -- Escape hatches (Phase 1 only)

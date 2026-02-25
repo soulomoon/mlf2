@@ -307,7 +307,7 @@ resolveContext env bindParentsSoft scopeRootArg targetNodeArg = do
                 solvedRes = Solved.fromSolveResult (geRes env)
                 resForReify =
                     Solved.toSolveResult
-                        (Solved.mkSolved constraintForReify (Solved.unionFind solvedRes))
+                        (Solved.rebuildWithConstraint solvedRes constraintForReify)
             pure ResolveBinds
                 { rbBindParents = bindParents
                 , rbFirstGenAncestor = firstGenAncestorGa

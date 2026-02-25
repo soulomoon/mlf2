@@ -176,7 +176,7 @@ computeResultTypeFallbackCore ctx annCanon ann = do
         canonicalOf = Solved.canonical . Solved.fromSolveResult
         setSolvedConstraint res c' =
             Solved.toSolveResult $
-                Solved.mkSolved c' (Solved.unionFind (Solved.fromSolveResult res))
+                Solved.rebuildWithConstraint (Solved.fromSolveResult res) c'
         generalizeAtWith = \mbGa s -> generalizeAtWithBuilder planBuilder mbGa (Solved.toSolveResult s)
 
     let edgeTraceCounts =

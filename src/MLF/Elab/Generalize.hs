@@ -403,9 +403,8 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
                         substAlias =
                             IntMap.union (IntMap.fromList aliasEntries) substBaseRigid
                         resAlias =
-                            let solvedRes = Solved.fromSolveResult resForReify
-                            in Solved.toSolveResult
-                                (Solved.mkSolved constraintAlias (Solved.unionFind solvedRes))
+                            Solved.toSolveResult
+                                (Solved.rebuildWithConstraint (Solved.fromSolveResult resForReify) constraintAlias)
                     ty <- reifyWith bodyRoot substAlias constraintAlias resAlias
                     inlineRigid substAlias constraintAlias resAlias ty
           where

@@ -88,9 +88,9 @@ runPipelineElabWith traceCfg genConstraints expr = do
     solvedView <- fromSolveError (Solved.fromSolveOutput solveOut)
     let solved = soResult solveOut
         setSolvedConstraint res c' =
-            let uf = Solved.unionFind (Solved.fromSolveResult res)
-                cCanon = rewriteConstraintWithUF uf c'
-            in Solved.toSolveResult (Solved.mkSolved cCanon uf)
+            let solvedRes = Solved.fromSolveResult res
+                cCanon = rewriteConstraintWithUF (Solved.unionFind solvedRes) c'
+            in Solved.toSolveResult (Solved.rebuildWithConstraint solvedRes cCanon)
         solvedClean =
             setSolvedConstraint solved
                 (pruneBindParentsConstraint (Solved.solvedConstraint solvedView))
