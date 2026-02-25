@@ -1474,7 +1474,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 _ <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew)
                 pure ()
 
-            it "OpWeaken on trace binder source with no replay binder mapping is no-op (solved-away binder)" $ do
+            it "OpWeaken on solved-away binder emits InstElim (binder preserved in scheme)" $ do
                 let root = NodeId 100
                     binderA = NodeId 1
                     binderB = NodeId 2
@@ -1495,10 +1495,11 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 ]
                         }
                     solved = mkSolved c IntMap.empty
-                    scheme = Elab.schemeFromType (Elab.TForall "a" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
+                    -- Scheme now includes the solved-away binder b (original constraint preserves all binders)
+                    scheme = Elab.schemeFromType (Elab.TForall "a" Nothing (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))))
                     si = Elab.SchemeInfo
                         { Elab.siScheme = scheme
-                        , Elab.siSubst = IntMap.fromList [(getNodeId binderA, "a")]
+                        , Elab.siSubst = IntMap.fromList [(getNodeId binderA, "a"), (getNodeId binderB, "b")]
                         }
                     tr =
                         EdgeTrace
@@ -1519,9 +1520,12 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         }
                 case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew of
                     Left err ->
-                        expectationFailure ("Expected no-op (ε) for solved-away binder, got error: " ++ show err)
+                        expectationFailure ("Expected InstElim for solved-away binder, got error: " ++ show err)
                     Right inst ->
-                        Elab.pretty inst `shouldBe` "ε"
+                        -- With the original constraint as primary, binderB is in the scheme
+                        -- and VSpine, so OpWeaken finds it and emits InstElim (N) under
+                        -- the prefix context of binder "a".
+                        Elab.pretty inst `shouldBe` "∀(a ⩾) N"
 
             it "O15-TR-RIGID-MERGE: OpMerge with rigid operated node n translates to identity" $ do
                 let root = NodeId 100
