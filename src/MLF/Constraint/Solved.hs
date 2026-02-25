@@ -239,6 +239,13 @@ originalConstraint :: Solved -> Constraint
 originalConstraint (Solved EquivBackend { ebOriginalConstraint = c }) = c
 
 -- | The canonical (post-solving) constraint.
+--
+-- /Deprecated/: prefer the opaque queries ('lookupNode', 'allNodes',
+-- 'lookupBindParent', 'bindParents', 'instEdges', 'genNodes',
+-- 'lookupVarBound') which already read from the original constraint.
+-- This accessor and the underlying 'ebCanonicalConstraint' field will
+-- be removed once all external callers are migrated.
+-- See Note [solvedConstraint migration status].
 solvedConstraint :: Solved -> Constraint
 solvedConstraint (Solved EquivBackend { ebCanonicalConstraint = c }) = c
 
@@ -318,3 +325,41 @@ wasOriginalBinder s@(Solved EquivBackend { ebOriginalConstraint = c }) nid =
         case NA.lookupNode c member of
             Just TyForall {} -> True
             _ -> False
+
+{- Note [solvedConstraint migration status]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Tasks 14-17 migrated the core opaque queries (lookupNode, allNodes,
+lookupBindParent, bindParents, instEdges, genNodes, lookupVarBound)
+to read from ebOriginalConstraint instead of ebCanonicalConstraint.
+
+However, ~20 external callers still use solvedConstraint to obtain the
+raw canonical Constraint and then access its fields directly (cNodes,
+cBindParents, cGenNodes, lookupVarBound, etc.). These callers fall
+into two categories:
+
+  (a) Read-only: use the canonical constraint for node lookup,
+      var-bound chasing, bind-parent traversal, gen-node enumeration,
+      order-key computation, reification, and validation.
+      Files: Reify/Core.hs, Reify/TypeOps.hs, Elab/Legacy.hs,
+      Elab/Elaborate.hs, Elab/Run/TypeOps.hs, Elab/Run/Scope.hs,
+      Elab/Run/ResultType/Ann.hs, Elab/Run/ResultType/Fallback.hs,
+      Util/Order.hs, Presolution/Plan.hs,
+      Elab/Run/Generalize (Phase1-4, Finalize).
+
+  (b) Read-write: obtain the canonical constraint, modify it (e.g.
+      alias insertion, bind-parent pruning, node-map replacement),
+      and store it back via rebuildWithConstraint.
+      Files: Elab/Run/Pipeline.hs, Elab/Generalize.hs,
+      Elab/Run/ResultType/Fallback.hs, Presolution/Plan/Context.hs.
+
+  (c) Test: PipelineSpec.hs feeds solvedConstraint into
+      validateSolvedGraphStrict via SolveResult.
+
+To remove ebCanonicalConstraint, all category (a) callers must be
+migrated to use the opaque queries or originalConstraint + canonical.
+Category (b) callers need a replacement for the rebuild pattern
+(possibly operating on originalConstraint directly). Category (c)
+callers need a validation path that works with the original constraint.
+
+This is tracked as future work beyond Task 18.
+-}
