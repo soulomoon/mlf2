@@ -27,7 +27,7 @@ import MLF.Elab.Pipeline
     )
 import MLF.Frontend.Syntax
 import MLF.Frontend.ConstraintGen
-import MLF.Constraint.Canonicalizer (canonicalizeNode)
+import MLF.Constraint.Canonicalizer (canonicalizerFrom, canonicalizeNode)
 import MLF.Constraint.Presolution
 import MLF.Constraint.Solve (validateSolvedGraphStrict)
 import qualified MLF.Constraint.Solved as Solved
@@ -40,7 +40,6 @@ import MLF.Elab.Run.Util
     ( canonicalizeTrace
     , canonicalizeWitness
     , chaseRedirects
-    , makeCanonicalizer
     )
 import SpecUtil
     ( collectVarNodes
@@ -76,7 +75,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 Right PipelineArtifacts{ paPresolution = pres, paSolved = res, paRoot = root } -> do
                     validateStrict res
                     let rootRedirected = chaseRedirects (prRedirects pres) root
-                        root' = canonical (Solved.unionFind res) rootRedirected
+                        root' = Solved.canonical res rootRedirected
                     -- With coercion-only semantics, f's type is inferred (not declared)
                     -- The coercion ensures the RHS has the annotated type.
                     let scopeRoot =
@@ -200,7 +199,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 Right PipelineArtifacts{ paConstraintNorm = c1, paPresolution = pres, paSolved = solved } ->
                     case validateSolvedGraphStrict (Solved.toSolveResult solved) of
                         [] -> do
-                            let canon = makeCanonicalizer (Solved.unionFind solved) (prRedirects pres)
+                            let canon = canonicalizerFrom (\nid -> Solved.canonical solved (chaseRedirects (prRedirects pres) nid))
                                 adoptNode = canonicalizeNode canon
                                 baseNamedKeysAll = collectBaseNamedKeys c1
                                 traceMaps = map (buildTraceCopyMap c1 baseNamedKeysAll adoptNode)
@@ -237,7 +236,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             case runPipelineArtifactsDefault defaultPolySyms expr of
                 Left err -> expectationFailure err
                 Right PipelineArtifacts{ paPresolution = pres, paSolved = solved } -> do
-                    let canon = makeCanonicalizer (Solved.unionFind solved) (prRedirects pres)
+                    let canon = canonicalizerFrom (\nid -> Solved.canonical solved (chaseRedirects (prRedirects pres) nid))
                         edgeWitnesses = IntMap.map (canonicalizeWitness canon) (prEdgeWitnesses pres)
                         edgeTraces = IntMap.map (canonicalizeTrace canon) (prEdgeTraces pres)
                         raisesForEdge (eid, ew) =
@@ -330,7 +329,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 staleRedirectNodes `shouldBe` []
                 annRootNode annRedirected `shouldSatisfy` (\nid -> chaseRedirects redirects nid == nid)
                 validateStrict solved
-                let canonicalize = canonicalizeNode (makeCanonicalizer (Solved.unionFind solved) redirects)
+                let canonicalize = canonicalizeNode (canonicalizerFrom (\nid -> Solved.canonical solved (chaseRedirects redirects nid)))
                     canonicalizedSchemeRoots =
                         [ nid
                         | nid <- annLetSchemeRoots annRedirected
@@ -975,11 +974,6 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     IntSet.intersection letEdgeIds expansionKeys
                         `shouldBe` IntSet.empty
 
-canonical :: IntMap.IntMap NodeId -> NodeId -> NodeId
-canonical uf nid =
-    case IntMap.lookup (getNodeId nid) uf of
-        Nothing -> nid
-        Just p -> canonical uf p
 
 annNodeOccurrences :: AnnExpr -> [NodeId]
 annNodeOccurrences expr = case expr of
