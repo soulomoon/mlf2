@@ -59,7 +59,7 @@ import MLF.Constraint.Presolution.Base (CopyMapping(..), InteriorNodes(..), copi
 import qualified MLF.Binding.Tree as Binding
 import MLF.Binding.Tree (checkBindingTree, checkNoGenFallback, checkSchemeClosureUnder)
 import qualified MLF.Constraint.NodeAccess as NodeAccess
-import MLF.Elab.Phi.Env (PhiM, askCanonical, askResult)
+import MLF.Elab.Phi.Env (PhiM, askResult)
 import MLF.Elab.Phi.IdentityBridge (mkIdentityBridge, sourceKeysForNode, traceOrderRank)
 import MLF.Elab.Phi.Omega (OmegaContext(..), phiWithSchemeOmega)
 import MLF.Util.Trace (TraceConfig, traceGeneralize)
@@ -73,8 +73,8 @@ canonicalNodeM nid = do
 -- | Remap scheme info using the copy mapping from an edge trace.
 remapSchemeInfoM :: EdgeTrace -> SchemeInfo -> PhiM SchemeInfo
 remapSchemeInfoM tr si = do
-    canonical <- askCanonical
-    pure (remapSchemeInfoByTrace canonical tr si)
+    solved <- askResult
+    pure (remapSchemeInfoByTrace solved tr si)
 
 -- | Re-key scheme substitutions into the EdgeTrace source-ID domain.
 --
@@ -83,14 +83,14 @@ remapSchemeInfoM tr si = do
 --   1) binder IDs in trace order (preferred),
 --   2) reverse lookup in `etCopyMap`,
 --   3) original key as deterministic fallback.
-remapSchemeInfoByTrace :: (NodeId -> NodeId) -> EdgeTrace -> SchemeInfo -> SchemeInfo
-remapSchemeInfoByTrace canonical tr si =
+remapSchemeInfoByTrace :: Solved -> EdgeTrace -> SchemeInfo -> SchemeInfo
+remapSchemeInfoByTrace solved tr si =
     let traceCopyMap = getCopyMapping (etCopyMap tr)
         binderOrder = map fst (etBinderArgs tr)
         schemeNames = case siScheme si of
             Forall binds _ -> map fst binds
         -- Build bridge for ranking/dedup
-        ib = mkIdentityBridge canonical (Just tr) traceCopyMap
+        ib = mkIdentityBridge solved (Just tr) traceCopyMap
         traceBindersInOrder =
             let sourceSeeds =
                     if null binderOrder
@@ -158,8 +158,8 @@ remapSchemeInfoByTrace canonical tr si =
 -- | Hydrate substitutions using traced binder order when remapped substitutions
 -- under-cover scheme binders. This preserves source-ID provenance instead of
 -- dropping scheme info on arity mismatch.
-hydrateSchemeInfoByTrace :: (NodeId -> NodeId) -> EdgeTrace -> SchemeInfo -> SchemeInfo
-hydrateSchemeInfoByTrace canonical tr si =
+hydrateSchemeInfoByTrace :: Solved -> EdgeTrace -> SchemeInfo -> SchemeInfo
+hydrateSchemeInfoByTrace solved tr si =
     let schemeNames =
             case siScheme si of
                 Forall binds _ -> map fst binds
@@ -167,7 +167,7 @@ hydrateSchemeInfoByTrace canonical tr si =
             Map.fromList [(name, ()) | name <- schemeNames]
         traceCopyMap = getCopyMapping (etCopyMap tr)
         -- Build bridge for ranking/dedup
-        ib = mkIdentityBridge canonical (Just tr) traceCopyMap
+        ib = mkIdentityBridge solved (Just tr) traceCopyMap
         traceBinderKeys =
             let (_, rev) =
                     foldl'
@@ -445,11 +445,11 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
     canonicalNode = Solved.canonical res
 
     remapSchemeInfo :: EdgeTrace -> SchemeInfo -> SchemeInfo
-    remapSchemeInfo tr si = remapSchemeInfoByTrace canonicalNode tr si
+    remapSchemeInfo tr si = remapSchemeInfoByTrace res tr si
 
     remapAndHydrateSchemeInfo :: EdgeTrace -> SchemeInfo -> SchemeInfo
     remapAndHydrateSchemeInfo tr =
-        hydrateSchemeInfoByTrace canonicalNode tr . remapSchemeInfo tr
+        hydrateSchemeInfoByTrace res tr . remapSchemeInfo tr
 
     computeTraceBinderReplayBridge
         :: Maybe EdgeTrace
@@ -491,7 +491,7 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
                             | (sourceKey, replayN) <- IntMap.toList hintMapRaw
                             ]
                     traceCopyMap = getCopyMapping (etCopyMap tr)
-                    ib = mkIdentityBridge canonicalNode (Just tr) traceCopyMap
+                    ib = mkIdentityBridge res (Just tr) traceCopyMap
                     chooseBetterKey new old =
                         if traceOrderRank ib new < traceOrderRank ib old
                             then new

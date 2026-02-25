@@ -98,7 +98,7 @@ phiWithSchemeOmega ctx namedSet keepBinderKeys si introCount omegaOps = phiWithS
     -- gaSolvedToBase lookup for all known cases.  If future binder-index
     -- resolution failures surface, consider integrating GaBindParents into
     -- the bridge rather than re-adding local resolution here.
-    ib = IB.mkIdentityBridge canonicalNode mTrace copyMap
+    ib = IB.mkIdentityBridge solved mTrace copyMap
 
     mSchemeInfo :: Maybe SchemeInfo
     mSchemeInfo = ocSchemeInfo ctx

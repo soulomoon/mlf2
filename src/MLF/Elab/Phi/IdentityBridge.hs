@@ -12,6 +12,7 @@ logic currently duplicated between "MLF.Elab.Phi.Omega" and
 module MLF.Elab.Phi.IdentityBridge (
     IdentityBridge,
     mkIdentityBridge,
+    bridgeSolved,
     bridgeCanonical,
     bridgeCopyMap,
     traceBinderKeysInOrder,
@@ -31,14 +32,17 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
 import MLF.Constraint.Types.Graph (NodeId(..))
+import MLF.Constraint.Solved (Solved)
+import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Presolution.Base (EdgeTrace(..))
 
 -- | Bridge between source-domain and canonical-domain node identities.
 --
--- Constructed once per edge from an 'EdgeTrace', a canonical function,
--- a copy map, and a scheme-binder key set.  All helpers are pure.
+-- Constructed once per edge from a 'Solved' handle, an optional
+-- 'EdgeTrace', and a copy map.  All helpers are pure.
 data IdentityBridge = IdentityBridge
-    { ibCanonical              :: NodeId -> NodeId
+    { ibSolved                 :: Solved
+    , ibCanonical              :: NodeId -> NodeId
     , ibTraceBinderOrder       :: [Int]
     , ibBinderOrderIx          :: IntMap.IntMap Int
     , ibReverseCopyByCanonical :: IntMap.IntMap [Int]
@@ -53,6 +57,10 @@ data IdentityBridge = IdentityBridge
 bridgeCanonical :: IdentityBridge -> (NodeId -> NodeId)
 bridgeCanonical = ibCanonical
 
+-- | Access the 'Solved' handle stored in the bridge.
+bridgeSolved :: IdentityBridge -> Solved
+bridgeSolved = ibSolved
+
 -- | Access the raw copy map stored in the bridge.
 bridgeCopyMap :: IdentityBridge -> IntMap.IntMap NodeId
 bridgeCopyMap = ibCopyMap
@@ -66,16 +74,17 @@ canonicalKeyForNode ib nid = getNodeId (ibCanonical ib nid)
 canonicalKeyForSource :: IdentityBridge -> Int -> Int
 canonicalKeyForSource ib key = canonicalKeyForNode ib (NodeId key)
 
--- | Build an 'IdentityBridge' from the canonical function, an optional
+-- | Build an 'IdentityBridge' from a 'Solved' handle, an optional
 -- 'EdgeTrace', and the raw copy map.
 mkIdentityBridge
-    :: (NodeId -> NodeId)
+    :: Solved
     -> Maybe EdgeTrace
     -> IntMap.IntMap NodeId
     -> IdentityBridge
-mkIdentityBridge canonical mTrace copyMap =
+mkIdentityBridge solved mTrace copyMap =
     IdentityBridge
-        { ibCanonical              = canonical
+        { ibSolved                 = solved
+        , ibCanonical              = canonical
         , ibTraceBinderOrder       = traceBinderOrder
         , ibBinderOrderIx          = binderOrderIx
         , ibReverseCopyByCanonical = reverseCopyByCanonical
@@ -84,6 +93,8 @@ mkIdentityBridge canonical mTrace copyMap =
         , ibCopyMap                = copyMap
         }
   where
+    canonical = Solved.canonical solved
+
     traceBinderOrder :: [Int]
     traceBinderOrder =
         case mTrace of
