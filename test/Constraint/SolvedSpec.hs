@@ -67,6 +67,41 @@ mkTestSolved =
         uf = IntMap.fromList [(0, NodeId 1)]
     in mkSolved constraint uf
 
+snapshotLegacyAndEquiv :: Either String (Solved, Solved, [NodeId])
+snapshotLegacyAndEquiv =
+    let var0 = TyVar { tnId = NodeId 0, tnBound = Nothing }
+        base1 = TyBase (NodeId 1) (BaseTy "Int")
+        arrow2 = TyArrow (NodeId 2) (NodeId 0) (NodeId 3)
+        bool3 = TyBase (NodeId 3) (BaseTy "Bool")
+        var4 = TyVar { tnId = NodeId 4, tnBound = Just (NodeId 0) }
+        nodes = nodeMapFromList
+            [ (0, var0)
+            , (1, base1)
+            , (2, arrow2)
+            , (3, bool3)
+            , (4, var4)
+            ]
+        constraint = rootedConstraint $ emptyConstraint
+            { cNodes = nodes
+            , cBindParents = inferBindParents nodes
+            , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 1)]
+            , cInstEdges =
+                [ InstEdge (EdgeId 0) (NodeId 2) (NodeId 0)
+                , InstEdge (EdgeId 1) (NodeId 4) (NodeId 3)
+                ]
+            }
+        ids = [NodeId 0, NodeId 1, NodeId 2, NodeId 3, NodeId 4, NodeId 99]
+    in case solveUnifyWithSnapshot defaultTraceConfig constraint of
+        Left err -> Left ("Unexpected solve error: " ++ show err)
+        Right out ->
+            let snapshot = soSnapshot out
+                legacy = fromSolveResult (soResult out)
+                equiv =
+                    fromPreRewriteState
+                        (snapUnionFind snapshot)
+                        (snapPreRewriteConstraint snapshot)
+            in Right (legacy, equiv, ids)
+
 spec :: Spec
 spec = describe "MLF.Constraint.Solved" $ do
     let s = mkTestSolved
@@ -152,40 +187,67 @@ spec = describe "MLF.Constraint.Solved" $ do
             lookupVarBound s' (NodeId 10) `shouldBe` Just (NodeId 11)
 
     describe "fromPreRewriteState" $ do
-        it "matches legacy core queries for solver snapshots" $ do
-            let var0 = TyVar { tnId = NodeId 0, tnBound = Nothing }
-                base1 = TyBase (NodeId 1) (BaseTy "Int")
-                arrow2 = TyArrow (NodeId 2) (NodeId 0) (NodeId 3)
-                bool3 = TyBase (NodeId 3) (BaseTy "Bool")
-                var4 = TyVar { tnId = NodeId 4, tnBound = Just (NodeId 0) }
-                nodes = nodeMapFromList
-                    [ (0, var0)
-                    , (1, base1)
-                    , (2, arrow2)
-                    , (3, bool3)
-                    , (4, var4)
+        let alphaNodeId = NodeId 10
+            intNodeId = NodeId 11
+            alphaBodyId = NodeId 12
+            parentNodeId = NodeId 13
+            alphaNode = TyForall alphaNodeId alphaBodyId
+            intNode = TyBase intNodeId (BaseTy "Int")
+            alphaBody = TyVar { tnId = alphaBodyId, tnBound = Nothing }
+            parentNode = TyArrow parentNodeId alphaNodeId intNodeId
+            preRewriteNodes =
+                nodeMapFromList
+                    [ (10, alphaNode)
+                    , (11, intNode)
+                    , (12, alphaBody)
+                    , (13, parentNode)
                     ]
-                constraint = rootedConstraint $ emptyConstraint
-                    { cNodes = nodes
-                    , cBindParents = inferBindParents nodes
-                    , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 1)]
-                    , cInstEdges =
-                        [ InstEdge (EdgeId 0) (NodeId 2) (NodeId 0)
-                        , InstEdge (EdgeId 1) (NodeId 4) (NodeId 3)
-                        ]
-                    }
-            case solveUnifyWithSnapshot defaultTraceConfig constraint of
-                Left err -> expectationFailure $ "Unexpected solve error: " ++ show err
-                Right out -> do
-                    let snapshot = soSnapshot out
-                        legacy = fromSolveResult (soResult out)
-                        staged =
-                            fromPreRewriteState
-                                (snapUnionFind snapshot)
-                                (snapPreRewriteConstraint snapshot)
-                        ids = [NodeId 0, NodeId 1, NodeId 2, NodeId 3, NodeId 4, NodeId 99]
+            preRewriteConstraint = emptyConstraint
+                { cNodes = preRewriteNodes
+                , cBindParents = IntMap.fromList
+                    [ (nodeRefKey (typeRef alphaNodeId), (typeRef parentNodeId, BindFlex))
+                    , (nodeRefKey (typeRef intNodeId), (typeRef parentNodeId, BindFlex))
+                    , (nodeRefKey (typeRef alphaBodyId), (typeRef alphaNodeId, BindFlex))
+                    ]
+                }
+            uf = IntMap.fromList [(10, intNodeId)]
+            equiv = fromPreRewriteState uf preRewriteConstraint
+
+        it "classMembers returns all original nodes in class" $ do
+            classMembers equiv intNodeId `shouldMatchList` [alphaNodeId, intNodeId]
+            classMembers equiv alphaNodeId `shouldMatchList` [alphaNodeId, intNodeId]
+
+        it "wasOriginalBinder returns True for unified-away binder" $ do
+            wasOriginalBinder equiv intNodeId `shouldBe` True
+            wasOriginalBinder equiv alphaNodeId `shouldBe` True
+            wasOriginalBinder equiv alphaBodyId `shouldBe` False
+
+        it "originalNode returns pre-solving node data" $ do
+            originalNode equiv alphaNodeId `shouldBe` Just alphaNode
+            originalNode equiv intNodeId `shouldBe` Just intNode
+
+        it "originalBindParent preserves pre-solving binding tree" $ do
+            originalBindParent equiv (typeRef alphaNodeId)
+                `shouldBe` Just (typeRef parentNodeId, BindFlex)
+            originalBindParent equiv (typeRef alphaBodyId)
+                `shouldBe` Just (typeRef alphaNodeId, BindFlex)
+
+        it "canonical matches legacy backend for solver snapshots" $ do
+            case snapshotLegacyAndEquiv of
+                Left err -> expectationFailure err
+                Right (legacy, staged, ids) ->
                     map (canonical staged) ids `shouldBe` map (canonical legacy) ids
+
+        it "lookupNode matches legacy backend for solver snapshots" $ do
+            case snapshotLegacyAndEquiv of
+                Left err -> expectationFailure err
+                Right (legacy, staged, ids) ->
                     map (lookupNode staged) ids `shouldBe` map (lookupNode legacy) ids
+
+        it "keeps other legacy snapshot queries in sync" $ do
+            case snapshotLegacyAndEquiv of
+                Left err -> expectationFailure err
+                Right (legacy, staged, ids) -> do
                     map (lookupVarBound staged) ids `shouldBe` map (lookupVarBound legacy) ids
                     instEdges staged `shouldBe` instEdges legacy
                     bindParents staged `shouldBe` bindParents legacy
