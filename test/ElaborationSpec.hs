@@ -47,10 +47,9 @@ import MLF.Constraint.Presolution
     , insertCopy
     , lookupCopy
     )
-import MLF.Constraint.Solve (SolveResult(..), solveUnify)
-import MLF.Constraint.Solved (Solved, fromSolveResult, toSolveResult)
+import MLF.Constraint.Solve (solveUnify)
+import qualified MLF.Constraint.Solved as Solved
 import MLF.Frontend.ConstraintGen (AnnExpr(..))
-import qualified MLF.Constraint.Solve as Solve (frWith)
 import SpecUtil
     ( bindParentsFromPairs
     , collectVarNodes
@@ -87,18 +86,25 @@ boundFromType ty = case ty of
 
 generalizeAtWith
     :: Maybe GaBindParents
-    -> Solved
+    -> Solved.Solved
     -> NodeRef
     -> NodeId
     -> Either Elab.ElabError (Elab.ElabScheme, IntMap.IntMap String)
-generalizeAtWith mbGa s = Elab.generalizeAtWithBuilder (defaultPlanBuilder defaultTraceConfig) mbGa (toSolveResult s)
+generalizeAtWith mbGa s =
+    Elab.generalizeAtWithBuilder
+        (defaultPlanBuilder defaultTraceConfig)
+        mbGa
+        (Solved.toSolveResult s)
 
 generalizeAt
-    :: SolveResult
+    :: Solved.Solved
     -> NodeRef
     -> NodeId
     -> Either Elab.ElabError (Elab.ElabScheme, IntMap.IntMap String)
-generalizeAt sr = generalizeAtWith Nothing (fromSolveResult sr)
+generalizeAt = generalizeAtWith Nothing
+
+mkSolved :: Constraint -> IntMap.IntMap NodeId -> Solved.Solved
+mkSolved = Solved.mkSolved
 
 requirePipeline :: SurfaceExpr -> IO (Elab.ElabTerm, Elab.ElabType)
 requirePipeline expr =
@@ -233,10 +239,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     , cBindParents = bindParents
                     , cGenNodes = fromListGen [(rootGen, GenNode rootGen [root])]
                     }
-                solved = SolveResult
-                    { srConstraint = constraint
-                    , srUnionFind = IntMap.empty
-                    }
+                solved = mkSolved constraint IntMap.empty
 
             (Elab.Forall binds ty, _subst) <- requireRight (generalizeAt solved (genRef rootGen) root)
             case binds of
@@ -269,10 +272,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     , cBindParents = bindParents
                     , cGenNodes = fromListGen [(rootGen, GenNode rootGen [root])]
                     }
-                solved = SolveResult
-                    { srConstraint = constraint
-                    , srUnionFind = IntMap.empty
-                    }
+                solved = mkSolved constraint IntMap.empty
 
             (Elab.Forall binds ty, _subst) <- requireRight (generalizeAt solved (genRef rootGen) root)
             binds `shouldBe` [("a", Nothing)]
@@ -296,11 +296,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , cGenNodes = fromListGen
                             [ (rootGen, GenNode rootGen [solvedRoot, baseMappedRoot]) ]
                         }
-                solved =
-                    SolveResult
-                        { srConstraint = solvedConstraint
-                        , srUnionFind = IntMap.empty
-                        }
+                solved = mkSolved solvedConstraint IntMap.empty
                 gaParents =
                     GaBindParents
                         { gaBindParentsBase = cBindParents solvedConstraint
@@ -313,7 +309,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         }
 
             (Elab.Forall binds ty, _subst) <-
-                requireRight (generalizeAtWith (Just gaParents) (fromSolveResult solved) (genRef rootGen) solvedRoot)
+                requireRight (generalizeAtWith (Just gaParents) solved (genRef rootGen) solvedRoot)
             binds `shouldBe` []
             ty `shouldBe` Elab.TBase (BaseTy "Int")
 
@@ -390,12 +386,12 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     expectationFailure ("Expected bounded forall, got " ++ show ty)
 
     describe "Binding tree coverage" $ do
-        let runSolvedWithScope :: SurfaceExpr -> Either String (SolveResult, NodeRef, NodeId)
+        let runSolvedWithScope :: SurfaceExpr -> Either String (Solved.Solved, NodeRef, NodeId)
             runSolvedWithScope e = do
                 PipelineArtifacts{ paPresolution = pres, paSolved = solved, paRoot = root } <-
                     runPipelineArtifactsDefault Set.empty e
                 let root' = Elab.chaseRedirects (prRedirects pres) root
-                scopeRoot <- case Binding.bindingRoots (srConstraint solved) of
+                scopeRoot <- case Binding.bindingRoots (Solved.solvedConstraint solved) of
                     [rootRef] -> Right rootRef
                     roots -> Left ("Expected single binding root, got " ++ show roots)
                 pure (solved, scopeRoot, root')
@@ -421,11 +417,11 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                         go (IntSet.insert key visited) (parent : path) parent
                 in go IntSet.empty [startC] startC
 
-            freeVarsUnder :: SolveResult -> NodeId -> Either BindingError IntSet.IntSet
-            freeVarsUnder res nid0 =
-                let constraint = srConstraint res
+            freeVarsUnder :: Solved.Solved -> NodeId -> Either BindingError IntSet.IntSet
+            freeVarsUnder s nid0 =
+                let constraint = Solved.solvedConstraint s
                     nodes = cNodes constraint
-                    canonical = Solve.frWith (srUnionFind res)
+                    canonical = Solved.canonical s
                     go bound visited nid =
                         let key = getNodeId nid
                         in if IntSet.member key visited
@@ -465,8 +461,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 (solved, scopeRoot, typeRoot) <- requireRight (runSolvedWithScope expr)
                 freeVars <- requireRight (freeVarsUnder solved typeRoot)
                 freeVars `shouldSatisfy` (not . IntSet.null)
-                let canonical = Solve.frWith (srUnionFind solved)
-                    constraint = srConstraint solved
+                let canonical = Solved.canonical solved
+                    constraint = Solved.solvedConstraint solved
                     scopeRootC = case scopeRoot of
                         TypeRef nid -> typeRef (canonical nid)
                         GenRef gid -> GenRef gid
@@ -558,7 +554,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , cEliminatedVars = IntSet.singleton (getNodeId v)
                         }
 
-            solved <- requireRight (solveUnify defaultTraceConfig c)
+            solved <- Solved.fromSolveResult <$> requireRight (solveUnify defaultTraceConfig c)
             (sch, _subst) <- requireRight (generalizeAt solved (typeRef forallNode) forallNode)
             sch `shouldBe`
                 Elab.schemeFromType (Elab.TArrow Elab.TBottom Elab.TBottom)
@@ -585,7 +581,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , cEliminatedVars = IntSet.singleton (getNodeId v)
                         }
 
-            solved <- requireRight (solveUnify defaultTraceConfig c)
+            solved <- Solved.fromSolveResult <$> requireRight (solveUnify defaultTraceConfig c)
             (sch, _subst) <- requireRight (generalizeAt solved (typeRef forallNode) forallNode)
             Elab.prettyDisplay sch `shouldBe` "∀(a ⩾ ⊥) a -> a"
 
@@ -610,7 +606,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 ]
                         }
 
-            solved <- requireRight (solveUnify defaultTraceConfig c)
+            solved <- Solved.fromSolveResult <$> requireRight (solveUnify defaultTraceConfig c)
             case generalizeAt solved (typeRef forallNode) forallNode of
                 Left err ->
                     show err `shouldSatisfy` isInfixOf "alias bounds survived"
@@ -878,7 +874,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 ]
                         }
 
-                solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+                solved = mkSolved c IntMap.empty
 
             (sch, _subst) <- requireRight (generalizeAt solved (genRef rootGen) forallNode)
             Elab.pretty sch `shouldBe` "∀(a ⩾ ⊥) ∀(b ⩾ ⊥) a -> b"
@@ -910,7 +906,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 ]
                         }
 
-                solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+                solved = mkSolved c IntMap.empty
 
             (sch, _subst) <- requireRight (generalizeAt solved (genRef rootGen) forallNode)
             Elab.pretty sch `shouldBe` "∀(a ⩾ ⊥) ∀(b ⩾ ⊥) a -> Int -> b"
@@ -942,7 +938,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 ]
                         }
 
-                solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+                solved = mkSolved c IntMap.empty
 
             (sch, _subst) <- requireRight (generalizeAt solved (genRef rootGen) forallNode)
             Elab.pretty sch `shouldBe` "∀(a ⩾ ⊥) ∀(b ⩾ a -> a) b -> a"
@@ -1045,7 +1041,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                     [ (rootGen, GenNode rootGen [forallNode]) ]
                             }
 
-                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+                    solved = mkSolved c IntMap.empty
 
                     -- Typ has binders in the opposite order of <P for the expansion root.
                     scheme =
@@ -1070,7 +1066,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness []
                         }
 
-                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith (fromSolveResult solved) (Just si) ew)
+                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
                 -- Φ should produce a non-identity instantiation (reordering)
                 phi `shouldNotBe` Elab.InstId
                 -- Apply and verify the result has binders in <P order (a before b)
@@ -1110,7 +1106,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             { cNodes = nodes
                             , cBindParents = bindParents
                             }
-                    solved = SolveResult { srConstraint = constraint, srUnionFind = IntMap.empty }
+                    solved = mkSolved constraint IntMap.empty
                     scheme =
                         Elab.schemeFromType
                             (Elab.TForall "a" Nothing (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))))
@@ -1134,7 +1130,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
-                case ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith (fromSolveResult solved) (Just si) ew of
+                case ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew of
                     Left _ -> pure ()
                     Right phi ->
                         expectationFailure
@@ -1169,7 +1165,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             { cNodes = nodes
                             , cBindParents = bindParents
                             }
-                    solved = SolveResult { srConstraint = constraint, srUnionFind = IntMap.empty }
+                    solved = mkSolved constraint IntMap.empty
                     scheme =
                         Elab.schemeFromType
                             (Elab.TForall "a" Nothing (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))))
@@ -1188,7 +1184,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
-                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith (fromSolveResult solved) (Just si) ew)
+                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
                 let expected = Elab.TArrow (Elab.TBase (BaseTy "Int")) (Elab.TBase (BaseTy "Bool"))
                 canonType out `shouldBe` canonType expected
@@ -1228,7 +1224,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                     [ (rootGen, GenNode rootGen [forallNode]) ]
                             }
 
-                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+                    solved = mkSolved c IntMap.empty
 
                     -- Scheme has binders in reverse order: c, b, a
                     scheme =
@@ -1256,7 +1252,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness []
                         }
 
-                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith (fromSolveResult solved) (Just si) ew)
+                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
                 phi `shouldNotBe` Elab.InstId
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
                 let expected =
@@ -1299,7 +1295,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                     ]
                             }
 
-                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+                    solved = mkSolved c IntMap.empty
 
                     -- Scheme references both a and b
                     scheme =
@@ -1323,7 +1319,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness []
                         }
 
-                case ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith (fromSolveResult solved) (Just si) ew of
+                case ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew of
                     Left (Elab.PhiInvariantError msg) ->
                         msg `shouldSatisfy` ("PhiReorder: missing order key" `isInfixOf`)
                     Left Elab.BindingTreeError{} ->
@@ -1334,7 +1330,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         expectationFailure ("Expected PhiReorder failure, got " ++ Elab.pretty inst)
 
         describe "Φ translation soundness" $ do
-            let runToSolved :: SurfaceExpr -> Either String (SolveResult, IntMap.IntMap EdgeWitness, IntMap.IntMap EdgeTrace)
+            let runToSolved :: SurfaceExpr -> Either String (Solved.Solved, IntMap.IntMap EdgeWitness, IntMap.IntMap EdgeTrace)
                 runToSolved e = do
                     PipelineArtifacts{ paPresolution = pres, paSolved = solved } <-
                         runPipelineArtifactsDefault Set.empty e
@@ -1349,7 +1345,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     Just (eid, _) -> do
                         let edgeTraces' = IntMap.delete eid (prEdgeTraces pres)
                             generalizeAtWith' = Elab.generalizeAtWithBuilder (prPlanBuilder pres)
-                        case Elab.elaborate defaultTraceConfig generalizeAtWith' solved solved (prEdgeWitnesses pres) edgeTraces' (prEdgeExpansions pres) ann of
+                        case Elab.elaborate defaultTraceConfig generalizeAtWith' (Solved.toSolveResult solved) (Solved.toSolveResult solved) (prEdgeWitnesses pres) edgeTraces' (prEdgeExpansions pres) ann of
                             Left (Elab.MissingEdgeTrace (EdgeId eid')) -> eid' `shouldBe` eid
                             Left err -> expectationFailure ("Expected MissingEdgeTrace, got " ++ show err)
                             Right _ -> expectationFailure "Expected elaboration to fail due to missing trace"
@@ -1367,7 +1363,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 [ (nodeRefKey (typeRef rigidN), (genRef (GenNodeId 0), BindRigid))
                                 ]
                         }
-                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+                    solved = mkSolved c IntMap.empty
                     scheme = Elab.schemeFromType (Elab.TForall "a" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
                     si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = IntMap.fromList [(getNodeId rigidN, "a")] }
                     tr =
@@ -1387,7 +1383,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
-                phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith (fromSolveResult solved) Nothing (Just si) (Just tr) ew)
+                phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew)
                 phi `shouldBe` Elab.InstId
 
             it "OpRaise accepts source-domain interior membership even when etCopyMap aliases the target" $ do
@@ -1405,7 +1401,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 [ (nodeRefKey (typeRef binderN), (genRef (GenNodeId 0), BindFlex))
                                 ]
                         }
-                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+                    solved = mkSolved c IntMap.empty
                     scheme = Elab.schemeFromType (Elab.TForall "a" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
                     si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = IntMap.fromList [(getNodeId binderN, "a")] }
                     tr =
@@ -1426,7 +1422,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                _ <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith (fromSolveResult solved) Nothing (Just si) (Just tr) ew)
+                _ <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew)
                 pure ()
 
             it "OpWeaken on trace binder source with no replay binder mapping is no-op (solved-away binder)" $ do
@@ -1449,7 +1445,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 , (nodeRefKey (typeRef binderB), (genRef (GenNodeId 0), BindFlex))
                                 ]
                         }
-                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+                    solved = mkSolved c IntMap.empty
                     scheme = Elab.schemeFromType (Elab.TForall "a" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
                     si = Elab.SchemeInfo
                         { Elab.siScheme = scheme
@@ -1472,7 +1468,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
-                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith (fromSolveResult solved) Nothing (Just si) (Just tr) ew of
+                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew of
                     Left err ->
                         expectationFailure ("Expected no-op (ε) for solved-away binder, got error: " ++ show err)
                     Right inst ->
@@ -1494,7 +1490,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 , (nodeRefKey (typeRef m), (genRef (GenNodeId 0), BindFlex))
                                 ]
                         }
-                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+                    solved = mkSolved c IntMap.empty
                     scheme = Elab.schemeFromType (Elab.TForall "a" Nothing (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))))
                     si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = IntMap.fromList [(getNodeId n, "a"), (getNodeId m, "b")] }
                     tr =
@@ -1514,7 +1510,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
-                phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith (fromSolveResult solved) Nothing (Just si) (Just tr) ew)
+                phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew)
                 phi `shouldBe` Elab.InstId
 
             it "O15-TR-RIGID-RAISEMERGE: OpRaiseMerge with rigid operated node n translates to identity" $ do
@@ -1533,7 +1529,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 , (nodeRefKey (typeRef m), (genRef (GenNodeId 0), BindFlex))
                                 ]
                         }
-                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+                    solved = mkSolved c IntMap.empty
                     scheme = Elab.schemeFromType (Elab.TForall "a" Nothing (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))))
                     si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = IntMap.fromList [(getNodeId n, "a"), (getNodeId m, "b")] }
                     tr =
@@ -1553,7 +1549,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
-                phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith (fromSolveResult solved) Nothing (Just si) (Just tr) ew)
+                phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew)
                 phi `shouldBe` Elab.InstId
 
             it "OpMerge with rigid endpoint only on m fails as non-translatable" $ do
@@ -1572,7 +1568,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 , (nodeRefKey (typeRef m), (genRef (GenNodeId 0), BindRigid))
                                 ]
                         }
-                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+                    solved = mkSolved c IntMap.empty
                     scheme = Elab.schemeFromType (Elab.TForall "a" Nothing (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))))
                     si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = IntMap.fromList [(getNodeId n, "a"), (getNodeId m, "b")] }
                     tr =
@@ -1592,7 +1588,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
-                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith (fromSolveResult solved) Nothing (Just si) (Just tr) ew of
+                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew of
                     Left (Elab.PhiTranslatabilityError msgs) ->
                         msgs `shouldSatisfy` any ("OpMerge: rigid endpoint appears only on non-operated node" `isInfixOf`)
                     Left err ->
@@ -1616,7 +1612,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 , (nodeRefKey (typeRef m), (genRef (GenNodeId 0), BindRigid))
                                 ]
                         }
-                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+                    solved = mkSolved c IntMap.empty
                     scheme = Elab.schemeFromType (Elab.TForall "a" Nothing (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))))
                     si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = IntMap.fromList [(getNodeId n, "a"), (getNodeId m, "b")] }
                     tr =
@@ -1636,7 +1632,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
-                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith (fromSolveResult solved) Nothing (Just si) (Just tr) ew of
+                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew of
                     Left (Elab.PhiTranslatabilityError msgs) ->
                         msgs `shouldSatisfy` any ("OpRaiseMerge: rigid endpoint appears only on non-operated node" `isInfixOf`)
                     Left err ->
@@ -1671,7 +1667,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             { cNodes = nodes
                             , cBindParents = bindParents
                             }
-                    solved = SolveResult { srConstraint = constraint, srUnionFind = IntMap.empty }
+                    solved = mkSolved constraint IntMap.empty
                     scheme =
                         Elab.schemeFromType
                             (Elab.TForall "a" Nothing (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))))
@@ -1693,7 +1689,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith (fromSolveResult solved) (Just si) ew)
+                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
                 phi `shouldNotBe` Elab.InstId
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
                 Elab.pretty out `shouldSatisfy` ("Int" `isInfixOf`)
@@ -1728,7 +1724,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             { cNodes = nodes
                             , cBindParents = bindParents
                             }
-                    solved = SolveResult { srConstraint = constraint, srUnionFind = IntMap.empty }
+                    solved = mkSolved constraint IntMap.empty
 
                     scheme =
                         Elab.schemeFromType
@@ -1751,7 +1747,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith (fromSolveResult solved) (Just si) ew)
+                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
 
                 -- Because we target the *second* binder, Φ must do more than a plain ⟨Int⟩.
                 phi `shouldNotBe` Elab.InstApp (Elab.TBase (BaseTy "Int"))
@@ -1787,7 +1783,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             { cNodes = nodes
                             , cBindParents = bindParents
                             }
-                    solved = SolveResult { srConstraint = constraint, srUnionFind = IntMap.empty }
+                    solved = mkSolved constraint IntMap.empty
                     scheme =
                         Elab.schemeFromType
                             (Elab.TForall "a" (Just (Elab.TBase (BaseTy "Int"))) (Elab.TVar "a"))
@@ -1806,7 +1802,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith (fromSolveResult solved) (Just si) ew)
+                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
                 phi `shouldBe` Elab.InstElim
 
             it "translates non-root graft-raise-weaken and preserves expected instantiated type" $ do
@@ -1836,7 +1832,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             { cNodes = nodes
                             , cBindParents = bindParents
                             }
-                    solved = SolveResult { srConstraint = constraint, srUnionFind = IntMap.empty }
+                    solved = mkSolved constraint IntMap.empty
                     scheme =
                         Elab.schemeFromType
                             (Elab.TForall "a" Nothing
@@ -1867,8 +1863,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewForallIntros = 0
                         , ewWitness = InstanceWitness [OpGraft intNode binderB, OpRaise binderB, OpWeaken binderB]
                         }
-                phiGRW <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith (fromSolveResult solved) (Just si) ewGRW)
-                _phiGW <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith (fromSolveResult solved) (Just si) ewGW)
+                phiGRW <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ewGRW)
+                _phiGW <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ewGW)
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phiGRW)
                 let expected =
                         Elab.TForall "a" Nothing
@@ -1902,7 +1898,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             { cNodes = nodes
                             , cBindParents = bindParents
                             }
-                    solved = SolveResult { srConstraint = constraint, srUnionFind = IntMap.empty }
+                    solved = mkSolved constraint IntMap.empty
                     scheme =
                         Elab.schemeFromType
                             (Elab.TForall "a" Nothing
@@ -1926,7 +1922,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness [OpGraft botNode binderB, OpWeaken binderB]
                         }
 
-                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith (fromSolveResult solved) (Just si) ew)
+                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
                 Elab.pretty out `shouldSatisfy` ("-> b" `isInfixOf`)
 
@@ -1945,7 +1941,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             { cNodes = nodes
                             , cBindParents = bindParents
                             }
-                    solved = SolveResult { srConstraint = constraint, srUnionFind = IntMap.empty }
+                    solved = mkSolved constraint IntMap.empty
 
                     scheme = Elab.schemeFromType (Elab.TForall "a" Nothing (Elab.TVar "a"))
                     subst = IntMap.fromList [(getNodeId binder, "a")]
@@ -1961,7 +1957,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith (fromSolveResult solved) (Just si) ew)
+                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
                 Elab.pretty phi `shouldBe` "O; ∀(u0 ⩾) N"
 
             it "scheme-aware Φ can translate Merge (alias one binder to another)" $ do
@@ -1991,7 +1987,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             { cNodes = nodes
                             , cBindParents = bindParents
                             }
-                    solved = SolveResult { srConstraint = constraint, srUnionFind = IntMap.empty }
+                    solved = mkSolved constraint IntMap.empty
 
                     scheme =
                         Elab.schemeFromType
@@ -2010,7 +2006,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith (fromSolveResult solved) (Just si) ew)
+                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
                 let expected =
                         Elab.TForall "a" Nothing
@@ -2044,7 +2040,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             { cNodes = nodes
                             , cBindParents = bindParents
                             }
-                    solved = SolveResult { srConstraint = constraint, srUnionFind = IntMap.empty }
+                    solved = mkSolved constraint IntMap.empty
 
                     scheme =
                         Elab.schemeFromType
@@ -2062,7 +2058,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith (fromSolveResult solved) (Just si) ew)
+                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
                 let expected =
                         Elab.TForall "a" Nothing
@@ -2092,7 +2088,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                     , (nodeRefKey (typeRef bN), (genRef (GenNodeId 0), BindFlex))
                                     ]
                             }
-                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+                    solved = mkSolved c IntMap.empty
 
                     -- Raise binder “b” outward by introducing a fresh front binder and
                     -- aliasing/eliminating the old one (paper Fig. 10 Raise).
@@ -2106,7 +2102,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith (fromSolveResult solved) (Just si) ew)
+                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
                 let expected =
                         Elab.TForall "u0" Nothing
@@ -2146,7 +2142,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                     , (nodeRefKey (typeRef inner), (typeRef root, BindFlex))
                                     ]
                             }
-                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+                    solved = mkSolved c IntMap.empty
 
                     ops = [OpRaise (NodeId 3)]
                     ew = EdgeWitness
@@ -2158,7 +2154,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith (fromSolveResult solved) (Just si) ew)
+                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
 
                 let expected =
@@ -2192,7 +2188,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 , (nodeRefKey (typeRef inner), (typeRef root, BindFlex))
                                 ]
                         }
-                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+                    solved = mkSolved c IntMap.empty
 
                     scheme =
                         Elab.schemeFromType
@@ -2222,7 +2218,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith (fromSolveResult solved) Nothing (Just si) (Just tr) ew)
+                phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew)
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
 
                 let expected =
@@ -2241,9 +2237,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         forM_ (IntMap.elems ews) $ \ew -> do
                             let EdgeId eid = ewEdgeId ew
                                 mTrace = IntMap.lookup eid traces
-                                canonical = Solve.frWith (srUnionFind solved)
+                                canonical = Solved.canonical solved
                             let scopeRootFor nid = do
-                                    path <- Binding.bindingPathToRoot (srConstraint solved) (typeRef (canonical nid))
+                                    path <- Binding.bindingPathToRoot (Solved.solvedConstraint solved) (typeRef (canonical nid))
                                     case drop 1 path of
                                         [] -> Right (typeRef (canonical nid))
                                         rest ->
@@ -2256,7 +2252,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             (tgtSch, _) <- requireRight (generalizeAt solved tgtScope (ewRight ew))
                             let srcTy = Elab.schemeToType srcSch
                                 tgtTy = Elab.schemeToType tgtSch
-                            phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith (fromSolveResult solved) Nothing Nothing mTrace ew)
+                            phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing Nothing mTrace ew)
                             out <- requireRight (Elab.applyInstantiation srcTy phi)
                             canonType (stripBoundWrapper out) `shouldBe` canonType (stripBoundWrapper tgtTy)
 
@@ -2273,9 +2269,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         forM_ (IntMap.elems ews) $ \ew -> do
                             let EdgeId eid = ewEdgeId ew
                                 mTrace = IntMap.lookup eid traces
-                                canonical = Solve.frWith (srUnionFind solved)
+                                canonical = Solved.canonical solved
                             let scopeRootFor nid = do
-                                    path <- Binding.bindingPathToRoot (srConstraint solved) (typeRef (canonical nid))
+                                    path <- Binding.bindingPathToRoot (Solved.solvedConstraint solved) (typeRef (canonical nid))
                                     case drop 1 path of
                                         [] -> Right (typeRef (canonical nid))
                                         rest ->
@@ -2288,7 +2284,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             (tgtSch, _) <- requireRight (generalizeAt solved tgtScope (ewRight ew))
                             let srcTy = Elab.schemeToType srcSch
                                 tgtTy = Elab.schemeToType tgtSch
-                            phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith (fromSolveResult solved) Nothing Nothing mTrace ew)
+                            phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing Nothing mTrace ew)
                             out <- requireRight (Elab.applyInstantiation srcTy phi)
                             canonType (stripBoundWrapper out) `shouldBe` canonType (stripBoundWrapper tgtTy)
 
@@ -2312,7 +2308,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             checkNoDupRaises ops
                             let EdgeId eid = ewEdgeId ew
                                 mTrace = IntMap.lookup eid traces
-                            case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith (fromSolveResult solved) Nothing Nothing mTrace ew of
+                            case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing Nothing mTrace ew of
                                 Left err -> expectationFailure ("Expected successful Phi translation, got: " ++ show err)
                                 Right _ -> pure ()
 
@@ -2335,7 +2331,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 , (nodeRefKey (typeRef body), (typeRef root, BindFlex))
                                 ]
                         }
-                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+                    solved = mkSolved c IntMap.empty
                     scheme = Elab.schemeFromType (Elab.TForall "a" Nothing (Elab.TVar "a"))
                     si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = IntMap.fromList [(getNodeId binderN, "a")] }
                     tr =
@@ -2355,7 +2351,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
-                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith (fromSolveResult solved) Nothing (Just si) (Just tr) ew of
+                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew of
                     Left (Elab.PhiTranslatabilityError msgs) -> do
                         let rendered = unlines msgs
                         rendered `shouldSatisfy` ("OpGraft targets non-binder node" `isInfixOf`)
@@ -2384,7 +2380,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 , (nodeRefKey (typeRef body), (typeRef root, BindFlex))
                                 ]
                         }
-                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+                    solved = mkSolved c IntMap.empty
                     scheme = Elab.schemeFromType (Elab.TForall "a" Nothing (Elab.TVar "a"))
                     si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = IntMap.fromList [(getNodeId binderN, "a")] }
                     tr =
@@ -2404,7 +2400,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
-                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith (fromSolveResult solved) Nothing (Just si) (Just tr) ew of
+                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew of
                     Left (Elab.PhiTranslatabilityError msgs) -> do
                         let rendered = unlines msgs
                         rendered `shouldSatisfy` ("OpGraft targets non-binder node" `isInfixOf`)
@@ -2439,9 +2435,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 , (nodeRefKey (typeRef body), (typeRef root, BindFlex))
                                 ]
                         }
-                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+                    solved = mkSolved c IntMap.empty
 
-                steps <- requireRight (Elab.contextToNodeBound (fromSolveResult solved) root cN)
+                steps <- requireRight (Elab.contextToNodeBound solved root cN)
                 steps `shouldBe` Just [Elab.StepUnder "t1", Elab.StepInside]
 
             it "contextToNodeBound computes under-quantifier contexts (context)" $ do
@@ -2468,9 +2464,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 , (nodeRefKey (typeRef body), (typeRef root, BindFlex))
                                 ]
                         }
-                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+                    solved = mkSolved c IntMap.empty
 
-                steps <- requireRight (Elab.contextToNodeBound (fromSolveResult solved) root bN)
+                steps <- requireRight (Elab.contextToNodeBound solved root bN)
                 steps `shouldBe` Just [Elab.StepUnder "t1"]
 
             it "contextToNodeBound handles shared bound subgraphs (context dag)" $ do
@@ -2498,9 +2494,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 , (nodeRefKey (typeRef xN), (typeRef shared, BindFlex))
                                 ]
                         }
-                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+                    solved = mkSolved c IntMap.empty
 
-                steps <- requireRight (Elab.contextToNodeBound (fromSolveResult solved) root xN)
+                steps <- requireRight (Elab.contextToNodeBound solved root xN)
                 steps `shouldBe` Just [Elab.StepInside]
 
             it "contextToNodeBound ignores non-variable binder bounds (context non-var)" $ do
@@ -2527,9 +2523,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 , (nodeRefKey (typeRef codN), (typeRef bN, BindFlex))
                                 ]
                         }
-                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+                    solved = mkSolved c IntMap.empty
 
-                steps <- requireRight (Elab.contextToNodeBound (fromSolveResult solved) root domN)
+                steps <- requireRight (Elab.contextToNodeBound solved root domN)
                 steps `shouldBe` Nothing
 
             it "O15-CONTEXT-REJECT: contextToNodeBound does not descend through forall body fallback" $ do
@@ -2551,8 +2547,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 , (nodeRefKey (typeRef bodyOnly), (typeRef body, BindFlex))
                                 ]
                         }
-                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
-                steps <- requireRight (Elab.contextToNodeBound (fromSolveResult solved) root bodyOnly)
+                    solved = mkSolved c IntMap.empty
+                steps <- requireRight (Elab.contextToNodeBound solved root bodyOnly)
                 steps `shouldBe` Nothing
 
             it "rejects fallback-dependent binders (gen fallback invariant)" $ do
@@ -2702,7 +2698,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 , (nodeRefKey (typeRef nN), (typeRef mN, BindFlex))
                                 ]
                         }
-                    solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+                    solved = mkSolved c IntMap.empty
 
                     nTy = Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")
                     scheme =
@@ -2732,7 +2728,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith (fromSolveResult solved) Nothing (Just si) (Just tr) ew)
+                phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew)
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
 
                 let expected =
@@ -2823,7 +2819,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 , (nodeRefKey (typeRef flexVar), (genRef rootGen, BindFlex))
                                 ]
                         }
-                solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+                solved = mkSolved c IntMap.empty
 
             (sch, _subst) <- requireRight (generalizeAt solved (genRef rootGen) arrow)
             Elab.prettyDisplay sch `shouldBe` "∀(a ⩾ ⊥) a -> a"
@@ -2850,7 +2846,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 , (nodeRefKey (typeRef flexVar), (genRef rootGen, BindFlex))
                                 ]
                         }
-                solved = SolveResult { srConstraint = c, srUnionFind = IntMap.empty }
+                solved = mkSolved c IntMap.empty
 
             (sch, _subst) <- requireRight (generalizeAt solved (genRef rootGen) arrow)
             let ty = Elab.schemeToType sch
@@ -3239,14 +3235,14 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     , cBindParents = bindParents
                     , cGenNodes = fromListGen [(g0, GenNode g0 [e1])]
                     }
-                solved = SolveResult { srConstraint = constraint, srUnionFind = IntMap.empty }
+                solved = mkSolved constraint IntMap.empty
                 noRedirects = IntMap.empty
                 withRedirects = IntMap.fromList [(getNodeId e1, n2)]
             -- Without redirects: scope of e1 should be GenRef g0
-            scopeNoRedir <- requireRight (resolveCanonicalScope constraint solved noRedirects e1)
+            scopeNoRedir <- requireRight (resolveCanonicalScope constraint (Solved.toSolveResult solved) noRedirects e1)
             scopeNoRedir `shouldBe` GenRef g0
             -- With redirects: scope of e1 should still be GenRef g0
-            scopeWithRedir <- requireRight (resolveCanonicalScope constraint solved withRedirects e1)
+            scopeWithRedir <- requireRight (resolveCanonicalScope constraint (Solved.toSolveResult solved) withRedirects e1)
             scopeWithRedir `shouldBe` GenRef g0
 
         it "ga′ stable when UF merges nodes under same gen scope" $ do
@@ -3268,11 +3264,11 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     , cGenNodes = fromListGen [(g0, GenNode g0 [n1, n2])]
                     }
                 uf = IntMap.fromList [(getNodeId n2, n1)]
-                solved = SolveResult { srConstraint = constraint, srUnionFind = uf }
+                solved = Solved.mkSolved constraint uf
                 noRedirects = IntMap.empty
-            scope1 <- requireRight (resolveCanonicalScope constraint solved noRedirects n1)
+            scope1 <- requireRight (resolveCanonicalScope constraint (Solved.toSolveResult solved) noRedirects n1)
             scope1 `shouldBe` GenRef g0
-            scope2 <- requireRight (resolveCanonicalScope constraint solved noRedirects n2)
+            scope2 <- requireRight (resolveCanonicalScope constraint (Solved.toSolveResult solved) noRedirects n2)
             scope2 `shouldBe` GenRef g0
 
         it "binding-parent canonicalization drops self-edges from UF merge" $ do
@@ -3362,13 +3358,10 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     , cBindParents = solvedForGenBP
                     }
                 redirects = IntMap.fromList [(getNodeId e1, n2)]
-                solved = SolveResult
-                    { srConstraint = solvedForGen
-                    , srUnionFind = IntMap.empty
-                    }
+                solved = Solved.mkSolved solvedForGen IntMap.empty
                 ann = ALet "x" g0 e1 (ExpVarId 0) g0
                     (AVar "y" n2) (AVar "z" n3) n3
-                overrides = letScopeOverrides base solvedForGen solved redirects ann
+                overrides = letScopeOverrides base solvedForGen (Solved.toSolveResult solved) redirects ann
             IntMap.lookup (getNodeId n2) overrides `shouldBe` Just (GenRef g0)
 
         it "letScopeOverrides returns empty when base and solved scopes agree" $ do
@@ -3390,14 +3383,11 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     , cBindParents = bp
                     , cGenNodes = fromListGen [(g0, GenNode g0 [n1, n2])]
                     }
-                solved = SolveResult
-                    { srConstraint = constraint
-                    , srUnionFind = IntMap.empty
-                    }
+                solved = Solved.mkSolved constraint IntMap.empty
                 noRedirects = IntMap.empty
                 ann = ALet "x" g0 n1 (ExpVarId 0) g0
                     (AVar "y" n2) (AVar "z" n2) n2
-                overrides = letScopeOverrides constraint constraint solved noRedirects ann
+                overrides = letScopeOverrides constraint constraint (Solved.toSolveResult solved) noRedirects ann
             overrides `shouldBe` IntMap.empty
 
         it "ga-invariant: validateCrossGenMapping filters out cross-scope nodes" $ do

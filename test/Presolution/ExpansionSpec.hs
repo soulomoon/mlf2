@@ -23,7 +23,8 @@ import MLF.Constraint.Presolution
     , runPresolutionM
     )
 import MLF.Constraint.Acyclicity (AcyclicityResult(..))
-import MLF.Constraint.Solve (SolveResult(..), validateSolvedGraphStrict)
+import MLF.Constraint.Solve (validateSolvedGraphStrict)
+import MLF.Constraint.Solved (mkSolved, toSolveResult)
 import qualified MLF.Binding.Tree as Binding
 import SpecUtil
     ( defaultTraceConfig
@@ -650,7 +651,7 @@ spec = do
                 Right PresolutionResult{ prConstraint = c' } -> do
                     any isExp (nodeMapElems (cNodes c')) `shouldBe` False
                     cInstEdges c' `shouldBe` []
-                    validateSolvedGraphStrict SolveResult{ srConstraint = c', srUnionFind = IntMap.empty }
+                    validateSolvedGraphStrict (toSolveResult (mkSolved c' IntMap.empty))
                         `shouldBe` []
 
     describe "Phase 4 regression matrix" $ do

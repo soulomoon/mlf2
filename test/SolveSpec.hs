@@ -6,7 +6,14 @@ import Data.List (isPrefixOf)
 import Data.List.NonEmpty (NonEmpty(..))
 
 import MLF.Constraint.Types.Graph
+-- White-box solver tests intentionally assert raw `SolveResult` internals.
 import MLF.Constraint.Solve
+    ( SolveError(..)
+    , SolveResult(..)
+    , frWith
+    , solveUnify
+    , validateSolvedGraphStrict
+    )
 import SpecUtil (defaultTraceConfig, emptyConstraint, inferBindParents, lookupNodeMaybe, nodeMapFromList, nodeMapSize, rootedConstraint)
 
 spec :: Spec

@@ -26,6 +26,7 @@ module MLF.Constraint.Solved (
     -- * Opaque type
     Solved,
     fromSolveResult,
+    mkSolved,
 
     -- * Core queries
     canonical,
@@ -81,6 +82,11 @@ newtype Solved = Solved { unSolved :: SolveResult }
 -- | Wrap a 'SolveResult' into the opaque 'Solved' handle.
 fromSolveResult :: SolveResult -> Solved
 fromSolveResult = Solved
+
+-- | Construct a 'Solved' directly from a constraint and union-find map.
+-- This avoids the need to import 'SolveResult(..)' in test code.
+mkSolved :: Constraint -> IntMap NodeId -> Solved
+mkSolved c uf = Solved SolveResult { srConstraint = c, srUnionFind = uf }
 
 -- -----------------------------------------------------------------
 -- Core queries

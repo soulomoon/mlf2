@@ -29,7 +29,9 @@ import MLF.Frontend.Syntax
 import MLF.Frontend.ConstraintGen
 import MLF.Constraint.Canonicalizer (canonicalizeNode)
 import MLF.Constraint.Presolution
-import MLF.Constraint.Solve
+import MLF.Constraint.Solve (validateSolvedGraphStrict)
+import qualified MLF.Constraint.Solved as Solved
+import MLF.Constraint.Solved (Solved)
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Witness (EdgeWitness(..), InstanceOp(..), InstanceWitness(..))
 import qualified MLF.Binding.Tree as Binding
@@ -74,15 +76,15 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 Right PipelineArtifacts{ paPresolution = pres, paSolved = res, paRoot = root } -> do
                     validateStrict res
                     let rootRedirected = chaseRedirects (prRedirects pres) root
-                        root' = canonical (srUnionFind res) rootRedirected
+                        root' = canonical (Solved.unionFind res) rootRedirected
                     -- With coercion-only semantics, f's type is inferred (not declared)
                     -- The coercion ensures the RHS has the annotated type.
                     let scopeRoot =
-                            case Binding.bindingRoots (srConstraint res) of
+                            case Binding.bindingRoots (Solved.solvedConstraint res) of
                                 [GenRef gid] -> genRef gid
                                 roots -> error ("PipelineSpec: unexpected binding roots " ++ show roots)
                     let generalizeAt = generalizeAtWithBuilder (defaultPlanBuilder defaultTraceConfig) Nothing
-                    case generalizeAt res scopeRoot root' of
+                    case generalizeAt (Solved.toSolveResult res) scopeRoot root' of
                         Right (Forall binds ty, _subst) -> do
                             binds `shouldBe` []
                             let tyStr = pretty ty
@@ -104,7 +106,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                      case ann of
                          ALet _ schemeGen schemeRoot _ _ _ _ _ -> do
                              let generalizeAt = generalizeAtWithBuilder (defaultPlanBuilder defaultTraceConfig) Nothing
-                             case generalizeAt res (genRef schemeGen) schemeRoot of
+                             case generalizeAt (Solved.toSolveResult res) (genRef schemeGen) schemeRoot of
                                  Right scheme -> show scheme `shouldSatisfy` ("Forall" `isInfixOf`)
                                  Left err -> expectationFailure $ "Generalize error: " ++ show err
                          _ -> expectationFailure "Expected ALet annotation"
@@ -120,7 +122,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 listNode = TyCon var1 listBase (var0 :| [])
                 nodes = fromListNode [(var0, baseNode), (var1, listNode)]
                 constraint = emptyConstraint { cNodes = nodes }
-                res = SolveResult { srConstraint = constraint, srUnionFind = IntMap.empty }
+                res = Solved.toSolveResult (Solved.mkSolved constraint IntMap.empty)
             case reifyType res var1 of
                 Right ty ->
                     case ty of
@@ -146,7 +148,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 listNode = TyCon var2 listBase (var1 :| [])
                 nodes = fromListNode [(var0, intNode), (var1, maybeNode), (var2, listNode)]
                 constraint = emptyConstraint { cNodes = nodes }
-                res = SolveResult { srConstraint = constraint, srUnionFind = IntMap.empty }
+                res = Solved.toSolveResult (Solved.mkSolved constraint IntMap.empty)
             case reifyType res var2 of
                 Right ty ->
                     case ty of
@@ -169,7 +171,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 Left err -> expectationFailure err
                 Right solved -> do
                     validateStrict solved
-                    let nodes = cNodes (srConstraint solved)
+                    let nodes = cNodes (Solved.solvedConstraint solved)
                     baseNames nodes `shouldContain` [BaseTy "Bool"]
                     noExpNodes nodes
 
@@ -183,7 +185,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 Left err -> expectationFailure err
                 Right res -> do
                     validateStrict res
-                    let nodes = cNodes (srConstraint res)
+                    let nodes = cNodes (Solved.solvedConstraint res)
                     baseNames nodes `shouldContain` [BaseTy "Int"]
                     noExpNodes nodes
 
@@ -196,9 +198,9 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             case runPipelineArtifactsDefault defaultPolySyms expr of
                 Left err -> expectationFailure err
                 Right PipelineArtifacts{ paConstraintNorm = c1, paPresolution = pres, paSolved = solved } ->
-                    case validateSolvedGraphStrict solved of
+                    case validateSolvedGraphStrict (Solved.toSolveResult solved) of
                         [] -> do
-                            let canon = makeCanonicalizer (srUnionFind solved) (prRedirects pres)
+                            let canon = makeCanonicalizer (Solved.unionFind solved) (prRedirects pres)
                                 adoptNode = canonicalizeNode canon
                                 baseNamedKeysAll = collectBaseNamedKeys c1
                                 traceMaps = map (buildTraceCopyMap c1 baseNamedKeysAll adoptNode)
@@ -235,7 +237,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             case runPipelineArtifactsDefault defaultPolySyms expr of
                 Left err -> expectationFailure err
                 Right PipelineArtifacts{ paPresolution = pres, paSolved = solved } -> do
-                    let canon = makeCanonicalizer (srUnionFind solved) (prRedirects pres)
+                    let canon = makeCanonicalizer (Solved.unionFind solved) (prRedirects pres)
                         edgeWitnesses = IntMap.map (canonicalizeWitness canon) (prEdgeWitnesses pres)
                         edgeTraces = IntMap.map (canonicalizeTrace canon) (prEdgeTraces pres)
                         raisesForEdge (eid, ew) =
@@ -267,7 +269,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             Left err -> expectationFailure err
             Right res -> do
                 validateStrict res
-                let c = srConstraint res
+                let c = Solved.solvedConstraint res
                     nodes = cNodes c
                 baseNames nodes `shouldContain` [BaseTy "Int"]
                 baseNames nodes `shouldContain` [BaseTy "Bool"]
@@ -328,13 +330,13 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 staleRedirectNodes `shouldBe` []
                 annRootNode annRedirected `shouldSatisfy` (\nid -> chaseRedirects redirects nid == nid)
                 validateStrict solved
-                let canonicalize = canonicalizeNode (makeCanonicalizer (srUnionFind solved) redirects)
+                let canonicalize = canonicalizeNode (makeCanonicalizer (Solved.unionFind solved) redirects)
                     canonicalizedSchemeRoots =
                         [ nid
                         | nid <- annLetSchemeRoots annRedirected
                         , canonicalize nid /= nid
                         ]
-                    hasCanonicalizationWork = not (IntMap.null (srUnionFind solved))
+                    hasCanonicalizationWork = not (IntMap.null (Solved.unionFind solved))
                     annCanonical = canonicalizeAnn canonicalize annRedirected
                     staleCanonicalNodes =
                         [ nid
@@ -364,7 +366,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             Left err -> expectationFailure err
             Right res -> do
                 validateStrict res
-                let c = srConstraint res
+                let c = Solved.solvedConstraint res
                     nodes = cNodes c
                 baseNames nodes `shouldContain` [BaseTy "Int"]
                 baseNames nodes `shouldContain` [BaseTy "Bool"]
@@ -588,7 +590,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             Left err -> expectationFailure err
             Right res -> do
                 validateStrict res
-                let c = srConstraint res
+                let c = Solved.solvedConstraint res
                     nodes = cNodes c
                 baseNames nodes `shouldContain` [BaseTy "Int"]
                 noExpNodes nodes
@@ -607,7 +609,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             Left err -> expectationFailure err
             Right res -> do
                 validateStrict res
-                let c = srConstraint res
+                let c = Solved.solvedConstraint res
                     nodes = cNodes c
                 baseNames nodes `shouldContain` [BaseTy "Int"]
                 noExpNodes nodes
@@ -626,7 +628,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             Left err -> expectationFailure err
             Right res -> do
                 validateStrict res
-                let c = srConstraint res
+                let c = Solved.solvedConstraint res
                     nodes = cNodes c
                 baseNames nodes `shouldContain` [BaseTy "Int"]
                 noExpNodes nodes
@@ -1009,9 +1011,9 @@ annRootNode expr = case expr of
     AAnn _ nid _ -> nid
 
 
-validateStrict :: SolveResult -> Expectation
-validateStrict res =
-    case validateSolvedGraphStrict res of
+validateStrict :: Solved -> Expectation
+validateStrict s =
+    case validateSolvedGraphStrict (Solved.toSolveResult s) of
         [] -> pure ()
         vs -> expectationFailure ("validateSolvedGraph failed:\n" ++ unlines vs)
 
