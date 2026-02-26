@@ -167,3 +167,52 @@
 ## Key Finding
 
 There is exactly **one** true graph mutation during elaboration: `patchNode` at `Fallback.hs:487`. This is the target for Task 14. All other call sites are either pre-elaboration pipeline setup, local projection rebuilds, or read-only temporaries that never feed back into the pipeline's Solved handle.
+
+---
+
+## Post-Task 14 Status
+
+**Date:** 2026-02-27
+**Prerequisite:** Task 14 eliminated `patchNode` from `Fallback.hs` and replaced it with a local projection via `rebuildWithNodes`.
+
+### patchNode — ELIMINATED
+
+Call site #4 (`Fallback.hs:487`) no longer exists. The `patchNode` function has been removed from `Solved.hs` exports entirely. The replacement code at `Fallback.hs:488–502` constructs a fresh node map with the adjusted bound entry and projects a new `Solved` via `Solved.rebuildWithNodes`. The original `Solved` is never mutated. See `{- Note [Local projection rebuild for bound-target patching] -}` at `Fallback.hs:474`.
+
+**Classification:** **Local projection rebuild** — creates a new Solved value; does not mutate the pipeline's Solved handle.
+
+### Remaining Call Sites — Final Classifications
+
+| # | Call Site | Classification | Rationale |
+|---|-----------|---------------|-----------|
+| 1 | `Pipeline.hs:104` — `rebuildWithConstraint` | **Pipeline setup** | Runs at pipeline initialization before elaboration begins. Canonicalizes the constraint via UF rewriting. |
+| 2 | `Generalize.hs:413` — `rebuildWithConstraint` | **Local projection rebuild** | Creates `resAlias` for a single `reifyWithOrig` call. Never written back to the pipeline's Solved handle. |
+| 3 | `Pipeline.hs:105` — `pruneBindParentsSolved` | **Pipeline setup** | Runs at pipeline initialization. Prunes stale bind-parent entries from the freshly-built Solved. |
+| NEW | `Fallback.hs:502` — `rebuildWithNodes` | **Local projection rebuild** | Task 14 replacement for `patchNode`. Builds a new Solved with the adjusted root node; original Solved untouched. |
+| 5 | `Fallback.hs:700` — `{ cNodes = }` | **Read-only temporary** | Local `Constraint` for generalization-args. Never persisted. |
+| 6 | `Phase3.hs:44` — `{ cNodes = }` | **Read-only temporary** | Local `Constraint` for `isUpperRef` predicate. Never persisted. |
+| 7 | `Phase4.hs:77` — `{ cNodes = }` | **Read-only temporary** | Local `Constraint` for `isUpperRef` predicate. Never persisted. |
+| 8 | `Phase4.hs:622–626` — `{ cNodes/cGenNodes/cBindParents = }` | **Read-only temporary** | Local `Constraint` for orphan attachment. Never persisted. |
+| 9 | `Finalize.hs:65` — `{ cNodes = }` | **Read-only temporary** | Local `Constraint` for `isUpperRef` predicate. Never persisted. |
+| 10 | `Finalize.hs:109–113` — `{ cNodes/cBindParents/cGenNodes = }` | **Read-only temporary** | Local `Constraint` for final generalization. Never persisted. |
+| 11 | `Constraint.hs:46` — `{ cBindParents = }` | **Local projection rebuild** | Pure function returning a new Constraint. Pipeline.hs caller is pipeline setup. |
+| 12 | `Generalize.hs:402,409` — `{ cNodes = }` | **Read-only temporary** | Local Constraints with alias nodes for reification. Never persisted. |
+
+### Updated Summary by Classification
+
+| Classification | Count | Call Sites |
+|----------------|-------|------------|
+| **Pipeline setup** | 2 | #1 (Pipeline.hs:104), #3 (Pipeline.hs:105) |
+| **Local projection rebuild** | 3 | #2 (Generalize.hs:413), #11 (Constraint.hs:46), NEW (Fallback.hs:502) |
+| **Read-only temporary** | 7 | #5, #6, #7, #8, #9, #10, #12 |
+| **Graph mutation in elab** | 0 | — |
+
+### Conclusion
+
+No graph mutation remains in the elaboration path. The single mutation (`patchNode` at Fallback.hs) has been replaced with a local projection rebuild. All remaining rebuild/record-update call sites fall into one of three safe categories:
+
+1. **Pipeline setup** (2 sites) — runs before elaboration begins; constructs the initial Solved handle.
+2. **Local projection rebuild** (3 sites) — creates new Solved/Constraint values without mutating the pipeline's handle.
+3. **Read-only temporary** (7 sites) — constructs local Constraint values for predicates or generalization; never persisted.
+
+The elaboration path is now read-only with respect to the Solved graph backend, satisfying the Phase D pipeline boundary invariant.
