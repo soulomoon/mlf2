@@ -496,7 +496,7 @@ computeResultTypeFallbackCore ctx annCanon ann = do
                                         _ -> node
                                 nodes0 = Solved.canonicalNodes resFinal
                                 nodes' = fromListNode
-                                    [ (nid, if nid == getNodeId rootC then adjustNode node else node)
+                                    [ (nid, if nid == rootC then adjustNode node else node)
                                     | (nid, node) <- toListNode nodes0
                                     ]
                             in Solved.rebuildWithNodes resFinal nodes'
