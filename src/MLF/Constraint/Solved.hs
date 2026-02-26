@@ -39,7 +39,6 @@ module MLF.Constraint.Solved (
     rebuildWithConstraint,
 
     -- * Mutation helpers
-    patchNode,
     pruneBindParentsSolved,
     rebuildWithNodes,
     rebuildWithBindParents,
@@ -431,14 +430,6 @@ rebuildWithConstraint (Solved eb) c =
 -- -----------------------------------------------------------------
 -- Mutation helpers
 -- -----------------------------------------------------------------
-
--- | Modify a node in the canonical constraint by its canonical ID.
--- Used by Fallback.hs to patch TyVar bounds.
-patchNode :: Solved -> NodeId -> (TyNode -> TyNode) -> Solved
-patchNode (Solved eb@EquivBackend { ebCanonicalNodes = NodeMap nodes }) nid f =
-    let
-        nodes' = NodeMap (IntMap.adjust f (getNodeId nid) nodes)
-    in Solved eb { ebCanonicalNodes = nodes' }
 
 -- | Prune dead bind-parent entries from the canonical constraint.
 -- Used by Pipeline.hs.

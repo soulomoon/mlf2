@@ -471,6 +471,16 @@ computeResultTypeFallbackCore ctx annCanon ann = do
                         ++ " edgeExpansions="
                         ++ show edgeExpansionsList
                 )
+            {- Note [Local projection rebuild for bound-target patching]
+               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+               When boundTarget is Just, we need the root node to carry a
+               TyVar bound pointing at the base node.  Rather than mutating
+               the Solved's canonical nodes in place (the old patchNode path),
+               we build a fresh node map with the adjusted entry and project
+               a new Solved via rebuildWithNodes.  This keeps the elaboration
+               path read-only with respect to the Solved backend — the only
+               "write" is constructing a new value, not mutating an existing
+               one. -}
             let resFinal =
                     case baseTarget of
                         Just _ -> solvedClean
@@ -484,7 +494,12 @@ computeResultTypeFallbackCore ctx annCanon ann = do
                                         TyVar{ tnId = nid, tnBound = Nothing } ->
                                             TyVar{ tnId = nid, tnBound = Just (canonical baseN) }
                                         _ -> node
-                            in Solved.patchNode resFinal rootC adjustNode
+                                nodes0 = Solved.canonicalNodes resFinal
+                                nodes' = fromListNode
+                                    [ (nid, if nid == getNodeId rootC then adjustNode node else node)
+                                    | (nid, node) <- toListNode nodes0
+                                    ]
+                            in Solved.rebuildWithNodes resFinal nodes'
             let scopeRootNodePre = rootForTypePre
             scopeRootPre <- bindingToElab (resolveCanonicalScope c1 resFinalBounded redirects scopeRootNodePre)
             let scopeRootPost =

@@ -77,6 +77,25 @@ spec = describe "Thesis alignment invariants" $ do
                         ": unchecked=" ++ show unchecked ++
                         ", checked=" ++ show checked
 
+    describe "D1: fallback result type works without patchNode" $ do
+        let corpus =
+                [ ("id", ELam "x" (EVar "x"))
+                , ("let-poly", ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (EVar "id")))
+                , ("ann-id", EAnn (ELam "x" (EVar "x")) (STForall "a" Nothing (STArrow (STVar "a") (STVar "a"))))
+                ]
+        forM_ corpus $ \(label, expr) ->
+            it ("pipeline output unchanged after patchNode elimination for: " ++ label) $ do
+                let norm = unsafeNormalizeExpr expr
+                    r1 = runPipelineElab Set.empty norm
+                    r2 = runPipelineElabChecked Set.empty norm
+                case (r1, r2) of
+                    (Right (t1, ty1), Right (t2, ty2)) -> do
+                        show t1 `shouldBe` show t2
+                        show ty1 `shouldBe` show ty2
+                    (Left _, Left _) -> pure ()
+                    _ -> expectationFailure $
+                        "Path disagreement for " ++ label
+
     describe "B1: reification output stable after original-domain migration" $ do
         let corpus =
                 [ ("id", ELam "x" (EVar "x"))
