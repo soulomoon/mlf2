@@ -63,6 +63,7 @@ module MLF.Constraint.Solved (
 
     -- * Validation helpers
     validateCanonicalGraphStrict,
+    validateOriginalCanonicalAgreement,
 ) where
 
 import Prelude hiding (lookup)
@@ -555,6 +556,34 @@ validateCanonicalGraphStrict s =
             { srConstraint = canonicalConstraint s
             , srUnionFind = canonicalMap s
             }
+
+-- | Check that original-domain and canonical-domain queries agree
+-- for all nodes.  Returns a list of mismatch descriptions.
+--
+-- Used by the projection-first pipeline variant (Phase E) to detect
+-- divergence between the two domains.
+validateOriginalCanonicalAgreement :: Solved -> [String]
+validateOriginalCanonicalAgreement s =
+    [ "Node " ++ show (getNodeId nid) ++ ": original=" ++ show origTag
+        ++ " canonical=" ++ show canonTag
+    | node <- allNodes s
+    , let nid = tnId node
+          nidC = canonical s nid
+          origNode = originalNode s nid
+          canonNode = lookupCanonicalNode s nidC
+          origTag = fmap tnTag origNode
+          canonTag = fmap tnTag canonNode
+    , origTag /= canonTag
+    ]
+  where
+    tnTag :: TyNode -> String
+    tnTag TyVar{}    = "var"
+    tnTag TyBottom{} = "bottom"
+    tnTag TyArrow{}  = "arrow"
+    tnTag TyBase{}   = "base"
+    tnTag TyCon{}    = "con"
+    tnTag TyForall{} = "forall"
+    tnTag TyExp{}    = "exp"
 
 {- Note [solvedConstraint migration status]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

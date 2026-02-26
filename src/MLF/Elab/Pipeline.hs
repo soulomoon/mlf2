@@ -40,6 +40,7 @@ module MLF.Elab.Pipeline (
     runPipelineElabChecked,
     runPipelineElabWithConfig,
     runPipelineElabCheckedWithConfig,
+    runPipelineElabProjectionFirst,
     applyRedirectsToAnn,
     canonicalizeAnn,
     -- * Exported for testing/debugging
@@ -89,6 +90,7 @@ import MLF.Elab.Run
     , runPipelineElabChecked
     , runPipelineElabWithConfig
     , runPipelineElabCheckedWithConfig
+    , runPipelineElabProjectionFirst
     )
 import MLF.Elab.Sigma (sigmaReorder)
 

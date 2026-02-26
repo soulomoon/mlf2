@@ -3,7 +3,8 @@ module MLF.Elab.Run.Pipeline (
     runPipelineElab,
     runPipelineElabChecked,
     runPipelineElabWithConfig,
-    runPipelineElabCheckedWithConfig
+    runPipelineElabCheckedWithConfig,
+    runPipelineElabProjectionFirst
 ) where
 
 import qualified Data.IntMap.Strict as IntMap
@@ -223,3 +224,30 @@ runPipelineElabWithSolvedBuilder traceCfg genConstraints buildSolved expr = do
                     _ <- fromElabError (computeResultTypeFallback resultTypeCtx annCanon ann)
                     checkedAuthoritative
         vs -> Left (PipelineSolveError (Solve.ValidationFailed vs))
+
+-- | Run pipeline with projection-first Solved queries.
+--
+-- Uses original-domain lookups as primary source; canonical projection
+-- only for alias reconciliation.  For dual-path verification (Phase E).
+--
+-- The key difference from 'runPipelineElab': after constructing the
+-- 'Solved' view, we validate that original-domain and canonical-domain
+-- node tags agree.  If any call site was missed during Phase B/C
+-- migration and still reads from canonical-domain queries, the
+-- projection-first path will expose the divergence.
+runPipelineElabProjectionFirst
+    :: PolySyms -> NormSurfaceExpr -> Either PipelineError (ElabTerm, ElabType)
+runPipelineElabProjectionFirst polySyms =
+    runPipelineElabWithSolvedBuilder
+        (pcTraceConfig defaultPipelineConfig)
+        (generateConstraints polySyms)
+        buildSolvedProjectionFirst
+  where
+    buildSolvedProjectionFirst :: SolvedBuilder
+    buildSolvedProjectionFirst _traceCfg pres = do
+        solved <- fromSolveError (Solved.fromPresolutionResult pres)
+        case Solved.validateOriginalCanonicalAgreement solved of
+            [] -> Right solved
+            mismatches ->
+                Left (PipelineSolveError
+                    (Solve.ValidationFailed mismatches))
