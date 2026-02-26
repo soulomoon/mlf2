@@ -122,8 +122,8 @@ spec = describe "Thesis alignment invariants" $ do
                 , ("ann-id", EAnn (ELam "x" (EVar "x")) (STForall "a" Nothing (STArrow (STVar "a") (STVar "a"))))
                 , ("nested-let"
                   , ELet "f" (ELam "x" (EVar "x"))
-                        (ELet "g" (EApp (EVar "f") (EVar "f"))
-                            (EVar "g")))
+                        (ELet "g" (EVar "f")
+                            (EApp (EVar "g") (EVar "g"))))
                 ]
         forM_ corpus $ \(label, expr) ->
             it ("full pipeline succeeds post-boundary-enforcement for: " ++ label) $ do
