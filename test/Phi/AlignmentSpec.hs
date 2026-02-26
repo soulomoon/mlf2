@@ -35,16 +35,16 @@ spec = describe "Phi alignment" $ do
                         show term `shouldNotBe` ""
                         show ty `shouldNotBe` ""
 
-    describe "C2: edge traces have non-empty copy maps for polymorphic edges" $ do
-        it "let-poly has at least one edge with non-empty copy map" $ do
+    describe "C2: edge traces have non-empty binder args for polymorphic edges" $ do
+        it "let-poly has at least one edge with non-empty binder args" $ do
             let expr = ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (EVar "id"))
                 result = runPipelineArtifactsDefault Set.empty expr
             case result of
                 Left err -> expectationFailure err
                 Right pa -> do
                     let traces = prEdgeTraces (paPresolution pa)
-                        nonEmptyCopyMaps =
+                        nonEmptyBinderArgs =
                             IntMap.filter
                                 (\tr -> not (null (etBinderArgs tr)))
                                 traces
-                    IntMap.size nonEmptyCopyMaps `shouldSatisfy` (> 0)
+                    IntMap.size nonEmptyBinderArgs `shouldSatisfy` (> 0)
