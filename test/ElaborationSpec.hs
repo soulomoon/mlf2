@@ -1615,6 +1615,93 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         -- via key ordering and should eliminate binder "a" first.
                         Elab.pretty inst `shouldBe` "N"
 
+            it "OpWeaken on unrecoverable non-binder alias fails fast (no no-op fallback)" $ do
+                let root = NodeId 100
+                    binderA = NodeId 1
+                    aliasN = NodeId 31
+                    c = rootedConstraint emptyConstraint
+                        { cNodes = nodeMapFromList
+                                [ (getNodeId root, TyArrow root binderA binderA)
+                                , (getNodeId binderA, TyVar { tnId = binderA, tnBound = Nothing })
+                                , (getNodeId aliasN, TyBase aliasN (BaseTy "Bool"))
+                                ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef binderA), (genRef (GenNodeId 0), BindFlex))
+                                ]
+                        }
+                    solved = mkSolved c IntMap.empty
+                    scheme =
+                        Elab.schemeFromType
+                            (Elab.TForall "a" Nothing
+                                (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
+                    si = Elab.SchemeInfo
+                        { Elab.siScheme = scheme
+                        , Elab.siSubst = IntMap.fromList [(getNodeId binderA, "a")]
+                        }
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewForallIntros = 0
+                        , ewWitness = InstanceWitness [OpWeaken aliasN]
+                        }
+                case ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew of
+                    Left (Elab.PhiTranslatabilityError msgs) ->
+                        unlines msgs `shouldSatisfy` ("OpWeaken" `isInfixOf`)
+                    Left err ->
+                        expectationFailure ("Expected PhiTranslatabilityError, got " ++ show err)
+                    Right inst ->
+                        expectationFailure ("Expected fail-fast OpWeaken, got inst: " ++ show inst)
+
+            it "OpWeaken on binder target missing from quantifier spine fails fast" $ do
+                let root = NodeId 100
+                    binderA = NodeId 1
+                    binderB = NodeId 2
+                    c = rootedConstraint emptyConstraint
+                        { cNodes = nodeMapFromList
+                                [ (getNodeId root, TyArrow root binderA binderA)
+                                , (getNodeId binderA, TyVar { tnId = binderA, tnBound = Nothing })
+                                , (getNodeId binderB, TyVar { tnId = binderB, tnBound = Nothing })
+                                ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef binderA), (genRef (GenNodeId 0), BindFlex))
+                                , (nodeRefKey (typeRef binderB), (genRef (GenNodeId 0), BindFlex))
+                                ]
+                        }
+                    solved = mkSolved c IntMap.empty
+                    -- Deliberately inconsistent fixture: binderB is in siSubst/binder key-space
+                    -- but absent from the scheme's quantifier spine.
+                    scheme =
+                        Elab.schemeFromType
+                            (Elab.TForall "a" Nothing
+                                (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
+                    si = Elab.SchemeInfo
+                        { Elab.siScheme = scheme
+                        , Elab.siSubst =
+                            IntMap.fromList
+                                [ (getNodeId binderA, "a")
+                                , (getNodeId binderB, "b")
+                                ]
+                        }
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewForallIntros = 0
+                        , ewWitness = InstanceWitness [OpWeaken binderB]
+                        }
+                case ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew of
+                    Left (Elab.PhiTranslatabilityError msgs) ->
+                        unlines msgs `shouldSatisfy` ("OpWeaken" `isInfixOf`)
+                    Left err ->
+                        expectationFailure ("Expected PhiTranslatabilityError, got " ++ show err)
+                    Right inst ->
+                        expectationFailure ("Expected fail-fast OpWeaken, got inst: " ++ show inst)
+
             it "O15-TR-RIGID-MERGE: OpMerge with rigid operated node n translates to identity" $ do
                 let root = NodeId 100
                     n = NodeId 1
