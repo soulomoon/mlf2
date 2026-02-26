@@ -349,7 +349,7 @@ resolveBaseBoundForInstConstraint constraint canonical start =
 
 resolveBaseBoundForInstSolved :: Solved.Solved -> NodeId -> Maybe NodeId
 resolveBaseBoundForInstSolved solved =
-    let constraint = Solved.solvedConstraint solved
+    let constraint = Solved.originalConstraint solved
         canonical = Solved.canonical solved
     in resolveBaseBoundForInstConstraint constraint canonical
 

@@ -53,7 +53,7 @@ inlineBoundVarsTypeWith unboundToBottom solved =
         (VarStore.lookupVarBound constraint)
         reifyBoundWithSeen
   where
-    constraint = Solved.solvedConstraint solved
+    constraint = Solved.originalConstraint solved
     canonical = Solved.canonical solved
     namedSet = either (const IntSet.empty) id (namedNodes solved)
     nodesVarOnly =

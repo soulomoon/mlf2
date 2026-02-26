@@ -1156,7 +1156,7 @@ reifyTypeForParam namedSet res nid = do
 inlineBaseBounds :: Solved -> ElabType -> ElabType
 inlineBaseBounds res =
     inlineBaseBoundsType
-        (Solved.solvedConstraint res)
+        (Solved.originalConstraint res)
         (Solved.canonical res)
 
 annNode :: AnnExpr -> NodeId

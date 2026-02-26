@@ -81,7 +81,7 @@ preferGenScope constraint ref = case ref of
 
 schemeBodyTarget :: Solved -> NodeId -> NodeId
 schemeBodyTarget solved target =
-    let constraint = Solved.solvedConstraint solved
+    let constraint = Solved.originalConstraint solved
         canonical = Solved.canonical solved
         targetC = canonical target
         isSchemeRoot =

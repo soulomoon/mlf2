@@ -44,7 +44,7 @@ import MLF.Util.RecursionSchemes (cataM)
 expansionToInst :: Solved -> Expansion -> Either ElabError Instantiation
 expansionToInst solved = cataM alg
   where
-    constraint = Solved.solvedConstraint solved
+    constraint = Solved.originalConstraint solved
     canonical = Solved.canonical solved
     resolveBaseBound = resolveBaseBoundForInstConstraint constraint canonical
     reifyArg arg =

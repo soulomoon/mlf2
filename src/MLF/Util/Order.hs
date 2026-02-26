@@ -39,11 +39,11 @@ import MLF.Util.OrderKey (OrderKey(..), OrderKeyError(..), compareOrderKey, orde
 -- solved graph’s canonicalization.
 orderKeysFromRoot :: Solved -> NodeId -> IntMap OrderKey
 orderKeysFromRoot solved root0 =
-    orderKeysFromConstraintWith (Solved.canonical solved) (Solved.solvedConstraint solved) root0 Nothing
+    orderKeysFromConstraintWith (Solved.canonical solved) (Solved.originalConstraint solved) root0 Nothing
 
 orderKeysFromRootRestricted :: Solved -> NodeId -> IntSet.IntSet -> IntMap OrderKey
 orderKeysFromRootRestricted solved root0 allowed =
-    orderKeysFromConstraintWith (Solved.canonical solved) (Solved.solvedConstraint solved) root0 (Just allowed)
+    orderKeysFromConstraintWith (Solved.canonical solved) (Solved.originalConstraint solved) root0 (Just allowed)
 
 -- | Compute order keys from a raw constraint using term-DAG structure plus
 -- instance-bound dependencies.

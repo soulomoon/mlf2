@@ -786,7 +786,7 @@ reifyBoundWithNamesOnConstraintBound constraint subst nid =
 
 namedNodes :: Solved -> Either ElabError IntSet.IntSet
 namedNodes solved = do
-    let constraint = Solved.solvedConstraint solved
+    let constraint = Solved.originalConstraint solved
         canonical = Solved.canonical solved
         nodes = cNodes constraint
     bindParents0 <- bindingToElab (canonicalizeBindParentsUnder canonical constraint)
@@ -829,7 +829,7 @@ freeVars solved nid visited
             Just TyExp{ tnBody = b } ->
                 freeVars solved (canonical b) visited'
   where
-    constraint = Solved.solvedConstraint solved
+    constraint = Solved.originalConstraint solved
     nodes = cNodes constraint
     canonical = Solved.canonical solved
     key = getNodeId (canonical nid)

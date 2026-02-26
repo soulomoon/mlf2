@@ -118,7 +118,7 @@ computeResultTypeFromAnn ctx inner innerPre annNodeId eid = do
         schemeInfo = SchemeInfo { siScheme = sch, siSubst = subst }
     phi0 <- phiFromEdgeWitnessWithTrace traceCfg generalizeAtWith solvedForGen (Just bindParentsGa) (Just schemeInfo) mTrace ew
     namedSetSolved <- namedNodes solvedForGen
-    let annBound = VarStore.lookupVarBound (Solved.solvedConstraint solvedForGenView) annNodeId
+    let annBound = Solved.lookupVarBound solvedForGenView annNodeId
         annTargetNode0 =
             case annBound of
                 Just bnd -> bnd
