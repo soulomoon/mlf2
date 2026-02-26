@@ -548,4 +548,5 @@ Progress (2026-02-08, Group 1): duplicated binding-core helpers are now single-s
 
 ## Active bug closures
 
-- [x] `BUG-2026-02-06-002`: graduate `BUG-2026-02-06-002 sentinel matrix` from `pendingWith` to strict assertions now that strict/thesis target matrix is green under retained C18/C21/C21.1 behavior.
+- [x] `BUG-2026-02-06-002` / `BUG-2026-02-08-004`: strict OpWeaken no-op fallback removal landed; fallback-dependent sentinel/strict-target/thesis gates now assert explicit Phase-6 fail-fast (`PhiTranslatabilityError`) instead of permissive success.
+- [ ] Follow-up: recover the above legacy paths by upstream witness shaping (so they elaborate successfully without unresolved non-root `OpWeaken`) while keeping strict Ω semantics (non-root weaken => `InstElim` or fail-fast).

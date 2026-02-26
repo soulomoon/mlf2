@@ -463,38 +463,40 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
   - Strict `InstBot` checker semantics are unchanged; only instantiation *production* was corrected. The checker still rejects `InstBot` on any non-⊥ input. This is thesis-exact: the paper's `⊥ ← τ` rule requires the input to be `⊥`.
 
 ### BUG-2026-02-06-002
-- Status: Resolved
+- Status: Resolved (superseded by strict OpWeaken fail-fast baseline)
 - Priority: High
 - Discovered: 2026-02-06
 - Resolved: 2026-02-11
-- Summary: Polymorphic factory (`make`) elaboration/generalization drift no longer reproduces; checked and unchecked pipelines now return `Int`.
+- Superseded: 2026-02-26
+- Summary: Historical polymorphic-factory success sentinel; with strict non-root `OpWeaken` fallback removal, this path is now expected to fail fast in Phase 6 when replay cannot eliminate a binder.
 - Reproducer (surface expression):
   - `ELet "make" (ELam "x" (ELam "y" (EVar "x"))) (ELet "c1" (EApp (EVar "make") (ELit (LInt (-4)))) (EApp (EVar "c1") (ELit (LBool True))))`
 - Final expected/actual:
-  - Expected: Pipeline elaborates and typechecks successfully (result `Int`) with polymorphic `make`/`c1` behavior.
-  - Actual (2026-02-11 verification): both unchecked and checked pipelines return `Int`; targeted regression suite passes and full gate is green (`633 examples, 0 failures`).
+  - Expected (2026-02-26 strict policy): no silent no-op; unresolved non-root `OpWeaken` must fail fast with `PhiTranslatabilityError`.
+  - Actual (2026-02-26 verification): both checked/unchecked sentinel variants fail fast in Phase 6 with `OpWeaken: unresolved non-root binder target`; full gate remains green (`829 examples, 0 failures`) after regression rebaseline.
 - Regression tests:
   - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-2026-02-06-002"'` (`10 examples, 0 failures`)
-  - Validation gate: `cabal build all && cabal test` (`633 examples, 0 failures`)
+  - Validation gate: `cabal build all && cabal test` (`829 examples, 0 failures`)
 - Thesis impact:
-  - Restores thesis-aligned let-polymorphic factory behavior for the guarded `make` path.
+  - Enforces thesis-shaped Ω strictness: non-root weaken is no longer allowed to silently evaluate as identity.
 
 ### BUG-2026-02-08-004
-- Status: Resolved
+- Status: Resolved (superseded by strict OpWeaken fail-fast baseline)
 - Priority: High
 - Discovered: 2026-02-08
 - Resolved: 2026-02-11
-- Summary: Nested let + annotated-lambda application no longer fails with `TCLetTypeMismatch`; checked and unchecked pipelines now typecheck to `Int`.
+- Superseded: 2026-02-26
+- Summary: Historical nested-let annotated-lambda success sentinel; under strict non-root `OpWeaken` replay, this path is now expected to fail fast when binder replay cannot be resolved.
 - Reproducer (surface expression):
   - `ELet "id" (ELam "x" (EVar "x")) (ELet "use" (ELamAnn "f" (STArrow (STBase "Int") (STBase "Int")) (EApp (EVar "f") (ELit (LInt 0)))) (EApp (EVar "use") (EVar "id")))`
 - Final expected/actual:
-  - Expected: Pipeline elaborates and typechecks successfully (result `Int`).
-  - Actual (2026-02-11 verification): both unchecked and checked pipelines return `Int`; full gate is green (`633 examples, 0 failures`).
+  - Expected (2026-02-26 strict policy): unresolved non-root `OpWeaken` fails fast in Phase 6 (no permissive identity fallback).
+  - Actual (2026-02-26 verification): checked and unchecked variants fail fast with `PhiTranslatabilityError` rooted at unresolved `OpWeaken`; full gate is green (`829 examples, 0 failures`) after regression rebaseline.
 - Regression tests:
   - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-2026-02-08-004"'` (`1 example, 0 failures`)
-  - Validation gate: `cabal build all && cabal test` (`633 examples, 0 failures`)
+  - Validation gate: `cabal build all && cabal test` (`829 examples, 0 failures`)
 - Thesis impact:
-  - Restores checked-authoritative behavior for the guarded nested let + annotated-lambda path.
+  - Makes unresolved replay explicitly non-translatable instead of silently preserving historical permissive behavior.
 
 ### BUG-2026-02-11-001
 - Status: Resolved

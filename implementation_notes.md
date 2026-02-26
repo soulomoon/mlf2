@@ -987,3 +987,24 @@ This repo’s design is primarily informed by:
   - preserves structural information for bounded shapes (for example `b -> a` becomes `⊥ -> a` for binder `b`),
   - keeps strict alias-bound rejection (`∀(b ⩾ a)`) intact.
 - Deterministic BUG-002 matrix (`BUG-002-V1..V4`, seed `1593170056`) is green in this workspace after this pass.
+
+## 2026-02-26 OpWeaken no-op fallback removal (Fig. 15.3.4 / §15.3.5)
+
+- Removed both non-root `OpWeaken` no-op fallback exits in `MLF.Elab.Phi.Omega`:
+  - non-binder alias target with no recoverable binder-in-spine,
+  - binder target that cannot be located in current `vSpineIds`.
+- Non-root `OpWeaken` now has a strict invariant:
+  - resolve replay binder and emit thesis-shaped `InstElim`, or
+  - fail fast with `PhiTranslatabilityError` (no silent identity/no-op path).
+- Error payloads are normalized across both former fallback sites and now include:
+  - op/replay/canonical targets,
+  - solved class members considered,
+  - recoverable binders,
+  - current spine ids,
+  - replay/hint map domains.
+- Added focused regressions in `test/ElaborationSpec.hs` for both former fallback branches and retained alias-recovery success coverage.
+- Rebaselined legacy fallback-dependent pipeline regressions to assert strict fail-fast behavior rather than permissive success.
+- Verification:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "OpWeaken"'` (green),
+  - `cabal build all && cabal test` (green),
+  - `cabal test --test-show-details=direct` (green).
