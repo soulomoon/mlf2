@@ -36,6 +36,13 @@ module MLF.Constraint.Solved (
     -- * Constraint rebuilding
     rebuildWithConstraint,
 
+    -- * Mutation helpers
+    patchNode,
+    pruneBindParentsSolved,
+    rebuildWithNodes,
+    rebuildWithBindParents,
+    rebuildWithGenNodes,
+
     -- * Extended queries
     classMembers,
     originalNode,
@@ -75,6 +82,8 @@ import MLF.Constraint.Types.Graph
     , NodeMap(..)
     , NodeRef(..)
     , TyNode(..)
+    , genNodeKey
+    , nodeRefFromKey
     )
 import qualified MLF.Constraint.NodeAccess as NA
 import qualified MLF.Constraint.VarStore as VarStore
@@ -306,6 +315,54 @@ rebuildWithConstraint (Solved EquivBackend { ebCanonicalMap = cm, ebEquivClasses
         , ebEquivClasses = ec
         , ebOriginalConstraint = orig
         }
+
+-- -----------------------------------------------------------------
+-- Mutation helpers
+-- -----------------------------------------------------------------
+
+-- | Modify a node in the canonical constraint by its canonical ID.
+-- Used by Fallback.hs to patch TyVar bounds.
+patchNode :: Solved -> NodeId -> (TyNode -> TyNode) -> Solved
+patchNode (Solved eb@EquivBackend { ebCanonicalConstraint = c }) nid f =
+    let NodeMap nodes = cNodes c
+        nodes' = NodeMap (IntMap.adjust f (getNodeId nid) nodes)
+        c' = c { cNodes = nodes' }
+    in Solved eb { ebCanonicalConstraint = c' }
+
+-- | Prune dead bind-parent entries from the canonical constraint.
+-- Used by Pipeline.hs.
+pruneBindParentsSolved :: Solved -> Solved
+pruneBindParentsSolved (Solved eb@EquivBackend { ebCanonicalConstraint = c }) =
+    let liveNodes = getNodeMap (cNodes c)
+        liveGens = getGenNodeMap (cGenNodes c)
+        liveRef ref =
+            case ref of
+                TypeRef nid -> IntMap.member (getNodeId nid) liveNodes
+                GenRef gid -> IntMap.member (genNodeKey gid) liveGens
+        liveChild childKey = liveRef (nodeRefFromKey childKey)
+        bindParents' =
+            IntMap.filterWithKey
+                (\childKey (parentRef, _flag) ->
+                    liveChild childKey && liveRef parentRef
+                )
+                (cBindParents c)
+    in Solved eb { ebCanonicalConstraint = c { cBindParents = bindParents' } }
+
+-- | Replace the canonical node map.
+-- Used by Generalize phases that build merged node maps.
+rebuildWithNodes :: Solved -> NodeMap TyNode -> Solved
+rebuildWithNodes (Solved eb@EquivBackend { ebCanonicalConstraint = c }) nodes =
+    Solved eb { ebCanonicalConstraint = c { cNodes = nodes } }
+
+-- | Replace the canonical bind parents.
+rebuildWithBindParents :: Solved -> BindParents -> Solved
+rebuildWithBindParents (Solved eb@EquivBackend { ebCanonicalConstraint = c }) bp =
+    Solved eb { ebCanonicalConstraint = c { cBindParents = bp } }
+
+-- | Replace the canonical gen nodes.
+rebuildWithGenNodes :: Solved -> GenNodeMap GenNode -> Solved
+rebuildWithGenNodes (Solved eb@EquivBackend { ebCanonicalConstraint = c }) gn =
+    Solved eb { ebCanonicalConstraint = c { cGenNodes = gn } }
 
 -- -----------------------------------------------------------------
 -- Extended queries
