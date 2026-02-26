@@ -20,8 +20,8 @@ spec = describe "Dual-path verification" $ do
                     (STForall "a" Nothing (STArrow (STVar "a") (STVar "a"))))
                 , ("nested-let"
                   , ELet "f" (ELam "x" (EVar "x"))
-                        (ELet "g" (EVar "f")
-                            (EApp (EVar "g") (EVar "g"))))
+                        (ELet "g" (EApp (EVar "f") (EVar "f"))
+                            (EVar "g")))
                 , ("higher-rank-app"
                   , EApp
                         (ELam "f" (EVar "f"))

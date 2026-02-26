@@ -22,8 +22,8 @@ spec = describe "Phi alignment" $ do
                   )
                 , ("nested-let"
                   , ELet "f" (ELam "x" (EVar "x"))
-                        (ELet "g" (EVar "f")
-                            (EApp (EVar "g") (EVar "g")))
+                        (ELet "g" (EApp (EVar "f") (EVar "f"))
+                            (EVar "g"))
                   )
                 ]
         forM_ corpus $ \(label, expr) ->
