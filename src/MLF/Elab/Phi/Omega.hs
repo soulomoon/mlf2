@@ -791,6 +791,9 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
             if bvC == rootC
                 then go binderKeys namedSet' vs accum rest lookupBinder
                 else do
+                    -- Strict replay invariant: non-root OpWeaken must resolve to a
+                    -- binder in the current replay spine (directly or via class
+                    -- recovery) and emit InstElim; otherwise translation fails fast.
                     weakenBinder <- resolveNonRootWeakenBinder binderKeys vs bv bvReplay
                     -- Thesis-exact OpWeaken: always emit InstElim.
                     -- For graft+weaken pairs, collapseAdjacentPairs merges
