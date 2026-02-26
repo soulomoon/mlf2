@@ -279,6 +279,15 @@ phiFromEdgeWitnessWithTrace traceCfg generalizeAtWith res mbGaParents mSchemeInf
         Nothing -> Left (MissingEdgeTrace (ewEdgeId ew))
         Just _ -> phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTrace ew
 
+{- Note [Trace-First Copied Set]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The copied-node set is built from EdgeTrace.etCopyMap (witness domain),
+then canonicalized for alias reconciliation only. The copy map is the
+authoritative source of which nodes were copied during presolution
+expansion (thesis §10.3). Canonical chasing here reconciles IDs that
+were merged during solving but does not introduce new semantic content.
+-}
+
 phiFromEdgeWitnessCore
     :: TraceConfig
     -> GeneralizeAtWith
@@ -304,6 +313,7 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
         )
         () of
         () -> pure ()
+    -- See Note [Trace-First Copied Set]
     let copied =
             case mTrace of
                 Nothing -> IntSet.empty
