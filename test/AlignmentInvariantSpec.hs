@@ -10,6 +10,7 @@ import MLF.Constraint.Presolution (PresolutionResult(..))
 import MLF.Constraint.Types.Graph
     ( TyNode(..) )
 import qualified MLF.Constraint.Solved as Solved
+import MLF.Elab.Pipeline (runPipelineElab, runPipelineElabChecked)
 import MLF.Frontend.Syntax (Expr(..), SrcTy(..))
 import SpecUtil
 
@@ -53,3 +54,25 @@ spec = describe "Thesis alignment invariants" $ do
                         -- Every witness should have a corresponding trace
                         let missingTraces = IntSet.difference witnessKeys traceKeys
                         missingTraces `shouldBe` IntSet.empty
+
+    describe "A3: pipeline output stability" $ do
+        let corpus =
+                [ ("id", ELam "x" (EVar "x"))
+                , ("const", ELam "x" (ELam "y" (EVar "x")))
+                , ("app-id", EApp (ELam "x" (EVar "x")) (ELam "y" (EVar "y")))
+                , ("let-poly", ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (EVar "id")))
+                ]
+        forM_ corpus $ \(label, expr) ->
+            it ("checked and unchecked paths agree for: " ++ label) $ do
+                let unchecked = runPipelineElab Set.empty (unsafeNormalizeExpr expr)
+                    checked = runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr)
+                case (unchecked, checked) of
+                    (Right (t1, ty1), Right (t2, ty2)) -> do
+                        show t1 `shouldBe` show t2
+                        show ty1 `shouldBe` show ty2
+                    (Left e1, Left e2) ->
+                        show e1 `shouldBe` show e2
+                    _ -> expectationFailure $
+                        "Path disagreement for " ++ label ++
+                        ": unchecked=" ++ show unchecked ++
+                        ", checked=" ++ show checked
