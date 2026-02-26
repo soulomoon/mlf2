@@ -1259,33 +1259,11 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
         | not (isBinderNode binderKeys replayTarget) =
             case listToMaybe recoverableInSpine of
                 Just recoveredBinder -> Right recoveredBinder
-                Nothing ->
-                    Left $
-                        PhiTranslatabilityError
-                            [ "OpWeaken: unresolved non-root binder target"
-                            , "  reason: non-binder target has no recoverable binder in current spine"
-                            , "  source target: " ++ show sourceTarget
-                            , "  replay target: " ++ show replayTarget
-                            , "  canonical target: " ++ show replayCanonical
-                            , "  class members considered: " ++ show classMembers
-                            , "  recoverable binders: " ++ show recoverableBinders
-                            , "  current ids: " ++ show (vSpineIds vs)
-                            ]
+                Nothing -> Left (unresolvedWeakenError "non-binder target has no recoverable binder in current spine")
         | otherwise =
             case lookupBinderIndex binderKeys (vSpineIds vs) replayTarget of
                 Just _ -> Right replayTarget
-                Nothing ->
-                    Left $
-                        PhiTranslatabilityError
-                            [ "OpWeaken: unresolved non-root binder target"
-                            , "  reason: binder target missing from quantifier spine"
-                            , "  source target: " ++ show sourceTarget
-                            , "  replay target: " ++ show replayTarget
-                            , "  canonical target: " ++ show replayCanonical
-                            , "  class members considered: " ++ show classMembers
-                            , "  recoverable binders: " ++ show recoverableBinders
-                            , "  current ids: " ++ show (vSpineIds vs)
-                            ]
+                Nothing -> Left (unresolvedWeakenError "binder target missing from quantifier spine")
       where
         replayCanonical = canonicalNode replayTarget
         classMembers = Solved.classMembers solved replayTarget
@@ -1301,6 +1279,19 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                 Just _ -> True
                 Nothing -> False
             ]
+        unresolvedWeakenError reason =
+            PhiTranslatabilityError
+                [ "OpWeaken: unresolved non-root binder target"
+                , "  reason: " ++ reason
+                , "  op-target: " ++ show sourceTarget
+                , "  replay-target: " ++ show replayTarget
+                , "  canonical-target: " ++ show replayCanonical
+                , "  classMembers: " ++ show classMembers
+                , "  recoverableBinders: " ++ show recoverableBinders
+                , "  ids: " ++ show (vSpineIds vs)
+                , "  replayMapDomain: " ++ show (IntMap.keys traceBinderReplayMap)
+                , "  hintDomain: " ++ show (IntSet.toList traceBinderHintDomain)
+                ]
 
     -- | Check if a node is bound rigidly. Some ω operations treat rigid targets as
     -- ε/identity (thesis Fig. 15.3.4), but not all (see the OpGraft/OpWeaken note).
