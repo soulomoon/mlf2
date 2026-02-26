@@ -4,7 +4,13 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Test.Hspec
 
-import MLF.Constraint.Types.Graph (NodeId(..))
+import MLF.Constraint.Types.Graph
+    ( BaseTy(..)
+    , Constraint(..)
+    , NodeId(..)
+    , TyNode(..)
+    , getNodeId
+    )
 import MLF.Constraint.Solved (Solved)
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Presolution
@@ -13,7 +19,7 @@ import MLF.Constraint.Presolution
     , InteriorNodes(..)
     )
 import MLF.Elab.Phi.IdentityBridge
-import SpecUtil (emptyConstraint)
+import SpecUtil (emptyConstraint, nodeMapFromList)
 
 -- | Build a Solved with the given union-find for testing.
 mkTestSolved :: IntMap.IntMap NodeId -> Solved
@@ -66,6 +72,20 @@ spec = describe "IdentityBridge" $ do
             IntSet.fromList keys `shouldBe` IntSet.fromList [5, 30]
             -- No duplicates
             length keys `shouldBe` length (IntSet.toList (IntSet.fromList keys))
+
+        it "includes solved class members for canonical alias recovery" $ do
+            let binder = NodeId 2
+                alias = NodeId 31
+                c :: Constraint
+                c = emptyConstraint
+                    { cNodes = nodeMapFromList
+                        [ (getNodeId binder, TyVar { tnId = binder, tnBound = Nothing })
+                        , (getNodeId alias, TyBase alias (BaseTy "Bool"))
+                        ]
+                    }
+                solved = Solved.mkTestSolved c (IntMap.fromList [(getNodeId binder, alias)])
+                ib = mkIdentityBridge solved Nothing IntMap.empty
+            sourceKeysForNode ib alias `shouldSatisfy` elem (getNodeId binder)
 
     -- ---------------------------------------------------------------
     -- Trace-order priority over numeric order
@@ -192,6 +212,46 @@ spec = describe "IdentityBridge" $ do
                 binderKeys = IntSet.fromList [20, 30]
                 spine = [Just (NodeId 20), Just (NodeId 30)]
             lookupBinderIndex ib binderKeys spine (NodeId 30) `shouldBe` Just 1
+
+        it "preserves raw binder identity before class-member fallback" $ do
+            let b1 = NodeId 1
+                b2 = NodeId 2
+                alias = NodeId 31
+                c = emptyConstraint
+                    { cNodes = nodeMapFromList
+                        [ (1, TyForall { tnId = b1, tnBody = NodeId 11 })
+                        , (11, TyVar { tnId = NodeId 11, tnBound = Nothing })
+                        , (2, TyForall { tnId = b2, tnBody = NodeId 12 })
+                        , (12, TyVar { tnId = NodeId 12, tnBound = Nothing })
+                        , (31, TyBase alias (BaseTy "Bool"))
+                        ]
+                    }
+                solved = Solved.mkTestSolved c (IntMap.fromList [(1, alias), (2, alias)])
+                ib = mkIdentityBridge solved Nothing IntMap.empty
+                binderKeys = IntSet.fromList [1, 2, 31]
+                spine = [Just b1, Just b2]
+            lookupBinderIndex ib binderKeys spine b1 `shouldBe` Just 0
+            lookupBinderIndex ib binderKeys spine b2 `shouldBe` Just 1
+
+        it "uses class-member fallback when target has no exact binder key" $ do
+            let b1 = NodeId 1
+                b2 = NodeId 2
+                alias = NodeId 31
+                c = emptyConstraint
+                    { cNodes = nodeMapFromList
+                        [ (1, TyForall { tnId = b1, tnBody = NodeId 11 })
+                        , (11, TyVar { tnId = NodeId 11, tnBound = Nothing })
+                        , (2, TyForall { tnId = b2, tnBody = NodeId 12 })
+                        , (12, TyVar { tnId = NodeId 12, tnBound = Nothing })
+                        , (31, TyBase alias (BaseTy "Bool"))
+                        ]
+                    }
+                solved = Solved.mkTestSolved c (IntMap.fromList [(1, alias), (2, alias)])
+                ib = mkIdentityBridge solved Nothing IntMap.empty
+                binderKeys = IntSet.fromList [1, 2]
+                spine = [Just b1, Just b2]
+            -- alias is not a raw binder key; selection comes from class fallback.
+            lookupBinderIndex ib binderKeys spine alias `shouldBe` Just 0
 
         it "deterministic tie-break by trace order when two positions have exact matches" $ do
             -- Trace: binder 20 at ix=0, binder 10 at ix=1

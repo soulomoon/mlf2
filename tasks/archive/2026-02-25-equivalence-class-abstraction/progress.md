@@ -1,0 +1,165 @@
+# Progress Log: 2026-02-25 Equivalence-Class Abstraction
+
+## 2026-02-25
+- Loaded skill instructions: `using-superpowers`, `planning-with-files`, `subagent-driven-development`.
+- Loaded implementation plan: `docs/plans/2026-02-25-equivalence-class-abstraction-plan.md`.
+- Audited git status and found pre-existing local modifications in 6 files.
+- Confirmed `tasks/todo/` was absent; initialized new task folder with tracking files.
+- Audited current `Solved` module and test changes to map baseline progress before dispatching task subagents.
+- Confirmed from git history that Tasks 1-5 were already committed (`b1e2a72`, `11a3282`, `17a1c25`, `4642596`, `93fa24d`).
+- Ran Task 6 via subagent loop with recovery:
+  - Initial implementer stalled; interrupted.
+  - Replacement implementer produced partial migration state but no tests/commit.
+  - Focused compile-fix subagent repaired `test/ElaborationSpec.hs` type/import boundaries.
+  - Resumed implementer completed full test run and committed.
+- Task 6 commit created: `898b733` (`refactor: migrate test infrastructure to Solved API`).
+- Task 6 verification evidence:
+  - `cabal test --test-show-details=direct` -> PASS (`802 examples, 0 failures`).
+  - Spec compliance review subagent -> ✅ compliant.
+  - Code quality review subagent -> ✅ approved (minor notes only).
+- Task 7 execution:
+  - Initial implementer stalled after broad partial migration and did not report status.
+  - Partial edits included abstraction of `SolveResult`, new internal module split, and partial consumer migration.
+  - Recovery implementer completed migration from partial state and committed:
+    - `07b2947` (`refactor: hide SolveResult fields — all access through Solved API`)
+- Task 7 verification evidence:
+  - `cabal build` -> PASS
+  - `cabal test --test-show-details=direct` -> PASS (`802 examples, 0 failures`)
+  - Spec compliance review subagent -> ✅ compliant.
+  - Code quality review subagent -> ✅ approved (minor notes only).
+- Advanced plan status: Tasks 1-7 complete; Task 8 queued as next in-progress implementation task.
+- Recovery Task 7 started from partial hidden-field state; captured failing baseline via `cabal build`.
+- Migrated remaining `MLF.Elab.Run.*` consumers (`TypeOps`, `Scope`, `Pipeline`, `ResultType*`) from direct `SolveResult` fields to `MLF.Constraint.Solved` accessors/wrappers.
+- Migrated `test/SolveSpec.hs` and `test/Constraint/SolvedSpec.hs` to avoid `SolveResult(..)` field patterns/constructors by using `Solved` helpers (`fromSolveResult`, `solvedConstraint`, `unionFind`, `mkSolved`, `toSolveResult`).
+- Verified no non-`Solve`/non-`Solved` direct `srConstraint`/`srUnionFind` usage remains (`rg` over `src` + `test`).
+- Validation evidence:
+  - `cabal build` -> PASS
+  - `cabal test --test-show-details=direct` -> PASS (`802 examples, 0 failures`)
+- Task 8 execution:
+  - Refactored `src/MLF/Constraint/Solved.hs` to introduce `SolvedBackend` sum type.
+  - Added `LegacyBackend` + `EquivBackend` internal constructors.
+  - Updated all exported `Solved` query/accessor functions to handle both backends.
+  - Kept runtime path on legacy (`fromSolveResult`, `mkSolved` still construct `LegacyBackend`).
+- Task 8 verification evidence:
+  - `cabal build` -> PASS
+  - `cabal test --test-show-details=direct` -> PASS (`802 examples, 0 failures`)
+- Task 8 review gates:
+  - Spec review -> ✅ compliant.
+  - Initial code-quality review -> ❌ needs changes (2 important findings).
+  - Implementer follow-up commit: `c3ec0a3` (`refactor: harden EquivBackend staged query semantics`).
+  - Quality re-review after follow-up -> ✅ approved (minor note only).
+- Advanced plan status: Tasks 1-8 complete; Task 9 queued as next in-progress implementation task.
+- Task 9 execution:
+  - Added staged solver snapshot API in `src/MLF/Constraint/Solve.hs`:
+    - `SolveSnapshot` (`snapUnionFind`, `snapPreRewriteConstraint`)
+    - `SolveOutput` (`soResult`, `soSnapshot`)
+    - `solveUnifyWithSnapshot`
+  - Kept runtime semantics stable by making `solveUnify = soResult <$> solveUnifyWithSnapshot`.
+  - Added `fromPreRewriteState` in `src/MLF/Constraint/Solved.hs` to construct `EquivBackend` from pre-rewrite constraint + final UF.
+  - Implemented snapshot canonicalization helpers in `Solved.hs` that mirror `applyUFConstraint` rewrite structure for nodes, edges, bind parents, eliminated/weakened sets, and gen-node schemes.
+- Task 9 verification evidence:
+  - `cabal build` -> PASS
+- Advanced plan status: Tasks 1-9 complete; Task 10 queued as next in-progress implementation task.
+- Task 9 focused spec-gap fix:
+  - In `src/MLF/Constraint/Solve.hs`, changed `SolveSnapshot.snapUnionFind` capture from post-rewrite-subst `uf'` to the same pre-`applyUFConstraint` UF (`uf`) used with `snapPreRewriteConstraint`.
+  - Kept `SolveResult` behavior unchanged (`srConstraint` still from rewritten/pruned constraint, `srUnionFind` still `uf'`).
+- Task 9 quality hardening:
+  - Added shared `rewriteConstraintWithUF` in `Solve` and reused it in `Solved` snapshot construction to remove duplicated rewrite logic drift risk.
+  - Added direct snapshot-path tests:
+    - `test/SolveSpec.hs`: snapshot pre-rewrite/rewrite consistency
+    - `test/Constraint/SolvedSpec.hs`: snapshot backend matches legacy core query behavior
+  - Follow-up commit: `aba07a0` (`refactor: unify snapshot rewrite path and add snapshot coverage`)
+- Post-follow-up verification:
+  - `cabal build` -> PASS
+  - `cabal test --test-show-details=direct` -> PASS (`804 examples, 0 failures`)
+  - Task 9 spec re-review -> ✅ compliant.
+  - Task 9 quality re-review -> ✅ approved.
+- Advanced plan status: Tasks 1-9 complete; Task 10 queued as next in-progress implementation task.
+- Task 10 execution:
+  - Added explicit EquivBackend unit assertions in `test/Constraint/SolvedSpec.hs`.
+  - Added explicit legacy-comparison oracle checks for `canonical` and `lookupNode`.
+  - Commit: `a36a7a0` (`test: equivalence-class backend unit tests with legacy comparison`).
+- Task 10 verification evidence:
+  - `cabal test --test-show-details=direct` -> PASS (`810 examples, 0 failures`)
+  - Spec review -> ✅ compliant.
+  - Quality review -> ✅ approved (minor notes only).
+- Advanced plan status: Tasks 1-10 complete; Task 11 queued as next in-progress implementation task.
+- Task 10 execution:
+  - Updated `test/Constraint/SolvedSpec.hs` with explicit `fromPreRewriteState` EquivBackend assertions for:
+    - `classMembers` (full original class membership)
+    - `wasOriginalBinder` (unified-away binder class)
+    - `originalNode` (pre-solving node payload)
+    - `originalBindParent` (pre-solving binding tree edge)
+  - Refactored snapshot parity setup into a reusable fixture and split explicit legacy-oracle tests for:
+    - `canonical`
+    - `lookupNode`
+  - Retained broader snapshot parity assertions for `lookupVarBound`, `instEdges`, `bindParents`, `genNodes`, and `allNodes`.
+- Task 10 verification evidence:
+  - `cabal test --test-show-details=direct` -> PASS (`810 examples, 0 failures`)
+- Advanced plan status: Tasks 1-10 complete; Milestone 4 tasks (11-13) pending.
+- Task 13 compile-recovery execution:
+  - Reproduced compile failure:
+    - `src/MLF/Constraint/Solved.hs:65:7: Module ‘MLF.Constraint.Solve’ does not export ‘rewriteEliminatedBinders’`
+  - Removed stale `rewriteEliminatedBinders` import from `Solved.hs`.
+  - Ran full tests to validate semantic impact; observed 14 regressions when `fromSolveOutput` used direct pre-rewrite state.
+  - Restored snapshot replay behavior by routing `fromSolveOutput` through `fromPreRewriteState`, preserving snapshot-derived construction without reading `soResult.srConstraint`.
+  - Kept replay fallback in `fromPreRewriteState` for handcrafted invalid snapshots used by tests.
+- Task 13 verification evidence:
+  - `cabal test --test-show-details=direct` -> PASS (`821 examples, 0 failures`)
+- Advanced plan status: Task 13 complete; Task 12 and Milestone 5 tasks remain pending.
+- Task 12 status synced from git history:
+  - Commit `349dc7f` confirmed as Task 12 (`test: full-suite backend equivalence comparison`).
+- Task 13 review-loop closure:
+  - Spec review and code-quality review executed on uncommitted diff.
+  - Addressed quality findings by removing partial/implicit fallback behavior:
+    - `Solved.fromSolveOutput` and `Solved.fromPreRewriteState` now return `Either SolveError Solved`.
+    - Runtime pipeline conversion updated to `fromSolveError (Solved.fromSolveOutput solveOut)`.
+    - Test helper/spec call sites migrated to explicit `requireRight` / `firstShowE` handling.
+  - Updated `Constraint/SolvedSpec` handcrafted snapshots to include a valid gen-root binding-tree shape for strict replay.
+- Post-fix verification:
+  - Targeted `SolvedSpec` replay/snapshot tests -> PASS.
+  - Full suite `cabal test --test-show-details=direct` -> PASS (`821 examples, 0 failures`).
+  - Final spec review -> ✅.
+  - Final code-quality review -> ✅ merge-ready (one non-blocking low-severity note).
+
+## 2026-02-26 (Task 15 follow-up: binder identity collapse)
+- Added RED regression in `test/Phi/IdentityBridgeSpec.hs`:
+  - `preserves raw binder identity before class-member fallback`.
+- RED verification:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "preserves raw binder identity before class-member fallback"'`
+  - FAIL (expected `Just 1`, got `Just 0` for second binder target).
+- Implemented GREEN fix in `src/MLF/Elab/Phi/IdentityBridge.hs`:
+  - introduced exact-key path without class members and used it for primary exact matching;
+  - added class-fallback ranking tier (only when no exact target keys exist);
+  - kept canonical-alias ranking as final fallback.
+- Regression check:
+  - initial full gate after first patch caught alias weaken regression (`OpWeaken ... alias target ...` expected `∀(a ⩾) N`, got `ε`);
+  - adjusted match-tier logic to preserve alias-target recovery while retaining binder identity disambiguation.
+- Targeted re-verification:
+  - `cabal test ... --match "preserves raw binder identity before class-member fallback"` -> PASS.
+  - `cabal test ... --match "OpWeaken on an alias target recovers binder via equivalence class and emits InstElim"` -> PASS.
+- Full validation:
+  - `cabal build all && cabal test` -> PASS (`825 examples, 0 failures`).
+
+## 2026-02-26 (Task 17: deviation/claims doc closure)
+- Audited `docs/thesis-deviations.yaml` and confirmed Milestone 5 deviation target is already removed:
+  - no `DEV-PHI-WEAKEN-SOLVED-BINDER-SKIP` entry remains.
+- Audited `docs/thesis-claims.yaml`:
+  - no remaining partial claim status tied to solved-identity-loss deviation;
+  - `CLM-PHI-CORRECTNESS` already has empty deviation list.
+- Verification:
+  - `./scripts/check-thesis-claims.sh` -> PASS.
+  - `cabal build all && cabal test` -> PASS (`827 examples, 0 failures`).
+
+## 2026-02-26 (review follow-up: additional regression coverage)
+- Added `IdentityBridge` regression:
+  - `uses class-member fallback when target has no exact binder key`
+  - file: `test/Phi/IdentityBridgeSpec.hs`
+- Added `Elaboration` regression:
+  - `OpWeaken on a shared alias class deterministically picks the first binder without trace`
+  - file: `test/ElaborationSpec.hs`
+- Targeted verification:
+  - `cabal test mlf2-test --test-show-details=direct --test-option=--match --test-option='uses class-member fallback when target has no exact binder key'` -> PASS
+  - `cabal test mlf2-test --test-show-details=direct --test-option=--match --test-option='OpWeaken on a shared alias class deterministically picks the first binder without trace'` -> PASS
+- Full validation:
+  - `cabal build all && cabal test` -> PASS (`827 examples, 0 failures`).

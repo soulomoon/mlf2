@@ -4,6 +4,24 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 23 Milestone 5 gap closure (Tasks 14-16) — 2026-02-26
+
+- Completed:
+  - Ω `OpWeaken` now recovers binder elimination targets via solved equivalence classes instead of skipping to `ε` on alias targets.
+  - IdentityBridge source-key expansion now includes `Solved.classMembers`, enabling canonical-alias binder recovery.
+  - IdentityBridge binder-index ranking now preserves raw binder identity before class-member fallback when multiple binders share one solved class.
+  - Verified `Solved.unionFind` escape hatch remains removed and has no call sites in `src/` or `test/`.
+  - Deviation/claims docs audited for Task 17 closure:
+    - `DEV-PHI-WEAKEN-SOLVED-BINDER-SKIP` is absent from `docs/thesis-deviations.yaml`.
+    - `docs/thesis-claims.yaml` remains synchronized (`CLM-PHI-CORRECTNESS` has `deviations: []`).
+    - `./scripts/check-thesis-claims.sh` passes (`21 claims, 4 deviations`).
+  - Added regressions:
+    - `OpWeaken on an alias target recovers binder via equivalence class and emits InstElim`
+    - `includes solved class members for canonical alias recovery`
+    - `preserves raw binder identity before class-member fallback`
+    - `uses class-member fallback when target has no exact binder key`
+  - Full gate: `cabal build all && cabal test` (`827 examples, 0 failures`).
+
 ## Task 22 Defensible Exactness — 2026-02-22
 
 - Scope:

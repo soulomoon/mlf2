@@ -8,6 +8,56 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 
 ## Resolved
 
+### BUG-2026-02-26-002
+- Status: Resolved
+- Priority: High
+- Discovered: 2026-02-26
+- Resolved: 2026-02-26
+- Summary: `IdentityBridge.lookupBinderIndex` could collapse distinct scheme binders to the same spine index when multiple binders shared one solved equivalence class.
+- Minimal reproducer:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "preserves raw binder identity before class-member fallback"'`
+- Expected vs actual:
+  - Expected: two binders in the same class still resolve to their own spine positions (`b1 -> 0`, `b2 -> 1`) when targeted directly.
+  - Actual before fix: both resolved to the lowest matching spine index (`b1 -> 0`, `b2 -> 0`) after class-member key expansion made exact key sets indistinguishable.
+- Suspected/owning area:
+  - `/Volumes/src/mlf4/src/MLF/Elab/Phi/IdentityBridge.hs`
+- Thesis impact:
+  - Impacts Def. 15.3.4 replay exactness by allowing binder-targeted Ω ops to eliminate the wrong quantifier under merged-class aliasing.
+- Fix:
+  - Split source-key matching into:
+    - exact identity keys (excluding class-member fallback),
+    - class-fallback keys (only when no exact keys exist),
+    - canonical-alias fallback.
+  - Updated `lookupBinderIndex` ranking to prefer exact identity matches before class-member and canonical alias fallback.
+- Regression tests:
+  - `/Volumes/src/mlf4/test/Phi/IdentityBridgeSpec.hs` (`preserves raw binder identity before class-member fallback`)
+  - `/Volumes/src/mlf4/test/ElaborationSpec.hs` (`OpWeaken on an alias target recovers binder via equivalence class and emits InstElim`) to ensure alias recovery still works.
+  - `cabal build all && cabal test`
+
+### BUG-2026-02-26-001
+- Status: Resolved
+- Priority: High
+- Discovered: 2026-02-26
+- Resolved: 2026-02-26
+- Summary: Ω `OpWeaken` could collapse to identity when the witness target was a non-binder alias in the same solved equivalence class as a scheme binder.
+- Minimal reproducer:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "OpWeaken on an alias target recovers binder via equivalence class and emits InstElim"'`
+- Expected vs actual:
+  - Expected: Φ emits quantifier elimination (`InstElim`, rendered `∀(a ⩾) N` in the regression fixture).
+  - Actual before fix: Φ emitted `ε` (skip path) for alias targets.
+- Suspected/owning area:
+  - `/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs`
+  - `/Volumes/src/mlf4/src/MLF/Elab/Phi/IdentityBridge.hs`
+- Thesis impact:
+  - Directly affects Def. 15.3.4 Ω replay exactness for weaken/elimination steps on solved-away alias targets.
+- Fix:
+  - `Omega.OpWeaken` now recovers binders from `Solved.classMembers` before skipping non-binder targets.
+  - `IdentityBridge.sourceKeysForNode` now includes solved-class members to preserve binder identity across canonical aliases.
+- Regression tests:
+  - `/Volumes/src/mlf4/test/ElaborationSpec.hs` (`OpWeaken on an alias target recovers binder via equivalence class and emits InstElim`)
+  - `/Volumes/src/mlf4/test/Phi/IdentityBridgeSpec.hs` (`includes solved class members for canonical alias recovery`)
+  - `cabal build all && cabal test`
+
 ### BUG-2026-02-20-001
 - Status: Resolved
 - Priority: High

@@ -1,5 +1,28 @@
 # Implementation Notes
 
+### 2026-02-26 Milestone 5 gap-closure (OpWeaken alias recovery + IdentityBridge class-members)
+
+- Closed a remaining Ω replay gap where `OpWeaken` could degrade to `ε` when the witness target resolved to a non-binder alias in canonical space.
+- `MLF.Elab.Phi.Omega` now attempts binder recovery from `Solved.classMembers` when `OpWeaken` lands on a non-binder replay target; if a recoverable binder index exists in the current `VSpine`, Φ emits `InstElim` at that binder instead of skipping.
+- `MLF.Elab.Phi.IdentityBridge.sourceKeysForNode` now includes solved equivalence-class members (`Solved.classMembers`) in source-key expansion, so binder identity can be recovered without relying only on trace/copy-map reverse links.
+- Added regressions:
+  - `test/ElaborationSpec.hs`: `OpWeaken on an alias target recovers binder via equivalence class and emits InstElim`.
+  - `test/Phi/IdentityBridgeSpec.hs`: `includes solved class members for canonical alias recovery`.
+- Validation: `cabal build all && cabal test` (`824 examples, 0 failures`).
+
+### 2026-02-26 IdentityBridge binder-identity disambiguation follow-up
+
+- Discovered a remaining replay ambiguity after class-member expansion: when multiple scheme binders shared one solved class, `lookupBinderIndex` could give both binders the same spine index via class-expanded exact-key ties.
+- Root cause: class-member keys were participating in exact-match ranking, so direct binder targets lost raw identity distinction and fell back to lowest spine index.
+- Fix in `MLF.Elab.Phi.IdentityBridge`:
+  - split key matching into exact (no class fallback) vs class fallback vs canonical alias fallback;
+  - `lookupBinderIndex` now ranks exact raw/copy/trace identity keys first, then class fallback only when no exact keys exist, then canonical alias fallback.
+- Added regression:
+  - `test/Phi/IdentityBridgeSpec.hs`: `preserves raw binder identity before class-member fallback`.
+- Guarded existing behavior:
+  - revalidated `test/ElaborationSpec.hs` alias-target weaken regression (`OpWeaken on an alias target recovers binder via equivalence class and emits InstElim`) to ensure class fallback still recovers alias targets.
+- Validation: `cabal build all && cabal test` (`825 examples, 0 failures`).
+
 ### 2026-02-26 solvedConstraint migration phase 6 (`ebCanonicalConstraint` removal)
 
 - Removed `ebCanonicalConstraint :: Constraint` from `MLF.Constraint.Solved.EquivBackend`.

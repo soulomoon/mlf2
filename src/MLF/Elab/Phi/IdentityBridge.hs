@@ -144,14 +144,26 @@ mkIdentityBridge solved mTrace copyMap =
 -- trace order (lower index = higher priority).  Falls back to numeric
 -- order for keys absent from the trace.
 sourceKeysForNode :: IdentityBridge -> NodeId -> [Int]
-sourceKeysForNode ib nid =
+sourceKeysForNode = sourceKeysForNodeByClassFallback UseClassFallback
+
+data ClassFallback
+    = UseClassFallback
+    | ExcludeClassFallback
+
+sourceKeysForNodeByClassFallback :: ClassFallback -> IdentityBridge -> NodeId -> [Int]
+sourceKeysForNodeByClassFallback classFallback ib nid =
     let canonical = ibCanonical ib
+        solved = ibSolved ib
         keyRaw   = getNodeId nid
         keyCanon = getNodeId (canonical nid)
         fwdRaw   = maybe [] (pure . getNodeId) (IntMap.lookup keyRaw (ibCopyMap ib))
         fwdCanon = map (getNodeId . canonical . NodeId) fwdRaw
         invRaw   = maybe [] (pure . getNodeId) (IntMap.lookup keyRaw (ibInvCopyMap ib))
         invCanon = maybe [] (pure . getNodeId) (IntMap.lookup keyCanon (ibInvCopyMap ib))
+        classKeys =
+            case classFallback of
+                UseClassFallback -> map getNodeId (Solved.classMembers solved nid)
+                ExcludeClassFallback -> []
         copyCanon  = IntMap.findWithDefault [] keyCanon (ibReverseCopyByCanonical ib)
         traceCanon = IntMap.findWithDefault [] keyCanon (ibReverseTraceByCanonical ib)
         rank key = (IntMap.findWithDefault maxBound key (ibBinderOrderIx ib), key)
@@ -163,8 +175,12 @@ sourceKeysForNode ib nid =
                         else (IntSet.insert key seenAcc, key : acc)
                 )
                 (IntSet.empty, [])
-                (keyRaw : keyCanon : fwdRaw ++ fwdCanon ++ invRaw ++ invCanon ++ copyCanon ++ traceCanon)
+                (keyRaw : keyCanon : classKeys ++ fwdRaw ++ fwdCanon ++ invRaw ++ invCanon ++ copyCanon ++ traceCanon)
     in sortOn rank (reverse keysRev)
+
+sourceKeysForNodeNoClassFallback :: IdentityBridge -> NodeId -> [Int]
+sourceKeysForNodeNoClassFallback =
+    sourceKeysForNodeByClassFallback ExcludeClassFallback
 
 -- | Candidate source keys for a canonical binder, ranked deterministically
 -- and constrained to that canonical binder identity.
@@ -192,9 +208,12 @@ isBinderNode ib binderKeys nid =
 -- position, or 'Nothing' if the target is not a binder node or no spine
 -- position matches.
 --
--- Ranking: exact source-key match (matchClass 0) beats canonical-alias
--- match (matchClass 1).  Within a match class, the key with the best
--- trace-order rank wins; ties are broken by spine index (lower wins).
+-- Ranking:
+--   * matchClass 0: exact source-key match from non-class-expanded keys
+--   * matchClass 1: class-member fallback (only when target has no exact key)
+--   * matchClass 2: canonical-alias fallback
+-- Within a match class, the key with the best trace-order rank wins;
+-- ties are broken by spine index (lower wins).
 lookupBinderIndex
     :: IdentityBridge -> IntSet.IntSet -> [Maybe NodeId] -> NodeId -> Maybe Int
 lookupBinderIndex ib binderKeys ids nid
@@ -214,8 +233,15 @@ lookupBinderIndex ib binderKeys ids nid
     targetKeys =
         filter (`IntSet.member` binderKeys) (sourceKeysForNode ib nid)
 
+    targetExactKeys :: [Int]
+    targetExactKeys =
+        filter (`IntSet.member` binderKeys) (sourceKeysForNodeNoClassFallback ib nid)
+
     targetKeySet :: IntSet.IntSet
     targetKeySet = IntSet.fromList targetKeys
+
+    targetExactKeySet :: IntSet.IntSet
+    targetExactKeySet = IntSet.fromList targetExactKeys
 
     chooseBestKey :: [Int] -> Int
     chooseBestKey keys =
@@ -228,21 +254,29 @@ lookupBinderIndex ib binderKeys ids nid
     candidateFor ix (Just nid') =
         let idKeys =
                 filter (`IntSet.member` binderKeys) (sourceKeysForNode ib nid')
-            idKeySet = IntSet.fromList idKeys
+            idExactKeys =
+                filter (`IntSet.member` binderKeys) (sourceKeysForNodeNoClassFallback ib nid')
+            idExactKeySet = IntSet.fromList idExactKeys
             idCanonSet = IntSet.fromList (map canonicalKey idKeys)
             exactMatches =
-                filter (`IntSet.member` idKeySet) targetKeys
+                filter (`IntSet.member` idExactKeySet) targetExactKeys
+            classFallbackMatches =
+                if IntSet.null targetExactKeySet
+                    then filter (`IntSet.member` idExactKeySet) targetKeys
+                    else []
             aliasMatches =
                 [ key
                 | key <- targetKeys
-                , not (IntSet.member key idKeySet)
+                , not (IntSet.member key idExactKeySet)
                 , IntSet.member (canonicalKey key) idCanonSet
                 ]
             matchPick =
                 if not (null exactMatches)
                     then Just (0, chooseBestKey exactMatches)
+                    else if not (null classFallbackMatches)
+                        then Just (1, chooseBestKey classFallbackMatches)
                     else if not (null aliasMatches)
-                        then Just (1, chooseBestKey aliasMatches)
+                        then Just (2, chooseBestKey aliasMatches)
                         else Nothing
         in case matchPick of
             Nothing -> Nothing

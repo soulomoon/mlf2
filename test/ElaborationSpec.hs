@@ -1527,6 +1527,94 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         -- the prefix context of binder "a".
                         Elab.pretty inst `shouldBe` "∀(a ⩾) N"
 
+            it "OpWeaken on an alias target recovers binder via equivalence class and emits InstElim" $ do
+                let root = NodeId 100
+                    binderA = NodeId 1
+                    binderB = NodeId 2
+                    aliasB = NodeId 31
+                    c = rootedConstraint emptyConstraint
+                        { cNodes = nodeMapFromList
+                                [ (getNodeId root, TyArrow root binderA binderA)
+                                , (getNodeId binderA, TyVar { tnId = binderA, tnBound = Nothing })
+                                , (getNodeId binderB, TyVar { tnId = binderB, tnBound = Nothing })
+                                , (getNodeId aliasB, TyBase aliasB (BaseTy "Bool"))
+                                ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef binderA), (genRef (GenNodeId 0), BindFlex))
+                                , (nodeRefKey (typeRef binderB), (genRef (GenNodeId 0), BindFlex))
+                                ]
+                        }
+                    -- Binder b is solved-away to aliasB in canonical space.
+                    solved = mkSolved c (IntMap.fromList [(getNodeId binderB, aliasB)])
+                    scheme =
+                        Elab.schemeFromType
+                            (Elab.TForall "a" Nothing
+                                (Elab.TForall "b" Nothing
+                                    (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))))
+                    si = Elab.SchemeInfo
+                        { Elab.siScheme = scheme
+                        , Elab.siSubst = IntMap.fromList [(getNodeId binderA, "a"), (getNodeId binderB, "b")]
+                        }
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewForallIntros = 0
+                        , ewWitness = InstanceWitness [OpWeaken aliasB]
+                        }
+                case ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew of
+                    Left err ->
+                        expectationFailure ("Expected InstElim via class recovery, got error: " ++ show err)
+                    Right inst ->
+                        Elab.pretty inst `shouldBe` "∀(a ⩾) N"
+
+            it "OpWeaken on a shared alias class deterministically picks the first binder without trace" $ do
+                let root = NodeId 100
+                    binderA = NodeId 1
+                    binderB = NodeId 2
+                    alias = NodeId 31
+                    c = rootedConstraint emptyConstraint
+                        { cNodes = nodeMapFromList
+                                [ (getNodeId root, TyArrow root binderA binderA)
+                                , (getNodeId binderA, TyVar { tnId = binderA, tnBound = Nothing })
+                                , (getNodeId binderB, TyVar { tnId = binderB, tnBound = Nothing })
+                                , (getNodeId alias, TyBase alias (BaseTy "Bool"))
+                                ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef binderA), (genRef (GenNodeId 0), BindFlex))
+                                , (nodeRefKey (typeRef binderB), (genRef (GenNodeId 0), BindFlex))
+                                ]
+                        }
+                    -- Both binders collapse to the same alias in canonical space.
+                    solved = mkSolved c (IntMap.fromList [(getNodeId binderA, alias), (getNodeId binderB, alias)])
+                    scheme =
+                        Elab.schemeFromType
+                            (Elab.TForall "a" Nothing
+                                (Elab.TForall "b" Nothing
+                                    (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))))
+                    si = Elab.SchemeInfo
+                        { Elab.siScheme = scheme
+                        , Elab.siSubst = IntMap.fromList [(getNodeId binderA, "a"), (getNodeId binderB, "b")]
+                        }
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewForallIntros = 0
+                        , ewWitness = InstanceWitness [OpWeaken alias]
+                        }
+                case ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew of
+                    Left err ->
+                        expectationFailure ("Expected deterministic InstElim for shared alias class, got error: " ++ show err)
+                    Right inst ->
+                        -- With no trace ordering, binder-choice fallback is deterministic
+                        -- via key ordering and should eliminate binder "a" first.
+                        Elab.pretty inst `shouldBe` "N"
+
             it "O15-TR-RIGID-MERGE: OpMerge with rigid operated node n translates to identity" $ do
                 let root = NodeId 100
                     n = NodeId 1

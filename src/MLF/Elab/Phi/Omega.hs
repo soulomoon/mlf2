@@ -791,10 +791,22 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
             if bvC == rootC
                 then go binderKeys namedSet' vs accum rest lookupBinder
                 else if not (isBinderNode binderKeys bvReplay)
-                    -- Structurally-bounded binder solved away during constraint
-                    -- solving: the quantifier no longer exists in the replay type,
-                    -- so OpWeaken is vacuously satisfied (no-op).
-                    then go binderKeys namedSet' vs accum rest lookupBinder
+                    -- If replay points at a non-binder alias, recover a binder
+                    -- from the same solved equivalence class and eliminate it.
+                    then
+                        case listToMaybe
+                            [ member
+                            | member <- Solved.classMembers solved bvReplay
+                            , isBinderNode binderKeys member
+                            , case lookupBinderIndex binderKeys (vSpineIds vs) member of
+                                Just _ -> True
+                                Nothing -> False
+                            ] of
+                            Just recoveredBinder -> do
+                                (inst, vs') <- atBinderWith False binderKeys vs recoveredBinder (pure InstElim)
+                                go binderKeys namedSet' vs' (inst : accum) rest lookupBinder
+                            Nothing ->
+                                go binderKeys namedSet' vs accum rest lookupBinder
                     else do
                                 case lookupBinderIndex binderKeys (vSpineIds vs) bvReplay of
                                     Nothing ->
