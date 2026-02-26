@@ -790,34 +790,14 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                 rootC = canonicalNode orderRoot
             if bvC == rootC
                 then go binderKeys namedSet' vs accum rest lookupBinder
-                else if not (isBinderNode binderKeys bvReplay)
-                    -- If replay points at a non-binder alias, recover a binder
-                    -- from the same solved equivalence class and eliminate it.
-                    then
-                        case listToMaybe
-                            [ member
-                            | member <- Solved.classMembers solved bvReplay
-                            , isBinderNode binderKeys member
-                            , case lookupBinderIndex binderKeys (vSpineIds vs) member of
-                                Just _ -> True
-                                Nothing -> False
-                            ] of
-                            Just recoveredBinder -> do
-                                (inst, vs') <- atBinderWith False binderKeys vs recoveredBinder (pure InstElim)
-                                go binderKeys namedSet' vs' (inst : accum) rest lookupBinder
-                            Nothing ->
-                                go binderKeys namedSet' vs accum rest lookupBinder
-                    else do
-                                case lookupBinderIndex binderKeys (vSpineIds vs) bvReplay of
-                                    Nothing ->
-                                        go binderKeys namedSet' vs accum rest lookupBinder
-                                    Just idx -> do
-                                        -- Thesis-exact OpWeaken: always emit InstElim.
-                                        -- For graft+weaken pairs, collapseAdjacentPairs merges
-                                        -- the preceding InstInside(InstBot t) with this InstElim
-                                        -- into InstApp t (thesis Def. 14.2.1).
-                                        (inst, vs') <- atBinderWith False binderKeys vs bvReplay (pure InstElim)
-                                        go binderKeys namedSet' vs' (inst : accum) rest lookupBinder
+                else do
+                    weakenBinder <- resolveNonRootWeakenBinder binderKeys vs bv bvReplay
+                    -- Thesis-exact OpWeaken: always emit InstElim.
+                    -- For graft+weaken pairs, collapseAdjacentPairs merges
+                    -- the preceding InstInside(InstBot t) with this InstElim
+                    -- into InstApp t (thesis Def. 14.2.1).
+                    (inst, vs') <- atBinderWith False binderKeys vs weakenBinder (pure InstElim)
+                    go binderKeys namedSet' vs' (inst : accum) rest lookupBinder
 
         (OpRaise n : rest) -> do
             nReplay <- resolveTraceBinderTarget False "OpRaise" n
@@ -1273,6 +1253,54 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
 
     isBinderNode :: IntSet.IntSet -> NodeId -> Bool
     isBinderNode binderKeys nid = IB.isBinderNode ib binderKeys nid
+
+    resolveNonRootWeakenBinder :: IntSet.IntSet -> VSpine -> NodeId -> NodeId -> Either ElabError NodeId
+    resolveNonRootWeakenBinder binderKeys vs sourceTarget replayTarget
+        | not (isBinderNode binderKeys replayTarget) =
+            case listToMaybe recoverableInSpine of
+                Just recoveredBinder -> Right recoveredBinder
+                Nothing ->
+                    Left $
+                        PhiTranslatabilityError
+                            [ "OpWeaken: unresolved non-root binder target"
+                            , "  reason: non-binder target has no recoverable binder in current spine"
+                            , "  source target: " ++ show sourceTarget
+                            , "  replay target: " ++ show replayTarget
+                            , "  canonical target: " ++ show replayCanonical
+                            , "  class members considered: " ++ show classMembers
+                            , "  recoverable binders: " ++ show recoverableBinders
+                            , "  current ids: " ++ show (vSpineIds vs)
+                            ]
+        | otherwise =
+            case lookupBinderIndex binderKeys (vSpineIds vs) replayTarget of
+                Just _ -> Right replayTarget
+                Nothing ->
+                    Left $
+                        PhiTranslatabilityError
+                            [ "OpWeaken: unresolved non-root binder target"
+                            , "  reason: binder target missing from quantifier spine"
+                            , "  source target: " ++ show sourceTarget
+                            , "  replay target: " ++ show replayTarget
+                            , "  canonical target: " ++ show replayCanonical
+                            , "  class members considered: " ++ show classMembers
+                            , "  recoverable binders: " ++ show recoverableBinders
+                            , "  current ids: " ++ show (vSpineIds vs)
+                            ]
+      where
+        replayCanonical = canonicalNode replayTarget
+        classMembers = Solved.classMembers solved replayTarget
+        recoverableBinders =
+            [ member
+            | member <- classMembers
+            , isBinderNode binderKeys member
+            ]
+        recoverableInSpine =
+            [ member
+            | member <- recoverableBinders
+            , case lookupBinderIndex binderKeys (vSpineIds vs) member of
+                Just _ -> True
+                Nothing -> False
+            ]
 
     -- | Check if a node is bound rigidly. Some ω operations treat rigid targets as
     -- ε/identity (thesis Fig. 15.3.4), but not all (see the OpGraft/OpWeaken note).
