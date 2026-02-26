@@ -65,6 +65,6 @@ cabal.project.local
 # Test / coverage / profiling
 *.tix
 *.eventlog
-papers/
 .cabal
 tmp/
+*.pdf
