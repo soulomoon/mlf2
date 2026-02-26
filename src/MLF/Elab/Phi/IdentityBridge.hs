@@ -140,6 +140,22 @@ mkIdentityBridge solved mTrace copyMap =
             , k /= getNodeId v
             ]
 
+{- Note [Witness-Domain-First Resolution]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Per thesis §15.3.5–15.3.6, Phi translation resolves binder/source identity
+from the witness domain (EdgeTrace/EdgeWitness) first. Canonical projection
+via equivalence classes is used only as a reconciliation fallback.
+
+The ranking in sourceKeysForNode enforces this:
+  1. Raw key (source domain)
+  2. Canonical key (projection)
+  3. Forward/inverse copy map keys (witness provenance)
+  4. Class members (equivalence-class fallback)
+
+Trace-order ranking (ibBinderOrderIx) further prioritizes keys that appear
+in the edge's binder argument list.
+-}
+
 -- | All source-domain keys for a node, de-duplicated and ranked by
 -- trace order (lower index = higher priority).  Falls back to numeric
 -- order for keys absent from the trace.
