@@ -56,6 +56,7 @@ module MLF.Constraint.Solved (
     canonicalGenNodes,
     canonicalNodes,
     lookupCanonicalNode,
+    lookupCanonicalVarBound,
 ) where
 
 import Prelude hiding (lookup)
@@ -426,6 +427,15 @@ canonicalNodes (Solved EquivBackend { ebCanonicalConstraint = c }) = cNodes c
 lookupCanonicalNode :: Solved -> NodeId -> Maybe TyNode
 lookupCanonicalNode (Solved EquivBackend { ebCanonicalConstraint = c }) nid =
     NA.lookupNode c nid
+
+-- | Look up the instance bound of a variable in the canonical constraint.
+--
+-- Unlike 'lookupVarBound', this does /not/ canonicalize the ID first
+-- and reads from the canonical (post-solve) constraint rather than the
+-- original. The caller is expected to provide a canonical ID.
+lookupCanonicalVarBound :: Solved -> NodeId -> Maybe NodeId
+lookupCanonicalVarBound (Solved EquivBackend { ebCanonicalConstraint = c }) nid =
+    VarStore.lookupVarBound c nid
 
 {- Note [solvedConstraint migration status]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
