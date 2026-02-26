@@ -7,7 +7,7 @@ import Test.Hspec
 
 import MLF.Constraint.Presolution (PresolutionResult(..), EdgeTrace(..))
 import MLF.Elab.Pipeline (runPipelineElab)
-import MLF.Frontend.Syntax (Expr(..))
+import MLF.Frontend.Syntax (Expr(..), SrcTy(..))
 import SpecUtil (unsafeNormalizeExpr, runPipelineArtifactsDefault, PipelineArtifacts(..))
 
 spec :: Spec
@@ -16,6 +16,9 @@ spec = describe "Phi alignment" $ do
         let corpus =
                 [ ("let-poly"
                   , ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (EVar "id"))
+                  )
+                , ("ann-id"
+                  , EAnn (ELam "x" (EVar "x")) (STForall "a" Nothing (STArrow (STVar "a") (STVar "a")))
                   )
                 , ("nested-let"
                   , ELet "f" (ELam "x" (EVar "x"))
