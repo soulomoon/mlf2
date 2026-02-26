@@ -1,0 +1,97 @@
+# Progress Log
+
+## 2026-02-26
+- Initialized task folder and tracking files.
+- Loaded and critically reviewed execution plan.
+- Confirmed dedicated worktree/branch safety before implementation.
+- Began Batch 1 (Tasks 1-3).
+- Task 1: Added `test/Presolution/UnificationClosureSpec.hs`; wired into `test/Main.hs` and `mlf2.cabal`.
+- Task 1: Added presolution UF scaffolding in `src/MLF/Constraint/Presolution/Base.hs` and `src/MLF/Constraint/Presolution/Driver.hs` (`prUnionFind`).
+- Task 2: Added shared closure engine `src/MLF/Constraint/Unify/Closure.hs` and refactored `src/MLF/Constraint/Solve.hs` to consume it.
+- Task 2: Added solve-level closure test in `test/SolveSpec.hs`.
+- Task 3: Added thesis ordering test (`solves initial unify edges before inst-edge traversal effects are persisted`) in `test/Presolution/UnificationClosureSpec.hs`.
+- Task 3: Updated presolution loop in `src/MLF/Constraint/Presolution/EdgeProcessing.hs` and `src/MLF/Constraint/Presolution/Driver.hs`:
+  - initial closure drain before inst-edge traversal,
+  - per-edge closure drain after propagation effects,
+  - canonicalization + parent repair + closure drain between iterations.
+- Task 3: Exported `repairNonUpperParents` from `src/MLF/Constraint/Solve.hs` for presolution ordering path.
+- Targeted verification runs (offline, local cache):
+  - `cabal test mlf2-test --offline --test-show-details=direct --test-options='--match "runUnifyClosure drains queue"'` -> PASS
+  - `cabal test mlf2-test --offline --test-show-details=direct --test-options='--match "Phase 4 thesis-exact unification closure"'` -> PASS
+  - `cabal test mlf2-test --offline --test-show-details=direct --test-options='--match "solves initial unify edges before inst-edge traversal"'` -> PASS
+- Batch 1 (Tasks 1-3) complete; waiting at checkpoint for user feedback before Batch 2.
+- Resumed at Batch 2 checkpoint and executed Tasks 4-6.
+- Task 4: Added `fromPresolutionResult` in `src/MLF/Constraint/Solved.hs` with no-replay constructor path (`fromConstraintAndUfNoReplay`); introduced `PresolutionSnapshot` in `src/MLF/Constraint/Types/Presolution.hs` and instance in `src/MLF/Constraint/Presolution/Base.hs`.
+- Task 4: Added `builds Solved from PresolutionResult without solve replay` in `test/Constraint/SolvedSpec.hs`.
+- Task 5: Switched production pipeline solved construction to presolution-native path in `src/MLF/Elab/Run/Pipeline.hs` (removed runtime call to `solveUnifyWithSnapshot` for production path).
+- Task 5: Updated `test/SpecUtil.hs` helpers (`runPipelineArtifactsDefault`, `runToSolvedDefault`) to use `Solved.fromPresolutionResult`.
+- Task 5: Added `uses presolution-native solved path in production pipeline` in `test/PipelineSpec.hs`.
+- Task 6: Added legacy comparison entrypoint `runPipelineElabViaLegacySolve` through:
+  - `src/MLF/Elab/Run/Pipeline.hs`
+  - `src/MLF/Elab/Run.hs`
+  - `src/MLF/Elab/Pipeline.hs`
+- Task 6: Added `runPipelineElabViaLegacySolve` helper to `test/SpecUtil.hs`.
+- Task 6: Added elaborated-type parity test in `test/ElaborationSpec.hs`:
+  - `matches legacy solve path on elaborated type for thesis anchor expressions`.
+- Task 6: Added solve-level parity-invariant test in `test/SolveSpec.hs`:
+  - `presolution-native solved conversion matches legacy solve snapshot conversion`.
+- Targeted verification runs (offline, local cache):
+  - `cabal test mlf2-test --offline --test-show-details=direct --test-options='--match "without solve replay"'` -> PASS
+  - `cabal test mlf2-test --offline --test-show-details=direct --test-options='--match "uses presolution-native solved path"'` -> PASS
+  - `cabal test mlf2-test --offline --test-show-details=direct --test-options='--match "matches legacy solve path on elaborated type"'` -> PASS
+  - `cabal test mlf2-test --offline --test-show-details=direct --test-options='--match "presolution-native solved conversion matches legacy solve snapshot conversion"'` -> PASS
+- Batch 2 (Tasks 4-6) complete; waiting at checkpoint for user feedback before Batch 3.
+- Received review findings (P0/P1) and reproduced both regression anchors:
+  - `O10-EXP-DECIDE` failed with `Binding tree has multiple roots...` during presolution closure.
+  - `O15-ELAB-LET: elaborates polymorphic let-binding` failed with `alias bounds survived scheme finalization`.
+- Applied regression fixes:
+  - Restored production `runPipelineElab` solved path to legacy replay in `src/MLF/Elab/Run/Pipeline.hs`.
+  - Restored `test/SpecUtil.hs` default solved helpers to legacy replay (`runPipelineArtifactsDefault`, `runToSolvedDefault`).
+  - Updated `test/PipelineSpec.hs` guard test to assert production artifacts use legacy replay.
+  - Adjusted presolution closure draining in `src/MLF/Constraint/Presolution/EdgeProcessing.hs`:
+    - if no pending `cUnifyEdges`, skip `runUnifyClosure` and only persist canonicalized/parent-repaired constraint.
+- Strengthened parity tests after review:
+  - `test/ElaborationSpec.hs`: legacy parity anchor set now includes `let id = (\x.x) in id`.
+  - `test/SolveSpec.hs`: parity test now compares canonical + original constraints between native and legacy solved construction (stronger than validity-only checks).
+- Post-fix targeted verification runs (offline, local cache):
+  - `--match "O10-EXP-DECIDE"` -> PASS
+  - `--match "O15-ELAB-LET: elaborates polymorphic let-binding"` -> PASS
+  - `--match "matches legacy solve path on elaborated type"` -> PASS
+  - `--match "uses legacy solve replay for production solved artifacts"` -> PASS
+  - `--match "presolution-native solved conversion matches legacy solve snapshot conversion"` -> PASS
+- Full suite check after fixes:
+  - `cabal test mlf2-test --offline` -> FAIL, **838 examples, 21 failures** (down from reported 38).
+  - Remaining failures cluster around presolution merge/expansion and downstream elaboration/pipeline baselines; not fully resolved in this checkpoint.
+- Continued Batch 3 completion work after the failing checkpoint:
+  - reran and completed `./scripts/thesis-conformance-gate.sh` end-to-end -> PASS.
+  - reran full suite locally and stabilized remaining regressions -> `cabal test mlf2-test --offline` -> PASS (**838 examples, 0 failures**).
+  - executed required final verification command -> `cabal build all && cabal test` -> PASS (**838 examples, 0 failures**).
+- Collected release/report artifacts:
+  - `git status --short`
+  - `git log --oneline -n 10`
+  - `git diff --stat origin/main...HEAD` (failed: missing `origin/main`), then used `git diff --stat origin/master...HEAD`.
+- Resumed migration for guarded native cutover (remove legacy replay from production path while keeping parity guard):
+  - `src/MLF/Constraint/Solved.hs`: `fromPresolutionResult` now routes through replay-equivalent finalization (`fromPreRewriteStateStrict`) with snapshot UF sanitization.
+  - `src/MLF/Elab/Run/Pipeline.hs`: production default switched to native solved builder with mandatory native-vs-legacy parity guard on canonical/original constraints and canonical map (live-original-node domain).
+  - `test/SpecUtil.hs`: default helpers now use native solved conversion; explicit legacy helper variants retained.
+  - parity/regression tests refreshed in `test/PipelineSpec.hs`, `test/SolveSpec.hs`, `test/ElaborationSpec.hs`, `test/Constraint/SolvedSpec.hs`.
+  - docs/trackers synced for guarded native default (`implementation_notes.md`, `docs/paper-map.md`, `TODO.md`, `CHANGELOG.md`, `/Volumes/src/mlf4/Bugs.md`).
+- Required verification matrix rerun sequentially:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "O10-EXP-DECIDE"'` -> PASS
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "O15-ELAB-LET"'` -> PASS
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "matches legacy solve path"'` -> PASS
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "presolution-native solved conversion"'` -> PASS
+  - `./scripts/thesis-conformance-gate.sh` -> PASS
+  - `cabal build all && cabal test` -> PASS (**838 examples, 0 failures**)
+- Phase 7 cleanup (post-green-window) completed for guarded cutover plan:
+  - Removed temporary native-vs-legacy dual-run guard from production default path in `src/MLF/Elab/Run/Pipeline.hs`.
+  - `runPipelineElab` now builds solved artifacts only via `Solved.fromPresolutionResult` in production.
+  - Kept `runPipelineElabViaLegacySolve` + legacy builder for explicit fallback/parity tooling.
+  - Updated regression wording/docs/trackers to reflect post-guard state.
+- Post-cleanup verification matrix (sequential) rerun and green:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "O10-EXP-DECIDE"'` -> PASS
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "O15-ELAB-LET"'` -> PASS
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "matches legacy solve path"'` -> PASS
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "presolution-native solved conversion"'` -> PASS
+  - `./scripts/thesis-conformance-gate.sh` -> PASS
+  - `cabal build all && cabal test` -> PASS (**838 examples, 0 failures**)

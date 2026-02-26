@@ -47,6 +47,15 @@ This ledger is the canonical rule-to-code-to-test index for thesis Chapters 4–
 | 5 | Global unification | `MLF.Constraint.Solve` |
 | 6 | Elaborate to xMLF | `MLF.Elab.Pipeline` |
 
+### 2026-02-26 Phase 4/5 integration note
+
+- Phase 4 now enforces thesis SolveConstraint ordering inside presolution:
+  - initial unify closure drain,
+  - per-edge propagation/interpreter step,
+  - post-edge closure drain when pending unify work exists.
+- Presolution exposes UF metadata separately (`prUnionFind`) while preserving raw presolution graph (`prConstraint`) for translation.
+- Production Phase 6 now consumes presolution-native solved snapshots (`fromPresolutionResult`) directly as the default path; legacy replay remains only as an explicit fallback/testing entrypoint.
+
 ## Section-to-Module Mapping
 
 ### Figures 1–4: xMLF Grammar and Instantiation

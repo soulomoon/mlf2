@@ -8,16 +8,26 @@ import Data.List.NonEmpty (NonEmpty(..))
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Solve
     ( SolveError(..)
+    , UnifyClosureResult(..)
     , SolveOutput(..)
     , SolveResult(..)
     , SolveSnapshot(..)
     , frWith
+    , runUnifyClosure
     , rewriteConstraintWithUF
     , solveUnify
     , solveUnifyWithSnapshot
     , validateSolvedGraphStrict
     )
-import SpecUtil (defaultTraceConfig, emptyConstraint, inferBindParents, lookupNodeMaybe, nodeMapFromList, nodeMapSize, rootedConstraint)
+import SpecUtil
+    ( defaultTraceConfig
+    , emptyConstraint
+    , inferBindParents
+    , lookupNodeMaybe
+    , nodeMapFromList
+    , nodeMapSize
+    , rootedConstraint
+    )
 
 resultConstraint :: SolveResult -> Constraint
 resultConstraint = srConstraint
@@ -31,6 +41,26 @@ mkSolveResult c uf = SolveResult { srConstraint = c, srUnionFind = uf }
 spec :: Spec
 spec = describe "Phase 5 -- Solve" $ do
     describe "Snapshot output" $ do
+        it "runUnifyClosure drains queue and returns UF without rewrite/elimination passes" $ do
+            let v0 = TyVar { tnId = NodeId 0, tnBound = Nothing }
+                v1 = TyVar { tnId = NodeId 1, tnBound = Nothing }
+                base = TyBase (NodeId 2) (BaseTy "Int")
+                nodes = nodeMapFromList
+                    [ (0, v0)
+                    , (1, v1)
+                    , (2, base)
+                    ]
+                constraint = rootedConstraint $ emptyConstraint
+                    { cNodes = nodes
+                    , cBindParents = inferBindParents nodes
+                    , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 1), UnifyEdge (NodeId 1) (NodeId 2)]
+                    }
+            case runUnifyClosure defaultTraceConfig constraint of
+                Left err -> expectationFailure $ "Unexpected runUnifyClosure error: " ++ show err
+                Right out -> do
+                    cUnifyEdges (ucConstraint out) `shouldBe` []
+                    frWith (ucUnionFind out) (NodeId 0) `shouldBe` NodeId 2
+
         it "rewrites pre-rewrite snapshot to the same canonical constraint" $ do
             let var0 = TyVar { tnId = NodeId 0, tnBound = Nothing }
                 base1 = TyBase (NodeId 1) (BaseTy "Int")

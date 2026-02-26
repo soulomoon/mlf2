@@ -35,7 +35,7 @@ module MLF.Constraint.Presolution.Driver (
 
 import Control.Monad.Reader (ask)
 import Control.Monad.Except (throwError)
-import Control.Monad (foldM, forM)
+import Control.Monad (foldM, forM, when)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
@@ -105,7 +105,7 @@ computePresolution traceCfg acyclicityResult constraint = do
     -- Run the presolution loop
     (_, presState) <- runPresolutionM traceCfg
         initialState
-        (runPresolutionLoop (arSortedEdges acyclicityResult))
+        (runPresolutionLoop traceCfg (arSortedEdges acyclicityResult))
 
     -- Materialize expansions, rewrite TyExp away, and apply UF canonicalization.
     (redirects, finalState) <- runPresolutionM traceCfg presState $ do
@@ -116,21 +116,25 @@ computePresolution traceCfg acyclicityResult constraint = do
         normalizeEdgeWitnessesM
         pure redirects
 
-    validateTranslatablePresolution (psConstraint finalState)
+    let finalConstraint = psConstraint finalState
+    when (not (null (cUnifyEdges finalConstraint))) $
+        Left (InternalError "computePresolution: residual unify edges after closure")
+    validateTranslatablePresolution finalConstraint
 
     let (edgeWitnesses, edgeTraces, edgeExpansions) =
             dropTrivialSchemeEdges
-                (psConstraint finalState)
+                finalConstraint
                 (psEdgeWitnesses finalState)
                 (psEdgeTraces finalState)
                 (psEdgeExpansions finalState)
 
     return PresolutionResult
-        { prConstraint = psConstraint finalState
+        { prConstraint = finalConstraint
         , prEdgeExpansions = edgeExpansions
         , prEdgeWitnesses = edgeWitnesses
         , prEdgeTraces = edgeTraces
         , prRedirects = redirects
+        , prUnionFind = PresolutionUf (psUnionFind finalState)
         , prPlanBuilder = PresolutionPlanBuilder (buildGeneralizePlans traceCfg)
         }
 

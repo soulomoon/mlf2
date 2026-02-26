@@ -77,14 +77,28 @@ runPipelineElabWith
     -> NormSurfaceExpr
     -> Either PipelineError (ElabTerm, ElabType)
 runPipelineElabWith traceCfg genConstraints expr = do
+    runPipelineElabWithSolvedBuilder traceCfg genConstraints buildSolvedNativeFromPresolution expr
+
+type SolvedBuilder = TraceConfig -> PresolutionResult -> Either PipelineError Solved.Solved
+
+buildSolvedNativeFromPresolution :: SolvedBuilder
+buildSolvedNativeFromPresolution _traceCfg pres =
+    fromSolveError (Solved.fromPresolutionResult pres)
+
+runPipelineElabWithSolvedBuilder
+    :: TraceConfig
+    -> (NormSurfaceExpr -> Either ConstraintError ConstraintResult)
+    -> SolvedBuilder
+    -> NormSurfaceExpr
+    -> Either PipelineError (ElabTerm, ElabType)
+runPipelineElabWithSolvedBuilder traceCfg genConstraints buildSolved expr = do
     ConstraintResult { crConstraint = c0, crAnnotated = ann } <- fromConstraintError (genConstraints expr)
     let c1 = normalize c0
     acyc <- fromCycleError (checkAcyclicity c1)
     pres <- fromPresolutionError (computePresolution traceCfg acyc c1)
     let planBuilder = prPlanBuilder pres
         generalizeAtWith = generalizeAtWithBuilder planBuilder
-    solveOut <- fromSolveError (solveUnifyWithSnapshot traceCfg (prConstraint pres))
-    solvedView <- fromSolveError (Solved.fromSolveOutput solveOut)
+    solvedView <- buildSolved traceCfg pres
     let setSolvedConstraint res c' =
             let cCanon = rewriteConstraintWithUF (Solved.canonicalMap res) c'
             in Solved.rebuildWithConstraint res cCanon

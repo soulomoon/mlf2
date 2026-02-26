@@ -14,6 +14,7 @@ import qualified ElaborationSpec
 import qualified FrontendNormalizeSpec
 import qualified FrontendParseSpec
 import qualified FrontendPrettySpec
+import qualified FrozenParitySpec
 import qualified GeneralizeSpec
 import qualified GraphOpsSpec
 import qualified InertSpec
@@ -21,6 +22,7 @@ import qualified NormalizeSpec
 import qualified PipelineSpec
 import qualified Phi.IdentityBridgeSpec
 import qualified PresolutionSpec
+import qualified Presolution.UnificationClosureSpec
 import qualified ReduceSpec
 import qualified SolveSpec
 import qualified ThesisFixDirectionSpec
@@ -42,6 +44,7 @@ main = do
         AcyclicitySpec.spec
         runIO (writeIORef presolutionMarker True)
         PresolutionSpec.spec
+        Presolution.UnificationClosureSpec.spec
         runIO $ do
             wasPresolutionWired <- readIORef presolutionMarker
             unless wasPresolutionWired $
@@ -64,6 +67,7 @@ main = do
         FrontendNormalizeSpec.spec
         XMLFParseSpec.spec
         XMLFPrettySpec.spec
+        FrozenParitySpec.spec
         Phi.IdentityBridgeSpec.spec
         TranslatablePresolutionSpec.spec
         PhiSoundnessSpec.spec

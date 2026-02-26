@@ -2,6 +2,7 @@
 module PipelineSpec (spec) where
 
 import Control.Monad (forM_, unless, when)
+import Data.Either (isRight)
 import Data.List (isInfixOf)
 import Data.Maybe (isJust)
 import qualified Data.IntMap.Strict as IntMap
@@ -46,6 +47,7 @@ import SpecUtil
     , emptyConstraint
     , PipelineArtifacts(..)
     , mkForalls
+    , requireRight
     , runConstraintDefault
     , runPipelineArtifactsDefault
     , runToPresolutionWithAnnDefault
@@ -163,6 +165,14 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 Left err -> expectationFailure $ "Reify error: " ++ show err
 
     describe "Integration Tests" $ do
+        it "uses presolution-native solved artifacts" $ do
+            artifacts <- requireRight (runPipelineArtifactsDefault Set.empty (ELam "x" (EVar "x")))
+            cUnifyEdges (prConstraint (paPresolution artifacts)) `shouldBe` []
+            expectedNative <- requireRight (Solved.fromPresolutionResult (paPresolution artifacts))
+            paSolved artifacts `shouldBe` expectedNative
+            runPipelineElab Set.empty (unsafeNormalizeExpr (ELam "x" (EVar "x")))
+                `shouldSatisfy` isRight
+
         it "solves let-bound id applied to Bool" $ do
             let expr = ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (ELit (LBool True)))
             case runToSolvedDefault defaultPolySyms expr of

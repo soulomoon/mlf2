@@ -10,7 +10,8 @@ the smaller presolution surface without importing the full constraint facade.
 module MLF.Constraint.Types.Presolution (
     Presolution(..),
     SolverState(..),
-    DepGraph(..)
+    DepGraph(..),
+    PresolutionSnapshot(..)
 ) where
 
 import Data.IntMap.Strict (IntMap)
@@ -56,3 +57,9 @@ data DepGraph a = DepGraph
       dgEdges :: IntMap [a]
     }
     deriving (Eq, Show)
+
+-- | Minimal snapshot interface used to construct a solved view directly
+-- from presolution output without replaying the solve pipeline.
+class PresolutionSnapshot a where
+    snapshotConstraint :: a -> Constraint
+    snapshotUnionFind :: a -> IntMap NodeId

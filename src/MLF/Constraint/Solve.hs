@@ -124,23 +124,22 @@ Paper references:
 -}
 module MLF.Constraint.Solve (
     SolveError(..),
+    UnifyClosureResult(..),
     SolveSnapshot(..),
     SolveOutput(..),
     SolveResult(..),
+    runUnifyClosure,
     solveUnify,
     solveUnifyWithSnapshot,
     solveResultFromSnapshot,
     validateSolvedGraph,
     validateSolvedGraphStrict,
     rewriteConstraintWithUF,
-    frWith,
-    MonadSolve(..),
-    SolveM
+    repairNonUpperParents,
+    frWith
 ) where
 
-import Control.Monad (forM, forM_, unless, when)
-import Control.Monad.Except (throwError)
-import Control.Monad.State.Strict
+import Control.Monad (forM, forM_, unless)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
@@ -148,31 +147,15 @@ import Data.List (find)
 import Data.Maybe (catMaybes, fromMaybe, isNothing)
 import qualified Data.List.NonEmpty as NE
 
-import qualified MLF.Binding.Adjustment as BindingAdjustment
 import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Solve.Internal (SolveResult(..))
+import MLF.Constraint.Unify.Closure (SolveError(..), UnifyClosureResult(..), runUnifyClosure)
 import qualified MLF.Util.UnionFind as UnionFind
 import qualified MLF.Constraint.Canonicalize as Canonicalize
-import qualified MLF.Constraint.Traversal as Traversal
-import qualified MLF.Constraint.Unify.Core as UnifyCore
 import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Types hiding (lookupNode)
 import MLF.Util.Trace (TraceConfig, traceBinding)
-
--- | Errors that can arise during monotype unification.
-data SolveError
-    = MissingNode NodeId
-    | ConstructorClash TyNode TyNode
-    | BaseClash BaseTy BaseTy
-    | ForallArityMismatch Int Int
-    | OccursCheckFailed NodeId NodeId   -- ^ (var, target)
-    | UnexpectedExpNode NodeId
-    | BindingTreeError BindingError
-    | ValidationFailed [String]         -- ^ Post-solve validation failures
-    | TyConClash BaseTy BaseTy          -- ^ TyCon head mismatch
-    | TyConArityMismatch BaseTy Int Int -- ^ TyCon arity mismatch (head, arity1, arity2)
-    deriving (Eq, Show)
 
 -- | Snapshot of solve state right before final canonical rewriting.
 data SolveSnapshot = SolveSnapshot
@@ -217,34 +200,6 @@ After solve succeeds, the constraint should satisfy:
         got fresh nodes as chosen in presolution.
 -}
 
-data SolveState = SolveState
-    { suConstraint :: Constraint
-    , suUnionFind :: IntMap NodeId
-    , suQueue :: [UnifyEdge]
-    }
-
-type SolveM = StateT SolveState (Either SolveError)
-
--- | Typeclass for monads that support solve-phase operations.
--- This allows functions to be polymorphic over the concrete monad stack,
--- reducing the need for explicit lift calls.
-class Monad m => MonadSolve m where
-    -- | Get the current constraint.
-    getConstraint :: m Constraint
-    -- | Modify the constraint with a function.
-    modifyConstraint :: (Constraint -> Constraint) -> m ()
-    -- | Get the current union-find map.
-    getUnionFind :: m (IntMap NodeId)
-    -- | Throw a solve error.
-    throwSolveError :: SolveError -> m a
-
--- | Instance for the concrete SolveM monad.
-instance MonadSolve SolveM where
-    getConstraint = gets suConstraint
-    modifyConstraint f = modify' $ \s -> s { suConstraint = f (suConstraint s) }
-    getUnionFind = gets suUnionFind
-    throwSolveError = throwError
-
 -- | Drain all unification edges; assumes instantiation work was already done
 -- by earlier phases. Returns the rewritten constraint and the final UF map.
 -- See Note [Paper alignment: solveUnify] and Note [Algorithm sketch: solveUnify].
@@ -285,243 +240,27 @@ solveUnifyWithSnapshot traceCfg c0 = do
             ]
     case debugSolveBinding ("solveUnify: pre-check probe " ++ show probeInfo) () of
         () -> pure ()
-    case Binding.checkBindingTree c0' of
+    closure <- runUnifyClosure traceCfg c0'
+    let snapshot =
+            SolveSnapshot
+                { snapUnionFind = ucUnionFind closure
+                , snapPreRewriteConstraint = ucConstraint closure
+                }
+    res <- solveResultFromSnapshot snapshot
+    let solvedConstraint = srConstraint res
+        probeInfo' =
+            [ ( pid
+              , NodeAccess.lookupNode solvedConstraint pid
+              , IntMap.lookup (nodeRefKey (typeRef pid)) (cBindParents solvedConstraint)
+              )
+            | pid <- probeIds
+            ]
+    case Binding.checkBindingTree solvedConstraint of
         Left err -> Left (BindingTreeError err)
         Right () -> do
-            let st = SolveState { suConstraint = c0', suUnionFind = IntMap.empty, suQueue = cUnifyEdges c0' }
-            final <- execStateT (loop >> batchHarmonize) st
-            let preRewrite = (suConstraint final) { cUnifyEdges = [] }
-                snapshot =
-                    SolveSnapshot
-                        { snapUnionFind = suUnionFind final
-                        , snapPreRewriteConstraint = preRewrite
-                        }
-            res <- solveResultFromSnapshot snapshot
-            let solvedConstraint = srConstraint res
-                probeInfo' =
-                    [ ( pid
-                      , NodeAccess.lookupNode solvedConstraint pid
-                      , IntMap.lookup (nodeRefKey (typeRef pid)) (cBindParents solvedConstraint)
-                      )
-                    | pid <- probeIds
-                    ]
-            case Binding.checkBindingTree solvedConstraint of
-                Left err -> Left (BindingTreeError err)
-                Right () -> do
-                    case debugSolveBinding ("solveUnify: post-check probe " ++ show probeInfo') () of
-                        () -> pure ()
-                    pure SolveOutput { soResult = res, soSnapshot = snapshot }
-  where
-    loop :: SolveM ()
-    loop = do
-        q <- gets suQueue
-        case q of
-            [] -> pure ()
-            (e:rest) -> do
-                modify' $ \s -> s { suQueue = rest }
-                processEdge e
-                loop
-
-    enqueue :: [UnifyEdge] -> SolveM ()
-    enqueue es = modify' $ \s ->
-        s { suQueue = es ++ suQueue s }
-
-    -- | Compute equivalence classes from the union-find map.
-    -- Returns a list of lists, where each inner list contains all NodeIds
-    -- that share the same canonical representative.
-    equivalenceClasses :: IntMap NodeId -> Constraint -> [[NodeId]]
-    equivalenceClasses uf c =
-        let canonical = UnionFind.frWith uf
-            allNodeIds = map fst (toListNode (cNodes c))
-            grouped = IntMap.toList $
-                foldl'
-                    (\acc nid ->
-                        let rep = canonical nid
-                        in IntMap.insertWith (++) (getNodeId rep) [nid] acc
-                    )
-                    IntMap.empty
-                    allNodeIds
-        in [ members | (_, members) <- grouped, length members > 1 ]
-
-    batchHarmonize :: SolveM ()
-    batchHarmonize = do
-        uf <- gets suUnionFind
-        c <- gets suConstraint
-        let classes = equivalenceClasses uf c
-        mapM_ harmonizeClass classes
-
-    harmonizeClass :: [NodeId] -> SolveM ()
-    harmonizeClass members = do
-        cBefore <- gets suConstraint
-        let refs = map typeRef members
-        case BindingAdjustment.harmonizeBindParentsMulti refs cBefore of
-            Left err -> throwSolveError (BindingTreeError err)
-            Right (c', _trace) -> modify' $ \s -> s { suConstraint = c' }
-
-    -- | Process one equality edge using canonical representatives, decomposing
-    -- arrows/foralls as needed and performing occurs-checks for var = structure.
-    processEdge :: UnifyEdge -> SolveM ()
-    processEdge (UnifyEdge l r) = do
-        lRoot <- findRoot l
-        rRoot <- findRoot r
-        if lRoot == rRoot
-            then pure ()
-            else do
-                lNode <- lookupNode lRoot
-                rNode <- lookupNode rRoot
-                let boundEdges = boundEdgesFor lRoot lNode rRoot rNode
-                newEdges <-
-                    UnifyCore.processUnifyEdgesWith
-                        solveUnifyStrategy
-                        findRoot
-                        lookupNodeMaybe
-                        unionNodes
-                        [UnifyEdge lRoot rRoot]
-                enqueue (boundEdges ++ newEdges)
-
-    boundEdgesFor :: NodeId -> TyNode -> NodeId -> TyNode -> [UnifyEdge]
-    boundEdgesFor lRoot lNode rRoot rNode = case (lNode, rNode) of
-        (TyVar{ tnBound = mb1 }, TyVar{ tnBound = mb2 }) ->
-            case (mb1, mb2) of
-                (Just b1, Just b2)
-                    | b1 /= b2 -> [UnifyEdge b1 b2]
-                _ -> []
-        (TyVar{ tnBound = mb1 }, _) ->
-            case mb1 of
-                Just b1 | b1 /= rRoot -> [UnifyEdge b1 rRoot]
-                _ -> []
-        (_, TyVar{ tnBound = mb2 }) ->
-            case mb2 of
-                Just b2 | b2 /= lRoot -> [UnifyEdge b2 lRoot]
-                _ -> []
-        _ -> []
-
-    solveUnifyStrategy :: UnifyCore.UnifyStrategy SolveM
-    solveUnifyStrategy = UnifyCore.UnifyStrategy
-        { UnifyCore.usOccursCheck = UnifyCore.OccursCheck occursCheck
-        , UnifyCore.usTyExpPolicy = UnifyCore.TyExpReject
-        , UnifyCore.usForallArityPolicy = UnifyCore.ForallArityCheck solveForallArity
-        , UnifyCore.usRepresentative = UnifyCore.RepresentativeChoice solveRepresentative
-        , UnifyCore.usOnMismatch = solveOnMismatch
-        }
-
-    solveForallArity :: NodeId -> SolveM (Maybe Int)
-    solveForallArity nid = do
-        cCur <- gets suConstraint
-        uf0 <- gets suUnionFind
-        let canonical = UnionFind.frWith uf0
-        case Binding.orderedBinders canonical cCur (typeRef nid) of
-            Right bs -> pure (Just (length bs))
-            Left err -> throwSolveError (BindingTreeError err)
-
-    solveRepresentative :: NodeId -> TyNode -> NodeId -> TyNode -> SolveM (NodeId, NodeId)
-    solveRepresentative left leftNode right rightNode = do
-        cCur <- gets suConstraint
-        let leftElim = VarStore.isEliminatedVar cCur left
-            rightElim = VarStore.isEliminatedVar cCur right
-            isVarLeft = case leftNode of
-                TyVar{} -> True
-                _ -> False
-            isVarRight = case rightNode of
-                TyVar{} -> True
-                _ -> False
-            hasBoundLeft = case leftNode of
-                TyVar{ tnBound = Just _ } -> True
-                _ -> False
-            hasBoundRight = case rightNode of
-                TyVar{ tnBound = Just _ } -> True
-                _ -> False
-            (from0, to0) =
-                case (leftElim, rightElim) of
-                    (False, True) -> (right, left)
-                    _ -> (left, right)
-            (from, to)
-                | isVarLeft
-                , not isVarRight
-                , not leftElim
-                , hasBoundLeft = (right, left)
-                | not isVarLeft
-                , isVarRight
-                , not rightElim
-                , hasBoundRight = (left, right)
-                | not leftElim
-                , not rightElim
-                , isVarLeft
-                , isVarRight =
-                    case (hasBoundLeft, hasBoundRight) of
-                        (True, False) -> (right, left)
-                        (False, True) -> (left, right)
-                        _ -> (from0, to0)
-                | otherwise = (from0, to0)
-        pure (from, to)
-
-    solveOnMismatch :: UnifyCore.UnifyMismatch -> SolveM UnifyCore.UnifyMismatchAction
-    solveOnMismatch mismatch = case mismatch of
-        UnifyCore.MismatchMissingNode nid ->
-            throwSolveError (MissingNode nid)
-        UnifyCore.MismatchConstructor n1 n2 ->
-            throwSolveError (ConstructorClash n1 n2)
-        UnifyCore.MismatchBase b1 b2 ->
-            throwSolveError (BaseClash b1 b2)
-        UnifyCore.MismatchForallArity (Just k1) (Just k2) ->
-            throwSolveError (ForallArityMismatch k1 k2)
-        UnifyCore.MismatchForallArity _ _ ->
-            throwSolveError (ForallArityMismatch 0 0)
-        UnifyCore.MismatchExpVar _ _ ->
-            -- Unreachable with TyExpReject; treat as unexpected expansion if it occurs.
-            throwSolveError (UnexpectedExpNode (NodeId 0))
-        UnifyCore.MismatchUnexpectedExp nid ->
-            throwSolveError (UnexpectedExpNode nid)
-        UnifyCore.MismatchTyCon c1 c2 ->
-            throwSolveError (TyConClash c1 c2)
-        UnifyCore.MismatchTyConArity c k1 k2 ->
-            throwSolveError (TyConArityMismatch c k1 k2)
-
-    -- | Lookup a node by id or fail with 'MissingNode'.
-    lookupNode :: NodeId -> SolveM TyNode
-    lookupNode nid = do
-        nodes <- gets (cNodes . suConstraint)
-        case lookupNodeIn nodes nid of
-            Just n -> pure n
-            Nothing -> throwSolveError (MissingNode nid)
-
-    lookupNodeMaybe :: NodeId -> SolveM (Maybe TyNode)
-    lookupNodeMaybe nid = do
-        nodes <- gets (cNodes . suConstraint)
-        pure (lookupNodeIn nodes nid)
-
-    -- Union-find helpers
-    -- | Find canonical representative with path compression.
-    findRoot :: NodeId -> SolveM NodeId
-    findRoot nid = do
-        uf <- gets suUnionFind
-        let (root, uf') = UnionFind.findRootWithCompression uf nid
-        modify' $ \s -> s { suUnionFind = uf' }
-        pure root
-
-    -- | Union two sets, pointing the first root at the second.
-    -- Representative choice is handled by 'solveRepresentative'.
-    unionNodes :: NodeId -> NodeId -> SolveM ()
-    unionNodes from to =
-        when (from /= to) $
-            modify' $ \s ->
-                s { suUnionFind = IntMap.insert (getNodeId from) to (suUnionFind s) }
-
-    -- | Reject unifying a variable with a structure that already contains it.
-    -- Traverses under current UF representatives so it stays sound after merges.
-    occursCheck :: NodeId -> NodeId -> SolveM ()
-    occursCheck var target = do
-        varRoot <- findRoot var
-        targetRoot <- findRoot target
-        when (varRoot == targetRoot) $ throwSolveError (OccursCheckFailed varRoot targetRoot)
-        nodes <- gets (cNodes . suConstraint)
-        uf <- gets suUnionFind
-        let canonical = frWith uf
-            lookupTyNode nid = lookupNodeIn nodes nid
-        case Traversal.occursInUnder canonical lookupTyNode varRoot targetRoot of
-            Left _ -> throwSolveError (OccursCheckFailed varRoot targetRoot)
-            Right True -> throwSolveError (OccursCheckFailed varRoot targetRoot)
-            Right False -> pure ()
+            case debugSolveBinding ("solveUnify: post-check probe " ++ show probeInfo') () of
+                () -> pure ()
+            pure SolveOutput { soResult = res, soSnapshot = snapshot }
 
 applyElimSubstToUF :: IntMap NodeId -> IntMap NodeId -> IntMap NodeId
 applyElimSubstToUF uf subst =

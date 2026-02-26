@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+* Removed the internal legacy replay fallback path from elaboration (`runPipelineElabViaLegacySolve`) and cleaned legacy fallback helpers from the test harness.
+* Replaced live native-vs-legacy parity checks with frozen baseline artifacts:
+  - new deterministic artifact module `test/Parity/FrozenArtifacts.hs`,
+  - authoritative baseline test `test/FrozenParitySpec.hs`,
+  - generator executable `frozen-parity-gen`,
+  - regeneration script `scripts/update-frozen-parity-artifacts.sh`,
+  - checked-in baseline `test/golden/legacy-replay-baseline-v1.json`.
+* Thesis-exact unification ordering update: presolution now enforces initial + per-edge unification closure ordering and carries UF metadata separately (`prUnionFind`) while preserving raw presolution graph (`prConstraint`) for translation; shared closure semantics are centralized in `MLF.Constraint.Unify.Closure`.
+* Completed 2026-02-26 native cutover cleanup: production `runPipelineElab` now uses presolution-native solved construction (`fromPresolutionResult`) as the sole production path (temporary dual-run legacy parity guard removed after green-window validation); presolution closure drain continues to skip `runUnifyClosure` when no unify edges are pending, preventing false intermediate-state binding-tree failures.
+* Added/updated regression coverage:
+  - `O15-ELAB-LET` production baseline guard,
+  - `O10-EXP-DECIDE` presolution closure guard,
+  - `uses presolution-native solved artifacts`,
+  - `Frozen parity artifact baseline`.
 * Strict OpWeaken replay closure: removed non-root `OpWeaken` no-op fallbacks in `MLF.Elab.Phi.Omega`; non-root weaken now either resolves to thesis-shaped `InstElim` or fails fast with structured `PhiTranslatabilityError` diagnostics (targets/canonical/class-members/ids/replay domains). Added focused fallback-removal regressions and updated legacy fallback-dependent pipeline baselines to assert strict fail-fast behavior.
 * IdentityBridge binder disambiguation: `lookupBinderIndex` now preserves raw binder identity when multiple scheme binders share a solved equivalence class by ranking non-class exact matches before class-member fallback; added regression `preserves raw binder identity before class-member fallback` and retained alias-target `OpWeaken` recovery behavior.
 * Milestone 5 gap closure: Ω `OpWeaken` now recovers binder targets from `Solved.classMembers` when witness targets resolve to non-binder aliases (emits thesis-shape `InstElim` instead of `ε` skip); `IdentityBridge.sourceKeysForNode` now includes solved equivalence-class members for canonical-alias binder recovery; added regressions in `ElaborationSpec` and `Phi.IdentityBridgeSpec`.

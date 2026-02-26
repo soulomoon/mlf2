@@ -1,5 +1,36 @@
 # Implementation Notes
 
+### 2026-02-26 Legacy replay removal + frozen parity baseline
+
+- Removed internal legacy fallback elaboration entrypoints:
+  - `runPipelineElabViaLegacySolve` is no longer defined/exported in `MLF.Elab.Run.Pipeline`,
+    `MLF.Elab.Run`, and `MLF.Elab.Pipeline`.
+- Removed legacy fallback test harness helpers from `test/SpecUtil.hs`.
+- Replaced live native-vs-legacy parity tests with a frozen artifact oracle:
+  - deterministic artifact builder/renderer in `test/Parity/FrozenArtifacts.hs`,
+  - checked-in baseline `test/golden/legacy-replay-baseline-v1.json`,
+  - authoritative parity spec `test/FrozenParitySpec.hs`,
+  - generator executable `frozen-parity-gen`,
+  - regen script `scripts/update-frozen-parity-artifacts.sh` with two-pass deterministic check.
+- Scope note:
+  - low-level snapshot APIs (`solveUnifyWithSnapshot`, `fromSolveOutput`) remain available for snapshot-centric unit tests, but no longer drive production parity behavior.
+
+### 2026-02-26 Thesis-exact unification ordering + regression hardening
+
+- Presolution now enforces thesis `SolveConstraint` order in Phase 4:
+  - drain initial pending unification closure before inst-edge traversal,
+  - process edges in topological order,
+  - drain closure after each edge when unification work is pending.
+- Presolution now carries UF metadata explicitly (`prUnionFind`) while keeping `prConstraint` as the raw translation input graph.
+- Shared unification closure logic is centralized in `MLF.Constraint.Unify.Closure` and reused by both Solve and Presolution.
+- `Solved.fromPresolutionResult` now uses replay-equivalent snapshot finalization (shared semantics with `fromSolveOutput`).
+- Production decision update (2026-02-26): default elaboration pipeline now uses presolution-native solved construction directly (`fromPresolutionResult`) without dual-run legacy replay in the production path.
+- Regression hardening:
+  - presolution closure drain is now a no-op when `cUnifyEdges` is empty (avoids forcing closure over transient intermediate binding-tree shapes),
+  - strengthened parity coverage with explicit legacy-vs-native solved and elaboration anchors.
+- Verification snapshot:
+  - `cabal test mlf2-test --offline` => `838 examples, 0 failures`.
+
 ### 2026-02-26 Milestone 5 gap-closure (OpWeaken alias recovery + IdentityBridge class-members)
 
 - Closed a remaining Ω replay gap where `OpWeaken` could degrade to `ε` when the witness target resolved to a non-binder alias in canonical space.

@@ -56,6 +56,7 @@ module MLF.Constraint.Types (
     Presolution (..),
     SolverState (..),
     DepGraph (..),
+    PresolutionSnapshot (..),
     -- * Binding tree types
     BindFlag (..),
     BindParents,
@@ -64,7 +65,12 @@ module MLF.Constraint.Types (
 ) where
 
 import MLF.Constraint.Types.Graph
-import MLF.Constraint.Types.Presolution (DepGraph(..), Presolution(..), SolverState(..))
+import MLF.Constraint.Types.Presolution
+    ( DepGraph(..)
+    , Presolution(..)
+    , PresolutionSnapshot(..)
+    , SolverState(..)
+    )
 import MLF.Constraint.Types.Witness
     ( BoundRef(..)
     , EdgeWitness(..)

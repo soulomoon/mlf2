@@ -154,6 +154,7 @@ library mlf2-internal
                       MLF.Constraint.Solve.Internal,
                       MLF.Constraint.Canonicalize,
                       MLF.Constraint.Traversal,
+                      MLF.Constraint.Unify.Closure,
                       MLF.Constraint.Unify.Core,
                       MLF.Constraint.Unify.Decompose,
                       MLF.Constraint.BindingUtil,
@@ -271,6 +272,23 @@ executable mlf2
     -- Base language which the package is written in.
     default-language: Haskell2010
 
+executable frozen-parity-gen
+    import:           warnings
+
+    main-is:          Parity/FrozenParityGenMain.hs
+
+    other-modules:    Parity.FrozenArtifacts
+
+    build-depends:
+        base ^>=4.21.0.0,
+        containers,
+        mlf2,
+        mlf2:mlf2-internal
+
+    hs-source-dirs:   test
+
+    default-language: GHC2021
+
 test-suite mlf2-test
     -- Import common warning flags.
     import:           warnings
@@ -293,6 +311,7 @@ test-suite mlf2-test
                       Presolution.EdgePlannerSpec,
                       Presolution.EdgeInterpreterSpec,
                       Presolution.WitnessSpec,
+                      Presolution.UnificationClosureSpec,
                       SolveSpec,
                       PipelineSpec,
                       ThesisFixDirectionSpec,
@@ -315,7 +334,9 @@ test-suite mlf2-test
                       TranslatablePresolutionSpec,
                       PhiSoundnessSpec,
                       ExpansionMinimalitySpec,
+                      FrozenParitySpec,
                       Constraint.SolvedSpec,
+                      Parity.FrozenArtifacts,
                       SpecUtil,
 
     -- LANGUAGE extensions used by modules in this package.

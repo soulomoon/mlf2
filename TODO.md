@@ -4,6 +4,20 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 24 Thesis-Exact Unification Ordering + Presolution-Centric Solved Path (2026-02-26)
+
+- Completed:
+  - Phase-4 thesis-order closure draining is enforced in presolution (initial + per-edge).
+  - Presolution now carries UF metadata (`prUnionFind`) separately from raw translatable graph (`prConstraint`).
+  - Shared unification closure engine extracted and reused by Solve/Presolution.
+  - Aligned native solved construction to replay-finalized semantics (`Solved.fromPresolutionResult` uses snapshot replay finalization).
+  - Switched production pipeline to presolution-native solved path and removed temporary dual-run legacy parity guard after green-window validation.
+  - Expanded legacy/native parity regressions (including bounded/coercion-heavy anchors).
+  - Full suite validation: `cabal test mlf2-test --offline` => `838 examples, 0 failures`.
+- Next:
+  - Done: removed explicit legacy fallback entrypoint and migrated parity checks to frozen baseline artifacts.
+  - Optional follow-up: retire snapshot-only compatibility surfaces once no unit tests depend on `solveUnifyWithSnapshot`/`fromSolveOutput`.
+
 ## Task 23 Milestone 5 gap closure (Tasks 14-16) — 2026-02-26
 
 - Completed:

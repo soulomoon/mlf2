@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 
 module MLF.Constraint.Presolution.Base (
+    PresolutionUf(..),
     PresolutionResult(..),
     PresolutionPlanBuilder(..),
     PresolutionError(..),
@@ -66,6 +67,9 @@ import MLF.Constraint.Presolution.WitnessValidation (OmegaNormalizeError)
 import MLF.Constraint.Solved (Solved)
 import MLF.Util.ElabError (ElabError)
 
+newtype PresolutionUf = PresolutionUf { getPresolutionUf :: IntMap NodeId }
+    deriving (Eq, Show)
+
 -- | Result of the presolution phase.
 data PresolutionResult = PresolutionResult
     { prConstraint :: Constraint
@@ -73,8 +77,13 @@ data PresolutionResult = PresolutionResult
     , prEdgeWitnesses :: IntMap EdgeWitness
     , prEdgeTraces :: IntMap EdgeTrace
     , prRedirects :: IntMap NodeId -- ^ Map from old TyExp IDs to their replacement IDs
+    , prUnionFind :: PresolutionUf
     , prPlanBuilder :: PresolutionPlanBuilder
     } deriving (Eq, Show)
+
+instance PresolutionSnapshot PresolutionResult where
+    snapshotConstraint = prConstraint
+    snapshotUnionFind = getPresolutionUf . prUnionFind
 
 newtype PresolutionPlanBuilder = PresolutionPlanBuilder
     { ppbBuildGeneralizePlans
