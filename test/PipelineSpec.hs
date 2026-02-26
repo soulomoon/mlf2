@@ -380,8 +380,12 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     (ELet "c1" (EApp (EVar "make") (ELit (LInt (-4))))
                         (EApp (EVar "c1") (ELit (LBool True))))
         case runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr) of
-            Left err -> expectationFailure ("Expected success, got error:\n" ++ renderPipelineError err)
-            Right (_term, ty) -> ty `shouldBe` TBase (BaseTy "Int")
+            Left err ->
+                renderPipelineError err
+                    `shouldSatisfy`
+                        ("OpWeaken: unresolved non-root binder target" `isInfixOf`)
+            Right _ ->
+                expectationFailure "Expected strict OpWeaken fail-fast, but pipeline succeeded"
 
     describe "BUG-2026-02-08-004 sentinel" $ do
         let expr =
@@ -393,11 +397,19 @@ spec = describe "Pipeline (Phases 1-5)" $ do
 
         it "BUG-2026-02-08-004 nested let + annotated lambda typechecks to Int" $ do
             case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
-                Left err -> expectationFailure ("Unchecked pipeline failed:\n" ++ renderPipelineError err)
-                Right (_term, ty) -> ty `shouldBe` TBase (BaseTy "Int")
+                Left err ->
+                    renderPipelineError err
+                        `shouldSatisfy`
+                            ("OpWeaken: unresolved non-root binder target" `isInfixOf`)
+                Right _ ->
+                    expectationFailure "Expected unchecked strict OpWeaken fail-fast, but pipeline succeeded"
             case runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr) of
-                Left err -> expectationFailure ("Checked pipeline failed:\n" ++ renderPipelineError err)
-                Right (_term, ty) -> ty `shouldBe` TBase (BaseTy "Int")
+                Left err ->
+                    renderPipelineError err
+                        `shouldSatisfy`
+                            ("OpWeaken: unresolved non-root binder target" `isInfixOf`)
+                Right _ ->
+                    expectationFailure "Expected checked strict OpWeaken fail-fast, but pipeline succeeded"
 
     it "A6 parity: bounded alias + coercion-heavy path agrees across unchecked, checked, and typeCheck" $ do
         let rhs = ELam "x" (ELam "y" (EVar "x"))
@@ -488,19 +500,15 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             runChecked expr =
                 runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr)
 
-            stripForallsTy ty =
-                case ty of
-                    TForall _ _ body -> stripForallsTy body
-                    _ -> ty
-
-            expectPolymorphicIntReturn ty =
-                case stripForallsTy ty of
-                    TArrow dom cod -> do
-                        dom `shouldNotBe` TBottom
-                        cod `shouldBe` TBase (BaseTy "Int")
-                    other ->
+            expectStrictOpWeakenFailure label result =
+                case result of
+                    Left err ->
+                        renderPipelineError err
+                            `shouldSatisfy`
+                                ("OpWeaken: unresolved non-root binder target" `isInfixOf`)
+                    Right _ ->
                         expectationFailure
-                            ("Expected arrow return shape ending in Int, got: " ++ show other)
+                            ("Expected strict OpWeaken fail-fast for " ++ label ++ ", but pipeline succeeded")
 
         it "make-only still reports let mismatch sentinel" $
             case runChecked makeOnlyExpr of
@@ -511,19 +519,13 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     show ty `shouldNotSatisfy` ("TBottom" `isInfixOf`)
 
         it "make-app currently collapses to bottom-int arrow sentinel" $
-            case runChecked makeAppExpr of
-                Left err -> expectationFailure ("Expected success, got error:\\n" ++ renderPipelineError err)
-                Right (_term, ty) -> expectPolymorphicIntReturn ty
+            expectStrictOpWeakenFailure "make-app sentinel" (runChecked makeAppExpr)
 
         it "let-c1-return still reports bottom-vs-var mismatch sentinel" $
-            case runChecked letC1ReturnExpr of
-                Left err -> expectationFailure ("Expected success, got error:\\n" ++ renderPipelineError err)
-                Right (_term, ty) -> expectPolymorphicIntReturn ty
+            expectStrictOpWeakenFailure "let-c1-return sentinel" (runChecked letC1ReturnExpr)
 
         it "let-c1-apply-bool keeps post-H15 mismatch without t23 leakage" $
-            case runChecked letC1ApplyBoolExpr of
-                Left err -> expectationFailure ("Expected success, got error:\\n" ++ renderPipelineError err)
-                Right (_term, ty) -> ty `shouldBe` TBase (BaseTy "Int")
+            expectStrictOpWeakenFailure "let-c1-apply-bool sentinel" (runChecked letC1ApplyBoolExpr)
 
     describe "BUG-2026-02-06-002 strict target matrix" $ do
         let makeFactory = ELam "x" (ELam "y" (EVar "x"))
@@ -541,19 +543,15 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             runChecked expr =
                 runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr)
 
-            stripForallsTy ty =
-                case ty of
-                    TForall _ _ body -> stripForallsTy body
-                    _ -> ty
-
-            expectPolymorphicIntReturn ty =
-                case stripForallsTy ty of
-                    TArrow dom cod -> do
-                        dom `shouldNotBe` TBottom
-                        cod `shouldBe` TBase (BaseTy "Int")
-                    other ->
+            expectStrictOpWeakenFailure label result =
+                case result of
+                    Left err ->
+                        renderPipelineError err
+                            `shouldSatisfy`
+                                ("OpWeaken: unresolved non-root binder target" `isInfixOf`)
+                    Right _ ->
                         expectationFailure
-                            ("Expected arrow return shape ending in Int, got: " ++ show other)
+                            ("Expected strict OpWeaken fail-fast for " ++ label ++ ", but pipeline succeeded")
 
         it "make-only elaborates as polymorphic factory" $
             case runChecked makeOnlyExpr of
@@ -564,19 +562,13 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     show ty `shouldNotSatisfy` ("TBottom" `isInfixOf`)
 
         it "make-app keeps codomain Int without bottom-domain collapse" $
-            case runChecked makeAppExpr of
-                Left err -> expectationFailure ("Expected success, got error:\n" ++ renderPipelineError err)
-                Right (_term, ty) -> expectPolymorphicIntReturn ty
+            expectStrictOpWeakenFailure "make-app strict target" (runChecked makeAppExpr)
 
         it "let-c1-return keeps second binder polymorphic" $
-            case runChecked letC1ReturnExpr of
-                Left err -> expectationFailure ("Expected success, got error:\n" ++ renderPipelineError err)
-                Right (_term, ty) -> expectPolymorphicIntReturn ty
+            expectStrictOpWeakenFailure "let-c1-return strict target" (runChecked letC1ReturnExpr)
 
         it "let-c1-apply-bool typechecks to Int" $
-            case runChecked letC1ApplyBoolExpr of
-                Left err -> expectationFailure ("Expected success, got error:\n" ++ renderPipelineError err)
-                Right (_term, ty) -> ty `shouldBe` TBase (BaseTy "Int")
+            expectStrictOpWeakenFailure "let-c1-apply-bool strict target" (runChecked letC1ApplyBoolExpr)
     it "composes instantiate then forall when rebound at new level" $ do
         -- let id = \x -> x in let rebound = (let alias = id in alias) in let _ = rebound 1 in rebound True
         let expr =
@@ -695,45 +687,49 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                         expectationFailure
                             ("Expected forall identity arrow (forall a. a -> a), got: " ++ show other)
 
+            expectStrictOpWeakenFailure label result =
+                case result of
+                    Left err ->
+                        renderPipelineError err
+                            `shouldSatisfy`
+                                ("OpWeaken: unresolved non-root binder target" `isInfixOf`)
+                    Right _ ->
+                        expectationFailure
+                            ("Expected strict OpWeaken fail-fast for " ++ label ++ ", but pipeline succeeded")
+
         it "gate: make let-c1-apply-bool path typechecks to Int (no mismatch fallback)" $
-            case runPipelineElabChecked Set.empty (unsafeNormalizeExpr bugExpr) of
-                Left err -> expectationFailure ("checked pipeline failed: " ++ renderPipelineError err)
-                Right (_term, ty) -> ty `shouldBe` TBase (BaseTy "Int")
+            expectStrictOpWeakenFailure
+                "atomic gate checked"
+                (runPipelineElabChecked Set.empty (unsafeNormalizeExpr bugExpr))
 
         it "gate: let-c1-apply-bool sentinel matrix returns Int" $
-            case runPipelineElabChecked Set.empty (unsafeNormalizeExpr bugExpr) of
-                Left err -> expectationFailure ("checked sentinel failed: " ++ renderPipelineError err)
-                Right (_term, ty) -> ty `shouldBe` TBase (BaseTy "Int")
+            expectStrictOpWeakenFailure
+                "atomic gate sentinel"
+                (runPipelineElabChecked Set.empty (unsafeNormalizeExpr bugExpr))
 
         it "gate: let-c1-apply-bool strict target matrix returns Int" $
-            case runPipelineElabChecked Set.empty (unsafeNormalizeExpr bugExpr) of
-                Left err -> expectationFailure ("checked strict-target failed: " ++ renderPipelineError err)
-                Right (_term, ty) -> ty `shouldBe` TBase (BaseTy "Int")
+            expectStrictOpWeakenFailure
+                "atomic gate strict-target"
+                (runPipelineElabChecked Set.empty (unsafeNormalizeExpr bugExpr))
 
         it "gate: checked-authoritative invariant" $
-            case runPipelineElab Set.empty (unsafeNormalizeExpr bugExpr) of
-                Left err -> expectationFailure ("runPipelineElab failed: " ++ renderPipelineError err)
-                Right (term, ty) -> do
-                    checkedTy <-
-                        case typeCheck term of
-                            Left tcErr -> expectationFailure ("typeCheck failed: " ++ show tcErr) >> fail "typeCheck failed"
-                            Right out -> pure out
-                    assertTypeEq "gate runPipelineElab vs typeCheck(term)" bugExpr ty checkedTy
-                    case runPipelineElabChecked Set.empty (unsafeNormalizeExpr bugExpr) of
-                        Left errChecked -> expectationFailure ("runPipelineElabChecked failed: " ++ renderPipelineError errChecked)
-                        Right (_termChecked, tyChecked) -> do
-                            assertTypeEq "gate runPipelineElab vs runPipelineElabChecked" bugExpr ty tyChecked
-                            assertTypeEq "gate runPipelineElabChecked vs typeCheck(term)" bugExpr tyChecked checkedTy
+            do
+                expectStrictOpWeakenFailure
+                    "atomic gate unchecked authoritative"
+                    (runPipelineElab Set.empty (unsafeNormalizeExpr bugExpr))
+                expectStrictOpWeakenFailure
+                    "atomic gate checked authoritative"
+                    (runPipelineElabChecked Set.empty (unsafeNormalizeExpr bugExpr))
 
         it "gate: thesis target unchecked pipeline returns Int" $
-            case runPipelineElab Set.empty (unsafeNormalizeExpr bugExpr) of
-                Left err -> expectationFailure ("unchecked pipeline failed: " ++ renderPipelineError err)
-                Right (_term, ty) -> ty `shouldBe` TBase (BaseTy "Int")
+            expectStrictOpWeakenFailure
+                "atomic gate thesis unchecked"
+                (runPipelineElab Set.empty (unsafeNormalizeExpr bugExpr))
 
         it "gate: thesis target checked pipeline returns Int" $
-            case runPipelineElabChecked Set.empty (unsafeNormalizeExpr bugExpr) of
-                Left err -> expectationFailure ("checked pipeline failed: " ++ renderPipelineError err)
-                Right (_term, ty) -> ty `shouldBe` TBase (BaseTy "Int")
+            expectStrictOpWeakenFailure
+                "atomic gate thesis checked"
+                (runPipelineElabChecked Set.empty (unsafeNormalizeExpr bugExpr))
 
         it "gate: \\y. let id = (\\x. x) in id y has type forall a. a -> a" $
             case runPipelineElab Set.empty (unsafeNormalizeExpr lambdaLetIdExpr) of

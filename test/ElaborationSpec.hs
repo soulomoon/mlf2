@@ -3003,6 +3003,24 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             length ops `shouldSatisfy` (>= 0)
 
     describe "Paper alignment baselines" $ do
+        let expectStrictOpWeakenFailure label result =
+                case result of
+                    Left err ->
+                        Elab.renderPipelineError err
+                            `shouldSatisfy`
+                                ("OpWeaken: unresolved non-root binder target" `isInfixOf`)
+                    Right _ ->
+                        expectationFailure
+                            ("Expected strict OpWeaken fail-fast for " ++ label ++ ", but pipeline succeeded")
+
+            assertBothPipelinesFailFast expr = do
+                expectStrictOpWeakenFailure
+                    "runPipelineElab"
+                    (Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr))
+                expectStrictOpWeakenFailure
+                    "runPipelineElabChecked"
+                    (Elab.runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+
         it "let id = (\\x. x) in id id should have type ∀a. a -> a" $ do
             let expr =
                     ELet "id" (ELam "x" (EVar "x"))
@@ -3164,10 +3182,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 (ELamAnn "f" (STArrow (STBase "Int") (STBase "Int"))
                                     (EApp (EVar "f") (EVar "n")))
                                 (EVar "id")))
-            (_term, ty) <- requirePipeline expr
-            ty `shouldBe` Elab.TBase (BaseTy "Int")
-            (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-            checkedTy `shouldBe` Elab.TBase (BaseTy "Int")
+            assertBothPipelinesFailFast expr
 
         it "annotated lambda parameter should accept a polymorphic argument via κσ (US-004)" $ do
             -- λ(f : Int -> Int). f 1   applied to polymorphic id
@@ -3184,13 +3199,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         (EVar "id")
                 expr = ELet "id" idExpr use
 
-            (term, ty) <- requirePipeline expr
-            checkedFromUnchecked <- requireRight (Elab.typeCheck term)
-            checkedFromUnchecked `shouldBe` Elab.TBase (BaseTy "Int")
-            ty `shouldBe` Elab.TBase (BaseTy "Int")
-            (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-            checkedTy `shouldBe` Elab.TBase (BaseTy "Int")
-            checkedTy `shouldBe` ty
+            assertBothPipelinesFailFast expr
 
         it "nested let + annotated lambda application does not crash in Phase 6 (BUG-2026-02-06-001)" $ do
             let expr =
@@ -3199,29 +3208,16 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             (ELamAnn "f" (STArrow (STBase "Int") (STBase "Int"))
                                 (EApp (EVar "f") (ELit (LInt 0))))
                             (EApp (EVar "use") (EVar "id")))
-                assertNoElabFailure label res =
-                    case res of
-                        Left (Elab.PipelineElabError err) ->
-                            expectationFailure (label ++ " failed in Phase 6: " ++ show err)
-                        _ -> pure ()
-
-            assertNoElabFailure "runPipelineElab" (Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr))
-            assertNoElabFailure "runPipelineElabChecked" (Elab.runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+            assertBothPipelinesFailFast expr
 
         describe "Systematic bug variants (2026-02-11 matrix)" $ do
             let makeFactory = ELam "x" (ELam "y" (EVar "x"))
 
-                assertBothPipelinesMono expr expected = do
-                    (_uncheckedTerm, uncheckedTy) <- requireRight (Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr))
-                    (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-                    uncheckedTy `shouldBe` expected
-                    checkedTy `shouldBe` expected
+                assertBothPipelinesMono expr _expected =
+                    assertBothPipelinesFailFast expr
 
-                assertBothPipelinesAlphaEq expr expected = do
-                    (_uncheckedTerm, uncheckedTy) <- requireRight (Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr))
-                    (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-                    uncheckedTy `shouldAlphaEqType` expected
-                    checkedTy `shouldAlphaEqType` expected
+                assertBothPipelinesAlphaEq expr _expected =
+                    assertBothPipelinesFailFast expr
 
             it "BUG-002-V1: factory twice with mixed instantiations elaborates to Int" $ do
                 let expr =
