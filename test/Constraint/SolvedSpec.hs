@@ -243,6 +243,27 @@ spec = describe "MLF.Constraint.Solved" $ do
             originalBindParent s (typeRef (NodeId 2))
                 `shouldBe` lookupBindParent s (typeRef (NodeId 2))
 
+    describe "projection-first queries" $ do
+        it "originalNode returns pre-merge node data" $ do
+            -- Node 0 was merged into node 1 via union-find, but
+            -- originalNode should still return the pre-merge TyVar.
+            originalNode s (NodeId 0)
+                `shouldBe` Just (TyVar { tnId = NodeId 0, tnBound = Nothing })
+            originalNode s (NodeId 1)
+                `shouldBe` Just (TyBase (NodeId 1) (BaseTy "Int"))
+            originalNode s (NodeId 99) `shouldBe` Nothing
+
+        it "originalBindParent returns pre-merge binding parents" $ do
+            originalBindParent s (typeRef (NodeId 1))
+                `shouldBe` Just (typeRef (NodeId 2), BindFlex)
+            originalBindParent s (typeRef (NodeId 2))
+                `shouldBe` Nothing
+
+        it "lookupNode canonicalizes through union-find" $ do
+            -- lookupNode chases canonical: looking up merged node 0
+            -- should return the data at canonical node 1.
+            lookupNode s (NodeId 0) `shouldBe` lookupNode s (NodeId 1)
+
     describe "lookupVarBound with actual bound" $ do
         it "returns the bound when the canonical node is a TyVar with a bound" $ do
             let boundVar = TyVar { tnId = NodeId 10, tnBound = Just (NodeId 11) }
