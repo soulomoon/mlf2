@@ -20,6 +20,7 @@ import qualified GraphOpsSpec
 import qualified InertSpec
 import qualified NormalizeSpec
 import qualified PipelineSpec
+import qualified Phi.AlignmentSpec
 import qualified Phi.IdentityBridgeSpec
 import qualified PresolutionSpec
 import qualified Presolution.UnificationClosureSpec
@@ -70,6 +71,7 @@ main = do
         XMLFPrettySpec.spec
         FrozenParitySpec.spec
         Phi.IdentityBridgeSpec.spec
+        Phi.AlignmentSpec.spec
         TranslatablePresolutionSpec.spec
         PhiSoundnessSpec.spec
         AlignmentInvariantSpec.spec

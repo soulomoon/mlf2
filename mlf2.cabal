@@ -330,6 +330,7 @@ test-suite mlf2-test
                       FrontendNormalizeSpec,
                       XMLFParseSpec,
                       XMLFPrettySpec,
+                      Phi.AlignmentSpec,
                       Phi.IdentityBridgeSpec,
                       TranslatablePresolutionSpec,
                       PhiSoundnessSpec,
