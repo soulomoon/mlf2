@@ -32,6 +32,7 @@ import qualified XMLFParseSpec
 import qualified XMLFPrettySpec
 import qualified TranslatablePresolutionSpec
 import qualified PhiSoundnessSpec
+import qualified AlignmentInvariantSpec
 import qualified ExpansionMinimalitySpec
 import qualified Constraint.SolvedSpec
 
@@ -71,5 +72,6 @@ main = do
         Phi.IdentityBridgeSpec.spec
         TranslatablePresolutionSpec.spec
         PhiSoundnessSpec.spec
+        AlignmentInvariantSpec.spec
         ExpansionMinimalitySpec.spec
         Constraint.SolvedSpec.spec
