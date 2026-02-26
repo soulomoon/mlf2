@@ -141,11 +141,11 @@ domain query.
 | Priority | Count | Description |
 |----------|-------|-------------|
 | High | 17 | Reify/Core.hs (16) + Generalize.hs entry point (1) — direct canonical-domain queries |
-| Medium | 20 | Fallback.hs (7) + Generalize phases (12) + Scope.hs (1) — indirect or legacy |
+| Medium | 22 | Fallback.hs (7) + Generalize phases (14) + Scope.hs (1) — indirect or legacy |
 | Low | 1 | Phase2.hs elimination check — minor |
 | N/A | 1 | Ann.hs — already original-domain |
 
-**Total canonical-domain query call sites: 38** (excluding `Solved.canonical`
+**Total canonical-domain query call sites: 41** (excluding `Solved.canonical`
 mapping and `Solved.canonicalMap` infrastructure).
 
 The highest-priority migration target is `Reify/Core.hs` (Task 7), which
