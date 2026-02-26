@@ -8,6 +8,54 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 
 ## Resolved
 
+### BUG-2026-02-26-004
+- Status: Resolved
+- Priority: High
+- Discovered: 2026-02-26
+- Resolved: 2026-02-26
+- Summary: Presolution closure draining invoked `runUnifyClosure` on intermediate states with no pending unify work, producing false `BindingTreeError` failures (`multiple roots`) on valid programs.
+- Minimal reproducer:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "O10-EXP-DECIDE"'`
+- Expected vs actual:
+  - Expected: presolution succeeds and progresses to witness normalization checks.
+  - Actual before fix: `InternalError "presolution runUnifyClosure failed: BindingTreeError ... multiple roots"`.
+- Suspected/owning area:
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/EdgeProcessing.hs`
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Unify/Closure.hs`
+- Thesis impact:
+  - Violates Phase 4 SolveConstraint obligations by rejecting valid intermediate states before required unification work is present.
+- Fix:
+  - `drainPendingUnifyClosure` is now a no-op when `cUnifyEdges` is empty; closure is invoked only when pending unify work exists.
+- Regression tests:
+  - `test/Presolution/ExpansionSpec.hs` (`O10-EXP-DECIDE`)
+  - `cabal test mlf2-test --offline`
+
+### BUG-2026-02-26-003
+- Status: Resolved
+- Priority: High
+- Discovered: 2026-02-26
+- Resolved: 2026-02-26
+- Summary: Switching production pipeline solved construction to no-replay (`fromPresolutionResult`) regressed elaboration invariants (`alias bounds survived scheme finalization`).
+- Minimal reproducer:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "O15-ELAB-LET: elaborates polymorphic let-binding"'`
+- Expected vs actual:
+  - Expected: elaboration of `let id = (\x. x) in id` succeeds with `∀a. a -> a`.
+  - Actual before fix: `PipelineElabError (ValidationFailed ["alias bounds survived scheme finalization: [\"a\"]"])`.
+- Suspected/owning area:
+  - `/Volumes/src/mlf4/src/MLF/Elab/Run/Pipeline.hs`
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Solved.hs`
+- Thesis impact:
+  - Breaks production Phase 6 behavior and baseline paper-alignment elaboration paths.
+- Fix:
+  - Aligned `fromPresolutionResult` to replay-finalized snapshot semantics and switched production to presolution-native solved construction as the default path.
+  - After two consecutive green full-gate runs, removed the temporary dual-run parity guard from the production path.
+  - Follow-up: removed internal legacy fallback entrypoint (`runPipelineElabViaLegacySolve`) and replaced live native-vs-legacy parity tests with frozen baseline artifact checks.
+- Regression tests:
+  - `test/ElaborationSpec.hs` (`O15-ELAB-LET: elaborates polymorphic let-binding`)
+  - `test/PipelineSpec.hs` (`uses presolution-native solved artifacts`)
+  - `test/FrozenParitySpec.hs` (`Frozen parity artifact baseline`)
+  - `cabal test mlf2-test --offline`
+
 ### BUG-2026-02-26-002
 - Status: Resolved
 - Priority: High
