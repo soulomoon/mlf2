@@ -2,6 +2,7 @@
 -- TypeSoundnessSpec / PipelineSpec into fixed regression tests here.
 module TypeCheckSpec (spec) where
 
+import Data.List (isInfixOf)
 import qualified Data.Set as Set
 import Test.Hspec
 
@@ -169,7 +170,7 @@ spec = describe "Phase 7 typecheck" $ do
                             typeCheck uncheckedTerm `shouldBe` Right checkedTy
                             typeCheck checkedTerm `shouldBe` Right checkedTy
 
-        it "typeCheck agrees for dual annotated coercion consumers" $ do
+        it "dual annotated coercion consumers fail fast on unresolved non-root OpWeaken" $ do
             let useInt =
                     Surf.ELamAnn "f" (Surf.STArrow (Surf.STBase "Int") (Surf.STBase "Int"))
                         (Surf.EApp (Surf.EVar "f") (Surf.ELit (LInt 0)))
@@ -182,17 +183,17 @@ spec = describe "Phase 7 typecheck" $ do
                             (Surf.ELet "useB" useBool
                                 (Surf.ELet "_" (Surf.EApp (Surf.EVar "useI") (Surf.EVar "id"))
                                     (Surf.EApp (Surf.EVar "useB") (Surf.EVar "id")))))
-                expected = TBase (BaseTy "Bool")
                 normExpr = unsafeNormalizeExpr expr
 
-            case runPipelineElab Set.empty normExpr of
-                Left err -> expectationFailure ("Unchecked pipeline failed:\n" ++ renderPipelineError err)
-                Right (uncheckedTerm, uncheckedTy) -> do
-                    uncheckedTy `shouldBe` expected
-                    case runPipelineElabChecked Set.empty normExpr of
-                        Left errChecked -> expectationFailure ("Checked pipeline failed:\n" ++ renderPipelineError errChecked)
-                        Right (checkedTerm, checkedTy) -> do
-                            checkedTy `shouldBe` expected
-                            uncheckedTy `shouldBe` checkedTy
-                            typeCheck uncheckedTerm `shouldBe` Right checkedTy
-                            typeCheck checkedTerm `shouldBe` Right checkedTy
+            let expectStrictOpWeakenFailure label res =
+                    case res of
+                        Left err ->
+                            renderPipelineError err
+                                `shouldSatisfy`
+                                    ("OpWeaken: unresolved non-root binder target" `isInfixOf`)
+                        Right _ ->
+                            expectationFailure
+                                ("Expected strict OpWeaken fail-fast for " ++ label ++ ", but pipeline succeeded")
+
+            expectStrictOpWeakenFailure "unchecked pipeline" (runPipelineElab Set.empty normExpr)
+            expectStrictOpWeakenFailure "checked pipeline" (runPipelineElabChecked Set.empty normExpr)

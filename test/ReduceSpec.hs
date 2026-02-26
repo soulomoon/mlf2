@@ -4,6 +4,7 @@
 module ReduceSpec (spec) where
 
 import Control.Monad (forM_)
+import Data.List (isInfixOf)
 import qualified Data.Set as Set
 import Test.Hspec
 
@@ -166,7 +167,7 @@ spec = do
             uncheckedNormTy `shouldSatisfy` isPolyBinaryId
             checkedNormTy `shouldSatisfy` isPolyBinaryId
 
-        it "normalization preserves parity for dual annotated coercion consumers" $ do
+        it "dual annotated coercion consumers fail fast on unresolved non-root OpWeaken" $ do
             let useInt =
                     Surf.ELamAnn "f" (Surf.STArrow (Surf.STBase "Int") (Surf.STBase "Int"))
                         (Surf.EApp (Surf.EVar "f") (Surf.ELit (LInt 0)))
@@ -179,23 +180,17 @@ spec = do
                             (Surf.ELet "useB" useBool
                                 (Surf.ELet "_" (Surf.EApp (Surf.EVar "useI") (Surf.EVar "id"))
                                     (Surf.EApp (Surf.EVar "useB") (Surf.EVar "id")))))
-                expected = TBase (BaseTy "Bool")
                 normExpr = unsafeNormalizeExpr expr
 
-            uncheckedRes <- case runPipelineElab Set.empty normExpr of
-                Left err -> expectationFailure ("Unchecked pipeline failed:\n" ++ renderPipelineError err) >> fail "unchecked pipeline failed"
-                Right out -> pure out
-            checkedRes <- case runPipelineElabChecked Set.empty normExpr of
-                Left err -> expectationFailure ("Checked pipeline failed:\n" ++ renderPipelineError err) >> fail "checked pipeline failed"
-                Right out -> pure out
+            let expectStrictOpWeakenFailure label res =
+                    case res of
+                        Left err ->
+                            renderPipelineError err
+                                `shouldSatisfy`
+                                    ("OpWeaken: unresolved non-root binder target" `isInfixOf`)
+                        Right _ ->
+                            expectationFailure
+                                ("Expected strict OpWeaken fail-fast for " ++ label ++ ", but pipeline succeeded")
 
-            let (uncheckedTerm, uncheckedTy) = uncheckedRes
-                (checkedTerm, checkedTy) = checkedRes
-                uncheckedNorm = normalize uncheckedTerm
-                checkedNorm = normalize checkedTerm
-
-            uncheckedTy `shouldBe` expected
-            checkedTy `shouldBe` expected
-            uncheckedTy `shouldBe` checkedTy
-            typeCheck uncheckedNorm `shouldBe` Right expected
-            typeCheck checkedNorm `shouldBe` Right expected
+            expectStrictOpWeakenFailure "unchecked pipeline" (runPipelineElab Set.empty normExpr)
+            expectStrictOpWeakenFailure "checked pipeline" (runPipelineElabChecked Set.empty normExpr)

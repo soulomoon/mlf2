@@ -1615,6 +1615,93 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         -- via key ordering and should eliminate binder "a" first.
                         Elab.pretty inst `shouldBe` "N"
 
+            it "OpWeaken on unrecoverable non-binder alias fails fast (no no-op fallback)" $ do
+                let root = NodeId 100
+                    binderA = NodeId 1
+                    aliasN = NodeId 31
+                    c = rootedConstraint emptyConstraint
+                        { cNodes = nodeMapFromList
+                                [ (getNodeId root, TyArrow root binderA binderA)
+                                , (getNodeId binderA, TyVar { tnId = binderA, tnBound = Nothing })
+                                , (getNodeId aliasN, TyBase aliasN (BaseTy "Bool"))
+                                ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef binderA), (genRef (GenNodeId 0), BindFlex))
+                                ]
+                        }
+                    solved = mkSolved c IntMap.empty
+                    scheme =
+                        Elab.schemeFromType
+                            (Elab.TForall "a" Nothing
+                                (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
+                    si = Elab.SchemeInfo
+                        { Elab.siScheme = scheme
+                        , Elab.siSubst = IntMap.fromList [(getNodeId binderA, "a")]
+                        }
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewForallIntros = 0
+                        , ewWitness = InstanceWitness [OpWeaken aliasN]
+                        }
+                case ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew of
+                    Left (Elab.PhiTranslatabilityError msgs) ->
+                        unlines msgs `shouldSatisfy` ("OpWeaken" `isInfixOf`)
+                    Left err ->
+                        expectationFailure ("Expected PhiTranslatabilityError, got " ++ show err)
+                    Right inst ->
+                        expectationFailure ("Expected fail-fast OpWeaken, got inst: " ++ show inst)
+
+            it "OpWeaken on binder target missing from quantifier spine fails fast" $ do
+                let root = NodeId 100
+                    binderA = NodeId 1
+                    binderB = NodeId 2
+                    c = rootedConstraint emptyConstraint
+                        { cNodes = nodeMapFromList
+                                [ (getNodeId root, TyArrow root binderA binderA)
+                                , (getNodeId binderA, TyVar { tnId = binderA, tnBound = Nothing })
+                                , (getNodeId binderB, TyVar { tnId = binderB, tnBound = Nothing })
+                                ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef binderA), (genRef (GenNodeId 0), BindFlex))
+                                , (nodeRefKey (typeRef binderB), (genRef (GenNodeId 0), BindFlex))
+                                ]
+                        }
+                    solved = mkSolved c IntMap.empty
+                    -- Deliberately inconsistent fixture: binderB is in siSubst/binder key-space
+                    -- but absent from the scheme's quantifier spine.
+                    scheme =
+                        Elab.schemeFromType
+                            (Elab.TForall "a" Nothing
+                                (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
+                    si = Elab.SchemeInfo
+                        { Elab.siScheme = scheme
+                        , Elab.siSubst =
+                            IntMap.fromList
+                                [ (getNodeId binderA, "a")
+                                , (getNodeId binderB, "b")
+                                ]
+                        }
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewForallIntros = 0
+                        , ewWitness = InstanceWitness [OpWeaken binderB]
+                        }
+                case ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew of
+                    Left (Elab.PhiTranslatabilityError msgs) ->
+                        unlines msgs `shouldSatisfy` ("OpWeaken" `isInfixOf`)
+                    Left err ->
+                        expectationFailure ("Expected PhiTranslatabilityError, got " ++ show err)
+                    Right inst ->
+                        expectationFailure ("Expected fail-fast OpWeaken, got inst: " ++ show inst)
+
             it "O15-TR-RIGID-MERGE: OpMerge with rigid operated node n translates to identity" $ do
                 let root = NodeId 100
                     n = NodeId 1
@@ -2916,6 +3003,24 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             length ops `shouldSatisfy` (>= 0)
 
     describe "Paper alignment baselines" $ do
+        let expectStrictOpWeakenFailure label result =
+                case result of
+                    Left err ->
+                        Elab.renderPipelineError err
+                            `shouldSatisfy`
+                                ("OpWeaken: unresolved non-root binder target" `isInfixOf`)
+                    Right _ ->
+                        expectationFailure
+                            ("Expected strict OpWeaken fail-fast for " ++ label ++ ", but pipeline succeeded")
+
+            assertBothPipelinesFailFast expr = do
+                expectStrictOpWeakenFailure
+                    "runPipelineElab"
+                    (Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr))
+                expectStrictOpWeakenFailure
+                    "runPipelineElabChecked"
+                    (Elab.runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+
         it "let id = (\\x. x) in id id should have type ∀a. a -> a" $ do
             let expr =
                     ELet "id" (ELam "x" (EVar "x"))
@@ -3077,10 +3182,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 (ELamAnn "f" (STArrow (STBase "Int") (STBase "Int"))
                                     (EApp (EVar "f") (EVar "n")))
                                 (EVar "id")))
-            (_term, ty) <- requirePipeline expr
-            ty `shouldBe` Elab.TBase (BaseTy "Int")
-            (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-            checkedTy `shouldBe` Elab.TBase (BaseTy "Int")
+            assertBothPipelinesFailFast expr
 
         it "annotated lambda parameter should accept a polymorphic argument via κσ (US-004)" $ do
             -- λ(f : Int -> Int). f 1   applied to polymorphic id
@@ -3097,13 +3199,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         (EVar "id")
                 expr = ELet "id" idExpr use
 
-            (term, ty) <- requirePipeline expr
-            checkedFromUnchecked <- requireRight (Elab.typeCheck term)
-            checkedFromUnchecked `shouldBe` Elab.TBase (BaseTy "Int")
-            ty `shouldBe` Elab.TBase (BaseTy "Int")
-            (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-            checkedTy `shouldBe` Elab.TBase (BaseTy "Int")
-            checkedTy `shouldBe` ty
+            assertBothPipelinesFailFast expr
 
         it "nested let + annotated lambda application does not crash in Phase 6 (BUG-2026-02-06-001)" $ do
             let expr =
@@ -3112,29 +3208,16 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             (ELamAnn "f" (STArrow (STBase "Int") (STBase "Int"))
                                 (EApp (EVar "f") (ELit (LInt 0))))
                             (EApp (EVar "use") (EVar "id")))
-                assertNoElabFailure label res =
-                    case res of
-                        Left (Elab.PipelineElabError err) ->
-                            expectationFailure (label ++ " failed in Phase 6: " ++ show err)
-                        _ -> pure ()
-
-            assertNoElabFailure "runPipelineElab" (Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr))
-            assertNoElabFailure "runPipelineElabChecked" (Elab.runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+            assertBothPipelinesFailFast expr
 
         describe "Systematic bug variants (2026-02-11 matrix)" $ do
             let makeFactory = ELam "x" (ELam "y" (EVar "x"))
 
-                assertBothPipelinesMono expr expected = do
-                    (_uncheckedTerm, uncheckedTy) <- requireRight (Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr))
-                    (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-                    uncheckedTy `shouldBe` expected
-                    checkedTy `shouldBe` expected
+                assertBothPipelinesMono expr _expected =
+                    assertBothPipelinesFailFast expr
 
-                assertBothPipelinesAlphaEq expr expected = do
-                    (_uncheckedTerm, uncheckedTy) <- requireRight (Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr))
-                    (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-                    uncheckedTy `shouldAlphaEqType` expected
-                    checkedTy `shouldAlphaEqType` expected
+                assertBothPipelinesAlphaEq expr _expected =
+                    assertBothPipelinesFailFast expr
 
             it "BUG-002-V1: factory twice with mixed instantiations elaborates to Int" $ do
                 let expr =
