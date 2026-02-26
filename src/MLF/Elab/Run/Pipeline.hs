@@ -43,7 +43,6 @@ import MLF.Elab.Run.Generalize
     ( constraintForGeneralization
     , generalizeAtWithBuilder
     , instantiationCopyNodes
-    , pruneBindParentsConstraint
     )
 import MLF.Elab.Run.Provenance (buildTraceCopyMap, collectBaseNamedKeys)
 import MLF.Elab.Run.Scope (letScopeOverrides)
@@ -89,10 +88,10 @@ runPipelineElabWith traceCfg genConstraints expr = do
     let setSolvedConstraint res c' =
             let cCanon = rewriteConstraintWithUF (Solved.canonicalMap res) c'
             in Solved.rebuildWithConstraint res cCanon
-        solvedClean =
-            setSolvedConstraint solvedView
-                (pruneBindParentsConstraint (Solved.solvedConstraint solvedView))
+        solvedClean = Solved.pruneBindParentsSolved solvedView
         solvedCleanView = solvedClean
+        -- solvedConstraint used here only for debug validation (validateSolvedGraphStrict);
+        -- logic code should use opaque Solved queries instead.
         solvedCleanSR = SolveResult
             { srConstraint = Solved.solvedConstraint solvedClean
             , srUnionFind = Solved.canonicalMap solvedClean
