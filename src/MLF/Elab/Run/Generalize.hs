@@ -102,7 +102,7 @@ buildGeneralizeEnv
     -> Constraint
     -> GeneralizeEnv
 buildGeneralizeEnv traceCfg solved redirects instCopyNodes instCopyMap base =
-    let solvedConstraint = Solved.solvedConstraint solved
+    let canonicalConstraint = Solved.canonicalConstraint solved
         canonical = Solved.canonical solved
         applyRedirectsToRef ref =
             case ref of
@@ -116,7 +116,7 @@ buildGeneralizeEnv traceCfg solved redirects instCopyNodes instCopyMap base =
                 GenRef _ -> nid
     in GeneralizeEnv
         { geBaseConstraint = base
-        , geSolvedConstraint = solvedConstraint
+        , geSolvedConstraint = canonicalConstraint
         , geRedirects = redirects
         , geInstCopyNodes = instCopyNodes
         , geInstCopyMap = instCopyMap

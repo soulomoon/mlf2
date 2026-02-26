@@ -90,13 +90,7 @@ runPipelineElabWith traceCfg genConstraints expr = do
             in Solved.rebuildWithConstraint res cCanon
         solvedClean = Solved.pruneBindParentsSolved solvedView
         solvedCleanView = solvedClean
-        -- solvedConstraint used here only for debug validation (validateSolvedGraphStrict);
-        -- logic code should use opaque Solved queries instead.
-        solvedCleanSR = SolveResult
-            { srConstraint = Solved.solvedConstraint solvedClean
-            , srUnionFind = Solved.canonicalMap solvedClean
-            }
-    case validateSolvedGraphStrict solvedCleanSR of
+    case Solved.validateCanonicalGraphStrict solvedClean of
         [] -> do
             let canonNode = makeCanonicalizer (Solved.canonicalMap solvedCleanView) (prRedirects pres)
                 adoptNode = canonicalizeNode canonNode

@@ -1,5 +1,28 @@
 # Implementation Notes
 
+### 2026-02-26 solvedConstraint migration phase 6 (`ebCanonicalConstraint` removal)
+
+- Removed `ebCanonicalConstraint :: Constraint` from `MLF.Constraint.Solved.EquivBackend`.
+- Replaced canonical-storage strategy with explicit canonical graph slices in backend state:
+  - `ebCanonicalNodes`, `ebCanonicalInstEdges`, `ebCanonicalUnifyEdges`
+  - `ebCanonicalBindParents`, `ebCanonicalPolySyms`, `ebCanonicalEliminatedVars`, `ebCanonicalWeakenedVars`
+  - `ebCanonicalAnnEdges`, `ebCanonicalLetEdges`, `ebCanonicalGenNodes`
+- Added internal helpers:
+  - `canonicalConstraintFromBackend` (reconstruct full canonical `Constraint`)
+  - `setCanonicalConstraint` (replace canonical slices from a `Constraint`)
+- Updated constructors/rebuilders/mutation helpers to operate on canonical slices while keeping public API behavior unchanged (`canonicalConstraint`, `rebuildWithConstraint`, `patchNode`, `rebuildWithNodes`, etc.).
+- Verification after refactor: `cabal build all && cabal test` (`822 examples, 0 failures`).
+
+### 2026-02-26 solvedConstraint migration batch 2 (Reify/Fallback canonical-domain API)
+
+- Removed direct `Solved.solvedConstraint` usage from:
+  - `MLF.Reify.Core` (`reifyWith` bind-parent access)
+  - `MLF.Elab.Run.ResultType.Fallback` (canonical bound lookup + scope-root post-check path)
+- Added `Solved.canonicalizedBindParents :: Solved -> Either BindingError BindParents` so reification can keep canonical bind-parent normalization semantics without extracting raw canonical constraints.
+- Added `bindingScopeRefCanonical :: Solved -> NodeId -> Either BindingError NodeRef` in `MLF.Elab.Run.Scope` for canonical-domain scope-root lookup over `Solved.canonicalBindParents`.
+- Fallback bound-resolution no longer depends on raw canonical `Constraint`; it now traverses canonical nodes/var-bounds via `Solved.lookupCanonicalNode` and `Solved.lookupCanonicalVarBound`.
+- Verification after migration: `cabal build all && cabal test` (`822 examples, 0 failures`).
+
 ### 2026-02-24 Eliminate DEV-PHI-STANDALONE-GRAFT-EXTENSION (thesis-exact standalone graft)
 
 - Retired DEV-PHI-STANDALONE-GRAFT-EXTENSION: deeper thesis analysis (Def. 15.3.4) reveals the standalone `OpGraft` handler (`atBinderKeep` + `InstInside(InstBot σ)`) IS thesis-exact — the deviation description was backwards. The paired `OpGraft+OpWeaken` handler producing `InstApp σ` is a sound optimization (equivalent by normalizeInst Rule 1).

@@ -742,7 +742,7 @@ buildGeneralizePlans
     -> NodeId
     -> Either ElabError (GeneralizePlan, ReifyPlan)
 buildGeneralizePlans traceCfg solved mbBindParentsGa scopeRoot targetNode = do
-    let constraint = Solved.solvedConstraint solved
+    let constraint = Solved.canonicalConstraint solved
         canonical = Solved.canonical solved
         presEnv =
             PresolutionEnv
@@ -761,7 +761,7 @@ buildGeneralizePlans traceCfg solved mbBindParentsGa scopeRoot targetNode = do
 
 mkGeneralizeEnv :: TraceConfig -> Maybe GaBindParents -> Solved -> GeneralizeEnv
 mkGeneralizeEnv traceCfg mbBindParentsGa solved =
-    let constraint = Solved.solvedConstraint solved
+    let constraint = Solved.canonicalConstraint solved
         nodes =
             IntMap.fromList
                 [ (getNodeId nid, node)

@@ -133,8 +133,7 @@ reifyWith _contextLabel solved nameForVar isNamed rootMode nid =
     lookupNode k = maybe (Left (MissingNode k)) Right (lookupNodeIn nodes k)
 
     bindParentsE = do
-        bindParents0 <- bindingToElab (canonicalizeBindParentsUnder canonical
-                            (Solved.solvedConstraint solved))
+        bindParents0 <- bindingToElab (Solved.canonicalizedBindParents solved)
         pure (softenBindParents canonical weakened bindParents0)
 
     boundIsSimple start =

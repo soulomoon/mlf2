@@ -24,6 +24,7 @@ module MLF.Constraint.Solved (
     canonical,
     canonicalMap,
     originalConstraint,
+    canonicalConstraint,
     solvedConstraint,
     lookupNode,
     allNodes,
@@ -53,10 +54,15 @@ module MLF.Constraint.Solved (
     weakenedVars,
     isEliminatedVar,
     canonicalBindParents,
+    canonicalizedBindParents,
     canonicalGenNodes,
     canonicalNodes,
+    allCanonicalNodes,
     lookupCanonicalNode,
     lookupCanonicalVarBound,
+
+    -- * Validation helpers
+    validateCanonicalGraphStrict,
 ) where
 
 import Prelude hiding (lookup)
@@ -71,23 +77,30 @@ import MLF.Constraint.Solve
     , SolveSnapshot(..)
     , solveResultFromSnapshot
     )
+import qualified MLF.Constraint.Solve as Solve
 import MLF.Constraint.Solve.Internal (SolveResult(..))
 import MLF.Constraint.Types.Graph
     ( BindFlag(..)
     , BindParents
+    , BindingError
     , Constraint(..)
+    , EliminatedVars
     , GenNode(..)
     , GenNodeMap(..)
     , InstEdge
     , NodeId(..)
     , NodeMap(..)
     , NodeRef(..)
+    , PolySyms
     , TyNode(..)
+    , UnifyEdge
+    , WeakenedVars
     , genNodeKey
     , nodeRefFromKey
     )
 import qualified MLF.Constraint.NodeAccess as NA
 import qualified MLF.Constraint.VarStore as VarStore
+import qualified MLF.Binding.Tree as Binding
 
 -- -----------------------------------------------------------------
 -- Opaque type
@@ -98,7 +111,16 @@ import qualified MLF.Constraint.VarStore as VarStore
 data SolvedBackend
     = EquivBackend
         { ebCanonicalMap :: IntMap NodeId
-        , ebCanonicalConstraint :: Constraint
+        , ebCanonicalNodes :: NodeMap TyNode
+        , ebCanonicalInstEdges :: [InstEdge]
+        , ebCanonicalUnifyEdges :: [UnifyEdge]
+        , ebCanonicalBindParents :: BindParents
+        , ebCanonicalPolySyms :: PolySyms
+        , ebCanonicalEliminatedVars :: EliminatedVars
+        , ebCanonicalWeakenedVars :: WeakenedVars
+        , ebCanonicalAnnEdges :: IntSet
+        , ebCanonicalLetEdges :: IntSet
+        , ebCanonicalGenNodes :: GenNodeMap GenNode
         , ebEquivClasses :: IntMap [NodeId]
         , ebOriginalConstraint :: Constraint
         }
@@ -116,7 +138,16 @@ mkTestSolved c uf =
         equivClasses = buildEquivClasses canonicalMap c
     in Solved EquivBackend
         { ebCanonicalMap = canonicalMap
-        , ebCanonicalConstraint = c
+        , ebCanonicalNodes = cNodes c
+        , ebCanonicalInstEdges = cInstEdges c
+        , ebCanonicalUnifyEdges = cUnifyEdges c
+        , ebCanonicalBindParents = cBindParents c
+        , ebCanonicalPolySyms = cPolySyms c
+        , ebCanonicalEliminatedVars = cEliminatedVars c
+        , ebCanonicalWeakenedVars = cWeakenedVars c
+        , ebCanonicalAnnEdges = cAnnEdges c
+        , ebCanonicalLetEdges = cLetEdges c
+        , ebCanonicalGenNodes = cGenNodes c
         , ebEquivClasses = equivClasses
         , ebOriginalConstraint = c
         }
@@ -147,11 +178,20 @@ fromPreRewriteStateStrict uf preRewrite = do
     replayed <- solveResultFromSnapshot snapshot
     let
         canonicalMap = buildCanonicalMap (srUnionFind replayed) preRewrite
-        canonicalConstraint = srConstraint replayed
+        canonicalC = srConstraint replayed
         equivClasses = buildEquivClasses canonicalMap preRewrite
     pure $ Solved EquivBackend
         { ebCanonicalMap = canonicalMap
-        , ebCanonicalConstraint = canonicalConstraint
+        , ebCanonicalNodes = cNodes canonicalC
+        , ebCanonicalInstEdges = cInstEdges canonicalC
+        , ebCanonicalUnifyEdges = cUnifyEdges canonicalC
+        , ebCanonicalBindParents = cBindParents canonicalC
+        , ebCanonicalPolySyms = cPolySyms canonicalC
+        , ebCanonicalEliminatedVars = cEliminatedVars canonicalC
+        , ebCanonicalWeakenedVars = cWeakenedVars canonicalC
+        , ebCanonicalAnnEdges = cAnnEdges canonicalC
+        , ebCanonicalLetEdges = cLetEdges canonicalC
+        , ebCanonicalGenNodes = cGenNodes canonicalC
         , ebEquivClasses = equivClasses
         , ebOriginalConstraint = preRewrite
         }
@@ -245,6 +285,47 @@ equivCanonical canonMap = go IntSet.empty
 -- Core queries
 -- -----------------------------------------------------------------
 
+canonicalConstraintFromBackend :: SolvedBackend -> Constraint
+canonicalConstraintFromBackend EquivBackend
+    { ebCanonicalNodes = nodes
+    , ebCanonicalInstEdges = instEdges0
+    , ebCanonicalUnifyEdges = unifyEdges0
+    , ebCanonicalBindParents = bindParents0
+    , ebCanonicalPolySyms = polySyms
+    , ebCanonicalEliminatedVars = eliminatedVars
+    , ebCanonicalWeakenedVars = weakenedVars0
+    , ebCanonicalAnnEdges = annEdges
+    , ebCanonicalLetEdges = letEdges
+    , ebCanonicalGenNodes = genNodes0
+    } =
+    Constraint
+        { cNodes = nodes
+        , cInstEdges = instEdges0
+        , cUnifyEdges = unifyEdges0
+        , cBindParents = bindParents0
+        , cPolySyms = polySyms
+        , cEliminatedVars = eliminatedVars
+        , cWeakenedVars = weakenedVars0
+        , cAnnEdges = annEdges
+        , cLetEdges = letEdges
+        , cGenNodes = genNodes0
+        }
+
+setCanonicalConstraint :: Constraint -> SolvedBackend -> SolvedBackend
+setCanonicalConstraint c eb =
+    eb
+        { ebCanonicalNodes = cNodes c
+        , ebCanonicalInstEdges = cInstEdges c
+        , ebCanonicalUnifyEdges = cUnifyEdges c
+        , ebCanonicalBindParents = cBindParents c
+        , ebCanonicalPolySyms = cPolySyms c
+        , ebCanonicalEliminatedVars = cEliminatedVars c
+        , ebCanonicalWeakenedVars = cWeakenedVars c
+        , ebCanonicalAnnEdges = cAnnEdges c
+        , ebCanonicalLetEdges = cLetEdges c
+        , ebCanonicalGenNodes = cGenNodes c
+        }
+
 -- | Chase the canonical map to the canonical representative.
 canonical :: Solved -> NodeId -> NodeId
 canonical (Solved EquivBackend { ebCanonicalMap = canonMap }) nid =
@@ -260,15 +341,19 @@ originalConstraint :: Solved -> Constraint
 originalConstraint (Solved EquivBackend { ebOriginalConstraint = c }) = c
 
 -- | The canonical (post-solving) constraint.
+canonicalConstraint :: Solved -> Constraint
+canonicalConstraint (Solved eb) = canonicalConstraintFromBackend eb
+
+-- | The canonical (post-solving) constraint.
 --
 -- /Deprecated/: prefer the opaque queries ('lookupNode', 'allNodes',
 -- 'lookupBindParent', 'bindParents', 'instEdges', 'genNodes',
 -- 'lookupVarBound') which already read from the original constraint.
--- This accessor and the underlying 'ebCanonicalConstraint' field will
--- be removed once all external callers are migrated.
+-- This compatibility accessor will be removed once downstream callers
+-- are migrated to 'canonicalConstraint' and higher-level queries.
 -- See Note [solvedConstraint migration status].
 solvedConstraint :: Solved -> Constraint
-solvedConstraint (Solved EquivBackend { ebCanonicalConstraint = c }) = c
+solvedConstraint = canonicalConstraint
 
 -- | Look up a type node, canonicalizing the id first.
 lookupNode :: Solved -> NodeId -> Maybe TyNode
@@ -309,13 +394,8 @@ lookupVarBound s@(Solved EquivBackend { ebOriginalConstraint = c }) nid =
 -- canonical map. Used by callers that modify the constraint
 -- (e.g., alias insertion, canonicalization).
 rebuildWithConstraint :: Solved -> Constraint -> Solved
-rebuildWithConstraint (Solved EquivBackend { ebCanonicalMap = cm, ebEquivClasses = ec, ebOriginalConstraint = orig }) c =
-    Solved EquivBackend
-        { ebCanonicalMap = cm
-        , ebCanonicalConstraint = c
-        , ebEquivClasses = ec
-        , ebOriginalConstraint = orig
-        }
+rebuildWithConstraint (Solved eb) c =
+    Solved (setCanonicalConstraint c eb)
 
 -- -----------------------------------------------------------------
 -- Mutation helpers
@@ -324,18 +404,17 @@ rebuildWithConstraint (Solved EquivBackend { ebCanonicalMap = cm, ebEquivClasses
 -- | Modify a node in the canonical constraint by its canonical ID.
 -- Used by Fallback.hs to patch TyVar bounds.
 patchNode :: Solved -> NodeId -> (TyNode -> TyNode) -> Solved
-patchNode (Solved eb@EquivBackend { ebCanonicalConstraint = c }) nid f =
-    let NodeMap nodes = cNodes c
+patchNode (Solved eb@EquivBackend { ebCanonicalNodes = NodeMap nodes }) nid f =
+    let
         nodes' = NodeMap (IntMap.adjust f (getNodeId nid) nodes)
-        c' = c { cNodes = nodes' }
-    in Solved eb { ebCanonicalConstraint = c' }
+    in Solved eb { ebCanonicalNodes = nodes' }
 
 -- | Prune dead bind-parent entries from the canonical constraint.
 -- Used by Pipeline.hs.
 pruneBindParentsSolved :: Solved -> Solved
-pruneBindParentsSolved (Solved eb@EquivBackend { ebCanonicalConstraint = c }) =
-    let liveNodes = getNodeMap (cNodes c)
-        liveGens = getGenNodeMap (cGenNodes c)
+pruneBindParentsSolved (Solved eb@EquivBackend { ebCanonicalNodes = nodes, ebCanonicalGenNodes = genNodes0, ebCanonicalBindParents = bindParents0 }) =
+    let liveNodes = getNodeMap nodes
+        liveGens = getGenNodeMap genNodes0
         liveRef ref =
             case ref of
                 TypeRef nid -> IntMap.member (getNodeId nid) liveNodes
@@ -346,24 +425,24 @@ pruneBindParentsSolved (Solved eb@EquivBackend { ebCanonicalConstraint = c }) =
                 (\childKey (parentRef, _flag) ->
                     liveChild childKey && liveRef parentRef
                 )
-                (cBindParents c)
-    in Solved eb { ebCanonicalConstraint = c { cBindParents = bindParents' } }
+                bindParents0
+    in Solved eb { ebCanonicalBindParents = bindParents' }
 
 -- | Replace the canonical node map.
 -- Used by Generalize phases that build merged node maps.
 rebuildWithNodes :: Solved -> NodeMap TyNode -> Solved
-rebuildWithNodes (Solved eb@EquivBackend { ebCanonicalConstraint = c }) nodes =
-    Solved eb { ebCanonicalConstraint = c { cNodes = nodes } }
+rebuildWithNodes (Solved eb) nodes =
+    Solved eb { ebCanonicalNodes = nodes }
 
 -- | Replace the canonical bind parents.
 rebuildWithBindParents :: Solved -> BindParents -> Solved
-rebuildWithBindParents (Solved eb@EquivBackend { ebCanonicalConstraint = c }) bp =
-    Solved eb { ebCanonicalConstraint = c { cBindParents = bp } }
+rebuildWithBindParents (Solved eb) bp =
+    Solved eb { ebCanonicalBindParents = bp }
 
 -- | Replace the canonical gen nodes.
 rebuildWithGenNodes :: Solved -> GenNodeMap GenNode -> Solved
-rebuildWithGenNodes (Solved eb@EquivBackend { ebCanonicalConstraint = c }) gn =
-    Solved eb { ebCanonicalConstraint = c { cGenNodes = gn } }
+rebuildWithGenNodes (Solved eb) gn =
+    Solved eb { ebCanonicalGenNodes = gn }
 
 -- -----------------------------------------------------------------
 -- Extended queries
@@ -401,32 +480,41 @@ wasOriginalBinder s@(Solved EquivBackend { ebOriginalConstraint = c }) nid =
 
 -- | Weakened variable IDs from the canonical (post-solve) constraint.
 weakenedVars :: Solved -> IntSet
-weakenedVars (Solved EquivBackend { ebCanonicalConstraint = c }) = cWeakenedVars c
+weakenedVars (Solved EquivBackend { ebCanonicalWeakenedVars = ws }) = ws
 
 -- | Is the node an eliminated variable in the canonical constraint?
 isEliminatedVar :: Solved -> NodeId -> Bool
-isEliminatedVar (Solved EquivBackend { ebCanonicalConstraint = c }) nid =
-    VarStore.isEliminatedVar c nid
+isEliminatedVar (Solved EquivBackend { ebCanonicalEliminatedVars = evs }) nid =
+    IntSet.member (getNodeId nid) evs
 
 -- | Bind parents from the canonical (post-solve) constraint.
 canonicalBindParents :: Solved -> BindParents
-canonicalBindParents (Solved EquivBackend { ebCanonicalConstraint = c }) = cBindParents c
+canonicalBindParents (Solved EquivBackend { ebCanonicalBindParents = bp }) = bp
+
+-- | Canonicalized bind parents in canonical domain (with UF/redirect collapse).
+canonicalizedBindParents :: Solved -> Either BindingError BindParents
+canonicalizedBindParents s =
+    Binding.canonicalizeBindParentsUnder (canonical s) (canonicalConstraint s)
 
 -- | Gen nodes from the canonical constraint.
 canonicalGenNodes :: Solved -> GenNodeMap GenNode
-canonicalGenNodes (Solved EquivBackend { ebCanonicalConstraint = c }) = cGenNodes c
+canonicalGenNodes (Solved EquivBackend { ebCanonicalGenNodes = gn }) = gn
 
 -- | The canonical node map (post-solve nodes keyed by canonical IDs).
 canonicalNodes :: Solved -> NodeMap TyNode
-canonicalNodes (Solved EquivBackend { ebCanonicalConstraint = c }) = cNodes c
+canonicalNodes (Solved EquivBackend { ebCanonicalNodes = nodes }) = nodes
+
+-- | All nodes from the canonical (post-solve) constraint.
+allCanonicalNodes :: Solved -> [TyNode]
+allCanonicalNodes s = NA.allNodes (canonicalConstraint s)
 
 -- | Look up a node in the canonical constraint by its canonical ID.
 --
 -- Unlike 'lookupNode', this does /not/ canonicalize the ID first —
 -- the caller is expected to provide a canonical ID.
 lookupCanonicalNode :: Solved -> NodeId -> Maybe TyNode
-lookupCanonicalNode (Solved EquivBackend { ebCanonicalConstraint = c }) nid =
-    NA.lookupNode c nid
+lookupCanonicalNode s nid =
+    NA.lookupNode (canonicalConstraint s) nid
 
 -- | Look up the instance bound of a variable in the canonical constraint.
 --
@@ -434,43 +522,27 @@ lookupCanonicalNode (Solved EquivBackend { ebCanonicalConstraint = c }) nid =
 -- and reads from the canonical (post-solve) constraint rather than the
 -- original. The caller is expected to provide a canonical ID.
 lookupCanonicalVarBound :: Solved -> NodeId -> Maybe NodeId
-lookupCanonicalVarBound (Solved EquivBackend { ebCanonicalConstraint = c }) nid =
-    VarStore.lookupVarBound c nid
+lookupCanonicalVarBound s nid =
+    VarStore.lookupVarBound (canonicalConstraint s) nid
+
+-- | Run strict solved-graph validation against the canonical solved view.
+validateCanonicalGraphStrict :: Solved -> [String]
+validateCanonicalGraphStrict s =
+    Solve.validateSolvedGraphStrict
+        SolveResult
+            { srConstraint = canonicalConstraint s
+            , srUnionFind = canonicalMap s
+            }
 
 {- Note [solvedConstraint migration status]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Tasks 14-17 migrated the core opaque queries (lookupNode, allNodes,
-lookupBindParent, bindParents, instEdges, genNodes, lookupVarBound)
-to read from ebOriginalConstraint instead of ebCanonicalConstraint.
+As of 2026-02-26, the repository has no internal call sites of the
+compatibility accessor in `src/` or `test/`.
 
-However, ~20 external callers still use solvedConstraint to obtain the
-raw canonical Constraint and then access its fields directly (cNodes,
-cBindParents, cGenNodes, lookupVarBound, etc.). These callers fall
-into two categories:
+`solvedConstraint` is retained only as a compatibility alias for
+`canonicalConstraint`. New code should prefer `canonicalConstraint`
+or the higher-level `Solved` query helpers.
 
-  (a) Read-only: use the canonical constraint for node lookup,
-      var-bound chasing, bind-parent traversal, gen-node enumeration,
-      order-key computation, reification, and validation.
-      Files: Reify/Core.hs, Reify/TypeOps.hs, Elab/Legacy.hs,
-      Elab/Elaborate.hs, Elab/Run/TypeOps.hs, Elab/Run/Scope.hs,
-      Elab/Run/ResultType/Ann.hs, Elab/Run/ResultType/Fallback.hs,
-      Util/Order.hs, Presolution/Plan.hs,
-      Elab/Run/Generalize (Phase1-4, Finalize).
-
-  (b) Read-write: obtain the canonical constraint, modify it (e.g.
-      alias insertion, bind-parent pruning, node-map replacement),
-      and store it back via rebuildWithConstraint.
-      Files: Elab/Run/Pipeline.hs, Elab/Generalize.hs,
-      Elab/Run/ResultType/Fallback.hs, Presolution/Plan/Context.hs.
-
-  (c) Test: PipelineSpec.hs feeds solvedConstraint into
-      validateSolvedGraphStrict via SolveResult.
-
-To remove ebCanonicalConstraint, all category (a) callers must be
-migrated to use the opaque queries or originalConstraint + canonical.
-Category (b) callers need a replacement for the rebuild pattern
-(possibly operating on originalConstraint directly). Category (c)
-callers need a validation path that works with the original constraint.
-
-This is tracked as future work beyond Task 18.
+Removing the alias requires an explicit compatibility break for any
+downstream users.
 -}

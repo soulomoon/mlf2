@@ -655,12 +655,12 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 other -> expectationFailure $
                     "Expected TyVar for alpha in originalConstraint, got: " ++ show other
 
-            -- solvedConstraint (canonical) should map alpha to Int
-            let solvedC = Solved.solvedConstraint solved
+            -- canonicalConstraint should map alpha to Int
+            let solvedC = Solved.canonicalConstraint solved
             case lookupNodeIn (cNodes solvedC) (Solved.canonical solved alpha) of
                 Just (TyBase _ (BaseTy "Int")) -> pure ()
                 other -> expectationFailure $
-                    "Expected TyBase Int for canonical(alpha) in solvedConstraint, got: " ++ show other
+                    "Expected TyBase Int for canonical(alpha) in canonicalConstraint, got: " ++ show other
 
     describe "xMLF types (instance bounds)" $ do
         it "pretty prints unbounded forall" $ do

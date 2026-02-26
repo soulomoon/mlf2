@@ -1,5 +1,6 @@
 module MLF.Elab.Run.Scope (
     bindingScopeRef,
+    bindingScopeRefCanonical,
     preferGenScope,
     schemeBodyTarget,
     canonicalizeScopeRef,
@@ -9,19 +10,21 @@ module MLF.Elab.Run.Scope (
 
 import Data.Functor.Foldable (cata)
 import qualified Data.IntMap.Strict as IntMap
+import qualified Data.IntSet as IntSet
 import Data.Maybe (listToMaybe)
 
 import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Solved (Solved)
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types
-    ( BindingError
+    ( BindingError(..)
     , Constraint
     , NodeId(..)
     , NodeRef(..)
     , TyNode(..)
     , getNodeId
     , gnSchemes
+    , nodeRefKey
     , typeRef
     )
 import qualified MLF.Constraint.VarStore as VarStore
@@ -67,6 +70,28 @@ bindingScopeRef constraint root = do
     case listToMaybe [gid | GenRef gid <- drop 1 path] of
         Just gid -> Right (GenRef gid)
         Nothing -> Right (TypeRef root)
+
+-- | Canonical-domain variant of 'bindingScopeRef' that traverses
+-- 'Solved.canonicalBindParents'.
+bindingScopeRefCanonical :: Solved -> NodeId -> Either BindingError NodeRef
+bindingScopeRefCanonical solved root = do
+    path <- bindingPathToRootFromBindParents (Solved.canonicalBindParents solved) (typeRef root)
+    case listToMaybe [gid | GenRef gid <- drop 1 path] of
+        Just gid -> Right (GenRef gid)
+        Nothing -> Right (TypeRef root)
+  where
+    bindingPathToRootFromBindParents bindParents = go IntSet.empty []
+      where
+        go seen path ref
+            | IntSet.member (nodeRefKey ref) seen =
+                Left (BindingCycleDetected (reverse (ref : path)))
+            | otherwise =
+                let key = nodeRefKey ref
+                    seen' = IntSet.insert key seen
+                    path' = ref : path
+                in case IntMap.lookup key bindParents of
+                    Nothing -> Right (reverse path')
+                    Just (parent, _) -> go seen' path' parent
 
 preferGenScope :: Constraint -> NodeRef -> NodeRef
 preferGenScope constraint ref = case ref of

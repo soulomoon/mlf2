@@ -2,11 +2,17 @@
 
 **Goal:** Eliminate the last 5 `solvedConstraint` callers and remove `ebCanonicalConstraint` from `EquivBackend`.
 
-**Status:** 7 of 12 production callers migrated. 5 remain (7 call sites across 5 files).
+**Status:** Completed — 12 of 12 production callers migrated, test callers migrated, and `ebCanonicalConstraint` removed from `EquivBackend` (2026-02-26).
 
 **Prerequisite:** Branch `equiv-class-abstraction` (M5a-M5d complete).
 
 ---
+
+## Execution Update (2026-02-26)
+
+- Tier 1-4 migration targets listed in this plan have been applied in production modules (`Pipeline`, `Reify/Core`, `Fallback`, `Presolution/Plan`, `Elab/Run/Generalize`).
+- Production and test code no longer call `Solved.solvedConstraint`; remaining references are compatibility alias/docs-only.
+- Phase 6 is complete: `MLF.Constraint.Solved.EquivBackend` no longer stores `ebCanonicalConstraint`; canonical graph state is stored as explicit canonical slices and reconstructed via `canonicalConstraint`.
 
 ## Problem Analysis
 

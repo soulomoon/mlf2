@@ -29,7 +29,6 @@ import MLF.Frontend.Syntax
 import MLF.Frontend.ConstraintGen
 import MLF.Constraint.Canonicalizer (canonicalizerFrom, canonicalizeNode)
 import MLF.Constraint.Presolution
-import MLF.Constraint.Solve (SolveResult(..), validateSolvedGraphStrict)
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Solved (Solved)
 import MLF.Constraint.Types.Graph
@@ -197,7 +196,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             case runPipelineArtifactsDefault defaultPolySyms expr of
                 Left err -> expectationFailure err
                 Right PipelineArtifacts{ paConstraintNorm = c1, paPresolution = pres, paSolved = solved } ->
-                    case validateSolvedGraphStrict (SolveResult { srConstraint = Solved.solvedConstraint solved, srUnionFind = Solved.canonicalMap solved }) of
+                    case Solved.validateCanonicalGraphStrict solved of
                         [] -> do
                             let canon = canonicalizerFrom (\nid -> Solved.canonical solved (chaseRedirects (prRedirects pres) nid))
                                 adoptNode = canonicalizeNode canon
@@ -1007,8 +1006,7 @@ annRootNode expr = case expr of
 
 validateStrict :: Solved -> Expectation
 validateStrict s =
-    let sr = SolveResult { srConstraint = Solved.solvedConstraint s, srUnionFind = Solved.canonicalMap s }
-    in case validateSolvedGraphStrict sr of
+    case Solved.validateCanonicalGraphStrict s of
         [] -> pure ()
         vs -> expectationFailure ("validateSolvedGraph failed:\n" ++ unlines vs)
 

@@ -18,7 +18,6 @@ import MLF.Constraint.Types.Graph
     , NodeId(..)
     , NodeRef(..)
     , TyNode(..)
-    , cBindParents
     , cLetEdges
     , cNodes
     , fromListNode
@@ -29,18 +28,16 @@ import MLF.Constraint.Types.Graph
     , gnSchemes
     , nodeRefFromKey
     , toListNode
+    , toListGen
     )
 import MLF.Constraint.Types.Witness (EdgeWitness(..))
-import qualified MLF.Constraint.VarStore as VarStore
-import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Elab.Phi (phiFromEdgeWitnessWithTrace)
 import MLF.Elab.Types
-import MLF.Reify.TypeOps (resolveBaseBoundForInstConstraint)
 import MLF.Elab.Run.Annotation (annNode)
 import MLF.Elab.Run.Debug (debugGaScope, debugGaScopeEnabled, debugWhenCondM, debugWhenM)
 import MLF.Elab.Run.Scope
-    ( bindingScopeRef
+    ( bindingScopeRefCanonical
     , canonicalizeScopeRef
     , resolveCanonicalScope
     , schemeBodyTarget
@@ -172,10 +169,6 @@ computeResultTypeFallbackCore ctx annCanon ann = do
         redirects = rtcRedirects ctx
         traceCfg = rtcTraceConfig ctx
         solvedForGenView = solvedForGen
-        solvedConstraintOf = Solved.solvedConstraint
-        canonicalOf = Solved.canonical
-        setSolvedConstraint res c' =
-            Solved.rebuildWithConstraint res c'
         generalizeAtWith = \mbGa s -> generalizeAtWithBuilder planBuilder mbGa s
 
     let edgeTraceCounts =
@@ -184,10 +177,11 @@ computeResultTypeFallbackCore ctx annCanon ann = do
                 [ (getNodeId (etRoot tr), 1 :: Int)
                 | tr <- IntMap.elems edgeTraces
                 ]
+    let genNodesOriginal = map snd (toListGen (Solved.genNodes solvedForGenView))
     let schemeRootSet =
             IntSet.fromList
                 [ getNodeId (canonical root)
-                | gen <- NodeAccess.allGenNodes (Solved.originalConstraint solvedForGenView)
+                | gen <- genNodesOriginal
                 , root <- gnSchemes gen
                 ]
         isSchemeRoot nid =
@@ -234,9 +228,24 @@ computeResultTypeFallbackCore ctx annCanon ann = do
             Left (ValidationFailed ["computeResultTypeFallback called with AAnn - use facade instead"])
         _ -> do
             let rootC = canonical rootForType
-                constraint = solvedConstraintOf solved
-                nodes = cNodes constraint
+                nodes = Solved.canonicalNodes solved
                 nodeList = map snd (toListNode nodes)
+                resolveBaseBoundCanonical start =
+                    let go visited nid0 =
+                            let nid = canonical nid0
+                                key = getNodeId nid
+                            in if IntSet.member key visited
+                                then Nothing
+                                else
+                                    case Solved.lookupCanonicalNode solved nid of
+                                        Just TyBase{} -> Just nid
+                                        Just TyBottom{} -> Just nid
+                                        Just TyVar{} ->
+                                            case Solved.lookupCanonicalVarBound solved nid of
+                                                Just bnd -> go (IntSet.insert key visited) bnd
+                                                Nothing -> Nothing
+                                        _ -> Nothing
+                    in go IntSet.empty start
                 rootInstRoots =
                     [ etRoot tr
                     | EdgeId eid <- collectEdges rootForTypeAnn
@@ -277,7 +286,7 @@ computeResultTypeFallbackCore ctx annCanon ann = do
                                 Left _ -> IntSet.empty
                         Nothing -> IntSet.empty
                 argBounds arg = do
-                    baseC <- resolveBaseBoundForInstConstraint constraint canonical arg
+                    baseC <- resolveBaseBoundCanonical arg
                     case lookupNodeIn nodes baseC of
                         Just TyBase{} -> Just baseC
                         Just TyBottom{} -> Just baseC
@@ -313,7 +322,7 @@ computeResultTypeFallbackCore ctx annCanon ann = do
                                 else if not (IntSet.null fromArgEdge)
                                     then fromArgEdge
                                     else
-                                        case resolveBaseBoundForInstConstraint constraint canonical (annNode arg) of
+                                        case resolveBaseBoundCanonical (annNode arg) of
                                             Just baseC -> IntSet.singleton (getNodeId baseC)
                                             Nothing -> IntSet.empty
                         _ -> IntSet.empty
@@ -367,7 +376,7 @@ computeResultTypeFallbackCore ctx annCanon ann = do
             let baseTarget =
                     case lookupNodeIn nodes rootC of
                         Just TyVar{} ->
-                            case resolveBaseBoundForInstConstraint constraint canonical rootC of
+                            case resolveBaseBoundCanonical rootC of
                                 Just baseC
                                     | IntSet.size rootBoundCandidates == 1
                                         && IntSet.member (getNodeId baseC) rootBoundCandidates
@@ -416,7 +425,7 @@ computeResultTypeFallbackCore ctx annCanon ann = do
             debugWhenM traceCfg
                 (let showBase tr =
                         let bases =
-                                [ resolveBaseBoundForInstConstraint constraint canonical argNode
+                                [ resolveBaseBoundCanonical argNode
                                 | (binder, arg) <- etBinderArgs tr
                                 , let argNode =
                                         case lookupCopy binder (etCopyMap tr) of
@@ -426,7 +435,7 @@ computeResultTypeFallbackCore ctx annCanon ann = do
                         in (etRoot tr, bases)
                      perEdge = map showBase (IntMap.elems edgeTraces)
                      edgeRightBases =
-                        [ (EdgeId eid, ewRight ew, resolveBaseBoundForInstConstraint constraint canonical (ewRight ew))
+                        [ (EdgeId eid, ewRight ew, resolveBaseBoundCanonical (ewRight ew))
                         | (eid, ew) <- IntMap.toList edgeWitnesses
                         ]
                      edgeExpansionsList =
@@ -470,24 +479,16 @@ computeResultTypeFallbackCore ctx annCanon ann = do
                     case boundTarget of
                         Nothing -> resFinal
                         Just baseN ->
-                            let constraint0 = solvedConstraintOf resFinal
-                                nodes0 = cNodes constraint0
-                                adjustNode node =
+                            let adjustNode node =
                                     case node of
                                         TyVar{ tnId = nid, tnBound = Nothing } ->
                                             TyVar{ tnId = nid, tnBound = Just (canonical baseN) }
                                         _ -> node
-                                nodes' =
-                                    fromListNode
-                                        [ (nid, if nid == rootC then adjustNode node else node)
-                                        | (nid, node) <- toListNode nodes0
-                                        ]
-                                constraint' = constraint0 { cNodes = nodes' }
-                            in setSolvedConstraint resFinal constraint'
+                            in Solved.patchNode resFinal rootC adjustNode
             let scopeRootNodePre = rootForTypePre
             scopeRootPre <- bindingToElab (resolveCanonicalScope c1 resFinalBounded redirects scopeRootNodePre)
             let scopeRootPost =
-                    case bindingScopeRef (solvedConstraintOf resFinalBounded) rootC of
+                    case bindingScopeRefCanonical resFinalBounded rootC of
                         Right ref -> canonicalizeScopeRef resFinalBounded redirects ref
                         Left _ -> scopeRootPre
                 scopeRoot = scopeRootPre
@@ -501,10 +502,10 @@ computeResultTypeFallbackCore ctx annCanon ann = do
                     ++ " postNode="
                     ++ show rootC
                 )
-            let constraintFinalBounded = solvedConstraintOf resFinalBounded
-                canonicalFinal = canonicalOf resFinalBounded
+            let canonicalFinal = Solved.canonical resFinalBounded
                 rootFinal = canonicalFinal rootC
-                nodesFinal = cNodes constraintFinalBounded
+                nodesFinal = Solved.canonicalNodes resFinalBounded
+                genNodesFinal = map snd (toListGen (Solved.canonicalGenNodes resFinalBounded))
                 rootBound =
                     case lookupNodeIn nodesFinal rootFinal of
                         Just TyVar{ tnBound = Just bnd } -> Just (canonicalFinal bnd)
@@ -520,7 +521,7 @@ computeResultTypeFallbackCore ctx annCanon ann = do
                 rootIsSchemeRoot =
                     any
                         (\gen -> any (\root -> canonicalFinal root == rootFinal) (gnSchemes gen))
-                        (NodeAccess.allGenNodes constraintFinalBounded)
+                        genNodesFinal
                 rootIsSchemeAlias =
                     rootIsSchemeRoot
                         && maybe False (const True) rootBound
@@ -529,13 +530,13 @@ computeResultTypeFallbackCore ctx annCanon ann = do
                 schemeRootSetFinal =
                     IntSet.fromList
                         [ getNodeId (canonicalFinal root)
-                        | gen <- NodeAccess.allGenNodes constraintFinalBounded
+                        | gen <- genNodesFinal
                         , root <- gnSchemes gen
                         ]
                 schemeRootOwnerFinal =
                     IntMap.fromList
                         [ (getNodeId (canonicalFinal root), gnId gen)
-                        | gen <- NodeAccess.allGenNodes constraintFinalBounded
+                        | gen <- genNodesFinal
                         , root <- gnSchemes gen
                         ]
                 boundHasForallFrom start0 =
@@ -631,10 +632,10 @@ computeResultTypeFallbackCore ctx annCanon ann = do
                                       , canonicalFinal (schemeBodyTarget resFinalBounded bnd)
                                       , boundHasForallFrom bnd
                                       )
-                                    | (childKey, (parentRef, _flag)) <- IntMap.toList (cBindParents constraintFinalBounded)
+                                    | (childKey, (parentRef, _flag)) <- IntMap.toList (Solved.canonicalBindParents resFinalBounded)
                                     , parentRef == GenRef gid
                                     , TypeRef child <- [nodeRefFromKey childKey]
-                                    , Just bnd <- [VarStore.lookupVarBound constraintFinalBounded (canonicalFinal child)]
+                                    , Just bnd <- [Solved.lookupCanonicalVarBound resFinalBounded (canonicalFinal child)]
                                     ]
                                 debugCandidates =
                                     if debugGaScopeEnabled traceCfg
