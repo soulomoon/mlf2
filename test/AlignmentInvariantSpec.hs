@@ -114,3 +114,22 @@ spec = describe "Thesis alignment invariants" $ do
                     (Left _, Left _) -> pure ()
                     _ -> expectationFailure $
                         "Path disagreement for " ++ label
+
+    describe "D2: elaboration path is read-only on Solved" $ do
+        let corpus =
+                [ ("id", ELam "x" (EVar "x"))
+                , ("let-poly", ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (EVar "id")))
+                , ("ann-id", EAnn (ELam "x" (EVar "x")) (STForall "a" Nothing (STArrow (STVar "a") (STVar "a"))))
+                , ("nested-let"
+                  , ELet "f" (ELam "x" (EVar "x"))
+                        (ELet "g" (EVar "f")
+                            (EApp (EVar "g") (EVar "g"))))
+                ]
+        forM_ corpus $ \(label, expr) ->
+            it ("full pipeline succeeds post-boundary-enforcement for: " ++ label) $ do
+                let result = runPipelineElab Set.empty (unsafeNormalizeExpr expr)
+                case result of
+                    Left err -> expectationFailure (show err)
+                    Right (term, ty) -> do
+                        show term `shouldNotBe` ""
+                        show ty `shouldNotBe` ""
