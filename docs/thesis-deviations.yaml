@@ -88,3 +88,26 @@ deviations:
         file: test/PresolutionSpec.hs
     status: implementation-choice
 
+  - id: TA-001
+    status: resolved
+    description: >
+      Phi depended on canonical rewritten graph as primary source
+    resolution: >
+      Migrated to witness-domain-first resolution per §15.3.5-15.3.6
+    date: 2026-02-27
+
+  - id: TA-002
+    status: resolved
+    description: >
+      Fallback.hs used patchNode to mutate Solved in elaboration path
+    resolution: >
+      Eliminated patchNode; bound patching replaced with rebuildWithNodes local projection
+    date: 2026-02-27
+
+  - id: TA-003
+    status: resolved
+    description: >
+      solvedConstraint alias obscured intent (original vs canonical)
+    resolution: >
+      Deprecated and removed; call sites migrated to explicit accessors
+    date: 2026-02-27

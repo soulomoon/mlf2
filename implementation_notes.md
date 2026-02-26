@@ -1,5 +1,24 @@
 # Implementation Notes
 
+## Thesis Alignment (Phase A–E)
+
+### Solved Semantics
+- `Solved` is now a projection-first layer over equivalence classes.
+- `originalConstraint` is the primary accessor for pre-solve data.
+- `canonicalConstraint` is used only when post-solve canonical data is explicitly needed.
+- Canonical chasing (`canonical`) reconciles aliases but is not the primary source of semantic inputs.
+
+### Phi Translation
+- Phi/Omega/IdentityBridge resolve binder identity from witness domain (EdgeTrace/EdgeWitness) first.
+- Equivalence-class projection (`classMembers`) is a reconciliation fallback, not the primary resolution path.
+- `sourceKeysForNode` ranking: raw key → canonical key → copy-map keys → class members, sorted by trace order.
+
+### Pipeline Boundary
+- Presolution owns all graph transformations.
+- Elaboration path does not mutate Solved or the constraint graph.
+- Pipeline setup (before elaboration) may use `rebuildWithConstraint` for canonicalization and `pruneBindParentsSolved` for cleanup.
+- Generalize creates local Solved variants via `rebuildWithConstraint` for alias reification; these do not propagate to the pipeline's Solved handle.
+
 ### 2026-02-26 Legacy replay removal + frozen parity baseline
 
 - Removed internal legacy fallback elaboration entrypoints:

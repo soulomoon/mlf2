@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Changed
+- Aligned elaboration pipeline with thesis model (§10.3-10.4, §12.1.3, §15.3.5-15.3.6)
+- Solved is now projection-first; Phi resolves from witness domain before canonical fallback
+- Eliminated patchNode mutation from elaboration path (Fallback.hs)
+- Enforced read-only boundary for elaboration path on Solved
+- Removed deprecated `solvedConstraint` alias
+
 * Removed the internal legacy replay fallback path from elaboration (`runPipelineElabViaLegacySolve`) and cleaned legacy fallback helpers from the test harness.
 * Replaced live native-vs-legacy parity checks with frozen baseline artifacts:
   - new deterministic artifact module `test/Parity/FrozenArtifacts.hs`,
