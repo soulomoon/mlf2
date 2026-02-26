@@ -26,7 +26,6 @@ module MLF.Constraint.Solved (
     canonicalMap,
     originalConstraint,
     canonicalConstraint,
-    solvedConstraint,
     lookupNode,
     allNodes,
     lookupBindParent,
@@ -374,18 +373,6 @@ originalConstraint (Solved EquivBackend { ebOriginalConstraint = c }) = c
 canonicalConstraint :: Solved -> Constraint
 canonicalConstraint (Solved eb) = canonicalConstraintFromBackend eb
 
--- | The canonical (post-solving) constraint.
---
--- /Deprecated/: prefer the opaque queries ('lookupNode', 'allNodes',
--- 'lookupBindParent', 'bindParents', 'instEdges', 'genNodes',
--- 'lookupVarBound') which already read from the original constraint.
--- This compatibility accessor will be removed once downstream callers
--- are migrated to 'canonicalConstraint' and higher-level queries.
--- See Note [solvedConstraint migration status].
-{-# DEPRECATED solvedConstraint "Use originalConstraint or canonicalConstraint explicitly" #-}
-solvedConstraint :: Solved -> Constraint
-solvedConstraint = canonicalConstraint
-
 -- | Look up a type node, canonicalizing the id first.
 lookupNode :: Solved -> NodeId -> Maybe TyNode
 lookupNode s@(Solved EquivBackend { ebOriginalConstraint = c }) nid =
@@ -584,16 +571,3 @@ validateOriginalCanonicalAgreement s =
     tnTag TyCon{}    = "con"
     tnTag TyForall{} = "forall"
     tnTag TyExp{}    = "exp"
-
-{- Note [solvedConstraint migration status]
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-As of 2026-02-26, the repository has no internal call sites of the
-compatibility accessor in `src/` or `test/`.
-
-`solvedConstraint` is retained only as a compatibility alias for
-`canonicalConstraint`. New code should prefer `canonicalConstraint`
-or the higher-level `Solved` query helpers.
-
-Removing the alias requires an explicit compatibility break for any
-downstream users.
--}
