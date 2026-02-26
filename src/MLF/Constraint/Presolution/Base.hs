@@ -580,6 +580,11 @@ instantiationBindersM gid nid0 = do
                                         cache3 = IntMap.insert (getNodeId inner) binders cache2
                                     in st1 { psBinderCache = cache3 }
                             pure (inner, binders)
+                TyExp { tnBody = inner } ->
+                    -- Follow through TyExp wrappers to the inner scheme body.
+                    -- Nested TyExp arises from intermediate let bindings
+                    -- (e.g. `let g = f in g g` where g's scheme wraps f's).
+                    instantiationBindersM gid inner
                 _ -> do
                     -- Explicit provenance: use gen node scope instead of heuristic
                     (bodyRoot, binders) <- instantiationBindersFromGenM gid nid
