@@ -41,11 +41,20 @@ module MLF.Constraint.Solved (
     originalNode,
     originalBindParent,
     wasOriginalBinder,
+
+    -- * Canonical-domain queries
+    weakenedVars,
+    isEliminatedVar,
+    canonicalBindParents,
+    canonicalGenNodes,
+    canonicalNodes,
+    lookupCanonicalNode,
 ) where
 
 import Prelude hiding (lookup)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
+import Data.IntSet (IntSet)
 import qualified Data.IntSet as IntSet
 
 import MLF.Constraint.Solve
@@ -63,10 +72,12 @@ import MLF.Constraint.Types.Graph
     , GenNodeMap(..)
     , InstEdge
     , NodeId(..)
+    , NodeMap(..)
     , NodeRef(..)
     , TyNode(..)
     )
 import qualified MLF.Constraint.NodeAccess as NA
+import qualified MLF.Constraint.VarStore as VarStore
 
 -- -----------------------------------------------------------------
 -- Opaque type
@@ -325,6 +336,39 @@ wasOriginalBinder s@(Solved EquivBackend { ebOriginalConstraint = c }) nid =
         case NA.lookupNode c member of
             Just TyForall {} -> True
             _ -> False
+
+-- -----------------------------------------------------------------
+-- Canonical-domain queries
+-- -----------------------------------------------------------------
+
+-- | Weakened variable IDs from the canonical (post-solve) constraint.
+weakenedVars :: Solved -> IntSet
+weakenedVars (Solved EquivBackend { ebCanonicalConstraint = c }) = cWeakenedVars c
+
+-- | Is the node an eliminated variable in the canonical constraint?
+isEliminatedVar :: Solved -> NodeId -> Bool
+isEliminatedVar (Solved EquivBackend { ebCanonicalConstraint = c }) nid =
+    VarStore.isEliminatedVar c nid
+
+-- | Bind parents from the canonical (post-solve) constraint.
+canonicalBindParents :: Solved -> BindParents
+canonicalBindParents (Solved EquivBackend { ebCanonicalConstraint = c }) = cBindParents c
+
+-- | Gen nodes from the canonical constraint.
+canonicalGenNodes :: Solved -> GenNodeMap GenNode
+canonicalGenNodes (Solved EquivBackend { ebCanonicalConstraint = c }) = cGenNodes c
+
+-- | The canonical node map (post-solve nodes keyed by canonical IDs).
+canonicalNodes :: Solved -> NodeMap TyNode
+canonicalNodes (Solved EquivBackend { ebCanonicalConstraint = c }) = cNodes c
+
+-- | Look up a node in the canonical constraint by its canonical ID.
+--
+-- Unlike 'lookupNode', this does /not/ canonicalize the ID first —
+-- the caller is expected to provide a canonical ID.
+lookupCanonicalNode :: Solved -> NodeId -> Maybe TyNode
+lookupCanonicalNode (Solved EquivBackend { ebCanonicalConstraint = c }) nid =
+    NA.lookupNode c nid
 
 {- Note [solvedConstraint migration status]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
