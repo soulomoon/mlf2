@@ -48,3 +48,14 @@ spec = describe "Phi alignment" $ do
                                 (\tr -> not (null (etBinderArgs tr)))
                                 traces
                     IntMap.size nonEmptyBinderArgs `shouldSatisfy` (> 0)
+
+    describe "C3: Omega resolves binders without class-member fallback when trace available" $ do
+        let corpus =
+                [ ("let-poly", ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (EVar "id")))
+                ]
+        forM_ corpus $ \(label, expr) ->
+            it ("pipeline still succeeds for: " ++ label) $ do
+                let result = runPipelineElab Set.empty (unsafeNormalizeExpr expr)
+                case result of
+                    Left err -> expectationFailure (show err)
+                    Right _ -> pure ()

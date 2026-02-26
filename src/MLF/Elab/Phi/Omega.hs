@@ -1257,27 +1257,59 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
     isBinderNode :: IntSet.IntSet -> NodeId -> Bool
     isBinderNode binderKeys nid = IB.isBinderNode ib binderKeys nid
 
+    -- | Resolve a non-root OpWeaken binder target.
+    --
+    -- Per thesis §15.3.5 (witness-domain-first), we prefer trace-domain
+    -- resolution over class-member (equivalence-class) fallback.  The
+    -- resolution order is:
+    --
+    --   1. Direct binder check (replayTarget is already a binder in spine)
+    --   2. Trace-source recovery: source keys from IdentityBridge *without*
+    --      class-member expansion, filtered to binder nodes in the spine
+    --   3. Class-member recovery: full equivalence-class expansion (fallback)
     resolveNonRootWeakenBinder :: IntSet.IntSet -> VSpine -> NodeId -> NodeId -> Either ElabError NodeId
     resolveNonRootWeakenBinder binderKeys vs sourceTarget replayTarget
         | not (isBinderNode binderKeys replayTarget) =
-            case listToMaybe recoverableInSpine of
+            -- Step 2: try trace-source recovery before class-member fallback
+            case listToMaybe traceSourceInSpine of
                 Just recoveredBinder -> Right recoveredBinder
-                Nothing -> Left (unresolvedWeakenError "non-binder target has no recoverable binder in current spine")
+                Nothing ->
+                    -- Step 3: class-member fallback (only when trace-source yields nothing)
+                    case listToMaybe classRecoverableInSpine of
+                        Just recoveredBinder -> Right recoveredBinder
+                        Nothing -> Left (unresolvedWeakenError "non-binder target has no recoverable binder in current spine")
         | otherwise =
             case lookupBinderIndex binderKeys (vSpineIds vs) replayTarget of
                 Just _ -> Right replayTarget
                 Nothing -> Left (unresolvedWeakenError "binder target missing from quantifier spine")
       where
         replayCanonical = canonicalNode replayTarget
+
+        -- Trace-source candidates: source keys without class-member expansion,
+        -- filtered to binder nodes (witness-domain-first per §15.3.5).
+        traceSourceMatch =
+            [ NodeId member
+            | member <- IB.sourceKeysForNodeNoClassFallback ib replayTarget
+            , IB.isBinderNode ib binderKeys (NodeId member)
+            ]
+        traceSourceInSpine =
+            [ member
+            | member <- traceSourceMatch
+            , case lookupBinderIndex binderKeys (vSpineIds vs) member of
+                Just _ -> True
+                Nothing -> False
+            ]
+
+        -- Class-member candidates: full equivalence-class expansion (fallback).
         classMembers = Solved.classMembers solved replayTarget
-        recoverableBinders =
+        classRecoverableBinders =
             [ member
             | member <- classMembers
             , isBinderNode binderKeys member
             ]
-        recoverableInSpine =
+        classRecoverableInSpine =
             [ member
-            | member <- recoverableBinders
+            | member <- classRecoverableBinders
             , case lookupBinderIndex binderKeys (vSpineIds vs) member of
                 Just _ -> True
                 Nothing -> False
@@ -1289,8 +1321,9 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                 , "  op-target: " ++ show sourceTarget
                 , "  replay-target: " ++ show replayTarget
                 , "  canonical-target: " ++ show replayCanonical
+                , "  traceSourceMatch: " ++ show traceSourceMatch
                 , "  classMembers: " ++ show classMembers
-                , "  recoverableBinders: " ++ show recoverableBinders
+                , "  classRecoverableBinders: " ++ show classRecoverableBinders
                 , "  ids: " ++ show (vSpineIds vs)
                 , "  replayMapDomain: " ++ show (IntMap.keys traceBinderReplayMap)
                 , "  hintDomain: " ++ show (IntSet.toList traceBinderHintDomain)

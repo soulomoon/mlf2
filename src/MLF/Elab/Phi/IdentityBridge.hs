@@ -21,6 +21,7 @@ module MLF.Elab.Phi.IdentityBridge (
     sourceKeysForNode,
     safeSourceCandidatesForCanonicalBinder,
     sourceBinderKeysForNode,
+    sourceKeysForNodeNoClassFallback,
     isBinderNode,
     lookupBinderIndex,
     traceOrderRank,
