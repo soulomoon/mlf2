@@ -382,6 +382,7 @@ canonicalConstraint (Solved eb) = canonicalConstraintFromBackend eb
 -- This compatibility accessor will be removed once downstream callers
 -- are migrated to 'canonicalConstraint' and higher-level queries.
 -- See Note [solvedConstraint migration status].
+{-# DEPRECATED solvedConstraint "Use originalConstraint or canonicalConstraint explicitly" #-}
 solvedConstraint :: Solved -> Constraint
 solvedConstraint = canonicalConstraint
 
