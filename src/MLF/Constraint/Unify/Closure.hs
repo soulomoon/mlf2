@@ -12,15 +12,14 @@ module MLF.Constraint.Unify.Closure (
     SolveError(..),
     UnifyClosureResult(..),
     runUnifyClosure,
+    runUnifyClosureWithSeed,
 ) where
 
-import Control.Monad (mapM_, when)
+import Control.Monad (when)
 import Control.Monad.Except (throwError)
 import Control.Monad.State.Strict (StateT, execStateT, gets, modify')
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
-import qualified Data.IntSet as IntSet
-import Data.List (foldl')
 
 import qualified MLF.Binding.Adjustment as BindingAdjustment
 import qualified MLF.Binding.Tree as Binding
@@ -62,7 +61,15 @@ data SolveState = SolveState
 type SolveM = StateT SolveState (Either SolveError)
 
 runUnifyClosure :: TraceConfig -> Constraint -> Either SolveError UnifyClosureResult
-runUnifyClosure traceCfg c0 = do
+runUnifyClosure traceCfg =
+    runUnifyClosureWithSeed traceCfg IntMap.empty
+
+runUnifyClosureWithSeed
+    :: TraceConfig
+    -> IntMap NodeId
+    -> Constraint
+    -> Either SolveError UnifyClosureResult
+runUnifyClosureWithSeed traceCfg ufSeed c0 = do
     let debugSolveBinding = traceBinding traceCfg
         probeIds = [NodeId 2, NodeId 3]
         probeInfo =
@@ -77,7 +84,7 @@ runUnifyClosure traceCfg c0 = do
     case Binding.checkBindingTree c0 of
         Left err -> Left (BindingTreeError err)
         Right () -> do
-            let st = SolveState { suConstraint = c0, suUnionFind = IntMap.empty, suQueue = cUnifyEdges c0 }
+            let st = SolveState { suConstraint = c0, suUnionFind = ufSeed, suQueue = cUnifyEdges c0 }
             final <- execStateT (loop >> batchHarmonize) st
             let preRewrite = (suConstraint final) { cUnifyEdges = [] }
                 probeInfo' =

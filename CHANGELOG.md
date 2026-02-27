@@ -8,6 +8,12 @@
 - Eliminated patchNode mutation from elaboration path (Fallback.hs)
 - Enforced read-only boundary for elaboration path on Solved
 - Removed deprecated `solvedConstraint` alias
+- Thesis A-E cleanup (2026-02-27):
+  - added seeded unification-closure API (`runUnifyClosureWithSeed`) and switched presolution closure drains to seeded UF processing;
+  - added explicit presolution artifact contract errors (`ResidualUnifyEdges`, `ResidualInstEdges`, `ResidualTyExpNodes`, `MissingEdgeWitnesses`, `MissingEdgeTraces`);
+  - removed canonical-domain `Solved` query exports (`canonicalNodes`, `allCanonicalNodes`, `lookupCanonicalNode`, `lookupCanonicalVarBound`) after call-site migration;
+  - made `IdentityBridge.sourceKeysForNode` strict witness-domain-only and introduced explicit class-fallback API (`sourceKeysForNodeWithClassFallback`) plus fallback telemetry in Phi/Omega;
+  - removed runtime `runPipelineElabProjectionFirst`; retained dual-path parity as test-only harness in `DualPathSpec`.
 
 * Removed the internal legacy replay fallback path from elaboration (`runPipelineElabViaLegacySolve`) and cleaned legacy fallback helpers from the test harness.
 * Replaced live native-vs-legacy parity checks with frozen baseline artifacts:

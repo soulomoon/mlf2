@@ -60,7 +60,12 @@ import qualified MLF.Binding.Tree as Binding
 import MLF.Binding.Tree (checkBindingTree, checkNoGenFallback, checkSchemeClosureUnder)
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Elab.Phi.Env (PhiM, askResult)
-import MLF.Elab.Phi.IdentityBridge (mkIdentityBridge, sourceKeysForNode, traceOrderRank)
+import MLF.Elab.Phi.IdentityBridge
+    ( mkIdentityBridge
+    , sourceKeysForNode
+    , sourceKeysForNodeWithClassFallback
+    , traceOrderRank
+    )
 import MLF.Elab.Phi.Omega (OmegaContext(..), phiWithSchemeOmega)
 import MLF.Util.Trace (TraceConfig, traceGeneralize)
 
@@ -557,7 +562,7 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
                                         (getNodeId (canonicalNode replayN))
                                         hintPeersByHint
                     replayFromAlias sourceKey =
-                        let sourceEqKeys =
+                        let witnessSourceEqKeys =
                                 dedupKeys
                                     ( sourceKey
                                         : sourceKeysForNode ib (NodeId sourceKey)
@@ -566,6 +571,29 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
                                             | peerKey <- sameHintSources sourceKey
                                             ]
                                     )
+                            classFallbackEqKeys =
+                                dedupKeys
+                                    ( sourceKey
+                                        : sourceKeysForNodeWithClassFallback ib (NodeId sourceKey)
+                                        ++ concat
+                                            [ peerKey : sourceKeysForNodeWithClassFallback ib (NodeId peerKey)
+                                            | peerKey <- sameHintSources sourceKey
+                                            ]
+                                    )
+                            sourceEqKeys =
+                                if null witnessSourceEqKeys
+                                    then
+                                        case debugPhi
+                                            ( "phi replayBridge: class fallback source-key recovery"
+                                                ++ " sourceKey="
+                                                ++ show sourceKey
+                                                ++ " fallbackKeys="
+                                                ++ show classFallbackEqKeys
+                                            )
+                                            ()
+                                        of
+                                            () -> classFallbackEqKeys
+                                    else witnessSourceEqKeys
                             directReplay =
                                 [ NodeId key
                                 | key <- sourceEqKeys

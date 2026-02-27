@@ -228,7 +228,7 @@ computeResultTypeFallbackCore ctx annCanon ann = do
             Left (ValidationFailed ["computeResultTypeFallback called with AAnn - use facade instead"])
         _ -> do
             let rootC = canonical rootForType
-                nodes = Solved.canonicalNodes solved
+                nodes = cNodes (Solved.originalConstraint solved)
                 nodeList = map snd (toListNode nodes)
                 resolveBaseBoundCanonical start =
                     let go visited nid0 =
@@ -237,11 +237,11 @@ computeResultTypeFallbackCore ctx annCanon ann = do
                             in if IntSet.member key visited
                                 then Nothing
                                 else
-                                    case Solved.lookupCanonicalNode solved nid of
+                                    case Solved.lookupNode solved nid of
                                         Just TyBase{} -> Just nid
                                         Just TyBottom{} -> Just nid
                                         Just TyVar{} ->
-                                            case Solved.lookupCanonicalVarBound solved nid of
+                                            case Solved.lookupVarBound solved nid of
                                                 Just bnd -> go (IntSet.insert key visited) bnd
                                                 Nothing -> Nothing
                                         _ -> Nothing
@@ -494,7 +494,7 @@ computeResultTypeFallbackCore ctx annCanon ann = do
                                         TyVar{ tnId = nid, tnBound = Nothing } ->
                                             TyVar{ tnId = nid, tnBound = Just (canonical baseN) }
                                         _ -> node
-                                nodes0 = Solved.canonicalNodes resFinal
+                                nodes0 = cNodes (Solved.originalConstraint resFinal)
                                 nodes' = fromListNode
                                     [ (nid, if nid == rootC then adjustNode node else node)
                                     | (nid, node) <- toListNode nodes0
@@ -519,8 +519,8 @@ computeResultTypeFallbackCore ctx annCanon ann = do
                 )
             let canonicalFinal = Solved.canonical resFinalBounded
                 rootFinal = canonicalFinal rootC
-                nodesFinal = Solved.canonicalNodes resFinalBounded
-                genNodesFinal = map snd (toListGen (Solved.canonicalGenNodes resFinalBounded))
+                nodesFinal = cNodes (Solved.originalConstraint resFinalBounded)
+                genNodesFinal = map snd (toListGen (Solved.genNodes resFinalBounded))
                 rootBound =
                     case lookupNodeIn nodesFinal rootFinal of
                         Just TyVar{ tnBound = Just bnd } -> Just (canonicalFinal bnd)
@@ -650,7 +650,7 @@ computeResultTypeFallbackCore ctx annCanon ann = do
                                     | (childKey, (parentRef, _flag)) <- IntMap.toList (Solved.canonicalBindParents resFinalBounded)
                                     , parentRef == GenRef gid
                                     , TypeRef child <- [nodeRefFromKey childKey]
-                                    , Just bnd <- [Solved.lookupCanonicalVarBound resFinalBounded (canonicalFinal child)]
+                                    , Just bnd <- [Solved.lookupVarBound resFinalBounded (canonicalFinal child)]
                                     ]
                                 debugCandidates =
                                     if debugGaScopeEnabled traceCfg

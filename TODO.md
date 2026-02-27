@@ -10,8 +10,13 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - Phase-4 thesis-order closure draining is enforced in presolution (initial + per-edge).
   - Presolution now carries UF metadata (`prUnionFind`) separately from raw translatable graph (`prConstraint`).
   - Shared unification closure engine extracted and reused by Solve/Presolution.
+  - Closure engine now supports seeded UF drains (`runUnifyClosureWithSeed`) and presolution enforces no-pending-unify edge boundaries.
+  - Presolution producer contract now fails fast on residual queues/TyExp and missing non-trivial witness/trace coverage.
   - Aligned native solved construction to replay-finalized semantics (`Solved.fromPresolutionResult` uses snapshot replay finalization).
   - Switched production pipeline to presolution-native solved path and removed temporary dual-run legacy parity guard after green-window validation.
+  - Removed transitional runtime projection-first entrypoint; kept parity checks in test-only dual-path harness.
+  - Removed canonical-domain Solved query exports after migrating call sites.
+  - Tightened Phi identity resolution to strict witness-domain-first defaults with explicit class-fallback API/telemetry.
   - Expanded legacy/native parity regressions (including bounded/coercion-heavy anchors).
   - Full suite validation: `cabal test mlf2-test --offline` => `838 examples, 0 failures`.
 - Next:

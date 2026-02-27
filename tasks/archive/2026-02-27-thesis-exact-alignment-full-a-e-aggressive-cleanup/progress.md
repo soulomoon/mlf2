@@ -1,0 +1,43 @@
+# Progress Log
+
+## 2026-02-27
+- Created task folder and initialized tracking files.
+- Loaded required skill workflows and target plan document.
+- Audited plan target modules with `rg`.
+- Recorded unresolved implementation gaps before starting edits.
+- Added Phase A red test in `test/Presolution/UnificationClosureSpec.hs` for seeded closure UF behavior (`runUnifyClosureWithSeed`).
+- Implemented `runUnifyClosureWithSeed` and wired `runUnifyClosure` through empty-seed wrapper.
+- Updated `Presolution.EdgeProcessing` to use seeded closure (`runUnifyClosureWithSeed`), removed per-drain UF rewrite, and added boundary assertions around each edge.
+- Exposed `MLF.Constraint.Unify.Closure` from internal library for targeted testing.
+- Targeted verification:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "honors seeded UF equivalence"'` -> PASS
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Phase 4 thesis-exact unification closure"'` -> PASS
+- Added explicit contract errors in `PresolutionError`: `ResidualUnifyEdges`, `ResidualInstEdges`, `ResidualTyExpNodes`, `MissingEdgeWitnesses`, `MissingEdgeTraces`.
+- Enforced producer-boundary artifact checks in `computePresolution` (queues, TyExp-free, witness/trace completeness for non-trivial edges).
+- Added presolution artifact-contract tests in `Presolution.UnificationClosureSpec`.
+- Targeted verification:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Phase 4 thesis-exact unification closure"'` -> PASS (7 examples)
+- Phase C migration work:
+  - `MLF.Reify.Core`: switched node source from `Solved.canonicalNodes` to `cNodes (Solved.originalConstraint solved)`.
+  - `MLF.Elab.Run.ResultType.Fallback`: replaced canonical-domain Solved query usage with projection-first APIs (`Solved.lookupNode`, `Solved.lookupVarBound`, `Solved.genNodes`, `Solved.originalConstraint`).
+  - `MLF.Constraint.Solved`: removed canonical-domain query exports and deleted obsolete canonical-query helpers.
+- Sequential targeted verification after migration:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "reifies type with flexible bound"'` -> PASS
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "O15-ELAB-LET: elaborates polymorphic let-binding"'` -> PASS
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "uses presolution-native solved artifacts"'` -> PASS
+- Phase C correction:
+  - `MLF.Reify.Core` switched to canonical solved node domain (`cNodes (Solved.canonicalConstraint solved)`) after initial projection-domain attempt regressed behavior.
+- Phase D work:
+  - `MLF.Elab.Phi.IdentityBridge`: made `sourceKeysForNode` strict witness-domain default, added explicit `sourceKeysForNodeWithClassFallback`, and routed binder lookup fallback explicitly.
+  - `MLF.Elab.Phi.Translate`: added explicit class-member fallback branch with debug trace.
+  - `MLF.Elab.Phi.Omega`: added telemetry when non-root weaken binder resolution uses class-member fallback.
+- Phase E work:
+  - Removed `runPipelineElabProjectionFirst` from runtime exports (`MLF.Elab.Run.Pipeline`, `MLF.Elab.Run`, `MLF.Elab.Pipeline`).
+  - Reworked `test/DualPathSpec.hs` to compare presolution-native solved artifacts against legacy snapshot reconstruction in test-only space.
+- Test updates for new contracts:
+  - `test/Phi/IdentityBridgeSpec.hs`: strict-default/no-class-fallback coverage + explicit class-fallback API coverage.
+  - `test/Presolution/UnificationClosureSpec.hs`: seeded closure behavior + producer artifact contract assertions.
+- Documentation/tracker sync:
+  - Updated `implementation_notes.md`, `CHANGELOG.md`, and `TODO.md` for A-E cleanup completion.
+- Final verification:
+  - `cabal build all && cabal test` -> PASS

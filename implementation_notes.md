@@ -11,13 +11,39 @@
 ### Phi Translation
 - Phi/Omega/IdentityBridge resolve binder identity from witness domain (EdgeTrace/EdgeWitness) first.
 - Equivalence-class projection (`classMembers`) is a reconciliation fallback, not the primary resolution path.
-- `sourceKeysForNode` ranking: raw key → canonical key → copy-map keys → class members, sorted by trace order.
+- `sourceKeysForNode` is strict witness-domain ranking (raw → canonical → copy/trace provenance).
+- Class-member expansion is explicit via `sourceKeysForNodeWithClassFallback` and is used only in marked recovery branches.
 
 ### Pipeline Boundary
 - Presolution owns all graph transformations.
 - Elaboration path does not mutate Solved or the constraint graph.
 - Pipeline setup (before elaboration) may use `rebuildWithConstraint` for canonicalization and `pruneBindParentsSolved` for cleanup.
 - Generalize creates local Solved variants via `rebuildWithConstraint` for alias reification; these do not propagate to the pipeline's Solved handle.
+
+### 2026-02-27 Thesis exactness cleanup (A-E)
+
+- Phase A:
+  - Added seeded closure API `runUnifyClosureWithSeed` and switched presolution closure drains to seed from `psUnionFind`.
+  - Removed per-drain UF rewrite from presolution closure loop.
+  - Added hard presolution edge-boundary assertions that reject pending unify edges before and after each inst-edge closure cycle.
+- Phase B:
+  - `computePresolution` now enforces producer-boundary artifact invariants with explicit errors:
+    - `ResidualUnifyEdges`, `ResidualInstEdges`, `ResidualTyExpNodes`,
+    - `MissingEdgeWitnesses`, `MissingEdgeTraces`.
+  - Witness/trace completeness is checked against non-trivial input instantiation edge IDs (let-edge trivials excluded).
+- Phase C:
+  - Removed canonical-domain query exports from `MLF.Constraint.Solved`:
+    - `canonicalNodes`, `allCanonicalNodes`, `lookupCanonicalNode`, `lookupCanonicalVarBound`.
+  - Migrated reify/result-type call sites to projection-first access patterns via:
+    - `Solved.lookupNode`, `Solved.lookupVarBound`, `Solved.canonical`,
+    - `Solved.originalConstraint`/`Solved.canonicalConstraint` as explicit domain selectors.
+- Phase D:
+  - `IdentityBridge.sourceKeysForNode` is now strict (no implicit class fallback).
+  - Added explicit fallback API `sourceKeysForNodeWithClassFallback`.
+  - Translate/Omega now use explicit class-fallback recovery branches with trace logging when fallback is used.
+- Phase E:
+  - Removed transitional runtime entrypoint `runPipelineElabProjectionFirst`.
+  - Kept dual-path validation only in test harness (`DualPathSpec`) by comparing native solved artifacts against legacy snapshot reconstruction.
 
 ### 2026-02-26 Legacy replay removal + frozen parity baseline
 

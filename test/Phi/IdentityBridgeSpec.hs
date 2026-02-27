@@ -77,7 +77,7 @@ spec = describe "IdentityBridge" $ do
             -- No duplicates
             length keys `shouldBe` length (IntSet.toList (IntSet.fromList keys))
 
-        it "includes solved class members for canonical alias recovery" $ do
+        it "includes solved class members for canonical alias recovery when requested" $ do
             let binder = NodeId 2
                 alias = NodeId 31
                 c :: Constraint
@@ -89,7 +89,20 @@ spec = describe "IdentityBridge" $ do
                     }
                 solved = Solved.mkTestSolved c (IntMap.fromList [(getNodeId binder, alias)])
                 ib = mkIdentityBridge solved Nothing IntMap.empty
-            sourceKeysForNode ib alias `shouldSatisfy` elem (getNodeId binder)
+            sourceKeysForNodeWithClassFallback ib alias `shouldSatisfy` elem (getNodeId binder)
+
+        it "keeps class-member fallback out of default source keys" $ do
+            let binder = NodeId 2
+                alias = NodeId 31
+                c = emptyConstraint
+                    { cNodes = nodeMapFromList
+                        [ (getNodeId binder, TyVar { tnId = binder, tnBound = Nothing })
+                        , (getNodeId alias, TyBase alias (BaseTy "Bool"))
+                        ]
+                    }
+                solved = Solved.mkTestSolved c (IntMap.fromList [(getNodeId binder, alias)])
+                ib = mkIdentityBridge solved Nothing IntMap.empty
+            sourceKeysForNode ib alias `shouldSatisfy` notElem (getNodeId binder)
 
     -- ---------------------------------------------------------------
     -- Trace-order priority over numeric order

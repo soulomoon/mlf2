@@ -5,12 +5,15 @@ import Control.Monad (forM_)
 import qualified Data.Set as Set
 
 import MLF.Frontend.Syntax (Expr(..), SrcTy(..))
-import MLF.Elab.Pipeline (runPipelineElab, runPipelineElabProjectionFirst)
-import SpecUtil (unsafeNormalizeExpr)
+import MLF.Elab.Pipeline (runPipelineElab)
+import MLF.Constraint.Presolution (prConstraint)
+import MLF.Constraint.Solve (solveUnifyWithSnapshot)
+import qualified MLF.Constraint.Solved as Solved
+import SpecUtil (PipelineArtifacts(..), defaultTraceConfig, runPipelineArtifactsDefault, unsafeNormalizeExpr)
 
 spec :: Spec
 spec = describe "Dual-path verification" $ do
-    describe "E1: canonical-heavy vs projection-first equivalence" $ do
+    describe "E1: native solved vs legacy snapshot equivalence" $ do
         let corpus =
                 [ ("id", ELam "x" (EVar "x"))
                 , ("const", ELam "x" (ELam "y" (EVar "x")))
@@ -28,22 +31,24 @@ spec = describe "Dual-path verification" $ do
                         (ELam "x" (EVar "x")))
                 ]
         forM_ corpus $ \(label, expr) ->
-            it ("canonical-heavy and projection-first agree for: " ++ label) $ do
-                let norm = unsafeNormalizeExpr expr
-                    rCanonical = runPipelineElab Set.empty norm
-                    rProjection = runPipelineElabProjectionFirst Set.empty norm
-                case (rCanonical, rProjection) of
-                    (Right (t1, ty1), Right (t2, ty2)) -> do
-                        show t1 `shouldBe` show t2
-                        show ty1 `shouldBe` show ty2
-                    (Left e1, Left e2) ->
-                        show e1 `shouldBe` show e2
-                    _ -> expectationFailure $
-                        "Path disagreement for " ++ label
-                        ++ ": canonical=" ++ show rCanonical
-                        ++ ", projection=" ++ show rProjection
+            it ("native solved and legacy snapshot agree for: " ++ label) $ do
+                case runPipelineArtifactsDefault Set.empty expr of
+                    Left err ->
+                        expectationFailure ("runPipelineArtifactsDefault failed for " ++ label ++ ": " ++ err)
+                    Right PipelineArtifacts{ paPresolution = pres, paSolved = nativeSolved } ->
+                        case solveUnifyWithSnapshot defaultTraceConfig (prConstraint pres) of
+                            Left err ->
+                                expectationFailure ("solveUnifyWithSnapshot failed for " ++ label ++ ": " ++ show err)
+                            Right legacyOut ->
+                                case Solved.fromSolveOutput legacyOut of
+                                    Left err ->
+                                        expectationFailure ("fromSolveOutput failed for " ++ label ++ ": " ++ show err)
+                                    Right legacySolved -> do
+                                        Solved.canonicalConstraint nativeSolved `shouldBe` Solved.canonicalConstraint legacySolved
+                                        Solved.originalConstraint nativeSolved `shouldBe` Solved.originalConstraint legacySolved
+                runPipelineElab Set.empty (unsafeNormalizeExpr expr) `shouldSatisfy` either (const False) (const True)
 
-    describe "E2: projection-first validation passes" $ do
+    describe "E2: native solved projection agreement holds" $ do
         let corpus =
                 [ ("id", ELam "x" (EVar "x"))
                 , ("let-poly", ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (EVar "id")))
@@ -52,8 +57,7 @@ spec = describe "Dual-path verification" $ do
                 ]
         forM_ corpus $ \(label, expr) ->
             it ("original/canonical agreement holds for: " ++ label) $ do
-                let norm = unsafeNormalizeExpr expr
-                    result = runPipelineElabProjectionFirst Set.empty norm
-                case result of
-                    Left err -> expectationFailure (show err)
-                    Right _ -> pure ()
+                case runPipelineArtifactsDefault Set.empty expr of
+                    Left err -> expectationFailure err
+                    Right artifacts ->
+                        Solved.validateOriginalCanonicalAgreement (paSolved artifacts) `shouldBe` []

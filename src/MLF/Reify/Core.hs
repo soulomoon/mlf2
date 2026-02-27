@@ -91,7 +91,7 @@ reifyWith _contextLabel solved nameForVar isNamed rootMode nid =
             RootBound -> goBoundRoot
     in snd <$> start emptyCache (canonical nid)
   where
-    nodes = Solved.canonicalNodes solved
+    nodes = cNodes (Solved.canonicalConstraint solved)
     canonical = Solved.canonical solved
     weakened = Solved.weakenedVars solved
     canonicalGenNodesList =

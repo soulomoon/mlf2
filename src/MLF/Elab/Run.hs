@@ -3,7 +3,6 @@ module MLF.Elab.Run (
     runPipelineElabChecked,
     runPipelineElabWithConfig,
     runPipelineElabCheckedWithConfig,
-    runPipelineElabProjectionFirst,
     applyRedirectsToAnn,
     canonicalizeAnn,
     chaseRedirects
@@ -15,6 +14,5 @@ import MLF.Elab.Run.Pipeline
     , runPipelineElabChecked
     , runPipelineElabWithConfig
     , runPipelineElabCheckedWithConfig
-    , runPipelineElabProjectionFirst
     )
 import MLF.Elab.Run.Util (chaseRedirects)

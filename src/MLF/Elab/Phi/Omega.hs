@@ -1276,7 +1276,19 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                 Nothing ->
                     -- Step 3: class-member fallback (only when trace-source yields nothing)
                     case listToMaybe classRecoverableInSpine of
-                        Just recoveredBinder -> Right recoveredBinder
+                        Just recoveredBinder ->
+                            case debugPhi
+                                ( "OpWeaken: class-member fallback used"
+                                    ++ " sourceTarget="
+                                    ++ show sourceTarget
+                                    ++ " replayTarget="
+                                    ++ show replayTarget
+                                    ++ " recoveredBinder="
+                                    ++ show recoveredBinder
+                                )
+                                ()
+                            of
+                                () -> Right recoveredBinder
                         Nothing -> Left (unresolvedWeakenError "non-binder target has no recoverable binder in current spine")
         | otherwise =
             case lookupBinderIndex binderKeys (vSpineIds vs) replayTarget of

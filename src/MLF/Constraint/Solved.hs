@@ -55,10 +55,6 @@ module MLF.Constraint.Solved (
     canonicalBindParents,
     canonicalizedBindParents,
     canonicalGenNodes,
-    canonicalNodes,
-    allCanonicalNodes,
-    lookupCanonicalNode,
-    lookupCanonicalVarBound,
 
     -- * Validation helpers
     validateCanonicalGraphStrict,
@@ -100,7 +96,6 @@ import MLF.Constraint.Types.Graph
     , nodeRefFromKey
     )
 import qualified MLF.Constraint.NodeAccess as NA
-import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Binding.Tree as Binding
 
 -- -----------------------------------------------------------------
@@ -510,31 +505,6 @@ canonicalizedBindParents s =
 canonicalGenNodes :: Solved -> GenNodeMap GenNode
 canonicalGenNodes (Solved EquivBackend { ebCanonicalGenNodes = gn }) = gn
 
--- | The canonical node map (post-solve nodes keyed by canonical IDs).
-canonicalNodes :: Solved -> NodeMap TyNode
-canonicalNodes (Solved EquivBackend { ebCanonicalNodes = nodes }) = nodes
-
--- | All nodes from the canonical (post-solve) constraint.
-allCanonicalNodes :: Solved -> [TyNode]
-allCanonicalNodes s = NA.allNodes (canonicalConstraint s)
-
--- | Look up a node in the canonical constraint by its canonical ID.
---
--- Unlike 'lookupNode', this does /not/ canonicalize the ID first —
--- the caller is expected to provide a canonical ID.
-lookupCanonicalNode :: Solved -> NodeId -> Maybe TyNode
-lookupCanonicalNode s nid =
-    NA.lookupNode (canonicalConstraint s) nid
-
--- | Look up the instance bound of a variable in the canonical constraint.
---
--- Unlike 'lookupVarBound', this does /not/ canonicalize the ID first
--- and reads from the canonical (post-solve) constraint rather than the
--- original. The caller is expected to provide a canonical ID.
-lookupCanonicalVarBound :: Solved -> NodeId -> Maybe NodeId
-lookupCanonicalVarBound s nid =
-    VarStore.lookupVarBound (canonicalConstraint s) nid
-
 -- | Run strict solved-graph validation against the canonical solved view.
 validateCanonicalGraphStrict :: Solved -> [String]
 validateCanonicalGraphStrict s =
@@ -557,7 +527,7 @@ validateOriginalCanonicalAgreement s =
     , let nid = tnId node
           nidC = canonical s nid
           origNode = originalNode s nid
-          canonNode = lookupCanonicalNode s nidC
+          canonNode = NA.lookupNode (canonicalConstraint s) nidC
           origTag = fmap tnTag origNode
           canonTag = fmap tnTag canonNode
     , origTag /= canonTag

@@ -118,7 +118,15 @@ computePresolution traceCfg acyclicityResult constraint = do
 
     let finalConstraint = psConstraint finalState
     when (not (null (cUnifyEdges finalConstraint))) $
-        Left (InternalError "computePresolution: residual unify edges after closure")
+        Left (ResidualUnifyEdges (cUnifyEdges finalConstraint))
+    when (not (null (cInstEdges finalConstraint))) $
+        Left (ResidualInstEdges (cInstEdges finalConstraint))
+    let residualTyExpNodes =
+            [ tnId node
+            | node@TyExp{} <- NodeAccess.allNodes finalConstraint
+            ]
+    when (not (null residualTyExpNodes)) $
+        Left (ResidualTyExpNodes residualTyExpNodes)
     validateTranslatablePresolution finalConstraint
 
     let (edgeWitnesses, edgeTraces, edgeExpansions) =
@@ -127,6 +135,22 @@ computePresolution traceCfg acyclicityResult constraint = do
                 (psEdgeWitnesses finalState)
                 (psEdgeTraces finalState)
                 (psEdgeExpansions finalState)
+        nonTrivialEdgeKeys =
+            IntSet.fromList
+                [ getEdgeId (instEdgeId edge)
+                | edge <- cInstEdges constraint
+                , IntSet.notMember (getEdgeId (instEdgeId edge)) (cLetEdges finalConstraint)
+                ]
+        witnessKeys = IntSet.fromList (IntMap.keys edgeWitnesses)
+        traceKeys = IntSet.fromList (IntMap.keys edgeTraces)
+        missingWitnesses =
+            map EdgeId (IntSet.toList (IntSet.difference nonTrivialEdgeKeys witnessKeys))
+        missingTraces =
+            map EdgeId (IntSet.toList (IntSet.difference nonTrivialEdgeKeys traceKeys))
+    when (not (null missingWitnesses)) $
+        Left (MissingEdgeWitnesses missingWitnesses)
+    when (not (null missingTraces)) $
+        Left (MissingEdgeTraces missingTraces)
 
     return PresolutionResult
         { prConstraint = finalConstraint

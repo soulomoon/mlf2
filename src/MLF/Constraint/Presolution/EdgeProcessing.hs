@@ -23,12 +23,9 @@ module MLF.Constraint.Presolution.EdgeProcessing (
     canonicalizeEdgeTraceInteriorsM,
 ) where
 
-import Control.Monad (forM_)
-import Data.IntMap.Strict (IntMap)
-import qualified Data.IntMap.Strict as IntMap
-import qualified Data.IntSet as IntSet
+import Control.Monad (forM_, unless)
 
-import MLF.Constraint.Types (InstEdge, NodeId(..), cUnifyEdges)
+import MLF.Constraint.Types (InstEdge, cUnifyEdges)
 import MLF.Constraint.Presolution.Base
     ( MonadPresolution(..)
     , PresolutionError(..)
@@ -44,18 +41,19 @@ import MLF.Constraint.Presolution.EdgeProcessing.Solve (
     recordEdgeTrace,
     canonicalizeEdgeTraceInteriorsM,
     )
-import MLF.Constraint.Solve (repairNonUpperParents, rewriteConstraintWithUF)
-import MLF.Constraint.Unify.Closure (SolveError, UnifyClosureResult(..), runUnifyClosure)
+import MLF.Constraint.Solve (repairNonUpperParents)
+import MLF.Constraint.Unify.Closure (SolveError, UnifyClosureResult(..), runUnifyClosureWithSeed)
 import MLF.Util.Trace (TraceConfig)
-import qualified MLF.Util.UnionFind as UnionFind
 
 -- | The main loop processing sorted instantiation edges.
 runPresolutionLoop :: TraceConfig -> [InstEdge] -> PresolutionM ()
 runPresolutionLoop traceCfg edges = do
     drainPendingUnifyClosure traceCfg
     forM_ edges $ \edge -> do
+        assertNoPendingUnifyEdges "before-inst-edge" (Just edge)
         processInstEdge edge
         drainPendingUnifyClosure traceCfg
+        assertNoPendingUnifyEdges "after-inst-edge-closure" (Just edge)
 
 -- | Process a single instantiation edge.
 processInstEdge :: InstEdge -> PresolutionM ()
@@ -70,30 +68,33 @@ drainPendingUnifyClosure traceCfg = do
     if null (cUnifyEdges (psConstraint st))
         then pure ()
         else do
-            let cCanon =
-                    repairNonUpperParents
-                        (rewriteConstraintWithUF (psUnionFind st) (psConstraint st))
-                closureResult = runUnifyClosure traceCfg cCanon
+            let cPrepared = repairNonUpperParents (psConstraint st)
+                closureResult = runUnifyClosureWithSeed traceCfg (psUnionFind st) cPrepared
             closure <- either (throwPresolutionError . closureError) pure closureResult
-            let uf' = composeUnionFind (psUnionFind st) (ucUnionFind closure)
             putPresolutionState
                 st
                     { psConstraint = ucConstraint closure
-                    , psUnionFind = uf'
+                    , psUnionFind = ucUnionFind closure
                     }
 
-composeUnionFind :: IntMap NodeId -> IntMap NodeId -> IntMap NodeId
-composeUnionFind ufOld ufNew =
-    let oldCanon = UnionFind.frWith ufOld
-        newCanon = UnionFind.frWith ufNew
-        keys = IntSet.fromList (IntMap.keys ufOld ++ IntMap.keys ufNew)
-    in IntMap.fromList
-        [ (k, rep)
-        | k <- IntSet.toList keys
-        , let nid = NodeId k
-              rep = newCanon (oldCanon nid)
-        , rep /= nid
-        ]
+assertNoPendingUnifyEdges :: String -> Maybe InstEdge -> PresolutionM ()
+assertNoPendingUnifyEdges phase mbEdge = do
+    st <- getPresolutionState
+    let pending = cUnifyEdges (psConstraint st)
+    unless (null pending) $
+        throwPresolutionError $
+            InternalError
+                ( "presolution boundary violation ("
+                    ++ phase
+                    ++ ")"
+                    ++ edgeCtx
+                    ++ ": pending unify edges = "
+                    ++ show pending
+                )
+  where
+    edgeCtx = case mbEdge of
+        Nothing -> ""
+        Just edge -> " at edge " ++ show edge
 
 closureError :: SolveError -> PresolutionError
 closureError err =

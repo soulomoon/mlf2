@@ -111,6 +111,11 @@ data PresolutionError
     | BindingTreeError BindingError          -- ^ Invalid binding tree when binding edges are in use
     | NonTranslatablePresolution [TranslatabilityIssue]
     | WitnessNormalizationError EdgeId OmegaNormalizeError  -- ^ Normalized witness violates Fig. 15.3.4 invariants
+    | ResidualUnifyEdges [UnifyEdge]         -- ^ Presolution artifact must not retain unification work.
+    | ResidualInstEdges [InstEdge]           -- ^ Presolution artifact must not retain instantiation edges.
+    | ResidualTyExpNodes [NodeId]            -- ^ Presolution artifact must be TyExp-free.
+    | MissingEdgeWitnesses [EdgeId]          -- ^ Non-trivial instantiation edges missing witness entries.
+    | MissingEdgeTraces [EdgeId]             -- ^ Non-trivial instantiation edges missing trace entries.
     | ExpectedTyExpLeftInPlanner EdgeId TyNode
       -- ^ Planner expected normalized `TyExp <= τ` but saw a different left node.
     | PlanError PresolutionError             -- ^ Error surfaced during planner pass

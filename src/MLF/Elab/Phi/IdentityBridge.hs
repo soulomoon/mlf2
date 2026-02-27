@@ -19,6 +19,7 @@ module MLF.Elab.Phi.IdentityBridge (
     canonicalKeyForNode,
     canonicalKeyForSource,
     sourceKeysForNode,
+    sourceKeysForNodeWithClassFallback,
     safeSourceCandidatesForCanonicalBinder,
     sourceBinderKeysForNode,
     sourceKeysForNodeNoClassFallback,
@@ -147,7 +148,7 @@ Per thesis §15.3.5–15.3.6, Phi translation resolves binder/source identity
 from the witness domain (EdgeTrace/EdgeWitness) first. Canonical projection
 via equivalence classes is used only as a reconciliation fallback.
 
-The ranking in sourceKeysForNode enforces this:
+The ranking in sourceKeysForNodeWithClassFallback enforces this:
   1. Raw key (source domain)
   2. Canonical key (projection)
   3. Forward/inverse copy map keys (witness provenance)
@@ -158,10 +159,18 @@ in the edge's binder argument list.
 -}
 
 -- | All source-domain keys for a node, de-duplicated and ranked by
--- trace order (lower index = higher priority).  Falls back to numeric
--- order for keys absent from the trace.
+-- trace order (lower index = higher priority), restricted to witness-domain
+-- provenance (raw/canonical/copy/trace). Class-member expansion is excluded.
 sourceKeysForNode :: IdentityBridge -> NodeId -> [Int]
-sourceKeysForNode = sourceKeysForNodeByClassFallback UseClassFallback
+sourceKeysForNode = sourceKeysForNodeByClassFallback ExcludeClassFallback
+
+-- | Explicit class-member fallback variant.
+--
+-- Use this only in clearly marked recovery branches after witness-domain
+-- candidates are exhausted.
+sourceKeysForNodeWithClassFallback :: IdentityBridge -> NodeId -> [Int]
+sourceKeysForNodeWithClassFallback =
+    sourceKeysForNodeByClassFallback UseClassFallback
 
 data ClassFallback
     = UseClassFallback
@@ -196,8 +205,7 @@ sourceKeysForNodeByClassFallback classFallback ib nid =
     in sortOn rank (reverse keysRev)
 
 sourceKeysForNodeNoClassFallback :: IdentityBridge -> NodeId -> [Int]
-sourceKeysForNodeNoClassFallback =
-    sourceKeysForNodeByClassFallback ExcludeClassFallback
+sourceKeysForNodeNoClassFallback = sourceKeysForNode
 
 -- | Candidate source keys for a canonical binder, ranked deterministically
 -- and constrained to that canonical binder identity.
@@ -212,6 +220,10 @@ safeSourceCandidatesForCanonicalBinder ib binderCanonical =
 sourceBinderKeysForNode :: IdentityBridge -> IntSet.IntSet -> NodeId -> [Int]
 sourceBinderKeysForNode ib binderKeys nid =
     filter (`IntSet.member` binderKeys) (sourceKeysForNode ib nid)
+
+sourceBinderKeysForNodeWithClassFallback :: IdentityBridge -> IntSet.IntSet -> NodeId -> [Int]
+sourceBinderKeysForNodeWithClassFallback ib binderKeys nid =
+    filter (`IntSet.member` binderKeys) (sourceKeysForNodeWithClassFallback ib nid)
 
 -- | Does this node have any source key in the given binder key set?
 isBinderNode :: IdentityBridge -> IntSet.IntSet -> NodeId -> Bool
@@ -234,7 +246,7 @@ isBinderNode ib binderKeys nid =
 lookupBinderIndex
     :: IdentityBridge -> IntSet.IntSet -> [Maybe NodeId] -> NodeId -> Maybe Int
 lookupBinderIndex ib binderKeys ids nid
-    | not (isBinderNode ib binderKeys nid) = Nothing
+    | null targetKeys = Nothing
     | otherwise =
         case sortOn rankCandidate candidates of
             [] -> Nothing
@@ -247,8 +259,7 @@ lookupBinderIndex ib binderKeys ids nid
     canonicalKey key = getNodeId (ibCanonical ib (NodeId key))
 
     targetKeys :: [Int]
-    targetKeys =
-        filter (`IntSet.member` binderKeys) (sourceKeysForNode ib nid)
+    targetKeys = sourceBinderKeysForNodeWithClassFallback ib binderKeys nid
 
     targetExactKeys :: [Int]
     targetExactKeys =
@@ -270,7 +281,7 @@ lookupBinderIndex ib binderKeys ids nid
     candidateFor _ Nothing = Nothing
     candidateFor ix (Just nid') =
         let idKeys =
-                filter (`IntSet.member` binderKeys) (sourceKeysForNode ib nid')
+                sourceBinderKeysForNodeWithClassFallback ib binderKeys nid'
             idExactKeys =
                 filter (`IntSet.member` binderKeys) (sourceKeysForNodeNoClassFallback ib nid')
             idExactKeySet = IntSet.fromList idExactKeys
