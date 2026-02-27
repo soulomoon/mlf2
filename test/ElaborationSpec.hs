@@ -1712,7 +1712,10 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     Left (Elab.PhiInvariantError msg)
                         | "trace binder replay-map target outside replay binder domain" `isInfixOf` msg ->
                             expectationFailure ("Expected mixed-name replay domain to include siSubst key-space, got: " ++ msg)
-                    _ -> pure ()
+                    Left err ->
+                        expectationFailure ("Expected successful translation, got " ++ show err)
+                    Right _ ->
+                        pure ()
 
             it "OpWeaken on an alias target fails fast under strict replay-map resolution" $ do
                 let root = NodeId 100
