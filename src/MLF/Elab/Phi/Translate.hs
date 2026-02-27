@@ -46,6 +46,7 @@ import qualified Data.IntSet as IntSet
 import qualified Data.Map.Strict as Map
 import Data.List (sortOn)
 import Data.Maybe (listToMaybe)
+import Text.Read (readMaybe)
 
 import MLF.Constraint.Types
 import MLF.Elab.Types
@@ -457,7 +458,7 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
         -> SchemeInfo
         -> SchemeInfo
         -> Either ElabError (IntSet.IntSet, IntMap.IntMap NodeId, IntSet.IntSet)
-    computeTraceBinderReplayBridge mbTrace siReplay siSource =
+    computeTraceBinderReplayBridge mbTrace siReplay _siSource =
         case mbTrace of
             Nothing -> Left (MissingEdgeTrace (ewEdgeId ew))
             Just tr ->
@@ -477,36 +478,21 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
                     traceBinderSourceSet = IntSet.fromList traceBinderSourceKeys
                     replayMapRaw = etBinderReplayMap tr
                     replayMapDomain = IntSet.fromList (IntMap.keys replayMapRaw)
-                    sourceNameByKey =
-                        IntMap.fromList (IntMap.toList (siSubst siSource))
-                    replayKeyByName =
-                        IntMap.foldlWithKey'
-                            (\acc key name -> Map.insert name key acc)
-                            Map.empty
-                            (siSubst siReplay)
-                    traceCopyMap = getCopyMapping (etCopyMap tr)
-                    ib = mkIdentityBridge res (Just tr) traceCopyMap
-                    replayKeysInTraceOrder =
-                        sortOn (traceOrderRank ib) (IntMap.keys (siSubst siReplay))
-                    positionalReplayMap =
-                        IntMap.fromList
-                            [ (sourceKey, NodeId replayKey)
-                            | (sourceKey, replayKey) <- zip traceBinderSourceKeys replayKeysInTraceOrder
-                            ]
-                    defaultReplayTarget =
-                        case replayKeysInTraceOrder of
-                            replayKey : _ -> Just (NodeId replayKey)
-                            [] -> Nothing
-                    replayBinderDomainFromScheme =
-                        IntSet.fromList (IntMap.keys (siSubst siReplay))
+                    parseBinderId :: String -> Maybe NodeId
+                    parseBinderId ('t':rest) = NodeId <$> readMaybe rest
+                    parseBinderId _ = Nothing
                     replayBinderDomainRaw =
-                        if IntSet.null replayBinderDomainFromScheme
-                            then
-                                IntSet.fromList
-                                    [ getNodeId replayTarget
-                                    | replayTarget <- IntMap.elems replayMapRaw
-                                    ]
-                            else replayBinderDomainFromScheme
+                        let fromScheme =
+                                case siScheme siReplay of
+                                    Forall binds _ ->
+                                        IntSet.fromList
+                                            [ getNodeId n
+                                            | (name, _mbBound) <- binds
+                                            , Just n <- [parseBinderId name]
+                                            ]
+                        in if IntSet.null fromScheme
+                            then IntSet.fromList (IntMap.keys (siSubst siReplay))
+                            else fromScheme
                     replayBinderDomainCanonical =
                         IntSet.fromList
                             [ getNodeId (canonicalNode (NodeId key))
@@ -534,31 +520,7 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
                                         , "extra source keys: " ++ show extraSources
                                         ]
                     else
-                        let projectReplayTarget sourceKey replayTargetRaw =
-                                case IntMap.lookup sourceKey sourceNameByKey >>= (`Map.lookup` replayKeyByName) of
-                                    Just replayKeyBySourceName ->
-                                        Right (NodeId replayKeyBySourceName)
-                                    Nothing
-                                        | Just replayTargetPositional <- IntMap.lookup sourceKey positionalReplayMap ->
-                                            Right replayTargetPositional
-                                        | Just replayTargetDefault <- defaultReplayTarget ->
-                                            Right replayTargetDefault
-                                        | targetInReplayDomainRaw replayTargetRaw ->
-                                            Right replayTargetRaw
-                                        | targetInReplayDomainCanonical replayTargetRaw ->
-                                            Right replayTargetRaw
-                                        | otherwise ->
-                                        Left $
-                                            PhiInvariantError $
-                                                unlines
-                                                    [ "trace binder replay-map target outside replay binder domain"
-                                                    , "edge: " ++ show (ewEdgeId ew)
-                                                    , "source key: " ++ show sourceKey
-                                                    , "replay target: " ++ show replayTargetRaw
-                                                    , "target canonical key: " ++ show (canonicalNode replayTargetRaw)
-                                                    , "replay binder domain: " ++ show (IntSet.toList replayBinderDomainRaw)
-                                                    ]
-                            projectOne sourceKey = do
+                        let projectOne sourceKey = do
                                 replayTargetRaw <-
                                     case IntMap.lookup sourceKey replayMapRaw of
                                         Just replayTarget -> Right replayTarget
@@ -570,8 +532,19 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
                                                         , "edge: " ++ show (ewEdgeId ew)
                                                         , "source key: " ++ show sourceKey
                                                         ]
-                                replayTargetProjected <- projectReplayTarget sourceKey replayTargetRaw
-                                pure (sourceKey, replayTargetProjected)
+                                if targetInReplayDomainRaw replayTargetRaw || targetInReplayDomainCanonical replayTargetRaw
+                                    then pure (sourceKey, replayTargetRaw)
+                                    else
+                                        Left $
+                                            PhiInvariantError $
+                                                unlines
+                                                    [ "trace binder replay-map target outside replay binder domain"
+                                                    , "edge: " ++ show (ewEdgeId ew)
+                                                    , "source key: " ++ show sourceKey
+                                                    , "replay target: " ++ show replayTargetRaw
+                                                    , "target canonical key: " ++ show (canonicalNode replayTargetRaw)
+                                                    , "replay binder domain: " ++ show (IntSet.toList replayBinderDomainRaw)
+                                                    ]
                         in case mapM projectOne traceBinderSourceKeys of
                             Left err -> Left err
                             Right replayEntries ->
