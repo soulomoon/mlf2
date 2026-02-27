@@ -194,9 +194,9 @@ spec = describe "Phase 7 typecheck" $ do
                         Right _ ->
                             expectationFailure
                                 ("Expected strict OpWeaken fail-fast for " ++ label ++ ", but pipeline succeeded")
+                isStrictPhiFailFast :: String -> Bool
                 isStrictPhiFailFast msg =
-                    ("OpWeaken: unresolved non-root binder target" `isInfixOf` msg)
-                        || ("trace binder replay-map target outside replay binder domain" `isInfixOf` msg)
+                    "OpWeaken: unresolved non-root binder target" `isInfixOf` msg
 
             expectStrictOpWeakenFailure "unchecked pipeline" (runPipelineElab Set.empty normExpr)
             expectStrictOpWeakenFailure "checked pipeline" (runPipelineElabChecked Set.empty normExpr)
