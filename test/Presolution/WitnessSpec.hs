@@ -1729,6 +1729,181 @@ spec = do
                     }
             validateNormalizedWitness env [] `shouldBe` Left (ReplayMapNonInjective binderA binderB binderA)
 
+        it "normalization maps replay codomain to replay binders of edge root only" $ do
+            let edgeId = 0
+                root = NodeId 0
+                body = NodeId 5
+                replayA = NodeId 1
+                replayB = NodeId 2
+                sourceA = NodeId 20
+                sourceB = NodeId 21
+                argA = NodeId 30
+                argB = NodeId 31
+                nodes =
+                    nodeMapFromList
+                        [ (getNodeId root, TyForall root body)
+                        , (getNodeId body, TyArrow body replayA replayB)
+                        , (getNodeId replayA, TyVar { tnId = replayA, tnBound = Nothing })
+                        , (getNodeId replayB, TyVar { tnId = replayB, tnBound = Nothing })
+                        , (getNodeId sourceA, TyVar { tnId = sourceA, tnBound = Nothing })
+                        , (getNodeId sourceB, TyVar { tnId = sourceB, tnBound = Nothing })
+                        , (getNodeId argA, TyBase argA (BaseTy "Int"))
+                        , (getNodeId argB, TyBase argB (BaseTy "Bool"))
+                        ]
+                bindParents =
+                    bindParentsFromPairs
+                        [ (body, root, BindFlex)
+                        , (replayA, root, BindFlex)
+                        , (replayB, root, BindFlex)
+                        ]
+                c = rootedConstraint emptyConstraint
+                    { cNodes = nodes
+                    , cBindParents = bindParents
+                    }
+                edgeWitness =
+                    EdgeWitness
+                        { ewEdgeId = EdgeId edgeId
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewForallIntros = 0
+                        , ewWitness = InstanceWitness []
+                        }
+                edgeTrace =
+                    EdgeTrace
+                        { etRoot = root
+                        , etBinderArgs = [(sourceA, argA), (sourceB, argB)]
+                        , etInterior =
+                            InteriorNodes
+                                (IntSet.fromList
+                                    [ getNodeId root
+                                    , getNodeId body
+                                    , getNodeId replayA
+                                    , getNodeId replayB
+                                    , getNodeId sourceA
+                                    , getNodeId sourceB
+                                    , getNodeId argA
+                                    , getNodeId argB
+                                    ]
+                                )
+                        , etBinderReplayMap = IntMap.empty
+                        , etCopyMap = mempty
+                        }
+                st0 =
+                    PresolutionState
+                        { psConstraint = c
+                        , psPresolution = Presolution IntMap.empty
+                        , psUnionFind = IntMap.empty
+                        , psNextNodeId = 40
+                        , psPendingWeakens = IntSet.empty
+                        , psBinderCache = IntMap.empty
+                        , psEdgeExpansions = IntMap.empty
+                        , psEdgeWitnesses = IntMap.fromList [(edgeId, edgeWitness)]
+                        , psEdgeTraces = IntMap.fromList [(edgeId, edgeTrace)]
+                        }
+            case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
+                Left err ->
+                    expectationFailure ("normalizeEdgeWitnessesM failed: " ++ show err)
+                Right (_, st') ->
+                    case IntMap.lookup edgeId (psEdgeTraces st') of
+                        Nothing ->
+                            expectationFailure "Expected normalized trace in psEdgeTraces"
+                        Just tr' -> do
+                            orderedBinders <- case Binding.orderedBinders id (psConstraint st') (typeRef root) of
+                                Left err -> expectationFailure ("orderedBinders failed: " ++ show err) >> pure []
+                                Right bs -> pure bs
+                            let orderedTyVarBinders =
+                                    [ b
+                                    | b <- orderedBinders
+                                    , case lookupNodeIn (cNodes (psConstraint st')) b of
+                                        Just TyVar{} -> True
+                                        _ -> False
+                                    ]
+                                orderedBinderSet = IntSet.fromList (map getNodeId orderedTyVarBinders)
+                            IntMap.elems (etBinderReplayMap tr')
+                                `shouldSatisfy`
+                                    all (\target -> IntSet.member (getNodeId target) orderedBinderSet)
+
+        it "stale source binders are pruned so binderArgs and replay-map domain track only active sources" $ do
+            let edgeId = 1
+                root = NodeId 100
+                body = NodeId 101
+                replayA = NodeId 102
+                activeSource = NodeId 20
+                staleSource = NodeId 21
+                argActive = NodeId 30
+                argStale = NodeId 31
+                nodes =
+                    nodeMapFromList
+                        [ (getNodeId root, TyForall root body)
+                        , (getNodeId body, TyArrow body replayA replayA)
+                        , (getNodeId replayA, TyVar { tnId = replayA, tnBound = Nothing })
+                        , (getNodeId activeSource, TyVar { tnId = activeSource, tnBound = Nothing })
+                        , (getNodeId staleSource, TyVar { tnId = staleSource, tnBound = Nothing })
+                        , (getNodeId argActive, TyBase argActive (BaseTy "Int"))
+                        , (getNodeId argStale, TyBase argStale (BaseTy "Bool"))
+                        ]
+                bindParents =
+                    bindParentsFromPairs
+                        [ (body, root, BindFlex)
+                        , (replayA, root, BindFlex)
+                        ]
+                c = rootedConstraint emptyConstraint
+                    { cNodes = nodes
+                    , cBindParents = bindParents
+                    }
+                edgeWitness =
+                    EdgeWitness
+                        { ewEdgeId = EdgeId edgeId
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewForallIntros = 0
+                        , ewWitness = InstanceWitness [OpWeaken activeSource]
+                        }
+                edgeTrace =
+                    EdgeTrace
+                        { etRoot = root
+                        , etBinderArgs = [(activeSource, argActive), (staleSource, argStale)]
+                        , etInterior =
+                            InteriorNodes
+                                (IntSet.fromList
+                                    [ getNodeId root
+                                    , getNodeId body
+                                    , getNodeId replayA
+                                    , getNodeId activeSource
+                                    , getNodeId argActive
+                                    ]
+                                )
+                        , etBinderReplayMap = IntMap.empty
+                        , etCopyMap = mempty
+                        }
+                st0 =
+                    PresolutionState
+                        { psConstraint = c
+                        , psPresolution = Presolution IntMap.empty
+                        , psUnionFind = IntMap.empty
+                        , psNextNodeId = 150
+                        , psPendingWeakens = IntSet.empty
+                        , psBinderCache = IntMap.empty
+                        , psEdgeExpansions = IntMap.empty
+                        , psEdgeWitnesses = IntMap.fromList [(edgeId, edgeWitness)]
+                        , psEdgeTraces = IntMap.fromList [(edgeId, edgeTrace)]
+                        }
+                expectedActiveSource = activeSource
+            case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
+                Left err ->
+                    expectationFailure ("normalizeEdgeWitnessesM failed: " ++ show err)
+                Right (_, st') ->
+                    case IntMap.lookup edgeId (psEdgeTraces st') of
+                        Nothing ->
+                            expectationFailure "Expected normalized trace in psEdgeTraces"
+                        Just tr' -> do
+                            let sourceKeys = IntSet.fromList [getNodeId b | (b, _) <- etBinderArgs tr']
+                                mapKeys = IntSet.fromList (IntMap.keys (etBinderReplayMap tr'))
+                            sourceKeys `shouldBe` mapKeys
+                            sourceKeys `shouldBe` IntSet.fromList [getNodeId expectedActiveSource]
+
   where
     isTotalOp :: InstanceOp -> Bool
     isTotalOp _ = True

@@ -1609,6 +1609,56 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     Right inst ->
                         expectationFailure ("Expected fail-fast replay-map validation error, got " ++ Elab.pretty inst)
 
+            it "fails fast on malformed source-space replay target outside replay binder domain" $ do
+                let root = NodeId 100
+                    sourceKey = NodeId 1
+                    sourceBinder = NodeId 31
+                    argNode = NodeId 40
+                    c = rootedConstraint emptyConstraint
+                        { cNodes = nodeMapFromList
+                                [ (getNodeId root, TyArrow root sourceKey sourceKey)
+                                , (getNodeId sourceKey, TyVar { tnId = sourceKey, tnBound = Nothing })
+                                , (getNodeId sourceBinder, TyVar { tnId = sourceBinder, tnBound = Nothing })
+                                , (getNodeId argNode, TyBase argNode (BaseTy "Bool"))
+                                ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef sourceKey), (genRef (GenNodeId 0), BindFlex))
+                                ]
+                        }
+                    solved = mkSolved c IntMap.empty
+                    scheme =
+                        Elab.schemeFromType
+                            (Elab.TForall "a" Nothing
+                                (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
+                    si = Elab.SchemeInfo
+                        { Elab.siScheme = scheme
+                        , Elab.siSubst = IntMap.fromList [(getNodeId sourceKey, "a")]
+                        }
+                    tr =
+                        EdgeTrace
+                            { etRoot = root
+                            , etBinderArgs = [(sourceKey, argNode)]
+                            , etInterior = fromListInterior [root, sourceKey, sourceBinder, argNode]
+                            , etBinderReplayMap = IntMap.fromList [(getNodeId sourceKey, sourceBinder)]
+                            , etCopyMap = mempty
+                            }
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewForallIntros = 0
+                        , ewWitness = InstanceWitness [OpWeaken sourceKey]
+                        }
+                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew of
+                    Left (Elab.PhiInvariantError msg) ->
+                        msg `shouldSatisfy` ("trace binder replay-map target outside replay binder domain" `isInfixOf`)
+                    Left err ->
+                        expectationFailure ("Expected PhiInvariantError, got " ++ show err)
+                    Right inst ->
+                        expectationFailure ("Expected hard-fail, got " ++ Elab.pretty inst)
+
             it "OpWeaken on an alias target fails fast under strict replay-map resolution" $ do
                 let root = NodeId 100
                     binderA = NodeId 1
