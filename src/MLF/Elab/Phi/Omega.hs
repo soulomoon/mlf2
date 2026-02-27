@@ -778,7 +778,18 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                     , not (nodeIsBottom candidate)
                     ]
             case nNonBottom <|> nExisting of
-                [] -> go binderKeys namedSet' vs accum rest lookupBinder
+                []
+                    | IntSet.member (getNodeId nSource) traceBinderSources ->
+                        Left $
+                            PhiInvariantError $
+                                unlines
+                                    [ "trace/replay binder key-space mismatch (OpRaise unresolved trace-source target)"
+                                    , "op: OpRaise"
+                                    , "source target: " ++ show nSource
+                                    , "replay-map domain: " ++ show (IntMap.keys traceBinderReplayMap)
+                                    ]
+                    | otherwise ->
+                        go binderKeys namedSet' vs accum rest lookupBinder
                 nAdopt : _ -> do
                     let nOrig = canonicalNode nAdopt
                     case debugPhi
