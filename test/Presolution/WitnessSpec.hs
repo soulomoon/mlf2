@@ -1820,7 +1820,12 @@ spec = do
                                         _ -> False
                                     ]
                                 orderedBinderSet = IntSet.fromList (map getNodeId orderedTyVarBinders)
-                            IntMap.elems (etBinderReplayMap tr')
+                                replayMap = etBinderReplayMap tr'
+                                replayMapKeys = IntSet.fromList (IntMap.keys replayMap)
+                                expectedSourceKeys =
+                                    IntSet.fromList [getNodeId sourceA, getNodeId sourceB]
+                            replayMapKeys `shouldBe` expectedSourceKeys
+                            IntMap.elems replayMap
                                 `shouldSatisfy`
                                     all (\target -> IntSet.member (getNodeId target) orderedBinderSet)
 
