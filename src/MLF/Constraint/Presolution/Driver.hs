@@ -43,7 +43,7 @@ import MLF.Util.Trace (TraceConfig, traceBindingM)
 import Data.Maybe (catMaybes, fromMaybe, mapMaybe)
 
 import qualified MLF.Binding.Tree as Binding
-import MLF.Constraint.Canonicalizer (canonicalizerFrom)
+import MLF.Constraint.Canonicalizer (canonicalizerFrom, chaseRedirectsStable)
 import qualified MLF.Constraint.Canonicalize as Canonicalize
 import MLF.Constraint.Types
 import MLF.Constraint.Presolution.Base
@@ -147,6 +147,11 @@ computePresolution traceCfg acyclicityResult constraint = do
             map EdgeId (IntSet.toList (IntSet.difference nonTrivialEdgeKeys witnessKeys))
         missingTraces =
             map EdgeId (IntSet.toList (IntSet.difference nonTrivialEdgeKeys traceKeys))
+        canonical = chaseRedirectsStable redirects
+        replayBindersForTrace tr =
+            case Binding.orderedBinders canonical finalConstraint (typeRef (etRoot tr)) of
+                Left _ -> []
+                Right binders -> map canonical binders
     when (not (null missingWitnesses)) $
         Left (MissingEdgeWitnesses missingWitnesses)
     when (not (null missingTraces)) $
@@ -160,6 +165,8 @@ computePresolution traceCfg acyclicityResult constraint = do
                         ]
                 replayDomain =
                     IntSet.fromList (IntMap.keys (etBinderReplayMap tr))
+                replayBinderDomain =
+                    IntSet.fromList [getNodeId b | b <- replayBindersForTrace tr]
                 missingReplay =
                     IntSet.toList (IntSet.difference sourceDomain replayDomain)
                 extraReplay =
@@ -175,8 +182,18 @@ computePresolution traceCfg acyclicityResult constraint = do
                             , "missing source keys: " ++ show missingReplay
                             , "extra source keys: " ++ show extraReplay
                             ]
-            forM_ (IntMap.toList (etBinderReplayMap tr)) $ \(sourceKey, replayTarget) ->
-                case NodeAccess.lookupNode finalConstraint replayTarget of
+            forM_ (IntMap.toList (etBinderReplayMap tr)) $ \(sourceKey, replayTarget) -> do
+                let replayTargetC = canonical replayTarget
+                when (IntSet.notMember (getNodeId replayTargetC) replayBinderDomain) $
+                    Left $
+                        InternalError $
+                            unlines
+                                [ "edge replay-map codomain target outside replay binder domain"
+                                , "edge: " ++ show (EdgeId eid)
+                                , "source key: " ++ show sourceKey
+                                , "replay target: " ++ show replayTarget
+                                ]
+                case NodeAccess.lookupNode finalConstraint replayTargetC of
                     Just TyVar{} -> pure ()
                     _ ->
                         Left $

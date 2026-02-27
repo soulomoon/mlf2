@@ -1654,7 +1654,7 @@ spec = do
                     }
             validateNormalizedWitness env [] `shouldBe` Left (ReplayMapIncomplete [binder])
 
-        it "fails replay-map validation when codomain target is not a TyVar binder" $ do
+        it "fails replay-map validation when codomain target is outside replay binder domain" $ do
             let root = NodeId 0
                 binder = NodeId 1
                 badTarget = NodeId 2
@@ -1684,7 +1684,7 @@ spec = do
                     , binderArgs = IntMap.fromList [(getNodeId binder, argNode)]
                     , binderReplayMap = IntMap.fromList [(getNodeId binder, badTarget)]
                     }
-            validateNormalizedWitness env [] `shouldBe` Left (ReplayMapNonTyVarTarget binder badTarget)
+            validateNormalizedWitness env [] `shouldBe` Left (ReplayMapTargetOutsideReplayDomain binder badTarget)
 
         it "fails replay-map validation when two source binders map to one replay binder" $ do
             let root = NodeId 0
