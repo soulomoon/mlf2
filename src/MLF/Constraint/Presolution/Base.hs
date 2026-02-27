@@ -154,10 +154,11 @@ data PresolutionState = PresolutionState
 --   * `etInterior`
 -- all live in one source-ID domain.
 --
--- Replay-hint contract:
---   * `etBinderReplayHints` maps source binder keys to replay-domain binder
---     candidates (solved TyVar binders). This map is advisory metadata used to
---     reduce source/replay ambiguity at Φ translation time.
+-- Replay-map contract:
+--   * `etBinderReplayMap` maps source binder keys to replay-domain binder
+--     nodes selected during presolution normalization.
+--   * The map is required, total over the source binder domain (`etBinderArgs`),
+--     and injective over replay-domain TyVar binders.
 --
 -- Canonical IDs are derived locally at lookup sites. Global canonicalization
 -- must not rewrite provenance collections across this boundary.
@@ -170,7 +171,7 @@ data EdgeTrace = EdgeTrace
     { etRoot :: NodeId
     , etBinderArgs :: [(NodeId, NodeId)] -- ^ (binder node, instantiation argument node)
     , etInterior :: InteriorNodes -- ^ Nodes in I(r) (exact, from the binding tree).
-    , etBinderReplayHints :: IntMap NodeId -- ^ source binder key -> replay-domain binder candidate
+    , etBinderReplayMap :: IntMap NodeId -- ^ source binder key -> replay-domain binder node
     , etCopyMap :: CopyMapping -- ^ Provenance: original node -> copied/replaced node
     }
     deriving (Eq, Show)

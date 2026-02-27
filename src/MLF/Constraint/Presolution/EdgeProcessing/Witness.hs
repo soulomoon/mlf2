@@ -118,6 +118,6 @@ buildEdgeTrace gid _eid left leftRaw expn (copyMap0, _interior0, _frontier0) = d
         { etRoot = root
         , etBinderArgs = bas
         , etInterior = interior
-        , etBinderReplayHints = mempty
+        , etBinderReplayMap = mempty
         , etCopyMap = copyMap0
         }

@@ -1115,7 +1115,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness []
                         }
 
-                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
+                phi <- requireRight (ElabTest.phiFromEdgeWitnessAutoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
                 -- Φ should produce a non-identity instantiation (reordering)
                 phi `shouldNotBe` Elab.InstId
                 -- Apply and verify the result has binders in <P order (a before b)
@@ -1179,7 +1179,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
-                case ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew of
+                case ElabTest.phiFromEdgeWitnessAutoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew of
                     Left _ -> pure ()
                     Right phi ->
                         expectationFailure
@@ -1233,7 +1233,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
-                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
+                phi <- requireRight (ElabTest.phiFromEdgeWitnessAutoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
                 let expected = Elab.TArrow (Elab.TBase (BaseTy "Int")) (Elab.TBase (BaseTy "Bool"))
                 canonType out `shouldBe` canonType expected
@@ -1301,7 +1301,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness []
                         }
 
-                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
+                phi <- requireRight (ElabTest.phiFromEdgeWitnessAutoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
                 phi `shouldNotBe` Elab.InstId
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
                 let expected =
@@ -1368,7 +1368,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness []
                         }
 
-                case ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew of
+                case ElabTest.phiFromEdgeWitnessAutoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew of
                     Left (Elab.PhiInvariantError msg) ->
                         msg `shouldSatisfy` ("PhiReorder: missing order key" `isInfixOf`)
                     Left Elab.BindingTreeError{} ->
@@ -1399,6 +1399,35 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             Left err -> expectationFailure ("Expected MissingEdgeTrace, got " ++ show err)
                             Right _ -> expectationFailure "Expected elaboration to fail due to missing trace"
 
+            it "no-trace test entrypoint fails fast with MissingEdgeTrace" $ do
+                let root = NodeId 0
+                    binder = NodeId 1
+                    c = rootedConstraint emptyConstraint
+                        { cNodes = nodeMapFromList
+                                [ (getNodeId root, TyForall root binder)
+                                , (getNodeId binder, TyVar { tnId = binder, tnBound = Nothing })
+                                ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef binder), (typeRef root, BindFlex))
+                                ]
+                        }
+                    solved = mkSolved c IntMap.empty
+                    scheme = Elab.schemeFromType (Elab.TForall "a" Nothing (Elab.TVar "a"))
+                    si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = IntMap.fromList [(getNodeId binder, "a")] }
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 77
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewForallIntros = 0
+                        , ewWitness = InstanceWitness []
+                        }
+                case ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew of
+                    Left (Elab.MissingEdgeTrace (EdgeId eid)) -> eid `shouldBe` 77
+                    Left err -> expectationFailure ("Expected MissingEdgeTrace, got " ++ show err)
+                    Right inst -> expectationFailure ("Expected fail-fast MissingEdgeTrace, got " ++ Elab.pretty inst)
+
             it "O15-TR-RIGID-RAISE: OpRaise on a rigid node outside I(r) translates to identity" $ do
                 let root = NodeId 100
                     rigidN = NodeId 1
@@ -1420,7 +1449,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             { etRoot = root
                             , etBinderArgs = []
                             , etInterior = fromListInterior [root]
-                            , etBinderReplayHints = mempty
+                            , etBinderReplayMap = mempty
                             , etCopyMap = mempty
                             }
                     ops = [OpRaise rigidN]
@@ -1458,7 +1487,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             { etRoot = root
                             , etBinderArgs = []
                             , etInterior = fromListInterior [root, binderN]
-                            , etBinderReplayHints = mempty
+                            , etBinderReplayMap = mempty
                             , etCopyMap = insertCopy binderN aliasN mempty
                             }
                     ops = [OpRaise binderN]
@@ -1506,7 +1535,11 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             { etRoot = root
                             , etBinderArgs = [(binderA, argA), (binderB, argB)]
                             , etInterior = fromListInterior [root, binderA, binderB, argA, argB]
-                            , etBinderReplayHints = mempty
+                            , etBinderReplayMap =
+                                IntMap.fromList
+                                    [ (getNodeId binderA, binderA)
+                                    , (getNodeId binderB, binderB)
+                                    ]
                             , etCopyMap = mempty
                             }
                     ops = [OpWeaken binderB]
@@ -1527,7 +1560,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         -- the prefix context of binder "a".
                         Elab.pretty inst `shouldBe` "∀(a ⩾) N"
 
-            it "OpWeaken on an alias target recovers binder via equivalence class and emits InstElim" $ do
+            it "OpWeaken on an alias target fails fast under strict replay-map resolution" $ do
                 let root = NodeId 100
                     binderA = NodeId 1
                     binderB = NodeId 2
@@ -1564,13 +1597,15 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewForallIntros = 0
                         , ewWitness = InstanceWitness [OpWeaken aliasB]
                         }
-                case ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew of
+                case ElabTest.phiFromEdgeWitnessAutoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew of
+                    Left (Elab.PhiTranslatabilityError msgs) ->
+                        unlines msgs `shouldSatisfy` ("OpWeaken" `isInfixOf`)
                     Left err ->
-                        expectationFailure ("Expected InstElim via class recovery, got error: " ++ show err)
+                        expectationFailure ("Expected PhiTranslatabilityError, got " ++ show err)
                     Right inst ->
-                        Elab.pretty inst `shouldBe` "∀(a ⩾) N"
+                        expectationFailure ("Expected fail-fast OpWeaken, got inst: " ++ show inst)
 
-            it "OpWeaken on a shared alias class deterministically picks the first binder without trace" $ do
+            it "OpWeaken on a shared alias class fails fast without trace fallback search" $ do
                 let root = NodeId 100
                     binderA = NodeId 1
                     binderB = NodeId 2
@@ -1607,13 +1642,13 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewForallIntros = 0
                         , ewWitness = InstanceWitness [OpWeaken alias]
                         }
-                case ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew of
+                case ElabTest.phiFromEdgeWitnessAutoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew of
+                    Left (Elab.PhiTranslatabilityError msgs) ->
+                        unlines msgs `shouldSatisfy` ("OpWeaken" `isInfixOf`)
                     Left err ->
-                        expectationFailure ("Expected deterministic InstElim for shared alias class, got error: " ++ show err)
+                        expectationFailure ("Expected PhiTranslatabilityError, got " ++ show err)
                     Right inst ->
-                        -- With no trace ordering, binder-choice fallback is deterministic
-                        -- via key ordering and should eliminate binder "a" first.
-                        Elab.pretty inst `shouldBe` "N"
+                        expectationFailure ("Expected fail-fast OpWeaken, got inst: " ++ show inst)
 
             it "OpWeaken on unrecoverable non-binder alias fails fast (no no-op fallback)" $ do
                 let root = NodeId 100
@@ -1647,7 +1682,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewForallIntros = 0
                         , ewWitness = InstanceWitness [OpWeaken aliasN]
                         }
-                case ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew of
+                case ElabTest.phiFromEdgeWitnessAutoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew of
                     Left (Elab.PhiTranslatabilityError msgs) ->
                         unlines msgs `shouldSatisfy` ("OpWeaken" `isInfixOf`)
                     Left err ->
@@ -1694,7 +1729,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewForallIntros = 0
                         , ewWitness = InstanceWitness [OpWeaken binderB]
                         }
-                case ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew of
+                case ElabTest.phiFromEdgeWitnessAutoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew of
                     Left (Elab.PhiTranslatabilityError msgs) ->
                         unlines msgs `shouldSatisfy` ("OpWeaken" `isInfixOf`)
                     Left err ->
@@ -1726,7 +1761,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             { etRoot = root
                             , etBinderArgs = []
                             , etInterior = fromListInterior [root, n, m]
-                            , etBinderReplayHints = mempty
+                            , etBinderReplayMap = mempty
                             , etCopyMap = mempty
                             }
                     ops = [OpMerge n m]
@@ -1765,7 +1800,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             { etRoot = root
                             , etBinderArgs = []
                             , etInterior = fromListInterior [root, n]
-                            , etBinderReplayHints = mempty
+                            , etBinderReplayMap = mempty
                             , etCopyMap = mempty
                             }
                     ops = [OpRaiseMerge n m]
@@ -1804,7 +1839,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             { etRoot = root
                             , etBinderArgs = []
                             , etInterior = fromListInterior [root, n, m]
-                            , etBinderReplayHints = mempty
+                            , etBinderReplayMap = mempty
                             , etCopyMap = mempty
                             }
                     ops = [OpMerge n m]
@@ -1848,7 +1883,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             { etRoot = root
                             , etBinderArgs = []
                             , etInterior = fromListInterior [root, n]
-                            , etBinderReplayHints = mempty
+                            , etBinderReplayMap = mempty
                             , etCopyMap = mempty
                             }
                     ops = [OpRaiseMerge n m]
@@ -1917,7 +1952,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
+                phi <- requireRight (ElabTest.phiFromEdgeWitnessAutoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
                 phi `shouldNotBe` Elab.InstId
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
                 Elab.pretty out `shouldSatisfy` ("Int" `isInfixOf`)
@@ -1975,7 +2010,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
+                phi <- requireRight (ElabTest.phiFromEdgeWitnessAutoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
 
                 -- Because we target the *second* binder, Φ must do more than a plain ⟨Int⟩.
                 phi `shouldNotBe` Elab.InstApp (Elab.TBase (BaseTy "Int"))
@@ -2030,7 +2065,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
+                phi <- requireRight (ElabTest.phiFromEdgeWitnessAutoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
                 phi `shouldBe` Elab.InstElim
 
             it "translates non-root graft-raise-weaken and preserves expected instantiated type" $ do
@@ -2091,8 +2126,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewForallIntros = 0
                         , ewWitness = InstanceWitness [OpGraft intNode binderB, OpRaise binderB, OpWeaken binderB]
                         }
-                phiGRW <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ewGRW)
-                _phiGW <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ewGW)
+                phiGRW <- requireRight (ElabTest.phiFromEdgeWitnessAutoTrace defaultTraceConfig generalizeAtWith solved (Just si) ewGRW)
+                _phiGW <- requireRight (ElabTest.phiFromEdgeWitnessAutoTrace defaultTraceConfig generalizeAtWith solved (Just si) ewGW)
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phiGRW)
                 let expected =
                         Elab.TForall "a" Nothing
@@ -2150,7 +2185,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness [OpGraft botNode binderB, OpWeaken binderB]
                         }
 
-                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
+                phi <- requireRight (ElabTest.phiFromEdgeWitnessAutoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
                 Elab.pretty out `shouldSatisfy` ("-> b" `isInfixOf`)
 
@@ -2185,7 +2220,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
+                phi <- requireRight (ElabTest.phiFromEdgeWitnessAutoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
                 Elab.pretty phi `shouldBe` "O; ∀(u0 ⩾) N"
 
             it "scheme-aware Φ can translate Merge (alias one binder to another)" $ do
@@ -2234,7 +2269,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
+                phi <- requireRight (ElabTest.phiFromEdgeWitnessAutoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
                 let expected =
                         Elab.TForall "a" Nothing
@@ -2286,7 +2321,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
+                phi <- requireRight (ElabTest.phiFromEdgeWitnessAutoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
                 let expected =
                         Elab.TForall "a" Nothing
@@ -2330,7 +2365,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
+                phi <- requireRight (ElabTest.phiFromEdgeWitnessAutoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
                 let expected =
                         Elab.TForall "u0" Nothing
@@ -2382,7 +2417,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
+                phi <- requireRight (ElabTest.phiFromEdgeWitnessAutoTrace defaultTraceConfig generalizeAtWith solved (Just si) ew)
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
 
                 let expected =
@@ -2432,7 +2467,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             { etRoot = root
                             , etBinderArgs = []
                             , etInterior = mempty
-                            , etBinderReplayHints = mempty
+                            , etBinderReplayMap = mempty
                             , etCopyMap = mempty
                             }
 
@@ -2567,7 +2602,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             { etRoot = root
                             , etBinderArgs = []
                             , etInterior = fromListInterior [binderN, nonBinderN]
-                            , etBinderReplayHints = mempty
+                            , etBinderReplayMap = mempty
                             , etCopyMap = mempty
                             }
                     ops = [OpGraft binderN nonBinderN, OpWeaken nonBinderN]
@@ -2616,7 +2651,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             { etRoot = root
                             , etBinderArgs = []
                             , etInterior = fromListInterior [binderN, nonBinderN]
-                            , etBinderReplayHints = mempty
+                            , etBinderReplayMap = mempty
                             , etCopyMap = mempty
                             }
                     ops = [OpGraft binderN nonBinderN]
@@ -2942,7 +2977,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             { etRoot = root
                             , etBinderArgs = []
                             , etInterior = fromListInterior [root, aN, mN, nN]
-                            , etBinderReplayHints = mempty
+                            , etBinderReplayMap = mempty
                             , etCopyMap = mempty
                             }
 

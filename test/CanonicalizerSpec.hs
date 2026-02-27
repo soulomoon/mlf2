@@ -92,7 +92,7 @@ spec = describe "MLF.Constraint.Canonicalizer" $ do
                     { etRoot = NodeId 1
                     , etBinderArgs = [(NodeId 1, NodeId 3), (NodeId 2, NodeId 4)]
                     , etInterior = fromListInterior [NodeId 1, NodeId 2, NodeId 3]
-                    , etBinderReplayHints = mempty
+                    , etBinderReplayMap = mempty
                     , etCopyMap = CopyMapping (IntMap.fromList [(1, NodeId 2), (3, NodeId 4)])
                     }
                 tr1 = canonicalizeTrace canon tr0

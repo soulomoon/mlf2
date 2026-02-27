@@ -111,3 +111,13 @@ deviations:
     resolution: >
       Deprecated and removed; call sites migrated to explicit accessors
     date: 2026-02-27
+
+  - id: TA-004
+    status: resolved
+    description: >
+      Phi/Omega replay binder resolution depended on runtime fallback search
+      (class members / ad hoc alias recovery) instead of strict upfront replay metadata.
+    resolution: >
+      Replay-map contract is now produced/validated in presolution and consumed
+      deterministically in Phi/Omega with fail-fast diagnostics.
+    date: 2026-02-27

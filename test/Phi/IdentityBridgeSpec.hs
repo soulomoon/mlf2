@@ -44,7 +44,7 @@ mkTrace binderArgs copyPairs =
         { etRoot = NodeId 0
         , etBinderArgs = [(NodeId b, NodeId a) | (b, a) <- binderArgs]
         , etInterior = InteriorNodes IntSet.empty
-        , etBinderReplayHints = mempty
+        , etBinderReplayMap = mempty
         , etCopyMap = CopyMapping (IntMap.fromList [(k, NodeId v) | (k, v) <- copyPairs])
         }
 
@@ -77,21 +77,7 @@ spec = describe "IdentityBridge" $ do
             -- No duplicates
             length keys `shouldBe` length (IntSet.toList (IntSet.fromList keys))
 
-        it "includes solved class members for canonical alias recovery when requested" $ do
-            let binder = NodeId 2
-                alias = NodeId 31
-                c :: Constraint
-                c = emptyConstraint
-                    { cNodes = nodeMapFromList
-                        [ (getNodeId binder, TyVar { tnId = binder, tnBound = Nothing })
-                        , (getNodeId alias, TyBase alias (BaseTy "Bool"))
-                        ]
-                    }
-                solved = Solved.mkTestSolved c (IntMap.fromList [(getNodeId binder, alias)])
-                ib = mkIdentityBridge solved Nothing IntMap.empty
-            sourceKeysForNodeWithClassFallback ib alias `shouldSatisfy` elem (getNodeId binder)
-
-        it "keeps class-member fallback out of default source keys" $ do
+        it "keeps solved class members out of witness-domain source keys" $ do
             let binder = NodeId 2
                 alias = NodeId 31
                 c = emptyConstraint
@@ -230,7 +216,7 @@ spec = describe "IdentityBridge" $ do
                 spine = [Just (NodeId 20), Just (NodeId 30)]
             lookupBinderIndex ib binderKeys spine (NodeId 30) `shouldBe` Just 1
 
-        it "preserves raw binder identity before class-member fallback" $ do
+        it "preserves raw binder identity without class-member fallback" $ do
             let b1 = NodeId 1
                 b2 = NodeId 2
                 alias = NodeId 31
@@ -250,7 +236,7 @@ spec = describe "IdentityBridge" $ do
             lookupBinderIndex ib binderKeys spine b1 `shouldBe` Just 0
             lookupBinderIndex ib binderKeys spine b2 `shouldBe` Just 1
 
-        it "uses class-member fallback when target has no exact binder key" $ do
+        it "returns Nothing when target has no witness-domain binder key" $ do
             let b1 = NodeId 1
                 b2 = NodeId 2
                 alias = NodeId 31
@@ -267,8 +253,7 @@ spec = describe "IdentityBridge" $ do
                 ib = mkIdentityBridge solved Nothing IntMap.empty
                 binderKeys = IntSet.fromList [1, 2]
                 spine = [Just b1, Just b2]
-            -- alias is not a raw binder key; selection comes from class fallback.
-            lookupBinderIndex ib binderKeys spine alias `shouldBe` Just 0
+            lookupBinderIndex ib binderKeys spine alias `shouldBe` Nothing
 
         it "deterministic tie-break by trace order when two positions have exact matches" $ do
             -- Trace: binder 20 at ix=0, binder 10 at ix=1

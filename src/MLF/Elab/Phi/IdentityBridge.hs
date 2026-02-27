@@ -19,10 +19,8 @@ module MLF.Elab.Phi.IdentityBridge (
     canonicalKeyForNode,
     canonicalKeyForSource,
     sourceKeysForNode,
-    sourceKeysForNodeWithClassFallback,
     safeSourceCandidatesForCanonicalBinder,
     sourceBinderKeysForNode,
-    sourceKeysForNodeNoClassFallback,
     isBinderNode,
     lookupBinderIndex,
     traceOrderRank,
@@ -142,54 +140,32 @@ mkIdentityBridge solved mTrace copyMap =
             , k /= getNodeId v
             ]
 
-{- Note [Witness-Domain-First Resolution]
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+{- Note [Witness-Domain Source Keys]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Per thesis §15.3.5–15.3.6, Phi translation resolves binder/source identity
-from the witness domain (EdgeTrace/EdgeWitness) first. Canonical projection
-via equivalence classes is used only as a reconciliation fallback.
+from witness-domain artifacts first. `sourceKeysForNode` therefore includes
+only witness-domain provenance:
 
-The ranking in sourceKeysForNodeWithClassFallback enforces this:
-  1. Raw key (source domain)
-  2. Canonical key (projection)
-  3. Forward/inverse copy map keys (witness provenance)
-  4. Class members (equivalence-class fallback)
+  1. raw key
+  2. canonical key
+  3. copy-map forward/reverse aliases
+  4. trace binder aliases
 
-Trace-order ranking (ibBinderOrderIx) further prioritizes keys that appear
-in the edge's binder argument list.
+No runtime equivalence-class expansion is performed here.
 -}
 
 -- | All source-domain keys for a node, de-duplicated and ranked by
 -- trace order (lower index = higher priority), restricted to witness-domain
--- provenance (raw/canonical/copy/trace). Class-member expansion is excluded.
+-- provenance (raw/canonical/copy/trace).
 sourceKeysForNode :: IdentityBridge -> NodeId -> [Int]
-sourceKeysForNode = sourceKeysForNodeByClassFallback ExcludeClassFallback
-
--- | Explicit class-member fallback variant.
---
--- Use this only in clearly marked recovery branches after witness-domain
--- candidates are exhausted.
-sourceKeysForNodeWithClassFallback :: IdentityBridge -> NodeId -> [Int]
-sourceKeysForNodeWithClassFallback =
-    sourceKeysForNodeByClassFallback UseClassFallback
-
-data ClassFallback
-    = UseClassFallback
-    | ExcludeClassFallback
-
-sourceKeysForNodeByClassFallback :: ClassFallback -> IdentityBridge -> NodeId -> [Int]
-sourceKeysForNodeByClassFallback classFallback ib nid =
+sourceKeysForNode ib nid =
     let canonical = ibCanonical ib
-        solved = ibSolved ib
         keyRaw   = getNodeId nid
         keyCanon = getNodeId (canonical nid)
         fwdRaw   = maybe [] (pure . getNodeId) (IntMap.lookup keyRaw (ibCopyMap ib))
         fwdCanon = map (getNodeId . canonical . NodeId) fwdRaw
         invRaw   = maybe [] (pure . getNodeId) (IntMap.lookup keyRaw (ibInvCopyMap ib))
         invCanon = maybe [] (pure . getNodeId) (IntMap.lookup keyCanon (ibInvCopyMap ib))
-        classKeys =
-            case classFallback of
-                UseClassFallback -> map getNodeId (Solved.classMembers solved nid)
-                ExcludeClassFallback -> []
         copyCanon  = IntMap.findWithDefault [] keyCanon (ibReverseCopyByCanonical ib)
         traceCanon = IntMap.findWithDefault [] keyCanon (ibReverseTraceByCanonical ib)
         rank key = (IntMap.findWithDefault maxBound key (ibBinderOrderIx ib), key)
@@ -201,11 +177,8 @@ sourceKeysForNodeByClassFallback classFallback ib nid =
                         else (IntSet.insert key seenAcc, key : acc)
                 )
                 (IntSet.empty, [])
-                (keyRaw : keyCanon : classKeys ++ fwdRaw ++ fwdCanon ++ invRaw ++ invCanon ++ copyCanon ++ traceCanon)
+                (keyRaw : keyCanon : fwdRaw ++ fwdCanon ++ invRaw ++ invCanon ++ copyCanon ++ traceCanon)
     in sortOn rank (reverse keysRev)
-
-sourceKeysForNodeNoClassFallback :: IdentityBridge -> NodeId -> [Int]
-sourceKeysForNodeNoClassFallback = sourceKeysForNode
 
 -- | Candidate source keys for a canonical binder, ranked deterministically
 -- and constrained to that canonical binder identity.
@@ -221,10 +194,6 @@ sourceBinderKeysForNode :: IdentityBridge -> IntSet.IntSet -> NodeId -> [Int]
 sourceBinderKeysForNode ib binderKeys nid =
     filter (`IntSet.member` binderKeys) (sourceKeysForNode ib nid)
 
-sourceBinderKeysForNodeWithClassFallback :: IdentityBridge -> IntSet.IntSet -> NodeId -> [Int]
-sourceBinderKeysForNodeWithClassFallback ib binderKeys nid =
-    filter (`IntSet.member` binderKeys) (sourceKeysForNodeWithClassFallback ib nid)
-
 -- | Does this node have any source key in the given binder key set?
 isBinderNode :: IdentityBridge -> IntSet.IntSet -> NodeId -> Bool
 isBinderNode ib binderKeys nid =
@@ -238,9 +207,8 @@ isBinderNode ib binderKeys nid =
 -- position matches.
 --
 -- Ranking:
---   * matchClass 0: exact source-key match from non-class-expanded keys
---   * matchClass 1: class-member fallback (only when target has no exact key)
---   * matchClass 2: canonical-alias fallback
+--   * matchClass 0: exact source-key match
+--   * matchClass 1: canonical-alias fallback
 -- Within a match class, the key with the best trace-order rank wins;
 -- ties are broken by spine index (lower wins).
 lookupBinderIndex
@@ -259,17 +227,10 @@ lookupBinderIndex ib binderKeys ids nid
     canonicalKey key = getNodeId (ibCanonical ib (NodeId key))
 
     targetKeys :: [Int]
-    targetKeys = sourceBinderKeysForNodeWithClassFallback ib binderKeys nid
-
-    targetExactKeys :: [Int]
-    targetExactKeys =
-        filter (`IntSet.member` binderKeys) (sourceKeysForNodeNoClassFallback ib nid)
+    targetKeys = sourceBinderKeysForNode ib binderKeys nid
 
     targetKeySet :: IntSet.IntSet
     targetKeySet = IntSet.fromList targetKeys
-
-    targetExactKeySet :: IntSet.IntSet
-    targetExactKeySet = IntSet.fromList targetExactKeys
 
     chooseBestKey :: [Int] -> Int
     chooseBestKey keys =
@@ -281,30 +242,22 @@ lookupBinderIndex ib binderKeys ids nid
     candidateFor _ Nothing = Nothing
     candidateFor ix (Just nid') =
         let idKeys =
-                sourceBinderKeysForNodeWithClassFallback ib binderKeys nid'
-            idExactKeys =
-                filter (`IntSet.member` binderKeys) (sourceKeysForNodeNoClassFallback ib nid')
-            idExactKeySet = IntSet.fromList idExactKeys
+                sourceBinderKeysForNode ib binderKeys nid'
+            idKeySet = IntSet.fromList idKeys
             idCanonSet = IntSet.fromList (map canonicalKey idKeys)
             exactMatches =
-                filter (`IntSet.member` idExactKeySet) targetExactKeys
-            classFallbackMatches =
-                if IntSet.null targetExactKeySet
-                    then filter (`IntSet.member` idExactKeySet) targetKeys
-                    else []
+                filter (`IntSet.member` idKeySet) targetKeys
             aliasMatches =
                 [ key
                 | key <- targetKeys
-                , not (IntSet.member key idExactKeySet)
+                , not (IntSet.member key idKeySet)
                 , IntSet.member (canonicalKey key) idCanonSet
                 ]
             matchPick =
                 if not (null exactMatches)
                     then Just (0, chooseBestKey exactMatches)
-                    else if not (null classFallbackMatches)
-                        then Just (1, chooseBestKey classFallbackMatches)
                     else if not (null aliasMatches)
-                        then Just (2, chooseBestKey aliasMatches)
+                        then Just (1, chooseBestKey aliasMatches)
                         else Nothing
         in case matchPick of
             Nothing -> Nothing

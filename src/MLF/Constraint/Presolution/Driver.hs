@@ -35,7 +35,7 @@ module MLF.Constraint.Presolution.Driver (
 
 import Control.Monad.Reader (ask)
 import Control.Monad.Except (throwError)
-import Control.Monad (foldM, forM, when)
+import Control.Monad (foldM, forM, forM_, when)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
@@ -151,6 +151,42 @@ computePresolution traceCfg acyclicityResult constraint = do
         Left (MissingEdgeWitnesses missingWitnesses)
     when (not (null missingTraces)) $
         Left (MissingEdgeTraces missingTraces)
+    forM_ (IntMap.toList edgeTraces) $ \(eid, tr) ->
+        when (IntSet.member eid nonTrivialEdgeKeys) $ do
+            let sourceDomain =
+                    IntSet.fromList
+                        [ getNodeId binder
+                        | (binder, _arg) <- etBinderArgs tr
+                        ]
+                replayDomain =
+                    IntSet.fromList (IntMap.keys (etBinderReplayMap tr))
+                missingReplay =
+                    IntSet.toList (IntSet.difference sourceDomain replayDomain)
+                extraReplay =
+                    IntSet.toList (IntSet.difference replayDomain sourceDomain)
+            when (not (null missingReplay) || not (null extraReplay)) $
+                Left $
+                    InternalError $
+                        unlines
+                            [ "edge replay-map domain mismatch"
+                            , "edge: " ++ show (EdgeId eid)
+                            , "trace binder-source domain: " ++ show (IntSet.toList sourceDomain)
+                            , "replay-map domain: " ++ show (IntSet.toList replayDomain)
+                            , "missing source keys: " ++ show missingReplay
+                            , "extra source keys: " ++ show extraReplay
+                            ]
+            forM_ (IntMap.toList (etBinderReplayMap tr)) $ \(sourceKey, replayTarget) ->
+                case NodeAccess.lookupNode finalConstraint replayTarget of
+                    Just TyVar{} -> pure ()
+                    _ ->
+                        Left $
+                            InternalError $
+                                unlines
+                                    [ "edge replay-map codomain contains non-TyVar target"
+                                    , "edge: " ++ show (EdgeId eid)
+                                    , "source key: " ++ show sourceKey
+                                    , "replay target: " ++ show replayTarget
+                                    ]
 
     return PresolutionResult
         { prConstraint = finalConstraint

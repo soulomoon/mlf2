@@ -10,9 +10,17 @@
 
 ### Phi Translation
 - Phi/Omega/IdentityBridge resolve binder identity from witness domain (EdgeTrace/EdgeWitness) first.
-- Equivalence-class projection (`classMembers`) is a reconciliation fallback, not the primary resolution path.
+- Runtime class-member fallback search is removed from Phi/Omega binder resolution.
 - `sourceKeysForNode` is strict witness-domain ranking (raw → canonical → copy/trace provenance).
-- Class-member expansion is explicit via `sourceKeysForNodeWithClassFallback` and is used only in marked recovery branches.
+- Non-root replay resolution is replay-map/source-alias deterministic and fail-fast on contract misses.
+
+### 2026-02-27 Phi strict replay-map normalization (upfront, no runtime fallback search)
+
+- `EdgeTrace` now carries required `etBinderReplayMap` metadata (source binder key -> replay binder node).
+- Presolution normalization/validation enforces replay-map completeness, TyVar codomain, and injectivity contracts.
+- Phi `computeTraceBinderReplayBridge` aligns replay candidates with scheme quantifier IDs first, validates domain/targets, and fails fast on mismatches.
+- Omega consumes replay-map targets in replay raw-ID space (no eager canonical rewrite), then resolves binder indices deterministically.
+- No-trace Phi entrypoint is strict fail-fast (`MissingEdgeTrace`) for production parity.
 
 ### Pipeline Boundary
 - Presolution owns all graph transformations.
@@ -39,8 +47,8 @@
     - `Solved.originalConstraint`/`Solved.canonicalConstraint` as explicit domain selectors.
 - Phase D:
   - `IdentityBridge.sourceKeysForNode` is now strict (no implicit class fallback).
-  - Added explicit fallback API `sourceKeysForNodeWithClassFallback`.
-  - Translate/Omega now use explicit class-fallback recovery branches with trace logging when fallback is used.
+  - Removed class-fallback APIs from IdentityBridge and runtime Phi/Omega binder lookup.
+  - Translate/Omega now consume replay-map/source-alias contracts directly and fail fast when targets are unresolved.
 - Phase E:
   - Removed transitional runtime entrypoint `runPipelineElabProjectionFirst`.
   - Kept dual-path validation only in test harness (`DualPathSpec`) by comparing native solved artifacts against legacy snapshot reconstruction.

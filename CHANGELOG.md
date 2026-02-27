@@ -14,6 +14,12 @@
   - removed canonical-domain `Solved` query exports (`canonicalNodes`, `allCanonicalNodes`, `lookupCanonicalNode`, `lookupCanonicalVarBound`) after call-site migration;
   - made `IdentityBridge.sourceKeysForNode` strict witness-domain-only and introduced explicit class-fallback API (`sourceKeysForNodeWithClassFallback`) plus fallback telemetry in Phi/Omega;
   - removed runtime `runPipelineElabProjectionFirst`; retained dual-path parity as test-only harness in `DualPathSpec`.
+- Thesis-exact Phi replay normalization (2026-02-27):
+  - replay metadata contract is now strict: `EdgeTrace.etBinderReplayMap` is required and validated at presolution boundaries;
+  - witness normalization/validation enforces replay-map completeness + TyVar codomain + injectivity;
+  - Phi bridge aligns replay targets to scheme quantifier IDs and fails fast on replay-domain violations;
+  - Omega consumes replay-map/source-alias targets deterministically (no runtime class-member fallback search);
+  - no-trace Phi path is strict fail-fast (`MissingEdgeTrace`), and legacy alias-recovery success tests were migrated to fail-fast expectations.
 
 * Removed the internal legacy replay fallback path from elaboration (`runPipelineElabViaLegacySolve`) and cleaned legacy fallback helpers from the test harness.
 * Replaced live native-vs-legacy parity checks with frozen baseline artifacts:

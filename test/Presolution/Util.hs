@@ -85,7 +85,7 @@ mkNormalizeEnv c root interior =
         , canonical = id
         , constraint = c
         , binderArgs = IntMap.empty
-        , binderReplayHints = IntMap.empty
+        , binderReplayMap = IntMap.empty
         }
 
 orderedPairByPrec :: Constraint -> NodeId -> (NodeId, NodeId)
@@ -124,7 +124,7 @@ mkTestNormalizeEnv params =
             , canonical = id
             , constraint = emptyConstraint
             , binderArgs = IntMap.empty
-            , binderReplayHints = IntMap.empty
+            , binderReplayMap = IntMap.empty
             }
 
 -- | Generate a list of InstanceOps with bounded size.

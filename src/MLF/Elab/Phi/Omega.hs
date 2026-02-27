@@ -22,9 +22,9 @@ import Control.Monad (foldM, unless, when)
 import Data.Functor.Foldable (cata)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import Data.List (elemIndex, sortOn)
+import Data.List (elemIndex)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (fromMaybe, listToMaybe, mapMaybe, maybeToList)
+import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
 import qualified Data.Set as Set
 import Text.Read (readMaybe)
 
@@ -60,8 +60,7 @@ data OmegaContext = OmegaContext
     , ocSchemeInfo :: Maybe SchemeInfo
     , ocTraceBinderSources :: IntSet.IntSet
     , ocTraceBinderReplayMap :: IntMap.IntMap NodeId
-    , ocTraceBinderHintDomain :: IntSet.IntSet
-    , ocTraceBinderSourceNames :: IntMap.IntMap String
+    , ocTraceBinderMapDomain :: IntSet.IntSet
     , ocEdgeRoot :: NodeId
     , ocEdgeLeft :: NodeId
     , ocEdgeRight :: NodeId
@@ -108,11 +107,8 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
     traceBinderReplayMap :: IntMap.IntMap NodeId
     traceBinderReplayMap = ocTraceBinderReplayMap ctx
 
-    traceBinderHintDomain :: IntSet.IntSet
-    traceBinderHintDomain = ocTraceBinderHintDomain ctx
-
-    traceBinderSourceNames :: IntMap.IntMap String
-    traceBinderSourceNames = ocTraceBinderSourceNames ctx
+    traceBinderMapDomain :: IntSet.IntSet
+    traceBinderMapDomain = ocTraceBinderMapDomain ctx
 
     edgeRoot :: NodeId
     edgeRoot = ocEdgeRoot ctx
@@ -592,64 +588,6 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
     isTraceBinderSource nid =
         IntSet.member (getNodeId nid) traceBinderSources
 
-    replayKeysByName :: Map.Map String [NodeId]
-    replayKeysByName =
-        let grouped =
-                IntMap.foldlWithKey'
-                    (\acc key name -> Map.insertWith (++) name [NodeId key] acc)
-                    Map.empty
-                    (siSubst si)
-        in Map.map (sortOn (IB.traceOrderRank ib . getNodeId)) grouped
-
-    sourceNamesForNode :: NodeId -> [String]
-    sourceNamesForNode nid =
-        dedup $
-            [ name
-            | sourceKey <- IB.sourceKeysForNode ib nid
-            , name <- maybeToList (IntMap.lookup sourceKey traceBinderSourceNames)
-            ]
-      where
-        dedup =
-            reverse
-                . snd
-                . foldl'
-                    (\(seen, acc) name ->
-                        if Set.member name seen
-                            then (seen, acc)
-                            else (Set.insert name seen, name : acc)
-                    )
-                    (Set.empty, [])
-
-    nameReplayCandidatesForNode :: NodeId -> [NodeId]
-    nameReplayCandidatesForNode nid =
-        dedupNodeIds $
-            concat
-                [ Map.findWithDefault [] name replayKeysByName
-                | name <- sourceNamesForNode nid
-                ]
-
-    traceHintMap :: IntMap.IntMap NodeId
-    traceHintMap =
-        case mTrace of
-            Nothing -> IntMap.empty
-            Just tr -> etBinderReplayHints tr
-
-    normalizedReplayCandidates :: NodeId -> [NodeId]
-    normalizedReplayCandidates rawTarget =
-        let rawKey = getNodeId rawTarget
-            mapped =
-                maybe [] pure (IntMap.lookup rawKey traceBinderReplayMap)
-            hinted =
-                [ canonicalNode hintedN
-                | hintedN <- maybeToList (IntMap.lookup rawKey traceHintMap)
-                ]
-            named =
-                nameReplayCandidatesForNode rawTarget
-            sourceEq =
-                sourceCandidates rawTarget
-            canonicalFallback = [canonicalNode rawTarget]
-        in dedupNodeIds (mapped ++ hinted ++ named ++ sourceEq ++ canonicalFallback)
-
     dedupNodeIds :: [NodeId] -> [NodeId]
     dedupNodeIds =
         reverse
@@ -684,16 +622,11 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
         fromMaybe (adoptOpNode arg) $
             pickExistingSource (sourceCandidates arg ++ sourceCandidates bv)
 
-    normalizedBinderReplayCandidates :: NodeId -> [NodeId]
-    normalizedBinderReplayCandidates rawTarget =
-        filter isSchemeBinder (normalizedReplayCandidates rawTarget)
-
     resolveTraceBinderTarget :: Bool -> String -> NodeId -> Either ElabError NodeId
     resolveTraceBinderTarget requireBinder opName rawTarget
         | IntSet.member rawKey traceBinderSources =
-            case (requireBinder, binderCandidates, replayCandidates) of
-                (True, replayTarget : _, _) -> Right replayTarget
-                (True, [], _) ->
+            case IntMap.lookup rawKey traceBinderReplayMap of
+                Nothing ->
                     Left $
                         PhiInvariantError $
                             unlines
@@ -704,13 +637,28 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                                 , "replay binder keys: " ++ show (IntMap.keys (siSubst si))
                                 , "replay-map domain: " ++ show (IntMap.keys traceBinderReplayMap)
                                 ]
-                (False, _, replayTarget : _) -> Right replayTarget
-                (False, _, []) -> Right rawTarget
+                Just replayTargetRaw ->
+                    let replayTarget = replayTargetRaw
+                        replayTargetCanonical = canonicalNode replayTargetRaw
+                        replayTargetIsSchemeBinder =
+                            isSchemeBinder replayTarget
+                                || isSchemeBinder replayTargetCanonical
+                    in if requireBinder && not replayTargetIsSchemeBinder
+                        then
+                            Left $
+                                PhiInvariantError $
+                                    unlines
+                                        [ "trace/replay binder target is not a scheme TyVar binder"
+                                        , "op: " ++ opName
+                                        , "source target: " ++ show rawTarget
+                                        , "replay target: " ++ show replayTarget
+                                        , "canonical replay target: " ++ show replayTargetCanonical
+                                        , "replay-map domain: " ++ show (IntMap.keys traceBinderReplayMap)
+                                        ]
+                        else Right replayTarget
         | otherwise = Right rawTarget
       where
         rawKey = getNodeId rawTarget
-        replayCandidates = normalizedReplayCandidates rawTarget
-        binderCandidates = normalizedBinderReplayCandidates rawTarget
 
     go :: IntSet.IntSet -> IntSet.IntSet -> VSpine -> [Instantiation] -> [InstanceOp] -> (NodeId -> Maybe String)
        -> Either ElabError Instantiation
@@ -744,45 +692,56 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                         , "  canonical: " ++ show bvC
                         ]
                     else do
-                        case lookupBinderIndex binderKeys (vSpineIds vs) bvReplay of
+                        let bvInSpine =
+                                case lookupBinderIndex binderKeys (vSpineIds vs) bvReplay of
+                                    Just _ -> Just bvReplay
+                                    Nothing -> listToMaybe (mappedReplayTargetsInSpine binderKeys vs bvReplay)
+                        case bvInSpine of
                             Nothing -> Left $ PhiTranslatabilityError
                                 [ "OpGraft: binder not found in quantifier spine"
                                 , "  target node: " ++ show bv
                                 , "  canonical: " ++ show bvC
                                 ]
-                            Just i -> do
-                                let mbBound = vSpineBoundAt vs i
-                                if mbBound /= Just TBottom && mbBound /= Nothing
-                                    then do
-                                        argTy <- reifyTypeArg namedSet' Nothing (graftArgFor arg bv)
-                                        let boundTy = maybe TBottom tyToElab mbBound
-                                        if alphaEqType argTy boundTy
-                                            then
-                                                -- Bounded-match: bound already equals graft arg, so
-                                                -- OpGraft is a no-op. The adjacent OpWeaken will emit
-                                                -- InstElim which substitutes the existing bound (thesis Def. 14.2.1).
-                                                go binderKeys namedSet' vs accum rest lookupBinder
-                                            else if argTy == TBottom
-                                                then
-                                                    -- Bottom arg on bounded binder: no-op (OpWeaken will emit InstElim)
-                                                    go binderKeys namedSet' vs accum rest lookupBinder
-                                            else
-                                                Left $
-                                                    PhiTranslatabilityError
-                                                        [ "OpGraft requires target binder to be unbounded/⊥-bounded or match its explicit bound"
-                                                        , "  target node: " ++ show bv
-                                                        , "  canonical: " ++ show bvC
-                                                        , "  binder bound: " ++ show mbBound
-                                                        , "  graft arg: " ++ show argTy
-                                                        ]
-                                    else do
-                                        i' <- binderIndex binderKeys (vSpineIds vs) bvReplay
-                                        argTy <- reifyTypeArg namedSet' (Just bvReplay) (graftArgFor arg bv)
-                                        prefix <- prefixBinderNames vs i'
-                                        let inst = underContext prefix (InstInside (InstBot argTy))
-                                            newBound = either (const Nothing) Just (elabToBound argTy)
-                                            vs' = vsUpdateBound i' newBound vs
-                                        go binderKeys namedSet' vs' (inst : accum) rest lookupBinder
+                            Just bvResolved -> do
+                                case lookupBinderIndex binderKeys (vSpineIds vs) bvResolved of
+                                    Nothing -> Left $ PhiTranslatabilityError
+                                        [ "OpGraft: binder not found in quantifier spine"
+                                        , "  target node: " ++ show bv
+                                        , "  canonical: " ++ show bvC
+                                        ]
+                                    Just i -> do
+                                        let mbBound = vSpineBoundAt vs i
+                                        if mbBound /= Just TBottom && mbBound /= Nothing
+                                            then do
+                                                argTy <- reifyTypeArg namedSet' Nothing (graftArgFor arg bv)
+                                                let boundTy = maybe TBottom tyToElab mbBound
+                                                if alphaEqType argTy boundTy
+                                                    then
+                                                        -- Bounded-match: bound already equals graft arg, so
+                                                        -- OpGraft is a no-op. The adjacent OpWeaken will emit
+                                                        -- InstElim which substitutes the existing bound (thesis Def. 14.2.1).
+                                                        go binderKeys namedSet' vs accum rest lookupBinder
+                                                    else if argTy == TBottom
+                                                        then
+                                                            -- Bottom arg on bounded binder: no-op (OpWeaken will emit InstElim)
+                                                            go binderKeys namedSet' vs accum rest lookupBinder
+                                                    else
+                                                        Left $
+                                                            PhiTranslatabilityError
+                                                                [ "OpGraft requires target binder to be unbounded/⊥-bounded or match its explicit bound"
+                                                                , "  target node: " ++ show bv
+                                                                , "  canonical: " ++ show bvC
+                                                                , "  binder bound: " ++ show mbBound
+                                                                , "  graft arg: " ++ show argTy
+                                                                ]
+                                            else do
+                                                i' <- binderIndex binderKeys (vSpineIds vs) bvResolved
+                                                argTy <- reifyTypeArg namedSet' (Just bvResolved) (graftArgFor arg bv)
+                                                prefix <- prefixBinderNames vs i'
+                                                let inst = underContext prefix (InstInside (InstBot argTy))
+                                                    newBound = either (const Nothing) Just (elabToBound argTy)
+                                                    vs' = vsUpdateBound i' newBound vs
+                                                go binderKeys namedSet' vs' (inst : accum) rest lookupBinder
 
         (OpWeaken bv : rest) -> do
             bvReplay <- resolveTraceBinderTarget False "OpWeaken" bv
@@ -834,7 +793,7 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                                             , "  source candidates: " ++ show nCandidates
                                             , "  existing candidates: " ++ show nExisting
                                             , "  replay-map domain: " ++ show (IntMap.keys traceBinderReplayMap)
-                                            , "  hint domain: " ++ show (IntSet.toList traceBinderHintDomain)
+                                            , "  replay-map keys: " ++ show (IntSet.toList traceBinderMapDomain)
                                             ]
                             else pure (fromMaybe (adoptOpNode nReplay) (listToMaybe nExisting))
             let nOrig = canonicalNode nAdopt
@@ -1257,75 +1216,51 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
     isBinderNode :: IntSet.IntSet -> NodeId -> Bool
     isBinderNode binderKeys nid = IB.isBinderNode ib binderKeys nid
 
+    mappedReplayTargetsForSourceAliases :: NodeId -> [NodeId]
+    mappedReplayTargetsForSourceAliases replayTarget =
+        dedupNodeIds
+            [ mapped
+            | sourceKey <- IB.sourceKeysForNode ib replayTarget
+            , Just mapped <- [IntMap.lookup sourceKey traceBinderReplayMap]
+            ]
+
+    mappedReplayTargetsInSpine :: IntSet.IntSet -> VSpine -> NodeId -> [NodeId]
+    mappedReplayTargetsInSpine binderKeys vs replayTarget =
+        [ target
+        | target <- mappedReplayTargetsForSourceAliases replayTarget
+        , isBinderNode binderKeys target
+        , case lookupBinderIndex binderKeys (vSpineIds vs) target of
+            Just _ -> True
+            Nothing -> False
+        ]
+
     -- | Resolve a non-root OpWeaken binder target.
     --
-    -- Per thesis §15.3.5 (witness-domain-first), we prefer trace-domain
-    -- resolution over class-member (equivalence-class) fallback.  The
-    -- resolution order is:
-    --
-    --   1. Direct binder check (replayTarget is already a binder in spine)
-    --   2. Trace-source recovery: source keys from IdentityBridge *without*
-    --      class-member expansion, filtered to binder nodes in the spine
-    --   3. Class-member recovery: full equivalence-class expansion (fallback)
+    -- Strict runtime contract: target must resolve to a binder in the current
+    -- replay spine via replay-map keyed source aliases; otherwise fail fast.
     resolveNonRootWeakenBinder :: IntSet.IntSet -> VSpine -> NodeId -> NodeId -> Either ElabError NodeId
     resolveNonRootWeakenBinder binderKeys vs sourceTarget replayTarget
         | not (isBinderNode binderKeys replayTarget) =
-            -- Step 2: try trace-source recovery before class-member fallback
-            case listToMaybe traceSourceInSpine of
+            case listToMaybe replayMapInSpine of
                 Just recoveredBinder -> Right recoveredBinder
-                Nothing ->
-                    -- Step 3: class-member fallback (only when trace-source yields nothing)
-                    case listToMaybe classRecoverableInSpine of
-                        Just recoveredBinder ->
-                            case debugPhi
-                                ( "OpWeaken: class-member fallback used"
-                                    ++ " sourceTarget="
-                                    ++ show sourceTarget
-                                    ++ " replayTarget="
-                                    ++ show replayTarget
-                                    ++ " recoveredBinder="
-                                    ++ show recoveredBinder
-                                )
-                                ()
-                            of
-                                () -> Right recoveredBinder
-                        Nothing -> Left (unresolvedWeakenError "non-binder target has no recoverable binder in current spine")
+                Nothing -> Left (unresolvedWeakenError "non-binder target has no recoverable replay-map alias in current spine")
         | otherwise =
             case lookupBinderIndex binderKeys (vSpineIds vs) replayTarget of
                 Just _ -> Right replayTarget
-                Nothing -> Left (unresolvedWeakenError "binder target missing from quantifier spine")
+                Nothing ->
+                    case listToMaybe replayMapInSpine of
+                        Just recoveredBinder -> Right recoveredBinder
+                        Nothing -> Left (unresolvedWeakenError "binder target missing from quantifier spine")
       where
         replayCanonical = canonicalNode replayTarget
 
-        -- Trace-source candidates: source keys without class-member expansion,
-        -- filtered to binder nodes (witness-domain-first per §15.3.5).
         traceSourceMatch =
             [ NodeId member
-            | member <- IB.sourceKeysForNodeNoClassFallback ib replayTarget
+            | member <- IB.sourceKeysForNode ib replayTarget
             , IB.isBinderNode ib binderKeys (NodeId member)
             ]
-        traceSourceInSpine =
-            [ member
-            | member <- traceSourceMatch
-            , case lookupBinderIndex binderKeys (vSpineIds vs) member of
-                Just _ -> True
-                Nothing -> False
-            ]
-
-        -- Class-member candidates: full equivalence-class expansion (fallback).
-        classMembers = Solved.classMembers solved replayTarget
-        classRecoverableBinders =
-            [ member
-            | member <- classMembers
-            , isBinderNode binderKeys member
-            ]
-        classRecoverableInSpine =
-            [ member
-            | member <- classRecoverableBinders
-            , case lookupBinderIndex binderKeys (vSpineIds vs) member of
-                Just _ -> True
-                Nothing -> False
-            ]
+        replayMapAliases = mappedReplayTargetsForSourceAliases replayTarget
+        replayMapInSpine = mappedReplayTargetsInSpine binderKeys vs replayTarget
         unresolvedWeakenError reason =
             PhiTranslatabilityError
                 [ "OpWeaken: unresolved non-root binder target"
@@ -1334,11 +1269,11 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                 , "  replay-target: " ++ show replayTarget
                 , "  canonical-target: " ++ show replayCanonical
                 , "  traceSourceMatch: " ++ show traceSourceMatch
-                , "  classMembers: " ++ show classMembers
-                , "  classRecoverableBinders: " ++ show classRecoverableBinders
+                , "  replayMapAliases: " ++ show replayMapAliases
+                , "  replayMapInSpine: " ++ show replayMapInSpine
                 , "  ids: " ++ show (vSpineIds vs)
                 , "  replayMapDomain: " ++ show (IntMap.keys traceBinderReplayMap)
-                , "  hintDomain: " ++ show (IntSet.toList traceBinderHintDomain)
+                , "  replayMapKeys: " ++ show (IntSet.toList traceBinderMapDomain)
                 ]
 
     -- | Check if a node is bound rigidly. Some ω operations treat rigid targets as
@@ -1349,24 +1284,8 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
             Just (_, BindRigid) -> True
             _ -> False
 
-    fallbackBinderCandidates :: NodeId -> [NodeId]
-    fallbackBinderCandidates nid =
-        dedupNodeIds
-            ( filter isSchemeBinder (normalizedReplayCandidates nid)
-                ++ nameReplayCandidatesForNode nid
-                ++ filter isSchemeBinder (sourceCandidates nid)
-            )
-
     lookupBinderIndex :: IntSet.IntSet -> [Maybe NodeId] -> NodeId -> Maybe Int
-    lookupBinderIndex binderKeys ids nid =
-        case IB.lookupBinderIndex ib binderKeys ids nid of
-            Just i -> Just i
-            Nothing ->
-                listToMaybe
-                    [ i
-                    | candidate <- fallbackBinderCandidates nid
-                    , Just i <- [IB.lookupBinderIndex ib binderKeys ids candidate]
-                    ]
+    lookupBinderIndex binderKeys ids nid = IB.lookupBinderIndex ib binderKeys ids nid
 
     binderIndex :: IntSet.IntSet -> [Maybe NodeId] -> NodeId -> Either ElabError Int
     binderIndex binderKeys ids nid =

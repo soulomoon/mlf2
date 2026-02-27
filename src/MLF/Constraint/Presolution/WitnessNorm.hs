@@ -62,15 +62,14 @@ normalizeEdgeWitnessesM = do
             IntSet.union weakenedOps (translatableWeakenedNodes c0)
     witnessResults <- forM (IntMap.toList witnesses0) $ \(eid, w0) -> do
         let mbTrace = IntMap.lookup eid traces
-            (edgeRoot, copyMap, binderArgs0, traceInterior, existingHints) =
+            (edgeRoot, copyMap, binderArgs0, traceInterior) =
                 case mbTrace of
-                    Nothing -> (ewRoot w0, mempty, [], mempty, IntMap.empty)
+                    Nothing -> (ewRoot w0, mempty, [], mempty)
                     Just tr ->
                         ( etRoot tr
                         , etCopyMap tr
                         , etBinderArgs tr
                         , etInterior tr
-                        , etBinderReplayHints tr
                         )
             rewriteNode = rewriteNodeWith copyMap
             binderArgs =
@@ -101,8 +100,8 @@ normalizeEdgeWitnessesM = do
                     OpRaise n -> OpRaise (restoreNode n)
                     OpWeaken n -> OpWeaken (restoreNode n)
                     OpRaiseMerge n m -> OpRaiseMerge (restoreNode n) (restoreNode m)
-            isLiveTyVar nid =
-                case NodeAccess.lookupNode c0 (canonical nid) of
+            isExactTyVar nid =
+                case NodeAccess.lookupNode c0 nid of
                     Just TyVar{} -> True
                     _ -> False
             dedupNodes =
@@ -128,58 +127,11 @@ normalizeEdgeWitnessesM = do
                         )
                         (IntSet.empty, [])
                         binderArgs0
-            liveReplayPool =
-                [ NodeId key
-                | key <- IntMap.keys binderArgs
-                , isLiveTyVar (NodeId key)
-                ]
-            chooseReplayHints =
-                let go (sourceAcc, rewrittenAcc, used) (i, sourceBinder) =
-                        let sourceKey = getNodeId sourceBinder
-                            rewrittenSource = canonical (rewriteNode sourceBinder)
-                            rewrittenSourceKey = getNodeId rewrittenSource
-                            existingSeed =
-                                case IntMap.lookup sourceKey existingHints of
-                                    Just replayN -> [canonical replayN]
-                                    _ -> []
-                            directSeed = [rewrittenSource]
-                            positionalSeed =
-                                case drop i liveReplayPool of
-                                    replayN : _ -> [replayN]
-                                    [] -> []
-                            liveSeeds =
-                                [ nid
-                                | nid <- existingSeed ++ positionalSeed ++ liveReplayPool ++ directSeed
-                                , isLiveTyVar nid
-                                ]
-                            liveCandidates =
-                                dedupNodes liveSeeds
-                            fallbackCandidates =
-                                dedupNodes (liveCandidates ++ existingSeed ++ directSeed)
-                            pick =
-                                case [ nid | nid <- liveCandidates, not (IntSet.member (getNodeId nid) used) ] of
-                                    nid : _ -> Just nid
-                                    [] ->
-                                        case liveCandidates of
-                                            nid : _ -> Just nid
-                                            [] ->
-                                                case fallbackCandidates of
-                                                    nid : _ -> Just nid
-                                                    [] -> Just rewrittenSource
-                        in case pick of
-                            Nothing -> (sourceAcc, rewrittenAcc, used)
-                            Just replayN ->
-                                ( IntMap.insert sourceKey replayN sourceAcc
-                                , IntMap.insert rewrittenSourceKey replayN rewrittenAcc
-                                , IntSet.insert (getNodeId replayN) used
-                                )
-                in foldl' go (IntMap.empty, IntMap.empty, IntSet.empty) (zip [0 :: Int ..] sourceBindersInOrder)
-            (replayHintsSource, replayHintsRewritten, _usedReplayHints) = chooseReplayHints
-        let orderBase = edgeRoot
-            orderRoot = orderBase
             traceInteriorKeys =
                 case traceInterior of
                     InteriorNodes s -> s
+        let orderBase = edgeRoot
+            orderRoot = orderBase
         interiorExact <-
             if IntSet.null traceInteriorKeys
                 then edgeInteriorExact edgeRoot
@@ -191,7 +143,89 @@ normalizeEdgeWitnessesM = do
                     [ getNodeId (canonical (rewriteNode (NodeId n)))
                     | n <- IntSet.toList interiorExact
                     ]
-            interiorWithBinders =
+            sourceReplayCandidates =
+                [ sourceBinder
+                | sourceBinder <- sourceBindersInOrder
+                , isExactTyVar sourceBinder
+                ]
+                    ++
+                [ canonical (rewriteNode sourceBinder)
+                | sourceBinder <- sourceBindersInOrder
+                , isExactTyVar (canonical (rewriteNode sourceBinder))
+                ]
+            argReplayCandidates =
+                [ canonical (rewriteNode arg)
+                | (_sourceBinder, arg) <- binderArgs0
+                , isExactTyVar (canonical (rewriteNode arg))
+                ]
+            interiorReplayCandidates =
+                [ canonical (NodeId key)
+                | key <- IntSet.toList interiorNorm
+                , isExactTyVar (canonical (NodeId key))
+                ]
+            replayCandidatePool =
+                dedupNodes (sourceReplayCandidates ++ argReplayCandidates ++ interiorReplayCandidates)
+            assignReplayMap =
+                let step (sourceAcc, rewrittenAcc, usedReplay, missingSources) sourceBinder =
+                        let sourceKey = getNodeId sourceBinder
+                            rewrittenSource = canonical (rewriteNode sourceBinder)
+                            rewrittenSourceKey = getNodeId rewrittenSource
+                            sourceDirectCandidates =
+                                dedupNodes
+                                    ( [ sourceBinder
+                                      | isExactTyVar sourceBinder
+                                      ]
+                                        ++ [ rewrittenSource
+                                           | isExactTyVar rewrittenSource
+                                           ]
+                                    )
+                            sourceArgCandidates =
+                                dedupNodes
+                                    [ canonical (rewriteNode arg)
+                                    | (sourceBinder', arg) <- binderArgs0
+                                    , sourceBinder' == sourceBinder
+                                    , isExactTyVar (canonical (rewriteNode arg))
+                                    ]
+                            sourceCandidates =
+                                dedupNodes
+                                    ( sourceDirectCandidates
+                                        ++ sourceArgCandidates
+                                        ++ replayCandidatePool
+                                    )
+                            mbReplay =
+                                case [ cand
+                                     | cand <- sourceCandidates
+                                     , not (IntSet.member (getNodeId cand) usedReplay)
+                                     ] of
+                                    replayBinder : _ -> Just replayBinder
+                                    [] -> Nothing
+                        in case mbReplay of
+                            Nothing ->
+                                ( sourceAcc
+                                , rewrittenAcc
+                                , usedReplay
+                                , sourceBinder : missingSources
+                                )
+                            Just replayBinder ->
+                                ( IntMap.insert sourceKey replayBinder sourceAcc
+                                , IntMap.insert rewrittenSourceKey replayBinder rewrittenAcc
+                                , IntSet.insert (getNodeId replayBinder) usedReplay
+                                , missingSources
+                                )
+                    (replayMapSourceRev, replayMapRewrittenRev, _usedReplay, missingRev) =
+                        foldl'
+                            step
+                            (IntMap.empty, IntMap.empty, IntSet.empty, [])
+                            sourceBindersInOrder
+                    missing = reverse missingRev
+                in case missing of
+                    [] -> Right (replayMapSourceRev, replayMapRewrittenRev)
+                    _ -> Left (Witness.ReplayMapIncomplete missing)
+        (replayMapSource, replayMapRewritten) <-
+            case assignReplayMap of
+                Left err -> throwError (WitnessNormalizationError (EdgeId eid) err)
+                Right mapping -> pure mapping
+        let interiorWithBinders =
                 if IntMap.size binderArgs > 1
                     then IntSet.union interiorNorm (IntSet.fromList (IntMap.keys binderArgs))
                     else interiorNorm
@@ -204,9 +238,9 @@ normalizeEdgeWitnessesM = do
             sourceBinderReplayKey sourceBinder =
                 IntMap.lookup
                     (getNodeId (canonical (rewriteNode sourceBinder)))
-                    replayHintsRewritten
+                    replayMapRewritten
             replayBinderForOpTarget target =
-                case IntMap.lookup (getNodeId (canonical target)) replayHintsRewritten of
+                case IntMap.lookup (getNodeId (canonical target)) replayMapRewritten of
                     Just replay -> canonical replay
                     Nothing -> canonical target
             candidateArgsForReplay replayBinder =
@@ -306,7 +340,7 @@ normalizeEdgeWitnessesM = do
                     , Witness.canonical = canonical
                     , Witness.constraint = c0
                     , Witness.binderArgs = binderArgs
-                    , Witness.binderReplayHints = replayHintsRewritten
+                    , Witness.binderReplayMap = replayMapRewritten
                     }
         opsNorm <- case normalizeInstanceOpsFull env ops0 of
             Right ops' -> pure ops'
@@ -332,7 +366,9 @@ normalizeEdgeWitnessesM = do
                             Nothing
                     _ -> Just op
             opsFinal = mapMaybe (normalizeRaiseTarget . restoreOp) opsNorm
-            trace' = fmap (\tr -> tr { etBinderReplayHints = replayHintsSource }) mbTrace
+            replayMapSourceFinal =
+                IntMap.map canonical replayMapSource
+            trace' = fmap (\tr -> tr { etBinderReplayMap = replayMapSourceFinal }) mbTrace
         pure (eid, w0 { ewForallIntros = ewForallIntros w0, ewWitness = InstanceWitness opsFinal }, trace')
     let witnessMap =
             IntMap.fromList

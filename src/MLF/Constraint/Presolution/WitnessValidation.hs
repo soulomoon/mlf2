@@ -19,7 +19,7 @@ import qualified Data.IntSet as IntSet
 import Data.Maybe (listToMaybe)
 
 import MLF.Constraint.Types.Graph (BindFlag(..), Constraint(..), TyNode(..))
-import MLF.Constraint.Types.Graph (NodeId, NodeRef(..), getNodeId, nodeRefFromKey, typeRef)
+import MLF.Constraint.Types.Graph (NodeId(..), NodeRef(..), getNodeId, nodeRefFromKey, typeRef)
 import MLF.Constraint.Types.Witness (InstanceOp(..))
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.NodeAccess as NodeAccess
@@ -33,7 +33,7 @@ data OmegaNormalizeEnv = OmegaNormalizeEnv
     , canonical :: NodeId -> NodeId
     , constraint :: Constraint
     , binderArgs :: IntMap.IntMap NodeId
-    , binderReplayHints :: IntMap.IntMap NodeId
+    , binderReplayMap :: IntMap.IntMap NodeId
     }
 
 data OmegaNormalizeError
@@ -51,7 +51,9 @@ data OmegaNormalizeError
     | MalformedRaiseMerge [InstanceOp]
     | AmbiguousGraftWeaken NodeId [NodeId]
     | DeterministicGraftWeakenSynthesisFailed NodeId [NodeId]
-    | HintedOperandNotLiveTyVar InstanceOp NodeId NodeId
+    | ReplayMapIncomplete [NodeId]
+    | ReplayMapNonTyVarTarget NodeId NodeId
+    | ReplayMapNonInjective NodeId NodeId NodeId
     | StandaloneGraftRemaining NodeId
     deriving (Eq, Show)
 
@@ -69,12 +71,48 @@ compareNodesByOrderKeyM env a b =
 
 validateNormalizedWitness :: OmegaNormalizeEnv -> [InstanceOp] -> Either OmegaNormalizeError ()
 validateNormalizedWitness env ops = do
+    validateReplayMapContract
     mapM_ checkOp ops
     checkWeakenOrdering ops
   where
     rootC = canonical env (oneRoot env)
 
     canon = canonical env
+
+    validateReplayMapContract = do
+        let sourceDomain = IntSet.fromList (IntMap.keys (binderArgs env))
+            replayMap = binderReplayMap env
+            replayDomain = IntSet.fromList (IntMap.keys replayMap)
+            missingSources = IntSet.toList (IntSet.difference sourceDomain replayDomain)
+        if null missingSources
+            then Right ()
+            else Left (ReplayMapIncomplete (map NodeId missingSources))
+        mapM_ checkReplayTarget (IntMap.toList replayMap)
+        case duplicateReplayTarget replayMap of
+            Nothing -> Right ()
+            Just (sourceA, sourceB, target) ->
+                Left (ReplayMapNonInjective sourceA sourceB target)
+
+    checkReplayTarget (sourceKey, replayTargetRaw) =
+        let replayTarget = canon replayTargetRaw
+        in if isLiveTyVar replayTarget
+            then Right ()
+            else Left (ReplayMapNonTyVarTarget (NodeId sourceKey) replayTarget)
+
+    duplicateReplayTarget replayMap =
+        let step (seen, dup) (sourceKey, replayTargetRaw)
+                | Just _ <- dup = (seen, dup)
+                | otherwise =
+                    let replayKey = getNodeId (canon replayTargetRaw)
+                    in case IntMap.lookup replayKey seen of
+                        Nothing ->
+                            (IntMap.insert replayKey (NodeId sourceKey) seen, Nothing)
+                        Just sourceA ->
+                            ( seen
+                            , Just (sourceA, NodeId sourceKey, NodeId replayKey)
+                            )
+            (_, dup) = foldl' step (IntMap.empty, Nothing) (IntMap.toList replayMap)
+        in dup
 
     inInterior nid =
         IntSet.member (getNodeId (canon nid)) (interior env)
@@ -128,15 +166,6 @@ validateNormalizedWitness env ops = do
             Just TyVar{} -> True
             _ -> False
 
-    requireHintedOperandLive op nid =
-        case IntMap.lookup (getNodeId (canon nid)) (binderReplayHints env) of
-            Nothing -> Right ()
-            Just hinted ->
-                let hintedC = canon hinted
-                in if isLiveTyVar nid
-                    then Right ()
-                    else Left (HintedOperandNotLiveTyVar op (canon nid) hintedC)
-
     requireGraftTarget n =
         let nC = canon n
             trackedByExpansion = IntMap.member (getNodeId nC) (binderArgs env)
@@ -151,7 +180,6 @@ validateNormalizedWitness env ops = do
 
     checkOp op =
         do
-            mapM_ (requireHintedOperandLive op) (opTargets op)
             case op of
                 OpGraft _ n ->
                     requireInterior op n >> requireGraftTarget n

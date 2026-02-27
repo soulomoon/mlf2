@@ -4,6 +4,18 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 25 Thesis-Exact Phi Upfront Replay Normalization (2026-02-27)
+
+- Completed:
+  - Switched fully to strict `etBinderReplayMap` producer/consumer contract for Phi replay.
+  - Presolution replay-map normalization now enforces fail-fast completeness/TyVar-target/injectivity checks.
+  - Translate/Omega replay bridge now aligns to scheme quantifier replay IDs and consumes replay targets deterministically.
+  - Removed runtime class-member fallback search from non-root `OpWeaken`/`OpGraft` binder recovery paths.
+  - `phiFromEdgeWitnessNoTrace` is strict fail-fast (`MissingEdgeTrace`), and no-trace alias-recovery expectations were migrated to fail-fast tests.
+  - Verification green: `cabal test mlf2-test --test-show-details=direct` (`883 examples, 0 failures`) and `cabal build all && cabal test`.
+- Next:
+  - Optional cleanup: remove remaining historical docs/tests language that describes class-member replay recovery as active runtime behavior.
+
 ## Task 24 Thesis-Exact Unification Ordering + Presolution-Centric Solved Path (2026-02-26)
 
 - Completed:

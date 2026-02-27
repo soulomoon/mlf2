@@ -46,14 +46,14 @@ canonicalizeTrace :: Canonicalizer -> EdgeTrace -> EdgeTrace
 canonicalizeTrace canon tr =
     let canonNode = canonicalizeNode canon
         -- Contract: preserve source-domain provenance in `etBinderArgs`,
-        -- `etInterior`, and `etCopyMap` for Φ/Omega. Preserve replay-hint
-        -- metadata in `etBinderReplayHints`. `etRoot` is structural and may be
+        -- `etInterior`, and `etCopyMap` for Φ/Omega. Preserve replay-map
+        -- metadata in `etBinderReplayMap`. `etRoot` is structural and may be
         -- canonicalized for solved-graph lookup.
     in tr
         { etRoot = canonNode (etRoot tr)
         , etBinderArgs = etBinderArgs tr
         , etInterior = etInterior tr
-        , etBinderReplayHints = etBinderReplayHints tr
+        , etBinderReplayMap = etBinderReplayMap tr
         , etCopyMap = etCopyMap tr
         }
 

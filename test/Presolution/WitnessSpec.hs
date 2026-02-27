@@ -380,6 +380,7 @@ spec = do
                         (mkNormalizeEnv c root (IntSet.fromList [getNodeId (NodeId 2)]))
                             { canonical = canonicalMap
                             , binderArgs = IntMap.fromList [(2, NodeId 3)]
+                            , binderReplayMap = IntMap.fromList [(2, NodeId 2)]
                             }
                     ops0 = [OpGraft (NodeId 30) (NodeId 20), OpWeaken (NodeId 20)]
                 normalizeInstanceOpsFull env ops0
@@ -399,6 +400,7 @@ spec = do
                         (mkNormalizeEnv c root (IntSet.fromList [getNodeId (NodeId 2)]))
                             { canonical = canonicalMap
                             , binderArgs = IntMap.fromList [(2, NodeId 3)]
+                            , binderReplayMap = IntMap.fromList [(2, NodeId 2)]
                             }
                     ops0 =
                         [ OpGraft (NodeId 30) (NodeId 20)
@@ -422,6 +424,7 @@ spec = do
                         (mkNormalizeEnv c root (IntSet.fromList [getNodeId (NodeId 2)]))
                             { canonical = canonicalMap
                             , binderArgs = IntMap.fromList [(2, NodeId 3)]
+                            , binderReplayMap = IntMap.fromList [(2, NodeId 2)]
                             }
                     ops0 =
                         [ OpGraft (NodeId 30) (NodeId 20)
@@ -743,7 +746,11 @@ spec = do
                     n = NodeId 2
                     m = NodeId 3
                     env0 = mkNormalizeEnv c root (IntSet.fromList [getNodeId m])
-                    env = env0 { binderArgs = IntMap.singleton (getNodeId n) m }
+                    env =
+                        env0
+                            { binderArgs = IntMap.singleton (getNodeId n) m
+                            , binderReplayMap = IntMap.singleton (getNodeId n) n
+                            }
                     ops0 = [OpRaise n, OpMerge n m]
                 normalizeInstanceOpsFull env ops0
                     `shouldBe` Left (OpOutsideInterior (OpMerge n m))
@@ -989,7 +996,7 @@ spec = do
                             { etRoot = root
                             , etBinderArgs = []
                             , etInterior = InteriorNodes (IntSet.fromList [getNodeId m, getNodeId parent, getNodeId n])
-                            , etBinderReplayHints = mempty
+                            , etBinderReplayMap = mempty
                             , etCopyMap = mempty
                             }
                     st0 = PresolutionState
@@ -1053,7 +1060,7 @@ spec = do
                             { etRoot = root
                             , etBinderArgs = []
                             , etInterior = InteriorNodes (IntSet.fromList [getNodeId interiorNode])
-                            , etBinderReplayHints = mempty
+                            , etBinderReplayMap = mempty
                             , etCopyMap = mempty
                             }
                     st0 = PresolutionState
@@ -1116,7 +1123,7 @@ spec = do
                             { etRoot = root
                             , etBinderArgs = []
                             , etInterior = InteriorNodes (IntSet.fromList [getNodeId mLess, getNodeId nGreater])
-                            , etBinderReplayHints = mempty
+                            , etBinderReplayMap = mempty
                             , etCopyMap = mempty
                             }
                     st0 = PresolutionState
@@ -1171,7 +1178,7 @@ spec = do
                             { etRoot = root
                             , etBinderArgs = []
                             , etInterior = InteriorNodes (IntSet.fromList [getNodeId interiorNode, getNodeId outsideNode])
-                            , etBinderReplayHints = mempty
+                            , etBinderReplayMap = mempty
                             , etCopyMap = mempty
                             }
                     st0 = PresolutionState
@@ -1194,7 +1201,7 @@ spec = do
                     Right _ ->
                         expectationFailure "Expected WitnessNormalizationError for missing order key"
 
-            it "synthesizes one deterministic OpGraft+OpWeaken pair for annotation-edge ambiguous multi-graft" $ do
+            it "fails fast on annotation-edge ambiguous multi-graft when replay-map injectivity cannot be satisfied" $ do
                 let root = NodeId 0
                     binder = NodeId 2
                     sourceB1 = NodeId 20
@@ -1236,7 +1243,7 @@ spec = do
                             { etRoot = root
                             , etBinderArgs = [(sourceB1, arg1), (sourceB2, arg2)]
                             , etInterior = InteriorNodes (IntSet.fromList [getNodeId binder])
-                            , etBinderReplayHints =
+                            , etBinderReplayMap =
                                 IntMap.fromList
                                     [ (getNodeId sourceB1, binder)
                                     , (getNodeId sourceB2, binder)
@@ -1255,26 +1262,15 @@ spec = do
                             , psEdgeTraces = IntMap.fromList [(edgeId, edgeTrace)]
                             }
                 case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
-                    Left err ->
-                        expectationFailure $ "Expected synthesized OpGraft+OpWeaken pair, got: " ++ show err
-                    Right (_, st1) ->
-                        case IntMap.lookup edgeId (psEdgeWitnesses st1) of
-                            Nothing ->
-                                expectationFailure "Missing normalized witness for annotation edge"
-                            Just ew1 -> do
-                                let ops = getInstanceOps (ewWitness ew1)
-                                    grafts =
-                                        [ (arg, n)
-                                        | OpGraft arg n <- ops
-                                        ]
-                                    weakens =
-                                        [ n
-                                        | OpWeaken n <- ops
-                                        ]
-                                grafts `shouldBe` [(arg1, binder)]
-                                weakens `shouldBe` [binder]
+                    Left (WitnessNormalizationError (EdgeId eid) (ReplayMapIncomplete missing)) -> do
+                        eid `shouldBe` edgeId
+                        missing `shouldBe` [sourceB2]
+                    Left other ->
+                        expectationFailure $ "Expected replay-map injectivity fail-fast, got: " ++ show other
+                    Right _ ->
+                        expectationFailure "Expected replay-map injectivity fail-fast, but normalization succeeded"
 
-            it "fails fast when annotation-edge deterministic graft-weaken synthesis has no live candidate arg" $ do
+            it "fails fast before annotation-edge graft-weaken synthesis when replay-map injectivity cannot be satisfied" $ do
                 let root = NodeId 0
                     binder = NodeId 2
                     sourceB1 = NodeId 20
@@ -1312,7 +1308,7 @@ spec = do
                             { etRoot = root
                             , etBinderArgs = [(sourceB1, missingArg1), (sourceB2, missingArg2)]
                             , etInterior = InteriorNodes (IntSet.fromList [getNodeId binder])
-                            , etBinderReplayHints =
+                            , etBinderReplayMap =
                                 IntMap.fromList
                                     [ (getNodeId sourceB1, binder)
                                     , (getNodeId sourceB2, binder)
@@ -1331,17 +1327,16 @@ spec = do
                             , psEdgeTraces = IntMap.fromList [(edgeId, edgeTrace)]
                             }
                 case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
-                    Left (WitnessNormalizationError (EdgeId eid) (DeterministicGraftWeakenSynthesisFailed b cands)) -> do
+                    Left (WitnessNormalizationError (EdgeId eid) (ReplayMapIncomplete missing)) -> do
                         eid `shouldBe` edgeId
-                        b `shouldBe` binder
-                        cands `shouldBe` [missingArg1, missingArg2]
+                        missing `shouldBe` [sourceB2]
                     Left other ->
                         expectationFailure $
-                            "Expected deterministic synthesis fail-fast error, got: " ++ show other
+                            "Expected replay-map injectivity fail-fast error, got: " ++ show other
                     Right _ ->
-                        expectationFailure "Expected deterministic synthesis fail-fast error, but normalization succeeded"
+                        expectationFailure "Expected replay-map injectivity fail-fast error, but normalization succeeded"
 
-            it "does not synthesize deterministic graft-weaken pair on non-annotation edges" $ do
+            it "fails fast on non-annotation ambiguous multi-graft when replay-map injectivity cannot be satisfied" $ do
                 let root = NodeId 0
                     binder = NodeId 2
                     sourceB1 = NodeId 20
@@ -1382,7 +1377,7 @@ spec = do
                             { etRoot = root
                             , etBinderArgs = [(sourceB1, arg1), (sourceB2, arg2)]
                             , etInterior = InteriorNodes (IntSet.fromList [getNodeId binder])
-                            , etBinderReplayHints =
+                            , etBinderReplayMap =
                                 IntMap.fromList
                                     [ (getNodeId sourceB1, binder)
                                     , (getNodeId sourceB2, binder)
@@ -1401,24 +1396,13 @@ spec = do
                             , psEdgeTraces = IntMap.fromList [(edgeId, edgeTrace)]
                             }
                 case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
-                    Left err ->
-                        expectationFailure $ "Expected non-annotation edge to keep current behavior, got: " ++ show err
-                    Right (_, st1) ->
-                        case IntMap.lookup edgeId (psEdgeWitnesses st1) of
-                            Nothing ->
-                                expectationFailure "Missing normalized witness for non-annotation edge"
-                            Just ew1 -> do
-                                let ops = getInstanceOps (ewWitness ew1)
-                                    grafts =
-                                        [ (arg, n)
-                                        | OpGraft arg n <- ops
-                                        ]
-                                    weakens =
-                                        [ n
-                                        | OpWeaken n <- ops
-                                        ]
-                                grafts `shouldBe` [(arg2, binder), (arg1, binder)]
-                                weakens `shouldBe` []
+                    Left (WitnessNormalizationError (EdgeId eid) (ReplayMapIncomplete missing)) -> do
+                        eid `shouldBe` edgeId
+                        missing `shouldBe` [sourceB2]
+                    Left other ->
+                        expectationFailure $ "Expected replay-map injectivity fail-fast, got: " ++ show other
+                    Right _ ->
+                        expectationFailure "Expected replay-map injectivity fail-fast, but normalization succeeded"
 
         describe "Inert-locked detection" $ do
             it "does not mark nodes with flex path to ⊥ as inert-locked" $ do
@@ -1603,7 +1587,7 @@ spec = do
                     , canonical = id
                     , constraint = emptyConstraint
                     , binderArgs = IntMap.empty
-                    , binderReplayHints = IntMap.empty
+                    , binderReplayMap = IntMap.empty
                     }
             case normalizeInstanceOpsFull env [] of
                 Right _ -> pure ()
@@ -1619,7 +1603,7 @@ spec = do
                     , canonical = id
                     , constraint = emptyConstraint
                     , binderArgs = IntMap.empty
-                    , binderReplayHints = IntMap.empty
+                    , binderReplayMap = IntMap.empty
                     }
             case coalesceRaiseMergeWithEnv env [] of
                 Right _ -> pure ()
@@ -1635,11 +1619,115 @@ spec = do
                     , canonical = id
                     , constraint = emptyConstraint
                     , binderArgs = IntMap.empty
-                    , binderReplayHints = IntMap.empty
+                    , binderReplayMap = IntMap.empty
                     }
             case reorderWeakenWithEnv env [] of
                 Right _ -> pure ()
                 Left err -> expectationFailure $ "reorderWeakenWithEnv failed: " ++ show err
+
+        it "fails replay-map validation when source binder domain is under-covered" $ do
+            let root = NodeId 0
+                binder = NodeId 1
+                argNode = NodeId 2
+                c = rootedConstraint emptyConstraint
+                    { cNodes =
+                        nodeMapFromList
+                            [ (0, TyArrow root binder binder)
+                            , (1, TyVar { tnId = binder, tnBound = Nothing })
+                            , (2, TyBase argNode (BaseTy "Int"))
+                            ]
+                    , cBindParents =
+                        bindParentsFromPairs
+                            [ (binder, root, BindFlex)
+                            , (argNode, root, BindFlex)
+                            ]
+                    }
+                env = OmegaNormalizeEnv
+                    { oneRoot = root
+                    , interior = IntSet.fromList [0, 1, 2]
+                    , weakened = IntSet.empty
+                    , orderKeys = IntMap.empty
+                    , canonical = id
+                    , constraint = c
+                    , binderArgs = IntMap.fromList [(getNodeId binder, argNode)]
+                    , binderReplayMap = IntMap.empty
+                    }
+            validateNormalizedWitness env [] `shouldBe` Left (ReplayMapIncomplete [binder])
+
+        it "fails replay-map validation when codomain target is not a TyVar binder" $ do
+            let root = NodeId 0
+                binder = NodeId 1
+                badTarget = NodeId 2
+                argNode = NodeId 3
+                c = rootedConstraint emptyConstraint
+                    { cNodes =
+                        nodeMapFromList
+                            [ (0, TyArrow root binder binder)
+                            , (1, TyVar { tnId = binder, tnBound = Nothing })
+                            , (2, TyBase badTarget (BaseTy "Bool"))
+                            , (3, TyBase argNode (BaseTy "Int"))
+                            ]
+                    , cBindParents =
+                        bindParentsFromPairs
+                            [ (binder, root, BindFlex)
+                            , (badTarget, root, BindFlex)
+                            , (argNode, root, BindFlex)
+                            ]
+                    }
+                env = OmegaNormalizeEnv
+                    { oneRoot = root
+                    , interior = IntSet.fromList [0, 1, 2, 3]
+                    , weakened = IntSet.empty
+                    , orderKeys = IntMap.empty
+                    , canonical = id
+                    , constraint = c
+                    , binderArgs = IntMap.fromList [(getNodeId binder, argNode)]
+                    , binderReplayMap = IntMap.fromList [(getNodeId binder, badTarget)]
+                    }
+            validateNormalizedWitness env [] `shouldBe` Left (ReplayMapNonTyVarTarget binder badTarget)
+
+        it "fails replay-map validation when two source binders map to one replay binder" $ do
+            let root = NodeId 0
+                binderA = NodeId 1
+                binderB = NodeId 2
+                argA = NodeId 3
+                argB = NodeId 4
+                c = rootedConstraint emptyConstraint
+                    { cNodes =
+                        nodeMapFromList
+                            [ (0, TyArrow root binderA binderB)
+                            , (1, TyVar { tnId = binderA, tnBound = Nothing })
+                            , (2, TyVar { tnId = binderB, tnBound = Nothing })
+                            , (3, TyBase argA (BaseTy "Int"))
+                            , (4, TyBase argB (BaseTy "Bool"))
+                            ]
+                    , cBindParents =
+                        bindParentsFromPairs
+                            [ (binderA, root, BindFlex)
+                            , (binderB, root, BindFlex)
+                            , (argA, root, BindFlex)
+                            , (argB, root, BindFlex)
+                            ]
+                    }
+                env = OmegaNormalizeEnv
+                    { oneRoot = root
+                    , interior = IntSet.fromList [0, 1, 2, 3, 4]
+                    , weakened = IntSet.empty
+                    , orderKeys = IntMap.empty
+                    , canonical = id
+                    , constraint = c
+                    , binderArgs =
+                        IntMap.fromList
+                            [ (getNodeId binderA, argA)
+                            , (getNodeId binderB, argB)
+                            ]
+                    , binderReplayMap =
+                        IntMap.fromList
+                            [ (getNodeId binderA, binderA)
+                            , (getNodeId binderB, binderA)
+                            ]
+                    }
+            validateNormalizedWitness env [] `shouldBe` Left (ReplayMapNonInjective binderA binderB binderA)
 
   where
     isTotalOp :: InstanceOp -> Bool

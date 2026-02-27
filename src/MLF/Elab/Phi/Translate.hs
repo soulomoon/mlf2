@@ -63,11 +63,11 @@ import MLF.Elab.Phi.Env (PhiM, askResult)
 import MLF.Elab.Phi.IdentityBridge
     ( mkIdentityBridge
     , sourceKeysForNode
-    , sourceKeysForNodeWithClassFallback
     , traceOrderRank
     )
 import MLF.Elab.Phi.Omega (OmegaContext(..), phiWithSchemeOmega)
 import MLF.Util.Trace (TraceConfig, traceGeneralize)
+import MLF.Util.Names (parseNameId)
 
 -- | Canonicalize a node id using the union-find from the solve result.
 canonicalNodeM :: NodeId -> PhiM NodeId
@@ -245,9 +245,8 @@ type GeneralizeAtWith =
     -> NodeId
     -> Either ElabError (ElabScheme, IntMap.IntMap String)
 
--- | Test/debug-only: Translate without requiring an EdgeTrace.
--- This bypasses thesis-exact precondition checks and must not be used by
--- production elaboration paths.
+-- | Strict no-trace path for tests/debugging:
+-- fails fast because production Φ requires edge traces.
 phiFromEdgeWitnessNoTrace
     :: TraceConfig
     -> GeneralizeAtWith
@@ -255,8 +254,8 @@ phiFromEdgeWitnessNoTrace
     -> Maybe SchemeInfo
     -> EdgeWitness
     -> Either ElabError Instantiation
-phiFromEdgeWitnessNoTrace traceCfg generalizeAtWith res mSchemeInfo ew =
-    phiFromEdgeWitnessCore traceCfg generalizeAtWith res Nothing mSchemeInfo Nothing ew
+phiFromEdgeWitnessNoTrace _traceCfg _generalizeAtWith _res _mSchemeInfo ew =
+    Left (MissingEdgeTrace (ewEdgeId ew))
 
 -- | Legacy alias for 'phiFromEdgeWitnessNoTrace' (deprecated; test/debug-only).
 phiFromEdgeWitness
@@ -268,7 +267,7 @@ phiFromEdgeWitness
     -> Either ElabError Instantiation
 phiFromEdgeWitness = phiFromEdgeWitnessNoTrace
 
-{-# DEPRECATED phiFromEdgeWitness "Use phiFromEdgeWitnessNoTrace only in tests/debugging; production code must use phiFromEdgeWitnessWithTrace." #-}
+{-# DEPRECATED phiFromEdgeWitness "Use phiFromEdgeWitnessWithTrace; the no-trace entrypoint is strict fail-fast." #-}
 
 phiFromEdgeWitnessWithTrace
     :: TraceConfig
@@ -384,9 +383,9 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
         )
         () of
         () -> pure ()
-    let (traceBinderSourcesRaw, traceBinderReplayMapRaw, traceBinderHintDomainRaw, traceBinderSourceNamesRaw) =
-            computeTraceBinderReplayBridge mTrace siReplay siSource
-        traceBinderSources =
+    (traceBinderSourcesRaw, traceBinderReplayMapRaw, traceBinderMapDomainRaw) <-
+        computeTraceBinderReplayBridge mTrace siReplay siSource
+    let traceBinderSources =
             debugPhi
                 ("phi traceBinderSources=" ++ show (IntSet.toList traceBinderSourcesRaw))
                 traceBinderSourcesRaw
@@ -394,16 +393,12 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
             debugPhi
                 ("phi traceBinderReplayMap=" ++ show (IntMap.toList traceBinderReplayMapRaw))
                 traceBinderReplayMapRaw
-        traceBinderHintDomain =
+        traceBinderMapDomain =
             debugPhi
-                ("phi traceBinderHintDomain=" ++ show (IntSet.toList traceBinderHintDomainRaw))
-                traceBinderHintDomainRaw
-        traceBinderSourceNames =
-            debugPhi
-                ("phi traceBinderSourceNames=" ++ show (IntMap.toList traceBinderSourceNamesRaw))
-                traceBinderSourceNamesRaw
+                ("phi traceBinderMapDomain=" ++ show (IntSet.toList traceBinderMapDomainRaw))
+                traceBinderMapDomainRaw
     phiWithSchemeOmega
-        (omegaCtx (Just siReplay) traceBinderSources traceBinderReplayMap traceBinderHintDomain traceBinderSourceNames)
+        (omegaCtx (Just siReplay) traceBinderSources traceBinderReplayMap traceBinderMapDomain)
         namedSet
         siReplay
         introCount
@@ -417,9 +412,8 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
         -> IntSet.IntSet
         -> IntMap.IntMap NodeId
         -> IntSet.IntSet
-        -> IntMap.IntMap String
         -> OmegaContext
-    omegaCtx mSchemeInfoCtx traceBinderSources traceBinderReplayMap traceBinderHintDomain traceBinderSourceNames =
+    omegaCtx mSchemeInfoCtx traceBinderSources traceBinderReplayMap traceBinderMapDomain =
         OmegaContext
             { ocTraceConfig = traceCfg
             , ocSolved = res
@@ -429,8 +423,7 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
             , ocSchemeInfo = mSchemeInfoCtx
             , ocTraceBinderSources = traceBinderSources
             , ocTraceBinderReplayMap = traceBinderReplayMap
-            , ocTraceBinderHintDomain = traceBinderHintDomain
-            , ocTraceBinderSourceNames = traceBinderSourceNames
+            , ocTraceBinderMapDomain = traceBinderMapDomain
             , ocEdgeRoot = ewRoot ew
             , ocEdgeLeft = ewLeft ew
             , ocEdgeRight = ewRight ew
@@ -464,15 +457,12 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
         :: Maybe EdgeTrace
         -> SchemeInfo
         -> SchemeInfo
-        -> (IntSet.IntSet, IntMap.IntMap NodeId, IntSet.IntSet, IntMap.IntMap String)
+        -> Either ElabError (IntSet.IntSet, IntMap.IntMap NodeId, IntSet.IntSet)
     computeTraceBinderReplayBridge mbTrace siReplay siSource =
         case mbTrace of
-            Nothing -> (IntSet.empty, IntMap.empty, IntSet.empty, IntMap.empty)
+            Nothing -> Left (MissingEdgeTrace (ewEdgeId ew))
             Just tr ->
-                let schemeNames =
-                        case siScheme siReplay of
-                            Forall binds _ -> map fst binds
-                    traceBinderSourcesInOrder =
+                let traceBinderSourcesInOrder =
                         reverse $
                             snd $
                                 foldl'
@@ -484,23 +474,16 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
                                     )
                                     (IntSet.empty, [])
                                     (etBinderArgs tr)
-                    traceBinderSourcesKeys =
-                        [ getNodeId binder
-                        | binder <- traceBinderSourcesInOrder
-                        ]
-                    traceBinderSourcesSet =
-                        IntSet.fromList traceBinderSourcesKeys
-                    hintMapRaw = etBinderReplayHints tr
-                    hintDomain = IntSet.fromList (IntMap.keys hintMapRaw)
-                    hintPeersByHint =
-                        IntMap.fromListWith IntSet.union
-                            [ ( getNodeId (canonicalNode replayN)
-                              , IntSet.singleton sourceKey
-                              )
-                            | (sourceKey, replayN) <- IntMap.toList hintMapRaw
-                            ]
+                    traceBinderSourceKeys = map getNodeId traceBinderSourcesInOrder
+                    traceBinderSourceSet = IntSet.fromList traceBinderSourceKeys
                     traceCopyMap = getCopyMapping (etCopyMap tr)
                     ib = mkIdentityBridge res (Just tr) traceCopyMap
+                    sourceNameByKey =
+                        IntMap.fromList (IntMap.toList (siSubst siSource))
+                    isLiveTyVarTarget replayTarget =
+                        case Solved.lookupNode res (canonicalNode replayTarget) of
+                            Just TyVar{} -> True
+                            _ -> False
                     chooseBetterKey new old =
                         if traceOrderRank ib new < traceOrderRank ib old
                             then new
@@ -512,22 +495,6 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
                             )
                             Map.empty
                             (IntMap.toList (siSubst siReplay))
-                    sourceNameByKey =
-                        IntMap.fromList (IntMap.toList (siSubst siSource))
-                    replayBinderDomain =
-                        IntSet.fromList
-                            [ getNodeId (canonicalNode (NodeId key))
-                            | key <- IntMap.keys (siSubst siReplay)
-                            , case Solved.lookupNode res (canonicalNode (NodeId key)) of
-                                Just TyVar{} -> True
-                                _ -> False
-                            ]
-                    isReplayBinderKey key =
-                        IntSet.member
-                            (getNodeId (canonicalNode (NodeId key)))
-                            replayBinderDomain
-                    isUsableReplayKey key =
-                        isReplayBinderKey key
                     dedupKeys =
                         reverse
                             . snd
@@ -536,178 +503,186 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
                                     if IntSet.member key seen
                                         then (seen, acc)
                                         else (IntSet.insert key seen, key : acc)
-                                )
+                                    )
                                 (IntSet.empty, [])
-                    replayFromHint sourceKey =
-                        case IntMap.lookup sourceKey hintMapRaw of
-                            Nothing -> []
-                            Just replayN ->
-                                let replayKey = getNodeId (canonicalNode replayN)
-                                in [NodeId replayKey | isUsableReplayKey replayKey]
-                    replayFromName sourceKey =
+                    replayKeyBySchemeName =
+                        Map.fromList
+                            [ (name, NodeId key)
+                            | (key, name) <- IntMap.toList (siSubst siReplay)
+                            ]
+                    replayKeysFromSchemeQuantifiers =
+                        dedupKeys
+                            [ getNodeId replayTarget
+                            | (name, _mbBound) <- case siScheme siReplay of
+                                Forall binds _ -> binds
+                            , Just replayTarget <-
+                                [ Map.lookup name replayKeyBySchemeName
+                                    <|> (NodeId <$> parseNameId name)
+                                ]
+                            , isLiveTyVarTarget replayTarget
+                            ]
+                    replayKeysInTraceOrder =
+                        if null replayKeysFromSchemeQuantifiers
+                            then
+                                dedupKeys
+                                    [ replayKey
+                                    | replayKey <- sortOn (traceOrderRank ib) (IntMap.keys (siSubst siReplay))
+                                    , isLiveTyVarTarget (NodeId replayKey)
+                                    ]
+                            else replayKeysFromSchemeQuantifiers
+                    positionalReplayMap =
+                        IntMap.fromList
+                            [ (sourceKey, NodeId replayKey)
+                            | (sourceKey, replayKey) <- zip traceBinderSourceKeys replayKeysInTraceOrder
+                            ]
+                    replayMapRaw = etBinderReplayMap tr
+                    replayMapDomain = IntSet.fromList (IntMap.keys replayMapRaw)
+                    replayMapCanonical0 =
+                        replayMapRaw
+                    replayBinderDomainFromSchemeRaw =
+                        IntSet.fromList replayKeysInTraceOrder
+                    replayBinderDomainFromSchemeCanonical =
+                        IntSet.fromList
+                            [ getNodeId (canonicalNode (NodeId key))
+                            | key <- IntSet.toList replayBinderDomainFromSchemeRaw
+                            ]
+                    replayBinderDomainFromMapRaw0 =
+                        IntSet.fromList
+                            [ getNodeId replayTarget0
+                            | replayTarget0 <- IntMap.elems replayMapCanonical0
+                            , isLiveTyVarTarget replayTarget0
+                            ]
+                    preferredReplayBinderDomainRaw =
+                        if IntSet.null replayBinderDomainFromSchemeRaw
+                            then replayBinderDomainFromMapRaw0
+                            else replayBinderDomainFromSchemeRaw
+                    inPreferredReplayDomainRaw replayTarget =
+                        IntSet.member (getNodeId replayTarget) preferredReplayBinderDomainRaw
+                    sourceTyVarFallback sourceKey =
+                        if IntSet.null replayBinderDomainFromSchemeRaw
+                            then
+                                let sourceTarget = NodeId sourceKey
+                                in if isLiveTyVarTarget sourceTarget
+                                    then Just sourceTarget
+                                    else Nothing
+                            else Nothing
+                    sourceNameFallback sourceKey =
                         case IntMap.lookup sourceKey sourceNameByKey of
-                            Nothing -> []
+                            Nothing -> Nothing
                             Just name ->
                                 case Map.lookup name replayKeyByName of
-                                    Just replayKey | isUsableReplayKey replayKey ->
-                                        [NodeId replayKey]
-                                    _ -> []
-                    sameHintSources sourceKey =
-                        case IntMap.lookup sourceKey hintMapRaw of
-                            Nothing -> []
-                            Just replayN ->
-                                IntSet.toList $
-                                    IntMap.findWithDefault
-                                        (IntSet.singleton sourceKey)
-                                        (getNodeId (canonicalNode replayN))
-                                        hintPeersByHint
-                    replayFromAlias sourceKey =
-                        let witnessSourceEqKeys =
-                                dedupKeys
-                                    ( sourceKey
-                                        : sourceKeysForNode ib (NodeId sourceKey)
-                                        ++ concat
-                                            [ peerKey : sourceKeysForNode ib (NodeId peerKey)
-                                            | peerKey <- sameHintSources sourceKey
-                                            ]
-                                    )
-                            classFallbackEqKeys =
-                                dedupKeys
-                                    ( sourceKey
-                                        : sourceKeysForNodeWithClassFallback ib (NodeId sourceKey)
-                                        ++ concat
-                                            [ peerKey : sourceKeysForNodeWithClassFallback ib (NodeId peerKey)
-                                            | peerKey <- sameHintSources sourceKey
-                                            ]
-                                    )
-                            sourceEqKeys =
-                                if null witnessSourceEqKeys
-                                    then
-                                        case debugPhi
-                                            ( "phi replayBridge: class fallback source-key recovery"
-                                                ++ " sourceKey="
-                                                ++ show sourceKey
-                                                ++ " fallbackKeys="
-                                                ++ show classFallbackEqKeys
-                                            )
-                                            ()
-                                        of
-                                            () -> classFallbackEqKeys
-                                    else witnessSourceEqKeys
-                            directReplay =
-                                [ NodeId key
-                                | key <- sourceEqKeys
-                                , isUsableReplayKey key
+                                    Nothing -> Nothing
+                                    Just replayKey ->
+                                        let replayTarget = NodeId replayKey
+                                        in if isLiveTyVarTarget replayTarget
+                                            && (IntSet.null replayBinderDomainFromSchemeRaw
+                                                || inPreferredReplayDomainRaw replayTarget)
+                                            then Just replayTarget
+                                            else Nothing
+                    positionalFallback sourceKey =
+                        case IntMap.lookup sourceKey positionalReplayMap of
+                            Just candidate ->
+                                if isLiveTyVarTarget candidate
+                                    && (IntSet.null replayBinderDomainFromSchemeRaw
+                                        || inPreferredReplayDomainRaw candidate)
+                                    then Just candidate
+                                    else Nothing
+                            Nothing -> Nothing
+                    replayMapCanonical =
+                        IntMap.fromList
+                            [ let existing = IntMap.lookup sourceKey replayMapCanonical0
+                                  existingValid =
+                                      case existing of
+                                          Just replayTarget
+                                              | IntSet.member (getNodeId replayTarget) preferredReplayBinderDomainRaw ->
+                                                  Just replayTarget
+                                          _ -> Nothing
+                                  defaultReplayFallback =
+                                      if IntSet.null replayBinderDomainFromSchemeRaw
+                                          then Nothing
+                                          else case replayKeysInTraceOrder of
+                                              replayKey : _ -> Just (NodeId replayKey)
+                                              [] -> Nothing
+                                  fallbackTarget =
+                                      existingValid
+                                          <|> sourceNameFallback sourceKey
+                                          <|> positionalFallback sourceKey
+                                          <|> sourceTyVarFallback sourceKey
+                                          <|> defaultReplayFallback
+                                  chosen =
+                                      case fallbackTarget of
+                                          Just replayTarget -> replayTarget
+                                          Nothing ->
+                                              case existing of
+                                                  Just replayTarget -> replayTarget
+                                                  Nothing -> NodeId sourceKey
+                              in (sourceKey, chosen)
+                            | sourceKey <- traceBinderSourceKeys
+                            ]
+                    replayBinderDomainFromMapRaw' =
+                        IntSet.fromList
+                            [ getNodeId replayTarget
+                            | replayTarget <- IntMap.elems replayMapCanonical
+                            , isLiveTyVarTarget replayTarget
+                            ]
+                    replayBinderDomainFromMapCanonical' =
+                        IntSet.fromList
+                            [ getNodeId (canonicalNode replayTarget)
+                            | replayTarget <- IntMap.elems replayMapCanonical
+                            , isLiveTyVarTarget replayTarget
+                            ]
+                    replayBinderDomainCanonical =
+                        IntSet.union replayBinderDomainFromSchemeCanonical replayBinderDomainFromMapCanonical'
+                    targetInReplayDomain replayTarget =
+                        if IntSet.null replayBinderDomainFromSchemeRaw
+                            then IntSet.member (getNodeId replayTarget) replayBinderDomainFromMapRaw'
+                            else IntSet.member (getNodeId replayTarget) replayBinderDomainFromSchemeRaw
+                    renderReplayBinderDomain =
+                        if IntSet.null replayBinderDomainFromSchemeRaw
+                            then IntSet.toList replayBinderDomainCanonical
+                            else IntSet.toList replayBinderDomainFromSchemeRaw
+                    missingSources =
+                        IntSet.toList (IntSet.difference traceBinderSourceSet replayMapDomain)
+                    extraSources =
+                        IntSet.toList (IntSet.difference replayMapDomain traceBinderSourceSet)
+                    invalidTargets =
+                        if IntSet.null replayBinderDomainFromSchemeRaw
+                            then []
+                            else
+                                [ (sourceKey, replayTarget)
+                                | (sourceKey, replayTarget) <- IntMap.toList replayMapCanonical
+                                , not (targetInReplayDomain replayTarget)
                                 ]
-                            hintedReplay =
-                                concatMap replayFromHint sourceEqKeys
-                            namedReplay =
-                                concatMap replayFromName sourceEqKeys
-                        in map canonicalNode (hintedReplay ++ namedReplay ++ directReplay)
-                    replayCandidates sourceKey =
-                        let candidates =
-                                replayFromHint sourceKey
-                                    ++ replayFromName sourceKey
-                                    ++ replayFromAlias sourceKey
-                            dedupNodeIds =
-                                reverse
-                                    . snd
-                                    . foldl'
-                                        (\(seen, acc) nid ->
-                                            let k = getNodeId nid
-                                            in if IntSet.member k seen
-                                                then (seen, acc)
-                                                else (IntSet.insert k seen, nid : acc)
-                                        )
-                                        (IntSet.empty, [])
-                        in dedupNodeIds candidates
-                    replaySeedPairs =
-                        [ (getNodeId sourceBinder, replayCandidates (getNodeId sourceBinder))
-                        | sourceBinder <- traceBinderSourcesInOrder
-                        ]
-                    replayKeysInTraceOrder =
-                        dedupKeys
-                            [ getNodeId (canonicalNode (NodeId replayKey))
-                        | replayKey <- sortOn (traceOrderRank ib) (IntMap.keys (siSubst siReplay))
-                        , isUsableReplayKey replayKey
-                            ]
-                    replayPositionalSeed =
-                        IntMap.fromList
-                            [ (sourceKey, [NodeId replayKey])
-                            | (sourceKey, replayKey) <- zip traceBinderSourcesKeys replayKeysInTraceOrder
-                            ]
-                    replayNameSeed =
-                        IntMap.fromList
-                            [ (sourceKey, [NodeId replayKey])
-                            | ((_, name), sourceKey) <- zip (zip traceBinderSourcesInOrder schemeNames) traceBinderSourcesKeys
-                            , Just replayKey <- [Map.lookup name replayKeyByName]
-                            , isUsableReplayKey replayKey
-                            ]
-                    replayAllCandidates =
-                        IntMap.fromListWith
-                            (\new old -> new ++ old)
-                            [ (sourceKey, cands)
-                            | (sourceKey, cands) <- replaySeedPairs
-                            ]
-                    replayAllCandidates' =
-                        IntMap.unionsWith (\a b -> a ++ b)
-                            [ replayAllCandidates
-                            , replayNameSeed
-                            , replayPositionalSeed
-                            ]
-                    replayCandidatesBySource =
-                        [ ( sourceKey
-                          , map getNodeId (IntMap.findWithDefault [] sourceKey replayAllCandidates')
-                          )
-                        | sourceKey <- traceBinderSourcesKeys
-                        ]
-                    replayMap =
-                        fst $
-                            foldl'
-                                (\(acc, used) sourceKey ->
-                                    let cands0 = IntMap.findWithDefault [] sourceKey replayAllCandidates'
-                                        cands =
-                                            [ canonicalNode nid
-                                            | nid <- cands0
-                                            , isUsableReplayKey (getNodeId (canonicalNode nid))
-                                            ]
-                                        pickUnused =
-                                            listToMaybe
-                                                [ nid
-                                                | nid <- cands
-                                                , not (IntSet.member (getNodeId nid) used)
-                                                ]
-                                        fallbackHint =
-                                            canonicalNode <$>
-                                                IntMap.lookup sourceKey hintMapRaw
-                                        fallbackRaw =
-                                            Just (canonicalNode (NodeId sourceKey))
-                                        pick = pickUnused <|> listToMaybe cands <|> fallbackHint <|> fallbackRaw
-                                    in case pick of
-                                        Nothing ->
-                                            ( IntMap.insert sourceKey (NodeId sourceKey) acc
-                                            , used
-                                            )
-                                        Just replayN ->
-                                            ( IntMap.insert sourceKey replayN acc
-                                            , IntSet.insert (getNodeId replayN) used
-                                            )
+                in
+                    if not (null missingSources) || not (null extraSources)
+                        then
+                            Left $
+                                PhiInvariantError $
+                                    unlines
+                                        [ "trace binder replay-map domain mismatch"
+                                        , "edge: " ++ show (ewEdgeId ew)
+                                        , "trace binder sources: " ++ show traceBinderSourceKeys
+                                        , "replay-map domain: " ++ show (IntMap.keys replayMapCanonical)
+                                        , "missing source keys: " ++ show missingSources
+                                        , "extra source keys: " ++ show extraSources
+                                        ]
+                    else case invalidTargets of
+                        (sourceKey, replayTarget) : _ ->
+                            Left $
+                                PhiInvariantError $
+                                    unlines
+                                        [ "trace binder replay-map target outside replay binder domain"
+                                        , "edge: " ++ show (ewEdgeId ew)
+                                        , "source key: " ++ show sourceKey
+                                        , "replay target: " ++ show replayTarget
+                                        , "replay binder domain: " ++ show renderReplayBinderDomain
+                                        ]
+                        [] ->
+                            Right
+                                ( traceBinderSourceSet
+                                , replayMapCanonical
+                                , replayMapDomain
                                 )
-                                (IntMap.empty, IntSet.empty)
-                                traceBinderSourcesKeys
-                    replayMap' =
-                        debugPhi
-                            ( "phi replayBridge detail: positionalSeed="
-                                ++ show (fmap (map getNodeId) replayPositionalSeed)
-                                ++ " nameSeed="
-                                ++ show (fmap (map getNodeId) replayNameSeed)
-                                ++ " candidates="
-                                ++ show replayCandidatesBySource
-                                ++ " replayMap="
-                                ++ show (IntMap.toList replayMap)
-                            )
-                            replayMap
-                in (traceBinderSourcesSet, replayMap', hintDomain, sourceNameByKey)
 
     traceBinderArity :: EdgeTrace -> Int
     traceBinderArity tr =
