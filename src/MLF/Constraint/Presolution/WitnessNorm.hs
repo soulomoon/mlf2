@@ -27,7 +27,7 @@ import MLF.Constraint.Presolution.Base
 import MLF.Constraint.Presolution.StateAccess (getConstraintAndCanonical)
 import MLF.Constraint.Presolution.Validation (translatableWeakenedNodes)
 import MLF.Constraint.Presolution.Witness (
-    normalizeInstanceOpsFull,
+    normalizeInstanceOpsCore,
     OmegaNormalizeEnv(OmegaNormalizeEnv, oneRoot),
     validateNormalizedWitness,
     )
@@ -345,16 +345,10 @@ normalizeEdgeWitnessesM = do
                     , Witness.binderArgs = binderArgs
                     , Witness.binderReplayMap = replayMapRewritten
                     }
-        opsNorm <- case normalizeInstanceOpsFull env ops0 of
+        opsNorm <- case normalizeInstanceOpsCore env ops0 of
             Right ops' -> pure ops'
             Left err ->
                 throwError (WitnessNormalizationError (EdgeId eid) err)
-        -- Validate normalized ops against Fig. 15.3.4 invariants (thesis-exact).
-        -- IMPORTANT: Validate BEFORE restoring to original node space, since
-        -- interiorNorm is in the rewritten node space (matching the normalized ops).
-        case validateNormalizedWitness env opsNorm of
-            Left valErr -> throwError (WitnessNormalizationError (EdgeId eid) valErr)
-            Right () -> pure ()
         let targetKeysUsed :: IntSet.IntSet
             targetKeysUsed =
                 IntSet.fromList
@@ -395,7 +389,31 @@ normalizeEdgeWitnessesM = do
                     [ (getNodeId sourceBinder, replayBinder)
                     | ((sourceBinder, _), replayBinder) <- replayPairs
                     ]
+            replayMapValidation =
+                IntMap.fromList
+                    [ (getNodeId (canonical (rewriteNode sourceBinder)), replayBinder)
+                    | ((sourceBinder, _), replayBinder) <- replayPairs
+                    ]
+            activeBinderArgsMap =
+                IntMap.fromList
+                    [ ( getNodeId (canonical (rewriteNode sourceBinder))
+                      , canonical (rewriteNode arg)
+                      )
+                    | (sourceBinder, arg) <- activeSourceEntries
+                    ]
             activeBinderArgs = map fst (zip activeSourceEntries [1 .. nActive])
+            envPost =
+                env
+                    { Witness.binderArgs = activeBinderArgsMap
+                    , Witness.binderReplayMap = replayMapValidation
+                    }
+        -- Validate normalized ops and replay-map contract against the
+        -- post-projection replay codomain (producer boundary contract).
+        -- IMPORTANT: Validate BEFORE restoring to original node space, since
+        -- interiorNorm is in the rewritten node space (matching the normalized ops).
+        case validateNormalizedWitness envPost opsNorm of
+            Left valErr -> throwError (WitnessNormalizationError (EdgeId eid) valErr)
+            Right () -> pure ()
         let interiorSourceKeys =
                 case traceInterior of
                     InteriorNodes s -> s

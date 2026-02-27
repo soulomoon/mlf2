@@ -7,6 +7,7 @@ This module provides canonicalization and normalization functions for
 instance operation witnesses, enforcing the conditions from the MLF thesis.
 -}
 module MLF.Constraint.Presolution.WitnessCanon (
+    normalizeInstanceOpsCore,
     normalizeInstanceOpsFull,
     coalesceRaiseMergeWithEnv,
     reorderWeakenWithEnv,
@@ -299,10 +300,10 @@ assertNoStandaloneGrafts env = go
     go (OpGraft _ bv : _) = Left (StandaloneGraftRemaining (canon bv))
     go (_ : rest) = go rest
 
--- | Normalize Ω by enforcing `papers/these-finale-english.txt` conditions
--- (see `papers/xmlf.txt` conditions (1)–(5)) only.
-normalizeInstanceOpsFull :: OmegaNormalizeEnv -> [InstanceOp] -> Either OmegaNormalizeError [InstanceOp]
-normalizeInstanceOpsFull env ops0 = do
+-- | Normalize Ω by canonicalization/coalescing/reordering passes only.
+-- Validation is applied by 'normalizeInstanceOpsFull' or at call-site boundaries.
+normalizeInstanceOpsCore :: OmegaNormalizeEnv -> [InstanceOp] -> Either OmegaNormalizeError [InstanceOp]
+normalizeInstanceOpsCore env ops0 = do
     let ops1 = stripExteriorOps env ops0
     ops2 <- canonicalizeOps ops1
     ops2' <- rejectAmbiguousGraftWeaken ops2
@@ -312,7 +313,6 @@ normalizeInstanceOpsFull env ops0 = do
     ops5 <- reorderWeakenWithEnv env ops4
     ops5' <- coalesceDelayedGraftWeakenWithEnv env ops5
     let ops6 = dropRedundantOps ops5'
-    validateNormalizedWitness env ops6
     pure ops6
   where
     canon = canonical env
@@ -392,6 +392,13 @@ normalizeInstanceOpsFull env ops0 = do
         case ord of
             LT -> Right ()
             _ -> Left (MergeDirectionInvalid (canon n) (canon m))
+
+-- | Normalize Ω and validate paper invariants (conditions (1)–(5)).
+normalizeInstanceOpsFull :: OmegaNormalizeEnv -> [InstanceOp] -> Either OmegaNormalizeError [InstanceOp]
+normalizeInstanceOpsFull env ops0 = do
+    ops <- normalizeInstanceOpsCore env ops0
+    validateNormalizedWitness env ops
+    pure ops
 
 -- | Drop locally redundant witness operations without changing order.
 -- This removes consecutive duplicate raises and self-merges.
