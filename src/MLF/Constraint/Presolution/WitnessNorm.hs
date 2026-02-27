@@ -14,13 +14,14 @@ module MLF.Constraint.Presolution.WitnessNorm (
 
 import Control.Monad.State
 import Control.Monad.Except (throwError)
-import Control.Monad (forM, foldM)
+import Control.Monad (forM, foldM, when)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.Maybe (mapMaybe)
 
 import qualified MLF.Util.Order as Order
 import MLF.Constraint.Types
+import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Presolution.Base
 import MLF.Constraint.Presolution.StateAccess (getConstraintAndCanonical)
@@ -115,18 +116,20 @@ normalizeEdgeWitnessesM = do
                                 else (IntSet.insert key seen, nid : acc)
                         )
                         (IntSet.empty, [])
-            sourceBindersInOrder =
-                reverse
-                    . snd
-                    $ foldl'
-                        (\(seen, acc) (binder, _arg) ->
-                            let key = getNodeId binder
-                            in if IntSet.member key seen
-                                then (seen, acc)
-                                else (IntSet.insert key seen, binder : acc)
-                        )
-                        (IntSet.empty, [])
-                        binderArgs0
+            sourceEntriesInOrder :: [(NodeId, NodeId)]
+            sourceEntriesInOrder =
+                reverse $
+                    snd $
+                        foldl'
+                            (\(seen, acc) (sourceBinder, arg) ->
+                                let key = getNodeId sourceBinder
+                                in if IntSet.member key seen
+                                    then (seen, acc)
+                                    else (IntSet.insert key seen, (sourceBinder, arg) : acc)
+                            )
+                            (IntSet.empty, [])
+                            binderArgs0
+            sourceBindersInOrder = map fst sourceEntriesInOrder
             traceInteriorKeys =
                 case traceInterior of
                     InteriorNodes s -> s
@@ -212,16 +215,16 @@ normalizeEdgeWitnessesM = do
                                 , IntSet.insert (getNodeId replayBinder) usedReplay
                                 , missingSources
                                 )
-                    (replayMapSourceRev, replayMapRewrittenRev, _usedReplay, missingRev) =
+                    (_replayMapSourceRev, replayMapRewrittenRev, _usedReplay, missingRev) =
                         foldl'
                             step
                             (IntMap.empty, IntMap.empty, IntSet.empty, [])
                             sourceBindersInOrder
                     missing = reverse missingRev
                 in case missing of
-                    [] -> Right (replayMapSourceRev, replayMapRewrittenRev)
+                    [] -> Right replayMapRewrittenRev
                     _ -> Left (Witness.ReplayMapIncomplete missing)
-        (replayMapSource, replayMapRewritten) <-
+        replayMapRewritten <-
             case assignReplayMap of
                 Left err -> throwError (WitnessNormalizationError (EdgeId eid) err)
                 Right mapping -> pure mapping
@@ -352,6 +355,47 @@ normalizeEdgeWitnessesM = do
         case validateNormalizedWitness env opsNorm of
             Left valErr -> throwError (WitnessNormalizationError (EdgeId eid) valErr)
             Right () -> pure ()
+        let targetKeysUsed :: IntSet.IntSet
+            targetKeysUsed =
+                IntSet.fromList
+                    [ getNodeId (canonical n)
+                    | op <- opsNorm
+                    , n <- case op of
+                        OpGraft _ t -> [t]
+                        OpWeaken t -> [t]
+                        OpRaise t -> [t]
+                        OpMerge a b -> [a, b]
+                        OpRaiseMerge a b -> [a, b]
+                    ]
+            activeSourceEntries =
+                if IntSet.null targetKeysUsed
+                    then sourceEntriesInOrder
+                    else
+                        [ entry
+                        | entry@(sourceBinder, _arg) <- sourceEntriesInOrder
+                        , IntSet.member (getNodeId (canonical (rewriteNode sourceBinder))) targetKeysUsed
+                        ]
+            replayBinders =
+                [ canonical b
+                | b <- bindersOrdered
+                , isExactTyVar (canonical b)
+                ]
+              where
+                bindersOrdered =
+                    either (const []) id $
+                        Binding.orderedBinders canonical c0 (typeRef (canonical edgeRoot))
+            nActive = length activeSourceEntries
+        when (length replayBinders < nActive) $
+            throwError $
+                WitnessNormalizationError (EdgeId eid) $
+                    Witness.ReplayMapIncomplete (map fst (drop (length replayBinders) activeSourceEntries))
+        let replayPairs = zip activeSourceEntries (take nActive replayBinders)
+            replayMapSourceFinal =
+                IntMap.fromList
+                    [ (getNodeId sourceBinder, replayBinder)
+                    | ((sourceBinder, _), replayBinder) <- replayPairs
+                    ]
+            activeBinderArgs = map fst (zip activeSourceEntries [1 .. nActive])
         let interiorSourceKeys =
                 case traceInterior of
                     InteriorNodes s -> s
@@ -366,9 +410,10 @@ normalizeEdgeWitnessesM = do
                             Nothing
                     _ -> Just op
             opsFinal = mapMaybe (normalizeRaiseTarget . restoreOp) opsNorm
-            replayMapSourceFinal =
-                IntMap.map canonical replayMapSource
-            trace' = fmap (\tr -> tr { etBinderReplayMap = replayMapSourceFinal }) mbTrace
+            trace' = fmap (\tr -> tr
+                { etBinderArgs = activeBinderArgs
+                , etBinderReplayMap = replayMapSourceFinal
+                }) mbTrace
         pure (eid, w0 { ewForallIntros = ewForallIntros w0, ewWitness = InstanceWitness opsFinal }, trace')
     let witnessMap =
             IntMap.fromList
