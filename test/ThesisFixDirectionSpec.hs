@@ -21,9 +21,13 @@ assertPipelineFailFast label runPipeline =
         Left err ->
             renderPipelineError err
                 `shouldSatisfy`
-                    ("OpWeaken: unresolved non-root binder target" `isInfixOf`)
+                    isStrictPhiFailFast
         Right _ ->
             expectationFailure (label ++ " unexpectedly succeeded")
+  where
+    isStrictPhiFailFast msg =
+        ("OpWeaken: unresolved non-root binder target" `isInfixOf` msg)
+            || ("trace binder replay-map target outside replay binder domain" `isInfixOf` msg)
 
 spec :: Spec
 spec = describe "BUG-2026-02-06-002 thesis target" $ do

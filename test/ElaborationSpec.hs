@@ -1560,6 +1560,55 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         -- the prefix context of binder "a".
                         Elab.pretty inst `shouldBe` "∀(a ⩾) N"
 
+            it "fails fast when replay-map source domain mismatches trace binder sources" $ do
+                let root = NodeId 100
+                    binderA = NodeId 1
+                    badTarget = NodeId 31
+                    c = rootedConstraint emptyConstraint
+                        { cNodes = nodeMapFromList
+                                [ (getNodeId root, TyArrow root binderA binderA)
+                                , (getNodeId binderA, TyVar { tnId = binderA, tnBound = Nothing })
+                                , (getNodeId badTarget, TyBase badTarget (BaseTy "Bool"))
+                                ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef binderA), (genRef (GenNodeId 0), BindFlex))
+                                ]
+                        }
+                    solved = mkSolved c IntMap.empty
+                    scheme =
+                        Elab.schemeFromType
+                            (Elab.TForall "a" Nothing
+                                (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
+                    si = Elab.SchemeInfo
+                        { Elab.siScheme = scheme
+                        , Elab.siSubst = IntMap.fromList [(getNodeId binderA, "a")]
+                        }
+                    tr =
+                        EdgeTrace
+                            { etRoot = root
+                            , etBinderArgs = [(binderA, badTarget)]
+                            , etInterior = fromListInterior [root, binderA, badTarget]
+                            -- Missing source key binderA in replay-map domain: strict fail-fast.
+                            , etBinderReplayMap = IntMap.empty
+                            , etCopyMap = mempty
+                            }
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewForallIntros = 0
+                        , ewWitness = InstanceWitness [OpWeaken binderA]
+                        }
+                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew of
+                    Left (Elab.PhiInvariantError msg) ->
+                        msg `shouldSatisfy` ("trace binder replay-map domain mismatch" `isInfixOf`)
+                    Left err ->
+                        expectationFailure ("Expected PhiInvariantError, got " ++ show err)
+                    Right inst ->
+                        expectationFailure ("Expected fail-fast replay-map validation error, got " ++ Elab.pretty inst)
+
             it "OpWeaken on an alias target fails fast under strict replay-map resolution" $ do
                 let root = NodeId 100
                     binderA = NodeId 1

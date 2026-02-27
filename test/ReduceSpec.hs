@@ -187,10 +187,13 @@ spec = do
                         Left err ->
                             renderPipelineError err
                                 `shouldSatisfy`
-                                    ("OpWeaken: unresolved non-root binder target" `isInfixOf`)
+                                    isStrictPhiFailFast
                         Right _ ->
                             expectationFailure
                                 ("Expected strict OpWeaken fail-fast for " ++ label ++ ", but pipeline succeeded")
+                isStrictPhiFailFast msg =
+                    ("OpWeaken: unresolved non-root binder target" `isInfixOf` msg)
+                        || ("trace binder replay-map target outside replay binder domain" `isInfixOf` msg)
 
             expectStrictOpWeakenFailure "unchecked pipeline" (runPipelineElab Set.empty normExpr)
             expectStrictOpWeakenFailure "checked pipeline" (runPipelineElabChecked Set.empty normExpr)

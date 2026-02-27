@@ -23,7 +23,7 @@ module MLF.Constraint.Presolution.Witness (
     OmegaNormalizeError(..)
 ) where
 
-import Control.Monad (foldM)
+import Control.Monad (filterM, foldM)
 import Control.Monad.Except (throwError)
 import Data.Functor.Foldable (cata)
 import qualified Data.IntMap.Strict as IntMap
@@ -48,9 +48,15 @@ import MLF.Util.RecursionSchemes (cataM)
 
 binderArgsFromExpansion :: GenNodeId -> TyNode -> Expansion -> PresolutionM [(NodeId, NodeId)]
 binderArgsFromExpansion gid leftRaw expn = do
-    let instantiationBinders nid = do
+    let isTyVarBinder nid = do
+            n <- getCanonicalNode nid
+            pure $
+                case n of
+                    TyVar{} -> True
+                    _ -> False
+        instantiationBinders nid = do
             (_bodyRoot, binders) <- instantiationBindersM gid nid
-            pure binders
+            filterM isTyVarBinder binders
     let alg layer = case layer of
             ExpIdentityF -> pure []
             ExpForallF _ -> pure []
