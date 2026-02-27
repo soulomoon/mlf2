@@ -1659,6 +1659,57 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     Right inst ->
                         expectationFailure ("Expected hard-fail, got " ++ Elab.pretty inst)
 
+            it "OpRaise fails fast when a trace-source target resolves to no existing replay node" $ do
+                let root = NodeId 100
+                    binderA = NodeId 1
+                    sourceKey = NodeId 99
+                    replayGhost = NodeId 77
+                    argNode = NodeId 40
+                    c = rootedConstraint emptyConstraint
+                        { cNodes = nodeMapFromList
+                                [ (getNodeId root, TyArrow root binderA binderA)
+                                , (getNodeId binderA, TyVar { tnId = binderA, tnBound = Nothing })
+                                , (getNodeId argNode, TyBase argNode (BaseTy "Bool"))
+                                ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef binderA), (genRef (GenNodeId 0), BindFlex))
+                                ]
+                        }
+                    solved = mkSolved c IntMap.empty
+                    scheme =
+                        Elab.schemeFromType
+                            (Elab.TForall "t77" Nothing
+                                (Elab.TArrow (Elab.TVar "t77") (Elab.TVar "t77")))
+                    si = Elab.SchemeInfo
+                        { Elab.siScheme = scheme
+                        , Elab.siSubst = IntMap.singleton (getNodeId replayGhost) "t77"
+                        }
+                    tr =
+                        EdgeTrace
+                            { etRoot = root
+                            , etBinderArgs = [(sourceKey, argNode)]
+                            , etInterior = fromListInterior [root, binderA, argNode]
+                            , etBinderReplayMap = IntMap.singleton (getNodeId sourceKey) replayGhost
+                            , etCopyMap = mempty
+                            }
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewForallIntros = 0
+                        , ewWitness = InstanceWitness [OpRaise sourceKey]
+                        }
+                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew of
+                    Left (Elab.PhiInvariantError msg) ->
+                        msg `shouldSatisfy`
+                            ("trace/replay binder key-space mismatch (OpRaise unresolved trace-source target)" `isInfixOf`)
+                    Left err ->
+                        expectationFailure ("Expected PhiInvariantError, got " ++ show err)
+                    Right inst ->
+                        expectationFailure ("Expected strict OpRaise fail-fast, got " ++ Elab.pretty inst)
+
             it "accepts replay targets from siSubst key-space when replay scheme binders are mixed parseable/non-parseable" $ do
                 let root = NodeId 100
                     sourceKey = NodeId 1
