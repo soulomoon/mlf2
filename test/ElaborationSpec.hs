@@ -1659,6 +1659,61 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     Right inst ->
                         expectationFailure ("Expected hard-fail, got " ++ Elab.pretty inst)
 
+            it "accepts replay targets from siSubst key-space when replay scheme binders are mixed parseable/non-parseable" $ do
+                let root = NodeId 100
+                    sourceKey = NodeId 1
+                    replayTarget = NodeId 2
+                    argNode = NodeId 40
+                    c = rootedConstraint emptyConstraint
+                        { cNodes = nodeMapFromList
+                                [ (getNodeId root, TyArrow root sourceKey sourceKey)
+                                , (getNodeId sourceKey, TyVar { tnId = sourceKey, tnBound = Nothing })
+                                , (getNodeId replayTarget, TyVar { tnId = replayTarget, tnBound = Nothing })
+                                , (getNodeId argNode, TyBase argNode (BaseTy "Bool"))
+                                ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef sourceKey), (genRef (GenNodeId 0), BindFlex))
+                                , (nodeRefKey (typeRef replayTarget), (genRef (GenNodeId 0), BindFlex))
+                                ]
+                        }
+                    solved = mkSolved c IntMap.empty
+                    -- Mixed binder names: "t1" parses as binder id, "a" does not.
+                    scheme =
+                        Elab.schemeFromType
+                            (Elab.TForall "t1" Nothing
+                                (Elab.TForall "a" Nothing
+                                    (Elab.TArrow (Elab.TVar "t1") (Elab.TVar "t1"))))
+                    si = Elab.SchemeInfo
+                        { Elab.siScheme = scheme
+                        , Elab.siSubst = IntMap.fromList
+                            [ (getNodeId sourceKey, "t1")
+                            , (getNodeId replayTarget, "a")
+                            ]
+                        }
+                    tr =
+                        EdgeTrace
+                            { etRoot = root
+                            , etBinderArgs = [(sourceKey, argNode)]
+                            , etInterior = fromListInterior [root, sourceKey, replayTarget, argNode]
+                            -- Target comes from siSubst key-space, not parseable binder-name extraction.
+                            , etBinderReplayMap = IntMap.fromList [(getNodeId sourceKey, replayTarget)]
+                            , etCopyMap = mempty
+                            }
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewForallIntros = 0
+                        , ewWitness = InstanceWitness [OpWeaken sourceKey]
+                        }
+                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew of
+                    Left (Elab.PhiInvariantError msg)
+                        | "trace binder replay-map target outside replay binder domain" `isInfixOf` msg ->
+                            expectationFailure ("Expected mixed-name replay domain to include siSubst key-space, got: " ++ msg)
+                    _ -> pure ()
+
             it "OpWeaken on an alias target fails fast under strict replay-map resolution" $ do
                 let root = NodeId 100
                     binderA = NodeId 1

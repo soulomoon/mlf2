@@ -384,7 +384,7 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
         () of
         () -> pure ()
     (traceBinderSourcesRaw, traceBinderReplayMapRaw, traceBinderMapDomainRaw) <-
-        computeTraceBinderReplayBridge mTrace siReplay siSource
+        computeTraceBinderReplayBridge mTrace siReplay
     let traceBinderSources =
             debugPhi
                 ("phi traceBinderSources=" ++ show (IntSet.toList traceBinderSourcesRaw))
@@ -456,9 +456,8 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
     computeTraceBinderReplayBridge
         :: Maybe EdgeTrace
         -> SchemeInfo
-        -> SchemeInfo
         -> Either ElabError (IntSet.IntSet, IntMap.IntMap NodeId, IntSet.IntSet)
-    computeTraceBinderReplayBridge mbTrace siReplay _siSource =
+    computeTraceBinderReplayBridge mbTrace siReplay =
         case mbTrace of
             Nothing -> Left (MissingEdgeTrace (ewEdgeId ew))
             Just tr ->
@@ -490,9 +489,9 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
                                             | (name, _mbBound) <- binds
                                             , Just n <- [parseBinderId name]
                                             ]
-                        in if IntSet.null fromScheme
-                            then IntSet.fromList (IntMap.keys (siSubst siReplay))
-                            else fromScheme
+                            fromSubst =
+                                IntSet.fromList (IntMap.keys (siSubst siReplay))
+                        in IntSet.union fromScheme fromSubst
                     replayBinderDomainCanonical =
                         IntSet.fromList
                             [ getNodeId (canonicalNode (NodeId key))
