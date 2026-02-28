@@ -28,12 +28,15 @@ import MLF.Util.Order (OrderKey, compareOrderKey)
 data OmegaNormalizeEnv = OmegaNormalizeEnv
     { oneRoot :: NodeId
     , interior :: IntSet.IntSet
+    , interiorRaw :: IntSet.IntSet
     , weakened :: IntSet.IntSet
     , orderKeys :: IntMap.IntMap OrderKey
     , canonical :: NodeId -> NodeId
     , constraint :: Constraint
     , binderArgs :: IntMap.IntMap NodeId
     , binderReplayMap :: IntMap.IntMap NodeId
+    , replayDomainBinders :: [NodeId]
+    , isAnnotationEdge :: Bool
     }
 
 data OmegaNormalizeError

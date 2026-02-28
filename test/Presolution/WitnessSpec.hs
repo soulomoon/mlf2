@@ -1651,12 +1651,15 @@ spec = do
             let env = OmegaNormalizeEnv
                     { oneRoot = NodeId 0
                     , interior = IntSet.empty
+                    , interiorRaw = IntSet.empty
                     , weakened = IntSet.empty
                     , orderKeys = IntMap.empty
                     , canonical = id
                     , constraint = emptyConstraint
                     , binderArgs = IntMap.empty
                     , binderReplayMap = IntMap.empty
+                    , replayDomainBinders = []
+                    , isAnnotationEdge = False
                     }
             case normalizeInstanceOpsFull env [] of
                 Right _ -> pure ()
@@ -1667,12 +1670,15 @@ spec = do
             let env = OmegaNormalizeEnv
                     { oneRoot = NodeId 0
                     , interior = IntSet.empty
+                    , interiorRaw = IntSet.empty
                     , weakened = IntSet.empty
                     , orderKeys = IntMap.empty
                     , canonical = id
                     , constraint = emptyConstraint
                     , binderArgs = IntMap.empty
                     , binderReplayMap = IntMap.empty
+                    , replayDomainBinders = []
+                    , isAnnotationEdge = False
                     }
             case coalesceRaiseMergeWithEnv env [] of
                 Right _ -> pure ()
@@ -1683,12 +1689,15 @@ spec = do
             let env = OmegaNormalizeEnv
                     { oneRoot = NodeId 0
                     , interior = IntSet.empty
+                    , interiorRaw = IntSet.empty
                     , weakened = IntSet.empty
                     , orderKeys = IntMap.empty
                     , canonical = id
                     , constraint = emptyConstraint
                     , binderArgs = IntMap.empty
                     , binderReplayMap = IntMap.empty
+                    , replayDomainBinders = []
+                    , isAnnotationEdge = False
                     }
             case reorderWeakenWithEnv env [] of
                 Right _ -> pure ()
@@ -1714,12 +1723,15 @@ spec = do
                 env = OmegaNormalizeEnv
                     { oneRoot = root
                     , interior = IntSet.fromList [0, 1, 2]
+                    , interiorRaw = IntSet.fromList [0, 1, 2]
                     , weakened = IntSet.empty
                     , orderKeys = IntMap.empty
                     , canonical = id
                     , constraint = c
                     , binderArgs = IntMap.fromList [(getNodeId binder, argNode)]
                     , binderReplayMap = IntMap.empty
+                    , replayDomainBinders = []
+                    , isAnnotationEdge = False
                     }
             validateNormalizedWitness env [] `shouldBe` Left (ReplayMapIncomplete [binder])
 
@@ -1746,12 +1758,15 @@ spec = do
                 env = OmegaNormalizeEnv
                     { oneRoot = root
                     , interior = IntSet.fromList [0, 1, 2, 3]
+                    , interiorRaw = IntSet.fromList [0, 1, 2, 3]
                     , weakened = IntSet.empty
                     , orderKeys = IntMap.empty
                     , canonical = id
                     , constraint = c
                     , binderArgs = IntMap.fromList [(getNodeId binder, argNode)]
                     , binderReplayMap = IntMap.fromList [(getNodeId binder, badTarget)]
+                    , replayDomainBinders = []
+                    , isAnnotationEdge = False
                     }
             validateNormalizedWitness env [] `shouldBe` Left (ReplayMapTargetOutsideReplayDomain binder badTarget)
 
@@ -1781,6 +1796,7 @@ spec = do
                 env = OmegaNormalizeEnv
                     { oneRoot = root
                     , interior = IntSet.fromList [0, 1, 2, 3, 4]
+                    , interiorRaw = IntSet.fromList [0, 1, 2, 3, 4]
                     , weakened = IntSet.empty
                     , orderKeys = IntMap.empty
                     , canonical = id
@@ -1795,6 +1811,8 @@ spec = do
                             [ (getNodeId binderA, binderA)
                             , (getNodeId binderB, binderA)
                             ]
+                    , replayDomainBinders = []
+                    , isAnnotationEdge = False
                     }
             validateNormalizedWitness env [] `shouldBe` Left (ReplayMapNonInjective binderA binderB binderA)
 

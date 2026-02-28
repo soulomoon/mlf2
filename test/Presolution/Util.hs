@@ -80,12 +80,15 @@ mkNormalizeEnv c root interior =
     OmegaNormalizeEnv
         { oneRoot = root
         , interior = interior
+        , interiorRaw = interior
         , weakened = IntSet.empty
         , orderKeys = Order.orderKeysFromRootWith id (cNodes c) root Nothing
         , canonical = id
         , constraint = c
         , binderArgs = IntMap.empty
         , binderReplayMap = IntMap.empty
+        , replayDomainBinders = []
+        , isAnnotationEdge = False
         }
 
 orderedPairByPrec :: Constraint -> NodeId -> (NodeId, NodeId)
@@ -119,12 +122,15 @@ mkTestNormalizeEnv params =
      in OmegaNormalizeEnv
             { oneRoot = nepRoot params
             , interior = interiorNodes
+            , interiorRaw = interiorNodes
             , weakened = IntSet.empty
             , orderKeys = IntMap.fromList [(n, Order.OrderKey 0 [n]) | n <- [0 .. 50]]
             , canonical = id
             , constraint = emptyConstraint
             , binderArgs = IntMap.empty
             , binderReplayMap = IntMap.empty
+            , replayDomainBinders = []
+            , isAnnotationEdge = False
             }
 
 -- | Generate a list of InstanceOps with bounded size.
