@@ -548,7 +548,7 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
                                         , "extra source keys: " ++ show extraSources
                                         ]
                     else
-                        let projectOne sourceKey = do
+                        let validateTarget sourceKey = do
                                 replayTargetRaw <-
                                     case IntMap.lookup sourceKey replayMapRaw of
                                         Just replayTarget -> Right replayTarget
@@ -566,14 +566,14 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
                                         Left $
                                             PhiInvariantError $
                                                 unlines
-                                                    [ "trace binder replay-map target outside replay binder domain"
+                                                    [ "replay-map target outside replay binder domain"
                                                     , "edge: " ++ show (ewEdgeId ew)
                                                     , "source key: " ++ show sourceKey
                                                     , "replay target: " ++ show replayTargetRaw
                                                     , "target canonical key: " ++ show (canonicalNode replayTargetRaw)
                                                     , "replay binder domain: " ++ show (IntSet.toList replayBinderDomainRaw)
                                                     ]
-                        in case mapM projectOne traceBinderSourceKeys of
+                        in case mapM validateTarget traceBinderSourceKeys of
                             Left err -> Left err
                             Right replayEntries ->
                                 Right
