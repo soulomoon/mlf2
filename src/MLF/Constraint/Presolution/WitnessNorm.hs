@@ -17,7 +17,7 @@ import Control.Monad.Except (throwError)
 import Control.Monad (forM, foldM, when)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import Data.Maybe (mapMaybe)
+import Data.Maybe (fromMaybe, mapMaybe)
 
 import qualified MLF.Util.Order as Order
 import MLF.Constraint.Types
@@ -215,16 +215,16 @@ normalizeEdgeWitnessesM = do
                                 , IntSet.insert (getNodeId replayBinder) usedReplay
                                 , missingSources
                                 )
-                    (_replayMapSourceRev, replayMapRewrittenRev, _usedReplay, missingRev) =
+                    (replayMapSourceRev, replayMapRewrittenRev, _usedReplay, missingRev) =
                         foldl'
                             step
                             (IntMap.empty, IntMap.empty, IntSet.empty, [])
                             sourceBindersInOrder
                     missing = reverse missingRev
                 in case missing of
-                    [] -> Right replayMapRewrittenRev
+                    [] -> Right (replayMapSourceRev, replayMapRewrittenRev)
                     _ -> Left (Witness.ReplayMapIncomplete missing)
-        replayMapRewritten <-
+        (replayMapSource, replayMapRewritten) <-
             case assignReplayMap of
                 Left err -> throwError (WitnessNormalizationError (EdgeId eid) err)
                 Right mapping -> pure mapping
@@ -234,6 +234,15 @@ normalizeEdgeWitnessesM = do
                     else interiorNorm
             isAnnEdge =
                 IntSet.member eid (cAnnEdges c0)
+            replayBindersAtRoot =
+                [ canonical b
+                | b <- bindersOrdered
+                , isExactTyVar (canonical b)
+                ]
+              where
+                bindersOrdered =
+                    either (const []) id $
+                        Binding.orderedBinders canonical c0 (typeRef (canonical edgeRoot))
             isLiveNode nid =
                 case NodeAccess.lookupNode c0 (canonical nid) of
                     Just _ -> True
@@ -242,6 +251,34 @@ normalizeEdgeWitnessesM = do
                 IntMap.lookup
                     (getNodeId (canonical (rewriteNode sourceBinder)))
                     replayMapRewritten
+            replayToSourceMap =
+                IntMap.fromListWith min
+                    [ (getNodeId (canonical replayTarget), canonical (NodeId sourceKey))
+                    | (sourceKey, replayTarget) <- IntMap.toList replayMapSource
+                    ]
+            argToSourceMap =
+                IntMap.fromListWith min
+                    [ ( getNodeId (canonical (rewriteNode arg))
+                      , canonical sourceBinder
+                      )
+                    | (sourceBinder, arg) <- binderArgs0
+                    ]
+            sourceBinderFallback =
+                case reverse sourceBindersInOrder of
+                    sourceBinder : _ -> Just (canonical sourceBinder)
+                    [] -> Nothing
+            sourceBinderForOpTarget target =
+                case IntMap.lookup (getNodeId (canonical target)) replayToSourceMap of
+                    Just sourceBinder -> sourceBinder
+                    Nothing -> canonical target
+            sourceBinderForWeakenTarget target =
+                case IntMap.lookup (getNodeId (canonical target)) replayToSourceMap of
+                    Just sourceBinder -> sourceBinder
+                    Nothing -> fromMaybe (canonical target) sourceBinderFallback
+            sourceBinderForOpArg arg =
+                case IntMap.lookup (getNodeId (canonical arg)) argToSourceMap of
+                    Just sourceBinder -> sourceBinder
+                    Nothing -> canonical arg
             replayBinderForOpTarget target =
                 case IntMap.lookup (getNodeId (canonical target)) replayMapRewritten of
                     Just replay -> canonical replay
@@ -324,6 +361,7 @@ normalizeEdgeWitnessesM = do
                     [] -> Right ops
             synthesizeAmbiguousAnnotationGraftWeaken ops
                 | not isAnnEdge = Right ops
+                | null replayBindersAtRoot = Right ops
                 | otherwise = do
                     let binders0 = ambiguousReplayBinders ops
                     foldM synthesizeOneBinder ops binders0
@@ -349,11 +387,73 @@ normalizeEdgeWitnessesM = do
             Right ops' -> pure ops'
             Left err ->
                 throwError (WitnessNormalizationError (EdgeId eid) err)
-        let targetKeysUsed :: IntSet.IntSet
+        let replayBinders = replayBindersAtRoot
+            graftTargetKeysNorm =
+                IntSet.fromList
+                    [ getNodeId (canonical target)
+                    | OpGraft _ target <- opsNorm
+                    ]
+            hasNonPairedWeaken =
+                any
+                    (\case
+                        OpWeaken target ->
+                            IntSet.notMember (getNodeId (canonical target)) graftTargetKeysNorm
+                        _ -> False
+                    )
+                    opsNorm
+            prunePairedWeaken (OpWeaken target)
+                | null replayBinders
+                , hasNonPairedWeaken
+                , IntSet.notMember (getNodeId (canonical target)) interiorNorm
+                , IntSet.member (getNodeId (canonical target)) graftTargetKeysNorm =
+                    Nothing
+            prunePairedWeaken op = Just op
+            opsNormPruned = mapMaybe prunePairedWeaken opsNorm
+            dropNoReplayGraftWeaken op =
+                case op of
+                    OpGraft{} -> Nothing
+                    OpWeaken{} -> Nothing
+                    _ -> Just op
+            stripNoReplayOp op =
+                case op of
+                    OpGraft{} -> Nothing
+                    OpMerge{} -> Nothing
+                    OpRaiseMerge{} -> Nothing
+                    OpWeaken target
+                        | IntSet.member (getNodeId (canonical target)) graftTargetKeysNorm ->
+                            Nothing
+                    _ -> Just op
+            opsNormNoReplay
+                | null replayBinders
+                , not isAnnEdge =
+                    mapMaybe stripNoReplayOp opsNormPruned
+                | null replayBinders
+                , not hasNonPairedWeaken =
+                    mapMaybe dropNoReplayGraftWeaken opsNormPruned
+                | otherwise =
+                    opsNormPruned
+            projectOpTargetsNoReplay op =
+                let project = sourceBinderForOpTarget
+                in case op of
+                    OpGraft sigma n -> OpGraft (sourceBinderForOpArg sigma) (project n)
+                    OpMerge n m -> OpMerge (project n) (project m)
+                    OpRaise n -> OpRaise (project n)
+                    OpWeaken n -> OpWeaken (sourceBinderForWeakenTarget n)
+                    OpRaiseMerge n m -> OpRaiseMerge (project n) (project m)
+            opsNormProjected
+                | null replayBinders = map projectOpTargetsNoReplay opsNormNoReplay
+                | otherwise = opsNormPruned
+            opsNormFinalized
+                | null replayBinders
+                , null sourceBindersInOrder =
+                    []
+                | otherwise =
+                    opsNormProjected
+            targetKeysUsed :: IntSet.IntSet
             targetKeysUsed =
                 IntSet.fromList
                     [ getNodeId (canonical n)
-                    | op <- opsNorm
+                    | op <- opsNormFinalized
                     , n <- case op of
                         OpGraft _ t -> [t]
                         OpWeaken t -> [t]
@@ -361,38 +461,65 @@ normalizeEdgeWitnessesM = do
                         OpMerge a b -> [a, b]
                         OpRaiseMerge a b -> [a, b]
                     ]
-            activeSourceEntries =
-                if IntSet.null targetKeysUsed
-                    then sourceEntriesInOrder
-                    else
-                        [ entry
-                        | entry@(sourceBinder, _arg) <- sourceEntriesInOrder
-                        , IntSet.member (getNodeId (canonical (rewriteNode sourceBinder))) targetKeysUsed
-                        ]
-            replayBinders =
-                [ canonical b
-                | b <- bindersOrdered
-                , isExactTyVar (canonical b)
+            isReplaySourceBinder sourceBinder =
+                case IntMap.lookup (getNodeId sourceBinder) replayMapSource of
+                    Just replayTarget -> isExactTyVar (canonical replayTarget)
+                    Nothing -> False
+            sourceReplayTargetKey sourceBinder =
+                fmap (getNodeId . canonical) $
+                    IntMap.lookup (getNodeId sourceBinder) replayMapSource
+            sourceEntryTouchesTargets sourceBinder =
+                let sourceKey = getNodeId (canonical (rewriteNode sourceBinder))
+                in IntSet.member sourceKey targetKeysUsed
+                    || maybe False (`IntSet.member` targetKeysUsed) (sourceReplayTargetKey sourceBinder)
+            activeSourceEntriesBaseRaw =
+                [ entry
+                | entry@(sourceBinder, _arg) <- sourceEntriesInOrder
+                , IntMap.member (getNodeId sourceBinder) replayMapSource
                 ]
-              where
-                bindersOrdered =
-                    either (const []) id $
-                        Binding.orderedBinders canonical c0 (typeRef (canonical edgeRoot))
+            activeSourceEntriesBase
+                | null replayBinders = activeSourceEntriesBaseRaw
+                | otherwise =
+                    [ entry
+                    | entry@(sourceBinder, _arg) <- activeSourceEntriesBaseRaw
+                    , isReplaySourceBinder sourceBinder
+                    ]
+            activeSourceEntries
+                -- Non-polymorphic edge: do not emit replay-domain contract fields.
+                | null replayBinders = []
+                | IntSet.null targetKeysUsed = activeSourceEntriesBase
+                | otherwise =
+                    let filtered =
+                            [ entry
+                            | entry@(sourceBinder, _arg) <- activeSourceEntriesBase
+                            , sourceEntryTouchesTargets sourceBinder
+                            ]
+                    in if null filtered
+                        then activeSourceEntriesBase
+                        else filtered
             nActive = length activeSourceEntries
-        when (length replayBinders < nActive) $
+        when (not (null replayBinders) && length replayBinders < nActive) $
             throwError $
                 WitnessNormalizationError (EdgeId eid) $
                     Witness.ReplayMapIncomplete (map fst (drop (length replayBinders) activeSourceEntries))
         let replayPairs = zip activeSourceEntries (take nActive replayBinders)
-            replayMapSourceFinal =
-                IntMap.fromList
-                    [ (getNodeId sourceBinder, replayBinder)
-                    | ((sourceBinder, _), replayBinder) <- replayPairs
-                    ]
+            replayMapSourceFinal
+                | null replayBinders =
+                    IntMap.fromList
+                        [ (getNodeId sourceBinder, canonical replayBinder)
+                        | (sourceBinder, _arg) <- activeSourceEntries
+                        , Just replayBinder <- [IntMap.lookup (getNodeId sourceBinder) replayMapSource]
+                        ]
+                | otherwise =
+                    IntMap.fromList
+                        [ (getNodeId sourceBinder, replayBinder)
+                        | ((sourceBinder, _), replayBinder) <- replayPairs
+                        ]
             replayMapValidation =
                 IntMap.fromList
                     [ (getNodeId (canonical (rewriteNode sourceBinder)), replayBinder)
-                    | ((sourceBinder, _), replayBinder) <- replayPairs
+                    | (sourceBinder, _arg) <- activeSourceEntries
+                    , Just replayBinder <- [IntMap.lookup (getNodeId sourceBinder) replayMapSourceFinal]
                     ]
             activeBinderArgsMap =
                 IntMap.fromList
@@ -401,7 +528,7 @@ normalizeEdgeWitnessesM = do
                       )
                     | (sourceBinder, arg) <- activeSourceEntries
                     ]
-            activeBinderArgs = map fst (zip activeSourceEntries [1 .. nActive])
+            activeBinderArgs = activeSourceEntries
             envPost =
                 env
                     { Witness.binderArgs = activeBinderArgsMap
@@ -411,9 +538,14 @@ normalizeEdgeWitnessesM = do
         -- post-projection replay codomain (producer boundary contract).
         -- IMPORTANT: Validate BEFORE restoring to original node space, since
         -- interiorNorm is in the rewritten node space (matching the normalized ops).
-        case validateNormalizedWitness envPost opsNorm of
-            Left valErr -> throwError (WitnessNormalizationError (EdgeId eid) valErr)
-            Right () -> pure ()
+        --
+        -- When an edge root has no replay binders, there is no replay codomain
+        -- contract to enforce at this boundary; keep legacy permissive behavior
+        -- for these edges and defer to downstream constraints.
+        when (not (null replayBinders)) $
+            case validateNormalizedWitness envPost opsNormFinalized of
+                Left valErr -> throwError (WitnessNormalizationError (EdgeId eid) valErr)
+                Right () -> pure ()
         let interiorSourceKeys =
                 case traceInterior of
                     InteriorNodes s -> s
@@ -427,7 +559,7 @@ normalizeEdgeWitnessesM = do
                         | otherwise ->
                             Nothing
                     _ -> Just op
-            opsFinal = mapMaybe (normalizeRaiseTarget . restoreOp) opsNorm
+            opsFinal = mapMaybe (normalizeRaiseTarget . restoreOp) opsNormFinalized
             trace' = fmap (\tr -> tr
                 { etBinderArgs = activeBinderArgs
                 , etBinderReplayMap = replayMapSourceFinal

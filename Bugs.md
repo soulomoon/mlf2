@@ -4,9 +4,47 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 
 ## Open
 
-- None currently.
+### BUG-2026-02-27-001
+- Status: Open
+- Priority: High
+- Discovered: 2026-02-27
+- Summary: Strict replay-map producer normalization can over-activate source binders and hard-fail with `ReplayMapIncomplete` on valid edges, causing broad presolution/pipeline regressions.
+- Minimal reproducer:
+  - `cd /Volumes/src/mlf4-strict-replay-cutover && cabal build all && cabal test`
+  - `cd /Volumes/src/mlf4-strict-replay-cutover && cabal test mlf2-test --test-show-details=direct --test-options='--match "Phi" --match "IdentityBridge" --match "Witness" --match "OpWeaken" --match "OpRaise" --match "MissingEdgeTrace" --match "A6" --match "BUG-002" --match "BUG-003"'`
+- Expected vs actual:
+  - Expected: strict replay hard-reject policy removes runtime repair while preserving green thesis/pipeline regressions (`cabal test` passes).
+  - Actual: full gate is red (`889 examples, 97 failures`), with dominant `WitnessNormalizationError (ReplayMapIncomplete ...)` propagated as `PipelinePresolutionError`.
+- Suspected/owning area:
+  - `/Volumes/src/mlf4-strict-replay-cutover/src/MLF/Constraint/Presolution/WitnessNorm.hs` (active-source derivation and replay-map completeness shortfall)
+  - `/Volumes/src/mlf4-strict-replay-cutover/src/MLF/Constraint/Presolution/WitnessValidation.hs` (post-normalization validation boundaries)
+  - `/Volumes/src/mlf4-strict-replay-cutover/src/MLF/Constraint/Presolution/Driver.hs` (presolution boundary checks)
+- Thesis impact:
+  - Blocks thesis-faithful cutover by rejecting many valid elaboration/pipeline paths before Φ/Ω reconstruction can proceed.
 
 ## Resolved
+
+### BUG-2026-02-28-001
+- Status: Resolved
+- Priority: High
+- Discovered: 2026-02-28
+- Resolved: 2026-02-28
+- Summary: Presolution Driver replay-map codomain validation was conditional on non-empty replay binder domain, allowing malformed replay targets to bypass the hard-reject boundary contract.
+- Minimal reproducer:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Driver replay-map boundary validation"'`
+- Expected vs actual:
+  - Expected: any replay-map codomain target outside replay binder domain hard-fails, including empty replay binder domains.
+  - Actual before fix: `validateReplayMapTraceContract` logic skipped outside-domain rejection when replay binder domain was empty.
+- Suspected/owning area:
+  - `/Volumes/src/mlf4-strict-replay-cutover/src/MLF/Constraint/Presolution/Driver.hs`
+- Thesis impact:
+  - Violates strict producer-boundary replay-domain codomain rejection required by Task 5.2 and weakens hard-reject invariants before elaboration.
+- Fix:
+  - Extracted replay-map trace validation into driver helper `validateReplayMapTraceContract`.
+  - Made replay-domain codomain rejection unconditional (removed empty-domain guard) while preserving existing diagnostics.
+- Regression tests:
+  - `/Volumes/src/mlf4-strict-replay-cutover/test/Presolution/WitnessSpec.hs` (`Driver replay-map boundary validation`)
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Driver replay-map boundary validation"'`
 
 ### BUG-2026-02-26-004
 - Status: Resolved

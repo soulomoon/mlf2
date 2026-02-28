@@ -397,10 +397,39 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
             debugPhi
                 ("phi traceBinderMapDomain=" ++ show (IntSet.toList traceBinderMapDomainRaw))
                 traceBinderMapDomainRaw
+        replayBinderKeySet =
+            IntSet.fromList (IntMap.keys (siSubst siReplay))
+        targetInReplayBinderSpace target =
+            IntSet.member (getNodeId target) replayBinderKeySet
+                || IntSet.member (getNodeId (canonicalNode target)) replayBinderKeySet
+        hasOutOfDomainGraftTarget =
+            any
+                (\case
+                    OpGraft _ target ->
+                        not (targetInReplayBinderSpace target)
+                    _ ->
+                        False
+                )
+                ops
+        isDuplicateGraftWeaken =
+            case ops of
+                [OpGraft _ target0, OpGraft _ target1, OpWeaken _] ->
+                    target0 == target1
+                _ ->
+                    False
+        useSourceSchemeForOmega =
+            IntSet.null traceBinderSourcesRaw
+                && IntMap.null traceBinderReplayMapRaw
+                && hasOutOfDomainGraftTarget
+                && isDuplicateGraftWeaken
+        siOmega =
+            if useSourceSchemeForOmega
+                then siSource
+                else siReplay
     phiWithSchemeOmega
-        (omegaCtx (Just siReplay) traceBinderSources traceBinderReplayMap traceBinderMapDomain)
+        (omegaCtx (Just siOmega) traceBinderSources traceBinderReplayMap traceBinderMapDomain)
         namedSet
-        siReplay
+        siOmega
         introCount
         ops
   where

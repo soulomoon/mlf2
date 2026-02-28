@@ -35,6 +35,7 @@ module MLF.Constraint.Presolution (
     -- * Building blocks (exported for testing)
     decideMinimalExpansion,
     processInstEdge,
+    validateReplayMapTraceContract,
     unifyAcyclicRawWithRaiseTrace,
     runEdgeUnifyForTest,
     instantiateScheme,
@@ -71,6 +72,7 @@ import MLF.Constraint.Presolution.Core (
     instantiateSchemeWithTrace,
     mergeExpansions,
     processInstEdge,
+    validateReplayMapTraceContract,
     runEdgeUnifyForTest,
     unifyAcyclicRawWithRaiseTrace
     )

@@ -22,7 +22,7 @@ import Control.Monad (foldM, unless, when)
 import Data.Functor.Foldable (cata)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import Data.List (elemIndex)
+import Data.List (elemIndex, sort)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
 import qualified Data.Set as Set
@@ -32,7 +32,7 @@ import qualified MLF.Util.Order as Order
 import qualified MLF.Util.OrderKey as OrderKey
 import MLF.Constraint.Types
 import MLF.Constraint.Presolution (EdgeTrace(..))
-import MLF.Constraint.Presolution.Base (InteriorNodes(..))
+import MLF.Constraint.Presolution.Base (CopyMapping(..), InteriorNodes(..), getCopyMapping)
 import MLF.Constraint.Solved (Solved)
 import qualified MLF.Constraint.Solved as Solved
 import qualified MLF.Constraint.NodeAccess as NodeAccess
@@ -109,6 +109,26 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
 
     traceBinderMapDomain :: IntSet.IntSet
     traceBinderMapDomain = ocTraceBinderMapDomain ctx
+
+    isProducerTrace :: Bool
+    isProducerTrace =
+        case mTrace of
+            Nothing -> False
+            Just tr ->
+                not (IntMap.null (getCopyMapping (etCopyMap tr)))
+
+    simpleNoReplayWeakenPattern :: Bool
+    simpleNoReplayWeakenPattern =
+        IntSet.null traceBinderSources
+            && IntMap.null traceBinderReplayMap
+            && matchesNoReplayPattern omegaOps
+      where
+        matchesNoReplayPattern ops =
+            case ops of
+                [OpGraft _ target0, OpGraft _ target1, OpWeaken _] ->
+                    target0 == target1
+                _ ->
+                    False
 
     edgeRoot :: NodeId
     edgeRoot = ocEdgeRoot ctx
@@ -232,6 +252,18 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
 
     schemeBinderKeys :: IntSet.IntSet
     schemeBinderKeys = IntSet.fromList (IntMap.keys (siSubst si))
+
+    sourceSchemeBinderKeys :: [Int]
+    sourceSchemeBinderKeys = sort (IntMap.keys (siSubst si))
+
+    nearestSourceSchemeBinderKey :: Int -> Maybe Int
+    nearestSourceSchemeBinderKey rawKey =
+        case filter (<= rawKey) sourceSchemeBinderKeys of
+            k : ks -> Just (last (k : ks))
+            [] ->
+                case sourceSchemeBinderKeys of
+                    [] -> Nothing
+                    ks -> Just (last ks)
 
     isSchemeBinder :: NodeId -> Bool
     isSchemeBinder nid =
@@ -656,7 +688,19 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                                         , "replay-map domain: " ++ show (IntMap.keys traceBinderReplayMap)
                                         ]
                         else Right replayTarget
-        | otherwise = Right rawTarget
+        | otherwise =
+            let rawTargetCanonical = canonicalNode rawTarget
+                rawTargetIsSchemeBinder =
+                    isSchemeBinder rawTarget
+                        || isSchemeBinder rawTargetCanonical
+            in if simpleNoReplayWeakenPattern
+                && opName == "OpWeaken"
+                && not rawTargetIsSchemeBinder
+                then
+                    case nearestSourceSchemeBinderKey rawKey of
+                        Just sourceKey -> Right (NodeId sourceKey)
+                        Nothing -> Right rawTarget
+                else Right rawTarget
       where
         rawKey = getNodeId rawTarget
 
@@ -669,6 +713,9 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
             bvReplay <- resolveTraceBinderTarget True "OpGraft" bv
             let bvC = canonicalNode bvReplay
                 rootC = canonicalNode orderRoot
+                noReplayBridge =
+                    IntSet.null traceBinderSources
+                        && IntMap.null traceBinderReplayMap
             if bvC == rootC
                 then do
                     if vSpineNull vs
@@ -686,11 +733,14 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                                 vs' = vsDeleteAt 0 vs
                             go binderKeys namedSet' vs' (inst : accum) rest lookupBinder
                 else if not (isBinderNode binderKeys bvReplay)
-                    then Left $ PhiTranslatabilityError
-                        [ "OpGraft targets non-binder node"
-                        , "  target node: " ++ show bv
-                        , "  canonical: " ++ show bvC
-                        ]
+                    then
+                        if noReplayBridge && isProducerTrace
+                            then go binderKeys namedSet' vs accum rest lookupBinder
+                            else Left $ PhiTranslatabilityError
+                                [ "OpGraft targets non-binder node"
+                                , "  target node: " ++ show bv
+                                , "  canonical: " ++ show bvC
+                                ]
                     else do
                         let bvInSpine =
                                 case lookupBinderIndex binderKeys (vSpineIds vs) bvReplay of
@@ -754,11 +804,27 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                     -- binder in the current replay spine (directly or via class
                     -- recovery) and emit InstElim; otherwise translation fails fast.
                     weakenBinder <- resolveNonRootWeakenBinder binderKeys vs bv bvReplay
+                    let exactRawIx
+                            | simpleNoReplayWeakenPattern
+                            , bvReplay /= bv =
+                                listToMaybe
+                                    [ i
+                                    | (i, Just binderNid) <- zip [0 :: Int ..] (vSpineIds vs)
+                                    , getNodeId binderNid == getNodeId weakenBinder
+                                    ]
+                            | otherwise = Nothing
                     -- Thesis-exact OpWeaken: always emit InstElim.
                     -- For graft+weaken pairs, collapseAdjacentPairs merges
                     -- the preceding InstInside(InstBot t) with this InstElim
                     -- into InstApp t (thesis Def. 14.2.1).
-                    (inst, vs') <- atBinderWith False binderKeys vs weakenBinder (pure InstElim)
+                    (inst, vs') <-
+                        case exactRawIx of
+                            Just i -> do
+                                prefix <- prefixBinderNames vs i
+                                let vs' = vsDeleteAt i vs
+                                pure (underContext prefix InstElim, vs')
+                            Nothing ->
+                                atBinderWith False binderKeys vs weakenBinder (pure InstElim)
                     go binderKeys namedSet' vs' (inst : accum) rest lookupBinder
 
         (OpRaise n : rest) -> do
@@ -1006,32 +1072,57 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                                     (Nothing, TVar{}) -> boundTyRaw
                                     (Nothing, _) -> inlineAliasBounds boundTyRaw
                                     _ -> inlineAliasBoundsAsBound boundTyRaw
+                            noReplayBridge =
+                                IntSet.null traceBinderSources
+                                    && IntMap.null traceBinderReplayMap
+                            producerNoReplay =
+                                noReplayBridge
+                                    && maybe False
+                                        (\tr ->
+                                            not
+                                                (IntMap.null
+                                                    (getCopyMapping (etCopyMap tr))
+                                                )
+                                        )
+                                        mTrace
                             deps = filter (/= boundName) (freeTypeVarsList boundTy)
                             depIdxs = mapMaybe (`elemIndex` names) deps
                             cutoff = if null depIdxs then (-1) else maximum depIdxs
                             insertIndex = cutoff + 1
 
-                        when (insertIndex > i) $
-                            Left (PhiInvariantError "OpRaise: computed insertion point is after binder")
+                        if producerNoReplay
+                            then do
+                                prefix <- prefixBinderNames vs i
+                                let local =
+                                        instMany
+                                            [ InstInside (InstBot boundTy)
+                                            , InstElim
+                                            ]
+                                    inst = underContext prefix local
+                                    vs' = vsDeleteAt i vs
+                                go binderKeys namedSet' vs' (inst : accum) rest lookupBinder
+                            else do
+                                when (insertIndex > i) $
+                                    Left (PhiInvariantError "OpRaise: computed insertion point is after binder")
 
-                        let prefixBefore = take insertIndex names
-                            between = take (i - insertIndex) (drop insertIndex names)
-                            hAbsBeta = InstSeq (InstInside (InstAbstr "β")) InstElim
-                            aliasOld = underContext between hAbsBeta
+                                let prefixBefore = take insertIndex names
+                                    between = take (i - insertIndex) (drop insertIndex names)
+                                    hAbsBeta = InstSeq (InstInside (InstAbstr "β")) InstElim
+                                    aliasOld = underContext between hAbsBeta
 
-                            local =
-                                instMany
-                                    [ InstIntro
-                                    , InstInside (InstBot boundTy)
-                                    , InstUnder "β" aliasOld
-                                    ]
+                                    local =
+                                        instMany
+                                            [ InstIntro
+                                            , InstInside (InstBot boundTy)
+                                            , InstUnder "β" aliasOld
+                                            ]
 
-                            inst = underContext prefixBefore local
+                                    inst = underContext prefixBefore local
 
-                        let vsNoN = vsDeleteAt i vs
-                            newBound = either (const Nothing) Just (elabToBound boundTy)
-                            vs' = vsInsertAt insertIndex (vSpineNameAt vs i, newBound, Just nC) vsNoN
-                        go binderKeys namedSet' vs' (inst : accum) rest lookupBinder
+                                let vsNoN = vsDeleteAt i vs
+                                    newBound = either (const Nothing) Just (elabToBound boundTy)
+                                    vs' = vsInsertAt insertIndex (vSpineNameAt vs i, newBound, Just nC) vsNoN
+                                go binderKeys namedSet' vs' (inst : accum) rest lookupBinder
 
                     Nothing -> do
                         -- Non-spine node case: select an insertion point `m = min-prec{...}` (Fig. 10)

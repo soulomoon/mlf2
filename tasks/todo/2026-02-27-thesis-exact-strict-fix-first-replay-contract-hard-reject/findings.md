@@ -1,0 +1,102 @@
+# Findings
+
+## 2026-02-27
+- Full strict-cutover plan parsed into 10 executable tasks.
+- Worktree branch `codex/strict-replay-cutover` created at `/Volumes/src/mlf4-strict-replay-cutover`.
+- Baseline targeted suite command completed with zero matched examples; no failing baseline examples captured from that broad filter.
+- Task 2 predicate tightening commit: `fd8e5f4943e12ee4c5d17ea25641f7f03f75f988`.
+- Hspec `--match "thesis target|dual annotated coercion consumers fail fast"` does not match examples in this suite; split `--match` arguments select the intended tests (6 total), all currently green.
+- Task 2 reviews: spec-compliance approved with expectation-drift note; code-quality approved with minor non-blocking suggestions only.
+- Task 3 red-regression commits:
+  - `2f50bb8f792e77defa667295ebbfe6beecaeb5f2` (new red tests)
+  - `a2bc3fab20c364a51c5934f0f5ec0771ad3aa678` (non-vacuous codomain assertion hardening)
+- New red regressions currently fail as intended before producer/runtime implementation:
+  - replay codomain not constrained to replay binders of edge root,
+  - stale-source pruning/domain equality mismatch,
+  - malformed source-space replay target not hard-rejected.
+- Task 3 quality gate required one follow-up: ensure replay-map source-key coverage is asserted to avoid vacuous pass.
+- Task 4 implementation commit: `38f9bfcce645a38c34bb72b18238ed043c7e7519`.
+- WitnessNorm now computes replay mapping from deterministic active source domain:
+  - derives `targetKeysUsed` from normalized ops,
+  - prunes to `activeSourceEntries`,
+  - maps active sources to first N replay binders at edge root,
+  - fails with `ReplayMapIncomplete` when replay binder supply is short,
+  - updates `etBinderArgs` and `etBinderReplayMap` together.
+- Task 4 reviews: spec-compliance approved; code-quality approved with one minor maintainability note (dual replay-map construction paths still present internally).
+- Task 5 validation hardening commit: `0597e0eaf1b5e12b75a6b53632a299339c03e064` added:
+  - `ReplayMapTargetOutsideReplayDomain` in `WitnessValidation`,
+  - driver-side replay codomain domain check with explicit `InternalError` context,
+  - test expectation update in `WitnessSpec`.
+- Task 5 follow-up fix commit: `49eb83bfa53ba04eea47a033d39de4389b5d81c3`.
+  - Root cause: validation ran on pre-projection intermediate replay map, rejecting source-space targets too early.
+  - Fix: split normalization (`normalizeInstanceOpsCore`) from validation and run `validateNormalizedWitness` on post-projection env in `WitnessNorm`.
+- After fix, focused validation subsets are green:
+  - `stale source binders are pruned` (1/1 pass)
+  - `replay-map validation` (3/3 pass)
+  - `Witness normalization invariants` (10/10 pass).
+- Task 6 replay bridge commits:
+  - `9df5d348d3195aa2c2fe237c4c57c3ea52df5569`: remove runtime replay-target repair, enforce strict validation/pass-through.
+  - `bb7d2c5d0b9dc19523da99a2435c1c5a1e080f00`: fix mixed parseable/non-parseable binder under-approx by unioning scheme-parsed IDs with `siSubst` keys; add regression test.
+  - `d110d0ca942aca4906d07e88ecf30f9ce7b0cfd0`: tighten new regression assertion to avoid false-pass on unexpected `Left`.
+- Task 6 strictness subset tests pass on per-pattern runs (`replay-map source domain mismatches`, `malformed source-space replay target`, `MissingEdgeTrace`, `OpWeaken on an alias target fails fast`).
+- Task 7 commits:
+  - `8fad0bbcdcc27ee8a2fb88f46172ed1543307e81`: restore strict unresolved trace-source `OpRaise` fail-fast branch in `Omega`.
+  - `6c00c8c42dc65b216ce6b2cf8a5cd3573bb8dda4`: add direct regression for trace-source unresolved-target `OpRaise` fail-fast.
+- Task 8 docs sync commits:
+  - `e1343007df8290c9b1e675213d2b851e3ecc39ba`: strict replay no-repair policy recorded across implementation notes, changelog, TODO, and TA-004 deviation text.
+  - `6589e69fe5870096d7e80bc1e8d1053a43e99d30`: wording polish for TODO status framing and changelog clarity.
+- Task 8 reviews: spec-compliance approved; final docs quality re-review approved with no residual issues.
+- Task 9 invariant search (`sourceKeysForNodeWithClassFallback|fallbackBinderCandidates|replayFromAlias|fallbackHint|fallbackRaw|etBinderReplayHints`) returned no matches in `src/` and `test/`.
+- Task 9 strict slice:
+  - exact combined `|` matcher still yields false green (`0 examples, 0 failures`),
+  - explicit multi-`--match` selection runs 172 examples with 25 failures (seed `532407677`), concentrated in bug matrix, Phi translation soundness, pipeline, and A6 groups.
+- Code-quality reviewers note branch-level residual risk: broad suite currently reports many failures (`ReplayMapIncomplete` clusters) outside localized Task 6/7 diffs; final gate still required in Task 10.
+- Task 10 full gate result:
+  - `cabal build all && cabal test` => FAIL (`889` examples, `97` failures, seed `1367127192`),
+  - dominant failure class: `WitnessNormalizationError (ReplayMapIncomplete ...)` propagating through presolution/pipeline paths.
+- Bug tracker updated with open entry `BUG-2026-02-27-001` documenting strict-cutover replay normalization regression and repro commands.
+- Final `git status --short` includes untracked task folders:
+  - `tasks/archive/2026-02-27-task5-rereview-post-projection-fix/`
+  - `tasks/todo/`
+  (left untouched for user decision).
+
+## 2026-02-28 (follow-up: P1 runtime replay-target repair)
+- Added a new Elaboration regression proving runtime repair existed for source-space identity replay targets:
+  - `fails fast on source-space identity replay target (no runtime repair)`.
+- Red verification before fix:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "source-space identity replay target (no runtime repair)"'`
+  - Result: FAIL (`Expected hard-fail with no runtime replay-target repair, got N`).
+- `computeTraceBinderReplayBridge` now does strict validation-only pass-through:
+  - removed source-name/replay-name target remapping path,
+  - replay target must already be in replay binder domain (raw or canonical alias) or it hard-fails.
+- Preserved existing mixed-name replay-domain behavior (`scheme parsed IDs ∪ siSubst keys`) while removing repair branch.
+- Focused replay strictness slice now passes (4/4), and full validation currently reports 2 unrelated pre-existing failures in this workspace state.
+- Follow-up full-suite triage after P1 replay-target repair shows one remaining failure (explicit forall let-bound round-trip), not two, in current workspace state.
+- Root cause: test compared `shouldBe` on canonicalized-then-stripped schemes, which can differ by alpha-renamed binders after vacuous-forall stripping.
+- Fix: strip vacuous top-level foralls first, then compare with `shouldAlphaEqType`.
+- Post-fix full gate is green: `890 examples, 0 failures`.
+
+## 2026-02-28 (follow-up: P1 Driver codomain guard)
+- `computePresolution` had a conditional replay codomain membership check in Driver:
+  - `not (IntSet.null replayBinderDomain) && IntSet.notMember ...`
+  - this let empty replay binder domains bypass codomain rejection.
+- Implemented `validateReplayMapTraceContract` in `MLF.Constraint.Presolution.Driver` and re-used it from `computePresolution`; exported through `MLF.Constraint.Presolution.Core` and `MLF.Constraint.Presolution`.
+- Driver codomain rejection is now unconditional for each replay-map entry; error strings are preserved.
+- Added deterministic Driver-boundary regression coverage in `test/Presolution/WitnessSpec.hs`:
+  - `hard-rejects codomain targets when replay binder domain is empty`,
+  - `accepts codomain targets inside replay binder domain`.
+- Focused verification is green:
+  - Driver replay boundary + replay-map validation subset passes.
+- Full gate is currently red with broad failures (`892 examples, 115 failures`), dominated by:
+  - `InternalError "edge replay-map codomain target outside replay binder domain"` from existing source-space replay targets (for example `source key: 0, replay target: NodeId 0`).
+
+## 2026-02-28 (follow-up triage: BUG-2026-02-17-002)
+- Reproduced failure on current dirty strict-replay branch:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-2026-02-17-002"'`
+  - Fails in unchecked pipeline with `TCLetTypeMismatch` due extra inner `forall t0` binder.
+- Captured edge-0 presolution artifacts in ghci for the failing expression:
+  - `ewWitness ops = [OpGraft 37 0, OpGraft 37 0, OpWeaken 3]`
+  - `etBinderArgs = []`, `etBinderReplayMap = []` (strict empty replay-domain contract preserved)
+- With debug trace (`runPipelineElabWithConfig` + `tcGeneralize=True`), edge-0 translation reports `phi=InstElim`, and elaborated let-rhs keeps an extra vacuous `ETyAbs "t0" ...` layer; downstream type-check rejects declared let scheme.
+- Root-cause area is Omega fallback resolution under empty trace replay bridge: `resolveTraceBinderTarget` falls back to nearest source scheme binder key in absence of replay-map, which can mis-target mixed source/replay op nodes on edge 0.
+- Experimental typechecker-only normalization of vacuous top-foralls was insufficient (it exposed downstream `InstBot expects TBottom, got Int`), confirming the producer/translation mismatch is primary.
