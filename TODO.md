@@ -13,8 +13,8 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - Removed runtime class-member fallback search from non-root `OpWeaken`/`OpGraft` binder recovery paths.
   - `phiFromEdgeWitnessNoTrace` is strict fail-fast (`MissingEdgeTrace`), and no-trace alias-recovery expectations were migrated to fail-fast tests.
   - Verification green: `cabal test mlf2-test --test-show-details=direct` (`883 examples, 0 failures`) and `cabal build all && cabal test`.
-- Next:
-  - Optional cleanup: remove remaining historical docs/tests language that describes class-member replay recovery as active runtime behavior.
+- Status:
+  - Runtime replay fallback is not active behavior; bridge handling is validate + pass-through only, and source-space replay targets are hard errors.
 
 ## Task 24 Thesis-Exact Unification Ordering + Presolution-Centric Solved Path (2026-02-26)
 

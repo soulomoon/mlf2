@@ -1,13 +1,15 @@
 module Phi.AlignmentSpec (spec) where
 
-import Control.Monad (forM_)
+import Control.Monad (forM_, when)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Set as Set
 import Test.Hspec
 
 import MLF.Constraint.Presolution (PresolutionResult(..), EdgeTrace(..))
+import MLF.Constraint.Types.Graph (typeRef)
 import MLF.Elab.Pipeline (runPipelineElab)
 import MLF.Frontend.Syntax (Expr(..), SrcTy(..))
+import qualified MLF.Binding.Tree as Binding
 import SpecUtil (unsafeNormalizeExpr, runPipelineArtifactsDefault, PipelineArtifacts(..))
 
 spec :: Spec
@@ -35,19 +37,23 @@ spec = describe "Phi alignment" $ do
                         show term `shouldNotBe` ""
                         show ty `shouldNotBe` ""
 
-    describe "C2: edge traces have non-empty binder args for polymorphic edges" $ do
-        it "let-poly has at least one edge with non-empty binder args" $ do
+    describe "C2: replay contract fields are omitted when replay binder domain is empty" $ do
+        it "let-poly traces with empty replay binder domains have empty binder args and replay-map" $ do
             let expr = ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (EVar "id"))
                 result = runPipelineArtifactsDefault Set.empty expr
             case result of
                 Left err -> expectationFailure err
                 Right pa -> do
-                    let traces = prEdgeTraces (paPresolution pa)
-                        nonEmptyBinderArgs =
-                            IntMap.filter
-                                (\tr -> not (null (etBinderArgs tr)))
-                                traces
-                    IntMap.size nonEmptyBinderArgs `shouldSatisfy` (> 0)
+                    let pres = paPresolution pa
+                        traces = IntMap.elems (prEdgeTraces pres)
+                        replayBinderDomain tr =
+                            case Binding.orderedBinders id (prConstraint pres) (typeRef (etRoot tr)) of
+                                Left _ -> []
+                                Right binders -> binders
+                    forM_ traces $ \tr ->
+                        when (null (replayBinderDomain tr)) $ do
+                            etBinderArgs tr `shouldBe` []
+                            etBinderReplayMap tr `shouldBe` IntMap.empty
 
     describe "C3: Omega resolves binders without class-member fallback when trace available" $ do
         let corpus =

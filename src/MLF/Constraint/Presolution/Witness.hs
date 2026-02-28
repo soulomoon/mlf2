@@ -14,16 +14,18 @@ module MLF.Constraint.Presolution.Witness (
     integratePhase2Ops,
     integratePhase2Steps,
     witnessFromExpansion,
+    normalizeInstanceOpsCore,
     normalizeInstanceOpsFull,
     coalesceRaiseMergeWithEnv,
     reorderWeakenWithEnv,
     assertNoStandaloneGrafts,
+    stripForNonReplay,
     validateNormalizedWitness,
     OmegaNormalizeEnv(..),
     OmegaNormalizeError(..)
 ) where
 
-import Control.Monad (foldM)
+import Control.Monad (filterM, foldM)
 import Control.Monad.Except (throwError)
 import Data.Functor.Foldable (cata)
 import qualified Data.IntMap.Strict as IntMap
@@ -43,14 +45,27 @@ import MLF.Constraint.Types.Witness (Expansion(..), ExpansionF(..), ForallSpec(.
 import MLF.Constraint.Presolution.Base (PresolutionM, PresolutionError(..), instantiationBindersM)
 import MLF.Constraint.Presolution.Ops (getCanonicalNode, lookupVarBound)
 import MLF.Constraint.Presolution.WitnessValidation (OmegaNormalizeEnv(..), OmegaNormalizeError(..), validateNormalizedWitness)
-import MLF.Constraint.Presolution.WitnessCanon (normalizeInstanceOpsFull, coalesceRaiseMergeWithEnv, reorderWeakenWithEnv, assertNoStandaloneGrafts)
+import MLF.Constraint.Presolution.WitnessCanon (
+    normalizeInstanceOpsCore,
+    normalizeInstanceOpsFull,
+    coalesceRaiseMergeWithEnv,
+    reorderWeakenWithEnv,
+    assertNoStandaloneGrafts,
+    stripForNonReplay
+    )
 import MLF.Util.RecursionSchemes (cataM)
 
 binderArgsFromExpansion :: GenNodeId -> TyNode -> Expansion -> PresolutionM [(NodeId, NodeId)]
 binderArgsFromExpansion gid leftRaw expn = do
-    let instantiationBinders nid = do
+    let isTyVarBinder nid = do
+            n <- getCanonicalNode nid
+            pure $
+                case n of
+                    TyVar{} -> True
+                    _ -> False
+        instantiationBinders nid = do
             (_bodyRoot, binders) <- instantiationBindersM gid nid
-            pure binders
+            filterM isTyVarBinder binders
     let alg layer = case layer of
             ExpIdentityF -> pure []
             ExpForallF _ -> pure []

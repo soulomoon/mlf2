@@ -20,6 +20,8 @@
   - Phi bridge aligns replay targets to scheme quantifier IDs and fails fast on replay-domain violations;
   - Omega consumes replay-map/source-alias targets deterministically (no runtime class-member fallback search);
   - no-trace Phi path is strict fail-fast (`MissingEdgeTrace`), and legacy alias-recovery success tests were migrated to fail-fast expectations.
+- Atomic strict replay cutover (2026-02-27): producer normalization now enforces the active-source/replay-domain contract; runtime replay-target repair is removed; unresolved trace-source `OpRaise` targets now fail fast; tests/docs were updated in the same change.
+- Presolution driver replay-map codomain validation is now unconditional: empty replay binder domains no longer bypass outside-domain hard-reject checks.
 
 * Removed the internal legacy replay fallback path from elaboration (`runPipelineElabViaLegacySolve`) and cleaned legacy fallback helpers from the test harness.
 * Replaced live native-vs-legacy parity checks with frozen baseline artifacts:

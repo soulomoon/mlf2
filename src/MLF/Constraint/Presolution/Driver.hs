@@ -30,7 +30,8 @@ to extract shared state into explicit parameter passing or reader patterns.
 -}
 module MLF.Constraint.Presolution.Driver (
     computePresolution,
-    processInstEdge
+    processInstEdge,
+    validateReplayMapTraceContract
 ) where
 
 import Control.Monad.Reader (ask)
@@ -43,7 +44,7 @@ import MLF.Util.Trace (TraceConfig, traceBindingM)
 import Data.Maybe (catMaybes, fromMaybe, mapMaybe)
 
 import qualified MLF.Binding.Tree as Binding
-import MLF.Constraint.Canonicalizer (canonicalizerFrom)
+import MLF.Constraint.Canonicalizer (canonicalizerFrom, chaseRedirectsStable)
 import qualified MLF.Constraint.Canonicalize as Canonicalize
 import MLF.Constraint.Types
 import MLF.Constraint.Presolution.Base
@@ -147,46 +148,14 @@ computePresolution traceCfg acyclicityResult constraint = do
             map EdgeId (IntSet.toList (IntSet.difference nonTrivialEdgeKeys witnessKeys))
         missingTraces =
             map EdgeId (IntSet.toList (IntSet.difference nonTrivialEdgeKeys traceKeys))
+        canonical = chaseRedirectsStable redirects
     when (not (null missingWitnesses)) $
         Left (MissingEdgeWitnesses missingWitnesses)
     when (not (null missingTraces)) $
         Left (MissingEdgeTraces missingTraces)
     forM_ (IntMap.toList edgeTraces) $ \(eid, tr) ->
         when (IntSet.member eid nonTrivialEdgeKeys) $ do
-            let sourceDomain =
-                    IntSet.fromList
-                        [ getNodeId binder
-                        | (binder, _arg) <- etBinderArgs tr
-                        ]
-                replayDomain =
-                    IntSet.fromList (IntMap.keys (etBinderReplayMap tr))
-                missingReplay =
-                    IntSet.toList (IntSet.difference sourceDomain replayDomain)
-                extraReplay =
-                    IntSet.toList (IntSet.difference replayDomain sourceDomain)
-            when (not (null missingReplay) || not (null extraReplay)) $
-                Left $
-                    InternalError $
-                        unlines
-                            [ "edge replay-map domain mismatch"
-                            , "edge: " ++ show (EdgeId eid)
-                            , "trace binder-source domain: " ++ show (IntSet.toList sourceDomain)
-                            , "replay-map domain: " ++ show (IntSet.toList replayDomain)
-                            , "missing source keys: " ++ show missingReplay
-                            , "extra source keys: " ++ show extraReplay
-                            ]
-            forM_ (IntMap.toList (etBinderReplayMap tr)) $ \(sourceKey, replayTarget) ->
-                case NodeAccess.lookupNode finalConstraint replayTarget of
-                    Just TyVar{} -> pure ()
-                    _ ->
-                        Left $
-                            InternalError $
-                                unlines
-                                    [ "edge replay-map codomain contains non-TyVar target"
-                                    , "edge: " ++ show (EdgeId eid)
-                                    , "source key: " ++ show sourceKey
-                                    , "replay target: " ++ show replayTarget
-                                    ]
+            validateReplayMapTraceContract canonical constraint finalConstraint eid tr
 
     return PresolutionResult
         { prConstraint = finalConstraint
@@ -197,6 +166,66 @@ computePresolution traceCfg acyclicityResult constraint = do
         , prUnionFind = PresolutionUf (psUnionFind finalState)
         , prPlanBuilder = PresolutionPlanBuilder (buildGeneralizePlans traceCfg)
         }
+
+validateReplayMapTraceContract
+    :: (NodeId -> NodeId)
+    -> Constraint
+    -> Constraint
+    -> Int
+    -> EdgeTrace
+    -> Either PresolutionError ()
+validateReplayMapTraceContract canonical sourceConstraint finalConstraint eid tr = do
+    let sourceDomain =
+            IntSet.fromList
+                [ getNodeId binder
+                | (binder, _arg) <- etBinderArgs tr
+                ]
+        replayDomain =
+            IntSet.fromList (IntMap.keys (etBinderReplayMap tr))
+        replayBinderDomain =
+            IntSet.fromList [getNodeId b | b <- replayBindersForTrace tr]
+        missingReplay =
+            IntSet.toList (IntSet.difference sourceDomain replayDomain)
+        extraReplay =
+            IntSet.toList (IntSet.difference replayDomain sourceDomain)
+    when (not (null missingReplay) || not (null extraReplay)) $
+        Left $
+            InternalError $
+                unlines
+                    [ "edge replay-map domain mismatch"
+                    , "edge: " ++ show (EdgeId eid)
+                    , "trace binder-source domain: " ++ show (IntSet.toList sourceDomain)
+                    , "replay-map domain: " ++ show (IntSet.toList replayDomain)
+                    , "missing source keys: " ++ show missingReplay
+                    , "extra source keys: " ++ show extraReplay
+                    ]
+    forM_ (IntMap.toList (etBinderReplayMap tr)) $ \(sourceKey, replayTarget) -> do
+        let replayTargetC = canonical replayTarget
+        when (IntSet.notMember (getNodeId replayTargetC) replayBinderDomain) $
+            Left $
+                InternalError $
+                    unlines
+                        [ "edge replay-map codomain target outside replay binder domain"
+                        , "edge: " ++ show (EdgeId eid)
+                        , "source key: " ++ show sourceKey
+                        , "replay target: " ++ show replayTarget
+                        ]
+        case NodeAccess.lookupNode finalConstraint replayTargetC of
+            Just TyVar{} -> pure ()
+            _ ->
+                Left $
+                    InternalError $
+                        unlines
+                            [ "edge replay-map codomain contains non-TyVar target"
+                            , "edge: " ++ show (EdgeId eid)
+                            , "source key: " ++ show sourceKey
+                            , "replay target: " ++ show replayTarget
+                            ]
+  where
+    replayBindersForTrace trace =
+        case Binding.orderedBinders canonical sourceConstraint (typeRef (etRoot trace)) of
+            Left _ -> []
+            Right binders -> map canonical binders
 
 -- | Rewrite constraint by removing TyExp nodes, applying expansion mapping and
 -- union-find canonicalization, collapsing duplicates (preferring structure over

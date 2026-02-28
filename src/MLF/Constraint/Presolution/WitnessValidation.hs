@@ -28,12 +28,15 @@ import MLF.Util.Order (OrderKey, compareOrderKey)
 data OmegaNormalizeEnv = OmegaNormalizeEnv
     { oneRoot :: NodeId
     , interior :: IntSet.IntSet
+    , interiorRaw :: IntSet.IntSet
     , weakened :: IntSet.IntSet
     , orderKeys :: IntMap.IntMap OrderKey
     , canonical :: NodeId -> NodeId
     , constraint :: Constraint
     , binderArgs :: IntMap.IntMap NodeId
     , binderReplayMap :: IntMap.IntMap NodeId
+    , replayDomainBinders :: [NodeId]
+    , isAnnotationEdge :: Bool
     }
 
 data OmegaNormalizeError
@@ -52,6 +55,7 @@ data OmegaNormalizeError
     | AmbiguousGraftWeaken NodeId [NodeId]
     | DeterministicGraftWeakenSynthesisFailed NodeId [NodeId]
     | ReplayMapIncomplete [NodeId]
+    | ReplayMapTargetOutsideReplayDomain NodeId NodeId
     | ReplayMapNonTyVarTarget NodeId NodeId
     | ReplayMapNonInjective NodeId NodeId NodeId
     | StandaloneGraftRemaining NodeId
@@ -95,9 +99,22 @@ validateNormalizedWitness env ops = do
 
     checkReplayTarget (sourceKey, replayTargetRaw) =
         let replayTarget = canon replayTargetRaw
-        in if isLiveTyVar replayTarget
-            then Right ()
-            else Left (ReplayMapNonTyVarTarget (NodeId sourceKey) replayTarget)
+        in if IntSet.notMember (getNodeId replayTarget) replayBinderDomain
+            then Left (ReplayMapTargetOutsideReplayDomain (NodeId sourceKey) replayTarget)
+            else if isLiveTyVar replayTarget
+                then Right ()
+                else Left (ReplayMapNonTyVarTarget (NodeId sourceKey) replayTarget)
+
+    replayBindersForRoot =
+        case Binding.orderedBinders canon (constraint env) (typeRef rootC) of
+            Left _ -> []
+            Right binders -> map canon binders
+
+    replayBinderDomain =
+        IntSet.fromList
+            [ getNodeId binder
+            | binder <- replayBindersForRoot
+            ]
 
     duplicateReplayTarget replayMap =
         let step (seen, dup) (sourceKey, replayTargetRaw)

@@ -119,5 +119,7 @@ deviations:
       (class members / ad hoc alias recovery) instead of strict upfront replay metadata.
     resolution: >
       Replay-map contract is now produced/validated in presolution and consumed
-      deterministically in Phi/Omega with fail-fast diagnostics.
+      in Phi/Omega under a strict runtime no-repair policy: bridge handling only
+      validates/passes through producer-normalized mappings, and source-space
+      replay targets are hard-rejected with fail-fast diagnostics.
     date: 2026-02-27

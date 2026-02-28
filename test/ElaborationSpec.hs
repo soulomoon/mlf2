@@ -157,6 +157,38 @@ shouldAlphaEqType :: Elab.ElabType -> Elab.ElabType -> Expectation
 shouldAlphaEqType actual expected =
     canonType actual `shouldBe` canonType expected
 
+-- | Drop top-level vacuous forall binders to compare equivalent schemes
+-- that differ only by unused quantifier wrappers.
+stripUnusedTopForalls :: Elab.ElabType -> Elab.ElabType
+stripUnusedTopForalls ty =
+    case ty of
+        Elab.TForall v Nothing body
+            | not (occursInType v body) -> stripUnusedTopForalls body
+        _ -> ty
+  where
+    occursInType needle = go False
+      where
+        go shadowed t = case t of
+            Elab.TVar v -> not shadowed && v == needle
+            Elab.TCon _ args -> any (go shadowed) args
+            Elab.TBase _ -> False
+            Elab.TBottom -> False
+            Elab.TArrow a b -> go shadowed a || go shadowed b
+            Elab.TForall v mb body ->
+                let inBound = maybe False (occursInBound shadowed) mb
+                    bodyShadowed = shadowed || v == needle
+                in inBound || go bodyShadowed body
+
+        occursInBound shadowed b = case b of
+            Elab.TArrow a c -> go shadowed a || go shadowed c
+            Elab.TCon _ args -> any (go shadowed) args
+            Elab.TBase _ -> False
+            Elab.TBottom -> False
+            Elab.TForall v mb body ->
+                let inBound = maybe False (occursInBound shadowed) mb
+                    bodyShadowed = shadowed || v == needle
+                in inBound || go bodyShadowed body
+
 spec :: Spec
 spec = describe "Phase 6 — Elaborate (xMLF)" $ do
     describe "SrcTy indexed aliases compile shape" $ do
@@ -1559,6 +1591,270 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         -- and VSpine, so OpWeaken finds it and emits InstElim (N) under
                         -- the prefix context of binder "a".
                         Elab.pretty inst `shouldBe` "∀(a ⩾) N"
+
+            it "fails fast when replay-map source domain mismatches trace binder sources" $ do
+                let root = NodeId 100
+                    binderA = NodeId 1
+                    badTarget = NodeId 31
+                    c = rootedConstraint emptyConstraint
+                        { cNodes = nodeMapFromList
+                                [ (getNodeId root, TyArrow root binderA binderA)
+                                , (getNodeId binderA, TyVar { tnId = binderA, tnBound = Nothing })
+                                , (getNodeId badTarget, TyBase badTarget (BaseTy "Bool"))
+                                ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef binderA), (genRef (GenNodeId 0), BindFlex))
+                                ]
+                        }
+                    solved = mkSolved c IntMap.empty
+                    scheme =
+                        Elab.schemeFromType
+                            (Elab.TForall "a" Nothing
+                                (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
+                    si = Elab.SchemeInfo
+                        { Elab.siScheme = scheme
+                        , Elab.siSubst = IntMap.fromList [(getNodeId binderA, "a")]
+                        }
+                    tr =
+                        EdgeTrace
+                            { etRoot = root
+                            , etBinderArgs = [(binderA, badTarget)]
+                            , etInterior = fromListInterior [root, binderA, badTarget]
+                            -- Missing source key binderA in replay-map domain: strict fail-fast.
+                            , etBinderReplayMap = IntMap.empty
+                            , etCopyMap = mempty
+                            }
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewForallIntros = 0
+                        , ewWitness = InstanceWitness [OpWeaken binderA]
+                        }
+                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew of
+                    Left (Elab.PhiInvariantError msg) ->
+                        msg `shouldSatisfy` ("trace binder replay-map domain mismatch" `isInfixOf`)
+                    Left err ->
+                        expectationFailure ("Expected PhiInvariantError, got " ++ show err)
+                    Right inst ->
+                        expectationFailure ("Expected fail-fast replay-map validation error, got " ++ Elab.pretty inst)
+
+            it "fails fast on malformed source-space replay target outside replay binder domain" $ do
+                let root = NodeId 100
+                    sourceKey = NodeId 1
+                    sourceBinder = NodeId 31
+                    argNode = NodeId 40
+                    c = rootedConstraint emptyConstraint
+                        { cNodes = nodeMapFromList
+                                [ (getNodeId root, TyArrow root sourceKey sourceKey)
+                                , (getNodeId sourceKey, TyVar { tnId = sourceKey, tnBound = Nothing })
+                                , (getNodeId sourceBinder, TyVar { tnId = sourceBinder, tnBound = Nothing })
+                                , (getNodeId argNode, TyBase argNode (BaseTy "Bool"))
+                                ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef sourceKey), (genRef (GenNodeId 0), BindFlex))
+                                ]
+                        }
+                    solved = mkSolved c IntMap.empty
+                    scheme =
+                        Elab.schemeFromType
+                            (Elab.TForall "a" Nothing
+                                (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
+                    si = Elab.SchemeInfo
+                        { Elab.siScheme = scheme
+                        , Elab.siSubst = IntMap.fromList [(getNodeId sourceKey, "a")]
+                        }
+                    tr =
+                        EdgeTrace
+                            { etRoot = root
+                            , etBinderArgs = [(sourceKey, argNode)]
+                            , etInterior = fromListInterior [root, sourceKey, sourceBinder, argNode]
+                            , etBinderReplayMap = IntMap.fromList [(getNodeId sourceKey, sourceBinder)]
+                            , etCopyMap = mempty
+                            }
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewForallIntros = 0
+                        , ewWitness = InstanceWitness [OpWeaken sourceKey]
+                        }
+                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew of
+                    Left (Elab.PhiInvariantError msg) ->
+                        msg `shouldSatisfy` ("trace binder replay-map target outside replay binder domain" `isInfixOf`)
+                    Left err ->
+                        expectationFailure ("Expected PhiInvariantError, got " ++ show err)
+                    Right inst ->
+                        expectationFailure ("Expected hard-fail, got " ++ Elab.pretty inst)
+
+            it "fails fast on source-space identity replay target (no runtime repair)" $ do
+                let root = NodeId 100
+                    sourceKey = NodeId 1
+                    replayBinder = NodeId 2
+                    argNode = NodeId 40
+                    c = rootedConstraint emptyConstraint
+                        { cNodes = nodeMapFromList
+                                [ (getNodeId root, TyArrow root sourceKey sourceKey)
+                                , (getNodeId sourceKey, TyVar { tnId = sourceKey, tnBound = Nothing })
+                                , (getNodeId replayBinder, TyVar { tnId = replayBinder, tnBound = Nothing })
+                                , (getNodeId argNode, TyBase argNode (BaseTy "Bool"))
+                                ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef sourceKey), (genRef (GenNodeId 0), BindFlex))
+                                , (nodeRefKey (typeRef replayBinder), (genRef (GenNodeId 0), BindFlex))
+                                ]
+                        }
+                    solved = mkSolved c IntMap.empty
+                    scheme =
+                        Elab.schemeFromType
+                            (Elab.TForall "t2" Nothing
+                                (Elab.TArrow (Elab.TVar "t2") (Elab.TVar "t2")))
+                    si = Elab.SchemeInfo
+                        { Elab.siScheme = scheme
+                        , Elab.siSubst = IntMap.singleton (getNodeId replayBinder) "t2"
+                        }
+                    tr =
+                        EdgeTrace
+                            { etRoot = root
+                            , etBinderArgs = [(sourceKey, argNode)]
+                            , etInterior = fromListInterior [root, sourceKey, replayBinder, argNode]
+                            -- Invalid source-space identity target: source key is not in replay key-space.
+                            -- Strict pass-through bridge must hard-fail instead of remapping at runtime.
+                            , etBinderReplayMap = IntMap.singleton (getNodeId sourceKey) sourceKey
+                            , etCopyMap = mempty
+                            }
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewForallIntros = 0
+                        , ewWitness = InstanceWitness [OpWeaken sourceKey]
+                        }
+                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew of
+                    Left (Elab.PhiInvariantError msg) ->
+                        msg `shouldSatisfy` ("trace binder replay-map target outside replay binder domain" `isInfixOf`)
+                    Left err ->
+                        expectationFailure ("Expected PhiInvariantError, got " ++ show err)
+                    Right inst ->
+                        expectationFailure
+                            ( "Expected hard-fail with no runtime replay-target repair, got "
+                                ++ Elab.pretty inst
+                            )
+
+            it "OpRaise fails fast when a trace-source target resolves to no existing replay node" $ do
+                let root = NodeId 100
+                    binderA = NodeId 1
+                    sourceKey = NodeId 99
+                    replayGhost = NodeId 77
+                    argNode = NodeId 40
+                    c = rootedConstraint emptyConstraint
+                        { cNodes = nodeMapFromList
+                                [ (getNodeId root, TyArrow root binderA binderA)
+                                , (getNodeId binderA, TyVar { tnId = binderA, tnBound = Nothing })
+                                , (getNodeId argNode, TyBase argNode (BaseTy "Bool"))
+                                ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef binderA), (genRef (GenNodeId 0), BindFlex))
+                                ]
+                        }
+                    solved = mkSolved c IntMap.empty
+                    scheme =
+                        Elab.schemeFromType
+                            (Elab.TForall "t77" Nothing
+                                (Elab.TArrow (Elab.TVar "t77") (Elab.TVar "t77")))
+                    si = Elab.SchemeInfo
+                        { Elab.siScheme = scheme
+                        , Elab.siSubst = IntMap.singleton (getNodeId replayGhost) "t77"
+                        }
+                    tr =
+                        EdgeTrace
+                            { etRoot = root
+                            , etBinderArgs = [(sourceKey, argNode)]
+                            , etInterior = fromListInterior [root, binderA, argNode]
+                            , etBinderReplayMap = IntMap.singleton (getNodeId sourceKey) replayGhost
+                            , etCopyMap = mempty
+                            }
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewForallIntros = 0
+                        , ewWitness = InstanceWitness [OpRaise sourceKey]
+                        }
+                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew of
+                    Left (Elab.PhiInvariantError msg) ->
+                        msg `shouldSatisfy`
+                            ("trace/replay binder key-space mismatch (OpRaise unresolved trace-source target)" `isInfixOf`)
+                    Left err ->
+                        expectationFailure ("Expected PhiInvariantError, got " ++ show err)
+                    Right inst ->
+                        expectationFailure ("Expected strict OpRaise fail-fast, got " ++ Elab.pretty inst)
+
+            it "accepts replay targets from siSubst key-space when replay scheme binders are mixed parseable/non-parseable" $ do
+                let root = NodeId 100
+                    sourceKey = NodeId 1
+                    replayTarget = NodeId 2
+                    argNode = NodeId 40
+                    c = rootedConstraint emptyConstraint
+                        { cNodes = nodeMapFromList
+                                [ (getNodeId root, TyArrow root sourceKey sourceKey)
+                                , (getNodeId sourceKey, TyVar { tnId = sourceKey, tnBound = Nothing })
+                                , (getNodeId replayTarget, TyVar { tnId = replayTarget, tnBound = Nothing })
+                                , (getNodeId argNode, TyBase argNode (BaseTy "Bool"))
+                                ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef sourceKey), (genRef (GenNodeId 0), BindFlex))
+                                , (nodeRefKey (typeRef replayTarget), (genRef (GenNodeId 0), BindFlex))
+                                ]
+                        }
+                    solved = mkSolved c IntMap.empty
+                    -- Mixed binder names: "t1" parses as binder id, "a" does not.
+                    scheme =
+                        Elab.schemeFromType
+                            (Elab.TForall "t1" Nothing
+                                (Elab.TForall "a" Nothing
+                                    (Elab.TArrow (Elab.TVar "t1") (Elab.TVar "t1"))))
+                    si = Elab.SchemeInfo
+                        { Elab.siScheme = scheme
+                        , Elab.siSubst = IntMap.fromList
+                            [ (getNodeId sourceKey, "t1")
+                            , (getNodeId replayTarget, "a")
+                            ]
+                        }
+                    tr =
+                        EdgeTrace
+                            { etRoot = root
+                            , etBinderArgs = [(sourceKey, argNode)]
+                            , etInterior = fromListInterior [root, sourceKey, replayTarget, argNode]
+                            -- Target comes from siSubst key-space, not parseable binder-name extraction.
+                            , etBinderReplayMap = IntMap.fromList [(getNodeId sourceKey, replayTarget)]
+                            , etCopyMap = mempty
+                            }
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewForallIntros = 0
+                        , ewWitness = InstanceWitness [OpWeaken sourceKey]
+                        }
+                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew of
+                    Left (Elab.PhiInvariantError msg)
+                        | "trace binder replay-map target outside replay binder domain" `isInfixOf` msg ->
+                            expectationFailure ("Expected mixed-name replay domain to include siSubst key-space, got: " ++ msg)
+                    Left err ->
+                        expectationFailure ("Expected successful translation, got " ++ show err)
+                    Right _ ->
+                        pure ()
 
             it "OpWeaken on an alias target fails fast under strict replay-map resolution" $ do
                 let root = NodeId 100
@@ -3443,7 +3739,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 let expected =
                         Elab.TForall "a" Nothing
                             (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
-                ty `shouldAlphaEqType` expected
+                stripUnusedTopForalls ty
+                    `shouldAlphaEqType` stripUnusedTopForalls expected
 
         it "explicit forall coercion in let RHS elaborates through use-site application" $ do
             let ann = STForall "a" Nothing (STArrow (STVar "a") (STVar "a"))

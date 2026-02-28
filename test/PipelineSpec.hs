@@ -443,7 +443,6 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     other ->
                         expectationFailure
                             ("Expected forall a. a -> a -> a, got: " ++ show other)
-
         case runPipelineElab Set.empty normExpr of
             Left err -> expectationFailure ("Unchecked pipeline failed:\n" ++ renderPipelineError err)
             Right (term, ty) -> do

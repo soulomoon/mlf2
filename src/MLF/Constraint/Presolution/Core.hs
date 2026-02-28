@@ -9,6 +9,7 @@ module MLF.Constraint.Presolution.Core (
     computePresolution,
     decideMinimalExpansion,
     processInstEdge,
+    validateReplayMapTraceContract,
     unifyAcyclicRawWithRaiseTrace,
     runEdgeUnifyForTest,
     instantiateScheme,
@@ -17,7 +18,7 @@ module MLF.Constraint.Presolution.Core (
     applyExpansion
 ) where
 
-import MLF.Constraint.Presolution.Driver (computePresolution, processInstEdge)
+import MLF.Constraint.Presolution.Driver (computePresolution, processInstEdge, validateReplayMapTraceContract)
 import MLF.Constraint.Presolution.EdgeUnify (runEdgeUnifyForTest)
 import MLF.Constraint.Presolution.Expansion (
     applyExpansion,
