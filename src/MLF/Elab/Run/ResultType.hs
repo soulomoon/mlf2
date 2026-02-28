@@ -39,7 +39,7 @@ computeResultTypeFallback ctx annCanon ann = do
     -- First, determine the root (same logic as before to check for AAnn)
     let canonical = rtcCanonical ctx
         c1 = rtcBaseConstraint ctx
-        solvedForGen = rtcSolvedForGen ctx
+        solvedForGen = rtcSolved ctx
         solvedForGenView = solvedForGen
 
     let schemeRootSet =

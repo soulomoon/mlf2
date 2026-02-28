@@ -172,6 +172,13 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 elaborateSrc `shouldSatisfy` (not . isInfixOf needle)
                 pipelineSrc `shouldSatisfy` (not . isInfixOf needle)
 
+        it "single-solved migration removes rtcSolvedForGen/rtcSolvedClean fields" $ do
+            typesSrc <- readFile "src/MLF/Elab/Run/ResultType/Types.hs"
+            fallbackSrc <- readFile "src/MLF/Elab/Run/ResultType/Fallback.hs"
+            forM_ ["rtcSolvedForGen", "rtcSolvedClean"] $ \needle -> do
+                typesSrc `shouldSatisfy` (not . isInfixOf needle)
+                fallbackSrc `shouldSatisfy` (not . isInfixOf needle)
+
         it "uses presolution-native solved artifacts" $ do
             artifacts <- requireRight (runPipelineArtifactsDefault Set.empty (ELam "x" (EVar "x")))
             cUnifyEdges (prConstraint (paPresolution artifacts)) `shouldBe` []

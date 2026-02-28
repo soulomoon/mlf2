@@ -21,8 +21,7 @@ data ResultTypeContext = ResultTypeContext
     , rtcEdgeWitnesses :: IntMap.IntMap EdgeWitness
     , rtcEdgeTraces :: IntMap.IntMap EdgeTrace
     , rtcEdgeExpansions :: IntMap.IntMap Expansion
-    , rtcSolvedForGen :: Solved
-    , rtcSolvedClean :: Solved
+    , rtcSolved :: Solved
     , rtcBindParentsGa :: GaBindParents
     , rtcPlanBuilder :: PresolutionPlanBuilder
     , rtcBaseConstraint :: Constraint
