@@ -179,6 +179,15 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 typesSrc `shouldSatisfy` (not . isInfixOf needle)
                 fallbackSrc `shouldSatisfy` (not . isInfixOf needle)
 
+        it "single-solved refactor keeps checked pipeline authoritative" $ do
+            let expr = ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (ELit (LInt 1)))
+            case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
+                Left err -> expectationFailure (renderPipelineError err)
+                Right (_termUnchecked, tyUnchecked) ->
+                    case runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr) of
+                        Left err -> expectationFailure (renderPipelineError err)
+                        Right (_termChecked, tyChecked) -> tyUnchecked `shouldBe` tyChecked
+
         it "uses presolution-native solved artifacts" $ do
             artifacts <- requireRight (runPipelineArtifactsDefault Set.empty (ELam "x" (EVar "x")))
             cUnifyEdges (prConstraint (paPresolution artifacts)) `shouldBe` []

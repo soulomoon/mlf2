@@ -145,7 +145,7 @@ runPipelineElabWithSolvedBuilder traceCfg genConstraints buildSolved expr = do
                     , ecGeneralizeAtWith = generalizeAtWith
                     }
                 elabEnv = ElabEnv
-                    { eeSolved = solvedClean
+                    { eeSolved = solvedForGen
                     , eeGaParents = bindParentsGa
                     , eeEdgeWitnesses = edgeWitnesses
                     , eeEdgeTraces = edgeTraces
@@ -202,7 +202,7 @@ runPipelineElabWithSolvedBuilder traceCfg genConstraints buildSolved expr = do
                     , rtcEdgeWitnesses = edgeWitnesses
                     , rtcEdgeTraces = edgeTraces
                     , rtcEdgeExpansions = edgeExpansions
-                    , rtcSolved = solvedClean
+                    , rtcSolved = solvedForGen
                     , rtcBindParentsGa = bindParentsGa
                     , rtcPlanBuilder = planBuilder
                     , rtcBaseConstraint = c1
