@@ -4,6 +4,16 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 26 Phi replay bridge strict pass-through follow-up (2026-03-01)
+
+- Completed:
+  - Removed remaining projection-era helper naming from `computeTraceBinderReplayBridge` (`projectOne` -> `validateTarget`) to keep bridge invariant explicit: validate + pass-through only.
+  - Added/kept replay codomain fail-fast regression coverage in `ElaborationSpec` and aligned related strict error assertions to the runtime invariant message.
+  - Synced docs (`CHANGELOG.md`, `implementation_notes.md`) with strict pass-through follow-up behavior.
+  - Verification green: `cabal build all && cabal test` (`894 examples, 0 failures`).
+- Status:
+  - Runtime replay projection/repair paths are absent from bridge code; replay map domain/codomain contract is enforced fail-fast.
+
 ## Task 25 Thesis-Exact Phi Upfront Replay Normalization (2026-02-27)
 
 - Completed:

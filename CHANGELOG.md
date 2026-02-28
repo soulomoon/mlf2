@@ -3,6 +3,8 @@
 ## Unreleased
 
 ### Changed
+- Refactored elaboration/pipeline/result-type wiring to a single solved input handle (`eeSolved`, `rtcSolved`) while preserving checked-authoritative output behavior.
+- Added regression locks for single-solved migration guards and checked/unchecked pipeline parity slices.
 - Aligned elaboration pipeline with thesis model (§10.3-10.4, §12.1.3, §15.3.5-15.3.6)
 - Solved is now projection-first; Phi resolves from witness domain before canonical fallback
 - Eliminated patchNode mutation from elaboration path (Fallback.hs)
@@ -22,6 +24,7 @@
   - no-trace Phi path is strict fail-fast (`MissingEdgeTrace`), and legacy alias-recovery success tests were migrated to fail-fast expectations.
 - Atomic strict replay cutover (2026-02-27): producer normalization now enforces the active-source/replay-domain contract; runtime replay-target repair is removed; unresolved trace-source `OpRaise` targets now fail fast; tests/docs were updated in the same change.
 - Presolution driver replay-map codomain validation is now unconditional: empty replay binder domains no longer bypass outside-domain hard-reject checks.
+- Phi replay bridge strict pass-through follow-up (2026-03-01): removed the remaining runtime projection helper path in `computeTraceBinderReplayBridge`; runtime now only validates replay-map domain/codomain invariants and forwards replay targets unchanged.
 
 * Removed the internal legacy replay fallback path from elaboration (`runPipelineElabViaLegacySolve`) and cleaned legacy fallback helpers from the test harness.
 * Replaced live native-vs-legacy parity checks with frozen baseline artifacts:
