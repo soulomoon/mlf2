@@ -20,6 +20,7 @@
 - Presolution normalization/validation enforces replay-map completeness, TyVar codomain, and injectivity contracts.
 - 2026-02-27 strict runtime contract: producer normalization must emit an active-source/replay-domain replay map; runtime bridge logic validates and passes through only (no projection/repair).
 - Phi `computeTraceBinderReplayBridge` aligns replay candidates with scheme quantifier IDs first, validates domain/targets, and fails fast on mismatches.
+- 2026-03-01 strict pass-through follow-up: `computeTraceBinderReplayBridge` no longer carries projection-helper fallback paths (`projectReplayTarget`/`projectOne`); runtime bridge checks are domain parity + codomain membership only, then pass-through.
 - Omega consumes replay-map targets in replay raw-ID space (no eager canonical rewrite), then resolves binder indices deterministically.
 - Source-space replay targets are hard errors (strict fail-fast), not repairable runtime cases.
 - No-trace Phi entrypoint is strict fail-fast (`MissingEdgeTrace`) for production parity.
