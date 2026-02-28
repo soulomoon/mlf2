@@ -3,6 +3,8 @@
 ## Unreleased
 
 ### Changed
+- Refactored elaboration/pipeline/result-type wiring to a single solved input handle (`eeSolved`, `rtcSolved`) while preserving checked-authoritative output behavior.
+- Added regression locks for single-solved migration guards and checked/unchecked pipeline parity slices.
 - Aligned elaboration pipeline with thesis model (§10.3-10.4, §12.1.3, §15.3.5-15.3.6)
 - Solved is now projection-first; Phi resolves from witness domain before canonical fallback
 - Eliminated patchNode mutation from elaboration path (Fallback.hs)

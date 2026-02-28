@@ -2,6 +2,13 @@
 
 ## Thesis Alignment (Phase A–E)
 
+### 2026-03-01 Single-solved elaboration input migration
+- Elaboration input wiring now uses a single solved snapshot handle in `ElabEnv` (`eeSolved`) and in result-type context (`rtcSolved`).
+- Split solved field names were removed from elaboration and result-type wiring (`eeResPhi`, `eeResReify`, `eeResGen`, `rtcSolvedForGen`, `rtcSolvedClean`).
+- Checked-authoritative output policy is preserved; `runPipelineElab`/`runPipelineElabChecked` parity remains locked by targeted regression tests.
+- Generalization-context differences remain explicit through `GaBindParents`, scope overrides, redirects, and plan-builder-driven generalization.
+- For behavior stability in this migration, the authoritative single solved snapshot threaded by pipeline elaboration/result-type wiring is `solvedForGen`.
+
 ### Solved Semantics
 - `Solved` is now a projection-first layer over equivalence classes.
 - `originalConstraint` is the primary accessor for pre-solve data.

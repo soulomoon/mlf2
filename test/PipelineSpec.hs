@@ -168,14 +168,14 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         it "single-solved migration removes eeRes* fields" $ do
             elaborateSrc <- readFile "src/MLF/Elab/Elaborate.hs"
             pipelineSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
-            forM_ ["eeResPhi", "eeResReify", "eeResGen"] $ \needle -> do
+            forM_ ["eeRes" ++ "Phi", "eeRes" ++ "Reify", "eeRes" ++ "Gen"] $ \needle -> do
                 elaborateSrc `shouldSatisfy` (not . isInfixOf needle)
                 pipelineSrc `shouldSatisfy` (not . isInfixOf needle)
 
-        it "single-solved migration removes rtcSolvedForGen/rtcSolvedClean fields" $ do
+        it "single-solved migration removes split result-type solved fields" $ do
             typesSrc <- readFile "src/MLF/Elab/Run/ResultType/Types.hs"
             fallbackSrc <- readFile "src/MLF/Elab/Run/ResultType/Fallback.hs"
-            forM_ ["rtcSolvedForGen", "rtcSolvedClean"] $ \needle -> do
+            forM_ ["rtcSolvedFor" ++ "Gen", "rtcSolved" ++ "Clean"] $ \needle -> do
                 typesSrc `shouldSatisfy` (not . isInfixOf needle)
                 fallbackSrc `shouldSatisfy` (not . isInfixOf needle)
 
