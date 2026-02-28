@@ -2,6 +2,22 @@
 
 ## Thesis Alignment (Phase A–E)
 
+### 2026-03-01 Transformation-mechanism thesis-exact classification campaign
+- Transformation Mechanism Table rows are now classified with a binary policy:
+  - `Aligned`
+  - `Deviation(<id>)` mapped in `docs/thesis-deviations.yaml`.
+- Added explicit deviation entries for remaining load-bearing representation/runtime
+  choices:
+  - `DEV-TMT-ELAB-SOLVED-PROJECTION`
+  - `DEV-TMT-RESULT-TYPE-CONTEXT`
+  - `DEV-TMT-OMEGA-OPERATIONALIZATION`
+  - `DEV-TMT-PHI-CANONICAL-DEPENDENCE`
+  - `DEV-TMT-IDENTITY-BRIDGE`
+  - `DEV-TMT-SOLVE-REWRITE-LAYER`
+  - `DEV-TMT-DUAL-PATH-GUARDRAIL`
+- Table statements now reference those deviation IDs directly so row status,
+  code paths, and test evidence stay synchronized.
+
 ### 2026-03-01 Single-solved elaboration input migration
 - Elaboration input wiring now uses a single solved snapshot handle in `ElabEnv` (`eeSolved`) and in result-type context (`rtcSolved`).
 - Split solved field names were removed from elaboration and result-type wiring (`eeResPhi`, `eeResReify`, `eeResGen`, `rtcSolvedForGen`, `rtcSolvedClean`).

@@ -188,6 +188,26 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                         Left err -> expectationFailure (renderPipelineError err)
                         Right (_termChecked, tyChecked) -> tyUnchecked `shouldBe` tyChecked
 
+        it "runtime pipeline keeps dual-path wiring out of production entrypoints" $ do
+            pipelineSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
+            forM_ ["runPipelineElabProjectionFirst", "runPipelineElabViaLegacySolve"] $ \needle ->
+                pipelineSrc `shouldSatisfy` (not . isInfixOf needle)
+
+        it "annotation-heavy path still reports checked-authoritative type" $ do
+            let expr =
+                    EAnn
+                        (ELam "x" (EVar "x"))
+                        (STForall "a" Nothing (STArrow (STVar "a") (STVar "a")))
+            case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
+                Left err -> expectationFailure (renderPipelineError err)
+                Right (termUnchecked, tyUnchecked) -> do
+                    typeCheck termUnchecked `shouldBe` Right tyUnchecked
+                    case runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr) of
+                        Left err -> expectationFailure (renderPipelineError err)
+                        Right (termChecked, tyChecked) -> do
+                            typeCheck termChecked `shouldBe` Right tyChecked
+                            tyUnchecked `shouldBe` tyChecked
+
         it "uses presolution-native solved artifacts" $ do
             artifacts <- requireRight (runPipelineArtifactsDefault Set.empty (ELam "x" (EVar "x")))
             cUnifyEdges (prConstraint (paPresolution artifacts)) `shouldBe` []

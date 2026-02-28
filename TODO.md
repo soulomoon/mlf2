@@ -4,6 +4,22 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 27 Transformation Mechanism Table thesis-exact classification campaign (2026-03-01)
+
+- Completed:
+  - Reclassified every row in `docs/notes/2026-02-27-transformation-mechanism-table.md`
+    to `Aligned` or `Deviation(<id>)`.
+  - Added explicit deviation-ledger coverage for all remaining non-aligned row
+    clusters in `docs/thesis-deviations.yaml` with code/test evidence.
+  - Synced implementation/changelog/docs to keep row status and deviation IDs
+    consistent.
+  - Baseline + targeted campaign slices are green (`cabal build all`, `cabal test`,
+    targeted Phi/Presolution/Pipeline slices).
+- Status:
+  - Transformation-mechanism campaign classification is now decision-closed by row.
+  - Remaining thesis-exact work is tracked via explicit deviation IDs, not
+    ambiguous table wording.
+
 ## Task 26 Phi replay bridge strict pass-through follow-up (2026-03-01)
 
 - Completed:

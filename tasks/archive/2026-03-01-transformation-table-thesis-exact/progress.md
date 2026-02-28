@@ -1,0 +1,31 @@
+# Progress
+
+## 2026-03-01
+- Initialized campaign task folder and core tracking files.
+- Preparing Wave 0 row contracts and baseline verification evidence.
+- Ran baseline gate: `cabal build all` (PASS).
+- Ran baseline gate: `cabal test` (PASS).
+- Ran targeted Phi slice:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "fails fast when replay-map source domain mismatches trace binder sources" --match "fails fast when replay-map codomain target is outside replay binder domain" --match "trace/replay binder key-space mismatch (OpRaise unresolved trace-source target)"'`
+  - PASS (`2 examples, 0 failures`; matcher subset selected 2 examples in current suite).
+- Ran targeted Presolution slice:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "replay-map validation" --match "Driver replay-map boundary validation" --match "Witness normalization invariants"'`
+  - PASS (`15 examples, 0 failures`).
+- Ran targeted Pipeline/Elab slice:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "single-solved migration removes eeRes" --match "single-solved migration removes split result-type solved fields" --match "single-solved refactor keeps checked pipeline authoritative" --match "Dual-path verification"'`
+  - PASS (`13 examples, 0 failures`).
+- Observed one transient operational issue during baseline:
+  - Parallel Cabal test invocations conflicted on `package.conf.inplace`; reran targeted slices sequentially.
+- Added explicit deviation-ledger entries for each remaining non-aligned row cluster in `docs/thesis-deviations.yaml`.
+- Updated transformation-mechanism table row classification to strict binary (`Aligned` or `Deviation(<id>)`).
+- Synced supporting docs:
+  - `implementation_notes.md`
+  - `CHANGELOG.md`
+  - `TODO.md`
+  - campaign row contracts (`tasks/todo/.../row_contracts.md`).
+- Final verification:
+  - `cabal build all && cabal test` -> PASS.
+  - Phi targeted slice -> PASS (`2 examples, 0 failures`).
+  - Presolution targeted slice -> PASS (`15 examples, 0 failures`).
+  - Pipeline/Elab targeted slice -> PASS (`13 examples, 0 failures`).
+- Task closed: all campaign phases complete; folder moved from `tasks/todo/` to `tasks/archive/`.

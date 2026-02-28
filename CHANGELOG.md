@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Changed
+- Transformation Mechanism Table campaign classification is now binary (`Aligned` or `Deviation(<id>)`), with all remaining non-aligned rows mapped to explicit entries in `docs/thesis-deviations.yaml` and linked test evidence.
 - Refactored elaboration/pipeline/result-type wiring to a single solved input handle (`eeSolved`, `rtcSolved`) while preserving checked-authoritative output behavior.
 - Added regression locks for single-solved migration guards and checked/unchecked pipeline parity slices.
 - Aligned elaboration pipeline with thesis model (§10.3-10.4, §12.1.3, §15.3.5-15.3.6)
