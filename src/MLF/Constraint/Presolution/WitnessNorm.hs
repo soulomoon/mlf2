@@ -401,19 +401,12 @@ normalizeEdgeWitnessesM = do
                         _ -> False
                     )
                     opsNorm
-            prunePairedWeaken (OpWeaken target)
-                | null replayBinders
-                , hasNonPairedWeaken
-                , IntSet.notMember (getNodeId (canonical target)) interiorNorm
-                , IntSet.member (getNodeId (canonical target)) graftTargetKeysNorm =
-                    Nothing
-            prunePairedWeaken op = Just op
-            opsNormPruned = mapMaybe prunePairedWeaken opsNorm
-            dropNoReplayGraftWeaken op =
-                case op of
-                    OpGraft{} -> Nothing
-                    OpWeaken{} -> Nothing
-                    _ -> Just op
+            -- For non-annotation edges with no replay binders, strip grafts,
+            -- merges, raise-merges, and paired weakens (weaken whose target
+            -- coincides with a graft target — the graft already establishes
+            -- the relationship, making the weaken redundant).  Non-paired
+            -- weakens survive: they encode genuine structural constraints
+            -- that downstream phi translation must resolve or reject.
             stripNoReplayOp op =
                 case op of
                     OpGraft{} -> Nothing
@@ -423,15 +416,32 @@ normalizeEdgeWitnessesM = do
                         | IntSet.member (getNodeId (canonical target)) graftTargetKeysNorm ->
                             Nothing
                     _ -> Just op
+            -- When all weakens are paired with grafts, the graft-weaken pairs
+            -- are self-canceling instantiation/generalization steps.  Drop both.
+            stripPairedGraftWeaken op =
+                case op of
+                    OpGraft{} -> Nothing
+                    OpWeaken{} -> Nothing
+                    _ -> Just op
+            -- For annotation edges with non-paired weakens, remove only the
+            -- paired weakens (redundant with co-located grafts).  Non-paired
+            -- weakens and all other ops are kept for phi translation.
+            stripPairedWeaken (OpWeaken target)
+                | IntSet.member (getNodeId (canonical target)) graftTargetKeysNorm
+                , IntSet.notMember (getNodeId (canonical target)) interiorNorm =
+                    Nothing
+            stripPairedWeaken op = Just op
             opsNormNoReplay
                 | null replayBinders
                 , not isAnnEdge =
-                    mapMaybe stripNoReplayOp opsNormPruned
+                    mapMaybe stripNoReplayOp opsNorm
                 | null replayBinders
                 , not hasNonPairedWeaken =
-                    mapMaybe dropNoReplayGraftWeaken opsNormPruned
+                    mapMaybe stripPairedGraftWeaken opsNorm
+                | null replayBinders =
+                    mapMaybe stripPairedWeaken opsNorm
                 | otherwise =
-                    opsNormPruned
+                    opsNorm
             projectOpTargetsNoReplay op =
                 let project = sourceBinderForOpTarget
                 in case op of
@@ -442,10 +452,10 @@ normalizeEdgeWitnessesM = do
                     OpRaiseMerge n m -> OpRaiseMerge (project n) (project m)
             opsNormProjected
                 | null replayBinders = map projectOpTargetsNoReplay opsNormNoReplay
-                | otherwise = opsNormPruned
+                | otherwise = opsNorm
             opsNormFinalized
-                | null replayBinders
-                , null sourceBindersInOrder =
+                | null sourceBindersInOrder
+                , null opsNormProjected =
                     []
                 | otherwise =
                     opsNormProjected
@@ -485,7 +495,6 @@ normalizeEdgeWitnessesM = do
                     , isReplaySourceBinder sourceBinder
                     ]
             activeSourceEntries
-                -- Non-polymorphic edge: do not emit replay-domain contract fields.
                 | null replayBinders = []
                 | IntSet.null targetKeysUsed = activeSourceEntriesBase
                 | otherwise =
@@ -498,19 +507,12 @@ normalizeEdgeWitnessesM = do
                         then activeSourceEntriesBase
                         else filtered
             nActive = length activeSourceEntries
-        when (not (null replayBinders) && length replayBinders < nActive) $
+        when (length replayBinders < nActive) $
             throwError $
                 WitnessNormalizationError (EdgeId eid) $
                     Witness.ReplayMapIncomplete (map fst (drop (length replayBinders) activeSourceEntries))
         let replayPairs = zip activeSourceEntries (take nActive replayBinders)
-            replayMapSourceFinal
-                | null replayBinders =
-                    IntMap.fromList
-                        [ (getNodeId sourceBinder, canonical replayBinder)
-                        | (sourceBinder, _arg) <- activeSourceEntries
-                        , Just replayBinder <- [IntMap.lookup (getNodeId sourceBinder) replayMapSource]
-                        ]
-                | otherwise =
+            replayMapSourceFinal =
                     IntMap.fromList
                         [ (getNodeId sourceBinder, replayBinder)
                         | ((sourceBinder, _), replayBinder) <- replayPairs
