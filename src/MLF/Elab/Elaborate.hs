@@ -104,14 +104,13 @@ elaborate
     :: TraceConfig
     -> GeneralizeAtWith
     -> Solved
-    -> Solved
     -> IntMap.IntMap EdgeWitness
     -> IntMap.IntMap EdgeTrace
     -> IntMap.IntMap Expansion
     -> AnnExpr
     -> Either ElabError ElabTerm
-elaborate traceCfg generalizeAtWith resPhi resGen edgeWitnesses edgeTraces edgeExpansions ann =
-    let constraint = Solved.originalConstraint resGen
+elaborate traceCfg generalizeAtWith solved edgeWitnesses edgeTraces edgeExpansions ann =
+    let constraint = Solved.originalConstraint solved
         keys = map (getNodeId . fst) (toListNode (cNodes constraint))
         baseToSolved =
             IntMap.fromList
@@ -129,7 +128,7 @@ elaborate traceCfg generalizeAtWith resPhi resGen edgeWitnesses edgeTraces edgeE
             , gaBaseToSolved = baseToSolved
             , gaSolvedToBase = solvedToBase
             }
-    in elaborateWithGen traceCfg generalizeAtWith resPhi resGen resGen gaParents edgeWitnesses edgeTraces edgeExpansions ann
+    in elaborateWithGen traceCfg generalizeAtWith solved solved solved gaParents edgeWitnesses edgeTraces edgeExpansions ann
 
 elaborateWithGen
     :: TraceConfig
