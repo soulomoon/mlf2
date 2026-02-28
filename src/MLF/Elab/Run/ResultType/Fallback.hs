@@ -86,7 +86,7 @@ computeResultTypeFallback ctx annCanon ann = do
                 -- Get the parameter type from the coercion's codomain.
                 -- We need to generalize at the annotation node to get the full
                 -- type with any forall wrappers.
-                let solvedForGen = rtcSolvedForGen ctx
+                let solvedForGen = rtcSolved ctx
                     bindParentsGa = rtcBindParentsGa ctx
                     planBuilder = rtcPlanBuilder ctx
                     c1 = rtcBaseConstraint ctx
@@ -160,8 +160,8 @@ computeResultTypeFallbackCore ctx annCanon ann = do
         edgeWitnesses = rtcEdgeWitnesses ctx
         edgeTraces = rtcEdgeTraces ctx
         edgeExpansions = rtcEdgeExpansions ctx
-        solvedForGen = rtcSolvedForGen ctx
-        solvedClean = rtcSolvedClean ctx
+        solvedForGen = rtcSolved ctx
+        solvedClean = rtcSolved ctx
         solved = solvedClean
         bindParentsGa = rtcBindParentsGa ctx
         planBuilder = rtcPlanBuilder ctx

@@ -1426,7 +1426,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     Just (eid, _) -> do
                         let edgeTraces' = IntMap.delete eid (prEdgeTraces pres)
                             generalizeAtWith' = Elab.generalizeAtWithBuilder (prPlanBuilder pres)
-                        case Elab.elaborate defaultTraceConfig generalizeAtWith' (solved) (solved) (prEdgeWitnesses pres) edgeTraces' (prEdgeExpansions pres) ann of
+                        case Elab.elaborate defaultTraceConfig generalizeAtWith' solved (prEdgeWitnesses pres) edgeTraces' (prEdgeExpansions pres) ann of
                             Left (Elab.MissingEdgeTrace (EdgeId eid')) -> eid' `shouldBe` eid
                             Left err -> expectationFailure ("Expected MissingEdgeTrace, got " ++ show err)
                             Right _ -> expectationFailure "Expected elaboration to fail due to missing trace"
