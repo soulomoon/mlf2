@@ -71,9 +71,7 @@ data ElabConfig = ElabConfig
     }
 
 data ElabEnv = ElabEnv
-    { eeResPhi :: Solved
-    , eeResReify :: Solved
-    , eeResGen :: Solved
+    { eeSolved :: Solved
     , eeGaParents :: GaBindParents
     , eeEdgeWitnesses :: IntMap.IntMap EdgeWitness
     , eeEdgeTraces :: IntMap.IntMap EdgeTrace
@@ -128,13 +126,11 @@ elaborate traceCfg generalizeAtWith solved edgeWitnesses edgeTraces edgeExpansio
             , gaBaseToSolved = baseToSolved
             , gaSolvedToBase = solvedToBase
             }
-    in elaborateWithGen traceCfg generalizeAtWith solved solved solved gaParents edgeWitnesses edgeTraces edgeExpansions ann
+    in elaborateWithGen traceCfg generalizeAtWith solved gaParents edgeWitnesses edgeTraces edgeExpansions ann
 
 elaborateWithGen
     :: TraceConfig
     -> GeneralizeAtWith
-    -> Solved
-    -> Solved
     -> Solved
     -> GaBindParents
     -> IntMap.IntMap EdgeWitness
@@ -142,14 +138,12 @@ elaborateWithGen
     -> IntMap.IntMap Expansion
     -> AnnExpr
     -> Either ElabError ElabTerm
-elaborateWithGen traceCfg generalizeAtWith resPhi resReify resGen gaParents edgeWitnesses edgeTraces edgeExpansions ann =
-    elaborateWithScope traceCfg generalizeAtWith resPhi resReify resGen gaParents edgeWitnesses edgeTraces edgeExpansions IntMap.empty ann
+elaborateWithGen traceCfg generalizeAtWith solved gaParents edgeWitnesses edgeTraces edgeExpansions ann =
+    elaborateWithScope traceCfg generalizeAtWith solved gaParents edgeWitnesses edgeTraces edgeExpansions IntMap.empty ann
 
 elaborateWithScope
     :: TraceConfig
     -> GeneralizeAtWith
-    -> Solved
-    -> Solved
     -> Solved
     -> GaBindParents
     -> IntMap.IntMap EdgeWitness
@@ -158,16 +152,14 @@ elaborateWithScope
     -> IntMap.IntMap NodeRef
     -> AnnExpr
     -> Either ElabError ElabTerm
-elaborateWithScope traceCfg generalizeAtWith resPhi resReify resGen gaParents edgeWitnesses edgeTraces edgeExpansions scopeOverrides ann =
+elaborateWithScope traceCfg generalizeAtWith solved gaParents edgeWitnesses edgeTraces edgeExpansions scopeOverrides ann =
     elaborateWithEnv
         ElabConfig
             { ecTraceConfig = traceCfg
             , ecGeneralizeAtWith = generalizeAtWith
             }
         ElabEnv
-            { eeResPhi = resPhi
-            , eeResReify = resReify
-            , eeResGen = resGen
+            { eeSolved = solved
             , eeGaParents = gaParents
             , eeEdgeWitnesses = edgeWitnesses
             , eeEdgeTraces = edgeTraces
@@ -182,8 +174,9 @@ elaborateWithEnv
     -> AnnExpr
     -> Either ElabError ElabTerm
 elaborateWithEnv config elabEnv ann = do
-    namedSetPhi <- namedNodes (resPhi)
-    namedSetReify <- namedNodes (resReify)
+    namedSet <- namedNodes solved
+    let namedSetPhi = namedSet
+        namedSetReify = namedSet
     let ElabOut { elabTerm = runElab } = para (elabAlg namedSetPhi namedSetReify) ann
     runElab Map.empty
   where
@@ -191,15 +184,13 @@ elaborateWithEnv config elabEnv ann = do
         { ecTraceConfig = traceCfg
         , ecGeneralizeAtWith = generalizeAtWithRaw
         } = config
-    resPhi = eeResPhi elabEnv
-    resReify = eeResReify elabEnv
-    resGen = eeResGen elabEnv
+    solved = eeSolved elabEnv
     gaParents = eeGaParents elabEnv
     edgeWitnesses = eeEdgeWitnesses elabEnv
     edgeTraces = eeEdgeTraces elabEnv
     edgeExpansions = eeEdgeExpansions elabEnv
     scopeOverrides = eeScopeOverrides elabEnv
-    canonical = Solved.canonical resReify
+    canonical = Solved.canonical solved
     scopeRootFromBase root =
         case IntMap.lookup (getNodeId (canonical root)) (gaSolvedToBase gaParents) of
             Nothing -> typeRef root
@@ -249,19 +240,19 @@ elaborateWithEnv config elabEnv ann = do
     generalizeAtNode :: NodeId -> Either ElabError (ElabScheme, IntMap.IntMap String)
     generalizeAtNode nodeId =
         let scopeRoot = scopeRootForNode nodeId
-            targetC = schemeBodyTarget resGen nodeId
+            targetC = schemeBodyTarget solved nodeId
             preferMoreCoherent primary fallback =
                 case fallback of
                     Right alt
                         | schemeSubstCoherenceScore alt > schemeSubstCoherenceScore primary -> alt
                     _ -> primary
-        in case generalizeAtWith (Just gaParents) resGen scopeRoot targetC of
+        in case generalizeAtWith (Just gaParents) solved scopeRoot targetC of
             Right out ->
-                let fallback = generalizeAtWith Nothing resGen scopeRoot targetC
+                let fallback = generalizeAtWith Nothing solved scopeRoot targetC
                     out' = preferMoreCoherent out fallback
                 in Right out'
             Left err | generalizeNeedsFallback err ->
-                case generalizeAtWith Nothing resGen scopeRoot targetC of
+                case generalizeAtWith Nothing solved scopeRoot targetC of
                     Right out -> Right out
                     Left err2 | generalizeNeedsFallback err2 -> do
                         tyFallback <- reifyNodeTypePreferringBound targetC
@@ -351,11 +342,11 @@ elaborateWithEnv config elabEnv ann = do
 
     reifyNodeTypePreferringBound :: NodeId -> Either ElabError ElabType
     reifyNodeTypePreferringBound nodeId = do
-        namedSet <- namedNodes (resReify)
+        namedSet <- namedNodes solved
         let nodeC = canonical nodeId
-        case Solved.lookupVarBound resReify nodeC of
-            Just bnd -> reifyTypeForParam namedSet resReify bnd
-            Nothing -> reifyTypeForParam namedSet resReify nodeC
+        case Solved.lookupVarBound solved nodeC of
+            Just bnd -> reifyTypeForParam namedSet solved bnd
+            Nothing -> reifyTypeForParam namedSet solved nodeC
 
     closeTermForAnnotation :: ElabTerm -> ElabTerm
     closeTermForAnnotation term =
@@ -379,10 +370,10 @@ elaborateWithEnv config elabEnv ann = do
     resolvedLambdaParamNode :: NodeId -> Maybe NodeId
     resolvedLambdaParamNode lamNodeId =
         let lamC = canonical lamNodeId
-        in case Solved.lookupNode resReify lamC of
+        in case Solved.lookupNode solved lamC of
             Just TyArrow{ tnDom = dom } -> Just dom
             Just TyVar{ tnBound = Just bnd } ->
-                case Solved.lookupNode resReify (canonical bnd) of
+                case Solved.lookupNode solved (canonical bnd) of
                     Just TyArrow{ tnDom = dom } -> Just dom
                     _ -> Nothing
             _ -> Nothing
@@ -537,7 +528,7 @@ elaborateWithEnv config elabEnv ann = do
                                     si <- Map.lookup v env
                                     let paramTy' =
                                             if shouldInlineParamTy
-                                                then inlineBoundVarsType (resGen) paramTy
+                                                then inlineBoundVarsType solved paramTy
                                                 else paramTy
                                     args <- inferInstAppArgs (siScheme si) paramTy'
                                     pure (instSeqApps args)
@@ -547,7 +538,7 @@ elaborateWithEnv config elabEnv ann = do
                                         Right (TArrow paramTy _) -> do
                                             let paramTy' =
                                                     if shouldInlineParamTy
-                                                        then inlineBoundVarsType (resGen) paramTy
+                                                        then inlineBoundVarsType solved paramTy
                                                         else paramTy
                                             args <- inferInstAppArgs (siScheme si) paramTy'
                                             pure (instSeqApps args)
@@ -944,7 +935,7 @@ elaborateWithEnv config elabEnv ann = do
                     )
                     () of
                     () -> pure ()
-                phi <- phiFromEdgeWitnessWithTrace traceCfg generalizeAtWith resReify (Just gaParents) mSchemeInfo' mTrace ew
+                phi <- phiFromEdgeWitnessWithTrace traceCfg generalizeAtWith solved (Just gaParents) mSchemeInfo' mTrace ew
                 case debugGeneralize
                     ("reifyInst phi edge=" ++ show eid ++ " phi=" ++ show phi)
                     () of
@@ -1025,13 +1016,13 @@ elaborateWithEnv config elabEnv ann = do
                                             Nothing -> IntMap.empty
                                     reifyArg arg =
                                         let argC = canonical arg
-                                        in case Solved.lookupVarBound resReify argC of
-                                            Just bnd -> reifyBoundWithNames (resReify) substForArgs bnd
-                                            Nothing -> reifyTypeWithNamedSetNoFallback (resReify) substForArgs namedSetReify argC
+                                        in case Solved.lookupVarBound solved argC of
+                                            Just bnd -> reifyBoundWithNames solved substForArgs bnd
+                                            Nothing -> reifyTypeWithNamedSetNoFallback solved substForArgs namedSetReify argC
                                 argTys <- case targetArgs of
                                     Just inferred -> pure inferred
                                     Nothing -> mapM reifyArg argNodes'
-                                let argTys' = map (inlineBoundVarsType (resReify)) argTys
+                                let argTys' = map (inlineBoundVarsType solved) argTys
                                 case debugGeneralize
                                     ("reifyInst fallback edge=" ++ show eid
                                         ++ " argTys=" ++ show argTys
@@ -1048,9 +1039,9 @@ elaborateWithEnv config elabEnv ann = do
     reifyTargetType :: IntSet.IntSet -> EdgeWitness -> SchemeInfo -> Either ElabError ElabType
     reifyTargetType namedSetReify ew si =
         let subst = siSubst si
-        in case Solved.lookupVarBound resReify (ewRight ew) of
-            Just bnd -> reifyTypeWithNamedSetNoFallback (resReify) subst namedSetReify bnd
-            Nothing -> reifyTypeWithNamedSetNoFallback (resReify) subst namedSetReify (ewRight ew)
+        in case Solved.lookupVarBound solved (ewRight ew) of
+            Just bnd -> reifyTypeWithNamedSetNoFallback solved subst namedSetReify bnd
+            Nothing -> reifyTypeWithNamedSetNoFallback solved subst namedSetReify (ewRight ew)
 
     inferInstAppArgs :: ElabScheme -> ElabType -> Maybe [ElabType]
     inferInstAppArgs scheme targetTy =
@@ -1103,7 +1094,7 @@ elaborateWithEnv config elabEnv ann = do
             ]
       where
         nodeExists nid =
-            isJust (Solved.lookupNode resReify (canonical nid))
+            isJust (Solved.lookupNode solved (canonical nid))
 
     fallbackArgCandidates :: Maybe EdgeTrace -> NodeId -> [NodeId]
     fallbackArgCandidates mTrace arg =

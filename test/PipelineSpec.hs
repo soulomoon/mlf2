@@ -165,6 +165,13 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 Left err -> expectationFailure $ "Reify error: " ++ show err
 
     describe "Integration Tests" $ do
+        it "single-solved migration removes eeRes* fields" $ do
+            elaborateSrc <- readFile "src/MLF/Elab/Elaborate.hs"
+            pipelineSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
+            forM_ ["eeResPhi", "eeResReify", "eeResGen"] $ \needle -> do
+                elaborateSrc `shouldSatisfy` (not . isInfixOf needle)
+                pipelineSrc `shouldSatisfy` (not . isInfixOf needle)
+
         it "uses presolution-native solved artifacts" $ do
             artifacts <- requireRight (runPipelineArtifactsDefault Set.empty (ELam "x" (EVar "x")))
             cUnifyEdges (prConstraint (paPresolution artifacts)) `shouldBe` []
