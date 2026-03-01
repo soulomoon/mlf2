@@ -123,7 +123,10 @@ runPipelineElabWithSolvedBuilder traceCfg genConstraints buildSolved expr = do
                         { snapUnionFind = Solved.canonicalMap res
                         , snapPreRewriteConstraint = c'
                         }
-            pure (Solved.rebuildWithConstraint res (srConstraint replayed))
+            let rebuilt = Solved.rebuildWithConstraint res (srConstraint replayed)
+            case Solved.validateCanonicalGraphStrict rebuilt of
+                [] -> pure rebuilt
+                vs -> Left (PipelineSolveError (Solve.ValidationFailed vs))
         solvedClean = Solved.pruneBindParentsSolved solvedView
         solvedCleanView = solvedClean
     case Solved.validateCanonicalGraphStrict solvedClean of
