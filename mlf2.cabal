@@ -338,7 +338,6 @@ test-suite mlf2-test
                       ExpansionMinimalitySpec,
                       FrozenParitySpec,
                       Constraint.SolvedSpec,
-                      DualPathSpec,
                       Parity.FrozenArtifacts,
                       SpecUtil,
 

@@ -59,11 +59,11 @@ import MLF.Elab.Run.ResultType.Util
     , instHasBoundForall
     , instantiateImplicitForalls
     )
-import MLF.Elab.Run.ResultType.Types (ResultTypeContext(..))
+import MLF.Elab.Run.ResultType.Types (ResultTypeInputs(..))
 
 -- | Compute result type from an annotation edge.
 computeResultTypeFromAnn
-    :: ResultTypeContext
+    :: ResultTypeInputs
     -> AnnExpr      -- ^ inner (post-redirect)
     -> AnnExpr      -- ^ innerPre (pre-redirect)
     -> NodeId       -- ^ annNodeId

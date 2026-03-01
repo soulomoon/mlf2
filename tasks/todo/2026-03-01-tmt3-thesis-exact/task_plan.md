@@ -38,3 +38,13 @@ Remove runtime load-bearing dependence on `rewriteConstraintWithUF` as a boundar
 |---|---:|---|
 | `tasks/todo/2026-03-01-tmt3-thesis-exact` missing in pod worktrees | 1 | Created folder and initialized `task_plan.md`, `findings.md`, and `progress.md`. |
 | Add/add merge conflicts on task files during Wave 1 integration | 1 | Consolidated pod notes into merged campaign-level task artifacts. |
+
+## Pod D Wave 2 Addendum
+### Goal
+Deliver DEV-TMT-ELAB-SOLVED-PROJECTION, DEV-TMT-RESULT-TYPE-CONTEXT, and DEV-TMT-DUAL-PATH-GUARDRAIL outcomes under owned Pod D files.
+
+### Status
+1. [completed] Remove runtime `Solved.fromPresolutionResult` dependency in `MLF.Elab.Run` path.
+2. [completed] Remove `ResultTypeContext` identifier from run-path result-type API (`ResultTypeInputs` replacement).
+3. [completed] Retire active `DualPathSpec` wiring from test harness/cabal.
+4. [completed] Run focused acceptance checks and prepare commit.

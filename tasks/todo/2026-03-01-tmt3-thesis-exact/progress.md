@@ -34,10 +34,19 @@
 - Merged `codex/tmt3-phi-source-domain-wave1`.
 - Merged `codex/tmt3-solve-no-rewrite-layer-wave1`.
 - Resolved add/add task-file conflicts by consolidating pod logs.
-- Pending: full integration gate (`cabal build all && cabal test`) and focused acceptance checks.
+- Full integration gate and focused acceptance checks passed.
 
 ## Pod B (Wave 2)
 - Added regression lock: non-replay normalization keeps omega witness ops (no strip divergence).
-- Removed runtime use of `stripForNonReplay` in `WitnessNorm`; normalized ops now flow directly to projection/validation.
-- Preserved strict replay-map fail-fast behavior; targeted replay-map boundary and fail-fast suites remain green.
-- Ownership blocker: complete symbol removal requires editing `src/MLF/Constraint/Presolution/Witness.hs` (outside Pod B ownership).
+- Removed runtime dependence on `stripForNonReplay`; pruning now lives directly in `WitnessNorm` path.
+- Removed compatibility exports/imports for `stripForNonReplay` from `Witness`/`WitnessCanon`.
+- Preserved strict replay-map fail-fast behavior and replay boundary checks.
+- Added runtime guard in pipeline solved-rebuild path: replayed constraint rebuild must pass `validateCanonicalGraphStrict`.
+
+## Pod D (Wave 2)
+- Removed runtime run-path dependence on `Solved.fromPresolutionResult` in `src/MLF/Elab/Run`.
+- Renamed run result-type boundary record `ResultTypeContext` -> `ResultTypeInputs`.
+- Retired active dual-path guardrail wiring in `test/Main.hs` and `mlf2.cabal`; removed orphan `test/DualPathSpec.hs`.
+- Replaced textual-only coverage with behavioral snapshot invariants in `PipelineSpec`.
+- Updated `SpecUtil` and frozen parity generation helpers to use snapshot-shaped solved reconstruction (`fromPreRewriteState`).
+- Added runtime guard in pipeline solved-rebuild path: replayed constraint rebuild must pass `validateCanonicalGraphStrict`.

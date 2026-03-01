@@ -1,6 +1,6 @@
 {-# LANGUAGE GADTs #-}
 module MLF.Elab.Run.ResultType (
-    ResultTypeContext(..),
+    ResultTypeInputs(..),
     computeResultTypeFromAnn,
     computeResultTypeFallback
 ) where
@@ -19,19 +19,19 @@ import MLF.Constraint.Types.Graph
 import qualified MLF.Constraint.NodeAccess
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Elab.Types (ElabType, ElabError)
-import MLF.Elab.Run.ResultType.Types (ResultTypeContext(..))
+import MLF.Elab.Run.ResultType.Types (ResultTypeInputs(..))
 import qualified MLF.Elab.Run.ResultType.Ann as Ann
 import qualified MLF.Elab.Run.ResultType.Fallback as Fallback
 
 -- Re-export computeResultTypeFromAnn from Ann module
-computeResultTypeFromAnn :: ResultTypeContext -> AnnExpr -> AnnExpr -> NodeId -> EdgeId -> Either ElabError ElabType
+computeResultTypeFromAnn :: ResultTypeInputs -> AnnExpr -> AnnExpr -> NodeId -> EdgeId -> Either ElabError ElabType
 computeResultTypeFromAnn = Ann.computeResultTypeFromAnn
 
 -- | Compute result type when there's no direct annotation (fallback path).
 -- This is a facade that handles the AAnn case by delegating to computeResultTypeFromAnn,
 -- and delegates the non-AAnn case to the Fallback submodule.
 computeResultTypeFallback
-    :: ResultTypeContext
+    :: ResultTypeInputs
     -> AnnExpr      -- ^ annCanon (post-redirect)
     -> AnnExpr      -- ^ ann (pre-redirect)
     -> Either ElabError ElabType

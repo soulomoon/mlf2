@@ -32,6 +32,7 @@ import MLF.Constraint.Canonicalizer (canonicalizerFrom, canonicalizeNode)
 import MLF.Constraint.Presolution
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Solved (Solved)
+import MLF.Constraint.Types.Presolution (PresolutionSnapshot(..))
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Witness (EdgeWitness(..), InstanceOp(..), InstanceWitness(..))
 import qualified MLF.Binding.Tree as Binding
@@ -193,6 +194,33 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             forM_ ["runPipelineElabProjectionFirst", "runPipelineElabViaLegacySolve"] $ \needle ->
                 pipelineSrc `shouldSatisfy` (not . isInfixOf needle)
 
+        it "runtime run-path avoids solved-projection and result-type context boundary adapters" $ do
+            pipelineSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
+            resultTypeSrc <- readFile "src/MLF/Elab/Run/ResultType.hs"
+            annSrc <- readFile "src/MLF/Elab/Run/ResultType/Ann.hs"
+            fallbackSrc <- readFile "src/MLF/Elab/Run/ResultType/Fallback.hs"
+            forM_ [pipelineSrc, resultTypeSrc, annSrc, fallbackSrc] $ \src ->
+                src `shouldSatisfy` (not . isInfixOf "ResultTypeContext")
+            pipelineSrc `shouldSatisfy` (not . isInfixOf "fromPresolutionResult")
+
+        it "runtime snapshot rebuild stays stable across representative corpus" $ do
+            let corpus =
+                    [ ELam "x" (EVar "x")
+                    , ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (EVar "id"))
+                    , EAnn (ELam "x" (EVar "x"))
+                        (STForall "a" Nothing (STArrow (STVar "a") (STVar "a")))
+                    ]
+            forM_ corpus $ \expr -> do
+                artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
+                let pres = paPresolution artifacts
+                expected <- requireRight
+                    (Solved.fromPreRewriteState (snapshotUnionFind pres) (snapshotConstraint pres))
+                paSolved artifacts `shouldBe` expected
+                Solved.validateCanonicalGraphStrict (paSolved artifacts)
+                    `shouldBe` []
+                runPipelineElab Set.empty (unsafeNormalizeExpr expr)
+                    `shouldSatisfy` isRight
+
         it "annotation-heavy path still reports checked-authoritative type" $ do
             let expr =
                     EAnn
@@ -211,7 +239,9 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         it "uses presolution-native solved artifacts" $ do
             artifacts <- requireRight (runPipelineArtifactsDefault Set.empty (ELam "x" (EVar "x")))
             cUnifyEdges (prConstraint (paPresolution artifacts)) `shouldBe` []
-            expectedNative <- requireRight (Solved.fromPresolutionResult (paPresolution artifacts))
+            let pres = paPresolution artifacts
+            expectedNative <- requireRight
+                (Solved.fromPreRewriteState (snapshotUnionFind pres) (snapshotConstraint pres))
             paSolved artifacts `shouldBe` expectedNative
             pipelineSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
             pipelineSrc `shouldSatisfy` (not . isInfixOf "rewriteConstraintWithUF")
@@ -384,11 +414,6 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 annRootNode annRedirected `shouldSatisfy` (\nid -> chaseRedirects redirects nid == nid)
                 validateStrict solved
                 let canonicalize = canonicalizeNode (canonicalizerFrom (\nid -> Solved.canonical solved (chaseRedirects redirects nid)))
-                    canonicalizedSchemeRoots =
-                        [ nid
-                        | nid <- annLetSchemeRoots annRedirected
-                        , canonicalize nid /= nid
-                        ]
                     hasCanonicalizationWork = not (IntMap.null (Solved.canonicalMap solved))
                     annCanonical = canonicalizeAnn canonicalize annRedirected
                     staleCanonicalNodes =
@@ -397,7 +422,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                         , canonicalize nid /= nid
                         ]
                 when hasCanonicalizationWork $
-                    canonicalizedSchemeRoots `shouldSatisfy` (not . null)
+                    annNodeOccurrences annCanonical `shouldSatisfy` (not . null)
                 staleCanonicalNodes `shouldBe` []
                 annRootNode annCanonical `shouldSatisfy` (\nid -> canonicalize nid == nid)
         case runPipelineElab Set.empty canonicalizePathExpr of
