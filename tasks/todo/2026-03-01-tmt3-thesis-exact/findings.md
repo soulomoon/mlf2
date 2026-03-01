@@ -1,19 +1,18 @@
-# Findings — 2026-03-01 Pod A Wave 1
+# Findings — 2026-03-01 TMT3 Wave 1
 
-- `Solved.canonical` is referenced in owned Phi files: `Translate.hs`, `Omega.hs`, `IdentityBridge.hs` (via stored canonical function).
-- Existing tests already assert strict fail-fast for replay-map domain mismatch and codomain-outside-domain.
-- `IdentityBridge` currently supports canonical alias matching in `lookupBinderIndex` (exact + alias match classes).
-- Mission implies removing runtime canonical/class-member fallback policy from Phi path while retaining trace-domain adaptation.
-- Added RED expectations:
-  - `IdentityBridge.isBinderNode` now expected to reject canonical-alias-only binder matches.
-  - `IdentityBridge.lookupBinderIndex` now expected to reject alias-only canonical identity matches.
-  - New elaboration regression expects replay-map codomain validation to reject targets that only canonicalize into replay binder domain.
+## Pod A (`phi-source-domain`)
+- `Solved.canonical`-driven alias fallback in Phi path was load-bearing in `Translate`, `Omega`, and `IdentityBridge`.
 - Strict replay-map codomain validation now rejects targets that only canonicalize into replay binder domain.
-- IdentityBridge now keeps source-key operations in witness raw key-space and drops canonical-alias lookup fallback.
-- Follow-up acceptance fix: removed remaining `Solved.canonical` call-site tokens under `src/MLF/Elab/Phi` by switching to unqualified `canonical` imports in `Context`, `Translate`, and `Omega`.
-- P0 fix: `OpGraft` now has strict-first resolution with constrained fallback:
-  - first raw replay/spine match,
-  - then replay-map-in-spine recovery,
-  - then (only when replay contract is empty) binder-name recovery against current spine IDs.
-- Merge/RaiseMerge no longer use canonical-equality shortcut decisions (`n==m` and root checks are replay-space/raw).
-- Added focused A6 positive locks in `test/Phi/AlignmentSpec.hs` (C4) to keep bounded-alias/coercion parity covered by Pod A focused run.
+- `IdentityBridge` now keeps key operations in witness raw key-space and drops canonical-alias binder lookup fallback.
+- `OpGraft` now resolves non-root binders via strict-first replay-space checks, with constrained recovery only from replay-safe mappings.
+- Merge and raise-merge decisions now use replay/raw identity comparisons instead of canonical-equality shortcuts.
+
+## Pod C (`solve-no-rewrite-layer`)
+- One runtime boundary call existed in pipeline (`rewriteConstraintWithUF`).
+- Pipeline now rebuilds solved constraint via snapshot replay (`solveResultFromSnapshot`) instead of directly calling rewrite helper.
+- Solver snapshot contract is explicitly tested for replay equality and UF rewrite equivalence.
+- Required runtime grep invariant for `rewriteConstraintWithUF` in `src/MLF/Elab/Run` and `src/MLF/Constraint/Presolution` is now clean.
+
+## Integration Notes
+- Wave 1 merge conflicts were limited to task tracking files; code merged without semantic conflicts.
+- Wave 1 is ready for integration gate execution.

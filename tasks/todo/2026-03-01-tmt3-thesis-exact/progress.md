@@ -1,12 +1,8 @@
-# Progress — 2026-03-01 Pod A Wave 1
+# Progress — 2026-03-01 TMT3 Wave 1
 
-## Log
+## Pod A
 - Initialized task folder and planning files.
 - Scanned owned Phi modules and targeted specs.
-- Identified fallback-sensitive locations:
-  - `Translate.computeTraceBinderReplayBridge` canonical domain checks.
-  - `Omega` local canonical fallbacks in replay target/domain checks.
-  - `IdentityBridge.lookupBinderIndex` canonical alias match class.
 - Updated tests first (RED):
   - `test/Phi/IdentityBridgeSpec.hs`
   - `test/ElaborationSpec.hs`
@@ -14,17 +10,28 @@
   - `IdentityBridge`: removed canonical-alias matching from source key and binder-index resolution.
   - `Translate`: replay-map codomain/domain validation now raw replay key-space only.
   - `Omega`: removed canonical-based binder acceptance in replay-target resolution.
-- Verification:
-  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Phi alignment" --match "fails fast when replay-map source domain mismatches trace binder sources" --match "fails fast when replay-map codomain target is outside replay binder domain" --match "IdentityBridge"'` => PASS (30 examples).
-  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "fails fast when replay-map codomain only matches replay domain via canonical alias"'` => PASS (1 example).
-  - `rg -n "Solved\\.canonical" src/MLF/Elab/Phi` executed for required audit output.
-- Follow-up hard-check #1:
-  - `rg -n "Solved\\.canonical" src/MLF/Elab/Phi` => no matches.
-  - Targeted command with added canonical-alias fail-fast matcher => PASS (31 examples).
-- Reproduced blocker state: full suite failed with 8 A6-related regressions (`OpGraft: binder not found in quantifier spine`).
-- Implemented constrained OpGraft fallback + merge/raise-merge decision cleanup in `Omega`.
-- Added `Phi alignment` C4 regression tests for bounded-alias/coercion parity.
+- Follow-up fix for parity regressions:
+  - Added constrained OpGraft fallback for replay-safe recovery.
+  - Removed canonical-equality shortcuts in merge/raise-merge decisions.
+  - Added focused C4 locks in `test/Phi/AlignmentSpec.hs`.
 - Validation:
-  - focused Pod A command => PASS (33 examples, 0 failures)
-  - full suite `cabal test mlf2-test` => PASS (903 examples, 0 failures)
-  - `rg -n "Solved\\.canonical" src/MLF/Elab/Phi` => no matches.
+  - Focused Pod A tests passed (33 examples, 0 failures).
+  - Full suite `cabal test mlf2-test` passed (903 examples, 0 failures).
+  - `rg -n "Solved\\.canonical" src/MLF/Elab/Phi` returned no matches.
+
+## Pod C
+- Confirmed branch and worktree ownership.
+- Ran required audit command `rg -n "rewriteConstraintWithUF" src/MLF/Elab/Run src/MLF/Constraint/Presolution`; found one runtime call in pipeline.
+- Added lock assertion in `test/PipelineSpec.hs` that pipeline runtime path does not reference `rewriteConstraintWithUF`.
+- Replaced boundary rewrite in pipeline with snapshot replay (`solveResultFromSnapshot` + `SolveSnapshot`) and rebuild from canonical solved constraint.
+- Updated `test/SolveSpec.hs` snapshot test to assert replayed solve result equality.
+- Validation:
+  - Required grep command returned no matches in owned runtime directories.
+  - Targeted Pod C tests passed (45 examples, 0 failures).
+
+## Wave 1 Integration
+- Created `codex/tmt3-wave1-integration`.
+- Merged `codex/tmt3-phi-source-domain-wave1`.
+- Merged `codex/tmt3-solve-no-rewrite-layer-wave1`.
+- Resolved add/add task-file conflicts by consolidating pod logs.
+- Pending: full integration gate (`cabal build all && cabal test`) and focused acceptance checks.
