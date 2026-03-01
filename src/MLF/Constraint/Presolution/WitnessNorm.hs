@@ -28,7 +28,6 @@ import MLF.Constraint.Presolution.StateAccess (getConstraintAndCanonical)
 import MLF.Constraint.Presolution.Validation (translatableWeakenedNodes)
 import MLF.Constraint.Presolution.Witness (
     normalizeInstanceOpsCore,
-    stripForNonReplay,
     OmegaNormalizeEnv(OmegaNormalizeEnv, oneRoot),
     validateNormalizedWitness,
     )
@@ -391,7 +390,49 @@ normalizeEdgeWitnessesM = do
             Right ops' -> pure ops'
             Left err ->
                 throwError (WitnessNormalizationError (EdgeId eid) err)
-        let opsNorm = stripForNonReplay env opsNormRaw
+        let pruneOpsForOutput ops
+                | not (null replayBindersAtRoot) = ops
+                | not isAnnEdge = mapMaybe pruneNoReplayOp ops
+                | not hasNonPairedWeaken = mapMaybe prunePairedGraftWeaken ops
+                | otherwise = mapMaybe prunePairedWeaken ops
+              where
+                graftTargetKeys = IntSet.fromList
+                    [ getNodeId (canonical target)
+                    | OpGraft _ target <- ops
+                    ]
+                hasNonPairedWeaken = any
+                    (\case
+                        OpWeaken target ->
+                            IntSet.notMember (getNodeId (canonical target)) graftTargetKeys
+                        _ ->
+                            False
+                    )
+                    ops
+                pruneNoReplayOp op = case op of
+                    OpGraft{} ->
+                        Nothing
+                    OpMerge{} ->
+                        Nothing
+                    OpRaiseMerge{} ->
+                        Nothing
+                    OpWeaken target
+                        | IntSet.member (getNodeId (canonical target)) graftTargetKeys ->
+                            Nothing
+                    _ ->
+                        Just op
+                prunePairedGraftWeaken op = case op of
+                    OpGraft{} ->
+                        Nothing
+                    OpWeaken{} ->
+                        Nothing
+                    _ ->
+                        Just op
+                prunePairedWeaken (OpWeaken target)
+                    | IntSet.member (getNodeId (canonical target)) graftTargetKeys
+                    , IntSet.notMember (getNodeId (canonical target)) interiorNorm =
+                        Nothing
+                prunePairedWeaken op = Just op
+            opsNorm = pruneOpsForOutput opsNormRaw
         let replayBinders = replayBindersAtRoot
             projectOpTargetsNoReplay op =
                 let project = sourceBinderForOpTarget
