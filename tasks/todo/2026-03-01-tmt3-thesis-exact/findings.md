@@ -11,3 +11,9 @@
 - Strict replay-map codomain validation now rejects targets that only canonicalize into replay binder domain.
 - IdentityBridge now keeps source-key operations in witness raw key-space and drops canonical-alias lookup fallback.
 - Follow-up acceptance fix: removed remaining `Solved.canonical` call-site tokens under `src/MLF/Elab/Phi` by switching to unqualified `canonical` imports in `Context`, `Translate`, and `Omega`.
+- P0 fix: `OpGraft` now has strict-first resolution with constrained fallback:
+  - first raw replay/spine match,
+  - then replay-map-in-spine recovery,
+  - then (only when replay contract is empty) binder-name recovery against current spine IDs.
+- Merge/RaiseMerge no longer use canonical-equality shortcut decisions (`n==m` and root checks are replay-space/raw).
+- Added focused A6 positive locks in `test/Phi/AlignmentSpec.hs` (C4) to keep bounded-alias/coercion parity covered by Pod A focused run.

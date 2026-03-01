@@ -21,3 +21,10 @@
 - Follow-up hard-check #1:
   - `rg -n "Solved\\.canonical" src/MLF/Elab/Phi` => no matches.
   - Targeted command with added canonical-alias fail-fast matcher => PASS (31 examples).
+- Reproduced blocker state: full suite failed with 8 A6-related regressions (`OpGraft: binder not found in quantifier spine`).
+- Implemented constrained OpGraft fallback + merge/raise-merge decision cleanup in `Omega`.
+- Added `Phi alignment` C4 regression tests for bounded-alias/coercion parity.
+- Validation:
+  - focused Pod A command => PASS (33 examples, 0 failures)
+  - full suite `cabal test mlf2-test` => PASS (903 examples, 0 failures)
+  - `rg -n "Solved\\.canonical" src/MLF/Elab/Phi` => no matches.

@@ -735,56 +735,46 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                                 , "  canonical: " ++ show bvC
                                 ]
                     else do
-                        let bvInSpine =
-                                case lookupBinderIndex binderKeys (vSpineIds vs) bvReplay of
-                                    Just _ -> Just bvReplay
-                                    Nothing -> listToMaybe (mappedReplayTargetsInSpine binderKeys vs bvReplay)
-                        case bvInSpine of
+                        bvResolved <- resolveNonRootGraftBinder binderKeys vs lookupBinder bv bvReplay
+                        case lookupBinderIndex binderKeys (vSpineIds vs) bvResolved of
                             Nothing -> Left $ PhiTranslatabilityError
                                 [ "OpGraft: binder not found in quantifier spine"
                                 , "  target node: " ++ show bv
                                 , "  canonical: " ++ show bvC
                                 ]
-                            Just bvResolved -> do
-                                case lookupBinderIndex binderKeys (vSpineIds vs) bvResolved of
-                                    Nothing -> Left $ PhiTranslatabilityError
-                                        [ "OpGraft: binder not found in quantifier spine"
-                                        , "  target node: " ++ show bv
-                                        , "  canonical: " ++ show bvC
-                                        ]
-                                    Just i -> do
-                                        let mbBound = vSpineBoundAt vs i
-                                        if mbBound /= Just TBottom && mbBound /= Nothing
-                                            then do
-                                                argTy <- reifyTypeArg namedSet' Nothing (graftArgFor arg bv)
-                                                let boundTy = maybe TBottom tyToElab mbBound
-                                                if alphaEqType argTy boundTy
-                                                    then
-                                                        -- Bounded-match: bound already equals graft arg, so
-                                                        -- OpGraft is a no-op. The adjacent OpWeaken will emit
-                                                        -- InstElim which substitutes the existing bound (thesis Def. 14.2.1).
-                                                        go binderKeys namedSet' vs accum rest lookupBinder
-                                                    else if argTy == TBottom
-                                                        then
-                                                            -- Bottom arg on bounded binder: no-op (OpWeaken will emit InstElim)
-                                                            go binderKeys namedSet' vs accum rest lookupBinder
-                                                    else
-                                                        Left $
-                                                            PhiTranslatabilityError
-                                                                [ "OpGraft requires target binder to be unbounded/⊥-bounded or match its explicit bound"
-                                                                , "  target node: " ++ show bv
-                                                                , "  canonical: " ++ show bvC
-                                                                , "  binder bound: " ++ show mbBound
-                                                                , "  graft arg: " ++ show argTy
-                                                                ]
-                                            else do
-                                                i' <- binderIndex binderKeys (vSpineIds vs) bvResolved
-                                                argTy <- reifyTypeArg namedSet' (Just bvResolved) (graftArgFor arg bv)
-                                                prefix <- prefixBinderNames vs i'
-                                                let inst = underContext prefix (InstInside (InstBot argTy))
-                                                    newBound = either (const Nothing) Just (elabToBound argTy)
-                                                    vs' = vsUpdateBound i' newBound vs
-                                                go binderKeys namedSet' vs' (inst : accum) rest lookupBinder
+                            Just i -> do
+                                let mbBound = vSpineBoundAt vs i
+                                if mbBound /= Just TBottom && mbBound /= Nothing
+                                    then do
+                                        argTy <- reifyTypeArg namedSet' Nothing (graftArgFor arg bv)
+                                        let boundTy = maybe TBottom tyToElab mbBound
+                                        if alphaEqType argTy boundTy
+                                            then
+                                                -- Bounded-match: bound already equals graft arg, so
+                                                -- OpGraft is a no-op. The adjacent OpWeaken will emit
+                                                -- InstElim which substitutes the existing bound (thesis Def. 14.2.1).
+                                                go binderKeys namedSet' vs accum rest lookupBinder
+                                            else if argTy == TBottom
+                                                then
+                                                    -- Bottom arg on bounded binder: no-op (OpWeaken will emit InstElim)
+                                                    go binderKeys namedSet' vs accum rest lookupBinder
+                                                else
+                                                    Left $
+                                                        PhiTranslatabilityError
+                                                            [ "OpGraft requires target binder to be unbounded/⊥-bounded or match its explicit bound"
+                                                            , "  target node: " ++ show bv
+                                                            , "  canonical: " ++ show bvC
+                                                            , "  binder bound: " ++ show mbBound
+                                                            , "  graft arg: " ++ show argTy
+                                                            ]
+                                    else do
+                                        i' <- binderIndex binderKeys (vSpineIds vs) bvResolved
+                                        argTy <- reifyTypeArg namedSet' (Just bvResolved) (graftArgFor arg bv)
+                                        prefix <- prefixBinderNames vs i'
+                                        let inst = underContext prefix (InstInside (InstBot argTy))
+                                            newBound = either (const Nothing) Just (elabToBound argTy)
+                                            vs' = vsUpdateBound i' newBound vs
+                                        go binderKeys namedSet' vs' (inst : accum) rest lookupBinder
 
         (OpWeaken bv : rest) -> do
             bvReplay <- resolveTraceBinderTarget False "OpWeaken" bv
@@ -927,7 +917,7 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                         , "  target node: " ++ show m
                         , "  canonical: " ++ show (canonicalNode mReplay)
                         ]
-                else if canonicalNode nReplay == canonicalNode mReplay
+                else if nReplay == mReplay
                     then go binderKeys namedSet' vs accum rest lookupBinder
                 else do
                     mName <- binderNameFor binderKeys vs mReplay lookupBinder
@@ -960,9 +950,7 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                             , "  canonical: " ++ show (canonicalNode mReplay)
                             ]
                         else do
-                            let nC = canonicalNode nReplay
-                                rC = canonicalNode orderRoot
-                            if nC == rC
+                            if nReplay == orderRoot
                                 then do
                                     mName <- binderNameFor binderKeys vs mReplay lookupBinder
                                     let vs' = VSpine [] BodyNonBottom
@@ -1312,6 +1300,71 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
             Just _ -> True
             Nothing -> False
         ]
+
+    -- | Resolve a non-root OpGraft binder target.
+    --
+    -- Strict-first policy:
+    --   1) require direct raw-key binder+spine membership, else
+    --   2) allow replay-map keyed recovery only if the recovered target is
+    --      already a binder in the current replay spine.
+    -- This keeps fallback constrained to validated replay-domain mappings.
+    resolveNonRootGraftBinder
+        :: IntSet.IntSet
+        -> VSpine
+        -> (NodeId -> Maybe String)
+        -> NodeId
+        -> NodeId
+        -> Either ElabError NodeId
+    resolveNonRootGraftBinder binderKeys vs lookupBinder sourceTarget replayTarget =
+        case lookupBinderIndex binderKeys (vSpineIds vs) replayTarget of
+            Just _ -> Right replayTarget
+            Nothing ->
+                case listToMaybe (replaySafeRecovered ++ nameSpineRecovered) of
+                    Just recoveredBinder -> Right recoveredBinder
+                    Nothing -> Left (unresolvedGraftError "binder target missing from quantifier spine")
+      where
+        replaySafeRecovered =
+            dedupNodeIds
+                ( mappedReplayTargetsInSpine binderKeys vs replayTarget
+                    ++ mappedReplayTargetsInSpine binderKeys vs sourceTarget
+                )
+        nameSpineRecovered
+            | not (IntSet.null traceBinderSources) || not (IntMap.null traceBinderReplayMap) = []
+            | otherwise =
+                case dedupNodeIds nameMatches of
+                    [single] -> [single]
+                    _ -> []
+          where
+            spineBindersWithName =
+                [ (nid, vSpineNameAt vs i)
+                | (i, Just nid) <- zip [0 :: Int ..] (vSpineIds vs)
+                , isBinderNode binderKeys nid
+                ]
+            targetNames =
+                Set.fromList
+                    [ nm
+                    | Just nm <-
+                        [ lookupBinder sourceTarget
+                        , lookupBinder replayTarget
+                        ]
+                    ]
+            nameMatches =
+                [ nid
+                | (nid, nm) <- spineBindersWithName
+                , Set.member nm targetNames
+                ]
+        unresolvedGraftError reason =
+            PhiTranslatabilityError
+                [ "OpGraft: binder not found in quantifier spine"
+                , "  reason: " ++ reason
+                , "  op-target: " ++ show sourceTarget
+                , "  replay-target: " ++ show replayTarget
+                , "  replayMapRecovered: " ++ show replaySafeRecovered
+                , "  nameSpineRecovered: " ++ show nameSpineRecovered
+                , "  ids: " ++ show (vSpineIds vs)
+                , "  replayMapDomain: " ++ show (IntMap.keys traceBinderReplayMap)
+                , "  replayMapKeys: " ++ show (IntSet.toList traceBinderMapDomain)
+                ]
 
     -- | Resolve a non-root OpWeaken binder target.
     --

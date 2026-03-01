@@ -7,10 +7,10 @@ import Test.Hspec
 
 import MLF.Constraint.Presolution (PresolutionResult(..), EdgeTrace(..))
 import MLF.Constraint.Types.Graph (typeRef)
-import MLF.Elab.Pipeline (runPipelineElab)
-import MLF.Frontend.Syntax (Expr(..), SrcTy(..))
+import MLF.Elab.Pipeline (runPipelineElab, runPipelineElabChecked)
+import MLF.Frontend.Syntax (Expr(..), SrcTy(..), Lit(..))
 import qualified MLF.Binding.Tree as Binding
-import SpecUtil (unsafeNormalizeExpr, runPipelineArtifactsDefault, PipelineArtifacts(..))
+import SpecUtil (unsafeNormalizeExpr, runPipelineArtifactsDefault, PipelineArtifacts(..), mkForalls)
 
 spec :: Spec
 spec = describe "Phi alignment" $ do
@@ -65,3 +65,52 @@ spec = describe "Phi alignment" $ do
                 case result of
                     Left err -> expectationFailure (show err)
                     Right _ -> pure ()
+
+    describe "C4: A6 bounded-alias coercion regressions stay green" $ do
+        it "bounded-alias coercion path succeeds in unchecked and checked pipelines" $ do
+            let rhs = ELam "x" (ELam "y" (EVar "x"))
+                schemeTy =
+                    mkForalls
+                        [ ("a", Nothing)
+                        , ("b", Just (STVar "a"))
+                        ]
+                        (STArrow (STVar "a") (STArrow (STVar "b") (STVar "a")))
+                ann =
+                    STForall "a" Nothing
+                        (STArrow (STVar "a") (STArrow (STVar "a") (STVar "a")))
+                expr =
+                    ELet "c" (EAnn rhs schemeTy)
+                        (EAnn (EVar "c") ann)
+                normExpr = unsafeNormalizeExpr expr
+            case runPipelineElab Set.empty normExpr of
+                Left err -> expectationFailure (show err)
+                Right (_, tyUnchecked) ->
+                    case runPipelineElabChecked Set.empty normExpr of
+                        Left err -> expectationFailure (show err)
+                        Right (_, tyChecked) ->
+                            show tyUnchecked `shouldBe` show tyChecked
+
+        it "applied bounded-coercion path succeeds in unchecked and checked pipelines" $ do
+            let rhs = ELam "x" (ELam "y" (EVar "x"))
+                schemeTy =
+                    mkForalls
+                        [ ("a", Nothing)
+                        , ("b", Just (STVar "a"))
+                        ]
+                        (STArrow (STVar "a") (STArrow (STVar "b") (STVar "a")))
+                ann =
+                    STForall "a" Nothing
+                        (STArrow (STVar "a") (STArrow (STVar "a") (STVar "a")))
+                expr =
+                    ELet "c" (EAnn rhs schemeTy)
+                        (EApp
+                            (EApp (EAnn (EVar "c") ann) (ELit (LInt 1)))
+                            (ELit (LInt 2)))
+                normExpr = unsafeNormalizeExpr expr
+            case runPipelineElab Set.empty normExpr of
+                Left err -> expectationFailure (show err)
+                Right (_, tyUnchecked) ->
+                    case runPipelineElabChecked Set.empty normExpr of
+                        Left err -> expectationFailure (show err)
+                        Right (_, tyChecked) ->
+                            show tyUnchecked `shouldBe` show tyChecked
