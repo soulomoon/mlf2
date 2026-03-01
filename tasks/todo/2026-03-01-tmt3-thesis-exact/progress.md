@@ -35,3 +35,9 @@
 - Merged `codex/tmt3-solve-no-rewrite-layer-wave1`.
 - Resolved add/add task-file conflicts by consolidating pod logs.
 - Pending: full integration gate (`cabal build all && cabal test`) and focused acceptance checks.
+
+## Pod B (Wave 2)
+- Added regression lock: non-replay normalization keeps omega witness ops (no strip divergence).
+- Removed runtime use of `stripForNonReplay` in `WitnessNorm`; normalized ops now flow directly to projection/validation.
+- Preserved strict replay-map fail-fast behavior; targeted replay-map boundary and fail-fast suites remain green.
+- Ownership blocker: complete symbol removal requires editing `src/MLF/Constraint/Presolution/Witness.hs` (outside Pod B ownership).

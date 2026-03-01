@@ -19,7 +19,6 @@ import Data.Functor.Foldable (ListF(..), ana, cata)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.List (partition, sortBy)
-import Data.Maybe (mapMaybe)
 
 import MLF.Constraint.Types.Graph (NodeId(..), NodeRef(..), getNodeId, nodeRefFromKey, typeRef)
 import MLF.Constraint.Types.Witness (InstanceOp(..))
@@ -395,43 +394,17 @@ normalizeInstanceOpsCore env ops0 = do
             LT -> Right ()
             _ -> Left (MergeDirectionInvalid (canon n) (canon m))
 
--- | Strip ops that are irrelevant for non-replay edges or annotation edges.
--- For replay edges (replayDomainBinders non-empty) this is a no-op.
-stripForNonReplay :: OmegaNormalizeEnv -> [InstanceOp] -> [InstanceOp]
-stripForNonReplay env ops
-    | not (null (replayDomainBinders env)) = ops  -- replay edge: pass through
-    | not (isAnnotationEdge env) = mapMaybe stripNoReplayOp ops
-    | not hasNonPairedWeaken = mapMaybe stripPairedGraftWeaken ops
-    | otherwise = mapMaybe stripPairedWeaken ops
-  where
-    canon = canonical env
-    graftTargetKeys = IntSet.fromList
-        [ getNodeId (canon target) | OpGraft _ target <- ops ]
-    hasNonPairedWeaken = any
-        (\case OpWeaken t -> IntSet.notMember (getNodeId (canon t)) graftTargetKeys
-               _ -> False) ops
-    stripNoReplayOp op = case op of
-        OpGraft{}       -> Nothing
-        OpMerge{}       -> Nothing
-        OpRaiseMerge{}  -> Nothing
-        OpWeaken target
-            | IntSet.member (getNodeId (canon target)) graftTargetKeys -> Nothing
-        _ -> Just op
-    stripPairedGraftWeaken op = case op of
-        OpGraft{}  -> Nothing
-        OpWeaken{} -> Nothing
-        _ -> Just op
-    stripPairedWeaken (OpWeaken target)
-        | IntSet.member (getNodeId (canon target)) graftTargetKeys
-        , IntSet.notMember (getNodeId (canon target)) (interiorRaw env) = Nothing
-    stripPairedWeaken op = Just op
-
 -- | Normalize Ω and validate paper invariants (conditions (1)–(5)).
 normalizeInstanceOpsFull :: OmegaNormalizeEnv -> [InstanceOp] -> Either OmegaNormalizeError [InstanceOp]
 normalizeInstanceOpsFull env ops0 = do
     ops <- normalizeInstanceOpsCore env ops0
     validateNormalizedWitness env ops
     pure ops
+
+-- Compatibility shim for callers that still import this symbol.
+-- Non-replay stripping is no longer part of normalization semantics.
+stripForNonReplay :: OmegaNormalizeEnv -> [InstanceOp] -> [InstanceOp]
+stripForNonReplay _ = id
 
 -- | Drop locally redundant witness operations without changing order.
 -- This removes consecutive duplicate raises and self-merges.

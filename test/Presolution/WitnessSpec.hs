@@ -2018,7 +2018,7 @@ spec = do
                         , ewRight = root
                         , ewRoot = root
                         , ewForallIntros = 0
-                        , ewWitness = InstanceWitness [OpWeaken source]
+                        , ewWitness = InstanceWitness [OpGraft argNode source, OpWeaken source]
                         }
                 edgeTrace =
                     EdgeTrace
@@ -2051,10 +2051,15 @@ spec = do
                 Left err ->
                     expectationFailure ("normalizeEdgeWitnessesM failed: " ++ show err)
                 Right (_, st') ->
-                    case IntMap.lookup edgeId (psEdgeTraces st') of
-                        Nothing ->
+                    case ( IntMap.lookup edgeId (psEdgeWitnesses st')
+                         , IntMap.lookup edgeId (psEdgeTraces st')
+                         ) of
+                        (Nothing, _) ->
+                            expectationFailure "Expected normalized witness in psEdgeWitnesses"
+                        (_, Nothing) ->
                             expectationFailure "Expected normalized trace in psEdgeTraces"
-                        Just tr' -> do
+                        (Just ew', Just tr') -> do
+                            getInstanceOps (ewWitness ew') `shouldBe` []
                             etBinderArgs tr' `shouldBe` []
                             etBinderReplayMap tr' `shouldBe` IntMap.empty
 
