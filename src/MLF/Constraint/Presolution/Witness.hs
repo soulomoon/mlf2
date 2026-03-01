@@ -19,7 +19,6 @@ module MLF.Constraint.Presolution.Witness (
     coalesceRaiseMergeWithEnv,
     reorderWeakenWithEnv,
     assertNoStandaloneGrafts,
-    stripForNonReplay,
     validateNormalizedWitness,
     OmegaNormalizeEnv(..),
     OmegaNormalizeError(..)
@@ -50,8 +49,7 @@ import MLF.Constraint.Presolution.WitnessCanon (
     normalizeInstanceOpsFull,
     coalesceRaiseMergeWithEnv,
     reorderWeakenWithEnv,
-    assertNoStandaloneGrafts,
-    stripForNonReplay
+    assertNoStandaloneGrafts
     )
 import MLF.Util.RecursionSchemes (cataM)
 

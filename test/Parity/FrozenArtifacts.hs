@@ -19,6 +19,7 @@ import qualified Data.Set as Set
 import MLF.Constraint.Acyclicity (checkAcyclicity)
 import MLF.Constraint.Normalize (normalize)
 import MLF.Constraint.Presolution (computePresolution)
+import MLF.Constraint.Types.Presolution (PresolutionSnapshot(..))
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types.Graph (NodeId(..))
 import MLF.Elab.Pipeline (defaultTraceConfig, prettyDisplay, runPipelineElab)
@@ -124,7 +125,7 @@ buildAnchorResult (label, expr) = do
     let c1 = normalize c0
     acyc <- firstShowE (checkAcyclicity c1)
     pres <- firstShowE (computePresolution defaultTraceConfig acyc c1)
-    solved <- firstShowE (Solved.fromPresolutionResult pres)
+    solved <- firstShowE (Solved.fromPreRewriteState (snapshotUnionFind pres) (snapshotConstraint pres))
     (_, ty) <- firstShowE (runPipelineElab Set.empty norm)
     pure FrozenAnchorResult
         { farName = label

@@ -20,6 +20,18 @@
 - Solver snapshot contract is explicitly tested for replay equality and UF rewrite equivalence.
 - Required runtime grep invariant for `rewriteConstraintWithUF` in `src/MLF/Elab/Run` and `src/MLF/Constraint/Presolution` is clean.
 
+## Wave 2 Pod Findings
+
+### Pod B (`omega-thesis-order`)
+- Non-replay witness pruning was moved into `WitnessNorm`; runtime semantic path no longer depends on `stripForNonReplay` helper boundaries.
+- Compatibility exports/imports for `stripForNonReplay` were removed.
+- Pipeline now enforces canonical solved rebuild validity with `validateCanonicalGraphStrict` after replayed reconstruction.
+
+### Pod D (`elab-direct-chi`)
+- Runtime run-path no longer depends on `Solved.fromPresolutionResult`; solved input derives from presolution snapshot reconstruction.
+- `ResultTypeContext` boundary identifier was removed from run-path API in favor of `ResultTypeInputs`.
+- Active `DualPathSpec` wiring was retired from `test/Main.hs` and `mlf2.cabal`; single-path behavioral invariants are covered in `PipelineSpec`.
+
 ## Integration Notes
-- Wave 1 merge conflicts were limited to task tracking files; code merged without semantic conflicts.
-- Wave 1 is ready/used as the base for Wave 2 integration and final closeout.
+- Wave 1 and Wave 2 merge conflicts were limited to task tracking files.
+- Code-path integrations are preserved across wave branches and ready for final docs closeout + final gate.

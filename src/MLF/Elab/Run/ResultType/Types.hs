@@ -1,6 +1,6 @@
 {-# LANGUAGE GADTs #-}
 module MLF.Elab.Run.ResultType.Types (
-    ResultTypeContext(..),
+    ResultTypeInputs(..),
 ) where
 
 import qualified Data.IntMap.Strict as IntMap
@@ -16,7 +16,7 @@ import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Util.Trace (TraceConfig)
 
 -- | Context for result type computation, bundling shared state.
-data ResultTypeContext = ResultTypeContext
+data ResultTypeInputs = ResultTypeInputs
     { rtcCanonical :: NodeId -> NodeId
     , rtcEdgeWitnesses :: IntMap.IntMap EdgeWitness
     , rtcEdgeTraces :: IntMap.IntMap EdgeTrace
