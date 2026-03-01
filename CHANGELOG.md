@@ -3,7 +3,7 @@
 ## Unreleased
 
 ### Changed
-- Transformation Mechanism Table campaign classification is now binary (`Aligned` or `Deviation(<id>)`), with all remaining non-aligned rows mapped to explicit entries in `docs/thesis-deviations.yaml` and linked test evidence.
+- TMT3 Wave 3 docs closeout: Transformation Mechanism Table is now fully all-aligned (all rows `Aligned`), and all `DEV-TMT-*` entries were moved from active `deviations` to `history.resolved` in `docs/thesis-deviations.yaml` with `resolution_date: 2026-03-01`, replacing-commit metadata (Wave 1/Wave 2), and regression evidence.
 - Refactored elaboration/pipeline/result-type wiring to a single solved input handle (`eeSolved`, `rtcSolved`) while preserving checked-authoritative output behavior.
 - Added regression locks for single-solved migration guards and checked/unchecked pipeline parity slices.
 - Aligned elaboration pipeline with thesis model (§10.3-10.4, §12.1.3, §15.3.5-15.3.6)
@@ -15,7 +15,7 @@
   - added seeded unification-closure API (`runUnifyClosureWithSeed`) and switched presolution closure drains to seeded UF processing;
   - added explicit presolution artifact contract errors (`ResidualUnifyEdges`, `ResidualInstEdges`, `ResidualTyExpNodes`, `MissingEdgeWitnesses`, `MissingEdgeTraces`);
   - removed canonical-domain `Solved` query exports (`canonicalNodes`, `allCanonicalNodes`, `lookupCanonicalNode`, `lookupCanonicalVarBound`) after call-site migration;
-  - made `IdentityBridge.sourceKeysForNode` strict witness-domain-only and introduced explicit class-fallback API (`sourceKeysForNodeWithClassFallback`) plus fallback telemetry in Phi/Omega;
+  - made `IdentityBridge.sourceKeysForNode` strict witness-domain-only and removed runtime class-fallback identity recovery from Phi/Omega paths;
   - removed runtime `runPipelineElabProjectionFirst`; retained dual-path parity as test-only harness in `DualPathSpec`.
 - Thesis-exact Phi replay normalization (2026-02-27):
   - replay metadata contract is now strict: `EdgeTrace.etBinderReplayMap` is required and validated at presolution boundaries;

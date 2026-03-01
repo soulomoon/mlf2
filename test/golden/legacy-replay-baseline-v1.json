@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "generated_on": "2026-02-26",
-  "source_commit": "f4d9780bb76004927df9a4704cfa8e5deba184d2",
+  "generated_on": "2026-03-01",
+  "source_commit": "4a875e9",
   "anchors": [
     "id",
     "id-app-int",
@@ -21,21 +21,88 @@
       "name": "id-app-int",
       "canonical_constraint": "Constraint {cNodes = NodeMap {getNodeMap = fromList [(0,TyVar {tnId = NodeId {getNodeId = 0}, tnBound = Nothing}),(1,TyArrow {tnId = NodeId {getNodeId = 1}, tnDom = NodeId {getNodeId = 4}, tnCod = NodeId {getNodeId = 4}}),(2,TyArrow {tnId = NodeId {getNodeId = 2}, tnDom = NodeId {getNodeId = 4}, tnCod = NodeId {getNodeId = 4}}),(3,TyBase {tnId = NodeId {getNodeId = 3}, tnBase = BaseTy {getBaseName = \"Int\"}}),(4,TyVar {tnId = NodeId {getNodeId = 4}, tnBound = Just (NodeId {getNodeId = 3})}),(5,TyVar {tnId = NodeId {getNodeId = 5}, tnBound = Nothing}),(7,TyArrow {tnId = NodeId {getNodeId = 7}, tnDom = NodeId {getNodeId = 4}, tnCod = NodeId {getNodeId = 4}}),(8,TyVar {tnId = NodeId {getNodeId = 8}, tnBound = Nothing}),(9,TyVar {tnId = NodeId {getNodeId = 9}, tnBound = Nothing})]}, cInstEdges = [], cUnifyEdges = [], cBindParents = fromList [(0,(GenRef (GenNodeId {getGenNodeId = 0}),BindRigid)),(2,(GenRef (GenNodeId {getGenNodeId = 0}),BindRigid)),(4,(GenRef (GenNodeId {getGenNodeId = 0}),BindRigid)),(6,(TypeRef (NodeId {getNodeId = 4}),BindRigid)),(8,(GenRef (GenNodeId {getGenNodeId = 0}),BindRigid)),(10,(GenRef (GenNodeId {getGenNodeId = 0}),BindRigid)),(14,(GenRef (GenNodeId {getGenNodeId = 0}),BindRigid)),(16,(GenRef (GenNodeId {getGenNodeId = 0}),BindRigid)),(18,(GenRef (GenNodeId {getGenNodeId = 0}),BindRigid))], cPolySyms = fromList [], cEliminatedVars = fromList [], cWeakenedVars = fromList [], cAnnEdges = fromList [], cLetEdges = fromList [], cGenNodes = GenNodeMap {getGenNodeMap = fromList [(0,GenNode {gnId = GenNodeId {getGenNodeId = 0}, gnSchemes = [NodeId {getNodeId = 4}]})]}}",
       "original_constraint": "Constraint {cNodes = NodeMap {getNodeMap = fromList [(0,TyVar {tnId = NodeId {getNodeId = 0}, tnBound = Nothing}),(1,TyArrow {tnId = NodeId {getNodeId = 1}, tnDom = NodeId {getNodeId = 4}, tnCod = NodeId {getNodeId = 4}}),(2,TyArrow {tnId = NodeId {getNodeId = 2}, tnDom = NodeId {getNodeId = 4}, tnCod = NodeId {getNodeId = 4}}),(3,TyBase {tnId = NodeId {getNodeId = 3}, tnBase = BaseTy {getBaseName = \"Int\"}}),(4,TyVar {tnId = NodeId {getNodeId = 4}, tnBound = Just (NodeId {getNodeId = 3})}),(5,TyVar {tnId = NodeId {getNodeId = 5}, tnBound = Nothing}),(7,TyArrow {tnId = NodeId {getNodeId = 7}, tnDom = NodeId {getNodeId = 4}, tnCod = NodeId {getNodeId = 4}}),(8,TyVar {tnId = NodeId {getNodeId = 8}, tnBound = Nothing}),(9,TyVar {tnId = NodeId {getNodeId = 9}, tnBound = Nothing})]}, cInstEdges = [], cUnifyEdges = [], cBindParents = fromList [(0,(GenRef (GenNodeId {getGenNodeId = 0}),BindRigid)),(2,(GenRef (GenNodeId {getGenNodeId = 0}),BindRigid)),(4,(GenRef (GenNodeId {getGenNodeId = 0}),BindRigid)),(6,(TypeRef (NodeId {getNodeId = 4}),BindRigid)),(8,(GenRef (GenNodeId {getGenNodeId = 0}),BindRigid)),(10,(GenRef (GenNodeId {getGenNodeId = 0}),BindRigid)),(14,(GenRef (GenNodeId {getGenNodeId = 0}),BindRigid)),(16,(GenRef (GenNodeId {getGenNodeId = 0}),BindRigid)),(18,(GenRef (GenNodeId {getGenNodeId = 0}),BindRigid))], cPolySyms = fromList [], cEliminatedVars = fromList [], cWeakenedVars = fromList [3], cAnnEdges = fromList [], cLetEdges = fromList [], cGenNodes = GenNodeMap {getGenNodeMap = fromList [(0,GenNode {gnId = GenNodeId {getGenNodeId = 0}, gnSchemes = [NodeId {getNodeId = 4}]})]}}",
-      "canonical_map": [],
+      "canonical_map": [
+        [
+          6,
+          4
+        ]
+      ],
       "elaborated_type": "Int"
     },
     {
       "name": "let-id",
       "canonical_constraint": "Constraint {cNodes = NodeMap {getNodeMap = fromList [(0,TyVar {tnId = NodeId {getNodeId = 0}, tnBound = Nothing}),(1,TyArrow {tnId = NodeId {getNodeId = 1}, tnDom = NodeId {getNodeId = 0}, tnCod = NodeId {getNodeId = 0}}),(2,TyVar {tnId = NodeId {getNodeId = 2}, tnBound = Just (NodeId {getNodeId = 1})})]}, cInstEdges = [], cUnifyEdges = [], cBindParents = fromList [(0,(GenRef (GenNodeId {getGenNodeId = 1}),BindFlex)),(2,(TypeRef (NodeId {getNodeId = 2}),BindRigid)),(3,(GenRef (GenNodeId {getGenNodeId = 2}),BindFlex)),(4,(GenRef (GenNodeId {getGenNodeId = 1}),BindRigid)),(5,(GenRef (GenNodeId {getGenNodeId = 0}),BindFlex)),(7,(GenRef (GenNodeId {getGenNodeId = 2}),BindFlex))], cPolySyms = fromList [], cEliminatedVars = fromList [], cWeakenedVars = fromList [], cAnnEdges = fromList [], cLetEdges = fromList [0], cGenNodes = GenNodeMap {getGenNodeMap = fromList [(0,GenNode {gnId = GenNodeId {getGenNodeId = 0}, gnSchemes = [NodeId {getNodeId = 2}]}),(1,GenNode {gnId = GenNodeId {getGenNodeId = 1}, gnSchemes = [NodeId {getNodeId = 2}]}),(2,GenNode {gnId = GenNodeId {getGenNodeId = 2}, gnSchemes = [NodeId {getNodeId = 2}]}),(3,GenNode {gnId = GenNodeId {getGenNodeId = 3}, gnSchemes = []})]}}",
       "original_constraint": "Constraint {cNodes = NodeMap {getNodeMap = fromList [(0,TyVar {tnId = NodeId {getNodeId = 0}, tnBound = Nothing}),(1,TyArrow {tnId = NodeId {getNodeId = 1}, tnDom = NodeId {getNodeId = 0}, tnCod = NodeId {getNodeId = 0}}),(2,TyVar {tnId = NodeId {getNodeId = 2}, tnBound = Just (NodeId {getNodeId = 1})})]}, cInstEdges = [], cUnifyEdges = [], cBindParents = fromList [(0,(GenRef (GenNodeId {getGenNodeId = 1}),BindFlex)),(2,(TypeRef (NodeId {getNodeId = 2}),BindRigid)),(3,(GenRef (GenNodeId {getGenNodeId = 2}),BindFlex)),(4,(GenRef (GenNodeId {getGenNodeId = 1}),BindRigid)),(5,(GenRef (GenNodeId {getGenNodeId = 0}),BindFlex)),(7,(GenRef (GenNodeId {getGenNodeId = 2}),BindFlex))], cPolySyms = fromList [], cEliminatedVars = fromList [], cWeakenedVars = fromList [], cAnnEdges = fromList [], cLetEdges = fromList [0], cGenNodes = GenNodeMap {getGenNodeMap = fromList [(0,GenNode {gnId = GenNodeId {getGenNodeId = 0}, gnSchemes = [NodeId {getNodeId = 2}]}),(1,GenNode {gnId = GenNodeId {getGenNodeId = 1}, gnSchemes = [NodeId {getNodeId = 2}]}),(2,GenNode {gnId = GenNodeId {getGenNodeId = 2}, gnSchemes = [NodeId {getNodeId = 2}]}),(3,GenNode {gnId = GenNodeId {getGenNodeId = 3}, gnSchemes = []})]}}",
-      "canonical_map": [],
+      "canonical_map": [
+        [
+          3,
+          2
+        ]
+      ],
       "elaborated_type": "∀(a ⩾ ⊥) a -> a"
     },
     {
       "name": "let-poly-two-use",
       "canonical_constraint": "Constraint {cNodes = NodeMap {getNodeMap = fromList [(0,TyVar {tnId = NodeId {getNodeId = 0}, tnBound = Nothing}),(1,TyArrow {tnId = NodeId {getNodeId = 1}, tnDom = NodeId {getNodeId = 0}, tnCod = NodeId {getNodeId = 0}}),(2,TyVar {tnId = NodeId {getNodeId = 2}, tnBound = Just (NodeId {getNodeId = 1})}),(5,TyBase {tnId = NodeId {getNodeId = 5}, tnBase = BaseTy {getBaseName = \"Int\"}}),(9,TyArrow {tnId = NodeId {getNodeId = 9}, tnDom = NodeId {getNodeId = 22}, tnCod = NodeId {getNodeId = 22}}),(12,TyBase {tnId = NodeId {getNodeId = 12}, tnBase = BaseTy {getBaseName = \"Bool\"}}),(16,TyArrow {tnId = NodeId {getNodeId = 16}, tnDom = NodeId {getNodeId = 26}, tnCod = NodeId {getNodeId = 26}}),(21,TyVar {tnId = NodeId {getNodeId = 21}, tnBound = Just (NodeId {getNodeId = 5})}),(22,TyVar {tnId = NodeId {getNodeId = 22}, tnBound = Just (NodeId {getNodeId = 5})}),(25,TyVar {tnId = NodeId {getNodeId = 25}, tnBound = Just (NodeId {getNodeId = 12})}),(26,TyVar {tnId = NodeId {getNodeId = 26}, tnBound = Just (NodeId {getNodeId = 12})})]}, cInstEdges = [], cUnifyEdges = [], cBindParents = fromList [(0,(GenRef (GenNodeId {getGenNodeId = 1}),BindFlex)),(2,(TypeRef (NodeId {getNodeId = 2}),BindRigid)),(3,(GenRef (GenNodeId {getGenNodeId = 2}),BindFlex)),(4,(GenRef (GenNodeId {getGenNodeId = 1}),BindRigid)),(5,(GenRef (GenNodeId {getGenNodeId = 0}),BindFlex)),(7,(GenRef (GenNodeId {getGenNodeId = 2}),BindFlex)),(9,(GenRef (GenNodeId {getGenNodeId = 5}),BindFlex)),(10,(TypeRef (NodeId {getNodeId = 22}),BindRigid)),(11,(GenRef (GenNodeId {getGenNodeId = 3}),BindFlex)),(13,(GenRef (GenNodeId {getGenNodeId = 5}),BindFlex)),(18,(GenRef (GenNodeId {getGenNodeId = 4}),BindRigid)),(24,(TypeRef (NodeId {getNodeId = 26}),BindRigid)),(32,(GenRef (GenNodeId {getGenNodeId = 6}),BindRigid)),(42,(GenRef (GenNodeId {getGenNodeId = 0}),BindRigid)),(44,(GenRef (GenNodeId {getGenNodeId = 2}),BindRigid)),(50,(GenRef (GenNodeId {getGenNodeId = 0}),BindRigid)),(52,(GenRef (GenNodeId {getGenNodeId = 2}),BindRigid))], cPolySyms = fromList [], cEliminatedVars = fromList [], cWeakenedVars = fromList [22,26], cAnnEdges = fromList [], cLetEdges = fromList [4,5], cGenNodes = GenNodeMap {getGenNodeMap = fromList [(0,GenNode {gnId = GenNodeId {getGenNodeId = 0}, gnSchemes = [NodeId {getNodeId = 26}]}),(1,GenNode {gnId = GenNodeId {getGenNodeId = 1}, gnSchemes = [NodeId {getNodeId = 2}]}),(2,GenNode {gnId = GenNodeId {getGenNodeId = 2}, gnSchemes = [NodeId {getNodeId = 26}]}),(3,GenNode {gnId = GenNodeId {getGenNodeId = 3}, gnSchemes = [NodeId {getNodeId = 26}]}),(4,GenNode {gnId = GenNodeId {getGenNodeId = 4}, gnSchemes = [NodeId {getNodeId = 22},NodeId {getNodeId = 9}]}),(5,GenNode {gnId = GenNodeId {getGenNodeId = 5}, gnSchemes = [NodeId {getNodeId = 26}]}),(6,GenNode {gnId = GenNodeId {getGenNodeId = 6}, gnSchemes = [NodeId {getNodeId = 26},NodeId {getNodeId = 16}]})]}}",
       "original_constraint": "Constraint {cNodes = NodeMap {getNodeMap = fromList [(0,TyVar {tnId = NodeId {getNodeId = 0}, tnBound = Nothing}),(1,TyArrow {tnId = NodeId {getNodeId = 1}, tnDom = NodeId {getNodeId = 0}, tnCod = NodeId {getNodeId = 0}}),(2,TyVar {tnId = NodeId {getNodeId = 2}, tnBound = Just (NodeId {getNodeId = 1})}),(5,TyBase {tnId = NodeId {getNodeId = 5}, tnBase = BaseTy {getBaseName = \"Int\"}}),(9,TyArrow {tnId = NodeId {getNodeId = 9}, tnDom = NodeId {getNodeId = 22}, tnCod = NodeId {getNodeId = 22}}),(12,TyBase {tnId = NodeId {getNodeId = 12}, tnBase = BaseTy {getBaseName = \"Bool\"}}),(16,TyArrow {tnId = NodeId {getNodeId = 16}, tnDom = NodeId {getNodeId = 26}, tnCod = NodeId {getNodeId = 26}}),(21,TyVar {tnId = NodeId {getNodeId = 21}, tnBound = Just (NodeId {getNodeId = 5})}),(22,TyVar {tnId = NodeId {getNodeId = 22}, tnBound = Just (NodeId {getNodeId = 5})}),(25,TyVar {tnId = NodeId {getNodeId = 25}, tnBound = Just (NodeId {getNodeId = 12})}),(26,TyVar {tnId = NodeId {getNodeId = 26}, tnBound = Just (NodeId {getNodeId = 12})})]}, cInstEdges = [], cUnifyEdges = [], cBindParents = fromList [(0,(GenRef (GenNodeId {getGenNodeId = 1}),BindFlex)),(2,(TypeRef (NodeId {getNodeId = 2}),BindRigid)),(3,(GenRef (GenNodeId {getGenNodeId = 2}),BindFlex)),(4,(GenRef (GenNodeId {getGenNodeId = 1}),BindRigid)),(5,(GenRef (GenNodeId {getGenNodeId = 0}),BindFlex)),(7,(GenRef (GenNodeId {getGenNodeId = 2}),BindFlex)),(9,(GenRef (GenNodeId {getGenNodeId = 5}),BindFlex)),(10,(TypeRef (NodeId {getNodeId = 22}),BindRigid)),(11,(GenRef (GenNodeId {getGenNodeId = 3}),BindFlex)),(13,(GenRef (GenNodeId {getGenNodeId = 5}),BindFlex)),(18,(GenRef (GenNodeId {getGenNodeId = 4}),BindRigid)),(24,(TypeRef (NodeId {getNodeId = 26}),BindRigid)),(32,(GenRef (GenNodeId {getGenNodeId = 6}),BindRigid)),(42,(GenRef (GenNodeId {getGenNodeId = 0}),BindRigid)),(44,(GenRef (GenNodeId {getGenNodeId = 2}),BindRigid)),(50,(GenRef (GenNodeId {getGenNodeId = 0}),BindRigid)),(52,(GenRef (GenNodeId {getGenNodeId = 2}),BindRigid))], cPolySyms = fromList [], cEliminatedVars = fromList [], cWeakenedVars = fromList [5,12,22,26], cAnnEdges = fromList [], cLetEdges = fromList [4,5], cGenNodes = GenNodeMap {getGenNodeMap = fromList [(0,GenNode {gnId = GenNodeId {getGenNodeId = 0}, gnSchemes = [NodeId {getNodeId = 26}]}),(1,GenNode {gnId = GenNodeId {getGenNodeId = 1}, gnSchemes = [NodeId {getNodeId = 2}]}),(2,GenNode {gnId = GenNodeId {getGenNodeId = 2}, gnSchemes = [NodeId {getNodeId = 26}]}),(3,GenNode {gnId = GenNodeId {getGenNodeId = 3}, gnSchemes = [NodeId {getNodeId = 26}]}),(4,GenNode {gnId = GenNodeId {getGenNodeId = 4}, gnSchemes = [NodeId {getNodeId = 22},NodeId {getNodeId = 9}]}),(5,GenNode {gnId = GenNodeId {getGenNodeId = 5}, gnSchemes = [NodeId {getNodeId = 26}]}),(6,GenNode {gnId = GenNodeId {getGenNodeId = 6}, gnSchemes = [NodeId {getNodeId = 26},NodeId {getNodeId = 16}]})]}}",
-      "canonical_map": [],
+      "canonical_map": [
+        [
+          3,
+          26
+        ],
+        [
+          4,
+          9
+        ],
+        [
+          6,
+          22
+        ],
+        [
+          7,
+          22
+        ],
+        [
+          8,
+          22
+        ],
+        [
+          10,
+          26
+        ],
+        [
+          11,
+          16
+        ],
+        [
+          13,
+          26
+        ],
+        [
+          14,
+          26
+        ],
+        [
+          15,
+          26
+        ],
+        [
+          23,
+          9
+        ],
+        [
+          24,
+          9
+        ],
+        [
+          27,
+          16
+        ],
+        [
+          28,
+          16
+        ]
+      ],
       "elaborated_type": "Bool"
     },
     {
@@ -48,8 +115,52 @@
           0
         ],
         [
+          6,
+          23
+        ],
+        [
+          12,
+          8
+        ],
+        [
+          15,
+          33
+        ],
+        [
+          21,
+          17
+        ],
+        [
+          24,
+          23
+        ],
+        [
           26,
           23
+        ],
+        [
+          27,
+          23
+        ],
+        [
+          29,
+          8
+        ],
+        [
+          30,
+          8
+        ],
+        [
+          31,
+          7
+        ],
+        [
+          34,
+          17
+        ],
+        [
+          35,
+          16
         ]
       ],
       "elaborated_type": "∀(a ⩾ ⊥) a -> a -> a"

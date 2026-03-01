@@ -88,201 +88,240 @@ deviations:
         file: test/PresolutionSpec.hs
     status: implementation-choice
 
-  - id: TA-001
-    status: resolved
-    description: >
-      Phi depended on canonical rewritten graph as primary source
-    resolution: >
-      Migrated to witness-domain-first resolution per §15.3.5-15.3.6
-    date: 2026-02-27
+history:
+  resolved:
+    - id: TA-001
+      status: resolved
+      description: >
+        Phi depended on canonical rewritten graph as primary source.
+      resolution: >
+        Migrated to witness-domain-first resolution per §15.3.5-15.3.6.
+      date: 2026-02-27
 
-  - id: TA-002
-    status: resolved
-    description: >
-      Fallback.hs used patchNode to mutate Solved in elaboration path
-    resolution: >
-      Eliminated patchNode; bound patching replaced with rebuildWithNodes local projection
-    date: 2026-02-27
+    - id: TA-002
+      status: resolved
+      description: >
+        Fallback.hs used patchNode to mutate Solved in elaboration path.
+      resolution: >
+        Eliminated patchNode; bound patching replaced with rebuildWithNodes local
+        projection.
+      date: 2026-02-27
 
-  - id: TA-003
-    status: resolved
-    description: >
-      solvedConstraint alias obscured intent (original vs canonical)
-    resolution: >
-      Deprecated and removed; call sites migrated to explicit accessors
-    date: 2026-02-27
+    - id: TA-003
+      status: resolved
+      description: >
+        solvedConstraint alias obscured intent (original vs canonical).
+      resolution: >
+        Deprecated and removed; call sites migrated to explicit accessors.
+      date: 2026-02-27
 
-  - id: TA-004
-    status: resolved
-    description: >
-      Phi/Omega replay binder resolution depended on runtime fallback search
-      (class members / ad hoc alias recovery) instead of strict upfront replay metadata.
-    resolution: >
-      Replay-map contract is now produced/validated in presolution and consumed
-      in Phi/Omega under a strict runtime no-repair policy: bridge handling only
-      validates/passes through producer-normalized mappings, and source-space
-      replay targets are hard-rejected with fail-fast diagnostics.
-    date: 2026-02-27
+    - id: TA-004
+      status: resolved
+      description: >
+        Phi/Omega replay binder resolution depended on runtime fallback search
+        (class members / ad hoc alias recovery) instead of strict upfront replay
+        metadata.
+      resolution: >
+        Replay-map contract is now produced/validated in presolution and consumed
+        in Phi/Omega under a strict runtime no-repair policy: bridge handling only
+        validates/passes through producer-normalized mappings, and source-space
+        replay targets are hard-rejected with fail-fast diagnostics.
+      date: 2026-02-27
 
+    - id: DEV-TMT-ELAB-SOLVED-PROJECTION
+      status: resolved
+      chapter: 15
+      section: "15.3"
+      thesis_ref: "Definition 15.3.5-15.3.6 (Phi over translatable presolution artifacts)"
+      description: >
+        Elaboration used a projection-style solved boundary that was tracked as a
+        TMT3 alignment gap.
+      resolution: >
+        Closed in Wave 2 + Wave 3: run-path solved construction now comes from
+        presolution snapshots and elaboration threads a single solved handle
+        (`eeSolved`) with no split projection boundary semantics in production.
+      resolution_date: 2026-03-01
+      replacing_commits:
+        - commit: 4a3f120
+          note: "wave2 pod D elab-direct-chi"
+        - commit: 006757b
+          note: "tmt3 wave2 integration into final branch"
+      code_paths:
+        - src/MLF/Elab/Run/Pipeline.hs
+        - src/MLF/Elab/Elaborate.hs
+      test_evidence:
+        - matcher: "single-solved refactor keeps checked pipeline authoritative"
+          file: test/PipelineSpec.hs
+        - matcher: "uses presolution-native solved artifacts"
+          file: test/PipelineSpec.hs
 
-  - id: DEV-TMT-ELAB-SOLVED-PROJECTION
-    chapter: 15
-    section: "15.3"
-    thesis_ref: "Definition 15.3.5-15.3.6 (Phi over translatable presolution artifacts)"
-    description: >
-      Elaboration still passes through an explicit solved projection/env layer
-      (`ElabEnv.eeSolved`) instead of consuming a direct thesis-level `χp`
-      object at the API boundary.
-    impact: semantic-neutral
-    rationale: >
-      The projection layer is representational and keeps runtime behavior stable.
-      It is guarded by regression tests for single-solved wiring and checked
-      pipeline authority.
-    code_paths:
-      - src/MLF/Elab/Run/Pipeline.hs
-      - src/MLF/Elab/Elaborate.hs
-    test_evidence:
-      - matcher: "single-solved migration removes eeRes"
-        file: test/PipelineSpec.hs
-      - matcher: "single-solved refactor keeps checked pipeline authoritative"
-        file: test/PipelineSpec.hs
-      - matcher: "uses presolution-native solved artifacts"
-        file: test/PipelineSpec.hs
-    status: implementation-choice
+    - id: DEV-TMT-RESULT-TYPE-CONTEXT
+      status: resolved
+      chapter: 15
+      section: "15.3"
+      thesis_ref: "Section 15.3 translation pipeline"
+      description: >
+        Result-type reconstruction boundary used `ResultTypeContext` and was
+        tracked as a TMT3 row-level deviation.
+      resolution: >
+        Closed in Wave 2 + Wave 3: run-path boundary is now `ResultTypeInputs`,
+        synchronized with single-solved wiring and checked-authoritative output.
+      resolution_date: 2026-03-01
+      replacing_commits:
+        - commit: 4a3f120
+          note: "wave2 pod D elab-direct-chi"
+        - commit: 006757b
+          note: "tmt3 wave2 integration into final branch"
+      code_paths:
+        - src/MLF/Elab/Run/ResultType/Types.hs
+        - src/MLF/Elab/Run/ResultType.hs
+        - src/MLF/Elab/Run/Pipeline.hs
+      test_evidence:
+        - matcher: "single-solved migration removes split result-type solved fields"
+          file: test/PipelineSpec.hs
+        - matcher: "runtime run-path avoids solved-projection and result-type context boundary adapters"
+          file: test/PipelineSpec.hs
 
-  - id: DEV-TMT-RESULT-TYPE-CONTEXT
-    chapter: 15
-    section: "15.3"
-    thesis_ref: "Section 15.3 translation pipeline"
-    description: >
-      Result-type reconstruction uses an explicit runtime context object
-      (`ResultTypeContext`) that carries solved/canonical/redirect/plan-builder
-      metadata, which is not presented as a separate entity in the thesis.
-    impact: semantic-neutral
-    rationale: >
-      The context object is an implementation boundary for diagnostics and
-      fallback paths; core elaboration output remains checked-authoritative.
-    code_paths:
-      - src/MLF/Elab/Run/ResultType/Types.hs
-      - src/MLF/Elab/Run/ResultType.hs
-      - src/MLF/Elab/Run/Pipeline.hs
-    test_evidence:
-      - matcher: "single-solved migration removes split result-type solved fields"
-        file: test/PipelineSpec.hs
-      - matcher: "single-solved refactor keeps checked pipeline authoritative"
-        file: test/PipelineSpec.hs
-    status: implementation-choice
+    - id: DEV-TMT-OMEGA-OPERATIONALIZATION
+      status: resolved
+      chapter: 15
+      section: "15.3.4"
+      thesis_ref: "Definition 15.3.4 (omega witness replay)"
+      description: >
+        Ω operational sequencing/runtime staging was tracked as a TMT3 row-level
+        deviation.
+      resolution: >
+        Closed in Wave 2 + Wave 3: runtime sequencing is now documented as thesis
+        aligned (pre/post ordering with delayed weaken flush) and guarded by
+        witness/replay-map contract tests.
+      resolution_date: 2026-03-01
+      replacing_commits:
+        - commit: 590b43d
+          note: "wave2 pod B omega-thesis-order"
+        - commit: 006757b
+          note: "tmt3 wave2 integration into final branch"
+      code_paths:
+        - src/MLF/Witness/OmegaExec.hs
+        - src/MLF/Constraint/Presolution/EdgeUnify.hs
+        - src/MLF/Constraint/Presolution/WitnessNorm.hs
+      test_evidence:
+        - matcher: "R-"
+          file: test/Presolution/WitnessSpec.hs
+        - matcher: "Driver replay-map boundary validation"
+          file: test/Presolution/WitnessSpec.hs
+        - matcher: "replay-map"
+          file: test/ElaborationSpec.hs
 
-  - id: DEV-TMT-OMEGA-OPERATIONALIZATION
-    chapter: 15
-    section: "15.3.4"
-    thesis_ref: "Definition 15.3.4 (omega witness replay)"
-    description: >
-      Omega witness replay and presolution edge operations are executed through
-      an explicit operational runtime (pre/post base-op phases, deferred weaken
-      flush, and non-replay stripping), rather than a direct textual derivation
-      interpreter.
-    impact: semantic-neutral
-    rationale: >
-      The runtime layering is load-bearing for deterministic execution order and
-      remains covered by witness matrix and replay-domain contract tests.
-    code_paths:
-      - src/MLF/Witness/OmegaExec.hs
-      - src/MLF/Constraint/Presolution/EdgeUnify.hs
-      - src/MLF/Constraint/Presolution/WitnessCanon.hs
-    test_evidence:
-      - matcher: "R-"
-        file: test/Presolution/WitnessSpec.hs
-      - matcher: "Driver replay-map boundary validation"
-        file: test/Presolution/WitnessSpec.hs
-      - matcher: "trace/replay binder key-space mismatch (OpRaise unresolved trace-source target)"
-        file: test/ElaborationSpec.hs
-    status: implementation-choice
+    - id: DEV-TMT-PHI-CANONICAL-DEPENDENCE
+      status: resolved
+      chapter: 15
+      section: "15.3.5"
+      thesis_ref: "Definition 15.3.5 (Phi translation over propagation witness)"
+      description: >
+        Phi canonical-domain dependency (as primary identity authority) was
+        tracked as a TMT3 row-level deviation.
+      resolution: >
+        Closed in Wave 1 + Wave 3: witness-domain identity is primary, and
+        canonicalization is retained only for alias reconciliation/scope lookup
+        after source-domain checks.
+      resolution_date: 2026-03-01
+      replacing_commits:
+        - commit: a2ddc45
+          note: "wave1 pod A phi-source-domain"
+        - commit: c78ad4e
+          note: "tmt3 wave1 integration"
+        - commit: 006757b
+          note: "tmt3 wave2 integration into final branch"
+      code_paths:
+        - src/MLF/Elab/Phi/Translate.hs
+        - src/MLF/Elab/Phi/Omega.hs
+        - src/MLF/Elab/Phi/IdentityBridge.hs
+      test_evidence:
+        - matcher: "Phi alignment"
+          file: test/Phi/AlignmentSpec.hs
+        - matcher: "fails fast when replay-map codomain only matches replay domain via canonical alias"
+          file: test/ElaborationSpec.hs
 
-  - id: DEV-TMT-PHI-CANONICAL-DEPENDENCE
-    chapter: 15
-    section: "15.3.5"
-    thesis_ref: "Definition 15.3.5 (Phi translation over propagation witness)"
-    description: >
-      Phi translation still relies on explicit `Solved.canonical` lookups in
-      runtime decisions and scope computations.
-    impact: semantic-risk
-    rationale: >
-      Canonicalization use is explicit and test-backed; removing it entirely
-      would require high-risk refactors across replay identity/scoping paths.
-    code_paths:
-      - src/MLF/Elab/Phi/Translate.hs
-      - src/MLF/Elab/Phi/Omega.hs
-      - src/MLF/Constraint/Solved.hs
-    test_evidence:
-      - matcher: "fails fast when replay-map source domain mismatches trace binder sources"
-        file: test/ElaborationSpec.hs
-      - matcher: "fails fast when replay-map codomain target is outside replay binder domain"
-        file: test/ElaborationSpec.hs
-    status: implementation-choice
+    - id: DEV-TMT-IDENTITY-BRIDGE
+      status: resolved
+      chapter: 15
+      section: "15.3.5"
+      thesis_ref: "Definition 15.3.5 (source/binder identity during Phi)"
+      description: >
+        IdentityBridge fallback behavior was tracked as a TMT3 row-level
+        deviation.
+      resolution: >
+        Closed in Wave 1 + Wave 3: IdentityBridge now stays in witness-domain
+        key-space and enforces deterministic exact binder-key matching without
+        equivalence-class fallback expansion.
+      resolution_date: 2026-03-01
+      replacing_commits:
+        - commit: a2ddc45
+          note: "wave1 pod A phi-source-domain"
+        - commit: c78ad4e
+          note: "tmt3 wave1 integration"
+        - commit: 006757b
+          note: "tmt3 wave2 integration into final branch"
+      code_paths:
+        - src/MLF/Elab/Phi/IdentityBridge.hs
+        - src/MLF/Elab/Phi/Omega.hs
+      test_evidence:
+        - matcher: "IdentityBridge"
+          file: test/Phi/IdentityBridgeSpec.hs
+        - matcher: "Phi alignment"
+          file: test/Phi/AlignmentSpec.hs
 
-  - id: DEV-TMT-IDENTITY-BRIDGE
-    chapter: 15
-    section: "15.3.5"
-    thesis_ref: "Definition 15.3.5 (source/binder identity during Phi)"
-    description: >
-      `IdentityBridge` is an explicit runtime reconciliation component for
-      witness-domain key ranking and controlled fallback in binder-index lookup,
-      rather than a thesis-named construct.
-    impact: semantic-neutral
-    rationale: >
-      The mechanism constrains identity recovery to explicit ranked candidates
-      and keeps fallback behavior measurable and deterministic.
-    code_paths:
-      - src/MLF/Elab/Phi/IdentityBridge.hs
-      - src/MLF/Elab/Phi/Omega.hs
-    test_evidence:
-      - matcher: "preserves raw binder identity before class-member fallback"
-        file: test/Phi/IdentityBridgeSpec.hs
-      - matcher: "includes solved class members for canonical alias recovery"
-        file: test/Phi/IdentityBridgeSpec.hs
-    status: implementation-choice
+    - id: DEV-TMT-SOLVE-REWRITE-LAYER
+      status: resolved
+      chapter: 12
+      section: "12.1.6"
+      thesis_ref: "SolveConstraint proof sketch (propagation + unification mutation)"
+      description: >
+        Runtime dependence on explicit rewrite-layer helpers in the elaboration
+        run path was tracked as a TMT3 row-level deviation.
+      resolution: >
+        Closed in Wave 1 + Wave 3: production pipeline solved construction is
+        snapshot-driven and no longer depends on run-path `rewriteConstraintWithUF`
+        wiring.
+      resolution_date: 2026-03-01
+      replacing_commits:
+        - commit: 0204a60
+          note: "wave1 pod C solve-no-rewrite-layer"
+        - commit: c78ad4e
+          note: "tmt3 wave1 integration"
+        - commit: 006757b
+          note: "tmt3 wave2 integration into final branch"
+      code_paths:
+        - src/MLF/Elab/Run/Pipeline.hs
+        - src/MLF/Constraint/Solve.hs
+      test_evidence:
+        - matcher: "uses presolution-native solved artifacts"
+          file: test/PipelineSpec.hs
+        - matcher: "runtime snapshot rebuild stays stable across representative corpus"
+          file: test/PipelineSpec.hs
 
-  - id: DEV-TMT-SOLVE-REWRITE-LAYER
-    chapter: 12
-    section: "12.1.6"
-    thesis_ref: "SolveConstraint proof sketch (propagation + unification mutation)"
-    description: >
-      The implementation keeps an explicit rewrite/canonicalization helper layer
-      (`rewriteConstraint`, `rewriteConstraintWithUF`) around solved artifacts
-      in addition to presolution mutation steps.
-    impact: semantic-neutral
-    rationale: >
-      The layer is representational and used to preserve canonical consistency;
-      mutation semantics remain equivalent to thesis propagation/unification.
-    code_paths:
-      - src/MLF/Constraint/Presolution/Driver.hs
-      - src/MLF/Constraint/Solve.hs
-    test_evidence:
-      - matcher: "uses presolution-native solved artifacts"
-        file: test/PipelineSpec.hs
-      - matcher: "Dual-path verification"
-        file: test/DualPathSpec.hs
-    status: implementation-choice
-
-  - id: DEV-TMT-DUAL-PATH-GUARDRAIL
-    chapter: 15
-    section: "15.3"
-    thesis_ref: "Translation/evidence path (single production pipeline)"
-    description: >
-      A native-vs-legacy solved comparison path is retained as a test-only
-      guardrail (`DualPathSpec`) and solved-domain agreement helper, even though
-      production runtime is single-path.
-    impact: semantic-neutral
-    rationale: >
-      This guardrail is non-production and provides regression confidence during
-      thesis-alignment changes.
-    code_paths:
-      - test/DualPathSpec.hs
-      - src/MLF/Constraint/Solved.hs
-    test_evidence:
-      - matcher: "Dual-path verification"
-        file: test/DualPathSpec.hs
-      - matcher: "uses presolution-native solved artifacts"
-        file: test/PipelineSpec.hs
-    status: implementation-choice
+    - id: DEV-TMT-DUAL-PATH-GUARDRAIL
+      status: resolved
+      chapter: 15
+      section: "15.3"
+      thesis_ref: "Translation/evidence path (single production pipeline)"
+      description: >
+        Runtime dual-path guardrail expectations were tracked as a TMT3 row-level
+        deviation.
+      resolution: >
+        Closed in Wave 2 + Wave 3: production runtime remains single-path and
+        legacy parity confidence is provided by frozen artifact tests only.
+      resolution_date: 2026-03-01
+      replacing_commits:
+        - commit: 4a3f120
+          note: "wave2 pod D elab-direct-chi"
+        - commit: 006757b
+          note: "tmt3 wave2 integration into final branch"
+      code_paths:
+        - src/MLF/Elab/Run/Pipeline.hs
+        - test/FrozenParitySpec.hs
+      test_evidence:
+        - matcher: "runtime pipeline keeps dual-path wiring out of production entrypoints"
+          file: test/PipelineSpec.hs
+        - matcher: "Frozen parity artifact baseline"
+          file: test/FrozenParitySpec.hs

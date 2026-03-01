@@ -1,12 +1,12 @@
 {- |
 Module      : MLF.Elab.Phi.IdentityBridge
-Description : Centralised source-ID / canonical-ID reconciliation
+Description : Centralised trace-domain/source-key reconciliation
 Copyright   : (c) 2026
 License     : BSD-3-Clause
 
-Pure data structure that captures the source-domain ↔ canonical-domain
-mapping for a single edge, centralising the ranking and de-duplication
-logic currently duplicated between "MLF.Elab.Phi.Omega" and
+Pure data structure that captures witness-domain key provenance for a
+single edge, centralising the ranking and de-duplication logic currently
+duplicated between "MLF.Elab.Phi.Omega" and
 "MLF.Elab.Phi.Translate".
 -}
 module MLF.Elab.Phi.IdentityBridge (
@@ -33,10 +33,9 @@ import qualified Data.IntSet as IntSet
 
 import MLF.Constraint.Types.Graph (NodeId(..))
 import MLF.Constraint.Solved (Solved)
-import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Presolution.Base (EdgeTrace(..))
 
--- | Bridge between source-domain and canonical-domain node identities.
+-- | Bridge between witness-domain key artifacts (trace/copy/raw node ids).
 --
 -- Constructed once per edge from a 'Solved' handle, an optional
 -- 'EdgeTrace', and a copy map.  All helpers are pure.
@@ -45,10 +44,10 @@ data IdentityBridge = IdentityBridge
     , ibCanonical              :: NodeId -> NodeId
     , ibTraceBinderOrder       :: [Int]
     , ibBinderOrderIx          :: IntMap.IntMap Int
-    , ibReverseCopyByCanonical :: IntMap.IntMap [Int]
-      -- ^ Copy-map source keys grouped by canonical(destination)
-    , ibReverseTraceByCanonical :: IntMap.IntMap [Int]
-      -- ^ Trace binder IDs grouped by canonical(binder)
+    , ibReverseCopyByTarget    :: IntMap.IntMap [Int]
+      -- ^ Copy-map source keys grouped by destination key.
+    , ibReverseTraceByTarget   :: IntMap.IntMap [Int]
+      -- ^ Trace binder IDs grouped by binder key.
     , ibInvCopyMap             :: IntMap.IntMap NodeId
     , ibCopyMap                :: IntMap.IntMap NodeId
     }
@@ -69,10 +68,10 @@ traceBinderKeysInOrder :: IdentityBridge -> [Int]
 traceBinderKeysInOrder = ibTraceBinderOrder
 
 canonicalKeyForNode :: IdentityBridge -> NodeId -> Int
-canonicalKeyForNode ib nid = getNodeId (ibCanonical ib nid)
+canonicalKeyForNode _ib nid = getNodeId nid
 
 canonicalKeyForSource :: IdentityBridge -> Int -> Int
-canonicalKeyForSource ib key = canonicalKeyForNode ib (NodeId key)
+canonicalKeyForSource _ib key = key
 
 -- | Build an 'IdentityBridge' from a 'Solved' handle, an optional
 -- 'EdgeTrace', and the raw copy map.
@@ -84,17 +83,15 @@ mkIdentityBridge
 mkIdentityBridge solved mTrace copyMap =
     IdentityBridge
         { ibSolved                 = solved
-        , ibCanonical              = canonical
+        , ibCanonical              = id
         , ibTraceBinderOrder       = traceBinderOrder
         , ibBinderOrderIx          = binderOrderIx
-        , ibReverseCopyByCanonical = reverseCopyByCanonical
-        , ibReverseTraceByCanonical = reverseTraceByCanonical
+        , ibReverseCopyByTarget    = reverseCopyByTarget
+        , ibReverseTraceByTarget   = reverseTraceByTarget
         , ibInvCopyMap             = invCopyMap
         , ibCopyMap                = copyMap
         }
   where
-    canonical = Solved.canonical solved
-
     traceBinderOrder :: [Int]
     traceBinderOrder =
         case mTrace of
@@ -115,20 +112,20 @@ mkIdentityBridge solved mTrace copyMap =
     binderOrderIx :: IntMap.IntMap Int
     binderOrderIx = IntMap.fromList (zip traceBinderOrder [0 :: Int ..])
 
-    reverseCopyByCanonical :: IntMap.IntMap [Int]
-    reverseCopyByCanonical =
+    reverseCopyByTarget :: IntMap.IntMap [Int]
+    reverseCopyByTarget =
         IntMap.fromListWith (++)
-            [ (getNodeId (canonical dst), [src])
+            [ (getNodeId dst, [src])
             | (src, dst) <- IntMap.toList copyMap
             ]
 
-    reverseTraceByCanonical :: IntMap.IntMap [Int]
-    reverseTraceByCanonical =
+    reverseTraceByTarget :: IntMap.IntMap [Int]
+    reverseTraceByTarget =
         case mTrace of
             Nothing -> IntMap.empty
             Just tr ->
                 IntMap.fromListWith (++)
-                    [ (getNodeId (canonical binder), [getNodeId binder])
+                    [ (getNodeId binder, [getNodeId binder])
                     | (binder, _arg) <- etBinderArgs tr
                     ]
 
@@ -143,31 +140,26 @@ mkIdentityBridge solved mTrace copyMap =
 {- Note [Witness-Domain Source Keys]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Per thesis §15.3.5–15.3.6, Phi translation resolves binder/source identity
-from witness-domain artifacts first. `sourceKeysForNode` therefore includes
-only witness-domain provenance:
+from witness-domain artifacts first. `sourceKeysForNode` therefore stays in
+raw witness key-space and includes only:
 
   1. raw key
-  2. canonical key
-  3. copy-map forward/reverse aliases
-  4. trace binder aliases
+  2. copy-map forward/reverse aliases
+  3. trace binder aliases (same raw key-space)
 
 No runtime equivalence-class expansion is performed here.
 -}
 
 -- | All source-domain keys for a node, de-duplicated and ranked by
 -- trace order (lower index = higher priority), restricted to witness-domain
--- provenance (raw/canonical/copy/trace).
+-- provenance (raw/copy/trace).
 sourceKeysForNode :: IdentityBridge -> NodeId -> [Int]
 sourceKeysForNode ib nid =
-    let canonical = ibCanonical ib
-        keyRaw   = getNodeId nid
-        keyCanon = getNodeId (canonical nid)
+    let keyRaw   = getNodeId nid
         fwdRaw   = maybe [] (pure . getNodeId) (IntMap.lookup keyRaw (ibCopyMap ib))
-        fwdCanon = map (getNodeId . canonical . NodeId) fwdRaw
         invRaw   = maybe [] (pure . getNodeId) (IntMap.lookup keyRaw (ibInvCopyMap ib))
-        invCanon = maybe [] (pure . getNodeId) (IntMap.lookup keyCanon (ibInvCopyMap ib))
-        copyCanon  = IntMap.findWithDefault [] keyCanon (ibReverseCopyByCanonical ib)
-        traceCanon = IntMap.findWithDefault [] keyCanon (ibReverseTraceByCanonical ib)
+        revCopy = IntMap.findWithDefault [] keyRaw (ibReverseCopyByTarget ib)
+        traceRaw = IntMap.findWithDefault [] keyRaw (ibReverseTraceByTarget ib)
         rank key = (IntMap.findWithDefault maxBound key (ibBinderOrderIx ib), key)
         (_seen, keysRev) =
             foldl'
@@ -177,7 +169,7 @@ sourceKeysForNode ib nid =
                         else (IntSet.insert key seenAcc, key : acc)
                 )
                 (IntSet.empty, [])
-                (keyRaw : keyCanon : fwdRaw ++ fwdCanon ++ invRaw ++ invCanon ++ copyCanon ++ traceCanon)
+                (keyRaw : fwdRaw ++ invRaw ++ revCopy ++ traceRaw)
     in sortOn rank (reverse keysRev)
 
 -- | Candidate source keys for a canonical binder, ranked deterministically
@@ -208,8 +200,7 @@ isBinderNode ib binderKeys nid =
 --
 -- Ranking:
 --   * matchClass 0: exact source-key match
---   * matchClass 1: canonical-alias fallback
--- Within a match class, the key with the best trace-order rank wins;
+-- Within exact matches, the key with the best trace-order rank wins;
 -- ties are broken by spine index (lower wins).
 lookupBinderIndex
     :: IdentityBridge -> IntSet.IntSet -> [Maybe NodeId] -> NodeId -> Maybe Int
@@ -222,9 +213,6 @@ lookupBinderIndex ib binderKeys ids nid
   where
     keyRank :: Int -> (Int, Int)
     keyRank key = (IntMap.findWithDefault maxBound key (ibBinderOrderIx ib), key)
-
-    canonicalKey :: Int -> Int
-    canonicalKey key = getNodeId (ibCanonical ib (NodeId key))
 
     targetKeys :: [Int]
     targetKeys = sourceBinderKeysForNode ib binderKeys nid
@@ -244,21 +232,12 @@ lookupBinderIndex ib binderKeys ids nid
         let idKeys =
                 sourceBinderKeysForNode ib binderKeys nid'
             idKeySet = IntSet.fromList idKeys
-            idCanonSet = IntSet.fromList (map canonicalKey idKeys)
             exactMatches =
                 filter (`IntSet.member` idKeySet) targetKeys
-            aliasMatches =
-                [ key
-                | key <- targetKeys
-                , not (IntSet.member key idKeySet)
-                , IntSet.member (canonicalKey key) idCanonSet
-                ]
             matchPick =
                 if not (null exactMatches)
                     then Just (0, chooseBestKey exactMatches)
-                    else if not (null aliasMatches)
-                        then Just (1, chooseBestKey aliasMatches)
-                        else Nothing
+                    else Nothing
         in case matchPick of
             Nothing -> Nothing
             Just (matchClass, key) ->

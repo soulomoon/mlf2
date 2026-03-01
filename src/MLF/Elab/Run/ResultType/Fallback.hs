@@ -48,13 +48,13 @@ import MLF.Elab.Run.ResultType.Util
     , stripAnn
     , collectEdges
     )
-import MLF.Elab.Run.ResultType.Types (ResultTypeContext(..))
+import MLF.Elab.Run.ResultType.Types (ResultTypeInputs(..))
 
 -- | Compute result type when there's no direct annotation (fallback path).
 -- Note: This function handles the non-AAnn case. When the root is an AAnn,
 -- the facade (ResultType.hs) dispatches to computeResultTypeFromAnn instead.
 computeResultTypeFallback
-    :: ResultTypeContext
+    :: ResultTypeInputs
     -> AnnExpr      -- ^ annCanon (post-redirect)
     -> AnnExpr      -- ^ ann (pre-redirect)
     -> Either ElabError ElabType
@@ -125,7 +125,7 @@ computeResultTypeFallback ctx annCanon ann = do
 -- | Compute result type for the body of an annotated lambda.
 -- This handles the case where the body is wrapped in AAnn.
 computeBodyResultType
-    :: ResultTypeContext
+    :: ResultTypeInputs
     -> AnnExpr
     -> Either ElabError ElabType
 computeBodyResultType ctx bodyAnn =
@@ -138,7 +138,7 @@ computeBodyResultType ctx bodyAnn =
 -- | Local version of computeResultTypeFromAnn to avoid circular imports.
 -- This is a simplified version that handles the common case.
 computeResultTypeFromAnnLocal
-    :: ResultTypeContext
+    :: ResultTypeInputs
     -> AnnExpr      -- ^ inner (post-redirect)
     -> AnnExpr      -- ^ innerPre (pre-redirect)
     -> NodeId       -- ^ annNodeId
@@ -151,7 +151,7 @@ computeResultTypeFromAnnLocal ctx inner _innerPre _annNodeId _eid = do
 
 -- | Core implementation of computeResultTypeFallback (non-annotated-lambda case).
 computeResultTypeFallbackCore
-    :: ResultTypeContext
+    :: ResultTypeInputs
     -> AnnExpr      -- ^ annCanon (post-redirect)
     -> AnnExpr      -- ^ ann (pre-redirect)
     -> Either ElabError ElabType

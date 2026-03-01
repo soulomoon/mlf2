@@ -59,13 +59,12 @@ spec = describe "IdentityBridge" $ do
             let ib = mkIdentityBridge idSolved Nothing IntMap.empty
             sourceKeysForNode ib (NodeId 5) `shouldBe` [5]
 
-        it "de-duplicates when canonical collapses two ids" $ do
+        it "keeps raw witness key even when solved canonical collapses ids" $ do
             let ib = mkIdentityBridge mergeSolved Nothing IntMap.empty
-            -- Node 20 canonicalises to 10; raw=20, canon=10 -> two distinct keys
+            -- Node 20 canonicalises to 10 in solved space, but source keys stay
+            -- in raw witness key-space.
             let keys = sourceKeysForNode ib (NodeId 20)
-            -- Both 20 and 10 should appear, each exactly once
-            length keys `shouldBe` 2
-            IntSet.fromList keys `shouldBe` IntSet.fromList [10, 20]
+            keys `shouldBe` [20]
 
         it "de-duplicates copy-map reverse entries" $ do
             -- copy map: 30 -> NodeId 5 (source 30 was copied to 5)
@@ -181,11 +180,12 @@ spec = describe "IdentityBridge" $ do
                 binderKeys = IntSet.fromList [5]
             isBinderNode ib binderKeys (NodeId 5) `shouldBe` True
 
-        it "returns True via canonical alias" $ do
-            -- Node 20 canonicalises to 10; binder set has 10
+        it "returns False when only canonical alias matches binder set" $ do
+            -- Node 20 canonicalises to 10; strict source-domain matching must
+            -- not treat canonical aliases as binder keys.
             let ib = mkIdentityBridge mergeSolved Nothing IntMap.empty
                 binderKeys = IntSet.fromList [10]
-            isBinderNode ib binderKeys (NodeId 20) `shouldBe` True
+            isBinderNode ib binderKeys (NodeId 20) `shouldBe` False
 
         it "returns False when no source key matches" $ do
             let ib = mkIdentityBridge idSolved Nothing IntMap.empty
@@ -215,6 +215,14 @@ spec = describe "IdentityBridge" $ do
                 binderKeys = IntSet.fromList [20, 30]
                 spine = [Just (NodeId 20), Just (NodeId 30)]
             lookupBinderIndex ib binderKeys spine (NodeId 30) `shouldBe` Just 1
+
+        it "does not resolve alias-only matches through canonical identity" $ do
+            -- Node 20 canonicalises to 10, but strict source-domain matching
+            -- must not match target 20 to a spine binder keyed only by 10.
+            let ib = mkIdentityBridge mergeSolved Nothing IntMap.empty
+                binderKeys = IntSet.fromList [10]
+                spine = [Just (NodeId 10)]
+            lookupBinderIndex ib binderKeys spine (NodeId 20) `shouldBe` Nothing
 
         it "preserves raw binder identity without class-member fallback" $ do
             let b1 = NodeId 1
