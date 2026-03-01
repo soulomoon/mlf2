@@ -11,8 +11,7 @@ module MLF.Constraint.Presolution.WitnessCanon (
     normalizeInstanceOpsFull,
     coalesceRaiseMergeWithEnv,
     reorderWeakenWithEnv,
-    assertNoStandaloneGrafts,
-    stripForNonReplay
+    assertNoStandaloneGrafts
 ) where
 
 import Data.Functor.Foldable (ListF(..), ana, cata)
@@ -400,11 +399,6 @@ normalizeInstanceOpsFull env ops0 = do
     ops <- normalizeInstanceOpsCore env ops0
     validateNormalizedWitness env ops
     pure ops
-
--- Compatibility shim for callers that still import this symbol.
--- Non-replay stripping is no longer part of normalization semantics.
-stripForNonReplay :: OmegaNormalizeEnv -> [InstanceOp] -> [InstanceOp]
-stripForNonReplay _ = id
 
 -- | Drop locally redundant witness operations without changing order.
 -- This removes consecutive duplicate raises and self-merges.
