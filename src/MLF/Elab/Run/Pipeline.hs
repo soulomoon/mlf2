@@ -99,9 +99,14 @@ runPipelineElabWithSolvedBuilder traceCfg genConstraints buildSolved expr = do
     let planBuilder = prPlanBuilder pres
         generalizeAtWith = generalizeAtWithBuilder planBuilder
     solvedView <- buildSolved traceCfg pres
-    let setSolvedConstraint res c' =
-            let cCanon = rewriteConstraintWithUF (Solved.canonicalMap res) c'
-            in Solved.rebuildWithConstraint res cCanon
+    let setSolvedConstraint res c' = do
+            replayed <- fromSolveError $
+                solveResultFromSnapshot
+                    SolveSnapshot
+                        { snapUnionFind = Solved.canonicalMap res
+                        , snapPreRewriteConstraint = c'
+                        }
+            pure (Solved.rebuildWithConstraint res (srConstraint replayed))
         solvedClean = Solved.pruneBindParentsSolved solvedView
         solvedCleanView = solvedClean
     case Solved.validateCanonicalGraphStrict solvedClean of
@@ -126,8 +131,8 @@ runPipelineElabWithSolvedBuilder traceCfg genConstraints buildSolved expr = do
                     in foldl' IntMap.union IntMap.empty traceMaps
                 (constraintForGen, bindParentsGa) =
                     constraintForGeneralization traceCfg solvedClean (prRedirects pres) instCopyNodes instCopyMapFull c1 ann
-            let solvedForGen = setSolvedConstraint solvedClean constraintForGen
-                solvedForGenView = solvedForGen
+            solvedForGen <- setSolvedConstraint solvedClean constraintForGen
+            let solvedForGenView = solvedForGen
             let ann' = applyRedirectsToAnn (prRedirects pres) ann
             let annCanon = canonicalizeAnn (canonicalizeNode canonNode) ann'
             let edgeWitnesses = IntMap.map (canonicalizeWitness canonNode) (prEdgeWitnesses pres)

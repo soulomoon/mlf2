@@ -36,7 +36,7 @@ import MLF.Elab.Types
 import qualified MLF.Constraint.Traversal as Traversal
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.NodeAccess as NodeAccess
-import MLF.Constraint.Solved (Solved)
+import MLF.Constraint.Solved (Solved, canonical)
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Reify.Core (namedNodes)
 
@@ -56,16 +56,16 @@ import MLF.Reify.Core (namedNodes)
 contextToNodeBound :: Solved -> NodeId -> NodeId -> Either ElabError (Maybe [ContextStep])
 contextToNodeBound res root target = do
     let c = Solved.originalConstraint res
-        canonical = Solved.canonical res
-        rootC = canonical root
-        targetC = canonical target
+        canonicalNode = canonical res
+        rootC = canonicalNode root
+        targetC = canonicalNode target
 
     if rootC == targetC
         then pure (Just [])
         else do
             let keys = Order.orderKeysFromRoot res rootC
             namedSet <- namedNodes res
-            contextToNodeBoundWithOrderKeys canonical keys c namedSet rootC targetC
+            contextToNodeBoundWithOrderKeys canonicalNode keys c namedSet rootC targetC
 
 contextToNodeBoundWithOrderKeys
     :: (NodeId -> NodeId)
@@ -75,9 +75,9 @@ contextToNodeBoundWithOrderKeys
     -> NodeId
     -> NodeId
     -> Either ElabError (Maybe [ContextStep])
-contextToNodeBoundWithOrderKeys canonical keys c _namedSet root target = do
-    let rootC = canonical root
-        targetC = canonical target
+contextToNodeBoundWithOrderKeys canonicalNode keys c _namedSet root target = do
+    let rootC = canonicalNode root
+        targetC = canonicalNode target
 
     if rootC == targetC
         then pure (Just [])
@@ -95,7 +95,7 @@ contextToNodeBoundWithOrderKeys canonical keys c _namedSet root target = do
                         Nothing -> False
                 start =
                     case rootNode of
-                        Just TyVar{ tnBound = Just bnd } -> canonical bnd
+                        Just TyVar{ tnBound = Just bnd } -> canonicalNode bnd
                         Just TyVar{} -> rootC
                         _ -> rootC
             res <- snd <$> go IntSet.empty IntMap.empty start
@@ -108,7 +108,7 @@ contextToNodeBoundWithOrderKeys canonical keys c _namedSet root target = do
 
     reachableFromStructural :: NodeId -> IntSet.IntSet
     reachableFromStructural root0 =
-        Traversal.reachableFromUnderLenient canonical (NodeAccess.lookupNode c) root0
+        Traversal.reachableFromUnderLenient canonicalNode (NodeAccess.lookupNode c) root0
 
     dedupeById :: [NodeId] -> [NodeId]
     dedupeById =
@@ -116,16 +116,16 @@ contextToNodeBoundWithOrderKeys canonical keys c _namedSet root target = do
 
     orderedBindersAt :: NodeId -> Either ElabError [NodeId]
     orderedBindersAt binder0 = do
-        let binder = canonical binder0
+        let binder = canonicalNode binder0
         binders0 <-
-            bindingToElab (Binding.boundFlexChildrenUnder canonical c (typeRef binder))
+            bindingToElab (Binding.boundFlexChildrenUnder canonicalNode c (typeRef binder))
         let orderRoot =
                 case NodeAccess.lookupNode c binder of
-                    Just TyForall{ tnBody = body } -> canonical body
+                    Just TyForall{ tnBody = body } -> canonicalNode body
                     _ -> binder
             reachable = reachableFromStructural orderRoot
             bindersReachable =
-                filter (\nid -> IntSet.member (getNodeId nid) reachable) (dedupeById (map canonical binders0))
+                filter (\nid -> IntSet.member (getNodeId nid) reachable) (dedupeById (map canonicalNode binders0))
             missing =
                 [ nid
                 | nid <- bindersReachable
@@ -148,9 +148,9 @@ contextToNodeBoundWithOrderKeys canonical keys c _namedSet root target = do
         -> NodeId
         -> Either ElabError (IntMap.IntMap (Maybe [ContextStep]), Maybe [ContextStep])
     go visiting memo nid0 = do
-        let nid = canonical nid0
+        let nid = canonicalNode nid0
             key = getNodeId nid
-            targetC = canonical target
+            targetC = canonicalNode target
         if nid == targetC
             then
                 let res = Just []
@@ -211,7 +211,7 @@ contextToNodeBoundWithOrderKeys canonical keys c _namedSet root target = do
         -> Either ElabError (IntMap.IntMap (Maybe [ContextStep]), Maybe [ContextStep])
     goForall visiting memo forallId _body0 = do
         binders <- orderedBindersAt forallId
-        let targetC = canonical target
+        let targetC = canonicalNode target
         case elemIndex targetC binders of
             Just i -> do
                 let before = take i binders
@@ -222,7 +222,7 @@ contextToNodeBoundWithOrderKeys canonical keys c _namedSet root target = do
                     tryBound memoAcc (b : bs) =
                         case NodeAccess.lookupNode c b of
                             Just TyVar{ tnBound = Just bnd } -> do
-                                let bndC = canonical bnd
+                                let bndC = canonicalNode bnd
                                 (memo', res) <- go visiting memoAcc bndC
                                 case res of
                                     Just ctx ->

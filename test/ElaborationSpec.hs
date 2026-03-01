@@ -1691,6 +1691,61 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     Right inst ->
                         expectationFailure ("Expected fail-fast codomain error, got " ++ Elab.pretty inst)
 
+            it "fails fast when replay-map codomain only matches replay domain via canonical alias" $ do
+                let root = NodeId 100
+                    sourceKey = NodeId 1
+                    replayBinder = NodeId 2
+                    replayAlias = NodeId 31
+                    argNode = NodeId 40
+                    c = rootedConstraint emptyConstraint
+                        { cNodes = nodeMapFromList
+                                [ (getNodeId root, TyArrow root sourceKey sourceKey)
+                                , (getNodeId sourceKey, TyVar { tnId = sourceKey, tnBound = Nothing })
+                                , (getNodeId replayBinder, TyVar { tnId = replayBinder, tnBound = Nothing })
+                                , (getNodeId replayAlias, TyBase replayAlias (BaseTy "Bool"))
+                                , (getNodeId argNode, TyBase argNode (BaseTy "Int"))
+                                ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef sourceKey), (genRef (GenNodeId 0), BindFlex))
+                                , (nodeRefKey (typeRef replayBinder), (genRef (GenNodeId 0), BindFlex))
+                                ]
+                        }
+                    -- replayAlias canonicalises to replayBinder, but strict replay-map
+                    -- codomain validation must use replay key-space membership only.
+                    solved = mkSolved c (IntMap.singleton (getNodeId replayAlias) replayBinder)
+                    scheme =
+                        Elab.schemeFromType
+                            (Elab.TForall "t2" Nothing
+                                (Elab.TArrow (Elab.TVar "t2") (Elab.TVar "t2")))
+                    si = Elab.SchemeInfo
+                        { Elab.siScheme = scheme
+                        , Elab.siSubst = IntMap.singleton (getNodeId replayBinder) "t2"
+                        }
+                    tr =
+                        EdgeTrace
+                            { etRoot = root
+                            , etBinderArgs = [(sourceKey, argNode)]
+                            , etInterior = fromListInterior [root, sourceKey, replayBinder, replayAlias, argNode]
+                            , etBinderReplayMap = IntMap.singleton (getNodeId sourceKey) replayAlias
+                            , etCopyMap = mempty
+                            }
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewForallIntros = 0
+                        , ewWitness = InstanceWitness [OpWeaken sourceKey]
+                        }
+                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAtWith solved Nothing (Just si) (Just tr) ew of
+                    Left (Elab.PhiInvariantError msg) ->
+                        msg `shouldSatisfy` ("replay-map target outside replay binder domain" `isInfixOf`)
+                    Left err ->
+                        expectationFailure ("Expected PhiInvariantError, got " ++ show err)
+                    Right inst ->
+                        expectationFailure ("Expected fail-fast canonical-alias codomain rejection, got " ++ Elab.pretty inst)
+
             it "fails fast on malformed source-space replay target outside replay binder domain" $ do
                 let root = NodeId 100
                     sourceKey = NodeId 1
