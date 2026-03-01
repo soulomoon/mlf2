@@ -16,6 +16,7 @@ import MLF.Constraint.Solve
     , runUnifyClosure
     , rewriteConstraintWithUF
     , solveUnify
+    , solveResultFromSnapshot
     , solveUnifyWithSnapshot
     , validateSolvedGraphStrict
     )
@@ -86,12 +87,16 @@ spec = describe "Phase 5 -- Solve" $ do
                             rewriteConstraintWithUF
                                 (snapUnionFind snapshot)
                                 (snapPreRewriteConstraint snapshot)
-                        solved = resultConstraint (soResult out)
-                    cUnifyEdges (snapPreRewriteConstraint snapshot) `shouldBe` []
-                    lookupNodeMaybe (cNodes (snapPreRewriteConstraint snapshot)) (NodeId 0)
-                        `shouldBe` Just var0
-                    lookupNodeMaybe (cNodes solved) (NodeId 0) `shouldBe` Nothing
-                    rewritten `shouldBe` solved
+                    case solveResultFromSnapshot snapshot of
+                        Left err -> expectationFailure $ "Unexpected snapshot replay error: " ++ show err
+                        Right replayed -> do
+                            let solved = resultConstraint replayed
+                            cUnifyEdges (snapPreRewriteConstraint snapshot) `shouldBe` []
+                            lookupNodeMaybe (cNodes (snapPreRewriteConstraint snapshot)) (NodeId 0)
+                                `shouldBe` Just var0
+                            lookupNodeMaybe (cNodes solved) (NodeId 0) `shouldBe` Nothing
+                            replayed `shouldBe` soResult out
+                            rewritten `shouldBe` solved
 
     describe "Variables and structure" $ do
         it "merges a variable with a base type and rewrites to the canonical node" $ do
