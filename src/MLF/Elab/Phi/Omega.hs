@@ -267,9 +267,8 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
 
     isSchemeBinder :: NodeId -> Bool
     isSchemeBinder nid =
-        let nidC = canonicalNode nid
-        in IntSet.member (getNodeId nidC) schemeBinderKeys
-            && case Solved.lookupNode solved nidC of
+        IntSet.member (getNodeId nid) schemeBinderKeys
+            && case Solved.lookupNode solved nid of
                 Just TyVar{} -> True
                 _ -> False
 
@@ -671,10 +670,8 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                                 ]
                 Just replayTargetRaw ->
                     let replayTarget = replayTargetRaw
-                        replayTargetCanonical = canonicalNode replayTargetRaw
                         replayTargetIsSchemeBinder =
                             isSchemeBinder replayTarget
-                                || isSchemeBinder replayTargetCanonical
                     in if requireBinder && not replayTargetIsSchemeBinder
                         then
                             Left $
@@ -684,15 +681,11 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                                         , "op: " ++ opName
                                         , "source target: " ++ show rawTarget
                                         , "replay target: " ++ show replayTarget
-                                        , "canonical replay target: " ++ show replayTargetCanonical
                                         , "replay-map domain: " ++ show (IntMap.keys traceBinderReplayMap)
                                         ]
                         else Right replayTarget
         | otherwise =
-            let rawTargetCanonical = canonicalNode rawTarget
-                rawTargetIsSchemeBinder =
-                    isSchemeBinder rawTarget
-                        || isSchemeBinder rawTargetCanonical
+            let rawTargetIsSchemeBinder = isSchemeBinder rawTarget
             in if simpleNoReplayWeakenPattern
                 && opName == "OpWeaken"
                 && not rawTargetIsSchemeBinder

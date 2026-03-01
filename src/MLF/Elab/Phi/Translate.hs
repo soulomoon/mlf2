@@ -401,7 +401,6 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
             IntSet.fromList (IntMap.keys (siSubst siReplay))
         targetInReplayBinderSpace target =
             IntSet.member (getNodeId target) replayBinderKeySet
-                || IntSet.member (getNodeId (canonicalNode target)) replayBinderKeySet
         hasOutOfDomainGraftTarget =
             any
                 (\case
@@ -521,15 +520,8 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
                             fromSubst =
                                 IntSet.fromList (IntMap.keys (siSubst siReplay))
                         in IntSet.union fromScheme fromSubst
-                    replayBinderDomainCanonical =
-                        IntSet.fromList
-                            [ getNodeId (canonicalNode (NodeId key))
-                            | key <- IntSet.toList replayBinderDomainRaw
-                            ]
                     targetInReplayDomainRaw replayTarget =
                         IntSet.member (getNodeId replayTarget) replayBinderDomainRaw
-                    targetInReplayDomainCanonical replayTarget =
-                        IntSet.member (getNodeId (canonicalNode replayTarget)) replayBinderDomainCanonical
                     missingSources =
                         IntSet.toList (IntSet.difference traceBinderSourceSet replayMapDomain)
                     extraSources =
@@ -560,7 +552,7 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
                                                         , "edge: " ++ show (ewEdgeId ew)
                                                         , "source key: " ++ show sourceKey
                                                         ]
-                                if targetInReplayDomainRaw replayTargetRaw || targetInReplayDomainCanonical replayTargetRaw
+                                if targetInReplayDomainRaw replayTargetRaw
                                     then pure (sourceKey, replayTargetRaw)
                                     else
                                         Left $
@@ -570,7 +562,6 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
                                                     , "edge: " ++ show (ewEdgeId ew)
                                                     , "source key: " ++ show sourceKey
                                                     , "replay target: " ++ show replayTargetRaw
-                                                    , "target canonical key: " ++ show (canonicalNode replayTargetRaw)
                                                     , "replay binder domain: " ++ show (IntSet.toList replayBinderDomainRaw)
                                                     ]
                         in case mapM validateTarget traceBinderSourceKeys of
