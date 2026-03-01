@@ -15,7 +15,7 @@ Remove runtime load-bearing dependence on `rewriteConstraintWithUF` as a boundar
 1. `completed` Baseline + call-site audit + failing/locking tests
 2. `completed` Implement canonical solved-artifact path without runtime boundary rewrite dependency
 3. `completed` Run targeted checks + regression tests
-4. `in_progress` Pod notes update + focused commits + report
+4. `completed` Pod notes update + focused commits + report
 
 ## Errors Encountered
 | Error | Attempt | Resolution |
