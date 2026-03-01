@@ -1,8 +1,8 @@
 # Transformation Mechanism Table (Thesis vs Codebase)
 
-Last updated (UTC): 2026-02-28 21:47:50 UTC
-Source revision: `48c4049`
-Source machine local time: 2026-03-01 05:47:50 +0800
+Last updated (UTC): 2026-03-01 09:22:12 UTC
+Source revision: `9d6b6d2`
+Source machine local time: 2026-03-01 17:22:12 +0800
 
 | Transformation mechanism | Thesis pipeline | Current codebase | Alignment |
 |---|---|---|---|
