@@ -17,7 +17,7 @@ Eliminate all `DEV-TMT-*` rows from `docs/notes/2026-02-27-transformation-mechan
 | Wave 0: contracts + baseline | completed | Campaign files created and baseline gates captured |
 | Wave 1: Pod A + Pod C | completed | Integrated on `codex/tmt3-wave1-integration` |
 | Wave 2: Pod B + Pod D | completed | Integrated on `codex/tmt3-wave2-integration` |
-| Wave 3: Pod E docs closeout + final integration | in_progress | Reclassify rows to Aligned and finalize ledger/docs |
+| Wave 3: Pod E docs closeout + final integration | completed | Table/ledger/docs synchronized to all-aligned policy; ready for independent verifier gates |
 
 ## Decisions
 - Completion policy: all rows aligned (no active DEV-TMT implementation-choice rows).

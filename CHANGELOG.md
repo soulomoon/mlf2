@@ -3,7 +3,7 @@
 ## Unreleased
 
 ### Changed
-- Transformation Mechanism Table campaign classification is now binary (`Aligned` or `Deviation(<id>)`), with all remaining non-aligned rows mapped to explicit entries in `docs/thesis-deviations.yaml` and linked test evidence.
+- TMT3 Wave 3 docs closeout: Transformation Mechanism Table is now fully all-aligned (all rows `Aligned`), and all `DEV-TMT-*` entries were moved from active `deviations` to `history.resolved` in `docs/thesis-deviations.yaml` with `resolution_date: 2026-03-01`, replacing-commit metadata (Wave 1/Wave 2), and regression evidence.
 - Refactored elaboration/pipeline/result-type wiring to a single solved input handle (`eeSolved`, `rtcSolved`) while preserving checked-authoritative output behavior.
 - Added regression locks for single-solved migration guards and checked/unchecked pipeline parity slices.
 - Aligned elaboration pipeline with thesis model (§10.3-10.4, §12.1.3, §15.3.5-15.3.6)
