@@ -34,7 +34,7 @@
 ### Phi Translation
 - Phi/Omega/IdentityBridge resolve binder identity from witness domain (EdgeTrace/EdgeWitness) first.
 - Runtime class-member fallback search is removed from Phi/Omega binder resolution.
-- `sourceKeysForNode` is strict witness-domain ranking (raw → canonical → copy/trace provenance).
+- `sourceKeysForNode` is strict witness-domain ranking (raw + copy/trace provenance only; no canonical/class-member expansion fallback).
 - Non-root replay resolution is replay-map/source-alias deterministic and fail-fast on contract misses.
 
 ### 2026-02-27 Phi strict replay-map normalization (upfront, no runtime fallback search)

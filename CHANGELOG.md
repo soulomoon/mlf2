@@ -15,7 +15,7 @@
   - added seeded unification-closure API (`runUnifyClosureWithSeed`) and switched presolution closure drains to seeded UF processing;
   - added explicit presolution artifact contract errors (`ResidualUnifyEdges`, `ResidualInstEdges`, `ResidualTyExpNodes`, `MissingEdgeWitnesses`, `MissingEdgeTraces`);
   - removed canonical-domain `Solved` query exports (`canonicalNodes`, `allCanonicalNodes`, `lookupCanonicalNode`, `lookupCanonicalVarBound`) after call-site migration;
-  - made `IdentityBridge.sourceKeysForNode` strict witness-domain-only and introduced explicit class-fallback API (`sourceKeysForNodeWithClassFallback`) plus fallback telemetry in Phi/Omega;
+  - made `IdentityBridge.sourceKeysForNode` strict witness-domain-only and removed runtime class-fallback identity recovery from Phi/Omega paths;
   - removed runtime `runPipelineElabProjectionFirst`; retained dual-path parity as test-only harness in `DualPathSpec`.
 - Thesis-exact Phi replay normalization (2026-02-27):
   - replay metadata contract is now strict: `EdgeTrace.etBinderReplayMap` is required and validated at presolution boundaries;

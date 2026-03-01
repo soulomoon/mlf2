@@ -1,8 +1,8 @@
 # Transformation Mechanism Table (Thesis vs Codebase)
 
-Last updated (UTC): 2026-03-01 10:51:15 UTC
-Source revision: `006757b`
-Source machine local time: 2026-03-01 18:51:15 +0800
+Last updated (UTC): 2026-03-01 12:12:40 UTC
+Source revision: `4a875e9`
+Source machine local time: 2026-03-01 20:12:40 +0800
 
 | Transformation mechanism | Thesis pipeline | Current codebase | Alignment |
 |---|---|---|---|
@@ -17,7 +17,7 @@ Source machine local time: 2026-03-01 18:51:15 +0800
 | Canonicalization source used by Phi | Canonicalization is implicit in derivation/equivalence reasoning over `χp`. (`papers/these-finale-english.txt` §15.3.5-§15.3.6) | Phi resolves binder/source identity in witness key-space first; canonicalization is used only for alias reconciliation and scope/node lookups after source-domain selection. (`src/MLF/Elab/Phi/Translate.hs:286-293`, `:320-327`, `:488-574`, `src/MLF/Elab/Phi/IdentityBridge.hs:70-74`, `:140-151`) | Aligned |
 | Identity reconciliation mechanism | No explicit bridge object in thesis presentation. | `IdentityBridge` now restricts identity candidates to raw/copy/trace witness provenance and exact binder-key matching (no runtime equivalence-class expansion fallback). (`src/MLF/Elab/Phi/IdentityBridge.hs:140-173`, `:205-246`) | Aligned |
 | Non-root weaken/raise binder resolution | Thesis translation follows witness/operation structure; unresolved witness targets are not success cases. (`papers/these-finale-english.txt` §15.3.5) | Ω resolves non-root `OpWeaken` via replay-map/source-alias binder lookup and fails fast if unresolved; unresolved trace-source `OpRaise` targets fail with invariant error. (`src/MLF/Elab/Phi/Omega.hs:796-829`, `:848-856`) | Aligned |
-| Graph mutation during solve/presolution | Thesis transformations mutate constraints via propagation + unification. (`papers/these-finale-english.txt` §12.1.6 proof) | Presolution performs closure/materialization/rewrite mutation; pipeline rebuilds solved state from presolution snapshots and does not invoke rewrite helpers in the run path. (`src/MLF/Constraint/Presolution/EdgeProcessing.hs:49-57`, `src/MLF/Constraint/Presolution/Driver.hs:111-131`, `src/MLF/Elab/Run/Pipeline.hs:85-90`, `:118-129`, `src/MLF/Constraint/Solve.hs:211-219`) | Aligned |
+| Graph mutation during solve/presolution | Thesis transformations mutate constraints via propagation + unification. (`papers/these-finale-english.txt` §12.1.6 proof) | Presolution performs closure/materialization/rewrite mutation; pipeline rebuilds solved state from presolution snapshots via `solveResultFromSnapshot`, with canonical rewrite encapsulated inside snapshot reconstruction rather than direct run-path helper calls. (`src/MLF/Constraint/Presolution/EdgeProcessing.hs:49-57`, `src/MLF/Constraint/Presolution/Driver.hs:111-131`, `src/MLF/Elab/Run/Pipeline.hs:85-90`, `:118-129`, `src/MLF/Constraint/Solve.hs:211-219`) | Aligned |
 | Dual-path verification mechanism | N/A in thesis | Production elaboration is single-path (`runPipelineElabWith`), and historical legacy parity is retained only as frozen artifact regression coverage. (`src/MLF/Elab/Run/Pipeline.hs:75-90`, `test/FrozenParitySpec.hs:12-18`, `test/PipelineSpec.hs:192-205`) | Aligned |
 | Campaign classification status | N/A in thesis | All rows are aligned to current runtime behavior; DEV-TMT campaign entries are retired to resolved history in `docs/thesis-deviations.yaml`. | Aligned |
 
