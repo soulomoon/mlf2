@@ -35,3 +35,13 @@
 - Merged `codex/tmt3-solve-no-rewrite-layer-wave1`.
 - Resolved add/add task-file conflicts by consolidating pod logs.
 - Pending: full integration gate (`cabal build all && cabal test`) and focused acceptance checks.
+
+## Pod D (Wave 2)
+- Branch/worktree: `codex/tmt3-elab-direct-chi-wave2`.
+- Added/kept pipeline invariant test ensuring run path does not reference `Solved.fromPresolutionResult` or `ResultTypeContext`.
+- Refactored runtime solved construction to snapshot replay via `Solved.fromPreRewriteState` with local UF sanitization.
+- Renamed run result-type boundary record `ResultTypeContext` -> `ResultTypeInputs` across `src/MLF/Elab/Run/ResultType*` and pipeline call sites.
+- Retired active dual-path guardrail wiring by removing `DualPathSpec` from `test/Main.hs` and `mlf2.cabal` test-suite modules.
+- Validation slices:
+  - `Pipeline (Phases 1-5)`: 56 examples, 0 failures.
+  - `Phase 5 -- Solve`: 44 examples, 0 failures.

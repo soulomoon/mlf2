@@ -16,3 +16,8 @@
 ## Integration Notes
 - Wave 1 merge conflicts were limited to task tracking files; code merged without semantic conflicts.
 - Wave 1 is ready for integration gate execution.
+
+## Pod D (`elab-direct-chi`, Wave 2)
+- Runtime run-path no longer depends on `Solved.fromPresolutionResult`; pipeline now projects solved state from presolution snapshots through `Solved.fromPreRewriteState` after local live-node UF sanitization.
+- `ResultTypeContext` boundary identifier was removed from `src/MLF/Elab/Run/*`; run-path result-type API now uses `ResultTypeInputs`.
+- `DualPathSpec` is no longer wired as an active guardrail in `test/Main.hs` / `mlf2.cabal`; single-path pipeline invariants remain covered by `PipelineSpec`.

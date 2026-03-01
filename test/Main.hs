@@ -36,7 +36,6 @@ import qualified PhiSoundnessSpec
 import qualified AlignmentInvariantSpec
 import qualified ExpansionMinimalitySpec
 import qualified Constraint.SolvedSpec
-import qualified DualPathSpec
 
 main :: IO ()
 main = do
@@ -78,4 +77,3 @@ main = do
         AlignmentInvariantSpec.spec
         ExpansionMinimalitySpec.spec
         Constraint.SolvedSpec.spec
-        DualPathSpec.spec

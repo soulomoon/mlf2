@@ -193,6 +193,15 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             forM_ ["runPipelineElabProjectionFirst", "runPipelineElabViaLegacySolve"] $ \needle ->
                 pipelineSrc `shouldSatisfy` (not . isInfixOf needle)
 
+        it "runtime run-path avoids solved-projection and result-type context boundary adapters" $ do
+            pipelineSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
+            resultTypeSrc <- readFile "src/MLF/Elab/Run/ResultType.hs"
+            annSrc <- readFile "src/MLF/Elab/Run/ResultType/Ann.hs"
+            fallbackSrc <- readFile "src/MLF/Elab/Run/ResultType/Fallback.hs"
+            forM_ [pipelineSrc, resultTypeSrc, annSrc, fallbackSrc] $ \src ->
+                src `shouldSatisfy` (not . isInfixOf "ResultTypeContext")
+            pipelineSrc `shouldSatisfy` (not . isInfixOf "fromPresolutionResult")
+
         it "annotation-heavy path still reports checked-authoritative type" $ do
             let expr =
                     EAnn
