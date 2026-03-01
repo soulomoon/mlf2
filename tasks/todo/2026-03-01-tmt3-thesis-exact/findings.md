@@ -35,3 +35,8 @@
 ## Integration Notes
 - Wave 1 and Wave 2 merge conflicts were limited to task tracking files.
 - Code-path integrations are preserved across wave branches and ready for final docs closeout + final gate.
+
+## Wave 3 Pod Findings (`docs-closeout`)
+- Transformation Mechanism Table is fully aligned on this branch; DEV-TMT row labels were retired from table alignment cells.
+- `docs/thesis-deviations.yaml` now keeps only non-TMT active deviations, while all `DEV-TMT-*` entries are recorded as `resolved` with resolution metadata and evidence.
+- `implementation_notes.md`, `CHANGELOG.md`, and `TODO.md` were updated to reflect campaign closure as an all-aligned table state.

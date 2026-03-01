@@ -2,21 +2,21 @@
 
 ## Thesis Alignment (Phase A–E)
 
+### 2026-03-01 TMT3 Wave 3 docs closeout (all-aligned policy)
+- Transformation Mechanism Table (`docs/notes/2026-02-27-transformation-mechanism-table.md`) is now fully all-aligned for the current branch: every row is `Aligned` and no row references active `DEV-TMT-*` IDs.
+- `docs/thesis-deviations.yaml` now moves all `DEV-TMT-*` records out of active `deviations` and into `history.resolved`.
+- Each resolved `DEV-TMT-*` history entry includes:
+  - `resolution_date: 2026-03-01`
+  - replacing commit metadata from TMT3 Wave 1/Wave 2 integration commits where relevant
+  - regression test evidence anchors (Phi alignment, IdentityBridge, replay-map and pipeline closeout slices)
+- Campaign closeout status: TMT3 is documentation-complete and ready for final integration handoff.
+
 ### 2026-03-01 Transformation-mechanism thesis-exact classification campaign
-- Transformation Mechanism Table rows are now classified with a binary policy:
-  - `Aligned`
-  - `Deviation(<id>)` mapped in `docs/thesis-deviations.yaml`.
-- Added explicit deviation entries for remaining load-bearing representation/runtime
-  choices:
-  - `DEV-TMT-ELAB-SOLVED-PROJECTION`
-  - `DEV-TMT-RESULT-TYPE-CONTEXT`
-  - `DEV-TMT-OMEGA-OPERATIONALIZATION`
-  - `DEV-TMT-PHI-CANONICAL-DEPENDENCE`
-  - `DEV-TMT-IDENTITY-BRIDGE`
-  - `DEV-TMT-SOLVE-REWRITE-LAYER`
-  - `DEV-TMT-DUAL-PATH-GUARDRAIL`
-- Table statements now reference those deviation IDs directly so row status,
-  code paths, and test evidence stay synchronized.
+- Historical Wave 0-2 campaign work introduced explicit `DEV-TMT-*` tracking to
+  classify remaining non-aligned rows and bind them to code/test evidence.
+- Wave 3 completed the closeout: those IDs are now retired to
+  `docs/thesis-deviations.yaml` `history.resolved`, and the table itself is
+  fully `Aligned`.
 
 ### 2026-03-01 Single-solved elaboration input migration
 - Elaboration input wiring now uses a single solved snapshot handle in `ElabEnv` (`eeSolved`) and in result-type context (`rtcSolved`).

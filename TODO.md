@@ -8,17 +8,21 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 - Completed:
   - Reclassified every row in `docs/notes/2026-02-27-transformation-mechanism-table.md`
-    to `Aligned` or `Deviation(<id>)`.
-  - Added explicit deviation-ledger coverage for all remaining non-aligned row
-    clusters in `docs/thesis-deviations.yaml` with code/test evidence.
-  - Synced implementation/changelog/docs to keep row status and deviation IDs
-    consistent.
+    to `Aligned`.
+  - Moved all `DEV-TMT-*` entries from active `deviations` to
+    `history.resolved` in `docs/thesis-deviations.yaml`.
+  - Added closeout metadata for each `DEV-TMT-*` record:
+    - `resolution_date: 2026-03-01`
+    - replacing commit references from TMT3 Wave 1 / Wave 2 where relevant
+    - regression evidence anchors (`Phi alignment`, `IdentityBridge`,
+      `replay-map`, and pipeline closeout slices).
+  - Synced implementation/changelog/task docs for final integration readiness.
   - Baseline + targeted campaign slices are green (`cabal build all`, `cabal test`,
     targeted Phi/Presolution/Pipeline slices).
 - Status:
-  - Transformation-mechanism campaign classification is now decision-closed by row.
-  - Remaining thesis-exact work is tracked via explicit deviation IDs, not
-    ambiguous table wording.
+  - Transformation-mechanism campaign is closed with all rows aligned on this
+    branch.
+  - No active `DEV-TMT-*` implementation-choice entries remain.
 
 ## Task 26 Phi replay bridge strict pass-through follow-up (2026-03-01)
 

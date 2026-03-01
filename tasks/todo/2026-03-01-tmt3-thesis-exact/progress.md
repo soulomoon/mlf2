@@ -43,3 +43,12 @@
 - Merged `codex/tmt3-omega-thesis-order-wave2` and `codex/tmt3-elab-direct-chi-wave2`.
 - Resolved task-file content conflicts by preserving Wave 0/1/2 evidence in campaign files.
 - Wave 2 chain is ready for Wave 3 docs closeout and final gate on final integration branch.
+
+## 2026-03-01 Wave 3 Pod E (docs closeout)
+- Updated `docs/notes/2026-02-27-transformation-mechanism-table.md` so all rows classify as `Aligned` on the integrated Wave 1+2 runtime behavior.
+- Updated `docs/thesis-deviations.yaml` to retire all `DEV-TMT-*` entries to resolved history with `resolution_date: 2026-03-01`, replacing-commit references, and test evidence.
+- Synced campaign closeout wording in `implementation_notes.md`, `CHANGELOG.md`, and `TODO.md`.
+- Validation:
+  - `rg -n 'Deviation \\(`DEV-TMT-' docs/notes/2026-02-27-transformation-mechanism-table.md` -> no matches.
+  - `rg -n 'id: DEV-TMT-' docs/thesis-deviations.yaml` -> resolved-history entries only.
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Phi alignment" --match "IdentityBridge" --match "replay-map"'` -> PASS (`43 examples, 0 failures`).
