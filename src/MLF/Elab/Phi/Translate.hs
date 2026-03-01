@@ -53,7 +53,7 @@ import MLF.Elab.Types
 import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Constraint.BindingUtil (bindingPathToRootLocal)
 import MLF.Reify.Core (namedNodes, reifyType)
-import MLF.Constraint.Solved (Solved)
+import MLF.Constraint.Solved (Solved, canonical)
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Presolution (EdgeTrace(..))
 import MLF.Constraint.Presolution.Base (CopyMapping(..), InteriorNodes(..), copiedNodes)
@@ -73,7 +73,7 @@ import MLF.Util.Trace (TraceConfig, traceGeneralize)
 canonicalNodeM :: NodeId -> PhiM NodeId
 canonicalNodeM nid = do
     res <- askResult
-    pure $ Solved.canonical res nid
+    pure $ canonical res nid
 
 -- | Remap scheme info using the copy mapping from an edge trace.
 remapSchemeInfoM :: EdgeTrace -> SchemeInfo -> PhiM SchemeInfo
@@ -401,7 +401,6 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
             IntSet.fromList (IntMap.keys (siSubst siReplay))
         targetInReplayBinderSpace target =
             IntSet.member (getNodeId target) replayBinderKeySet
-                || IntSet.member (getNodeId (canonicalNode target)) replayBinderKeySet
         hasOutOfDomainGraftTarget =
             any
                 (\case
@@ -473,7 +472,7 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
                             Right () -> Right ()
 
     canonicalNode :: NodeId -> NodeId
-    canonicalNode = Solved.canonical res
+    canonicalNode = canonical res
 
     remapSchemeInfo :: EdgeTrace -> SchemeInfo -> SchemeInfo
     remapSchemeInfo tr si = remapSchemeInfoByTrace res tr si
@@ -521,15 +520,8 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
                             fromSubst =
                                 IntSet.fromList (IntMap.keys (siSubst siReplay))
                         in IntSet.union fromScheme fromSubst
-                    replayBinderDomainCanonical =
-                        IntSet.fromList
-                            [ getNodeId (canonicalNode (NodeId key))
-                            | key <- IntSet.toList replayBinderDomainRaw
-                            ]
                     targetInReplayDomainRaw replayTarget =
                         IntSet.member (getNodeId replayTarget) replayBinderDomainRaw
-                    targetInReplayDomainCanonical replayTarget =
-                        IntSet.member (getNodeId (canonicalNode replayTarget)) replayBinderDomainCanonical
                     missingSources =
                         IntSet.toList (IntSet.difference traceBinderSourceSet replayMapDomain)
                     extraSources =
@@ -560,7 +552,7 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
                                                         , "edge: " ++ show (ewEdgeId ew)
                                                         , "source key: " ++ show sourceKey
                                                         ]
-                                if targetInReplayDomainRaw replayTargetRaw || targetInReplayDomainCanonical replayTargetRaw
+                                if targetInReplayDomainRaw replayTargetRaw
                                     then pure (sourceKey, replayTargetRaw)
                                     else
                                         Left $
@@ -570,7 +562,6 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
                                                     , "edge: " ++ show (ewEdgeId ew)
                                                     , "source key: " ++ show sourceKey
                                                     , "replay target: " ++ show replayTargetRaw
-                                                    , "target canonical key: " ++ show (canonicalNode replayTargetRaw)
                                                     , "replay binder domain: " ++ show (IntSet.toList replayBinderDomainRaw)
                                                     ]
                         in case mapM validateTarget traceBinderSourceKeys of
