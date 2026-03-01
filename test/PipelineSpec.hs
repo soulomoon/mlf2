@@ -213,6 +213,8 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             cUnifyEdges (prConstraint (paPresolution artifacts)) `shouldBe` []
             expectedNative <- requireRight (Solved.fromPresolutionResult (paPresolution artifacts))
             paSolved artifacts `shouldBe` expectedNative
+            pipelineSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
+            pipelineSrc `shouldSatisfy` (not . isInfixOf "rewriteConstraintWithUF")
             runPipelineElab Set.empty (unsafeNormalizeExpr (ELam "x" (EVar "x")))
                 `shouldSatisfy` isRight
 
