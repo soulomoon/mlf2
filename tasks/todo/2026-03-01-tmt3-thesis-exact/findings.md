@@ -10,3 +10,4 @@
   - New elaboration regression expects replay-map codomain validation to reject targets that only canonicalize into replay binder domain.
 - Strict replay-map codomain validation now rejects targets that only canonicalize into replay binder domain.
 - IdentityBridge now keeps source-key operations in witness raw key-space and drops canonical-alias lookup fallback.
+- Follow-up acceptance fix: removed remaining `Solved.canonical` call-site tokens under `src/MLF/Elab/Phi` by switching to unqualified `canonical` imports in `Context`, `Translate`, and `Omega`.

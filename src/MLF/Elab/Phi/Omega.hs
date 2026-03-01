@@ -33,7 +33,7 @@ import qualified MLF.Util.OrderKey as OrderKey
 import MLF.Constraint.Types
 import MLF.Constraint.Presolution (EdgeTrace(..))
 import MLF.Constraint.Presolution.Base (CopyMapping(..), InteriorNodes(..), getCopyMapping)
-import MLF.Constraint.Solved (Solved)
+import MLF.Constraint.Solved (Solved, canonical)
 import qualified MLF.Constraint.Solved as Solved
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Binding.Tree as Binding
@@ -82,7 +82,7 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
     solved = ocSolved ctx
 
     canonicalNode :: NodeId -> NodeId
-    canonicalNode = Solved.canonical solved
+    canonicalNode = canonical solved
 
     copyMap :: IntMap.IntMap NodeId
     copyMap = ocCopyMap ctx

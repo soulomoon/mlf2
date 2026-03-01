@@ -18,3 +18,6 @@
   - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Phi alignment" --match "fails fast when replay-map source domain mismatches trace binder sources" --match "fails fast when replay-map codomain target is outside replay binder domain" --match "IdentityBridge"'` => PASS (30 examples).
   - `cabal test mlf2-test --test-show-details=direct --test-options='--match "fails fast when replay-map codomain only matches replay domain via canonical alias"'` => PASS (1 example).
   - `rg -n "Solved\\.canonical" src/MLF/Elab/Phi` executed for required audit output.
+- Follow-up hard-check #1:
+  - `rg -n "Solved\\.canonical" src/MLF/Elab/Phi` => no matches.
+  - Targeted command with added canonical-alias fail-fast matcher => PASS (31 examples).

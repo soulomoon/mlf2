@@ -53,7 +53,7 @@ import MLF.Elab.Types
 import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Constraint.BindingUtil (bindingPathToRootLocal)
 import MLF.Reify.Core (namedNodes, reifyType)
-import MLF.Constraint.Solved (Solved)
+import MLF.Constraint.Solved (Solved, canonical)
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Presolution (EdgeTrace(..))
 import MLF.Constraint.Presolution.Base (CopyMapping(..), InteriorNodes(..), copiedNodes)
@@ -73,7 +73,7 @@ import MLF.Util.Trace (TraceConfig, traceGeneralize)
 canonicalNodeM :: NodeId -> PhiM NodeId
 canonicalNodeM nid = do
     res <- askResult
-    pure $ Solved.canonical res nid
+    pure $ canonical res nid
 
 -- | Remap scheme info using the copy mapping from an edge trace.
 remapSchemeInfoM :: EdgeTrace -> SchemeInfo -> PhiM SchemeInfo
@@ -472,7 +472,7 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
                             Right () -> Right ()
 
     canonicalNode :: NodeId -> NodeId
-    canonicalNode = Solved.canonical res
+    canonicalNode = canonical res
 
     remapSchemeInfo :: EdgeTrace -> SchemeInfo -> SchemeInfo
     remapSchemeInfo tr si = remapSchemeInfoByTrace res tr si
