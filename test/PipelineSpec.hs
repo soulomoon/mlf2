@@ -198,6 +198,19 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             pipelineSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
             pipelineSrc `shouldSatisfy` (not . isInfixOf "runPipelineElabWithSolvedBuilder")
 
+        it "pipeline no longer defines buildSolvedFromPresolutionSnapshot" $ do
+            pipelineSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
+            pipelineSrc `shouldSatisfy` (not . isInfixOf "buildSolvedFromPresolutionSnapshot")
+
+        it "generalize env derives canonical constraint from PresolutionView" $ do
+            generalizeSrc <- readFile "src/MLF/Elab/Run/Generalize.hs"
+            generalizeSrc `shouldSatisfy` (isInfixOf "pvCanonicalConstraint")
+            generalizeSrc `shouldSatisfy` (isInfixOf "pvCanonical")
+
+        it "result-type context no longer stores rtcSolved" $ do
+            resultTypeTypesSrc <- readFile "src/MLF/Elab/Run/ResultType/Types.hs"
+            resultTypeTypesSrc `shouldSatisfy` (not . isInfixOf "rtcSolved")
+
         it "runtime run-path avoids solved-projection and result-type context boundary adapters" $ do
             pipelineSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
             resultTypeSrc <- readFile "src/MLF/Elab/Run/ResultType.hs"

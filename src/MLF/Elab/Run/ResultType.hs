@@ -19,7 +19,7 @@ import MLF.Constraint.Types.Graph
 import qualified MLF.Constraint.NodeAccess
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Elab.Types (ElabType, ElabError)
-import MLF.Elab.Run.ResultType.Types (ResultTypeInputs(..))
+import MLF.Elab.Run.ResultType.Types (ResultTypeInputs(..), rtcSolveLike)
 import qualified MLF.Elab.Run.ResultType.Ann as Ann
 import qualified MLF.Elab.Run.ResultType.Fallback as Fallback
 
@@ -36,10 +36,10 @@ computeResultTypeFallback
     -> AnnExpr      -- ^ ann (pre-redirect)
     -> Either ElabError ElabType
 computeResultTypeFallback ctx annCanon ann = do
+    solvedForGen <- rtcSolveLike ctx
     -- First, determine the root (same logic as before to check for AAnn)
     let canonical = rtcCanonical ctx
         c1 = rtcBaseConstraint ctx
-        solvedForGen = rtcSolved ctx
         solvedForGenView = solvedForGen
 
     let schemeRootSet =

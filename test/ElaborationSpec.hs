@@ -39,7 +39,8 @@ import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Binding.Canonicalization as BindCanon
 import MLF.Elab.Run.Scope (letScopeOverrides, resolveCanonicalScope)
 import MLF.Constraint.Presolution
-    ( PresolutionResult(..)
+    ( PresolutionView(..)
+    , PresolutionResult(..)
     , EdgeTrace(..)
     , GaBindParents(..)
     , validateCrossGenMapping
@@ -106,6 +107,19 @@ generalizeAt = generalizeAtWith Nothing
 
 mkSolved :: Constraint -> IntMap.IntMap NodeId -> Solved.Solved
 mkSolved = Solved.mkTestSolved
+
+presolutionViewFromSolved :: Solved.Solved -> PresolutionView
+presolutionViewFromSolved solved =
+    PresolutionView
+        { pvConstraint = Solved.originalConstraint solved
+        , pvCanonicalMap = Solved.canonicalMap solved
+        , pvCanonical = Solved.canonical solved
+        , pvLookupNode = Solved.lookupNode solved
+        , pvLookupVarBound = Solved.lookupVarBound solved
+        , pvLookupBindParent = Solved.lookupBindParent solved
+        , pvBindParents = Solved.bindParents solved
+        , pvCanonicalConstraint = Solved.canonicalConstraint solved
+        }
 
 requirePipeline :: SurfaceExpr -> IO (Elab.ElabTerm, Elab.ElabType)
 requirePipeline expr =
@@ -191,6 +205,22 @@ stripUnusedTopForalls ty =
 
 spec :: Spec
 spec = describe "Phase 6 — Elaborate (xMLF)" $ do
+    describe "Migration guards" $ do
+        it "ElabEnv uses PresolutionView boundary" $ do
+            src <- readFile "src/MLF/Elab/Elaborate.hs"
+            src `shouldSatisfy` (isInfixOf "eePresolutionView")
+            src `shouldSatisfy` (not . isInfixOf "eeSolved ::")
+
+        it "Phi modules no longer import MLF.Constraint.Solved directly" $ do
+            let phiModules =
+                    [ "src/MLF/Elab/Phi/Omega.hs"
+                    , "src/MLF/Elab/Phi/Context.hs"
+                    , "src/MLF/Elab/Phi/IdentityBridge.hs"
+                    ]
+            forM_ phiModules $ \path -> do
+                src <- readFile path
+                src `shouldSatisfy` (not . isInfixOf "import MLF.Constraint.Solved")
+
     describe "SrcTy indexed aliases compile shape" $ do
         it "supports raw and normalized aliases from one SrcTy family" $ do
             let rawTy :: SrcType
@@ -3101,7 +3131,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         }
                     solved = mkSolved c IntMap.empty
 
-                steps <- requireRight (Elab.contextToNodeBound solved root cN)
+                steps <- requireRight (Elab.contextToNodeBound (presolutionViewFromSolved solved) root cN)
                 steps `shouldBe` Just [Elab.StepUnder "t1", Elab.StepInside]
 
             it "contextToNodeBound computes under-quantifier contexts (context)" $ do
@@ -3130,7 +3160,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         }
                     solved = mkSolved c IntMap.empty
 
-                steps <- requireRight (Elab.contextToNodeBound solved root bN)
+                steps <- requireRight (Elab.contextToNodeBound (presolutionViewFromSolved solved) root bN)
                 steps `shouldBe` Just [Elab.StepUnder "t1"]
 
             it "contextToNodeBound handles shared bound subgraphs (context dag)" $ do
@@ -3160,7 +3190,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         }
                     solved = mkSolved c IntMap.empty
 
-                steps <- requireRight (Elab.contextToNodeBound solved root xN)
+                steps <- requireRight (Elab.contextToNodeBound (presolutionViewFromSolved solved) root xN)
                 steps `shouldBe` Just [Elab.StepInside]
 
             it "contextToNodeBound ignores non-variable binder bounds (context non-var)" $ do
@@ -3189,7 +3219,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         }
                     solved = mkSolved c IntMap.empty
 
-                steps <- requireRight (Elab.contextToNodeBound solved root domN)
+                steps <- requireRight (Elab.contextToNodeBound (presolutionViewFromSolved solved) root domN)
                 steps `shouldBe` Nothing
 
             it "O15-CONTEXT-REJECT: contextToNodeBound does not descend through forall body fallback" $ do
@@ -3212,7 +3242,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 ]
                         }
                     solved = mkSolved c IntMap.empty
-                steps <- requireRight (Elab.contextToNodeBound solved root bodyOnly)
+                steps <- requireRight (Elab.contextToNodeBound (presolutionViewFromSolved solved) root bodyOnly)
                 steps `shouldBe` Nothing
 
             it "rejects fallback-dependent binders (gen fallback invariant)" $ do

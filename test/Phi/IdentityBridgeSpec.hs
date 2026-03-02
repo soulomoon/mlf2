@@ -15,7 +15,8 @@ import MLF.Constraint.Types.Graph
 import MLF.Constraint.Solved (Solved)
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Presolution
-    ( EdgeTrace(..)
+    ( PresolutionView(..)
+    , EdgeTrace(..)
     , CopyMapping(..)
     , InteriorNodes(..)
     , PresolutionResult(..)
@@ -28,6 +29,23 @@ import SpecUtil (emptyConstraint, nodeMapFromList, runPipelineArtifactsDefault, 
 -- | Build a Solved with the given union-find for testing.
 mkTestSolved :: IntMap.IntMap NodeId -> Solved
 mkTestSolved uf = Solved.mkTestSolved emptyConstraint uf
+
+solvedToPresolutionView :: Solved -> PresolutionView
+solvedToPresolutionView solved =
+    PresolutionView
+        { pvConstraint = Solved.originalConstraint solved
+        , pvCanonicalMap = Solved.canonicalMap solved
+        , pvCanonical = Solved.canonical solved
+        , pvLookupNode = Solved.lookupNode solved
+        , pvLookupVarBound = Solved.lookupVarBound solved
+        , pvLookupBindParent = Solved.lookupBindParent solved
+        , pvBindParents = Solved.bindParents solved
+        , pvCanonicalConstraint = Solved.canonicalConstraint solved
+        }
+
+mkBridge :: Solved -> Maybe EdgeTrace -> IntMap.IntMap NodeId -> IdentityBridge
+mkBridge solved mTrace copyMap =
+    mkIdentityBridge (solvedToPresolutionView solved) mTrace copyMap
 
 -- | Solved with identity canonical (empty union-find).
 idSolved :: Solved
@@ -56,11 +74,11 @@ spec = describe "IdentityBridge" $ do
     -- ---------------------------------------------------------------
     describe "sourceKeysForNode de-duplication" $ do
         it "returns a single key when raw == canonical and no copies" $ do
-            let ib = mkIdentityBridge idSolved Nothing IntMap.empty
+            let ib = mkBridge idSolved Nothing IntMap.empty
             sourceKeysForNode ib (NodeId 5) `shouldBe` [5]
 
         it "keeps raw witness key even when solved canonical collapses ids" $ do
-            let ib = mkIdentityBridge mergeSolved Nothing IntMap.empty
+            let ib = mkBridge mergeSolved Nothing IntMap.empty
             -- Node 20 canonicalises to 10 in solved space, but source keys stay
             -- in raw witness key-space.
             let keys = sourceKeysForNode ib (NodeId 20)
@@ -69,7 +87,7 @@ spec = describe "IdentityBridge" $ do
         it "de-duplicates copy-map reverse entries" $ do
             -- copy map: 30 -> NodeId 5 (source 30 was copied to 5)
             let copyMap = IntMap.fromList [(30, NodeId 5)]
-                ib = mkIdentityBridge idSolved Nothing copyMap
+                ib = mkBridge idSolved Nothing copyMap
                 keys = sourceKeysForNode ib (NodeId 5)
             -- raw=5, canon=5, reverseCopy gives [30]
             IntSet.fromList keys `shouldBe` IntSet.fromList [5, 30]
@@ -86,7 +104,7 @@ spec = describe "IdentityBridge" $ do
                         ]
                     }
                 solved = Solved.mkTestSolved c (IntMap.fromList [(getNodeId binder, alias)])
-                ib = mkIdentityBridge solved Nothing IntMap.empty
+                ib = mkBridge solved Nothing IntMap.empty
             sourceKeysForNode ib alias `shouldSatisfy` notElem (getNodeId binder)
 
     -- ---------------------------------------------------------------
@@ -96,7 +114,7 @@ spec = describe "IdentityBridge" $ do
         it "ranks keys by trace binder order, not numeric order" $ do
             -- Trace has binders [50, 10, 30] in that order
             let tr = mkTrace [(50, 100), (10, 101), (30, 102)] []
-                ib = mkIdentityBridge idSolved (Just tr) IntMap.empty
+                ib = mkBridge idSolved (Just tr) IntMap.empty
             -- For node 50: raw=50, canon=50 -> keys=[50], trace-order ix=0
             -- For node 10: raw=10, canon=10 -> keys=[10], trace-order ix=1
             -- For node 30: raw=30, canon=30 -> keys=[30], trace-order ix=2
@@ -111,7 +129,7 @@ spec = describe "IdentityBridge" $ do
             -- So for node 20: raw=20, canon=10, traceCanon for canon 10 = [20, 10]
             -- After dedup: [20, 10], sorted by trace order: 20 (ix=0), 10 (ix=1)
             let tr = mkTrace [(20, 200), (10, 201)] []
-                ib = mkIdentityBridge mergeSolved (Just tr) IntMap.empty
+                ib = mkBridge mergeSolved (Just tr) IntMap.empty
                 keys = sourceKeysForNode ib (NodeId 20)
             -- 20 has trace-order 0, 10 has trace-order 1 -> 20 first
             case keys of
@@ -123,7 +141,7 @@ spec = describe "IdentityBridge" $ do
             -- Copy map: 30 -> NodeId 10 (so reverseCopy for canon 10 includes 30)
             let tr = mkTrace [(10, 100)] []
                 copyMap = IntMap.fromList [(30, NodeId 10)]
-                ib = mkIdentityBridge idSolved (Just tr) copyMap
+                ib = mkBridge idSolved (Just tr) copyMap
                 keys = sourceKeysForNode ib (NodeId 10)
             -- raw=10, canon=10, reverseCopy=[30], reverseTrace=[10]
             -- After dedup: [10, 30]
@@ -140,7 +158,7 @@ spec = describe "IdentityBridge" $ do
         it "includes inverse copy map entries" $ do
             -- invCopyMap: if copyMap has 40 -> NodeId 5, then inv has 5 -> NodeId 40
             let copyMap = IntMap.fromList [(40, NodeId 5)]
-                ib = mkIdentityBridge idSolved Nothing copyMap
+                ib = mkBridge idSolved Nothing copyMap
                 keys = sourceKeysForNode ib (NodeId 5)
             -- raw=5, canon=5, invRaw for 5 -> Just 40, reverseCopy for 5 -> [40]
             -- After dedup: [5, 40]
@@ -148,7 +166,7 @@ spec = describe "IdentityBridge" $ do
 
         it "falls back to numeric order when no trace" $ do
             let copyMap = IntMap.fromList [(40, NodeId 5), (30, NodeId 5)]
-                ib = mkIdentityBridge idSolved Nothing copyMap
+                ib = mkBridge idSolved Nothing copyMap
                 keys = sourceKeysForNode ib (NodeId 5)
             -- No trace -> all keys get (maxBound, key) rank -> sorted by key ascending
             -- After dedup: [5, 40, 30] or similar, sorted by numeric key
@@ -161,13 +179,13 @@ spec = describe "IdentityBridge" $ do
     describe "sourceBinderKeysForNode" $ do
         it "filters to binder key set membership" $ do
             let copyMap = IntMap.fromList [(30, NodeId 10)]
-                ib = mkIdentityBridge idSolved Nothing copyMap
+                ib = mkBridge idSolved Nothing copyMap
                 binderKeys = IntSet.fromList [10]
                 keys = sourceBinderKeysForNode ib binderKeys (NodeId 10)
             keys `shouldBe` [10]
 
         it "returns empty when no source key is a binder" $ do
-            let ib = mkIdentityBridge idSolved Nothing IntMap.empty
+            let ib = mkBridge idSolved Nothing IntMap.empty
                 binderKeys = IntSet.fromList [99]
             sourceBinderKeysForNode ib binderKeys (NodeId 5) `shouldBe` []
 
@@ -176,19 +194,19 @@ spec = describe "IdentityBridge" $ do
     -- ---------------------------------------------------------------
     describe "isBinderNode" $ do
         it "returns True when a source key is in the binder set" $ do
-            let ib = mkIdentityBridge idSolved Nothing IntMap.empty
+            let ib = mkBridge idSolved Nothing IntMap.empty
                 binderKeys = IntSet.fromList [5]
             isBinderNode ib binderKeys (NodeId 5) `shouldBe` True
 
         it "returns False when only canonical alias matches binder set" $ do
             -- Node 20 canonicalises to 10; strict source-domain matching must
             -- not treat canonical aliases as binder keys.
-            let ib = mkIdentityBridge mergeSolved Nothing IntMap.empty
+            let ib = mkBridge mergeSolved Nothing IntMap.empty
                 binderKeys = IntSet.fromList [10]
             isBinderNode ib binderKeys (NodeId 20) `shouldBe` False
 
         it "returns False when no source key matches" $ do
-            let ib = mkIdentityBridge idSolved Nothing IntMap.empty
+            let ib = mkBridge idSolved Nothing IntMap.empty
                 binderKeys = IntSet.fromList [99]
             isBinderNode ib binderKeys (NodeId 5) `shouldBe` False
 
@@ -198,7 +216,7 @@ spec = describe "IdentityBridge" $ do
     describe "lookupBinderIndex" $ do
 
         it "exact source-key match at spine position 0 returns Just 0" $ do
-            let ib = mkIdentityBridge idSolved Nothing IntMap.empty
+            let ib = mkBridge idSolved Nothing IntMap.empty
                 binderKeys = IntSet.fromList [10]
                 spine = [Just (NodeId 10)]
             lookupBinderIndex ib binderKeys spine (NodeId 10) `shouldBe` Just 0
@@ -211,7 +229,7 @@ spec = describe "IdentityBridge" $ do
             -- Spine pos 1 (node 30): exact match (30 in sourceKeys(30))
             -- Exact (matchClass 0) at pos 1 beats alias (matchClass 1) at pos 0
             let threeWaySolved = mkTestSolved (IntMap.fromList [(30, NodeId 10), (20, NodeId 10)])
-                ib = mkIdentityBridge threeWaySolved Nothing IntMap.empty
+                ib = mkBridge threeWaySolved Nothing IntMap.empty
                 binderKeys = IntSet.fromList [20, 30]
                 spine = [Just (NodeId 20), Just (NodeId 30)]
             lookupBinderIndex ib binderKeys spine (NodeId 30) `shouldBe` Just 1
@@ -219,7 +237,7 @@ spec = describe "IdentityBridge" $ do
         it "does not resolve alias-only matches through canonical identity" $ do
             -- Node 20 canonicalises to 10, but strict source-domain matching
             -- must not match target 20 to a spine binder keyed only by 10.
-            let ib = mkIdentityBridge mergeSolved Nothing IntMap.empty
+            let ib = mkBridge mergeSolved Nothing IntMap.empty
                 binderKeys = IntSet.fromList [10]
                 spine = [Just (NodeId 10)]
             lookupBinderIndex ib binderKeys spine (NodeId 20) `shouldBe` Nothing
@@ -238,7 +256,7 @@ spec = describe "IdentityBridge" $ do
                         ]
                     }
                 solved = Solved.mkTestSolved c (IntMap.fromList [(1, alias), (2, alias)])
-                ib = mkIdentityBridge solved Nothing IntMap.empty
+                ib = mkBridge solved Nothing IntMap.empty
                 binderKeys = IntSet.fromList [1, 2, 31]
                 spine = [Just b1, Just b2]
             lookupBinderIndex ib binderKeys spine b1 `shouldBe` Just 0
@@ -258,7 +276,7 @@ spec = describe "IdentityBridge" $ do
                         ]
                     }
                 solved = Solved.mkTestSolved c (IntMap.fromList [(1, alias), (2, alias)])
-                ib = mkIdentityBridge solved Nothing IntMap.empty
+                ib = mkBridge solved Nothing IntMap.empty
                 binderKeys = IntSet.fromList [1, 2]
                 spine = [Just b1, Just b2]
             lookupBinderIndex ib binderKeys spine alias `shouldBe` Nothing
@@ -272,20 +290,20 @@ spec = describe "IdentityBridge" $ do
             -- Rank: (0, (0,20), 0) vs (0, (0,20), 1) -> pos 0 wins by index
             let tr = mkTrace [(20, 200), (10, 201)] [(20, 10)]
                 copyMap = IntMap.fromList [(20, NodeId 10)]
-                ib = mkIdentityBridge idSolved (Just tr) copyMap
+                ib = mkBridge idSolved (Just tr) copyMap
                 binderKeys = IntSet.fromList [10, 20]
                 spine = [Just (NodeId 10), Just (NodeId 20)]
             lookupBinderIndex ib binderKeys spine (NodeId 10) `shouldBe` Just 0
 
         it "no match returns Nothing" $ do
             -- Target is a binder node but no spine position shares its key.
-            let ib = mkIdentityBridge idSolved Nothing IntMap.empty
+            let ib = mkBridge idSolved Nothing IntMap.empty
                 binderKeys = IntSet.fromList [10, 50]
                 spine = [Just (NodeId 50), Nothing]
             lookupBinderIndex ib binderKeys spine (NodeId 10) `shouldBe` Nothing
 
         it "non-binder node returns Nothing (isBinderNode gate)" $ do
-            let ib = mkIdentityBridge idSolved Nothing IntMap.empty
+            let ib = mkBridge idSolved Nothing IntMap.empty
                 binderKeys = IntSet.fromList [99]
                 spine = [Just (NodeId 5)]
             lookupBinderIndex ib binderKeys spine (NodeId 5) `shouldBe` Nothing

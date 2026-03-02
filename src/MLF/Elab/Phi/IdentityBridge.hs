@@ -12,7 +12,7 @@ duplicated between "MLF.Elab.Phi.Omega" and
 module MLF.Elab.Phi.IdentityBridge (
     IdentityBridge,
     mkIdentityBridge,
-    bridgeSolved,
+    bridgePresolutionView,
     bridgeCanonical,
     bridgeCopyMap,
     traceBinderKeysInOrder,
@@ -32,15 +32,14 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
 import MLF.Constraint.Types.Graph (NodeId(..))
-import MLF.Constraint.Solved (Solved)
-import MLF.Constraint.Presolution.Base (EdgeTrace(..))
+import MLF.Constraint.Presolution (PresolutionView(..), EdgeTrace(..))
 
 -- | Bridge between witness-domain key artifacts (trace/copy/raw node ids).
 --
--- Constructed once per edge from a 'Solved' handle, an optional
+-- Constructed once per edge from a 'PresolutionView', an optional
 -- 'EdgeTrace', and a copy map.  All helpers are pure.
 data IdentityBridge = IdentityBridge
-    { ibSolved                 :: Solved
+    { ibPresolutionView        :: PresolutionView
     , ibCanonical              :: NodeId -> NodeId
     , ibTraceBinderOrder       :: [Int]
     , ibBinderOrderIx          :: IntMap.IntMap Int
@@ -56,9 +55,9 @@ data IdentityBridge = IdentityBridge
 bridgeCanonical :: IdentityBridge -> (NodeId -> NodeId)
 bridgeCanonical = ibCanonical
 
--- | Access the 'Solved' handle stored in the bridge.
-bridgeSolved :: IdentityBridge -> Solved
-bridgeSolved = ibSolved
+-- | Access the 'PresolutionView' handle stored in the bridge.
+bridgePresolutionView :: IdentityBridge -> PresolutionView
+bridgePresolutionView = ibPresolutionView
 
 -- | Access the raw copy map stored in the bridge.
 bridgeCopyMap :: IdentityBridge -> IntMap.IntMap NodeId
@@ -73,17 +72,17 @@ canonicalKeyForNode _ib nid = getNodeId nid
 canonicalKeyForSource :: IdentityBridge -> Int -> Int
 canonicalKeyForSource _ib key = key
 
--- | Build an 'IdentityBridge' from a 'Solved' handle, an optional
+-- | Build an 'IdentityBridge' from a 'PresolutionView', an optional
 -- 'EdgeTrace', and the raw copy map.
 mkIdentityBridge
-    :: Solved
+    :: PresolutionView
     -> Maybe EdgeTrace
     -> IntMap.IntMap NodeId
     -> IdentityBridge
-mkIdentityBridge solved mTrace copyMap =
+mkIdentityBridge presolutionView mTrace copyMap =
     IdentityBridge
-        { ibSolved                 = solved
-        , ibCanonical              = id
+        { ibPresolutionView        = presolutionView
+        , ibCanonical              = pvCanonical presolutionView
         , ibTraceBinderOrder       = traceBinderOrder
         , ibBinderOrderIx          = binderOrderIx
         , ibReverseCopyByTarget    = reverseCopyByTarget

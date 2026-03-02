@@ -59,7 +59,7 @@ import MLF.Elab.Run.ResultType.Util
     , instHasBoundForall
     , instantiateImplicitForalls
     )
-import MLF.Elab.Run.ResultType.Types (ResultTypeInputs(..))
+import MLF.Elab.Run.ResultType.Types (ResultTypeInputs(..), rtcSolveLike)
 
 -- | Compute result type from an annotation edge.
 computeResultTypeFromAnn
@@ -70,10 +70,10 @@ computeResultTypeFromAnn
     -> EdgeId       -- ^ eid
     -> Either ElabError ElabType
 computeResultTypeFromAnn ctx inner innerPre annNodeId eid = do
+    solvedForGen <- rtcSolveLike ctx
     let canonical = rtcCanonical ctx
         edgeWitnesses = rtcEdgeWitnesses ctx
         edgeTraces = rtcEdgeTraces ctx
-        solvedForGen = rtcSolved ctx
         bindParentsGa = rtcBindParentsGa ctx
         planBuilder = rtcPlanBuilder ctx
         c1 = rtcBaseConstraint ctx

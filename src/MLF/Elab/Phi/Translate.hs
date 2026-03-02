@@ -52,15 +52,20 @@ import MLF.Constraint.Types
 import MLF.Elab.Types
 import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Constraint.BindingUtil (bindingPathToRootLocal)
-import MLF.Reify.Core (namedNodes, reifyType)
-import MLF.Constraint.Solved (Solved, canonical)
+import MLF.Reify.Core
+    ( namedNodes
+    , reifyBoundWithNames
+    , reifyType
+    , reifyTypeWithNamedSetNoFallback
+    )
+import MLF.Constraint.Solved (Solved)
 import qualified MLF.Constraint.Solved as Solved
-import MLF.Constraint.Presolution (EdgeTrace(..))
+import MLF.Constraint.Presolution (EdgeTrace(..), PresolutionView(..))
 import MLF.Constraint.Presolution.Base (CopyMapping(..), InteriorNodes(..), copiedNodes)
 import qualified MLF.Binding.Tree as Binding
 import MLF.Binding.Tree (checkBindingTree, checkNoGenFallback, checkSchemeClosureUnder)
 import qualified MLF.Constraint.NodeAccess as NodeAccess
-import MLF.Elab.Phi.Env (PhiM, askResult)
+import MLF.Elab.Phi.Env (PhiM, askCanonical, askResult)
 import MLF.Elab.Phi.IdentityBridge
     ( mkIdentityBridge
     , sourceKeysForNode
@@ -72,14 +77,27 @@ import MLF.Util.Trace (TraceConfig, traceGeneralize)
 -- | Canonicalize a node id using the union-find from the solve result.
 canonicalNodeM :: NodeId -> PhiM NodeId
 canonicalNodeM nid = do
-    res <- askResult
-    pure $ canonical res nid
+    canonicalNode <- askCanonical
+    pure (canonicalNode nid)
 
 -- | Remap scheme info using the copy mapping from an edge trace.
 remapSchemeInfoM :: EdgeTrace -> SchemeInfo -> PhiM SchemeInfo
 remapSchemeInfoM tr si = do
     solved <- askResult
-    pure (remapSchemeInfoByTrace solved tr si)
+    pure (remapSchemeInfoByTrace (presolutionViewFromSolved solved) tr si)
+
+presolutionViewFromSolved :: Solved -> PresolutionView
+presolutionViewFromSolved solved =
+    PresolutionView
+        { pvConstraint = Solved.originalConstraint solved
+        , pvCanonicalMap = Solved.canonicalMap solved
+        , pvCanonical = Solved.canonical solved
+        , pvLookupNode = Solved.lookupNode solved
+        , pvLookupVarBound = Solved.lookupVarBound solved
+        , pvLookupBindParent = Solved.lookupBindParent solved
+        , pvBindParents = Solved.bindParents solved
+        , pvCanonicalConstraint = Solved.canonicalConstraint solved
+        }
 
 -- | Re-key scheme substitutions into the EdgeTrace source-ID domain.
 --
@@ -88,14 +106,14 @@ remapSchemeInfoM tr si = do
 --   1) binder IDs in trace order (preferred),
 --   2) reverse lookup in `etCopyMap`,
 --   3) original key as deterministic fallback.
-remapSchemeInfoByTrace :: Solved -> EdgeTrace -> SchemeInfo -> SchemeInfo
-remapSchemeInfoByTrace solved tr si =
+remapSchemeInfoByTrace :: PresolutionView -> EdgeTrace -> SchemeInfo -> SchemeInfo
+remapSchemeInfoByTrace presolutionView tr si =
     let traceCopyMap = getCopyMapping (etCopyMap tr)
         binderOrder = map fst (etBinderArgs tr)
         schemeNames = case siScheme si of
             Forall binds _ -> map fst binds
         -- Build bridge for ranking/dedup
-        ib = mkIdentityBridge solved (Just tr) traceCopyMap
+        ib = mkIdentityBridge presolutionView (Just tr) traceCopyMap
         traceBindersInOrder =
             let sourceSeeds =
                     if null binderOrder
@@ -163,8 +181,8 @@ remapSchemeInfoByTrace solved tr si =
 -- | Hydrate substitutions using traced binder order when remapped substitutions
 -- under-cover scheme binders. This preserves source-ID provenance instead of
 -- dropping scheme info on arity mismatch.
-hydrateSchemeInfoByTrace :: Solved -> EdgeTrace -> SchemeInfo -> SchemeInfo
-hydrateSchemeInfoByTrace solved tr si =
+hydrateSchemeInfoByTrace :: PresolutionView -> EdgeTrace -> SchemeInfo -> SchemeInfo
+hydrateSchemeInfoByTrace presolutionView tr si =
     let schemeNames =
             case siScheme si of
                 Forall binds _ -> map fst binds
@@ -172,7 +190,7 @@ hydrateSchemeInfoByTrace solved tr si =
             Map.fromList [(name, ()) | name <- schemeNames]
         traceCopyMap = getCopyMapping (etCopyMap tr)
         -- Build bridge for ranking/dedup
-        ib = mkIdentityBridge solved (Just tr) traceCopyMap
+        ib = mkIdentityBridge presolutionView (Just tr) traceCopyMap
         traceBinderKeys =
             let (_, rev) =
                     foldl'
@@ -254,7 +272,7 @@ phiFromEdgeWitnessNoTrace
     -> Maybe SchemeInfo
     -> EdgeWitness
     -> Either ElabError Instantiation
-phiFromEdgeWitnessNoTrace _traceCfg _generalizeAtWith _res _mSchemeInfo ew =
+phiFromEdgeWitnessNoTrace _traceCfg _generalizeAtWith _solved _mSchemeInfo ew =
     Left (MissingEdgeTrace (ewEdgeId ew))
 
 -- | Legacy alias for 'phiFromEdgeWitnessNoTrace' (deprecated; test/debug-only).
@@ -278,10 +296,10 @@ phiFromEdgeWitnessWithTrace
     -> Maybe EdgeTrace
     -> EdgeWitness
     -> Either ElabError Instantiation
-phiFromEdgeWitnessWithTrace traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTrace ew =
+phiFromEdgeWitnessWithTrace traceCfg generalizeAtWith solved mbGaParents mSchemeInfo mTrace ew =
     case mTrace of
         Nothing -> Left (MissingEdgeTrace (ewEdgeId ew))
-        Just _ -> phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTrace ew
+        Just _ -> phiFromEdgeWitnessCore traceCfg generalizeAtWith solved (presolutionViewFromSolved solved) mbGaParents mSchemeInfo mTrace ew
 
 {- Note [Trace-First Copied Set]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -296,14 +314,15 @@ phiFromEdgeWitnessCore
     :: TraceConfig
     -> GeneralizeAtWith
     -> Solved
+    -> PresolutionView
     -> Maybe GaBindParents
     -> Maybe SchemeInfo
     -> Maybe EdgeTrace
     -> EdgeWitness
     -> Either ElabError Instantiation
-phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTrace ew = do
+phiFromEdgeWitnessCore traceCfg generalizeAtWith solved presolutionView mbGaParents mSchemeInfo mTrace ew = do
     requireValidBindingTree
-    namedSet0 <- namedNodes res
+    namedSet0 <- namedNodes solved
     case debugPhi
         ("phi ewLeft=" ++ show (ewLeft ew)
             ++ " ewRight=" ++ show (ewRight ew)
@@ -311,9 +330,9 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
         () of
         () -> pure ()
     case debugPhi
-        ("phi ewRootType=" ++ show (reifyType res (ewRoot ew))
-            ++ " ewLeftType=" ++ show (reifyType res (ewLeft ew))
-            ++ " ewRightType=" ++ show (reifyType res (ewRight ew))
+        ("phi ewRootType=" ++ show (reifyDebugType (ewRoot ew))
+            ++ " ewLeftType=" ++ show (reifyDebugType (ewLeft ew))
+            ++ " ewRightType=" ++ show (reifyDebugType (ewRight ew))
         )
         () of
         () -> pure ()
@@ -444,7 +463,9 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
     omegaCtx mSchemeInfoCtx traceBinderSources traceBinderReplayMap traceBinderMapDomain =
         OmegaContext
             { ocTraceConfig = traceCfg
-            , ocSolved = res
+            , ocPresolutionView = presolutionView
+            , ocReifyBoundWithNames = reifyBoundWithNamesAt
+            , ocReifyTypeWithNamedSetNoFallback = reifyTypeWithNamedSetNoFallbackAt
             , ocCopyMap = copyMap
             , ocGaParents = mbGaParents
             , ocTrace = mTrace
@@ -460,7 +481,7 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
     requireValidBindingTree :: Either ElabError ()
     requireValidBindingTree =
         let (constraintCheck, schemeConstraint, schemeCanonical) =
-                (Solved.originalConstraint res, Solved.originalConstraint res, canonicalNode)
+                (constraint, constraint, canonicalNode)
         in case checkBindingTree constraintCheck of
             Left err -> Left (BindingTreeError err)
             Right () ->
@@ -472,14 +493,33 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
                             Right () -> Right ()
 
     canonicalNode :: NodeId -> NodeId
-    canonicalNode = canonical res
+    canonicalNode = pvCanonical presolutionView
+
+    constraint :: Constraint
+    constraint = pvConstraint presolutionView
+
+    reifyDebugType :: NodeId -> Either ElabError ElabType
+    reifyDebugType = reifyType solved
+
+    reifyBoundWithNamesAt
+        :: IntMap.IntMap String
+        -> NodeId
+        -> Either ElabError ElabType
+    reifyBoundWithNamesAt = reifyBoundWithNames solved
+
+    reifyTypeWithNamedSetNoFallbackAt
+        :: IntMap.IntMap String
+        -> IntSet.IntSet
+        -> NodeId
+        -> Either ElabError ElabType
+    reifyTypeWithNamedSetNoFallbackAt = reifyTypeWithNamedSetNoFallback solved
 
     remapSchemeInfo :: EdgeTrace -> SchemeInfo -> SchemeInfo
-    remapSchemeInfo tr si = remapSchemeInfoByTrace res tr si
+    remapSchemeInfo tr si = remapSchemeInfoByTrace presolutionView tr si
 
     remapAndHydrateSchemeInfo :: EdgeTrace -> SchemeInfo -> SchemeInfo
     remapAndHydrateSchemeInfo tr =
-        hydrateSchemeInfoByTrace res tr . remapSchemeInfo tr
+        hydrateSchemeInfoByTrace presolutionView tr . remapSchemeInfo tr
 
     computeTraceBinderReplayBridge
         :: Maybe EdgeTrace
@@ -586,8 +626,8 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
         scopeRoot <- instScopeRoot root0
         (sch, subst) <-
             case mbGaParents of
-                Nothing -> generalizeAtWith Nothing res scopeRoot root0
-                Just ga -> generalizeAtWith (Just ga) res scopeRoot root0
+                Nothing -> generalizeAtWith Nothing solved scopeRoot root0
+                Just ga -> generalizeAtWith (Just ga) solved scopeRoot root0
         pure SchemeInfo { siScheme = sch, siSubst = subst }
 
     instScopeRoot :: NodeId -> Either ElabError NodeRef
@@ -597,7 +637,7 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
                 let rootC = canonicalNode root0
                     owners =
                         [ gnId gen
-                        | gen <- NodeAccess.allGenNodes (Solved.originalConstraint res)
+                        | gen <- NodeAccess.allGenNodes constraint
                         , any (\root -> canonicalNode root == rootC) (gnSchemes gen)
                         ]
                 in case owners of
@@ -633,12 +673,13 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith res mbGaParents mSchemeInfo mTr
             | IntSet.member (nodeRefKey ref) visited =
                 Right (typeRef (canonicalNode root0))
             | otherwise = do
-                mbParent <- bindingToElab (Binding.lookupBindParentUnder canonicalNode (Solved.originalConstraint res) ref)
+                mbParent <- bindingToElab (Binding.lookupBindParentUnder canonicalNode constraint ref)
                 case mbParent of
                     Nothing -> Right (typeRef (canonicalNode root0))
                     Just (GenRef gid, _) -> Right (genRef gid)
                     Just (TypeRef parent, _) ->
                         goScope (IntSet.insert (nodeRefKey ref) visited) (typeRef (canonicalNode parent))
+
     copyMap :: IntMap.IntMap NodeId
     copyMap =
         case mTrace of

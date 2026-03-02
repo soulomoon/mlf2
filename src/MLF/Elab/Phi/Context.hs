@@ -36,9 +36,7 @@ import MLF.Elab.Types
 import qualified MLF.Constraint.Traversal as Traversal
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.NodeAccess as NodeAccess
-import MLF.Constraint.Solved (Solved, canonical)
-import qualified MLF.Constraint.Solved as Solved
-import MLF.Reify.Core (namedNodes)
+import MLF.Constraint.Presolution (PresolutionView(..))
 
 -- | Compute an instantiation-context path from a root node to a target node.
 --
@@ -53,29 +51,27 @@ import MLF.Reify.Core (namedNodes)
 -- that contains @target@.
 --
 -- Returns 'Nothing' when @target@ is not transitively bound to @root@.
-contextToNodeBound :: Solved -> NodeId -> NodeId -> Either ElabError (Maybe [ContextStep])
-contextToNodeBound res root target = do
-    let c = Solved.originalConstraint res
-        canonicalNode = canonical res
+contextToNodeBound :: PresolutionView -> NodeId -> NodeId -> Either ElabError (Maybe [ContextStep])
+contextToNodeBound presolutionView root target = do
+    let c = pvConstraint presolutionView
+        canonicalNode = pvCanonical presolutionView
         rootC = canonicalNode root
         targetC = canonicalNode target
 
     if rootC == targetC
         then pure (Just [])
         else do
-            let keys = Order.orderKeysFromRoot res rootC
-            namedSet <- namedNodes res
-            contextToNodeBoundWithOrderKeys canonicalNode keys c namedSet rootC targetC
+            let keys = Order.orderKeysFromConstraintWith canonicalNode c rootC Nothing
+            contextToNodeBoundWithOrderKeys canonicalNode keys c rootC targetC
 
 contextToNodeBoundWithOrderKeys
     :: (NodeId -> NodeId)
     -> IntMap.IntMap Order.OrderKey
     -> Constraint
-    -> IntSet.IntSet
     -> NodeId
     -> NodeId
     -> Either ElabError (Maybe [ContextStep])
-contextToNodeBoundWithOrderKeys canonicalNode keys c _namedSet root target = do
+contextToNodeBoundWithOrderKeys canonicalNode keys c root target = do
     let rootC = canonicalNode root
         targetC = canonicalNode target
 

@@ -10,9 +10,9 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified MLF.Constraint.Canonicalize as Canonicalize
 import MLF.Constraint.Presolution
     ( PresolutionPlanBuilder(..)
+    , PresolutionView(..)
     )
 import MLF.Constraint.Solved (Solved)
-import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types
     ( Constraint
     , NodeId(..)
@@ -84,9 +84,9 @@ policies are safe because (a) redirects merge structurally equivalent nodes
 sharing the same gen ancestor, and (b) the base-domain binding parents
 (which define ga′) are computed independently of the solved-domain quotient.
 -}
-constraintForGeneralization :: TraceConfig -> Solved -> IntMap.IntMap NodeId -> NodeKeySet -> IntMap.IntMap NodeId -> Constraint -> AnnExpr -> (Constraint, GaBindParents)
-constraintForGeneralization traceCfg solved redirects instCopyNodes instCopyMap base _ann =
-    let env = buildGeneralizeEnv traceCfg solved redirects instCopyNodes instCopyMap base
+constraintForGeneralization :: TraceConfig -> PresolutionView -> IntMap.IntMap NodeId -> NodeKeySet -> IntMap.IntMap NodeId -> Constraint -> AnnExpr -> (Constraint, GaBindParents)
+constraintForGeneralization traceCfg presolutionView redirects instCopyNodes instCopyMap base _ann =
+    let env = buildGeneralizeEnv traceCfg presolutionView redirects instCopyNodes instCopyMap base
         phase1 = restoreSchemeNodes env
         phase2 = buildNodeMappings env phase1
         phase3 = computeBindParentsBase env phase1 phase2
@@ -95,15 +95,15 @@ constraintForGeneralization traceCfg solved redirects instCopyNodes instCopyMap 
 
 buildGeneralizeEnv
     :: TraceConfig
-    -> Solved
+    -> PresolutionView
     -> IntMap.IntMap NodeId
     -> NodeKeySet
     -> IntMap.IntMap NodeId
     -> Constraint
     -> GeneralizeEnv
-buildGeneralizeEnv traceCfg solved redirects instCopyNodes instCopyMap base =
-    let canonicalConstraint = Solved.canonicalConstraint solved
-        canonical = Solved.canonical solved
+buildGeneralizeEnv traceCfg presolutionView redirects instCopyNodes instCopyMap base =
+    let canonicalConstraint = pvCanonicalConstraint presolutionView
+        canonical = pvCanonical presolutionView
         applyRedirectsToRef ref =
             case ref of
                 TypeRef nid -> TypeRef (chaseRedirects redirects nid)

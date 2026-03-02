@@ -50,7 +50,8 @@ import MLF.Reify.Core
     , reifyTypeWithNamedSetNoFallback
     )
 import MLF.Constraint.Presolution
-    ( EdgeTrace
+    ( PresolutionView(..)
+    , EdgeTrace
     , CopyMapping(..)
     , etBinderArgs
     , etCopyMap
@@ -68,10 +69,11 @@ type GeneralizeAtWith =
 data ElabConfig = ElabConfig
     { ecTraceConfig :: TraceConfig
     , ecGeneralizeAtWith :: GeneralizeAtWith
+    , ecSolved :: Solved
     }
 
 data ElabEnv = ElabEnv
-    { eeSolved :: Solved
+    { eePresolutionView :: PresolutionView
     , eeGaParents :: GaBindParents
     , eeEdgeWitnesses :: IntMap.IntMap EdgeWitness
     , eeEdgeTraces :: IntMap.IntMap EdgeTrace
@@ -85,6 +87,19 @@ data ElabOut = ElabOut
     { elabTerm :: Env -> Either ElabError ElabTerm
     , elabStripped :: Env -> Either ElabError ElabTerm
     }
+
+presolutionViewFromSolved :: Solved -> PresolutionView
+presolutionViewFromSolved solved =
+    PresolutionView
+        { pvConstraint = Solved.originalConstraint solved
+        , pvCanonicalMap = Solved.canonicalMap solved
+        , pvCanonical = Solved.canonical solved
+        , pvLookupNode = Solved.lookupNode solved
+        , pvLookupVarBound = Solved.lookupVarBound solved
+        , pvLookupBindParent = Solved.lookupBindParent solved
+        , pvBindParents = Solved.bindParents solved
+        , pvCanonicalConstraint = Solved.canonicalConstraint solved
+        }
 
 schemeBodyTarget :: Solved -> NodeId -> NodeId
 schemeBodyTarget res target =
@@ -157,9 +172,10 @@ elaborateWithScope traceCfg generalizeAtWith solved gaParents edgeWitnesses edge
         ElabConfig
             { ecTraceConfig = traceCfg
             , ecGeneralizeAtWith = generalizeAtWith
+            , ecSolved = solved
             }
         ElabEnv
-            { eeSolved = solved
+            { eePresolutionView = presolutionViewFromSolved solved
             , eeGaParents = gaParents
             , eeEdgeWitnesses = edgeWitnesses
             , eeEdgeTraces = edgeTraces
@@ -183,14 +199,15 @@ elaborateWithEnv config elabEnv ann = do
     ElabConfig
         { ecTraceConfig = traceCfg
         , ecGeneralizeAtWith = generalizeAtWithRaw
+        , ecSolved = solved
         } = config
-    solved = eeSolved elabEnv
+    presolutionView = eePresolutionView elabEnv
     gaParents = eeGaParents elabEnv
     edgeWitnesses = eeEdgeWitnesses elabEnv
     edgeTraces = eeEdgeTraces elabEnv
     edgeExpansions = eeEdgeExpansions elabEnv
     scopeOverrides = eeScopeOverrides elabEnv
-    canonical = Solved.canonical solved
+    canonical = pvCanonical presolutionView
     scopeRootFromBase root =
         case IntMap.lookup (getNodeId (canonical root)) (gaSolvedToBase gaParents) of
             Nothing -> typeRef root

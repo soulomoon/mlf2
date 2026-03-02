@@ -48,7 +48,7 @@ import MLF.Elab.Run.ResultType.Util
     , stripAnn
     , collectEdges
     )
-import MLF.Elab.Run.ResultType.Types (ResultTypeInputs(..))
+import MLF.Elab.Run.ResultType.Types (ResultTypeInputs(..), rtcSolveLike)
 
 -- | Compute result type when there's no direct annotation (fallback path).
 -- Note: This function handles the non-AAnn case. When the root is an AAnn,
@@ -59,6 +59,7 @@ computeResultTypeFallback
     -> AnnExpr      -- ^ ann (pre-redirect)
     -> Either ElabError ElabType
 computeResultTypeFallback ctx annCanon ann = do
+    solvedForGen <- rtcSolveLike ctx
     -- Note [Annotated Lambda Result Type]
     -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     -- When we have an annotated lambda like `\x : τ. body`, it desugars to:
@@ -86,8 +87,7 @@ computeResultTypeFallback ctx annCanon ann = do
                 -- Get the parameter type from the coercion's codomain.
                 -- We need to generalize at the annotation node to get the full
                 -- type with any forall wrappers.
-                let solvedForGen = rtcSolved ctx
-                    bindParentsGa = rtcBindParentsGa ctx
+                let bindParentsGa = rtcBindParentsGa ctx
                     planBuilder = rtcPlanBuilder ctx
                     c1 = rtcBaseConstraint ctx
                     redirects = rtcRedirects ctx
@@ -156,12 +156,12 @@ computeResultTypeFallbackCore
     -> AnnExpr      -- ^ ann (pre-redirect)
     -> Either ElabError ElabType
 computeResultTypeFallbackCore ctx annCanon ann = do
+    solvedForGen <- rtcSolveLike ctx
     let canonical = rtcCanonical ctx
         edgeWitnesses = rtcEdgeWitnesses ctx
         edgeTraces = rtcEdgeTraces ctx
         edgeExpansions = rtcEdgeExpansions ctx
-        solvedForGen = rtcSolved ctx
-        solvedClean = rtcSolved ctx
+        solvedClean = solvedForGen
         solved = solvedClean
         bindParentsGa = rtcBindParentsGa ctx
         planBuilder = rtcPlanBuilder ctx

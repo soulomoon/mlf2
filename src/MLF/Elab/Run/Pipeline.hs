@@ -16,6 +16,7 @@ import MLF.Constraint.Acyclicity (checkAcyclicity)
 import MLF.Constraint.Canonicalizer (canonicalizeNode)
 import MLF.Constraint.Presolution
     ( PresolutionResult(..)
+    , PresolutionView(..)
     , computePresolution
     , EdgeTrace(..)
     )
@@ -78,44 +79,15 @@ runPipelineElabWith
     -> NormSurfaceExpr
     -> Either PipelineError (ElabTerm, ElabType)
 runPipelineElabWith traceCfg genConstraints expr = do
-    runPipelineElabWithSolvedBuilder traceCfg genConstraints buildSolvedFromPresolutionSnapshot expr
-
-type SolvedBuilder = TraceConfig -> PresolutionResult -> Either PipelineError Solved.Solved
-
-buildSolvedFromPresolutionSnapshot :: SolvedBuilder
-buildSolvedFromPresolutionSnapshot _traceCfg pres =
-    let preRewrite = snapshotConstraint pres
-        uf = sanitizeSnapshotUf preRewrite (snapshotUnionFind pres)
-    in fromSolveError (Solved.fromPreRewriteState uf preRewrite)
-
-sanitizeSnapshotUf :: Constraint -> IntMap.IntMap NodeId -> IntMap.IntMap NodeId
-sanitizeSnapshotUf preRewrite =
-    IntMap.mapMaybeWithKey keepLive
-  where
-    isLive nid = case lookupNodeIn (cNodes preRewrite) nid of
-        Just _ -> True
-        Nothing -> False
-
-    keepLive key rep =
-        let keyNode = NodeId key
-        in if isLive keyNode && isLive rep && keyNode /= rep
-            then Just rep
-            else Nothing
-
-runPipelineElabWithSolvedBuilder
-    :: TraceConfig
-    -> (NormSurfaceExpr -> Either ConstraintError ConstraintResult)
-    -> SolvedBuilder
-    -> NormSurfaceExpr
-    -> Either PipelineError (ElabTerm, ElabType)
-runPipelineElabWithSolvedBuilder traceCfg genConstraints buildSolved expr = do
     ConstraintResult { crConstraint = c0, crAnnotated = ann } <- fromConstraintError (genConstraints expr)
     let c1 = normalize c0
     acyc <- fromCycleError (checkAcyclicity c1)
     pres <- fromPresolutionError (computePresolution traceCfg acyc c1)
     let planBuilder = prPlanBuilder pres
         generalizeAtWith = generalizeAtWithBuilder planBuilder
-    solvedView <- buildSolved traceCfg pres
+        preRewrite = snapshotConstraint pres
+        uf = sanitizeSnapshotUf preRewrite (snapshotUnionFind pres)
+    solvedView <- fromSolveError (Solved.fromPreRewriteState uf preRewrite)
     let setSolvedConstraint res c' = do
             replayed <- fromSolveError $
                 solveResultFromSnapshot
@@ -129,6 +101,7 @@ runPipelineElabWithSolvedBuilder traceCfg genConstraints buildSolved expr = do
                 vs -> Left (PipelineSolveError (Solve.ValidationFailed vs))
         solvedClean = Solved.pruneBindParentsSolved solvedView
         solvedCleanView = solvedClean
+        presolutionViewClean = solvedToPresolutionView solvedClean
     case Solved.validateCanonicalGraphStrict solvedClean of
         [] -> do
             let canonNode = makeCanonicalizer (Solved.canonicalMap solvedCleanView) (prRedirects pres)
@@ -143,16 +116,17 @@ runPipelineElabWithSolvedBuilder traceCfg genConstraints buildSolved expr = do
                         )
                         (prEdgeTraces pres)
                 instCopyNodes =
-                    instantiationCopyNodes solvedClean (prRedirects pres) edgeTracesForCopy
+                    instantiationCopyNodes presolutionViewClean (prRedirects pres) edgeTracesForCopy
                 instCopyMapFull =
                     let baseNamedKeysAll = collectBaseNamedKeys c1
                         traceMaps = map (buildTraceCopyMap c1 baseNamedKeysAll adoptNode)
                                          (IntMap.elems edgeTracesForCopy)
                     in foldl' IntMap.union IntMap.empty traceMaps
                 (constraintForGen, bindParentsGa) =
-                    constraintForGeneralization traceCfg solvedClean (prRedirects pres) instCopyNodes instCopyMapFull c1 ann
+                    constraintForGeneralization traceCfg presolutionViewClean (prRedirects pres) instCopyNodes instCopyMapFull c1 ann
             solvedForGen <- setSolvedConstraint solvedClean constraintForGen
             let solvedForGenView = solvedForGen
+                presolutionViewForGen = solvedToPresolutionView solvedForGen
             let ann' = applyRedirectsToAnn (prRedirects pres) ann
             let annCanon = canonicalizeAnn (canonicalizeNode canonNode) ann'
             let edgeWitnesses = IntMap.map (canonicalizeWitness canonNode) (prEdgeWitnesses pres)
@@ -168,9 +142,10 @@ runPipelineElabWithSolvedBuilder traceCfg genConstraints buildSolved expr = do
             let elabConfig = ElabConfig
                     { ecTraceConfig = traceCfg
                     , ecGeneralizeAtWith = generalizeAtWith
+                    , ecSolved = solvedForGen
                     }
                 elabEnv = ElabEnv
-                    { eeSolved = solvedForGen
+                    { eePresolutionView = presolutionViewForGen
                     , eeGaParents = bindParentsGa
                     , eeEdgeWitnesses = edgeWitnesses
                     , eeEdgeTraces = edgeTraces
@@ -221,13 +196,13 @@ runPipelineElabWithSolvedBuilder traceCfg genConstraints buildSolved expr = do
                     pure (termClosed, tyChecked)
 
             -- Build context for result type computation
-            let canonical = Solved.canonical solvedCleanView
+            let canonical = pvCanonical presolutionViewForGen
                 resultTypeInputs = ResultTypeInputs
                     { rtcCanonical = canonical
                     , rtcEdgeWitnesses = edgeWitnesses
                     , rtcEdgeTraces = edgeTraces
                     , rtcEdgeExpansions = edgeExpansions
-                    , rtcSolved = solvedForGen
+                    , rtcPresolutionView = presolutionViewForGen
                     , rtcBindParentsGa = bindParentsGa
                     , rtcPlanBuilder = planBuilder
                     , rtcBaseConstraint = c1
@@ -245,3 +220,30 @@ runPipelineElabWithSolvedBuilder traceCfg genConstraints buildSolved expr = do
                     _ <- fromElabError (computeResultTypeFallback resultTypeInputs annCanon ann)
                     checkedAuthoritative
         vs -> Left (PipelineSolveError (Solve.ValidationFailed vs))
+
+sanitizeSnapshotUf :: Constraint -> IntMap.IntMap NodeId -> IntMap.IntMap NodeId
+sanitizeSnapshotUf preRewrite =
+    IntMap.mapMaybeWithKey keepLive
+  where
+    isLive nid = case lookupNodeIn (cNodes preRewrite) nid of
+        Just _ -> True
+        Nothing -> False
+
+    keepLive key rep =
+        let keyNode = NodeId key
+        in if isLive keyNode && isLive rep && keyNode /= rep
+            then Just rep
+            else Nothing
+
+solvedToPresolutionView :: Solved.Solved -> PresolutionView
+solvedToPresolutionView solved =
+    PresolutionView
+        { pvConstraint = Solved.originalConstraint solved
+        , pvCanonicalMap = Solved.canonicalMap solved
+        , pvCanonical = Solved.canonical solved
+        , pvLookupNode = Solved.lookupNode solved
+        , pvLookupVarBound = Solved.lookupVarBound solved
+        , pvLookupBindParent = Solved.lookupBindParent solved
+        , pvBindParents = Solved.bindParents solved
+        , pvCanonicalConstraint = Solved.canonicalConstraint solved
+        }

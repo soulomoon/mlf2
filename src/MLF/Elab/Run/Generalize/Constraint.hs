@@ -6,10 +6,11 @@ module MLF.Elab.Run.Generalize.Constraint (
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
-import MLF.Constraint.Presolution (EdgeTrace(..))
+import MLF.Constraint.Presolution
+    ( EdgeTrace(..)
+    , PresolutionView(..)
+    )
 import MLF.Constraint.Presolution.Base (InteriorNodes(..), copiedNodes)
-import MLF.Constraint.Solved (Solved)
-import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types
     ( Constraint
     , NodeId(..)
@@ -46,12 +47,12 @@ pruneBindParentsConstraint c =
     in c { cBindParents = bindParents' }
 
 instantiationCopyNodes
-    :: Solved
+    :: PresolutionView
     -> IntMap.IntMap NodeId
     -> IntMap.IntMap EdgeTrace
     -> NodeKeySet
-instantiationCopyNodes solved redirects edgeTraces =
-    let canonical = Solved.canonical solved
+instantiationCopyNodes presolutionView redirects edgeTraces =
+    let canonical = pvCanonical presolutionView
         adoptNode nid = canonical (chaseRedirects redirects nid)
         collectTrace tr =
             let InteriorNodes interiorKeys = etInterior tr
