@@ -168,6 +168,10 @@ spec = describe "MLF.Constraint.Solved" $ do
             it ("produces valid Solved for " ++ label ++ " (" ++ show expr ++ ")") $
                 runCase (label, expr)
 
+    describe "Presolution view parity guards" $ do
+        it "presolution view parity: canonical lookup agrees with solved on snapshot fixtures" $ do
+            expectationFailure "TODO(Task 2): add PresolutionView parity assertions over snapshot fixtures"
+
     describe "Core queries" $ do
         it "canonical chases the union-find" $ do
             canonical s (NodeId 0) `shouldBe` NodeId 1

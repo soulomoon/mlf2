@@ -194,6 +194,10 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             forM_ ["runPipelineElabProjectionFirst", "runPipelineElabViaLegacySolve"] $ \needle ->
                 pipelineSrc `shouldSatisfy` (not . isInfixOf needle)
 
+        it "pipeline path can construct elaboration inputs without solved builder" $ do
+            pipelineSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
+            pipelineSrc `shouldSatisfy` (not . isInfixOf "runPipelineElabWithSolvedBuilder")
+
         it "runtime run-path avoids solved-projection and result-type context boundary adapters" $ do
             pipelineSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
             resultTypeSrc <- readFile "src/MLF/Elab/Run/ResultType.hs"
