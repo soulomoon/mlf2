@@ -821,7 +821,7 @@ buildSolvedFromPresolutionView presolutionView =
                         else Nothing
                 )
                 (pvCanonicalMap presolutionView)
-    in Right (Solved.mkTestSolved constraint canonicalMap)
+    in Right (Solved.fromConstraintAndUf constraint canonicalMap)
 
 softenBindParents :: (NodeId -> NodeId) -> Constraint -> BindParents -> BindParents
 softenBindParents canonical constraint =

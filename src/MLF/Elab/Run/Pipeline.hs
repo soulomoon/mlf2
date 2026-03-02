@@ -20,6 +20,7 @@ import MLF.Constraint.Presolution
     , computePresolution
     , EdgeTrace(..)
     )
+import MLF.Constraint.Presolution.View (fromSolved)
 import MLF.Constraint.Solve hiding (BindingTreeError, MissingNode)
 import qualified MLF.Constraint.Solve as Solve
 import qualified MLF.Constraint.Solved as Solved
@@ -101,7 +102,7 @@ runPipelineElabWith traceCfg genConstraints expr = do
                 vs -> Left (PipelineSolveError (Solve.ValidationFailed vs))
         solvedClean = Solved.pruneBindParentsSolved solvedView
         solvedCleanView = solvedClean
-        presolutionViewClean = solvedToPresolutionView solvedClean
+        presolutionViewClean = fromSolved solvedClean
     case Solved.validateCanonicalGraphStrict solvedClean of
         [] -> do
             let canonNode = makeCanonicalizer (Solved.canonicalMap solvedCleanView) (prRedirects pres)
@@ -126,7 +127,7 @@ runPipelineElabWith traceCfg genConstraints expr = do
                     constraintForGeneralization traceCfg presolutionViewClean (prRedirects pres) instCopyNodes instCopyMapFull c1 ann
             solvedForGen <- setSolvedConstraint solvedClean constraintForGen
             let solvedForGenView = solvedForGen
-                presolutionViewForGen = solvedToPresolutionView solvedForGen
+                presolutionViewForGen = fromSolved solvedForGen
             let ann' = applyRedirectsToAnn (prRedirects pres) ann
             let annCanon = canonicalizeAnn (canonicalizeNode canonNode) ann'
             let edgeWitnesses = IntMap.map (canonicalizeWitness canonNode) (prEdgeWitnesses pres)
@@ -234,16 +235,3 @@ sanitizeSnapshotUf preRewrite =
         in if isLive keyNode && isLive rep && keyNode /= rep
             then Just rep
             else Nothing
-
-solvedToPresolutionView :: Solved.Solved -> PresolutionView
-solvedToPresolutionView solved =
-    PresolutionView
-        { pvConstraint = Solved.originalConstraint solved
-        , pvCanonicalMap = Solved.canonicalMap solved
-        , pvCanonical = Solved.canonical solved
-        , pvLookupNode = Solved.lookupNode solved
-        , pvLookupVarBound = Solved.lookupVarBound solved
-        , pvLookupBindParent = Solved.lookupBindParent solved
-        , pvBindParents = Solved.bindParents solved
-        , pvCanonicalConstraint = Solved.canonicalConstraint solved
-        }

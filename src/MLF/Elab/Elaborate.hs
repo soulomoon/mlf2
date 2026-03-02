@@ -57,6 +57,7 @@ import MLF.Constraint.Presolution
     , etCopyMap
     , lookupCopy
     )
+import MLF.Constraint.Presolution.View (fromSolved)
 import MLF.Frontend.ConstraintGen.Types (AnnExpr(..), AnnExprF(..))
 
 type GeneralizeAtWith =
@@ -87,19 +88,6 @@ data ElabOut = ElabOut
     { elabTerm :: Env -> Either ElabError ElabTerm
     , elabStripped :: Env -> Either ElabError ElabTerm
     }
-
-presolutionViewFromSolved :: Solved -> PresolutionView
-presolutionViewFromSolved solved =
-    PresolutionView
-        { pvConstraint = Solved.originalConstraint solved
-        , pvCanonicalMap = Solved.canonicalMap solved
-        , pvCanonical = Solved.canonical solved
-        , pvLookupNode = Solved.lookupNode solved
-        , pvLookupVarBound = Solved.lookupVarBound solved
-        , pvLookupBindParent = Solved.lookupBindParent solved
-        , pvBindParents = Solved.bindParents solved
-        , pvCanonicalConstraint = Solved.canonicalConstraint solved
-        }
 
 schemeBodyTarget :: Solved -> NodeId -> NodeId
 schemeBodyTarget res target =
@@ -175,7 +163,7 @@ elaborateWithScope traceCfg generalizeAtWith solved gaParents edgeWitnesses edge
             , ecSolved = solved
             }
         ElabEnv
-            { eePresolutionView = presolutionViewFromSolved solved
+            { eePresolutionView = fromSolved solved
             , eeGaParents = gaParents
             , eeEdgeWitnesses = edgeWitnesses
             , eeEdgeTraces = edgeTraces

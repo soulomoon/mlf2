@@ -30,6 +30,7 @@ import MLF.Frontend.Syntax
 import MLF.Frontend.ConstraintGen
 import MLF.Constraint.Canonicalizer (canonicalizerFrom, canonicalizeNode)
 import MLF.Constraint.Presolution
+import qualified MLF.Constraint.Presolution.View as PresolutionViewBoundary
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Solved (Solved)
 import MLF.Constraint.Types.Presolution (PresolutionSnapshot(..))
@@ -231,6 +232,34 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             forM_ [pipelineSrc, resultTypeSrc, annSrc, fallbackSrc] $ \src ->
                 src `shouldSatisfy` (not . isInfixOf "ResultTypeContext")
             pipelineSrc `shouldSatisfy` (not . isInfixOf "fromPresolutionResult")
+
+        it "shared solved-to-presolution adapter matches selected solved queries on representative corpus" $ do
+            let corpus =
+                    [ ELam "x" (EVar "x")
+                    , ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (ELit (LInt 1)))
+                    , EAnn (ELam "x" (EVar "x"))
+                        (STForall "a" Nothing (STArrow (STVar "a") (STVar "a")))
+                    ]
+            forM_ corpus $ \expr -> do
+                artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
+                let solved = paSolved artifacts
+                    view = PresolutionViewBoundary.fromSolved solved
+                    nodeIds = map fst (toListNode (cNodes (Solved.originalConstraint solved)))
+                    probeIds = nodeIds ++ [NodeId 999]
+                    probeRefs = map typeRef probeIds
+
+                pvConstraint view `shouldBe` Solved.originalConstraint solved
+                pvCanonicalMap view `shouldBe` Solved.canonicalMap solved
+                pvBindParents view `shouldBe` Solved.bindParents solved
+                pvCanonicalConstraint view `shouldBe` Solved.canonicalConstraint solved
+
+                forM_ probeIds $ \nid -> do
+                    pvCanonical view nid `shouldBe` Solved.canonical solved nid
+                    pvLookupNode view nid `shouldBe` Solved.lookupNode solved nid
+                    pvLookupVarBound view nid `shouldBe` Solved.lookupVarBound solved nid
+
+                forM_ probeRefs $ \ref ->
+                    pvLookupBindParent view ref `shouldBe` Solved.lookupBindParent solved ref
 
         it "runtime snapshot rebuild stays stable across representative corpus" $ do
             let corpus =

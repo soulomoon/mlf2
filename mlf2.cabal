@@ -80,6 +80,7 @@ library mlf2-internal
                       MLF.Constraint.Acyclicity,
                       MLF.Constraint.Inert,
                       MLF.Constraint.Presolution,
+                      MLF.Constraint.Presolution.View,
                       MLF.Constraint.Presolution.Witness,
                       MLF.Constraint.Presolution.EdgeProcessing.Plan,
                       MLF.Constraint.Presolution.EdgeProcessing.Planner,
@@ -110,7 +111,9 @@ library mlf2-internal
                       MLF.Util.UnionFind,
                       MLF.Types.Elab,
                       MLF.Reify.Core,
-                      MLF.Elab.Run.Scope
+                      MLF.Elab.Run.Scope,
+                      MLF.Elab.Run.ResultType,
+                      MLF.Constraint.Presolution.Plan.Context
 
     other-modules:    MLF.Constraint.Types.Ids,
                       MLF.Constraint.Types.SynthesizedExpVar,
@@ -128,7 +131,6 @@ library mlf2-internal
                       MLF.Constraint.Presolution.Materialization,
                       MLF.Constraint.Presolution.Ops,
                       MLF.Constraint.Presolution.StateAccess,
-                      MLF.Constraint.Presolution.View,
                       MLF.Constraint.Presolution.Plan,
                       MLF.Constraint.Presolution.Rewrite,
                       MLF.Constraint.Presolution.Validation,
@@ -140,7 +142,6 @@ library mlf2-internal
                       MLF.Constraint.Presolution.Plan.BinderPlan.Selection,
                       MLF.Constraint.Presolution.Plan.BinderPlan.Types,
                       MLF.Constraint.Presolution.Plan.BinderPlan.Util,
-                      MLF.Constraint.Presolution.Plan.Context,
                       MLF.Constraint.Presolution.Plan.Finalize,
                       MLF.Constraint.Presolution.Plan.Normalize,
                       MLF.Constraint.Presolution.Plan.ReifyPlan,
@@ -197,7 +198,6 @@ library mlf2-internal
                       MLF.Elab.Run.Generalize.Types,
                       MLF.Elab.Run.Instantiation,
                       MLF.Elab.Run.Pipeline,
-                      MLF.Elab.Run.ResultType,
                       MLF.Elab.Run.ResultType.Ann,
                       MLF.Elab.Run.ResultType.Fallback,
                       MLF.Elab.Run.ResultType.Types,

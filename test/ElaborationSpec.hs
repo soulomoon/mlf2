@@ -29,14 +29,17 @@ import MLF.Constraint.Types.Graph
     , UnifyEdge(..)
     , fromListGen
     , genRef
+    , getEdgeId
     , getNodeId
     , lookupNodeIn
     , nodeRefKey
+    , toListNode
     , typeRef
     )
 import MLF.Constraint.Types.Witness (InstanceOp(..), InstanceWitness(..), EdgeWitness(..))
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Binding.Canonicalization as BindCanon
+import MLF.Constraint.Canonicalizer (canonicalizeNode)
 import MLF.Elab.Run.Scope (letScopeOverrides, resolveCanonicalScope)
 import MLF.Constraint.Presolution
     ( PresolutionView(..)
@@ -49,8 +52,23 @@ import MLF.Constraint.Presolution
     , insertCopy
     , lookupCopy
     )
+import MLF.Constraint.Presolution.Plan.Context
+    ( SolvedToBaseResolution(..)
+    , resolveGaSolvedToBase
+    )
 import MLF.Constraint.Solve (solveUnifyWithSnapshot)
 import qualified MLF.Constraint.Solved as Solved
+import MLF.Elab.Run.ResultType
+    ( ResultTypeInputs(..)
+    , computeResultTypeFromAnn
+    , computeResultTypeFallback
+    )
+import MLF.Elab.Run.Util
+    ( canonicalizeExpansion
+    , canonicalizeTrace
+    , canonicalizeWitness
+    , makeCanonicalizer
+    )
 import MLF.Frontend.ConstraintGen (AnnExpr(..))
 import SpecUtil
     ( bindParentsFromPairs
@@ -121,6 +139,66 @@ presolutionViewFromSolved solved =
         , pvCanonicalConstraint = Solved.canonicalConstraint solved
         }
 
+resultTypeInputsForArtifacts
+    :: PipelineArtifacts
+    -> (ResultTypeInputs, AnnExpr, AnnExpr)
+resultTypeInputsForArtifacts
+    PipelineArtifacts
+        { paConstraintNorm = c1
+        , paPresolution = pres
+        , paSolved = solved0
+        , paAnnotated = ann0
+        } =
+    let solvedClean = Solved.pruneBindParentsSolved solved0
+        canon = makeCanonicalizer (Solved.canonicalMap solvedClean) (prRedirects pres)
+        canonical = canonicalizeNode canon
+        annRedirected = Elab.applyRedirectsToAnn (prRedirects pres) ann0
+        annCanon = Elab.canonicalizeAnn canonical annRedirected
+        edgeWitnesses = IntMap.map (canonicalizeWitness canon) (prEdgeWitnesses pres)
+        edgeTraces = IntMap.map (canonicalizeTrace canon) (prEdgeTraces pres)
+        edgeExpansions = IntMap.map (canonicalizeExpansion canon) (prEdgeExpansions pres)
+        baseNodeKeys =
+            [ getNodeId nid
+            | (nid, _) <- toListNode (cNodes c1)
+            ]
+        baseToSolved =
+            IntMap.fromList
+                [ (baseKey, canonical (NodeId baseKey))
+                | baseKey <- baseNodeKeys
+                ]
+        solvedToBase =
+            foldl'
+                (\acc (baseKey, solvedNid) ->
+                    IntMap.insertWith
+                        (\_ existing -> existing)
+                        (getNodeId solvedNid)
+                        (NodeId baseKey)
+                        acc
+                )
+                IntMap.empty
+                (IntMap.toList baseToSolved)
+        bindParentsGa =
+            GaBindParents
+                { gaBindParentsBase = cBindParents c1
+                , gaBaseConstraint = c1
+                , gaBaseToSolved = baseToSolved
+                , gaSolvedToBase = solvedToBase
+                }
+        inputs =
+            ResultTypeInputs
+                { rtcCanonical = canonical
+                , rtcEdgeWitnesses = edgeWitnesses
+                , rtcEdgeTraces = edgeTraces
+                , rtcEdgeExpansions = edgeExpansions
+                , rtcPresolutionView = presolutionViewFromSolved solvedClean
+                , rtcBindParentsGa = bindParentsGa
+                , rtcPlanBuilder = defaultPlanBuilder defaultTraceConfig
+                , rtcBaseConstraint = c1
+                , rtcRedirects = prRedirects pres
+                , rtcTraceConfig = defaultTraceConfig
+                }
+    in (inputs, annCanon, ann0)
+
 requirePipeline :: SurfaceExpr -> IO (Elab.ElabTerm, Elab.ElabType)
 requirePipeline expr =
     requireRight (Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr))
@@ -139,6 +217,15 @@ fInstantiations = go
                         (_:xs) -> xs
                 in inst : go next
             Nothing -> go (drop 1 s)
+
+annExprNode :: AnnExpr -> NodeId
+annExprNode ann = case ann of
+    ALit _ nid -> nid
+    AVar _ nid -> nid
+    ALam _ _ _ _ nid -> nid
+    AApp _ _ _ _ nid -> nid
+    ALet _ _ _ _ _ _ _ nid -> nid
+    AAnn _ nid _ -> nid
 
 stripBoundWrapper :: Elab.ElabType -> Elab.ElabType
 stripBoundWrapper (Elab.TForall v (Just bound) (Elab.TVar v'))
@@ -447,6 +534,62 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             expectationFailure ("Expected Int bound, got " ++ show ty)
                 _ ->
                     expectationFailure ("Expected bounded forall, got " ++ show ty)
+
+    describe "Result-type guard rails" $ do
+        it "AAnn root: primary annotation result type matches fallback facade with populated GA mappings" $ do
+            let cases =
+                    [ ( "let-poly value annotation"
+                      , EAnn
+                            (ELet "id" (ELam "x" (EVar "x")) (EVar "id"))
+                            (STArrow (STBase "Int") (STBase "Int"))
+                      )
+                    , ( "let-poly application annotation"
+                      , EAnn
+                            (ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (ELit (LInt 1))))
+                            (STBase "Int")
+                      )
+                    ]
+            forM_ cases $ \(label, expr) -> do
+                artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
+                let (inputs, annCanon, annPre) = resultTypeInputsForArtifacts artifacts
+                case annCanon of
+                    AAnn inner annNodeId eid -> do
+                        IntMap.member (getEdgeId eid) (rtcEdgeWitnesses inputs) `shouldBe` True
+                        IntMap.member (getEdgeId eid) (rtcEdgeTraces inputs) `shouldBe` True
+                        let ga = rtcBindParentsGa inputs
+                            baseToSolved = gaBaseToSolved ga
+                            solvedToBase = gaSolvedToBase ga
+                            annRootC = rtcCanonical inputs (annExprNode inner)
+                        IntMap.null baseToSolved `shouldBe` False
+                        IntMap.null solvedToBase `shouldBe` False
+                        case resolveGaSolvedToBase ga annRootC of
+                            SolvedToBaseMapped annRootBase ->
+                                IntMap.lookup (getNodeId annRootBase) baseToSolved `shouldBe` Just annRootC
+                            SolvedToBaseSameDomain sameDomain ->
+                                expectationFailure
+                                    ( "Expected ann root mapping in gaSolvedToBase for "
+                                        ++ label
+                                        ++ ", got same-domain root: "
+                                        ++ show sameDomain
+                                    )
+                            SolvedToBaseMissing ->
+                                expectationFailure
+                                    ( "Expected ann root mapping in gaSolvedToBase for "
+                                        ++ label
+                                        ++ ", got missing mapping"
+                                    )
+                        primary <- requireRight
+                            (computeResultTypeFromAnn inputs inner inner annNodeId eid)
+                        fallback <- requireRight
+                            (computeResultTypeFallback inputs annCanon annPre)
+                        primary `shouldAlphaEqType` fallback
+                    other ->
+                        expectationFailure
+                            ( "Expected top-level annotation after canonicalization for "
+                                ++ label
+                                ++ ", got: "
+                                ++ show other
+                            )
 
     describe "Binding tree coverage" $ do
         let runSolvedWithScope :: SurfaceExpr -> Either String (Solved.Solved, NodeRef, NodeId)
@@ -1373,6 +1516,84 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                     (Elab.TArrow (Elab.TVar "a")
                                         (Elab.TArrow (Elab.TVar "b") (Elab.TVar "c")))))
                 canonType out `shouldBe` canonType expected
+
+            it "O15-TR-SEQ-EMPTY-IDENTITY: Trχ(ε)=ε when Σ(g)=ε (isolated from reorder coupling)" $ do
+                -- Keep binder order identical to <P so Σ(g) is identity. With empty Ω,
+                -- Φ should remain identity as well (Trχ(ε)=ε).
+                let rootGen = GenNodeId 0
+                    vA = NodeId 40
+                    vB = NodeId 41
+                    vC = NodeId 42
+                    inner = NodeId 51
+                    arrow = NodeId 50
+                    forallNode = NodeId 60
+
+                    c =
+                        emptyConstraint
+                            { cNodes = nodeMapFromList
+                                    [ (getNodeId vA, TyVar { tnId = vA, tnBound = Nothing })
+                                    , (getNodeId vB, TyVar { tnId = vB, tnBound = Nothing })
+                                    , (getNodeId vC, TyVar { tnId = vC, tnBound = Nothing })
+                                    , (getNodeId inner, TyArrow inner vB vC)
+                                    , (getNodeId arrow, TyArrow arrow vA inner)
+                                    , (getNodeId forallNode, TyForall forallNode arrow)
+                                    ]
+                            , cBindParents =
+                                IntMap.fromList
+                                    [ (nodeRefKey (typeRef forallNode), (genRef rootGen, BindFlex))
+                                    , (nodeRefKey (typeRef arrow), (typeRef forallNode, BindFlex))
+                                    , (nodeRefKey (typeRef inner), (typeRef forallNode, BindFlex))
+                                    , (nodeRefKey (typeRef vA), (typeRef forallNode, BindFlex))
+                                    , (nodeRefKey (typeRef vB), (typeRef forallNode, BindFlex))
+                                    , (nodeRefKey (typeRef vC), (typeRef forallNode, BindFlex))
+                                    ]
+                            , cGenNodes =
+                                fromListGen
+                                    [ (rootGen, GenNode rootGen [forallNode]) ]
+                            }
+
+                    solved = mkSolved c IntMap.empty
+
+                    -- Already in <P order: a, b, c
+                    scheme =
+                        Elab.schemeFromType
+                            (Elab.TForall "a" Nothing
+                                (Elab.TForall "b" Nothing
+                                    (Elab.TForall "c" Nothing
+                                        (Elab.TArrow (Elab.TVar "a")
+                                            (Elab.TArrow (Elab.TVar "b") (Elab.TVar "c"))))))
+                    subst =
+                        IntMap.fromList
+                            [ (getNodeId vA, "a")
+                            , (getNodeId vB, "b")
+                            , (getNodeId vC, "c")
+                            ]
+                    si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = subst }
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = arrow
+                        , ewRight = arrow
+                        , ewRoot = arrow
+                        , ewForallIntros = 0
+                        , ewWitness = InstanceWitness []
+                        }
+
+                -- Explicitly assert Σ(g) is identity to isolate this guard from reordering.
+                sigma <- requireRight
+                    (Elab.sigmaReorder (Elab.schemeToType scheme) (Elab.schemeToType scheme))
+                sigma `shouldBe` Elab.InstId
+
+                phi <- requireRight
+                    (ElabTest.phiFromEdgeWitnessAutoTrace
+                        defaultTraceConfig
+                        generalizeAtWith
+                        solved
+                        (Just si)
+                        ew
+                    )
+                phi `shouldBe` Elab.InstId
+                out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
+                canonType out `shouldBe` canonType (Elab.schemeToType scheme)
 
             it "missing <P order key for a binder fails Σ(g) reordering" $ do
                 -- Create a constraint where a binder node is NOT reachable from the root
@@ -4106,6 +4327,32 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     | otherwise = Nothing
             validateCrossGenMapping g0 fga baseBP findSolvedKey
                 `shouldBe` Right ()
+
+        it "gaSolvedToBase resolution classifies mapped, same-domain, and missing outcomes" $ do
+            let mappedSolved = NodeId 5
+                mappedBase = NodeId 20
+                sameDomain = NodeId 21
+                missing = NodeId 999
+                baseConstraint =
+                    emptyConstraint
+                        { cNodes = nodeMapFromList
+                            [ (getNodeId mappedBase, TyVar { tnId = mappedBase, tnBound = Nothing })
+                            , (getNodeId sameDomain, TyVar { tnId = sameDomain, tnBound = Nothing })
+                            ]
+                        }
+                ga =
+                    GaBindParents
+                        { gaBindParentsBase = IntMap.empty
+                        , gaBaseConstraint = baseConstraint
+                        , gaBaseToSolved = IntMap.empty
+                        , gaSolvedToBase = IntMap.singleton (getNodeId mappedSolved) mappedBase
+                        }
+            resolveGaSolvedToBase ga mappedSolved
+                `shouldBe` SolvedToBaseMapped mappedBase
+            resolveGaSolvedToBase ga sameDomain
+                `shouldBe` SolvedToBaseSameDomain sameDomain
+            resolveGaSolvedToBase ga missing
+                `shouldBe` SolvedToBaseMissing
 
         it "ga-invariant: validateCrossGenMapping succeeds when multi-base mapping shares ancestor" $ do
             -- Two base nodes both under g0, both map to same solved key.

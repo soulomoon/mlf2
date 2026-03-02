@@ -2,6 +2,25 @@
 
 ## Thesis Alignment (Phase A–E)
 
+### 2026-03-03 Task 29 solved follow-up closure (Phases 1-6 complete)
+- Completed solved-boundary follow-ups from `TODO.md` with end-to-end green validation (`cabal build all && cabal test`: `913 examples, 0 failures`).
+- Consolidated solved-to-view projection at the presolution boundary:
+  - shared adapter `MLF.Constraint.Presolution.View.fromSolved`
+  - removed duplicated runtime adapters in elaboration/pipeline call sites.
+- Replaced runtime construction dependencies on test-only naming:
+  - added production-safe `Solved.fromConstraintAndUf`
+  - migrated runtime planner/reify uses off `mkTestSolved` naming.
+- Tightened solved/base mapping handling in presolution planning:
+  - introduced explicit `SolvedToBaseResolution` classification (`mapped | same-domain | missing`)
+  - routed scope/target fallback handling through typed resolution.
+- Expanded and hardened guard coverage:
+  - solved invariant checks (`validateOriginalCanonicalAgreement`, `canonicalizedBindParents`)
+  - isolated O15 empty-sequence translation guard (`Trχ(ε)=ε` with `Σ(g)=ε`)
+  - AAnn result-type primary vs fallback equivalence with populated GA mapping assertions.
+- Closed review follow-ups:
+  - removed tautological constructor parity test and replaced with semantic constructor invariants,
+  - narrowed adapter guard wording to avoid overclaiming corpus scope.
+
 ### 2026-03-01 TMT3 Wave 3 docs closeout (all-aligned policy)
 - Transformation Mechanism Table (`docs/notes/2026-02-27-transformation-mechanism-table.md`) is now fully all-aligned for the current branch: every row is `Aligned` and no row references active `DEV-TMT-*` IDs.
 - `docs/thesis-deviations.yaml` now moves all `DEV-TMT-*` records out of active `deviations` and into `history.resolved`.

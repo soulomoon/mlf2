@@ -3,6 +3,23 @@
 ## Unreleased
 
 ### Changed
+- Task 29 Phase 1 solved-view adapter consolidation (2026-03-03):
+  - added shared `fromSolved :: Solved -> PresolutionView` at `MLF.Constraint.Presolution.View`;
+  - removed duplicated runtime solved→presolution adapter builders from `MLF.Elab.Elaborate`, `MLF.Elab.Phi.Translate`, `MLF.Elab.Run.Generalize`, and `MLF.Elab.Run.Pipeline`;
+  - added semantic adapter-equivalence coverage in `PipelineSpec` to keep solved-query behavior unchanged across the shared adapter path.
+- Task 29 Phase 4 solved-boundary guard expansion (2026-03-03):
+  - added direct solved invariant guards for `validateOriginalCanonicalAgreement` and `canonicalizedBindParents` in `Constraint.SolvedSpec`;
+  - added isolated empty-sequence Φ guard (`Trχ(ε)=ε` with `Σ(g)=ε`) in `ElaborationSpec` to decouple Ω-empty coverage from reorder-only behavior;
+  - added replay-relevant annotation result-type guard comparing primary annotation computation vs fallback facade in `ElaborationSpec`;
+  - moved solved/base resolution test imports to `MLF.Constraint.Presolution.Plan.Context` and removed temporary top-level `MLF.Constraint.Presolution` re-exports for `SolvedToBaseResolution`/`resolveGaSolvedToBase`.
+- Task 29 Phase 4 review-fix follow-up (2026-03-03):
+  - replaced tautological `fromConstraintAndUf` constructor parity check with direct semantic invariants over canonicalization/original-domain preservation in `Constraint.SolvedSpec`;
+  - strengthened AAnn result-type guard setup with populated GA solved/base mappings and explicit mapping assertions before primary-vs-fallback equivalence;
+  - narrowed adapter-parity test wording in `PipelineSpec` to "selected solved queries on representative corpus" to avoid overclaiming coverage.
+- Solved-module audit closeout (2026-03-03):
+  - completed a production-vs-compat/test boundary inventory for `MLF.Constraint.Solved` consumers;
+  - documented seven production call chains that still depend on solved-boundary assumptions;
+  - mapped thesis-claims/obligations touchpoints and added prioritized follow-up actions/guard-test gaps in task artifacts.
 - Wave 2 solved-indirection closeout:
   - migrated `PresolutionPlanBuilder` closure boundary from `Solved` to `PresolutionView` and updated planner/generalize call chain accordingly;
   - generalized `Presolution.View.fromPresolutionResult` to `PresolutionSnapshot a => a -> PresolutionView` to avoid base/view cycle pressure;

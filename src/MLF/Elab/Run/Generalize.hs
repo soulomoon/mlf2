@@ -12,8 +12,8 @@ import MLF.Constraint.Presolution
     ( PresolutionPlanBuilder(..)
     , PresolutionView(..)
     )
+import MLF.Constraint.Presolution.View (fromSolved)
 import MLF.Constraint.Solved (Solved)
-import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types
     ( Constraint
     , NodeId(..)
@@ -137,17 +137,7 @@ generalizeAtWithBuilder
     -> Either ElabError (ElabScheme, IntMap.IntMap String)
 generalizeAtWithBuilder planBuilder mbBindParentsGa solved scopeRoot targetNode =
     let PresolutionPlanBuilder buildPlans = planBuilder
-        presolutionView =
-            PresolutionView
-                { pvConstraint = Solved.originalConstraint solved
-                , pvCanonicalMap = Solved.canonicalMap solved
-                , pvCanonical = Solved.canonical solved
-                , pvLookupNode = Solved.lookupNode solved
-                , pvLookupVarBound = Solved.lookupVarBound solved
-                , pvLookupBindParent = Solved.lookupBindParent solved
-                , pvBindParents = Solved.bindParents solved
-                , pvCanonicalConstraint = Solved.canonicalConstraint solved
-                }
+        presolutionView = fromSolved solved
         go mbGa scope target = do
             (genPlan, reifyPlan) <- buildPlans presolutionView mbGa scope target
             let fallback scope' target' = fst <$> go mbGa scope' target'

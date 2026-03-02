@@ -1,7 +1,9 @@
 module MLF.Constraint.Presolution.Plan.Context (
     GaBindParents(..),
+    SolvedToBaseResolution(..),
     GeneralizeEnv(..),
     GeneralizeCtx(..),
+    resolveGaSolvedToBase,
     resolveContext,
     validateCrossGenMapping,
     traceGeneralizeEnabled,
@@ -29,6 +31,21 @@ data GaBindParents = GaBindParents
     , gaBaseToSolved :: IntMap.IntMap NodeId
     , gaSolvedToBase :: IntMap.IntMap NodeId
     }
+
+data SolvedToBaseResolution
+    = SolvedToBaseMapped NodeId
+    | SolvedToBaseSameDomain NodeId
+    | SolvedToBaseMissing
+    deriving (Eq, Show)
+
+resolveGaSolvedToBase :: GaBindParents -> NodeId -> SolvedToBaseResolution
+resolveGaSolvedToBase ga solvedNid =
+    case IntMap.lookup (getNodeId solvedNid) (gaSolvedToBase ga) of
+        Just baseNid -> SolvedToBaseMapped baseNid
+        Nothing ->
+            case lookupNodeIn (cNodes (gaBaseConstraint ga)) solvedNid of
+                Just _ -> SolvedToBaseSameDomain solvedNid
+                Nothing -> SolvedToBaseMissing
 
 data GeneralizeEnv = GeneralizeEnv
     { geConstraint :: Constraint
@@ -118,19 +135,23 @@ resolveContext env bindParentsSoft scopeRootArg targetNodeArg = do
             case mbBindParentsGa' of
                 Nothing -> target
                 Just ga ->
-                    IntMap.findWithDefault target (getNodeId target) (gaSolvedToBase ga)
+                    case resolveGaSolvedToBase ga target of
+                        SolvedToBaseMapped baseN -> baseN
+                        SolvedToBaseSameDomain baseN -> baseN
+                        SolvedToBaseMissing -> target
         resolveScopeRoot root =
             case (root, mbBindParentsGa') of
                 (TypeRef nid, Just ga) ->
-                    case IntMap.lookup (getNodeId nid) (gaSolvedToBase ga) of
-                        Nothing -> root
-                        Just baseN ->
+                    case resolveGaSolvedToBase ga nid of
+                        SolvedToBaseMapped baseN ->
                             case bindingPathToRootLocal (gaBindParentsBase ga) (typeRef baseN) of
                                 Left _ -> root
                                 Right path ->
                                     case listToMaybe [gid | GenRef gid <- drop 1 path] of
                                         Just gid -> GenRef gid
                                         Nothing -> root
+                        SolvedToBaseSameDomain _ -> root
+                        SolvedToBaseMissing -> root
                 _ -> root
         resolveOrderRoots root target =
             case root of
@@ -187,21 +208,24 @@ resolveContext env bindParentsSoft scopeRootArg targetNodeArg = do
                 Just _ -> " orderRootBase=" ++ show orderRootBase
         )
     -- Phase 2: discover the scope's owning gen node (if any).
-    let resolveScopeGen root =
+    let scopeGenFromSolvedPath nid = do
+            path <- bindingToElab (Binding.bindingPathToRoot constraint (TypeRef nid))
+            pure (listToMaybe [gid | GenRef gid <- drop 1 path])
+        resolveScopeGen root =
             case root of
                 GenRef gid -> pure (Just gid)
                 TypeRef nid ->
                     case mbBindParentsGa' of
                         Just ga ->
-                            case IntMap.lookup (getNodeId nid) (gaSolvedToBase ga) of
-                                Just baseNid ->
+                            case resolveGaSolvedToBase ga nid of
+                                SolvedToBaseMapped baseNid ->
                                     pure (firstGenAncestor (gaBindParentsBase ga) (TypeRef baseNid))
-                                Nothing -> do
-                                    path <- bindingToElab (Binding.bindingPathToRoot constraint (TypeRef nid))
-                                    pure (listToMaybe [gid | GenRef gid <- drop 1 path])
-                        Nothing -> do
-                            path <- bindingToElab (Binding.bindingPathToRoot constraint (TypeRef nid))
-                            pure (listToMaybe [gid | GenRef gid <- drop 1 path])
+                                SolvedToBaseSameDomain _ ->
+                                    scopeGenFromSolvedPath nid
+                                SolvedToBaseMissing ->
+                                    scopeGenFromSolvedPath nid
+                        Nothing ->
+                            scopeGenFromSolvedPath nid
         resolveScopePhase root = do
             scopeGen <- resolveScopeGen root
             pure ResolveScope { rsScopeGen = scopeGen }
@@ -294,16 +318,14 @@ resolveContext env bindParentsSoft scopeRootArg targetNodeArg = do
                         case ref of
                             GenRef gid -> Just gid
                             TypeRef nid ->
-                                let key = getNodeId (canonical nid)
-                                    baseConstraint = gaBaseConstraint ga
-                                in case IntMap.lookup key (gaSolvedToBase ga) of
-                                    Just baseNid ->
+                                let keyNid = NodeId (getNodeId (canonical nid))
+                                in case resolveGaSolvedToBase ga keyNid of
+                                    SolvedToBaseMapped baseNid ->
                                         firstGenAncestor (gaBindParentsBase ga) (TypeRef baseNid)
-                                    Nothing ->
-                                        case lookupNodeIn (cNodes baseConstraint) (NodeId key) of
-                                            Just _ ->
-                                                firstGenAncestor (gaBindParentsBase ga) (TypeRef (NodeId key))
-                                            Nothing -> Nothing
+                                    SolvedToBaseSameDomain baseNid ->
+                                        firstGenAncestor (gaBindParentsBase ga) (TypeRef baseNid)
+                                    SolvedToBaseMissing ->
+                                        Nothing
         resolveBindsPhase scopeGen' = do
             bindParents <- resolveBindParents scopeGen'
             let firstGenAncestorGa = resolveFirstGenAncestor bindParents

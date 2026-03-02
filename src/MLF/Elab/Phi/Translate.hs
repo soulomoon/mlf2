@@ -59,9 +59,9 @@ import MLF.Reify.Core
     , reifyTypeWithNamedSetNoFallback
     )
 import MLF.Constraint.Solved (Solved)
-import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Presolution (EdgeTrace(..), PresolutionView(..))
 import MLF.Constraint.Presolution.Base (CopyMapping(..), InteriorNodes(..), copiedNodes)
+import MLF.Constraint.Presolution.View (fromSolved)
 import qualified MLF.Binding.Tree as Binding
 import MLF.Binding.Tree (checkBindingTree, checkNoGenFallback, checkSchemeClosureUnder)
 import qualified MLF.Constraint.NodeAccess as NodeAccess
@@ -84,20 +84,7 @@ canonicalNodeM nid = do
 remapSchemeInfoM :: EdgeTrace -> SchemeInfo -> PhiM SchemeInfo
 remapSchemeInfoM tr si = do
     solved <- askResult
-    pure (remapSchemeInfoByTrace (presolutionViewFromSolved solved) tr si)
-
-presolutionViewFromSolved :: Solved -> PresolutionView
-presolutionViewFromSolved solved =
-    PresolutionView
-        { pvConstraint = Solved.originalConstraint solved
-        , pvCanonicalMap = Solved.canonicalMap solved
-        , pvCanonical = Solved.canonical solved
-        , pvLookupNode = Solved.lookupNode solved
-        , pvLookupVarBound = Solved.lookupVarBound solved
-        , pvLookupBindParent = Solved.lookupBindParent solved
-        , pvBindParents = Solved.bindParents solved
-        , pvCanonicalConstraint = Solved.canonicalConstraint solved
-        }
+    pure (remapSchemeInfoByTrace (fromSolved solved) tr si)
 
 -- | Re-key scheme substitutions into the EdgeTrace source-ID domain.
 --
@@ -299,7 +286,7 @@ phiFromEdgeWitnessWithTrace
 phiFromEdgeWitnessWithTrace traceCfg generalizeAtWith solved mbGaParents mSchemeInfo mTrace ew =
     case mTrace of
         Nothing -> Left (MissingEdgeTrace (ewEdgeId ew))
-        Just _ -> phiFromEdgeWitnessCore traceCfg generalizeAtWith solved (presolutionViewFromSolved solved) mbGaParents mSchemeInfo mTrace ew
+        Just _ -> phiFromEdgeWitnessCore traceCfg generalizeAtWith solved (fromSolved solved) mbGaParents mSchemeInfo mTrace ew
 
 {- Note [Trace-First Copied Set]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

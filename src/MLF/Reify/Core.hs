@@ -706,7 +706,7 @@ reifyTypeWithNamesNoFallback solved subst nid =
 -- | Reify with an explicit constraint (Schi' on base graphs).
 reifyTypeWithNamesNoFallbackOnConstraint :: Constraint -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
 reifyTypeWithNamesNoFallbackOnConstraint constraint subst nid =
-    let solvedBase = Solved.mkTestSolved constraint IntMap.empty
+    let solvedBase = Solved.fromConstraintAndUf constraint IntMap.empty
     in reifyTypeWithNamesNoFallback solvedBase subst nid
 
 -- | Reify with an explicit named-node set (Schi').
@@ -776,12 +776,12 @@ reifyBoundWithNamesBound solved subst =
 -- | Reify a node for use as a binder bound on an explicit constraint (Schi_p on base graphs).
 reifyBoundWithNamesOnConstraint :: Constraint -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
 reifyBoundWithNamesOnConstraint constraint subst nid =
-    let solvedBase = Solved.mkTestSolved constraint IntMap.empty
+    let solvedBase = Solved.fromConstraintAndUf constraint IntMap.empty
     in reifyBoundWithNames solvedBase subst nid
 
 reifyBoundWithNamesOnConstraintBound :: Constraint -> IntMap.IntMap String -> NodeId -> Either ElabError BoundType
 reifyBoundWithNamesOnConstraintBound constraint subst nid =
-    let solvedBase = Solved.mkTestSolved constraint IntMap.empty
+    let solvedBase = Solved.fromConstraintAndUf constraint IntMap.empty
     in reifyBoundWithNamesBound solvedBase subst nid
 
 namedNodes :: Solved -> Either ElabError IntSet.IntSet

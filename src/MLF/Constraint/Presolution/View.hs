@@ -1,6 +1,7 @@
 module MLF.Constraint.Presolution.View (
     PresolutionView(..),
-    fromPresolutionResult
+    fromPresolutionResult,
+    fromSolved
 ) where
 
 import Data.IntMap.Strict (IntMap)
@@ -9,6 +10,7 @@ import qualified Data.IntSet as IntSet
 
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Solve (rewriteConstraintWithUF)
+import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types.Graph
     ( BindFlag
     , BindParents
@@ -46,6 +48,19 @@ fromPresolutionResult pres =
         , pvLookupBindParent = NodeAccess.lookupBindParent constraint
         , pvBindParents = cBindParents constraint
         , pvCanonicalConstraint = rewriteConstraintWithUF uf constraint
+        }
+
+fromSolved :: Solved.Solved -> PresolutionView
+fromSolved solved =
+    PresolutionView
+        { pvConstraint = Solved.originalConstraint solved
+        , pvCanonicalMap = Solved.canonicalMap solved
+        , pvCanonical = Solved.canonical solved
+        , pvLookupNode = Solved.lookupNode solved
+        , pvLookupVarBound = Solved.lookupVarBound solved
+        , pvLookupBindParent = Solved.lookupBindParent solved
+        , pvBindParents = Solved.bindParents solved
+        , pvCanonicalConstraint = Solved.canonicalConstraint solved
         }
 
 buildCanonicalMap :: IntMap NodeId -> Constraint -> IntMap NodeId

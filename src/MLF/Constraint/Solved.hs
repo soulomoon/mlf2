@@ -17,6 +17,7 @@ module MLF.Constraint.Solved (
     -- * Opaque type
     Solved,
     fromSolveOutput,
+    fromConstraintAndUf,
     mkTestSolved,
     fromPreRewriteState,
 
@@ -123,11 +124,11 @@ data SolvedBackend
 newtype Solved = Solved { unSolved :: SolvedBackend }
     deriving (Eq, Show)
 
--- | Test helper: construct an EquivBackend from a constraint and
--- union-find map. The constraint serves as both original and canonical
--- (no pre-rewrite snapshot needed for tests with empty union-find).
-mkTestSolved :: Constraint -> IntMap NodeId -> Solved
-mkTestSolved c uf =
+-- | Construct an Equiv backend directly from a constraint and
+-- union-find map. The input constraint is used as both original and
+-- canonical; callers should only use this when no solve replay is needed.
+fromConstraintAndUf :: Constraint -> IntMap NodeId -> Solved
+fromConstraintAndUf c uf =
     let canonMap = buildCanonicalMap uf c
         equivClasses = buildEquivClasses canonMap c
     in Solved EquivBackend
@@ -145,6 +146,10 @@ mkTestSolved c uf =
         , ebEquivClasses = equivClasses
         , ebOriginalConstraint = c
         }
+
+-- | Backward-compatible alias used by tests and legacy call sites.
+mkTestSolved :: Constraint -> IntMap NodeId -> Solved
+mkTestSolved = fromConstraintAndUf
 
 -- | Build a staged equivalence backend from snapshot-enabled solve output.
 fromSolveOutput :: SolveOutput -> Either SolveError Solved

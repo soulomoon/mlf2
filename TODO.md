@@ -4,6 +4,19 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 29 Solved module audit follow-up execution (completed 2026-03-03)
+
+- Completed:
+  - Shared `Solved -> PresolutionView` adapter (`MLF.Constraint.Presolution.View.fromSolved`) and removed duplicated runtime adapter code.
+  - Runtime constructor migration to `Solved.fromConstraintAndUf` for planner/reify paths.
+  - Explicit typed solved/base fallback handling via `SolvedToBaseResolution`.
+  - Added solved-boundary guards for canonical/original invariants, isolated O15 `Trχ(ε)=ε`, and AAnn result-type primary/fallback equivalence with populated GA mappings.
+  - Completed review-fix follow-up for test quality and claim precision; full validation remained green.
+- Verification:
+  - `cabal build all && cabal test` -> `913 examples, 0 failures`.
+- Archive:
+  - Task records moved under `tasks/archive/2026-03-03-task-29-solved-followup/`.
+
 ## Task 28 Eliminate solved indirection via presolution view (2026-03-02)
 
 - Current status:

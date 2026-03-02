@@ -126,6 +126,25 @@ spec = describe "MLF.Constraint.Solved" $ do
 
     let s = testSolved
 
+    describe "Constructor compatibility" $ do
+        it "fromConstraintAndUf builds canonical queries from union-find and preserves original graph" $ do
+            let var0 = TyVar { tnId = NodeId 0, tnBound = Nothing }
+                base1 = TyBase (NodeId 1) (BaseTy "Int")
+                inst = InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)
+                nodes = nodeMapFromList [(0, var0), (1, base1)]
+                constraint = emptyConstraint
+                    { cNodes = nodes
+                    , cInstEdges = [inst]
+                    }
+                uf = IntMap.fromList [(0, NodeId 1)]
+                solved = fromConstraintAndUf constraint uf
+            canonical solved (NodeId 0) `shouldBe` NodeId 1
+            lookupNode solved (NodeId 0) `shouldBe` Just base1
+            originalNode solved (NodeId 0) `shouldBe` Just var0
+            classMembers solved (NodeId 1) `shouldMatchList` [NodeId 0, NodeId 1]
+            instEdges solved `shouldBe` [inst]
+            originalConstraint solved `shouldBe` constraint
+
     describe "Backend equivalence" $ do
         let idLam = ELam "x" (EVar "x")
             intTy = STBase "Int"
@@ -256,6 +275,59 @@ spec = describe "MLF.Constraint.Solved" $ do
         it "originalConstraint returns the raw constraint" $ do
             let c = originalConstraint s
             cInstEdges c `shouldBe` [InstEdge (EdgeId 0) (NodeId 2) (NodeId 3)]
+
+    describe "Solved invariants" $ do
+        it "validateOriginalCanonicalAgreement reports original/canonical tag mismatches" $ do
+            let mismatches = validateOriginalCanonicalAgreement s
+            mismatches `shouldSatisfy` (not . null)
+            mismatches `shouldSatisfy`
+                any
+                    (\msg ->
+                        "Node 0" `isInfixOf` msg
+                            && "original=Just \"var\"" `isInfixOf` msg
+                            && "canonical=Just \"base\"" `isInfixOf` msg
+                    )
+
+        it "validateOriginalCanonicalAgreement is empty when original and canonical domains align" $ do
+            let var0 = TyVar { tnId = NodeId 0, tnBound = Nothing }
+                var1 = TyVar { tnId = NodeId 1, tnBound = Nothing }
+                nodes = nodeMapFromList [(0, var0), (1, var1)]
+                aligned = mkTestSolved (emptyConstraint { cNodes = nodes }) IntMap.empty
+            validateOriginalCanonicalAgreement aligned `shouldBe` []
+
+        it "canonicalizedBindParents rewrites non-canonical child/parent refs into canonical-domain refs" $ do
+            let childMerged = NodeId 0
+                childCanonical = NodeId 1
+                parentMerged = NodeId 2
+                parentCanonical = NodeId 3
+                nodes = nodeMapFromList
+                    [ (0, TyVar { tnId = childMerged, tnBound = Nothing })
+                    , (1, TyVar { tnId = childCanonical, tnBound = Nothing })
+                    , (2, TyVar { tnId = parentMerged, tnBound = Nothing })
+                    , (3, TyVar { tnId = parentCanonical, tnBound = Nothing })
+                    ]
+                bp =
+                    IntMap.fromList
+                        [ ( nodeRefKey (typeRef childMerged)
+                          , (typeRef parentMerged, BindFlex)
+                          )
+                        ]
+                solved =
+                    mkTestSolved
+                        (emptyConstraint { cNodes = nodes, cBindParents = bp })
+                        (IntMap.fromList
+                            [ (getNodeId childMerged, childCanonical)
+                            , (getNodeId parentMerged, parentCanonical)
+                            ]
+                        )
+            case canonicalizedBindParents solved of
+                Left err ->
+                    expectationFailure ("Expected canonicalized bind parents, got error: " ++ show err)
+                Right canonBp -> do
+                    IntMap.lookup (nodeRefKey (typeRef childCanonical)) canonBp
+                        `shouldBe` Just (typeRef parentCanonical, BindFlex)
+                    IntMap.lookup (nodeRefKey (typeRef childMerged)) canonBp
+                        `shouldBe` Nothing
 
     describe "Degraded stubs (Phase 1)" $ do
         it "classMembers returns equivalence class members" $ do
