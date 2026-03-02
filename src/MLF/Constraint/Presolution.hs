@@ -12,7 +12,9 @@ module MLF.Constraint.Presolution (
     -- * Main API
     computePresolution,
     PresolutionResult(..),
+    PresolutionView(..),
     PresolutionPlanBuilder(..),
+    fromPresolutionResult,
     defaultPlanBuilder,
     PresolutionError(..),
     GaBindParents(..),
@@ -75,6 +77,10 @@ import MLF.Constraint.Presolution.Core (
     validateReplayMapTraceContract,
     runEdgeUnifyForTest,
     unifyAcyclicRawWithRaiseTrace
+    )
+import MLF.Constraint.Presolution.View
+    ( PresolutionView(..)
+    , fromPresolutionResult
     )
 import MLF.Constraint.Presolution.WitnessNorm (normalizeEdgeWitnessesM)
 import MLF.Constraint.Presolution.Validation (validateTranslatablePresolution)

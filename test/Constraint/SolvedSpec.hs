@@ -5,6 +5,7 @@ import Test.Hspec
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Set as Set
 
+import qualified MLF.Constraint.Presolution as Presolution
 import MLF.Constraint.Presolution (PresolutionResult(..))
 import MLF.Constraint.Solve
     ( SolveOutput(..)
@@ -13,6 +14,7 @@ import MLF.Constraint.Solve
     , solveUnifyWithSnapshot
     )
 import MLF.Constraint.Solved
+import qualified MLF.Constraint.Solved as Solved
 import MLF.Frontend.Syntax
     ( Lit(..)
     , SrcTy(..)
@@ -34,6 +36,7 @@ import MLF.Constraint.Types.Graph
     , genRef
     , nodeRefKey
     , toListGen
+    , toListNode
     , typeRef
     )
 
@@ -169,8 +172,29 @@ spec = describe "MLF.Constraint.Solved" $ do
                 runCase (label, expr)
 
     describe "Presolution view parity guards" $ do
-        it "presolution view parity: canonical lookup agrees with solved on snapshot fixtures" $ do
-            expectationFailure "TODO(Task 2): add PresolutionView parity assertions over snapshot fixtures"
+        it "PresolutionView mirrors solved canonical/node/bound queries" $ do
+            let fixtures =
+                    [ ("id", ELam "x" (EVar "x"))
+                    , ("let-poly-use", ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (ELit (LInt 1))))
+                    ]
+            forM_ fixtures $ \(label, expr) ->
+                case runToPresolutionDefault Set.empty expr of
+                    Left err ->
+                        expectationFailure
+                            ( "Presolution failed for fixture "
+                                ++ label
+                                ++ ": "
+                                ++ err
+                            )
+                    Right pres -> do
+                        solved <- requireRight (Solved.fromPresolutionResult pres)
+                        let view = Presolution.fromPresolutionResult pres
+                            nodeIds = map fst (toListNode (cNodes (prConstraint pres)))
+                            probes = nodeIds ++ [NodeId 999]
+                        forM_ probes $ \nid -> do
+                            Presolution.pvCanonical view nid `shouldBe` canonical solved nid
+                            Presolution.pvLookupNode view nid `shouldBe` lookupNode solved nid
+                            Presolution.pvLookupVarBound view nid `shouldBe` lookupVarBound solved nid
 
     describe "Core queries" $ do
         it "canonical chases the union-find" $ do
