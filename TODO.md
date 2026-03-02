@@ -4,6 +4,22 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 30 Reduce internal solved compatibility reads (completed 2026-03-03)
+
+- Completed:
+  - Removed compatibility-only context fields (`gcConstraintForReify`, `rbConstraintForReify`) and added context-side invariant tracing for unexpected base-domain `SolvedToBaseMissing`.
+  - Gated alias solved rebuild in `MLF.Elab.Generalize` and moved explicit-bound helper reification to OnConstraint path where authoritative.
+  - Added `MLF.Elab.Run.ResultType.View` and centralized result-type solved reads; confined `rtcSolveLike` usage to the view-construction boundary.
+  - Replaced fallback-core local `rebuildWithNodes` path with view-bound overlay materialization and preserved target-selection/base-mutation semantics.
+  - Added regressions for:
+    - `generalizeWithPlan` fallback ladder (`SchemeFreeVars` GA->no-GA and double fallback to `reifyType`)
+    - result-type fallback `gaSolvedToBase` same-domain/missing integrated branches.
+- Verification:
+  - Focused matrix checks: PASS (carry-forward + 4 new tests).
+  - `cabal build all && cabal test` -> `917 examples, 0 failures`.
+- Archive:
+  - Task records moved under `tasks/archive/2026-03-03-solved-compat-read-reduction/`.
+
 ## Task 29 Solved module audit follow-up execution (completed 2026-03-03)
 
 - Completed:

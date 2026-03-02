@@ -202,6 +202,7 @@ library mlf2-internal
                       MLF.Elab.Run.ResultType.Fallback,
                       MLF.Elab.Run.ResultType.Types,
                       MLF.Elab.Run.ResultType.Util,
+                      MLF.Elab.Run.ResultType.View,
                       MLF.Elab.Run.TypeOps,
                       MLF.Elab.Sigma,
                       MLF.Elab.TypeCheck,

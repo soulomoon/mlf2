@@ -410,7 +410,9 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
                         substAlias =
                             IntMap.union (IntMap.fromList aliasEntries) substBaseRigid
                         resAlias =
-                            Solved.rebuildWithConstraint resForReify constraintAlias
+                            if useConstraintReify
+                                then resForReify
+                                else Solved.rebuildWithConstraint resForReify constraintAlias
                     ty <- reifyWithOrig originalConstraintAlias bodyRoot substAlias constraintAlias resAlias
                     inlineRigidOrig originalConstraintAlias substAlias constraintAlias resAlias ty
           where
@@ -446,7 +448,6 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
 
             -- Convenience wrappers using the base original constraint
             reifyWith = reifyWithOrig originalConstraint
-            reifyBoundWith = reifyBoundWithOrig originalConstraint
 
             -- Rigid type handling
             isReachableRigidVar nid =
@@ -618,12 +619,19 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
                                 | Just _ <- NodeAccess.lookupNode constraint (canonical bnd) ->
                                     Just (canonical bnd)
                             _ -> Nothing
+                    useConstraintBoundReify =
+                        scopeHasStructuralScheme && null bindings
+                    reifyBoundForExplicit bndRoot
+                        | useConstraintBoundReify =
+                            reifyBoundWithNamesOnConstraint originalConstraint substExplicit bndRoot
+                        | otherwise =
+                            reifyBoundWithNames resForReify substExplicit bndRoot
                     inlineNamedBounds = inlineNamedBoundsFor substExplicit
                     computeBound (b, name) =
                         case lookupBound b of
                             Nothing -> pure (name, Nothing)
                             Just bnd -> do
-                                bndTy <- reifyBoundWithNames resForReify substExplicit (canonical bnd)
+                                bndTy <- reifyBoundForExplicit (canonical bnd)
                                 let bndTy' = inlineNamedBounds bndTy
                                     mbBound = case bndTy' of
                                         TBottom -> Nothing
@@ -636,12 +644,20 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
             inlineNamedBoundsFor substExplicit =
                 -- See Note [Scope-aware bound/alias inlining] in
                 -- docs/notes/2026-01-27-elab-changes.md.
+                let useConstraintBoundReify =
+                        scopeHasStructuralScheme && null bindings
+                    reifyBoundForInline bndRoot
+                        | useConstraintBoundReify =
+                            reifyBoundWithNamesOnConstraint originalConstraint substExplicit bndRoot
+                        | otherwise =
+                            reifyBoundWithNames resForReify substExplicit bndRoot
+                in
                 inlineAliasBoundsWithBy
                     False
                     canonical
                     (NodeMap nodes)
                     (VarStore.lookupVarBound constraint)
-                    (reifyBoundWithNames resForReify substExplicit)
+                    reifyBoundForInline
 
             fallbackSchemeType
                 | scopeHasStructuralScheme && null bindings =

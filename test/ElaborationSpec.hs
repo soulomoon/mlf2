@@ -33,6 +33,7 @@ import MLF.Constraint.Types.Graph
     , getNodeId
     , lookupNodeIn
     , nodeRefKey
+    , fromListNode
     , toListNode
     , typeRef
     )
@@ -43,6 +44,7 @@ import MLF.Constraint.Canonicalizer (canonicalizeNode)
 import MLF.Elab.Run.Scope (letScopeOverrides, resolveCanonicalScope)
 import MLF.Constraint.Presolution
     ( PresolutionView(..)
+    , PresolutionPlanBuilder(..)
     , PresolutionResult(..)
     , EdgeTrace(..)
     , GaBindParents(..)
@@ -60,6 +62,7 @@ import MLF.Constraint.Solve (solveUnifyWithSnapshot)
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Elab.Run.ResultType
     ( ResultTypeInputs(..)
+    , generalizeWithPlan
     , computeResultTypeFromAnn
     , computeResultTypeFallback
     )
@@ -590,6 +593,107 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 ++ ", got: "
                                 ++ show other
                             )
+
+        it "generalizeWithPlan falls back from GA to no-GA on SchemeFreeVars" $ do
+            let root = NodeId 0
+                constraint =
+                    emptyConstraint
+                        { cNodes = nodeMapFromList
+                            [ (getNodeId root, TyBase root (BaseTy "Int")) ]
+                        }
+                solved = mkSolved constraint IntMap.empty
+                ga =
+                    GaBindParents
+                        { gaBindParentsBase = cBindParents constraint
+                        , gaBaseConstraint = constraint
+                        , gaBaseToSolved = IntMap.singleton (getNodeId root) root
+                        , gaSolvedToBase = IntMap.singleton (getNodeId root) root
+                        }
+                planBuilder =
+                    PresolutionPlanBuilder $ \_ mbGa _ _ ->
+                        case mbGa of
+                            Just _ -> Left (Elab.SchemeFreeVars root ["ga-first-pass"])
+                            Nothing -> Left (Elab.ValidationFailed ["ga-fallback-no-ga"])
+            generalizeWithPlan planBuilder ga solved (typeRef root) root
+                `shouldBe` Left (Elab.ValidationFailed ["ga-fallback-no-ga"])
+
+        it "generalizeWithPlan falls back to reifyType after double SchemeFreeVars" $ do
+            let root = NodeId 0
+                constraint =
+                    emptyConstraint
+                        { cNodes = nodeMapFromList
+                            [ (getNodeId root, TyBase root (BaseTy "Int")) ]
+                        }
+                solved = mkSolved constraint IntMap.empty
+                ga =
+                    GaBindParents
+                        { gaBindParentsBase = cBindParents constraint
+                        , gaBaseConstraint = constraint
+                        , gaBaseToSolved = IntMap.singleton (getNodeId root) root
+                        , gaSolvedToBase = IntMap.singleton (getNodeId root) root
+                        }
+                planBuilder =
+                    PresolutionPlanBuilder $ \_ _ _ _ ->
+                        Left (Elab.SchemeFreeVars root ["double-schemefreevars"])
+            generalizeWithPlan planBuilder ga solved (typeRef root) root
+                `shouldBe` Right (Elab.Forall [] (Elab.TBase (BaseTy "Int")), IntMap.empty)
+
+        it "result-type fallback core handles gaSolvedToBase same-domain roots" $ do
+            let expr = ELit (LInt 1)
+            artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
+            let (inputs, annCanon, annPre) = resultTypeInputsForArtifacts artifacts
+                rootC = rtcCanonical inputs (annExprNode annCanon)
+                ga0 = rtcBindParentsGa inputs
+                gaSameDomain =
+                    ga0
+                        { gaSolvedToBase =
+                            IntMap.delete (getNodeId rootC) (gaSolvedToBase ga0)
+                        }
+                inputsSame = inputs { rtcBindParentsGa = gaSameDomain }
+            resolveGaSolvedToBase gaSameDomain rootC
+                `shouldBe` SolvedToBaseSameDomain rootC
+            expected <- requireRight (computeResultTypeFallback inputs annCanon annPre)
+            actual <- requireRight (computeResultTypeFallback inputsSame annCanon annPre)
+            actual `shouldAlphaEqType` expected
+
+        it "result-type fallback core handles gaSolvedToBase missing roots" $ do
+            let expr = ELit (LInt 1)
+            artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
+            let (inputs, annCanon, annPre) = resultTypeInputsForArtifacts artifacts
+                rootC = rtcCanonical inputs (annExprNode annCanon)
+                ga0 = rtcBindParentsGa inputs
+                base0 = gaBaseConstraint ga0
+                baseNodesMissing =
+                    fromListNode
+                        [ (nid, node)
+                        | (nid, node) <- toListNode (cNodes base0)
+                        , nid /= rootC
+                        ]
+                rootRef = typeRef rootC
+                baseBindParentsMissing =
+                    IntMap.filterWithKey
+                        (\childKey (parentRef, _) ->
+                            childKey /= nodeRefKey rootRef
+                                && parentRef /= rootRef
+                        )
+                        (cBindParents base0)
+                baseMissing =
+                    base0
+                        { cNodes = baseNodesMissing
+                        , cBindParents = baseBindParentsMissing
+                        }
+                gaMissing =
+                    ga0
+                        { gaBaseConstraint = baseMissing
+                        , gaSolvedToBase =
+                            IntMap.delete (getNodeId rootC) (gaSolvedToBase ga0)
+                        }
+                inputsMissing = inputs { rtcBindParentsGa = gaMissing }
+            resolveGaSolvedToBase gaMissing rootC
+                `shouldBe` SolvedToBaseMissing
+            expected <- requireRight (computeResultTypeFallback inputs annCanon annPre)
+            actual <- requireRight (computeResultTypeFallback inputsMissing annCanon annPre)
+            actual `shouldAlphaEqType` expected
 
     describe "Binding tree coverage" $ do
         let runSolvedWithScope :: SurfaceExpr -> Either String (Solved.Solved, NodeRef, NodeId)

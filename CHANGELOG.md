@@ -3,6 +3,12 @@
 ## Unreleased
 
 ### Changed
+- Task 30 solved-compat read reduction (2026-03-03):
+  - removed compatibility-only generalize/context fields (`gcConstraintForReify`, `rbConstraintForReify`) and added light `SolvedToBaseMissing` base-domain invariant tracing in plan-context resolution;
+  - tightened generalize reification flow by gating alias solved rebuild to non-OnConstraint paths and routing explicit-bound helper reification through OnConstraint bound reads when structural-scheme reify is authoritative;
+  - introduced `MLF.Elab.Run.ResultType.View` and refactored result-type internals (`ResultType.hs`, `Ann.hs`, `Fallback.hs`) to centralize solved reads and confine `rtcSolveLike` usage to the view-construction boundary;
+  - replaced fallback-core local `Solved.rebuildWithNodes` patching with a bound-overlay view path and preserved parity semantics in target selection and base-constraint mutation;
+  - added regressions for GA fallback ladder and result-type fallback mapping branches (`same-domain`, `missing`), and revalidated focused matrix + full gate (`cabal build all && cabal test` => `917 examples, 0 failures`).
 - Task 29 Phase 1 solved-view adapter consolidation (2026-03-03):
   - added shared `fromSolved :: Solved -> PresolutionView` at `MLF.Constraint.Presolution.View`;
   - removed duplicated runtime solved→presolution adapter builders from `MLF.Elab.Elaborate`, `MLF.Elab.Phi.Translate`, `MLF.Elab.Run.Generalize`, and `MLF.Elab.Run.Pipeline`;

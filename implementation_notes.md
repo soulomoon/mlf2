@@ -21,6 +21,27 @@
   - removed tautological constructor parity test and replaced with semantic constructor invariants,
   - narrowed adapter guard wording to avoid overclaiming corpus scope.
 
+### 2026-03-03 Task 30 solved compatibility-read reduction (Waves 0-4 complete)
+- Reduced compatibility-oriented internal solved reads across generalize/result-type internals while preserving behavior:
+  - removed unused context compatibility fields (`gcConstraintForReify`, `rbConstraintForReify`);
+  - added lightweight context trace when `SolvedToBaseMissing` is hit for a node present in base-domain constraints.
+- Generalize reify flow cleanup:
+  - alias solved rebuild is now gated to non-OnConstraint branches;
+  - explicit-bound helper reification now uses OnConstraint bound reads when structural-scheme path is authoritative.
+- Result-type solved-read centralization:
+  - added `MLF.Elab.Run.ResultType.View` as a read boundary;
+  - confined `rtcSolveLike` usage to view construction;
+  - refactored `ResultType`, `Ann`, and `Fallback` to consume the view interface.
+- Fallback high-risk path replacement:
+  - removed local `Solved.rebuildWithNodes` patching in fallback core;
+  - introduced bound-overlay materialization at the view boundary while preserving target-selection and `bindParentsGaFinal` semantics.
+- Regression coverage additions:
+  - `generalizeWithPlan` GA->no-GA fallback ladder on `SchemeFreeVars` and double-`SchemeFreeVars` reify fallback;
+  - integrated result-type fallback handling for `gaSolvedToBase` `same-domain` and `missing` roots.
+- Validation:
+  - focused carry-forward + new checks: pass;
+  - full gate: `cabal build all && cabal test` => `917 examples, 0 failures`.
+
 ### 2026-03-01 TMT3 Wave 3 docs closeout (all-aligned policy)
 - Transformation Mechanism Table (`docs/notes/2026-02-27-transformation-mechanism-table.md`) is now fully all-aligned for the current branch: every row is `Aligned` and no row references active `DEV-TMT-*` IDs.
 - `docs/thesis-deviations.yaml` now moves all `DEV-TMT-*` records out of active `deviations` and into `history.resolved`.

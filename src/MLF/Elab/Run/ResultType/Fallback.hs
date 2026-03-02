@@ -11,7 +11,6 @@ import Data.Functor.Foldable (cata)
 import MLF.Frontend.ConstraintGen (AnnExpr(..))
 import MLF.Constraint.Presolution (EdgeTrace(..))
 import MLF.Constraint.Presolution.Base (CopyMapping(..), lookupCopy)
-import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types.Graph
     ( EdgeId(..)
     , GenNode(..)
@@ -28,7 +27,6 @@ import MLF.Constraint.Types.Graph
     , gnSchemes
     , nodeRefFromKey
     , toListNode
-    , toListGen
     )
 import MLF.Constraint.Types.Witness (EdgeWitness(..))
 import MLF.Elab.Generalize (GaBindParents(..))
@@ -48,7 +46,8 @@ import MLF.Elab.Run.ResultType.Util
     , stripAnn
     , collectEdges
     )
-import MLF.Elab.Run.ResultType.Types (ResultTypeInputs(..), rtcSolveLike)
+import MLF.Elab.Run.ResultType.Types (ResultTypeInputs(..))
+import qualified MLF.Elab.Run.ResultType.View as View
 
 -- | Compute result type when there's no direct annotation (fallback path).
 -- Note: This function handles the non-AAnn case. When the root is an AAnn,
@@ -59,7 +58,8 @@ computeResultTypeFallback
     -> AnnExpr      -- ^ ann (pre-redirect)
     -> Either ElabError ElabType
 computeResultTypeFallback ctx annCanon ann = do
-    solvedForGen <- rtcSolveLike ctx
+    view <- View.buildResultTypeView ctx
+    let solvedForGen = View.rtvSolved view
     -- Note [Annotated Lambda Result Type]
     -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     -- When we have an annotated lambda like `\x : τ. body`, it desugars to:
@@ -87,10 +87,10 @@ computeResultTypeFallback ctx annCanon ann = do
                 -- Get the parameter type from the coercion's codomain.
                 -- We need to generalize at the annotation node to get the full
                 -- type with any forall wrappers.
-                let bindParentsGa = rtcBindParentsGa ctx
-                    planBuilder = rtcPlanBuilder ctx
-                    c1 = rtcBaseConstraint ctx
-                    redirects = rtcRedirects ctx
+                let bindParentsGa = View.rtvBindParentsGa view
+                    planBuilder = View.rtvPlanBuilder view
+                    c1 = View.rtvBaseConstraint view
+                    redirects = View.rtvRedirects view
                 -- Find the scope root for the annotation node
                 scopeRoot <- bindingToElab (resolveCanonicalScope c1 solvedForGen redirects annNodeId)
                 let targetC = schemeBodyTarget solvedForGen annNodeId
@@ -156,19 +156,17 @@ computeResultTypeFallbackCore
     -> AnnExpr      -- ^ ann (pre-redirect)
     -> Either ElabError ElabType
 computeResultTypeFallbackCore ctx annCanon ann = do
-    solvedForGen <- rtcSolveLike ctx
-    let canonical = rtcCanonical ctx
-        edgeWitnesses = rtcEdgeWitnesses ctx
-        edgeTraces = rtcEdgeTraces ctx
-        edgeExpansions = rtcEdgeExpansions ctx
-        solvedClean = solvedForGen
-        solved = solvedClean
-        bindParentsGa = rtcBindParentsGa ctx
-        planBuilder = rtcPlanBuilder ctx
-        c1 = rtcBaseConstraint ctx
-        redirects = rtcRedirects ctx
-        traceCfg = rtcTraceConfig ctx
-        solvedForGenView = solvedForGen
+    viewBase <- View.buildResultTypeView ctx
+    let canonical = View.rtvCanonical viewBase
+        edgeWitnesses = View.rtvEdgeWitnesses viewBase
+        edgeTraces = View.rtvEdgeTraces viewBase
+        edgeExpansions = View.rtvEdgeExpansions viewBase
+        solved = View.rtvSolved viewBase
+        bindParentsGa = View.rtvBindParentsGa viewBase
+        planBuilder = View.rtvPlanBuilder viewBase
+        c1 = View.rtvBaseConstraint viewBase
+        redirects = View.rtvRedirects viewBase
+        traceCfg = View.rtvTraceConfig viewBase
         generalizeAtWith = \mbGa s -> generalizeAtWithBuilder planBuilder mbGa s
 
     let edgeTraceCounts =
@@ -177,7 +175,7 @@ computeResultTypeFallbackCore ctx annCanon ann = do
                 [ (getNodeId (etRoot tr), 1 :: Int)
                 | tr <- IntMap.elems edgeTraces
                 ]
-    let genNodesOriginal = map snd (toListGen (Solved.genNodes solvedForGenView))
+    let genNodesOriginal = View.rtvGenNodes viewBase
     let schemeRootSet =
             IntSet.fromList
                 [ getNodeId (canonical root)
@@ -228,7 +226,7 @@ computeResultTypeFallbackCore ctx annCanon ann = do
             Left (ValidationFailed ["computeResultTypeFallback called with AAnn - use facade instead"])
         _ -> do
             let rootC = canonical rootForType
-                nodes = cNodes (Solved.originalConstraint solved)
+                nodes = cNodes (View.rtvOriginalConstraint viewBase)
                 nodeList = map snd (toListNode nodes)
                 resolveBaseBoundCanonical start =
                     let go visited nid0 =
@@ -237,11 +235,11 @@ computeResultTypeFallbackCore ctx annCanon ann = do
                             in if IntSet.member key visited
                                 then Nothing
                                 else
-                                    case Solved.lookupNode solved nid of
+                                    case View.rtvLookupNode viewBase nid of
                                         Just TyBase{} -> Just nid
                                         Just TyBottom{} -> Just nid
                                         Just TyVar{} ->
-                                            case Solved.lookupVarBound solved nid of
+                                            case View.rtvLookupVarBound viewBase nid of
                                                 Just bnd -> go (IntSet.insert key visited) bnd
                                                 Nothing -> Nothing
                                         _ -> Nothing
@@ -471,40 +469,22 @@ computeResultTypeFallbackCore ctx annCanon ann = do
                         ++ " edgeExpansions="
                         ++ show edgeExpansionsList
                 )
-            {- Note [Local projection rebuild for bound-target patching]
-               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-               When boundTarget is Just, we need the root node to carry a
-               TyVar bound pointing at the base node.  Rather than mutating
-               the Solved's canonical nodes in place (the old patchNode path),
-               we build a fresh node map with the adjusted entry and project
-               a new Solved via rebuildWithNodes.  This keeps the elaboration
-               path read-only with respect to the Solved backend — the only
-               "write" is constructing a new value, not mutating an existing
-               one. -}
-            let resFinal =
-                    case baseTarget of
-                        Just _ -> solvedClean
-                        Nothing -> solvedForGen
-                resFinalBounded =
+            {- Note [Bound overlay for fallback target refinement]
+               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+               For the boundTarget case we model the root's inferred bound as an
+               overlay at the result-type view boundary, then materialize a
+               solved view from that overlay when needed.  This keeps fallback
+               logic read-oriented and avoids local rebuildWithNodes patching. -}
+            let viewFinalBounded =
                     case boundTarget of
-                        Nothing -> resFinal
-                        Just baseN ->
-                            let adjustNode node =
-                                    case node of
-                                        TyVar{ tnId = nid, tnBound = Nothing } ->
-                                            TyVar{ tnId = nid, tnBound = Just (canonical baseN) }
-                                        _ -> node
-                                nodes0 = cNodes (Solved.originalConstraint resFinal)
-                                nodes' = fromListNode
-                                    [ (nid, if nid == rootC then adjustNode node else node)
-                                    | (nid, node) <- toListNode nodes0
-                                    ]
-                            in Solved.rebuildWithNodes resFinal nodes'
+                        Nothing -> viewBase
+                        Just baseN -> View.rtvWithBoundOverlay rootC baseN viewBase
+                solvedFinal = View.rtvSolved viewFinalBounded
             let scopeRootNodePre = rootForTypePre
-            scopeRootPre <- bindingToElab (resolveCanonicalScope c1 resFinalBounded redirects scopeRootNodePre)
+            scopeRootPre <- bindingToElab (resolveCanonicalScope c1 solvedFinal redirects scopeRootNodePre)
             let scopeRootPost =
-                    case bindingScopeRefCanonical resFinalBounded rootC of
-                        Right ref -> canonicalizeScopeRef resFinalBounded redirects ref
+                    case bindingScopeRefCanonical solvedFinal rootC of
+                        Right ref -> canonicalizeScopeRef solvedFinal redirects ref
                         Left _ -> scopeRootPre
                 scopeRoot = scopeRootPre
             debugWhenCondM traceCfg (scopeRootPre /= scopeRootPost)
@@ -517,10 +497,10 @@ computeResultTypeFallbackCore ctx annCanon ann = do
                     ++ " postNode="
                     ++ show rootC
                 )
-            let canonicalFinal = Solved.canonical resFinalBounded
+            let canonicalFinal = View.rtvCanonical viewFinalBounded
                 rootFinal = canonicalFinal rootC
-                nodesFinal = cNodes (Solved.originalConstraint resFinalBounded)
-                genNodesFinal = map snd (toListGen (Solved.genNodes resFinalBounded))
+                nodesFinal = cNodes (View.rtvOriginalConstraint viewFinalBounded)
+                genNodesFinal = View.rtvGenNodes viewFinalBounded
                 rootBound =
                     case lookupNodeIn nodesFinal rootFinal of
                         Just TyVar{ tnBound = Just bnd } -> Just (canonicalFinal bnd)
@@ -541,7 +521,7 @@ computeResultTypeFallbackCore ctx annCanon ann = do
                     rootIsSchemeRoot
                         && maybe False (const True) rootBound
                 rootBoundIsBaseLike = rootBoundIsBase
-                boundVarTargetRoot = canonicalFinal (schemeBodyTarget resFinalBounded rootC)
+                boundVarTargetRoot = canonicalFinal (View.rtvSchemeBodyTarget viewFinalBounded rootC)
                 schemeRootSetFinal =
                     IntSet.fromList
                         [ getNodeId (canonicalFinal root)
@@ -644,13 +624,13 @@ computeResultTypeFallbackCore ctx annCanon ann = do
                             let candidates =
                                     [ ( canonicalFinal child
                                       , canonicalFinal bnd
-                                      , canonicalFinal (schemeBodyTarget resFinalBounded bnd)
+                                      , canonicalFinal (View.rtvSchemeBodyTarget viewFinalBounded bnd)
                                       , boundHasForallFrom bnd
                                       )
-                                    | (childKey, (parentRef, _flag)) <- IntMap.toList (Solved.canonicalBindParents resFinalBounded)
+                                    | (childKey, (parentRef, _flag)) <- IntMap.toList (View.rtvCanonicalBindParents viewFinalBounded)
                                     , parentRef == GenRef gid
                                     , TypeRef child <- [nodeRefFromKey childKey]
-                                    , Just bnd <- [Solved.lookupVarBound resFinalBounded (canonicalFinal child)]
+                                    , Just bnd <- [View.rtvLookupVarBound viewFinalBounded (canonicalFinal child)]
                                     ]
                                 debugCandidates =
                                     if debugGaScopeEnabled traceCfg
@@ -691,8 +671,8 @@ computeResultTypeFallbackCore ctx annCanon ann = do
                                         _ ->
                                             case boundVarTarget of
                                                 Just v -> v
-                                                Nothing -> schemeBodyTarget resFinalBounded rootC
-                                else schemeBodyTarget resFinalBounded rootC
+                                                Nothing -> View.rtvSchemeBodyTarget viewFinalBounded rootC
+                                else View.rtvSchemeBodyTarget viewFinalBounded rootC
             let bindParentsGaFinal =
                     case boundTarget of
                         Just baseN ->
@@ -716,7 +696,7 @@ computeResultTypeFallbackCore ctx annCanon ann = do
                             in bindParentsGa { gaBaseConstraint = baseConstraint' }
                         Nothing -> bindParentsGa
             (sch, _subst) <-
-                generalizeWithPlan planBuilder bindParentsGaFinal resFinalBounded scopeRoot targetC
+                generalizeWithPlan planBuilder bindParentsGaFinal solvedFinal scopeRoot targetC
             debugWhenM traceCfg
                 ("runPipelineElab: final scheme="
                     ++ pretty sch

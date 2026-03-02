@@ -75,7 +75,6 @@ data GeneralizeCtx = GeneralizeCtx
     , gcScopeGen :: Maybe GenNodeId
     , gcBindParents :: BindParents
     , gcFirstGenAncestor :: NodeRef -> Maybe GenNodeId
-    , gcConstraintForReify :: Constraint
     , gcResForReify :: Solved
     , gcBindParentsGaInfo :: Maybe GaBindParentsInfo
     , gcSchemeRootsPlan :: SchemeRootsPlan
@@ -97,7 +96,6 @@ data ResolveScope = ResolveScope
 data ResolveBinds = ResolveBinds
     { rbBindParents :: BindParents
     , rbFirstGenAncestor :: NodeRef -> Maybe GenNodeId
-    , rbConstraintForReify :: Constraint
     , rbResForReify :: Solved
     }
 
@@ -138,7 +136,8 @@ resolveContext env bindParentsSoft scopeRootArg targetNodeArg = do
                     case resolveGaSolvedToBase ga target of
                         SolvedToBaseMapped baseN -> baseN
                         SolvedToBaseSameDomain baseN -> baseN
-                        SolvedToBaseMissing -> target
+                        SolvedToBaseMissing ->
+                            traceUnexpectedSolvedToBaseMissing ga target target
         resolveScopeRoot root =
             case (root, mbBindParentsGa') of
                 (TypeRef nid, Just ga) ->
@@ -151,7 +150,8 @@ resolveContext env bindParentsSoft scopeRootArg targetNodeArg = do
                                         Just gid -> GenRef gid
                                         Nothing -> root
                         SolvedToBaseSameDomain _ -> root
-                        SolvedToBaseMissing -> root
+                        SolvedToBaseMissing ->
+                            traceUnexpectedSolvedToBaseMissing ga nid root
                 _ -> root
         resolveOrderRoots root target =
             case root of
@@ -223,7 +223,11 @@ resolveContext env bindParentsSoft scopeRootArg targetNodeArg = do
                                 SolvedToBaseSameDomain _ ->
                                     scopeGenFromSolvedPath nid
                                 SolvedToBaseMissing ->
-                                    scopeGenFromSolvedPath nid
+                                    traceGeneralizeM env
+                                        ("generalizeAt: scope-gen fallback after SolvedToBaseMissing node="
+                                            ++ show nid
+                                        )
+                                        >> scopeGenFromSolvedPath nid
                         Nothing ->
                             scopeGenFromSolvedPath nid
         resolveScopePhase root = do
@@ -335,14 +339,12 @@ resolveContext env bindParentsSoft scopeRootArg targetNodeArg = do
             pure ResolveBinds
                 { rbBindParents = bindParents
                 , rbFirstGenAncestor = firstGenAncestorGa
-                , rbConstraintForReify = constraintForReify
                 , rbResForReify = resForReify
                 }
     bindsPhase <- resolveBindsPhase scopeGen
     let ResolveBinds
             { rbBindParents = bindParents
             , rbFirstGenAncestor = firstGenAncestorGa
-            , rbConstraintForReify = constraintForReify
             , rbResForReify = resForReify
             } = bindsPhase
         schemeRootsPlan =
@@ -362,13 +364,24 @@ resolveContext env bindParentsSoft scopeRootArg targetNodeArg = do
         , gcScopeGen = scopeGen
         , gcBindParents = bindParents
         , gcFirstGenAncestor = firstGenAncestorGa
-        , gcConstraintForReify = constraintForReify
         , gcResForReify = resForReify
         , gcBindParentsGaInfo = mbBindParentsGaInfo
         , gcSchemeRootsPlan = schemeRootsPlan
         }
 
   where
+    traceUnexpectedSolvedToBaseMissing :: GaBindParents -> NodeId -> a -> a
+    traceUnexpectedSolvedToBaseMissing ga solvedNid out =
+        let baseNodes = cNodes (gaBaseConstraint ga)
+        in case lookupNodeIn baseNodes solvedNid of
+            Just _ ->
+                traceGeneralize env
+                    ( "generalizeAt: invariant SolvedToBaseMissing for base-domain node="
+                        ++ show solvedNid
+                    )
+                    out
+            Nothing -> out
+
     firstGenAncestor bindParents' start =
         case bindingPathToRootLocal bindParents' start of
             Left _ -> Nothing

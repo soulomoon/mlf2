@@ -1,6 +1,7 @@
 {-# LANGUAGE GADTs #-}
 module MLF.Elab.Run.ResultType (
     ResultTypeInputs(..),
+    generalizeWithPlan,
     computeResultTypeFromAnn,
     computeResultTypeFallback
 ) where
@@ -16,10 +17,10 @@ import MLF.Constraint.Types.Graph
     , getNodeId
     , gnSchemes
     )
-import qualified MLF.Constraint.NodeAccess
-import qualified MLF.Constraint.Solved as Solved
 import MLF.Elab.Types (ElabType, ElabError)
-import MLF.Elab.Run.ResultType.Types (ResultTypeInputs(..), rtcSolveLike)
+import MLF.Elab.Run.ResultType.Types (ResultTypeInputs(..))
+import MLF.Elab.Run.ResultType.Util (generalizeWithPlan)
+import qualified MLF.Elab.Run.ResultType.View as View
 import qualified MLF.Elab.Run.ResultType.Ann as Ann
 import qualified MLF.Elab.Run.ResultType.Fallback as Fallback
 
@@ -36,15 +37,13 @@ computeResultTypeFallback
     -> AnnExpr      -- ^ ann (pre-redirect)
     -> Either ElabError ElabType
 computeResultTypeFallback ctx annCanon ann = do
-    solvedForGen <- rtcSolveLike ctx
+    view <- View.buildResultTypeView ctx
     -- First, determine the root (same logic as before to check for AAnn)
-    let canonical = rtcCanonical ctx
+    let canonical = View.rtvCanonical view
         c1 = rtcBaseConstraint ctx
-        solvedForGenView = solvedForGen
 
     let schemeRootSet =
-            let allGenNodes =
-                    MLF.Constraint.NodeAccess.allGenNodes (Solved.originalConstraint solvedForGenView)
+            let allGenNodes = View.rtvGenNodes view
             in IntSet.fromList
                 [ getNodeId (canonical root)
                 | gen <- allGenNodes
