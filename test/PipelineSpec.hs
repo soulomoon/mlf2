@@ -194,6 +194,18 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             forM_ ["runPipelineElabProjectionFirst", "runPipelineElabViaLegacySolve"] $ \needle ->
                 pipelineSrc `shouldSatisfy` (not . isInfixOf needle)
 
+        it "production src tree has no MLF.Constraint.Solved imports in elaboration path" $ do
+            let elaborationPath =
+                    [ "src/MLF/Elab/Run.hs"
+                    , "src/MLF/Elab/Pipeline.hs"
+                    , "src-public/MLF/API.hs"
+                    , "src-public/MLF/Pipeline.hs"
+                    ]
+            forM_ elaborationPath $ \path -> do
+                src <- readFile path
+                src `shouldSatisfy` (not . isInfixOf "import MLF.Constraint.Solved")
+                src `shouldSatisfy` (not . isInfixOf "import qualified MLF.Constraint.Solved")
+
         it "pipeline path can construct elaboration inputs without solved builder" $ do
             pipelineSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
             pipelineSrc `shouldSatisfy` (not . isInfixOf "runPipelineElabWithSolvedBuilder")

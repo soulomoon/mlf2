@@ -1118,3 +1118,22 @@ This repo’s design is primarily informed by:
   - `cabal test mlf2-test --test-show-details=direct --test-options='--match "OpWeaken"'` (green),
   - `cabal build all && cabal test` (green),
   - `cabal test --test-show-details=direct` (green).
+
+## 2026-03-02 Wave 2 solved-indirection closeout (Tasks 7-9)
+
+- Presolution planner boundary is now view-first:
+  - `PresolutionPlanBuilder` closure migrated from `Solved -> ...` to `PresolutionView -> ...`.
+  - `MLF.Constraint.Presolution.Plan.buildGeneralizePlans` now consumes `PresolutionView` canonical data directly.
+  - `MLF.Elab.Run.Generalize.generalizeAtWithBuilder` adapts runtime solved handles into `PresolutionView` before invoking the plan builder.
+- `MLF.Constraint.Presolution.View.fromPresolutionResult` now accepts any `PresolutionSnapshot`:
+  - signature generalized to `PresolutionSnapshot a => a -> PresolutionView`,
+  - this removes the `Presolution.Base <-> Presolution.View` cycle pressure introduced by the builder-signature migration.
+- `MLF.Constraint.Solved` was reduced by removing `fromPresolutionResult` (production-only builder surface):
+  - no production call sites depended on it,
+  - compatibility/test paths continue through `fromSolveOutput`, `fromPreRewriteState`, and `mkTestSolved`.
+- Planner solved-compat reconstruction note:
+  - first attempt (`Solved.fromPreRewriteState` from view snapshot) regressed paper baseline tests with `InvalidBindingTree ... node ... not in constraint`,
+  - final approach uses `Solved.mkTestSolved` over `pvCanonicalConstraint` plus a live-node sanitized canonical map, restoring baseline behavior.
+- Hygiene guard scope note (Task 9):
+  - enforce no direct `MLF.Constraint.Solved` imports in elaboration entrypoint/public modules (`MLF.Elab.Run`, `MLF.Elab.Pipeline`, `MLF.API`, `MLF.Pipeline`),
+  - internal elaboration modules still keep compatibility solved reads where removal would require broader architectural changes.

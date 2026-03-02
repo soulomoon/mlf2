@@ -33,7 +33,7 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
 import qualified MLF.Binding.Tree as Binding
-import MLF.Constraint.Solved (Solved)
+import MLF.Constraint.Presolution.View (PresolutionView(..))
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types hiding (lookupNode)
 import qualified MLF.Constraint.NodeAccess as NodeAccess
@@ -86,7 +86,7 @@ lookupNodeInMap nodes nid = IntMap.lookup (getNodeId nid) nodes
 
 data PresolutionEnv = PresolutionEnv
     { peConstraint :: Constraint
-    , peSolved :: Solved
+    , pePresolutionView :: PresolutionView
     , peCanonical :: NodeId -> NodeId
     , peBindParents :: BindParents
     , peBindParentsGa :: Maybe GaBindParents
@@ -119,14 +119,14 @@ data ReifyPlan = ReifyPlan
 
 planGeneralizeAt :: PresolutionEnv -> Either ElabError GeneralizePlan
 planGeneralizeAt PresolutionEnv
-    { peSolved = res
+    { pePresolutionView = presolutionView
     , peBindParentsGa = mbBindParentsGa
     , peScopeRoot = scopeRoot
     , peTargetNode = targetNode
     , peTraceConfig = traceCfg
     } = do
-    let env = mkGeneralizeEnv traceCfg mbBindParentsGa res
-        constraint = geConstraint env
+    env <- mkGeneralizeEnv traceCfg mbBindParentsGa presolutionView
+    let constraint = geConstraint env
         nodes = geNodes env
         canonical = geCanonical env
         canonKey = geCanonKey env
@@ -736,18 +736,18 @@ planReify _ plan = do
 
 buildGeneralizePlans
     :: TraceConfig
-    -> Solved
+    -> PresolutionView
     -> Maybe GaBindParents
     -> NodeRef
     -> NodeId
     -> Either ElabError (GeneralizePlan, ReifyPlan)
-buildGeneralizePlans traceCfg solved mbBindParentsGa scopeRoot targetNode = do
-    let constraint = Solved.canonicalConstraint solved
-        canonical = Solved.canonical solved
+buildGeneralizePlans traceCfg presolutionView mbBindParentsGa scopeRoot targetNode = do
+    let constraint = pvCanonicalConstraint presolutionView
+        canonical = pvCanonical presolutionView
         presEnv =
             PresolutionEnv
                 { peConstraint = constraint
-                , peSolved = solved
+                , pePresolutionView = presolutionView
                 , peCanonical = canonical
                 , peBindParents = cBindParents constraint
                 , peBindParentsGa = mbBindParentsGa
@@ -759,15 +759,20 @@ buildGeneralizePlans traceCfg solved mbBindParentsGa scopeRoot targetNode = do
     reifyPlan <- planReify presEnv genPlan
     pure (genPlan, reifyPlan)
 
-mkGeneralizeEnv :: TraceConfig -> Maybe GaBindParents -> Solved -> GeneralizeEnv
-mkGeneralizeEnv traceCfg mbBindParentsGa solved =
-    let constraint = Solved.canonicalConstraint solved
+mkGeneralizeEnv
+    :: TraceConfig
+    -> Maybe GaBindParents
+    -> PresolutionView
+    -> Either ElabError GeneralizeEnv
+mkGeneralizeEnv traceCfg mbBindParentsGa presolutionView = do
+    solved <- buildSolvedFromPresolutionView presolutionView
+    let constraint = pvCanonicalConstraint presolutionView
         nodes =
             IntMap.fromList
                 [ (getNodeId nid, node)
                 | (nid, node) <- toListNode (cNodes constraint)
                 ]
-        canonical = Solved.canonical solved
+        canonical = pvCanonical presolutionView
         canonKey nid = getNodeId (canonical nid)
         lookupNode key = lookupNodeInMap nodes (NodeId key)
         isTyVarNode node = case node of
@@ -783,9 +788,9 @@ mkGeneralizeEnv traceCfg mbBindParentsGa solved =
         isTyVarKey key = maybe False isTyVarNode (lookupNode key)
         isTyForallKey key = maybe False isTyForallNode (lookupNode key)
         isBaseLikeKey key = maybe False isBaseLikeNode (lookupNode key)
-    in GeneralizeEnv
+    pure GeneralizeEnv
         { geConstraint = constraint
-        , geOriginalConstraint = Solved.originalConstraint solved
+        , geOriginalConstraint = pvConstraint presolutionView
         , geNodes = nodes
         , geCanonical = canonical
         , geCanonKey = canonKey
@@ -797,6 +802,26 @@ mkGeneralizeEnv traceCfg mbBindParentsGa solved =
         , geRes = solved
         , geDebugEnabled = tcGeneralize traceCfg
         }
+
+buildSolvedFromPresolutionView :: PresolutionView -> Either ElabError Solved.Solved
+buildSolvedFromPresolutionView presolutionView =
+    let constraint = pvCanonicalConstraint presolutionView
+        canonicalMap =
+            IntMap.mapMaybeWithKey
+                (\k rep ->
+                    let keyNode = NodeId k
+                        keyLive = case NodeAccess.lookupNode constraint keyNode of
+                            Just _ -> True
+                            Nothing -> False
+                        repLive = case NodeAccess.lookupNode constraint rep of
+                            Just _ -> True
+                            Nothing -> False
+                    in if keyLive && repLive && keyNode /= rep
+                        then Just rep
+                        else Nothing
+                )
+                (pvCanonicalMap presolutionView)
+    in Right (Solved.mkTestSolved constraint canonicalMap)
 
 softenBindParents :: (NodeId -> NodeId) -> Constraint -> BindParents -> BindParents
 softenBindParents canonical constraint =

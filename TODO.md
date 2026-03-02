@@ -4,6 +4,19 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 28 Eliminate solved indirection via presolution view (2026-03-02)
+
+- Current status:
+  - Wave 0/1/2 migration work is complete in this worktree.
+  - `PresolutionPlanBuilder` now closes over `PresolutionView` (not `Solved`).
+  - `MLF.Constraint.Solved` no longer exposes the production-only `fromPresolutionResult` builder.
+  - Hygiene guard added for elaboration entrypoint modules to prevent direct solved imports.
+  - Detailed plan and session tracking:
+    - `docs/plans/2026-03-02-eliminate-solved-indirection-agent-team-implementation-plan.md`
+    - `tasks/todo/2026-03-02-eliminate-solved-indirection/`
+- Next:
+  - Optional follow-up: continue reducing internal elaboration compatibility reads of `Solved` (result-type/generalize internals) once architecture allows full replacement without regressing paper baseline slices.
+
 ## Task 27 Transformation Mechanism Table thesis-exact classification campaign (2026-03-01)
 
 - Completed:

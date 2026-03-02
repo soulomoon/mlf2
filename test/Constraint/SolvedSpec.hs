@@ -1,6 +1,7 @@
 module Constraint.SolvedSpec (spec) where
 
 import Control.Monad (forM_)
+import Data.List (isInfixOf)
 import Test.Hspec
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Set as Set
@@ -13,6 +14,7 @@ import MLF.Constraint.Solve
     , SolveSnapshot(..)
     , solveUnifyWithSnapshot
     )
+import MLF.Constraint.Types.Presolution (PresolutionSnapshot(..))
 import MLF.Constraint.Solved
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Frontend.Syntax
@@ -117,6 +119,11 @@ snapshotEquiv =
 
 spec :: Spec
 spec = describe "MLF.Constraint.Solved" $ do
+    describe "Migration guards" $ do
+        it "Solved production-only builders are absent" $ do
+            src <- readFile "src/MLF/Constraint/Solved.hs"
+            src `shouldSatisfy` (not . isInfixOf "fromPresolutionResult")
+
     let s = testSolved
 
     describe "Backend equivalence" $ do
@@ -187,7 +194,11 @@ spec = describe "MLF.Constraint.Solved" $ do
                                 ++ err
                             )
                     Right pres -> do
-                        solved <- requireRight (Solved.fromPresolutionResult pres)
+                        solved <- requireRight
+                            (Solved.fromPreRewriteState
+                                (snapshotUnionFind pres)
+                                (snapshotConstraint pres)
+                            )
                         let view = Presolution.fromPresolutionResult pres
                             nodeIds = map fst (toListNode (cNodes (prConstraint pres)))
                             probes = nodeIds ++ [NodeId 999]

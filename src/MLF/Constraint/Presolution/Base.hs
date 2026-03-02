@@ -63,8 +63,8 @@ import qualified MLF.Util.UnionFind as UnionFind
 import MLF.Util.Trace (TraceConfig, traceBindingM)
 import MLF.Constraint.Presolution.Plan (GeneralizePlan, ReifyPlan)
 import MLF.Constraint.Presolution.Plan.Context (GaBindParents)
+import MLF.Constraint.Presolution.View (PresolutionView)
 import MLF.Constraint.Presolution.WitnessValidation (OmegaNormalizeError)
-import MLF.Constraint.Solved (Solved)
 import MLF.Util.ElabError (ElabError)
 
 newtype PresolutionUf = PresolutionUf { getPresolutionUf :: IntMap NodeId }
@@ -87,7 +87,7 @@ instance PresolutionSnapshot PresolutionResult where
 
 newtype PresolutionPlanBuilder = PresolutionPlanBuilder
     { ppbBuildGeneralizePlans
-        :: Solved
+        :: PresolutionView
         -> Maybe GaBindParents
         -> NodeRef
         -> NodeId

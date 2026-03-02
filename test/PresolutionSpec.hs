@@ -1,5 +1,6 @@
 module PresolutionSpec (spec) where
 
+import Data.List (isInfixOf)
 import Test.Hspec
 
 import qualified Presolution.EdgeInterpreterSpec
@@ -14,6 +15,12 @@ import qualified Presolution.WitnessSpec
 
 spec :: Spec
 spec = describe "Phase 4 — Principal Presolution" $ do
+    describe "Migration guards" $ do
+        it "PresolutionPlanBuilder closes over PresolutionView, not Solved" $ do
+            src <- readFile "src/MLF/Constraint/Presolution/Base.hs"
+            src `shouldSatisfy` (isInfixOf ":: PresolutionView")
+            src `shouldSatisfy` (not . isInfixOf ":: Solved")
+
     Presolution.EnforcementSpec.spec
     Presolution.InstantiateSpec.spec
     Presolution.EdgeTraceSpec.spec

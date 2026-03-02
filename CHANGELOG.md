@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Changed
+- Wave 2 solved-indirection closeout:
+  - migrated `PresolutionPlanBuilder` closure boundary from `Solved` to `PresolutionView` and updated planner/generalize call chain accordingly;
+  - generalized `Presolution.View.fromPresolutionResult` to `PresolutionSnapshot a => a -> PresolutionView` to avoid base/view cycle pressure;
+  - removed production-only `Solved.fromPresolutionResult` surface (compat/test paths now use remaining solved constructors/query APIs);
+  - added source-level guards for (1) plan-builder closure type, (2) solved builder removal, and (3) elaboration entrypoint solved-import hygiene.
 - TMT3 Wave 3 docs closeout: Transformation Mechanism Table is now fully all-aligned (all rows `Aligned`), and all `DEV-TMT-*` entries were moved from active `deviations` to `history.resolved` in `docs/thesis-deviations.yaml` with `resolution_date: 2026-03-01`, replacing-commit metadata (Wave 1/Wave 2), and regression evidence.
 - Refactored elaboration/pipeline/result-type wiring to a single solved input handle (`eeSolved`, `rtcSolved`) while preserving checked-authoritative output behavior.
 - Added regression locks for single-solved migration guards and checked/unchecked pipeline parity slices.

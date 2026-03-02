@@ -8,7 +8,6 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
 import qualified MLF.Constraint.NodeAccess as NodeAccess
-import MLF.Constraint.Presolution.Base (PresolutionResult(..), PresolutionUf(..))
 import MLF.Constraint.Solve (rewriteConstraintWithUF)
 import MLF.Constraint.Types.Graph
     ( BindFlag
@@ -18,6 +17,7 @@ import MLF.Constraint.Types.Graph
     , NodeRef
     , TyNode(..)
     )
+import MLF.Constraint.Types.Presolution (PresolutionSnapshot(..))
 
 -- | Read-only presolution queries built directly from presolution snapshot data.
 data PresolutionView = PresolutionView
@@ -31,10 +31,10 @@ data PresolutionView = PresolutionView
     , pvCanonicalConstraint :: Constraint
     }
 
-fromPresolutionResult :: PresolutionResult -> PresolutionView
+fromPresolutionResult :: PresolutionSnapshot a => a -> PresolutionView
 fromPresolutionResult pres =
-    let constraint = prConstraint pres
-        uf = sanitizeSnapshotUf constraint (getPresolutionUf (prUnionFind pres))
+    let constraint = snapshotConstraint pres
+        uf = sanitizeSnapshotUf constraint (snapshotUnionFind pres)
         canonMap = buildCanonicalMap uf constraint
         canonical = equivCanonical canonMap
     in PresolutionView

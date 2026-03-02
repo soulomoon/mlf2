@@ -17,7 +17,6 @@ module MLF.Constraint.Solved (
     -- * Opaque type
     Solved,
     fromSolveOutput,
-    fromPresolutionResult,
     mkTestSolved,
     fromPreRewriteState,
 
@@ -75,7 +74,6 @@ import MLF.Constraint.Solve
     )
 import qualified MLF.Constraint.Solve as Solve
 import MLF.Constraint.Solve.Internal (SolveResult(..))
-import MLF.Constraint.Types.Presolution (PresolutionSnapshot(..))
 import MLF.Constraint.Types.Graph
     ( BindFlag(..)
     , BindParents
@@ -130,10 +128,10 @@ newtype Solved = Solved { unSolved :: SolvedBackend }
 -- (no pre-rewrite snapshot needed for tests with empty union-find).
 mkTestSolved :: Constraint -> IntMap NodeId -> Solved
 mkTestSolved c uf =
-    let canonicalMap = buildCanonicalMap uf c
-        equivClasses = buildEquivClasses canonicalMap c
+    let canonMap = buildCanonicalMap uf c
+        equivClasses = buildEquivClasses canonMap c
     in Solved EquivBackend
-        { ebCanonicalMap = canonicalMap
+        { ebCanonicalMap = canonMap
         , ebCanonicalNodes = cNodes c
         , ebCanonicalInstEdges = cInstEdges c
         , ebCanonicalUnifyEdges = cUnifyEdges c
@@ -156,21 +154,6 @@ fromSolveOutput out =
         (snapUnionFind snapshot)
         (snapPreRewriteConstraint snapshot)
 
--- | Build a solved view from presolution output without invoking
--- Phase 5 solve worklist again.
---
--- This still uses the same snapshot-finalization semantics as legacy
--- `fromSolveOutput` (`solveResultFromSnapshot`) so eliminated-binder and
--- bind-parent replay invariants match production expectations.
-fromPresolutionResult :: PresolutionSnapshot a => a -> Either SolveError Solved
-fromPresolutionResult pres =
-    let preRewrite = snapshotConstraint pres
-        uf = sanitizeSnapshotUf preRewrite (snapshotUnionFind pres)
-    in
-    fromPreRewriteStateStrict
-        uf
-        preRewrite
-
 -- | Build a staged equivalence-backend snapshot from solver pre-rewrite state.
 --
 -- The input pair should come from solve after unification has converged:
@@ -188,11 +171,11 @@ fromPreRewriteStateStrict uf preRewrite = do
                 }
     replayed <- solveResultFromSnapshot snapshot
     let
-        canonicalMap = buildCanonicalMap (srUnionFind replayed) preRewrite
+        canonMap = buildCanonicalMap (srUnionFind replayed) preRewrite
         canonicalC = srConstraint replayed
-        equivClasses = buildEquivClasses canonicalMap preRewrite
+        equivClasses = buildEquivClasses canonMap preRewrite
     pure $ Solved EquivBackend
-        { ebCanonicalMap = canonicalMap
+        { ebCanonicalMap = canonMap
         , ebCanonicalNodes = cNodes canonicalC
         , ebCanonicalInstEdges = cInstEdges canonicalC
         , ebCanonicalUnifyEdges = cUnifyEdges canonicalC
@@ -220,19 +203,6 @@ buildCanonicalMap uf c =
         , let rep = canonicalNode (NodeId k)
         , rep /= NodeId k
         ]
-
-sanitizeSnapshotUf :: Constraint -> IntMap NodeId -> IntMap NodeId
-sanitizeSnapshotUf c =
-    IntMap.mapMaybeWithKey keepLive
-  where
-    isLive nid = case NA.lookupNode c nid of
-        Just _ -> True
-        Nothing -> False
-    keepLive k rep =
-        let keyNode = NodeId k
-        in if isLive keyNode && isLive rep && keyNode /= rep
-            then Just rep
-            else Nothing
 
 chaseUfCanonical :: IntMap NodeId -> NodeId -> NodeId
 chaseUfCanonical uf = go IntSet.empty
