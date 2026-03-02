@@ -69,3 +69,6 @@
   - `cabal build all && cabal test` PASS (`905 examples, 0 failures`).
 - 2026-03-02: Cleaned `MLF.Constraint.Solved` local name-shadowing (`canonicalMap` -> `canonMap`) in touched constructors and re-ran Gate C:
   - `cabal build all && cabal test` PASS (`905 examples, 0 failures`).
+- 2026-03-02: Gate 1 `cabal test mlf2-test --test-options='--match "Solved|Presolution|Pipeline"'` PASS (0 examples, 0 failures; suite PASS).
+- 2026-03-02: Gate 2 `cabal test mlf2-test --test-options='--match "Phi|IdentityBridge|Generalize|ResultType|Pipeline"'` PASS (0 examples, 0 failures; suite PASS).
+- 2026-03-02: Gate 3 `cabal build all && cabal test` PASS (build completed; mlf2-test PASS, 905 examples, 0 failures).

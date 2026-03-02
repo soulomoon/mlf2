@@ -44,3 +44,9 @@ Replace production `Solved`-based elaboration/planning boundaries with `Presolut
 | Requested verification commands currently fail before tests run because unrelated in-flight edits in `src/MLF/Elab/Phi/Omega.hs` do not compile | 1 | Left unrelated Team B files untouched; captured blocker output in progress log and reported verification as blocked by external compile errors. |
 | Required Team B guard red-run blocked by existing module cycle (`Presolution.Plan.BinderPlan.Build` -> `Reify.Core` -> `Presolution.Plan` ...) | 1 | Logged blocker and proceeded with source migration; re-run verification commands after edits to confirm whether blocker persists. |
 | Task 7 first implementation rebuilt solved-compat state via `Solved.fromPreRewriteState` and regressed `Paper alignment baselines` with `InvalidBindingTree ... node ... not in constraint` | 1 | Replaced that reconstruction with `Solved.mkTestSolved` over `pvCanonicalConstraint` plus live-node sanitized `pvCanonicalMap`; regression slices returned green. |
+
+## Completion / Closure (2026-03-02)
+- Gate A (target slices for Tasks 7-9): PASS.
+- Gate B (guard/hygiene verification): PASS.
+- Gate C (`cabal build all && cabal test`): PASS (`905 examples, 0 failures`).
+- Task records archived to `tasks/archive/2026-03-02-eliminate-solved-indirection` on 2026-03-02.

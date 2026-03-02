@@ -94,3 +94,6 @@
   - `production src tree has no MLF.Constraint.Solved imports in elaboration path` (entrypoint scope)
 - `MLF.Constraint.Solved` reduced by removing `fromPresolutionResult` export/implementation; `Constraint.SolvedSpec` parity guard now uses `fromPreRewriteState (snapshotUnionFind/snapshotConstraint)`.
 - Docs/task tracking updated for Wave 2 completion and compatibility-boundary rationale.
+
+## Final Closure Note (2026-03-02)
+- Final verification passed at Gate C: `cabal build all && cabal test` succeeded with `905 examples, 0 failures`.
