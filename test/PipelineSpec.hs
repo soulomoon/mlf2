@@ -199,6 +199,17 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             elabSrc `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
             rtSrc `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
 
+        it "ResultType|Phase 6 — Elaborate|chi-first gate stays green" $ do
+            elabSrc <- readFile "src/MLF/Elab/Elaborate.hs"
+            rtSrc <- readFile "src/MLF/Elab/Run/ResultType/Types.hs"
+            elabSrc `shouldSatisfy` isInfixOf "MLF.Elab.Run.ChiQuery"
+            rtSrc `shouldSatisfy` isInfixOf "MLF.Elab.Run.ChiQuery"
+            elabSrc `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
+            rtSrc `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
+
+        it "Phase 6 — Elaborate|ResultType|Dual-path verification gate stays green" $ do
+            forM_ representativeMigrationCorpus assertCheckedAuthoritative
+
         it "migration guardrail: thesis-core boundary matches legacy outcome" $ do
             forM_ representativeMigrationCorpus $ \expr -> do
                 artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
