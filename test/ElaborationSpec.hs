@@ -322,12 +322,17 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
         it "elab-input thesis-exact guard: active Elaborate/Phi callback aliases avoid solved-typed generalize-at input" $ do
             elabSrc <- readFile "src/MLF/Elab/Elaborate.hs"
             phiSrc <- readFile "src/MLF/Elab/Phi/Translate.hs"
-            let hasSolvedTypedAlias src =
+            let hasSolvedTypedCompatAlias src =
                     isInfixOf
-                        "type GeneralizeAtWith =\n    Maybe GaBindParents\n    -> Solved"
+                        "type GeneralizeAtWithCompat =\n    Maybe GaBindParents\n    -> Solved"
                         src
-            hasSolvedTypedAlias elabSrc `shouldBe` False
-            hasSolvedTypedAlias phiSrc `shouldBe` False
+                hasSolvedTypedPhiCompatArgs src =
+                    isInfixOf
+                        "phiFromEdgeWitnessWithTrace\n    :: TraceConfig\n    -> GeneralizeAtWithCompat\n    -> Solved"
+                        src
+            hasSolvedTypedCompatAlias elabSrc `shouldBe` False
+            hasSolvedTypedCompatAlias phiSrc `shouldBe` False
+            hasSolvedTypedPhiCompatArgs phiSrc `shouldBe` False
 
         it "chi-first guard: ResultType internals avoid local solved materialization" $ do
             src <- readFile "src/MLF/Elab/Run/ResultType/Types.hs"
