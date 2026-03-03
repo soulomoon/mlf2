@@ -50,13 +50,17 @@ phiFromEdgeWitnessAutoTrace
 phiFromEdgeWitnessAutoTrace traceCfg generalizeAtWith solved mSchemeInfo ew =
     phiFromEdgeWitnessWithTrace
         traceCfg
-        generalizeAtWith
+        generalizeAtWithActive
         solved
         Nothing
         mSchemeInfo
         (Just syntheticTrace)
         ew
   where
+    -- Explicit legacy adapter: tests may still provide solved-aware callbacks.
+    generalizeAtWithActive mbGa scopeRoot targetNode =
+        generalizeAtWith mbGa solved scopeRoot targetNode
+
     opTargets op =
         case op of
             OpGraft arg n -> [arg, n]

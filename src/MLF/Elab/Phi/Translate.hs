@@ -249,7 +249,8 @@ type GeneralizeAtWith =
     -> NodeId
     -> Either ElabError (ElabScheme, IntMap.IntMap String)
 
-type GeneralizeAtWithCompat =
+-- | Legacy callback shape retained for no-trace/testing adapters.
+type GeneralizeAtWithLegacy =
     Maybe GaBindParents
     -> Solved
     -> NodeRef
@@ -260,7 +261,7 @@ type GeneralizeAtWithCompat =
 -- fails fast because production Φ requires edge traces.
 phiFromEdgeWitnessNoTrace
     :: TraceConfig
-    -> GeneralizeAtWithCompat
+    -> GeneralizeAtWithLegacy
     -> Solved
     -> Maybe SchemeInfo
     -> EdgeWitness
@@ -271,7 +272,7 @@ phiFromEdgeWitnessNoTrace _traceCfg _generalizeAtWith _solved _mSchemeInfo ew =
 -- | Legacy alias for 'phiFromEdgeWitnessNoTrace' (deprecated; test/debug-only).
 phiFromEdgeWitness
     :: TraceConfig
-    -> GeneralizeAtWithCompat
+    -> GeneralizeAtWithLegacy
     -> Solved
     -> Maybe SchemeInfo
     -> EdgeWitness
@@ -282,7 +283,7 @@ phiFromEdgeWitness = phiFromEdgeWitnessNoTrace
 
 phiFromEdgeWitnessWithTrace
     :: TraceConfig
-    -> GeneralizeAtWithCompat
+    -> GeneralizeAtWith
     -> Solved
     -> Maybe GaBindParents
     -> Maybe SchemeInfo
@@ -293,9 +294,7 @@ phiFromEdgeWitnessWithTrace traceCfg generalizeAtWith solved mbGaParents mScheme
     case mTrace of
         Nothing -> Left (MissingEdgeTrace (ewEdgeId ew))
         Just _ ->
-            let generalizeAtWithView mbGa scopeRoot targetNode =
-                    generalizeAtWith mbGa solved scopeRoot targetNode
-            in phiFromEdgeWitnessCore traceCfg generalizeAtWithView solved (fromSolved solved) mbGaParents mSchemeInfo mTrace ew
+            phiFromEdgeWitnessCore traceCfg generalizeAtWith solved (fromSolved solved) mbGaParents mSchemeInfo mTrace ew
 
 {- Note [Trace-First Copied Set]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
