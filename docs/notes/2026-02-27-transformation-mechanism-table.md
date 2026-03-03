@@ -1,11 +1,11 @@
 # Transformation Mechanism Table (Thesis vs Codebase)
 
 Last updated (UTC): 2026-03-04
-Source revision: `761db00`
+Source revision: `66f4920`
 
 | Transformation mechanism | Thesis pipeline | Current codebase | What to change for thesis-exact | Thesis-exact |
 |---|---|---|---|---|
-| Elaboration input | Elaborates from a translatable presolution `χp`; each instantiation edge translation uses a chosen propagation witness before term-level elaboration. (`papers/these-finale-english.txt` §15.3.5 Def. 15.3.12, §15.3.6, Fig. 15.3.5) | Boundary input is now `χp`-first: pipeline builds `ElabEnv` from `eePresolutionView` + witness/trace/expansion artifacts + scope overrides, and `ElabConfig` no longer carries `ecSolved`. Inside elaboration, canonical/bound queries go through `ChiQuery`; a solved-style view is still materialized internally via `ChiQuery.chiSolved` for existing generalize/reify helper signatures. (`src/MLF/Elab/Run/Pipeline.hs:131-143`, `src/MLF/Elab/Elaborate.hs:5-83`, `:174-199`, `src/MLF/Elab/Run/ChiQuery.hs:50-61`, `test/PipelineSpec.hs:176-186`, `test/ElaborationSpec.hs:314-320`) | Row2 adapter retirement is complete at the input boundary. Remaining optional cleanup is internal: reduce `Solved`-typed helper signatures so elaboration no longer needs `chiSolved` materialization, while keeping `row2 closeout guard`, `checked-authoritative`, and `Dual-path verification` coverage. | Yes (boundary aligned; internal `chiSolved` adapter still present) |
+| Elaboration input | Elaborates from a translatable presolution `χp`; each instantiation edge translation uses a chosen propagation witness before term-level elaboration. (`papers/these-finale-english.txt` §15.3.5 Def. 15.3.12, §15.3.6, Fig. 15.3.5) | Runtime elaboration input is now thesis-exact in active path shape: pipeline builds `ElabEnv` from `PresolutionView` + witness/trace/expansion artifacts + scope overrides; active elaboration/Phi callback shape is `χp`-native (`GeneralizeAtWith`) with compatibility wrappers isolated to non-active adapter aliases; active elaboration no longer materializes `ChiQuery.chiSolved` in `elaborateWithEnv`. (`src/MLF/Elab/Run/Pipeline.hs`, `src/MLF/Elab/Elaborate.hs`, `src/MLF/Elab/Phi/Translate.hs`, `test/PipelineSpec.hs`, `test/ElaborationSpec.hs`) | Keep guardrails (`elab-input thesis-exact guard`, `checked-authoritative`, `Dual-path verification`) as regression safety nets; optional future cleanup is limited to reducing residual compatibility aliases that are not in active runtime flow. | Yes |
 | Result-type context wiring | Thesis result-type construction is defined from translated artifacts (Def. 15.3.2) and chosen edge-witness evidence over `χp`; it does not prescribe a split solved adapter object. | Result-type inputs are now adapter-free: `ResultTypeInputs` carries `rtcPresolutionView` directly (no `rtcSolvedCompat`/`rtcSolveLike`), and `mkResultTypeInputs` wires only `χp`-native context plus edge artifacts. `buildResultTypeView` derives solved state from presolution snapshots and keeps checked-authoritative behavior unchanged. (`src/MLF/Elab/Run/ResultType/Types.hs:1-39`, `src/MLF/Elab/Run/ResultType.hs:31-58`, `src/MLF/Elab/Run/ResultType/View.hs:49-156`) | Post-row2 follow-up can target internal solved-overlay simplification in `ResultType.View` (`rtvSolved`/bound overlay) while preserving checked-authoritative behavior and existing guard slices. | Yes (row-2 adapter retirement complete) |
 | Ordering of transformations | `SolveConstraint`: ordered edge traversal with propagation + unification. (`papers/these-finale-english.txt` §12.1.3) | Presolution drains unification closure before/after each inst edge with boundary assertions, then materializes expansions, flushes deferred weakens, rewrites, rigidifies, and normalizes witnesses. (`src/MLF/Constraint/Presolution/EdgeProcessing.hs:49-57`, `src/MLF/Constraint/Presolution/Driver.hs:111-131`) | Reduce auxiliary staging where possible, but preserve thesis-compatible delayed weakening in normalized propagation witnesses (§15.2.1) and preserve translatability-construction obligations (Def. 15.2.10), not only a terminal validation check. | No |
 | Per-edge propagation transform | Propagation expands schemes and adds unification obligations. (`papers/these-finale-english.txt` §10.3.2, §15.2.2) | `executeUnifiedExpansionPath` uses two per-edge branches: synthesized wrappers force `ExpIdentity` with direct body-to-target unification, while non-synth `TyExp` edges compute/merge minimal expansion; both paths record expansion/witness/trace artifacts and run expansion-unify where required. (`src/MLF/Constraint/Presolution/EdgeProcessing/Interpreter.hs:74-104`) | Remove synthesized-wrapper special case. Use uniform per-edge expansion + unification: every edge computes an expansion of the source scheme and adds unification obligations, regardless of synthesis origin. | No |
@@ -31,6 +31,18 @@ Source revision: `761db00`
     - PASS (`4 examples, 0 failures`).
   - `cabal build all && cabal test`
     - PASS (`929 examples, 0 failures`).
+
+## 2026-03-04 Task 35 elaboration-input thesis-exact closeout evidence
+
+- Required closeout matcher commands:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "elab-input thesis-exact guard"'`
+    - PASS (`2 examples, 0 failures`).
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "checked-authoritative"'`
+    - PASS (`8 examples, 0 failures`).
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Dual-path verification"'`
+    - PASS (`4 examples, 0 failures`).
+  - `cabal build all && cabal test`
+    - PASS (`931 examples, 0 failures`).
 
 ## Post-row2 priority ordering
 

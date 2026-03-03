@@ -2,6 +2,23 @@
 
 ## Thesis Alignment (Phase A–E)
 
+### 2026-03-04 Task 35 elaboration-input thesis-exact closeout
+- Elaboration input row is now closed as thesis-exact for active runtime flow:
+  - active elaboration path no longer depends on `ChiQuery.chiSolved` materialization in `elaborateWithEnv`;
+  - active Elaborate/Phi generalize callback shape uses `χp`-native inputs;
+  - checked-authoritative behavior remains unchanged on representative slices.
+- Verification evidence (Task 35 gates):
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "elab-input thesis-exact guard"'`
+    - PASS (`2 examples, 0 failures`)
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "checked-authoritative"'`
+    - PASS (`8 examples, 0 failures`)
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Dual-path verification"'`
+    - PASS (`4 examples, 0 failures`)
+  - `cabal build all && cabal test`
+    - PASS (`931 examples, 0 failures`)
+- Residual note:
+  - compatibility aliases remain in some modules for non-active compatibility surfaces, but the active elaboration input call chain satisfies thesis-exact guard conditions.
+
 ### 2026-03-04 Wave 3 Task 6 verifier closeout (row-2 adapter retirement evidence)
 - Row-2 adapter retirement is closed in runtime boundaries:
   - `ResultTypeInputs` no longer exposes `rtcSolvedCompat`/`rtcSolveLike`.

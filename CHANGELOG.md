@@ -3,6 +3,17 @@
 ## Unreleased
 
 ### Changed
+- Task 35 elaboration-input thesis-exact closeout (2026-03-04):
+  - closed the remaining elaboration-input row gap by removing active
+    elaboration-path dependence on internal `chiSolved` materialization and
+    validating chi-native active generalize callback wiring;
+  - recorded closeout gate evidence:
+    `elab-input thesis-exact guard` (`2 examples`),
+    `checked-authoritative` (`8 examples`),
+    `Dual-path verification` (`4 examples`),
+    and `cabal build all && cabal test` (`931 examples, 0 failures`);
+  - updated TMT row status and implementation/task notes to mark
+    elaboration-input migration done.
 - Wave 3 Task 6 row2 adapter retirement docs/verifier closeout (2026-03-04):
   - documented that runtime boundaries no longer expose
     `rtcSolvedCompat`/`rtcSolveLike`/`ecSolved` adapters;
