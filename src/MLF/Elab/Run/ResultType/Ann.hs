@@ -23,6 +23,7 @@ import MLF.Constraint.Types.Graph
     , toListNode
     )
 import qualified MLF.Constraint.VarStore as VarStore
+import MLF.Constraint.Presolution.View (fromSolved)
 import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Elab.Inst (applyInstantiation, schemeToType)
 import MLF.Reify.Core
@@ -51,7 +52,7 @@ import MLF.Elab.Run.TypeOps
     , inlineBoundVarsTypeForBound
     , simplifyAnnotationType
     )
-import MLF.Elab.Run.Generalize (generalizeAtWithBuilder)
+import MLF.Elab.Run.Generalize (generalizeAtWithBuilderView)
 import MLF.Elab.Run.ResultType.Util
     ( generalizeWithPlan
     , containsBoundForall
@@ -72,6 +73,7 @@ computeResultTypeFromAnn
 computeResultTypeFromAnn ctx inner innerPre annNodeId eid = do
     view <- View.buildResultTypeView ctx
     let solvedForGen = View.rtvSolved view
+        presolutionViewForGen = fromSolved solvedForGen
         canonical = View.rtvCanonical view
         edgeWitnesses = View.rtvEdgeWitnesses view
         edgeTraces = View.rtvEdgeTraces view
@@ -80,7 +82,8 @@ computeResultTypeFromAnn ctx inner innerPre annNodeId eid = do
         c1 = View.rtvBaseConstraint view
         redirects = View.rtvRedirects view
         traceCfg = View.rtvTraceConfig view
-        generalizeAtWith = \mbGa s -> generalizeAtWithBuilder planBuilder mbGa s
+        generalizeAtWith = \mbGa _solved ->
+            generalizeAtWithBuilderView planBuilder mbGa presolutionViewForGen
 
     let rootPre = annNode inner
         rootC = canonical rootPre

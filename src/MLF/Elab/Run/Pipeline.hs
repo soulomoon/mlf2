@@ -42,7 +42,7 @@ import MLF.Elab.TermClosure (closeTermWithSchemeSubst, substInTerm)
 import MLF.Elab.Run.Annotation (applyRedirectsToAnn, canonicalizeAnn, annNode)
 import MLF.Elab.Run.Generalize
     ( constraintForGeneralization
-    , generalizeAtWithBuilder
+    , generalizeAtWithBuilderView
     , instantiationCopyNodes
     )
 import MLF.Elab.Run.Provenance (buildTraceCopyMap, collectBaseNamedKeys)
@@ -83,7 +83,6 @@ runPipelineElabWith traceCfg genConstraints expr = do
     acyc <- fromCycleError (checkAcyclicity c1)
     pres <- fromPresolutionError (computePresolution traceCfg acyc c1)
     let planBuilder = prPlanBuilder pres
-        generalizeAtWith = generalizeAtWithBuilder planBuilder
         preRewrite = snapshotConstraint pres
     solvedClean <- fromSolveError (Finalize.finalizeSolvedFromSnapshot preRewrite (snapshotUnionFind pres))
     let presolutionViewClean = fromSolved solvedClean
@@ -110,6 +109,13 @@ runPipelineElabWith traceCfg genConstraints expr = do
     solvedForGen <- fromSolveError (Finalize.finalizeSolvedForConstraint solvedClean constraintForGen)
     let presolutionViewForGen =
             fromSolved solvedForGen
+        generalizeAtWithView mbGa =
+            generalizeAtWithBuilderView
+                planBuilder
+                mbGa
+                presolutionViewForGen
+        generalizeAtWithCompat mbGa _solved =
+            generalizeAtWithView mbGa
     let ann' = applyRedirectsToAnn (prRedirects pres) ann
     let annCanon = canonicalizeAnn (canonicalizeNode canonNode) ann'
     let edgeWitnesses = IntMap.map (canonicalizeWitness canonNode) (prEdgeWitnesses pres)
@@ -124,7 +130,7 @@ runPipelineElabWith traceCfg genConstraints expr = do
                 annCanon
     let elabConfig = ElabConfig
             { ecTraceConfig = traceCfg
-            , ecGeneralizeAtWith = generalizeAtWith
+            , ecGeneralizeAtWith = generalizeAtWithCompat
             , ecSolved = solvedForGen
             }
         elabEnv = ElabEnv
@@ -146,11 +152,11 @@ runPipelineElabWith traceCfg genConstraints expr = do
             SchemeFreeVars{} -> True
             _ -> False
     (rootScheme, rootSubst) <- fromElabError $
-        case generalizeAtWith (Just bindParentsGa) solvedForGen rootScope rootTarget of
+        case generalizeAtWithView (Just bindParentsGa) rootScope rootTarget of
             Right out -> Right out
             Left err
                 | generalizeNeedsFallback err ->
-                    case generalizeAtWith Nothing solvedForGen rootScope rootTarget of
+                    case generalizeAtWithView Nothing rootScope rootTarget of
                         Right out -> Right out
                         Left err2
                             | generalizeNeedsFallback err2 -> do

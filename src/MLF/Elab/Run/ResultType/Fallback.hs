@@ -11,6 +11,7 @@ import Data.Functor.Foldable (cata)
 import MLF.Frontend.ConstraintGen (AnnExpr(..))
 import MLF.Constraint.Presolution (EdgeTrace(..))
 import MLF.Constraint.Presolution.Base (CopyMapping(..), lookupCopy)
+import MLF.Constraint.Presolution.View (fromSolved)
 import MLF.Constraint.Types.Graph
     ( EdgeId(..)
     , GenNode(..)
@@ -40,7 +41,7 @@ import MLF.Elab.Run.Scope
     , resolveCanonicalScope
     , schemeBodyTarget
     )
-import MLF.Elab.Run.Generalize (generalizeAtWithBuilder)
+import MLF.Elab.Run.Generalize (generalizeAtWithBuilderView)
 import MLF.Elab.Run.ResultType.Util
     ( generalizeWithPlan
     , stripAnn
@@ -162,12 +163,14 @@ computeResultTypeFallbackCore ctx annCanon ann = do
         edgeTraces = View.rtvEdgeTraces viewBase
         edgeExpansions = View.rtvEdgeExpansions viewBase
         solved = View.rtvSolved viewBase
+        presolutionView = fromSolved solved
         bindParentsGa = View.rtvBindParentsGa viewBase
         planBuilder = View.rtvPlanBuilder viewBase
         c1 = View.rtvBaseConstraint viewBase
         redirects = View.rtvRedirects viewBase
         traceCfg = View.rtvTraceConfig viewBase
-        generalizeAtWith = \mbGa s -> generalizeAtWithBuilder planBuilder mbGa s
+        generalizeAtWith = \mbGa _solved ->
+            generalizeAtWithBuilderView planBuilder mbGa presolutionView
 
     let edgeTraceCounts =
             IntMap.fromListWith
