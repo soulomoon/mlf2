@@ -25,24 +25,41 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - Row-1 boundary closeout is complete.
   - Row-2 adapter retirement (`rtcSolvedCompat` / `rtcSolveLike`) remains.
 
-## Task 33 TMT row-2 result-type adapter retirement (planned next)
+## Task 33 TMT row-2 result-type adapter retirement (completed 2026-03-04)
+
+- Completed:
+  - `ResultTypeInputs` no longer exposes `rtcSolvedCompat`.
+  - `MLF.Elab.Run.ResultType.Types` no longer exposes `rtcSolveLike`.
+  - `ElabConfig` no longer includes `ecSolved`.
+  - Runtime production path remains single-path and checked-authoritative.
+- Plan/tracker:
+  - `/Volumes/src/mlf4/docs/plans/2026-03-04-tmt-row2-resulttype-adapter-retirement-agent-team-implementation-plan.md`
+  - `/Volumes/src/mlf4/tasks/todo/2026-03-04-tmt-row2-resulttype-adapter-retirement-agent-team/`
+- Verification:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "row2 closeout guard"'`
+    - PASS (`3 examples, 0 failures`)
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "checked-authoritative"'`
+    - PASS (`8 examples, 0 failures`)
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Dual-path verification"'`
+    - PASS (`4 examples, 0 failures`)
+  - `cabal build all && cabal test`
+    - PASS (`929 examples, 0 failures`)
+- Status:
+  - Row-2 adapter retirement is closed.
+
+## Task 34 Post-row2 runtime simplification priorities (planned next)
 
 - Goal:
-  - Retire remaining result-type compatibility adapters
-    (`rtcSolvedCompat`/`rtcSolveLike`) without changing checked-authoritative
-    output behavior.
-- Plan:
-  - `/Volumes/src/mlf4/docs/plans/2026-03-04-tmt-row2-resulttype-adapter-retirement-agent-team-implementation-plan.md`
-- Task tracker:
-  - `/Volumes/src/mlf4/tasks/todo/2026-03-04-tmt-row2-resulttype-adapter-retirement-agent-team/`
-- Ordered next steps:
-  1. Move bound-overlay/materialization in `ResultType.View` to `χp`-native
-     reads and overlays.
-  2. Remove `rtcSolveLike` from `buildResultTypeView` and downstream paths.
-  3. Remove `rtcSolvedCompat` from `ResultTypeInputs`,
-     `mkResultTypeInputs`, and pipeline wiring.
-  4. Re-run row-1 closeout guard slices + full gate to confirm no behavior
-     regression.
+  - Continue reducing non-thesis runtime scaffolding while preserving
+    checked-authoritative behavior and row2 guard coverage.
+- Ordered priorities:
+  1. Reduce `ResultType.View` solved-overlay materialization (`rtvSolved` +
+     bound-overlay rebuild path) where equivalent `χp`-native reads are
+     available.
+  2. Simplify compatibility-heavy helper signatures that still thread `Solved`
+     into generalize/reify paths.
+  3. Keep `row2 closeout guard`, `checked-authoritative`, and
+     `Dual-path verification` slices in regular closeout verification.
 
 ## Task 31 χp-first elaboration/result-type internal cleanup (completed 2026-03-03)
 

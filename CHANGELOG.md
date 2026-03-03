@@ -3,6 +3,15 @@
 ## Unreleased
 
 ### Changed
+- Wave 3 Task 6 row2 adapter retirement docs/verifier closeout (2026-03-04):
+  - documented that runtime boundaries no longer expose
+    `rtcSolvedCompat`/`rtcSolveLike`/`ecSolved` adapters;
+  - captured final closeout verification evidence:
+    `row2 closeout guard` (`3 examples`), `checked-authoritative`
+    (`8 examples`), `Dual-path verification` (`4 examples`), and
+    `cabal build all && cabal test` (`929 examples, 0 failures`);
+  - reordered TODO priorities to post-row2 follow-ups (result-type
+    solved-overlay simplification and compatibility-signature cleanup).
 - Wave 3 Task 6 docs/verifier closeout (2026-03-03):
   - recorded row-1 runtime boundary shape as shipped (`ElabEnv` has no
     `eeSolvedCompat`; `elaborateWithEnv` has no entry-time

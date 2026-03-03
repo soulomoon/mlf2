@@ -1,9 +1,20 @@
 # Findings
 
 ## 2026-03-04
-- Remaining row-2 adapters are still active in the current runtime:
-  - `rtcSolvedCompat` field in `src/MLF/Elab/Run/ResultType/Types.hs`.
-  - `rtcSolveLike` in `src/MLF/Elab/Run/ResultType/Types.hs`.
-  - `ElabConfig.ecSolved` in `src/MLF/Elab/Elaborate.hs`.
-- Current result-type view still materializes solved-domain structures via `rtvSolved` and solved rebuild paths in `src/MLF/Elab/Run/ResultType/View.hs`.
-- Existing TODO already marks row-2 adapter retirement as the next planned target (`Task 33`), so this plan can align directly with existing repo priorities.
+- Initial reconnaissance identified row2 adapter surfaces (`rtcSolvedCompat`,
+  `rtcSolveLike`, `ecSolved`) as the closeout targets for this wave.
+- Final source verification after wave merges:
+  - `rg -n "rtcSolvedCompat|rtcSolveLike|ecSolved" src test src-public app`
+    reports these symbols only in row2 closeout guard tests
+    (`test/PipelineSpec.hs`, `test/ElaborationSpec.hs`), not in `src/`.
+- `ResultTypeInputs` now carries `rtcPresolutionView` directly and no longer
+  exposes solved-compat adapter fields.
+- `ElabConfig` exports only `ecTraceConfig` and `ecGeneralizeAtWith`; there is
+  no `ecSolved` field.
+- Verification gates for row2 closeout are green:
+  - `row2 closeout guard`: `3 examples, 0 failures`
+  - `checked-authoritative`: `8 examples, 0 failures`
+  - `Dual-path verification`: `4 examples, 0 failures`
+  - Full suite: `929 examples, 0 failures`
+- No concrete defects were found during verifier closeout; `Bugs.md` did not
+  require updates.

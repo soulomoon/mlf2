@@ -2,6 +2,28 @@
 
 ## Thesis Alignment (Phase A–E)
 
+### 2026-03-04 Wave 3 Task 6 verifier closeout (row-2 adapter retirement evidence)
+- Row-2 adapter retirement is closed in runtime boundaries:
+  - `ResultTypeInputs` no longer exposes `rtcSolvedCompat`/`rtcSolveLike`.
+  - `ElabConfig` no longer includes `ecSolved`.
+  - Guard search confirms adapter symbols now appear only in row2 closeout
+    tests, not in `src/` runtime modules.
+- Verification evidence captured for closeout:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "row2 closeout guard"'`
+    - PASS (`3 examples, 0 failures`)
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "checked-authoritative"'`
+    - PASS (`8 examples, 0 failures`)
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Dual-path verification"'`
+    - PASS (`4 examples, 0 failures`)
+  - `cabal build all && cabal test`
+    - PASS (`929 examples, 0 failures`)
+- Post-row2 priorities:
+  1. Reduce `ResultType.View` solved-overlay scaffolding (`rtvSolved` +
+     bound-overlay rebuild path) where equivalent `χp`-native queries exist.
+  2. Continue simplifying compatibility-shaped helper signatures that still
+     thread `Solved` through generalize/reify flows.
+  3. Keep row2 closeout guard slices in regular regression cadence.
+
 ### 2026-03-03 Wave 3 Task 6 verifier closeout (row-1 chi-first boundary evidence)
 - Row-1 runtime boundary shape is now explicit and stable:
   - `ElabEnv` carries `eePresolutionView`, GA parents, edge artifacts, and
