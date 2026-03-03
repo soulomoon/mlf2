@@ -296,25 +296,55 @@ stripUnusedTopForalls ty =
 spec :: Spec
 spec = describe "Phase 6 — Elaborate (xMLF)" $ do
     describe "Migration guards" $ do
-        it "ElabEnv uses PresolutionView boundary" $ do
-            src <- readFile "src/MLF/Elab/Elaborate.hs"
-            src `shouldSatisfy` (isInfixOf "eePresolutionView")
-            src `shouldSatisfy` (not . isInfixOf "eeSolved ::")
+        it "result-type fallback matches pipeline type on non-annotation roots" $ do
+            let expr = EApp (ELam "x" (EVar "x")) (ELit (LInt 7))
+            artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
+            let (inputs, annCanon, annPre) = resultTypeInputsForArtifacts artifacts
+            viaFallback <- requireRight (computeResultTypeFallback inputs annCanon annPre)
+            (_term, viaPipeline) <- requirePipeline expr
+            viaFallback `shouldAlphaEqType` viaPipeline
 
-        it "elaborateWithEnv consumes thesis-core input" $ do
-            src <- readFile "src/MLF/Elab/Elaborate.hs"
-            src `shouldSatisfy` (isInfixOf "eePresolutionView :: PresolutionView")
-            src `shouldSatisfy` (not . isInfixOf "ecSolved ::")
+        it "result-type reconstruction fails on malformed PresolutionView materialization" $ do
+            let expr = ELit (LInt 1)
+            artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
+            let (inputs, annCanon, annPre) = resultTypeInputsForArtifacts artifacts
+                rootC = rtcCanonical inputs (annExprNode annCanon)
+                view0 = rtcPresolutionView inputs
+                brokenView =
+                    view0
+                        { pvCanonicalConstraint =
+                            (pvCanonicalConstraint view0)
+                                { cUnifyEdges = [UnifyEdge rootC rootC] }
+                        }
+                inputsBroken =
+                    inputs
+                        { rtcPresolutionView = brokenView
+                        }
+            case computeResultTypeFallback inputsBroken annCanon annPre of
+                Left (Elab.ValidationFailed msgs) ->
+                    msgs `shouldSatisfy` any ("Residual unification edge" `isInfixOf`)
+                other ->
+                    expectationFailure
+                        ("Expected ValidationFailed from malformed PresolutionView, got " ++ show other)
 
-        it "Phi modules no longer import MLF.Constraint.Solved directly" $ do
-            let phiModules =
-                    [ "src/MLF/Elab/Phi/Omega.hs"
-                    , "src/MLF/Elab/Phi/Context.hs"
-                    , "src/MLF/Elab/Phi/IdentityBridge.hs"
-                    ]
-            forM_ phiModules $ \path -> do
-                src <- readFile path
-                src `shouldSatisfy` (not . isInfixOf "import MLF.Constraint.Solved")
+        it "annotation result-type path is driven by runtime witness payload" $ do
+            let expr =
+                    EAnn
+                        (ELam "x" (EVar "x"))
+                        (STArrow (STBase "Int") (STBase "Int"))
+            artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
+            let (inputs, annCanon, _annPre) = resultTypeInputsForArtifacts artifacts
+            case annCanon of
+                AAnn inner annNodeId eid -> do
+                    let inputsMissingWitness =
+                            inputs
+                                { rtcEdgeWitnesses =
+                                    IntMap.delete (getEdgeId eid) (rtcEdgeWitnesses inputs)
+                                }
+                    computeResultTypeFromAnn inputsMissingWitness inner inner annNodeId eid
+                        `shouldBe` Left (Elab.ValidationFailed ["missing edge witness for annotation"])
+                other ->
+                    expectationFailure ("Expected top-level AAnn for witness guard, got " ++ show other)
 
     describe "SrcTy indexed aliases compile shape" $ do
         it "supports raw and normalized aliases from one SrcTy family" $ do

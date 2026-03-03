@@ -50,8 +50,12 @@
   - removed direct production `Solved.fromPreRewriteState` /
     `solveResultFromSnapshot` calls from `MLF.Elab.Run.Pipeline`;
   - deleted inline `setSolvedConstraint` replay helper path from
-    `Pipeline.hs`, and centralized snapshot finalization in
-    `MLF.Elab.Run.PipelineBoundary`.
+    `Pipeline.hs` and removed `MLF.Elab.Run.PipelineBoundary`.
+  - introduced `MLF.Constraint.Finalize` as the shared runtime finalization
+    boundary used by pipeline/runtime paths.
+  - restored full snapshot-finalization semantics in the shared boundary by
+    reusing `Solve.finalizeConstraintWithUF` (UF rewrite, eliminated-binder
+    rewrite, UF substitution update, bind-parent pruning, strict validation).
 - Result-type replay removal:
   - `rtcSolveLike` no longer calls replay reconstruction; it now materializes
     solved state from `PresolutionView` canonical data (`pvCanonicalConstraint`
@@ -67,6 +71,11 @@
   - `migration guardrail: thesis-core boundary matches legacy outcome`
   - `final row1 state uses single thesis-core boundary path`
   - `Dual-path verification`
+- Migration guardrail alignment note:
+  - thesis-core vs legacy canonical-map checks now compare on shared live-node
+    domain, while preserving strict canonical-constraint and solved-query parity
+    assertions; legacy eliminated-node-only canonical links are treated as
+    historical metadata, not runtime-domain divergence.
 - Validation:
   - targeted closeout slices above: PASS;
   - regression anchors: `Phase 6 — Elaborate` PASS, `Pipeline (Phases 1-5)` PASS, `Dual-path verification` PASS;

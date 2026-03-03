@@ -7,6 +7,32 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 
 ## Resolved
 
+### BUG-2026-03-03-001
+- Status: Resolved
+- Priority: High
+- Discovered: 2026-03-03
+- Resolved: 2026-03-03
+- Summary: Replay-free runtime finalization omitted eliminated-binder snapshot finalization steps, causing Phase 6 Φ regressions after the replay/mediation cutover.
+- Minimal reproducer:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Phase 6 — Elaborate"'`
+- Expected vs actual:
+  - Expected: replay-free runtime boundary preserves Phase 6 elaboration behavior and keeps paper baseline matrix green.
+  - Actual before fix: 9 failures with `PhiInvariantError "PhiReorder: missing binder identity ..."` and `PhiTranslatabilityError "OpRaise (non-spine): missing computation context"` in paper-alignment baselines.
+- Suspected/owning area:
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Finalize.hs`
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Solve.hs`
+  - `/Volumes/src/mlf4/test/PipelineSpec.hs`
+- Thesis impact:
+  - Broke Chapter 15.3.4-aligned Phase 6 behavior under the runtime replay-removal migration, invalidating strict cutover claims.
+- Fix:
+  - Added shared snapshot finalization helper `finalizeConstraintWithUF` in `MLF.Constraint.Solve`.
+  - Routed `MLF.Constraint.Finalize` through full snapshot finalization semantics (UF rewrite, eliminated-binder rewrite, UF substitution update, bind-parent pruning, strict validation).
+  - Updated migration guardrail map comparison to shared live-node domain while retaining strict canonical-constraint and solved-query parity checks.
+- Regression tests:
+  - `/Volumes/src/mlf4/test/ElaborationSpec.hs` (`Phase 6 — Elaborate`)
+  - `/Volumes/src/mlf4/test/PipelineSpec.hs` (`migration guardrail: thesis-core boundary matches legacy outcome`, `Dual-path verification`)
+  - `cabal build all && cabal test`
+
 ### BUG-2026-02-27-001
 - Status: Resolved
 - Priority: High

@@ -16,7 +16,7 @@ import MLF.Constraint.Solved (Solved)
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types.Witness (EdgeWitness(..), Expansion(..))
 import MLF.Elab.Generalize (GaBindParents(..))
-import MLF.Util.ElabError (ElabError)
+import MLF.Util.ElabError (ElabError(..))
 import MLF.Util.Trace (TraceConfig)
 
 -- | Context for result type computation, bundling shared state.
@@ -41,4 +41,6 @@ rtcSolveLike ctx =
                 (pvConstraint presolutionView)
                 (pvCanonicalMap presolutionView)
         solved = Solved.rebuildWithConstraint solved0 (pvCanonicalConstraint presolutionView)
-    in Right solved
+    in case Solved.validateCanonicalGraphStrict solved of
+        [] -> Right solved
+        violations -> Left (ValidationFailed violations)

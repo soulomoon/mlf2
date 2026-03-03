@@ -1,13 +1,15 @@
 {-# LANGUAGE PatternSynonyms #-}
 module PipelineSpec (spec) where
 
-import Control.Monad (forM_, unless, when)
+import Control.Monad (forM, forM_, unless, when)
+import Data.Char (isSpace)
 import Data.Either (isRight)
-import Data.List (isInfixOf)
-import Data.Maybe (isJust)
+import Data.List (isInfixOf, isPrefixOf, nub, sort)
+import Data.Maybe (catMaybes, isJust)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Set as Set
+import System.IO.Error (tryIOError)
 import Test.Hspec
 import Test.QuickCheck (Gen, arbitrary, chooseInt, counterexample, elements, forAll, property, withMaxSuccess, (===))
 
@@ -167,132 +169,52 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 Left err -> expectationFailure $ "Reify error: " ++ show err
 
     describe "Integration Tests" $ do
-        it "single-solved migration removes eeRes* fields" $ do
-            elaborateSrc <- readFile "src/MLF/Elab/Elaborate.hs"
-            pipelineSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
-            forM_ ["eeRes" ++ "Phi", "eeRes" ++ "Reify", "eeRes" ++ "Gen"] $ \needle -> do
-                elaborateSrc `shouldSatisfy` (not . isInfixOf needle)
-                pipelineSrc `shouldSatisfy` (not . isInfixOf needle)
-
-        it "single-solved migration removes split result-type solved fields" $ do
-            typesSrc <- readFile "src/MLF/Elab/Run/ResultType/Types.hs"
-            fallbackSrc <- readFile "src/MLF/Elab/Run/ResultType/Fallback.hs"
-            forM_ ["rtcSolvedFor" ++ "Gen", "rtcSolved" ++ "Clean"] $ \needle -> do
-                typesSrc `shouldSatisfy` (not . isInfixOf needle)
-                fallbackSrc `shouldSatisfy` (not . isInfixOf needle)
-
-        it "single-solved refactor keeps checked pipeline authoritative" $ do
-            let expr = ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (ELit (LInt 1)))
-            case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
-                Left err -> expectationFailure (renderPipelineError err)
-                Right (_termUnchecked, tyUnchecked) ->
-                    case runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr) of
-                        Left err -> expectationFailure (renderPipelineError err)
-                        Right (_termChecked, tyChecked) -> tyUnchecked `shouldBe` tyChecked
-
-        it "row1 boundary uses thesis-core elaboration input contract" $ do
-            pipelineSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
-            pipelineSrc `shouldSatisfy` (isInfixOf "fromPresolutionResult")
-            pipelineSrc `shouldSatisfy` (isInfixOf "eePresolutionView = presolutionViewForGen")
-            pipelineSrc `shouldSatisfy` (not . isInfixOf "Solved.fromPreRewriteState")
-            pipelineSrc `shouldSatisfy` (not . isInfixOf "solveResultFromSnapshot")
-
-        it "row1 boundary validates-only and does not mediate input" $ do
-            pipelineSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
-            pipelineSrc `shouldSatisfy` (not . isInfixOf "setSolvedConstraint")
-            pipelineSrc `shouldSatisfy` (not . isInfixOf "snapPreRewriteConstraint")
-            pipelineSrc `shouldSatisfy` (not . isInfixOf "snapUnionFind =")
-            runPipelineElab Set.empty (unsafeNormalizeExpr (ELam "x" (EVar "x")))
-                `shouldSatisfy` isRight
+        it "single-solved refactor keeps checked pipeline authoritative on representative corpus" $ do
+            forM_ representativeMigrationCorpus assertCheckedAuthoritative
 
         it "migration guardrail: thesis-core boundary matches legacy outcome" $ do
-            let corpus =
-                    [ ELam "x" (EVar "x")
-                    , ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (ELit (LInt 1)))
-                    , EAnn (ELam "x" (EVar "x"))
-                        (STForall "a" Nothing (STArrow (STVar "a") (STVar "a")))
-                    ]
-                solvedFromView view =
-                    Solved.fromConstraintAndUf
-                        (pvCanonicalConstraint view)
-                        (pvCanonicalMap view)
-            forM_ corpus $ \expr -> do
+            forM_ representativeMigrationCorpus $ \expr -> do
                 artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
                 let pres = paPresolution artifacts
                     view = PresolutionViewBoundary.fromPresolutionResult pres
-                    thesisCore = solvedFromView view
                     legacy = paSolved artifacts
-                Solved.validateCanonicalGraphStrict thesisCore `shouldBe` []
-                Solved.validateCanonicalGraphStrict legacy `shouldBe` []
-                case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
-                    Left err -> expectationFailure (renderPipelineError err)
-                    Right (_termUnchecked, tyUnchecked) ->
-                        case runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr) of
-                            Left err -> expectationFailure (renderPipelineError err)
-                            Right (_termChecked, tyChecked) -> tyUnchecked `shouldBe` tyChecked
-
-        it "final row1 state uses single thesis-core boundary path" $ do
-            pipelineSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
-            pipelineSrc `shouldSatisfy` (isInfixOf "solvedFromConstraintWithCanonicalMap")
-            pipelineSrc `shouldSatisfy` (isInfixOf "presolutionViewFromConstraintAndUf")
-            pipelineSrc `shouldSatisfy` (not . isInfixOf "Solved.fromPreRewriteState")
-            pipelineSrc `shouldSatisfy` (not . isInfixOf "solveResultFromSnapshot")
-            pipelineSrc `shouldSatisfy` (not . isInfixOf "setSolvedConstraint")
-
-        it "runtime pipeline keeps dual-path wiring out of production entrypoints" $ do
-            pipelineSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
-            forM_ ["runPipelineElabProjectionFirst", "runPipelineElabViaLegacySolve"] $ \needle ->
-                pipelineSrc `shouldSatisfy` (not . isInfixOf needle)
+                    thesisCoreValidated =
+                        Solved.fromConstraintAndUf
+                            (pvCanonicalConstraint view)
+                            (pvCanonicalMap view)
+                validateStrict thesisCoreValidated
+                validateStrict legacy
+                assertViewParity view legacy
 
         describe "Dual-path verification" $ do
-            it "production entrypoint remains single-path and checked-authoritative" $ do
-                let expr = ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (ELit (LInt 1)))
-                pipelineSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
-                forM_ ["runPipelineElabProjectionFirst", "runPipelineElabViaLegacySolve"] $ \needle ->
-                    pipelineSrc `shouldSatisfy` (not . isInfixOf needle)
-                case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
-                    Left err -> expectationFailure (renderPipelineError err)
-                    Right (_termUnchecked, tyUnchecked) ->
-                        case runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr) of
-                            Left err -> expectationFailure (renderPipelineError err)
-                            Right (_termChecked, tyChecked) -> tyUnchecked `shouldBe` tyChecked
+            it "production entrypoint remains checked-authoritative on representative corpus" $ do
+                forM_ representativeMigrationCorpus assertCheckedAuthoritative
 
-        it "production src tree has no MLF.Constraint.Solved imports in elaboration path" $ do
-            let elaborationPath =
-                    [ "src/MLF/Elab/Run.hs"
-                    , "src/MLF/Elab/Pipeline.hs"
-                    , "src-public/MLF/API.hs"
-                    , "src-public/MLF/Pipeline.hs"
-                    ]
-            forM_ elaborationPath $ \path -> do
-                src <- readFile path
-                src `shouldSatisfy` (not . isInfixOf "import MLF.Constraint.Solved")
-                src `shouldSatisfy` (not . isInfixOf "import qualified MLF.Constraint.Solved")
-
-        it "pipeline path can construct elaboration inputs without solved builder" $ do
-            pipelineSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
-            pipelineSrc `shouldSatisfy` (not . isInfixOf "runPipelineElabWithSolvedBuilder")
-
-        it "pipeline no longer defines buildSolvedFromPresolutionSnapshot" $ do
-            pipelineSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
-            pipelineSrc `shouldSatisfy` (not . isInfixOf "buildSolvedFromPresolutionSnapshot")
-
-        it "generalize env derives canonical constraint from PresolutionView" $ do
-            generalizeSrc <- readFile "src/MLF/Elab/Run/Generalize.hs"
-            generalizeSrc `shouldSatisfy` (isInfixOf "pvCanonicalConstraint")
-            generalizeSrc `shouldSatisfy` (isInfixOf "pvCanonical")
-
-        it "result-type context no longer stores rtcSolved" $ do
-            resultTypeTypesSrc <- readFile "src/MLF/Elab/Run/ResultType/Types.hs"
-            resultTypeTypesSrc `shouldSatisfy` (not . isInfixOf "rtcSolved")
-
-        it "runtime run-path avoids solved-projection and result-type context boundary adapters" $ do
-            pipelineSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
-            resultTypeSrc <- readFile "src/MLF/Elab/Run/ResultType.hs"
-            annSrc <- readFile "src/MLF/Elab/Run/ResultType/Ann.hs"
-            fallbackSrc <- readFile "src/MLF/Elab/Run/ResultType/Fallback.hs"
-            forM_ [pipelineSrc, resultTypeSrc, annSrc, fallbackSrc] $ \src ->
-                src `shouldSatisfy` (not . isInfixOf "ResultTypeContext")
+            it "runtime callgraph forbids legacy snapshot APIs in production run-path modules" $ do
+                runModules <- loadRunPathModules
+                let productionModules =
+                        reachableRunPathModules runModules ["MLF.Elab.Run.Pipeline"]
+                    forbiddenApis =
+                        [ "Solved.fromPreRewriteState"
+                        , "solveResultFromSnapshot"
+                        ]
+                    offenders =
+                        sort
+                            [ (rmPath modSrc, api)
+                            | modSrc <- productionModules
+                            , api <- forbiddenApis
+                            , api `isInfixOf` rmSource modSrc
+                            ]
+                when (null productionModules) $
+                    expectationFailure "Runtime callgraph guard found no production run-path modules"
+                unless (null offenders) $
+                    expectationFailure
+                        ( "Forbidden runtime API usage in production run-path callgraph:\n"
+                            ++ unlines
+                                [ path ++ " uses " ++ api
+                                | (path, api) <- offenders
+                                ]
+                        )
 
         it "shared solved-to-presolution adapter matches selected solved queries on representative corpus" $ do
             let corpus =
@@ -362,8 +284,6 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             expectedNative <- requireRight
                 (Solved.fromPreRewriteState (snapshotUnionFind pres) (snapshotConstraint pres))
             paSolved artifacts `shouldBe` expectedNative
-            pipelineSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
-            pipelineSrc `shouldSatisfy` (not . isInfixOf "rewriteConstraintWithUF")
             runPipelineElab Set.empty (unsafeNormalizeExpr (ELam "x" (EVar "x")))
                 `shouldSatisfy` isRight
 
@@ -1166,6 +1086,155 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     -- But none of them appear in the expansion map
                     IntSet.intersection letEdgeIds expansionKeys
                         `shouldBe` IntSet.empty
+
+representativeMigrationCorpus :: [SurfaceExpr]
+representativeMigrationCorpus =
+    [ ELam "x" (EVar "x")
+    , ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (ELit (LInt 1)))
+    , ELet "id" (ELam "x" (EVar "x"))
+        (ELet "a" (EApp (EVar "id") (ELit (LInt 1)))
+            (EApp (EVar "id") (ELit (LBool True))))
+    , EAnn (ELam "x" (EVar "x"))
+        (STForall "a" Nothing (STArrow (STVar "a") (STVar "a")))
+    ]
+
+assertCheckedAuthoritative :: SurfaceExpr -> Expectation
+assertCheckedAuthoritative expr =
+    case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
+        Left err -> expectationFailure (renderPipelineError err)
+        Right (termUnchecked, tyUnchecked) -> do
+            typeCheck termUnchecked `shouldBe` Right tyUnchecked
+            case runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr) of
+                Left err -> expectationFailure (renderPipelineError err)
+                Right (termChecked, tyChecked) -> do
+                    typeCheck termChecked `shouldBe` Right tyChecked
+                    tyUnchecked `shouldBe` tyChecked
+
+assertViewParity :: PresolutionViewBoundary.PresolutionView -> Solved -> Expectation
+assertViewParity view legacy = do
+    let sharedLiveDomain =
+            IntSet.intersection
+                (liveNodeKeySet (pvConstraint view))
+                (liveNodeKeySet (Solved.originalConstraint legacy))
+    projectCanonicalMap sharedLiveDomain (pvCanonicalMap view)
+        `shouldBe` projectCanonicalMap sharedLiveDomain (Solved.canonicalMap legacy)
+    pvCanonicalConstraint view `shouldBe` Solved.canonicalConstraint legacy
+
+    let thesisNodes =
+            map fst
+                (toListNode (cNodes (pvConstraint view)))
+        legacyNodes =
+                map fst
+                (toListNode (cNodes (Solved.originalConstraint legacy)))
+        probeIds = nub (thesisNodes ++ legacyNodes ++ [NodeId 999, NodeId 1000])
+        probeRefs = map typeRef probeIds
+
+    forM_ probeIds $ \nid -> do
+        pvCanonical view nid `shouldBe` Solved.canonical legacy nid
+        pvLookupNode view nid `shouldBe` Solved.lookupNode legacy nid
+        pvLookupVarBound view nid `shouldBe` Solved.lookupVarBound legacy nid
+
+    forM_ probeRefs $ \ref ->
+        pvLookupBindParent view ref `shouldBe` Solved.lookupBindParent legacy ref
+
+projectCanonicalMap :: IntSet.IntSet -> IntMap.IntMap NodeId -> IntMap.IntMap NodeId
+projectCanonicalMap domain =
+    IntMap.filterWithKey keepInDomain
+  where
+    keepInDomain key rep =
+        IntSet.member key domain
+            && IntSet.member (nodeIdToKey rep) domain
+            && rep /= NodeId key
+
+liveNodeKeySet :: Constraint -> IntSet.IntSet
+liveNodeKeySet constraint =
+    IntSet.fromList
+        [ nodeIdToKey nid
+        | (nid, _) <- toListNode (cNodes constraint)
+        ]
+
+nodeIdToKey :: NodeId -> Int
+nodeIdToKey (NodeId k) = k
+
+data RunPathModule = RunPathModule
+    { rmName :: String
+    , rmPath :: FilePath
+    , rmImports :: [String]
+    , rmSource :: String
+    }
+
+loadRunPathModules :: IO [RunPathModule]
+loadRunPathModules = do
+    maybeModules <-
+        forM runPathModuleCatalog $ \(name, path) -> do
+            srcOrErr <- tryIOError (readFile path)
+            pure $ case srcOrErr of
+                Left _ -> Nothing
+                Right src ->
+                    Just
+                        RunPathModule
+                            { rmName = name
+                            , rmPath = path
+                            , rmImports = parseRunPathImports src
+                            , rmSource = src
+                            }
+    pure (catMaybes maybeModules)
+
+runPathModuleCatalog :: [(String, FilePath)]
+runPathModuleCatalog =
+    [ ("MLF.Elab.Run.Annotation", "src/MLF/Elab/Run/Annotation.hs")
+    , ("MLF.Elab.Run.Debug", "src/MLF/Elab/Run/Debug.hs")
+    , ("MLF.Elab.Run.Generalize", "src/MLF/Elab/Run/Generalize.hs")
+    , ("MLF.Elab.Run.Instantiation", "src/MLF/Elab/Run/Instantiation.hs")
+    , ("MLF.Elab.Run.Pipeline", "src/MLF/Elab/Run/Pipeline.hs")
+    , ("MLF.Elab.Run.PipelineBoundary", "src/MLF/Elab/Run/PipelineBoundary.hs")
+    , ("MLF.Elab.Run.Provenance", "src/MLF/Elab/Run/Provenance.hs")
+    , ("MLF.Elab.Run.ResultType", "src/MLF/Elab/Run/ResultType.hs")
+    , ("MLF.Elab.Run.Scope", "src/MLF/Elab/Run/Scope.hs")
+    , ("MLF.Elab.Run.TypeOps", "src/MLF/Elab/Run/TypeOps.hs")
+    , ("MLF.Elab.Run.Util", "src/MLF/Elab/Run/Util.hs")
+    ]
+
+reachableRunPathModules :: [RunPathModule] -> [String] -> [RunPathModule]
+reachableRunPathModules modules roots =
+    let moduleNames = map rmName modules
+        edges =
+            [ (rmName m, filter (`elem` moduleNames) (rmImports m))
+            | m <- modules
+            ]
+        reachableNames = go [] roots edges
+    in [ m | m <- modules, rmName m `elem` reachableNames ]
+  where
+    go seen [] _ = seen
+    go seen (m : queue) edges
+        | m `elem` seen = go seen queue edges
+        | otherwise =
+            let deps = maybe [] id (lookup m edges)
+            in go (m : seen) (deps ++ queue) edges
+
+parseRunPathImports :: String -> [String]
+parseRunPathImports src =
+    nub
+        [ moduleName
+        | line <- lines src
+        , let trimmed = dropWhile isSpace line
+        , "import " `isPrefixOf` trimmed
+        , moduleName <- maybe [] pure (parseImportedModule trimmed)
+        , "MLF.Elab.Run." `isPrefixOf` moduleName
+        ]
+
+parseImportedModule :: String -> Maybe String
+parseImportedModule line =
+    case words line of
+        ("import" : "qualified" : moduleName : _) ->
+            Just (cleanModuleToken moduleName)
+        ("import" : moduleName : _) ->
+            Just (cleanModuleToken moduleName)
+        _ -> Nothing
+
+cleanModuleToken :: String -> String
+cleanModuleToken =
+    takeWhile (\c -> c /= '(' && c /= '\r')
 
 
 annNodeOccurrences :: AnnExpr -> [NodeId]

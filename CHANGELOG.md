@@ -3,8 +3,19 @@
 ## Unreleased
 
 ### Changed
+- Runtime replay/mediation removal follow-up (2026-03-03):
+  - fixed shared replay-free finalization semantics by introducing
+    `Solve.finalizeConstraintWithUF` and routing `MLF.Constraint.Finalize`
+    through full snapshot-finalization steps (UF rewrite, eliminated-binder
+    rewrite/substitution, bind-parent pruning, strict validation);
+  - resolved post-cutover Phase 6 regressions (`PhiInvariantError` /
+    `PhiTranslatabilityError`) caused by missing eliminated-binder finalization
+    in the new runtime boundary;
+  - aligned migration guardrail canonical-map assertions to shared live-node
+    domain parity while keeping strict canonical-constraint and solved-query
+    parity checks.
 - Runtime thesis-exact elaboration-input closeout (2026-03-03):
-  - removed direct replay mediation calls from row-1 `Pipeline.hs` boundary wiring (`Solved.fromPreRewriteState`, `solveResultFromSnapshot`, `setSolvedConstraint`) and centralized snapshot finalization in `MLF.Elab.Run.PipelineBoundary`;
+  - removed direct replay mediation calls from row-1 `Pipeline.hs` boundary wiring (`Solved.fromPreRewriteState`, `solveResultFromSnapshot`, `setSolvedConstraint`) and centralized snapshot finalization in shared runtime constraint finalization helpers;
   - removed replay reconstruction from result-type context materialization (`rtcSolveLike`) by sourcing solved state from `PresolutionView` canonical data;
   - completed boundary wiring by removing `ecSolved` from `ElabConfig` and deriving internal solved access from `ElabEnv.eePresolutionView`;
   - added strict closeout regression slices with exact plan matchers:

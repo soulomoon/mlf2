@@ -1,0 +1,37 @@
+# Progress Log
+
+## 2026-03-03
+- Located implementation plan and loaded required skills (`using-superpowers`, `planning-with-files`, `codex-tmux-team`, `dispatching-parallel-agents`, `subagent-driven-development`, `test-driven-development`, `verification-before-completion`).
+- Audited runtime code and tests for replay/mediation dependencies and fragile guards.
+- Initialized task tracking files in `tasks/todo/2026-03-03-close-review-findings-runtime-replay-mediation-removal/`.
+- Set up tmux team scaffold via `/Users/ares/.codex/skills/public/codex-tmux-team/scripts/setup_codex_team_tmux.sh` with session `mlf4-close-review` and 5 members.
+- Dispatched 3 worker agents with non-overlapping ownership:
+  - runtime finalization + pipeline cutover
+  - result-type validation + ElaborationSpec migration guard updates
+  - PipelineSpec semantic guard hardening + callgraph forbidden-API guard
+- Collected worker outputs and closed all worker agents.
+- Current workspace delta after round:
+  - modified: `mlf2.cabal`, `src/MLF/Elab/Run/Pipeline.hs`, `src/MLF/Elab/Run/ResultType/Types.hs`, `test/ElaborationSpec.hs`, `test/PipelineSpec.hs`
+  - added: `src/MLF/Constraint/Finalize.hs`
+  - deleted: `src/MLF/Elab/Run/PipelineBoundary.hs`
+- Open blocker captured for next round: migration guardrail canonical-map mismatch between thesis-core and legacy artifacts.
+- Continued execution for blocker closure:
+  - located plan source at `docs/plans/2026-03-03-close-review-findings-runtime-replay-mediation-removal-agent-team-plan.md`;
+  - reloaded required process skills (`using-superpowers`, `codex-tmux-team`, `systematic-debugging`, `test-driven-development`).
+- Reproduced blocker and gathered diagnostics:
+  - `cabal test ... --match "migration guardrail: thesis-core boundary matches legacy outcome"` failed with legacy canonical map populated vs thesis-core empty;
+  - GHCI artifact comparison showed canonical constraints matched while legacy canonical-map entries were eliminated-node-only (non-live keys).
+- Ran codex-tmux-team setup for continuation round:
+  - created session `mlf4-close-review-r3` with members `lead`, `diagnostics`, `fixer` using `/Users/ares/.codex/skills/public/codex-tmux-team/scripts/setup_codex_team.sh`;
+  - verified pane count/titles and `codex` running in all panes.
+- Implemented guardrail fix:
+  - updated `test/PipelineSpec.hs` parity assertion to compare canonical maps on shared live-node domain while preserving strict canonical-constraint + solved-query parity checks.
+- Detected and fixed runtime regression revealed by broader gate:
+  - `Phase 6 — Elaborate` initially failed with 9 regressions (`PhiInvariantError`/`PhiTranslatabilityError`);
+  - introduced `Solve.finalizeConstraintWithUF` and routed `MLF.Constraint.Finalize` through full snapshot finalization semantics (including eliminated-binder rewrite/substitution and bind-parent pruning), restoring Phase 6 behavior.
+- Documentation/tracker updates:
+  - updated `implementation_notes.md` and `CHANGELOG.md` with runtime-finalization follow-up details;
+  - added resolved entry `BUG-2026-03-03-001` to `Bugs.md`.
+- Verification:
+  - targeted slices: `migration guardrail`, `Dual-path verification`, `Phase 6 — Elaborate` all PASS;
+  - full gate: `cabal build all && cabal test` PASS.

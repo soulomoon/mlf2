@@ -1,0 +1,98 @@
+module MLF.Constraint.Finalize (
+    stepSanitizeSnapshotUf,
+    stepCanonicalizeConstraint,
+    stepSolvedFromPresolutionView,
+    stepPruneSolvedBindParents,
+    stepValidateSolvedStrict,
+    presolutionViewFromSnapshot,
+    finalizeSolvedFromSnapshot,
+    finalizeSolvedForConstraint
+) where
+
+import Data.IntMap.Strict (IntMap)
+import qualified Data.IntMap.Strict as IntMap
+
+import qualified MLF.Binding.Tree as Binding
+import MLF.Constraint.Presolution.View (PresolutionView(..), fromPresolutionResult)
+import MLF.Constraint.Solve (SolveError, SolveResult(..))
+import qualified MLF.Constraint.Solve as Solve
+import qualified MLF.Constraint.Solved as Solved
+import MLF.Constraint.Types (Constraint, NodeId(..), cNodes, lookupNodeIn)
+import MLF.Constraint.Types.Presolution (PresolutionSnapshot(..))
+
+stepSanitizeSnapshotUf :: Constraint -> IntMap NodeId -> IntMap NodeId
+stepSanitizeSnapshotUf constraint =
+    IntMap.mapMaybeWithKey keepLive
+  where
+    isLive nid = case lookupNodeIn (cNodes constraint) nid of
+        Just _ -> True
+        Nothing -> False
+
+    keepLive key rep =
+        let keyNode = NodeId key
+        in if isLive keyNode && isLive rep && keyNode /= rep
+            then Just rep
+            else Nothing
+
+stepCanonicalizeConstraint :: Constraint -> IntMap NodeId -> Constraint
+stepCanonicalizeConstraint constraint uf =
+    let ufSanitized = stepSanitizeSnapshotUf constraint uf
+    in Solve.repairNonUpperParents (Solve.rewriteConstraintWithUF ufSanitized constraint)
+
+data FinalizeSnapshot = FinalizeSnapshot
+    { fsConstraint :: Constraint
+    , fsUnionFind :: IntMap NodeId
+    }
+
+instance PresolutionSnapshot FinalizeSnapshot where
+    snapshotConstraint = fsConstraint
+    snapshotUnionFind = fsUnionFind
+
+presolutionViewFromSnapshot :: Constraint -> IntMap NodeId -> PresolutionView
+presolutionViewFromSnapshot constraint uf =
+    fromPresolutionResult
+        FinalizeSnapshot
+            { fsConstraint = constraint
+            , fsUnionFind = uf
+            }
+
+stepSolvedFromPresolutionView :: PresolutionView -> Solved.Solved
+stepSolvedFromPresolutionView presolutionView =
+    let constraint = pvConstraint presolutionView
+        canonicalMap = pvCanonicalMap presolutionView
+        canonicalConstraint = stepCanonicalizeConstraint constraint canonicalMap
+        solved0 = Solved.fromConstraintAndUf constraint canonicalMap
+    in Solved.rebuildWithConstraint solved0 canonicalConstraint
+
+stepPruneSolvedBindParents :: Solved.Solved -> Solved.Solved
+stepPruneSolvedBindParents = Solved.pruneBindParentsSolved
+
+stepValidateSolvedStrict :: Solved.Solved -> Either SolveError Solved.Solved
+stepValidateSolvedStrict solved =
+    case Binding.checkBindingTree (Solved.canonicalConstraint solved) of
+        Left err -> Left (Solve.BindingTreeError err)
+        Right () ->
+            case Solved.validateCanonicalGraphStrict solved of
+                [] -> Right solved
+                violations -> Left (Solve.ValidationFailed violations)
+
+finalizeSolvedFromSnapshot :: Constraint -> IntMap NodeId -> Either SolveError Solved.Solved
+finalizeSolvedFromSnapshot constraint uf =
+    let ufSanitized = stepSanitizeSnapshotUf constraint uf
+    in do
+        SolveResult{ srConstraint = canonicalConstraint, srUnionFind = ufFinal } <-
+            Solve.finalizeConstraintWithUF ufSanitized constraint
+        let solved0 = Solved.fromConstraintAndUf constraint ufFinal
+            solved1 = Solved.rebuildWithConstraint solved0 canonicalConstraint
+            solved2 = stepPruneSolvedBindParents solved1
+        stepValidateSolvedStrict solved2
+
+finalizeSolvedForConstraint :: Solved.Solved -> Constraint -> Either SolveError Solved.Solved
+finalizeSolvedForConstraint solved constraint =
+    let uf = Solved.canonicalMap solved
+    in do
+        SolveResult{ srConstraint = canonicalConstraint } <-
+            Solve.finalizeConstraintWithUF uf constraint
+        let solved0 = Solved.rebuildWithConstraint solved canonicalConstraint
+            solved1 = stepPruneSolvedBindParents solved0
+        stepValidateSolvedStrict solved1

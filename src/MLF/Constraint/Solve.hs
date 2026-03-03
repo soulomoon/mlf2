@@ -132,6 +132,7 @@ module MLF.Constraint.Solve (
     solveUnify,
     solveUnifyWithSnapshot,
     solveResultFromSnapshot,
+    finalizeConstraintWithUF,
     validateSolvedGraph,
     validateSolvedGraphStrict,
     rewriteConstraintWithUF,
@@ -210,6 +211,12 @@ solveUnify traceCfg c0 = soResult <$> solveUnifyWithSnapshot traceCfg c0
 -- This keeps snapshot-driven consumers independent of `soResult.srConstraint`.
 solveResultFromSnapshot :: SolveSnapshot -> Either SolveError SolveResult
 solveResultFromSnapshot SolveSnapshot { snapUnionFind = uf, snapPreRewriteConstraint = preRewrite } = do
+    finalizeConstraintWithUF uf preRewrite
+
+-- | Apply snapshot finalization steps to a pre-rewrite constraint and
+-- union-find map without running unification.
+finalizeConstraintWithUF :: IntMap NodeId -> Constraint -> Either SolveError SolveResult
+finalizeConstraintWithUF uf preRewrite = do
     let c' = rewriteConstraintWithUF uf preRewrite
     (c'', elimSubst) <- case rewriteEliminatedBinders c' of
         Left err -> Left (BindingTreeError err)

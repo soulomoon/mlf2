@@ -14,18 +14,16 @@ import MLF.Frontend.ConstraintGen (AnnExpr(..), ConstraintError, ConstraintResul
 import MLF.Constraint.Normalize (normalize)
 import MLF.Constraint.Acyclicity (checkAcyclicity)
 import MLF.Constraint.Canonicalizer (canonicalizeNode)
+import qualified MLF.Constraint.Finalize as Finalize
 import MLF.Constraint.Presolution
     ( PresolutionResult(..)
-    , PresolutionView(..)
     , computePresolution
     , EdgeTrace(..)
-    , fromPresolutionResult
     )
-import MLF.Constraint.Presolution.View (fromSolved)
-import qualified MLF.Constraint.Solve as Solve
+import MLF.Constraint.Presolution.View (PresolutionView(..), fromSolved)
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types.Graph (PolySyms)
-import MLF.Constraint.Types (Constraint, NodeId(..), cNodes, lookupNodeIn)
+import MLF.Constraint.Types (cNodes, lookupNodeIn)
 import MLF.Constraint.Types.Presolution (PresolutionSnapshot(..))
 import MLF.Elab.Elaborate (ElabConfig(..), ElabEnv(..), elaborateWithEnv)
 import MLF.Elab.PipelineConfig (PipelineConfig(..), defaultPipelineConfig)
@@ -50,7 +48,6 @@ import MLF.Elab.Run.Generalize
 import MLF.Elab.Run.Provenance (buildTraceCopyMap, collectBaseNamedKeys)
 import MLF.Elab.Run.Scope (letScopeOverrides)
 import MLF.Elab.Run.Scope (resolveCanonicalScope, schemeBodyTarget)
-import qualified MLF.Elab.Run.PipelineBoundary as PipelineBoundary
 import MLF.Elab.Run.Util
     ( canonicalizeExpansion
     , canonicalizeTrace
@@ -88,162 +85,119 @@ runPipelineElabWith traceCfg genConstraints expr = do
     let planBuilder = prPlanBuilder pres
         generalizeAtWith = generalizeAtWithBuilder planBuilder
         preRewrite = snapshotConstraint pres
-        uf = PipelineBoundary.sanitizeSnapshotUf preRewrite (snapshotUnionFind pres)
-        _boundaryContractView = presolutionViewFromConstraintAndUf preRewrite uf
-    solvedView <- fromSolveError (PipelineBoundary.solvedFromSnapshotReplay preRewrite uf)
-    let solvedClean = Solved.pruneBindParentsSolved solvedView
-        presolutionViewClean = fromSolved solvedClean
-    case Solved.validateCanonicalGraphStrict solvedClean of
-        [] -> do
-            let canonNode = makeCanonicalizer (Solved.canonicalMap solvedClean) (prRedirects pres)
-                adoptNode = canonicalizeNode canonNode
-                baseNodes = cNodes c1
-                edgeTracesForCopy =
-                    IntMap.filter
-                        (\tr ->
-                            case lookupNodeIn baseNodes (etRoot tr) of
-                                Just _ -> True
-                                Nothing -> False
-                        )
-                        (prEdgeTraces pres)
-                instCopyNodes =
-                    instantiationCopyNodes presolutionViewClean (prRedirects pres) edgeTracesForCopy
-                instCopyMapFull =
-                    let baseNamedKeysAll = collectBaseNamedKeys c1
-                        traceMaps = map (buildTraceCopyMap c1 baseNamedKeysAll adoptNode)
-                                         (IntMap.elems edgeTracesForCopy)
-                    in foldl' IntMap.union IntMap.empty traceMaps
-                (constraintForGen, bindParentsGa) =
-                    constraintForGeneralization traceCfg presolutionViewClean (prRedirects pres) instCopyNodes instCopyMapFull c1 ann
-                _boundaryContractSolved =
-                    solvedFromConstraintWithCanonicalMap
-                        (Solved.canonicalMap solvedClean)
-                        constraintForGen
-            solvedForGen <- fromSolveError (PipelineBoundary.rebuildSolvedForConstraint solvedClean constraintForGen)
-            case Solved.validateCanonicalGraphStrict solvedForGen of
-                [] -> do
-                    let presolutionViewForGen =
-                            fromSolved solvedForGen
-                    let ann' = applyRedirectsToAnn (prRedirects pres) ann
-                    let annCanon = canonicalizeAnn (canonicalizeNode canonNode) ann'
-                    let edgeWitnesses = IntMap.map (canonicalizeWitness canonNode) (prEdgeWitnesses pres)
-                        edgeTraces = IntMap.map (canonicalizeTrace canonNode) (prEdgeTraces pres)
-                        edgeExpansions = IntMap.map (canonicalizeExpansion canonNode) (prEdgeExpansions pres)
-                    let scopeOverrides =
-                            letScopeOverrides
-                                c1
-                                (Solved.originalConstraint solvedForGen)
-                                solvedClean
-                                (prRedirects pres)
-                                annCanon
-                    let elabConfig = ElabConfig
-                            { ecTraceConfig = traceCfg
-                            , ecGeneralizeAtWith = generalizeAtWith
-                            }
-                        elabEnv = ElabEnv
-                            { eePresolutionView = presolutionViewForGen
-                            , eeGaParents = bindParentsGa
-                            , eeEdgeWitnesses = edgeWitnesses
-                            , eeEdgeTraces = edgeTraces
-                            , eeEdgeExpansions = edgeExpansions
-                            , eeScopeOverrides = scopeOverrides
-                            }
-                    term <- fromElabError (elaborateWithEnv elabConfig elabEnv annCanon)
-                    case traceGeneralize traceCfg ("pipeline elaborated term=" ++ show term) () of
-                        () -> pure ()
-                    rootScope <- fromElabError $
-                        bindingToElab $
-                            resolveCanonicalScope c1 solvedForGen (prRedirects pres) (annNode ann)
-                    let rootTarget = schemeBodyTarget solvedForGen (annNode annCanon)
-                    let generalizeNeedsFallback err = case err of
-                            SchemeFreeVars{} -> True
-                            _ -> False
-                    (rootScheme, rootSubst) <- fromElabError $
-                        case generalizeAtWith (Just bindParentsGa) solvedForGen rootScope rootTarget of
-                            Right out -> Right out
-                            Left err
-                                | generalizeNeedsFallback err ->
-                                    case generalizeAtWith Nothing solvedForGen rootScope rootTarget of
-                                        Right out -> Right out
-                                        Left err2
-                                            | generalizeNeedsFallback err2 -> do
-                                                tyFallback <- reifyType solvedForGen rootTarget
-                                                pure (schemeFromType tyFallback, IntMap.empty)
-                                        Left err2 -> Left err2
-                            Left err -> Left err
-                    let termSubst = substInTerm rootSubst term
-                        termClosed =
-                            case typeCheck termSubst of
-                                Right ty | null (freeTypeVarsType ty) -> termSubst
-                                Right ty ->
-                                    case rootScheme of
-                                        Forall binds _
-                                            | null binds ->
-                                                let freeBinds =
-                                                        [ (name, Nothing)
-                                                        | name <- Set.toList (freeTypeVarsType ty)
-                                                        ]
-                                                    freeScheme = Forall freeBinds ty
-                                                in closeTermWithSchemeSubst IntMap.empty freeScheme termSubst
-                                        _ -> closeTermWithSchemeSubst rootSubst rootScheme term
-                                Left _ -> closeTermWithSchemeSubst rootSubst rootScheme term
-                    let checkedAuthoritative = do
-                            tyChecked <- fromTypeCheckError (typeCheck termClosed)
-                            pure (termClosed, tyChecked)
+    solvedClean <- fromSolveError (Finalize.finalizeSolvedFromSnapshot preRewrite (snapshotUnionFind pres))
+    let presolutionViewClean = fromSolved solvedClean
+    let canonNode = makeCanonicalizer (Solved.canonicalMap solvedClean) (prRedirects pres)
+        adoptNode = canonicalizeNode canonNode
+        baseNodes = cNodes c1
+        edgeTracesForCopy =
+            IntMap.filter
+                (\tr ->
+                    case lookupNodeIn baseNodes (etRoot tr) of
+                        Just _ -> True
+                        Nothing -> False
+                )
+                (prEdgeTraces pres)
+        instCopyNodes =
+            instantiationCopyNodes presolutionViewClean (prRedirects pres) edgeTracesForCopy
+        instCopyMapFull =
+            let baseNamedKeysAll = collectBaseNamedKeys c1
+                traceMaps = map (buildTraceCopyMap c1 baseNamedKeysAll adoptNode)
+                                 (IntMap.elems edgeTracesForCopy)
+            in foldl' IntMap.union IntMap.empty traceMaps
+        (constraintForGen, bindParentsGa) =
+            constraintForGeneralization traceCfg presolutionViewClean (prRedirects pres) instCopyNodes instCopyMapFull c1 ann
+    solvedForGen <- fromSolveError (Finalize.finalizeSolvedForConstraint solvedClean constraintForGen)
+    let presolutionViewForGen =
+            fromSolved solvedForGen
+    let ann' = applyRedirectsToAnn (prRedirects pres) ann
+    let annCanon = canonicalizeAnn (canonicalizeNode canonNode) ann'
+    let edgeWitnesses = IntMap.map (canonicalizeWitness canonNode) (prEdgeWitnesses pres)
+        edgeTraces = IntMap.map (canonicalizeTrace canonNode) (prEdgeTraces pres)
+        edgeExpansions = IntMap.map (canonicalizeExpansion canonNode) (prEdgeExpansions pres)
+    let scopeOverrides =
+            letScopeOverrides
+                c1
+                (Solved.originalConstraint solvedForGen)
+                solvedClean
+                (prRedirects pres)
+                annCanon
+    let elabConfig = ElabConfig
+            { ecTraceConfig = traceCfg
+            , ecGeneralizeAtWith = generalizeAtWith
+            }
+        elabEnv = ElabEnv
+            { eePresolutionView = presolutionViewForGen
+            , eeGaParents = bindParentsGa
+            , eeEdgeWitnesses = edgeWitnesses
+            , eeEdgeTraces = edgeTraces
+            , eeEdgeExpansions = edgeExpansions
+            , eeScopeOverrides = scopeOverrides
+            }
+    term <- fromElabError (elaborateWithEnv elabConfig elabEnv annCanon)
+    case traceGeneralize traceCfg ("pipeline elaborated term=" ++ show term) () of
+        () -> pure ()
+    rootScope <- fromElabError $
+        bindingToElab $
+            resolveCanonicalScope c1 solvedForGen (prRedirects pres) (annNode ann)
+    let rootTarget = schemeBodyTarget solvedForGen (annNode annCanon)
+    let generalizeNeedsFallback err = case err of
+            SchemeFreeVars{} -> True
+            _ -> False
+    (rootScheme, rootSubst) <- fromElabError $
+        case generalizeAtWith (Just bindParentsGa) solvedForGen rootScope rootTarget of
+            Right out -> Right out
+            Left err
+                | generalizeNeedsFallback err ->
+                    case generalizeAtWith Nothing solvedForGen rootScope rootTarget of
+                        Right out -> Right out
+                        Left err2
+                            | generalizeNeedsFallback err2 -> do
+                                tyFallback <- reifyType solvedForGen rootTarget
+                                pure (schemeFromType tyFallback, IntMap.empty)
+                        Left err2 -> Left err2
+            Left err -> Left err
+    let termSubst = substInTerm rootSubst term
+        termClosed =
+            case typeCheck termSubst of
+                Right ty | null (freeTypeVarsType ty) -> termSubst
+                Right ty ->
+                    case rootScheme of
+                        Forall binds _
+                            | null binds ->
+                                let freeBinds =
+                                        [ (name, Nothing)
+                                        | name <- Set.toList (freeTypeVarsType ty)
+                                        ]
+                                    freeScheme = Forall freeBinds ty
+                                in closeTermWithSchemeSubst IntMap.empty freeScheme termSubst
+                        _ -> closeTermWithSchemeSubst rootSubst rootScheme term
+                Left _ -> closeTermWithSchemeSubst rootSubst rootScheme term
+    let checkedAuthoritative = do
+            tyChecked <- fromTypeCheckError (typeCheck termClosed)
+            pure (termClosed, tyChecked)
 
-                    -- Build context for result type computation
-                    let canonical = pvCanonical presolutionViewForGen
-                        resultTypeInputs = ResultTypeInputs
-                            { rtcCanonical = canonical
-                            , rtcEdgeWitnesses = edgeWitnesses
-                            , rtcEdgeTraces = edgeTraces
-                            , rtcEdgeExpansions = edgeExpansions
-                            , rtcPresolutionView = presolutionViewForGen
-                            , rtcBindParentsGa = bindParentsGa
-                            , rtcPlanBuilder = planBuilder
-                            , rtcBaseConstraint = c1
-                            , rtcRedirects = prRedirects pres
-                            , rtcTraceConfig = traceCfg
-                            }
-
-                    -- Keep result-type reconstruction for diagnostics, but report the
-                    -- type-checker result as authoritative.
-                    case annCanon of
-                        AAnn inner annNodeId eid -> do
-                            _ <- fromElabError (computeResultTypeFromAnn resultTypeInputs inner inner annNodeId eid)
-                            checkedAuthoritative
-                        _ -> do
-                            _ <- fromElabError (computeResultTypeFallback resultTypeInputs annCanon ann)
-                            checkedAuthoritative
-                vs -> Left (PipelineSolveError (Solve.ValidationFailed vs))
-        vs -> Left (PipelineSolveError (Solve.ValidationFailed vs))
-
-data BoundarySnapshot = BoundarySnapshot
-    { bsConstraint :: Constraint
-    , bsUnionFind :: IntMap.IntMap NodeId
-    }
-
-instance PresolutionSnapshot BoundarySnapshot where
-    snapshotConstraint = bsConstraint
-    snapshotUnionFind = bsUnionFind
-
-presolutionViewFromConstraintAndUf :: Constraint -> IntMap.IntMap NodeId -> PresolutionView
-presolutionViewFromConstraintAndUf constraint uf =
-    fromPresolutionResult
-        BoundarySnapshot
-            { bsConstraint = constraint
-            , bsUnionFind = uf
+    -- Build context for result type computation
+    let canonical = pvCanonical presolutionViewForGen
+        resultTypeInputs = ResultTypeInputs
+            { rtcCanonical = canonical
+            , rtcEdgeWitnesses = edgeWitnesses
+            , rtcEdgeTraces = edgeTraces
+            , rtcEdgeExpansions = edgeExpansions
+            , rtcPresolutionView = presolutionViewForGen
+            , rtcBindParentsGa = bindParentsGa
+            , rtcPlanBuilder = planBuilder
+            , rtcBaseConstraint = c1
+            , rtcRedirects = prRedirects pres
+            , rtcTraceConfig = traceCfg
             }
 
-solvedFromPresolutionView :: PresolutionView -> Solved.Solved
-solvedFromPresolutionView presolutionView =
-    let solved0 =
-            Solved.fromConstraintAndUf
-                (pvConstraint presolutionView)
-                (pvCanonicalMap presolutionView)
-    in Solved.rebuildWithConstraint solved0 (pvCanonicalConstraint presolutionView)
-
-solvedFromConstraintWithCanonicalMap :: IntMap.IntMap NodeId -> Constraint -> Solved.Solved
-solvedFromConstraintWithCanonicalMap canonicalMap constraint =
-    solvedFromPresolutionView
-        (presolutionViewFromConstraintAndUf constraint canonicalMap)
+    -- Keep result-type reconstruction for diagnostics, but report the
+    -- type-checker result as authoritative.
+    case annCanon of
+        AAnn inner annNodeId eid -> do
+            _ <- fromElabError (computeResultTypeFromAnn resultTypeInputs inner inner annNodeId eid)
+            checkedAuthoritative
+        _ -> do
+            _ <- fromElabError (computeResultTypeFallback resultTypeInputs annCanon ann)
+            checkedAuthoritative
