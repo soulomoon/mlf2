@@ -7,10 +7,12 @@ Update the `Elaboration input` row in `docs/notes/2026-02-27-transformation-mech
 - [completed] Locate authoritative thesis statements and current runtime code path.
 - [completed] Update the row text and references.
 - [completed] Validate consistency with related docs and capture session notes.
+- [completed] Re-audit active Elaborate → Φ call chain and refresh thesis-exact classification from current code.
 
 ## Decisions
 - Use thesis `papers/these-finale-english.txt` as primary source.
 - Keep update scoped to the single requested row unless mismatches require nearby clarifications.
+- Classify thesis-exactness from active runtime call signatures/usages, not only guard-string checks.
 
 ## Errors Encountered
 - None.

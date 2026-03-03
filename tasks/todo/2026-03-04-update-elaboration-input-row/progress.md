@@ -7,5 +7,6 @@
   - `src/MLF/Elab/Run/Pipeline.hs`
   - `src/MLF/Elab/Elaborate.hs`
   - `src/MLF/Elab/Phi/Translate.hs`
-- Patched the `Elaboration input` row to reflect boundary-`χp` alignment plus residual solved-compat active-path dependency.
-- Updated table source revision metadata to the reviewed head (`3b1256a`).
+- Re-audited active Elaborate → Φ call path and confirmed residual solved handoff at
+  `phiFromEdgeWitnessWithTrace ... (ChiQuery.chiSolved presolutionView)`.
+- Patched the `Elaboration input` row to reflect boundary `χp` alignment plus active solved-argument dependency in Φ translation; updated row classification to `Thesis-exact = No`.
