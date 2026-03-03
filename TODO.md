@@ -61,18 +61,42 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   3. Keep `row2 closeout guard`, `checked-authoritative`, and
      `Dual-path verification` slices in regular closeout verification.
 
-## Task 35 TMT elaboration-input thesis-exact closeout (planned)
+## Task 35 TMT elaboration-input thesis-exact closeout (completed 2026-03-04)
 
-- Goal:
-  - Make the **Elaboration input** row thesis-exact by removing the remaining
-    internal solved-adapter dependency in the active elaboration input path,
-    while preserving checked-authoritative behavior.
+- Completed:
+  - Added thesis-exact elaboration-input source guards and drove RED->GREEN
+    migration over Wave 0..3.
+  - Active elaboration input path now satisfies closeout guards:
+    - no active-path `ChiQuery.chiSolved` dependency in `elaborateWithEnv`;
+    - active Elaborate/Phi callback aliases avoid solved-typed
+      generalize-at input requirements.
+  - Checked-authoritative behavior remained unchanged on representative slices.
 - Plan/tracker:
   - `/Volumes/src/mlf4/docs/plans/2026-03-04-tmt-elaboration-input-thesis-exact-agent-team-implementation-plan.md`
   - `/Volumes/src/mlf4/tasks/todo/2026-03-04-tmt-elaboration-input-thesis-exact-agent-team/`
-- Execution model:
-  - Agent-team wave plan (A/B/C/D/E), strict TDD mini-cycles, merge gates,
-    and final gate `cabal build all && cabal test`.
+- Verification:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "elab-input thesis-exact guard"'`
+    - PASS (`2 examples, 0 failures`)
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "checked-authoritative"'`
+    - PASS (`8 examples, 0 failures`)
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Dual-path verification"'`
+    - PASS (`4 examples, 0 failures`)
+  - `cabal build all && cabal test`
+    - PASS (`931 examples, 0 failures`)
+
+## Task 36 Post-task35 compatibility cleanup (planned)
+
+- Goal:
+  - Reduce residual compatibility aliases in elaboration/result-type internals
+    where they are no longer active runtime requirements, without changing
+    checked-authoritative behavior.
+- Initial priorities:
+  1. Trim non-active `GeneralizeAtWithCompat` plumbing where active
+     `χp`-native signatures already carry runtime flow.
+  2. Reduce solved-overlay scaffolding in result-type view paths where direct
+     `PresolutionView` queries are equivalent.
+  3. Keep `elab-input thesis-exact guard`, `checked-authoritative`, and
+     `Dual-path verification` as mandatory closeout gates for each reduction.
 
 ## Task 31 χp-first elaboration/result-type internal cleanup (completed 2026-03-03)
 
