@@ -3,6 +3,18 @@
 ## Unreleased
 
 ### Changed
+- Chi-first elaboration/result-type internal cleanup (2026-03-03):
+  - added shared presolution query facade `MLF.Elab.Run.ChiQuery` and wired
+    elaboration/result-type internals to query `χp` through that facade;
+  - migrated result-type internals to chi-first reads (`ResultType.View`)
+    while confining solved compatibility to explicit boundary adapters
+    (`rtcSolvedCompat` / `rtcSolveLike`);
+  - migrated `elaborateWithEnv` to chi-first canonical/bound access and
+    removed ad hoc solved reconstruction in elaboration internals, retaining
+    only a narrowed compatibility adapter input (`eeSolvedCompat`);
+  - integrated explicit boundary construction via `mkResultTypeInputs` in
+    pipeline wiring and added gate-name regression checks for
+    `chi-first`/`ResultType`/`Phase 6 — Elaborate`/`Dual-path verification`.
 - Runtime replay/mediation removal follow-up (2026-03-03):
   - fixed shared replay-free finalization semantics by introducing
     `Solve.finalizeConstraintWithUF` and routing `MLF.Constraint.Finalize`

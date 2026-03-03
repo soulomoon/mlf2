@@ -4,6 +4,27 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 31 χp-first elaboration/result-type internal cleanup (completed 2026-03-03)
+
+- Completed:
+  - Added shared facade `MLF.Elab.Run.ChiQuery` for chi-first runtime queries.
+  - Migrated `MLF.Elab.Elaborate` and `MLF.Elab.Run.ResultType.*` internals to
+    prefer `PresolutionView` (`χp`) reads over internal solved reconstruction.
+  - Kept solved compatibility only at explicit boundary adapters:
+    `eeSolvedCompat` in `ElabEnv` and `rtcSolvedCompat`/`rtcSolveLike` in
+    result-type inputs.
+  - Wired pipeline boundary setup through `mkResultTypeInputs`.
+  - Added/updated regression guardrails for:
+    - `chi-first guard`
+    - `ResultType|Phase 6 — Elaborate|chi-first`
+    - `Phase 6 — Elaborate|ResultType|Dual-path verification`
+- Verification:
+  - Gate A: `cabal test mlf2-test --test-show-details=direct --test-options='--match "chi-first guard"'` -> PASS
+  - Gate B: `cabal test mlf2-test --test-show-details=direct --test-options='--match "ResultType|Phase 6 — Elaborate|chi-first"'` -> PASS
+  - Gate C: `cabal build all && cabal test` -> PASS (`923 examples, 0 failures`)
+- Archive:
+  - Task records in `tasks/archive/2026-03-03-chi-p-query-first-elab-resulttype-agent-team/`.
+
 ## Task 30 Reduce internal solved compatibility reads (completed 2026-03-03)
 
 - Completed:

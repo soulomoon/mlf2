@@ -2,6 +2,35 @@
 
 ## Thesis Alignment (Phase A–E)
 
+### 2026-03-03 Task 31 chi-first elaboration/result-type internal cleanup (Tasks 1-6 complete)
+- Completed the chi-first migration plan at
+  `docs/plans/2026-03-03-chi-p-query-first-elab-resulttype-agent-team-implementation-plan.md`
+  with wave gates green.
+- Added shared chi-query facade for elaboration/result-type internals:
+  - new `MLF.Elab.Run.ChiQuery` centralizes `PresolutionView` reads
+    (canonical, node lookup, var-bound lookup, bind-parent lookup, and
+    canonical-constraint access).
+- Result-type internals now prefer `χp` reads:
+  - `ResultType.View` routes runtime node/bound reads through `ChiQuery`,
+    retaining solved compatibility only in `rtcSolveLike` and bound-overlay
+    materialization needed by legacy helper signatures.
+- Elaborate internals now prefer `χp` reads:
+  - `ElabEnv` carries `eePresolutionView` plus narrowed `eeSolvedCompat`;
+  - `elaborateWithEnv` uses `ChiQuery` for canonicalization/boundary queries
+    and avoids local solved-from-constraint materialization.
+- Pipeline boundary integration:
+  - added `mkResultTypeInputs` and wired pipeline result-type/elaboration
+    setup through explicit compatibility inputs (`rtcSolvedCompat`,
+    `eeSolvedCompat`) instead of ad hoc internal reconstruction.
+- Guardrails and verification:
+  - source-level chi-first guard tests and phase-gate matcher aliases were
+    added in `PipelineSpec`/`ElaborationSpec`;
+  - Gate A: `--match "chi-first guard"` PASS;
+  - Gate B: `--match "ResultType|Phase 6 — Elaborate|chi-first"` PASS;
+  - Task 6 closeout slice:
+    `--match "Phase 6 — Elaborate|ResultType|Dual-path verification"` PASS;
+  - Gate C: `cabal build all && cabal test` PASS (`923 examples, 0 failures`).
+
 ### 2026-03-03 Task 29 solved follow-up closure (Phases 1-6 complete)
 - Completed solved-boundary follow-ups from `TODO.md` with end-to-end green validation (`cabal build all && cabal test`: `913 examples, 0 failures`).
 - Consolidated solved-to-view projection at the presolution boundary:
