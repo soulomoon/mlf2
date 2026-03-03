@@ -308,6 +308,10 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 _ <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
                 pure ()
 
+        it "row1 closeout guard|checked-authoritative keeps representative corpus parity: ElabEnv no longer includes eeSolvedCompat" $ do
+            src <- readFile "src/MLF/Elab/Elaborate.hs"
+            isInfixOf "eeSolvedCompat ::" src `shouldBe` False
+
         it "chi-first Elaborate|Phase 6 guard: elaborate internals avoid local solved materialization" $ do
             src <- readFile "src/MLF/Elab/Elaborate.hs"
             src `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")

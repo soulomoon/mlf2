@@ -173,6 +173,10 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             src <- readFile "src/MLF/Elab/Elaborate.hs"
             src `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
 
+        it "row1 closeout guard|checked-authoritative keeps representative corpus parity: elaborateWithEnv has no entry-time Solved.rebuildWithConstraint" $ do
+            src <- readFile "src/MLF/Elab/Elaborate.hs"
+            isInfixOf "solved = Solved.rebuildWithConstraint" src `shouldBe` False
+
         it "chi-first guard: internals use shared ChiQuery facade" $ do
             elabSrc <- readFile "src/MLF/Elab/Elaborate.hs"
             rtSrc <- readFile "src/MLF/Elab/Run/ResultType/Types.hs"
