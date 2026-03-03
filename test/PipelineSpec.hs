@@ -176,6 +176,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         it "elab-input thesis-exact guard: Elaborate active input path does not materialize chiSolved" $ do
             src <- readFile "src/MLF/Elab/Elaborate.hs"
             isInfixOf "solved = ChiQuery.chiSolved presolutionView" src `shouldBe` False
+            isInfixOf "chiSolvedCompat presolutionView" src `shouldBe` False
 
         it "row1 closeout guard|checked-authoritative keeps representative corpus parity: elaborateWithEnv has no entry-time Solved.rebuildWithConstraint" $ do
             src <- readFile "src/MLF/Elab/Elaborate.hs"
