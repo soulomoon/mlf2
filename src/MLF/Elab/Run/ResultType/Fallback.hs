@@ -176,7 +176,7 @@ computeResultTypeFallbackCore ctx annCanon ann = do
         c1 = View.rtvBaseConstraint viewBase
         redirects = View.rtvRedirects viewBase
         traceCfg = View.rtvTraceConfig viewBase
-        generalizeAtWith = \mbGa _solved ->
+        generalizeAtWith mbGa =
             generalizeAtWithBuilderView planBuilder mbGa presolutionView
 
     let edgeTraceCounts =

@@ -81,7 +81,7 @@ computeResultTypeFromAnn ctx inner innerPre annNodeId eid = do
         c1 = View.rtvBaseConstraint view
         redirects = View.rtvRedirects view
         traceCfg = View.rtvTraceConfig view
-        generalizeAtWith = \mbGa _solved ->
+        generalizeAtWith mbGa =
             generalizeAtWithBuilderView planBuilder mbGa presolutionViewForGen
 
     let rootPre = annNode inner
