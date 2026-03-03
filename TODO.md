@@ -31,6 +31,10 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - Retire remaining result-type compatibility adapters
     (`rtcSolvedCompat`/`rtcSolveLike`) without changing checked-authoritative
     output behavior.
+- Plan:
+  - `/Volumes/src/mlf4/docs/plans/2026-03-04-tmt-row2-resulttype-adapter-retirement-agent-team-implementation-plan.md`
+- Task tracker:
+  - `/Volumes/src/mlf4/tasks/todo/2026-03-04-tmt-row2-resulttype-adapter-retirement-agent-team/`
 - Ordered next steps:
   1. Move bound-overlay/materialization in `ResultType.View` to `χp`-native
      reads and overlays.
