@@ -185,6 +185,20 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         it "chi-first ResultType|checked-authoritative keeps representative corpus parity" $ do
             forM_ representativeMigrationCorpus assertCheckedAuthoritative
 
+        it "Pipeline \\(Phases 1-5\\)|Dual-path verification|chi-first integration keeps boundary wiring explicit" $ do
+            elabSrc <- readFile "src/MLF/Elab/Elaborate.hs"
+            rtSrc <- readFile "src/MLF/Elab/Run/ResultType/Types.hs"
+            pipelineSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
+            elabSrc `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
+            rtSrc `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
+            pipelineSrc `shouldSatisfy` isInfixOf "mkResultTypeInputs"
+
+        it "chi-first integration: pipeline run path has no internal solved materialization in Elaborate/ResultType" $ do
+            elabSrc <- readFile "src/MLF/Elab/Elaborate.hs"
+            rtSrc <- readFile "src/MLF/Elab/Run/ResultType/Types.hs"
+            elabSrc `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
+            rtSrc `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
+
         it "migration guardrail: thesis-core boundary matches legacy outcome" $ do
             forM_ representativeMigrationCorpus $ \expr -> do
                 artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)

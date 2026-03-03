@@ -54,7 +54,7 @@ import MLF.Elab.Run.Util
     , canonicalizeWitness
     , makeCanonicalizer
     )
-import MLF.Elab.Run.ResultType (ResultTypeInputs(..), computeResultTypeFromAnn, computeResultTypeFallback)
+import MLF.Elab.Run.ResultType (mkResultTypeInputs, computeResultTypeFromAnn, computeResultTypeFallback)
 import MLF.Reify.Core (reifyType)
 import MLF.Reify.TypeOps (freeTypeVarsType)
 import MLF.Util.Trace (TraceConfig, traceGeneralize)
@@ -128,6 +128,7 @@ runPipelineElabWith traceCfg genConstraints expr = do
             }
         elabEnv = ElabEnv
             { eePresolutionView = presolutionViewForGen
+            , eeSolvedCompat = solvedForGen
             , eeGaParents = bindParentsGa
             , eeEdgeWitnesses = edgeWitnesses
             , eeEdgeTraces = edgeTraces
@@ -179,18 +180,19 @@ runPipelineElabWith traceCfg genConstraints expr = do
 
     -- Build context for result type computation
     let canonical = pvCanonical presolutionViewForGen
-        resultTypeInputs = ResultTypeInputs
-            { rtcCanonical = canonical
-            , rtcEdgeWitnesses = edgeWitnesses
-            , rtcEdgeTraces = edgeTraces
-            , rtcEdgeExpansions = edgeExpansions
-            , rtcPresolutionView = presolutionViewForGen
-            , rtcBindParentsGa = bindParentsGa
-            , rtcPlanBuilder = planBuilder
-            , rtcBaseConstraint = c1
-            , rtcRedirects = prRedirects pres
-            , rtcTraceConfig = traceCfg
-            }
+        resultTypeInputs =
+            mkResultTypeInputs
+                canonical
+                edgeWitnesses
+                edgeTraces
+                edgeExpansions
+                presolutionViewForGen
+                solvedForGen
+                bindParentsGa
+                planBuilder
+                c1
+                (prRedirects pres)
+                traceCfg
 
     -- Keep result-type reconstruction for diagnostics, but report the
     -- type-checker result as authoritative.
