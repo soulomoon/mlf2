@@ -5,7 +5,8 @@ module MLF.Elab.Run.ChiQuery (
     chiLookupBindParent,
     chiConstraint,
     chiCanonicalConstraint,
-    chiBindParents
+    chiBindParents,
+    chiCanonicalBindParents
 ) where
 
 import MLF.Constraint.Presolution (PresolutionView(..))
@@ -16,6 +17,7 @@ import MLF.Constraint.Types
     , NodeId
     , NodeRef
     , TyNode
+    , cBindParents
     )
 
 chiCanonical :: PresolutionView -> NodeId -> NodeId
@@ -38,3 +40,6 @@ chiCanonicalConstraint = pvCanonicalConstraint
 
 chiBindParents :: PresolutionView -> BindParents
 chiBindParents = pvBindParents
+
+chiCanonicalBindParents :: PresolutionView -> BindParents
+chiCanonicalBindParents = cBindParents . pvCanonicalConstraint

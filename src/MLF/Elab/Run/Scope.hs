@@ -15,7 +15,6 @@ import Data.Maybe (listToMaybe)
 
 import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Solved (Solved)
-import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types
     ( BindingError(..)
     , Constraint
@@ -27,8 +26,9 @@ import MLF.Constraint.Types
     , nodeRefKey
     , typeRef
     )
-import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Constraint.NodeAccess as NodeAccess
+import MLF.Constraint.Presolution.View (fromSolved)
+import qualified MLF.Elab.Run.ChiQuery as ChiQuery
 import MLF.Elab.Run.Util (chaseRedirects)
 import MLF.Frontend.ConstraintGen (AnnExpr(..))
 import MLF.Frontend.ConstraintGen.Types (AnnExprF(..))
@@ -75,7 +75,8 @@ bindingScopeRef constraint root = do
 -- 'Solved.canonicalBindParents'.
 bindingScopeRefCanonical :: Solved -> NodeId -> Either BindingError NodeRef
 bindingScopeRefCanonical solved root = do
-    path <- bindingPathToRootFromBindParents (Solved.canonicalBindParents solved) (typeRef root)
+    let presolutionView = fromSolved solved
+    path <- bindingPathToRootFromBindParents (ChiQuery.chiCanonicalBindParents presolutionView) (typeRef root)
     case listToMaybe [gid | GenRef gid <- drop 1 path] of
         Just gid -> Right (GenRef gid)
         Nothing -> Right (TypeRef root)
@@ -106,8 +107,9 @@ preferGenScope constraint ref = case ref of
 
 schemeBodyTarget :: Solved -> NodeId -> NodeId
 schemeBodyTarget solved target =
-    let constraint = Solved.originalConstraint solved
-        canonical = Solved.canonical solved
+    let presolutionView = fromSolved solved
+        constraint = ChiQuery.chiConstraint presolutionView
+        canonical = ChiQuery.chiCanonical presolutionView
         targetC = canonical target
         isSchemeRoot =
             any
@@ -119,19 +121,19 @@ schemeBodyTarget solved target =
                 [ (getNodeId (canonical bnd), root)
                 | gen <- NodeAccess.allGenNodes constraint
                 , root <- gnSchemes gen
-                , Just bnd <- [VarStore.lookupVarBound constraint root]
-                , case NodeAccess.lookupNode constraint (canonical bnd) of
+                , Just bnd <- [ChiQuery.chiLookupVarBound presolutionView root]
+                , case ChiQuery.chiLookupNode presolutionView (canonical bnd) of
                     Just TyBase{} -> False
                     Just TyBottom{} -> False
                     _ -> True
                 ]
-    in case NodeAccess.lookupNode constraint targetC of
+    in case ChiQuery.chiLookupNode presolutionView targetC of
         Just TyVar{ tnBound = Just bnd } ->
             let bndC = canonical bnd
                 boundIsSchemeBody = IntMap.member (getNodeId bndC) schemeRootByBody
             in if isSchemeRoot || boundIsSchemeBody
                 then
-                    case NodeAccess.lookupNode constraint bndC of
+                    case ChiQuery.chiLookupNode presolutionView bndC of
                         Just TyForall{ tnBody = body } -> canonical body
                         _ -> bndC
                 else targetC
@@ -168,7 +170,7 @@ canonicalizeScopeRef solved redirects scopeRef =
     case scopeRef of
         GenRef gid -> GenRef gid
         TypeRef nid ->
-            let canonical = Solved.canonical solved
+            let canonical = ChiQuery.chiCanonical (fromSolved solved)
             in TypeRef (canonical (chaseRedirects redirects nid))
 
 resolveCanonicalScope :: Constraint -> Solved -> IntMap.IntMap NodeId -> NodeId -> Either BindingError NodeRef
@@ -179,7 +181,7 @@ resolveCanonicalScope constraint solved redirects scopeRoot = do
 
 letScopeOverrides :: Constraint -> Constraint -> Solved -> IntMap.IntMap NodeId -> AnnExpr -> IntMap.IntMap NodeRef
 letScopeOverrides base solvedForGen solved redirects ann =
-    let canonical = Solved.canonical solved
+    let canonical = ChiQuery.chiCanonical (fromSolved solved)
         addOverride acc schemeRootId =
             case bindingScopeRef base schemeRootId of
                 Right scope0 ->

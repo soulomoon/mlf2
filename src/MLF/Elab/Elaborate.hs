@@ -90,13 +90,13 @@ data ElabOut = ElabOut
     , elabStripped :: Env -> Either ElabError ElabTerm
     }
 
-schemeBodyTarget :: Solved -> NodeId -> NodeId
-schemeBodyTarget res target =
-    let canonical = Solved.canonical res
+schemeBodyTarget :: PresolutionView -> NodeId -> NodeId
+schemeBodyTarget presolutionView target =
+    let canonical = ChiQuery.chiCanonical presolutionView
         targetC = canonical target
-    in case Solved.lookupNode res targetC of
+    in case ChiQuery.chiLookupNode presolutionView targetC of
         Just TyVar{ tnBound = Just bnd } ->
-            case Solved.lookupNode res (canonical bnd) of
+            case ChiQuery.chiLookupNode presolutionView (canonical bnd) of
                 Just TyForall{ tnBody = body } -> canonical body
                 _ -> canonical bnd
         Just TyForall{ tnBody = body } -> canonical body
@@ -190,15 +190,15 @@ elaborateWithEnv config elabEnv ann = do
         , ecGeneralizeAtWith = generalizeAtWithRaw
         } = config
     presolutionView = eePresolutionView elabEnv
-    solved = Solved.rebuildWithConstraint
-        (eeSolvedCompat elabEnv)
-        (ChiQuery.chiCanonicalConstraint presolutionView)
+    solved = eeSolvedCompat elabEnv
     gaParents = eeGaParents elabEnv
     edgeWitnesses = eeEdgeWitnesses elabEnv
     edgeTraces = eeEdgeTraces elabEnv
     edgeExpansions = eeEdgeExpansions elabEnv
     scopeOverrides = eeScopeOverrides elabEnv
     canonical = ChiQuery.chiCanonical presolutionView
+    chiLookupNode = ChiQuery.chiLookupNode presolutionView
+    chiLookupVarBound = ChiQuery.chiLookupVarBound presolutionView
     scopeRootFromBase root =
         case IntMap.lookup (getNodeId (canonical root)) (gaSolvedToBase gaParents) of
             Nothing -> typeRef root
@@ -248,7 +248,7 @@ elaborateWithEnv config elabEnv ann = do
     generalizeAtNode :: NodeId -> Either ElabError (ElabScheme, IntMap.IntMap String)
     generalizeAtNode nodeId =
         let scopeRoot = scopeRootForNode nodeId
-            targetC = schemeBodyTarget solved nodeId
+            targetC = schemeBodyTarget presolutionView nodeId
             preferMoreCoherent primary fallback =
                 case fallback of
                     Right alt
@@ -352,7 +352,7 @@ elaborateWithEnv config elabEnv ann = do
     reifyNodeTypePreferringBound nodeId = do
         namedSet <- namedNodes solved
         let nodeC = canonical nodeId
-        case Solved.lookupVarBound solved nodeC of
+        case chiLookupVarBound nodeC of
             Just bnd -> reifyTypeForParam namedSet solved bnd
             Nothing -> reifyTypeForParam namedSet solved nodeC
 
@@ -378,10 +378,10 @@ elaborateWithEnv config elabEnv ann = do
     resolvedLambdaParamNode :: NodeId -> Maybe NodeId
     resolvedLambdaParamNode lamNodeId =
         let lamC = canonical lamNodeId
-        in case Solved.lookupNode solved lamC of
+        in case chiLookupNode lamC of
             Just TyArrow{ tnDom = dom } -> Just dom
             Just TyVar{ tnBound = Just bnd } ->
-                case Solved.lookupNode solved (canonical bnd) of
+                case chiLookupNode (canonical bnd) of
                     Just TyArrow{ tnDom = dom } -> Just dom
                     _ -> Nothing
             _ -> Nothing
@@ -1024,7 +1024,7 @@ elaborateWithEnv config elabEnv ann = do
                                             Nothing -> IntMap.empty
                                     reifyArg arg =
                                         let argC = canonical arg
-                                        in case Solved.lookupVarBound solved argC of
+                                        in case chiLookupVarBound argC of
                                             Just bnd -> reifyBoundWithNames solved substForArgs bnd
                                             Nothing -> reifyTypeWithNamedSetNoFallback solved substForArgs namedSetReify argC
                                 argTys <- case targetArgs of
@@ -1047,7 +1047,7 @@ elaborateWithEnv config elabEnv ann = do
     reifyTargetType :: IntSet.IntSet -> EdgeWitness -> SchemeInfo -> Either ElabError ElabType
     reifyTargetType namedSetReify ew si =
         let subst = siSubst si
-        in case Solved.lookupVarBound solved (ewRight ew) of
+        in case chiLookupVarBound (ewRight ew) of
             Just bnd -> reifyTypeWithNamedSetNoFallback solved subst namedSetReify bnd
             Nothing -> reifyTypeWithNamedSetNoFallback solved subst namedSetReify (ewRight ew)
 
@@ -1102,7 +1102,7 @@ elaborateWithEnv config elabEnv ann = do
             ]
       where
         nodeExists nid =
-            isJust (Solved.lookupNode solved (canonical nid))
+            isJust (chiLookupNode (canonical nid))
 
     fallbackArgCandidates :: Maybe EdgeTrace -> NodeId -> [NodeId]
     fallbackArgCandidates mTrace arg =
