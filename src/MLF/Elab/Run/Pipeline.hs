@@ -131,7 +131,6 @@ runPipelineElabWith traceCfg genConstraints expr = do
     let elabConfig = ElabConfig
             { ecTraceConfig = traceCfg
             , ecGeneralizeAtWith = generalizeAtWithCompat
-            , ecSolved = error "ElabConfig.ecSolved retired; pipeline should not plumb solved-compat"
             }
         elabEnv = ElabEnv
             { eePresolutionView = presolutionViewForGen

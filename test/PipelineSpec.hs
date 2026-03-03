@@ -179,7 +179,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
 
         it "row2 closeout guard: ResultTypeInputs no longer exposes rtcSolvedCompat" $ do
             src <- readFile "src/MLF/Elab/Run/ResultType/Types.hs"
-            isInfixOf "rtcSolvedCompat ::" src `shouldBe` False
+            isInfixOf "rtcSolvedCompat" src `shouldBe` False
 
         it "row2 closeout guard: MLF.Elab.Run.ResultType.Types no longer exposes rtcSolveLike" $ do
             src <- readFile "src/MLF/Elab/Run/ResultType/Types.hs"
@@ -187,9 +187,9 @@ spec = describe "Pipeline (Phases 1-5)" $ do
 
         it "chi-first guard: internals use shared ChiQuery facade" $ do
             elabSrc <- readFile "src/MLF/Elab/Elaborate.hs"
-            rtSrc <- readFile "src/MLF/Elab/Run/ResultType/Types.hs"
+            rtViewSrc <- readFile "src/MLF/Elab/Run/ResultType/View.hs"
             elabSrc `shouldSatisfy` isInfixOf "MLF.Elab.Run.ChiQuery"
-            rtSrc `shouldSatisfy` isInfixOf "MLF.Elab.Run.ChiQuery"
+            rtViewSrc `shouldSatisfy` isInfixOf "MLF.Elab.Run.ChiQuery"
 
         it "single-solved refactor keeps checked pipeline authoritative on representative corpus" $ do
             forM_ representativeMigrationCorpus assertCheckedAuthoritative
@@ -216,9 +216,10 @@ spec = describe "Pipeline (Phases 1-5)" $ do
 
         it "ResultType|Phase 6 — Elaborate|chi-first gate stays green" $ do
             elabSrc <- readFile "src/MLF/Elab/Elaborate.hs"
+            rtViewSrc <- readFile "src/MLF/Elab/Run/ResultType/View.hs"
             rtSrc <- readFile "src/MLF/Elab/Run/ResultType/Types.hs"
             elabSrc `shouldSatisfy` isInfixOf "MLF.Elab.Run.ChiQuery"
-            rtSrc `shouldSatisfy` isInfixOf "MLF.Elab.Run.ChiQuery"
+            rtViewSrc `shouldSatisfy` isInfixOf "MLF.Elab.Run.ChiQuery"
             elabSrc `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
             rtSrc `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
 

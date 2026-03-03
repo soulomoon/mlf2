@@ -313,7 +313,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
         it "row2 closeout guard: ElabConfig no longer includes ecSolved" $ do
             src <- readFile "src/MLF/Elab/Elaborate.hs"
-            isInfixOf "ecSolved ::" src `shouldBe` False
+            isInfixOf "ecSolved" src `shouldBe` False
 
         it "chi-first Elaborate|Phase 6 guard: elaborate internals avoid local solved materialization" $ do
             src <- readFile "src/MLF/Elab/Elaborate.hs"

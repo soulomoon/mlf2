@@ -51,7 +51,6 @@ mkResultTypeInputs canonical edgeWitnesses edgeTraces edgeExpansions presolution
         , rtcEdgeTraces = edgeTraces
         , rtcEdgeExpansions = edgeExpansions
         , rtcPresolutionView = presolutionView
-        , rtcSolvedCompat = error "ResultTypeInputs.rtcSolvedCompat retired; callsites should not provide solved-compat"
         , rtcBindParentsGa = bindParentsGa
         , rtcPlanBuilder = planBuilder
         , rtcBaseConstraint = baseConstraint
