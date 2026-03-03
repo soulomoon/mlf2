@@ -23,7 +23,7 @@ module MLF.Elab.Run.ResultType.View (
 
 import qualified Data.IntMap.Strict as IntMap
 
-import MLF.Constraint.Presolution (EdgeTrace, PresolutionPlanBuilder)
+import MLF.Constraint.Presolution (EdgeTrace, PresolutionPlanBuilder, PresolutionView)
 import MLF.Constraint.Solved (Solved)
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types
@@ -41,6 +41,7 @@ import MLF.Constraint.Types
     , toListNode
     )
 import MLF.Elab.Generalize (GaBindParents)
+import qualified MLF.Elab.Run.ChiQuery as ChiQuery
 import MLF.Elab.Run.Scope (schemeBodyTarget)
 import MLF.Elab.Run.ResultType.Types (ResultTypeInputs(..), rtcSolveLike)
 import MLF.Util.ElabError (ElabError)
@@ -125,10 +126,19 @@ rtvOriginalConstraint :: ResultTypeView -> Constraint
 rtvOriginalConstraint = Solved.originalConstraint . rtvSolved
 
 rtvLookupNode :: ResultTypeView -> NodeId -> Maybe TyNode
-rtvLookupNode view nid = Solved.lookupNode (rtvSolved view) nid
+rtvLookupNode view nid =
+    case ChiQuery.chiLookupNode (rtvPresolutionView view) nid of
+        Just TyVar{ tnId = varId, tnBound = Nothing } ->
+            case overlayBound view nid of
+                Just bnd -> Just TyVar{ tnId = varId, tnBound = Just bnd }
+                Nothing -> Just TyVar{ tnId = varId, tnBound = Nothing }
+        other -> other
 
 rtvLookupVarBound :: ResultTypeView -> NodeId -> Maybe NodeId
-rtvLookupVarBound view nid = Solved.lookupVarBound (rtvSolved view) nid
+rtvLookupVarBound view nid =
+    case overlayBound view nid of
+        Just bnd -> Just bnd
+        Nothing -> ChiQuery.chiLookupVarBound (rtvPresolutionView view) nid
 
 rtvGenNodes :: ResultTypeView -> [GenNode]
 rtvGenNodes view = map snd (toListGen (Solved.genNodes (rtvSolved view)))
@@ -138,3 +148,10 @@ rtvCanonicalBindParents = Solved.canonicalBindParents . rtvSolved
 
 rtvSchemeBodyTarget :: ResultTypeView -> NodeId -> NodeId
 rtvSchemeBodyTarget view nid = schemeBodyTarget (rtvSolved view) nid
+
+rtvPresolutionView :: ResultTypeView -> PresolutionView
+rtvPresolutionView = rtcPresolutionView . rtvInputs0
+
+overlayBound :: ResultTypeView -> NodeId -> Maybe NodeId
+overlayBound view nid =
+    IntMap.lookup (getNodeId (rtvCanonical view nid)) (rtvBoundOverlay0 view)

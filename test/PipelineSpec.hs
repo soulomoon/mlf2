@@ -182,6 +182,9 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         it "single-solved refactor keeps checked pipeline authoritative on representative corpus" $ do
             forM_ representativeMigrationCorpus assertCheckedAuthoritative
 
+        it "chi-first ResultType|checked-authoritative keeps representative corpus parity" $ do
+            forM_ representativeMigrationCorpus assertCheckedAuthoritative
+
         it "migration guardrail: thesis-core boundary matches legacy outcome" $ do
             forM_ representativeMigrationCorpus $ \expr -> do
                 artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)

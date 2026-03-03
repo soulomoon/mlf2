@@ -17,9 +17,7 @@ import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types.Witness (EdgeWitness(..), Expansion(..))
 import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Elab.Run.ChiQuery
-    ( chiCanonicalConstraint
-    , chiConstraint
-    )
+    ( chiCanonicalConstraint )
 import MLF.Util.ElabError (ElabError(..))
 import MLF.Util.Trace (TraceConfig)
 
@@ -30,6 +28,7 @@ data ResultTypeInputs = ResultTypeInputs
     , rtcEdgeTraces :: IntMap.IntMap EdgeTrace
     , rtcEdgeExpansions :: IntMap.IntMap Expansion
     , rtcPresolutionView :: PresolutionView
+    , rtcSolvedCompat :: Solved
     , rtcBindParentsGa :: GaBindParents
     , rtcPlanBuilder :: PresolutionPlanBuilder
     , rtcBaseConstraint :: Constraint
@@ -39,14 +38,9 @@ data ResultTypeInputs = ResultTypeInputs
 
 rtcSolveLike :: ResultTypeInputs -> Either ElabError Solved
 rtcSolveLike ctx =
-    let presolutionView = rtcPresolutionView ctx
-        sourceConstraint = chiConstraint presolutionView
-        canonicalConstraint = chiCanonicalConstraint presolutionView
-        solved0 =
-            Solved.fromConstraintAndUf
-                sourceConstraint
-                (pvCanonicalMap presolutionView)
-        solved = Solved.rebuildWithConstraint solved0 canonicalConstraint
+    let solved = Solved.rebuildWithConstraint
+            (rtcSolvedCompat ctx)
+            (chiCanonicalConstraint (rtcPresolutionView ctx))
     in case Solved.validateCanonicalGraphStrict solved of
         [] -> Right solved
         violations -> Left (ValidationFailed violations)

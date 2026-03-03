@@ -194,6 +194,7 @@ resultTypeInputsForArtifacts
                 , rtcEdgeTraces = edgeTraces
                 , rtcEdgeExpansions = edgeExpansions
                 , rtcPresolutionView = presolutionViewFromSolved solvedClean
+                , rtcSolvedCompat = solvedClean
                 , rtcBindParentsGa = bindParentsGa
                 , rtcPlanBuilder = defaultPlanBuilder defaultTraceConfig
                 , rtcBaseConstraint = c1
@@ -299,6 +300,10 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
         it "chi-first guard: ResultType internals avoid local solved materialization" $ do
             src <- readFile "src/MLF/Elab/Run/ResultType/Types.hs"
             src `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
+
+        it "chi-first ResultType|checked-authoritative query guard avoids direct Solved.lookup usage" $ do
+            viewSrc <- readFile "src/MLF/Elab/Run/ResultType/View.hs"
+            viewSrc `shouldSatisfy` (not . isInfixOf "Solved.lookup")
 
         it "result-type fallback matches pipeline type on non-annotation roots" $ do
             let expr = EApp (ELam "x" (EVar "x")) (ELit (LInt 7))
