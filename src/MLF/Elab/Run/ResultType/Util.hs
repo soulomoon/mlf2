@@ -13,13 +13,14 @@ import Data.Functor.Foldable (cata)
 import qualified Data.IntMap.Strict as IntMap
 
 import MLF.Constraint.Presolution (PresolutionPlanBuilder(..))
+import MLF.Constraint.Presolution.View (fromSolved)
 import MLF.Constraint.Solved (Solved)
 import MLF.Constraint.Types.Graph
     ( NodeId(..)
     , NodeRef(..)
     )
 import MLF.Elab.Generalize (GaBindParents(..))
-import MLF.Elab.Run.Generalize (generalizeAtWithBuilder)
+import MLF.Elab.Run.Generalize (generalizeAtWithBuilderView)
 import MLF.Elab.Inst (applyInstantiation)
 import MLF.Elab.Types
 import MLF.Frontend.ConstraintGen (AnnExpr(..))
@@ -38,24 +39,22 @@ generalizeWithPlan planBuilder bindParentsGa solved scopeRoot targetNode =
     let generalizeNeedsFallback err = case err of
             SchemeFreeVars{} -> True
             _ -> False
+        presolutionView = fromSolved solved
+        runWithGa mbGa =
+            generalizeAtWithBuilderView
+                planBuilder
+                mbGa
+                presolutionView
+                scopeRoot
+                targetNode
         fallbackToReify = do
             ty <- reifyType solved targetNode
             pure (schemeFromType ty, IntMap.empty)
-    in case generalizeAtWithBuilder
-        planBuilder
-        (Just bindParentsGa)
-        solved
-        scopeRoot
-        targetNode of
+    in case runWithGa (Just bindParentsGa) of
         Right out -> Right out
         Left err
             | generalizeNeedsFallback err ->
-                case generalizeAtWithBuilder
-                    planBuilder
-                    Nothing
-                    solved
-                    scopeRoot
-                    targetNode of
+                case runWithGa Nothing of
                     Right out -> Right out
                     Left err2
                         | generalizeNeedsFallback err2 ->

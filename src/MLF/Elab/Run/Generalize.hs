@@ -2,6 +2,7 @@ module MLF.Elab.Run.Generalize (
     pruneBindParentsConstraint,
     instantiationCopyNodes,
     constraintForGeneralization,
+    generalizeAtWithBuilderView,
     generalizeAtWithBuilder
 ) where
 
@@ -136,8 +137,22 @@ generalizeAtWithBuilder
     -> NodeId
     -> Either ElabError (ElabScheme, IntMap.IntMap String)
 generalizeAtWithBuilder planBuilder mbBindParentsGa solved scopeRoot targetNode =
+    generalizeAtWithBuilderView
+        planBuilder
+        mbBindParentsGa
+        (fromSolved solved)
+        scopeRoot
+        targetNode
+
+generalizeAtWithBuilderView
+    :: PresolutionPlanBuilder
+    -> Maybe GaBindParents
+    -> PresolutionView
+    -> NodeRef
+    -> NodeId
+    -> Either ElabError (ElabScheme, IntMap.IntMap String)
+generalizeAtWithBuilderView planBuilder mbBindParentsGa presolutionView scopeRoot targetNode =
     let PresolutionPlanBuilder buildPlans = planBuilder
-        presolutionView = fromSolved solved
         go mbGa scope target = do
             (genPlan, reifyPlan) <- buildPlans presolutionView mbGa scope target
             let fallback scope' target' = fst <$> go mbGa scope' target'
