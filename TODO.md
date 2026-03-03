@@ -84,6 +84,22 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - `cabal build all && cabal test`
     - PASS (`931 examples, 0 failures`)
 
+## Task 37 Team E verifier docs closeout for Task 5 (completed 2026-03-04)
+
+- Completed:
+  - Updated `docs/notes/2026-02-27-transformation-mechanism-table.md`
+    so row `Elaboration input` is `Thesis-exact = Yes` with current
+    code/guard references.
+  - Synced `implementation_notes.md`, `CHANGELOG.md`, and task tracker files
+    under
+    `tasks/todo/2026-03-04-tmt-elab-input-thesis-exact-remediation-plan/`
+    for final Wave 3 verifier closeout.
+- Verification evidence recorded (already-run gates):
+  - `elab-input thesis-exact guard`: PASS (`2 examples, 0 failures`)
+  - `checked-authoritative`: PASS (`8 examples, 0 failures`)
+  - `Dual-path verification`: PASS (`4 examples, 0 failures`)
+  - `cabal build all && cabal test`: PASS
+
 ## Task 36 Post-task35 compatibility cleanup (planned)
 
 - Goal:
