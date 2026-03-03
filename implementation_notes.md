@@ -2,6 +2,17 @@
 
 ## Thesis Alignment (Phase A–E)
 
+### 2026-03-04 Task 5 verifier docs closeout (elaboration-input remediation plan)
+- Team E closeout completed for
+  `tasks/todo/2026-03-04-tmt-elab-input-thesis-exact-remediation-plan/`.
+- Transformation Mechanism Table row `Elaboration input` is now marked
+  `Thesis-exact = Yes` with current runtime/guard references.
+- Recorded verification evidence from already-run gates:
+  - `elab-input thesis-exact guard`: PASS (`2 examples, 0 failures`)
+  - `checked-authoritative`: PASS (`8 examples, 0 failures`)
+  - `Dual-path verification`: PASS (`4 examples, 0 failures`)
+  - `cabal build all && cabal test`: PASS
+
 ### 2026-03-04 Task 35 elaboration-input thesis-exact closeout
 - Elaboration input row is now closed as thesis-exact for active runtime flow:
   - active elaboration path no longer depends on `ChiQuery.chiSolved` materialization in `elaborateWithEnv`;

@@ -3,6 +3,15 @@
 ## Unreleased
 
 ### Changed
+- Docs verifier closeout for elaboration-input thesis-exact remediation plan
+  (2026-03-04):
+  - updated Transformation Mechanism Table row `Elaboration input` to
+    `Thesis-exact = Yes` with current runtime and guard code references;
+  - synchronized implementation/task/TODO docs with already-run gate evidence:
+    `elab-input thesis-exact guard` (`2 examples, 0 failures`),
+    `checked-authoritative` (`8 examples, 0 failures`),
+    `Dual-path verification` (`4 examples, 0 failures`),
+    `cabal build all && cabal test` (PASS).
 - Task 35 elaboration-input thesis-exact closeout (2026-03-04):
   - closed the remaining elaboration-input row gap by removing active
     elaboration-path dependence on internal `chiSolved` materialization and
