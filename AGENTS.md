@@ -108,12 +108,6 @@ tasks/
 - Maintain `implementation_notes.md` when behavior, architecture, or thesis-alignment details change, so documentation stays in sync with implementation.
 - Close a task by marking all phases complete in `task_plan.md` and moving the folder to `tasks/archive/`.
 
-**When agent teams are needed (tmux runtime):**
-- Use `[$codex-tmux-team](/Users/ares/.codex/skills/public/codex-tmux-team/SKILL.md)` whenever work is split across multiple members (e.g., planner/implementer/reviewer).
-- Create exactly one tmux pane per member and launch `codex` in every member pane.
-- Arrange tmux layout before execution and attach with `tmux attach -t <session>` before starting team tasks.
-- Use `scripts/setup_codex_team_tmux.sh --session <name> --members "<a,b,c>" --cwd /absolute/path --layout tiled` as the default setup path.
-
 **Validation command:** `cabal build all && cabal test`
 
 ## Bug Tracking

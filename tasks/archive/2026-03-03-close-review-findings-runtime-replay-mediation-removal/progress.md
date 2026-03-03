@@ -21,7 +21,7 @@
 - Reproduced blocker and gathered diagnostics:
   - `cabal test ... --match "migration guardrail: thesis-core boundary matches legacy outcome"` failed with legacy canonical map populated vs thesis-core empty;
   - GHCI artifact comparison showed canonical constraints matched while legacy canonical-map entries were eliminated-node-only (non-live keys).
-- Ran codex-tmux-team setup for continuation round:
+- Ran tmux-team setup for continuation round:
   - created session `mlf4-close-review-r3` with members `lead`, `diagnostics`, `fixer` using `/Users/ares/.codex/skills/public/codex-tmux-team/scripts/setup_codex_team.sh`;
   - verified pane count/titles and `codex` running in all panes.
 - Implemented guardrail fix:

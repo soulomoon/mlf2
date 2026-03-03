@@ -8,7 +8,7 @@
 
 **Tech Stack:** Haskell (`cabal`, `hspec`), modules under `src/MLF/Elab/*` and `src/MLF/Constraint/Presolution/*`, tests in `test/*Spec.hs`.
 
-**Execution Discipline:** `@haskell-pro`, `@test-driven-development`, `@subagent-driven-development`, `@verification-before-completion`.
+**Execution Discipline:** `@haskell-pro`, `[$codex-tmux-team](/Users/ares/.codex/skills/public/codex-tmux-team/SKILL.md)`, `@test-driven-development`, `@subagent-driven-development`, `@verification-before-completion`.
 
 ---
 
