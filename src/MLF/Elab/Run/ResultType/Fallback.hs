@@ -11,7 +11,6 @@ import Data.Functor.Foldable (cata)
 import MLF.Frontend.ConstraintGen (AnnExpr(..))
 import MLF.Constraint.Presolution (EdgeTrace(..))
 import MLF.Constraint.Presolution.Base (CopyMapping(..), lookupCopy)
-import MLF.Constraint.Presolution.View (fromSolved)
 import MLF.Constraint.Types.Graph
     ( EdgeId(..)
     , GenNode(..)
@@ -44,6 +43,7 @@ import MLF.Elab.Run.Scope
 import MLF.Elab.Run.Generalize (generalizeAtWithBuilderView)
 import MLF.Elab.Run.ResultType.Util
     ( generalizeWithPlan
+    , generalizeWithPlanView
     , stripAnn
     , collectEdges
     )
@@ -95,7 +95,14 @@ computeResultTypeFallback ctx annCanon ann = do
                 -- Find the scope root for the annotation node
                 scopeRoot <- bindingToElab (resolveCanonicalScope c1 solvedForGen redirects annNodeId)
                 let targetC = schemeBodyTarget solvedForGen annNodeId
-                (paramSch, _subst) <- generalizeWithPlan planBuilder bindParentsGa solvedForGen scopeRoot targetC
+                (paramSch, _subst) <-
+                    generalizeWithPlanView
+                        planBuilder
+                        bindParentsGa
+                        (rtcPresolutionView ctx)
+                        solvedForGen
+                        scopeRoot
+                        targetC
                 let paramTy = case paramSch of
                         Forall binds body -> foldr (\(n, b) t -> TForall n b t) body binds
                 -- Compute the result type from the body.
@@ -163,7 +170,7 @@ computeResultTypeFallbackCore ctx annCanon ann = do
         edgeTraces = View.rtvEdgeTraces viewBase
         edgeExpansions = View.rtvEdgeExpansions viewBase
         solved = View.rtvSolved viewBase
-        presolutionView = fromSolved solved
+        presolutionView = rtcPresolutionView ctx
         bindParentsGa = View.rtvBindParentsGa viewBase
         planBuilder = View.rtvPlanBuilder viewBase
         c1 = View.rtvBaseConstraint viewBase

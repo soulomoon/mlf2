@@ -62,6 +62,7 @@ import MLF.Constraint.Solve (solveUnifyWithSnapshot)
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Elab.Run.ResultType
     ( ResultTypeInputs(..)
+    , mkResultTypeInputs
     , generalizeWithPlan
     , computeResultTypeFromAnn
     , computeResultTypeFallback
@@ -188,19 +189,17 @@ resultTypeInputsForArtifacts
                 , gaSolvedToBase = solvedToBase
                 }
         inputs =
-            ResultTypeInputs
-                { rtcCanonical = canonical
-                , rtcEdgeWitnesses = edgeWitnesses
-                , rtcEdgeTraces = edgeTraces
-                , rtcEdgeExpansions = edgeExpansions
-                , rtcPresolutionView = presolutionViewFromSolved solvedClean
-                , rtcSolvedCompat = solvedClean
-                , rtcBindParentsGa = bindParentsGa
-                , rtcPlanBuilder = defaultPlanBuilder defaultTraceConfig
-                , rtcBaseConstraint = c1
-                , rtcRedirects = prRedirects pres
-                , rtcTraceConfig = defaultTraceConfig
-                }
+            mkResultTypeInputs
+                canonical
+                edgeWitnesses
+                edgeTraces
+                edgeExpansions
+                (presolutionViewFromSolved solvedClean)
+                bindParentsGa
+                (defaultPlanBuilder defaultTraceConfig)
+                c1
+                (prRedirects pres)
+                defaultTraceConfig
     in (inputs, annCanon, ann0)
 
 requirePipeline :: SurfaceExpr -> IO (Elab.ElabTerm, Elab.ElabType)

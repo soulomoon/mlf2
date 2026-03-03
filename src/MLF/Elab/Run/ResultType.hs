@@ -13,7 +13,6 @@ import qualified Data.IntSet as IntSet
 import MLF.Frontend.ConstraintGen (AnnExpr(..))
 import MLF.Constraint.Presolution (EdgeTrace, PresolutionPlanBuilder)
 import MLF.Constraint.Presolution.View (PresolutionView)
-import MLF.Constraint.Solved (Solved)
 import MLF.Constraint.Types.Graph
     ( Constraint
     , EdgeId(..)
@@ -39,21 +38,20 @@ mkResultTypeInputs
     -> IntMap.IntMap EdgeTrace
     -> IntMap.IntMap Expansion
     -> PresolutionView
-    -> Solved
     -> GaBindParents
     -> PresolutionPlanBuilder
     -> Constraint
     -> IntMap.IntMap NodeId
     -> TraceConfig
     -> ResultTypeInputs
-mkResultTypeInputs canonical edgeWitnesses edgeTraces edgeExpansions presolutionView solvedCompat bindParentsGa planBuilder baseConstraint redirects traceCfg =
+mkResultTypeInputs canonical edgeWitnesses edgeTraces edgeExpansions presolutionView bindParentsGa planBuilder baseConstraint redirects traceCfg =
     ResultTypeInputs
         { rtcCanonical = canonical
         , rtcEdgeWitnesses = edgeWitnesses
         , rtcEdgeTraces = edgeTraces
         , rtcEdgeExpansions = edgeExpansions
         , rtcPresolutionView = presolutionView
-        , rtcSolvedCompat = solvedCompat
+        , rtcSolvedCompat = error "ResultTypeInputs.rtcSolvedCompat retired; callsites should not provide solved-compat"
         , rtcBindParentsGa = bindParentsGa
         , rtcPlanBuilder = planBuilder
         , rtcBaseConstraint = baseConstraint

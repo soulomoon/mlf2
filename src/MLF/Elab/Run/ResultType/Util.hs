@@ -1,6 +1,7 @@
 {-# LANGUAGE GADTs #-}
 module MLF.Elab.Run.ResultType.Util (
     generalizeWithPlan,
+    generalizeWithPlanView,
     containsBoundForall,
     instHasBoundForall,
     instantiateImplicitForalls,
@@ -12,7 +13,7 @@ import Data.Functor.Foldable (cata)
 
 import qualified Data.IntMap.Strict as IntMap
 
-import MLF.Constraint.Presolution (PresolutionPlanBuilder(..))
+import MLF.Constraint.Presolution (PresolutionPlanBuilder(..), PresolutionView)
 import MLF.Constraint.Presolution.View (fromSolved)
 import MLF.Constraint.Solved (Solved)
 import MLF.Constraint.Types.Graph
@@ -36,10 +37,26 @@ generalizeWithPlan
     -> NodeId
     -> Either ElabError (ElabScheme, IntMap.IntMap String)
 generalizeWithPlan planBuilder bindParentsGa solved scopeRoot targetNode =
+    generalizeWithPlanView
+        planBuilder
+        bindParentsGa
+        (fromSolved solved)
+        solved
+        scopeRoot
+        targetNode
+
+generalizeWithPlanView
+    :: PresolutionPlanBuilder
+    -> GaBindParents
+    -> PresolutionView
+    -> Solved
+    -> NodeRef
+    -> NodeId
+    -> Either ElabError (ElabScheme, IntMap.IntMap String)
+generalizeWithPlanView planBuilder bindParentsGa presolutionView solved scopeRoot targetNode =
     let generalizeNeedsFallback err = case err of
             SchemeFreeVars{} -> True
             _ -> False
-        presolutionView = fromSolved solved
         runWithGa mbGa =
             generalizeAtWithBuilderView
                 planBuilder

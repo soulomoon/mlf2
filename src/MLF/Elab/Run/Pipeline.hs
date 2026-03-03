@@ -131,7 +131,7 @@ runPipelineElabWith traceCfg genConstraints expr = do
     let elabConfig = ElabConfig
             { ecTraceConfig = traceCfg
             , ecGeneralizeAtWith = generalizeAtWithCompat
-            , ecSolved = solvedForGen
+            , ecSolved = error "ElabConfig.ecSolved retired; pipeline should not plumb solved-compat"
             }
         elabEnv = ElabEnv
             { eePresolutionView = presolutionViewForGen
@@ -193,7 +193,6 @@ runPipelineElabWith traceCfg genConstraints expr = do
                 edgeTraces
                 edgeExpansions
                 presolutionViewForGen
-                solvedForGen
                 bindParentsGa
                 planBuilder
                 c1
