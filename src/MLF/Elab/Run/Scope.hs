@@ -30,6 +30,7 @@ import MLF.Constraint.Types
     , typeRef
     )
 import qualified MLF.Constraint.NodeAccess as NodeAccess
+import MLF.Constraint.Presolution (PresolutionView)
 import MLF.Constraint.Presolution.View (fromSolved)
 import qualified MLF.Elab.Run.ChiQuery as ChiQuery
 import MLF.Elab.Run.Util (chaseRedirects)
@@ -172,11 +173,15 @@ Redirect chasing and UF canonicalization preserve ga′ through the pipeline:
      remain after annotation rewriting.
 -}
 canonicalizeScopeRef :: Solved -> IntMap.IntMap NodeId -> NodeRef -> NodeRef
-canonicalizeScopeRef solved redirects scopeRef =
+canonicalizeScopeRef solved =
+    canonicalizeScopeRefView (fromSolved solved)
+
+canonicalizeScopeRefView :: PresolutionView -> IntMap.IntMap NodeId -> NodeRef -> NodeRef
+canonicalizeScopeRefView presolutionView redirects scopeRef =
     case scopeRef of
         GenRef gid -> GenRef gid
         TypeRef nid ->
-            let canonical = ChiQuery.chiCanonical (fromSolved solved)
+            let canonical = ChiQuery.chiCanonical presolutionView
             in TypeRef (canonical (chaseRedirects redirects nid))
 
 resolveCanonicalScope :: Constraint -> Solved -> IntMap.IntMap NodeId -> NodeId -> Either BindingError NodeRef
