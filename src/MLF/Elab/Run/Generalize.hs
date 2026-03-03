@@ -1,7 +1,9 @@
 module MLF.Elab.Run.Generalize (
+    GeneralizeAtView,
     pruneBindParentsConstraint,
     instantiationCopyNodes,
     constraintForGeneralization,
+    mkGeneralizeAtWithBuilderView,
     generalizeAtWithBuilderView,
     generalizeAtWithBuilder
 ) where
@@ -40,6 +42,12 @@ import MLF.Util.Trace (TraceConfig)
 import MLF.Frontend.ConstraintGen (AnnExpr)
 import MLF.Elab.Types (ElabScheme)
 import MLF.Util.ElabError (ElabError)
+
+type GeneralizeAtView =
+    Maybe GaBindParents
+    -> NodeRef
+    -> NodeId
+    -> Either ElabError (ElabScheme, IntMap.IntMap String)
 
 {- Note [binding-parent projection — ga′ invariants]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -158,3 +166,10 @@ generalizeAtWithBuilderView planBuilder mbBindParentsGa presolutionView scopeRoo
             let fallback scope' target' = fst <$> go mbGa scope' target'
             applyGeneralizePlan fallback genPlan reifyPlan
     in go mbBindParentsGa scopeRoot targetNode
+
+mkGeneralizeAtWithBuilderView
+    :: PresolutionPlanBuilder
+    -> PresolutionView
+    -> GeneralizeAtView
+mkGeneralizeAtWithBuilderView planBuilder presolutionView mbGa scopeRoot targetNode =
+    generalizeAtWithBuilderView planBuilder mbGa presolutionView scopeRoot targetNode

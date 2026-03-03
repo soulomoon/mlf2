@@ -4,7 +4,9 @@ module MLF.Elab.Run.Scope (
     bindingScopeRefCanonicalView,
     preferGenScope,
     schemeBodyTarget,
+    schemeBodyTargetView,
     canonicalizeScopeRef,
+    canonicalizeScopeRefView,
     resolveCanonicalScope,
     resolveCanonicalScopeView,
     letScopeOverrides,
@@ -113,9 +115,11 @@ preferGenScope constraint ref = case ref of
             Left _ -> ref
 
 schemeBodyTarget :: Solved -> NodeId -> NodeId
-schemeBodyTarget solved target =
-    let presolutionView = fromSolved solved
-        constraint = ChiQuery.chiConstraint presolutionView
+schemeBodyTarget solved = schemeBodyTargetView (fromSolved solved)
+
+schemeBodyTargetView :: PresolutionView -> NodeId -> NodeId
+schemeBodyTargetView presolutionView target =
+    let constraint = ChiQuery.chiConstraint presolutionView
         canonical = ChiQuery.chiCanonical presolutionView
         targetC = canonical target
         isSchemeRoot =
