@@ -1,5 +1,6 @@
 module MLF.Elab.Run.ChiQuery (
     chiCanonical,
+    chiCanonicalMap,
     chiLookupNode,
     chiLookupVarBound,
     chiLookupBindParent,
@@ -11,6 +12,7 @@ module MLF.Elab.Run.ChiQuery (
     chiSolved
 ) where
 
+import qualified Data.IntMap.Strict as IntMap
 import MLF.Constraint.Presolution (PresolutionView(..))
 import MLF.Constraint.Solved (Solved)
 import qualified MLF.Constraint.Solved as Solved
@@ -26,6 +28,9 @@ import MLF.Constraint.Types
 
 chiCanonical :: PresolutionView -> NodeId -> NodeId
 chiCanonical = pvCanonical
+
+chiCanonicalMap :: PresolutionView -> IntMap.IntMap NodeId
+chiCanonicalMap = pvCanonicalMap
 
 chiLookupNode :: PresolutionView -> NodeId -> Maybe TyNode
 chiLookupNode = pvLookupNode
@@ -57,9 +62,9 @@ chiSolvedCompat :: PresolutionView -> Solved
 chiSolvedCompat presolutionView =
     let solved0 =
             Solved.fromConstraintAndUf
-                (pvConstraint presolutionView)
-                (pvCanonicalMap presolutionView)
-    in Solved.rebuildWithConstraint solved0 (pvCanonicalConstraint presolutionView)
+                (chiConstraint presolutionView)
+                (chiCanonicalMap presolutionView)
+    in Solved.rebuildWithConstraint solved0 (chiCanonicalConstraint presolutionView)
 
 chiSolved :: PresolutionView -> Solved
 chiSolved = chiSolvedCompat

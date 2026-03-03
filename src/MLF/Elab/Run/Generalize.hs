@@ -3,6 +3,7 @@ module MLF.Elab.Run.Generalize (
     pruneBindParentsConstraint,
     instantiationCopyNodes,
     constraintForGeneralization,
+    mkGeneralizeAtWithBuilder,
     mkGeneralizeAtWithBuilderView,
     generalizeAtWithBuilderView,
     generalizeAtWithBuilder
@@ -137,21 +138,6 @@ buildGeneralizeEnv traceCfg presolutionView redirects instCopyNodes instCopyMap 
         , geTraceConfig = traceCfg
         }
 
-generalizeAtWithBuilder
-    :: PresolutionPlanBuilder
-    -> Maybe GaBindParents
-    -> Solved
-    -> NodeRef
-    -> NodeId
-    -> Either ElabError (ElabScheme, IntMap.IntMap String)
-generalizeAtWithBuilder planBuilder mbBindParentsGa solved scopeRoot targetNode =
-    generalizeAtWithBuilderView
-        planBuilder
-        mbBindParentsGa
-        (fromSolved solved)
-        scopeRoot
-        targetNode
-
 generalizeAtWithBuilderView
     :: PresolutionPlanBuilder
     -> Maybe GaBindParents
@@ -166,6 +152,23 @@ generalizeAtWithBuilderView planBuilder mbBindParentsGa presolutionView scopeRoo
             let fallback scope' target' = fst <$> go mbGa scope' target'
             applyGeneralizePlan fallback genPlan reifyPlan
     in go mbBindParentsGa scopeRoot targetNode
+
+generalizeAtWithBuilder
+    :: PresolutionPlanBuilder
+    -> Maybe GaBindParents
+    -> Solved
+    -> NodeRef
+    -> NodeId
+    -> Either ElabError (ElabScheme, IntMap.IntMap String)
+generalizeAtWithBuilder planBuilder mbBindParentsGa solved scopeRoot targetNode =
+    generalizeAtWithBuilderView planBuilder mbBindParentsGa (fromSolved solved) scopeRoot targetNode
+
+mkGeneralizeAtWithBuilder
+    :: PresolutionPlanBuilder
+    -> Solved
+    -> GeneralizeAtView
+mkGeneralizeAtWithBuilder planBuilder solved =
+    mkGeneralizeAtWithBuilderView planBuilder (fromSolved solved)
 
 mkGeneralizeAtWithBuilderView
     :: PresolutionPlanBuilder
