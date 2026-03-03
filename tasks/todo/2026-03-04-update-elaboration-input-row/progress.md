@@ -1,0 +1,11 @@
+# Progress — 2026-03-04 Update Elaboration Input Row
+
+- Initialized task folder and planning files.
+- Reviewed target table row in `docs/notes/2026-02-27-transformation-mechanism-table.md`.
+- Inspected thesis references in `papers/these-finale-english.txt` around Def. 15.3.12 and §15.3.6.
+- Inspected elaboration input runtime files:
+  - `src/MLF/Elab/Run/Pipeline.hs`
+  - `src/MLF/Elab/Elaborate.hs`
+  - `src/MLF/Elab/Phi/Translate.hs`
+- Patched the `Elaboration input` row to reflect boundary-`χp` alignment plus residual solved-compat active-path dependency.
+- Updated table source revision metadata to the reviewed head (`3b1256a`).
