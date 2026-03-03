@@ -37,6 +37,7 @@ import MLF.Elab.Legacy (expansionToInst)
 import MLF.Elab.TermClosure (closeTermWithSchemeSubstIfNeeded, substInTerm)
 import MLF.Elab.Run.TypeOps (inlineBoundVarsType, simplifyAnnotationType)
 import MLF.Elab.Run.Annotation (adjustAnnotationInst)
+import qualified MLF.Elab.Run.ChiQuery as ChiQuery
 import MLF.Constraint.BindingUtil (bindingPathToRootLocal)
 import MLF.Elab.Phi (phiFromEdgeWitnessWithTrace)
 import MLF.Elab.Inst (applyInstantiation, schemeToType)
@@ -74,6 +75,7 @@ data ElabConfig = ElabConfig
 
 data ElabEnv = ElabEnv
     { eePresolutionView :: PresolutionView
+    , eeSolvedCompat :: Solved
     , eeGaParents :: GaBindParents
     , eeEdgeWitnesses :: IntMap.IntMap EdgeWitness
     , eeEdgeTraces :: IntMap.IntMap EdgeTrace
@@ -162,6 +164,7 @@ elaborateWithScope traceCfg generalizeAtWith solved gaParents edgeWitnesses edge
             }
         ElabEnv
             { eePresolutionView = fromSolved solved
+            , eeSolvedCompat = solved
             , eeGaParents = gaParents
             , eeEdgeWitnesses = edgeWitnesses
             , eeEdgeTraces = edgeTraces
@@ -187,18 +190,15 @@ elaborateWithEnv config elabEnv ann = do
         , ecGeneralizeAtWith = generalizeAtWithRaw
         } = config
     presolutionView = eePresolutionView elabEnv
-    solved =
-        let solved0 =
-                Solved.fromConstraintAndUf
-                    (pvConstraint presolutionView)
-                    (pvCanonicalMap presolutionView)
-        in Solved.rebuildWithConstraint solved0 (pvCanonicalConstraint presolutionView)
+    solved = Solved.rebuildWithConstraint
+        (eeSolvedCompat elabEnv)
+        (ChiQuery.chiCanonicalConstraint presolutionView)
     gaParents = eeGaParents elabEnv
     edgeWitnesses = eeEdgeWitnesses elabEnv
     edgeTraces = eeEdgeTraces elabEnv
     edgeExpansions = eeEdgeExpansions elabEnv
     scopeOverrides = eeScopeOverrides elabEnv
-    canonical = pvCanonical presolutionView
+    canonical = ChiQuery.chiCanonical presolutionView
     scopeRootFromBase root =
         case IntMap.lookup (getNodeId (canonical root)) (gaSolvedToBase gaParents) of
             Nothing -> typeRef root

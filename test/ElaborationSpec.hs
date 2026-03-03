@@ -297,6 +297,21 @@ stripUnusedTopForalls ty =
 spec :: Spec
 spec = describe "Phase 6 — Elaborate (xMLF)" $ do
     describe "Migration guards" $ do
+        it "chi-first Elaborate|Phase 6 keeps representative behavior" $ do
+            let corpus =
+                    [ ELit (LInt 1)
+                    , ELam "x" (EVar "x")
+                    , ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (ELit (LInt 0)))
+                    ]
+            forM_ corpus $ \expr -> do
+                _ <- requirePipeline expr
+                _ <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+                pure ()
+
+        it "chi-first Elaborate|Phase 6 guard: elaborate internals avoid local solved materialization" $ do
+            src <- readFile "src/MLF/Elab/Elaborate.hs"
+            src `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
+
         it "chi-first guard: ResultType internals avoid local solved materialization" $ do
             src <- readFile "src/MLF/Elab/Run/ResultType/Types.hs"
             src `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
