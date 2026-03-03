@@ -4,6 +4,42 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 32 TMT row-1 chi-first elab/generalize closeout (completed 2026-03-03)
+
+- Completed:
+  - `ElabEnv` no longer carries `eeSolvedCompat`.
+  - `elaborateWithEnv` no longer performs entry-time
+    `Solved.rebuildWithConstraint`.
+  - Runtime production path stays single-path and checked-authoritative.
+- Verification:
+  - Requested closeout matcher:
+    - `cabal test mlf2-test --test-show-details=direct --test-options='--match "row1 closeout guard|checked-authoritative|Dual-path verification"'`
+    - PASS with `0 examples, 0 failures` (empty selection).
+  - Required narrow fallback matchers:
+    - `--match "row1 closeout guard"`: PASS (`2 examples, 0 failures`)
+    - `--match "checked-authoritative"`: PASS (`7 examples, 0 failures`)
+    - `--match "Dual-path verification"`: PASS (`4 examples, 0 failures`)
+  - Final gate:
+    - `cabal build all && cabal test`: PASS.
+- Status:
+  - Row-1 boundary closeout is complete.
+  - Row-2 adapter retirement (`rtcSolvedCompat` / `rtcSolveLike`) remains.
+
+## Task 33 TMT row-2 result-type adapter retirement (planned next)
+
+- Goal:
+  - Retire remaining result-type compatibility adapters
+    (`rtcSolvedCompat`/`rtcSolveLike`) without changing checked-authoritative
+    output behavior.
+- Ordered next steps:
+  1. Move bound-overlay/materialization in `ResultType.View` to `χp`-native
+     reads and overlays.
+  2. Remove `rtcSolveLike` from `buildResultTypeView` and downstream paths.
+  3. Remove `rtcSolvedCompat` from `ResultTypeInputs`,
+     `mkResultTypeInputs`, and pipeline wiring.
+  4. Re-run row-1 closeout guard slices + full gate to confirm no behavior
+     regression.
+
 ## Task 31 χp-first elaboration/result-type internal cleanup (completed 2026-03-03)
 
 - Completed:

@@ -3,6 +3,17 @@
 ## Unreleased
 
 ### Changed
+- Wave 3 Task 6 docs/verifier closeout (2026-03-03):
+  - recorded row-1 runtime boundary shape as shipped (`ElabEnv` has no
+    `eeSolvedCompat`; `elaborateWithEnv` has no entry-time
+    `Solved.rebuildWithConstraint`);
+  - captured closeout verification evidence after matcher fallback:
+    `row1 closeout guard` (`2 examples`), `checked-authoritative`
+    (`7 examples`), `Dual-path verification` (`4 examples`), and final
+    `cabal build all && cabal test` PASS;
+  - documented explicit row-2 follow-up ordering to retire
+    `rtcSolvedCompat`/`rtcSolveLike` before removing remaining elaboration
+    compatibility wiring.
 - Chi-first elaboration/result-type internal cleanup (2026-03-03):
   - added shared presolution query facade `MLF.Elab.Run.ChiQuery` and wired
     elaboration/result-type internals to query `χp` through that facade;

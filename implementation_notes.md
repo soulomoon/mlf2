@@ -2,6 +2,33 @@
 
 ## Thesis Alignment (Phase A–E)
 
+### 2026-03-03 Wave 3 Task 6 verifier closeout (row-1 chi-first boundary evidence)
+- Row-1 runtime boundary shape is now explicit and stable:
+  - `ElabEnv` carries `eePresolutionView`, GA parents, edge artifacts, and
+    scope overrides (no `eeSolvedCompat` field).
+  - `elaborateWithEnv` no longer performs entry-time
+    `Solved.rebuildWithConstraint`; chi-first queries flow through `ChiQuery`.
+  - Production pipeline remains checked-authoritative; result-type
+    reconstruction remains diagnostic-only.
+- Explicit adapters still present (row-2 follow-up surface):
+  - `rtcSolvedCompat` + `rtcSolveLike` at the result-type boundary.
+  - `ElabConfig.ecSolved` as an elaboration compatibility input for existing
+    generalize/reify helper signatures.
+- Verification evidence for this closeout:
+  - Requested combined matcher
+    `--match "row1 closeout guard|checked-authoritative|Dual-path verification"`
+    selected `0 examples` (PASS, empty selection).
+  - Required narrow fallback slices:
+    - `--match "row1 closeout guard"`: PASS (`2 examples, 0 failures`)
+    - `--match "checked-authoritative"`: PASS (`7 examples, 0 failures`)
+    - `--match "Dual-path verification"`: PASS (`4 examples, 0 failures`)
+  - Full gate: `cabal build all && cabal test` PASS.
+- Ordered next steps (row-2):
+  1. Move result-type bound-overlay/materialization to `χp`-native views.
+  2. Remove `rtcSolveLike` from `ResultType.View` construction.
+  3. Remove `rtcSolvedCompat` from `ResultTypeInputs` and pipeline wiring.
+  4. Re-evaluate `ElabConfig.ecSolved` removal once row-2 adapters are gone.
+
 ### 2026-03-03 Task 31 chi-first elaboration/result-type internal cleanup (Tasks 1-6 complete)
 - Completed the chi-first migration plan at
   `docs/plans/2026-03-03-chi-p-query-first-elab-resulttype-agent-team-implementation-plan.md`
@@ -15,13 +42,14 @@
     retaining solved compatibility only in `rtcSolveLike` and bound-overlay
     materialization needed by legacy helper signatures.
 - Elaborate internals now prefer `χp` reads:
-  - `ElabEnv` carries `eePresolutionView` plus narrowed `eeSolvedCompat`;
+  - `ElabEnv` carries `eePresolutionView` plus runtime edge/scope artifacts
+    (no `eeSolvedCompat` field);
   - `elaborateWithEnv` uses `ChiQuery` for canonicalization/boundary queries
     and avoids local solved-from-constraint materialization.
 - Pipeline boundary integration:
   - added `mkResultTypeInputs` and wired pipeline result-type/elaboration
     setup through explicit compatibility inputs (`rtcSolvedCompat`,
-    `eeSolvedCompat`) instead of ad hoc internal reconstruction.
+    `ecSolved`) instead of ad hoc internal reconstruction.
 - Guardrails and verification:
   - source-level chi-first guard tests and phase-gate matcher aliases were
     added in `PipelineSpec`/`ElaborationSpec`;
@@ -90,9 +118,10 @@
     solved state from `PresolutionView` canonical data (`pvCanonicalConstraint`
     + `pvCanonicalMap`).
 - Elaboration boundary wiring completion:
-  - `ElabConfig` no longer carries `ecSolved`;
-  - `elaborateWithEnv` materializes internal solved access from
-    `eePresolutionView` only.
+  - `ElabEnv` no longer carries solved compatibility state (`eeSolvedCompat`);
+  - `elaborateWithEnv` no longer performs entry-time solved reconstruction
+    (`Solved.rebuildWithConstraint`);
+  - compatibility solved access remains explicit in `ElabConfig.ecSolved`.
 - Added executable closeout tests (exact plan-matcher names):
   - `row1 boundary uses thesis-core elaboration input contract`
   - `elaborateWithEnv consumes thesis-core input`
