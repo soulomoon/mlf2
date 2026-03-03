@@ -114,8 +114,6 @@ runPipelineElabWith traceCfg genConstraints expr = do
                 planBuilder
                 mbGa
                 presolutionViewForGen
-        generalizeAtWithCompat mbGa _solved =
-            generalizeAtWithView mbGa
     let ann' = applyRedirectsToAnn (prRedirects pres) ann
     let annCanon = canonicalizeAnn (canonicalizeNode canonNode) ann'
     let edgeWitnesses = IntMap.map (canonicalizeWitness canonNode) (prEdgeWitnesses pres)
@@ -130,7 +128,7 @@ runPipelineElabWith traceCfg genConstraints expr = do
                 annCanon
     let elabConfig = ElabConfig
             { ecTraceConfig = traceCfg
-            , ecGeneralizeAtWith = generalizeAtWithCompat
+            , ecGeneralizeAtWith = generalizeAtWithView
             }
         elabEnv = ElabEnv
             { eePresolutionView = presolutionViewForGen
