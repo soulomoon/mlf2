@@ -296,6 +296,10 @@ stripUnusedTopForalls ty =
 spec :: Spec
 spec = describe "Phase 6 — Elaborate (xMLF)" $ do
     describe "Migration guards" $ do
+        it "chi-first guard: ResultType internals avoid local solved materialization" $ do
+            src <- readFile "src/MLF/Elab/Run/ResultType/Types.hs"
+            src `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
+
         it "result-type fallback matches pipeline type on non-annotation roots" $ do
             let expr = EApp (ELam "x" (EVar "x")) (ELit (LInt 7))
             artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)

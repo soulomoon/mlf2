@@ -169,6 +169,10 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 Left err -> expectationFailure $ "Reify error: " ++ show err
 
     describe "Integration Tests" $ do
+        it "chi-first guard: Elaborate internals avoid local solved materialization" $ do
+            src <- readFile "src/MLF/Elab/Elaborate.hs"
+            src `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
+
         it "single-solved refactor keeps checked pipeline authoritative on representative corpus" $ do
             forM_ representativeMigrationCorpus assertCheckedAuthoritative
 
