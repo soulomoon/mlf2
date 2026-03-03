@@ -177,6 +177,14 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             src <- readFile "src/MLF/Elab/Elaborate.hs"
             isInfixOf "solved = Solved.rebuildWithConstraint" src `shouldBe` False
 
+        it "row2 closeout guard: ResultTypeInputs no longer exposes rtcSolvedCompat" $ do
+            src <- readFile "src/MLF/Elab/Run/ResultType/Types.hs"
+            isInfixOf "rtcSolvedCompat ::" src `shouldBe` False
+
+        it "row2 closeout guard: MLF.Elab.Run.ResultType.Types no longer exposes rtcSolveLike" $ do
+            src <- readFile "src/MLF/Elab/Run/ResultType/Types.hs"
+            isInfixOf "rtcSolveLike" src `shouldBe` False
+
         it "chi-first guard: internals use shared ChiQuery facade" $ do
             elabSrc <- readFile "src/MLF/Elab/Elaborate.hs"
             rtSrc <- readFile "src/MLF/Elab/Run/ResultType/Types.hs"
@@ -187,6 +195,9 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             forM_ representativeMigrationCorpus assertCheckedAuthoritative
 
         it "chi-first ResultType|checked-authoritative keeps representative corpus parity" $ do
+            forM_ representativeMigrationCorpus assertCheckedAuthoritative
+
+        it "checked-authoritative keeps representative corpus parity" $ do
             forM_ representativeMigrationCorpus assertCheckedAuthoritative
 
         it "Pipeline \\(Phases 1-5\\)|Dual-path verification|chi-first integration keeps boundary wiring explicit" $ do
