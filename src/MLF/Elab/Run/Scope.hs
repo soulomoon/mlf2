@@ -1,11 +1,14 @@
 module MLF.Elab.Run.Scope (
     bindingScopeRef,
     bindingScopeRefCanonical,
+    bindingScopeRefCanonicalView,
     preferGenScope,
     schemeBodyTarget,
     canonicalizeScopeRef,
     resolveCanonicalScope,
-    letScopeOverrides
+    resolveCanonicalScopeView,
+    letScopeOverrides,
+    letScopeOverridesView
 ) where
 
 import Data.Functor.Foldable (cata)
@@ -74,8 +77,11 @@ bindingScopeRef constraint root = do
 -- | Canonical-domain variant of 'bindingScopeRef' that traverses
 -- 'Solved.canonicalBindParents'.
 bindingScopeRefCanonical :: Solved -> NodeId -> Either BindingError NodeRef
-bindingScopeRefCanonical solved root = do
-    let presolutionView = fromSolved solved
+bindingScopeRefCanonical solved =
+    bindingScopeRefCanonicalView (fromSolved solved)
+
+bindingScopeRefCanonicalView :: PresolutionView -> NodeId -> Either BindingError NodeRef
+bindingScopeRefCanonicalView presolutionView root = do
     path <- bindingPathToRootFromBindParents (ChiQuery.chiCanonicalBindParents presolutionView) (typeRef root)
     case listToMaybe [gid | GenRef gid <- drop 1 path] of
         Just gid -> Right (GenRef gid)
@@ -174,22 +180,41 @@ canonicalizeScopeRef solved redirects scopeRef =
             in TypeRef (canonical (chaseRedirects redirects nid))
 
 resolveCanonicalScope :: Constraint -> Solved -> IntMap.IntMap NodeId -> NodeId -> Either BindingError NodeRef
-resolveCanonicalScope constraint solved redirects scopeRoot = do
+resolveCanonicalScope constraint solved =
+    resolveCanonicalScopeView constraint (fromSolved solved)
+
+resolveCanonicalScopeView
+    :: Constraint
+    -> PresolutionView
+    -> IntMap.IntMap NodeId
+    -> NodeId
+    -> Either BindingError NodeRef
+resolveCanonicalScopeView constraint presolutionView redirects scopeRoot = do
     scope0 <- bindingScopeRef constraint scopeRoot
     let scopeBase = preferGenScope constraint scope0
-    pure (canonicalizeScopeRef solved redirects scopeBase)
+    pure (canonicalizeScopeRefView presolutionView redirects scopeBase)
 
 letScopeOverrides :: Constraint -> Constraint -> Solved -> IntMap.IntMap NodeId -> AnnExpr -> IntMap.IntMap NodeRef
-letScopeOverrides base solvedForGen solved redirects ann =
-    let canonical = ChiQuery.chiCanonical (fromSolved solved)
+letScopeOverrides base solvedForGen solved =
+    letScopeOverridesView base solvedForGen (fromSolved solved)
+
+letScopeOverridesView
+    :: Constraint
+    -> Constraint
+    -> PresolutionView
+    -> IntMap.IntMap NodeId
+    -> AnnExpr
+    -> IntMap.IntMap NodeRef
+letScopeOverridesView base solvedForGen presolutionView redirects ann =
+    let canonical = ChiQuery.chiCanonical presolutionView
         addOverride acc schemeRootId =
             case bindingScopeRef base schemeRootId of
                 Right scope0 ->
-                    let scope = canonicalizeScopeRef solved redirects scope0
+                    let scope = canonicalizeScopeRefView presolutionView redirects scope0
                         schemeRootC = canonical (chaseRedirects redirects schemeRootId)
                         postScope =
                             case bindingScopeRef solvedForGen schemeRootC of
-                                Right ref -> canonicalizeScopeRef solved redirects ref
+                                Right ref -> canonicalizeScopeRefView presolutionView redirects ref
                                 Left _ -> scope
                     in if scope == postScope
                         then acc

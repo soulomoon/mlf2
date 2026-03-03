@@ -1,6 +1,8 @@
 {-# LANGUAGE GADTs #-}
 module MLF.Reify.Core (
     reifyType,
+    reifyTypeFromView,
+    reifyTypeWithNamedSetNoFallbackFromView,
     reifyTypeWithNames,
     reifyTypeWithNamesNoFallback,
     reifyTypeWithNamesNoFallbackOnConstraint,
@@ -8,11 +10,13 @@ module MLF.Reify.Core (
     reifyTypeWithNamedSetNoFallback,
     reifyWithAs,
     reifyBoundWithNames,
+    reifyBoundWithNamesFromView,
     reifyBoundWithNamesOnConstraint,
     reifyBoundWithNamesBound,
     reifyBoundWithNamesOnConstraintBound,
     freeVars,
     namedNodes,
+    namedNodesFromView,
 ) where
 
 import Control.Monad (foldM, unless)
@@ -22,6 +26,7 @@ import Data.Maybe (fromMaybe)
 
 import qualified MLF.Util.Order as Order
 import qualified MLF.Constraint.Canonicalize as Canonicalize
+import MLF.Constraint.Presolution.View (PresolutionView(..))
 import MLF.Constraint.Types hiding (lookupNode)
 import MLF.Types.Elab
 import MLF.Util.ElabError (ElabError(..), bindingToElab)
@@ -679,6 +684,10 @@ reifyType solved =
   where
     nameFor (NodeId i) = "t" ++ show i
 
+reifyTypeFromView :: PresolutionView -> NodeId -> Either ElabError ElabType
+reifyTypeFromView presolutionView =
+    reifyType (solvedFromView presolutionView)
+
 -- | Reify with an explicit name substitution for vars (Schi': named nodes become variables).
 reifyTypeWithNames :: Solved -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
 reifyTypeWithNames solved subst nid = do
@@ -706,7 +715,7 @@ reifyTypeWithNamesNoFallback solved subst nid =
 -- | Reify with an explicit constraint (Schi' on base graphs).
 reifyTypeWithNamesNoFallbackOnConstraint :: Constraint -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
 reifyTypeWithNamesNoFallbackOnConstraint constraint subst nid =
-    let solvedBase = Solved.fromConstraintAndUf constraint IntMap.empty
+    let solvedBase = Solved.mkTestSolved constraint IntMap.empty
     in reifyTypeWithNamesNoFallback solvedBase subst nid
 
 -- | Reify with an explicit named-node set (Schi').
@@ -741,6 +750,15 @@ reifyTypeWithNamedSetNoFallback solved subst namedSet =
 
     isNamed nodeId = IntSet.member (getNodeId (canonical nodeId)) namedSet
 
+reifyTypeWithNamedSetNoFallbackFromView
+    :: PresolutionView
+    -> IntMap.IntMap String
+    -> IntSet.IntSet
+    -> NodeId
+    -> Either ElabError ElabType
+reifyTypeWithNamedSetNoFallbackFromView presolutionView subst namedSet nid =
+    reifyTypeWithNamedSetNoFallback (solvedFromView presolutionView) subst namedSet nid
+
 -- | Reify a node for use as a binder bound (T(n) in the paper, Schi_p).
 reifyBoundWithNames :: Solved -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
 reifyBoundWithNames solved subst =
@@ -756,6 +774,14 @@ reifyBoundWithNames solved subst =
         in fromMaybe (nameFor cv) (IntMap.lookup (getNodeId cv) subst)
 
     isNamed nodeId = IntMap.member (getNodeId (canonical nodeId)) subst
+
+reifyBoundWithNamesFromView
+    :: PresolutionView
+    -> IntMap.IntMap String
+    -> NodeId
+    -> Either ElabError ElabType
+reifyBoundWithNamesFromView presolutionView subst nid =
+    reifyBoundWithNames (solvedFromView presolutionView) subst nid
 
 reifyBoundWithNamesBound :: Solved -> IntMap.IntMap String -> NodeId -> Either ElabError BoundType
 reifyBoundWithNamesBound solved subst =
@@ -776,12 +802,12 @@ reifyBoundWithNamesBound solved subst =
 -- | Reify a node for use as a binder bound on an explicit constraint (Schi_p on base graphs).
 reifyBoundWithNamesOnConstraint :: Constraint -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
 reifyBoundWithNamesOnConstraint constraint subst nid =
-    let solvedBase = Solved.fromConstraintAndUf constraint IntMap.empty
+    let solvedBase = Solved.mkTestSolved constraint IntMap.empty
     in reifyBoundWithNames solvedBase subst nid
 
 reifyBoundWithNamesOnConstraintBound :: Constraint -> IntMap.IntMap String -> NodeId -> Either ElabError BoundType
 reifyBoundWithNamesOnConstraintBound constraint subst nid =
-    let solvedBase = Solved.fromConstraintAndUf constraint IntMap.empty
+    let solvedBase = Solved.mkTestSolved constraint IntMap.empty
     in reifyBoundWithNamesBound solvedBase subst nid
 
 namedNodes :: Solved -> Either ElabError IntSet.IntSet
@@ -804,6 +830,18 @@ namedNodes solved = do
             , isNamedNode childC
             ]
     pure (IntSet.fromList named)
+
+namedNodesFromView :: PresolutionView -> Either ElabError IntSet.IntSet
+namedNodesFromView presolutionView =
+    namedNodes (solvedFromView presolutionView)
+
+solvedFromView :: PresolutionView -> Solved
+solvedFromView presolutionView =
+    let solved0 =
+            Solved.fromConstraintAndUf
+                (pvConstraint presolutionView)
+                (pvCanonicalMap presolutionView)
+    in Solved.rebuildWithConstraint solved0 (pvCanonicalConstraint presolutionView)
 
 -- | Collect free variables by NodeId, skipping vars under TyForall.
 freeVars :: Solved -> NodeId -> IntSet.IntSet -> IntSet.IntSet

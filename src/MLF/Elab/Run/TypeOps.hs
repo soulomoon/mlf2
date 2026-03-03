@@ -2,6 +2,8 @@
 module MLF.Elab.Run.TypeOps (
     inlineBoundVarsType,
     inlineBoundVarsTypeForBound,
+    inlineBoundVarsTypeView,
+    inlineBoundVarsTypeForBoundView,
     simplifyAnnotationType
 ) where
 
@@ -10,11 +12,15 @@ import qualified Data.IntSet as IntSet
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
+import MLF.Constraint.Presolution (PresolutionView(..))
+import MLF.Constraint.Presolution.View (fromSolved)
 import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Constraint.Solved (Solved)
-import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types.Graph (TyNode(..), cNodes, fromListNode, toListNode)
-import MLF.Reify.Core (namedNodes, reifyTypeWithNamedSetNoFallback)
+import MLF.Reify.Core
+    ( namedNodesFromView
+    , reifyTypeWithNamedSetNoFallbackFromView
+    )
 import MLF.Reify.TypeOps (
     freeTypeVarsType,
     inlineAliasBoundsWithBySeen,
@@ -37,15 +43,23 @@ mapBound f bound = case bound of
         in TForall v mb' (f body)
 
 inlineBoundVarsType :: Solved -> ElabType -> ElabType
-inlineBoundVarsType = inlineBoundVarsTypeWith False
+inlineBoundVarsType solved =
+    inlineBoundVarsTypeWith False (fromSolved solved)
 
 inlineBoundVarsTypeForBound :: Solved -> ElabType -> ElabType
-inlineBoundVarsTypeForBound = inlineBoundVarsTypeWith True
+inlineBoundVarsTypeForBound solved =
+    inlineBoundVarsTypeWith True (fromSolved solved)
+
+inlineBoundVarsTypeView :: PresolutionView -> ElabType -> ElabType
+inlineBoundVarsTypeView = inlineBoundVarsTypeWith False
+
+inlineBoundVarsTypeForBoundView :: PresolutionView -> ElabType -> ElabType
+inlineBoundVarsTypeForBoundView = inlineBoundVarsTypeWith True
 
 -- See Note [Scope-aware bound/alias inlining] in
 -- docs/notes/2026-01-27-elab-changes.md.
-inlineBoundVarsTypeWith :: Bool -> Solved -> ElabType -> ElabType
-inlineBoundVarsTypeWith unboundToBottom solved =
+inlineBoundVarsTypeWith :: Bool -> PresolutionView -> ElabType -> ElabType
+inlineBoundVarsTypeWith unboundToBottom presolutionView =
     inlineAliasBoundsWithBySeen
         unboundToBottom
         canonical
@@ -53,9 +67,9 @@ inlineBoundVarsTypeWith unboundToBottom solved =
         (VarStore.lookupVarBound constraint)
         reifyBoundWithSeen
   where
-    constraint = Solved.originalConstraint solved
-    canonical = Solved.canonical solved
-    namedSet = either (const IntSet.empty) id (namedNodes solved)
+    constraint = pvConstraint presolutionView
+    canonical = pvCanonical presolutionView
+    namedSet = either (const IntSet.empty) id (namedNodesFromView presolutionView)
     nodesVarOnly =
         fromListNode
             [ (nid, node)
@@ -67,7 +81,7 @@ inlineBoundVarsTypeWith unboundToBottom solved =
         _ -> False
     reifyBoundWithSeen seen bnd = do
         let bndRoot = resolveBoundBodyConstraint canonical constraint seen bnd
-        t0 <- reifyTypeWithNamedSetNoFallback solved IntMap.empty namedSet bndRoot
+        t0 <- reifyTypeWithNamedSetNoFallbackFromView presolutionView IntMap.empty namedSet bndRoot
         pure (inlineBaseBoundsType constraint canonical t0)
 
 simplifyAnnotationType :: ElabType -> ElabType
