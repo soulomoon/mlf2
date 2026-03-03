@@ -1,0 +1,40 @@
+# Findings
+
+## 2026-03-03
+- Current row-1 blockers still present in code:
+  - `ElabEnv` includes `eeSolvedCompat` in `src/MLF/Elab/Elaborate.hs`.
+  - `elaborateWithEnv` rebuilds solved at entry via `Solved.rebuildWithConstraint`.
+- Generalization helper entry point is still solved-typed:
+  - `generalizeAtWithBuilder :: ... -> Solved -> ...` in `src/MLF/Elab/Run/Generalize.hs`.
+- Result-type utility `generalizeWithPlan` is solved-typed and uses solved fallback reification in `src/MLF/Elab/Run/ResultType/Util.hs`.
+- Existing test corpus already has checked-authoritative representative assertions and chi-first guards that can anchor this closeout.
+- Team A added explicit row-1 closeout source guards:
+  - `test/PipelineSpec.hs`: asserts `elaborateWithEnv` no longer contains `Solved.rebuildWithConstraint`.
+  - `test/ElaborationSpec.hs`: asserts `ElabEnv` no longer contains `eeSolvedCompat`.
+- Red-cycle verification succeeded for Task 1:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "row1 closeout guard|checked-authoritative keeps representative corpus parity"'`
+  - Outcome: `2 examples, 2 failures` (expected red on new guards).
+- The plan's Gate A matcher string currently matches zero examples verbatim in this harness, so red evidence is tracked via the Task 1 targeted matcher output.
+- Wave 1 / Team B:
+  - Added `generalizeAtWithBuilderView` in `src/MLF/Elab/Run/Generalize.hs`.
+  - Kept solved compatibility by delegating `generalizeAtWithBuilder` through `fromSolved`.
+  - `generalizeWithPlan` now uses view-first generalization internally while preserving GA/no-GA/reify fallback semantics.
+- Wave 1 / Team C:
+  - Expanded `MLF.Elab.Run.ChiQuery` helper surface and migrated row-1 elaboration/scope helper reads to χp-first lookups.
+  - Preserved fallback behavior and checked-authoritative output.
+- Wave 2 / Task 4:
+  - Removed `eeSolvedCompat` from `ElabEnv`.
+  - Removed `Solved.rebuildWithConstraint` entry-time reconstruction from `elaborateWithEnv`.
+  - `ElabConfig` now carries explicit solved compatibility wiring (`ecSolved`) as an explicit boundary adapter.
+- Wave 2 / Task 5:
+  - Row-1 pipeline/result-type call sites switched from solved-typed helper usage to view-first adapter usage (`generalizeAtWithBuilderView` wrappers).
+  - `ResultType.hs` required no direct change for row-1 because remaining solved boundary is centralized in result-type view/types adapters.
+- Wave 3 verification:
+  - Narrow gate slices all passed:
+    - `row1 closeout guard`: `2 examples, 0 failures`
+    - `checked-authoritative`: `7 examples, 0 failures`
+    - `Dual-path verification`: `4 examples, 0 failures`
+  - Final gate passed: `cabal build all && cabal test`.
+- Residual row-2 follow-up (documented in repo docs):
+  - `rtcSolvedCompat` / `rtcSolveLike` remain in result-type boundary adapters.
+  - Explicit `ElabConfig.ecSolved` compatibility wiring remains pending row-2 retirement.
