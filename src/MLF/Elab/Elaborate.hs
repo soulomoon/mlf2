@@ -1,8 +1,10 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE ViewPatterns #-}
 module MLF.Elab.Elaborate (
-    ElabConfig(..),
+    ElabConfig(ElabConfig, ecTraceConfig, ecGeneralizeAtWith, ecSolved),
     ElabEnv(..),
     expansionToInst,
     elaborate,
@@ -68,11 +70,32 @@ type GeneralizeAtWith =
     -> NodeId
     -> Either ElabError (ElabScheme, IntMap.IntMap String)
 
-data ElabConfig = ElabConfig
-    { ecTraceConfig :: TraceConfig
-    , ecGeneralizeAtWith :: GeneralizeAtWith
-    , ecSolved :: Solved
+data ElabConfig = MkElabConfig
+    { ecTraceConfigCore :: TraceConfig
+    , ecGeneralizeAtWithCore :: GeneralizeAtWith
     }
+
+elabConfigCompatView :: ElabConfig -> (TraceConfig, GeneralizeAtWith, Solved)
+elabConfigCompatView cfg =
+    ( ecTraceConfigCore cfg
+    , ecGeneralizeAtWithCore cfg
+    , error "ElabConfig.ecSolved retired; use ElabEnv + ChiQuery.chiSolved"
+    )
+
+pattern ElabConfig :: TraceConfig -> GeneralizeAtWith -> Solved -> ElabConfig
+pattern ElabConfig
+    { ecTraceConfig
+    , ecGeneralizeAtWith
+    , ecSolved
+    } <- (elabConfigCompatView -> (ecTraceConfig, ecGeneralizeAtWith, ecSolved))
+  where
+    ElabConfig traceCfg generalizeAtWith _ =
+        MkElabConfig
+            { ecTraceConfigCore = traceCfg
+            , ecGeneralizeAtWithCore = generalizeAtWith
+            }
+
+{-# COMPLETE ElabConfig #-}
 
 data ElabEnv = ElabEnv
     { eePresolutionView :: PresolutionView
@@ -158,10 +181,9 @@ elaborateWithScope
     -> Either ElabError ElabTerm
 elaborateWithScope traceCfg generalizeAtWith solved gaParents edgeWitnesses edgeTraces edgeExpansions scopeOverrides ann =
     elaborateWithEnv
-        ElabConfig
-            { ecTraceConfig = traceCfg
-            , ecGeneralizeAtWith = generalizeAtWith
-            , ecSolved = solved
+        MkElabConfig
+            { ecTraceConfigCore = traceCfg
+            , ecGeneralizeAtWithCore = generalizeAtWith
             }
         ElabEnv
             { eePresolutionView = fromSolved solved
@@ -185,12 +207,12 @@ elaborateWithEnv config elabEnv ann = do
     let ElabOut { elabTerm = runElab } = para (elabAlg namedSetPhi namedSetReify) ann
     runElab Map.empty
   where
-    ElabConfig
-        { ecTraceConfig = traceCfg
-        , ecGeneralizeAtWith = generalizeAtWithRaw
-        , ecSolved = solved
+    MkElabConfig
+        { ecTraceConfigCore = traceCfg
+        , ecGeneralizeAtWithCore = generalizeAtWithRaw
         } = config
     presolutionView = eePresolutionView elabEnv
+    solved = ChiQuery.chiSolved presolutionView
     gaParents = eeGaParents elabEnv
     edgeWitnesses = eeEdgeWitnesses elabEnv
     edgeTraces = eeEdgeTraces elabEnv
