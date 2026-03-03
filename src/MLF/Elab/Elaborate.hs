@@ -63,6 +63,12 @@ import MLF.Frontend.ConstraintGen.Types (AnnExpr(..), AnnExprF(..))
 
 type GeneralizeAtWith =
     Maybe GaBindParents
+    -> NodeRef
+    -> NodeId
+    -> Either ElabError (ElabScheme, IntMap.IntMap String)
+
+type GeneralizeAtWithCompat =
+    Maybe GaBindParents
     -> Solved
     -> NodeRef
     -> NodeId
@@ -70,7 +76,7 @@ type GeneralizeAtWith =
 
 data ElabConfig = ElabConfig
     { ecTraceConfig :: TraceConfig
-    , ecGeneralizeAtWith :: GeneralizeAtWith
+    , ecGeneralizeAtWith :: GeneralizeAtWithCompat
     }
 
 data ElabEnv = ElabEnv
@@ -103,7 +109,7 @@ schemeBodyTarget presolutionView target =
 
 elaborate
     :: TraceConfig
-    -> GeneralizeAtWith
+    -> GeneralizeAtWithCompat
     -> Solved
     -> IntMap.IntMap EdgeWitness
     -> IntMap.IntMap EdgeTrace
@@ -133,7 +139,7 @@ elaborate traceCfg generalizeAtWith solved edgeWitnesses edgeTraces edgeExpansio
 
 elaborateWithGen
     :: TraceConfig
-    -> GeneralizeAtWith
+    -> GeneralizeAtWithCompat
     -> Solved
     -> GaBindParents
     -> IntMap.IntMap EdgeWitness
@@ -146,7 +152,7 @@ elaborateWithGen traceCfg generalizeAtWith solved gaParents edgeWitnesses edgeTr
 
 elaborateWithScope
     :: TraceConfig
-    -> GeneralizeAtWith
+    -> GeneralizeAtWithCompat
     -> Solved
     -> GaBindParents
     -> IntMap.IntMap EdgeWitness
@@ -177,7 +183,7 @@ elaborateWithEnv
     -> AnnExpr
     -> Either ElabError ElabTerm
 elaborateWithEnv config elabEnv ann = do
-    namedSet <- namedNodes solved
+    namedSet <- namedNodes solvedCompat
     let namedSetPhi = namedSet
         namedSetReify = namedSet
     let ElabOut { elabTerm = runElab } = para (elabAlg namedSetPhi namedSetReify) ann
@@ -188,7 +194,7 @@ elaborateWithEnv config elabEnv ann = do
         , ecGeneralizeAtWith = generalizeAtWithRaw
         } = config
     presolutionView = eePresolutionView elabEnv
-    solved = ChiQuery.chiSolved presolutionView
+    solvedCompat = ChiQuery.chiSolvedCompat presolutionView
     gaParents = eeGaParents elabEnv
     edgeWitnesses = eeEdgeWitnesses elabEnv
     edgeTraces = eeEdgeTraces elabEnv
@@ -210,6 +216,11 @@ elaborateWithEnv config elabEnv ann = do
 
     generalizeAtWith
         :: Maybe GaBindParents
+        -> NodeRef
+        -> NodeId
+        -> Either ElabError (ElabScheme, IntMap.IntMap String)
+    generalizeAtWithCompat
+        :: Maybe GaBindParents
         -> Solved
         -> NodeRef
         -> NodeId
@@ -219,23 +230,25 @@ elaborateWithEnv config elabEnv ann = do
         SchemeFreeVars{} -> True
         _ -> False
 
-    generalizeAtWith mbGa res scopeRoot targetNode =
-        let resSR = res
-        in case generalizeAtWithRaw mbGa resSR scopeRoot targetNode of
+    generalizeAtWith mbGa scopeRoot targetNode =
+        case generalizeAtWithRaw mbGa solvedCompat scopeRoot targetNode of
             Right out -> Right out
             Left err | generalizeNeedsFallback err ->
                 case mbGa of
                     Just _ ->
-                        case generalizeAtWithRaw Nothing resSR scopeRoot targetNode of
+                        case generalizeAtWithRaw Nothing solvedCompat scopeRoot targetNode of
                             Right out -> Right out
                             Left err2 | generalizeNeedsFallback err2 -> do
-                                ty <- reifyType resSR targetNode
+                                ty <- reifyType solvedCompat targetNode
                                 pure (schemeFromType ty, IntMap.empty)
                             Left err3 -> Left err3
                     Nothing -> do
-                        ty <- reifyType resSR targetNode
+                        ty <- reifyType solvedCompat targetNode
                         pure (schemeFromType ty, IntMap.empty)
             Left err -> Left err
+
+    generalizeAtWithCompat mbGa _solved scopeRoot targetNode =
+        generalizeAtWith mbGa scopeRoot targetNode
 
     scopeRootForNode :: NodeId -> NodeRef
     scopeRootForNode nodeId =
@@ -252,13 +265,13 @@ elaborateWithEnv config elabEnv ann = do
                     Right alt
                         | schemeSubstCoherenceScore alt > schemeSubstCoherenceScore primary -> alt
                     _ -> primary
-        in case generalizeAtWith (Just gaParents) solved scopeRoot targetC of
+        in case generalizeAtWith (Just gaParents) scopeRoot targetC of
             Right out ->
-                let fallback = generalizeAtWith Nothing solved scopeRoot targetC
+                let fallback = generalizeAtWith Nothing scopeRoot targetC
                     out' = preferMoreCoherent out fallback
                 in Right out'
             Left err | generalizeNeedsFallback err ->
-                case generalizeAtWith Nothing solved scopeRoot targetC of
+                case generalizeAtWith Nothing scopeRoot targetC of
                     Right out -> Right out
                     Left err2 | generalizeNeedsFallback err2 -> do
                         tyFallback <- reifyNodeTypePreferringBound targetC
@@ -348,11 +361,11 @@ elaborateWithEnv config elabEnv ann = do
 
     reifyNodeTypePreferringBound :: NodeId -> Either ElabError ElabType
     reifyNodeTypePreferringBound nodeId = do
-        namedSet <- namedNodes solved
+        namedSet <- namedNodes solvedCompat
         let nodeC = canonical nodeId
         case chiLookupVarBound nodeC of
-            Just bnd -> reifyTypeForParam namedSet solved bnd
-            Nothing -> reifyTypeForParam namedSet solved nodeC
+            Just bnd -> reifyTypeForParam namedSet solvedCompat bnd
+            Nothing -> reifyTypeForParam namedSet solvedCompat nodeC
 
     closeTermForAnnotation :: ElabTerm -> ElabTerm
     closeTermForAnnotation term =
@@ -534,7 +547,7 @@ elaborateWithEnv config elabEnv ann = do
                                     si <- Map.lookup v env
                                     let paramTy' =
                                             if shouldInlineParamTy
-                                                then inlineBoundVarsType solved paramTy
+                                                then inlineBoundVarsType solvedCompat paramTy
                                                 else paramTy
                                     args <- inferInstAppArgs (siScheme si) paramTy'
                                     pure (instSeqApps args)
@@ -544,7 +557,7 @@ elaborateWithEnv config elabEnv ann = do
                                         Right (TArrow paramTy _) -> do
                                             let paramTy' =
                                                     if shouldInlineParamTy
-                                                        then inlineBoundVarsType solved paramTy
+                                                        then inlineBoundVarsType solvedCompat paramTy
                                                         else paramTy
                                             args <- inferInstAppArgs (siScheme si) paramTy'
                                             pure (instSeqApps args)
@@ -941,7 +954,7 @@ elaborateWithEnv config elabEnv ann = do
                     )
                     () of
                     () -> pure ()
-                phi <- phiFromEdgeWitnessWithTrace traceCfg generalizeAtWith solved (Just gaParents) mSchemeInfo' mTrace ew
+                phi <- phiFromEdgeWitnessWithTrace traceCfg generalizeAtWithCompat solvedCompat (Just gaParents) mSchemeInfo' mTrace ew
                 case debugGeneralize
                     ("reifyInst phi edge=" ++ show eid ++ " phi=" ++ show phi)
                     () of
@@ -1023,12 +1036,12 @@ elaborateWithEnv config elabEnv ann = do
                                     reifyArg arg =
                                         let argC = canonical arg
                                         in case chiLookupVarBound argC of
-                                            Just bnd -> reifyBoundWithNames solved substForArgs bnd
-                                            Nothing -> reifyTypeWithNamedSetNoFallback solved substForArgs namedSetReify argC
+                                            Just bnd -> reifyBoundWithNames solvedCompat substForArgs bnd
+                                            Nothing -> reifyTypeWithNamedSetNoFallback solvedCompat substForArgs namedSetReify argC
                                 argTys <- case targetArgs of
                                     Just inferred -> pure inferred
                                     Nothing -> mapM reifyArg argNodes'
-                                let argTys' = map (inlineBoundVarsType solved) argTys
+                                let argTys' = map (inlineBoundVarsType solvedCompat) argTys
                                 case debugGeneralize
                                     ("reifyInst fallback edge=" ++ show eid
                                         ++ " argTys=" ++ show argTys
@@ -1046,8 +1059,8 @@ elaborateWithEnv config elabEnv ann = do
     reifyTargetType namedSetReify ew si =
         let subst = siSubst si
         in case chiLookupVarBound (ewRight ew) of
-            Just bnd -> reifyTypeWithNamedSetNoFallback solved subst namedSetReify bnd
-            Nothing -> reifyTypeWithNamedSetNoFallback solved subst namedSetReify (ewRight ew)
+            Just bnd -> reifyTypeWithNamedSetNoFallback solvedCompat subst namedSetReify bnd
+            Nothing -> reifyTypeWithNamedSetNoFallback solvedCompat subst namedSetReify (ewRight ew)
 
     inferInstAppArgs :: ElabScheme -> ElabType -> Maybe [ElabType]
     inferInstAppArgs scheme targetTy =

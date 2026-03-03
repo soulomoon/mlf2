@@ -245,6 +245,12 @@ hydrateSchemeInfoByTrace presolutionView tr si =
 -- | Translate a recorded per-edge graph witness to an xMLF instantiation.
 type GeneralizeAtWith =
     Maybe GaBindParents
+    -> NodeRef
+    -> NodeId
+    -> Either ElabError (ElabScheme, IntMap.IntMap String)
+
+type GeneralizeAtWithCompat =
+    Maybe GaBindParents
     -> Solved
     -> NodeRef
     -> NodeId
@@ -254,7 +260,7 @@ type GeneralizeAtWith =
 -- fails fast because production Φ requires edge traces.
 phiFromEdgeWitnessNoTrace
     :: TraceConfig
-    -> GeneralizeAtWith
+    -> GeneralizeAtWithCompat
     -> Solved
     -> Maybe SchemeInfo
     -> EdgeWitness
@@ -265,7 +271,7 @@ phiFromEdgeWitnessNoTrace _traceCfg _generalizeAtWith _solved _mSchemeInfo ew =
 -- | Legacy alias for 'phiFromEdgeWitnessNoTrace' (deprecated; test/debug-only).
 phiFromEdgeWitness
     :: TraceConfig
-    -> GeneralizeAtWith
+    -> GeneralizeAtWithCompat
     -> Solved
     -> Maybe SchemeInfo
     -> EdgeWitness
@@ -276,7 +282,7 @@ phiFromEdgeWitness = phiFromEdgeWitnessNoTrace
 
 phiFromEdgeWitnessWithTrace
     :: TraceConfig
-    -> GeneralizeAtWith
+    -> GeneralizeAtWithCompat
     -> Solved
     -> Maybe GaBindParents
     -> Maybe SchemeInfo
@@ -286,7 +292,10 @@ phiFromEdgeWitnessWithTrace
 phiFromEdgeWitnessWithTrace traceCfg generalizeAtWith solved mbGaParents mSchemeInfo mTrace ew =
     case mTrace of
         Nothing -> Left (MissingEdgeTrace (ewEdgeId ew))
-        Just _ -> phiFromEdgeWitnessCore traceCfg generalizeAtWith solved (fromSolved solved) mbGaParents mSchemeInfo mTrace ew
+        Just _ ->
+            let generalizeAtWithView mbGa scopeRoot targetNode =
+                    generalizeAtWith mbGa solved scopeRoot targetNode
+            in phiFromEdgeWitnessCore traceCfg generalizeAtWithView solved (fromSolved solved) mbGaParents mSchemeInfo mTrace ew
 
 {- Note [Trace-First Copied Set]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -613,8 +622,8 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith solved presolutionView mbGaPare
         scopeRoot <- instScopeRoot root0
         (sch, subst) <-
             case mbGaParents of
-                Nothing -> generalizeAtWith Nothing solved scopeRoot root0
-                Just ga -> generalizeAtWith (Just ga) solved scopeRoot root0
+                Nothing -> generalizeAtWith Nothing scopeRoot root0
+                Just ga -> generalizeAtWith (Just ga) scopeRoot root0
         pure SchemeInfo { siScheme = sch, siSubst = subst }
 
     instScopeRoot :: NodeId -> Either ElabError NodeRef

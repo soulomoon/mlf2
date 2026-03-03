@@ -7,6 +7,7 @@ module MLF.Elab.Run.ChiQuery (
     chiCanonicalConstraint,
     chiBindParents,
     chiCanonicalBindParents,
+    chiSolvedCompat,
     chiSolved
 ) where
 
@@ -52,10 +53,13 @@ chiCanonicalBindParents = cBindParents . pvCanonicalConstraint
 -- The original constraint comes from `pvConstraint`; we then overwrite the
 -- canonical slice with `pvCanonicalConstraint` so downstream solved-domain
 -- queries continue to observe the canonicalized graph.
-chiSolved :: PresolutionView -> Solved
-chiSolved presolutionView =
+chiSolvedCompat :: PresolutionView -> Solved
+chiSolvedCompat presolutionView =
     let solved0 =
             Solved.fromConstraintAndUf
                 (pvConstraint presolutionView)
                 (pvCanonicalMap presolutionView)
     in Solved.rebuildWithConstraint solved0 (pvCanonicalConstraint presolutionView)
+
+chiSolved :: PresolutionView -> Solved
+chiSolved = chiSolvedCompat
