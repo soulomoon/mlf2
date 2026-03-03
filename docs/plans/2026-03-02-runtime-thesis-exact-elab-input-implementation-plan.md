@@ -8,6 +8,36 @@
 
 **Tech Stack:** Haskell (Cabal + Hspec), `src/MLF/Elab/*`, `src/MLF/Constraint/*`, `test/*Spec.hs`.
 
+## 2026-03-03 Strict Completion Checklist (5-item closeout)
+
+1. [x] Remove row-1 pipeline direct replay mediation calls (`Solved.fromPreRewriteState`, `solveResultFromSnapshot`, `setSolvedConstraint`) from `Pipeline.hs` boundary assembly.
+   Evidence:
+   - `src/MLF/Elab/Run/Pipeline.hs` no longer calls replay APIs directly and now routes boundary finalization via dedicated helper module `src/MLF/Elab/Run/PipelineBoundary.hs`.
+   - `cabal test mlf2-test --test-show-details=direct --test-options='--match "row1 boundary uses thesis-core elaboration input contract"'` (PASS).
+   - `cabal test mlf2-test --test-show-details=direct --test-options='--match "row1 boundary validates-only and does not mediate input"'` (PASS).
+2. [x] Remove result-type replay reconstruction (`rtcSolveLike -> fromPreRewriteState`) and switch to non-replay solved materialization.
+   Evidence:
+   - `src/MLF/Elab/Run/ResultType/Types.hs` now builds solved view via `Solved.fromConstraintAndUf` over `pvCanonicalConstraint`/`pvCanonicalMap` (no replay call).
+   - `cabal test mlf2-test --test-show-details=direct --test-options='--match "migration guardrail: thesis-core boundary matches legacy outcome"'` (PASS).
+3. [x] Complete elaboration boundary wiring on presolution-authoritative inputs (remove `ecSolved` boundary injection).
+   Evidence:
+   - `src/MLF/Elab/Elaborate.hs` `ElabConfig` no longer includes `ecSolved`.
+   - `elaborateWithEnv` materializes internal solved state from `eePresolutionView`.
+   - `cabal test mlf2-test --test-show-details=direct --test-options='--match "elaborateWithEnv consumes thesis-core input"'` (PASS).
+4. [x] Add exact plan-checklist tests and make them executable via `--match`.
+   Evidence (all PASS):
+   - `row1 boundary uses thesis-core elaboration input contract`
+   - `elaborateWithEnv consumes thesis-core input`
+   - `row1 boundary validates-only and does not mediate input`
+   - `migration guardrail: thesis-core boundary matches legacy outcome`
+   - `final row1 state uses single thesis-core boundary path`
+   - `Dual-path verification`
+5. [x] Docs/gate closeout: update docs and run final gate (`cabal build all && cabal test`).
+   Evidence:
+   - Updated closeout docs: `docs/notes/2026-02-27-transformation-mechanism-table.md`, `implementation_notes.md`, `CHANGELOG.md`.
+   - Targeted gates: `Phase 6 — Elaborate` (PASS), `Pipeline (Phases 1-5)` (PASS), `Dual-path verification` (PASS).
+   - Full gate: `cabal build all && cabal test` (PASS).
+
 ---
 
 ### Task 1: Add a failing boundary contract test for thesis-core elaboration input

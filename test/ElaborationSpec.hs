@@ -301,6 +301,11 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             src `shouldSatisfy` (isInfixOf "eePresolutionView")
             src `shouldSatisfy` (not . isInfixOf "eeSolved ::")
 
+        it "elaborateWithEnv consumes thesis-core input" $ do
+            src <- readFile "src/MLF/Elab/Elaborate.hs"
+            src `shouldSatisfy` (isInfixOf "eePresolutionView :: PresolutionView")
+            src `shouldSatisfy` (not . isInfixOf "ecSolved ::")
+
         it "Phi modules no longer import MLF.Constraint.Solved directly" $ do
             let phiModules =
                     [ "src/MLF/Elab/Phi/Omega.hs"

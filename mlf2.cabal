@@ -198,6 +198,7 @@ library mlf2-internal
                       MLF.Elab.Run.Generalize.Types,
                       MLF.Elab.Run.Instantiation,
                       MLF.Elab.Run.Pipeline,
+                      MLF.Elab.Run.PipelineBoundary,
                       MLF.Elab.Run.ResultType.Ann,
                       MLF.Elab.Run.ResultType.Fallback,
                       MLF.Elab.Run.ResultType.Types,

@@ -42,6 +42,36 @@
   - focused carry-forward + new checks: pass;
   - full gate: `cabal build all && cabal test` => `917 examples, 0 failures`.
 
+### 2026-03-03 Runtime thesis-exact elaboration-input strict checklist closeout
+- Closed the remaining runtime row-1 boundary gaps tracked in
+  `docs/plans/2026-03-02-runtime-thesis-exact-elab-input-implementation-plan.md`
+  with a strict 5-item checklist.
+- Runtime replay/mediation removal:
+  - removed direct production `Solved.fromPreRewriteState` /
+    `solveResultFromSnapshot` calls from `MLF.Elab.Run.Pipeline`;
+  - deleted inline `setSolvedConstraint` replay helper path from
+    `Pipeline.hs`, and centralized snapshot finalization in
+    `MLF.Elab.Run.PipelineBoundary`.
+- Result-type replay removal:
+  - `rtcSolveLike` no longer calls replay reconstruction; it now materializes
+    solved state from `PresolutionView` canonical data (`pvCanonicalConstraint`
+    + `pvCanonicalMap`).
+- Elaboration boundary wiring completion:
+  - `ElabConfig` no longer carries `ecSolved`;
+  - `elaborateWithEnv` materializes internal solved access from
+    `eePresolutionView` only.
+- Added executable closeout tests (exact plan-matcher names):
+  - `row1 boundary uses thesis-core elaboration input contract`
+  - `elaborateWithEnv consumes thesis-core input`
+  - `row1 boundary validates-only and does not mediate input`
+  - `migration guardrail: thesis-core boundary matches legacy outcome`
+  - `final row1 state uses single thesis-core boundary path`
+  - `Dual-path verification`
+- Validation:
+  - targeted closeout slices above: PASS;
+  - regression anchors: `Phase 6 — Elaborate` PASS, `Pipeline (Phases 1-5)` PASS, `Dual-path verification` PASS;
+  - full gate: `cabal build all && cabal test` PASS.
+
 ### 2026-03-01 TMT3 Wave 3 docs closeout (all-aligned policy)
 - Transformation Mechanism Table (`docs/notes/2026-02-27-transformation-mechanism-table.md`) is now fully all-aligned for the current branch: every row is `Aligned` and no row references active `DEV-TMT-*` IDs.
 - `docs/thesis-deviations.yaml` now moves all `DEV-TMT-*` records out of active `deviations` and into `history.resolved`.

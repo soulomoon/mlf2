@@ -190,10 +190,72 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                         Left err -> expectationFailure (renderPipelineError err)
                         Right (_termChecked, tyChecked) -> tyUnchecked `shouldBe` tyChecked
 
+        it "row1 boundary uses thesis-core elaboration input contract" $ do
+            pipelineSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
+            pipelineSrc `shouldSatisfy` (isInfixOf "fromPresolutionResult")
+            pipelineSrc `shouldSatisfy` (isInfixOf "eePresolutionView = presolutionViewForGen")
+            pipelineSrc `shouldSatisfy` (not . isInfixOf "Solved.fromPreRewriteState")
+            pipelineSrc `shouldSatisfy` (not . isInfixOf "solveResultFromSnapshot")
+
+        it "row1 boundary validates-only and does not mediate input" $ do
+            pipelineSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
+            pipelineSrc `shouldSatisfy` (not . isInfixOf "setSolvedConstraint")
+            pipelineSrc `shouldSatisfy` (not . isInfixOf "snapPreRewriteConstraint")
+            pipelineSrc `shouldSatisfy` (not . isInfixOf "snapUnionFind =")
+            runPipelineElab Set.empty (unsafeNormalizeExpr (ELam "x" (EVar "x")))
+                `shouldSatisfy` isRight
+
+        it "migration guardrail: thesis-core boundary matches legacy outcome" $ do
+            let corpus =
+                    [ ELam "x" (EVar "x")
+                    , ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (ELit (LInt 1)))
+                    , EAnn (ELam "x" (EVar "x"))
+                        (STForall "a" Nothing (STArrow (STVar "a") (STVar "a")))
+                    ]
+                solvedFromView view =
+                    Solved.fromConstraintAndUf
+                        (pvCanonicalConstraint view)
+                        (pvCanonicalMap view)
+            forM_ corpus $ \expr -> do
+                artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
+                let pres = paPresolution artifacts
+                    view = PresolutionViewBoundary.fromPresolutionResult pres
+                    thesisCore = solvedFromView view
+                    legacy = paSolved artifacts
+                Solved.validateCanonicalGraphStrict thesisCore `shouldBe` []
+                Solved.validateCanonicalGraphStrict legacy `shouldBe` []
+                case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
+                    Left err -> expectationFailure (renderPipelineError err)
+                    Right (_termUnchecked, tyUnchecked) ->
+                        case runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr) of
+                            Left err -> expectationFailure (renderPipelineError err)
+                            Right (_termChecked, tyChecked) -> tyUnchecked `shouldBe` tyChecked
+
+        it "final row1 state uses single thesis-core boundary path" $ do
+            pipelineSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
+            pipelineSrc `shouldSatisfy` (isInfixOf "solvedFromConstraintWithCanonicalMap")
+            pipelineSrc `shouldSatisfy` (isInfixOf "presolutionViewFromConstraintAndUf")
+            pipelineSrc `shouldSatisfy` (not . isInfixOf "Solved.fromPreRewriteState")
+            pipelineSrc `shouldSatisfy` (not . isInfixOf "solveResultFromSnapshot")
+            pipelineSrc `shouldSatisfy` (not . isInfixOf "setSolvedConstraint")
+
         it "runtime pipeline keeps dual-path wiring out of production entrypoints" $ do
             pipelineSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
             forM_ ["runPipelineElabProjectionFirst", "runPipelineElabViaLegacySolve"] $ \needle ->
                 pipelineSrc `shouldSatisfy` (not . isInfixOf needle)
+
+        describe "Dual-path verification" $ do
+            it "production entrypoint remains single-path and checked-authoritative" $ do
+                let expr = ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (ELit (LInt 1)))
+                pipelineSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
+                forM_ ["runPipelineElabProjectionFirst", "runPipelineElabViaLegacySolve"] $ \needle ->
+                    pipelineSrc `shouldSatisfy` (not . isInfixOf needle)
+                case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
+                    Left err -> expectationFailure (renderPipelineError err)
+                    Right (_termUnchecked, tyUnchecked) ->
+                        case runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr) of
+                            Left err -> expectationFailure (renderPipelineError err)
+                            Right (_termChecked, tyChecked) -> tyUnchecked `shouldBe` tyChecked
 
         it "production src tree has no MLF.Constraint.Solved imports in elaboration path" $ do
             let elaborationPath =
@@ -231,7 +293,6 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             fallbackSrc <- readFile "src/MLF/Elab/Run/ResultType/Fallback.hs"
             forM_ [pipelineSrc, resultTypeSrc, annSrc, fallbackSrc] $ \src ->
                 src `shouldSatisfy` (not . isInfixOf "ResultTypeContext")
-            pipelineSrc `shouldSatisfy` (not . isInfixOf "fromPresolutionResult")
 
         it "shared solved-to-presolution adapter matches selected solved queries on representative corpus" $ do
             let corpus =

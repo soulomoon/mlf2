@@ -16,7 +16,7 @@ import MLF.Constraint.Solved (Solved)
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types.Witness (EdgeWitness(..), Expansion(..))
 import MLF.Elab.Generalize (GaBindParents(..))
-import MLF.Util.ElabError (ElabError(..))
+import MLF.Util.ElabError (ElabError)
 import MLF.Util.Trace (TraceConfig)
 
 -- | Context for result type computation, bundling shared state.
@@ -36,14 +36,9 @@ data ResultTypeInputs = ResultTypeInputs
 rtcSolveLike :: ResultTypeInputs -> Either ElabError Solved
 rtcSolveLike ctx =
     let presolutionView = rtcPresolutionView ctx
-    in case Solved.fromPreRewriteState
-        (pvCanonicalMap presolutionView)
-        (pvConstraint presolutionView) of
-        Right solved -> Right solved
-        Left err ->
-            Left
-                (ValidationFailed
-                    [ "result-type: failed to materialize solved view from PresolutionView"
-                    , show err
-                    ]
-                )
+        solved0 =
+            Solved.fromConstraintAndUf
+                (pvConstraint presolutionView)
+                (pvCanonicalMap presolutionView)
+        solved = Solved.rebuildWithConstraint solved0 (pvCanonicalConstraint presolutionView)
+    in Right solved

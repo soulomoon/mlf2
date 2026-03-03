@@ -3,6 +3,17 @@
 ## Unreleased
 
 ### Changed
+- Runtime thesis-exact elaboration-input closeout (2026-03-03):
+  - removed direct replay mediation calls from row-1 `Pipeline.hs` boundary wiring (`Solved.fromPreRewriteState`, `solveResultFromSnapshot`, `setSolvedConstraint`) and centralized snapshot finalization in `MLF.Elab.Run.PipelineBoundary`;
+  - removed replay reconstruction from result-type context materialization (`rtcSolveLike`) by sourcing solved state from `PresolutionView` canonical data;
+  - completed boundary wiring by removing `ecSolved` from `ElabConfig` and deriving internal solved access from `ElabEnv.eePresolutionView`;
+  - added strict closeout regression slices with exact plan matchers:
+    `row1 boundary uses thesis-core elaboration input contract`,
+    `elaborateWithEnv consumes thesis-core input`,
+    `row1 boundary validates-only and does not mediate input`,
+    `migration guardrail: thesis-core boundary matches legacy outcome`,
+    `final row1 state uses single thesis-core boundary path`,
+    `Dual-path verification`.
 - Task 30 solved-compat read reduction (2026-03-03):
   - removed compatibility-only generalize/context fields (`gcConstraintForReify`, `rbConstraintForReify`) and added light `SolvedToBaseMissing` base-domain invariant tracing in plan-context resolution;
   - tightened generalize reification flow by gating alias solved rebuild to non-OnConstraint paths and routing explicit-bound helper reification through OnConstraint bound reads when structural-scheme reify is authoritative;

@@ -70,7 +70,6 @@ type GeneralizeAtWith =
 data ElabConfig = ElabConfig
     { ecTraceConfig :: TraceConfig
     , ecGeneralizeAtWith :: GeneralizeAtWith
-    , ecSolved :: Solved
     }
 
 data ElabEnv = ElabEnv
@@ -160,7 +159,6 @@ elaborateWithScope traceCfg generalizeAtWith solved gaParents edgeWitnesses edge
         ElabConfig
             { ecTraceConfig = traceCfg
             , ecGeneralizeAtWith = generalizeAtWith
-            , ecSolved = solved
             }
         ElabEnv
             { eePresolutionView = fromSolved solved
@@ -187,9 +185,14 @@ elaborateWithEnv config elabEnv ann = do
     ElabConfig
         { ecTraceConfig = traceCfg
         , ecGeneralizeAtWith = generalizeAtWithRaw
-        , ecSolved = solved
         } = config
     presolutionView = eePresolutionView elabEnv
+    solved =
+        let solved0 =
+                Solved.fromConstraintAndUf
+                    (pvConstraint presolutionView)
+                    (pvCanonicalMap presolutionView)
+        in Solved.rebuildWithConstraint solved0 (pvCanonicalConstraint presolutionView)
     gaParents = eeGaParents elabEnv
     edgeWitnesses = eeEdgeWitnesses elabEnv
     edgeTraces = eeEdgeTraces elabEnv

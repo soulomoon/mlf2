@@ -78,6 +78,7 @@
 The `tasks/` folder contains task plans and execution tracking for autonomous agent execution using:
 - `[$using-superpowers](/Users/ares/.codex/superpowers/skills/using-superpowers/SKILL.md)`
 - `[$planning-with-files](/Users/ares/.codex/skills/planning-with-files/SKILL.md)`
+- `[$codex-tmux-team](/Users/ares/.codex/skills/public/codex-tmux-team/SKILL.md)` for parallel team sessions in tmux
 
 Create a new task under `tasks/todo/` as a folder named `YYYY-MM-DD-description/` (e.g. `2026-02-03-thesis-exact-coercions/`). Completed tasks move to `tasks/archive/` with the same folder name.
 
@@ -106,6 +107,12 @@ tasks/
 - Maintain the repository root `TODO.md` as the rolling list of next goals; update it whenever priorities or upcoming work change.
 - Maintain `implementation_notes.md` when behavior, architecture, or thesis-alignment details change, so documentation stays in sync with implementation.
 - Close a task by marking all phases complete in `task_plan.md` and moving the folder to `tasks/archive/`.
+
+**When agent teams are needed (tmux runtime):**
+- Use `[$codex-tmux-team](/Users/ares/.codex/skills/public/codex-tmux-team/SKILL.md)` whenever work is split across multiple members (e.g., planner/implementer/reviewer).
+- Create exactly one tmux pane per member and launch `codex` in every member pane.
+- Arrange tmux layout before execution and attach with `tmux attach -t <session>` before starting team tasks.
+- Use `scripts/setup_codex_team_tmux.sh --session <name> --members "<a,b,c>" --cwd /absolute/path --layout tiled` as the default setup path.
 
 **Validation command:** `cabal build all && cabal test`
 
