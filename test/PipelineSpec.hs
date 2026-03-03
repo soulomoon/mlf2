@@ -173,6 +173,12 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             src <- readFile "src/MLF/Elab/Elaborate.hs"
             src `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
 
+        it "chi-first guard: internals use shared ChiQuery facade" $ do
+            elabSrc <- readFile "src/MLF/Elab/Elaborate.hs"
+            rtSrc <- readFile "src/MLF/Elab/Run/ResultType/Types.hs"
+            elabSrc `shouldSatisfy` isInfixOf "MLF.Elab.Run.ChiQuery"
+            rtSrc `shouldSatisfy` isInfixOf "MLF.Elab.Run.ChiQuery"
+
         it "single-solved refactor keeps checked pipeline authoritative on representative corpus" $ do
             forM_ representativeMigrationCorpus assertCheckedAuthoritative
 

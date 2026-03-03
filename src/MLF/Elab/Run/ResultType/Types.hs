@@ -16,6 +16,10 @@ import MLF.Constraint.Solved (Solved)
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types.Witness (EdgeWitness(..), Expansion(..))
 import MLF.Elab.Generalize (GaBindParents(..))
+import MLF.Elab.Run.ChiQuery
+    ( chiCanonicalConstraint
+    , chiConstraint
+    )
 import MLF.Util.ElabError (ElabError(..))
 import MLF.Util.Trace (TraceConfig)
 
@@ -36,11 +40,13 @@ data ResultTypeInputs = ResultTypeInputs
 rtcSolveLike :: ResultTypeInputs -> Either ElabError Solved
 rtcSolveLike ctx =
     let presolutionView = rtcPresolutionView ctx
+        sourceConstraint = chiConstraint presolutionView
+        canonicalConstraint = chiCanonicalConstraint presolutionView
         solved0 =
             Solved.fromConstraintAndUf
-                (pvConstraint presolutionView)
+                sourceConstraint
                 (pvCanonicalMap presolutionView)
-        solved = Solved.rebuildWithConstraint solved0 (pvCanonicalConstraint presolutionView)
+        solved = Solved.rebuildWithConstraint solved0 canonicalConstraint
     in case Solved.validateCanonicalGraphStrict solved of
         [] -> Right solved
         violations -> Left (ValidationFailed violations)

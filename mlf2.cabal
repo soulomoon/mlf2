@@ -187,6 +187,7 @@ library mlf2-internal
                       MLF.Elab.Reduce,
                       MLF.Elab.Run,
                       MLF.Elab.Run.Annotation,
+                      MLF.Elab.Run.ChiQuery,
                       MLF.Elab.Run.Debug,
                       MLF.Elab.Run.Generalize,
                       MLF.Elab.Run.Generalize.Common,
