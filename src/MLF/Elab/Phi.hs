@@ -10,7 +10,7 @@ split submodules under "MLF.Elab.Phi.*".
 module MLF.Elab.Phi (
     -- * Re-exports from Context
     contextToNodeBound,
-    -- * Main entry points
+    -- * Main entry point (chi-native callback: no solved-typed arg)
     phiFromEdgeWitnessWithTrace,
     -- * Test/debug-only entry points (no trace required; not for production paths)
     phiFromEdgeWitnessNoTrace,
