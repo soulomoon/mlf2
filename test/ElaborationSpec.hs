@@ -319,6 +319,16 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             src <- readFile "src/MLF/Elab/Elaborate.hs"
             src `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
 
+        it "elab-input thesis-exact guard: active Elaborate/Phi callback aliases avoid solved-typed generalize-at input" $ do
+            elabSrc <- readFile "src/MLF/Elab/Elaborate.hs"
+            phiSrc <- readFile "src/MLF/Elab/Phi/Translate.hs"
+            let hasSolvedTypedAlias src =
+                    isInfixOf
+                        "type GeneralizeAtWith =\n    Maybe GaBindParents\n    -> Solved"
+                        src
+            hasSolvedTypedAlias elabSrc `shouldBe` False
+            hasSolvedTypedAlias phiSrc `shouldBe` False
+
         it "chi-first guard: ResultType internals avoid local solved materialization" $ do
             src <- readFile "src/MLF/Elab/Run/ResultType/Types.hs"
             src `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
