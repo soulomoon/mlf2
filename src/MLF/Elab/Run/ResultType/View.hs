@@ -34,16 +34,15 @@ import MLF.Constraint.Types
     , GenNode
     , NodeId(..)
     , TyNode(..)
-    , cGenNodes
     , cNodes
     , fromListNode
     , getNodeId
-    , gnSchemes
     , toListGen
     , toListNode
     )
 import MLF.Elab.Generalize (GaBindParents)
 import qualified MLF.Elab.Run.ChiQuery as ChiQuery
+import MLF.Elab.Run.Scope (schemeBodyTarget)
 import MLF.Elab.Run.ResultType.Types (ResultTypeInputs(..))
 import MLF.Util.ElabError (ElabError(..))
 import MLF.Util.Trace (TraceConfig)
@@ -142,47 +141,13 @@ rtvLookupVarBound view nid =
         Nothing -> ChiQuery.chiLookupVarBound (rtvPresolutionView view) nid
 
 rtvGenNodes :: ResultTypeView -> [GenNode]
-rtvGenNodes view =
-    let cCanon = ChiQuery.chiCanonicalConstraint (rtvPresolutionView view)
-    in map snd (toListGen (cGenNodes cCanon))
+rtvGenNodes view = map snd (toListGen (Solved.genNodes (rtvSolved view)))
 
 rtvCanonicalBindParents :: ResultTypeView -> BindParents
-rtvCanonicalBindParents = ChiQuery.chiCanonicalBindParents . rtvPresolutionView
+rtvCanonicalBindParents = Solved.canonicalBindParents . rtvSolved
 
 rtvSchemeBodyTarget :: ResultTypeView -> NodeId -> NodeId
-rtvSchemeBodyTarget view target =
-    let canonical = rtvCanonical view
-        targetC = canonical target
-        canonicalConstraint = ChiQuery.chiCanonicalConstraint (rtvPresolutionView view)
-        genNodes = map snd (toListGen (cGenNodes canonicalConstraint))
-        isSchemeRoot =
-            any
-                (\gen -> any (\root -> canonical root == targetC) (gnSchemes gen))
-                genNodes
-        schemeRootByBody =
-            IntMap.fromListWith
-                (\a _ -> a)
-                [ (getNodeId (canonical bnd), root)
-                | gen <- genNodes
-                , root <- gnSchemes gen
-                , Just bnd <- [rtvLookupVarBound view root]
-                , case rtvLookupNode view (canonical bnd) of
-                    Just TyBase{} -> False
-                    Just TyBottom{} -> False
-                    _ -> True
-                ]
-    in case rtvLookupNode view targetC of
-        Just TyVar{ tnBound = Just bnd } ->
-            let bndC = canonical bnd
-                boundIsSchemeBody = IntMap.member (getNodeId bndC) schemeRootByBody
-            in if isSchemeRoot || boundIsSchemeBody
-                then
-                    case rtvLookupNode view bndC of
-                        Just TyForall{ tnBody = body } -> canonical body
-                        _ -> bndC
-                else targetC
-        Just TyForall{ tnBody = body } -> canonical body
-        _ -> targetC
+rtvSchemeBodyTarget view nid = schemeBodyTarget (rtvSolved view) nid
 
 rtvPresolutionView :: ResultTypeView -> PresolutionView
 rtvPresolutionView = rtcPresolutionView . rtvInputs0
@@ -196,7 +161,7 @@ solveFromInputs inputs =
     let presolutionView = rtcPresolutionView inputs
         solved0 =
             Solved.fromConstraintAndUf
-                (rtcBaseConstraint inputs)
+                (pvConstraint presolutionView)
                 (pvCanonicalMap presolutionView)
         solved =
             Solved.rebuildWithConstraint

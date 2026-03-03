@@ -135,7 +135,7 @@ toCompatFields
         , edgeTraces
         , edgeExpansions
         , presolutionView
-        , compatSolved presolutionView baseConstraint
+        , compatSolved presolutionView
         , bindParentsGa
         , planBuilder
         , baseConstraint
@@ -143,7 +143,7 @@ toCompatFields
         , traceCfg
         )
 
-compatSolved :: PresolutionView -> Constraint -> Solved
-compatSolved presolutionView baseConstraint =
-    let solved0 = SolvedCompat.fromConstraintAndUf baseConstraint (pvCanonicalMap presolutionView)
+compatSolved :: PresolutionView -> Solved
+compatSolved presolutionView =
+    let solved0 = SolvedCompat.fromConstraintAndUf (pvConstraint presolutionView) (pvCanonicalMap presolutionView)
     in SolvedCompat.rebuildWithConstraint solved0 (chiCanonicalConstraint presolutionView)
