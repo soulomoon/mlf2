@@ -125,10 +125,10 @@ runPipelineElabWith traceCfg genConstraints expr = do
     let elabConfig = ElabConfig
             { ecTraceConfig = traceCfg
             , ecGeneralizeAtWith = generalizeAtWith
+            , ecSolved = solvedForGen
             }
         elabEnv = ElabEnv
             { eePresolutionView = presolutionViewForGen
-            , eeSolvedCompat = solvedForGen
             , eeGaParents = bindParentsGa
             , eeEdgeWitnesses = edgeWitnesses
             , eeEdgeTraces = edgeTraces
