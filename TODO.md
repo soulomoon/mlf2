@@ -150,6 +150,30 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
     owner-boundary scheduled (not loop-final-only), but still uses
     compatibility-conservative boundary flushing.
 
+## Task 46 Elaboration-input witness-authoritative strictness plan (planned 2026-03-05)
+
+- Planned:
+  - Drafted a new agent-team execution plan to retire remaining fallback
+    synthesis in the elaboration-input path so row-1 is closer to thesis
+    witness-authoritative shape (Def. 15.3.12, §15.3.6).
+  - Targeted residual gaps include:
+    - Elaborate scope-root fallback swallowing (`Left _ -> typeRef root`)
+    - Elaborate/Pipeline `SchemeFreeVars` fallback ladders
+    - Let-level fallback scheme chooser (`fallbackChoiceFrom*`)
+    - `reifyInst` trace/expansion-based fallback synthesis when `phi = InstId`
+- Plan/tracker:
+  - `/Volumes/src/mlf4/docs/plans/2026-03-05-elaboration-input-witness-authoritative-agent-team-implementation-plan.md`
+  - `/Volumes/src/mlf4/tasks/todo/2026-03-05-elaboration-input-witness-authoritative-agent-team-plan/`
+- Execution requirement:
+  - Implement via Team A-E waves (RED guard -> parallel core refactors ->
+    integration gates -> docs closeout).
+- Required verification gates (during execution):
+  - `--match "elab-input witness-authoritative guard"`
+  - `--match "elab-input absolute thesis-exact guard"`
+  - `--match "checked-authoritative"`
+  - `--match "Dual-path verification"`
+  - `cabal build all && cabal test`
+
 ## Task 32 TMT row-1 chi-first elab/generalize closeout (completed 2026-03-03)
 
 - Completed:
