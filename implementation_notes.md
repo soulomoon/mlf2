@@ -2,6 +2,31 @@
 
 ## Thesis Alignment (Phase A–E)
 
+### 2026-03-05 Task 42 row2 absolute thesis-exact hardening (agent-team execution)
+- Completed strict wave-based hardening for TMT row `Result-type context wiring`
+  with ownership-enforced Team A-E execution.
+- Retired row2-local solved-overlay/materialization surfaces:
+  - removed `rtvSolved`, `rtvOriginalConstraint`, and `solveFromInputs` from
+    `MLF.Elab.Run.ResultType.View`;
+  - migrated `Ann`/`Fallback`/`Util` consumers from `View.rtvSolved` and
+    solved-only scope/reify helpers to view-native `PresolutionView` paths.
+- Preserved strict malformed-view fail-fast semantics at
+  `buildResultTypeView` via canonical graph validation and `ValidationFailed`
+  error propagation.
+- Added and locked regression guard:
+  - `Pipeline (Phases 1-5) / Integration Tests / row2 absolute thesis-exact guard`
+    asserting row2 solved-overlay surfaces remain absent.
+- Verification evidence (required order):
+  - RED proof before Wave 1:
+    - `cabal test mlf2-test --test-show-details=direct --test-options='--match "row2 absolute thesis-exact guard"'`
+      -> FAIL (`1 example, 1 failure`).
+  - GREEN after integration:
+    - `--match "row2 absolute thesis-exact guard"` -> PASS (`1 example`)
+    - `--match "row2 closeout guard"` -> PASS (`3 examples`)
+    - `--match "checked-authoritative"` -> PASS (`8 examples`)
+    - `--match "Dual-path verification"` -> PASS (`4 examples`)
+    - `cabal build all && cabal test` -> PASS (`935 examples, 0 failures`)
+
 ### 2026-03-05 Task 41 absolute strict all-path hardening (agent-team execution)
 - Completed strict-wave hardening for row `Elaboration input` with explicit
   ownership splits and integration gates.
