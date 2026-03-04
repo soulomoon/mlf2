@@ -152,6 +152,41 @@ presolutionViewFromSolved solved =
         , pvCanonicalConstraint = Solved.canonicalConstraint solved
         }
 
+edgeTraceFixtureFromWitness :: EdgeWitness -> EdgeTrace
+edgeTraceFixtureFromWitness ew =
+    EdgeTrace
+        { etRoot = ewRoot ew
+        , etBinderArgs = []
+        , etInterior = fromListInterior (ewRoot ew : concatMap opTargets ops)
+        , etBinderReplayMap = IntMap.empty
+        , etCopyMap = mempty
+        }
+  where
+    ops = case ewWitness ew of
+        InstanceWitness witnessOps -> witnessOps
+
+    opTargets op = case op of
+        OpGraft arg n -> [arg, n]
+        OpMerge n m -> [n, m]
+        OpRaise n -> [n]
+        OpWeaken n -> [n]
+        OpRaiseMerge n m -> [n, m]
+
+phiFromEdgeWitnessFixtureTrace
+    :: Solved.Solved
+    -> Maybe Elab.SchemeInfo
+    -> EdgeWitness
+    -> Either Elab.ElabError Elab.Instantiation
+phiFromEdgeWitnessFixtureTrace solved mSchemeInfo ew =
+    Elab.phiFromEdgeWitnessWithTrace
+        defaultTraceConfig
+        (generalizeAtWithActive solved)
+        (presolutionViewFromSolved solved)
+        Nothing
+        mSchemeInfo
+        (Just (edgeTraceFixtureFromWitness ew))
+        ew
+
 resultTypeInputsForArtifacts
     :: PipelineArtifacts
     -> (ResultTypeInputs, AnnExpr, AnnExpr)
@@ -1526,7 +1561,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness []
                         }
 
-                phi <- requireRight (ElabTest.phiFromEdgeWitnessAutoTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) (Just si) ew)
+                phi <- requireRight (phiFromEdgeWitnessFixtureTrace solved (Just si) ew)
                 -- Φ should produce a non-identity instantiation (reordering)
                 phi `shouldNotBe` Elab.InstId
                 -- Apply and verify the result has binders in <P order (a before b)
@@ -1590,7 +1625,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
-                case ElabTest.phiFromEdgeWitnessAutoTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) (Just si) ew of
+                case phiFromEdgeWitnessFixtureTrace solved (Just si) ew of
                     Left _ -> pure ()
                     Right phi ->
                         expectationFailure
@@ -1644,7 +1679,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
-                phi <- requireRight (ElabTest.phiFromEdgeWitnessAutoTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) (Just si) ew)
+                phi <- requireRight (phiFromEdgeWitnessFixtureTrace solved (Just si) ew)
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
                 let expected = Elab.TArrow (Elab.TBase (BaseTy "Int")) (Elab.TBase (BaseTy "Bool"))
                 canonType out `shouldBe` canonType expected
@@ -1712,7 +1747,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness []
                         }
 
-                phi <- requireRight (ElabTest.phiFromEdgeWitnessAutoTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) (Just si) ew)
+                phi <- requireRight (phiFromEdgeWitnessFixtureTrace solved (Just si) ew)
                 phi `shouldNotBe` Elab.InstId
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
                 let expected =
@@ -1790,12 +1825,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 sigma `shouldBe` Elab.InstId
 
                 phi <- requireRight
-                    (ElabTest.phiFromEdgeWitnessAutoTrace
-                        defaultTraceConfig
-                        (generalizeAtWithActive solved)
-                        (presolutionViewFromSolved solved)
-                        (Just si)
-                        ew
+                    (phiFromEdgeWitnessFixtureTrace solved (Just si) ew
                     )
                 phi `shouldBe` Elab.InstId
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
@@ -1857,7 +1887,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness []
                         }
 
-                case ElabTest.phiFromEdgeWitnessAutoTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) (Just si) ew of
+                case phiFromEdgeWitnessFixtureTrace solved (Just si) ew of
                     Left (Elab.PhiInvariantError msg) ->
                         msg `shouldSatisfy` ("PhiReorder: missing order key" `isInfixOf`)
                     Left Elab.BindingTreeError{} ->
@@ -2465,7 +2495,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewForallIntros = 0
                         , ewWitness = InstanceWitness [OpWeaken aliasB]
                         }
-                case ElabTest.phiFromEdgeWitnessAutoTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) (Just si) ew of
+                case phiFromEdgeWitnessFixtureTrace solved (Just si) ew of
                     Left (Elab.PhiTranslatabilityError msgs) ->
                         unlines msgs `shouldSatisfy` ("OpWeaken" `isInfixOf`)
                     Left err ->
@@ -2510,7 +2540,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewForallIntros = 0
                         , ewWitness = InstanceWitness [OpWeaken alias]
                         }
-                case ElabTest.phiFromEdgeWitnessAutoTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) (Just si) ew of
+                case phiFromEdgeWitnessFixtureTrace solved (Just si) ew of
                     Left (Elab.PhiTranslatabilityError msgs) ->
                         unlines msgs `shouldSatisfy` ("OpWeaken" `isInfixOf`)
                     Left err ->
@@ -2550,7 +2580,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewForallIntros = 0
                         , ewWitness = InstanceWitness [OpWeaken aliasN]
                         }
-                case ElabTest.phiFromEdgeWitnessAutoTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) (Just si) ew of
+                case phiFromEdgeWitnessFixtureTrace solved (Just si) ew of
                     Left (Elab.PhiTranslatabilityError msgs) ->
                         unlines msgs `shouldSatisfy` ("OpWeaken" `isInfixOf`)
                     Left err ->
@@ -2597,7 +2627,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewForallIntros = 0
                         , ewWitness = InstanceWitness [OpWeaken binderB]
                         }
-                case ElabTest.phiFromEdgeWitnessAutoTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) (Just si) ew of
+                case phiFromEdgeWitnessFixtureTrace solved (Just si) ew of
                     Left (Elab.PhiTranslatabilityError msgs) ->
                         unlines msgs `shouldSatisfy` ("OpWeaken" `isInfixOf`)
                     Left err ->
@@ -2820,7 +2850,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (ElabTest.phiFromEdgeWitnessAutoTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) (Just si) ew)
+                phi <- requireRight (phiFromEdgeWitnessFixtureTrace solved (Just si) ew)
                 phi `shouldNotBe` Elab.InstId
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
                 Elab.pretty out `shouldSatisfy` ("Int" `isInfixOf`)
@@ -2878,7 +2908,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (ElabTest.phiFromEdgeWitnessAutoTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) (Just si) ew)
+                phi <- requireRight (phiFromEdgeWitnessFixtureTrace solved (Just si) ew)
 
                 -- Because we target the *second* binder, Φ must do more than a plain ⟨Int⟩.
                 phi `shouldNotBe` Elab.InstApp (Elab.TBase (BaseTy "Int"))
@@ -2933,7 +2963,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (ElabTest.phiFromEdgeWitnessAutoTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) (Just si) ew)
+                phi <- requireRight (phiFromEdgeWitnessFixtureTrace solved (Just si) ew)
                 phi `shouldBe` Elab.InstElim
 
             it "translates non-root graft-raise-weaken and preserves expected instantiated type" $ do
@@ -2994,8 +3024,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewForallIntros = 0
                         , ewWitness = InstanceWitness [OpGraft intNode binderB, OpRaise binderB, OpWeaken binderB]
                         }
-                phiGRW <- requireRight (ElabTest.phiFromEdgeWitnessAutoTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) (Just si) ewGRW)
-                _phiGW <- requireRight (ElabTest.phiFromEdgeWitnessAutoTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) (Just si) ewGW)
+                phiGRW <- requireRight (phiFromEdgeWitnessFixtureTrace solved (Just si) ewGRW)
+                _phiGW <- requireRight (phiFromEdgeWitnessFixtureTrace solved (Just si) ewGW)
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phiGRW)
                 let expected =
                         Elab.TForall "a" Nothing
@@ -3053,7 +3083,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness [OpGraft botNode binderB, OpWeaken binderB]
                         }
 
-                phi <- requireRight (ElabTest.phiFromEdgeWitnessAutoTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) (Just si) ew)
+                phi <- requireRight (phiFromEdgeWitnessFixtureTrace solved (Just si) ew)
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
                 Elab.pretty out `shouldSatisfy` ("-> b" `isInfixOf`)
 
@@ -3088,7 +3118,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (ElabTest.phiFromEdgeWitnessAutoTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) (Just si) ew)
+                phi <- requireRight (phiFromEdgeWitnessFixtureTrace solved (Just si) ew)
                 Elab.pretty phi `shouldBe` "O; ∀(u0 ⩾) N"
 
             it "scheme-aware Φ can translate Merge (alias one binder to another)" $ do
@@ -3137,7 +3167,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (ElabTest.phiFromEdgeWitnessAutoTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) (Just si) ew)
+                phi <- requireRight (phiFromEdgeWitnessFixtureTrace solved (Just si) ew)
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
                 let expected =
                         Elab.TForall "a" Nothing
@@ -3189,7 +3219,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (ElabTest.phiFromEdgeWitnessAutoTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) (Just si) ew)
+                phi <- requireRight (phiFromEdgeWitnessFixtureTrace solved (Just si) ew)
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
                 let expected =
                         Elab.TForall "a" Nothing
@@ -3233,7 +3263,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (ElabTest.phiFromEdgeWitnessAutoTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) (Just si) ew)
+                phi <- requireRight (phiFromEdgeWitnessFixtureTrace solved (Just si) ew)
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
                 let expected =
                         Elab.TForall "u0" Nothing
@@ -3285,7 +3315,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (ElabTest.phiFromEdgeWitnessAutoTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) (Just si) ew)
+                phi <- requireRight (phiFromEdgeWitnessFixtureTrace solved (Just si) ew)
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
 
                 let expected =
