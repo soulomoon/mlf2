@@ -13,9 +13,9 @@
 | 0 | Re-audit thesis + row2 codebase surfaces | completed |
 | 1 | Draft controller plan with team topology and gates | completed |
 | 2 | Create task tracker artifacts under tasks/todo | completed |
-| 3 | Agent-team execution (Wave 0..4) | pending |
-| 4 | Post-green docs + ledger closeout | pending |
-| 5 | Archive task folder | pending |
+| 3 | Agent-team execution (Wave 0..4) | completed |
+| 4 | Post-green docs + ledger closeout | completed |
+| 5 | Archive task folder | completed |
 
 ## Ownership Matrix (Execution)
 - Team A (`contracts`)
@@ -30,17 +30,26 @@
   - Owns integration gate running + docs/task closeout.
 
 ## Gate Checklist
-- [ ] Gate A RED: `row2 absolute thesis-exact guard` fails before Wave 1
-- [ ] Gate B GREEN: `row2 absolute thesis-exact guard` passes after Wave 2
-- [ ] Gate C1: `row2 closeout guard` passes
-- [ ] Gate C2: `checked-authoritative` passes
-- [ ] Gate C3: `Dual-path verification` passes
-- [ ] Final Gate: `cabal build all && cabal test` passes
+- [x] Gate A RED: `row2 absolute thesis-exact guard` fails before Wave 1
+- [x] Gate B GREEN: `row2 absolute thesis-exact guard` passes after Wave 2
+- [x] Gate C1: `row2 closeout guard` passes
+- [x] Gate C2: `checked-authoritative` passes
+- [x] Gate C3: `Dual-path verification` passes
+- [x] Final Gate: `cabal build all && cabal test` passes
 
 ## Decisions
 - Treat this as a strict all-path hardening task (same strictness style as Task 41).
 - Keep algorithmic behavior unchanged; scope is dependency/wiring simplification toward thesis-direct surfaces.
 - Require explicit non-empty gate evidence before any docs reclassification.
+- Gate A RED was validated after adding source-guard assertions in `test/PipelineSpec.hs`; no consumer/view code changes started before RED proof.
+- Wave 1 was executed with strict ownership split:
+  - Team B only changed `src/MLF/Elab/Run/ResultType/View.hs`.
+  - Team C only changed `src/MLF/Elab/Run/ResultType/{Ann,Fallback,Util}.hs`.
+  - No unexpected cross-ownership edits were observed.
+- Wave 2 integration-wire changes were restricted to import/signature reconciliation only; no algorithmic/path logic redesign was introduced.
+- Wave 3 gates were executed in strict order with non-empty matcher evidence for every required slice.
+- No `Bugs.md` updates were required because no new defects were discovered during Wave 3/4 verification.
+- Wave 4 docs were updated only after all gates were green.
 
 ## Errors Encountered
 | Timestamp | Error | Attempt | Resolution |

@@ -3,6 +3,23 @@
 ## Unreleased
 
 ### Changed
+- Task 42 TMT row2 result-type context wiring absolute hardening (2026-03-05):
+  - added RED->GREEN guard `row2 absolute thesis-exact guard`;
+  - removed ResultType-local solved-overlay/materialization surfaces from
+    `MLF.Elab.Run.ResultType.View` (`rtvSolved`, `rtvOriginalConstraint`,
+    `solveFromInputs`);
+  - migrated row2 consumers (`Ann`, `Fallback`, `Util`) to
+    `PresolutionView`/view-helper query paths and removed direct
+    `View.rtvSolved` dependencies;
+  - reconciled integration wiring/imports across ResultType/Pipeline boundary
+    modules with no algorithmic behavior changes;
+  - verified required gates in strict order:
+    RED baseline (`1 example, 1 failure`), GREEN gates
+    `row2 absolute thesis-exact guard` (`1 example`),
+    `row2 closeout guard` (`3 examples`),
+    `checked-authoritative` (`8 examples`),
+    `Dual-path verification` (`4 examples`), and full gate
+    `cabal build all && cabal test` (`935 examples, 0 failures`).
 - Task 41 elaboration-input absolute strict all-path hardening (2026-03-05):
   - added RED->GREEN guard `elab-input absolute thesis-exact guard` and
     removed residual surfaces across owned modules:

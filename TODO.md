@@ -17,11 +17,13 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - `Dual-path verification`: PASS (`4 examples, 0 failures`)
   - `cabal build all && cabal test`: PASS (`931 examples, 0 failures`)
 - Rolling priorities (next):
-  1. Task 34: reduce `ResultType.View` solved-overlay scaffolding (`rtvSolved`
-     + bound-overlay rebuild path) where equivalent `χp`-native reads exist.
+  1. Task 43: simplify per-edge propagation transform toward uniform
+     expansion+unification handling (retire synthesized-wrapper special-case
+     path where thesis-equivalent behavior can be preserved).
   2. Task 36: trim non-active compatibility aliases in generalize/reify
      internals while preserving checked-authoritative behavior.
-  3. Keep closeout guard slices mandatory for each follow-up reduction.
+  3. Keep closeout guard slices plus full-gate verification mandatory for each
+     follow-up reduction.
 
 ## Task 41 Elaboration-input absolute thesis-exact hardening (completed 2026-03-05)
 
@@ -48,22 +50,30 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
     - `--match "Dual-path verification"`: PASS (`4 examples, 0 failures`)
     - `cabal build all && cabal test`: PASS (`934 examples, 0 failures`)
 
-## Task 42 TMT row-2 absolute thesis-exact hardening (planned 2026-03-05)
+## Task 42 TMT row-2 absolute thesis-exact hardening (completed 2026-03-05)
 
-- Goal:
-  - Make row `Result-type context wiring` absolute thesis-exact by removing
-    residual `ResultType.View` solved-overlay materialization
-    (`rtvSolved`/`rtvOriginalConstraint`/`solveFromInputs`) and migrating
-    row2 consumers to explicit `PresolutionView`/`ChiQuery`-first helpers.
+- Completed:
+  - Added RED->GREEN source guard `row2 absolute thesis-exact guard`.
+  - Removed residual ResultType-local solved-overlay surfaces in
+    `MLF.Elab.Run.ResultType.View` (`rtvSolved`, `rtvOriginalConstraint`,
+    `solveFromInputs`).
+  - Migrated row2 consumers (`Ann`, `Fallback`, `Util`) to
+    `PresolutionView`/view-native scope and reify/generalize helpers.
+  - Kept strict malformed-view fail-fast behavior at
+    `buildResultTypeView` boundary.
 - Plan/tracker:
   - `/Volumes/src/mlf4/docs/plans/2026-03-05-tmt-row2-absolute-thesis-exact-agent-team-implementation-plan.md`
-  - `/Volumes/src/mlf4/tasks/todo/2026-03-05-tmt-row2-absolute-thesis-exact-agent-team/`
-- Required gates:
-  - `row2 absolute thesis-exact guard` (RED -> GREEN)
-  - `row2 closeout guard`
-  - `checked-authoritative`
-  - `Dual-path verification`
-  - `cabal build all && cabal test`
+  - `/Volumes/src/mlf4/tasks/archive/2026-03-05-tmt-row2-absolute-thesis-exact-agent-team/`
+- Verification:
+  - RED baseline before Wave 1:
+    - `cabal test mlf2-test --test-show-details=direct --test-options='--match "row2 absolute thesis-exact guard"'`
+      -> FAIL (`1 example, 1 failure`).
+  - GREEN gates after integration:
+    - `--match "row2 absolute thesis-exact guard"`: PASS (`1 example, 0 failures`)
+    - `--match "row2 closeout guard"`: PASS (`3 examples, 0 failures`)
+    - `--match "checked-authoritative"`: PASS (`8 examples, 0 failures`)
+    - `--match "Dual-path verification"`: PASS (`4 examples, 0 failures`)
+    - `cabal build all && cabal test`: PASS (`935 examples, 0 failures`)
 
 ## Task 32 TMT row-1 chi-first elab/generalize closeout (completed 2026-03-03)
 
@@ -108,19 +118,17 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 - Status:
   - Row-2 adapter retirement is closed.
 
-## Task 34 Post-row2 runtime simplification priorities (planned next)
+## Task 34 Post-row2 runtime simplification priorities (completed via Task 42)
 
-- Goal:
-  - Continue reducing non-thesis runtime scaffolding while preserving
-    checked-authoritative behavior and row2 guard coverage.
-- Ordered priorities:
-  1. Reduce `ResultType.View` solved-overlay materialization (`rtvSolved` +
-     bound-overlay rebuild path) where equivalent `χp`-native reads are
-     available.
-  2. Simplify compatibility-heavy helper signatures that still thread `Solved`
-     into generalize/reify paths.
-  3. Keep `row2 closeout guard`, `checked-authoritative`, and
-     `Dual-path verification` slices in regular closeout verification.
+- Closed:
+  - Priority (1) solved-overlay materialization reduction is completed in
+    Task 42 (`ResultType.View` no longer exposes/materializes row2-local
+    solved overlays).
+  - Priority (2) compatibility-heavy row2 generalize/reify signatures were
+    reduced by migrating consumer call chains to view-native helpers in
+    Task 42.
+  - Priority (3) guard slices remain active and are now reinforced with the
+    new `row2 absolute thesis-exact guard`.
 
 ## Task 35 TMT elaboration-input thesis-exact closeout (completed 2026-03-04)
 
