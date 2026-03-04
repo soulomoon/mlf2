@@ -1,0 +1,21 @@
+# Progress — 2026-03-04 Elaboration Input Row Review
+
+- Initialized task folder and planning files.
+- Located target row in `docs/notes/2026-02-27-transformation-mechanism-table.md`.
+- Audited thesis anchors:
+  - `papers/these-finale-english.txt:14087-14097`
+  - `papers/these-finale-english.txt:14112-14117`
+- Audited code evidence:
+  - `src/MLF/Elab/Run/Pipeline.hs:110-141`
+  - `src/MLF/Elab/Elaborate.hs:97-119`
+  - `src/MLF/Elab/Phi/Translate.hs:247-260`
+  - `src/MLF/Elab/Phi/TestOnly.hs:39-75`
+  - `test/ElaborationSpec.hs:331-356`
+  - `test/ElaborationSpec.hs:1901-1928`
+  - `test/PipelineSpec.hs:176-203`
+- Updated table metadata and target row in `docs/notes/2026-02-27-transformation-mechanism-table.md`:
+  - `Source revision` refreshed to current HEAD `e94626e`.
+  - `Elaboration input` current-code narrative refreshed for fail-fast wording and `Phi.Translate` line references.
+- Verification:
+  - Ran `cabal test mlf2-test --test-show-details=direct --test-options='--match "elab-input thesis-exact guard"'`.
+  - PASS (`2 examples, 0 failures`).
