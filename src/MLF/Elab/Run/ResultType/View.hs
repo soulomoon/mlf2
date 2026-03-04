@@ -12,8 +12,6 @@ module MLF.Elab.Run.ResultType.View (
     rtvBaseConstraint,
     rtvRedirects,
     rtvTraceConfig,
-    rtvSolved,
-    rtvOriginalConstraint,
     rtvLookupNode,
     rtvLookupVarBound,
     rtvGenNodes,
@@ -24,7 +22,6 @@ module MLF.Elab.Run.ResultType.View (
 import qualified Data.IntMap.Strict as IntMap
 
 import MLF.Constraint.Presolution (EdgeTrace, PresolutionPlanBuilder, PresolutionView(..))
-import MLF.Constraint.Solved (Solved)
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types
     ( BindParents
@@ -34,31 +31,30 @@ import MLF.Constraint.Types
     , GenNode
     , NodeId(..)
     , TyNode(..)
-    , cNodes
-    , fromListNode
+    , cGenNodes
     , getNodeId
     , toListGen
-    , toListNode
     )
 import MLF.Elab.Generalize (GaBindParents)
 import qualified MLF.Elab.Run.ChiQuery as ChiQuery
-import MLF.Elab.Run.Scope (schemeBodyTarget)
+import MLF.Elab.Run.Scope (schemeBodyTargetView)
 import MLF.Elab.Run.ResultType.Types (ResultTypeInputs(..))
 import MLF.Util.ElabError (ElabError(..))
 import MLF.Util.Trace (TraceConfig)
 
 data ResultTypeView = ResultTypeView
     { rtvInputs0 :: ResultTypeInputs
-    , rtvSolvedBase :: Solved
     , rtvBoundOverlay0 :: IntMap.IntMap NodeId
     }
 
 buildResultTypeView :: ResultTypeInputs -> Either ElabError ResultTypeView
 buildResultTypeView inputs = do
-    solved <- solveFromInputs inputs
+    let presolutionView = rtcPresolutionView inputs
+    case Solved.validateCanonicalGraphStrict (ChiQuery.chiSolved presolutionView) of
+        [] -> pure ()
+        violations -> Left (ValidationFailed violations)
     pure ResultTypeView
         { rtvInputs0 = inputs
-        , rtvSolvedBase = solved
         , rtvBoundOverlay0 = IntMap.empty
         }
 
@@ -98,33 +94,6 @@ rtvRedirects = rtcRedirects . rtvInputs0
 rtvTraceConfig :: ResultTypeView -> TraceConfig
 rtvTraceConfig = rtcTraceConfig . rtvInputs0
 
-rtvSolved :: ResultTypeView -> Solved
-rtvSolved view
-    | IntMap.null overlay = solved
-    | otherwise = Solved.rebuildWithConstraint solved constraint'
-  where
-    solved = rtvSolvedBase view
-    overlay = rtvBoundOverlay0 view
-    constraint0 = Solved.originalConstraint solved
-    nodes0 = cNodes constraint0
-    patchNode nid node =
-        case IntMap.lookup (getNodeId nid) overlay of
-            Just bnd ->
-                case node of
-                    TyVar{ tnId = varId, tnBound = Nothing } ->
-                        TyVar{ tnId = varId, tnBound = Just bnd }
-                    _ -> node
-            Nothing -> node
-    nodes' =
-        fromListNode
-            [ (nid, patchNode nid node)
-            | (nid, node) <- toListNode nodes0
-            ]
-    constraint' = constraint0 { cNodes = nodes' }
-
-rtvOriginalConstraint :: ResultTypeView -> Constraint
-rtvOriginalConstraint = Solved.originalConstraint . rtvSolved
-
 rtvLookupNode :: ResultTypeView -> NodeId -> Maybe TyNode
 rtvLookupNode view nid =
     case ChiQuery.chiLookupNode (rtvPresolutionView view) nid of
@@ -141,32 +110,27 @@ rtvLookupVarBound view nid =
         Nothing -> ChiQuery.chiLookupVarBound (rtvPresolutionView view) nid
 
 rtvGenNodes :: ResultTypeView -> [GenNode]
-rtvGenNodes view = map snd (toListGen (Solved.genNodes (rtvSolved view)))
+rtvGenNodes view =
+    map
+        snd
+        (toListGen (cGenNodes (ChiQuery.chiConstraint (rtvPresolutionView view))))
 
 rtvCanonicalBindParents :: ResultTypeView -> BindParents
-rtvCanonicalBindParents = Solved.canonicalBindParents . rtvSolved
+rtvCanonicalBindParents = ChiQuery.chiCanonicalBindParents . rtvPresolutionView
 
 rtvSchemeBodyTarget :: ResultTypeView -> NodeId -> NodeId
-rtvSchemeBodyTarget view nid = schemeBodyTarget (rtvSolved view) nid
+rtvSchemeBodyTarget view nid = schemeBodyTargetView (rtvPresolutionViewOverlay view) nid
 
 rtvPresolutionView :: ResultTypeView -> PresolutionView
 rtvPresolutionView = rtcPresolutionView . rtvInputs0
 
+rtvPresolutionViewOverlay :: ResultTypeView -> PresolutionView
+rtvPresolutionViewOverlay view =
+    (rtvPresolutionView view)
+        { pvLookupNode = rtvLookupNode view
+        , pvLookupVarBound = rtvLookupVarBound view
+        }
+
 overlayBound :: ResultTypeView -> NodeId -> Maybe NodeId
 overlayBound view nid =
     IntMap.lookup (getNodeId (rtvCanonical view nid)) (rtvBoundOverlay0 view)
-
-solveFromInputs :: ResultTypeInputs -> Either ElabError Solved
-solveFromInputs inputs =
-    let presolutionView = rtcPresolutionView inputs
-        solved0 =
-            Solved.fromConstraintAndUf
-                (pvConstraint presolutionView)
-                (pvCanonicalMap presolutionView)
-        solved =
-            Solved.rebuildWithConstraint
-                solved0
-                (ChiQuery.chiCanonicalConstraint presolutionView)
-    in case Solved.validateCanonicalGraphStrict solved of
-        [] -> Right solved
-        violations -> Left (ValidationFailed violations)
