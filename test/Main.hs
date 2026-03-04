@@ -26,6 +26,7 @@ import qualified PresolutionSpec
 import qualified Presolution.UnificationClosureSpec
 import qualified ReduceSpec
 import qualified SolveSpec
+import qualified ScopeSpec
 import qualified ThesisFixDirectionSpec
 import qualified TypeCheckSpec
 import qualified TypeSoundnessSpec
@@ -52,6 +53,7 @@ main = do
             unless wasPresolutionWired $
                 die "PresolutionSpec was not wired into the test harness."
         SolveSpec.spec
+        ScopeSpec.spec
         PipelineSpec.spec
         ThesisFixDirectionSpec.spec
         TypeCheckSpec.spec
