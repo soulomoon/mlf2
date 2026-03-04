@@ -23,6 +23,22 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
      internals while preserving checked-authoritative behavior.
   3. Keep closeout guard slices mandatory for each follow-up reduction.
 
+## Task 41 Elaboration-input absolute thesis-exact hardening (planned 2026-03-05)
+
+- Goal:
+  - Make row `Elaboration input` closer to an absolute all-path thesis-exact
+    contract by removing residual non-thesis-friendly internal surfaces.
+- Plan:
+  - `/Volumes/src/mlf4/docs/plans/2026-03-05-elaboration-input-absolute-thesis-exact-agent-team-implementation-plan.md`
+  - `/Volumes/src/mlf4/tasks/todo/2026-03-05-elaboration-input-absolute-thesis-exact-agent-team/`
+- Planned wave execution (agent teams):
+  1. Wave 0 (Team A): add RED guard `elab-input absolute thesis-exact guard`.
+  2. Wave 1 (parallel Teams B/C/D): remove residual solved-backed Phi env
+     surfaces, remove ga' scope error swallowing, retire synthetic auto-trace
+     helper path in test-only Phi usage.
+  3. Wave 2 (Team E): run required gates (`absolute guard`, `checked-authoritative`,
+     `Dual-path verification`, full gate) and close docs/ledger only after green.
+
 ## Task 32 TMT row-1 chi-first elab/generalize closeout (completed 2026-03-03)
 
 - Completed:
