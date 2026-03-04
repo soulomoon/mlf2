@@ -73,7 +73,25 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
     - `--match "row2 closeout guard"`: PASS (`3 examples, 0 failures`)
     - `--match "checked-authoritative"`: PASS (`8 examples, 0 failures`)
     - `--match "Dual-path verification"`: PASS (`4 examples, 0 failures`)
-    - `cabal build all && cabal test`: PASS (`935 examples, 0 failures`)
+  - `cabal build all && cabal test`: PASS (`935 examples, 0 failures`)
+
+## Task 44 TMT row `Ordering of transformations` thesis-exact agent-team plan (planned 2026-03-05)
+
+- Goal:
+  - Make row `Ordering of transformations` more thesis-exact by tightening
+    presolution ordering around thesis `SolveConstraint` shape (§12.1.3),
+    reducing non-thesis global staging, and preserving delayed-weaken +
+    translatability obligations (§15.2.1, Def. 15.2.10).
+- Plan artifact:
+  - `/Volumes/src/mlf4/docs/plans/2026-03-05-tmt-row-ordering-of-transformations-thesis-exact-agent-team-implementation-plan.md`
+- Task tracker:
+  - `/Volumes/src/mlf4/tasks/todo/2026-03-05-tmt-ordering-of-transformations-thesis-exact-agent-team-plan/`
+- Planned execution shape:
+  - Wave 0 RED guard (`row3 ordering thesis-exact guard`)
+  - Wave 1 parallel loop/weaken-core refactors
+  - Wave 2 finalization-stage integration
+  - Wave 3 verification gates
+  - Wave 4 TMT/docs closeout
 
 ## Task 32 TMT row-1 chi-first elab/generalize closeout (completed 2026-03-03)
 
