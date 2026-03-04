@@ -12,10 +12,6 @@ module MLF.Elab.Phi (
     contextToNodeBound,
     -- * Main entry point (chi-native callback: no solved-typed arg)
     phiFromEdgeWitnessWithTrace,
-    -- * Test/debug-only entry points (no trace required; not for production paths)
-    phiFromEdgeWitnessNoTrace,
-    -- * Legacy alias (deprecated)
-    phiFromEdgeWitness,
     -- * Phi environment
     PhiEnv(..),
     PhiM,
@@ -36,4 +32,4 @@ module MLF.Elab.Phi (
 import MLF.Elab.Phi.Binder (binderIndexM, binderNameForM, isBinderNodeM, lookupBinderIndexM)
 import MLF.Elab.Phi.Context (contextToNodeBound)
 import MLF.Elab.Phi.Env (PhiEnv(..), PhiM, askCanonical, askCopyMap, askGaParents, askResult, askTrace)
-import MLF.Elab.Phi.Translate (canonicalNodeM, phiFromEdgeWitness, phiFromEdgeWitnessNoTrace, phiFromEdgeWitnessWithTrace, remapSchemeInfoM)
+import MLF.Elab.Phi.Translate (canonicalNodeM, phiFromEdgeWitnessWithTrace, remapSchemeInfoM)

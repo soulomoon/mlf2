@@ -3,6 +3,13 @@
 ## Unreleased
 
 ### Changed
+- Task 39 elaboration-input strict legacy-retirement closeout (2026-03-04):
+  retired solved-typed elaboration/Phi compatibility APIs from production
+  modules, migrated test-only Phi callback contracts to chi-native shape while
+  preserving strict `MissingEdgeTrace` fail-fast behavior, and revalidated
+  closeout gates (`elab-input thesis-exact guard` `2 examples`,
+  `checked-authoritative` `8 examples`, `Dual-path verification` `4 examples`,
+  `cabal build all && cabal test` `931 examples, 0 failures`).
 - Wave 4 docs closeout for Task 38 elaboration-input thesis-exact replan
   (2026-03-04): set TMT row `Elaboration input` to `Thesis-exact = Yes` with
   current `χp`-native code/guard references, synced implementation/TODO/task

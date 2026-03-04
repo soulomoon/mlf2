@@ -125,20 +125,27 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   2. Task 36: trim remaining non-active compatibility aliases in
      generalize/reify internals while keeping closeout guard slices mandatory.
 
-## Task 39 Elaboration-input strict legacy-retirement closeout (planned 2026-03-04)
+## Task 39 Elaboration-input strict legacy-retirement closeout (completed 2026-03-04)
 
-- Goal:
-  - Make `Elaboration input` thesis-exact under strict table criterion that
-    includes test-only code paths by removing remaining solved-typed
-    elaboration/Phi compatibility APIs.
+- Completed:
+  - Retired solved-typed elaboration/Phi compatibility APIs from production
+    modules for this row closeout.
+  - Migrated test-only Phi callback surfaces to chi-native shape and preserved
+    strict no-trace fail-fast behavior.
+  - Updated TMT row `Elaboration input` to `Thesis-exact = Yes` only after
+    required closeout gates passed in the integrated workspace.
 - Plan/tracker:
   - `/Volumes/src/mlf4/docs/plans/2026-03-04-elab-input-thesis-exact-legacy-retirement-agent-team-implementation-plan.md`
-  - `/Volumes/src/mlf4/tasks/todo/2026-03-04-elab-input-thesis-exact-agent-team-plan/`
-- Required closeout gates:
+  - `/Volumes/src/mlf4/tasks/archive/2026-03-04-elab-input-thesis-exact-agent-team-plan/`
+- Verification:
   - `cabal test mlf2-test --test-show-details=direct --test-options='--match "elab-input thesis-exact guard"'`
+    - PASS (`2 examples, 0 failures`)
   - `cabal test mlf2-test --test-show-details=direct --test-options='--match "checked-authoritative"'`
+    - PASS (`8 examples, 0 failures`)
   - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Dual-path verification"'`
+    - PASS (`4 examples, 0 failures`)
   - `cabal build all && cabal test`
+    - PASS (`931 examples, 0 failures`)
 
 ## Task 36 Post-task35 compatibility cleanup (planned)
 

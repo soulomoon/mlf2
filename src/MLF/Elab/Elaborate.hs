@@ -5,9 +5,6 @@ module MLF.Elab.Elaborate (
     ElabConfig(ElabConfig, ecTraceConfig, ecGeneralizeAtWith),
     ElabEnv(..),
     expansionToInst,
-    elaborate,
-    elaborateWithGen,
-    elaborateWithScope,
     elaborateWithEnv
 ) where
 
@@ -29,8 +26,6 @@ import MLF.Reify.TypeOps
 
 import MLF.Frontend.Syntax (VarName)
 import MLF.Constraint.Types
-import MLF.Constraint.Solved (Solved)
-import qualified MLF.Constraint.Solved as Solved
 import MLF.Elab.Types
 import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Elab.Legacy (expansionToInst)
@@ -58,18 +53,10 @@ import MLF.Constraint.Presolution
     , etCopyMap
     , lookupCopy
     )
-import MLF.Constraint.Presolution.View (fromSolved)
 import MLF.Frontend.ConstraintGen.Types (AnnExpr(..), AnnExprF(..))
 
 type GeneralizeAtWith =
     Maybe GaBindParents
-    -> NodeRef
-    -> NodeId
-    -> Either ElabError (ElabScheme, IntMap.IntMap String)
-
-type GeneralizeAtWithLegacy =
-    Maybe GaBindParents
-    -> Solved
     -> NodeRef
     -> NodeId
     -> Either ElabError (ElabScheme, IntMap.IntMap String)
@@ -106,77 +93,6 @@ schemeBodyTarget presolutionView target =
                 _ -> canonical bnd
         Just TyForall{ tnBody = body } -> canonical body
         _ -> targetC
-
-elaborate
-    :: TraceConfig
-    -> GeneralizeAtWithLegacy
-    -> Solved
-    -> IntMap.IntMap EdgeWitness
-    -> IntMap.IntMap EdgeTrace
-    -> IntMap.IntMap Expansion
-    -> AnnExpr
-    -> Either ElabError ElabTerm
-elaborate traceCfg generalizeAtWith solved edgeWitnesses edgeTraces edgeExpansions ann =
-    let constraint = Solved.originalConstraint solved
-        keys = map (getNodeId . fst) (toListNode (cNodes constraint))
-        baseToSolved =
-            IntMap.fromList
-                [ (k, NodeId k)
-                | k <- keys
-                ]
-        solvedToBase =
-            IntMap.fromList
-                [ (k, NodeId k)
-                | k <- keys
-                ]
-        gaParents = GaBindParents
-            { gaBindParentsBase = cBindParents constraint
-            , gaBaseConstraint = constraint
-            , gaBaseToSolved = baseToSolved
-            , gaSolvedToBase = solvedToBase
-            }
-    in elaborateWithGen traceCfg generalizeAtWith solved gaParents edgeWitnesses edgeTraces edgeExpansions ann
-
-elaborateWithGen
-    :: TraceConfig
-    -> GeneralizeAtWithLegacy
-    -> Solved
-    -> GaBindParents
-    -> IntMap.IntMap EdgeWitness
-    -> IntMap.IntMap EdgeTrace
-    -> IntMap.IntMap Expansion
-    -> AnnExpr
-    -> Either ElabError ElabTerm
-elaborateWithGen traceCfg generalizeAtWith solved gaParents edgeWitnesses edgeTraces edgeExpansions ann =
-    elaborateWithScope traceCfg generalizeAtWith solved gaParents edgeWitnesses edgeTraces edgeExpansions IntMap.empty ann
-
-elaborateWithScope
-    :: TraceConfig
-    -> GeneralizeAtWithLegacy
-    -> Solved
-    -> GaBindParents
-    -> IntMap.IntMap EdgeWitness
-    -> IntMap.IntMap EdgeTrace
-    -> IntMap.IntMap Expansion
-    -> IntMap.IntMap NodeRef
-    -> AnnExpr
-    -> Either ElabError ElabTerm
-elaborateWithScope traceCfg generalizeAtWith solved gaParents edgeWitnesses edgeTraces edgeExpansions scopeOverrides ann =
-    elaborateWithEnv
-        ElabConfig
-            { ecTraceConfig = traceCfg
-            , ecGeneralizeAtWith = \mbGa scopeRoot targetNode ->
-                generalizeAtWith mbGa solved scopeRoot targetNode
-            }
-        ElabEnv
-            { eePresolutionView = fromSolved solved
-            , eeGaParents = gaParents
-            , eeEdgeWitnesses = edgeWitnesses
-            , eeEdgeTraces = edgeTraces
-            , eeEdgeExpansions = edgeExpansions
-            , eeScopeOverrides = scopeOverrides
-            }
-        ann
 
 elaborateWithEnv
     :: ElabConfig

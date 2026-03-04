@@ -23,9 +23,9 @@ import MLF.Constraint.Solved (Solved)
 import MLF.Constraint.Types.Graph (NodeId, NodeRef)
 import MLF.Constraint.Types.Witness (EdgeWitness(..), InstanceOp(..), getInstanceOps)
 import MLF.Elab.Generalize (GaBindParents, shadowCompareTypes, selectSolvedOrderWithShadow)
-import MLF.Elab.Phi.Translate (phiFromEdgeWitness, phiFromEdgeWitnessNoTrace, phiFromEdgeWitnessWithTrace)
+import MLF.Elab.Phi.Translate (phiFromEdgeWitnessWithTrace)
 import MLF.Elab.Phi.Omega (normalizeInst)
-import MLF.Elab.Types (ElabError, ElabType, ElabScheme, Instantiation, SchemeInfo)
+import MLF.Elab.Types (ElabError(..), ElabType, ElabScheme, Instantiation, SchemeInfo)
 import MLF.Util.Trace (TraceConfig)
 
 shadowCompareTypesTestOnly :: String -> ElabType -> ElabType -> Either ElabError ()
@@ -38,12 +38,40 @@ selectSolvedOrderWithShadowTestOnly
     -> Either ElabError ElabType
 selectSolvedOrderWithShadowTestOnly = selectSolvedOrderWithShadow
 
+type GeneralizeAtWith =
+    Maybe GaBindParents
+    -> NodeRef
+    -> NodeId
+    -> Either ElabError (ElabScheme, IntMap.IntMap String)
+
+-- | Strict no-trace path for tests/debugging:
+-- fails fast because production Φ requires edge traces.
+phiFromEdgeWitnessNoTrace
+    :: TraceConfig
+    -> GeneralizeAtWith
+    -> Solved
+    -> Maybe SchemeInfo
+    -> EdgeWitness
+    -> Either ElabError Instantiation
+phiFromEdgeWitnessNoTrace _traceCfg _generalizeAtWith _solved _mSchemeInfo ew =
+    Left (MissingEdgeTrace (ewEdgeId ew))
+
+-- | Legacy alias for the fail-fast no-trace helper.
+phiFromEdgeWitness
+    :: TraceConfig
+    -> GeneralizeAtWith
+    -> Solved
+    -> Maybe SchemeInfo
+    -> EdgeWitness
+    -> Either ElabError Instantiation
+phiFromEdgeWitness = phiFromEdgeWitnessNoTrace
+
 -- | Trace-backed helper for tests that previously used the no-trace entrypoint.
 -- The synthesized trace keeps root + witness op targets in I(r) and uses an
 -- empty replay map when the fixture does not model binder-source provenance.
 phiFromEdgeWitnessAutoTrace
     :: TraceConfig
-    -> (Maybe GaBindParents -> Solved -> NodeRef -> NodeId -> Either ElabError (ElabScheme, IntMap.IntMap String))
+    -> GeneralizeAtWith
     -> Solved
     -> Maybe SchemeInfo
     -> EdgeWitness
@@ -51,17 +79,13 @@ phiFromEdgeWitnessAutoTrace
 phiFromEdgeWitnessAutoTrace traceCfg generalizeAtWith solved mSchemeInfo ew =
     phiFromEdgeWitnessWithTrace
         traceCfg
-        generalizeAtWithActive
+        generalizeAtWith
         (fromSolved solved)
         Nothing
         mSchemeInfo
         (Just syntheticTrace)
         ew
   where
-    -- Explicit legacy adapter: tests may still provide solved-aware callbacks.
-    generalizeAtWithActive mbGa scopeRoot targetNode =
-        generalizeAtWith mbGa solved scopeRoot targetNode
-
     opTargets op =
         case op of
             OpGraft arg n -> [arg, n]
