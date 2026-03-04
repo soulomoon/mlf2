@@ -20,7 +20,7 @@ import MLF.Constraint.Presolution
     , computePresolution
     , EdgeTrace(..)
     )
-import MLF.Constraint.Presolution.View (PresolutionView(..), fromSolved)
+import MLF.Constraint.Presolution.View (fromSolved, pvCanonical)
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types.Graph (PolySyms)
 import MLF.Constraint.Types (cNodes, lookupNodeIn)

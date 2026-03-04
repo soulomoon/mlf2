@@ -18,10 +18,10 @@ import qualified Data.IntMap.Strict as IntMap
 
 import MLF.Constraint.Types.Graph (Constraint, NodeId)
 import MLF.Constraint.Presolution
-    ( PresolutionView
-    , EdgeTrace
+    ( EdgeTrace
     , PresolutionPlanBuilder
     )
+import MLF.Constraint.Presolution.View (PresolutionView)
 import MLF.Constraint.Types.Witness (EdgeWitness, Expansion)
 import MLF.Elab.Generalize (GaBindParents)
 import MLF.Util.Trace (TraceConfig)
