@@ -48,6 +48,34 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
   - `/Volumes/src/mlf4/test/TranslatablePresolutionSpec.hs` (`Translatable presolution`)
   - `cabal build all && cabal test`
 
+### BUG-2026-03-05-002
+- Status: Resolved
+- Priority: High
+- Discovered: 2026-03-05
+- Resolved: 2026-03-05
+- Summary: Wave-3 owner-boundary scheduling left residual pending weakens at the post-edge-loop boundary because the boundary key (planner owner) could differ from the pending-node-derived owner bucket.
+- Minimal reproducer:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Phase 4 thesis-exact unification closure"'`
+- Expected vs actual:
+  - Expected: no residual pending weakens at `after-inst-edge-closure`; closure/translatability slices stay green.
+  - Actual before fix: `InternalError "presolution boundary violation (after-inst-edge-closure): pending unify edges = [], pending weakens = [...]"` in multiple Phase-4 closure examples.
+- Suspected/owning area:
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/EdgeProcessing.hs`
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/EdgeUnify.hs`
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/StateAccess.hs`
+- Thesis impact:
+  - Broke strict boundary-empty invariant expected by thesis-shaped `SolveConstraint` ordering and blocked full gate verification.
+- Fix:
+  - At owner boundaries, scheduler now flushes all currently pending owner buckets and then asserts no pending owner buckets remain.
+  - Preserved owner-aware APIs for inspection/flush while preventing residual queue leakage at boundaries.
+- Regression tests:
+  - `/Volumes/src/mlf4/test/Presolution/UnificationClosureSpec.hs` (`Phase 4 thesis-exact unification closure`)
+  - `/Volumes/src/mlf4/test/TranslatablePresolutionSpec.hs` (`Translatable presolution`)
+  - `/Volumes/src/mlf4/test/PipelineSpec.hs` (`row3 absolute thesis-exact guard`, `generalizes reused constructors via make const`, `checked-authoritative`, `Dual-path verification`)
+  - `/Volumes/src/mlf4/test/ElaborationSpec.hs` (`BUG-002-V1`)
+  - `/Volumes/src/mlf4/test/FrozenParitySpec.hs` (`Frozen parity artifact baseline`)
+  - `cabal build all && cabal test`
+
 ### BUG-2026-03-04-002
 - Status: Resolved
 - Priority: Medium

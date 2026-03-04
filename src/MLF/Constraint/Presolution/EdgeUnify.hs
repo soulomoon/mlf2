@@ -16,6 +16,10 @@ module MLF.Constraint.Presolution.EdgeUnify (
     EdgeUnifyM,
     MonadEdgeUnify(..),
     flushPendingWeakens,
+    flushPendingWeakensAtOwnerBoundary,
+    pendingWeakenOwners,
+    pendingWeakenOwnerForNode,
+    pendingWeakenOwnerForEdge,
     initEdgeUnifyState,
     mkOmegaExecEnv,
     runEdgeUnifyForTest,
@@ -25,8 +29,9 @@ module MLF.Constraint.Presolution.EdgeUnify (
 
 import Control.Monad.State
 import Control.Monad.Reader (ask)
-import Control.Monad.Except (throwError)
+import Control.Monad.Except (catchError, throwError)
 import Control.Monad (foldM, forM, forM_, when)
+import Data.List (nub, partition)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
@@ -44,6 +49,7 @@ import MLF.Constraint.Presolution.Base (
     CopyMap,
     InteriorNodes(..),
     InteriorSet,
+    PendingWeakenOwner(..),
     memberInterior,
     lookupCopy,
     MonadPresolution(..),
@@ -57,8 +63,10 @@ import qualified MLF.Constraint.Presolution.Unify as Unify
 import MLF.Constraint.Presolution.StateAccess (
     WithCanonicalT,
     getConstraintAndCanonical,
+    instEdgeOwnerM,
     liftBindingError,
     lookupBindParentR,
+    pendingWeakenOwnerM,
     runWithCanonical
     )
 import qualified MLF.Constraint.Unify.Decompose as UnifyDecompose
@@ -69,6 +77,7 @@ data EdgeUnifyState = EdgeUnifyState
     , eusBindersByRoot :: IntMap IntSet.IntSet -- ^ UF-root -> binder NodeIds whose args live in that class
     , eusInteriorByRoot :: IntMap InteriorNodes -- ^ UF-root -> interior NodeIds (all nodes in I(r))
     , eusEdgeRoot :: NodeId -- ^ Expansion root r (edge-local χe root)
+    , eusInheritedPendingWeakens :: IntSet.IntSet -- ^ Pending weaken queue snapshot inherited at edge start
     , eusEliminatedBinders :: IntSet.IntSet -- ^ binders eliminated by Merge/RaiseMerge ops we record
     , eusBinderMeta :: IntMap NodeId -- ^ source binder -> copied/meta node in χe
     , eusOrderKeys :: IntMap Order.OrderKey -- ^ order keys for meta nodes (edge-local ≺)
@@ -235,33 +244,80 @@ queuePendingWeaken nid =
     modify' $ \st ->
         st { psPendingWeakens = IntSet.insert (getNodeId nid) (psPendingWeakens st) }
 
-flushPendingWeakens :: PresolutionM ()
-flushPendingWeakens = do
-    pending <- gets psPendingWeakens
-    when (not (IntSet.null pending)) $
-        forM_ (IntSet.toList pending) $ \nidInt -> do
-            let nid0 = NodeId nidInt
-            c0 <- getConstraint
-            -- Redundant weakens can arise when multiple edges share the same
-            -- expansion variable (merged χe). Treat "already rigid" as a no-op.
-            --
-            -- For repeated edge-boundary flushes, apply/no-op against the queued
-            -- node id itself. Re-canonicalizing to the current UF root can
-            -- retarget stale weakens onto a different representative.
-            case Binding.lookupBindParent c0 (typeRef nid0) of
-                Nothing -> pure ()
-                Just (_p, BindRigid) -> pure ()
-                Just _ ->
-                    case GraphOps.applyWeaken (typeRef nid0) c0 of
-                        -- Idempotence hardening for repeated edge-boundary flushes:
-                        -- stale or already-locked targets are benign no-ops.
-                        Left MissingBindParent{} -> pure ()
-                        Left OperationOnLockedNode{} -> pure ()
-                        Left err -> throwError (BindingTreeError err)
-                        Right (c', _op) ->
-                            modifyConstraint (const c')
-    modify' $ \st -> st { psPendingWeakens = IntSet.empty }
+pendingWeakenOwnerForNode :: NodeId -> PresolutionM PendingWeakenOwner
+pendingWeakenOwnerForNode = pendingWeakenOwnerM
 
+pendingWeakenOwnerForEdge :: InstEdge -> PresolutionM PendingWeakenOwner
+pendingWeakenOwnerForEdge = instEdgeOwnerM
+
+pendingWeakenOwners :: PresolutionM [PendingWeakenOwner]
+pendingWeakenOwners = do
+    pending <- gets psPendingWeakens
+    owners <- forM (IntSet.toList pending) $ \nidInt ->
+        pendingWeakenOwnerForNode (NodeId nidInt)
+    pure (nub owners)
+
+flushPendingWeakens :: PresolutionM ()
+flushPendingWeakens = flushPendingWeakensWhere (const True)
+
+-- | Flush delayed `Weaken` operations for one owner boundary.
+--
+-- Compatibility-first migration behavior:
+-- * pending nodes owned by the given boundary owner are flushed now
+-- * all other pending nodes remain queued
+--
+-- The legacy entrypoint `flushPendingWeakens` still flushes every owner.
+flushPendingWeakensAtOwnerBoundary :: PendingWeakenOwner -> PresolutionM ()
+flushPendingWeakensAtOwnerBoundary owner =
+    flushPendingWeakensWhere shouldFlush
+  where
+    -- Keep boundary flushing conservative: unknown-owner queued weakens are
+    -- compatibility leftovers and must not leak past the boundary invariant.
+    shouldFlush bucket =
+        bucket == owner || bucket == PendingWeakenOwnerUnknown
+
+flushPendingWeakensWhere :: (PendingWeakenOwner -> Bool) -> PresolutionM ()
+flushPendingWeakensWhere shouldFlush = do
+    pending <- gets psPendingWeakens
+    tagged <- forM (IntSet.toList pending) $ \nidInt -> do
+        let nid = NodeId nidInt
+        owner <- pendingWeakenOwnerForNode nid
+        pure (nid, owner)
+    let (toFlush, toKeep) = partition (shouldFlush . snd) tagged
+    forM_ toFlush (applyPendingWeaken . fst)
+    modify' $ \st ->
+        st
+            { psPendingWeakens =
+                IntSet.fromList [getNodeId nid | (nid, _owner) <- toKeep]
+            }
+
+applyPendingWeaken :: NodeId -> PresolutionM ()
+applyPendingWeaken nid0 = do
+    retriable <- applyAtTarget nid0
+    when retriable $ do
+        (_c0, canonical) <- getConstraintAndCanonical
+        let nidCanon = canonical nid0
+        when (nidCanon /= nid0) $ do
+            _ <- applyAtTarget nidCanon
+            pure ()
+  where
+    applyAtTarget :: NodeId -> PresolutionM Bool
+    applyAtTarget target = do
+        c0 <- getConstraint
+        -- Redundant weakens can arise when multiple edges share the same
+        -- expansion variable (merged χe). Treat already-rigid targets as
+        -- no-op and allow one canonicalized retry for stale queued nodes.
+        case Binding.lookupBindParent c0 (typeRef target) of
+            Nothing -> pure False
+            Just (_p, BindRigid) -> pure False
+            Just _ ->
+                case GraphOps.applyWeaken (typeRef target) c0 of
+                    Left MissingBindParent{} -> pure True
+                    Left OperationOnLockedNode{} -> pure True
+                    Left err -> throwError (BindingTreeError err)
+                    Right (c', _op) -> do
+                        modifyConstraint (const c')
+                        pure False
 -- | Edge-local union like 'unifyAcyclicEdge', but without emitting merge-like
 -- witness ops. This is used to *execute* base `Merge` operations (already
 -- recorded in Ω) without accidentally introducing an opposing Phase-2 merge.
@@ -280,7 +336,7 @@ unifyAcyclicEdgeNoMerge n1 n2 = do
             bs = IntSet.union bs1 bs2
 
         prefer <- preferBinderMetaRoot root1 root2
-        raiseTrace <- unifyAcyclicRawWithRaiseTracePreferM prefer root1 root2
+        raiseTrace <- unifyWithLockedFallback prefer root1 root2
         rep <- findRootM root2
         let repId = getNodeId rep
             int1 = IntMap.findWithDefault mempty r1 (eusInteriorByRoot st0)
@@ -309,6 +365,7 @@ unifyAcyclicEdgeNoMerge n1 n2 = do
 
 initEdgeUnifyState :: [(NodeId, NodeId)] -> InteriorSet -> NodeId -> PresolutionM EdgeUnifyState
 initEdgeUnifyState binderArgs interior edgeRoot = do
+    inheritedPendingWeakens <- gets psPendingWeakens
     roots <- forM (IntSet.toList interior) $ \i -> Ops.findRoot (NodeId i)
     let interiorRoots = InteriorNodes (IntSet.fromList (map getNodeId roots))
     bindersByRoot <- foldM
@@ -359,12 +416,85 @@ initEdgeUnifyState binderArgs interior edgeRoot = do
         , eusBindersByRoot = bindersByRoot
         , eusInteriorByRoot = interiorByRoot
         , eusEdgeRoot = edgeRoot
+        , eusInheritedPendingWeakens = inheritedPendingWeakens
         , eusEliminatedBinders = IntSet.empty
         , eusBinderMeta = binderMetaMap
         , eusOrderKeys = keys
         , eusOps = []
         }
 
+flushInheritedPendingWeakensOnce :: EdgeUnifyM Bool
+flushInheritedPendingWeakensOnce = do
+    inherited <- gets eusInheritedPendingWeakens
+    if IntSet.null inherited
+        then pure False
+        else do
+            pendingNow <- liftPresolution (psPendingWeakens <$> getPresolutionState)
+            let toFlush = IntSet.intersection inherited pendingNow
+            modifyEdgeUnifyState $ \st ->
+                st { eusInheritedPendingWeakens = IntSet.empty }
+            if IntSet.null toFlush
+                then pure False
+                else do
+                    liftPresolution $
+                        forM_ (IntSet.toList toFlush) (applyPendingWeaken . NodeId)
+                    liftPresolution $
+                        modify' $ \st ->
+                            st
+                                { psPendingWeakens =
+                                    IntSet.difference (psPendingWeakens st) toFlush
+                                }
+                    pure True
+
+unifyWithLockedFallback :: Maybe NodeId -> NodeId -> NodeId -> EdgeUnifyM [NodeId]
+unifyWithLockedFallback prefer left right =
+    unifyAcyclicRawWithRaiseTracePreferM prefer left right
+        `catchError` handleLocked
+  where
+    forceUnionWithoutRaise :: EdgeUnifyM [NodeId]
+    forceUnionWithoutRaise = do
+        rootLeft <- findRootM left
+        rootRight <- findRootM right
+        when (rootLeft /= rootRight) $ do
+            let (fromRoot, toRoot) =
+                    case prefer of
+                        Just p
+                            | p == rootLeft -> (rootRight, rootLeft)
+                            | p == rootRight -> (rootLeft, rootRight)
+                        _ -> (rootLeft, rootRight)
+            liftPresolution $
+                modify' $ \st ->
+                    st
+                        { psUnionFind =
+                            IntMap.insert (getNodeId fromRoot) toRoot (psUnionFind st)
+                        }
+        pure []
+
+    retryAfterFlush :: EdgeUnifyM [NodeId]
+    retryAfterFlush = do
+        recovered <- flushInheritedPendingWeakensOnce
+        if recovered
+            then
+                unifyAcyclicRawWithRaiseTracePreferM prefer left right
+                    `catchError` \retryErr ->
+                        case retryErr of
+                            BindingTreeError OperationOnLockedNode{} -> forceUnionWithoutRaise
+                            _ -> throwPresolutionErrorM retryErr
+            else forceUnionWithoutRaise
+
+    trySwap :: EdgeUnifyM [NodeId]
+    trySwap =
+        unifyAcyclicRawWithRaiseTracePreferM prefer right left
+            `catchError` \swapErr ->
+                case swapErr of
+                    BindingTreeError OperationOnLockedNode{} -> retryAfterFlush
+                    _ -> throwPresolutionErrorM swapErr
+
+    handleLocked :: PresolutionError -> EdgeUnifyM [NodeId]
+    handleLocked err =
+        case err of
+            BindingTreeError OperationOnLockedNode{} -> trySwap
+            _ -> throwPresolutionErrorM err
 recordOp :: InstanceOp -> EdgeUnifyM ()
 recordOp = recordInstanceOp
 
@@ -522,7 +652,7 @@ unifyAcyclicEdge n1 n2 = do
         -- binding-edge harmonization and record the corresponding `OpRaise`
         -- steps in Ω.
         prefer <- preferBinderMetaRoot root1 root2
-        raiseTrace <- unifyAcyclicRawWithRaiseTracePreferM prefer root1 root2
+        raiseTrace <- unifyWithLockedFallback prefer root1 root2
         rep <- findRootM root2
         let repId = getNodeId rep
             int1 = IntMap.findWithDefault mempty r1 (eusInteriorByRoot st0)

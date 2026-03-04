@@ -330,6 +330,50 @@
   - Row remains `No` in the TMT because weaken flushing is still loop-final
     rather than strictly per-edge after each propagation step.
 
+### 2026-03-05 TMT row3 absolute ordering follow-up execution (Task 45)
+- Executed the follow-up agent-team plan from
+  `docs/plans/2026-03-05-tmt-row3-ordering-absolute-thesis-exact-agent-team-implementation-plan.md`
+  with Wave 0..4 ownership boundaries and sequential gates.
+- Wave 0 RED contracts:
+  - added strict matcher `row3 absolute thesis-exact guard` in
+    `PipelineSpec` and `Presolution.UnificationClosureSpec`;
+  - confirmed RED baseline before implementation (`4 examples, 4 failures`).
+- Wave 1 integration:
+  - added pending-weaken ownership APIs (`PendingWeakenOwner`,
+    owner-lookup helpers, owner-boundary flush API surface) in presolution
+    base/state/edge-unify layers;
+  - rewired `EdgeProcessing` loop to owner-boundary scheduling hooks:
+    `scheduleWeakensByOwnerBoundary`,
+    `flushPendingWeakensAtOwnerBoundary`,
+    `assertNoPendingWeakensOutsideOwnerBoundary`;
+  - removed loop-final-only fallback shape
+    (`flushPendingWeakens` + `drainPendingUnifyClosureIfNeeded`).
+- Wave 2/3 regression + fix:
+  - verification exposed residual pending-weaken boundary failures in
+    `Phase 4 thesis-exact unification closure`
+    (`pending weakens` remained after edge-loop boundary);
+  - root cause: planner-owner boundary key and pending-node owner buckets could
+    diverge;
+  - fix: boundary scheduler now flushes all currently pending owner buckets at
+    each owner boundary and reasserts owner-bucket emptiness post-flush.
+- Verification evidence (strict required stack):
+  - `row3 absolute thesis-exact guard`: PASS (`4 examples, 0 failures`)
+  - `Phase 4 thesis-exact unification closure`: PASS (`10 examples, 0 failures`)
+  - `Translatable presolution`: PASS (`8 examples, 0 failures`)
+  - `generalizes reused constructors via make const`: PASS (`1 example, 0 failures`)
+  - `BUG-002-V1`: PASS (`1 example, 0 failures`)
+  - `Frozen parity artifact baseline`: PASS (`1 example, 0 failures`)
+  - `checked-authoritative`: PASS (`8 examples, 0 failures`)
+  - `Dual-path verification`: PASS (`4 examples, 0 failures`)
+  - final gate `cabal build all && cabal test`: PASS
+    (`942 examples, 0 failures` from `mlf2-test` log summary)
+- Classification note:
+  - Row remains `Thesis-exact = No` under strict criterion.
+  - Current boundary scheduler is thesis-shape aligned and no longer
+    loop-final-only, but remains compatibility-conservative
+    (flush-all-pending-owner-buckets at boundaries) rather than a fully proven
+    per-edge owner-local weaken schedule.
+
 ### 2026-03-01 TMT3 Wave 3 docs closeout (all-aligned policy)
 - Transformation Mechanism Table (`docs/notes/2026-02-27-transformation-mechanism-table.md`) is now fully all-aligned for the current branch: every row is `Aligned` and no row references active `DEV-TMT-*` IDs.
 - `docs/thesis-deviations.yaml` now moves all `DEV-TMT-*` records out of active `deviations` and into `history.resolved`.

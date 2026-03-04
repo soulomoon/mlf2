@@ -23,18 +23,23 @@ module MLF.Constraint.Presolution.EdgeProcessing (
     canonicalizeEdgeTraceInteriorsM,
 ) where
 
-import Control.Monad (forM_, unless)
+import Control.Monad (foldM, forM_, unless, when)
 import qualified Data.IntSet as IntSet
 
-import MLF.Constraint.Types (InstEdge(..), cUnifyEdges)
+import MLF.Constraint.Types (GenNodeId, InstEdge(..), cUnifyEdges)
 import MLF.Constraint.Presolution.Base
     ( MonadPresolution(..)
     , PresolutionError(..)
     , PresolutionM
     , PresolutionState(..)
+    , pendingWeakenOwnerFromMaybe
     , requireValidBindingTree
     )
-import MLF.Constraint.Presolution.EdgeUnify (flushPendingWeakens)
+import MLF.Constraint.Presolution.EdgeUnify
+    ( flushPendingWeakensAtOwnerBoundary
+    , pendingWeakenOwners
+    )
+import MLF.Constraint.Presolution.EdgeProcessing.Plan (EdgePlan(..))
 import MLF.Constraint.Presolution.EdgeProcessing.Planner (planEdge)
 import MLF.Constraint.Presolution.EdgeProcessing.Interpreter (executeEdgePlan)
 import MLF.Constraint.Presolution.EdgeProcessing.Solve (
@@ -51,21 +56,70 @@ import MLF.Util.Trace (TraceConfig)
 runPresolutionLoop :: TraceConfig -> [InstEdge] -> PresolutionM ()
 runPresolutionLoop traceCfg edges = do
     drainPendingUnifyClosure traceCfg
-    forM_ edges $ \edge -> do
-        assertNoPendingUnifyEdgesOnly "before-inst-edge" (Just edge)
-        processInstEdge edge
-        drainPendingUnifyClosure traceCfg
-        assertNoPendingUnifyEdgesOnly "after-inst-edge-closure" (Just edge)
-    flushPendingWeakens
-    drainPendingUnifyClosureIfNeeded traceCfg
+    mbLastOwner <- foldM (runScheduledEdge traceCfg) Nothing edges
+    scheduleWeakensByOwnerBoundary mbLastOwner Nothing Nothing
     assertNoPendingUnifyEdges "after-inst-edge-closure" Nothing
 
 -- | Process a single instantiation edge.
 processInstEdge :: InstEdge -> PresolutionM ()
 processInstEdge edge = do
-    requireValidBindingTree
-    plan <- planEdge edge
+    plan <- prepareInstEdgePlan edge
     executeEdgePlan plan
+
+prepareInstEdgePlan :: InstEdge -> PresolutionM EdgePlan
+prepareInstEdgePlan edge = do
+    requireValidBindingTree
+    planEdge edge
+
+runScheduledEdge :: TraceConfig -> Maybe GenNodeId -> InstEdge -> PresolutionM (Maybe GenNodeId)
+runScheduledEdge traceCfg mbActiveOwner edge = do
+    assertNoPendingUnifyEdgesOnly "before-inst-edge" (Just edge)
+    plan <- prepareInstEdgePlan edge
+    let nextOwner = Just (eprSchemeOwnerGen plan)
+    scheduleWeakensByOwnerBoundary mbActiveOwner nextOwner (Just edge)
+    executeEdgePlan plan
+    drainPendingUnifyClosure traceCfg
+    assertNoPendingUnifyEdgesOnly "after-inst-edge-closure" (Just edge)
+    pure nextOwner
+
+-- | Boundary scheduler for delayed weakens.
+--
+-- Flush only when crossing owner groups (or exiting the edge loop) so pending
+-- weakens remain edge-local within an owner but cannot leak across boundaries.
+scheduleWeakensByOwnerBoundary :: Maybe GenNodeId -> Maybe GenNodeId -> Maybe InstEdge -> PresolutionM ()
+scheduleWeakensByOwnerBoundary mbCurrentOwner mbNextOwner mbEdge =
+    when (ownerBoundaryChanged mbCurrentOwner mbNextOwner) $ do
+        assertNoPendingUnifyEdgesOnly "owner-boundary-before-weaken-flush" mbEdge
+        owners <- pendingWeakenOwners
+        if null owners
+            then flushPendingWeakensAtOwnerBoundary (pendingWeakenOwnerFromMaybe mbCurrentOwner)
+            else forM_ owners flushPendingWeakensAtOwnerBoundary
+        assertNoPendingWeakensOutsideOwnerBoundary
+            "owner-boundary-after-weaken-flush"
+            mbEdge
+  where
+    ownerBoundaryChanged :: Maybe GenNodeId -> Maybe GenNodeId -> Bool
+    ownerBoundaryChanged (Just ownerA) (Just ownerB) = ownerA /= ownerB
+    ownerBoundaryChanged (Just _) Nothing = True
+    ownerBoundaryChanged _ _ = False
+
+assertNoPendingWeakensOutsideOwnerBoundary :: String -> Maybe InstEdge -> PresolutionM ()
+assertNoPendingWeakensOutsideOwnerBoundary phase mbEdge = do
+    owners <- pendingWeakenOwners
+    unless (null owners) $
+        throwPresolutionError $
+            InternalError
+                ( "presolution boundary violation ("
+                    ++ phase
+                    ++ ")"
+                    ++ edgeCtx
+                    ++ ": pending weakens remained after owner-boundary flush, owners = "
+                    ++ show owners
+                )
+  where
+    edgeCtx = case mbEdge of
+        Nothing -> ""
+        Just edge -> " at edge " ++ show edge
 
 drainPendingUnifyClosure :: TraceConfig -> PresolutionM ()
 drainPendingUnifyClosure traceCfg = do
@@ -82,29 +136,27 @@ drainPendingUnifyClosure traceCfg = do
                     , psUnionFind = ucUnionFind closure
                     }
 
-drainPendingUnifyClosureIfNeeded :: TraceConfig -> PresolutionM ()
-drainPendingUnifyClosureIfNeeded traceCfg = do
-    st <- getPresolutionState
-    unless (null (cUnifyEdges (psConstraint st))) $
-        drainPendingUnifyClosure traceCfg
-
 assertNoPendingUnifyEdges :: String -> Maybe InstEdge -> PresolutionM ()
 assertNoPendingUnifyEdges phase mbEdge = do
     st <- getPresolutionState
     let pendingUnify = cUnifyEdges (psConstraint st)
         pendingWeakens = psPendingWeakens st
     unless (null pendingUnify && IntSet.null pendingWeakens) $
-        throwPresolutionError $
-            InternalError
-                ( "presolution boundary violation ("
-                    ++ phase
-                    ++ ")"
-                    ++ edgeCtx
-                    ++ ": pending unify edges = "
-                    ++ show pendingUnify
-                    ++ ", pending weakens = "
-                    ++ show (IntSet.toList pendingWeakens)
-                )
+        do
+            pendingOwners <- pendingWeakenOwners
+            throwPresolutionError $
+                InternalError
+                    ( "presolution boundary violation ("
+                        ++ phase
+                        ++ ")"
+                        ++ edgeCtx
+                        ++ ": pending unify edges = "
+                        ++ show pendingUnify
+                        ++ ", pending weakens = "
+                        ++ show (IntSet.toList pendingWeakens)
+                        ++ ", pending weaken owners = "
+                        ++ show pendingOwners
+                    )
   where
     edgeCtx = case mbEdge of
         Nothing -> ""

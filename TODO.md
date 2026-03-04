@@ -107,17 +107,24 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - Row remains `Thesis-exact = No` pending a strict per-edge (not loop-final)
     weaken-flush schedule that preserves current regression/parity guarantees.
 
-## Task 45 TMT row3 absolute ordering follow-up plan (2026-03-05)
+## Task 45 TMT row3 absolute ordering follow-up execution (completed 2026-03-05)
 
-- Planned:
-  - New follow-up plan targets the remaining row3 gap after Task 44:
-    loop-final-only delayed-weaken flushing in `runPresolutionLoop`.
-  - Implementation approach is agent-team based with explicit wave ownership,
-    RED->GREEN gates, and regression-shield gates for known sensitive paths.
+- Completed:
+  - Added strict RED->GREEN row3 matcher
+    `row3 absolute thesis-exact guard`.
+  - Introduced owner-aware pending-weaken API surfaces and rewired
+    `EdgeProcessing` to owner-boundary scheduling markers.
+  - Removed loop-final-only fallback shape from edge-loop scheduling path.
+  - Resolved Wave-3 boundary regression (`BUG-2026-03-05-002`) where pending
+    weaken owner buckets could remain after boundary checks.
 - Plan/tracker:
   - `/Volumes/src/mlf4/docs/plans/2026-03-05-tmt-row3-ordering-absolute-thesis-exact-agent-team-implementation-plan.md`
   - `/Volumes/src/mlf4/tasks/todo/2026-03-05-row3-ordering-absolute-thesis-exact-agent-team-replan/`
-- Required gate stack in follow-up execution:
+- Verification:
+  - RED baseline before Wave 1:
+    - `cabal test mlf2-test --test-show-details=direct --test-options='--match "row3 absolute thesis-exact guard"'`
+      -> FAIL (`4 examples, 4 failures`).
+  - GREEN gate stack:
   - `row3 absolute thesis-exact guard`
   - `Phase 4 thesis-exact unification closure`
   - `Translatable presolution`
@@ -127,6 +134,21 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - `checked-authoritative`
   - `Dual-path verification`
   - `cabal build all && cabal test`
+  - Gate counts:
+    - `row3 absolute thesis-exact guard`: PASS (`4 examples, 0 failures`)
+    - `Phase 4 thesis-exact unification closure`: PASS (`10 examples, 0 failures`)
+    - `Translatable presolution`: PASS (`8 examples, 0 failures`)
+    - `generalizes reused constructors via make const`: PASS (`1 example, 0 failures`)
+    - `BUG-002-V1`: PASS (`1 example, 0 failures`)
+    - `Frozen parity artifact baseline`: PASS (`1 example, 0 failures`)
+    - `checked-authoritative`: PASS (`8 examples, 0 failures`)
+    - `Dual-path verification`: PASS (`4 examples, 0 failures`)
+    - Final gate: `cabal build all && cabal test` PASS
+      (`942 examples, 0 failures` from `mlf2-test` log summary).
+- Status:
+  - Row remains `Thesis-exact = No` under strict criterion; ordering is now
+    owner-boundary scheduled (not loop-final-only), but still uses
+    compatibility-conservative boundary flushing.
 
 ## Task 32 TMT row-1 chi-first elab/generalize closeout (completed 2026-03-03)
 
