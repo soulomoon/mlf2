@@ -53,10 +53,10 @@ import MLF.Elab.Types
 import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Constraint.BindingUtil (bindingPathToRootLocal)
 import MLF.Reify.Core
-    ( namedNodes
-    , reifyBoundWithNames
-    , reifyType
-    , reifyTypeWithNamedSetNoFallback
+    ( namedNodesFromView
+    , reifyBoundWithNamesFromView
+    , reifyTypeFromView
+    , reifyTypeWithNamedSetNoFallbackFromView
     )
 import MLF.Constraint.Solved (Solved)
 import MLF.Constraint.Presolution (EdgeTrace(..), PresolutionView(..))
@@ -284,17 +284,17 @@ phiFromEdgeWitness = phiFromEdgeWitnessNoTrace
 phiFromEdgeWitnessWithTrace
     :: TraceConfig
     -> GeneralizeAtWith
-    -> Solved
+    -> PresolutionView
     -> Maybe GaBindParents
     -> Maybe SchemeInfo
     -> Maybe EdgeTrace
     -> EdgeWitness
     -> Either ElabError Instantiation
-phiFromEdgeWitnessWithTrace traceCfg generalizeAtWith solved mbGaParents mSchemeInfo mTrace ew =
+phiFromEdgeWitnessWithTrace traceCfg generalizeAtWith presolutionView mbGaParents mSchemeInfo mTrace ew =
     case mTrace of
         Nothing -> Left (MissingEdgeTrace (ewEdgeId ew))
         Just _ ->
-            phiFromEdgeWitnessCore traceCfg generalizeAtWith solved (fromSolved solved) mbGaParents mSchemeInfo mTrace ew
+            phiFromEdgeWitnessCore traceCfg generalizeAtWith presolutionView mbGaParents mSchemeInfo mTrace ew
 
 {- Note [Trace-First Copied Set]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -308,16 +308,15 @@ were merged during solving but does not introduce new semantic content.
 phiFromEdgeWitnessCore
     :: TraceConfig
     -> GeneralizeAtWith
-    -> Solved
     -> PresolutionView
     -> Maybe GaBindParents
     -> Maybe SchemeInfo
     -> Maybe EdgeTrace
     -> EdgeWitness
     -> Either ElabError Instantiation
-phiFromEdgeWitnessCore traceCfg generalizeAtWith solved presolutionView mbGaParents mSchemeInfo mTrace ew = do
+phiFromEdgeWitnessCore traceCfg generalizeAtWith presolutionView mbGaParents mSchemeInfo mTrace ew = do
     requireValidBindingTree
-    namedSet0 <- namedNodes solved
+    namedSet0 <- namedNodesFromView presolutionView
     case debugPhi
         ("phi ewLeft=" ++ show (ewLeft ew)
             ++ " ewRight=" ++ show (ewRight ew)
@@ -494,20 +493,20 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith solved presolutionView mbGaPare
     constraint = pvConstraint presolutionView
 
     reifyDebugType :: NodeId -> Either ElabError ElabType
-    reifyDebugType = reifyType solved
+    reifyDebugType = reifyTypeFromView presolutionView
 
     reifyBoundWithNamesAt
         :: IntMap.IntMap String
         -> NodeId
         -> Either ElabError ElabType
-    reifyBoundWithNamesAt = reifyBoundWithNames solved
+    reifyBoundWithNamesAt = reifyBoundWithNamesFromView presolutionView
 
     reifyTypeWithNamedSetNoFallbackAt
         :: IntMap.IntMap String
         -> IntSet.IntSet
         -> NodeId
         -> Either ElabError ElabType
-    reifyTypeWithNamedSetNoFallbackAt = reifyTypeWithNamedSetNoFallback solved
+    reifyTypeWithNamedSetNoFallbackAt = reifyTypeWithNamedSetNoFallbackFromView presolutionView
 
     remapSchemeInfo :: EdgeTrace -> SchemeInfo -> SchemeInfo
     remapSchemeInfo tr si = remapSchemeInfoByTrace presolutionView tr si

@@ -18,6 +18,7 @@ module MLF.Elab.Phi.TestOnly (
 import qualified Data.IntMap.Strict as IntMap
 
 import MLF.Constraint.Presolution (EdgeTrace(..), fromListInterior)
+import MLF.Constraint.Presolution.View (fromSolved)
 import MLF.Constraint.Solved (Solved)
 import MLF.Constraint.Types.Graph (NodeId, NodeRef)
 import MLF.Constraint.Types.Witness (EdgeWitness(..), InstanceOp(..), getInstanceOps)
@@ -51,7 +52,7 @@ phiFromEdgeWitnessAutoTrace traceCfg generalizeAtWith solved mSchemeInfo ew =
     phiFromEdgeWitnessWithTrace
         traceCfg
         generalizeAtWithActive
-        solved
+        (fromSolved solved)
         Nothing
         mSchemeInfo
         (Just syntheticTrace)

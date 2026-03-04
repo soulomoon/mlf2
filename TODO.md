@@ -100,26 +100,30 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - `Dual-path verification`: PASS (`4 examples, 0 failures`)
   - `cabal build all && cabal test`: PASS
 
-## Task 38 Elaboration-input thesis-exact replan with agent teams (planned 2026-03-04)
+## Task 38 Elaboration-input thesis-exact replan with agent teams (completed 2026-03-04)
 
-- Why:
-  - Current TMT row `Elaboration input` is again `Thesis-exact = No` on HEAD due
-    to active solved handoff at
-    `phiFromEdgeWitnessWithTrace ... (ChiQuery.chiSolved presolutionView)` in
-    `MLF.Elab.Elaborate`.
-  - Existing guard matcher text was not strict enough to catch this active
-    call-site shape.
-- Plan:
+- Completed outcomes by wave:
+  - Wave 0 (`guards`): tightened source guards to assert active `χp`-native
+    elaboration input wiring.
+  - Wave 1 (`phi-core`): active Φ trace entry/core signatures now use
+    `GeneralizeAtWith` + `PresolutionView` in production paths.
+  - Wave 2 (`callsites`): active `reifyInst`/pipeline call chain passes
+    `presolutionView` directly into `phiFromEdgeWitnessWithTrace`.
+  - Wave 3 (`verification`): required gates are green:
+    - `elab-input thesis-exact guard`: PASS (`2 examples, 0 failures`)
+    - `checked-authoritative`: PASS (`8 examples, 0 failures`)
+    - `Dual-path verification`: PASS (`4 examples, 0 failures`)
+    - `cabal build all && cabal test`: PASS (`931 examples, 0 failures`)
+  - Wave 4 (`docs-closeout`): TMT/implementation/changelog/task tracker synced
+    and task folder archived.
+- Plan + archive:
   - `/Volumes/src/mlf4/docs/plans/2026-03-04-elaboration-input-thesis-exact-agent-team-replan.md`
-  - `/Volumes/src/mlf4/tasks/todo/2026-03-04-elab-input-thesis-exact-agent-team-replan/`
-- Execution model:
-  - Agent-team waves (`guards`, `phi-core`, `callsites`, `verification`,
-    `docs-closeout`) with explicit file ownership and gate checks.
-- Required gates:
-  - `elab-input thesis-exact guard` (must go RED->GREEN under stricter checks)
-  - `checked-authoritative`
-  - `Dual-path verification`
-  - `cabal build all && cabal test`
+  - `/Volumes/src/mlf4/tasks/archive/2026-03-04-elab-input-thesis-exact-agent-team-replan/`
+- Next work:
+  1. Task 34: reduce `ResultType.View` solved-overlay scaffolding (`rtvSolved`
+     + bound-overlay rebuild path) where equivalent `χp`-native reads exist.
+  2. Task 36: trim remaining non-active compatibility aliases in
+     generalize/reify internals while keeping closeout guard slices mandatory.
 
 ## Task 36 Post-task35 compatibility cleanup (planned)
 

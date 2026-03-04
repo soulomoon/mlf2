@@ -945,7 +945,7 @@ elaborateWithEnv config elabEnv ann = do
                     )
                     () of
                     () -> pure ()
-                phi <- phiFromEdgeWitnessWithTrace traceCfg generalizeAtWith (ChiQuery.chiSolved presolutionView) (Just gaParents) mSchemeInfo' mTrace ew
+                phi <- phiFromEdgeWitnessWithTrace traceCfg generalizeAtWith presolutionView (Just gaParents) mSchemeInfo' mTrace ew
                 case debugGeneralize
                     ("reifyInst phi edge=" ++ show eid ++ " phi=" ++ show phi)
                     () of

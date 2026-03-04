@@ -339,9 +339,14 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     isInfixOf
                         "phiFromEdgeWitnessWithTrace\n    :: TraceConfig\n    -> GeneralizeAtWithCompat\n    -> Solved"
                         src
+                hasSolvedTypedPhiActiveArgs src =
+                    isInfixOf
+                        "phiFromEdgeWitnessWithTrace\n    :: TraceConfig\n    -> GeneralizeAtWith\n    -> Solved"
+                        src
             hasSolvedTypedCompatAlias elabSrc `shouldBe` False
             hasSolvedTypedCompatAlias phiSrc `shouldBe` False
             hasSolvedTypedPhiCompatArgs phiSrc `shouldBe` False
+            hasSolvedTypedPhiActiveArgs phiSrc `shouldBe` False
 
         it "chi-first guard: ResultType internals avoid local solved materialization" $ do
             src <- readFile "src/MLF/Elab/Run/ResultType/Types.hs"
@@ -1938,7 +1943,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
-                phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) solved Nothing (Just si) (Just tr) ew)
+                phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) Nothing (Just si) (Just tr) ew)
                 phi `shouldBe` Elab.InstId
 
             it "OpRaise accepts source-domain interior membership even when etCopyMap aliases the target" $ do
@@ -1977,7 +1982,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                _ <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) solved Nothing (Just si) (Just tr) ew)
+                _ <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) Nothing (Just si) (Just tr) ew)
                 pure ()
 
             it "OpWeaken on solved-away binder emits InstElim (binder preserved in scheme)" $ do
@@ -2028,7 +2033,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
-                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) solved Nothing (Just si) (Just tr) ew of
+                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) Nothing (Just si) (Just tr) ew of
                     Left err ->
                         expectationFailure ("Expected InstElim for solved-away binder, got error: " ++ show err)
                     Right inst ->
@@ -2078,7 +2083,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewForallIntros = 0
                         , ewWitness = InstanceWitness [OpWeaken binderA]
                         }
-                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) solved Nothing (Just si) (Just tr) ew of
+                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) Nothing (Just si) (Just tr) ew of
                     Left (Elab.PhiInvariantError msg) ->
                         msg `shouldSatisfy` ("trace binder replay-map domain mismatch" `isInfixOf`)
                     Left err ->
@@ -2128,7 +2133,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewForallIntros = 0
                         , ewWitness = InstanceWitness [OpWeaken binderA]
                         }
-                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) solved Nothing (Just si) (Just tr) ew of
+                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) Nothing (Just si) (Just tr) ew of
                     Left (Elab.PhiInvariantError msg) ->
                         msg `shouldSatisfy` ("replay-map target outside replay binder domain" `isInfixOf`)
                     Left err ->
@@ -2183,7 +2188,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewForallIntros = 0
                         , ewWitness = InstanceWitness [OpWeaken sourceKey]
                         }
-                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) solved Nothing (Just si) (Just tr) ew of
+                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) Nothing (Just si) (Just tr) ew of
                     Left (Elab.PhiInvariantError msg) ->
                         msg `shouldSatisfy` ("replay-map target outside replay binder domain" `isInfixOf`)
                     Left err ->
@@ -2233,7 +2238,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewForallIntros = 0
                         , ewWitness = InstanceWitness [OpWeaken sourceKey]
                         }
-                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) solved Nothing (Just si) (Just tr) ew of
+                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) Nothing (Just si) (Just tr) ew of
                     Left (Elab.PhiInvariantError msg) ->
                         msg `shouldSatisfy` ("replay-map target outside replay binder domain" `isInfixOf`)
                     Left err ->
@@ -2286,7 +2291,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewForallIntros = 0
                         , ewWitness = InstanceWitness [OpWeaken sourceKey]
                         }
-                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) solved Nothing (Just si) (Just tr) ew of
+                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) Nothing (Just si) (Just tr) ew of
                     Left (Elab.PhiInvariantError msg) ->
                         msg `shouldSatisfy` ("replay-map target outside replay binder domain" `isInfixOf`)
                     Left err ->
@@ -2339,7 +2344,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewForallIntros = 0
                         , ewWitness = InstanceWitness [OpRaise sourceKey]
                         }
-                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) solved Nothing (Just si) (Just tr) ew of
+                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) Nothing (Just si) (Just tr) ew of
                     Left (Elab.PhiInvariantError msg) ->
                         msg `shouldSatisfy`
                             ("trace/replay binder key-space mismatch (OpRaise unresolved trace-source target)" `isInfixOf`)
@@ -2397,7 +2402,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewForallIntros = 0
                         , ewWitness = InstanceWitness [OpWeaken sourceKey]
                         }
-                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) solved Nothing (Just si) (Just tr) ew of
+                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) Nothing (Just si) (Just tr) ew of
                     Left (Elab.PhiInvariantError msg)
                         | "trace binder replay-map target outside replay binder domain" `isInfixOf` msg ->
                             expectationFailure ("Expected mixed-name replay domain to include siSubst key-space, got: " ++ msg)
@@ -2619,7 +2624,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
-                phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) solved Nothing (Just si) (Just tr) ew)
+                phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) Nothing (Just si) (Just tr) ew)
                 phi `shouldBe` Elab.InstId
 
             it "O15-TR-RIGID-RAISEMERGE: OpRaiseMerge with rigid operated node n translates to identity" $ do
@@ -2658,7 +2663,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
-                phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) solved Nothing (Just si) (Just tr) ew)
+                phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) Nothing (Just si) (Just tr) ew)
                 phi `shouldBe` Elab.InstId
 
             it "OpMerge with rigid endpoint only on m fails as non-translatable" $ do
@@ -2697,7 +2702,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
-                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) solved Nothing (Just si) (Just tr) ew of
+                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) Nothing (Just si) (Just tr) ew of
                     Left (Elab.PhiTranslatabilityError msgs) ->
                         msgs `shouldSatisfy` any ("OpMerge: rigid endpoint appears only on non-operated node" `isInfixOf`)
                     Left err ->
@@ -2741,7 +2746,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
-                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) solved Nothing (Just si) (Just tr) ew of
+                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) Nothing (Just si) (Just tr) ew of
                     Left (Elab.PhiTranslatabilityError msgs) ->
                         msgs `shouldSatisfy` any ("OpRaiseMerge: rigid endpoint appears only on non-operated node" `isInfixOf`)
                     Left err ->
@@ -3327,7 +3332,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) solved Nothing (Just si) (Just tr) ew)
+                phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) Nothing (Just si) (Just tr) ew)
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
 
                 let expected =
@@ -3361,7 +3366,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             (tgtSch, _) <- requireRight (generalizeAt solved tgtScope (ewRight ew))
                             let srcTy = Elab.schemeToType srcSch
                                 tgtTy = Elab.schemeToType tgtSch
-                            phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) solved Nothing Nothing mTrace ew)
+                            phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) Nothing Nothing mTrace ew)
                             out <- requireRight (Elab.applyInstantiation srcTy phi)
                             canonType (stripBoundWrapper out) `shouldBe` canonType (stripBoundWrapper tgtTy)
 
@@ -3393,7 +3398,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             (tgtSch, _) <- requireRight (generalizeAt solved tgtScope (ewRight ew))
                             let srcTy = Elab.schemeToType srcSch
                                 tgtTy = Elab.schemeToType tgtSch
-                            phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) solved Nothing Nothing mTrace ew)
+                            phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) Nothing Nothing mTrace ew)
                             out <- requireRight (Elab.applyInstantiation srcTy phi)
                             canonType (stripBoundWrapper out) `shouldBe` canonType (stripBoundWrapper tgtTy)
 
@@ -3417,7 +3422,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             checkNoDupRaises ops
                             let EdgeId eid = ewEdgeId ew
                                 mTrace = IntMap.lookup eid traces
-                            case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) solved Nothing Nothing mTrace ew of
+                            case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) Nothing Nothing mTrace ew of
                                 Left err -> expectationFailure ("Expected successful Phi translation, got: " ++ show err)
                                 Right _ -> pure ()
 
@@ -3460,7 +3465,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
-                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) solved Nothing (Just si) (Just tr) ew of
+                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) Nothing (Just si) (Just tr) ew of
                     Left (Elab.PhiTranslatabilityError msgs) -> do
                         let rendered = unlines msgs
                         rendered `shouldSatisfy` ("OpGraft targets non-binder node" `isInfixOf`)
@@ -3509,7 +3514,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewForallIntros = 0
                         , ewWitness = InstanceWitness ops
                         }
-                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) solved Nothing (Just si) (Just tr) ew of
+                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) Nothing (Just si) (Just tr) ew of
                     Left (Elab.PhiTranslatabilityError msgs) -> do
                         let rendered = unlines msgs
                         rendered `shouldSatisfy` ("OpGraft targets non-binder node" `isInfixOf`)
@@ -3837,7 +3842,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewWitness = InstanceWitness ops
                         }
 
-                phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) solved Nothing (Just si) (Just tr) ew)
+                phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) Nothing (Just si) (Just tr) ew)
                 out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
 
                 let expected =

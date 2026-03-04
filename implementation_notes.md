@@ -2,16 +2,28 @@
 
 ## Thesis Alignment (Phase A–E)
 
-### 2026-03-04 Task 5 verifier docs closeout (elaboration-input remediation plan)
-- Team E closeout completed for
-  `tasks/todo/2026-03-04-tmt-elab-input-thesis-exact-remediation-plan/`.
-- Transformation Mechanism Table row `Elaboration input` is now marked
-  `Thesis-exact = Yes` with current runtime/guard references.
-- Recorded verification evidence from already-run gates:
+### 2026-03-04 Wave 4 docs closeout (Task 38 agent-team replan)
+- Closed Team E docs/verifier handoff for
+  `tasks/archive/2026-03-04-elab-input-thesis-exact-agent-team-replan/`.
+- Thesis contract references for this migration are now explicit in closeout
+  docs:
+  - `papers/these-finale-english.txt` Def. 15.3.12 (translation starts from
+    translatable `χp` and chosen per-edge witnesses)
+  - `papers/these-finale-english.txt` §15.3.6 / Fig. 15.3.5 (edge-witness
+    translation pipeline into term elaboration)
+- Runtime closure references recorded in TMT:
+  - `runPipelineElabWith` threads `ecGeneralizeAtWith` and
+    `eePresolutionView` into `elaborateWithEnv`
+    (`src/MLF/Elab/Run/Pipeline.hs:112-141`);
+  - `reifyInst` calls `phiFromEdgeWitnessWithTrace` with `presolutionView`
+    (`src/MLF/Elab/Elaborate.hs:917-949`);
+  - active Φ entry/core signatures are `PresolutionView`-based
+    (`src/MLF/Elab/Phi/Translate.hs:284-317`).
+- Recorded verification evidence from already-run Wave 3 gates:
   - `elab-input thesis-exact guard`: PASS (`2 examples, 0 failures`)
   - `checked-authoritative`: PASS (`8 examples, 0 failures`)
   - `Dual-path verification`: PASS (`4 examples, 0 failures`)
-  - `cabal build all && cabal test`: PASS
+  - `cabal build all && cabal test`: PASS (`931 examples, 0 failures`)
 
 ### 2026-03-04 Task 35 elaboration-input thesis-exact closeout
 - Elaboration input row is now closed as thesis-exact for active runtime flow:
