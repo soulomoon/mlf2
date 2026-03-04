@@ -23,21 +23,30 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
      internals while preserving checked-authoritative behavior.
   3. Keep closeout guard slices mandatory for each follow-up reduction.
 
-## Task 41 Elaboration-input absolute thesis-exact hardening (planned 2026-03-05)
+## Task 41 Elaboration-input absolute thesis-exact hardening (completed 2026-03-05)
 
-- Goal:
-  - Make row `Elaboration input` closer to an absolute all-path thesis-exact
-    contract by removing residual non-thesis-friendly internal surfaces.
-- Plan:
+- Completed:
+  - Added RED->GREEN guard `elab-input absolute thesis-exact guard`.
+  - Removed residual solved-backed Phi env surface in `MLF.Elab.Phi.Env`
+    (`peResult`/`askResult` removed).
+  - Removed ga' scope error swallowing in `MLF.Elab.Run.Scope`
+    (`Left _ -> ref` fallback removed; errors now propagate).
+  - Retired synthetic auto-trace test helper path by removing
+    `phiFromEdgeWitnessAutoTrace` from `MLF.Elab.Phi.TestOnly` and migrating
+    affected tests; no-trace path remains strict `MissingEdgeTrace` fail-fast.
+  - Added focused `ScopeSpec` coverage and registered it in test harness/cabal.
+- Plan/tracker:
   - `/Volumes/src/mlf4/docs/plans/2026-03-05-elaboration-input-absolute-thesis-exact-agent-team-implementation-plan.md`
-  - `/Volumes/src/mlf4/tasks/todo/2026-03-05-elaboration-input-absolute-thesis-exact-agent-team/`
-- Planned wave execution (agent teams):
-  1. Wave 0 (Team A): add RED guard `elab-input absolute thesis-exact guard`.
-  2. Wave 1 (parallel Teams B/C/D): remove residual solved-backed Phi env
-     surfaces, remove ga' scope error swallowing, retire synthetic auto-trace
-     helper path in test-only Phi usage.
-  3. Wave 2 (Team E): run required gates (`absolute guard`, `checked-authoritative`,
-     `Dual-path verification`, full gate) and close docs/ledger only after green.
+  - `/Volumes/src/mlf4/tasks/archive/2026-03-05-elaboration-input-absolute-thesis-exact-agent-team/`
+- Verification:
+  - RED baseline before Wave 1:
+    - `cabal test mlf2-test --test-show-details=direct --test-options='--match "elab-input absolute thesis-exact guard"'`
+      -> FAIL (expected RED).
+  - GREEN gates after integration:
+    - `--match "elab-input absolute thesis-exact guard"`: PASS (`1 example, 0 failures`)
+    - `--match "checked-authoritative"`: PASS (`8 examples, 0 failures`)
+    - `--match "Dual-path verification"`: PASS (`4 examples, 0 failures`)
+    - `cabal build all && cabal test`: PASS (`934 examples, 0 failures`)
 
 ## Task 32 TMT row-1 chi-first elab/generalize closeout (completed 2026-03-03)
 

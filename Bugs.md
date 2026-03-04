@@ -4,31 +4,43 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 
 ## Open
 
-### BUG-2026-03-04-002
-- Status: Open
-- Priority: Medium
-- Discovered: 2026-03-04
-- Summary: Elaboration-input path is not absolutely thesis-exact under strict
-  all-path criterion because test-only Φ helper APIs still expose
-  `Solved`-typed parameters.
-- Minimal reproducer:
-  - `rg -n "phiFromEdgeWitnessNoTrace|phiFromEdgeWitnessAutoTrace|-> Solved" src/MLF/Elab/Phi/TestOnly.hs`
-- Expected vs actual:
-  - Expected: all elaboration-input surfaces (including test-only helpers per
-    TMT note) are `χp`/trace-native with no solved-typed API requirements.
-  - Actual: `phiFromEdgeWitnessNoTrace`, alias `phiFromEdgeWitness`, and
-    `phiFromEdgeWitnessAutoTrace` keep a `Solved` argument; auto-trace bridges
-    through `fromSolved solved`.
-- Suspected/owning area:
-  - `/Volumes/src/mlf4/src/MLF/Elab/Phi/TestOnly.hs`
-  - `/Volumes/src/mlf4/test/ElaborationSpec.hs`
-  - `/Volumes/src/mlf4/test/PipelineSpec.hs`
-- Thesis impact:
-  - Does not affect production elaboration semantics, but blocks an
-    "absolute" thesis-exact claim for row `Elaboration input` when test-only
-    paths are included in the criterion.
+- None currently.
 
 ## Resolved
+
+### BUG-2026-03-04-002
+- Status: Resolved
+- Priority: Medium
+- Discovered: 2026-03-04
+- Resolved: 2026-03-05
+- Summary: Elaboration-input path was not absolutely thesis-exact under strict
+  all-path criterion due to residual solved-backed/test-only surfaces.
+- Minimal reproducer:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "elab-input absolute thesis-exact guard"'`
+- Expected vs actual:
+  - Expected: no residual solved-backed Phi env surface, no ga-scope
+    error-swallowing fallback, and no synthetic auto-trace test helper.
+  - Actual before fix: guard failed (residual markers present in source).
+- Suspected/owning area:
+  - `/Volumes/src/mlf4/src/MLF/Elab/Phi/Env.hs`
+  - `/Volumes/src/mlf4/src/MLF/Elab/Run/Scope.hs`
+  - `/Volumes/src/mlf4/src/MLF/Elab/Phi/TestOnly.hs`
+  - `/Volumes/src/mlf4/test/PipelineSpec.hs`
+- Thesis impact:
+  - Blocked strict all-path absolute claim for row `Elaboration input`.
+- Fix:
+  - Removed solved-backed Phi env surface (`peResult`/`askResult`).
+  - Propagated binding-tree errors in ga-scope preference path
+    (removed `Left _ -> ref` swallowing).
+  - Removed synthetic `phiFromEdgeWitnessAutoTrace` from test-only Phi helper
+    surface while preserving no-trace `MissingEdgeTrace` fail-fast behavior.
+- Regression tests:
+  - `/Volumes/src/mlf4/test/PipelineSpec.hs` (`elab-input absolute thesis-exact guard`)
+  - `/Volumes/src/mlf4/test/ScopeSpec.hs` (`ga scope` error-propagation checks)
+  - `/Volumes/src/mlf4/test/ElaborationSpec.hs` (`MissingEdgeTrace` no-trace fail-fast path)
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "checked-authoritative"'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Dual-path verification"'`
+  - `cabal build all && cabal test`
 
 ### BUG-2026-03-03-001
 - Status: Resolved
