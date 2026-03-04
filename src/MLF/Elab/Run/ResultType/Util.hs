@@ -26,7 +26,7 @@ import MLF.Elab.Inst (applyInstantiation)
 import MLF.Elab.Types
 import MLF.Frontend.ConstraintGen (AnnExpr(..))
 import MLF.Constraint.Types.Graph (EdgeId(..))
-import MLF.Reify.Core (reifyType)
+import MLF.Reify.Core (reifyTypeFromView)
 
 -- | Generalize with plan helper
 generalizeWithPlan
@@ -41,7 +41,6 @@ generalizeWithPlan planBuilder bindParentsGa solved scopeRoot targetNode =
         planBuilder
         bindParentsGa
         (fromSolved solved)
-        solved
         scopeRoot
         targetNode
 
@@ -49,11 +48,10 @@ generalizeWithPlanView
     :: PresolutionPlanBuilder
     -> GaBindParents
     -> PresolutionView
-    -> Solved
     -> NodeRef
     -> NodeId
     -> Either ElabError (ElabScheme, IntMap.IntMap String)
-generalizeWithPlanView planBuilder bindParentsGa presolutionView solved scopeRoot targetNode =
+generalizeWithPlanView planBuilder bindParentsGa presolutionView scopeRoot targetNode =
     let generalizeNeedsFallback err = case err of
             SchemeFreeVars{} -> True
             _ -> False
@@ -65,7 +63,7 @@ generalizeWithPlanView planBuilder bindParentsGa presolutionView solved scopeRoo
                 scopeRoot
                 targetNode
         fallbackToReify = do
-            ty <- reifyType solved targetNode
+            ty <- reifyTypeFromView presolutionView targetNode
             pure (schemeFromType ty, IntMap.empty)
     in case runWithGa (Just bindParentsGa) of
         Right out -> Right out
