@@ -2,17 +2,19 @@
 
 ## Thesis Alignment (Phase A–E)
 
-### 2026-03-04 absolute thesis-exact re-audit (row Elaboration input)
-- Re-audited `docs/notes/2026-02-27-transformation-mechanism-table.md` row
-  `Elaboration input` against `papers/these-finale-english.txt`
-  (Def. 15.3.12, Fig. 15.3.5, §15.3.6) and current code.
-- Outcome under strict table criterion (`include test-only code paths`):
-  - production elaboration input path remains `χp`-native;
-  - strict absolute gap remains in `MLF.Elab.Phi.TestOnly`, where
-    `phiFromEdgeWitnessNoTrace`, `phiFromEdgeWitness`, and
-    `phiFromEdgeWitnessAutoTrace` still expose `Solved`-typed parameters.
-- TMT row is therefore currently marked `Thesis-exact = No` for absolute
-  classification, with follow-up tracked in `TODO.md` Task 40.
+### 2026-03-04 docs closeout: strict-policy elaboration-input alignment
+- Strict table policy remains unchanged: thesis-exact classification includes
+  test-only code paths.
+- Retired solved-typed test-only Φ surfaces in `MLF.Elab.Phi.TestOnly`:
+  `phiFromEdgeWitnessNoTrace`, alias `phiFromEdgeWitness`, and
+  `phiFromEdgeWitnessAutoTrace` now use chi-native `GeneralizeAtWith` callback
+  shape (no `Solved`-typed helper signatures).
+- No-trace test entrypoint remains strict fail-fast (`MissingEdgeTrace`), so
+  the migration preserves the trace contract while removing solved-typed test
+  surfaces.
+- Row `Elaboration input` is now `Thesis-exact = Yes` under the strict policy,
+  conditional on the existing closeout gates (`elab-input thesis-exact guard`,
+  `checked-authoritative`, `Dual-path verification`, and full gate).
 
 ### 2026-03-04 Task 39 strict legacy-retirement closeout (Team E verification)
 - Closed the strict elaboration-input criterion that includes test-only paths:

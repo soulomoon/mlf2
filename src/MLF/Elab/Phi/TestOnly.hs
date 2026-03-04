@@ -17,9 +17,7 @@ module MLF.Elab.Phi.TestOnly (
 
 import qualified Data.IntMap.Strict as IntMap
 
-import MLF.Constraint.Presolution (EdgeTrace(..), fromListInterior)
-import MLF.Constraint.Presolution.View (fromSolved)
-import MLF.Constraint.Solved (Solved)
+import MLF.Constraint.Presolution (EdgeTrace(..), PresolutionView, fromListInterior)
 import MLF.Constraint.Types.Graph (NodeId, NodeRef)
 import MLF.Constraint.Types.Witness (EdgeWitness(..), InstanceOp(..), getInstanceOps)
 import MLF.Elab.Generalize (GaBindParents, shadowCompareTypes, selectSolvedOrderWithShadow)
@@ -49,18 +47,16 @@ type GeneralizeAtWith =
 phiFromEdgeWitnessNoTrace
     :: TraceConfig
     -> GeneralizeAtWith
-    -> Solved
     -> Maybe SchemeInfo
     -> EdgeWitness
     -> Either ElabError Instantiation
-phiFromEdgeWitnessNoTrace _traceCfg _generalizeAtWith _solved _mSchemeInfo ew =
+phiFromEdgeWitnessNoTrace _traceCfg _generalizeAtWith _mSchemeInfo ew =
     Left (MissingEdgeTrace (ewEdgeId ew))
 
 -- | Legacy alias for the fail-fast no-trace helper.
 phiFromEdgeWitness
     :: TraceConfig
     -> GeneralizeAtWith
-    -> Solved
     -> Maybe SchemeInfo
     -> EdgeWitness
     -> Either ElabError Instantiation
@@ -72,15 +68,15 @@ phiFromEdgeWitness = phiFromEdgeWitnessNoTrace
 phiFromEdgeWitnessAutoTrace
     :: TraceConfig
     -> GeneralizeAtWith
-    -> Solved
+    -> PresolutionView
     -> Maybe SchemeInfo
     -> EdgeWitness
     -> Either ElabError Instantiation
-phiFromEdgeWitnessAutoTrace traceCfg generalizeAtWith solved mSchemeInfo ew =
+phiFromEdgeWitnessAutoTrace traceCfg generalizeAtWith presolutionView mSchemeInfo ew =
     phiFromEdgeWitnessWithTrace
         traceCfg
         generalizeAtWith
-        (fromSolved solved)
+        presolutionView
         Nothing
         mSchemeInfo
         (Just syntheticTrace)

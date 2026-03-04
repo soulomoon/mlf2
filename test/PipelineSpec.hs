@@ -176,6 +176,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         it "elab-input thesis-exact guard: Elaborate active input path does not materialize chiSolved" $ do
             elabSrc <- readFile "src/MLF/Elab/Elaborate.hs"
             phiSrc <- readFile "src/MLF/Elab/Phi/Translate.hs"
+            phiTestOnlySrc <- readFile "src/MLF/Elab/Phi/TestOnly.hs"
             let legacySolvedTypedElabApiMarkers =
                     [ "type GeneralizeAtWithLegacy ="
                     , "elaborate\n    :: TraceConfig\n    -> GeneralizeAtWithLegacy\n    -> Solved"
@@ -187,12 +188,19 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     , "phiFromEdgeWitnessNoTrace\n    :: TraceConfig\n    -> GeneralizeAtWithLegacy\n    -> Solved"
                     , "phiFromEdgeWitness\n    :: TraceConfig\n    -> GeneralizeAtWithLegacy\n    -> Solved"
                     ]
+                solvedTypedPhiTestOnlyApiMarkers =
+                    [ "phiFromEdgeWitnessNoTrace\n    :: TraceConfig\n    -> GeneralizeAtWith\n    -> Solved"
+                    , "phiFromEdgeWitness\n    :: TraceConfig\n    -> GeneralizeAtWith\n    -> Solved"
+                    , "phiFromEdgeWitnessAutoTrace\n    :: TraceConfig\n    -> GeneralizeAtWith\n    -> Solved"
+                    ]
             isInfixOf "ChiQuery.chiSolved presolutionView" elabSrc `shouldBe` False
             isInfixOf "chiSolvedCompat presolutionView" elabSrc `shouldBe` False
             forM_ legacySolvedTypedElabApiMarkers $ \marker ->
                 isInfixOf marker elabSrc `shouldBe` False
             forM_ legacySolvedTypedPhiApiMarkers $ \marker ->
                 isInfixOf marker phiSrc `shouldBe` False
+            forM_ solvedTypedPhiTestOnlyApiMarkers $ \marker ->
+                isInfixOf marker phiTestOnlySrc `shouldBe` False
 
         it "row1 closeout guard|checked-authoritative keeps representative corpus parity: elaborateWithEnv has no entry-time Solved.rebuildWithConstraint" $ do
             src <- readFile "src/MLF/Elab/Elaborate.hs"
