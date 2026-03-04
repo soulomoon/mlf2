@@ -169,7 +169,6 @@ computeResultTypeFallbackCore ctx annCanon ann = do
         edgeWitnesses = View.rtvEdgeWitnesses viewBase
         edgeTraces = View.rtvEdgeTraces viewBase
         edgeExpansions = View.rtvEdgeExpansions viewBase
-        solved = View.rtvSolved viewBase
         presolutionView = rtcPresolutionView ctx
         bindParentsGa = View.rtvBindParentsGa viewBase
         planBuilder = View.rtvPlanBuilder viewBase
@@ -284,7 +283,7 @@ computeResultTypeFallbackCore ctx annCanon ann = do
                 instAppBasesFromWitness funEid =
                     case IntMap.lookup (getEdgeId funEid) edgeWitnesses of
                         Just ew ->
-                            case phiFromEdgeWitnessWithTrace traceCfg generalizeAtWith solved (Just bindParentsGa) Nothing (IntMap.lookup (getEdgeId funEid) edgeTraces) ew of
+                            case phiFromEdgeWitnessWithTrace traceCfg generalizeAtWith presolutionView (Just bindParentsGa) Nothing (IntMap.lookup (getEdgeId funEid) edgeTraces) ew of
                                 Right inst ->
                                     IntSet.fromList
                                         [ getNodeId nid

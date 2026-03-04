@@ -8,3 +8,7 @@
   - `ElabConfig`/`ElabEnv` active input shapes are `χp`-native (`GeneralizeAtWith`, `eePresolutionView`), but `reifyInst` still calls `phiFromEdgeWitnessWithTrace ... (ChiQuery.chiSolved presolutionView)` (`src/MLF/Elab/Elaborate.hs`).
   - `phiFromEdgeWitnessWithTrace`/`phiFromEdgeWitnessCore` still take a `Solved` argument in the active trace path (`src/MLF/Elab/Phi/Translate.hs`), with adapter construction in `ChiQuery.chiSolved` (`src/MLF/Elab/Run/ChiQuery.hs`).
 - Table row was refreshed to mark `Thesis-exact = No` for `Elaboration input`, and to call out the specific active solved handoff that remains.
+- Re-audit on HEAD `ce8c392` confirms the same classification:
+  - Thesis still anchors elaboration on translatable `χp` with chosen per-edge propagation witness (`papers/these-finale-english.txt` Def. 15.3.12, §15.3.6, Fig. 15.3.5).
+  - Active code still passes a solved adapter at the term-path Φ call-site (`reifyInst -> phiFromEdgeWitnessWithTrace ... (ChiQuery.chiSolved presolutionView)`), and Φ trace entrypoints still require `Solved`.
+  - Therefore row remains `Thesis-exact = No`; row text was refreshed with current line references and source revision.
