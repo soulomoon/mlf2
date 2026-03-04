@@ -3,6 +3,31 @@
 ## Unreleased
 
 ### Changed
+- Task 44 TMT row `Ordering of transformations` thesis-exact wave integration (2026-03-05):
+  - added RED->GREEN row guards:
+    - `row3 ordering thesis-exact guard`,
+    - `Phase 4 thesis-exact unification closure` characterization for
+      `OpWeaken`/edge-interior consistency;
+  - moved presolution post-loop work to explicit Driver finalization stage
+    (`materialize -> rewrite/canonicalize -> rigidify -> witness normalize`)
+    and removed Driver-global `flushPendingWeakens`;
+  - integrated edge-loop weaken-flush boundary handling in
+    `MLF.Constraint.Presolution.EdgeProcessing` with strict queue drain at the
+    loop-final boundary and preserved per-edge unify-closure fail-fast checks;
+  - hardened `EdgeUnify.flushPendingWeakens` for idempotent boundary use on
+    stale/locked targets without changing witness-recording semantics;
+  - resolved regressions (`make const`, `BUG-002-V1`, frozen parity) discovered
+    during full-gate verification;
+  - verification evidence:
+    - RED baseline `row3 ordering thesis-exact guard`: FAIL (`2 examples, 2 failures`),
+    - GREEN gates:
+      - `row3 ordering thesis-exact guard` (`2 examples, 0 failures`),
+      - `Phase 4 thesis-exact unification closure` (`8 examples, 0 failures`),
+      - `Translatable presolution` (`8 examples, 0 failures`),
+      - `checked-authoritative` (`8 examples, 0 failures`),
+      - `Dual-path verification` (`4 examples, 0 failures`),
+    - full gate `cabal build all && cabal test`: PASS,
+    - full direct suite evidence: `938 examples, 0 failures`.
 - Task 42 TMT row2 result-type context wiring absolute hardening (2026-03-05):
   - added RED->GREEN guard `row2 absolute thesis-exact guard`;
   - removed ResultType-local solved-overlay/materialization surfaces from

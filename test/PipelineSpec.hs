@@ -237,6 +237,15 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             isInfixOf "View.rtvSolved" annSrc `shouldBe` False
             isInfixOf "View.rtvSolved" fallbackSrc `shouldBe` False
 
+        it "row3 ordering thesis-exact guard: Driver removes global post-loop weaken flush" $ do
+            driverSrc <- readFile "src/MLF/Constraint/Presolution/Driver.hs"
+            driverSrc `shouldSatisfy` (not . isInfixOf "flushPendingWeakens")
+
+        it "row3 ordering thesis-exact guard: EdgeProcessing flushes delayed weakens at each edge boundary" $ do
+            edgeSrc <- readFile "src/MLF/Constraint/Presolution/EdgeProcessing.hs"
+            edgeSrc `shouldSatisfy` isInfixOf "flushPendingWeakens"
+            edgeSrc `shouldSatisfy` isInfixOf "assertNoPendingUnifyEdges \"after-inst-edge-closure\""
+
         it "chi-first guard: internals use shared ChiQuery facade" $ do
             elabSrc <- readFile "src/MLF/Elab/Elaborate.hs"
             rtViewSrc <- readFile "src/MLF/Elab/Run/ResultType/View.hs"

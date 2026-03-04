@@ -8,6 +8,46 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 
 ## Resolved
 
+### BUG-2026-03-05-001
+- Status: Resolved
+- Priority: High
+- Discovered: 2026-03-05
+- Resolved: 2026-03-05
+- Summary: Row3 ordering refactor initially applied delayed weakens too early in
+  edge traversal, causing `OperationOnLockedNode` regressions on reused
+  constructor instantiations and frozen parity drift.
+- Minimal reproducer:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "generalizes reused constructors via make const"'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-002-V1"'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Frozen parity artifact baseline"'`
+- Expected vs actual:
+  - Expected: reused-constructor path elaborates/solves without locked-node
+    failures and frozen parity baseline remains stable.
+  - Actual before fix: `ExecError (BindingTreeError (OperationOnLockedNode ...))`
+    in pipeline/elaboration slices, plus frozen parity mismatch
+    (`cWeakenedVars` drift).
+- Suspected/owning area:
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/EdgeProcessing.hs`
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/EdgeUnify.hs`
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/Driver.hs`
+- Thesis impact:
+  - Broke stable Phase 4 behavior while tightening row3 ordering and prevented
+    closeout verification from reaching green.
+- Fix:
+  - Preserved Driver-global flush removal and explicit finalization stage.
+  - Adjusted edge-loop weaken scheduling so delayed weakens can remain pending
+    intra-loop while per-edge unify closure remains strict; queue is drained
+    and asserted empty at loop-final boundary.
+  - Kept `flushPendingWeakens` idempotence hardening in edge-unify helper.
+- Regression tests:
+  - `/Volumes/src/mlf4/test/PipelineSpec.hs` (`generalizes reused constructors via make const`)
+  - `/Volumes/src/mlf4/test/ElaborationSpec.hs` (`BUG-002-V1`)
+  - `/Volumes/src/mlf4/test/FrozenParitySpec.hs` (`Frozen parity artifact baseline`)
+  - `/Volumes/src/mlf4/test/PipelineSpec.hs` (`row3 ordering thesis-exact guard`, `checked-authoritative`, `Dual-path verification`)
+  - `/Volumes/src/mlf4/test/Presolution/UnificationClosureSpec.hs` (`Phase 4 thesis-exact unification closure`)
+  - `/Volumes/src/mlf4/test/TranslatablePresolutionSpec.hs` (`Translatable presolution`)
+  - `cabal build all && cabal test`
+
 ### BUG-2026-03-04-002
 - Status: Resolved
 - Priority: Medium
