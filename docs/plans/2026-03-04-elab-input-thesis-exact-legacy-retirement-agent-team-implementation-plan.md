@@ -199,9 +199,9 @@ git commit -m "test: migrate elaboration phi helpers to chi-native callback cont
 - Modify: `implementation_notes.md`
 - Modify: `CHANGELOG.md`
 - Modify: `TODO.md`
-- Modify: `tasks/todo/2026-03-04-elab-input-thesis-exact-agent-team-plan/task_plan.md`
-- Modify: `tasks/todo/2026-03-04-elab-input-thesis-exact-agent-team-plan/findings.md`
-- Modify: `tasks/todo/2026-03-04-elab-input-thesis-exact-agent-team-plan/progress.md`
+- Modify: `tasks/archive/2026-03-04-elab-input-thesis-exact-agent-team-plan/task_plan.md`
+- Modify: `tasks/archive/2026-03-04-elab-input-thesis-exact-agent-team-plan/findings.md`
+- Modify: `tasks/archive/2026-03-04-elab-input-thesis-exact-agent-team-plan/progress.md`
 - Modify: `Bugs.md` only if a real defect is uncovered.
 
 **Step 1: Run closeout gates**
@@ -222,7 +222,7 @@ Expected: PASS.
 
 **Step 4: Commit**
 ```bash
-git add docs/notes/2026-02-27-transformation-mechanism-table.md implementation_notes.md CHANGELOG.md TODO.md tasks/todo/2026-03-04-elab-input-thesis-exact-agent-team-plan/task_plan.md tasks/todo/2026-03-04-elab-input-thesis-exact-agent-team-plan/findings.md tasks/todo/2026-03-04-elab-input-thesis-exact-agent-team-plan/progress.md
+git add docs/notes/2026-02-27-transformation-mechanism-table.md implementation_notes.md CHANGELOG.md TODO.md tasks/archive/2026-03-04-elab-input-thesis-exact-agent-team-plan/task_plan.md tasks/archive/2026-03-04-elab-input-thesis-exact-agent-team-plan/findings.md tasks/archive/2026-03-04-elab-input-thesis-exact-agent-team-plan/progress.md
 git commit -m "docs: close elaboration-input thesis-exact legacy-retirement with verification evidence"
 ```
 

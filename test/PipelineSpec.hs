@@ -174,9 +174,25 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             src `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
 
         it "elab-input thesis-exact guard: Elaborate active input path does not materialize chiSolved" $ do
-            src <- readFile "src/MLF/Elab/Elaborate.hs"
-            isInfixOf "ChiQuery.chiSolved presolutionView" src `shouldBe` False
-            isInfixOf "chiSolvedCompat presolutionView" src `shouldBe` False
+            elabSrc <- readFile "src/MLF/Elab/Elaborate.hs"
+            phiSrc <- readFile "src/MLF/Elab/Phi/Translate.hs"
+            let legacySolvedTypedElabApiMarkers =
+                    [ "type GeneralizeAtWithLegacy ="
+                    , "elaborate\n    :: TraceConfig\n    -> GeneralizeAtWithLegacy\n    -> Solved"
+                    , "elaborateWithGen\n    :: TraceConfig\n    -> GeneralizeAtWithLegacy\n    -> Solved"
+                    , "elaborateWithScope\n    :: TraceConfig\n    -> GeneralizeAtWithLegacy\n    -> Solved"
+                    ]
+                legacySolvedTypedPhiApiMarkers =
+                    [ "type GeneralizeAtWithLegacy ="
+                    , "phiFromEdgeWitnessNoTrace\n    :: TraceConfig\n    -> GeneralizeAtWithLegacy\n    -> Solved"
+                    , "phiFromEdgeWitness\n    :: TraceConfig\n    -> GeneralizeAtWithLegacy\n    -> Solved"
+                    ]
+            isInfixOf "ChiQuery.chiSolved presolutionView" elabSrc `shouldBe` False
+            isInfixOf "chiSolvedCompat presolutionView" elabSrc `shouldBe` False
+            forM_ legacySolvedTypedElabApiMarkers $ \marker ->
+                isInfixOf marker elabSrc `shouldBe` False
+            forM_ legacySolvedTypedPhiApiMarkers $ \marker ->
+                isInfixOf marker phiSrc `shouldBe` False
 
         it "row1 closeout guard|checked-authoritative keeps representative corpus parity: elaborateWithEnv has no entry-time Solved.rebuildWithConstraint" $ do
             src <- readFile "src/MLF/Elab/Elaborate.hs"

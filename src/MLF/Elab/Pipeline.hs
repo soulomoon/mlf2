@@ -24,7 +24,6 @@ module MLF.Elab.Pipeline (
     fromTypeCheckError,
     Pretty(..),
     PrettyDisplay(..),
-    elaborate,
     reifyType,
     reifyTypeWithNames,
     reifyTypeWithNamedSet,
@@ -61,7 +60,6 @@ module MLF.Elab.Pipeline (
 ) where
 
 import MLF.Elab.Types
-import MLF.Elab.Elaborate (elaborate)
 import MLF.Elab.PipelineConfig (PipelineConfig(..), defaultPipelineConfig)
 import MLF.Elab.PipelineError
     ( PipelineError(..)

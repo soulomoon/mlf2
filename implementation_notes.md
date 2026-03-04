@@ -2,6 +2,27 @@
 
 ## Thesis Alignment (Phase A–E)
 
+### 2026-03-04 Task 39 strict legacy-retirement closeout (Team E verification)
+- Closed the strict elaboration-input criterion that includes test-only paths:
+  - production elaboration/Phi modules no longer expose solved-typed
+    compatibility entrypoints;
+  - test-only Phi helpers use the chi-native callback shape
+    (`GeneralizeAtWith` without a solved-typed callback argument);
+  - fail-fast no-trace invariant is preserved (`MissingEdgeTrace`).
+- Updated TMT row `Elaboration input` to `Thesis-exact = Yes` only after all
+  required closeout gates passed in this workspace.
+- Verification evidence (required gates, run with temporary
+  `HOME=/tmp/codex-home` and `XDG_CACHE_HOME=/tmp/codex-cache` to avoid cache
+  permission failures while keeping command semantics unchanged):
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "elab-input thesis-exact guard"'`
+    - PASS (`2 examples, 0 failures`)
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "checked-authoritative"'`
+    - PASS (`8 examples, 0 failures`)
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Dual-path verification"'`
+    - PASS (`4 examples, 0 failures`)
+  - `cabal build all && cabal test`
+    - PASS (`931 examples, 0 failures`)
+
 ### 2026-03-04 Wave 4 docs closeout (Task 38 agent-team replan)
 - Closed Team E docs/verifier handoff for
   `tasks/archive/2026-03-04-elab-input-thesis-exact-agent-team-replan/`.
@@ -39,8 +60,10 @@
     - PASS (`4 examples, 0 failures`)
   - `cabal build all && cabal test`
     - PASS (`931 examples, 0 failures`)
-- Residual note:
-  - compatibility aliases remain in some modules for non-active compatibility surfaces, but the active elaboration input call chain satisfies thesis-exact guard conditions.
+- Historical note (superseded by Task 39 strict closeout):
+  - this task closed active-path boundaries; Task 39 subsequently retired the
+    remaining solved-typed production compatibility surfaces and updated
+    test-only callback contracts.
 
 ### 2026-03-04 Wave 3 Task 6 verifier closeout (row-2 adapter retirement evidence)
 - Row-2 adapter retirement is closed in runtime boundaries:

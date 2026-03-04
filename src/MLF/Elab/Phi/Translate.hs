@@ -30,12 +30,8 @@ helpers live in "MLF.Elab.Phi.Omega"; the "MLF.Elab.Phi" module re-exports
 the public entry points as a facade.
 -}
 module MLF.Elab.Phi.Translate (
-    -- * Production entry point (requires trace)
+    -- * Translation entry point (requires trace)
     phiFromEdgeWitnessWithTrace,
-    -- * Test-only entry point (no trace required)
-    phiFromEdgeWitnessNoTrace,
-    -- * Legacy alias (deprecated)
-    phiFromEdgeWitness,
     canonicalNodeM,
     remapSchemeInfoM
 ) where
@@ -58,7 +54,6 @@ import MLF.Reify.Core
     , reifyTypeFromView
     , reifyTypeWithNamedSetNoFallbackFromView
     )
-import MLF.Constraint.Solved (Solved)
 import MLF.Constraint.Presolution (EdgeTrace(..), PresolutionView(..))
 import MLF.Constraint.Presolution.Base (CopyMapping(..), InteriorNodes(..), copiedNodes)
 import MLF.Constraint.Presolution.View (fromSolved)
@@ -248,38 +243,6 @@ type GeneralizeAtWith =
     -> NodeRef
     -> NodeId
     -> Either ElabError (ElabScheme, IntMap.IntMap String)
-
--- | Legacy callback shape retained for no-trace/testing adapters.
-type GeneralizeAtWithLegacy =
-    Maybe GaBindParents
-    -> Solved
-    -> NodeRef
-    -> NodeId
-    -> Either ElabError (ElabScheme, IntMap.IntMap String)
-
--- | Strict no-trace path for tests/debugging:
--- fails fast because production Φ requires edge traces.
-phiFromEdgeWitnessNoTrace
-    :: TraceConfig
-    -> GeneralizeAtWithLegacy
-    -> Solved
-    -> Maybe SchemeInfo
-    -> EdgeWitness
-    -> Either ElabError Instantiation
-phiFromEdgeWitnessNoTrace _traceCfg _generalizeAtWith _solved _mSchemeInfo ew =
-    Left (MissingEdgeTrace (ewEdgeId ew))
-
--- | Legacy alias for 'phiFromEdgeWitnessNoTrace' (deprecated; test/debug-only).
-phiFromEdgeWitness
-    :: TraceConfig
-    -> GeneralizeAtWithLegacy
-    -> Solved
-    -> Maybe SchemeInfo
-    -> EdgeWitness
-    -> Either ElabError Instantiation
-phiFromEdgeWitness = phiFromEdgeWitnessNoTrace
-
-{-# DEPRECATED phiFromEdgeWitness "Use phiFromEdgeWitnessWithTrace; the no-trace entrypoint is strict fail-fast." #-}
 
 phiFromEdgeWitnessWithTrace
     :: TraceConfig
