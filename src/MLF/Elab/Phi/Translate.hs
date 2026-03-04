@@ -32,8 +32,7 @@ the public entry points as a facade.
 module MLF.Elab.Phi.Translate (
     -- * Translation entry point (requires trace)
     phiFromEdgeWitnessWithTrace,
-    canonicalNodeM,
-    remapSchemeInfoM
+    canonicalNodeM
 ) where
 
 import Control.Applicative ((<|>))
@@ -56,11 +55,10 @@ import MLF.Reify.Core
     )
 import MLF.Constraint.Presolution (EdgeTrace(..), PresolutionView(..))
 import MLF.Constraint.Presolution.Base (CopyMapping(..), InteriorNodes(..), copiedNodes)
-import MLF.Constraint.Presolution.View (fromSolved)
 import qualified MLF.Binding.Tree as Binding
 import MLF.Binding.Tree (checkBindingTree, checkNoGenFallback, checkSchemeClosureUnder)
 import qualified MLF.Constraint.NodeAccess as NodeAccess
-import MLF.Elab.Phi.Env (PhiM, askCanonical, askResult)
+import MLF.Elab.Phi.Env (PhiM, askCanonical)
 import MLF.Elab.Phi.IdentityBridge
     ( mkIdentityBridge
     , sourceKeysForNode
@@ -74,12 +72,6 @@ canonicalNodeM :: NodeId -> PhiM NodeId
 canonicalNodeM nid = do
     canonicalNode <- askCanonical
     pure (canonicalNode nid)
-
--- | Remap scheme info using the copy mapping from an edge trace.
-remapSchemeInfoM :: EdgeTrace -> SchemeInfo -> PhiM SchemeInfo
-remapSchemeInfoM tr si = do
-    solved <- askResult
-    pure (remapSchemeInfoByTrace (fromSolved solved) tr si)
 
 -- | Re-key scheme substitutions into the EdgeTrace source-ID domain.
 --

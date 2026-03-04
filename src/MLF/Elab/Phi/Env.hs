@@ -11,7 +11,6 @@ in one place so the main Phi module can remain a thin facade.
 module MLF.Elab.Phi.Env (
     PhiEnv(..),
     PhiM,
-    askResult,
     askCanonical,
     askCopyMap,
     askInvCopyMap,
@@ -24,7 +23,6 @@ import qualified Data.IntMap.Strict as IntMap
 
 import MLF.Constraint.Types.Graph (NodeId)
 import MLF.Constraint.Presolution (EdgeTrace)
-import MLF.Constraint.Solved (Solved)
 import MLF.Elab.Generalize (GaBindParents)
 import MLF.Elab.Types (ElabError)
 
@@ -36,15 +34,13 @@ import MLF.Elab.Types (ElabError)
 -- via a ReaderT monad.
 --
 -- Fields:
---   * peResult: The solved constraint handle (opaque Solved API)
 --   * peCanonical: Function to get the canonical node id
 --   * peCopyMap: Copy mapping from edge trace (original -> copied)
 --   * peInvCopyMap: Inverse copy mapping (copied -> original)
 --   * peGaParents: Optional generalized binding parents
 --   * peTrace: Optional edge trace with interior/copy info
 data PhiEnv = PhiEnv
-    { peResult :: Solved
-    , peCanonical :: NodeId -> NodeId
+    { peCanonical :: NodeId -> NodeId
     , peCopyMap :: IntMap.IntMap NodeId
     , peInvCopyMap :: IntMap.IntMap NodeId
     , peGaParents :: Maybe GaBindParents
@@ -56,10 +52,6 @@ data PhiEnv = PhiEnv
 -- PhiM is a ReaderT over Either ElabError, providing access to the PhiEnv
 -- and short-circuiting error handling.
 type PhiM = ReaderT PhiEnv (Either ElabError)
-
--- | Get the Solved handle from the environment.
-askResult :: PhiM Solved
-askResult = asks peResult
 
 -- | Get the canonical node function from the environment.
 askCanonical :: PhiM (NodeId -> NodeId)
