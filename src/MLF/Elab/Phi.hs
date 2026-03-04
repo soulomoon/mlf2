@@ -15,14 +15,12 @@ module MLF.Elab.Phi (
     -- * Phi environment
     PhiEnv(..),
     PhiM,
-    askResult,
     askCanonical,
     askCopyMap,
     askGaParents,
     askTrace,
     -- * Extracted helpers (using PhiM)
     canonicalNodeM,
-    remapSchemeInfoM,
     isBinderNodeM,
     lookupBinderIndexM,
     binderIndexM,
@@ -31,5 +29,5 @@ module MLF.Elab.Phi (
 
 import MLF.Elab.Phi.Binder (binderIndexM, binderNameForM, isBinderNodeM, lookupBinderIndexM)
 import MLF.Elab.Phi.Context (contextToNodeBound)
-import MLF.Elab.Phi.Env (PhiEnv(..), PhiM, askCanonical, askCopyMap, askGaParents, askResult, askTrace)
-import MLF.Elab.Phi.Translate (canonicalNodeM, phiFromEdgeWitnessWithTrace, remapSchemeInfoM)
+import MLF.Elab.Phi.Env (PhiEnv(..), PhiM, askCanonical, askCopyMap, askGaParents, askTrace)
+import MLF.Elab.Phi.Translate (canonicalNodeM, phiFromEdgeWitnessWithTrace)
