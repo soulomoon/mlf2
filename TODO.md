@@ -107,6 +107,27 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - Row remains `Thesis-exact = No` pending a strict per-edge (not loop-final)
     weaken-flush schedule that preserves current regression/parity guarantees.
 
+## Task 45 TMT row3 absolute ordering follow-up plan (2026-03-05)
+
+- Planned:
+  - New follow-up plan targets the remaining row3 gap after Task 44:
+    loop-final-only delayed-weaken flushing in `runPresolutionLoop`.
+  - Implementation approach is agent-team based with explicit wave ownership,
+    RED->GREEN gates, and regression-shield gates for known sensitive paths.
+- Plan/tracker:
+  - `/Volumes/src/mlf4/docs/plans/2026-03-05-tmt-row3-ordering-absolute-thesis-exact-agent-team-implementation-plan.md`
+  - `/Volumes/src/mlf4/tasks/todo/2026-03-05-row3-ordering-absolute-thesis-exact-agent-team-replan/`
+- Required gate stack in follow-up execution:
+  - `row3 absolute thesis-exact guard`
+  - `Phase 4 thesis-exact unification closure`
+  - `Translatable presolution`
+  - `generalizes reused constructors via make const`
+  - `BUG-002-V1`
+  - `Frozen parity artifact baseline`
+  - `checked-authoritative`
+  - `Dual-path verification`
+  - `cabal build all && cabal test`
+
 ## Task 32 TMT row-1 chi-first elab/generalize closeout (completed 2026-03-03)
 
 - Completed:
