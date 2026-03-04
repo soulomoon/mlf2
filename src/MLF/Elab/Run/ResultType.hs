@@ -16,7 +16,6 @@ import MLF.Constraint.Presolution.View (PresolutionView)
 import MLF.Constraint.Types.Graph
     ( Constraint
     , EdgeId(..)
-    , GenNode(..)
     , NodeId(..)
     , cLetEdges
     , getNodeId
