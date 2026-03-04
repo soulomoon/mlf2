@@ -17,3 +17,12 @@
 - Refreshed the table row references to current line ranges and updated
   `Source revision` in
   `docs/notes/2026-02-27-transformation-mechanism-table.md`.
+
+- Performed a fresh late re-audit on HEAD `17b2635` and reconciled stale notes:
+  - Verified active call chain is `runPipelineElabWith` -> `elaborateWithEnv` ->
+    `reifyInst` -> `phiFromEdgeWitnessWithTrace ... presolutionView ...` (no
+    `ChiQuery.chiSolved` handoff on production path).
+  - Verified active Φ signatures are `PresolutionView`-based, with solved-typed
+    entrypoints restricted to deprecated no-trace/test adapters.
+  - Reworded the `Elaboration input` row and refreshed source references to
+    match current thesis/code alignment (`Thesis-exact = Yes`).
