@@ -9,6 +9,7 @@ Update the `Elaboration input` row in `docs/notes/2026-02-27-transformation-mech
 - [completed] Validate consistency with related docs and capture session notes.
 - [completed] Re-audit active Elaborate → Φ call chain and refresh thesis-exact classification from current code.
 - [completed] Re-validate row content on current HEAD and refresh source-revision + line references.
+- [completed] Reconcile prior stale notes with current runtime state and refresh task logs.
 
 ## Decisions
 - Use thesis `papers/these-finale-english.txt` as primary source.
