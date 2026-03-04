@@ -2,6 +2,30 @@
 
 ## Thesis Alignment (Phase A–E)
 
+### 2026-03-05 Task 41 absolute strict all-path hardening (agent-team execution)
+- Completed strict-wave hardening for row `Elaboration input` with explicit
+  ownership splits and integration gates.
+- Removed residual non-thesis surfaces targeted by the absolute guard:
+  - `MLF.Elab.Phi.Env` no longer carries solved-backed `peResult` /
+    `askResult` helper surface.
+  - `MLF.Elab.Run.Scope.preferGenScope` no longer swallows binding-tree
+    errors (`Left _ -> ref` removed; errors now propagate).
+  - `MLF.Elab.Phi.TestOnly` no longer exports/implements
+    `phiFromEdgeWitnessAutoTrace`; no-trace helper remains strict fail-fast
+    (`MissingEdgeTrace`).
+- Added and locked regression guard:
+  - `Pipeline (Phases 1-5) / Integration Tests / elab-input absolute thesis-exact guard`
+    asserts absence of the three residual surfaces above.
+- Verification evidence (required order):
+  - RED proof before implementation:
+    - `cabal test mlf2-test --test-show-details=direct --test-options='--match "elab-input absolute thesis-exact guard"'`
+      -> FAIL (guard sees residual surface).
+  - GREEN after integration:
+    - `--match "elab-input absolute thesis-exact guard"` -> PASS (`1 example`)
+    - `--match "checked-authoritative"` -> PASS (`8 examples`)
+    - `--match "Dual-path verification"` -> PASS (`4 examples`)
+    - `cabal build all && cabal test` -> PASS (`934 examples, 0 failures`)
+
 ### 2026-03-04 docs closeout: strict-policy elaboration-input alignment
 - Strict table policy remains unchanged: thesis-exact classification includes
   test-only code paths.

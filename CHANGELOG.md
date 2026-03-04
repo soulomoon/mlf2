@@ -3,6 +3,19 @@
 ## Unreleased
 
 ### Changed
+- Task 41 elaboration-input absolute strict all-path hardening (2026-03-05):
+  - added RED->GREEN guard `elab-input absolute thesis-exact guard` and
+    removed residual surfaces across owned modules:
+    `MLF.Elab.Phi.Env` solved-backed env accessors,
+    ga-scope error swallowing in `MLF.Elab.Run.Scope`,
+    and synthetic `phiFromEdgeWitnessAutoTrace` in
+    `MLF.Elab.Phi.TestOnly`;
+  - added `test/ScopeSpec.hs` and wired it into test suite registration to
+    assert ga-scope binding errors are propagated explicitly;
+  - verified required gates in strict order:
+    `absolute guard` (`1 example`), `checked-authoritative` (`8 examples`),
+    `Dual-path verification` (`4 examples`), full gate
+    `cabal build all && cabal test` (`934 examples, 0 failures`).
 - Docs closeout for strict elaboration-input classification (2026-03-04):
   finalized TMT row `Elaboration input` as `Thesis-exact = Yes` under the
   strict policy that includes test-only paths, with migration evidence that
