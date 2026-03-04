@@ -4,22 +4,24 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
-## Task 40 Elaboration-input absolute thesis-exact follow-up (planned 2026-03-04)
+## Task 40 Elaboration-input strict-policy docs closeout (completed 2026-03-04)
 
-- Re-audit outcome:
-  - TMT row `Elaboration input` was downgraded to `Thesis-exact = No` under
-    the table criterion (`thesis exact include test-only code paths`).
-  - Production path remains `χp`-native; strict gap is test-only
-    `Solved`-typed Φ helper signatures in
-    `src/MLF/Elab/Phi/TestOnly.hs`.
-- Next actions:
-  1. Retire `Solved` from `phiFromEdgeWitnessNoTrace`,
-     `phiFromEdgeWitness` alias, and `phiFromEdgeWitnessAutoTrace`
-     signatures (or move them behind explicit compatibility shims).
-  2. Keep no-trace helper strict fail-fast (`MissingEdgeTrace`).
-  3. Re-run `elab-input thesis-exact guard`,
-     `checked-authoritative`, `Dual-path verification`, and full gate
-     (`cabal build all && cabal test`) before reclassifying row to `Yes`.
+- Closed:
+  - TMT row `Elaboration input` is now `Thesis-exact = Yes` under the strict
+    criterion (`thesis exact includes test-only code paths`).
+  - Test-only Φ helper surfaces no longer carry solved-typed signatures.
+  - No-trace helper remains strict fail-fast (`MissingEdgeTrace`).
+- Verification (required for strict reclassification):
+  - `elab-input thesis-exact guard`: PASS (`2 examples, 0 failures`)
+  - `checked-authoritative`: PASS (`8 examples, 0 failures`)
+  - `Dual-path verification`: PASS (`4 examples, 0 failures`)
+  - `cabal build all && cabal test`: PASS (`931 examples, 0 failures`)
+- Rolling priorities (next):
+  1. Task 34: reduce `ResultType.View` solved-overlay scaffolding (`rtvSolved`
+     + bound-overlay rebuild path) where equivalent `χp`-native reads exist.
+  2. Task 36: trim non-active compatibility aliases in generalize/reify
+     internals while preserving checked-authoritative behavior.
+  3. Keep closeout guard slices mandatory for each follow-up reduction.
 
 ## Task 32 TMT row-1 chi-first elab/generalize closeout (completed 2026-03-03)
 

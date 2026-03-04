@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Changed
+- Docs closeout for strict elaboration-input classification (2026-03-04):
+  finalized TMT row `Elaboration input` as `Thesis-exact = Yes` under the
+  strict policy that includes test-only paths, with migration evidence that
+  `MLF.Elab.Phi.TestOnly` helper signatures are no longer solved-typed and the
+  no-trace entrypoint still fails fast with `MissingEdgeTrace`.
 - Elaboration-input absolute thesis-exact re-audit (2026-03-04): rechecked
   Def. 15.3.12 / Fig. 15.3.5 / §15.3.6 against current code and downgraded TMT
   row `Elaboration input` to `Thesis-exact = No` under the table's strict
