@@ -75,23 +75,37 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
     - `--match "Dual-path verification"`: PASS (`4 examples, 0 failures`)
   - `cabal build all && cabal test`: PASS (`935 examples, 0 failures`)
 
-## Task 44 TMT row `Ordering of transformations` thesis-exact agent-team plan (planned 2026-03-05)
+## Task 44 TMT row `Ordering of transformations` thesis-exact agent-team execution (completed 2026-03-05)
 
-- Goal:
-  - Make row `Ordering of transformations` more thesis-exact by tightening
-    presolution ordering around thesis `SolveConstraint` shape (§12.1.3),
-    reducing non-thesis global staging, and preserving delayed-weaken +
-    translatability obligations (§15.2.1, Def. 15.2.10).
-- Plan artifact:
+- Completed:
+  - Added RED->GREEN row3 ordering guard coverage and Phase-4 semantic
+    characterization for edge-local `OpWeaken` interior consistency.
+  - Removed Driver-global post-loop `flushPendingWeakens` and extracted explicit
+    post-loop finalization stage (`materialize -> rewrite/canonicalize ->
+    rigidify -> witness normalize`) with construction checkpoints.
+  - Integrated edge-loop weaken-flush scheduling in `EdgeProcessing` and
+    preserved per-edge unify-closure fail-fast boundaries.
+  - Resolved integration regressions discovered during full-gate runs:
+    `generalizes reused constructors via make const`, `BUG-002-V1`,
+    and frozen parity baseline mismatch.
+- Plan/tracker:
   - `/Volumes/src/mlf4/docs/plans/2026-03-05-tmt-row-ordering-of-transformations-thesis-exact-agent-team-implementation-plan.md`
-- Task tracker:
   - `/Volumes/src/mlf4/tasks/todo/2026-03-05-tmt-ordering-of-transformations-thesis-exact-agent-team-plan/`
-- Planned execution shape:
-  - Wave 0 RED guard (`row3 ordering thesis-exact guard`)
-  - Wave 1 parallel loop/weaken-core refactors
-  - Wave 2 finalization-stage integration
-  - Wave 3 verification gates
-  - Wave 4 TMT/docs closeout
+- Verification:
+  - RED baseline:
+    - `--match "row3 ordering thesis-exact guard"`: FAIL (`2 examples, 2 failures`)
+  - GREEN gates:
+    - `--match "row3 ordering thesis-exact guard"`: PASS (`2 examples, 0 failures`)
+    - `--match "Phase 4 thesis-exact unification closure"`: PASS (`8 examples, 0 failures`)
+    - `--match "Translatable presolution"`: PASS (`8 examples, 0 failures`)
+    - `--match "checked-authoritative"`: PASS (`8 examples, 0 failures`)
+    - `--match "Dual-path verification"`: PASS (`4 examples, 0 failures`)
+  - Final gate:
+    - `cabal build all && cabal test`: PASS
+    - `cabal test mlf2-test --test-show-details=direct`: PASS (`938 examples, 0 failures`)
+- Status:
+  - Row remains `Thesis-exact = No` pending a strict per-edge (not loop-final)
+    weaken-flush schedule that preserves current regression/parity guarantees.
 
 ## Task 32 TMT row-1 chi-first elab/generalize closeout (completed 2026-03-03)
 

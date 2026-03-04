@@ -187,7 +187,10 @@ runEdgeUnifyForTest edgeRoot interior n1 n2 = do
 Base Omega operations from `ExpInstantiate` include `Weaken`, but the paper
 executes Weaken only after all other chi_e actions below it. To preserve that
 ordering (and keep RaiseMerge discoverable), we execute the base ops in two
-phases and queue Weaken in `psPendingWeakens` for a later flush.
+phases and queue Weaken in `psPendingWeakens`.
+
+`Weaken` is delayed only relative to edge-local χe operations and is flushed at
+edge boundaries (not globally deferred to finalization).
 -}
 
 -- | Build an ω executor environment for χe base ops (Graft/Merge/Weaken).
@@ -238,15 +241,22 @@ flushPendingWeakens = do
     when (not (IntSet.null pending)) $
         forM_ (IntSet.toList pending) $ \nidInt -> do
             let nid0 = NodeId nidInt
-            nid <- Ops.findRoot nid0
             c0 <- getConstraint
             -- Redundant weakens can arise when multiple edges share the same
             -- expansion variable (merged χe). Treat "already rigid" as a no-op.
-            case Binding.lookupBindParent c0 (typeRef nid) of
+            --
+            -- For repeated edge-boundary flushes, apply/no-op against the queued
+            -- node id itself. Re-canonicalizing to the current UF root can
+            -- retarget stale weakens onto a different representative.
+            case Binding.lookupBindParent c0 (typeRef nid0) of
                 Nothing -> pure ()
                 Just (_p, BindRigid) -> pure ()
                 Just _ ->
-                    case GraphOps.applyWeaken (typeRef nid) c0 of
+                    case GraphOps.applyWeaken (typeRef nid0) c0 of
+                        -- Idempotence hardening for repeated edge-boundary flushes:
+                        -- stale or already-locked targets are benign no-ops.
+                        Left MissingBindParent{} -> pure ()
+                        Left OperationOnLockedNode{} -> pure ()
                         Left err -> throwError (BindingTreeError err)
                         Right (c', _op) ->
                             modifyConstraint (const c')

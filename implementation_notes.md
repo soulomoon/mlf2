@@ -287,6 +287,49 @@
   - regression anchors: `Phase 6 — Elaborate` PASS, `Pipeline (Phases 1-5)` PASS, `Dual-path verification` PASS;
   - full gate: `cabal build all && cabal test` PASS.
 
+### 2026-03-05 TMT row `Ordering of transformations` wave execution (Task 44)
+- Implemented the row-ordering agent-team plan from
+  `docs/plans/2026-03-05-tmt-row-ordering-of-transformations-thesis-exact-agent-team-implementation-plan.md`.
+- Wave 0 RED guard:
+  - Added `row3 ordering thesis-exact guard` checks in `PipelineSpec` and
+    a semantic closure characterization in `UnificationClosureSpec`.
+  - Confirmed RED baseline (`2 examples, 2 failures`) before refactors.
+- Wave 1+2 core refactor:
+  - `MLF.Constraint.Presolution.EdgeProcessing` now integrates delayed-weaken
+    flushing within the edge-loop boundary machinery and preserves per-edge
+    unify-closure fail-fast checks.
+  - `MLF.Constraint.Presolution.EdgeUnify.flushPendingWeakens` was hardened for
+    repeated invocation/no-op safety on stale targets.
+  - `MLF.Constraint.Presolution.Driver` no longer performs global post-loop
+    `flushPendingWeakens`; post-loop work is now explicit
+    `runFinalizationStage`:
+    - materialization,
+    - rewrite/canonicalization,
+    - rigidification for translatability,
+    - witness normalization,
+    with construction checkpoints for pending queues, TyExp coverage/removal,
+    and witness/trace domain alignment.
+- Regression handling:
+  - Initial per-edge weaken flushing triggered
+    `OperationOnLockedNode` regressions in reused-constructor paths
+    (`generalizes reused constructors via make const`, `BUG-002-V1`) and frozen
+    parity drift.
+  - Edge-loop scheduling was adjusted so weaken queues are allowed intra-loop
+    while preserving per-edge unify-closure boundaries; strict queue drain is
+    enforced at the loop-final boundary.
+- Verification:
+  - `row3 ordering thesis-exact guard`: PASS (`2 examples, 0 failures`)
+  - `Phase 4 thesis-exact unification closure`: PASS (`8 examples, 0 failures`)
+  - `Translatable presolution`: PASS (`8 examples, 0 failures`)
+  - `checked-authoritative`: PASS (`8 examples, 0 failures`)
+  - `Dual-path verification`: PASS (`4 examples, 0 failures`)
+  - full gate: `cabal build all && cabal test` PASS
+  - full-suite direct evidence: `cabal test mlf2-test --test-show-details=direct`
+    PASS (`938 examples, 0 failures`)
+- Thesis-exact classification note:
+  - Row remains `No` in the TMT because weaken flushing is still loop-final
+    rather than strictly per-edge after each propagation step.
+
 ### 2026-03-01 TMT3 Wave 3 docs closeout (all-aligned policy)
 - Transformation Mechanism Table (`docs/notes/2026-02-27-transformation-mechanism-table.md`) is now fully all-aligned for the current branch: every row is `Aligned` and no row references active `DEV-TMT-*` IDs.
 - `docs/thesis-deviations.yaml` now moves all `DEV-TMT-*` records out of active `deviations` and into `history.resolved`.

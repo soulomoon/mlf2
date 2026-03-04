@@ -68,7 +68,6 @@ import MLF.Constraint.Presolution.Expansion (getExpansion)
 import MLF.Constraint.Presolution.Materialization (
     materializeExpansions
     )
-import MLF.Constraint.Presolution.EdgeUnify (flushPendingWeakens)
 import MLF.Constraint.Presolution.EdgeProcessing (
     runPresolutionLoop,
     processInstEdge
@@ -103,19 +102,18 @@ computePresolution traceCfg acyclicityResult constraint = do
             , psEdgeTraces = IntMap.empty
             }
 
-    -- Run the presolution loop
+    -- Run the presolution loop.
     (_, presState) <- runPresolutionM traceCfg
         initialState
         (runPresolutionLoop traceCfg (arSortedEdges acyclicityResult))
 
-    -- Materialize expansions, rewrite TyExp away, and apply UF canonicalization.
+    -- Finalization stage (thesis-aligned post-loop artifact construction):
+    --  1) materialize expansions
+    --  2) rewrite/canonicalize to remove TyExp
+    --  3) rigidify for translatability construction
+    --  4) normalize witnesses
     (redirects, finalState) <- runPresolutionM traceCfg presState $ do
-        mapping <- materializeExpansions
-        flushPendingWeakens
-        redirects <- rewriteConstraint mapping
-        rigidifyTranslatablePresolutionM
-        normalizeEdgeWitnessesM
-        pure redirects
+        runFinalizationStage
 
     let finalConstraint = psConstraint finalState
     when (not (null (cUnifyEdges finalConstraint))) $
@@ -166,6 +164,78 @@ computePresolution traceCfg acyclicityResult constraint = do
         , prUnionFind = PresolutionUf (psUnionFind finalState)
         , prPlanBuilder = PresolutionPlanBuilder (buildGeneralizePlans traceCfg)
         }
+
+runFinalizationStage :: PresolutionM (IntMap NodeId)
+runFinalizationStage = do
+    assertFinalizationBoundary "pre-materialization"
+    mapping <- materializeExpansions
+    assertMaterializationCoverage mapping
+    assertFinalizationBoundary "post-materialization"
+    redirects <- rewriteConstraint mapping
+    assertNoResidualTyExp "post-rewrite"
+    assertFinalizationBoundary "post-rewrite"
+    rigidifyTranslatablePresolutionM
+    cRigid <- getConstraint
+    case validateTranslatablePresolution cRigid of
+        Left err -> throwError err
+        Right () -> pure ()
+    normalizeEdgeWitnessesM
+    assertWitnessTraceDomain "post-witness-normalization"
+    assertFinalizationBoundary "post-witness-normalization"
+    pure redirects
+
+assertFinalizationBoundary :: String -> PresolutionM ()
+assertFinalizationBoundary phase = do
+    st <- getPresolutionState
+    let pendingWeakens = psPendingWeakens st
+        pendingUnify = cUnifyEdges (psConstraint st)
+    when (not (IntSet.null pendingWeakens) || not (null pendingUnify)) $
+        throwError $
+            InternalError $
+                unlines
+                    [ "presolution finalization boundary violation: " ++ phase
+                    , "pending weakens: " ++ show (IntSet.toList pendingWeakens)
+                    , "pending unify edges: " ++ show pendingUnify
+                    ]
+
+assertMaterializationCoverage :: IntMap NodeId -> PresolutionM ()
+assertMaterializationCoverage mapping = do
+    c <- getConstraint
+    let missing =
+            [ tnId node
+            | node@TyExp{} <- NodeAccess.allNodes c
+            , IntMap.notMember (getNodeId (tnId node)) mapping
+            ]
+    when (not (null missing)) $
+        throwError $
+            InternalError $
+                "materialization coverage missing TyExp nodes: " ++ show missing
+
+assertNoResidualTyExp :: String -> PresolutionM ()
+assertNoResidualTyExp phase = do
+    c <- getConstraint
+    let residual =
+            [ tnId node
+            | node@TyExp{} <- NodeAccess.allNodes c
+            ]
+    when (not (null residual)) $
+        throwError $
+            InternalError $
+                phase ++ ": residual TyExp nodes " ++ show residual
+
+assertWitnessTraceDomain :: String -> PresolutionM ()
+assertWitnessTraceDomain phase = do
+    st <- getPresolutionState
+    let witnessKeys = IntSet.fromList (IntMap.keys (psEdgeWitnesses st))
+        traceKeys = IntSet.fromList (IntMap.keys (psEdgeTraces st))
+    when (witnessKeys /= traceKeys) $
+        throwError $
+            InternalError $
+                unlines
+                    [ "presolution witness/trace domain mismatch at " ++ phase
+                    , "witness keys: " ++ show (IntSet.toList witnessKeys)
+                    , "trace keys: " ++ show (IntSet.toList traceKeys)
+                    ]
 
 validateReplayMapTraceContract
     :: (NodeId -> NodeId)

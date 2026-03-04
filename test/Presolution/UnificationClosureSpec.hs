@@ -1,5 +1,6 @@
 module Presolution.UnificationClosureSpec (spec) where
 
+import Control.Monad (forM_)
 import Data.Either (isLeft)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
@@ -9,15 +10,19 @@ import Test.Hspec
 import MLF.Constraint.Acyclicity (AcyclicityResult(..))
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Presolution
-    ( PresolutionResult(..)
+    ( EdgeTrace(..)
+    , PresolutionResult(..)
     , computePresolution
+    , toListInterior
     , validateTranslatablePresolution
     )
-import MLF.Constraint.Types.Graph (BaseTy(..), Constraint(..), EdgeId(..), ExpVarId(..), InstEdge(..), NodeId(..), TyNode(..), UnifyEdge(..))
+import MLF.Constraint.Types.Graph (BaseTy(..), BindFlag(..), Constraint(..), EdgeId(..), ExpVarId(..), InstEdge(..), NodeId(..), TyNode(..), UnifyEdge(..))
+import MLF.Constraint.Types.Witness (EdgeWitness(..), InstanceOp(..), InstanceWitness(..))
 import MLF.Constraint.Unify.Closure (SolveError(..), runUnifyClosureWithSeed)
 import MLF.Frontend.Syntax (Expr(..), Lit(..))
 import SpecUtil
-    ( defaultTraceConfig
+    ( bindParentsFromPairs
+    , defaultTraceConfig
     , emptyConstraint
     , inferBindParents
     , nodeMapFromList
@@ -126,3 +131,71 @@ spec = describe "Phase 4 thesis-exact unification closure" $ do
         let witnessKeys = IntSet.fromList (IntMap.keys (prEdgeWitnesses pres))
             traceKeys = IntSet.fromList (IntMap.keys (prEdgeTraces pres))
         witnessKeys `shouldBe` traceKeys
+
+    it "characterizes edge-boundary ordering by keeping OpWeaken targets inside each edge interior" $ do
+        let a = NodeId 0
+            arrow = NodeId 1
+            forallNode = NodeId 2
+            expNode = NodeId 3
+            intNode = NodeId 4
+            targetArrow = NodeId 5
+            rootArrow = NodeId 6
+            nodes =
+                nodeMapFromList
+                    [ (getNodeId a, TyVar { tnId = a, tnBound = Nothing })
+                    , (getNodeId arrow, TyArrow arrow a a)
+                    , (getNodeId forallNode, TyForall forallNode arrow)
+                    , (getNodeId expNode, TyExp expNode (ExpVarId 0) forallNode)
+                    , (getNodeId intNode, TyBase intNode (BaseTy "Int"))
+                    , (getNodeId targetArrow, TyArrow targetArrow intNode intNode)
+                    , (getNodeId rootArrow, TyArrow rootArrow expNode targetArrow)
+                    ]
+            bindParents =
+                bindParentsFromPairs
+                    [ (a, forallNode, BindFlex)
+                    , (arrow, forallNode, BindFlex)
+                    , (forallNode, rootArrow, BindFlex)
+                    , (expNode, rootArrow, BindFlex)
+                    , (intNode, targetArrow, BindFlex)
+                    , (targetArrow, rootArrow, BindFlex)
+                    ]
+            edge = InstEdge (EdgeId 0) expNode targetArrow
+            constraint =
+                rootedConstraint
+                    emptyConstraint
+                        { cNodes = nodes
+                        , cInstEdges = [edge]
+                        , cBindParents = bindParents
+                        }
+            acyc =
+                AcyclicityResult
+                    { arSortedEdges = [edge]
+                    , arDepGraph = undefined
+                    }
+        pres <- requireRight (computePresolution defaultTraceConfig acyc constraint)
+        let weakenTargetsForWitness :: EdgeWitness -> [NodeId]
+            weakenTargetsForWitness ew =
+                [ n
+                | op <- getInstanceOps (ewWitness ew)
+                , n <- case op of
+                    OpWeaken nid -> [nid]
+                    _ -> []
+                ]
+            weakenTargetsByEdge =
+                [ (eid, weakenTargetsForWitness ew)
+                | (eid, ew) <- IntMap.toList (prEdgeWitnesses pres)
+                ]
+            nonEmptyWeakenEdges = [eid | (eid, ns) <- weakenTargetsByEdge, not (null ns)]
+        nonEmptyWeakenEdges `shouldSatisfy` (not . null)
+        forM_ weakenTargetsByEdge $ \(eid, weakenTargets) ->
+            case IntMap.lookup eid (prEdgeTraces pres) of
+                Nothing ->
+                    expectationFailure ("Missing edge trace for witness key " ++ show eid)
+                Just tr -> do
+                    let interiorKeys =
+                            IntSet.fromList
+                                [ getNodeId nid
+                                | nid <- toListInterior (etInterior tr)
+                                ]
+                    forM_ weakenTargets $ \nid ->
+                        IntSet.member (getNodeId nid) interiorKeys `shouldBe` True

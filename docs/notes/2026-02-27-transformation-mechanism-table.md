@@ -1,14 +1,14 @@
 # Transformation Mechanism Table (Thesis vs Codebase)
 
 Last updated (UTC): 2026-03-05
-Source revision: `957b595`
+Source revision: `29f7bab`
 Note: thesis exact includes test-only code paths
 
 | Transformation mechanism | Thesis pipeline | Current codebase | What to change for thesis-exact | Thesis-exact |
 |---|---|---|---|---|
 | Elaboration input | Thesis elaboration consumes a translatable presolution `χp`; translation of `a` to xMLF is defined inductively on term shape (Fig. 15.3.5, §15.3.6). For each instantiation edge `e`, choose a propagation witness `I` and define `T(e)` from that witness (Def. 15.3.12); witness choice is intentionally non-deterministic ("pick any propagation witness"). (`papers/these-finale-english.txt:14087-14097`, `papers/these-finale-english.txt:14112-14117`) | Active production path remains `χp`-native end-to-end (`presolutionViewForGen` -> `generalizeAtWithBuilderView` -> `elaborateWithEnv`). Task 41 tightened strict all-path contracts by removing residual non-thesis surfaces: `PhiEnv` no longer exposes solved-backed fields/accessors (`peResult`/`askResult` removed), ga' scope preference no longer swallows binding-tree errors (`Left _ -> ref` removed; errors propagate), and test-only Φ no longer exports/implements `phiFromEdgeWitnessAutoTrace` (no-trace helper remains fail-fast as `MissingEdgeTrace`). The absolute guard now asserts these surfaces are absent. (`src/MLF/Elab/Run/Pipeline.hs:110-141`, `src/MLF/Elab/Phi/Env.hs:42-74`, `src/MLF/Elab/Run/Scope.hs:103-113`, `src/MLF/Elab/Phi/TestOnly.hs:9-63`, `test/PipelineSpec.hs:205-213`) | Closed in Task 41 (absolute strict all-path hardening). Keep mandatory regression gates: `elab-input absolute thesis-exact guard`, `checked-authoritative`, `Dual-path verification`, and full gate (`cabal build all && cabal test`). | Yes (absolute strict all-path contract for this row, including test-only paths) |
 | Result-type context wiring | Thesis result-type construction is defined from translated artifacts (Def. 15.3.2) and chosen edge-witness evidence over `χp`; it does not prescribe a split solved adapter object. | Row2 wiring is now fully `χp`-first at runtime boundaries: `ResultTypeInputs` carries only `rtcPresolutionView` + edge artifacts, `ResultType.View` no longer exports/materializes `rtvSolved`/`rtvOriginalConstraint`/`solveFromInputs`, and Ann/Fallback/Util consumers resolve scope/reify/generalize through view-native helpers (`resolveCanonicalScopeView`, `canonicalizeScopeRefView`, `schemeBodyTargetView`, `reifyTypeFromView`). Strict malformed-view validation remains fail-fast at `buildResultTypeView` via canonical graph checks. (`src/MLF/Elab/Run/ResultType/Types.hs:1-39`, `src/MLF/Elab/Run/ResultType/View.hs:1-141`, `src/MLF/Elab/Run/ResultType/Ann.hs:70-306`, `src/MLF/Elab/Run/ResultType/Fallback.hs:52-714`, `src/MLF/Elab/Run/ResultType/Util.hs:38-73`) | Closed in Task 42 (absolute thesis-exact dependency hardening for row2). Keep `row2 absolute thesis-exact guard`, `row2 closeout guard`, `checked-authoritative`, `Dual-path verification`, and full gate in regression cadence. | Yes (absolute strict row2 runtime contract) |
-| Ordering of transformations | `SolveConstraint`: ordered edge traversal with propagation + unification. (`papers/these-finale-english.txt` §12.1.3) | Presolution drains unification closure before/after each inst edge with boundary assertions, then materializes expansions, flushes deferred weakens, rewrites, rigidifies, and normalizes witnesses. (`src/MLF/Constraint/Presolution/EdgeProcessing.hs:49-57`, `src/MLF/Constraint/Presolution/Driver.hs:111-131`) | Reduce auxiliary staging where possible, but preserve thesis-compatible delayed weakening in normalized propagation witnesses (§15.2.1) and preserve translatability-construction obligations (Def. 15.2.10), not only a terminal validation check. | No |
+| Ordering of transformations | `SolveConstraint`: ordered edge traversal with propagation + unification. (`papers/these-finale-english.txt` §12.1.3) | Presolution drains unification closure at edge boundaries and now flushes delayed weakens at the loop-final boundary (no driver-global weaken flush). Driver post-loop work is an explicit finalization stage (`materialize -> rewrite/canonicalize -> rigidify -> witness normalize`) with fail-fast construction checkpoints (`pending queues`, `TyExp` coverage/removal, `witness/trace` key alignment). (`src/MLF/Constraint/Presolution/EdgeProcessing.hs:50-58`, `src/MLF/Constraint/Presolution/Driver.hs:105-243`) | Keep narrowing toward thesis `SolveConstraint` shape: migrate from loop-final weaken flushing to a truly per-edge thesis-shaped weaken boundary while preserving delayed-weaken witness intent (§15.2.1), Def. 15.2.10 translatability construction, and existing `make const`/BUG-002/parity regressions. | No |
 | Per-edge propagation transform | Propagation expands schemes and adds unification obligations. (`papers/these-finale-english.txt` §10.3.2, §15.2.2) | `executeUnifiedExpansionPath` uses two per-edge branches: synthesized wrappers force `ExpIdentity` with direct body-to-target unification, while non-synth `TyExp` edges compute/merge minimal expansion; both paths record expansion/witness/trace artifacts and run expansion-unify where required. (`src/MLF/Constraint/Presolution/EdgeProcessing/Interpreter.hs:74-104`) | Remove synthesized-wrapper special case. Use uniform per-edge expansion + unification: every edge computes an expansion of the source scheme and adds unification obligations, regardless of synthesis origin. | No |
 | Graph operation execution (Graft/Merge/Weaken/Raise) | Operations are part of normalized witness derivations translated into computations. (`papers/these-finale-english.txt` Fig. 15.3.4) | Runtime execution follows thesis operation ordering (pre/post Ω phases with delayed weaken flush), and witness normalization validates operation/replay contracts before emission. (`src/MLF/Witness/OmegaExec.hs:45-95`, `src/MLF/Constraint/Presolution/EdgeUnify.hs:186-253`, `src/MLF/Constraint/Presolution/WitnessNorm.hs:530-540`, `src/MLF/Constraint/Presolution/WitnessValidation.hs:76-107`) | Keep delayed-weakening semantics (thesis propagation witnesses explicitly assume delayed weakenings). If simplifying, collapse only implementation staging while preserving witness-equivalent operation order from Fig. 15.3.4. | No |
 | Replay-map producer normalization (upfront strict contract) | Witness artifacts must identify binder targets consistently with propagation witnesses. (`papers/these-finale-english.txt` §15.2.2, §15.3.5) | Witness normalization derives replay maps from active source binders, enforces completeness/injectivity/TyVar codomain, and persists replay metadata in `EdgeTrace`; Driver re-validates source-domain and codomain contracts. (`src/MLF/Constraint/Presolution/WitnessNorm.hs:170-231`, `:460-521`, `src/MLF/Constraint/Presolution/WitnessValidation.hs:76-107`, `src/MLF/Constraint/Presolution/Driver.hs:170-223`) | Prefer deriving binder-target mappings from chosen witness derivations/replay artifacts; keep explicit runtime contract checks unless proof-level guarantees replace them. | No |
@@ -91,6 +91,28 @@ Note: thesis exact includes test-only code paths
     - PASS (`4 examples, 0 failures`).
   - `cabal build all && cabal test`
     - PASS (`935 examples, 0 failures`).
+
+## 2026-03-05 Task 44 ordering-row closeout evidence
+
+- Wave 0 RED baseline:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "row3 ordering thesis-exact guard"'`
+    - FAIL (`2 examples, 2 failures`) before integration.
+- Required GREEN gates after Waves 1-3 integration:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "row3 ordering thesis-exact guard"'`
+    - PASS (`2 examples, 0 failures`).
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Phase 4 thesis-exact unification closure"'`
+    - PASS (`8 examples, 0 failures`).
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Translatable presolution"'`
+    - PASS (`8 examples, 0 failures`).
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "checked-authoritative"'`
+    - PASS (`8 examples, 0 failures`).
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Dual-path verification"'`
+    - PASS (`4 examples, 0 failures`).
+  - `cabal build all && cabal test`
+    - PASS.
+  - Full-suite evidence run:
+    - `cabal test mlf2-test --test-show-details=direct`
+    - PASS (`938 examples, 0 failures`).
 
 ## Post-row2 priority ordering
 
