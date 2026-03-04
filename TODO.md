@@ -48,6 +48,23 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
     - `--match "Dual-path verification"`: PASS (`4 examples, 0 failures`)
     - `cabal build all && cabal test`: PASS (`934 examples, 0 failures`)
 
+## Task 42 TMT row-2 absolute thesis-exact hardening (planned 2026-03-05)
+
+- Goal:
+  - Make row `Result-type context wiring` absolute thesis-exact by removing
+    residual `ResultType.View` solved-overlay materialization
+    (`rtvSolved`/`rtvOriginalConstraint`/`solveFromInputs`) and migrating
+    row2 consumers to explicit `PresolutionView`/`ChiQuery`-first helpers.
+- Plan/tracker:
+  - `/Volumes/src/mlf4/docs/plans/2026-03-05-tmt-row2-absolute-thesis-exact-agent-team-implementation-plan.md`
+  - `/Volumes/src/mlf4/tasks/todo/2026-03-05-tmt-row2-absolute-thesis-exact-agent-team/`
+- Required gates:
+  - `row2 absolute thesis-exact guard` (RED -> GREEN)
+  - `row2 closeout guard`
+  - `checked-authoritative`
+  - `Dual-path verification`
+  - `cabal build all && cabal test`
+
 ## Task 32 TMT row-1 chi-first elab/generalize closeout (completed 2026-03-03)
 
 - Completed:
