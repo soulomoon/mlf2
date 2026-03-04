@@ -223,6 +223,20 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             src <- readFile "src/MLF/Elab/Run/ResultType/Types.hs"
             isInfixOf "rtcSolveLike" src `shouldBe` False
 
+        it "row2 absolute thesis-exact guard" $ do
+            viewSrc <- readFile "src/MLF/Elab/Run/ResultType/View.hs"
+            annSrc <- readFile "src/MLF/Elab/Run/ResultType/Ann.hs"
+            fallbackSrc <- readFile "src/MLF/Elab/Run/ResultType/Fallback.hs"
+            forM_
+                [ "rtvSolved ::"
+                , "rtvOriginalConstraint ::"
+                , "solveFromInputs ::"
+                , "Solved.rebuildWithConstraint"
+                ] $ \marker ->
+                    isInfixOf marker viewSrc `shouldBe` False
+            isInfixOf "View.rtvSolved" annSrc `shouldBe` False
+            isInfixOf "View.rtvSolved" fallbackSrc `shouldBe` False
+
         it "chi-first guard: internals use shared ChiQuery facade" $ do
             elabSrc <- readFile "src/MLF/Elab/Elaborate.hs"
             rtViewSrc <- readFile "src/MLF/Elab/Run/ResultType/View.hs"
