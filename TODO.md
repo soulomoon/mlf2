@@ -4,6 +4,23 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 40 Elaboration-input absolute thesis-exact follow-up (planned 2026-03-04)
+
+- Re-audit outcome:
+  - TMT row `Elaboration input` was downgraded to `Thesis-exact = No` under
+    the table criterion (`thesis exact include test-only code paths`).
+  - Production path remains `χp`-native; strict gap is test-only
+    `Solved`-typed Φ helper signatures in
+    `src/MLF/Elab/Phi/TestOnly.hs`.
+- Next actions:
+  1. Retire `Solved` from `phiFromEdgeWitnessNoTrace`,
+     `phiFromEdgeWitness` alias, and `phiFromEdgeWitnessAutoTrace`
+     signatures (or move them behind explicit compatibility shims).
+  2. Keep no-trace helper strict fail-fast (`MissingEdgeTrace`).
+  3. Re-run `elab-input thesis-exact guard`,
+     `checked-authoritative`, `Dual-path verification`, and full gate
+     (`cabal build all && cabal test`) before reclassifying row to `Yes`.
+
 ## Task 32 TMT row-1 chi-first elab/generalize closeout (completed 2026-03-03)
 
 - Completed:

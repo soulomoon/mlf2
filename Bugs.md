@@ -3,7 +3,30 @@
 Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 
 ## Open
-(none)
+
+### BUG-2026-03-04-002
+- Status: Open
+- Priority: Medium
+- Discovered: 2026-03-04
+- Summary: Elaboration-input path is not absolutely thesis-exact under strict
+  all-path criterion because test-only Φ helper APIs still expose
+  `Solved`-typed parameters.
+- Minimal reproducer:
+  - `rg -n "phiFromEdgeWitnessNoTrace|phiFromEdgeWitnessAutoTrace|-> Solved" src/MLF/Elab/Phi/TestOnly.hs`
+- Expected vs actual:
+  - Expected: all elaboration-input surfaces (including test-only helpers per
+    TMT note) are `χp`/trace-native with no solved-typed API requirements.
+  - Actual: `phiFromEdgeWitnessNoTrace`, alias `phiFromEdgeWitness`, and
+    `phiFromEdgeWitnessAutoTrace` keep a `Solved` argument; auto-trace bridges
+    through `fromSolved solved`.
+- Suspected/owning area:
+  - `/Volumes/src/mlf4/src/MLF/Elab/Phi/TestOnly.hs`
+  - `/Volumes/src/mlf4/test/ElaborationSpec.hs`
+  - `/Volumes/src/mlf4/test/PipelineSpec.hs`
+- Thesis impact:
+  - Does not affect production elaboration semantics, but blocks an
+    "absolute" thesis-exact claim for row `Elaboration input` when test-only
+    paths are included in the criterion.
 
 ## Resolved
 

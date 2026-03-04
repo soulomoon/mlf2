@@ -3,6 +3,12 @@
 ## Unreleased
 
 ### Changed
+- Elaboration-input absolute thesis-exact re-audit (2026-03-04): rechecked
+  Def. 15.3.12 / Fig. 15.3.5 / §15.3.6 against current code and downgraded TMT
+  row `Elaboration input` to `Thesis-exact = No` under the table's strict
+  criterion (includes test-only paths), because `MLF.Elab.Phi.TestOnly`
+  still exposes `Solved`-typed helper signatures (`phiFromEdgeWitnessNoTrace`,
+  alias `phiFromEdgeWitness`, and `phiFromEdgeWitnessAutoTrace`).
 - Task 39 elaboration-input strict legacy-retirement closeout (2026-03-04):
   retired solved-typed elaboration/Phi compatibility APIs from production
   modules, migrated test-only Phi callback contracts to chi-native shape while
