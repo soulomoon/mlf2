@@ -7,12 +7,12 @@
 
 ## Project Structure & Module Organization
 
-- `src/` contains the private implementation library (`mlf2-internal`). Most logic lives in `src/MLF/` and is organized by domain: `MLF.Frontend.*`, `MLF.Constraint.*`, `MLF.Binding.*`, `MLF.Witness.*`, `MLF.Elab.*`, `MLF.Util.*`.
-- `src-public/` contains the public library entry points intended for downstream users: `MLF.API`, `MLF.Pipeline`, and legacy `MyLib`.
+- `src/` contains the private implementation library (`mlf2-internal`). Most logic lives in `src/MLF/` and is organized by domain: `MLF.Frontend.*`, `MLF.Constraint.*`, `MLF.Binding.*`, `MLF.Witness.*`, `MLF.Elab.*`, `MLF.XMLF.*`, `MLF.Reify.*`, `MLF.Types.*`, `MLF.Util.*`.
+- `src-public/` contains the public library entry points intended for downstream users: `MLF.API`, `MLF.Pipeline`, `MLF.XMLF`, and legacy `MyLib`.
 - `app/` contains the executable entry point (`app/Main.hs`) for the `mlf2` binary.
-- `test/` contains the Hspec suite (`*Spec.hs`) and a manual test runner (`test/Main.hs`).
+- `test/` contains the Hspec suite (`*Spec.hs`), the manual test runner (`test/Main.hs`), and frozen parity tooling/artifacts (`test/Parity/FrozenParityGenMain.hs`, `test/golden/legacy-replay-baseline-v1.json`).
 - `papers/` holds reference material (PDF/TXT) used to align the implementation with the xMLF/MLF papers; it is not required to build.
-- `MLF.Constraint.Types.EdgeWitness` now records `ewSteps` (interleaved O/Ω steps for Φ) alongside Ω-only `ewWitness`.
+- Witness metadata lives in `MLF.Constraint.Types.Witness`; `EdgeWitness` records per-edge reconstruction metadata including `ewForallIntros` and Ω witness payload `ewWitness`.
 - Shared unification logic lives in `MLF.Constraint.Unify.Core`; configure phase-specific behavior via `UnifyStrategy` instead of duplicating unification loops.
 - Shared structural decomposition lives in `MLF.Constraint.Unify.Decompose`; presolution structural unification should call `decomposeUnifyChildren` after handling TyVar/TyExp special cases.
 - Legacy expansion-to-instantiation translation lives in `MLF.Elab.Legacy`; `MLF.Elab.Elaborate`/`MLF.Elab.Pipeline` re-export `expansionToInst` for compatibility.
@@ -33,6 +33,7 @@
 - `cabal test` — run the `mlf2-test` suite (Hspec).
 - `cabal test --test-show-details=direct` — rerun tests with per-example output (useful when debugging failures).
 - `cabal run mlf2` — run the demo executable.
+- `cabal run frozen-parity-gen -- --generated-on YYYY-MM-DD --source-commit <sha>` — regenerate the frozen parity baseline JSON (defaults to `test/golden/legacy-replay-baseline-v1.json`).
 - `cabal repl mlf2` / `cabal repl mlf2-test` — open GHCi with the chosen target loaded.
 
 ## Coding Style & Naming Conventions
@@ -40,7 +41,7 @@
 - Use `haskell-pro` (`/Users/ares/.agents/skills/haskell-pro/SKILL.md`) as the default style guide for Haskell design decisions, including expressive types, pure IO boundaries, and total functions.
 - Match existing formatting: 4-space indentation, explicit module export lists, and GHC-style `{- Note [...] -}` blocks for design rationale.
 - Keep builds warning-free (`-Wall` is enabled in `mlf2.cabal`). Prefer total pattern matches and clear error constructors.
-- When adding new modules under `src/`, update `mlf2.cabal` `other-modules`/`exposed-modules` so Cabal compiles them.
+- When adding new modules under `src/`, `src-public/`, or `test/`, update the matching `mlf2.cabal` `other-modules`/`exposed-modules` stanzas so Cabal compiles them.
 - Many modules import `MLF.Constraint.Types` unqualified; when adding new exports with common names, check for clashes and use `hiding` or explicit imports as needed.
 - Constraint graph identifiers (`NodeId`, `NodeMap`, `GenNodeId`, `GenNodeMap`, `NodeRef` + helpers) live in `MLF.Constraint.Types.Graph`; `MLF.Constraint.Types` re-exports them for compatibility.
 - Core graph node/edge/constraint types (`BaseTy`, `TyNode`, `InstEdge`, `UnifyEdge`, `Constraint`, `BindFlag`/`BindParents`, `GenNode`, `EdgeId`, `ExpVarId`) live in `MLF.Constraint.Types.Graph`; `MLF.Constraint.Types` re-exports them for compatibility, while witness types live in `MLF.Constraint.Types.Witness`.
@@ -52,11 +53,11 @@
 - Tracing is explicit: pass `TraceConfig` (e.g., `defaultTraceConfig` or `pcTraceConfig defaultPipelineConfig`) into presolution/solve/elab helpers and `runPresolutionM`.
 - Elaboration entry points now bundle inputs as `ElabConfig`/`ElabEnv`; prefer `elaborateWithEnv` for new call sites.
 - Presolution state access should go through `MonadPresolution` plus `MLF.Constraint.Presolution.Ops`/`StateAccess`; avoid new direct `gets psConstraint`/`gets psUnionFind` and manual `Binding` error lifting.
-- Edge-level presolution helpers in `MLF.Constraint.Presolution.EdgeProcessing` should use `EdgeCtx` to snapshot let/ann edge checks and trace config instead of ad hoc state reads.
+- Edge-level presolution flow is split across planner/interpreter passes (`MLF.Constraint.Presolution.EdgeProcessing.Planner` + `.Interpreter`) via typed `EdgePlan`; carry new edge checks/flags in the plan payload instead of ad hoc interpreter state reads.
 - For redirect + union-find canonicalization, prefer `MLF.Constraint.Canonicalizer` (idempotent and cycle-safe) over ad hoc chase functions.
 - Naming conventions:
   - Modules: `src/MLF/Foo/Bar.hs` defines `module MLF.Foo.Bar`.
-  - Public entry modules: `src-public/MLF/API.hs` defines `module MLF.API` (similarly `MLF.Pipeline`).
+  - Public entry modules: `src-public/MLF/API.hs` defines `module MLF.API` (similarly `MLF.Pipeline` and `MLF.XMLF`).
   - Tests: `test/FooSpec.hs` defines `spec :: Spec`.
 
 ## Testing Guidelines
