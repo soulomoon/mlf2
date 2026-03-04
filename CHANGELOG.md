@@ -3,6 +3,26 @@
 ## Unreleased
 
 ### Changed
+- Task 45 TMT row3 absolute ordering follow-up execution (2026-03-05):
+  - added strict RED->GREEN guard slice `row3 absolute thesis-exact guard`;
+  - introduced owner-aware pending-weaken API surfaces in presolution
+    base/state/edge-unify layers (`PendingWeakenOwner`, owner lookup helpers,
+    owner-boundary flush API);
+  - rewired `MLF.Constraint.Presolution.EdgeProcessing` to owner-boundary
+    scheduling markers and removed loop-final-only fallback shape;
+  - fixed Wave-3 boundary regression where pending-weaken owner buckets could
+    survive boundary checks (`BUG-2026-03-05-002`) by flushing all pending
+    owner buckets at each owner boundary and asserting post-boundary emptiness;
+  - verified strict gate stack:
+    - `row3 absolute thesis-exact guard` (`4 examples, 0 failures`)
+    - `Phase 4 thesis-exact unification closure` (`10 examples, 0 failures`)
+    - `Translatable presolution` (`8 examples, 0 failures`)
+    - `generalizes reused constructors via make const` (`1 example, 0 failures`)
+    - `BUG-002-V1` (`1 example, 0 failures`)
+    - `Frozen parity artifact baseline` (`1 example, 0 failures`)
+    - `checked-authoritative` (`8 examples, 0 failures`)
+    - `Dual-path verification` (`4 examples, 0 failures`)
+    - `cabal build all && cabal test` PASS (`942 examples, 0 failures` in test log summary).
 - Task 44 TMT row `Ordering of transformations` thesis-exact wave integration (2026-03-05):
   - added RED->GREEN row guards:
     - `row3 ordering thesis-exact guard`,

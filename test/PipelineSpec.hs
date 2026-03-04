@@ -246,6 +246,19 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             edgeSrc `shouldSatisfy` isInfixOf "flushPendingWeakens"
             edgeSrc `shouldSatisfy` isInfixOf "assertNoPendingUnifyEdges \"after-inst-edge-closure\""
 
+        it "row3 absolute thesis-exact guard: EdgeProcessing forbids loop-final weaken flush fallback" $ do
+            edgeSrc <- readFile "src/MLF/Constraint/Presolution/EdgeProcessing.hs"
+            edgeSrc `shouldSatisfy` (not . isInfixOf "flushPendingWeakens\n    drainPendingUnifyClosureIfNeeded")
+
+        it "row3 absolute thesis-exact guard: EdgeProcessing requires owner-aware boundary scheduler markers" $ do
+            edgeSrc <- readFile "src/MLF/Constraint/Presolution/EdgeProcessing.hs"
+            forM_
+                [ "scheduleWeakensByOwnerBoundary"
+                , "flushPendingWeakensAtOwnerBoundary"
+                , "assertNoPendingWeakensOutsideOwnerBoundary"
+                ] $ \marker ->
+                    edgeSrc `shouldSatisfy` isInfixOf marker
+
         it "chi-first guard: internals use shared ChiQuery facade" $ do
             elabSrc <- readFile "src/MLF/Elab/Elaborate.hs"
             rtViewSrc <- readFile "src/MLF/Elab/Run/ResultType/View.hs"

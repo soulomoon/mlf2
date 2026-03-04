@@ -7,6 +7,9 @@ module MLF.Constraint.Presolution.Base (
     PresolutionError(..),
     TranslatabilityIssue(..),
     PresolutionState(..),
+    PendingWeakenOwner(..),
+    pendingWeakenOwnerFromMaybe,
+    pendingWeakenOwnerToMaybe,
     EdgeTrace(..),
     CopyMapping(..),
     CopyMap,
@@ -144,6 +147,23 @@ data PresolutionState = PresolutionState
     , psEdgeTraces :: IntMap EdgeTrace
     }
     deriving (Eq, Show)
+
+-- | Ownership bucket used by owner-aware pending-weaken scheduling.
+--
+-- `PendingWeakenOwnerUnknown` keeps compatibility with legacy behavior where a
+-- pending weaken target may not resolve to any enclosing scheme owner.
+data PendingWeakenOwner
+    = PendingWeakenOwnerGen !GenNodeId
+    | PendingWeakenOwnerUnknown
+    deriving (Eq, Ord, Show)
+
+pendingWeakenOwnerFromMaybe :: Maybe GenNodeId -> PendingWeakenOwner
+pendingWeakenOwnerFromMaybe = maybe PendingWeakenOwnerUnknown PendingWeakenOwnerGen
+
+pendingWeakenOwnerToMaybe :: PendingWeakenOwner -> Maybe GenNodeId
+pendingWeakenOwnerToMaybe owner = case owner of
+    PendingWeakenOwnerGen gid -> Just gid
+    PendingWeakenOwnerUnknown -> Nothing
 
 -- | Per-edge provenance for instantiation-related operations.
 --

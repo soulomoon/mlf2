@@ -4,6 +4,7 @@ import Control.Monad (forM_)
 import Data.Either (isLeft)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
+import Data.List (isInfixOf)
 import qualified Data.Set as Set
 import Test.Hspec
 
@@ -199,3 +200,16 @@ spec = describe "Phase 4 thesis-exact unification closure" $ do
                                 ]
                     forM_ weakenTargets $ \nid ->
                         IntSet.member (getNodeId nid) interiorKeys `shouldBe` True
+
+    it "row3 absolute thesis-exact guard: unification closure removes loop-final weaken flush fallback" $ do
+        edgeSrc <- readFile "src/MLF/Constraint/Presolution/EdgeProcessing.hs"
+        edgeSrc `shouldSatisfy` (not . isInfixOf "flushPendingWeakens\n    drainPendingUnifyClosureIfNeeded")
+
+    it "row3 absolute thesis-exact guard: unification closure requires owner-aware scheduler API markers" $ do
+        edgeSrc <- readFile "src/MLF/Constraint/Presolution/EdgeProcessing.hs"
+        forM_
+            [ "scheduleWeakensByOwnerBoundary"
+            , "flushPendingWeakensAtOwnerBoundary"
+            , "assertNoPendingWeakensOutsideOwnerBoundary"
+            ] $ \marker ->
+                edgeSrc `shouldSatisfy` isInfixOf marker

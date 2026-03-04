@@ -67,6 +67,8 @@ module MLF.Constraint.Presolution.StateAccess (
     getCanonicalNodeM,
 
     -- * Scheme provenance
+    pendingWeakenOwnerM,
+    instEdgeOwnerM,
     findSchemeIntroducerM,
 
     -- * Convenience re-exports
@@ -85,10 +87,12 @@ import qualified MLF.Util.UnionFind as UnionFind
 import MLF.Constraint.Types
 import MLF.Constraint.Presolution.Base (
     MonadPresolution(throwPresolutionError),
+    PendingWeakenOwner(..),
     PresolutionM,
     PresolutionError(..),
     PresolutionState(..),
-    bindingPathToRootUnderM
+    bindingPathToRootUnderM,
+    pendingWeakenOwnerFromMaybe
     )
 
 -- -----------------------------------------------------------------------------
@@ -362,6 +366,42 @@ lookupBindParentR ref = do
 -- -----------------------------------------------------------------------------
 -- Scheme provenance
 -- -----------------------------------------------------------------------------
+
+-- | Resolve the nearest scheme owner for a pending-weaken target.
+--
+-- This is intentionally total: unknown/malformed paths map to
+-- 'PendingWeakenOwnerUnknown' so owner-aware scheduling can remain
+-- compatibility-first during migration.
+pendingWeakenOwnerM :: NodeId -> PresolutionM PendingWeakenOwner
+pendingWeakenOwnerM nid = do
+    (c, canonical) <- getConstraintAndCanonical
+    pure (pendingWeakenOwnerUnder canonical c nid)
+
+-- | Resolve the owner bucket for an instantiation edge.
+--
+-- For TyExp-left edges, ownership is derived from the wrapped body root.
+-- Non-TyExp-left edges fall back to the left node itself.
+instEdgeOwnerM :: InstEdge -> PresolutionM PendingWeakenOwner
+instEdgeOwnerM edge = do
+    (c, canonical) <- getConstraintAndCanonical
+    let leftC = canonical (instLeft edge)
+    pure $ case NodeAccess.lookupNode c leftC of
+        Just TyExp { tnBody = body } -> pendingWeakenOwnerUnder canonical c body
+        _ -> pendingWeakenOwnerUnder canonical c leftC
+
+pendingWeakenOwnerUnder :: (NodeId -> NodeId) -> Constraint -> NodeId -> PendingWeakenOwner
+pendingWeakenOwnerUnder canonical c0 nid0 = go IntSet.empty (typeRef (canonical nid0))
+  where
+    go :: IntSet -> NodeRef -> PendingWeakenOwner
+    go visited ref
+        | IntSet.member (nodeRefKey ref) visited = PendingWeakenOwnerUnknown
+        | otherwise =
+            case Binding.lookupBindParentUnder canonical c0 ref of
+                Left _ -> PendingWeakenOwnerUnknown
+                Right Nothing -> PendingWeakenOwnerUnknown
+                Right (Just (GenRef gid, _flag)) -> pendingWeakenOwnerFromMaybe (Just gid)
+                Right (Just (TypeRef parent, _flag)) ->
+                    go (IntSet.insert (nodeRefKey ref) visited) (typeRef parent)
 
 -- | Find the nearest gen-node ancestor on the binding path from a type node.
 --
