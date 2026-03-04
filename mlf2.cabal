@@ -317,6 +317,7 @@ test-suite mlf2-test
                       Presolution.WitnessSpec,
                       Presolution.UnificationClosureSpec,
                       SolveSpec,
+                      ScopeSpec,
                       PipelineSpec,
                       ThesisFixDirectionSpec,
                       TypeCheckSpec,

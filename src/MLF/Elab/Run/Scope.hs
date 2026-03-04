@@ -54,8 +54,6 @@ binding root in the original constraint χ_p.  The 3-step pipeline
      already performed.  When `bindingScopeRef` returned GenRef, this is a
      no-op.  When it returned TypeRef, this re-attempts the same lookup on
      the same constraint — redundant but harmless.
-     Known deviation: the `Left _ -> ref` fallback silently swallows
-     binding-tree errors rather than propagating them.
 
   3. `canonicalizeScopeRef`: GenRef passes through unchanged (gen nodes are
      stable identifiers not subject to redirect/UF).  TypeRef gets
@@ -66,9 +64,8 @@ binding root in the original constraint χ_p.  The 3-step pipeline
      diverge.  This is correct: the thesis defines ga′ on the original χ_p,
      not the solved version.
 
-Conclusion: the pipeline is thesis-aligned.  The `preferGenScope` error
-swallowing is a known deviation that is harmless in practice (the same
-lookup succeeded in step 1).
+Conclusion: the pipeline is thesis-aligned and now propagates binding-tree
+errors consistently through scope preference and canonical scope resolution.
 -}
 bindingScopeRef :: Constraint -> NodeId -> Either BindingError NodeRef
 bindingScopeRef constraint root = do
@@ -103,16 +100,16 @@ bindingScopeRefCanonicalView presolutionView root = do
                     Nothing -> Right (reverse path')
                     Just (parent, _) -> go seen' path' parent
 
-preferGenScope :: Constraint -> NodeRef -> NodeRef
+preferGenScope :: Constraint -> NodeRef -> Either BindingError NodeRef
 preferGenScope constraint ref = case ref of
-    GenRef _ -> ref
+    GenRef _ -> Right ref
     TypeRef nid ->
         case Binding.bindingPathToRoot constraint (typeRef nid) of
             Right path ->
                 case listToMaybe [gid | GenRef gid <- drop 1 path] of
-                    Just gid -> GenRef gid
-                    Nothing -> ref
-            Left _ -> ref
+                    Just gid -> Right (GenRef gid)
+                    Nothing -> Right ref
+            Left err -> Left err
 
 schemeBodyTarget :: Solved -> NodeId -> NodeId
 schemeBodyTarget solved = schemeBodyTargetView (fromSolved solved)
@@ -200,7 +197,7 @@ resolveCanonicalScopeView
     -> Either BindingError NodeRef
 resolveCanonicalScopeView constraint presolutionView redirects scopeRoot = do
     scope0 <- bindingScopeRef constraint scopeRoot
-    let scopeBase = preferGenScope constraint scope0
+    scopeBase <- preferGenScope constraint scope0
     pure (canonicalizeScopeRefView presolutionView redirects scopeBase)
 
 letScopeOverrides :: Constraint -> Constraint -> Solved -> IntMap.IntMap NodeId -> AnnExpr -> IntMap.IntMap NodeRef
