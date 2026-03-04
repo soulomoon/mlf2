@@ -202,6 +202,12 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             forM_ solvedTypedPhiTestOnlyApiMarkers $ \marker ->
                 isInfixOf marker phiTestOnlySrc `shouldBe` False
 
+        it "elab-input absolute thesis-exact guard" $ do
+            elabSrc <- readFile "src/MLF/Elab/Elaborate.hs"
+            phiSrc <- readFile "src/MLF/Elab/Phi/Translate.hs"
+            isInfixOf "generalizeAtWith Nothing scopeRoot targetC" elabSrc `shouldBe` False
+            isInfixOf "Nothing -> generalizeAtWith Nothing scopeRoot root0" phiSrc `shouldBe` False
+
         it "row1 closeout guard|checked-authoritative keeps representative corpus parity: elaborateWithEnv has no entry-time Solved.rebuildWithConstraint" $ do
             src <- readFile "src/MLF/Elab/Elaborate.hs"
             isInfixOf "solved = Solved.rebuildWithConstraint" src `shouldBe` False
