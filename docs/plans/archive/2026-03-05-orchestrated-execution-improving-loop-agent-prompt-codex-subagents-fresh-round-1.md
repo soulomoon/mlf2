@@ -1,5 +1,7 @@
 # Plan: Orchestrated Execution of the Improving Loop Agent Prompt (Codex Subagents, Fresh Round 1)
 
+> Archived historical round-1 plan. Superseded for live use by `/Volumes/src/mlf4/docs/plans/2026-03-06-orchestrated-execution-improving-loop-agent-prompt-codex-subagents-fresh-round-2.md`. Original run instructions are preserved for provenance.
+
 ## Summary
 Execute the workflow in [improving-loop-agent.prompt.md](/Volumes/src/mlf4/docs/prompts/improving-loop-agent.prompt.md) with strict role separation, strict YES/NO gates, bounded retries, and one terminal status line.
 This plan is decision-complete for a Codex-subagent orchestrator and assumes a fresh run from Round 1 against current repo state in `/Volumes/src/mlf4`.

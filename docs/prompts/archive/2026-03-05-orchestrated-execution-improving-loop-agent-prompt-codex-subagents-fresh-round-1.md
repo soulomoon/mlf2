@@ -1,5 +1,7 @@
 # Orchestrated Execution Log Template (Fresh Round 1)
 
+> Archived historical round-1 prompt/log template. Superseded for live use by the round-2 orchestration artifacts.
+
 Date (UTC): 2026-03-05
 Goal: `<REPLACE_WITH_GOAL>`
 Prompt template: `docs/prompts/goal-improving-loop-agent.prompt.md`

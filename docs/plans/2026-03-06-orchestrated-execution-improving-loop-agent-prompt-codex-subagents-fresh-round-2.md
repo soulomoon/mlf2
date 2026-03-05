@@ -24,7 +24,7 @@ This plan is decision-complete for a Codex-subagent orchestrator and assumes a f
 
 ### 1. Initialize run artifacts (fresh Round 1)
 1. Create a run folder: `tasks/todo/2026-03-06-tmt-improving-loop-orchestrator-fresh-round-2/`.
-2. Create files: `task_plan.md`, `findings.md`, `progress.md`, `orchestrator-log.md`.
+2. Create files: `task_plan.md`, `findings.md`, `progress.md`, `orchestrator-log.jsonl`.
 3. Record baseline inputs with commit hash and timestamp:
    - [Transformation table](/Volumes/src/mlf4/docs/notes/2026-02-27-transformation-mechanism-table.md)
    - [Thesis source](/Volumes/src/mlf4/papers/these-finale-english.txt)
@@ -123,22 +123,25 @@ This plan is decision-complete for a Codex-subagent orchestrator and assumes a f
    - Use `FAILED` only when the approach is explicitly deemed non-viable beyond this run (not just this round) and should stop before retry exhaustion.
 
 ## Logging and Output Format
-1. `orchestrator-log.md` must include per event:
-   - round number
-   - selected mechanism
-   - attempt number
-   - producing agent
-   - gate value (`YES`/`NO`)
-   - one-line reason for every `NO`
+1. `orchestrator-log.jsonl` is the single authoritative orchestrator event log.
+2. Write one JSON object per line. Each gate/event record must include:
+   - `event_type`
+   - `round`
+   - `selected_mechanism`
+   - `attempt`
+   - `producing_agent`
+   - `gate`
+   - `reason_if_no`
    - `blocker_class`
-   - `meaningful_diff` (`YES`/`NO`)
-   - `scope_changed` (`YES`/`NO`)
-2. Keep gate lines machine-checkable with exact values.
-3. Print exactly one terminal line in the entire run:
+   - `meaningful_diff`
+   - `scope_changed`
+3. Keep all gate-like fields machine-checkable with exact `YES`/`NO` values.
+4. Write a terminal JSONL record with `event_type = "final_status"` and exact final-status payload.
+5. Keep human-readable narrative summaries in `findings.md` and `progress.md`; do not maintain a second canonical markdown orchestrator log.
+6. Print exactly one terminal line in the entire run:
    - `FINAL STATUS: COMPLETED`
    - or `FINAL STATUS: FAILED`
    - or `FINAL STATUS: MAXIMUMRETRY`
-4. In addition to markdown table logs, write one JSONL gate record per event to `orchestrator-log.jsonl` for deterministic replay and post-run analytics.
 
 ## Git/Integration policy
 1. Integrator acts only after triple gate success (Review+QA+Thesis all `YES`).

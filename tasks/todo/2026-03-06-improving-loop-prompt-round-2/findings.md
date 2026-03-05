@@ -1,7 +1,7 @@
 # Findings
 
 ## 2026-03-06
-- `docs/plans/2026-03-05-orchestrated-execution-improving-loop-agent-prompt-codex-subagents-fresh-round-1.md` defines a 10-round outer loop but a 6-attempt inner implementation loop.
+- `docs/plans/archive/2026-03-05-orchestrated-execution-improving-loop-agent-prompt-codex-subagents-fresh-round-1.md` defines a 10-round outer loop but a 6-attempt inner implementation loop.
 - `docs/prompts/improving-loop-agent.prompt.md` also uses a 10-round outer loop and a 6-attempt inner implementation loop.
 - Neither source artifact currently requires researcher agents to brief the Planner before planning begins.
 - The round-2 plan needed one extra normalization pass to update the sample run-folder path so it matches the new document version/date.

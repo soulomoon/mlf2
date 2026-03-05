@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import json
 import re
 from pathlib import Path
 from typing import Iterable
@@ -101,7 +102,8 @@ Algorithm:
 8. If round 10 ends without completion, stop with `FAILED`.
 
 Output requirements:
-- Log round, target mechanism, attempt, and reasons for NO gates.
+- Append machine-checkable JSONL event records to `orchestrator-log.jsonl`, one event per line, with reason for each `NO`.
+- Keep human-readable summaries in `findings.md` / `progress.md`.
 - Print exactly one final line:
   - `FINAL STATUS: COMPLETED`
   - `FINAL STATUS: FAILED`
@@ -110,21 +112,32 @@ Output requirements:
 
 
 def render_round_log(date_str: str, goal: str, prompt_path: Path, table_path: Path) -> str:
-    return f"""# Orchestrated Execution Log Template (Fresh Round 1)
-
-Date (UTC): {date_str}
-Goal: `{goal}`
-Prompt template: `{prompt_path}`
-Table: `{table_path}`
-
-| Round | Selected mechanism | Attempt | Reviewer | QA | Verifier | Decision | Notes |
-|---|---|---|---|---|---|---|---|
-| 1 | <first NO mechanism> | 1 | NO | YES | NO | REPLAN | <blocking finding> |
-
-## Final Status
-
-`FINAL STATUS: <COMPLETED|FAILED|MAXIMUMRETRY>`
-"""
+    events = [
+        {
+            "event_type": "run_header",
+            "date_utc": date_str,
+            "goal": goal,
+            "prompt_template": str(prompt_path),
+            "table": str(table_path),
+        },
+        {
+            "event_type": "gate",
+            "round": 1,
+            "selected_mechanism": "<first NO mechanism>",
+            "attempt": 1,
+            "producing_agent": "Reviewer",
+            "gate": "NO",
+            "reason_if_no": "<blocking finding>",
+            "blocker_class": "<BLOCKER_CLASS>",
+            "meaningful_diff": "YES",
+            "scope_changed": "NO",
+        },
+        {
+            "event_type": "final_status",
+            "final_status": "<COMPLETED|FAILED|MAXIMUMRETRY>",
+        },
+    ]
+    return "\n".join(json.dumps(event) for event in events) + "\n"
 
 
 def parse_args() -> argparse.Namespace:
@@ -150,7 +163,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--prompts-dir", default="docs/prompts", help="Prompts directory.")
     parser.add_argument("--table-path", help="Explicit table output path.")
     parser.add_argument("--prompt-path", help="Explicit orchestrator prompt output path.")
-    parser.add_argument("--round-path", help="Explicit round-log output path.")
+    parser.add_argument("--round-path", help="Explicit JSONL event-log output path.")
     parser.add_argument(
         "--overwrite",
         action="store_true",
@@ -172,7 +185,7 @@ def main() -> None:
     round_path = (
         Path(args.round_path)
         if args.round_path
-        else prompts_dir / f"{args.date}-orchestrated-execution-{goal_slug}-codex-subagents-fresh-round-1.md"
+        else prompts_dir / f"{args.date}-orchestrated-execution-{goal_slug}-codex-subagents-fresh-round-1.jsonl"
     )
 
     table_state = write_text(table_path, render_table(args.date, args.goal, args.source, mechanisms), args.overwrite)
@@ -189,7 +202,7 @@ def main() -> None:
 
     print(f"table: {table_state} -> {table_path}")
     print(f"prompt: {prompt_state} -> {prompt_path}")
-    print(f"round: {round_state} -> {round_path}")
+    print(f"event_log: {round_state} -> {round_path}")
 
 
 if __name__ == "__main__":

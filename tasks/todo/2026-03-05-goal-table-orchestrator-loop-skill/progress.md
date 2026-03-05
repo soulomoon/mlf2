@@ -9,7 +9,7 @@
 - Added:
   - `docs/notes/2026-03-05-goal-transformation-mechanism-table.md`
   - `docs/prompts/goal-improving-loop-agent.prompt.md`
-  - `docs/prompts/2026-03-05-orchestrated-execution-improving-loop-agent-prompt-codex-subagents-fresh-round-1.md`
+  - `docs/prompts/archive/2026-03-05-orchestrated-execution-improving-loop-agent-prompt-codex-subagents-fresh-round-1.md`
 - Implemented skill at `.codex/skills/goal-table-orchestrator-loop/` with:
   - `SKILL.md`
   - `agents/openai.yaml`

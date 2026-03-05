@@ -1,7 +1,7 @@
 # Progress: 2026-03-05 TMT Improving Loop Orchestrator (Fresh Round 1 Re-Run)
 
 ## Session Log
-- 2026-03-05T11:36:40Z initialized fresh artifacts in `tasks/todo/2026-03-05-tmt-improving-loop-orchestrator-fresh`.
+- 2026-03-05T11:36:40Z initialized fresh artifacts in `tasks/archive/2026-03-05-tmt-improving-loop-orchestrator-fresh`.
 - 2026-03-05T11:41:38Z completed Round-1 full verifier sweep; selected row6 as first `NO`.
 - Attempt 1 gated: Reviewer=YES, QA=YES, Verifier=NO -> continue.
 - Attempt 2 gated after strict cutover: Reviewer=NO, QA=NO, Verifier=NO (38 full-suite failures) -> continue.

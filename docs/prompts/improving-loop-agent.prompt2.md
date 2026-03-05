@@ -159,12 +159,16 @@ If round 10 finishes without `COMPLETED`, report:
 - `FAILED: stopped after 10 planning rounds without completion.`
 
 Execution/output requirements:
-- Keep a concise log of:
+- Append one machine-checkable JSONL event record per event to `orchestrator-log.jsonl`.
+- Each record should capture:
+  - `event_type`
   - round number
   - selected mechanism
   - attempt number
-  - gate decisions and producing agent
+  - producing agent
+  - gate decisions
   - short reason for each `NO`
+- Keep human-readable narrative summaries in `findings.md` and `progress.md`, not in a second canonical orchestrator markdown log.
 - Every gate value must be exactly `YES` or `NO`.
 - Print exactly one final status line:
   - `FINAL STATUS:` followed by one of `COMPLETED`, `FAILED`, or `MAXIMUMRETRY`.

@@ -2,7 +2,7 @@
 
 ## Baseline Inputs
 - Prompt: `docs/prompts/improving-loop-agent.prompt.md`
-- Plan: `docs/plans/2026-03-05-orchestrated-execution-improving-loop-agent-prompt-codex-subagents-fresh-round-1.md`
+- Plan: `docs/plans/archive/2026-03-05-orchestrated-execution-improving-loop-agent-prompt-codex-subagents-fresh-round-1.md`
 - Table: `docs/notes/2026-02-27-transformation-mechanism-table.md`
 - Thesis: `papers/these-finale-english.txt`
 - Source revision: `035ec160233cbb1ed6ba88abb700f4a3e75933a2`

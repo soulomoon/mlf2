@@ -55,9 +55,9 @@
 
 ### 2026-03-05 Row6 orchestrated execution (fresh round re-run) terminal status
 - Executed
-  `/Volumes/src/mlf4/docs/plans/2026-03-05-orchestrated-execution-improving-loop-agent-prompt-codex-subagents-fresh-round-1.md`
+  `/Volumes/src/mlf4/docs/plans/archive/2026-03-05-orchestrated-execution-improving-loop-agent-prompt-codex-subagents-fresh-round-1.md`
   against task tracker
-  `/Volumes/src/mlf4/tasks/todo/2026-03-05-tmt-improving-loop-orchestrator-fresh/`.
+  `/Volumes/src/mlf4/tasks/archive/2026-03-05-tmt-improving-loop-orchestrator-fresh/`.
 - Round-1 target was row6 (`Replay-map producer normalization`), with strict
   role-separated gates across six attempts.
 - Terminal outcome for this run: attempt-limit exhaustion (`MAXIMUMRETRY`).

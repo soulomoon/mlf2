@@ -5,7 +5,7 @@
 - source_revision: 035ec160233cbb1ed6ba88abb700f4a3e75933a2
 - branch: codex/tmt-improving-loop-fresh-20260305
 - prompt: docs/prompts/improving-loop-agent.prompt.md
-- plan: docs/plans/2026-03-05-orchestrated-execution-improving-loop-agent-prompt-codex-subagents-fresh-round-1.md
+- plan: docs/plans/archive/2026-03-05-orchestrated-execution-improving-loop-agent-prompt-codex-subagents-fresh-round-1.md
 - constraints: max_rounds=10, max_attempts_per_round=6, gate_values=YES|NO
 
 ## Event Log

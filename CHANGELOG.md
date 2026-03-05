@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Changed
+- Docs orchestrator log format rationalization (2026-03-06):
+  - chose `orchestrator-log.jsonl` as the single authoritative orchestrator execution log;
+  - moved human-readable run summaries to `findings.md` / `progress.md` rather than a second canonical markdown log;
+  - updated the live round-2 plan, active prompt templates, reusable goal-loop skill references, and scaffold script to emit/use JSONL event logs consistently.
 - Docs orchestrator round-2 prompt workflow hardening (2026-03-06):
   - added standalone round-2 improving-loop prompt and companion plan docs
     with mandatory pre-planner researcher handoff;
