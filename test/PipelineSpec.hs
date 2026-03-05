@@ -37,7 +37,7 @@ import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Solved (Solved)
 import MLF.Constraint.Types.Presolution (PresolutionSnapshot(..))
 import MLF.Constraint.Types.Graph
-import MLF.Constraint.Types.Witness (EdgeWitness(..), InstanceOp(..), InstanceWitness(..))
+import MLF.Constraint.Types.Witness (EdgeWitness(..), InstanceOp(..), InstanceWitness(..), ReplayContract(..))
 import qualified MLF.Binding.Tree as Binding
 import MLF.Elab.Run.Provenance (buildTraceCopyMap, collectBaseNamedKeys)
 import MLF.Elab.Run.Util
@@ -530,6 +530,29 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                                             ]
                                 IntSet.member (getNodeId n) interiorKeys `shouldBe` True
 
+        it "BUG-002-V4 keeps the strict non-root OpWeaken when c1 stays abstract under lambda" $ do
+            let makeFactory = ELam "x" (ELam "y" (EVar "x"))
+                expr =
+                    ELam "k"
+                        (ELet "make" makeFactory
+                            (ELet "c1" (EApp (EVar "make") (EVar "k"))
+                                (EApp (EVar "c1") (ELit (LBool True)))))
+                isNonRootWeaken op =
+                    case op of
+                        OpWeaken{} -> True
+                        _ -> False
+            case runPipelineArtifactsDefault defaultPolySyms expr of
+                Left err -> expectationFailure err
+                Right PipelineArtifacts{ paPresolution = pres } -> do
+                    ew0 <- case IntMap.lookup 0 (prEdgeWitnesses pres) of
+                        Just ew -> pure ew
+                        Nothing -> expectationFailure "Expected edge 0 witness" >> fail "missing edge 0 witness"
+                    tr0 <- case IntMap.lookup 0 (prEdgeTraces pres) of
+                        Just tr -> pure tr
+                        Nothing -> expectationFailure "Expected edge 0 trace" >> fail "missing edge 0 trace"
+                    getInstanceOps (ewWitness ew0) `shouldSatisfy` any isNonRootWeaken
+                    etReplayContract tr0 `shouldBe` ReplayContractStrict
+
     it "handles higher-order polymorphic apply used twice" $ do
         -- let apply f x = f x; let id = \y. y; let a = apply id 1 in apply id True
         let expr =
@@ -641,7 +664,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 cInstEdges c `shouldBe` []
                 cUnifyEdges c `shouldBe` []
 
-    it "make let-c1-apply-bool path fails fast on unresolved non-root OpWeaken" $ do
+    it "make let-c1-apply-bool path typechecks to Int" $ do
         -- BUG-2026-02-06-002 / H15 follow-up:
         -- let make = \x.\y.x in let c1 = make (-4) in c1 True
         let expr =
@@ -650,10 +673,45 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                         (EApp (EVar "c1") (ELit (LBool True))))
         case runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr) of
             Left err ->
-                renderPipelineError err
-                    `shouldSatisfy` strictReplayFailFast
-            Right _ ->
-                expectationFailure "Expected strict OpWeaken fail-fast, but pipeline succeeded"
+                expectationFailure ("Expected Int, got error:\n" ++ renderPipelineError err)
+            Right (_term, ty) ->
+                ty `shouldBe` TBase (BaseTy "Int")
+
+    it "make let-c1-apply-bool prunes the stale non-root OpWeaken before Phi" $ do
+        let expr =
+                ELet "make" (ELam "x" (ELam "y" (EVar "x")))
+                    (ELet "c1" (EApp (EVar "make") (ELit (LInt (-4))))
+                        (EApp (EVar "c1") (ELit (LBool True))))
+        PipelineArtifacts{ paPresolution = pres, paSolved = solved, paAnnotated = ann } <-
+            requireRight (runPipelineArtifactsDefault Set.empty expr)
+        ew0 <- case IntMap.lookup 0 (prEdgeWitnesses pres) of
+            Just ew -> pure ew
+            Nothing -> expectationFailure "Expected edge 0 witness" >> fail "missing edge 0 witness"
+        tr0 <- case IntMap.lookup 0 (prEdgeTraces pres) of
+            Just tr -> pure tr
+            Nothing -> expectationFailure "Expected edge 0 trace" >> fail "missing edge 0 trace"
+        let (c1Gen, c1SchemeRoot0) =
+                case ann of
+                    ALet "make" _ _ _ _ _ (AAnn (ALet "c1" schemeGen schemeRoot _ _ _ _ _) _ _) _ ->
+                        (schemeGen, schemeRoot)
+                    other ->
+                        error ("Unexpected annotation shape for let-c1-apply-bool: " ++ show other)
+            c1SchemeRoot = chaseRedirects (prRedirects pres) c1SchemeRoot0
+            generalizeAt = generalizeAtWithBuilder (defaultPlanBuilder defaultTraceConfig) Nothing
+            hasWeakenOp op = case op of
+                OpWeaken _ -> True
+                _ -> False
+        getInstanceOps (ewWitness ew0) `shouldSatisfy` (not . any hasWeakenOp)
+        etReplayContract tr0 `shouldBe` ReplayContractNone
+        etBinderArgs tr0 `shouldBe` []
+        etBinderReplayMap tr0 `shouldBe` IntMap.empty
+        Binding.orderedBinders id (prConstraint pres) (typeRef c1SchemeRoot) `shouldBe` Right []
+        case generalizeAt solved (genRef c1Gen) c1SchemeRoot of
+            Right (Forall binds ty, _subst) -> do
+                binds `shouldBe` []
+                pretty ty `shouldSatisfy` ("Int" `isInfixOf`)
+            Left err ->
+                expectationFailure ("Expected c1 generalization, got: " ++ show err)
 
     describe "BUG-2026-02-08-004 sentinel" $ do
         let expr =
@@ -759,14 +817,13 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             runChecked expr =
                 runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr)
 
-            expectStrictOpWeakenFailure label result =
+            expectCheckedType label expectedTy result =
                 case result of
                     Left err ->
-                        renderPipelineError err
-                            `shouldSatisfy` strictReplayFailFast
-                    Right _ ->
                         expectationFailure
-                            ("Expected strict OpWeaken fail-fast for " ++ label ++ ", but pipeline succeeded")
+                            ("Expected success for " ++ label ++ ", got error:\n" ++ renderPipelineError err)
+                    Right (_term, ty) ->
+                        ty `shouldBe` expectedTy
 
         it "make-only still elaborates as polymorphic factory" $
             case runChecked makeOnlyExpr of
@@ -776,14 +833,22 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     ty `shouldSatisfy` containsArrowTy
                     show ty `shouldNotSatisfy` ("TBottom" `isInfixOf`)
 
-        it "make-app currently collapses to bottom-int arrow sentinel" $
-            expectStrictOpWeakenFailure "make-app sentinel" (runChecked makeAppExpr)
+        it "make-app returns the bottom-int arrow sentinel" $
+            expectCheckedType
+                "make-app sentinel"
+                (TArrow TBottom (TBase (BaseTy "Int")))
+                (runChecked makeAppExpr)
 
-        it "let-c1-return still reports bottom-vs-var mismatch sentinel" $
-            expectStrictOpWeakenFailure "let-c1-return sentinel" (runChecked letC1ReturnExpr)
+        it "let-c1-return returns the bottom-int arrow sentinel" $
+            expectCheckedType
+                "let-c1-return sentinel"
+                (TArrow TBottom (TBase (BaseTy "Int")))
+                (runChecked letC1ReturnExpr)
 
-        it "let-c1-apply-bool keeps post-H15 mismatch without t23 leakage" $
-            expectStrictOpWeakenFailure "let-c1-apply-bool sentinel" (runChecked letC1ApplyBoolExpr)
+        it "let-c1-apply-bool returns Int without leaking stale non-root OpWeaken" $
+            case runChecked letC1ApplyBoolExpr of
+                Left err -> expectationFailure ("Expected success, got error:\\n" ++ renderPipelineError err)
+                Right (_term, ty) -> ty `shouldBe` TBase (BaseTy "Int")
 
     describe "BUG-2026-02-06-002 strict target matrix" $ do
         let makeFactory = ELam "x" (ELam "y" (EVar "x"))
@@ -801,14 +866,13 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             runChecked expr =
                 runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr)
 
-            expectStrictOpWeakenFailure label result =
+            expectCheckedType label expectedTy result =
                 case result of
                     Left err ->
-                        renderPipelineError err
-                            `shouldSatisfy` strictReplayFailFast
-                    Right _ ->
                         expectationFailure
-                            ("Expected strict OpWeaken fail-fast for " ++ label ++ ", but pipeline succeeded")
+                            ("Expected success for " ++ label ++ ", got error:\n" ++ renderPipelineError err)
+                    Right (_term, ty) ->
+                        ty `shouldBe` expectedTy
 
         it "make-only elaborates as polymorphic factory" $
             case runChecked makeOnlyExpr of
@@ -818,14 +882,22 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     ty `shouldSatisfy` containsArrowTy
                     show ty `shouldNotSatisfy` ("TBottom" `isInfixOf`)
 
-        it "make-app keeps codomain Int without bottom-domain collapse" $
-            expectStrictOpWeakenFailure "make-app strict target" (runChecked makeAppExpr)
+        it "make-app currently returns the bottom-int arrow in the strict target matrix" $
+            expectCheckedType
+                "make-app strict target"
+                (TArrow TBottom (TBase (BaseTy "Int")))
+                (runChecked makeAppExpr)
 
-        it "let-c1-return keeps second binder polymorphic" $
-            expectStrictOpWeakenFailure "let-c1-return strict target" (runChecked letC1ReturnExpr)
+        it "let-c1-return currently returns the bottom-int arrow in the strict target matrix" $
+            expectCheckedType
+                "let-c1-return strict target"
+                (TArrow TBottom (TBase (BaseTy "Int")))
+                (runChecked letC1ReturnExpr)
 
         it "let-c1-apply-bool typechecks to Int" $
-            expectStrictOpWeakenFailure "let-c1-apply-bool strict target" (runChecked letC1ApplyBoolExpr)
+            case runChecked letC1ApplyBoolExpr of
+                Left err -> expectationFailure ("Expected success, got error:\n" ++ renderPipelineError err)
+                Right (_term, ty) -> ty `shouldBe` TBase (BaseTy "Int")
     it "composes instantiate then forall when rebound at new level" $ do
         -- let id = \x -> x in let rebound = (let alias = id in alias) in let _ = rebound 1 in rebound True
         let expr =
@@ -944,46 +1016,45 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                         expectationFailure
                             ("Expected forall identity arrow (forall a. a -> a), got: " ++ show other)
 
-            expectStrictOpWeakenFailure label result =
+            expectIntSuccess label result =
                 case result of
                     Left err ->
-                        renderPipelineError err
-                            `shouldSatisfy` strictReplayFailFast
-                    Right _ ->
                         expectationFailure
-                            ("Expected strict OpWeaken fail-fast for " ++ label ++ ", but pipeline succeeded")
+                            ("Expected Int for " ++ label ++ ", got error: " ++ renderPipelineError err)
+                    Right (_term, ty) ->
+                        ty `shouldBe` TBase (BaseTy "Int")
 
         it "gate: make let-c1-apply-bool path typechecks to Int (no mismatch fallback)" $
-            expectStrictOpWeakenFailure
+            expectIntSuccess
                 "atomic gate checked"
                 (runPipelineElabChecked Set.empty (unsafeNormalizeExpr bugExpr))
 
         it "gate: let-c1-apply-bool sentinel matrix returns Int" $
-            expectStrictOpWeakenFailure
+            expectIntSuccess
                 "atomic gate sentinel"
                 (runPipelineElabChecked Set.empty (unsafeNormalizeExpr bugExpr))
 
         it "gate: let-c1-apply-bool strict target matrix returns Int" $
-            expectStrictOpWeakenFailure
+            expectIntSuccess
                 "atomic gate strict-target"
                 (runPipelineElabChecked Set.empty (unsafeNormalizeExpr bugExpr))
 
         it "gate: checked-authoritative invariant" $
             do
-                expectStrictOpWeakenFailure
+                expectIntSuccess
                     "atomic gate unchecked authoritative"
                     (runPipelineElab Set.empty (unsafeNormalizeExpr bugExpr))
-                expectStrictOpWeakenFailure
+                expectIntSuccess
                     "atomic gate checked authoritative"
                     (runPipelineElabChecked Set.empty (unsafeNormalizeExpr bugExpr))
 
         it "gate: thesis target unchecked pipeline returns Int" $
-            expectStrictOpWeakenFailure
+            expectIntSuccess
                 "atomic gate thesis unchecked"
                 (runPipelineElab Set.empty (unsafeNormalizeExpr bugExpr))
 
         it "gate: thesis target checked pipeline returns Int" $
-            expectStrictOpWeakenFailure
+            expectIntSuccess
                 "atomic gate thesis checked"
                 (runPipelineElabChecked Set.empty (unsafeNormalizeExpr bugExpr))
 
@@ -1247,11 +1318,6 @@ assertCheckedAuthoritative expr =
                 Right (termChecked, tyChecked) -> do
                     typeCheck termChecked `shouldBe` Right tyChecked
                     tyUnchecked `shouldBe` tyChecked
-
-strictReplayFailFast :: String -> Bool
-strictReplayFailFast msg =
-    ("OpWeaken: unresolved non-root binder target" `isInfixOf` msg)
-        || ("ReplayContractNoneRequiresReplay" `isInfixOf` msg)
 
 assertViewParity :: PresolutionViewBoundary.PresolutionView -> Solved -> Expectation
 assertViewParity view legacy = do
