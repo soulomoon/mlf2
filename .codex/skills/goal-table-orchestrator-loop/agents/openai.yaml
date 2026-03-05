@@ -1,0 +1,4 @@
+interface:
+  display_name: "Goal Loop Orchestrator"
+  short_description: "Build goal table + improving-loop prompts."
+  default_prompt: "Use $goal-table-orchestrator-loop to generate a goal table and improving-loop orchestrator artifacts for this repository."
