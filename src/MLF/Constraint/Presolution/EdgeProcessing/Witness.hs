@@ -17,6 +17,7 @@ import qualified Data.IntSet as IntSet
 
 import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Types
+import MLF.Constraint.Types.Witness (ReplayContract(..))
 import MLF.Constraint.Presolution.Base (
     CopyMap,
     EdgeTrace(..),
@@ -118,6 +119,7 @@ buildEdgeTrace gid _eid left leftRaw expn (copyMap0, _interior0, _frontier0) = d
         { etRoot = root
         , etBinderArgs = bas
         , etInterior = interior
+        , etReplayContract = ReplayContractNone
         , etBinderReplayMap = mempty
         , etCopyMap = copyMap0
         }

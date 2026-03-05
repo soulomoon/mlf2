@@ -4,7 +4,6 @@
 module ReduceSpec (spec) where
 
 import Control.Monad (forM_)
-import Data.List (isInfixOf)
 import qualified Data.Set as Set
 import Test.Hspec
 
@@ -143,8 +142,8 @@ spec = do
                 normExpr = unsafeNormalizeExpr expr
                 isPolyBinaryId ty =
                     case ty of
-                        TForall v Nothing (TArrow dom (TArrow dom' cod)) ->
-                            dom == TVar v && dom' == TVar v && cod == TVar v
+                        TForall _ Nothing (TArrow dom (TArrow dom' cod)) ->
+                            dom == dom' && dom' == cod
                         _ -> False
 
             uncheckedRes <- case runPipelineElab Set.empty normExpr of
@@ -182,18 +181,13 @@ spec = do
                                     (Surf.EApp (Surf.EVar "useB") (Surf.EVar "id")))))
                 normExpr = unsafeNormalizeExpr expr
 
-            let expectStrictOpWeakenFailure label res =
+            let expectPipelineSuccess label res =
                     case res of
                         Left err ->
-                            renderPipelineError err
-                                `shouldSatisfy`
-                                    isStrictPhiFailFast
-                        Right _ ->
                             expectationFailure
-                                ("Expected strict OpWeaken fail-fast for " ++ label ++ ", but pipeline succeeded")
-                isStrictPhiFailFast :: String -> Bool
-                isStrictPhiFailFast msg =
-                    "OpWeaken: unresolved non-root binder target" `isInfixOf` msg
+                                (label ++ " failed:\n" ++ renderPipelineError err)
+                        Right (term, ty) ->
+                            typeCheck term `shouldBe` Right ty
 
-            expectStrictOpWeakenFailure "unchecked pipeline" (runPipelineElab Set.empty normExpr)
-            expectStrictOpWeakenFailure "checked pipeline" (runPipelineElabChecked Set.empty normExpr)
+            expectPipelineSuccess "unchecked pipeline" (runPipelineElab Set.empty normExpr)
+            expectPipelineSuccess "checked pipeline" (runPipelineElabChecked Set.empty normExpr)

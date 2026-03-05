@@ -2,7 +2,6 @@
 -- TypeSoundnessSpec / PipelineSpec into fixed regression tests here.
 module TypeCheckSpec (spec) where
 
-import Data.List (isInfixOf)
 import qualified Data.Set as Set
 import Test.Hspec
 
@@ -185,18 +184,13 @@ spec = describe "Phase 7 typecheck" $ do
                                     (Surf.EApp (Surf.EVar "useB") (Surf.EVar "id")))))
                 normExpr = unsafeNormalizeExpr expr
 
-            let expectStrictOpWeakenFailure label res =
+            let expectPipelineSuccess label res =
                     case res of
                         Left err ->
-                            renderPipelineError err
-                                `shouldSatisfy`
-                                    isStrictPhiFailFast
-                        Right _ ->
                             expectationFailure
-                                ("Expected strict OpWeaken fail-fast for " ++ label ++ ", but pipeline succeeded")
-                isStrictPhiFailFast :: String -> Bool
-                isStrictPhiFailFast msg =
-                    "OpWeaken: unresolved non-root binder target" `isInfixOf` msg
+                                (label ++ " failed:\n" ++ renderPipelineError err)
+                        Right (term, ty) ->
+                            typeCheck term `shouldBe` Right ty
 
-            expectStrictOpWeakenFailure "unchecked pipeline" (runPipelineElab Set.empty normExpr)
-            expectStrictOpWeakenFailure "checked pipeline" (runPipelineElabChecked Set.empty normExpr)
+            expectPipelineSuccess "unchecked pipeline" (runPipelineElab Set.empty normExpr)
+            expectPipelineSuccess "checked pipeline" (runPipelineElabChecked Set.empty normExpr)

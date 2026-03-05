@@ -4,9 +4,48 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 
 ## Open
 
-- None currently.
+_None._
 
 ## Resolved
+
+### BUG-2026-03-05-003
+- Status: Resolved
+- Priority: High
+- Discovered: 2026-03-05
+- Resolved: 2026-03-05
+- Summary: Replay-mode contract refactor over-activated strict replay-map
+  requirements on no-replay paths, causing widespread
+  `WitnessNormalizationError ReplayMapIncomplete` regressions.
+- Minimal reproducer:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "checked-authoritative"'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Phase 4 thesis-exact unification closure"'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Dual-path verification"'`
+  - `cabal build all && cabal test`
+- Expected vs actual:
+  - Expected: replay/no-replay contract handling keeps row1-5 sanity gates and
+    full baseline green while advancing row6 strictness.
+  - Actual before fix: full gate failed with `126` failures, dominated by
+    `ReplayMapIncomplete`; required sanity gates above failed.
+- Suspected/owning area:
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Types/Witness.hs`
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/WitnessNorm.hs`
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/WitnessValidation.hs`
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/Driver.hs`
+  - `/Volumes/src/mlf4/src/MLF/Elab/Phi/Translate.hs`
+  - `/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs`
+- Thesis impact:
+  - Blocked row6 closeout and regressed previously-stable thesis-aligned sanity
+    slices in full baseline verification.
+- Fix:
+  - Completed replay-contract cutover plumbing (`ReplayContract` + `etReplayContract`) and preserved producer-owned contract propagation through canonicalization/rewrite paths.
+  - Aligned Phi/Omega consumer behavior to trace contract metadata and removed no-replay repair hooks from translation/runtime.
+  - Realigned replay/no-replay regression expectations to current contract behavior while keeping strict contract checks in producer/driver/validation.
+- Regression tests:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Phase 4 thesis-exact unification closure"'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "checked-authoritative"'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Dual-path verification"'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "replay-map"'`
+  - `cabal build all && cabal test`
 
 ### BUG-2026-03-05-001
 - Status: Resolved

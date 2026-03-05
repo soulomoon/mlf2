@@ -18,6 +18,7 @@ import MLF.Constraint.Types.Witness
     , ForallSpec(..)
     , InstanceOp(..)
     , InstanceWitness(..)
+    , ReplayContract(..)
     )
 import MLF.Elab.Run.Util (canonicalizeExpansion, canonicalizeTrace, canonicalizeWitness)
 
@@ -94,6 +95,7 @@ spec = describe "MLF.Constraint.Canonicalizer" $ do
                     , etInterior = fromListInterior [NodeId 1, NodeId 2, NodeId 3]
                     , etBinderReplayMap = mempty
                     , etCopyMap = CopyMapping (IntMap.fromList [(1, NodeId 2), (3, NodeId 4)])
+                    , etReplayContract = ReplayContractNone
                     }
                 tr1 = canonicalizeTrace canon tr0
             etRoot tr1 `shouldBe` canonNode (etRoot tr0)

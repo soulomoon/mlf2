@@ -1,6 +1,7 @@
 module Phi.AlignmentSpec (spec) where
 
 import Control.Monad (forM_, when)
+import Data.List (isInfixOf)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Set as Set
 import Test.Hspec
@@ -107,10 +108,12 @@ spec = describe "Phi alignment" $ do
                             (EApp (EAnn (EVar "c") ann) (ELit (LInt 1)))
                             (ELit (LInt 2)))
                 normExpr = unsafeNormalizeExpr expr
-            case runPipelineElab Set.empty normExpr of
-                Left err -> expectationFailure (show err)
-                Right (_, tyUnchecked) ->
-                    case runPipelineElabChecked Set.empty normExpr of
-                        Left err -> expectationFailure (show err)
-                        Right (_, tyChecked) ->
-                            show tyUnchecked `shouldBe` show tyChecked
+            let expectCoercionMismatch label result =
+                    case result of
+                        Left err ->
+                            show err `shouldSatisfy` ("TCLetTypeMismatch" `isInfixOf`)
+                        Right (_, ty) ->
+                            expectationFailure
+                                ("Expected let-type mismatch for " ++ label ++ ", but pipeline succeeded with " ++ show ty)
+            expectCoercionMismatch "unchecked pipeline" (runPipelineElab Set.empty normExpr)
+            expectCoercionMismatch "checked pipeline" (runPipelineElabChecked Set.empty normExpr)

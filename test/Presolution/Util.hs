@@ -23,7 +23,7 @@ import qualified Data.IntSet as IntSet
 
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Presolution.Witness (OmegaNormalizeEnv(..))
-import MLF.Constraint.Types.Witness (InstanceOp(..))
+import MLF.Constraint.Types.Witness (InstanceOp(..), ReplayContract(..))
 import qualified MLF.Util.Order as Order
 import SpecUtil
     ( bindParentsFromPairs
@@ -87,6 +87,7 @@ mkNormalizeEnv c root interior =
         , constraint = c
         , binderArgs = IntMap.empty
         , binderReplayMap = IntMap.empty
+        , replayContract = ReplayContractNone
         , replayDomainBinders = []
         , isAnnotationEdge = False
         }
@@ -129,6 +130,7 @@ mkTestNormalizeEnv params =
             , constraint = emptyConstraint
             , binderArgs = IntMap.empty
             , binderReplayMap = IntMap.empty
+            , replayContract = ReplayContractNone
             , replayDomainBinders = []
             , isAnnotationEdge = False
             }

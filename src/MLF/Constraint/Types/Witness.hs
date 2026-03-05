@@ -18,7 +18,10 @@ module MLF.Constraint.Types.Witness (
     ExpansionF(..),
     InstanceOp(..),
     InstanceWitness(..),
-    EdgeWitness(..)
+    EdgeWitness(..),
+    ReplayContract(..),
+    classifyReplayContract,
+    isStrictReplayContract
 ) where
 
 import Data.Functor.Foldable (Base, Corecursive(..), Recursive(..))
@@ -152,3 +155,26 @@ data EdgeWitness = EdgeWitness
     , ewWitness :: InstanceWitness
     }
     deriving (Eq, Show)
+
+-- | Producer/consumer replay-map contract mode.
+--
+-- `ReplayContractStrict` means replay metadata is present and must be enforced
+-- strictly in source/replay key spaces.
+--
+-- `ReplayContractNone` means the edge carries no replay-domain metadata and
+-- must not require replay-map mediation.
+data ReplayContract
+    = ReplayContractNone
+    | ReplayContractStrict
+    deriving (Eq, Show)
+
+classifyReplayContract :: Bool -> ReplayContract
+classifyReplayContract hasReplayPayload
+    | hasReplayPayload = ReplayContractStrict
+    | otherwise = ReplayContractNone
+
+isStrictReplayContract :: ReplayContract -> Bool
+isStrictReplayContract contract =
+    case contract of
+        ReplayContractStrict -> True
+        ReplayContractNone -> False

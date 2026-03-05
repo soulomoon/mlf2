@@ -4,6 +4,26 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 48 Row6 replay-contract recovery after orchestrated max-retry (active 2026-03-05)
+
+- Current status:
+  - Orchestrated Round-1 row6 run in
+    `/Volumes/src/mlf4/tasks/todo/2026-03-05-tmt-improving-loop-orchestrator-fresh/`
+    exhausted attempts and ended in `MAXIMUMRETRY`.
+  - Final baseline is red: `cabal build all && cabal test` reports
+    `126 failures`, dominated by
+    `WitnessNormalizationError ReplayMapIncomplete`.
+- Immediate priorities:
+  1. Stabilize baseline first: recover green on required sanity gates
+     (`Phase 4 thesis-exact unification closure`, `checked-authoritative`,
+     `Dual-path verification`).
+  2. Redesign replay contract as a single cross-phase authority
+     (producer + consumer), avoiding mixed strict/no-replay runtime lanes that
+     drift across `WitnessNorm`, `WitnessValidation`/`Driver`, and
+     `Phi.Translate`/`Phi.Omega`.
+  3. Re-run row6 orchestrated loop only after baseline stabilization and
+     explicit replay-contract design sign-off.
+
 ## Task 40 Elaboration-input strict-policy docs closeout (completed 2026-03-04)
 
 - Closed:
