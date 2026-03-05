@@ -29,5 +29,6 @@ Loop:
 8. If round 10 finishes without completion, report `FAILED`.
 
 Output:
-- Per-round concise gate log with reason for each `NO`.
+- Append machine-checkable JSONL event records to `orchestrator-log.jsonl`, one event per line, with reason for each `NO`.
+- Keep human-readable summaries in `findings.md` / `progress.md`.
 - Exactly one final line: `FINAL STATUS: <COMPLETED|FAILED|MAXIMUMRETRY>`.

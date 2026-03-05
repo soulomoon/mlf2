@@ -8,7 +8,7 @@ description: Create or update a goal-status mechanism table and paired multi-age
 Create three coordinated artifacts for a goal:
 - mechanism status table (current vs target)
 - orchestrator prompt (role-based improving loop)
-- round execution log (attempt-by-attempt gate evidence)
+- JSONL orchestrator event log template (attempt-by-attempt gate evidence)
 
 ## Inputs
 
@@ -37,9 +37,10 @@ If mechanism list is missing, derive a first-pass list from the goal decompositi
 - Keep limits explicit (rounds, attempts).
 - Require one terminal status line.
 
-4. Generate or refresh the round execution log.
+4. Generate or refresh the JSONL orchestrator event log template.
 - Use `references/orchestrated-round-template.md`.
-- Record round, selected mechanism, attempt, gate outputs, and reason for each `NO`.
+- Record one JSON object per line with round, selected mechanism, attempt, producing agent, gate outputs, and reason for each `NO`.
+- Treat `orchestrator-log.jsonl` as the single authoritative orchestrator log; keep human-readable narrative in `findings.md` / `progress.md`.
 
 5. Cross-check consistency.
 - Mechanism order must match across table, prompt, and log.

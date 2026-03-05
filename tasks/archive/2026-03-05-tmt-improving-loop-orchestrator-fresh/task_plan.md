@@ -1,12 +1,12 @@
 # Task Plan: 2026-03-05 TMT Improving Loop Orchestrator (Fresh Round 1 Re-Run)
 
 ## Goal
-Execute `docs/plans/2026-03-05-orchestrated-execution-improving-loop-agent-prompt-codex-subagents-fresh-round-1.md` end-to-end using strict role separation, exact `YES`/`NO` gates, bounded retries, and one terminal status line.
+Execute `docs/plans/archive/2026-03-05-orchestrated-execution-improving-loop-agent-prompt-codex-subagents-fresh-round-1.md` end-to-end using strict role separation, exact `YES`/`NO` gates, bounded retries, and one terminal status line.
 
 ## Scope
 - Repository: `/Volumes/src/mlf4`
 - Prompt source: `docs/prompts/improving-loop-agent.prompt.md`
-- Plan source: `docs/plans/2026-03-05-orchestrated-execution-improving-loop-agent-prompt-codex-subagents-fresh-round-1.md`
+- Plan source: `docs/plans/archive/2026-03-05-orchestrated-execution-improving-loop-agent-prompt-codex-subagents-fresh-round-1.md`
 - Mechanism order: fixed 1..14
 - Run mode: fresh Round 1
 
