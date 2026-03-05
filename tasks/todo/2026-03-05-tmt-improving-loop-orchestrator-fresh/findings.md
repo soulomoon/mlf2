@@ -166,3 +166,59 @@ Gate decisions:
 Decision:
 - Round 2 success conditions met at Attempt 1.
 - Integrator is authorized to commit and advance to Round 3.
+
+## Round 3 Verifier Full Sweep
+
+Ordered gates (YES/NO):
+1. Elaboration input -> YES
+2. Result-type context wiring -> YES
+3. Ordering of transformations -> YES
+4. Per-edge propagation transform -> YES
+5. Graph operation execution (Graft/Merge/Weaken/Raise) -> YES
+6. Replay-map producer normalization (upfront strict contract) -> NO
+7. Replay-map consumer bridge in Phi -> NO
+8. Translatability normalization -> NO
+9. Canonicalization source used by Phi -> NO
+10. Identity reconciliation mechanism -> NO
+11. Non-root weaken/raise binder resolution -> NO
+12. Graph mutation during solve/presolution -> NO
+13. Dual-path verification mechanism -> NO
+14. Campaign classification status -> YES
+
+Target mechanism selected (first NO):
+- Replay-map producer normalization (upfront strict contract)
+
+Target gap summary:
+- Producer replay-map path still uses heuristic candidate-pool/synthesis/projection layers beyond direct witness-derived mapping contract.
+
+## Round 3 Planner Output (Target: row6)
+
+PlannerRoundPlan summary:
+- target_mechanism: Replay-map producer normalization (upfront strict contract)
+- root-cause framing: producer remains heuristic and tightly coupled to Phi consumer assumptions.
+- scope includes both producer (`WitnessNorm`/validation) and potential consumer tightening (`Phi.Translate`/`Phi.Omega`), with explicit cross-phase redesign risk.
+
+Primary abort risk:
+- strict producer contract may be unattainable without semantic changes in Phase 6 consumer behavior.
+
+## Round 3 Attempt 1 Outcome
+
+Gate decisions:
+- Review gate: YES
+- QA gate: YES
+- Thesis gate: NO
+
+Decision:
+- Attempt 1 fails step 5.5 due thesis gate NO.
+- Planner revision required for Attempt 2.
+
+## Round 3 Attempts 2-6 Consolidated Outcome
+
+Observed pattern:
+- Attempts 2-6 remained bounded-scope feasibility failures for row6.
+- QA baseline stayed green throughout (`Phase 6`, `checked-authoritative`, full gate).
+- Verifier remained NO on row6 because `WitnessNorm` still contains non-thesis strictness scaffolding (`replayCandidatePool`, synthesis/projection/no-replay compatibility paths).
+
+Terminal decision:
+- Round 3 reached attempt limit (6) without satisfying step 5.5 success conditions.
+- Terminal status is `MAXIMUMRETRY`.
