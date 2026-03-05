@@ -61,3 +61,54 @@
 | 2 | Graph operation execution (Graft/Merge/Weaken/Raise) | 1 | Reviewer | YES | Implementation accepted relative to planner constraints. |
 | 2 | Graph operation execution (Graft/Merge/Weaken/Raise) | 1 | QA | YES | Required targeted commands and full gate passed. |
 | 2 | Graph operation execution (Graft/Merge/Weaken/Raise) | 1 | Verifier | YES | Target row5 and prior YES rows (1-4) re-check passed. |
+
+### Round 3 - Full Sweep
+
+| round | selected_mechanism | attempt | producing_agent | gate | reason_if_no |
+|---|---|---|---|---|---|
+| 3 | Elaboration input | 0 | Verifier | YES | |
+| 3 | Result-type context wiring | 0 | Verifier | YES | |
+| 3 | Ordering of transformations | 0 | Verifier | YES | |
+| 3 | Per-edge propagation transform | 0 | Verifier | YES | |
+| 3 | Graph operation execution (Graft/Merge/Weaken/Raise) | 0 | Verifier | YES | |
+| 3 | Replay-map producer normalization (upfront strict contract) | 0 | Verifier | NO | Producer replay-map normalization still uses heuristic scaffolding beyond direct witness-derived contract. |
+| 3 | Replay-map consumer bridge in Phi | 0 | Verifier | NO | Explicit bridge/recovery logic remains. |
+| 3 | Translatability normalization | 0 | Verifier | NO | Rigidify/validate construction pipeline remains. |
+| 3 | Canonicalization source used by Phi | 0 | Verifier | NO | Split identity authority remains. |
+| 3 | Identity reconciliation mechanism | 0 | Verifier | NO | Heuristic identity ranking subsystem remains. |
+| 3 | Non-root weaken/raise binder resolution | 0 | Verifier | NO | Replay-alias/spine recovery indirection remains. |
+| 3 | Graph mutation during solve/presolution | 0 | Verifier | NO | Post-presolution scaffolding remains substantial. |
+| 3 | Dual-path verification mechanism | 0 | Verifier | NO | Engineering guardrail, not thesis mechanism. |
+| 3 | Campaign classification status | 0 | Verifier | YES | |
+| 3 | Replay-map producer normalization (upfront strict contract) | 0 | Planner | YES | Produced row6 plan; notes producer-consumer coupling and cross-phase redesign risk. |
+| 3 | Replay-map producer normalization (upfront strict contract) | 1 | Bugfixer | YES | Tightened replay-edge assignment path in WitnessNorm; added strict replay-map contract regression test. |
+| 3 | Replay-map producer normalization (upfront strict contract) | 1 | Reviewer | YES | Implementation accepted as safe relative to planner scope. |
+| 3 | Replay-map producer normalization (upfront strict contract) | 1 | QA | YES | Required targeted checks and full gate passed. |
+| 3 | Replay-map producer normalization (upfront strict contract) | 1 | Verifier | NO | Producer still depends on candidate-pool plus synthesis/projection scaffolding; not absolute thesis-exact. |
+| 3 | Replay-map producer normalization (upfront strict contract) | 2 | Planner | YES | Revised plan targets remaining candidate-pool/synthesis scaffolding; includes feasibility-NO cross-phase path. |
+| 3 | Replay-map producer normalization (upfront strict contract) | 2 | Bugfixer | NO | Feasibility NO: no-diff attempt; remaining gap coupled to Phi semantics/trace schema boundaries. |
+| 3 | Replay-map producer normalization (upfront strict contract) | 2 | Reviewer | NO | Blocking: no code change and mechanism target remains unmet under current constraints. |
+| 3 | Replay-map producer normalization (upfront strict contract) | 2 | QA | YES | Current workspace validation remains green. |
+| 3 | Replay-map producer normalization (upfront strict contract) | 2 | Verifier | NO | Target still not thesis-exact; heuristic producer scaffolding remains. |
+| 3 | Replay-map producer normalization (upfront strict contract) | 3 | Planner | YES | Attempt-3 plan: bounded producer-only spike with explicit infeasible-within-boundaries NO path. |
+| 3 | Replay-map producer normalization (upfront strict contract) | 3 | Bugfixer | NO | Feasibility NO with no diff; producer strictness blocked by producer-consumer coupling under attempt boundaries. |
+| 3 | Replay-map producer normalization (upfront strict contract) | 3 | Reviewer | NO | Blocking: no implementation progress; target remains unmet. |
+| 3 | Replay-map producer normalization (upfront strict contract) | 3 | QA | YES | Baseline validation remained green. |
+| 3 | Replay-map producer normalization (upfront strict contract) | 3 | Verifier | NO | Target still not thesis-exact; heuristic producer paths remain. |
+| 3 | Replay-map producer normalization (upfront strict contract) | 4 | Bugfixer | NO | Feasibility NO evidence-only attempt; no edits; blocker remains cross-phase coupling. |
+| 3 | Replay-map producer normalization (upfront strict contract) | 4 | Reviewer | NO | Blocking: no implementation change and target remains unmet. |
+| 3 | Replay-map producer normalization (upfront strict contract) | 4 | QA | YES | Baseline validation remains green. |
+| 3 | Replay-map producer normalization (upfront strict contract) | 4 | Verifier | NO | Heuristic/synthesis/projection producer paths still present. |
+| 3 | Replay-map producer normalization (upfront strict contract) | 5 | Planner | YES | Attempt-5 plan declares NO-NEW-BOUNDED-ACTION under current constraints. |
+| 3 | Replay-map producer normalization (upfront strict contract) | 5 | Bugfixer | NO | Feasibility NO under no-new-bounded-action strategy; no code changes. |
+| 3 | Replay-map producer normalization (upfront strict contract) | 5 | Reviewer | NO | Blocking: no implementation progress; target remains unmet. |
+| 3 | Replay-map producer normalization (upfront strict contract) | 5 | QA | YES | Baseline validation remains green. |
+| 3 | Replay-map producer normalization (upfront strict contract) | 5 | Verifier | NO | Target still not thesis-exact; heuristic producer scaffolding remains. |
+| 3 | Replay-map producer normalization (upfront strict contract) | 6 | Planner | YES | Final-attempt plan declares FEASIBILITY=NO within bounded scope and no-edit evidence run. |
+| 3 | Replay-map producer normalization (upfront strict contract) | 6 | Bugfixer | NO | Final-attempt feasibility NO with no edits; bounded scope cannot close row6 without cross-phase redesign. |
+| 3 | Replay-map producer normalization (upfront strict contract) | 6 | Reviewer | NO | Blocking: no implementation progress and target remains unmet. |
+| 3 | Replay-map producer normalization (upfront strict contract) | 6 | QA | YES | Baseline validation remains green. |
+| 3 | Replay-map producer normalization (upfront strict contract) | 6 | Verifier | NO | Heuristic/synthesis/projection producer paths remain; row6 still not thesis-exact. |
+
+MAXIMUMRETRY: reached maximum implementation attempts (6).
+FINAL STATUS: MAXIMUMRETRY

@@ -25,16 +25,18 @@ Execute `docs/prompts/improving-loop-agent.prompt.md` end-to-end using strict ro
 | Phase | Status | Notes |
 |---|---|---|
 | 1. Initialize run artifacts + baseline metadata | complete | Folder/files created with source revision and UTC timestamp |
-| 2. Spawn role agents + run Round 1 full verification sweep | in_progress | Pending verifier sweep output |
-| 3. Execute attempt loop for first NO mechanism | pending | Up to 6 attempts with planner revisions |
-| 4. Continue rounds until terminal status | pending | Stop on COMPLETED / FAILED / MAXIMUMRETRY |
-| 5. Final report + archive/move task folder if done | pending | Final status line and closeout |
+| 2. Spawn role agents + run Round 1 full verification sweep | complete | Completed round-based sweeps through Round 3 |
+| 3. Execute attempt loop for first NO mechanism | complete | Round 1 row4 closed in Attempt 2 |
+| 4. Continue rounds until terminal status | complete | Round 2 row5 closed in Attempt 1; Round 3 row6 hit attempt-limit |
+| 5. Final report + archive/move task folder if done | complete | Terminal status emitted (`FINAL STATUS: MAXIMUMRETRY`) |
 
 ## Errors Encountered
 | Error | Attempt | Resolution |
 |---|---|---|
 | Shell heredoc append used unquoted delimiter causing backtick command substitution in log text | 1 | Repaired affected lines in `progress.md` and `orchestrator-log.md`; continue using single-quoted heredoc delimiters for literal markdown content |
 | Row4 Attempt 1 uniform expansion cutover triggered Phase 6 `PhiTranslatabilityError` on `\\y. let id = (\\x. x) in id y` | 1.1 | Recorded as blocking regression; proceed to planner failure analysis for Attempt 2 with explicit mitigation/abort criteria |
+| Repeat of unquoted heredoc append caused commit metadata backticks to be command-substituted in `progress.md` | 2 | Patched broken progress line; enforced quoted heredoc delimiters in all subsequent append commands |
+| Transient Cabal lock/package-conf conflicts when multiple subagents invoked test commands concurrently | 2+ | Re-ran affected commands serially; stabilized QA evidence collection on successful reruns |
 
 ## Decisions
 - Gate outputs must be exact `YES` or `NO` only.
