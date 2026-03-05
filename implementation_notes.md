@@ -2,6 +2,30 @@
 
 ## Thesis Alignment (Phase A–E)
 
+### 2026-03-06 Task 48 row6 replay-contract recovery closeout
+- Closed the post-orchestrator replay-contract recovery from a clean green base
+  after the fresh round-1 `MAXIMUMRETRY` regression.
+- `MLF.Constraint.Presolution.WitnessNorm` now treats no-replay projection as a
+  source-domain contract:
+  - wrapper-vs-semantic classification uses restored/source identities rather
+    than rewritten canonical ids;
+  - no-replay `OpWeaken` keeps the historical graft-target heuristic
+    (`graftTargetCount`) in source space, so valid success paths
+    (`\y. let id = (\x. x) in id y`, A6, annotation-heavy baselines) stay green;
+  - strict no-replay remains available only when a surviving source-domain
+    non-root `OpWeaken` remains (bug-002 path).
+- Producer fail-fast is now narrowed and explicit:
+  - residual no-replay replay-family rejection applies to single-target,
+    source-interior rogue `OpGraft` shapes that cannot be projected away;
+  - wrapper `OpRaise` under `GenRef` / missing type-tree binding is pruned
+    before Phi, while type-tree-bound invalid raises still fail via
+    `R-RAISE-INVALID-11`.
+- Recovery verification evidence:
+  - row6/no-replay witness obligations: PASS
+  - `checked-authoritative`: PASS
+  - `Dual-path verification`: PASS
+  - `cabal build all && cabal test`: PASS (`954 examples, 0 failures`)
+
 ### 2026-03-05 Row6 orchestrated execution (fresh round re-run) terminal status
 - Executed
   `/Volumes/src/mlf4/docs/plans/2026-03-05-orchestrated-execution-improving-loop-agent-prompt-codex-subagents-fresh-round-1.md`

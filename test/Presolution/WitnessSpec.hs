@@ -1659,6 +1659,56 @@ spec = do
                         }
             validateReplayMapTraceContract id c c edgeKey tr `shouldBe` Right ()
 
+        it "hard-rejects non-injective replay-map codomain under strict contract" $ do
+            let edgeKey = 11
+                root = NodeId 210
+                body = NodeId 211
+                replayBinder = NodeId 212
+                sourceA = NodeId 213
+                sourceB = NodeId 214
+                argA = NodeId 215
+                argB = NodeId 216
+                c = rootedConstraint emptyConstraint
+                    { cNodes =
+                        nodeMapFromList
+                            [ (getNodeId root, TyForall root body)
+                            , (getNodeId body, TyArrow body replayBinder replayBinder)
+                            , (getNodeId replayBinder, TyVar { tnId = replayBinder, tnBound = Nothing })
+                            , (getNodeId sourceA, TyVar { tnId = sourceA, tnBound = Nothing })
+                            , (getNodeId sourceB, TyVar { tnId = sourceB, tnBound = Nothing })
+                            , (getNodeId argA, TyBase argA (BaseTy "Int"))
+                            , (getNodeId argB, TyBase argB (BaseTy "Bool"))
+                            ]
+                    , cBindParents =
+                        bindParentsFromPairs
+                            [ (body, root, BindFlex)
+                            , (replayBinder, root, BindFlex)
+                            ]
+                    }
+                tr =
+                    EdgeTrace
+                        { etRoot = root
+                        , etBinderArgs = [(sourceA, argA), (sourceB, argB)]
+                        , etInterior = fromListInterior [root, body, replayBinder, sourceA, sourceB, argA, argB]
+                        , etBinderReplayMap =
+                            IntMap.fromList
+                                [ (getNodeId sourceA, replayBinder)
+                                , (getNodeId sourceB, replayBinder)
+                                ]
+                        , etCopyMap = mempty
+                        , etReplayContract = ReplayContractStrict
+                        }
+                expected =
+                    InternalError $
+                        unlines
+                            [ "edge replay-map codomain is non-injective"
+                            , "edge: " ++ show (EdgeId edgeKey)
+                            , "first source key: " ++ show (getNodeId sourceA)
+                            , "second source key: " ++ show (getNodeId sourceB)
+                            , "shared target: " ++ show replayBinder
+                            ]
+            validateReplayMapTraceContract id c c edgeKey tr `shouldBe` Left expected
+
         it "hard-rejects codomain targets that only match replay binders after canonicalization" $ do
             let edgeKey = 2
                 root = NodeId 300
@@ -1882,7 +1932,7 @@ spec = do
                     }
             validateNormalizedWitness env [] `shouldBe` Left (ReplayMapNonInjective binderA binderB binderA)
 
-        it "normalization maps replay codomain to replay binders of edge root only" $ do
+        it "normalization derives strict replay lane from edge semantics and maps codomain to edge-root replay binders" $ do
             let edgeId = 0
                 root = NodeId 0
                 body = NodeId 5
@@ -1973,9 +2023,13 @@ spec = do
                                         Just TyVar{} -> True
                                         _ -> False
                                     ]
-                            etReplayContract tr' `shouldBe` ReplayContractNone
-                            etBinderArgs tr' `shouldBe` []
-                            etBinderReplayMap tr' `shouldBe` IntMap.empty
+                            etReplayContract tr' `shouldBe` ReplayContractStrict
+                            etBinderArgs tr' `shouldBe` [(sourceA, argA), (sourceB, argB)]
+                            etBinderReplayMap tr'
+                                `shouldBe` IntMap.fromList
+                                    [ (getNodeId sourceA, replayA)
+                                    , (getNodeId sourceB, replayB)
+                                    ]
 
         it "fails fast when trace source domain exceeds replay binder domain (no stale-source pruning fallback)" $ do
             let edgeId = 1
@@ -2053,7 +2107,7 @@ spec = do
                 Right _ ->
                     expectationFailure "Expected fail-fast replay-map source/replay domain mismatch"
 
-        it "normalization drops replay contract fields when edge root has no replay binders" $ do
+        it "normalization projects no-replay source-key wrapper ops away when edge root has no replay binders" $ do
             let edgeId = 2
                 root = NodeId 300
                 source = NodeId 301
@@ -2120,6 +2174,123 @@ spec = do
                             getInstanceOps (ewWitness ew') `shouldBe` []
                             etBinderArgs tr' `shouldBe` []
                             etBinderReplayMap tr' `shouldBe` IntMap.empty
+
+        it "normalization rejects residual non-root replay-family ops when no-replay projection cannot eliminate them" $ do
+            let edgeId = 22
+                root = NodeId 320
+                source = NodeId 321
+                argNode = NodeId 322
+                rogueTarget = NodeId 323
+                nodes =
+                    nodeMapFromList
+                        [ (getNodeId root, TyArrow root source source)
+                        , (getNodeId source, TyVar { tnId = source, tnBound = Nothing })
+                        , (getNodeId argNode, TyBase argNode (BaseTy "Int"))
+                        , (getNodeId rogueTarget, TyVar { tnId = rogueTarget, tnBound = Nothing })
+                        ]
+                c = rootedConstraint emptyConstraint
+                    { cNodes = nodes
+                    , cBindParents = IntMap.empty
+                    }
+                edgeWitness =
+                    EdgeWitness
+                        { ewEdgeId = EdgeId edgeId
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewForallIntros = 0
+                        , ewWitness = InstanceWitness [OpGraft argNode rogueTarget, OpWeaken rogueTarget]
+                        }
+                edgeTrace =
+                    EdgeTrace
+                        { etRoot = root
+                        , etBinderArgs = [(source, argNode)]
+                        , etInterior =
+                            InteriorNodes
+                                (IntSet.fromList
+                                    [ getNodeId root
+                                    , getNodeId source
+                                    , getNodeId argNode
+                                    , getNodeId rogueTarget
+                                    ]
+                                )
+                        , etBinderReplayMap = IntMap.empty
+                        , etCopyMap = mempty
+                        , etReplayContract = ReplayContractNone
+                        }
+                st0 =
+                    PresolutionState
+                        { psConstraint = c
+                        , psPresolution = Presolution IntMap.empty
+                        , psUnionFind = IntMap.empty
+                        , psNextNodeId = 350
+                        , psPendingWeakens = IntSet.empty
+                        , psBinderCache = IntMap.empty
+                        , psEdgeExpansions = IntMap.empty
+                        , psEdgeWitnesses = IntMap.fromList [(edgeId, edgeWitness)]
+                        , psEdgeTraces = IntMap.fromList [(edgeId, edgeTrace)]
+                        }
+            case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
+                Left (WitnessNormalizationError (EdgeId eid) (ReplayContractNoneRequiresReplay op)) -> do
+                    eid `shouldBe` edgeId
+                    op `shouldBe` OpGraft argNode rogueTarget
+                Left err ->
+                    expectationFailure ("Expected ReplayContractNoneRequiresReplay, got: " ++ show err)
+                Right _ ->
+                    expectationFailure "Expected fail-fast no-replay residual non-root op rejection"
+
+        it "normalization prunes no-replay non-root raise wrappers before Phi" $ do
+            let edgeId = 23
+                root = NodeId 330
+                raised = NodeId 331
+                nodes =
+                    nodeMapFromList
+                        [ (getNodeId root, TyArrow root raised raised)
+                        , (getNodeId raised, TyVar { tnId = raised, tnBound = Nothing })
+                        ]
+                c = rootedConstraint emptyConstraint
+                    { cNodes = nodes
+                    , cBindParents = IntMap.empty
+                    }
+                edgeWitness =
+                    EdgeWitness
+                        { ewEdgeId = EdgeId edgeId
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewForallIntros = 0
+                        , ewWitness = InstanceWitness [OpRaise raised]
+                        }
+                edgeTrace =
+                    EdgeTrace
+                        { etRoot = root
+                        , etBinderArgs = []
+                        , etInterior = fromListInterior [root, raised]
+                        , etBinderReplayMap = IntMap.empty
+                        , etCopyMap = mempty
+                        , etReplayContract = ReplayContractNone
+                        }
+                st0 =
+                    PresolutionState
+                        { psConstraint = c
+                        , psPresolution = Presolution IntMap.empty
+                        , psUnionFind = IntMap.empty
+                        , psNextNodeId = 340
+                        , psPendingWeakens = IntSet.empty
+                        , psBinderCache = IntMap.empty
+                        , psEdgeExpansions = IntMap.empty
+                        , psEdgeWitnesses = IntMap.fromList [(edgeId, edgeWitness)]
+                        , psEdgeTraces = IntMap.fromList [(edgeId, edgeTrace)]
+                        }
+            case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
+                Left err ->
+                    expectationFailure ("normalizeEdgeWitnessesM failed: " ++ show err)
+                Right (_, st') ->
+                    case IntMap.lookup edgeId (psEdgeWitnesses st') of
+                        Nothing ->
+                            expectationFailure "Expected normalized witness in psEdgeWitnesses"
+                        Just ew' ->
+                            getInstanceOps (ewWitness ew') `shouldBe` []
 
         it "empty replay-domain lane prunes synthesized-wrapper raise-family ops during normalization" $ do
             let edgeId = 3
