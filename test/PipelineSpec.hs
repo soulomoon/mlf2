@@ -266,8 +266,13 @@ spec = describe "Pipeline (Phases 1-5)" $ do
 
         it "row4 per-edge propagation thesis-exact guard: Interpreter removes synthesized-wrapper branch markers" $ do
             interpSrc <- readFile "src/MLF/Constraint/Presolution/EdgeProcessing/Interpreter.hs"
-            interpSrc `shouldSatisfy` (not . isInfixOf "if isSynth")
-            interpSrc `shouldSatisfy` (not . isInfixOf "solveNonExpInstantiation")
+            forM_
+                [ "isSynthesizedExpVar"
+                , "synthesizedWrapper"
+                , "then pure (ExpIdentity, [(bodyId, n2Id)])"
+                , "then pure ExpIdentity"
+                ] $ \marker ->
+                    interpSrc `shouldSatisfy` (not . isInfixOf marker)
 
         it "chi-first guard: internals use shared ChiQuery facade" $ do
             elabSrc <- readFile "src/MLF/Elab/Elaborate.hs"

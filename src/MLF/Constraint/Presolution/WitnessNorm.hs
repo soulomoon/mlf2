@@ -31,6 +31,7 @@ import MLF.Constraint.Presolution.Witness (
     OmegaNormalizeEnv(OmegaNormalizeEnv, oneRoot),
     validateNormalizedWitness,
     )
+import MLF.Constraint.Types.SynthesizedExpVar (isSynthesizedExpVar)
 import qualified MLF.Constraint.Presolution.Witness as Witness
 
 -- | Normalize edge witnesses against the finalized presolution constraint.
@@ -234,6 +235,15 @@ normalizeEdgeWitnessesM = do
                     else interiorNorm
             isAnnEdge =
                 IntSet.member eid (cAnnEdges c0)
+            isSynthesizedWrapperEdge =
+                case NodeAccess.lookupNode c0 (canonical (ewLeft w0)) of
+                    Just TyExp { tnExpVar = s } -> isSynthesizedExpVar s
+                    _ -> False
+            isNoReplayCompatRoot =
+                case NodeAccess.lookupNode c0 (canonical edgeRoot) of
+                    Just TyVar { tnBound = Nothing } -> True
+                    Just TyBottom{} -> True
+                    _ -> False
             replayBindersAtRoot =
                 [ canonical b
                 | b <- bindersOrdered
@@ -432,7 +442,21 @@ normalizeEdgeWitnessesM = do
                     , IntSet.notMember (getNodeId (canonical target)) interiorNorm =
                         Nothing
                 prunePairedWeaken op = Just op
-            opsNorm = pruneOpsForOutput opsNormRaw
+            -- No-replay edges (including synthesized-wrapper compatibility paths)
+            -- cannot translate Raise-family ops in Phi, so drop them at witness
+            -- output regardless of annotation-edge branching.
+            pruneNoReplayRaiseFamily op = case op of
+                OpRaise{}
+                    | isSynthesizedWrapperEdge || isNoReplayCompatRoot ->
+                        Nothing
+                OpRaiseMerge{}
+                    | isSynthesizedWrapperEdge || isNoReplayCompatRoot ->
+                        Nothing
+                _ -> Just op
+            opsNorm =
+                if null replayBindersAtRoot
+                    then mapMaybe pruneNoReplayRaiseFamily (pruneOpsForOutput opsNormRaw)
+                    else pruneOpsForOutput opsNormRaw
         let replayBinders = replayBindersAtRoot
             projectOpTargetsNoReplay op =
                 let project = sourceBinderForOpTarget

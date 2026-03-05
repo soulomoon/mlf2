@@ -39,7 +39,6 @@ import MLF.Constraint.Presolution.Expansion (
     setExpansion
     )
 import MLF.Constraint.Types
-import MLF.Constraint.Types.SynthesizedExpVar (isSynthesizedExpVar)
 
 -- | Execute a resolved edge plan.
 executeEdgePlan :: EdgePlan -> PresolutionM ()
@@ -64,19 +63,11 @@ executeUnifiedExpansionPath plan = do
         n1Raw = resolvedTyExpNode leftTyExp
         n2 = eprRightNode plan
         s = rteExpVar leftTyExp
-        bodyId = rteBodyId leftTyExp
-        synthesizedWrapper = isSynthesizedExpVar s
         ownerGen = eprSchemeOwnerGen plan
 
     currentExp <- getExpansion s
-    (reqExp, unifications) <-
-        if synthesizedWrapper
-            then pure (ExpIdentity, [(bodyId, n2Id)])
-            else decideMinimalExpansion ownerGen (eprAllowTrivial plan) n1Raw n2
-    finalExp <-
-        if synthesizedWrapper
-            then pure ExpIdentity
-            else mergeExpansions s currentExp reqExp
+    (reqExp, unifications) <- decideMinimalExpansion ownerGen (eprAllowTrivial plan) n1Raw n2
+    finalExp <- mergeExpansions s currentExp reqExp
 
     setExpansion s finalExp
     recordEdgeExpansion edgeId finalExp
