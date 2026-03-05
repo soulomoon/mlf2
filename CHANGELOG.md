@@ -13,7 +13,9 @@
   - raised the per-round implementation attempt cap from 6 to 10;
   - hardened planner execution flow with evidence reconciliation,
     no-progress detection, scope expansion, blocked mode, failed-attempt
-    accept-or-revert hygiene, and standalone row-14 YES/NO mapping.
+    accept-or-revert hygiene, standalone row-14 YES/NO mapping, and
+    explicit Verifier-owned transformation-table row refreshes before
+    each `YES`/`NO` gate.
 - Task 48 row6 replay-contract recovery closeout (2026-03-06):
   - rewrote presolution no-replay projection in
     `MLF.Constraint.Presolution.WitnessNorm` to classify wrapper vs semantic

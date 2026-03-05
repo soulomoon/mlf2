@@ -13,7 +13,7 @@ Hard constraints:
 
 Recommended agent structure (strict responsibilities):
 - Orchestrator: coordination only. Must not modify files, fix bugs, review diffs, or self-approve gates.
-- Verifier: compares thesis vs codebase, emits mechanism-level evidence, and owns thesis-exact gates.
+- Verifier: compares thesis vs codebase, updates the matching row in `docs/notes/2026-02-27-transformation-mechanism-table.md`, emits mechanism-level evidence, and owns thesis-exact gates.
 - Researcher A: researches the target mechanism from the thesis/paper side, including intended semantics, adjacent mechanism coupling, and planner-relevant invariants.
 - Researcher B: researches the target mechanism from the codebase side, including likely files/modules, current behavior, tests, and regression risks.
 - Planner: turns verifier gaps plus both researcher summaries into actionable implementation plans and acceptance criteria.
@@ -44,11 +44,14 @@ For `round = 1..10`:
 1. Full verification sweep (Verifier):
    - For each mechanism in order, answer this gate:
      - `update the row <MECHANISM> for Transformation Mechanism Table (Thesis vs Codebase) by reviewing the codebase and thesis, are we absolutely thesis-exact?`
+   - For each mechanism, the Verifier must review the codebase and thesis, update the corresponding row in `docs/notes/2026-02-27-transformation-mechanism-table.md`, and only then return the gate.
+   - The returned gate must match the row the Verifier just wrote.
    - For mechanism 14 (`Campaign classification status`), map the result to exact `YES` or `NO`:
      - `YES` when `docs/thesis-deviations.yaml` has no active `DEV-TMT-*` live deviations and campaign items are retired or resolved
      - `NO` otherwise
    - For each mechanism, record:
      - gate (`YES` or `NO`)
+     - row update summary
      - evidence references (thesis section(s), code file(s), test(s))
      - short gap summary when gate is `NO`
 
@@ -113,7 +116,8 @@ For `round = 1..10`:
 
    6.4 Thesis gate (Verifier):
    - Re-check `target_mechanism` after implementation.
-   - Also run a regression sanity check on previously-`YES` earlier mechanisms in order.
+   - Refresh the corresponding row in `docs/notes/2026-02-27-transformation-mechanism-table.md` before returning the gate.
+   - Also run a regression sanity check on previously-`YES` earlier mechanisms in order, refreshing those rows too if the reassessment changes.
    - Output exactly `YES` or `NO`.
 
    6.5 Attempt decision:
