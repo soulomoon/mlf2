@@ -2063,6 +2063,67 @@ spec = do
                             etBinderArgs tr' `shouldBe` []
                             etBinderReplayMap tr' `shouldBe` IntMap.empty
 
+        it "synthesized-wrapper no-replay compatibility prunes raise-family ops from normalized witness output" $ do
+            let edgeId = 3
+                root = NodeId 400
+                wrapper = NodeId 401
+                owner = GenNodeId 40
+                nodes =
+                    nodeMapFromList
+                        [ (getNodeId root, TyBottom root)
+                        , (getNodeId wrapper, TyExp wrapper (ExpVarId (-1)) root)
+                        ]
+                c = rootedConstraint emptyConstraint
+                    { cNodes = nodes
+                    , cBindParents =
+                        IntMap.fromList
+                            [ (nodeRefKey (typeRef root), (genRef owner, BindFlex))
+                            ]
+                    }
+                edgeWitness =
+                    EdgeWitness
+                        { ewEdgeId = EdgeId edgeId
+                        , ewLeft = wrapper
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewForallIntros = 0
+                        , ewWitness = InstanceWitness [OpRaise root]
+                        }
+                edgeTrace =
+                    EdgeTrace
+                        { etRoot = root
+                        , etBinderArgs = []
+                        , etInterior =
+                            InteriorNodes
+                                (IntSet.fromList
+                                    [ getNodeId root
+                                    ]
+                                )
+                        , etBinderReplayMap = IntMap.empty
+                        , etCopyMap = mempty
+                        }
+                st0 =
+                    PresolutionState
+                        { psConstraint = c
+                        , psPresolution = Presolution IntMap.empty
+                        , psUnionFind = IntMap.empty
+                        , psNextNodeId = 450
+                        , psPendingWeakens = IntSet.empty
+                        , psBinderCache = IntMap.empty
+                        , psEdgeExpansions = IntMap.empty
+                        , psEdgeWitnesses = IntMap.fromList [(edgeId, edgeWitness)]
+                        , psEdgeTraces = IntMap.fromList [(edgeId, edgeTrace)]
+                        }
+            case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
+                Left err ->
+                    expectationFailure ("normalizeEdgeWitnessesM failed: " ++ show err)
+                Right (_, st') ->
+                    case IntMap.lookup edgeId (psEdgeWitnesses st') of
+                        Nothing ->
+                            expectationFailure "Expected normalized witness in psEdgeWitnesses"
+                        Just ew' ->
+                            getInstanceOps (ewWitness ew') `shouldBe` []
+
   where
     isTotalOp :: InstanceOp -> Bool
     isTotalOp _ = True
