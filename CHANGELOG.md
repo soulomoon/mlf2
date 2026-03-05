@@ -3,6 +3,13 @@
 ## Unreleased
 
 ### Changed
+- Docs orchestrator round-2 prompt workflow hardening (2026-03-06):
+  - added standalone round-2 improving-loop prompt and companion plan docs
+    with mandatory pre-planner researcher handoff;
+  - raised the per-round implementation attempt cap from 6 to 10;
+  - hardened planner execution flow with evidence reconciliation,
+    no-progress detection, scope expansion, blocked mode, failed-attempt
+    accept-or-revert hygiene, and standalone row-14 YES/NO mapping.
 - Task 47 row3 owner-boundary scheduler follow-up (2026-03-05):
   - removed the explicit flush-all-owner boundary fallback from
     `MLF.Constraint.Presolution.EdgeProcessing` and switched to strict
