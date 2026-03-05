@@ -1,21 +1,22 @@
-# Task Plan: 2026-03-05 TMT Improving Loop Orchestrator (Fresh)
+# Task Plan: 2026-03-05 TMT Improving Loop Orchestrator (Fresh Round 1 Re-Run)
 
 ## Goal
-Execute `docs/prompts/improving-loop-agent.prompt.md` end-to-end using strict role separation, YES/NO gates, attempt/round limits, and one terminal status line.
+Execute `docs/plans/2026-03-05-orchestrated-execution-improving-loop-agent-prompt-codex-subagents-fresh-round-1.md` end-to-end using strict role separation, exact `YES`/`NO` gates, bounded retries, and one terminal status line.
 
 ## Scope
 - Repository: `/Volumes/src/mlf4`
-- Prompt: `docs/prompts/improving-loop-agent.prompt.md`
-- Mechanism order: fixed 1..14 from the prompt
+- Prompt source: `docs/prompts/improving-loop-agent.prompt.md`
+- Plan source: `docs/plans/2026-03-05-orchestrated-execution-improving-loop-agent-prompt-codex-subagents-fresh-round-1.md`
+- Mechanism order: fixed 1..14
 - Run mode: fresh Round 1
 
 ## Baseline Metadata
-- Initialized (UTC): 2026-03-05T10:00:12Z
-- Source revision: `554de9e`
-- Branch at start: `master`
-- Prompt source: `docs/prompts/improving-loop-agent.prompt.md`
+- Initialized (UTC): 2026-03-05T11:36:40Z
+- Source revision: `035ec160233cbb1ed6ba88abb700f4a3e75933a2`
+- Branch at start: `codex/tmt-improving-loop-fresh-20260305`
 - Transformation table: `docs/notes/2026-02-27-transformation-mechanism-table.md`
 - Thesis source: `papers/these-finale-english.txt`
+- Prompt source: `docs/prompts/improving-loop-agent.prompt.md`
 
 ## Hard Limits
 - Max planning rounds: 10
@@ -24,20 +25,32 @@ Execute `docs/prompts/improving-loop-agent.prompt.md` end-to-end using strict ro
 ## Phases
 | Phase | Status | Notes |
 |---|---|---|
-| 1. Initialize run artifacts + baseline metadata | complete | Folder/files created with source revision and UTC timestamp |
-| 2. Spawn role agents + run Round 1 full verification sweep | complete | Completed round-based sweeps through Round 3 |
-| 3. Execute attempt loop for first NO mechanism | complete | Round 1 row4 closed in Attempt 2 |
-| 4. Continue rounds until terminal status | complete | Round 2 row5 closed in Attempt 1; Round 3 row6 hit attempt-limit |
-| 5. Final report + archive/move task folder if done | complete | Terminal status emitted (`FINAL STATUS: MAXIMUMRETRY`) |
+| 1. Initialize run artifacts + baseline metadata | complete | Fresh run artifacts reset with baseline metadata |
+| 2. Spawn role agents + run Round 1 full verification sweep | complete | Sweep done; first `NO` target is row6 |
+| 3. Execute attempt loop for first `NO` mechanism | complete | Completed attempts 1..6 with strict gate logging |
+| 4. Continue rounds until terminal status | complete | Run terminated in Round 1 due attempt-limit exhaustion |
+| 5. Final report and closeout | complete | Orchestrator logs + findings/progress updated |
 
 ## Errors Encountered
 | Error | Attempt | Resolution |
 |---|---|---|
-| Shell heredoc append used unquoted delimiter causing backtick command substitution in log text | 1 | Repaired affected lines in `progress.md` and `orchestrator-log.md`; continue using single-quoted heredoc delimiters for literal markdown content |
-| Row4 Attempt 1 uniform expansion cutover triggered Phase 6 `PhiTranslatabilityError` on `\\y. let id = (\\x. x) in id y` | 1.1 | Recorded as blocking regression; proceed to planner failure analysis for Attempt 2 with explicit mitigation/abort criteria |
-| Repeat of unquoted heredoc append caused commit metadata backticks to be command-substituted in `progress.md` | 2 | Patched broken progress line; enforced quoted heredoc delimiters in all subsequent append commands |
-| Transient Cabal lock/package-conf conflicts when multiple subagents invoked test commands concurrently | 2+ | Re-ran affected commands serially; stabilized QA evidence collection on successful reruns |
+| Initialization placeholder replacement failed due branch-name slash handling | 1 | Rewrote files with direct variable interpolation (no regex replacement) |
+| Attempt-2 strict cutover introduced broad Phase 4/6 regressions (`checked-authoritative` and full gate failed with 38 failures) | 2 | Kept attempt-2 diff as explicit baseline; planner switched to dual-lane repair strategy |
+| Attempt-5 replay-mode refactor caused `ReplayMapIncomplete` cascade (full gate failed with 126 failures) | 5 | Entered terminal blocked mode for attempt-6; no further bounded patching |
 
 ## Decisions
-- Gate outputs must be exact `YES` or `NO` only.
-- Row 14 mapping is forced to YES/NO per run contract (no N/A gate values).
+- All gate fields are exact `YES` or `NO`.
+- Row 14 mapping remains forced to `YES`/`NO` semantics.
+- QA execution remains serialized.
+- Failed-attempt hygiene is explicit:
+  - Attempt 2 failed and was explicitly kept as baseline for Attempt 3.
+  - Attempt 3 failed and was explicitly kept as baseline for Attempt 4.
+  - Attempt 4 made no edits (blocked mode), baseline unchanged.
+  - Attempt 5 failed and was explicitly kept as baseline for Attempt 6.
+  - Attempt 6 made no edits (terminal blocked mode), baseline unchanged.
+- Terminal outcome for this run: `MAXIMUMRETRY`.
+
+## Post-Round Follow-up
+- Executed the explicit cross-phase replay-contract remediation plan after Round 1 terminal status.
+- Verification status updated from red to green on the same branch baseline:
+  - `cabal build all && cabal test` PASS.

@@ -47,6 +47,7 @@ import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Canonicalizer (canonicalizerFrom, chaseRedirectsStable)
 import qualified MLF.Constraint.Canonicalize as Canonicalize
 import MLF.Constraint.Types
+import MLF.Constraint.Types.Witness (isStrictReplayContract)
 import MLF.Constraint.Presolution.Base
 import MLF.Constraint.Presolution.Plan (buildGeneralizePlans)
 import MLF.Constraint.Presolution.Rewrite (
@@ -263,44 +264,73 @@ validateReplayMapTraceContract canonical sourceConstraint finalConstraint eid tr
             IntSet.toList (IntSet.difference sourceDomain replayDomain)
         extraReplay =
             IntSet.toList (IntSet.difference replayDomain sourceDomain)
-    when (not (null missingReplay) || not (null extraReplay)) $
-        Left $
-            InternalError $
-                unlines
-                    [ "edge replay-map domain mismatch"
-                    , "edge: " ++ show (EdgeId eid)
-                    , "trace binder-source domain: " ++ show (IntSet.toList sourceDomain)
-                    , "replay-map domain: " ++ show (IntSet.toList replayDomain)
-                    , "missing source keys: " ++ show missingReplay
-                    , "extra source keys: " ++ show extraReplay
-                    ]
-    forM_ (IntMap.toList (etBinderReplayMap tr)) $ \(sourceKey, replayTarget) -> do
-        let replayTargetC = canonical replayTarget
-        when (IntSet.notMember (getNodeId replayTargetC) replayBinderDomain) $
-            Left $
-                InternalError $
-                    unlines
-                        [ "edge replay-map codomain target outside replay binder domain"
-                        , "edge: " ++ show (EdgeId eid)
-                        , "source key: " ++ show sourceKey
-                        , "replay target: " ++ show replayTarget
-                        ]
-        case NodeAccess.lookupNode finalConstraint replayTargetC of
-            Just TyVar{} -> pure ()
-            _ ->
+        replayContract = etReplayContract tr
+    if isStrictReplayContract replayContract
+        then do
+            when (not (null missingReplay) || not (null extraReplay)) $
                 Left $
                     InternalError $
                         unlines
-                            [ "edge replay-map codomain contains non-TyVar target"
+                            [ "edge replay-map domain mismatch"
                             , "edge: " ++ show (EdgeId eid)
-                            , "source key: " ++ show sourceKey
-                            , "replay target: " ++ show replayTarget
+                            , "trace binder-source domain: " ++ show (IntSet.toList sourceDomain)
+                            , "replay-map domain: " ++ show (IntSet.toList replayDomain)
+                            , "missing source keys: " ++ show missingReplay
+                            , "extra source keys: " ++ show extraReplay
+                            ]
+            forM_ (IntMap.toList (etBinderReplayMap tr)) $ \(sourceKey, replayTarget) -> do
+                let inReplayDomain =
+                        IntSet.member (getNodeId replayTarget) replayBinderDomain
+                when (not inReplayDomain) $
+                    Left $
+                        InternalError $
+                            unlines
+                                [ "edge replay-map codomain target outside replay binder domain"
+                                , "edge: " ++ show (EdgeId eid)
+                                , "source key: " ++ show sourceKey
+                                , "replay target: " ++ show replayTarget
+                                ]
+                case NodeAccess.lookupNode finalConstraint replayTarget of
+                    Just TyVar{} -> pure ()
+                    _ ->
+                        Left $
+                            InternalError $
+                                unlines
+                                    [ "edge replay-map codomain contains non-TyVar target"
+                                    , "edge: " ++ show (EdgeId eid)
+                                    , "source key: " ++ show sourceKey
+                                    , "replay target: " ++ show replayTarget
+                                    ]
+        else do
+            when (not (IntMap.null (etBinderReplayMap tr))) $
+                Left $
+                    InternalError $
+                        unlines
+                            [ "edge replay-map expected empty under ReplayContractNone"
+                            , "edge: " ++ show (EdgeId eid)
+                            , "replay-map domain: " ++ show (IntSet.toList replayDomain)
+                            ]
+            when (not (null (etBinderArgs tr))) $
+                Left $
+                    InternalError $
+                        unlines
+                            [ "edge binder-args expected empty under ReplayContractNone"
+                            , "edge: " ++ show (EdgeId eid)
+                            , "binder-arg keys: " ++ show (IntSet.toList sourceDomain)
                             ]
   where
     replayBindersForTrace trace =
-        case Binding.orderedBinders canonical sourceConstraint (typeRef (etRoot trace)) of
-            Left _ -> []
-            Right binders -> map canonical binders
+        let rootC = canonical (etRoot trace)
+            orderedUnder nid =
+                case Binding.orderedBinders canonical sourceConstraint (typeRef (canonical nid)) of
+                    Left _ -> []
+                    Right binders -> map canonical binders
+            direct = orderedUnder rootC
+        in case NodeAccess.lookupNode sourceConstraint rootC of
+            Just TyVar{ tnBound = Just bnd } ->
+                let viaBound = orderedUnder bnd
+                in if null direct then viaBound else direct
+            _ -> direct
 
 -- | Rewrite constraint by removing TyExp nodes, applying expansion mapping and
 -- union-find canonicalization, collapsing duplicates (preferring structure over

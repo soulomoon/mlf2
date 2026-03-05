@@ -22,6 +22,7 @@ import MLF.Constraint.Presolution
     , PresolutionResult(..)
     , copiedNodes
     )
+import MLF.Constraint.Types.Witness (ReplayContract(..))
 import MLF.Frontend.Syntax (Expr(..))
 import MLF.Elab.Phi.IdentityBridge
 import SpecUtil (emptyConstraint, nodeMapFromList, runPipelineArtifactsDefault, PipelineArtifacts(..))
@@ -64,6 +65,7 @@ mkTrace binderArgs copyPairs =
         , etInterior = InteriorNodes IntSet.empty
         , etBinderReplayMap = mempty
         , etCopyMap = CopyMapping (IntMap.fromList [(k, NodeId v) | (k, v) <- copyPairs])
+        , etReplayContract = ReplayContractNone
         }
 
 spec :: Spec

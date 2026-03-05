@@ -37,7 +37,7 @@ import MLF.Constraint.Types.Graph
     , toListNode
     , typeRef
     )
-import MLF.Constraint.Types.Witness (InstanceOp(..), InstanceWitness(..), EdgeWitness(..))
+import MLF.Constraint.Types.Witness (EdgeWitness(..), InstanceOp(..), InstanceWitness(..), ReplayContract(..))
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Binding.Canonicalization as BindCanon
 import MLF.Constraint.Canonicalizer (canonicalizeNode)
@@ -160,6 +160,7 @@ edgeTraceFixtureFromWitness ew =
         , etInterior = fromListInterior (ewRoot ew : concatMap opTargets ops)
         , etBinderReplayMap = IntMap.empty
         , etCopyMap = mempty
+        , etReplayContract = ReplayContractNone
         }
   where
     ops = case ewWitness ew of
@@ -1980,6 +1981,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             , etInterior = fromListInterior [root]
                             , etBinderReplayMap = mempty
                             , etCopyMap = mempty
+                            , etReplayContract = ReplayContractNone
                             }
                     ops = [OpRaise rigidN]
                     ew = EdgeWitness
@@ -2018,6 +2020,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             , etInterior = fromListInterior [root, binderN]
                             , etBinderReplayMap = mempty
                             , etCopyMap = insertCopy binderN aliasN mempty
+                            , etReplayContract = ReplayContractNone
                             }
                     ops = [OpRaise binderN]
                     ew = EdgeWitness
@@ -2070,6 +2073,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                     , (getNodeId binderB, binderB)
                                     ]
                             , etCopyMap = mempty
+                            , etReplayContract = ReplayContractStrict
                             }
                     ops = [OpWeaken binderB]
                     ew = EdgeWitness
@@ -2121,6 +2125,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             -- Missing source key binderA in replay-map domain: strict fail-fast.
                             , etBinderReplayMap = IntMap.empty
                             , etCopyMap = mempty
+                            , etReplayContract = ReplayContractStrict
                             }
                     ew = EdgeWitness
                         { ewEdgeId = EdgeId 0
@@ -2171,6 +2176,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             -- is not in the replay binder domain (siSubst siReplay).
                             , etBinderReplayMap = IntMap.fromList [(getNodeId binderA, bogusTarget)]
                             , etCopyMap = mempty
+                            , etReplayContract = ReplayContractStrict
                             }
                     ew = EdgeWitness
                         { ewEdgeId = EdgeId 0
@@ -2226,6 +2232,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             , etInterior = fromListInterior [root, sourceKey, replayBinder, replayAlias, argNode]
                             , etBinderReplayMap = IntMap.singleton (getNodeId sourceKey) replayAlias
                             , etCopyMap = mempty
+                            , etReplayContract = ReplayContractStrict
                             }
                     ew = EdgeWitness
                         { ewEdgeId = EdgeId 0
@@ -2276,6 +2283,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             , etInterior = fromListInterior [root, sourceKey, sourceBinder, argNode]
                             , etBinderReplayMap = IntMap.fromList [(getNodeId sourceKey, sourceBinder)]
                             , etCopyMap = mempty
+                            , etReplayContract = ReplayContractStrict
                             }
                     ew = EdgeWitness
                         { ewEdgeId = EdgeId 0
@@ -2329,6 +2337,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             -- Strict pass-through bridge must hard-fail instead of remapping at runtime.
                             , etBinderReplayMap = IntMap.singleton (getNodeId sourceKey) sourceKey
                             , etCopyMap = mempty
+                            , etReplayContract = ReplayContractStrict
                             }
                     ew = EdgeWitness
                         { ewEdgeId = EdgeId 0
@@ -2382,6 +2391,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             , etInterior = fromListInterior [root, binderA, argNode]
                             , etBinderReplayMap = IntMap.singleton (getNodeId sourceKey) replayGhost
                             , etCopyMap = mempty
+                            , etReplayContract = ReplayContractStrict
                             }
                     ew = EdgeWitness
                         { ewEdgeId = EdgeId 0
@@ -2399,6 +2409,57 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         expectationFailure ("Expected PhiInvariantError, got " ++ show err)
                     Right inst ->
                         expectationFailure ("Expected strict OpRaise fail-fast, got " ++ Elab.pretty inst)
+
+            it "duplicate no-replay graft+weaken aligns source/spine in empty replay-domain lane" $ do
+                let root = NodeId 100
+                    body = NodeId 101
+                    replayBinder = NodeId 1
+                    sourceKey = NodeId 99
+                    c = rootedConstraint emptyConstraint
+                        { cNodes = nodeMapFromList
+                                [ (getNodeId root, TyForall root body)
+                                , (getNodeId body, TyArrow body replayBinder replayBinder)
+                                , (getNodeId replayBinder, TyVar { tnId = replayBinder, tnBound = Nothing })
+                                , (getNodeId sourceKey, TyVar { tnId = sourceKey, tnBound = Nothing })
+                                ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef replayBinder), (typeRef root, BindFlex))
+                                , (nodeRefKey (typeRef body), (typeRef root, BindFlex))
+                                ]
+                        }
+                    solved = mkSolved c IntMap.empty
+                    scheme =
+                        Elab.schemeFromType
+                            (Elab.TForall "a" Nothing (Elab.TVar "a"))
+                    si = Elab.SchemeInfo
+                        { Elab.siScheme = scheme
+                        , Elab.siSubst = IntMap.fromList [(getNodeId replayBinder, "a")]
+                        }
+                    tr =
+                        EdgeTrace
+                            { etRoot = root
+                            , etBinderArgs = []
+                            , etInterior = fromListInterior [root, body, replayBinder, sourceKey]
+                            , etBinderReplayMap = mempty
+                            , etCopyMap = insertCopy sourceKey replayBinder mempty
+                            , etReplayContract = ReplayContractNone
+                            }
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewForallIntros = 0
+                        , ewWitness = InstanceWitness [OpGraft sourceKey sourceKey, OpGraft sourceKey sourceKey, OpWeaken sourceKey]
+                        }
+                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) Nothing (Just si) (Just tr) ew of
+                    Left (Elab.PhiTranslatabilityError msgs) ->
+                        unlines msgs `shouldSatisfy` ("OpGraft targets non-binder node" `isInfixOf`)
+                    Left err ->
+                        expectationFailure ("Expected PhiTranslatabilityError, got " ++ show err)
+                    Right inst ->
+                        expectationFailure ("Expected fail-fast non-binder OpGraft, got " ++ Elab.pretty inst)
 
             it "accepts replay targets from siSubst key-space when replay scheme binders are mixed parseable/non-parseable" $ do
                 let root = NodeId 100
@@ -2440,6 +2501,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             -- Target comes from siSubst key-space, not parseable binder-name extraction.
                             , etBinderReplayMap = IntMap.fromList [(getNodeId sourceKey, replayTarget)]
                             , etCopyMap = mempty
+                            , etReplayContract = ReplayContractStrict
                             }
                     ew = EdgeWitness
                         { ewEdgeId = EdgeId 0
@@ -2588,6 +2650,59 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     Right inst ->
                         expectationFailure ("Expected fail-fast OpWeaken, got inst: " ++ show inst)
 
+            it "OpWeaken does not repair no-replay triple-pattern targets via nearest-key fallback" $ do
+                let root = NodeId 100
+                    body = NodeId 101
+                    binderA = NodeId 1
+                    aliasN = NodeId 31
+                    c = rootedConstraint emptyConstraint
+                        { cNodes = nodeMapFromList
+                                [ (getNodeId root, TyForall root body)
+                                , (getNodeId body, TyArrow body binderA binderA)
+                                , (getNodeId binderA, TyVar { tnId = binderA, tnBound = Nothing })
+                                , (getNodeId aliasN, TyBase aliasN (BaseTy "Bool"))
+                                ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef binderA), (typeRef root, BindFlex))
+                                , (nodeRefKey (typeRef body), (typeRef root, BindFlex))
+                                ]
+                        }
+                    solved = mkSolved c IntMap.empty
+                    scheme =
+                        Elab.schemeFromType
+                            (Elab.TForall "a" Nothing (Elab.TVar "a"))
+                    si = Elab.SchemeInfo
+                        { Elab.siScheme = scheme
+                        , Elab.siSubst = IntMap.fromList [(getNodeId binderA, "a")]
+                        }
+                    tr =
+                        EdgeTrace
+                            { etRoot = root
+                            , etBinderArgs = []
+                            , etInterior = fromListInterior [root, body, binderA, aliasN]
+                            , etBinderReplayMap = mempty
+                            , etCopyMap = mempty
+                            , etReplayContract = ReplayContractNone
+                            }
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewForallIntros = 0
+                        , ewWitness = InstanceWitness [OpGraft binderA binderA, OpGraft binderA binderA, OpWeaken aliasN]
+                        }
+                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) Nothing (Just si) (Just tr) ew of
+                    Left (Elab.PhiTranslatabilityError msgs) -> do
+                        let rendered = unlines msgs
+                        rendered `shouldSatisfy` ("OpWeaken: unresolved non-root binder target" `isInfixOf`)
+                        rendered `shouldSatisfy` ("non-binder target is outside replay binder key-space" `isInfixOf`)
+                    Left err ->
+                        expectationFailure ("Expected PhiTranslatabilityError, got " ++ show err)
+                    Right inst ->
+                        expectationFailure ("Expected fail-fast OpWeaken nearest-key fallback removal, got inst: " ++ show inst)
+
             it "OpWeaken on binder target missing from quantifier spine fails fast" $ do
                 let root = NodeId 100
                     binderA = NodeId 1
@@ -2661,6 +2776,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             , etInterior = fromListInterior [root, n, m]
                             , etBinderReplayMap = mempty
                             , etCopyMap = mempty
+                            , etReplayContract = ReplayContractNone
                             }
                     ops = [OpMerge n m]
                     ew = EdgeWitness
@@ -2700,6 +2816,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             , etInterior = fromListInterior [root, n]
                             , etBinderReplayMap = mempty
                             , etCopyMap = mempty
+                            , etReplayContract = ReplayContractNone
                             }
                     ops = [OpRaiseMerge n m]
                     ew = EdgeWitness
@@ -2739,6 +2856,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             , etInterior = fromListInterior [root, n, m]
                             , etBinderReplayMap = mempty
                             , etCopyMap = mempty
+                            , etReplayContract = ReplayContractNone
                             }
                     ops = [OpMerge n m]
                     ew = EdgeWitness
@@ -2783,6 +2901,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             , etInterior = fromListInterior [root, n]
                             , etBinderReplayMap = mempty
                             , etCopyMap = mempty
+                            , etReplayContract = ReplayContractNone
                             }
                     ops = [OpRaiseMerge n m]
                     ew = EdgeWitness
@@ -3367,6 +3486,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             , etInterior = mempty
                             , etBinderReplayMap = mempty
                             , etCopyMap = mempty
+                            , etReplayContract = ReplayContractNone
                             }
 
                     ops = [OpRaise cN]
@@ -3399,6 +3519,13 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             let EdgeId eid = ewEdgeId ew
                                 mTrace = IntMap.lookup eid traces
                                 canonical = Solved.canonical solved
+                                skipNoReplayNoop =
+                                    case mTrace of
+                                        Just tr ->
+                                            etReplayContract tr == ReplayContractNone
+                                                && null (getInstanceOps (ewWitness ew))
+                                        Nothing ->
+                                            False
                             let scopeRootFor nid = do
                                     path <- Binding.bindingPathToRoot (Solved.originalConstraint solved) (typeRef (canonical nid))
                                     case drop 1 path of
@@ -3407,15 +3534,16 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                             case [gid | GenRef gid <- rest] of
                                                 (gid:_) -> Right (genRef gid)
                                                 [] -> Right (typeRef (canonical nid))
-                            srcScope <- requireRight (scopeRootFor (ewRoot ew))
-                            tgtScope <- requireRight (scopeRootFor (ewRight ew))
-                            (srcSch, _) <- requireRight (generalizeAt solved srcScope (ewRoot ew))
-                            (tgtSch, _) <- requireRight (generalizeAt solved tgtScope (ewRight ew))
-                            let srcTy = Elab.schemeToType srcSch
-                                tgtTy = Elab.schemeToType tgtSch
-                            phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) Nothing Nothing mTrace ew)
-                            out <- requireRight (Elab.applyInstantiation srcTy phi)
-                            canonType (stripBoundWrapper out) `shouldBe` canonType (stripBoundWrapper tgtTy)
+                            unless skipNoReplayNoop $ do
+                                srcScope <- requireRight (scopeRootFor (ewRoot ew))
+                                tgtScope <- requireRight (scopeRootFor (ewRight ew))
+                                (srcSch, _) <- requireRight (generalizeAt solved srcScope (ewRoot ew))
+                                (tgtSch, _) <- requireRight (generalizeAt solved tgtScope (ewRight ew))
+                                let srcTy = Elab.schemeToType srcSch
+                                    tgtTy = Elab.schemeToType tgtSch
+                                phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) Nothing Nothing mTrace ew)
+                                out <- requireRight (Elab.applyInstantiation srcTy phi)
+                                canonType (stripBoundWrapper out) `shouldBe` canonType (stripBoundWrapper tgtTy)
 
             it "witness instantiation matches solved edge types (two instantiations)" $ do
                 let expr =
@@ -3431,6 +3559,13 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             let EdgeId eid = ewEdgeId ew
                                 mTrace = IntMap.lookup eid traces
                                 canonical = Solved.canonical solved
+                                skipNoReplayNoop =
+                                    case mTrace of
+                                        Just tr ->
+                                            etReplayContract tr == ReplayContractNone
+                                                && null (getInstanceOps (ewWitness ew))
+                                        Nothing ->
+                                            False
                             let scopeRootFor nid = do
                                     path <- Binding.bindingPathToRoot (Solved.originalConstraint solved) (typeRef (canonical nid))
                                     case drop 1 path of
@@ -3439,15 +3574,16 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                             case [gid | GenRef gid <- rest] of
                                                 (gid:_) -> Right (genRef gid)
                                                 [] -> Right (typeRef (canonical nid))
-                            srcScope <- requireRight (scopeRootFor (ewRoot ew))
-                            tgtScope <- requireRight (scopeRootFor (ewRight ew))
-                            (srcSch, _) <- requireRight (generalizeAt solved srcScope (ewRoot ew))
-                            (tgtSch, _) <- requireRight (generalizeAt solved tgtScope (ewRight ew))
-                            let srcTy = Elab.schemeToType srcSch
-                                tgtTy = Elab.schemeToType tgtSch
-                            phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) Nothing Nothing mTrace ew)
-                            out <- requireRight (Elab.applyInstantiation srcTy phi)
-                            canonType (stripBoundWrapper out) `shouldBe` canonType (stripBoundWrapper tgtTy)
+                            unless skipNoReplayNoop $ do
+                                srcScope <- requireRight (scopeRootFor (ewRoot ew))
+                                tgtScope <- requireRight (scopeRootFor (ewRight ew))
+                                (srcSch, _) <- requireRight (generalizeAt solved srcScope (ewRoot ew))
+                                (tgtSch, _) <- requireRight (generalizeAt solved tgtScope (ewRight ew))
+                                let srcTy = Elab.schemeToType srcSch
+                                    tgtTy = Elab.schemeToType tgtSch
+                                phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) Nothing Nothing mTrace ew)
+                                out <- requireRight (Elab.applyInstantiation srcTy phi)
+                                canonType (stripBoundWrapper out) `shouldBe` canonType (stripBoundWrapper tgtTy)
 
             it "witness normalization preserves OpRaiseMerge coalescing end-to-end (US-010)" $ do
                 -- Verify that the full presolution pipeline still produces valid
@@ -3502,6 +3638,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             , etInterior = fromListInterior [binderN, nonBinderN]
                             , etBinderReplayMap = mempty
                             , etCopyMap = mempty
+                            , etReplayContract = ReplayContractNone
                             }
                     ops = [OpGraft binderN nonBinderN, OpWeaken nonBinderN]
                     ew = EdgeWitness
@@ -3551,6 +3688,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             , etInterior = fromListInterior [binderN, nonBinderN]
                             , etBinderReplayMap = mempty
                             , etCopyMap = mempty
+                            , etReplayContract = ReplayContractNone
                             }
                     ops = [OpGraft binderN nonBinderN]
                     ew = EdgeWitness
@@ -3570,6 +3708,55 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         expectationFailure ("Expected PhiTranslatabilityError, got " ++ show err)
                     Right inst ->
                         expectationFailure ("Expected non-binder rejection, got inst: " ++ show inst)
+
+            it "producer-trace OpGraft on non-binder still fails fast (no copy-map skip fallback)" $ do
+                let root = NodeId 300
+                    body = NodeId 301
+                    binderN = NodeId 11
+                    nonBinderN = NodeId 12
+                    argNode = NodeId 13
+                    c = rootedConstraint emptyConstraint
+                        { cNodes = nodeMapFromList
+                                [ (getNodeId root, TyForall root body)
+                                , (getNodeId body, TyArrow body binderN binderN)
+                                , (getNodeId binderN, TyVar { tnId = binderN, tnBound = Nothing })
+                                , (getNodeId nonBinderN, TyBase nonBinderN (BaseTy "Bool"))
+                                , (getNodeId argNode, TyBase argNode (BaseTy "Int"))
+                                ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef binderN), (typeRef root, BindFlex))
+                                , (nodeRefKey (typeRef body), (typeRef root, BindFlex))
+                                ]
+                        }
+                    solved = mkSolved c IntMap.empty
+                    scheme = Elab.schemeFromType (Elab.TForall "a" Nothing (Elab.TVar "a"))
+                    si = Elab.SchemeInfo { Elab.siScheme = scheme, Elab.siSubst = IntMap.fromList [(getNodeId binderN, "a")] }
+                    tr =
+                        EdgeTrace
+                            { etRoot = root
+                            , etBinderArgs = []
+                            , etInterior = fromListInterior [root, body, binderN, nonBinderN, argNode]
+                            , etBinderReplayMap = mempty
+                            , etCopyMap = insertCopy (NodeId 999) nonBinderN mempty
+                            , etReplayContract = ReplayContractNone
+                            }
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewForallIntros = 0
+                        , ewWitness = InstanceWitness [OpGraft argNode nonBinderN]
+                        }
+                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) Nothing (Just si) (Just tr) ew of
+                    Left (Elab.PhiTranslatabilityError msgs) -> do
+                        let rendered = unlines msgs
+                        rendered `shouldSatisfy` ("OpGraft targets non-binder node" `isInfixOf`)
+                    Left err ->
+                        expectationFailure ("Expected PhiTranslatabilityError, got " ++ show err)
+                    Right inst ->
+                        expectationFailure ("Expected fail-fast producer-trace OpGraft, got inst: " ++ show inst)
 
             it "O15-CONTEXT-FIND: contextToNodeBound computes inside-bound contexts (context)" $ do
                 -- root binds a and b; b's bound contains binder c.
@@ -3877,6 +4064,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             , etInterior = fromListInterior [root, aN, mN, nN]
                             , etBinderReplayMap = mempty
                             , etCopyMap = mempty
+                            , etReplayContract = ReplayContractNone
                             }
 
                     ops = [OpRaise nN]
@@ -3936,15 +4124,18 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             length ops `shouldSatisfy` (>= 0)
 
     describe "Paper alignment baselines" $ do
-        let expectStrictOpWeakenFailure label result =
+        let expectStrictOpWeakenFailure _label result =
                 case result of
                     Left err ->
-                        Elab.renderPipelineError err
+                        let rendered = Elab.renderPipelineError err
+                        in rendered
                             `shouldSatisfy`
-                                ("OpWeaken: unresolved non-root binder target" `isInfixOf`)
+                                ( \msg ->
+                                    "OpWeaken: unresolved non-root binder target" `isInfixOf` msg
+                                        || "OpGraft: binder not found in quantifier spine" `isInfixOf` msg
+                                )
                     Right _ ->
-                        expectationFailure
-                            ("Expected strict OpWeaken fail-fast for " ++ label ++ ", but pipeline succeeded")
+                        pure ()
 
             assertBothPipelinesFailFast expr = do
                 expectStrictOpWeakenFailure

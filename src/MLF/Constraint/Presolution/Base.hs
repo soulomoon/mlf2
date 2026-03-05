@@ -58,6 +58,7 @@ import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.Canonicalize as Canonicalize
 import MLF.Constraint.Types hiding (lookupNode)
 import qualified MLF.Constraint.Types as Types
+import MLF.Constraint.Types.Witness (ReplayContract)
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Constraint.Traversal as Traversal
@@ -192,6 +193,7 @@ data EdgeTrace = EdgeTrace
     { etRoot :: NodeId
     , etBinderArgs :: [(NodeId, NodeId)] -- ^ (binder node, instantiation argument node)
     , etInterior :: InteriorNodes -- ^ Nodes in I(r) (exact, from the binding tree).
+    , etReplayContract :: ReplayContract -- ^ Producer-owned replay contract authority.
     , etBinderReplayMap :: IntMap NodeId -- ^ source binder key -> replay-domain binder node
     , etCopyMap :: CopyMapping -- ^ Provenance: original node -> copied/replaced node
     }

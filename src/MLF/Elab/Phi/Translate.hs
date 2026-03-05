@@ -38,12 +38,10 @@ module MLF.Elab.Phi.Translate (
 import Control.Applicative ((<|>))
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import qualified Data.Map.Strict as Map
-import Data.List (sortOn)
 import Data.Maybe (listToMaybe)
-import Text.Read (readMaybe)
 
 import MLF.Constraint.Types
+import MLF.Constraint.Types.Witness (ReplayContract(..), isStrictReplayContract)
 import MLF.Elab.Types
 import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Constraint.BindingUtil (bindingPathToRootLocal)
@@ -59,11 +57,6 @@ import qualified MLF.Binding.Tree as Binding
 import MLF.Binding.Tree (checkBindingTree, checkNoGenFallback, checkSchemeClosureUnder)
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Elab.Phi.Env (PhiM, askCanonical)
-import MLF.Elab.Phi.IdentityBridge
-    ( mkIdentityBridge
-    , sourceKeysForNode
-    , traceOrderRank
-    )
 import MLF.Elab.Phi.Omega (OmegaContext(..), phiWithSchemeOmega)
 import MLF.Util.Trace (TraceConfig, traceGeneralize)
 
@@ -72,162 +65,6 @@ canonicalNodeM :: NodeId -> PhiM NodeId
 canonicalNodeM nid = do
     canonicalNode <- askCanonical
     pure (canonicalNode nid)
-
--- | Re-key scheme substitutions into the EdgeTrace source-ID domain.
---
--- Source IDs in `etBinderArgs` are authoritative for Phi binder membership.
--- We therefore map each substitution key to the best source-ID candidate using:
---   1) binder IDs in trace order (preferred),
---   2) reverse lookup in `etCopyMap`,
---   3) original key as deterministic fallback.
-remapSchemeInfoByTrace :: PresolutionView -> EdgeTrace -> SchemeInfo -> SchemeInfo
-remapSchemeInfoByTrace presolutionView tr si =
-    let traceCopyMap = getCopyMapping (etCopyMap tr)
-        binderOrder = map fst (etBinderArgs tr)
-        schemeNames = case siScheme si of
-            Forall binds _ -> map fst binds
-        -- Build bridge for ranking/dedup
-        ib = mkIdentityBridge presolutionView (Just tr) traceCopyMap
-        traceBindersInOrder =
-            let sourceSeeds =
-                    if null binderOrder
-                        then map NodeId (IntMap.keys traceCopyMap)
-                        else binderOrder
-                (_, rev) =
-                    foldl'
-                        (\(seen, acc) binder ->
-                            let k = getNodeId binder
-                            in if IntSet.member k seen
-                                then (seen, acc)
-                                else (IntSet.insert k seen, binder : acc)
-                        )
-                        (IntSet.empty, [])
-                        sourceSeeds
-            in reverse rev
-        -- Name-based preferred candidates (higher-level, stays in Translate)
-        traceBinderByName =
-            Map.fromList
-                [ (name, binder)
-                | (name, binder) <- zip schemeNames traceBindersInOrder
-                ]
-        -- Use bridge's sourceKeysForNode for candidate ranking
-        rankedCandidateKeys nid =
-            map NodeId (sourceKeysForNode ib nid)
-        remapExisting =
-            fst $
-                foldl'
-                    (\(acc, usedKeys) (k, name) ->
-                        let preferredByName = Map.lookup name traceBinderByName
-                            candidates = maybe id (:) preferredByName
-                                            (rankedCandidateKeys (NodeId k))
-                            pickSource =
-                                case filter (\n -> not (IntSet.member (getNodeId n) usedKeys)) candidates of
-                                    src : _ -> src
-                                    [] ->
-                                        case candidates of
-                                            src : _ -> src
-                                            [] -> NodeId k
-                            srcKey = getNodeId pickSource
-                        in ( IntMap.insert srcKey name acc
-                           , IntSet.insert srcKey usedKeys
-                           )
-                    )
-                    (IntMap.empty, IntSet.empty)
-                    (IntMap.toList (siSubst si))
-        synthFromScheme =
-            let (_, pairsRev) =
-                    foldl'
-                        (\(usedKeys, acc) (name, binder) ->
-                            let binderKey = getNodeId binder
-                            in if IntSet.member binderKey usedKeys
-                                then (usedKeys, acc)
-                                else (IntSet.insert binderKey usedKeys, (binderKey, name) : acc)
-                        )
-                        (IntSet.empty, [])
-                        (zip schemeNames traceBindersInOrder)
-            in IntMap.fromList (reverse pairsRev)
-        subst' =
-            if IntMap.null (siSubst si)
-                then synthFromScheme
-                else remapExisting
-    in si { siSubst = subst' }
-
--- | Hydrate substitutions using traced binder order when remapped substitutions
--- under-cover scheme binders. This preserves source-ID provenance instead of
--- dropping scheme info on arity mismatch.
-hydrateSchemeInfoByTrace :: PresolutionView -> EdgeTrace -> SchemeInfo -> SchemeInfo
-hydrateSchemeInfoByTrace presolutionView tr si =
-    let schemeNames =
-            case siScheme si of
-                Forall binds _ -> map fst binds
-        schemeNameSet =
-            Map.fromList [(name, ()) | name <- schemeNames]
-        traceCopyMap = getCopyMapping (etCopyMap tr)
-        -- Build bridge for ranking/dedup
-        ib = mkIdentityBridge presolutionView (Just tr) traceCopyMap
-        traceBinderKeys =
-            let (_, rev) =
-                    foldl'
-                        (\(seen, acc) (binder, _arg) ->
-                            let key = getNodeId binder
-                            in if IntSet.member key seen
-                                then (seen, acc)
-                                else (IntSet.insert key seen, key : acc)
-                        )
-                        (IntSet.empty, [])
-                        (etBinderArgs tr)
-            in reverse rev
-        -- Use bridge's traceOrderRank for key ranking
-        keyRank key = traceOrderRank ib key
-        traceByName = Map.fromList (zip schemeNames traceBinderKeys)
-        chooseBetterKey new old =
-            if keyRank new < keyRank old
-                then new
-                else old
-        existingByName =
-            foldl'
-                (\acc (key, name) ->
-                    if Map.member name schemeNameSet
-                        then Map.insertWith chooseBetterKey name key acc
-                        else acc
-                )
-                Map.empty
-                (IntMap.toList (siSubst si))
-        uniqueKeys =
-            reverse
-                . snd
-                . foldl'
-                    (\(seen, acc) key ->
-                        if IntSet.member key seen
-                            then (seen, acc)
-                            else (IntSet.insert key seen, key : acc)
-                    )
-                    (IntSet.empty, [])
-        (pairsRev, _) =
-            foldl'
-                (\(acc, usedKeys) name ->
-                    let candidates =
-                            sortOn keyRank $
-                                uniqueKeys
-                                    ( maybe [] pure (Map.lookup name existingByName)
-                                    ++ maybe [] pure (Map.lookup name traceByName)
-                                    )
-                        mbPick =
-                            listToMaybe
-                                [ key
-                                | key <- candidates
-                                , not (IntSet.member key usedKeys)
-                                ]
-                    in case mbPick of
-                        Nothing -> (acc, usedKeys)
-                        Just key ->
-                            ( (key, name) : acc
-                            , IntSet.insert key usedKeys
-                            )
-                )
-                ([], IntSet.empty)
-                schemeNames
-    in si { siSubst = IntMap.fromList (reverse pairsRev) }
 
 -- | Translate a recorded per-edge graph witness to an xMLF instantiation.
 type GeneralizeAtWith =
@@ -341,18 +178,10 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith presolutionView mbGaParents mSc
                 si0 <- schemeInfoForRoot (ewRoot ew)
                 pure si0
             Just si -> pure si
-    let siSource =
-            case mTrace of
-                Just tr -> remapAndHydrateSchemeInfo tr siReplay
-                Nothing -> siReplay
-    case debugPhi
-        ("phi scheme source-subst edge=" ++ show (ewEdgeId ew)
-            ++ " subst=" ++ show (siSubst siSource)
-        )
-        () of
-        () -> pure ()
+    let replayContract =
+            maybe ReplayContractNone etReplayContract mTrace
     (traceBinderSourcesRaw, traceBinderReplayMapRaw, traceBinderMapDomainRaw) <-
-        computeTraceBinderReplayBridge mTrace siReplay
+        computeTraceBinderReplayBridge mTrace replayContract siReplay
     let traceBinderSources =
             debugPhi
                 ("phi traceBinderSources=" ++ show (IntSet.toList traceBinderSourcesRaw))
@@ -365,38 +194,10 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith presolutionView mbGaParents mSc
             debugPhi
                 ("phi traceBinderMapDomain=" ++ show (IntSet.toList traceBinderMapDomainRaw))
                 traceBinderMapDomainRaw
-        replayBinderKeySet =
-            IntSet.fromList (IntMap.keys (siSubst siReplay))
-        targetInReplayBinderSpace target =
-            IntSet.member (getNodeId target) replayBinderKeySet
-        hasOutOfDomainGraftTarget =
-            any
-                (\case
-                    OpGraft _ target ->
-                        not (targetInReplayBinderSpace target)
-                    _ ->
-                        False
-                )
-                ops
-        isDuplicateGraftWeaken =
-            case ops of
-                [OpGraft _ target0, OpGraft _ target1, OpWeaken _] ->
-                    target0 == target1
-                _ ->
-                    False
-        useSourceSchemeForOmega =
-            IntSet.null traceBinderSourcesRaw
-                && IntMap.null traceBinderReplayMapRaw
-                && hasOutOfDomainGraftTarget
-                && isDuplicateGraftWeaken
-        siOmega =
-            if useSourceSchemeForOmega
-                then siSource
-                else siReplay
     phiWithSchemeOmega
-        (omegaCtx (Just siOmega) traceBinderSources traceBinderReplayMap traceBinderMapDomain)
+        (omegaCtx (Just siReplay) traceBinderSources traceBinderReplayMap traceBinderMapDomain replayContract)
         namedSet
-        siOmega
+        siReplay
         introCount
         ops
   where
@@ -408,8 +209,9 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith presolutionView mbGaParents mSc
         -> IntSet.IntSet
         -> IntMap.IntMap NodeId
         -> IntSet.IntSet
+        -> ReplayContract
         -> OmegaContext
-    omegaCtx mSchemeInfoCtx traceBinderSources traceBinderReplayMap traceBinderMapDomain =
+    omegaCtx mSchemeInfoCtx traceBinderSources traceBinderReplayMap traceBinderMapDomain replayContractCtx =
         OmegaContext
             { ocTraceConfig = traceCfg
             , ocPresolutionView = presolutionView
@@ -422,6 +224,7 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith presolutionView mbGaParents mSc
             , ocTraceBinderSources = traceBinderSources
             , ocTraceBinderReplayMap = traceBinderReplayMap
             , ocTraceBinderMapDomain = traceBinderMapDomain
+            , ocReplayContract = replayContractCtx
             , ocEdgeRoot = ewRoot ew
             , ocEdgeLeft = ewLeft ew
             , ocEdgeRight = ewRight ew
@@ -463,18 +266,12 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith presolutionView mbGaParents mSc
         -> Either ElabError ElabType
     reifyTypeWithNamedSetNoFallbackAt = reifyTypeWithNamedSetNoFallbackFromView presolutionView
 
-    remapSchemeInfo :: EdgeTrace -> SchemeInfo -> SchemeInfo
-    remapSchemeInfo tr si = remapSchemeInfoByTrace presolutionView tr si
-
-    remapAndHydrateSchemeInfo :: EdgeTrace -> SchemeInfo -> SchemeInfo
-    remapAndHydrateSchemeInfo tr =
-        hydrateSchemeInfoByTrace presolutionView tr . remapSchemeInfo tr
-
     computeTraceBinderReplayBridge
         :: Maybe EdgeTrace
+        -> ReplayContract
         -> SchemeInfo
         -> Either ElabError (IntSet.IntSet, IntMap.IntMap NodeId, IntSet.IntSet)
-    computeTraceBinderReplayBridge mbTrace siReplay =
+    computeTraceBinderReplayBridge mbTrace replayContract siReplay =
         case mbTrace of
             Nothing -> Left (MissingEdgeTrace (ewEdgeId ew))
             Just tr ->
@@ -494,73 +291,73 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith presolutionView mbGaParents mSc
                     traceBinderSourceSet = IntSet.fromList traceBinderSourceKeys
                     replayMapRaw = etBinderReplayMap tr
                     replayMapDomain = IntSet.fromList (IntMap.keys replayMapRaw)
-                    parseBinderId :: String -> Maybe NodeId
-                    parseBinderId ('t':rest) = NodeId <$> readMaybe rest
-                    parseBinderId _ = Nothing
                     replayBinderDomainRaw =
-                        let fromScheme =
-                                case siScheme siReplay of
-                                    Forall binds _ ->
-                                        IntSet.fromList
-                                            [ getNodeId n
-                                            | (name, _mbBound) <- binds
-                                            , Just n <- [parseBinderId name]
-                                            ]
-                            fromSubst =
-                                IntSet.fromList (IntMap.keys (siSubst siReplay))
-                        in IntSet.union fromScheme fromSubst
+                        IntSet.fromList (IntMap.keys (siSubst siReplay))
                     targetInReplayDomainRaw replayTarget =
                         IntSet.member (getNodeId replayTarget) replayBinderDomainRaw
                     missingSources =
                         IntSet.toList (IntSet.difference traceBinderSourceSet replayMapDomain)
                     extraSources =
                         IntSet.toList (IntSet.difference replayMapDomain traceBinderSourceSet)
-                in
-                    if not (null missingSources) || not (null extraSources)
-                        then
-                            Left $
-                                PhiInvariantError $
-                                    unlines
-                                        [ "trace binder replay-map domain mismatch"
-                                        , "edge: " ++ show (ewEdgeId ew)
-                                        , "trace binder sources: " ++ show traceBinderSourceKeys
-                                        , "replay-map domain: " ++ show (IntMap.keys replayMapRaw)
-                                        , "missing source keys: " ++ show missingSources
-                                        , "extra source keys: " ++ show extraSources
-                                        ]
-                    else
-                        let validateTarget sourceKey = do
-                                replayTargetRaw <-
-                                    case IntMap.lookup sourceKey replayMapRaw of
-                                        Just replayTarget -> Right replayTarget
-                                        Nothing ->
+                in if isStrictReplayContract replayContract
+                    then
+                        if not (null missingSources) || not (null extraSources)
+                            then
+                                Left $
+                                    PhiInvariantError $
+                                        unlines
+                                            [ "trace binder replay-map domain mismatch"
+                                            , "edge: " ++ show (ewEdgeId ew)
+                                            , "trace binder sources: " ++ show traceBinderSourceKeys
+                                            , "replay-map domain: " ++ show (IntMap.keys replayMapRaw)
+                                            , "missing source keys: " ++ show missingSources
+                                            , "extra source keys: " ++ show extraSources
+                                            ]
+                        else
+                            let validateTarget sourceKey = do
+                                    replayTargetRaw <-
+                                        case IntMap.lookup sourceKey replayMapRaw of
+                                            Just replayTarget -> Right replayTarget
+                                            Nothing ->
+                                                Left $
+                                                    PhiInvariantError $
+                                                        unlines
+                                                            [ "trace binder replay-map missing source key after domain validation"
+                                                            , "edge: " ++ show (ewEdgeId ew)
+                                                            , "source key: " ++ show sourceKey
+                                                            ]
+                                    if targetInReplayDomainRaw replayTargetRaw
+                                        then pure (sourceKey, replayTargetRaw)
+                                        else
                                             Left $
                                                 PhiInvariantError $
                                                     unlines
-                                                        [ "trace binder replay-map missing source key after domain validation"
+                                                        [ "replay-map target outside replay binder domain"
                                                         , "edge: " ++ show (ewEdgeId ew)
                                                         , "source key: " ++ show sourceKey
+                                                        , "replay target: " ++ show replayTargetRaw
+                                                        , "replay binder domain: " ++ show (IntSet.toList replayBinderDomainRaw)
                                                         ]
-                                if targetInReplayDomainRaw replayTargetRaw
-                                    then pure (sourceKey, replayTargetRaw)
-                                    else
-                                        Left $
-                                            PhiInvariantError $
-                                                unlines
-                                                    [ "replay-map target outside replay binder domain"
-                                                    , "edge: " ++ show (ewEdgeId ew)
-                                                    , "source key: " ++ show sourceKey
-                                                    , "replay target: " ++ show replayTargetRaw
-                                                    , "replay binder domain: " ++ show (IntSet.toList replayBinderDomainRaw)
-                                                    ]
-                        in case mapM validateTarget traceBinderSourceKeys of
-                            Left err -> Left err
-                            Right replayEntries ->
-                                Right
-                                    ( traceBinderSourceSet
-                                    , IntMap.fromList replayEntries
-                                    , replayMapDomain
-                                    )
+                            in case mapM validateTarget traceBinderSourceKeys of
+                                Left err -> Left err
+                                Right replayEntries ->
+                                    Right
+                                        ( traceBinderSourceSet
+                                        , IntMap.fromList replayEntries
+                                        , replayMapDomain
+                                        )
+                    else
+                        if IntMap.null replayMapRaw && null traceBinderSourceKeys
+                            then Right (IntSet.empty, IntMap.empty, IntSet.empty)
+                            else
+                                Left $
+                                    PhiInvariantError $
+                                        unlines
+                                            [ "trace replay artifacts expected empty under ReplayContractNone"
+                                            , "edge: " ++ show (ewEdgeId ew)
+                                            , "trace binder sources: " ++ show traceBinderSourceKeys
+                                            , "replay-map domain: " ++ show (IntMap.keys replayMapRaw)
+                                            ]
 
     traceBinderArity :: EdgeTrace -> Int
     traceBinderArity tr =

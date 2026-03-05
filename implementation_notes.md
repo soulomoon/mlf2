@@ -2,6 +2,24 @@
 
 ## Thesis Alignment (Phase A–E)
 
+### 2026-03-05 Row6 orchestrated execution (fresh round re-run) terminal status
+- Executed
+  `/Volumes/src/mlf4/docs/plans/2026-03-05-orchestrated-execution-improving-loop-agent-prompt-codex-subagents-fresh-round-1.md`
+  against task tracker
+  `/Volumes/src/mlf4/tasks/todo/2026-03-05-tmt-improving-loop-orchestrator-fresh/`.
+- Round-1 target was row6 (`Replay-map producer normalization`), with strict
+  role-separated gates across six attempts.
+- Terminal outcome for this run: attempt-limit exhaustion (`MAXIMUMRETRY`).
+- Final attempt baseline regressed system health:
+  - `cabal build all && cabal test` -> FAIL (`126 failures`), dominated by
+    `WitnessNormalizationError ReplayMapIncomplete`.
+  - Prior required sanity slices now unstable in full baseline:
+    `Phase 4 thesis-exact unification closure`,
+    `checked-authoritative`, `Dual-path verification`.
+- Follow-up direction:
+  - treat replay contract redesign as cross-phase work (producer + consumer),
+    then recover baseline green before re-attempting row6 closeout.
+
 ### 2026-03-05 Task 47 row3 strict owner-boundary scheduling closeout (agent-team execution)
 - Closed the remaining row3 strict gap around owner-boundary delayed-weaken
   scheduling in presolution.

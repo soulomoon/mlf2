@@ -20,7 +20,11 @@ import Data.Maybe (listToMaybe)
 
 import MLF.Constraint.Types.Graph (BindFlag(..), Constraint(..), TyNode(..))
 import MLF.Constraint.Types.Graph (NodeId(..), NodeRef(..), getNodeId, nodeRefFromKey, typeRef)
-import MLF.Constraint.Types.Witness (InstanceOp(..))
+import MLF.Constraint.Types.Witness
+    ( InstanceOp(..)
+    , ReplayContract(..)
+    , isStrictReplayContract
+    )
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Util.Order (OrderKey, compareOrderKey)
@@ -35,6 +39,7 @@ data OmegaNormalizeEnv = OmegaNormalizeEnv
     , constraint :: Constraint
     , binderArgs :: IntMap.IntMap NodeId
     , binderReplayMap :: IntMap.IntMap NodeId
+    , replayContract :: ReplayContract
     , replayDomainBinders :: [NodeId]
     , isAnnotationEdge :: Bool
     }
@@ -58,6 +63,8 @@ data OmegaNormalizeError
     | ReplayMapTargetOutsideReplayDomain NodeId NodeId
     | ReplayMapNonTyVarTarget NodeId NodeId
     | ReplayMapNonInjective NodeId NodeId NodeId
+    | ReplayMapExpectedEmpty [NodeId]
+    | ReplayMapRequiredForRaiseFamily InstanceOp
     | StandaloneGraftRemaining NodeId
     deriving (Eq, Show)
 
@@ -88,27 +95,42 @@ validateNormalizedWitness env ops = do
             replayMap = binderReplayMap env
             replayDomain = IntSet.fromList (IntMap.keys replayMap)
             missingSources = IntSet.toList (IntSet.difference sourceDomain replayDomain)
-        if null missingSources
-            then Right ()
-            else Left (ReplayMapIncomplete (map NodeId missingSources))
-        mapM_ checkReplayTarget (IntMap.toList replayMap)
-        case duplicateReplayTarget replayMap of
-            Nothing -> Right ()
-            Just (sourceA, sourceB, target) ->
-                Left (ReplayMapNonInjective sourceA sourceB target)
+            strictContract = isStrictReplayContract (replayContract env)
+        if strictContract
+            then do
+                if null missingSources
+                    then Right ()
+                    else Left (ReplayMapIncomplete (map NodeId missingSources))
+                mapM_ checkReplayTargetStrict (IntMap.toList replayMap)
+                case duplicateReplayTarget replayMap of
+                    Nothing -> Right ()
+                    Just (sourceA, sourceB, target) ->
+                        Left (ReplayMapNonInjective sourceA sourceB target)
+            else
+                if IntMap.null replayMap
+                    then Right ()
+                    else Left (ReplayMapExpectedEmpty (map NodeId (IntMap.keys replayMap)))
 
-    checkReplayTarget (sourceKey, replayTargetRaw) =
-        let replayTarget = canon replayTargetRaw
-        in if IntSet.notMember (getNodeId replayTarget) replayBinderDomain
-            then Left (ReplayMapTargetOutsideReplayDomain (NodeId sourceKey) replayTarget)
-            else if isLiveTyVar replayTarget
+    checkReplayTargetStrict (sourceKey, replayTargetRaw) =
+        let inReplayDomain =
+                IntSet.member (getNodeId replayTargetRaw) replayBinderDomain
+        in if not inReplayDomain
+            then Left (ReplayMapTargetOutsideReplayDomain (NodeId sourceKey) replayTargetRaw)
+            else if isLiveTyVar replayTargetRaw
                 then Right ()
-                else Left (ReplayMapNonTyVarTarget (NodeId sourceKey) replayTarget)
+                else Left (ReplayMapNonTyVarTarget (NodeId sourceKey) replayTargetRaw)
 
     replayBindersForRoot =
-        case Binding.orderedBinders canon (constraint env) (typeRef rootC) of
-            Left _ -> []
-            Right binders -> map canon binders
+        let orderedUnder nid =
+                case Binding.orderedBinders canon (constraint env) (typeRef (canon nid)) of
+                    Left _ -> []
+                    Right binders -> map canon binders
+            direct = orderedUnder rootC
+        in case NodeAccess.lookupNode (constraint env) rootC of
+            Just TyVar{ tnBound = Just bnd } ->
+                let viaBound = orderedUnder bnd
+                in if null direct then viaBound else direct
+            _ -> direct
 
     replayBinderDomain =
         IntSet.fromList
@@ -117,10 +139,10 @@ validateNormalizedWitness env ops = do
             ]
 
     duplicateReplayTarget replayMap =
-        let step (seen, dup) (sourceKey, replayTargetRaw)
-                | Just _ <- dup = (seen, dup)
+        let step (seen, dupFound) (sourceKey, replayTargetRaw)
+                | Just _ <- dupFound = (seen, dupFound)
                 | otherwise =
-                    let replayKey = getNodeId (canon replayTargetRaw)
+                    let replayKey = getNodeId replayTargetRaw
                     in case IntMap.lookup replayKey seen of
                         Nothing ->
                             (IntMap.insert replayKey (NodeId sourceKey) seen, Nothing)

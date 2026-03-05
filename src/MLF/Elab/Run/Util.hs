@@ -53,6 +53,7 @@ canonicalizeTrace canon tr =
         { etRoot = canonNode (etRoot tr)
         , etBinderArgs = etBinderArgs tr
         , etInterior = etInterior tr
+        , etReplayContract = etReplayContract tr
         , etBinderReplayMap = etBinderReplayMap tr
         , etCopyMap = etCopyMap tr
         }
