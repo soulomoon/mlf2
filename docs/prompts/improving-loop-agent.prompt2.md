@@ -22,6 +22,14 @@ Recommended agent structure (strict responsibilities):
 - QA: independent execution of validation commands and test outcomes.
 - Integrator: performs git commit/merge steps only after all required gates pass.
 
+Run initialization (required before Round 1):
+- Create a run folder under `tasks/todo/YYYY-MM-DD-tmt-improving-loop-orchestrator-fresh-round-2/`.
+- Create `task_plan.md`, `findings.md`, `progress.md`, and `orchestrator-log.jsonl` in that run folder.
+- Record baseline inputs with commit hash and timestamp:
+  - `docs/notes/2026-02-27-transformation-mechanism-table.md`
+  - `papers/these-finale-english.txt`
+  - `docs/prompts/improving-loop-agent.prompt2.md`
+
 Transformation mechanisms to check in this exact order:
 1. Elaboration input
 2. Result-type context wiring
@@ -104,22 +112,21 @@ For `round = 1..10`:
 
    6.2 Review gate (Reviewer):
    - Gate question: `is the implementation correct and safe relative to the plan?`
-   - Output exactly `YES` or `NO`.
+   - Output exactly `YES` or `NO` and the reason if `NO`.
    - If `NO`, list blocking findings.
 
    6.3 QA gate (QA):
    - Run validation commands, including:
      - `cabal build all && cabal test`
    - Gate question: `did required validation pass?`
-   - Output exactly `YES` or `NO`.
+   - Output exactly `YES` or `NO` and the reason if `NO`.
    - If `NO`, report failing command/tests.
 
    6.4 Thesis gate (Verifier):
    - Re-check `target_mechanism` after implementation.
    - Refresh the corresponding row in `docs/notes/2026-02-27-transformation-mechanism-table.md` before returning the gate.
    - Also run a regression sanity check on previously-`YES` earlier mechanisms in order, refreshing those rows too if the reassessment changes.
-   - Output exactly `YES` or `NO`.
-
+   - Output exactly `YES` or `NO` AND the reason if `NO`.
    6.5 Attempt decision:
    - If Review = `YES` and QA = `YES` and Thesis = `YES`:
      - Integrator may commit with a clear message.
@@ -148,6 +155,7 @@ For `round = 1..10`:
 7. Attempt-limit gate:
    - If attempt 10 ends without passing step 6.5 success conditions, report:
      - `MAXIMUMRETRY: reached maximum implementation attempts (10).`
+     - `FINAL STATUS: MAXIMUMRETRY`
    - Stop.
 
 8. Blocked mode:
@@ -159,12 +167,16 @@ For `round = 1..10`:
      - QA must still run baseline validation
      - Verifier must restate why the thesis gate remains `NO`
 
-If round 10 finishes without `COMPLETED`, report:
-- `FAILED: stopped after 10 planning rounds without completion.`
+9. Round-limit gate:
+   - If round 10 finishes without `COMPLETED`, report:
+     - `FAILED: stopped after 10 planning rounds without completion.`
+     - `FINAL STATUS: FAILED`
+   - Stop.
 
 Execution/output requirements:
-- Append one machine-checkable JSONL event record per event to `orchestrator-log.jsonl`.
-- Each record should capture:
+- `orchestrator-log.jsonl` is the single authoritative orchestrator event log.
+- Write one JSON object per line.
+- Each gate/event record must include:
   - `event_type`
   - round number
   - selected mechanism
@@ -173,6 +185,8 @@ Execution/output requirements:
   - gate decisions
   - short reason for each `NO`
 - Keep human-readable narrative summaries in `findings.md` and `progress.md`, not in a second canonical orchestrator markdown log.
-- Every gate value must be exactly `YES` or `NO`.
-- Print exactly one final status line:
-  - `FINAL STATUS:` followed by one of `COMPLETED`, `FAILED`, or `MAXIMUMRETRY`.
+- Every gate request must be idempotent and include enough context to be retried verbatim.
+- Print exactly one final status line in the entire run:
+  - `FINAL STATUS: COMPLETED`
+  - `FINAL STATUS: FAILED`
+  - `FINAL STATUS: MAXIMUMRETRY`
