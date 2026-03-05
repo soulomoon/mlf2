@@ -16,3 +16,9 @@
 - Next: independent Review/QA/Verifier gates for Attempt 2.
 - 2026-03-05T10:36:46Z Attempt 2 gates settled: Review=YES, QA=YES (after corrected static-check semantics), Thesis=YES.
 - Round 1 target mechanism closed per gate contract; next step is Integrator commit and Round 2 sweep.
+- 2026-03-05T10:40:10Z Round 2 full sweep completed after Round 1 commit; row4 now YES.
+- First NO in Round 2 is mechanism 5: Graph operation execution (Graft/Merge/Weaken/Raise).
+- Next: PlannerRoundPlan for mechanism 5, then Attempt loop.
+- 2026-03-05T10:42:03Z Planner produced Round 2 row5 plan; scope is a broad runtime unification refactor with explicit cross-phase abort risks.
+- 2026-03-05T10:47:54Z Round 2 Attempt 1 gates: Review=YES, QA=YES, Thesis=YES.
+- Round 2 closes successfully at Attempt 1; next step is Integrator commit and Round 3 full sweep.

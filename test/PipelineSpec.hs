@@ -274,6 +274,14 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 ] $ \marker ->
                     interpSrc `shouldSatisfy` (not . isInfixOf marker)
 
+        it "row5 graph-op execution thesis-exact guard: edge unification uses single omega entrypoint" $ do
+            unifySrc <- readFile "src/MLF/Constraint/Presolution/EdgeProcessing/Unify.hs"
+            edgeUnifySrc <- readFile "src/MLF/Constraint/Presolution/EdgeUnify.hs"
+            unifySrc `shouldSatisfy` (not . isInfixOf "OmegaExec.executeOmegaBaseOpsPre")
+            unifySrc `shouldSatisfy` (not . isInfixOf "OmegaExec.executeOmegaBaseOpsPost")
+            unifySrc `shouldSatisfy` isInfixOf "executeEdgeLocalOmegaOps omegaEnv baseOps"
+            edgeUnifySrc `shouldSatisfy` isInfixOf "executeEdgeLocalOmegaOps omegaEnv baseOps action = do"
+
         it "chi-first guard: internals use shared ChiQuery facade" $ do
             elabSrc <- readFile "src/MLF/Elab/Elaborate.hs"
             rtViewSrc <- readFile "src/MLF/Elab/Run/ResultType/View.hs"

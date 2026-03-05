@@ -120,3 +120,49 @@ Step 5.5 decision:
 - Success conditions met (`Review=YES` and `QA=YES` and `Thesis=YES`).
 - Integrator can commit on non-master branch/PR flow.
 - Round 1 result: CONTINUE to next planning round.
+
+## Round 2 Verifier Full Sweep
+
+Ordered gates (YES/NO):
+1. Elaboration input -> YES
+2. Result-type context wiring -> YES
+3. Ordering of transformations -> YES
+4. Per-edge propagation transform -> YES
+5. Graph operation execution (Graft/Merge/Weaken/Raise) -> NO
+6. Replay-map producer normalization (upfront strict contract) -> NO
+7. Replay-map consumer bridge in Phi -> NO
+8. Translatability normalization -> NO
+9. Canonicalization source used by Phi -> NO
+10. Identity reconciliation mechanism -> NO
+11. Non-root weaken/raise binder resolution -> NO
+12. Graph mutation during solve/presolution -> NO
+13. Dual-path verification mechanism -> NO
+14. Campaign classification status -> YES
+
+Target mechanism selected (first NO):
+- Graph operation execution (Graft/Merge/Weaken/Raise)
+
+Target gap summary (verifier):
+- Runtime remains split across staged machinery (`OmegaExec`, delayed weaken scheduling, witness normalization/validation) rather than an absolutely thesis-direct single mechanism.
+
+## Round 2 Planner Output (Target: row5)
+
+PlannerRoundPlan summary:
+- target_mechanism: Graph operation execution (Graft/Merge/Weaken/Raise)
+- root-cause framing: runtime semantics split across edge-unify/OmegaExec delayed scheduling and witness normalization stages.
+- proposed scope: large multi-module cutover across presolution edge execution, delayed-weaken scheduling, and witness normalization pipeline.
+- explicit cross-phase abort risks: potential need to touch Phi semantics or `EdgeWitness`/`InstanceOp` contracts.
+
+Execution note:
+- Plan scope is materially larger than Round 1 row4 changes and likely to trigger cross-phase redesign abort criteria.
+
+## Round 2 Attempt 1 Outcome
+
+Gate decisions:
+- Review gate: YES
+- QA gate: YES
+- Thesis gate: YES
+
+Decision:
+- Round 2 success conditions met at Attempt 1.
+- Integrator is authorized to commit and advance to Round 3.
