@@ -32,13 +32,14 @@ Execute an autonomous improving loop against the Transformation Mechanism Table 
 | 2. Round-based planner sweep (agent team) | complete | Round 1 stopped at mechanism 3 (`Ordering of transformations`) |
 | 3. Planner artifact generation (agent team) | complete | Concrete plan + implementer prompt generated |
 | 4. Implementer attempts (agent team) | complete | Attempt 1 completed with integrated team edits |
-| 5. Verification + git actions + loop continuation | complete | Required row3 gate stack + full gate passed |
-| 6. Final status report | in_progress | Produce concise loop log + terminal status |
+| 5. Verification + git actions + loop continuation | complete | Row3 committed; Round 2 gates revealed non-convergent row4 method |
+| 6. Final status report | complete | Produce concise loop log + terminal status |
 
 ## Errors Encountered
 | Error | Attempt | Resolution |
 |---|---|---|
 | `Phase 4 thesis-exact unification closure` boundary violation after removing flush-all fallback | 1 | Added owner-stamped pending-weaken provenance and strict closed-owner boundary scheduling; re-ran gate stack to green |
+| Row4 attempt 1 full-suite regression (`PhiTranslatabilityError` in Phase 6) after removing synthesized-wrapper branch | 2.1 | Attempt 2 restored regression stability but retained synthesized-wrapper-specific behavior, so row4 objective remained unmet |
 
 ## Decisions
 - Planner/implementer work is delegated via sub-agents.

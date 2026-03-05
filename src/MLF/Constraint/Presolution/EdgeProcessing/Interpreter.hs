@@ -19,7 +19,6 @@ import MLF.Constraint.Presolution.EdgeProcessing.Solve (
     canonicalizeEdgeTraceInteriorsM,
     recordEdgeTrace,
     recordEdgeWitness,
-    solveNonExpInstantiation,
     unifyStructure
     )
 import MLF.Constraint.Presolution.EdgeProcessing.Unify (
@@ -54,9 +53,7 @@ toExecError err = ExecError err
 
 -- | Unified expansion-oriented execution path.
 --
--- Frontend TyExp edges use minimal-expansion solving.
--- Synthesized wrappers still force identity expansion and apply
--- direct-instantiation semantics on the wrapper body.
+-- Frontend TyExp edges all use the same minimal-expansion + unification flow.
 executeUnifiedExpansionPath :: EdgePlan -> PresolutionM ()
 executeUnifiedExpansionPath plan = do
     let leftTyExp = eprLeftTyExp plan
@@ -68,38 +65,33 @@ executeUnifiedExpansionPath plan = do
         n2 = eprRightNode plan
         s = rteExpVar leftTyExp
         bodyId = rteBodyId leftTyExp
-        isSynth = isSynthesizedExpVar s
-        schemeGen = eprSchemeOwnerGen plan
+        synthesizedWrapper = isSynthesizedExpVar s
+        ownerGen = eprSchemeOwnerGen plan
 
     currentExp <- getExpansion s
     (reqExp, unifications) <-
-        if isSynth
+        if synthesizedWrapper
             then pure (ExpIdentity, [(bodyId, n2Id)])
-            else decideMinimalExpansion schemeGen (eprAllowTrivial plan) n1Raw n2
-
+            else decideMinimalExpansion ownerGen (eprAllowTrivial plan) n1Raw n2
     finalExp <-
-        if isSynth
+        if synthesizedWrapper
             then pure ExpIdentity
             else mergeExpansions s currentExp reqExp
 
     setExpansion s finalExp
     recordEdgeExpansion edgeId finalExp
 
-    let applyInstantiationUnification =
-            if isSynth
-                then uncurry solveNonExpInstantiation
-                else uncurry unifyStructure
-    mapM_ applyInstantiationUnification unifications
+    mapM_ (uncurry unifyStructure) unifications
 
-    witnessPlan <- edgeWitnessPlan schemeGen n1Id n1Raw finalExp
+    witnessPlan <- edgeWitnessPlan ownerGen n1Id n1Raw finalExp
     expansionResult <-
         if finalExp == ExpIdentity
             then pure EdgeExpansionResult { eerTrace = emptyTrace, eerExtraOps = [] }
-            else runExpansionUnify schemeGen edgeId n1Raw n2 finalExp (ewpBaseOps witnessPlan)
+            else runExpansionUnify ownerGen edgeId n1Raw n2 finalExp (ewpBaseOps witnessPlan)
 
     let expTrace = eerTrace expansionResult
         extraOps = eerExtraOps expansionResult
-    tr <- buildEdgeTrace schemeGen edgeId n1Id n1Raw finalExp expTrace
+    tr <- buildEdgeTrace ownerGen edgeId n1Id n1Raw finalExp expTrace
     recordEdgeTrace edgeId tr
     w <- buildEdgeWitness edgeId n1Id n2Id n1Raw (ewpForallIntros witnessPlan) (ewpBaseOps witnessPlan) extraOps
     recordEdgeWitness edgeId w

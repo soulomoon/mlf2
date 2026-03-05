@@ -40,7 +40,7 @@ planEdge edge = do
         n1Id = instLeft edge
         n2Id = instRight edge
         eidInt = getEdgeId edgeId
-        allowTrivial = IntSet.member eidInt (cLetEdges constraint0)
+        letEdgeTrivial = IntSet.member eidInt (cLetEdges constraint0)
 
     n1Raw <- getNode n1Id
     leftTyExp <- case mkResolvedTyExp n1Raw of
@@ -48,8 +48,11 @@ planEdge edge = do
         Nothing ->
             throwError
                 ( PlanError
-                    (ExpectedTyExpLeftInPlanner edgeId n1Raw)
+                (ExpectedTyExpLeftInPlanner edgeId n1Raw)
                 )
+
+    let allowTrivial =
+            letEdgeTrivial || isSynthesizedExpVar (rteExpVar leftTyExp)
 
     schemeOwnerGen <- resolveSchemeOwnerGen canonical constraint0 leftTyExp
 
@@ -67,6 +70,8 @@ planEdge edge = do
             ++ " ("
             ++ nodeTag n2
             ++ ") letEdge="
+            ++ show letEdgeTrivial
+            ++ " allowTrivial="
             ++ show allowTrivial
         )
     case n2 of
