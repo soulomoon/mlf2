@@ -66,8 +66,14 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 - Thesis impact:
   - Broke strict boundary-empty invariant expected by thesis-shaped `SolveConstraint` ordering and blocked full gate verification.
 - Fix:
-  - At owner boundaries, scheduler now flushes all currently pending owner buckets and then asserts no pending owner buckets remain.
-  - Preserved owner-aware APIs for inspection/flush while preventing residual queue leakage at boundaries.
+  - Stabilized pending-weaken owner provenance by stamping owner buckets at
+    enqueue-time in `EdgeUnify` (instead of deriving ownership at flush-time
+    from mutable graph state).
+  - At owner boundaries, scheduler now flushes only the closed-owner bucket
+    (plus `PendingWeakenOwnerUnknown`) and then fails fast if non-next-owner
+    buckets remain.
+  - Removed the flush-all-owner fallback shape while preserving strict
+    boundary/finalization diagnostics.
 - Regression tests:
   - `/Volumes/src/mlf4/test/Presolution/UnificationClosureSpec.hs` (`Phase 4 thesis-exact unification closure`)
   - `/Volumes/src/mlf4/test/TranslatablePresolutionSpec.hs` (`Translatable presolution`)

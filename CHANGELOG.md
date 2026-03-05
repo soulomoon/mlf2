@@ -3,6 +3,27 @@
 ## Unreleased
 
 ### Changed
+- Task 47 row3 owner-boundary scheduler follow-up (2026-03-05):
+  - removed the explicit flush-all-owner boundary fallback from
+    `MLF.Constraint.Presolution.EdgeProcessing` and switched to strict
+    closed-owner boundary flushing;
+  - stamped pending-weaken owner provenance at enqueue time in
+    `MLF.Constraint.Presolution.EdgeUnify` so boundary ownership remains stable
+    across later graph rewrites/merges;
+  - hardened boundary/finalization diagnostics to report pending owner buckets
+    in both edge-loop and Driver finalization invariant failures;
+  - strengthened row3 absolute guard slices to assert absence of the
+    flush-all-owner fallback pattern;
+  - verified gates:
+    - `row3 absolute thesis-exact guard` (`6 examples, 0 failures`)
+    - `Phase 4 thesis-exact unification closure` (`11 examples, 0 failures`)
+    - `Translatable presolution` (`8 examples, 0 failures`)
+    - `generalizes reused constructors via make const` (`1 example, 0 failures`)
+    - `BUG-002-V1` (`1 example, 0 failures`)
+    - `Frozen parity artifact baseline` (`1 example, 0 failures`)
+    - `checked-authoritative` (`8 examples, 0 failures`)
+    - `Dual-path verification` (`4 examples, 0 failures`)
+    - `cabal build all && cabal test` PASS.
 - Task 45 TMT row3 absolute ordering follow-up execution (2026-03-05):
   - added strict RED->GREEN guard slice `row3 absolute thesis-exact guard`;
   - introduced owner-aware pending-weaken API surfaces in presolution

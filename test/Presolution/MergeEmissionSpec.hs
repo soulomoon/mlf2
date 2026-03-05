@@ -88,6 +88,7 @@ spec = describe "Phase 2 — Merge/RaiseMerge emission" $ do
                     IntMap.empty
                     IntMap.empty
                     IntMap.empty
+                    IntMap.empty
         case runPresolutionM defaultTraceConfig st0 (processInstEdge edge) of
             Left err -> expectationFailure ("processInstEdge failed: " ++ show err)
             Right (_, st1) -> do
@@ -163,6 +164,7 @@ spec = describe "Phase 2 — Merge/RaiseMerge emission" $ do
                     IntMap.empty
                     15
                     IntSet.empty
+                    IntMap.empty
                     IntMap.empty
                     IntMap.empty
                     IntMap.empty
@@ -283,6 +285,7 @@ spec = describe "Phase 2 — Merge/RaiseMerge emission" $ do
                     IntMap.empty
                     IntMap.empty
                     IntMap.empty
+                    IntMap.empty
 
         case runPresolutionM defaultTraceConfig st0 (processInstEdge edge) of
             Left err -> expectationFailure ("processInstEdge failed: " ++ show err)
@@ -340,6 +343,7 @@ spec = describe "Phase 2 — Merge/RaiseMerge emission" $ do
                     IntMap.empty
                     7
                     IntSet.empty
+                    IntMap.empty
                     IntMap.empty
                     IntMap.empty
                     IntMap.empty
@@ -484,6 +488,7 @@ spec = describe "Phase 2 — Merge/RaiseMerge emission" $ do
                     IntMap.empty
                     7
                     IntSet.empty
+                    IntMap.empty
                     IntMap.empty
                     IntMap.empty
                     IntMap.empty

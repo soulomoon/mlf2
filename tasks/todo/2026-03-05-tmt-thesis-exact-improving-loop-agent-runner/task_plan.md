@@ -28,18 +28,18 @@ Execute an autonomous improving loop against the Transformation Mechanism Table 
 ## Phases
 | Phase | Status | Notes |
 |---|---|---|
-| 1. Setup task logs and collect baseline evidence | complete | Locate table + thesis anchors + current status signals |
-| 2. Round-based planner sweep (agent team) | complete | Stop at first NO each round |
-| 3. Planner artifact generation (agent team) | complete | Plan + implementer prompt for selected mechanism |
-| 4. Implementer attempts (agent team) | in_progress | Up to 6 attempts with YES/NO implementation gate |
-| 5. Verification + git actions + loop continuation | pending | Commit/merge behavior per requested algorithm |
-| 6. Final status report | pending | Emit concise log + FINAL STATUS line |
+| 1. Setup task logs and collect baseline evidence | complete | Located table + thesis anchors + baseline statuses |
+| 2. Round-based planner sweep (agent team) | complete | Round 1 stopped at mechanism 3 (`Ordering of transformations`) |
+| 3. Planner artifact generation (agent team) | complete | Concrete plan + implementer prompt generated |
+| 4. Implementer attempts (agent team) | complete | Attempt 1 completed with integrated team edits |
+| 5. Verification + git actions + loop continuation | complete | Required row3 gate stack + full gate passed |
+| 6. Final status report | in_progress | Produce concise loop log + terminal status |
 
 ## Errors Encountered
 | Error | Attempt | Resolution |
 |---|---|---|
-| None yet | 0 | N/A |
+| `Phase 4 thesis-exact unification closure` boundary violation after removing flush-all fallback | 1 | Added owner-stamped pending-weaken provenance and strict closed-owner boundary scheduling; re-ran gate stack to green |
 
 ## Decisions
-- Use planner/implementer sub-agents (`spawn_agent`) for required team-based work.
-- Use TMT row statuses plus direct code/thesis spot-check evidence for each round gate.
+- Planner/implementer work is delegated via sub-agents.
+- Row3 strict gap is treated as closed only when owner-stamped queue + strict boundary checks pass `row3 absolute thesis-exact guard` and `Phase 4 thesis-exact unification closure` together.

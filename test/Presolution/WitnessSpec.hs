@@ -80,7 +80,7 @@ spec = do
                         { cNodes = nodes
                         , cBindParents = inferBindParents nodes
                         }
-                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 4 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 4 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
                 expansion =
                     ExpCompose
                         (ExpForall (ForallSpec 1 [Nothing] NE.:| []) NE.:| [ExpInstantiate [argId]])
@@ -109,7 +109,7 @@ spec = do
                         { cNodes = nodes
                         , cBindParents = inferBindParents nodes
                         }
-                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 4 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 4 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
                 -- Instantiate BEFORE forall: suffix has forall, so suppressWeaken fires today
                 expansion =
                     ExpCompose
@@ -145,7 +145,7 @@ spec = do
                         { cNodes = nodes
                         , cBindParents = bindParents
                         }
-                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 4 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 4 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
                 expansion = ExpInstantiate [argId]
 
             case runPresolutionM defaultTraceConfig st0 (witnessFromExpansion (GenNodeId 0) expNodeId (nodeAt nodes 0) expansion) of
@@ -177,7 +177,7 @@ spec = do
                         { cNodes = nodes
                         , cBindParents = inferBindParents nodes
                         }
-                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 4 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 4 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
                 expansion = ExpInstantiate [argId]
             case runPresolutionM defaultTraceConfig st0 (witnessFromExpansion (GenNodeId 0) expNodeId (nodeAt nodes 0) expansion) of
                 Left err -> expectationFailure ("witnessFromExpansion failed: " ++ show err)
@@ -205,7 +205,7 @@ spec = do
                         { cNodes = nodes
                         , cBindParents = inferBindParents nodes
                         }
-                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 5 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 5 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
                 expansion = ExpInstantiate [argId]
 
             case runPresolutionM defaultTraceConfig st0 (witnessFromExpansion (GenNodeId 0) expNodeId (nodeAt nodes 0) expansion) of
@@ -228,7 +228,7 @@ spec = do
                         { cNodes = nodes
                         , cBindParents = inferBindParents nodes
                         }
-                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 2 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 2 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
                 expansion = ExpForall (ForallSpec 2 [Nothing, Nothing] NE.:| [])
 
             case runPresolutionM defaultTraceConfig st0 (witnessFromExpansion (GenNodeId 0) expNodeId (nodeAt nodes 0) expansion) of

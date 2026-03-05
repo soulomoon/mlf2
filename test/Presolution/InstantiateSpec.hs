@@ -43,7 +43,7 @@ spec = describe "instantiateScheme" $ do
                         , cBindParents = bindParentsFromPairs
                             [ (bound, body, BindFlex) ]
                         }
-            st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
+            st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
 
         case runPresolutionM defaultTraceConfig st0 (instantiateScheme body [(bound, fresh)]) of
             Left err -> expectationFailure $ "Instantiation failed: " ++ show err
@@ -79,7 +79,7 @@ spec = describe "instantiateScheme" $ do
                             , (NodeId 3, NodeId 4, BindFlex)
                             ]
                     }
-            st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
+            st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
 
         case runPresolutionM defaultTraceConfig st0 (instantiateScheme body [(bound, fresh)]) of
             Left err -> expectationFailure $ "Instantiation failed: " ++ show err
@@ -142,6 +142,7 @@ spec = describe "instantiateScheme" $ do
                     IntMap.empty
                     IntMap.empty
                     IntMap.empty
+                    IntMap.empty
         case runPresolutionM defaultTraceConfig st0 (instantiateSchemeWithTrace bodyArrow [(b, meta)]) of
             Left err -> expectationFailure ("instantiateSchemeWithTrace failed: " ++ show err)
             Right ((root, copyMap, _interior, frontier), st1) -> do
@@ -200,6 +201,7 @@ spec = describe "instantiateScheme" $ do
                     IntMap.empty
                     IntMap.empty
                     IntMap.empty
+                    IntMap.empty
         case runPresolutionM defaultTraceConfig st0 (instantiateSchemeWithTrace bodyArrow []) of
             Left err -> expectationFailure ("instantiateSchemeWithTrace failed: " ++ show err)
             Right ((root, copyMap, _interior, frontier), st1) -> do
@@ -243,7 +245,7 @@ spec = describe "instantiateScheme" $ do
                             , (NodeId 5, NodeId 6, BindFlex)
                             ]
                     }
-            st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
+            st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
 
         case runPresolutionM defaultTraceConfig st0 (instantiateScheme body [(bound, fresh)]) of
             Left err -> expectationFailure $ "Instantiation failed: " ++ show err
@@ -277,7 +279,7 @@ spec = describe "instantiateScheme" $ do
                         , cBindParents = bindParentsFromPairs
                             [ (base, body, BindFlex) ]
                         }
-            st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
+            st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
 
         case runPresolutionM defaultTraceConfig st0 (instantiateScheme body [(bound, fresh)]) of
             Left err -> expectationFailure $ "Instantiation failed: " ++ show err
@@ -315,7 +317,7 @@ spec = describe "instantiateScheme" $ do
                             , (NodeId 4, NodeId 5, BindFlex)
                             ]
                     }
-            st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 12 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
+            st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 12 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
 
         case runPresolutionM defaultTraceConfig st0 (instantiateScheme topBody [(outer, freshOuter), (innerVar, freshInner)]) of
             Left err -> expectationFailure $ "Instantiation failed: " ++ show err
@@ -360,7 +362,7 @@ spec = describe "instantiateScheme" $ do
                             , (NodeId 4, NodeId 5, BindFlex)
                             ]
                     }
-            st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
+            st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
 
         case runPresolutionM defaultTraceConfig st0 (instantiateScheme outerBody [(bound, fresh)]) of
             Left err -> expectationFailure $ "Instantiation failed: " ++ show err
@@ -395,7 +397,7 @@ spec = describe "instantiateScheme" $ do
                 , (10, TyVar { tnId = fresh, tnBound = Nothing })
                 ]
             constraint = rootedConstraint $ emptyConstraint { cNodes = nodes }
-            st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
+            st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
 
         case runPresolutionM defaultTraceConfig st0 (instantiateScheme body [(bound, fresh)]) of
             Left (NodeLookupFailed nid) -> nid `shouldBe` body
@@ -414,7 +416,7 @@ spec = describe "instantiateScheme" $ do
                 nodes = nodeMapFromList
                     [ (0, boundVar), (1, intNode), (10, freshVar) ]
                 constraint = rootedConstraint $ emptyConstraint { cNodes = nodes }
-                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
             case runPresolutionM defaultTraceConfig st0 (instantiateScheme body [(bound, fresh)]) of
                 Right (copyRoot, _st1) -> pure ()  -- instantiateScheme succeeds
                 Left err -> expectationFailure $ "instantiateScheme failed: " ++ show err
@@ -430,7 +432,7 @@ spec = describe "instantiateScheme" $ do
                 nodes = nodeMapFromList
                     [ (0, boundVar), (1, intNode), (10, freshVar) ]
                 constraint = rootedConstraint $ emptyConstraint { cNodes = nodes }
-                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
             case runPresolutionM defaultTraceConfig st0 (instantiateSchemeWithTrace body [(bound, fresh)]) of
                 Right ((_, _copyMap, _interior, _frontier), _st1) -> pure ()  -- instantiateSchemeWithTrace succeeds
                 Left err -> expectationFailure $ "instantiateSchemeWithTrace failed: " ++ show err

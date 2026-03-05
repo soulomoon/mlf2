@@ -141,6 +141,7 @@ data PresolutionState = PresolutionState
     , psUnionFind :: IntMap NodeId
     , psNextNodeId :: Int
     , psPendingWeakens :: IntSet.IntSet
+    , psPendingWeakenOwners :: IntMap PendingWeakenOwner
     , psBinderCache :: IntMap [NodeId]
     , psEdgeExpansions :: IntMap Expansion
     , psEdgeWitnesses :: IntMap EdgeWitness

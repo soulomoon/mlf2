@@ -81,6 +81,7 @@ data EdgeUnifyState = EdgeUnifyState
     , eusEliminatedBinders :: IntSet.IntSet -- ^ binders eliminated by Merge/RaiseMerge ops we record
     , eusBinderMeta :: IntMap NodeId -- ^ source binder -> copied/meta node in χe
     , eusOrderKeys :: IntMap Order.OrderKey -- ^ order keys for meta nodes (edge-local ≺)
+    , eusPendingWeakenOwner :: PendingWeakenOwner -- ^ owner bucket to stamp queued weakens for this edge
     , eusOps :: [InstanceOp]
     }
 
@@ -161,7 +162,9 @@ instance MonadEdgeUnify EdgeUnifyM where
     dropVarBindM nid = lift $ Ops.dropVarBind nid
     throwPresolutionErrorM err = lift $ throwError err
     isBoundAboveInBindingTreeM edgeRoot ext = liftPresolution $ isBoundAboveInBindingTree edgeRoot ext
-    queuePendingWeakenM nid = liftPresolution $ queuePendingWeaken nid
+    queuePendingWeakenM nid = do
+        owner <- gets eusPendingWeakenOwner
+        liftPresolution $ queuePendingWeaken owner nid
 
 -- | MonadPresolution instance for EdgeUnifyM, allowing presolution operations
 -- to be called without explicit lift.
@@ -188,7 +191,7 @@ runEdgeUnifyForTest
     -> PresolutionM [InstanceOp]
 runEdgeUnifyForTest edgeRoot interior n1 n2 = do
     requireValidBindingTree
-    eu0 <- initEdgeUnifyState [] interior edgeRoot
+    eu0 <- initEdgeUnifyState [] interior edgeRoot PendingWeakenOwnerUnknown
     (_a, eu1) <- runStateT (unifyAcyclicEdge n1 n2) eu0
     pure (eusOps eu1)
 
@@ -227,9 +230,11 @@ mkOmegaExecEnv copyMap =
         , OmegaExec.omegaEliminatedBinders = do
             elims <- gets eusEliminatedBinders
             pure (map NodeId (IntSet.toList elims))
-        , OmegaExec.omegaWeakenMeta = \meta -> do
-            metaRoot <- findRootM meta
-            queuePendingWeakenM metaRoot
+        , OmegaExec.omegaWeakenMeta = \meta ->
+            -- Queue the edge-local meta identity directly. Using a UF root here
+            -- can drift owner attribution across later merges and violate
+            -- boundary-owner scheduling invariants.
+            queuePendingWeakenM meta
         }
   where
     metaFor :: NodeId -> EdgeUnifyM NodeId
@@ -239,10 +244,14 @@ mkOmegaExecEnv copyMap =
             Nothing ->
                 throwPresolutionErrorM (InternalError ("mkOmegaExecEnv: missing copy for binder " ++ show bv))
 
-queuePendingWeaken :: NodeId -> PresolutionM ()
-queuePendingWeaken nid =
+queuePendingWeaken :: PendingWeakenOwner -> NodeId -> PresolutionM ()
+queuePendingWeaken owner nid =
     modify' $ \st ->
-        st { psPendingWeakens = IntSet.insert (getNodeId nid) (psPendingWeakens st) }
+        st
+            { psPendingWeakens = IntSet.insert (getNodeId nid) (psPendingWeakens st)
+            , psPendingWeakenOwners =
+                IntMap.insertWith (\existing _new -> existing) (getNodeId nid) owner (psPendingWeakenOwners st)
+            }
 
 pendingWeakenOwnerForNode :: NodeId -> PresolutionM PendingWeakenOwner
 pendingWeakenOwnerForNode = pendingWeakenOwnerM
@@ -252,9 +261,13 @@ pendingWeakenOwnerForEdge = instEdgeOwnerM
 
 pendingWeakenOwners :: PresolutionM [PendingWeakenOwner]
 pendingWeakenOwners = do
-    pending <- gets psPendingWeakens
+    st <- getPresolutionState
+    let pending = psPendingWeakens st
+        ownerMap = psPendingWeakenOwners st
     owners <- forM (IntSet.toList pending) $ \nidInt ->
-        pendingWeakenOwnerForNode (NodeId nidInt)
+        case IntMap.lookup nidInt ownerMap of
+            Just owner -> pure owner
+            Nothing -> pendingWeakenOwnerForNode (NodeId nidInt)
     pure (nub owners)
 
 flushPendingWeakens :: PresolutionM ()
@@ -278,10 +291,14 @@ flushPendingWeakensAtOwnerBoundary owner =
 
 flushPendingWeakensWhere :: (PendingWeakenOwner -> Bool) -> PresolutionM ()
 flushPendingWeakensWhere shouldFlush = do
-    pending <- gets psPendingWeakens
+    st0 <- getPresolutionState
+    let pending = psPendingWeakens st0
+        ownerMap = psPendingWeakenOwners st0
     tagged <- forM (IntSet.toList pending) $ \nidInt -> do
         let nid = NodeId nidInt
-        owner <- pendingWeakenOwnerForNode nid
+        owner <- case IntMap.lookup nidInt ownerMap of
+            Just stamped -> pure stamped
+            Nothing -> pendingWeakenOwnerForNode nid
         pure (nid, owner)
     let (toFlush, toKeep) = partition (shouldFlush . snd) tagged
     forM_ toFlush (applyPendingWeaken . fst)
@@ -289,6 +306,8 @@ flushPendingWeakensWhere shouldFlush = do
         st
             { psPendingWeakens =
                 IntSet.fromList [getNodeId nid | (nid, _owner) <- toKeep]
+            , psPendingWeakenOwners =
+                IntMap.fromList [(getNodeId nid, owner) | (nid, owner) <- toKeep]
             }
 
 applyPendingWeaken :: NodeId -> PresolutionM ()
@@ -363,8 +382,13 @@ unifyAcyclicEdgeNoMerge n1 n2 = do
                     in m1
             in st { eusInteriorRoots = roots', eusBindersByRoot = binders', eusInteriorByRoot = interior' }
 
-initEdgeUnifyState :: [(NodeId, NodeId)] -> InteriorSet -> NodeId -> PresolutionM EdgeUnifyState
-initEdgeUnifyState binderArgs interior edgeRoot = do
+initEdgeUnifyState
+    :: [(NodeId, NodeId)]
+    -> InteriorSet
+    -> NodeId
+    -> PendingWeakenOwner
+    -> PresolutionM EdgeUnifyState
+initEdgeUnifyState binderArgs interior edgeRoot pendingOwner = do
     inheritedPendingWeakens <- gets psPendingWeakens
     roots <- forM (IntSet.toList interior) $ \i -> Ops.findRoot (NodeId i)
     let interiorRoots = InteriorNodes (IntSet.fromList (map getNodeId roots))
@@ -420,6 +444,7 @@ initEdgeUnifyState binderArgs interior edgeRoot = do
         , eusEliminatedBinders = IntSet.empty
         , eusBinderMeta = binderMetaMap
         , eusOrderKeys = keys
+        , eusPendingWeakenOwner = pendingOwner
         , eusOps = []
         }
 
@@ -443,6 +468,8 @@ flushInheritedPendingWeakensOnce = do
                             st
                                 { psPendingWeakens =
                                     IntSet.difference (psPendingWeakens st) toFlush
+                                , psPendingWeakenOwners =
+                                    IntMap.withoutKeys (psPendingWeakenOwners st) toFlush
                                 }
                     pure True
 

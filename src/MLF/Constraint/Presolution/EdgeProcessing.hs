@@ -23,7 +23,7 @@ module MLF.Constraint.Presolution.EdgeProcessing (
     canonicalizeEdgeTraceInteriorsM,
 ) where
 
-import Control.Monad (foldM, forM_, unless, when)
+import Control.Monad (foldM, unless, when)
 import qualified Data.IntSet as IntSet
 
 import MLF.Constraint.Types (GenNodeId, InstEdge(..), cUnifyEdges)
@@ -32,6 +32,7 @@ import MLF.Constraint.Presolution.Base
     , PresolutionError(..)
     , PresolutionM
     , PresolutionState(..)
+    , PendingWeakenOwner
     , pendingWeakenOwnerFromMaybe
     , requireValidBindingTree
     )
@@ -90,12 +91,12 @@ scheduleWeakensByOwnerBoundary :: Maybe GenNodeId -> Maybe GenNodeId -> Maybe In
 scheduleWeakensByOwnerBoundary mbCurrentOwner mbNextOwner mbEdge =
     when (ownerBoundaryChanged mbCurrentOwner mbNextOwner) $ do
         assertNoPendingUnifyEdgesOnly "owner-boundary-before-weaken-flush" mbEdge
-        owners <- pendingWeakenOwners
-        if null owners
-            then flushPendingWeakensAtOwnerBoundary (pendingWeakenOwnerFromMaybe mbCurrentOwner)
-            else forM_ owners flushPendingWeakensAtOwnerBoundary
+        let boundaryOwner = pendingWeakenOwnerFromMaybe mbCurrentOwner
+        flushPendingWeakensAtOwnerBoundary boundaryOwner
         assertNoPendingWeakensOutsideOwnerBoundary
             "owner-boundary-after-weaken-flush"
+            boundaryOwner
+            mbNextOwner
             mbEdge
   where
     ownerBoundaryChanged :: Maybe GenNodeId -> Maybe GenNodeId -> Bool
@@ -103,17 +104,30 @@ scheduleWeakensByOwnerBoundary mbCurrentOwner mbNextOwner mbEdge =
     ownerBoundaryChanged (Just _) Nothing = True
     ownerBoundaryChanged _ _ = False
 
-assertNoPendingWeakensOutsideOwnerBoundary :: String -> Maybe InstEdge -> PresolutionM ()
-assertNoPendingWeakensOutsideOwnerBoundary phase mbEdge = do
+assertNoPendingWeakensOutsideOwnerBoundary
+    :: String
+    -> PendingWeakenOwner
+    -> Maybe GenNodeId
+    -> Maybe InstEdge
+    -> PresolutionM ()
+assertNoPendingWeakensOutsideOwnerBoundary phase boundaryOwner mbNextOwner mbEdge = do
     owners <- pendingWeakenOwners
-    unless (null owners) $
+    let allowedAfterBoundary = case mbNextOwner of
+            Nothing -> []
+            Just nextOwner -> [pendingWeakenOwnerFromMaybe (Just nextOwner)]
+        residualOwners = filter (`notElem` allowedAfterBoundary) owners
+    unless (null residualOwners) $
         throwPresolutionError $
             InternalError
                 ( "presolution boundary violation ("
                     ++ phase
                     ++ ")"
                     ++ edgeCtx
-                    ++ ": pending weakens remained after owner-boundary flush, owners = "
+                    ++ ": pending weakens remained after owner-boundary flush for closed owner "
+                    ++ show boundaryOwner
+                    ++ ", allowed owners after boundary = "
+                    ++ show allowedAfterBoundary
+                    ++ ", remaining owners = "
                     ++ show owners
                 )
   where

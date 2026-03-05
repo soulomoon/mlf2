@@ -71,6 +71,7 @@ spec = do
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
+                        IntMap.empty
             case runPresolutionM defaultTraceConfig st0 (unifyAcyclicRawWithRaiseTrace n m) of
                 Left err ->
                     expectationFailure ("unifyAcyclicRawWithRaiseTrace failed: " ++ show err)
@@ -129,6 +130,7 @@ spec = do
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
+                        IntMap.empty
                 interior = IntSet.fromList [getNodeId a, getNodeId b]
 
             case runPresolutionM defaultTraceConfig st0 (runEdgeUnifyForTest rootArrow interior a c) of
@@ -170,6 +172,7 @@ spec = do
                         IntMap.empty
                         7
                         IntSet.empty
+                        IntMap.empty
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
@@ -225,6 +228,7 @@ spec = do
                         IntMap.empty
                         7
                         IntSet.empty
+                        IntMap.empty
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
@@ -288,6 +292,7 @@ spec = do
                         IntMap.empty
                         7
                         IntSet.empty
+                        IntMap.empty
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
@@ -368,6 +373,7 @@ spec = do
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
+                        IntMap.empty
                 isRaiseOn nid op = case op of
                     OpRaise n -> n == nid
                     _ -> False
@@ -428,6 +434,7 @@ spec = do
                         IntMap.empty
                         5
                         IntSet.empty
+                        IntMap.empty
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
@@ -493,6 +500,7 @@ spec = do
                         IntMap.empty
                         7
                         IntSet.empty
+                        IntMap.empty
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty
@@ -567,6 +575,7 @@ spec = do
                                 IntMap.empty
                                 (rightVarId + 1)
                                 IntSet.empty
+                                IntMap.empty
                                 IntMap.empty
                                 IntMap.empty
                                 IntMap.empty

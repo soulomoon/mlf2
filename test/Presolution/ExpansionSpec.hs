@@ -372,7 +372,7 @@ spec = do
 
     describe "Error Conditions" $ do
         it "reports UnmatchableTypes when explicitly thrown" $ do
-            let st0 = PresolutionState emptyConstraint (Presolution IntMap.empty) IntMap.empty 0 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
+            let st0 = PresolutionState emptyConstraint (Presolution IntMap.empty) IntMap.empty 0 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
                 n1 = NodeId 1
                 n2 = NodeId 2
                 msg = "test mismatch"
@@ -386,7 +386,7 @@ spec = do
                 Right _ -> expectationFailure "Expected failure"
 
         it "reports UnresolvedExpVar when explicitly thrown" $ do
-            let st0 = PresolutionState emptyConstraint (Presolution IntMap.empty) IntMap.empty 0 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
+            let st0 = PresolutionState emptyConstraint (Presolution IntMap.empty) IntMap.empty 0 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
                 v = ExpVarId 123
 
             case runPresolutionM defaultTraceConfig st0 (throwError (UnresolvedExpVar v)) of
@@ -395,7 +395,7 @@ spec = do
                 Right _ -> expectationFailure "Expected failure"
 
         it "reports InternalError when explicitly thrown" $ do
-            let st0 = PresolutionState emptyConstraint (Presolution IntMap.empty) IntMap.empty 0 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
+            let st0 = PresolutionState emptyConstraint (Presolution IntMap.empty) IntMap.empty 0 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
                 msg = "test internal error"
 
             case runPresolutionM defaultTraceConfig st0 (throwError (InternalError msg)) of
@@ -404,7 +404,7 @@ spec = do
                 Right _ -> expectationFailure "Expected failure"
 
         it "reports ArityMismatch when merging ExpInstantiate with different lengths" $ do
-            let st0 = PresolutionState emptyConstraint (Presolution IntMap.empty) IntMap.empty 0 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
+            let st0 = PresolutionState emptyConstraint (Presolution IntMap.empty) IntMap.empty 0 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
                 exp1 = ExpInstantiate [NodeId 1]
                 exp2 = ExpInstantiate [NodeId 1, NodeId 2]
 
@@ -429,7 +429,7 @@ spec = do
                     , (1, TyBase bodyId (BaseTy "int"))
                     ]
                 constraint = rootedConstraint $ emptyConstraint { cNodes = nodes }
-                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 2 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 2 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
                 expansion = ExpInstantiate [NodeId 2] -- dummy arg
 
             case runPresolutionM defaultTraceConfig st0 (applyExpansion (GenNodeId 0) expansion (nodeAt nodes 0)) of
@@ -451,7 +451,7 @@ spec = do
                         { cNodes = nodes
                         , cBindParents = inferBindParents nodes
                         }
-                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 3 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 3 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
                 -- Forall has 1 bound var, but we provide 2 args
                 expansion = ExpInstantiate [NodeId 3, NodeId 4]
 
@@ -469,7 +469,7 @@ spec = do
             let nid = NodeId 0
                 nodes = nodeMapFromList [(0, TyBase nid (BaseTy "int"))]
                 constraint = rootedConstraint $ emptyConstraint { cNodes = nodes }
-                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 1 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 1 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
 
                 -- Construct an expansion: ExpCompose [ExpForall [1], ExpIdentity]
                 -- This will trigger the ExpCompose branch in applyExpansionOverNode
@@ -506,6 +506,7 @@ spec = do
                         IntMap.empty
                         5
                         IntSet.empty
+                        IntMap.empty
                         IntMap.empty
                         IntMap.empty
                         IntMap.empty

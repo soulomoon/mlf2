@@ -2,6 +2,37 @@
 
 ## Thesis Alignment (Phase A–E)
 
+### 2026-03-05 Task 47 row3 strict owner-boundary scheduling closeout (agent-team execution)
+- Closed the remaining row3 strict gap around owner-boundary delayed-weaken
+  scheduling in presolution.
+- Removed flush-all-owner boundary fallback shape from
+  `MLF.Constraint.Presolution.EdgeProcessing` and kept strict boundary
+  invariants (`closed owner` flush + residual-owner fail-fast checks).
+- Added stable owner provenance for pending weakens:
+  - `EdgeUnify` now stamps owner buckets at enqueue-time and carries them in
+    presolution state (`psPendingWeakenOwners`) so boundary selection is not
+    derived from mutable post-merge graph shape.
+  - Edge-local omega weaken queueing uses edge-local meta identity and
+    edge-owner context wiring from `runExpansionUnify`.
+- Hardened diagnostics:
+  - boundary/finalization violations now report pending owner buckets from both
+    edge-loop and driver finalization checks.
+- Added/updated strict guards:
+  - `Pipeline (Phases 1-5) / row3 absolute thesis-exact guard` now asserts the
+    flush-all-owner fallback pattern is absent.
+  - `Phase 4 thesis-exact unification closure` remains green with owner-stamped
+    boundary scheduling.
+- Verification evidence:
+  - `--match "row3 absolute thesis-exact guard"` -> PASS (`6 examples`)
+  - `--match "Phase 4 thesis-exact unification closure"` -> PASS (`11 examples`)
+  - `--match "Translatable presolution"` -> PASS (`8 examples`)
+  - `--match "generalizes reused constructors via make const"` -> PASS (`1 example`)
+  - `--match "BUG-002-V1"` -> PASS (`1 example`)
+  - `--match "Frozen parity artifact baseline"` -> PASS (`1 example`)
+  - `--match "checked-authoritative"` -> PASS (`8 examples`)
+  - `--match "Dual-path verification"` -> PASS (`4 examples`)
+  - `cabal build all && cabal test` -> PASS.
+
 ### 2026-03-05 Task 42 row2 absolute thesis-exact hardening (agent-team execution)
 - Completed strict wave-based hardening for TMT row `Result-type context wiring`
   with ownership-enforced Team A-E execution.
