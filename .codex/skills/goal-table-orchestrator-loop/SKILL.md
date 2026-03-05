@@ -33,13 +33,16 @@ If mechanism list is missing, derive a first-pass list from the goal decompositi
 
 3. Generate or refresh the orchestrator prompt.
 - Use the template in `references/orchestrator-prompt-template.md`.
-- Keep role separation strict (orchestrator, verifier, planner, implementer, reviewer, QA, integrator).
-- Keep limits explicit (rounds, attempts).
+- Keep role separation strict (orchestrator, verifier, researcher A, researcher B, planner, implementer, reviewer, QA, integrator).
+- Keep limits explicit (default: 10 rounds, 10 attempts unless the goal says otherwise).
+- Require verifier-owned row refreshes before returning gates.
+- Require the planner to wait for both researcher summaries and reconcile evidence before implementation begins.
+- Require failed-attempt accept-or-revert hygiene plus `PlannerDelta` revisions on attempts 2..N.
 - Require one terminal status line.
 
 4. Generate or refresh the JSONL orchestrator event log template.
 - Use `references/orchestrated-round-template.md`.
-- Record one JSON object per line with round, selected mechanism, attempt, producing agent, gate outputs, and reason for each `NO`.
+- Record one JSON object per line with `event_type`, round, selected mechanism, attempt, producing agent, gate outputs, reason for each `NO`, and the retry/scope metadata fields.
 - Treat `orchestrator-log.jsonl` as the single authoritative orchestrator log; keep human-readable narrative in `findings.md` / `progress.md`.
 
 5. Cross-check consistency.

@@ -15,7 +15,10 @@
     no-progress detection, scope expansion, blocked mode, failed-attempt
     accept-or-revert hygiene, standalone row-14 YES/NO mapping, and
     explicit Verifier-owned transformation-table row refreshes before
-    each `YES`/`NO` gate.
+    each `YES`/`NO` gate;
+  - aligned the generic goal-loop prompt, reusable prompt template, and
+    scaffold defaults with the same round-2 subagent workflow and
+    `fresh-round-2` event-log naming.
 - Task 48 row6 replay-contract recovery closeout (2026-03-06):
   - rewrote presolution no-replay projection in
     `MLF.Constraint.Presolution.WitnessNorm` to classify wrapper vs semantic
