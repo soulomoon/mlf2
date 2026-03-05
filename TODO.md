@@ -17,11 +17,16 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
     rejection of residual single-target source-interior grafts; wrapper
     `OpRaise` artifacts are pruned before Phi and true invalid type-tree raises
     still fail during normalization.
+  - Follow-up stale-witness shaping landed in the same recovery worktree:
+    `WitnessNorm` now prunes only dead non-root `OpWeaken` residue after
+    finalized source/replay binder domains are known, restoring
+    `let-c1-apply-bool` to `Int` without relaxing strict Ω behavior for live
+    non-root weakens (`BUG-002-V4` remains preserved under lambda).
 - Verification:
   - no-replay witness obligations: PASS
   - `checked-authoritative`: PASS
   - `Dual-path verification`: PASS
-  - `cabal build all && cabal test`: PASS (`954 examples, 0 failures`)
+  - `cabal build all && cabal test`: PASS (`956 examples, 0 failures`)
 - Rolling priorities (next):
   1. Re-run the row6 goal-table/orchestrator verification from a green base so
      the YES/NO table can be updated with fresh evidence instead of the stale
@@ -1053,5 +1058,5 @@ Progress (2026-02-08, Group 1): duplicated binding-core helpers are now single-s
 
 ## Active bug closures
 
-- [x] `BUG-2026-02-06-002` / `BUG-2026-02-08-004`: strict OpWeaken no-op fallback removal landed; fallback-dependent sentinel/strict-target/thesis gates now assert explicit Phase-6 fail-fast (`PhiTranslatabilityError`) instead of permissive success.
-- [ ] Follow-up: recover the above legacy paths by upstream witness shaping (so they elaborate successfully without unresolved non-root `OpWeaken`) while keeping strict Ω semantics (non-root weaken => `InstElim` or fail-fast).
+- [x] `BUG-2026-02-06-002`: upstream witness shaping now prunes only stale non-root `OpWeaken` residue, so `let-c1-apply-bool` again elaborates to `Int` while Ω still fails fast on real unresolved non-root weaken operations.
+- [x] `BUG-2026-02-08-004`: nested let + annotated lambda remains green under the same strict Ω regime.

@@ -195,11 +195,75 @@ normalizeEdgeWitnessesM = do
         let replayBinders = replayBindersAtRoot
             hasReplayCodomain =
                 not (null replayBinders)
+            semanticStrictWithReplayCodomain op =
+                case op of
+                    OpWeaken target -> canonical target /= canonical edgeRoot
+                    OpGraft _ target -> canonical target /= canonical edgeRoot
+                    OpMerge{} -> True
+                    OpRaiseMerge{} -> True
+                    OpRaise{} -> False
+            strictWithReplayCodomain =
+                hasReplayCodomain
+                    && ( not (null sourceEntriesInOrder)
+                            || any semanticStrictWithReplayCodomain opsNorm
+                       )
             sourceKeySet =
                 IntSet.fromList
                     [ getNodeId sourceBinder
                     | sourceBinder <- sourceBindersInOrder
                     ]
+            finalSourceKeySet =
+                if strictWithReplayCodomain
+                    then IntSet.fromList
+                        [ getNodeId (canonical (rewriteNode sourceBinder))
+                        | sourceBinder <- sourceBindersInOrder
+                        ]
+                    else IntSet.empty
+            finalReplayKeySet =
+                IntSet.fromList
+                    [ getNodeId replayBinder
+                    | replayBinder <- replayBinders
+                    ]
+            abstractBoundShape nid =
+                let go seen current =
+                        let currentC = canonical current
+                            currentKey = getNodeId currentC
+                            seen' = IntSet.insert currentKey seen
+                        in if IntSet.member currentKey seen
+                            then True
+                            else case NodeAccess.lookupNode c0 currentC of
+                                Just TyVar{ tnBound = Nothing } ->
+                                    True
+                                Just TyVar{ tnBound = Just bnd } ->
+                                    go seen' bnd
+                                Just TyBase{} ->
+                                    False
+                                Just TyBottom{} ->
+                                    False
+                                Just node ->
+                                    let children = structuralChildren node
+                                    in not (null children) && all (go seen') children
+                                Nothing ->
+                                    False
+                in case NodeAccess.lookupNode c0 (canonical nid) of
+                    Just TyVar{ tnBound = Just bnd } ->
+                        go IntSet.empty bnd
+                    _ ->
+                        False
+            keepFinalizedOp op =
+                case op of
+                    OpWeaken target ->
+                        let targetC = canonical target
+                            targetKey = getNodeId targetC
+                            rootKey = getNodeId (canonical edgeRoot)
+                        in targetKey == rootKey
+                            || IntSet.member targetKey finalSourceKeySet
+                            || IntSet.member targetKey finalReplayKeySet
+                            || abstractBoundShape target
+                    _ ->
+                        True
+            opsNormPruned =
+                filter keepFinalizedOp opsNorm
             graftTargetKeys =
                 IntSet.fromList
                     [ getNodeId (restoreNode target)
@@ -208,17 +272,10 @@ normalizeEdgeWitnessesM = do
             graftTargetCount = IntSet.size graftTargetKeys
             opsNormFinalized
                 | null sourceBindersInOrder
-                , null opsNorm =
+                , null opsNormPruned =
                     []
                 | otherwise =
-                    opsNorm
-            semanticStrictWithReplayCodomain op =
-                case op of
-                    OpWeaken target -> canonical target /= canonical edgeRoot
-                    OpGraft _ target -> canonical target /= canonical edgeRoot
-                    OpMerge{} -> True
-                    OpRaiseMerge{} -> True
-                    OpRaise{} -> False
+                    opsNormPruned
             keepNoReplayProjectedOp op =
                 case op of
                     OpGraft{} ->
@@ -257,11 +314,6 @@ normalizeEdgeWitnessesM = do
                     OpMerge{} -> True
                     OpRaiseMerge{} -> True
                     _ -> False
-            strictWithReplayCodomain =
-                hasReplayCodomain
-                    && ( not (null sourceEntriesInOrder)
-                            || any semanticStrictWithReplayCodomain opsNormFinalized
-                       )
             residualNoReplayOp
                 | strictWithReplayCodomain =
                     Nothing

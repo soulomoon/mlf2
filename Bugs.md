@@ -734,22 +734,26 @@ _None._
   - Strict `InstBot` checker semantics are unchanged; only instantiation *production* was corrected. The checker still rejects `InstBot` on any non-⊥ input. This is thesis-exact: the paper's `⊥ ← τ` rule requires the input to be `⊥`.
 
 ### BUG-2026-02-06-002
-- Status: Resolved (superseded by strict OpWeaken fail-fast baseline)
+- Status: Resolved
 - Priority: High
 - Discovered: 2026-02-06
-- Resolved: 2026-02-11
-- Superseded: 2026-02-26
-- Summary: Historical polymorphic-factory success sentinel; with strict non-root `OpWeaken` fallback removal, this path is now expected to fail fast in Phase 6 when replay cannot eliminate a binder.
+- Resolved: 2026-03-06
+- Summary: Historical polymorphic-factory success sentinel. Strict Ω fail-fast on unresolved non-root `OpWeaken` remains correct, but this specific path was carrying a stale producer-side non-root weaken after the `c1` scheme had already become monomorphic; upstream witness normalization now prunes that dead residue so the path elaborates successfully again.
 - Reproducer (surface expression):
   - `ELet "make" (ELam "x" (ELam "y" (EVar "x"))) (ELet "c1" (EApp (EVar "make") (ELit (LInt (-4)))) (EApp (EVar "c1") (ELit (LBool True))))`
 - Final expected/actual:
-  - Expected (2026-02-26 strict policy): no silent no-op; unresolved non-root `OpWeaken` must fail fast with `PhiTranslatabilityError`.
-  - Actual (2026-02-26 verification): both checked/unchecked sentinel variants fail fast in Phase 6 with `OpWeaken: unresolved non-root binder target`; full gate remains green (`829 examples, 0 failures`) after regression rebaseline.
+  - Expected: checked and unchecked pipelines elaborate to `Int`, while Ω still fails fast on genuine unresolved non-root `OpWeaken`.
+  - Actual (2026-03-06 verification): `WitnessNorm` prunes the stale non-root `OpWeaken` before Phi for `let-c1-apply-bool`; checked and unchecked pipelines return `Int`; the under-lambda `BUG-002-V4` strict non-root weaken is still preserved; full gate is green (`956 examples, 0 failures`).
 - Regression tests:
-  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-2026-02-06-002"'` (`10 examples, 0 failures`)
-  - Validation gate: `cabal build all && cabal test` (`829 examples, 0 failures`)
+  - `/Users/ares/.config/superpowers/worktrees/mlf4/row6-replay-contract-recovery-20260306/test/PipelineSpec.hs`
+    - `make let-c1-apply-bool path typechecks to Int`
+    - `make let-c1-apply-bool prunes the stale non-root OpWeaken before Phi`
+    - `BUG-002-V4 keeps the strict non-root OpWeaken when c1 stays abstract under lambda`
+  - `/Users/ares/.config/superpowers/worktrees/mlf4/row6-replay-contract-recovery-20260306/test/ThesisFixDirectionSpec.hs`
+    - `BUG-2026-02-06-002 thesis target`
+  - Validation gate: `cabal build all && cabal test` (`956 examples, 0 failures`)
 - Thesis impact:
-  - Enforces thesis-shaped Ω strictness: non-root weaken is no longer allowed to silently evaluate as identity.
+  - Keeps thesis-shaped Ω strictness intact. The fix is producer-side dead-op elimination after witness finalization, not a consumer fallback or no-op weaken rule.
 
 ### BUG-2026-02-08-004
 - Status: Resolved (superseded by strict OpWeaken fail-fast baseline)

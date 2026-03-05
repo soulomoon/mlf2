@@ -1,6 +1,5 @@
 module ThesisFixDirectionSpec (spec) where
 
-import Data.List (isInfixOf)
 import qualified Data.Set as Set
 import Test.Hspec
 
@@ -12,27 +11,21 @@ bugExpr =
         (ELet "c1" (EApp (EVar "make") (ELit (LInt (-4))))
             (EApp (EVar "c1") (ELit (LBool True))))
 
-assertPipelineFailFast
+assertPipelineInt
     :: String
     -> (PolySyms -> NormSurfaceExpr -> Either PipelineError (ElabTerm, ElabType))
     -> Expectation
-assertPipelineFailFast label runPipeline =
+assertPipelineInt label runPipeline =
     case runPipeline Set.empty bugExpr of
         Left err ->
-            renderPipelineError err
-                `shouldSatisfy`
-                    isStrictPhiFailFast
-        Right _ ->
-            expectationFailure (label ++ " unexpectedly succeeded")
-  where
-    isStrictPhiFailFast :: String -> Bool
-    isStrictPhiFailFast msg =
-        "OpWeaken: unresolved non-root binder target" `isInfixOf` msg
+            expectationFailure (label ++ " unexpectedly failed: " ++ renderPipelineError err)
+        Right (_term, ty) ->
+            ty `shouldBe` TBase (BaseTy "Int")
 
 spec :: Spec
 spec = describe "BUG-2026-02-06-002 thesis target" $ do
-    it "unchecked pipeline now fails fast on unresolved non-root OpWeaken" $
-        assertPipelineFailFast "unchecked pipeline" runPipelineElab
+    it "unchecked pipeline typechecks to Int" $
+        assertPipelineInt "unchecked pipeline" runPipelineElab
 
-    it "checked pipeline now fails fast on unresolved non-root OpWeaken" $
-        assertPipelineFailFast "checked pipeline" runPipelineElabChecked
+    it "checked pipeline typechecks to Int" $
+        assertPipelineInt "checked pipeline" runPipelineElabChecked

@@ -2,6 +2,33 @@
 
 ## Thesis Alignment (Phase A–E)
 
+### 2026-03-06 stale non-root `OpWeaken` pruning for BUG-2026-02-06-002
+- Recovered `let-c1-apply-bool` without relaxing Ω strictness.
+- `MLF.Constraint.Presolution.WitnessNorm` now prunes a non-root `OpWeaken`
+  only after finalized source/replay binder domains are known, and only when
+  the target is absent from those finalized domains and its bound skeleton is
+  no longer fully abstract.
+- This keeps the producer-side distinction between:
+  - dead residue: top-level stale weakens whose target path has concretized
+    leaves (for `let-c1-apply-bool`, the bound chain reaches `Int`);
+  - live semantic weaken: under-lambda strict weakens whose target path remains
+    fully abstract (`BUG-002-V4`).
+- Updated regressions:
+  - `test/PipelineSpec.hs`
+    - `make let-c1-apply-bool path typechecks to Int`
+    - `make let-c1-apply-bool prunes the stale non-root OpWeaken before Phi`
+    - `BUG-002-V4 keeps the strict non-root OpWeaken when c1 stays abstract under lambda`
+    - BUG-002 sentinel/strict-target matrix rows now assert the actual checked
+      success outputs (`TBottom -> Int` for `make-app` / `let-c1-return`,
+      `Int` for `let-c1-apply-bool`)
+  - `test/ThesisFixDirectionSpec.hs`
+    - checked + unchecked BUG-002 thesis target now both assert `Int`
+- Verification:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "bottom-int arrow"'`: PASS
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "let-c1-apply-bool"'`: PASS
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-2026-02-08-004"'`: PASS
+  - `cabal build all && cabal test`: PASS (`956 examples, 0 failures`)
+
 ### 2026-03-06 Task 48 row6 replay-contract recovery closeout
 - Closed the post-orchestrator replay-contract recovery from a clean green base
   after the fresh round-1 `MAXIMUMRETRY` regression.
