@@ -43,7 +43,6 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
 import qualified MLF.Binding.Tree as Binding
-import qualified MLF.Witness.OmegaExec as OmegaExec
 import MLF.Util.Trace (traceBindingM)
 
 import MLF.Constraint.Types
@@ -71,6 +70,7 @@ import MLF.Constraint.Presolution.Expansion (
     )
 import MLF.Constraint.Presolution.EdgeUnify (
     EdgeUnifyState(eusOps),
+    executeEdgeLocalOmegaOps,
     initEdgeUnifyState,
     mkOmegaExecEnv,
     unifyAcyclicEdge,
@@ -148,8 +148,7 @@ runExpansionUnify gid edgeId leftRaw target expn baseOps =
             eu0 <- initEdgeUnifyState binderMetas interior resNodeId (pendingWeakenOwnerFromMaybe (Just gid))
             let omegaEnv = mkOmegaExecEnv copyMap0
             (_a, eu1) <- runStateT
-                (do
-                    OmegaExec.executeOmegaBaseOpsPre omegaEnv baseOps
+                (executeEdgeLocalOmegaOps omegaEnv baseOps $ do
                     bindExpansionArgs resNodeId bas
                     forM_ (IntSet.toList frontier0) $ \nidInt ->
                         case IntMap.lookup nidInt copyMapCanon of
@@ -157,7 +156,6 @@ runExpansionUnify gid edgeId leftRaw target expn baseOps =
                             Just copy -> unifyStructureEdge copy (NodeId nidInt)
                     unifyStructureEdge resNodeId (tnId target)
                     unifyAcyclicEdge (tnId leftRaw) resNodeId
-                    OmegaExec.executeOmegaBaseOpsPost omegaEnv baseOps
                 )
                 eu0
 

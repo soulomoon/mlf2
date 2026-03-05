@@ -15,6 +15,7 @@ module MLF.Constraint.Presolution.EdgeUnify (
     EdgeUnifyState(..),
     EdgeUnifyM,
     MonadEdgeUnify(..),
+    executeEdgeLocalOmegaOps,
     flushPendingWeakens,
     flushPendingWeakensAtOwnerBoundary,
     pendingWeakenOwners,
@@ -194,6 +195,21 @@ runEdgeUnifyForTest edgeRoot interior n1 n2 = do
     eu0 <- initEdgeUnifyState [] interior edgeRoot PendingWeakenOwnerUnknown
     (_a, eu1) <- runStateT (unifyAcyclicEdge n1 n2) eu0
     pure (eusOps eu1)
+
+-- | Execute edge-local graph operations as one block around a unification action.
+--
+-- This preserves existing pre/post ordering while giving callers a single
+-- edge-local execution entrypoint.
+executeEdgeLocalOmegaOps
+    :: OmegaExec.OmegaExecEnv EdgeUnifyM
+    -> [InstanceOp]
+    -> EdgeUnifyM a
+    -> EdgeUnifyM a
+executeEdgeLocalOmegaOps omegaEnv baseOps action = do
+    OmegaExec.executeOmegaBaseOpsPre omegaEnv baseOps
+    out <- action
+    OmegaExec.executeOmegaBaseOpsPost omegaEnv baseOps
+    pure out
 
 {- Note [Edge-local Weaken scheduling]
 Base Omega operations from `ExpInstantiate` include `Weaken`, but the paper
