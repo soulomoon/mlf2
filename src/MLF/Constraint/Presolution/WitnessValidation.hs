@@ -64,7 +64,7 @@ data OmegaNormalizeError
     | ReplayMapNonTyVarTarget NodeId NodeId
     | ReplayMapNonInjective NodeId NodeId NodeId
     | ReplayMapExpectedEmpty [NodeId]
-    | ReplayMapRequiredForRaiseFamily InstanceOp
+    | ReplayContractNoneRequiresReplay InstanceOp
     | StandaloneGraftRemaining NodeId
     deriving (Eq, Show)
 

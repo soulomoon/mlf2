@@ -641,7 +641,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 cInstEdges c `shouldBe` []
                 cUnifyEdges c `shouldBe` []
 
-    it "make let-c1-apply-bool path typechecks to Int (strict success)" $ do
+    it "make let-c1-apply-bool path fails fast on unresolved non-root OpWeaken" $ do
         -- BUG-2026-02-06-002 / H15 follow-up:
         -- let make = \x.\y.x in let c1 = make (-4) in c1 True
         let expr =
@@ -651,8 +651,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         case runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr) of
             Left err ->
                 renderPipelineError err
-                    `shouldSatisfy`
-                        ("OpWeaken: unresolved non-root binder target" `isInfixOf`)
+                    `shouldSatisfy` strictReplayFailFast
             Right _ ->
                 expectationFailure "Expected strict OpWeaken fail-fast, but pipeline succeeded"
 
@@ -764,13 +763,12 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 case result of
                     Left err ->
                         renderPipelineError err
-                            `shouldSatisfy`
-                                ("OpWeaken: unresolved non-root binder target" `isInfixOf`)
+                            `shouldSatisfy` strictReplayFailFast
                     Right _ ->
                         expectationFailure
                             ("Expected strict OpWeaken fail-fast for " ++ label ++ ", but pipeline succeeded")
 
-        it "make-only still reports let mismatch sentinel" $
+        it "make-only still elaborates as polymorphic factory" $
             case runChecked makeOnlyExpr of
                 Left err -> expectationFailure ("Expected success, got error:\\n" ++ renderPipelineError err)
                 Right (_term, ty) -> do
@@ -807,8 +805,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 case result of
                     Left err ->
                         renderPipelineError err
-                            `shouldSatisfy`
-                                ("OpWeaken: unresolved non-root binder target" `isInfixOf`)
+                            `shouldSatisfy` strictReplayFailFast
                     Right _ ->
                         expectationFailure
                             ("Expected strict OpWeaken fail-fast for " ++ label ++ ", but pipeline succeeded")
@@ -951,8 +948,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 case result of
                     Left err ->
                         renderPipelineError err
-                            `shouldSatisfy`
-                                ("OpWeaken: unresolved non-root binder target" `isInfixOf`)
+                            `shouldSatisfy` strictReplayFailFast
                     Right _ ->
                         expectationFailure
                             ("Expected strict OpWeaken fail-fast for " ++ label ++ ", but pipeline succeeded")
@@ -1251,6 +1247,11 @@ assertCheckedAuthoritative expr =
                 Right (termChecked, tyChecked) -> do
                     typeCheck termChecked `shouldBe` Right tyChecked
                     tyUnchecked `shouldBe` tyChecked
+
+strictReplayFailFast :: String -> Bool
+strictReplayFailFast msg =
+    ("OpWeaken: unresolved non-root binder target" `isInfixOf` msg)
+        || ("ReplayContractNoneRequiresReplay" `isInfixOf` msg)
 
 assertViewParity :: PresolutionViewBoundary.PresolutionView -> Solved -> Expectation
 assertViewParity view legacy = do

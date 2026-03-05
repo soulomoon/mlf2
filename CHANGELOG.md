@@ -10,6 +10,23 @@
   - hardened planner execution flow with evidence reconciliation,
     no-progress detection, scope expansion, blocked mode, failed-attempt
     accept-or-revert hygiene, and standalone row-14 YES/NO mapping.
+- Task 48 row6 replay-contract recovery closeout (2026-03-06):
+  - rewrote presolution no-replay projection in
+    `MLF.Constraint.Presolution.WitnessNorm` to classify wrapper vs semantic
+    replay ops in source-domain identity space rather than rewritten/canonical
+    space;
+  - preserved baseline no-replay weakening behavior (`graftTargetCount` /
+    source-domain graft-target projection) while keeping strict no-replay
+    fail-fast on the intended bug-002 path;
+  - narrowed rogue no-replay replay-family rejection to residual single-target
+    source-interior grafts and pruned wrapper `OpRaise` artifacts before Phi
+    while keeping type-tree-bound invalid raises fail-fast in normalization;
+  - verified recovery gates:
+    - no-replay witness obligations (`6 examples, 0 failures`)
+    - `checked-authoritative` and `Dual-path verification` targeted slices
+    - bug-002 strict fail-fast, `\y. let id = (\x. x) in id y`, BUG-2026-02-08-004,
+      A6 parity, BUG-2026-02-17-002, explicit forall round-trip
+    - `cabal build all && cabal test` PASS (`954 examples, 0 failures`).
 - Task 47 row3 owner-boundary scheduler follow-up (2026-03-05):
   - removed the explicit flush-all-owner boundary fallback from
     `MLF.Constraint.Presolution.EdgeProcessing` and switched to strict

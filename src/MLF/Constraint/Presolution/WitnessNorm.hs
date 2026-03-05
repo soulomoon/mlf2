@@ -17,11 +17,12 @@ import Control.Monad.Except (throwError)
 import Control.Monad (forM, when)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
+import Data.List (find)
 import Data.Maybe (mapMaybe)
 
 import qualified MLF.Util.Order as Order
 import MLF.Constraint.Types
-import MLF.Constraint.Types.Witness (ReplayContract(..), isStrictReplayContract)
+import MLF.Constraint.Types.Witness (ReplayContract(..))
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Presolution.Base
@@ -192,54 +193,111 @@ normalizeEdgeWitnessesM = do
                 throwError (WitnessNormalizationError (EdgeId eid) err)
         let opsNorm = opsNormRaw
         let replayBinders = replayBindersAtRoot
+            hasReplayCodomain =
+                not (null replayBinders)
+            sourceKeySet =
+                IntSet.fromList
+                    [ getNodeId sourceBinder
+                    | sourceBinder <- sourceBindersInOrder
+                    ]
+            graftTargetKeys =
+                IntSet.fromList
+                    [ getNodeId (restoreNode target)
+                    | OpGraft _ target <- opsNormFinalized
+                    ]
+            graftTargetCount = IntSet.size graftTargetKeys
             opsNormFinalized
                 | null sourceBindersInOrder
                 , null opsNorm =
                     []
                 | otherwise =
                     opsNorm
-            isReplayDependentOp op =
+            semanticStrictWithReplayCodomain op =
                 case op of
-                    OpRaise{} -> True
+                    OpWeaken target -> canonical target /= canonical edgeRoot
+                    OpGraft _ target -> canonical target /= canonical edgeRoot
                     OpMerge{} -> True
                     OpRaiseMerge{} -> True
+                    OpRaise{} -> False
+            keepNoReplayProjectedOp op =
+                case op of
+                    OpGraft{} ->
+                        Nothing
+                    OpMerge{} ->
+                        Just op
+                    OpRaiseMerge{} ->
+                        Just op
+                    OpRaise target
+                        | restoreNode target == edgeRoot ->
+                            Nothing
+                        | not (isTypeTreeBound target) ->
+                            Nothing
+                        | otherwise ->
+                            Just op
+                    OpWeaken target
+                        | IntSet.member (getNodeId (restoreNode target)) graftTargetKeys ->
+                            Nothing
+                        | graftTargetCount <= 1 ->
+                            Nothing
+                        | restoreNode target == edgeRoot ->
+                            Nothing
+                        | otherwise ->
+                            Just op
+            opsNoReplayProjected =
+                mapMaybe keepNoReplayProjectedOp opsNormFinalized
+            isInSourceInterior target =
+                IntSet.member (getNodeId (restoreNode target)) traceInteriorKeys
+            disallowedNoReplayOp op =
+                case op of
                     OpGraft _ target ->
-                        canonical target /= canonical edgeRoot
-                    OpWeaken target ->
-                        canonical target /= canonical edgeRoot
-            opsNormContract =
-                if null replayBinders
-                    then
-                        let graftTargetKeys =
-                                IntSet.fromList
-                                    [ getNodeId (canonical target)
-                                    | OpGraft _ target <- opsNormFinalized
-                                    ]
-                            graftTargetCount = IntSet.size graftTargetKeys
-                            keepNoReplayOp op =
-                                case op of
-                                    OpGraft{} -> Nothing
-                                    OpMerge{} -> Nothing
-                                    OpRaiseMerge{} -> Nothing
-                                    OpRaise{} -> Nothing
-                                    OpWeaken target
-                                        | IntSet.member (getNodeId (canonical target)) graftTargetKeys ->
-                                            Nothing
-                                        | graftTargetCount <= 1 ->
-                                            Nothing
-                                    _ -> Just op
-                        in mapMaybe keepNoReplayOp opsNormFinalized
-                    else opsNormFinalized
+                        graftTargetCount <= 1
+                            && isInSourceInterior target
+                            && restoreNode target /= edgeRoot
+                            && not (IntSet.member (getNodeId (restoreNode target)) sourceKeySet)
+                    OpMerge{} -> True
+                    OpRaiseMerge{} -> True
+                    _ -> False
+            strictWithReplayCodomain =
+                hasReplayCodomain
+                    && ( not (null sourceEntriesInOrder)
+                            || any semanticStrictWithReplayCodomain opsNormFinalized
+                       )
+            residualNoReplayOp
+                | strictWithReplayCodomain =
+                    Nothing
+                | otherwise =
+                    find disallowedNoReplayOp opsNormFinalized
+            strictNoReplayContract =
+                case residualNoReplayOp of
+                    Nothing ->
+                        any
+                            (\case
+                                OpWeaken target -> restoreNode target /= edgeRoot
+                                _ -> False
+                            )
+                            opsNoReplayProjected
+                    Just _ ->
+                        False
+            strictReplayContract =
+                strictWithReplayCodomain || strictNoReplayContract
             replayContract =
-                if any isReplayDependentOp opsNormContract
+                if strictReplayContract
                     then ReplayContractStrict
                     else ReplayContractNone
-            strictReplayContract = isStrictReplayContract replayContract
+            opsNormContract
+                | strictWithReplayCodomain =
+                    opsNormFinalized
+                | otherwise =
+                    filter (not . disallowedNoReplayOp) opsNoReplayProjected
             activeSourceEntries
-                | not strictReplayContract = []
-                | null replayBinders = []
+                | not strictWithReplayCodomain = []
                 | otherwise = sourceEntriesInOrder
             nActive = length activeSourceEntries
+            isTypeTreeBound target =
+                case Binding.lookupBindParent c0 (typeRef (canonical target)) of
+                    Just (TypeRef _, _) -> True
+                    Nothing -> False
+                    Just _ -> False
         when (strictReplayContract && length replayBinders < nActive) $
             throwError $
                 WitnessNormalizationError (EdgeId eid) $
@@ -279,6 +337,12 @@ normalizeEdgeWitnessesM = do
         -- producer replay codomain.
         -- IMPORTANT: Validate BEFORE restoring to original node space, since
         -- interiorNorm is in the rewritten node space (matching the normalized ops).
+        case residualNoReplayOp of
+            Just op ->
+                throwError $
+                    WitnessNormalizationError (EdgeId eid) $
+                        Witness.ReplayContractNoneRequiresReplay op
+            Nothing -> pure ()
         case validateNormalizedWitness envPost opsNormContract of
             Left valErr -> throwError (WitnessNormalizationError (EdgeId eid) valErr)
             Right () -> pure ()

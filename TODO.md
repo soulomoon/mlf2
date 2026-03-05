@@ -4,25 +4,33 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
-## Task 48 Row6 replay-contract recovery after orchestrated max-retry (active 2026-03-05)
+## Task 48 Row6 replay-contract recovery after orchestrated max-retry (completed 2026-03-06)
 
-- Current status:
-  - Orchestrated Round-1 row6 run in
-    `/Volumes/src/mlf4/tasks/todo/2026-03-05-tmt-improving-loop-orchestrator-fresh/`
-    exhausted attempts and ended in `MAXIMUMRETRY`.
-  - Final baseline is red: `cabal build all && cabal test` reports
-    `126 failures`, dominated by
-    `WitnessNormalizationError ReplayMapIncomplete`.
-- Immediate priorities:
-  1. Stabilize baseline first: recover green on required sanity gates
-     (`Phase 4 thesis-exact unification closure`, `checked-authoritative`,
-     `Dual-path verification`).
-  2. Redesign replay contract as a single cross-phase authority
-     (producer + consumer), avoiding mixed strict/no-replay runtime lanes that
-     drift across `WitnessNorm`, `WitnessValidation`/`Driver`, and
-     `Phi.Translate`/`Phi.Omega`.
-  3. Re-run row6 orchestrated loop only after baseline stabilization and
-     explicit replay-contract design sign-off.
+- Closed:
+  - Recovered row6 replay-contract handling from the post-orchestrator red
+    baseline in isolated worktree
+    `/Users/ares/.config/superpowers/worktrees/mlf4/row6-replay-contract-recovery-20260306`.
+  - `WitnessNorm` now evaluates no-replay wrapper-vs-semantic behavior in
+    source-domain identity space, preserving baseline success paths while
+    keeping strict no-replay fail-fast on bug-002-style residual weakens.
+  - Rogue no-replay replay-family behavior is narrowed to producer-boundary
+    rejection of residual single-target source-interior grafts; wrapper
+    `OpRaise` artifacts are pruned before Phi and true invalid type-tree raises
+    still fail during normalization.
+- Verification:
+  - no-replay witness obligations: PASS
+  - `checked-authoritative`: PASS
+  - `Dual-path verification`: PASS
+  - `cabal build all && cabal test`: PASS (`954 examples, 0 failures`)
+- Rolling priorities (next):
+  1. Re-run the row6 goal-table/orchestrator verification from a green base so
+     the YES/NO table can be updated with fresh evidence instead of the stale
+     `MAXIMUMRETRY` attempt.
+  2. Audit row6 docs/prompts/task artifacts under `docs/plans/` and
+     `tasks/archive/` so the archived failed attempt and the successful
+     recovery wave tell one consistent story.
+  3. Keep source-domain replay-contract behavior covered when future presolution
+     changes touch copy-map/canonicalization logic.
 
 ## Task 40 Elaboration-input strict-policy docs closeout (completed 2026-03-04)
 

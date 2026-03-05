@@ -250,7 +250,7 @@ validateReplayMapTraceContract
     -> Int
     -> EdgeTrace
     -> Either PresolutionError ()
-validateReplayMapTraceContract canonical sourceConstraint finalConstraint eid tr = do
+validateReplayMapTraceContract canonical _sourceConstraint finalConstraint eid tr = do
     let sourceDomain =
             IntSet.fromList
                 [ getNodeId binder
@@ -301,6 +301,18 @@ validateReplayMapTraceContract canonical sourceConstraint finalConstraint eid tr
                                     , "source key: " ++ show sourceKey
                                     , "replay target: " ++ show replayTarget
                                     ]
+            case duplicateReplayTarget (etBinderReplayMap tr) of
+                Nothing -> pure ()
+                Just (sourceA, sourceB, target) ->
+                    Left $
+                        InternalError $
+                            unlines
+                                [ "edge replay-map codomain is non-injective"
+                                , "edge: " ++ show (EdgeId eid)
+                                , "first source key: " ++ show sourceA
+                                , "second source key: " ++ show sourceB
+                                , "shared target: " ++ show target
+                                ]
         else do
             when (not (IntMap.null (etBinderReplayMap tr))) $
                 Left $
@@ -319,14 +331,27 @@ validateReplayMapTraceContract canonical sourceConstraint finalConstraint eid tr
                             , "binder-arg keys: " ++ show (IntSet.toList sourceDomain)
                             ]
   where
+    duplicateReplayTarget replayMap =
+        let step (seen, dupFound) (sourceKey, replayTarget)
+                | Just _ <- dupFound = (seen, dupFound)
+                | otherwise =
+                    let replayKey = getNodeId replayTarget
+                    in case IntMap.lookup replayKey seen of
+                        Nothing ->
+                            (IntMap.insert replayKey sourceKey seen, Nothing)
+                        Just sourceA ->
+                            (seen, Just (sourceA, sourceKey, replayTarget))
+            (_, dup) = foldl' step (IntMap.empty, Nothing) (IntMap.toList replayMap)
+        in dup
+
     replayBindersForTrace trace =
         let rootC = canonical (etRoot trace)
             orderedUnder nid =
-                case Binding.orderedBinders canonical sourceConstraint (typeRef (canonical nid)) of
+                case Binding.orderedBinders canonical finalConstraint (typeRef (canonical nid)) of
                     Left _ -> []
                     Right binders -> map canonical binders
             direct = orderedUnder rootC
-        in case NodeAccess.lookupNode sourceConstraint rootC of
+        in case NodeAccess.lookupNode finalConstraint rootC of
             Just TyVar{ tnBound = Just bnd } ->
                 let viaBound = orderedUnder bnd
                 in if null direct then viaBound else direct
