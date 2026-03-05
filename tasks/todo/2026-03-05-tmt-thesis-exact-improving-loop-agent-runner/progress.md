@@ -21,3 +21,15 @@
   - `checked-authoritative`: PASS (`8 examples, 0 failures`)
   - `Dual-path verification`: PASS (`4 examples, 0 failures`)
   - `cabal build all && cabal test`: PASS
+- Round 2 planner sweep completed via agent team; first NO = mechanism 4 (`Per-edge propagation transform`).
+- Round 2 Attempt 1:
+  - Runtime worker removed synthesized-wrapper branch from `Interpreter` and enforced uniform minimal-expansion + `unifyStructure` path.
+  - Test worker added `row4 per-edge propagation thesis-exact guard` and relaxed synthesized-wrapper behavior assertion in `EdgeInterpreterSpec`.
+  - Verification:
+    - PASS: row4 guard / Phase 4 closure / Translatable presolution
+    - FAIL: full gate (`cabal build all && cabal test`) with Phase 6 regressions (`PhiTranslatabilityError` on `\\y. let id = (\\x. x) in id y`).
+- Round 2 Attempt 2:
+  - Worker recovered full-suite regressions by reintroducing synthesized-wrapper-safe behavior in Interpreter/Planner.
+  - Verification:
+    - PASS: row4 guard matcher, `Phase 6`, full gate.
+  - Outcome: row4 objective still not satisfied (synthesized special handling remains).

@@ -30,3 +30,17 @@
   - keep strict boundary scheduling (`closed owner` flush + post-boundary fail-fast),
   - keep improved diagnostics in `EdgeProcessing`/`Driver`.
 - Required matcher/full gates all passed after integration.
+
+## Round 2 planner sweep (agent team)
+- Ordered gate decisions:
+  1. Elaboration input -> YES
+  2. Result-type context wiring -> YES
+  3. Ordering of transformations -> YES
+  4. Per-edge propagation transform -> NO
+- `target_mechanism`: `Per-edge propagation transform`
+
+## Round 2 implementation findings
+- Attempt 1 removed synthesized-wrapper branching from Interpreter and added row4 guard/tests.
+- Focused row4 gates passed, but full gate failed with Phase 6 `PhiTranslatabilityError` (`OpRaise (non-spine): missing computation context`) on `\y. let id = (\x. x) in id y`.
+- Attempt 2 restored synthesized-wrapper-safe behavior to recover regressions while keeping `solveNonExpInstantiation` absent; full gate passed but objective remained unmet because synthesized-wrapper special handling still exists.
+- Conclusion: current implementation method for row4 does not converge to thesis-exact objective under required regression constraints.
