@@ -7,13 +7,13 @@ This plan is decision-complete for a Codex-subagent orchestrator and assumes a f
 ## Public APIs / Interfaces / Types
 1. No production Haskell API changes are required by this plan itself.
 2. Introduce orchestration message contracts (text/JSON) as agent interfaces:
-   - `VerifierSweepRecord`: `mechanism`, `gate`, `thesis_refs`, `code_refs`, `test_refs`, `gap_summary`.
+   - `VerifierSweepRecord`: `mechanism`, `table_row_path`, `table_row_update`, `gate`, `thesis_refs`, `code_refs`, `test_refs`, `gap_summary`.
    - `ResearchSummary`: `researcher`, `scope`, `key_findings`, `evidence_refs`, `planner_implications`.
    - `EvidenceReconciliation`: `agreed_facts`, `contradictions`, `trusted_claims`, `rejected_claims`, `resolution_status`.
    - `PlannerRoundPlan`: `target_mechanism`, `root_cause`, `files`, `tasks`, `tests`, `acceptance_criteria`, `abort_criteria`, `requires_scope_expansion`, `expanded_target_set`, `evidence_reconciliation`.
    - `ReviewResult`: `gate`, `blocking_findings`.
    - `QAResult`: `gate`, `commands_run`, `failures`.
-   - `ThesisGateResult`: `gate`, `target_evidence`, `earlier_yes_regression`.
+   - `ThesisGateResult`: `gate`, `table_row_update`, `target_evidence`, `earlier_yes_regression`.
 3. Gate value contract: every gate field value must be exactly `YES` or `NO`.
 4. Add orchestration-control metadata contracts:
    - `AttemptMeta`: `round`, `attempt`, `target_mechanism`, `feasibility`, `meaningful_diff`, `blocker_class`, `scope_changed`.
@@ -32,7 +32,7 @@ This plan is decision-complete for a Codex-subagent orchestrator and assumes a f
 
 ### 2. Spawn fixed role agents with strict ownership
 1. Orchestrator: coordination only, no file edits, no reviews, no gate self-approval.
-2. Verifier: thesis/code comparison and thesis gates.
+2. Verifier: thesis/code comparison, updates to the matching Transformation Mechanism Table row, and thesis gates.
 3. Researcher A: thesis/paper research for the selected mechanism, nearby transformations, and semantic invariants.
 4. Researcher B: codebase/tests/history research for the selected mechanism, likely edit points, and regression surface.
 5. Planner: actionable implementation plans from verifier gaps plus both researcher summaries.
@@ -45,31 +45,33 @@ This plan is decision-complete for a Codex-subagent orchestrator and assumes a f
 1. Use this exact mechanism order from the prompt (1..14).
 2. Gate question per mechanism must be:
    `update the row <MECHANISM> for Transformation Mechanism Table (Thesis vs Codebase) by reviewing the codebase and thesis, are we absolutely thesis-exact?`
-3. Row 14 (`Campaign classification status`) default gate mapping:
+3. Only the Verifier may update row statuses in `docs/notes/2026-02-27-transformation-mechanism-table.md`, and the emitted gate must match the row it just wrote.
+4. Row 14 (`Campaign classification status`) default gate mapping:
    - `YES` when `docs/thesis-deviations.yaml` has no active `DEV-TMT-*` in live deviations and campaign items are retired/resolved.
    - `NO` otherwise.
 
 ### 4. Round loop (maximum 10 rounds)
 1. Run verifier full sweep over all 14 mechanisms in order.
-2. Log one row per mechanism with gate and evidence refs.
-3. If all 14 gates are `YES`, emit:
+2. For each mechanism, the Verifier must review the codebase and thesis, update the corresponding row in `docs/notes/2026-02-27-transformation-mechanism-table.md`, and then return exact `YES` or `NO`.
+3. Log one row per mechanism with gate, row-update summary, and evidence refs.
+4. If all 14 gates are `YES`, emit:
    - `COMPLETED: implementation is thesis-exact; no code changes needed.`
    - `FINAL STATUS: COMPLETED`
    - Stop.
-4. Select `target_mechanism` as the first `NO`.
-5. Before planning starts, spawn both researchers for the selected target mechanism.
-6. Collect two `ResearchSummary` results:
+5. Select `target_mechanism` as the first `NO`.
+6. Before planning starts, spawn both researchers for the selected target mechanism.
+7. Collect two `ResearchSummary` results:
    - Researcher A summary must cover thesis references, intended semantics, coupling with adjacent mechanisms, and planner-relevant constraints.
    - Researcher B summary must cover current implementation shape, likely file ownership, existing tests/guards, and nearby regression risks.
-7. Planner may not start until both researcher summaries are available and must treat the verifier evidence plus both summaries as required inputs.
-8. Before writing implementation tasks, Planner must produce `EvidenceReconciliation`:
+8. Planner may not start until both researcher summaries are available and must treat the verifier evidence plus both summaries as required inputs.
+9. Before writing implementation tasks, Planner must produce `EvidenceReconciliation`:
    - list agreed facts across Verifier, Researcher A, and Researcher B,
    - list contradictions or uncertainty,
    - state which claims are trusted or rejected with evidence,
    - block implementation planning until the evidence basis is internally resolved.
-9. Planner produces `PlannerRoundPlan` for this target.
-10. If coupled mechanisms or cross-phase boundaries are implicated, Planner may set `requires_scope_expansion = YES` and provide `expanded_target_set`, while keeping the first `NO` as the anchor mechanism for the round.
-11. Enter attempt loop (max 10) for this round.
+10. Planner produces `PlannerRoundPlan` for this target.
+11. If coupled mechanisms or cross-phase boundaries are implicated, Planner may set `requires_scope_expansion = YES` and provide `expanded_target_set`, while keeping the first `NO` as the anchor mechanism for the round.
+12. Enter attempt loop (max 10) for this round.
 
 ### 5. Attempt loop (maximum 10 attempts per round)
 1. Bugfixer executes planner tasks and returns diff summary plus `AttemptMeta`; if infeasible, emits feasibility gate `NO` with reason.
@@ -77,7 +79,7 @@ This plan is decision-complete for a Codex-subagent orchestrator and assumes a f
 3. QA runs required commands:
    - Planner-required targeted commands.
    - Mandatory full gate: `cabal build all && cabal test`.
-4. Verifier re-checks target mechanism and runs sanity check on earlier mechanisms currently `YES`.
+4. Verifier re-checks the target mechanism, refreshes its row in `docs/notes/2026-02-27-transformation-mechanism-table.md`, and runs sanity checks on earlier mechanisms currently `YES`, refreshing those rows too if the reassessment changes.
 5. Attempt decision:
    - If Review=`YES` and QA=`YES` and Thesis=`YES`: Integrator commits on non-master branch/PR flow, mark round result `CONTINUE`, exit attempt loop, start next round.
    - Else:
