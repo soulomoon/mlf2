@@ -259,6 +259,11 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 ] $ \marker ->
                     edgeSrc `shouldSatisfy` isInfixOf marker
 
+        it "row3 absolute thesis-exact guard: EdgeProcessing does not flush all owner buckets at boundary" $ do
+            edgeSrc <- readFile "src/MLF/Constraint/Presolution/EdgeProcessing.hs"
+            edgeSrc `shouldSatisfy` (not . isInfixOf "forM_ owners flushPendingWeakensAtOwnerBoundary")
+            edgeSrc `shouldSatisfy` isInfixOf "let boundaryOwner = pendingWeakenOwnerFromMaybe mbCurrentOwner"
+
         it "chi-first guard: internals use shared ChiQuery facade" $ do
             elabSrc <- readFile "src/MLF/Elab/Elaborate.hs"
             rtViewSrc <- readFile "src/MLF/Elab/Run/ResultType/View.hs"

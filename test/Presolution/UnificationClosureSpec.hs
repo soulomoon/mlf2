@@ -213,3 +213,8 @@ spec = describe "Phase 4 thesis-exact unification closure" $ do
             , "assertNoPendingWeakensOutsideOwnerBoundary"
             ] $ \marker ->
                 edgeSrc `shouldSatisfy` isInfixOf marker
+
+    it "row3 absolute thesis-exact guard: unification closure forbids flush-all-owner boundary fallback" $ do
+        edgeSrc <- readFile "src/MLF/Constraint/Presolution/EdgeProcessing.hs"
+        edgeSrc `shouldSatisfy` (not . isInfixOf "forM_ owners flushPendingWeakensAtOwnerBoundary")
+        edgeSrc `shouldSatisfy` isInfixOf "let boundaryOwner = pendingWeakenOwnerFromMaybe mbCurrentOwner"

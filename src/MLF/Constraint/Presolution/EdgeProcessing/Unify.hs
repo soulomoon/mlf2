@@ -53,6 +53,7 @@ import MLF.Constraint.Presolution.Base (
     InteriorSet,
     PresolutionError(..),
     PresolutionM,
+    pendingWeakenOwnerFromMaybe,
     getConstraint,
     edgeInteriorExact,
     getCopyMapping,
@@ -144,7 +145,7 @@ runExpansionUnify gid edgeId leftRaw target expn baseOps =
             interiorExact <- edgeInteriorExact resNodeId
             let interior = IntSet.union canonInteriorSet interiorExact
 
-            eu0 <- initEdgeUnifyState binderMetas interior resNodeId
+            eu0 <- initEdgeUnifyState binderMetas interior resNodeId (pendingWeakenOwnerFromMaybe (Just gid))
             let omegaEnv = mkOmegaExecEnv copyMap0
             (_a, eu1) <- runStateT
                 (do

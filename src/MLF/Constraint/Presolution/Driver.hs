@@ -72,6 +72,7 @@ import MLF.Constraint.Presolution.EdgeProcessing (
     runPresolutionLoop,
     processInstEdge
     )
+import MLF.Constraint.Presolution.EdgeUnify (pendingWeakenOwners)
 import MLF.Constraint.Presolution.StateAccess (getConstraintAndCanonical)
 import MLF.Constraint.Acyclicity (AcyclicityResult(..))
 
@@ -96,6 +97,7 @@ computePresolution traceCfg acyclicityResult constraint = do
             , psUnionFind = IntMap.empty -- Should initialize from constraint if needed
             , psNextNodeId = maxNodeIdKeyOr0 constraint + 1
             , psPendingWeakens = IntSet.empty
+            , psPendingWeakenOwners = IntMap.empty
             , psBinderCache = IntMap.empty
             , psEdgeExpansions = IntMap.empty
             , psEdgeWitnesses = IntMap.empty
@@ -190,13 +192,16 @@ assertFinalizationBoundary phase = do
     let pendingWeakens = psPendingWeakens st
         pendingUnify = cUnifyEdges (psConstraint st)
     when (not (IntSet.null pendingWeakens) || not (null pendingUnify)) $
-        throwError $
-            InternalError $
-                unlines
-                    [ "presolution finalization boundary violation: " ++ phase
-                    , "pending weakens: " ++ show (IntSet.toList pendingWeakens)
-                    , "pending unify edges: " ++ show pendingUnify
-                    ]
+        do
+            pendingOwners <- pendingWeakenOwners
+            throwError $
+                InternalError $
+                    unlines
+                        [ "presolution finalization boundary violation: " ++ phase
+                        , "pending weakens: " ++ show (IntSet.toList pendingWeakens)
+                        , "pending weaken owners: " ++ show pendingOwners
+                        , "pending unify edges: " ++ show pendingUnify
+                        ]
 
 assertMaterializationCoverage :: IntMap NodeId -> PresolutionM ()
 assertMaterializationCoverage mapping = do

@@ -36,7 +36,7 @@ spec = describe "Edge interpreter" $ do
                 }
             st0 = PresolutionState constraint (Presolution IntMap.empty)
                 IntMap.empty 2 IntSet.empty IntMap.empty
-                IntMap.empty IntMap.empty IntMap.empty
+                IntMap.empty IntMap.empty IntMap.empty IntMap.empty
         case runPresolutionM defaultTraceConfig st0 (planEdge edge >>= executeEdgePlan) of
             Left _ -> pure ()
             Right _ -> expectationFailure "expected planner fail-fast on non-TyExp left edge"
@@ -63,7 +63,7 @@ spec = describe "Edge interpreter" $ do
                 }
             st0 = PresolutionState constraint (Presolution IntMap.empty)
                 IntMap.empty 4 IntSet.empty IntMap.empty
-                IntMap.empty IntMap.empty IntMap.empty
+                IntMap.empty IntMap.empty IntMap.empty IntMap.empty
         case runPresolutionM defaultTraceConfig st0 (planEdge edge >>= executeEdgePlan) of
             Left err -> expectationFailure ("executeEdgePlan failed: " ++ show err)
             Right ((), st1) -> do
@@ -95,7 +95,7 @@ spec = describe "Edge interpreter" $ do
                 }
             st0 = PresolutionState constraint (Presolution IntMap.empty)
                 IntMap.empty 3 IntSet.empty IntMap.empty
-                IntMap.empty IntMap.empty IntMap.empty
+                IntMap.empty IntMap.empty IntMap.empty IntMap.empty
         case runPresolutionM defaultTraceConfig st0 (executeEdgePlan plan) of
             Left err -> expectationFailure ("executeEdgePlan failed: " ++ show err)
             Right ((), st1) -> do
@@ -129,7 +129,7 @@ spec = describe "Edge interpreter" $ do
                 }
             st0 = PresolutionState constraint (Presolution IntMap.empty)
                 IntMap.empty 4 IntSet.empty IntMap.empty
-                IntMap.empty IntMap.empty IntMap.empty
+                IntMap.empty IntMap.empty IntMap.empty IntMap.empty
         case runPresolutionM defaultTraceConfig st0 (executeEdgePlan plan) of
             Left err -> expectationFailure ("executeEdgePlan failed: " ++ show err)
             Right ((), st1) -> do

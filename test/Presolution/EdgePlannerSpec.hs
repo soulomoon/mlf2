@@ -86,7 +86,7 @@ spec = describe "Edge plan types" $ do
                     }
                 st0 = PresolutionState constraint (Presolution IntMap.empty)
                     IntMap.empty 4 IntSet.empty IntMap.empty
-                    IntMap.empty IntMap.empty IntMap.empty
+                    IntMap.empty IntMap.empty IntMap.empty IntMap.empty
             case runPresolutionM defaultTraceConfig st0 (planEdge edge) of
                 Left err -> expectationFailure ("planEdge failed: " ++ show err)
                 Right (plan, _) -> do
@@ -103,7 +103,7 @@ spec = describe "Edge plan types" $ do
                     }
                 st0 = PresolutionState constraint (Presolution IntMap.empty)
                     IntMap.empty 2 IntSet.empty IntMap.empty
-                    IntMap.empty IntMap.empty IntMap.empty
+                    IntMap.empty IntMap.empty IntMap.empty IntMap.empty
             case runPresolutionM defaultTraceConfig st0 (planEdge edge) of
                 Left (PlanError (ExpectedTyExpLeftInPlanner edgeId leftNode)) -> do
                     edgeId `shouldBe` EdgeId 1
@@ -128,7 +128,7 @@ spec = describe "Edge plan types" $ do
                     }
                 st0 = PresolutionState constraint (Presolution IntMap.empty)
                     IntMap.empty 3 IntSet.empty IntMap.empty
-                    IntMap.empty IntMap.empty IntMap.empty
+                    IntMap.empty IntMap.empty IntMap.empty IntMap.empty
             case runPresolutionM defaultTraceConfig st0 (planEdge edge) of
                 Left err -> expectationFailure ("planEdge failed: " ++ show err)
                 Right (plan, _) -> do
@@ -150,7 +150,7 @@ spec = describe "Edge plan types" $ do
                     }
                 st0 = PresolutionState constraint (Presolution IntMap.empty)
                     IntMap.empty 3 IntSet.empty IntMap.empty
-                    IntMap.empty IntMap.empty IntMap.empty
+                    IntMap.empty IntMap.empty IntMap.empty IntMap.empty
             case runPresolutionM defaultTraceConfig st0 (planEdge edge) of
                 Left err -> expectationFailure ("planEdge failed: " ++ show err)
                 Right (plan, _) -> do

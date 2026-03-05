@@ -71,6 +71,7 @@ spec = describe "EdgeTrace" $ do
                     IntMap.empty
                     IntMap.empty
                     IntMap.empty
+                    IntMap.empty
         case runPresolutionM defaultTraceConfig st0 (processInstEdge edge) of
             Left err -> expectationFailure ("processInstEdge failed: " ++ show err)
             Right (_, st1) -> do
@@ -136,6 +137,7 @@ spec = describe "EdgeTrace" $ do
                     IntMap.empty
                     8
                     IntSet.empty
+                    IntMap.empty
                     IntMap.empty
                     IntMap.empty
                     IntMap.empty
@@ -210,6 +212,7 @@ spec = describe "EdgeTrace" $ do
                     IntMap.empty
                     7
                     IntSet.empty
+                    IntMap.empty
                     IntMap.empty
                     IntMap.empty
                     IntMap.empty
@@ -337,6 +340,7 @@ spec = describe "EdgeTrace" $ do
                     IntMap.empty
                     IntMap.empty
                     IntMap.empty
+                    IntMap.empty
         case runPresolutionM defaultTraceConfig st0 (processInstEdge edge) of
             Left err -> expectationFailure ("processInstEdge failed: " ++ show err)
             Right (_, st1) -> do
@@ -364,7 +368,7 @@ spec = describe "EdgeTrace" $ do
                         , (nodeRefKey (typeRef bodyNode), (typeRef expNode, BindFlex))
                         ]
                     }
-                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 10 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 10 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
             case runPresolutionM defaultTraceConfig st0 (processInstEdge edge) of
                 Right _ -> pure ()
                 Left err -> expectationFailure $ "processInstEdge failed: " ++ show err
@@ -387,7 +391,7 @@ spec = describe "EdgeTrace" $ do
                         , (nodeRefKey (typeRef bodyNode), (typeRef expNode, BindFlex))
                         ]
                     }
-                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 10 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 10 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
             case runPresolutionM defaultTraceConfig st0 (processInstEdge edge) of
                 Right (_, st1) ->
                     IntMap.lookup 0 (psEdgeExpansions st1) `shouldSatisfy` \case

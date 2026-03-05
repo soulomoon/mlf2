@@ -174,6 +174,34 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - `--match "Dual-path verification"`
   - `cabal build all && cabal test`
 
+## Task 47 TMT row3 strict owner-boundary scheduling closeout (completed 2026-03-05)
+
+- Completed:
+  - Removed the old flush-all-owner fallback shape from
+    `MLF.Constraint.Presolution.EdgeProcessing`.
+  - Made pending-weaken owner provenance stable by stamping owner buckets at
+    enqueue time in `MLF.Constraint.Presolution.EdgeUnify` and preserving that
+    provenance through boundary flush selection.
+  - Kept strict post-boundary/finalization fail-fast checks and improved
+    diagnostics to include pending owner buckets.
+  - Strengthened row3 absolute guard slices to detect flush-all-owner fallback
+    regression.
+- Verification:
+  - `--match "row3 absolute thesis-exact guard"`: PASS (`6 examples, 0 failures`)
+  - `--match "Phase 4 thesis-exact unification closure"`: PASS (`11 examples, 0 failures`)
+  - `--match "Translatable presolution"`: PASS (`8 examples, 0 failures`)
+  - `--match "generalizes reused constructors via make const"`: PASS (`1 example, 0 failures`)
+  - `--match "BUG-002-V1"`: PASS (`1 example, 0 failures`)
+  - `--match "Frozen parity artifact baseline"`: PASS (`1 example, 0 failures`)
+  - `--match "checked-authoritative"`: PASS (`8 examples, 0 failures`)
+  - `--match "Dual-path verification"`: PASS (`4 examples, 0 failures`)
+  - `cabal build all && cabal test`: PASS
+- Rolling priorities (next):
+  1. Row 4 (`Per-edge propagation transform`): retire synthesized-wrapper
+     special-case and enforce uniform expansion+unification semantics.
+  2. Keep row1/row2/row3 strict guard suites mandatory while reducing later
+     TMT non-thesis scaffolding.
+
 ## Task 32 TMT row-1 chi-first elab/generalize closeout (completed 2026-03-03)
 
 - Completed:
