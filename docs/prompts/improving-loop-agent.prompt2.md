@@ -47,15 +47,10 @@ Run this algorithm:
 
 For `round = 1..10`:
 1. Full verification sweep (Verifier-Researcher-Planner):
-   - For each mechanism in order, answer this gate:
-     - `update the row <MECHANISM> for Transformation Mechanism Table (Thesis vs Codebase) by reviewing the codebase and thesis, are we absolutely thesis-exact?`
-   - For each mechanism row, spawn a fresh Verifier-Researcher-Planner.
-   - That fresh Verifier-Researcher-Planner must review the codebase and thesis, update the corresponding row in `docs/notes/2026-02-27-transformation-mechanism-table.md`, and only then return the gate.
-   - The returned gate must match the row that fresh Verifier-Researcher-Planner just wrote.
+   - You should start a new Verifier-Researcher-Planner per table row
+   - Each Verifier-Researcher-Planner must review the newest codebase and thesis, update the corresponding row in `docs/notes/2026-02-27-transformation-mechanism-table.md`, and return the gate.
+   - The returned gate must match the row the Verifier-Researcher-Planner just wrote.
    - Do not reuse one Verifier-Researcher-Planner across multiple mechanism rows in the sweep.
-   - For mechanism 14 (`Campaign classification status`), map the result to exact `YES` or `NO`:
-     - `YES` when `docs/thesis-deviations.yaml` has no active `DEV-TMT-*` live deviations and campaign items are retired or resolved
-     - `NO` otherwise
    - For each mechanism, record:
      - gate (`YES` or `NO`)
      - row update summary
@@ -69,20 +64,20 @@ For `round = 1..10`:
 
 3. Target selection:
    - Set `target_mechanism` to the first `NO` in the fixed mechanism order.
+   - Set `Target-Verifier-Researcher-Planner` to the agent that produced the `NO` gate for that `target_mechanism`
    - Keep the remaining `NO` mechanisms as backlog for future rounds.
    - The first `NO` remains the anchor mechanism for the round even if the Verifier-Researcher-Planner later widens working scope.
 
 4. Combined analysis handoff:
-   - Before implementation starts, spawn a fresh Verifier-Researcher-Planner agent for `target_mechanism`.
-   - Do not reuse the Verifier-Researcher-Planner that wrote the verification-sweep row for `target_mechanism`.
-   - The Verifier-Researcher-Planner must produce, in order:
+   - Before implementation starts, reuse the `Target-Verifier-Researcher-Planner` agent that researched for `target_mechanism`.
+   - The Target-Verifier-Researcher-Planner must produce, in order:
      - a concise thesis-side research summary with thesis references, intended semantics, adjacent mechanism coupling, and planner-relevant invariants
      - a concise code-side research summary with code references, likely edit points, current behavior, existing tests/guards, and regression risks
-     - an evidence reconciliation summary that cross-checks its verification evidence against both research views
-   - The Verifier-Researcher-Planner must not hand implementation work to Bugfixer until all three artifacts are available and any contradictions are either resolved or explicitly bounded.
+     - an evidence reconciliation summary that cross-checks its verification evidence against research views
+   - The Target-Verifier-Researcher-Planner must not hand implementation work to Bugfixer until all three artifacts are available and any contradictions are either resolved or explicitly bounded.
 
-5. Plan generation (Verifier-Researcher-Planner):
-   - Input: the Verifier-Researcher-Planner's verification evidence for `target_mechanism` plus its thesis-side and code-side research summaries.
+5. Plan generation (Target-Verifier-Researcher-Planner):
+   - Input: the Target-Verifier-Researcher-Planner's verification evidence for `target_mechanism` plus its thesis-side and code-side research summaries.
    - First perform evidence reconciliation across the verification evidence, the thesis-side research summary, and the code-side research summary:
      - list agreed facts
      - list contradictions or uncertainty
@@ -100,9 +95,9 @@ For `round = 1..10`:
      - if `requires_scope_expansion = YES`, an `expanded_target_set` that names the coupled mechanism(s), producer/consumer path(s), or cross-phase boundary that must be handled together
 
 6. Implementation loop (`attempt = 1..10`):
-   - Attempt 1 input: Verifier-Researcher-Planner output from step 5.
-   - For attempts 2..10, before producing any revised analysis/plan for `target_mechanism`, spawn a fresh Verifier-Researcher-Planner for that attempt.
-   - Attempts 2..10 input: revised Verifier-Researcher-Planner output from that fresh attempt-specific agent, incorporating latest review/QA/thesis-gate findings.
+   - Attempt 1 input: Target-Verifier-Researcher-Planner output from step 5.
+   - For attempts 2..10, before producing any revised analysis/plan for `target_mechanism`, spawn a fresh Target-Verifier-Researcher-Planner for that attempt.
+   - Attempts 2..10 input: revised Target-Verifier-Researcher-Planner output from that fresh attempt-specific agent, incorporating latest review/QA/thesis-gate findings.
 
    6.1 Bugfixing execution (Bugfixer):
    - Apply code and test changes only.
@@ -125,10 +120,10 @@ For `round = 1..10`:
    - Output exactly `YES` or `NO` and the reason if `NO`.
    - If `NO`, report failing command/tests.
 
-   6.4 Thesis gate (Verifier-Researcher-Planner):
-   - Spawn a fresh Verifier-Researcher-Planner to re-check `target_mechanism` after implementation.
-   - That fresh Verifier-Researcher-Planner must refresh the corresponding row in `docs/notes/2026-02-27-transformation-mechanism-table.md` before returning the gate.
-   - Also run a regression sanity check on previously-`YES` earlier mechanisms in order; for each earlier row rechecked, spawn a fresh Verifier-Researcher-Planner for that row and refresh it if the reassessment changes.
+   6.4 Thesis gate (Target-Verifier-Researcher-Planner):
+   - The Target-Verifier-Researcher-Planner to re-check `target_mechanism` after implementation.
+   - That fresh Target-Verifier-Researcher-Planner must refresh the corresponding row in `docs/notes/2026-02-27-transformation-mechanism-table.md` before returning the gate.
+   - Also run a regression sanity check on previously-`YES` earlier mechanisms in order; for each earlier row rechecked, spawn a fresh Target-Verifier-Researcher-Planner for that row and refresh it if the reassessment changes.
    - Output exactly `YES` or `NO` AND the reason if `NO`.
    6.5 Attempt decision:
    - If Review = `YES` and QA = `YES` and Thesis = `YES`:
@@ -140,7 +135,7 @@ For `round = 1..10`:
      - After each failed attempt, the Orchestrator must explicitly choose one:
        - accept the current diff as the baseline for the next attempt, or
        - revert unaccepted edits before the next attempt begins
-     - The Verifier-Researcher-Planner must produce a failure analysis and revised plan before next attempt.
+     - The Target-Verifier-Researcher-Planner must produce a failure analysis and revised plan before next attempt.
      - For attempts 2..10, the revised plan must include `PlannerDelta`:
        - `changed_since_previous_attempt`
        - `why_outcome_should_change`

@@ -4,6 +4,20 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 49 TMT per-row fresh review (completed 2026-03-07)
+
+- Completed:
+  - Reviewed all 14 Transformation Mechanism Table rows with one fresh agent per row against the newest codebase and `papers/these-finale-english.txt`.
+  - Refreshed row wording/evidence for rows 1, 3, 6, 12, and 13.
+  - Reopened two thesis-faithfulness gaps:
+    - row2 `Result-type context wiring` is not fully thesis-exact while the live path still seeds `PresolutionView` from `Solved` and validates through `ChiQuery.chiSolved`;
+    - row8 `Translatability normalization` is not fully thesis-exact while §15.2.8 all-inert `W` normalization is not on the live production path.
+  - Recorded the reopened gaps in `Bugs.md` and updated the live TMT note accordingly.
+- Rolling priorities (next):
+  1. Remove the hidden solved-compat adapter from the live row2 result-type path.
+  2. Decide whether to implement live all-inert `W` normalization for row8 or keep that row explicitly scoped to Definition 15.2.10 / Theorem 15.2.11 only.
+  3. Keep the fresh-review-validated guard suites and full gate mandatory while fixing reopened rows.
+
 ## Task 48 Row6 replay-contract recovery after orchestrated max-retry (completed 2026-03-06)
 
 - Closed:
@@ -27,15 +41,15 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - `checked-authoritative`: PASS
   - `Dual-path verification`: PASS
   - `cabal build all && cabal test`: PASS (`956 examples, 0 failures`)
+- Follow-up status:
+  - Historical note: the fresh round-2 goal-table/orchestrator sweep had reported all 14 mechanisms `YES`.
+  - Superseded on 2026-03-07 by the stricter per-row fresh review: row2 and row8 are reopened thesis-faithfulness gaps, while row6 remains closed.
 - Rolling priorities (next):
-  1. Re-run the row6 goal-table/orchestrator verification from a green base so
-     the YES/NO table can be updated with fresh evidence instead of the stale
-     `MAXIMUMRETRY` attempt.
-  2. Audit row6 docs/prompts/task artifacts under `docs/plans/` and
-     `tasks/archive/` so the archived failed attempt and the successful
-     recovery wave tell one consistent story.
-  3. Keep source-domain replay-contract behavior covered when future presolution
-     changes touch copy-map/canonicalization logic.
+  1. Keep source-domain replay-contract behavior covered when future
+     presolution changes touch copy-map/canonicalization logic.
+  2. Fix reopened row2 and row8 gaps before claiming end-to-end TMT closure again.
+  3. Keep the closed-row thesis-exact guard suites and `cabal build all &&
+     cabal test` mandatory for future thesis-alignment changes.
 
 ## Task 40 Elaboration-input strict-policy docs closeout (completed 2026-03-04)
 

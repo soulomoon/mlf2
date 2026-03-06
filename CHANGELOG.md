@@ -3,6 +3,15 @@
 ## Unreleased
 
 ### Changed
+- TMT per-row fresh review audit (2026-03-07):
+  - reviewed all 14 Transformation Mechanism Table rows with one fresh agent per row against the newest codebase and the thesis;
+  - refreshed row wording/evidence for rows 1, 3, 6, 12, and 13;
+  - reclassified row2 and row8 back to `No` after finding a hidden solved-compat adapter in the live result-type path and a missing live all-inert `W` normalization step;
+  - recorded the reopened gaps in `Bugs.md` and updated live tracker/docs accordingly.
+- Docs TMT closeout tracker sync (2026-03-07):
+  - updated the live Transformation Mechanism Table note, `TODO.md`, and `implementation_notes.md` so the row6 `MAXIMUMRETRY` run is explicitly historical rather than current next work;
+  - recorded the fresh round-2 all-`YES` verification sweep as the authoritative post-closeout state for the TMT campaign;
+  - archived directly related completed task folders still living under `tasks/todo/`.
 - Round 2 TMT rows 9-11 direct-target closeout (2026-03-07):
   - removed Ω source-candidate reconciliation helpers from `MLF.Elab.Phi.Omega`, so `OpRaise` no longer recovers alternative source nodes after the replay bridge;
   - made unresolved non-trace `OpRaise` targets fail fast instead of degrading to `ε`, while preserving source-domain interior membership only for direct forward `etCopyMap` alias evidence;

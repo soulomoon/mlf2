@@ -2,6 +2,14 @@
 
 ## Thesis Alignment (Phase A–E)
 
+### 2026-03-07 TMT per-row fresh review reopened row2 and row8
+- A new per-row audit reviewed every TMT row with one fresh reviewer agent per row against the live codebase and `papers/these-finale-english.txt`.
+- The audit refreshed wording/evidence for rows 1, 3, 6, 12, and 13, and kept rows 4, 5, 7, 9, 10, 11, and 14 materially unchanged.
+- It also reopened two thesis-faithfulness gaps:
+  - row2 `Result-type context wiring`: the live path still seeds `PresolutionView` from `Solved` and validates through `ChiQuery.chiSolved`, so a hidden solved-compat adapter remains;
+  - row8 `Translatability normalization`: live finalization enforces Definition 15.2.10 / Theorem 15.2.11 constructive translatability, but not §15.2.8’s stronger all-inert `W` normalization.
+- This supersedes the blanket “all 14 mechanisms yes” closeout claim from the earlier 2026-03-07 verifier sweep section below.
+
 ### 2026-03-06 stale non-root `OpWeaken` pruning for BUG-2026-02-06-002
 - Recovered `let-c1-apply-bool` without relaxing Ω strictness.
 - `MLF.Constraint.Presolution.WitnessNorm` now prunes a non-root `OpWeaken`
@@ -29,6 +37,14 @@
   - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-2026-02-08-004"'`: PASS
   - `cabal build all && cabal test`: PASS (`956 examples, 0 failures`)
 
+### 2026-03-07 TMT full-sweep closeout sync
+- The 2026-03-05 row6 `MAXIMUMRETRY` orchestrator run is now historical-only evidence.
+- It was superseded first by the 2026-03-06 row6 replay-contract recovery and
+  then by the fresh round-2 full verifier sweep archived under
+  `/Volumes/src/mlf4/tasks/archive/2026-03-06-tmt-improving-loop-orchestrator-fresh-round-2/`.
+- Historical result at the time: that fresh sweep re-evaluated all 14 TMT mechanisms from a green base and returned `YES` for every row, with `cabal build all && cabal test` passing (`959 examples, 0 failures`).
+- Later on 2026-03-07, a stricter per-row thesis/code review reopened row2 and row8; treat the sweep as historical verifier evidence, not the final live classification.
+
 ### 2026-03-06 Task 48 row6 replay-contract recovery closeout
 - Closed the post-orchestrator replay-contract recovery from a clean green base
   after the fresh round-1 `MAXIMUMRETRY` regression.
@@ -53,7 +69,9 @@
   - `Dual-path verification`: PASS
   - `cabal build all && cabal test`: PASS (`954 examples, 0 failures`)
 
-### 2026-03-05 Row6 orchestrated execution (fresh round re-run) terminal status
+### 2026-03-05 Row6 orchestrated execution (historical blocked run; superseded)
+- Historical record only: this blocked run was superseded by the 2026-03-06
+  replay-contract recovery and the 2026-03-07 fresh round-2 full sweep.
 - Executed
   `/Volumes/src/mlf4/docs/plans/archive/2026-03-05-orchestrated-execution-improving-loop-agent-prompt-codex-subagents-fresh-round-1.md`
   against task tracker
@@ -67,7 +85,7 @@
   - Prior required sanity slices now unstable in full baseline:
     `Phase 4 thesis-exact unification closure`,
     `checked-authoritative`, `Dual-path verification`.
-- Follow-up direction:
+- Historical follow-up direction captured at the time:
   - treat replay contract redesign as cross-phase work (producer + consumer),
     then recover baseline green before re-attempting row6 closeout.
 
