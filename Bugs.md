@@ -4,6 +4,46 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 
 ## Open
 
+### BUG-2026-03-07-001
+- Status: Open
+- Priority: High
+- Discovered: 2026-03-07
+- Summary: Row2 result-type reconstruction still uses a hidden solved-compat adapter on the live path (`fromSolved` + `ChiQuery.chiSolved`), so the row is not fully thesis-exact.
+- Minimal reproducer:
+  - `rg -n "fromSolved solvedForGen|fromSolved solvedClean" /Volumes/src/mlf4/src/MLF/Elab/Run/Pipeline.hs`
+  - `rg -n "fromSolved ::|chiSolvedCompat|chiSolved =" /Volumes/src/mlf4/src/MLF/Constraint/Presolution/View.hs /Volumes/src/mlf4/src/MLF/Elab/Run/ChiQuery.hs`
+  - `rg -n "validateCanonicalGraphStrict \(ChiQuery\.chiSolved" /Volumes/src/mlf4/src/MLF/Elab/Run/ResultType/View.hs`
+- Expected vs actual:
+  - Expected: row2 should reconstruct result-type context directly from a snapshot-native `PresolutionView` with no solved-compat adapter in the live path.
+  - Actual: the live path still seeds `PresolutionView` from `Solved` and validates through `ChiQuery.chiSolved`, which rebuilds solved-compatible state.
+- Suspected/owning area:
+  - `/Volumes/src/mlf4/src/MLF/Elab/Run/Pipeline.hs`
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/View.hs`
+  - `/Volumes/src/mlf4/src/MLF/Elab/Run/ResultType/View.hs`
+  - `/Volumes/src/mlf4/src/MLF/Elab/Run/ChiQuery.hs`
+  - `/Volumes/src/mlf4/src/MLF/Elab/Run/ResultType/Types.hs`
+- Thesis impact:
+  - Reopens Transformation Mechanism Table row `Result-type context wiring`: the repo still carries an implementation-only solved-adapter boundary absent from the thesis presentation of `Typ(a′)`, `Typexp(a′)`, and `T(a)`.
+
+### BUG-2026-03-07-002
+- Status: Open
+- Priority: Medium
+- Discovered: 2026-03-07
+- Summary: Row8 translatability normalization claims full thesis alignment, but the live path does not run §15.2.8’s stronger all-inert `W` normalization.
+- Minimal reproducer:
+  - `rg -n "rigidifyTranslatablePresolutionM|validateTranslatablePresolution" /Volumes/src/mlf4/src/MLF/Constraint/Presolution/Driver.hs /Volumes/src/mlf4/src/MLF/Constraint/Presolution/Validation.hs`
+  - `rg -n "weakenInertNodes" /Volumes/src/mlf4/src /Volumes/src/mlf4/test`
+- Expected vs actual:
+  - Expected: if row8 is claimed thesis-exact at §15.2.8 scope, the live pre-elaboration path should weaken all inert nodes (or an equivalent `W` normalization) before translation.
+  - Actual: the live path enforces Definition 15.2.10 / Theorem 15.2.11 constructive translatability only; `weakenInertNodes` exists but is not on the live production path.
+- Suspected/owning area:
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/Driver.hs`
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/Validation.hs`
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Inert.hs`
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/WitnessNorm.hs`
+- Thesis impact:
+  - Reopens Transformation Mechanism Table row `Translatability normalization`: the implementation is aligned with Definition 15.2.10 / Theorem 15.2.11, but not with the stronger §15.2.8 all-inert normalization claim currently associated with that row.
+
 ### BUG-2026-03-06-001
 - Status: Open
 - Priority: Medium
