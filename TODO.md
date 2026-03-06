@@ -453,6 +453,16 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 - Next:
   - Optional follow-up: continue reducing internal elaboration compatibility reads of `Solved` (result-type/generalize internals) once architecture allows full replacement without regressing paper baseline slices.
 
+## Task 28 TMT identity row re-audit (2026-03-06)
+
+- Completed:
+  - Re-audited thesis elaboration identity handling against `papers/these-finale-english.txt` §15.3.1-§15.3.6 and the current Phi/Omega implementation.
+  - Confirmed the live `IdentityBridge`/Ω path is witness-domain exact (`raw`/`copy`/`trace` only; no class-member fallback).
+  - Identified the remaining row-level blocker: production Φ identity handling is still split across runtime reconciliation helpers (`Translate` replay bridge + `IdentityBridge` in `Omega`), and `MLF.Elab.Phi.Binder` still exposes canonical/base-key/copy-map reconciliation.
+  - Updated Transformation Mechanism Table row `Identity reconciliation mechanism` to keep the row at `No` for absolute whole-codebase exactness, with the concrete blocker recorded.
+- Next:
+  - Collapse the active reconciliation object model in Φ (`Translate`/`IdentityBridge`/`Omega`) and retire or rewrite `MLF.Elab.Phi.Binder` so no compiled Phi path preserves a separate non-thesis identity-reconciliation mechanism.
+
 ## Task 27 Transformation Mechanism Table thesis-exact classification campaign (2026-03-01)
 
 - Completed:
