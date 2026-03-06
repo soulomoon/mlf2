@@ -512,9 +512,9 @@
 ### 2026-03-06 TMT identity row re-audit
 
 - Thesis §§15.3.1-15.3.6 carries elaboration identity directly through named nodes, computation contexts, and witness-derived computations (`ε`, `ϕR`, `T(e)`); it does not introduce a separate identity-reconciliation object.
-- The active `MLF.Elab.Phi.IdentityBridge` + `MLF.Elab.Phi.Omega` path is now witness-domain exact: raw/copy/trace provenance only, plus direct replay-target/spine membership checks.
-- The active runtime is still split across `Translate` replay-bridge validation and `IdentityBridge`/`Omega` source reconciliation; this dedicated reconciliation object model is not present in the thesis presentation.
-- A further internal-helper divergence still exists in `MLF.Elab.Phi.Binder`, which reconciles binders via `canonical`, `gaSolvedToBase`, and copy-map inversion; this keeps the Transformation Mechanism Table row `Identity reconciliation mechanism` non-absolute at whole-codebase scope.
+- The accepted runtime path is now witness-domain exact: `Translate` validates trace/replay key-space contracts, while `Omega` uses direct replay/source targets with fail-fast behavior and no local source-candidate recovery helpers.
+- `MLF.Elab.Phi.IdentityBridge` remains as a witness-domain utility/diagnostic module and test surface only; it is no longer authoritative for runtime target repair.
+- The source-domain interior-membership exception is intentionally narrow: direct forward `etCopyMap` alias evidence is still accepted as witness-authoritative provenance, but reverse-copy/canonical candidate expansion is not used for runtime repair.
 
 ### 2026-02-27 Phi strict replay-map normalization (upfront, no runtime fallback search)
 
@@ -1616,3 +1616,11 @@ This repo’s design is primarily informed by:
 - Hygiene guard scope note (Task 9):
   - enforce no direct `MLF.Constraint.Solved` imports in elaboration entrypoint/public modules (`MLF.Elab.Run`, `MLF.Elab.Pipeline`, `MLF.API`, `MLF.Pipeline`),
   - internal elaboration modules still keep compatibility solved reads where removal would require broader architectural changes.
+
+## 2026-03-07 row9-11 direct-target Ω closeout
+
+- Ω no longer defines the local source-candidate recovery helpers (`sourceCandidates`, `pickExistingSource`, `adoptOpNode`, `graftArgFor`).
+- `resolveTraceBinderTarget` remains the only target-selection bridge from witness-domain source ids to replay ids for ω operations.
+- `OpRaise` now fails fast when no direct replay/source target exists, including the formerly silent non-trace no-op case.
+- Source-domain interior membership keeps one bounded exception: direct forward `etCopyMap` alias evidence may justify interior membership, but reverse-copy/canonical candidate expansion no longer participates in runtime target recovery.
+- `IdentityBridge` remains in the codebase as a witness-domain utility/test surface; runtime Ω binder selection is direct and no longer driven by local candidate ranking helpers.

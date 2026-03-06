@@ -3,6 +3,20 @@
 ## Unreleased
 
 ### Changed
+- Round 2 TMT rows 9-11 direct-target closeout (2026-03-07):
+  - removed Ω source-candidate reconciliation helpers from `MLF.Elab.Phi.Omega`, so `OpRaise` no longer recovers alternative source nodes after the replay bridge;
+  - made unresolved non-trace `OpRaise` targets fail fast instead of degrading to `ε`, while preserving source-domain interior membership only for direct forward `etCopyMap` alias evidence;
+  - added direct regression coverage for the new `OpRaise` fail-fast path and a guard that `Omega` no longer defines the old source-candidate helper layer;
+  - verified gates:
+    - `source-space identity replay target` (`1 example, 0 failures`)
+    - `OpRaise accepts source-domain interior membership even when etCopyMap aliases the target` (`1 example, 0 failures`)
+    - `OpRaise fails fast when a trace-source target resolves to no existing replay node` (`1 example, 0 failures`)
+    - `OpRaise fails fast when a non-trace target resolves to no existing replay node` (`1 example, 0 failures`)
+    - `row9-11 direct-target guard` (`1 example, 0 failures`)
+    - `IdentityBridge` (`23 examples, 0 failures`)
+    - `checked-authoritative` (`8 examples, 0 failures`)
+    - `Dual-path verification` (`4 examples, 0 failures`)
+    - `cabal build all && cabal test` PASS (`959 examples, 0 failures`).
 - Docs orchestrator log format rationalization (2026-03-06):
   - chose `orchestrator-log.jsonl` as the single authoritative orchestrator execution log;
   - moved human-readable run summaries to `findings.md` / `progress.md` rather than a second canonical markdown log;

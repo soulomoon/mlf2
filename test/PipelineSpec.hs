@@ -205,10 +205,12 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         it "elab-input absolute thesis-exact guard" $ do
             phiEnvSrc <- readFile "src/MLF/Elab/Phi/Env.hs"
             scopeSrc <- readFile "src/MLF/Elab/Run/Scope.hs"
+            contextSrc <- readFile "src/MLF/Constraint/Presolution/Plan/Context.hs"
             phiTestOnlySrc <- readFile "src/MLF/Elab/Phi/TestOnly.hs"
             isInfixOf "peResult :: Solved" phiEnvSrc `shouldBe` False
             isInfixOf "askResult ::" phiEnvSrc `shouldBe` False
             isInfixOf "Left _ -> ref" scopeSrc `shouldBe` False
+            isInfixOf "Left _ -> root" contextSrc `shouldBe` False
             isInfixOf "phiFromEdgeWitnessAutoTrace" phiTestOnlySrc `shouldBe` False
 
         it "row1 closeout guard|checked-authoritative keeps representative corpus parity: elaborateWithEnv has no entry-time Solved.rebuildWithConstraint" $ do
@@ -281,6 +283,13 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             unifySrc `shouldSatisfy` (not . isInfixOf "OmegaExec.executeOmegaBaseOpsPost")
             unifySrc `shouldSatisfy` isInfixOf "executeEdgeLocalOmegaOps omegaEnv baseOps"
             edgeUnifySrc `shouldSatisfy` isInfixOf "executeEdgeLocalOmegaOps omegaEnv baseOps action = do"
+
+        it "row9-11 direct-target guard: Omega does not define source-candidate reconciliation helpers" $ do
+            omegaSrc <- readFile "src/MLF/Elab/Phi/Omega.hs"
+            omegaSrc `shouldSatisfy` (not . isInfixOf "sourceCandidates :: NodeId -> [NodeId]")
+            omegaSrc `shouldSatisfy` (not . isInfixOf "pickExistingSource :: [NodeId] -> Maybe NodeId")
+            omegaSrc `shouldSatisfy` (not . isInfixOf "adoptOpNode :: NodeId -> NodeId")
+            omegaSrc `shouldSatisfy` (not . isInfixOf "graftArgFor :: NodeId -> NodeId -> NodeId")
 
         it "chi-first guard: internals use shared ChiQuery facade" $ do
             elabSrc <- readFile "src/MLF/Elab/Elaborate.hs"

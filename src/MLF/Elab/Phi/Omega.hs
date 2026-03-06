@@ -604,49 +604,9 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
             Just _ -> True
             Nothing -> False
 
-    nodeIsBottom :: NodeId -> Bool
-    nodeIsBottom nid =
-        case lookupNodePV (canonicalNode nid) of
-            Just TyBottom{} -> True
-            _ -> False
-
     isTraceBinderSource :: NodeId -> Bool
     isTraceBinderSource nid =
         IntSet.member (getNodeId nid) traceBinderSources
-
-    dedupNodeIds :: [NodeId] -> [NodeId]
-    dedupNodeIds =
-        reverse
-            . snd
-            . foldl'
-                (\(seen, acc) nid ->
-                    let key = getNodeId nid
-                    in if IntSet.member key seen
-                        then (seen, acc)
-                        else (IntSet.insert key seen, nid : acc)
-                )
-                (IntSet.empty, [])
-
-    sourceCandidates :: NodeId -> [NodeId]
-    sourceCandidates nid =
-        dedupNodeIds (map NodeId (IB.sourceKeysForNode ib nid))
-
-    pickExistingSource :: [NodeId] -> Maybe NodeId
-    pickExistingSource candidates =
-        listToMaybe
-            [ canonicalNode candidate
-            | candidate <- dedupNodeIds candidates
-            , nodeExists candidate
-            ]
-
-    adoptOpNode :: NodeId -> NodeId
-    adoptOpNode nid =
-        fromMaybe (canonicalNode nid) (pickExistingSource (sourceCandidates nid))
-
-    graftArgFor :: NodeId -> NodeId -> NodeId
-    graftArgFor arg bv =
-        fromMaybe (adoptOpNode arg) $
-            pickExistingSource (sourceCandidates arg ++ sourceCandidates bv)
 
     resolveTraceBinderTarget :: Bool -> String -> NodeId -> Either ElabError NodeId
     resolveTraceBinderTarget requireBinder opName rawTarget
@@ -696,7 +656,7 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                 then do
                     if vSpineNull vs
                         then do
-                            argTy <- reifyTypeArg namedSet' Nothing (graftArgFor arg bv)
+                            argTy <- reifyTypeArg namedSet' Nothing (canonicalNode arg)
                             let inst =
                                     if vsBody vs == BodyBottom
                                         then InstBot argTy
@@ -704,7 +664,7 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                                 vs' = if vsBody vs == BodyBottom then vs { vsBody = BodyNonBottom } else vs
                             go binderKeys namedSet' vs' (inst : accum) rest lookupBinder
                         else do
-                            argTy <- reifyTypeArg namedSet' Nothing (graftArgFor arg bv)
+                            argTy <- reifyTypeArg namedSet' Nothing (canonicalNode arg)
                             let inst = InstApp argTy
                                 vs' = vsDeleteAt 0 vs
                             go binderKeys namedSet' vs' (inst : accum) rest lookupBinder
@@ -726,7 +686,7 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                                 let mbBound = vSpineBoundAt vs i
                                 if mbBound /= Just TBottom && mbBound /= Nothing
                                     then do
-                                        argTy <- reifyTypeArg namedSet' Nothing (graftArgFor arg bv)
+                                        argTy <- reifyTypeArg namedSet' Nothing (canonicalNode arg)
                                         let boundTy = maybe TBottom tyToElab mbBound
                                         if alphaEqType argTy boundTy
                                             then
@@ -749,7 +709,7 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                                                             ]
                                     else do
                                         i' <- binderIndex binderKeys (vSpineIds vs) bvResolved
-                                        argTy <- reifyTypeArg namedSet' (Just bvResolved) (graftArgFor arg bv)
+                                        argTy <- reifyTypeArg namedSet' (Just bvResolved) (canonicalNode arg)
                                         prefix <- prefixBinderNames vs i'
                                         let inst = underContext prefix (InstInside (InstBot argTy))
                                             newBound = either (const Nothing) Just (elabToBound argTy)
@@ -777,23 +737,11 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
         (OpRaise n : rest) -> do
             nReplay <- resolveTraceBinderTarget False "OpRaise" n
             let nSource = n
-                nCandidates =
-                    dedupNodeIds
-                        (canonicalNode nReplay : sourceCandidates nReplay)
-                nExisting =
-                    [ canonicalNode candidate
-                    | candidate <- nCandidates
-                    , nodeExists candidate
-                    ]
-                nNonBottom =
-                    [ candidate
-                    | candidate <- nExisting
-                    , not (nodeIsBottom candidate)
-                    ]
-            case nNonBottom <|> nExisting of
-                []
-                    | IntSet.member (getNodeId nSource) traceBinderSources ->
-                        Left $
+                nAdopt = canonicalNode nReplay
+            if not (nodeExists nAdopt)
+                then
+                    if IntSet.member (getNodeId nSource) traceBinderSources
+                        then Left $
                             PhiInvariantError $
                                 unlines
                                     [ "trace/replay binder key-space mismatch (OpRaise unresolved trace-source target)"
@@ -801,9 +749,15 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                                     , "source target: " ++ show nSource
                                     , "replay-map domain: " ++ show (IntMap.keys traceBinderReplayMap)
                                     ]
-                    | otherwise ->
-                        go binderKeys namedSet' vs accum rest lookupBinder
-                nAdopt : _ -> do
+                        else Left $
+                            PhiInvariantError $
+                                unlines
+                                    [ "OpRaise unresolved target has no direct replay/source node"
+                                    , "op: OpRaise"
+                                    , "source target: " ++ show nSource
+                                    , "replay target: " ++ show nReplay
+                                    ]
+                else do
                     let nOrig = canonicalNode nAdopt
                     case debugPhi
                         ("OpRaise: nSource="
@@ -967,13 +921,13 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                                 ])
             allowOutsideAlias =
                 isTraceBinderSource nSource
-                    || any
-                        (\candidate ->
+                    || maybe False
+                        (\aliased ->
                             IntSet.member
-                                (getNodeId (canonicalNode candidate))
+                                (getNodeId (canonicalNode aliased))
                                 interiorSet
                         )
-                        (sourceCandidates nSource)
+                        (IntMap.lookup (getNodeId nSource) copyMap)
         if outsideInterior && not allowOutsideAlias
             then Left $ PhiTranslatabilityError
                 [ "OpRaise target outside I(r)"
