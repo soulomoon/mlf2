@@ -4,46 +4,6 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 
 ## Open
 
-### BUG-2026-03-07-001
-- Status: Open
-- Priority: High
-- Discovered: 2026-03-07
-- Summary: Row2 result-type reconstruction still uses a hidden solved-compat adapter on the live path (`fromSolved` + `ChiQuery.chiSolved`), so the row is not fully thesis-exact.
-- Minimal reproducer:
-  - `rg -n "fromSolved solvedForGen|fromSolved solvedClean" /Volumes/src/mlf4/src/MLF/Elab/Run/Pipeline.hs`
-  - `rg -n "fromSolved ::|chiSolvedCompat|chiSolved =" /Volumes/src/mlf4/src/MLF/Constraint/Presolution/View.hs /Volumes/src/mlf4/src/MLF/Elab/Run/ChiQuery.hs`
-  - `rg -n "validateCanonicalGraphStrict \(ChiQuery\.chiSolved" /Volumes/src/mlf4/src/MLF/Elab/Run/ResultType/View.hs`
-- Expected vs actual:
-  - Expected: row2 should reconstruct result-type context directly from a snapshot-native `PresolutionView` with no solved-compat adapter in the live path.
-  - Actual: the live path still seeds `PresolutionView` from `Solved` and validates through `ChiQuery.chiSolved`, which rebuilds solved-compatible state.
-- Suspected/owning area:
-  - `/Volumes/src/mlf4/src/MLF/Elab/Run/Pipeline.hs`
-  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/View.hs`
-  - `/Volumes/src/mlf4/src/MLF/Elab/Run/ResultType/View.hs`
-  - `/Volumes/src/mlf4/src/MLF/Elab/Run/ChiQuery.hs`
-  - `/Volumes/src/mlf4/src/MLF/Elab/Run/ResultType/Types.hs`
-- Thesis impact:
-  - Reopens Transformation Mechanism Table row `Result-type context wiring`: the repo still carries an implementation-only solved-adapter boundary absent from the thesis presentation of `Typ(a′)`, `Typexp(a′)`, and `T(a)`.
-
-### BUG-2026-03-07-002
-- Status: Open
-- Priority: Medium
-- Discovered: 2026-03-07
-- Summary: Row8 translatability normalization claims full thesis alignment, but the live path does not run §15.2.8’s stronger all-inert `W` normalization.
-- Minimal reproducer:
-  - `rg -n "rigidifyTranslatablePresolutionM|validateTranslatablePresolution" /Volumes/src/mlf4/src/MLF/Constraint/Presolution/Driver.hs /Volumes/src/mlf4/src/MLF/Constraint/Presolution/Validation.hs`
-  - `rg -n "weakenInertNodes" /Volumes/src/mlf4/src /Volumes/src/mlf4/test`
-- Expected vs actual:
-  - Expected: if row8 is claimed thesis-exact at §15.2.8 scope, the live pre-elaboration path should weaken all inert nodes (or an equivalent `W` normalization) before translation.
-  - Actual: the live path enforces Definition 15.2.10 / Theorem 15.2.11 constructive translatability only; `weakenInertNodes` exists but is not on the live production path.
-- Suspected/owning area:
-  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/Driver.hs`
-  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/Validation.hs`
-  - `/Volumes/src/mlf4/src/MLF/Constraint/Inert.hs`
-  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/WitnessNorm.hs`
-- Thesis impact:
-  - Reopens Transformation Mechanism Table row `Translatability normalization`: the implementation is aligned with Definition 15.2.10 / Theorem 15.2.11, but not with the stronger §15.2.8 all-inert normalization claim currently associated with that row.
-
 ### BUG-2026-03-06-001
 - Status: Open
 - Priority: Medium
@@ -63,9 +23,67 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
   - `/Volumes/src/mlf4/src/MLF/Elab/Phi.hs`
   - `/Volumes/src/mlf4/mlf2.cabal`
 - Thesis impact:
-  - Keeps Transformation Mechanism Table row `Identity reconciliation mechanism` non-absolute because compiled Φ code still uses an implementation-only reconciliation object model beyond the thesis presentation, with `MLF.Elab.Phi.Binder` as an additional leftover helper surface.
+  - Fresh 2026-03-07 closeout review keeps TMT row `Identity reconciliation mechanism` at `Yes`: this helper surface remains cleanup follow-up material, but it is not on the active runtime target-selection path used by the current thesis-exact pipeline.
 
 ## Resolved
+
+### BUG-2026-03-07-002
+- Status: Resolved
+- Priority: Medium
+- Discovered: 2026-03-07
+- Resolved: 2026-03-07
+- Summary: Row8 translatability normalization claimed full thesis alignment, but the live path did not yet run §15.2.8’s stronger all-inert `W` normalization.
+- Minimal reproducer:
+  - `rg -n "rigidifyTranslatablePresolutionM|weakenInertNodes c0|weakenInertNodes c2" /Volumes/src/mlf4/src/MLF/Constraint/Presolution/Validation.hs`
+  - `cabal test mlf2-test --test-show-details=direct --test-option=--match --test-option='row8 thesis-exact guard'`
+- Expected vs actual:
+  - Expected: the live pre-elaboration path should weaken all inert nodes (or an equivalent `W` normalization) before translation.
+  - Actual before fix: the live path enforced Definition 15.2.10 / Theorem 15.2.11 constructive translatability only.
+- Suspected/owning area:
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/Validation.hs`
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Inert.hs`
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/WitnessNorm.hs`
+- Thesis impact:
+  - Reopened Transformation Mechanism Table row `Translatability normalization` until the production path performed §15.2.8 all-inert `W` normalization.
+- Fix:
+  - `rigidifyTranslatablePresolutionM` now weakens all inert nodes before and after rigidification.
+  - `test/golden/legacy-replay-baseline-v1.json` is refreshed to freeze the resulting thesis-exact solved artifacts.
+- Regression tests:
+  - `/Volumes/src/mlf4/test/TranslatablePresolutionSpec.hs` (`row8 thesis-exact guard`)
+  - `/Volumes/src/mlf4/test/TranslatablePresolutionSpec.hs` (`Translatable presolution`)
+  - `/Volumes/src/mlf4/test/Presolution/EnforcementSpec.hs` (`O15-TRANS*`)
+  - `/Volumes/src/mlf4/test/InertSpec.hs` (`O05-*`)
+  - `/Volumes/src/mlf4/test/FrozenParitySpec.hs` (`Frozen parity artifact baseline`)
+  - `/Volumes/src/mlf4/test/PipelineSpec.hs` (`checked-authoritative`, `Dual-path verification`)
+  - `cabal build all && cabal test`
+
+### BUG-2026-03-07-001
+- Status: Resolved
+- Priority: High
+- Discovered: 2026-03-07
+- Resolved: 2026-03-07
+- Summary: Row2 result-type reconstruction still used a hidden solved-compat adapter on the live path (`fromSolved` + `ChiQuery.chiSolved`).
+- Minimal reproducer:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "row2 absolute thesis-exact guard"'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "row2 closeout guard"'`
+- Expected vs actual:
+  - Expected: row2 reconstructs result-type context directly from finalized `PresolutionView` artifacts with no solved-compat adapter in the live path.
+  - Actual before fix: the live path still seeded `PresolutionView` from `Solved` and `ResultType.View` validated via `ChiQuery.chiSolved`.
+- Suspected/owning area:
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Finalize.hs`
+  - `/Volumes/src/mlf4/src/MLF/Elab/Run/Pipeline.hs`
+  - `/Volumes/src/mlf4/src/MLF/Elab/Run/ResultType/View.hs`
+  - `/Volumes/src/mlf4/src/MLF/Elab/Run/ChiQuery.hs`
+- Thesis impact:
+  - Reopened Transformation Mechanism Table row `Result-type context wiring` until the live path stopped rebuilding solved-compatible state.
+- Fix:
+  - Added `Finalize.finalizePresolutionViewFromSnapshot` and rewired the live pipeline to build finalized clean/generalized `PresolutionView` artifacts directly from snapshot/finalize data.
+  - Changed `ResultType.View` to validate canonical graph structure directly from `PresolutionView` canonical artifacts.
+  - Removed `chiSolvedCompat` / `chiSolved` from `MLF.Elab.Run.ChiQuery`.
+- Regression tests:
+  - `/Volumes/src/mlf4/test/PipelineSpec.hs` (`row2 absolute thesis-exact guard`, `row2 closeout guard`, `checked-authoritative`, `Dual-path verification`)
+  - `/Volumes/src/mlf4/test/FrozenParitySpec.hs` (`Frozen parity artifact baseline`)
+  - `cabal build all && cabal test`
 
 ### BUG-2026-03-05-003
 - Status: Resolved

@@ -22,7 +22,8 @@ module MLF.Elab.Run.ResultType.View (
 import qualified Data.IntMap.Strict as IntMap
 
 import MLF.Constraint.Presolution (EdgeTrace, PresolutionPlanBuilder, PresolutionView(..))
-import qualified MLF.Constraint.Solved as Solved
+import MLF.Constraint.Solve (SolveResult(..))
+import qualified MLF.Constraint.Solve as Solve
 import MLF.Constraint.Types
     ( BindParents
     , Constraint
@@ -50,7 +51,11 @@ data ResultTypeView = ResultTypeView
 buildResultTypeView :: ResultTypeInputs -> Either ElabError ResultTypeView
 buildResultTypeView inputs = do
     let presolutionView = rtcPresolutionView inputs
-    case Solved.validateCanonicalGraphStrict (ChiQuery.chiSolved presolutionView) of
+    case Solve.validateSolvedGraphStrict
+        SolveResult
+            { srConstraint = ChiQuery.chiCanonicalConstraint presolutionView
+            , srUnionFind = ChiQuery.chiCanonicalMap presolutionView
+            } of
         [] -> pure ()
         violations -> Left (ValidationFailed violations)
     pure ResultTypeView

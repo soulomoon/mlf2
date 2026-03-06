@@ -3,12 +3,14 @@ module Presolution.EnforcementSpec (spec) where
 import Data.List (isInfixOf)
 import Test.Hspec
 import qualified Data.IntMap.Strict as IntMap
+import qualified Data.IntSet as IntSet
 
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Presolution
     ( PresolutionResult(..)
     , PresolutionError(..)
     , computePresolution
+    , translatableWeakenedNodes
     , validateTranslatablePresolution
     )
 import MLF.Constraint.Acyclicity (AcyclicityResult(..))
@@ -22,6 +24,31 @@ import SpecUtil
 
 spec :: Spec
 spec = describe "Translatable presolution enforcement" $ do
+    it "row8 translatability normalization guard: live weakened-set metadata includes all inert nodes" $ do
+        let root = NodeId 0
+            mid = NodeId 1
+            base = NodeId 2
+            nodes = nodeMapFromList
+                [ (getNodeId root, TyArrow root mid mid)
+                , (getNodeId mid, TyArrow mid base base)
+                , (getNodeId base, TyBase base (BaseTy "int"))
+                ]
+            bindParents =
+                bindParentsFromPairs
+                    [ (mid, root, BindFlex)
+                    , (base, mid, BindFlex)
+                    ]
+            constraint = rootedConstraint emptyConstraint { cNodes = nodes, cBindParents = bindParents }
+            acyclicityRes = AcyclicityResult { arSortedEdges = [], arDepGraph = undefined }
+
+        case computePresolution defaultTraceConfig acyclicityRes constraint of
+            Left err -> expectationFailure ("computePresolution failed: " ++ show err)
+            Right pr -> do
+                let bp = cBindParents (prConstraint pr)
+                IntMap.lookup (nodeRefKey (typeRef mid)) bp `shouldBe` Just (typeRef root, BindRigid)
+                IntMap.lookup (nodeRefKey (typeRef base)) bp `shouldBe` Just (typeRef mid, BindRigid)
+                translatableWeakenedNodes (prConstraint pr) `shouldSatisfy` IntSet.member (getNodeId base)
+
     it "O15-TRANS-SCHEME-ROOT-RIGID O15-TRANS-ARROW-RIGID O15-TRANS-NON-INTERIOR-RIGID: rigidifies scheme roots, arrow nodes, and non-interior nodes" $ do
         let rootGen = GenNodeId 0
             schemeRoot = NodeId 0

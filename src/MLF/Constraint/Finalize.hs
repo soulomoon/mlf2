@@ -5,6 +5,7 @@ module MLF.Constraint.Finalize (
     stepPruneSolvedBindParents,
     stepValidateSolvedStrict,
     presolutionViewFromSnapshot,
+    finalizePresolutionViewFromSnapshot,
     finalizeSolvedFromSnapshot,
     finalizeSolvedForConstraint
 ) where
@@ -50,11 +51,25 @@ instance PresolutionSnapshot FinalizeSnapshot where
 
 presolutionViewFromSnapshot :: Constraint -> IntMap NodeId -> PresolutionView
 presolutionViewFromSnapshot constraint uf =
-    fromPresolutionResult
-        FinalizeSnapshot
-            { fsConstraint = constraint
-            , fsUnionFind = uf
-            }
+    let ufSanitized = stepSanitizeSnapshotUf constraint uf
+        view0 =
+            fromPresolutionResult
+                FinalizeSnapshot
+                    { fsConstraint = constraint
+                    , fsUnionFind = ufSanitized
+                    }
+    in view0
+        { pvCanonicalConstraint = stepCanonicalizeConstraint constraint ufSanitized
+        }
+
+finalizePresolutionViewFromSnapshot :: Constraint -> IntMap NodeId -> Either SolveError PresolutionView
+finalizePresolutionViewFromSnapshot constraint uf = do
+    SolveResult{ srConstraint = canonicalConstraint, srUnionFind = ufFinal } <-
+        Solve.finalizeConstraintWithUF (stepSanitizeSnapshotUf constraint uf) constraint
+    let view = presolutionViewFromSnapshot constraint ufFinal
+    pure view
+        { pvCanonicalConstraint = canonicalConstraint
+        }
 
 stepSolvedFromPresolutionView :: PresolutionView -> Solved.Solved
 stepSolvedFromPresolutionView presolutionView =

@@ -20,7 +20,7 @@ import MLF.Constraint.Presolution
     , computePresolution
     , EdgeTrace(..)
     )
-import MLF.Constraint.Presolution.View (fromSolved, pvCanonical)
+import MLF.Constraint.Presolution.View (pvCanonical)
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types.Graph (PolySyms)
 import MLF.Constraint.Types (cNodes, lookupNodeIn)
@@ -46,8 +46,11 @@ import MLF.Elab.Run.Generalize
     , instantiationCopyNodes
     )
 import MLF.Elab.Run.Provenance (buildTraceCopyMap, collectBaseNamedKeys)
-import MLF.Elab.Run.Scope (letScopeOverrides)
-import MLF.Elab.Run.Scope (resolveCanonicalScope, schemeBodyTarget)
+import MLF.Elab.Run.Scope
+    ( letScopeOverridesView
+    , resolveCanonicalScopeView
+    , schemeBodyTargetView
+    )
 import MLF.Elab.Run.Util
     ( canonicalizeExpansion
     , canonicalizeTrace
@@ -55,7 +58,7 @@ import MLF.Elab.Run.Util
     , makeCanonicalizer
     )
 import MLF.Elab.Run.ResultType (mkResultTypeInputs, computeResultTypeFromAnn, computeResultTypeFallback)
-import MLF.Reify.Core (reifyType)
+import MLF.Reify.Core (reifyTypeFromView)
 import MLF.Reify.TypeOps (freeTypeVarsType)
 import MLF.Util.Trace (TraceConfig, traceGeneralize)
 
@@ -85,7 +88,7 @@ runPipelineElabWith traceCfg genConstraints expr = do
     let planBuilder = prPlanBuilder pres
         preRewrite = snapshotConstraint pres
     solvedClean <- fromSolveError (Finalize.finalizeSolvedFromSnapshot preRewrite (snapshotUnionFind pres))
-    let presolutionViewClean = fromSolved solvedClean
+    presolutionViewClean <- fromSolveError (Finalize.finalizePresolutionViewFromSnapshot preRewrite (snapshotUnionFind pres))
     let canonNode = makeCanonicalizer (Solved.canonicalMap solvedClean) (prRedirects pres)
         adoptNode = canonicalizeNode canonNode
         baseNodes = cNodes c1
@@ -106,9 +109,8 @@ runPipelineElabWith traceCfg genConstraints expr = do
             in foldl' IntMap.union IntMap.empty traceMaps
         (constraintForGen, bindParentsGa) =
             constraintForGeneralization traceCfg presolutionViewClean (prRedirects pres) instCopyNodes instCopyMapFull c1 ann
-    solvedForGen <- fromSolveError (Finalize.finalizeSolvedForConstraint solvedClean constraintForGen)
-    let presolutionViewForGen =
-            fromSolved solvedForGen
+    presolutionViewForGen <- fromSolveError (Finalize.finalizePresolutionViewFromSnapshot constraintForGen (Solved.canonicalMap solvedClean))
+    let
         generalizeAtWithView mbGa =
             generalizeAtWithBuilderView
                 planBuilder
@@ -120,10 +122,10 @@ runPipelineElabWith traceCfg genConstraints expr = do
         edgeTraces = IntMap.map (canonicalizeTrace canonNode) (prEdgeTraces pres)
         edgeExpansions = IntMap.map (canonicalizeExpansion canonNode) (prEdgeExpansions pres)
     let scopeOverrides =
-            letScopeOverrides
+            letScopeOverridesView
                 c1
-                (Solved.originalConstraint solvedForGen)
-                solvedClean
+                constraintForGen
+                presolutionViewClean
                 (prRedirects pres)
                 annCanon
     let elabConfig = ElabConfig
@@ -143,8 +145,8 @@ runPipelineElabWith traceCfg genConstraints expr = do
         () -> pure ()
     rootScope <- fromElabError $
         bindingToElab $
-            resolveCanonicalScope c1 solvedForGen (prRedirects pres) (annNode ann)
-    let rootTarget = schemeBodyTarget solvedForGen (annNode annCanon)
+            resolveCanonicalScopeView c1 presolutionViewForGen (prRedirects pres) (annNode ann)
+    let rootTarget = schemeBodyTargetView presolutionViewForGen (annNode annCanon)
     let generalizeNeedsFallback err = case err of
             SchemeFreeVars{} -> True
             _ -> False
@@ -157,7 +159,7 @@ runPipelineElabWith traceCfg genConstraints expr = do
                         Right out -> Right out
                         Left err2
                             | generalizeNeedsFallback err2 -> do
-                                tyFallback <- reifyType solvedForGen rootTarget
+                                tyFallback <- reifyTypeFromView presolutionViewForGen rootTarget
                                 pure (schemeFromType tyFallback, IntMap.empty)
                         Left err2 -> Left err2
             Left err -> Left err

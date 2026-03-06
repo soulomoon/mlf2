@@ -113,14 +113,14 @@ bindingToPresM = liftBindingError
 --
 -- This prepares the constraint for translation by ensuring all necessary nodes
 -- are rigidly bound:
--- 1. Weaken inert locked nodes
+-- 1. Weaken all inert nodes (thesis §15.2.8 W-normalization)
 -- 2. Rigidify arrow nodes
 -- 3. Rigidify scheme roots
 -- 4. Rigidify non-interior flexible children
 rigidifyTranslatablePresolutionM :: PresolutionM ()
 rigidifyTranslatablePresolutionM = do
     c0 <- getConstraint
-    c1 <- bindingToPresM (Inert.weakenInertLockedNodes c0)
+    c1 <- bindingToPresM (Inert.weakenInertNodes c0)
     let nodes = cNodes c1
         genNodes = cGenNodes c1
         bindParents0 = cBindParents c1
@@ -184,7 +184,7 @@ rigidifyTranslatablePresolutionM = do
 
         c2 = c1 { cBindParents = bindParents3 }
 
-    c3 <- bindingToPresM (Inert.weakenInertLockedNodes c2)
+    c3 <- bindingToPresM (Inert.weakenInertNodes c2)
     modifyConstraint (const c3)
 
 -- | Compute the structural interior of a set of scheme roots.

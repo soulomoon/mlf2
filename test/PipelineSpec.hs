@@ -226,6 +226,8 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             isInfixOf "rtcSolveLike" src `shouldBe` False
 
         it "row2 absolute thesis-exact guard" $ do
+            pipelineSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
+            chiQuerySrc <- readFile "src/MLF/Elab/Run/ChiQuery.hs"
             viewSrc <- readFile "src/MLF/Elab/Run/ResultType/View.hs"
             annSrc <- readFile "src/MLF/Elab/Run/ResultType/Ann.hs"
             fallbackSrc <- readFile "src/MLF/Elab/Run/ResultType/Fallback.hs"
@@ -234,10 +236,17 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 , "rtvOriginalConstraint ::"
                 , "solveFromInputs ::"
                 , "Solved.rebuildWithConstraint"
+                , "ChiQuery.chiSolved"
                 ] $ \marker ->
                     isInfixOf marker viewSrc `shouldBe` False
             isInfixOf "View.rtvSolved" annSrc `shouldBe` False
             isInfixOf "View.rtvSolved" fallbackSrc `shouldBe` False
+            isInfixOf "fromSolved solvedClean" pipelineSrc `shouldBe` False
+            isInfixOf "fromSolved solvedForGen" pipelineSrc `shouldBe` False
+            isInfixOf "chiSolvedCompat" chiQuerySrc `shouldBe` False
+            isInfixOf "chiSolved ::" chiQuerySrc `shouldBe` False
+            isInfixOf "Solved.fromConstraintAndUf" chiQuerySrc `shouldBe` False
+            isInfixOf "Solved.rebuildWithConstraint" chiQuerySrc `shouldBe` False
 
         it "row3 ordering thesis-exact guard: Driver removes global post-loop weaken flush" $ do
             driverSrc <- readFile "src/MLF/Constraint/Presolution/Driver.hs"
@@ -283,6 +292,11 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             unifySrc `shouldSatisfy` (not . isInfixOf "OmegaExec.executeOmegaBaseOpsPost")
             unifySrc `shouldSatisfy` isInfixOf "executeEdgeLocalOmegaOps omegaEnv baseOps"
             edgeUnifySrc `shouldSatisfy` isInfixOf "executeEdgeLocalOmegaOps omegaEnv baseOps action = do"
+
+        it "row8 translatability normalization guard: live presolution path uses all-inert W normalization" $ do
+            validationSrc <- readFile "src/MLF/Constraint/Presolution/Validation.hs"
+            validationSrc `shouldSatisfy` isInfixOf "Inert.weakenInertNodes"
+            validationSrc `shouldSatisfy` (not . isInfixOf "Inert.weakenInertLockedNodes")
 
         it "row9-11 direct-target guard: Omega does not define source-candidate reconciliation helpers" $ do
             omegaSrc <- readFile "src/MLF/Elab/Phi/Omega.hs"

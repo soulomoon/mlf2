@@ -4,6 +4,29 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 50 TMT fresh round-2 closeout (completed 2026-03-07)
+
+- Completed:
+  - closed row2 `Result-type context wiring` by retiring the live solved-compat adapter path from `Pipeline` / `ResultType.View` / `ChiQuery` and extending the absolute row2 source guard;
+  - closed row8 `Translatability normalization` by putting §15.2.8 all-inert `W`-normalization on the live presolution path and adding a dedicated row8 guard;
+  - refreshed `test/golden/legacy-replay-baseline-v1.json` so frozen parity now captures the new thesis-exact solved artifacts;
+  - revalidated the closeout guard stack (`row1`, `row2`, `row3`, `row8`, `checked-authoritative`, `Dual-path verification`, `Frozen parity artifact baseline`, full gate).
+- Verification:
+  - `row2 absolute thesis-exact guard`: PASS (`1 example, 0 failures`)
+  - `row2 closeout guard`: PASS (`3 examples, 0 failures`)
+  - `row8 thesis-exact guard`: PASS (`1 example, 0 failures`)
+  - `Translatable presolution`: PASS (`10 examples, 0 failures`)
+  - `O15-TRANS`: PASS (`5 examples, 0 failures`)
+  - `O05-`: PASS (`3 examples, 0 failures`)
+  - `Frozen parity artifact baseline`: PASS (`1 example, 0 failures`)
+  - `checked-authoritative`: PASS (`8 examples, 0 failures`)
+  - `Dual-path verification`: PASS (`4 examples, 0 failures`)
+  - `cabal build all && cabal test`: PASS
+- Rolling priorities (next):
+  1. Keep the row1/2/3/8 guards, frozen parity oracle, `checked-authoritative`, `Dual-path verification`, and full gate mandatory for future thesis-alignment changes.
+  2. Reconcile the stale `MLF.Elab.Phi.Binder` cleanup bug against the now-closed row10 table entry, since the helper surface is compiled but not used on the active runtime path.
+  3. Keep replay/witness and Ω direct-target guard stacks green when future presolution changes land.
+
 ## Task 49 TMT per-row fresh review (completed 2026-03-07)
 
 - Completed:
