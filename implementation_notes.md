@@ -509,6 +509,13 @@
 - `sourceKeysForNode` is strict witness-domain ranking (raw + copy/trace provenance only; no canonical/class-member expansion fallback).
 - Non-root replay resolution is replay-map/source-alias deterministic and fail-fast on contract misses.
 
+### 2026-03-06 TMT identity row re-audit
+
+- Thesis §§15.3.1-15.3.6 carries elaboration identity directly through named nodes, computation contexts, and witness-derived computations (`ε`, `ϕR`, `T(e)`); it does not introduce a separate identity-reconciliation object.
+- The active `MLF.Elab.Phi.IdentityBridge` + `MLF.Elab.Phi.Omega` path is now witness-domain exact: raw/copy/trace provenance only, plus direct replay-target/spine membership checks.
+- The active runtime is still split across `Translate` replay-bridge validation and `IdentityBridge`/`Omega` source reconciliation; this dedicated reconciliation object model is not present in the thesis presentation.
+- A further internal-helper divergence still exists in `MLF.Elab.Phi.Binder`, which reconciles binders via `canonical`, `gaSolvedToBase`, and copy-map inversion; this keeps the Transformation Mechanism Table row `Identity reconciliation mechanism` non-absolute at whole-codebase scope.
+
 ### 2026-02-27 Phi strict replay-map normalization (upfront, no runtime fallback search)
 
 - `EdgeTrace` now carries required `etBinderReplayMap` metadata (source binder key -> replay binder node).

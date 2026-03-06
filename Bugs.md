@@ -4,7 +4,26 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 
 ## Open
 
-_None._
+### BUG-2026-03-06-001
+- Status: Open
+- Priority: Medium
+- Discovered: 2026-03-06
+- Summary: Φ identity handling remains split across an active runtime reconciliation object model (`Translate` replay bridge + `IdentityBridge`/Ω source recovery) and a legacy internal helper surface (`MLF.Elab.Phi.Binder`).
+- Minimal reproducer:
+  - `rg -n "baseKeyFor|gaSolvedToBase|askCanonical|askCopyMap|askInvCopyMap" src/MLF/Elab/Phi/Binder.hs`
+  - `rg -n "MLF\.Elab\.Phi\.Binder|lookupBinderIndexM|binderIndexM" src/MLF/Elab/Phi.hs mlf2.cabal`
+- Expected vs actual:
+  - Expected: Φ identity handling should reduce to thesis-shaped witness-domain identity only (node/source identity from witness artifacts and replay-spine position), with no separate runtime reconciliation subsystem or solved/canonical fallback helper surface.
+  - Actual: production code still splits identity handling across `Translate`, `IdentityBridge`/`Omega`, and the internal helper `MLF.Elab.Phi.Binder`; the last of these still reconciles binders through `canonical`, `gaSolvedToBase`, and copy-map inversion.
+- Suspected/owning area:
+  - `/Volumes/src/mlf4/src/MLF/Elab/Phi/Translate.hs`
+  - `/Volumes/src/mlf4/src/MLF/Elab/Phi/IdentityBridge.hs`
+  - `/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs`
+  - `/Volumes/src/mlf4/src/MLF/Elab/Phi/Binder.hs`
+  - `/Volumes/src/mlf4/src/MLF/Elab/Phi.hs`
+  - `/Volumes/src/mlf4/mlf2.cabal`
+- Thesis impact:
+  - Keeps Transformation Mechanism Table row `Identity reconciliation mechanism` non-absolute because compiled Φ code still uses an implementation-only reconciliation object model beyond the thesis presentation, with `MLF.Elab.Phi.Binder` as an additional leftover helper surface.
 
 ## Resolved
 
