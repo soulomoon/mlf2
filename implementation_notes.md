@@ -2,6 +2,22 @@
 
 ## Thesis Alignment (Phase A–E)
 
+### 2026-03-07 TMT improving-loop rerun reclosed row2 and row8
+- Row2 `Result-type context wiring` is back to `Yes`: the live pipeline now builds finalized clean/generalized `PresolutionView` artifacts directly from `Finalize.finalizePresolutionViewFromSnapshot`, `ResultType.View` validates from canonical constraint + canonical map, and `ChiQuery` no longer exposes solved-compat shims.
+- Row8 `Translatability normalization` is back to `Yes`: `rigidifyTranslatablePresolutionM` now applies §15.2.8 all-inert `W`-normalization before and after rigidification, and the frozen parity oracle is refreshed to freeze the resulting solved artifacts.
+- Verification:
+  - `row2 absolute thesis-exact guard` — PASS (`1 example, 0 failures`)
+  - `row2 closeout guard` — PASS (`3 examples, 0 failures`)
+  - `row8 thesis-exact guard` — PASS (`1 example, 0 failures`)
+  - `Translatable presolution` — PASS (`10 examples, 0 failures`)
+  - `O15-TRANS` — PASS (`5 examples, 0 failures`)
+  - `O05-` — PASS (`3 examples, 0 failures`)
+  - `Frozen parity artifact baseline` — PASS (`1 example, 0 failures`)
+  - `checked-authoritative` — PASS (`8 examples, 0 failures`)
+  - `Dual-path verification` — PASS (`4 examples, 0 failures`)
+  - `cabal build all && cabal test` — PASS.
+- This supersedes the temporary “row2 and row8 reopened” classification recorded below.
+
 ### 2026-03-07 TMT per-row fresh review reopened row2 and row8
 - A new per-row audit reviewed every TMT row with one fresh reviewer agent per row against the live codebase and `papers/these-finale-english.txt`.
 - The audit refreshed wording/evidence for rows 1, 3, 6, 12, and 13, and kept rows 4, 5, 7, 9, 10, 11, and 14 materially unchanged.

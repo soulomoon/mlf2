@@ -46,7 +46,8 @@ module MLF.Constraint.Presolution (
     applyExpansion,
     normalizeEdgeWitnessesM,
     -- * Validation helpers (exported for obligations testing)
-    validateTranslatablePresolution
+    validateTranslatablePresolution,
+    translatableWeakenedNodes
 ) where
 
 import MLF.Constraint.Presolution.Base (
@@ -83,7 +84,10 @@ import MLF.Constraint.Presolution.View
     , fromPresolutionResult
     )
 import MLF.Constraint.Presolution.WitnessNorm (normalizeEdgeWitnessesM)
-import MLF.Constraint.Presolution.Validation (validateTranslatablePresolution)
+import MLF.Constraint.Presolution.Validation
+    ( translatableWeakenedNodes
+    , validateTranslatablePresolution
+    )
 import MLF.Constraint.Presolution.Plan (buildGeneralizePlans)
 import MLF.Constraint.Presolution.Plan.Context
     ( GaBindParents(..)

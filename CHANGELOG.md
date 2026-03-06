@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Changed
+- TMT fresh round-2 closeout (2026-03-07):
+  - row2 `Result-type context wiring` now uses finalized snapshot-native `PresolutionView`s in the live pipeline/result-type path and no longer exposes the row2 solved-compat shim in `ChiQuery`;
+  - row8 `Translatability normalization` now performs §15.2.8 all-inert `W`-normalization on the live presolution path;
+  - added dedicated row8 coverage, strengthened the row2 absolute guard, and refreshed `test/golden/legacy-replay-baseline-v1.json` to freeze the new thesis-exact artifacts;
+  - revalidated `row2 absolute thesis-exact guard`, `row2 closeout guard`, `row8 thesis-exact guard`, `Translatable presolution`, `O15-TRANS*`, `O05-*`, `Frozen parity artifact baseline`, `checked-authoritative`, `Dual-path verification`, and `cabal build all && cabal test`.
 - TMT per-row fresh review audit (2026-03-07):
   - reviewed all 14 Transformation Mechanism Table rows with one fresh agent per row against the newest codebase and the thesis;
   - refreshed row wording/evidence for rows 1, 3, 6, 12, and 13;
