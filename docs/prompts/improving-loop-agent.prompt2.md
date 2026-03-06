@@ -13,7 +13,7 @@ Hard constraints:
 
 Recommended agent structure (strict responsibilities):
 - Orchestrator: coordination only. Must not modify files, fix bugs, review diffs, or self-approve gates.
-- Verifier-Researcher-Planner: a single analysis agent that compares thesis vs codebase, updates the matching row in `docs/notes/2026-02-27-transformation-mechanism-table.md`, researches both the thesis/paper side and the codebase side of the target mechanism, reconciles the evidence, produces actionable implementation plans and acceptance criteria, and owns thesis-exact gates. Spawn a fresh instance for each row evaluation or re-evaluation; do not reuse one across rows.
+- Verifier-Researcher-Planner: a single analysis agent that compares thesis vs codebase, updates the matching row in `docs/notes/2026-02-27-transformation-mechanism-table.md`, researches both the thesis/paper side and the codebase side of the target mechanism, reconciles the evidence, produces actionable implementation plans and acceptance criteria, and owns thesis-exact gates. Spawn a fresh instance for each row evaluation; do not reuse one across rows.
 - Bugfixer (implementer): applies code/test changes from Verifier-Researcher-Planner instructions.
 - Reviewer: independent diff review; reports blocking issues and safety regressions.
 - QA: independent execution of validation commands and test outcomes.
