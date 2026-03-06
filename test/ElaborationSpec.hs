@@ -55,7 +55,9 @@ import MLF.Constraint.Presolution
     , lookupCopy
     )
 import MLF.Constraint.Presolution.Plan.Context
-    ( SolvedToBaseResolution(..)
+    ( GeneralizeEnv(..)
+    , SolvedToBaseResolution(..)
+    , resolveContext
     , resolveGaSolvedToBase
     )
 import MLF.Constraint.Solve (solveUnifyWithSnapshot)
@@ -2405,6 +2407,57 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     Left (Elab.PhiInvariantError msg) ->
                         msg `shouldSatisfy`
                             ("trace/replay binder key-space mismatch (OpRaise unresolved trace-source target)" `isInfixOf`)
+                    Left err ->
+                        expectationFailure ("Expected PhiInvariantError, got " ++ show err)
+                    Right inst ->
+                        expectationFailure ("Expected strict OpRaise fail-fast, got " ++ Elab.pretty inst)
+
+            it "OpRaise fails fast when a non-trace target resolves to no existing replay node" $ do
+                let root = NodeId 100
+                    binderA = NodeId 1
+                    missingTarget = NodeId 99
+                    argNode = NodeId 40
+                    c = rootedConstraint emptyConstraint
+                        { cNodes = nodeMapFromList
+                                [ (getNodeId root, TyArrow root binderA binderA)
+                                , (getNodeId binderA, TyVar { tnId = binderA, tnBound = Nothing })
+                                , (getNodeId argNode, TyBase argNode (BaseTy "Bool"))
+                                ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef binderA), (genRef (GenNodeId 0), BindFlex))
+                                ]
+                        }
+                    solved = mkSolved c IntMap.empty
+                    scheme =
+                        Elab.schemeFromType
+                            (Elab.TForall "t1" Nothing
+                                (Elab.TArrow (Elab.TVar "t1") (Elab.TVar "t1")))
+                    si = Elab.SchemeInfo
+                        { Elab.siScheme = scheme
+                        , Elab.siSubst = IntMap.singleton (getNodeId binderA) "t1"
+                        }
+                    tr =
+                        EdgeTrace
+                            { etRoot = root
+                            , etBinderArgs = [(binderA, argNode)]
+                            , etInterior = fromListInterior [root, binderA, argNode]
+                            , etBinderReplayMap = IntMap.singleton (getNodeId binderA) binderA
+                            , etCopyMap = mempty
+                            , etReplayContract = ReplayContractStrict
+                            }
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewForallIntros = 0
+                        , ewWitness = InstanceWitness [OpRaise missingTarget]
+                        }
+                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) Nothing (Just si) (Just tr) ew of
+                    Left (Elab.PhiInvariantError msg) ->
+                        msg `shouldSatisfy`
+                            ("OpRaise unresolved target has no direct replay/source node" `isInfixOf`)
                     Left err ->
                         expectationFailure ("Expected PhiInvariantError, got " ++ show err)
                     Right inst ->
@@ -4790,6 +4843,52 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 `shouldBe` SolvedToBaseSameDomain sameDomain
             resolveGaSolvedToBase ga missing
                 `shouldBe` SolvedToBaseMissing
+
+        it "resolveContext propagates ga base binding-path failures instead of falling back" $ do
+            let solvedN = NodeId 5
+                baseN = NodeId 20
+                solvedConstraint =
+                    emptyConstraint
+                        { cNodes = nodeMapFromList
+                            [ (getNodeId solvedN, TyBase solvedN (BaseTy "Int")) ]
+                        }
+                baseBindParents =
+                    IntMap.singleton
+                        (nodeRefKey (typeRef baseN))
+                        (typeRef baseN, BindFlex)
+                baseConstraint =
+                    emptyConstraint
+                        { cNodes = nodeMapFromList
+                            [ (getNodeId baseN, TyBase baseN (BaseTy "Int")) ]
+                        , cBindParents = baseBindParents
+                        }
+                ga =
+                    GaBindParents
+                        { gaBindParentsBase = baseBindParents
+                        , gaBaseConstraint = baseConstraint
+                        , gaBaseToSolved = IntMap.singleton (getNodeId baseN) solvedN
+                        , gaSolvedToBase = IntMap.singleton (getNodeId solvedN) baseN
+                        }
+                solved = mkSolved solvedConstraint IntMap.empty
+                nodes = IntMap.singleton (getNodeId solvedN) (TyBase solvedN (BaseTy "Int"))
+                env =
+                    GeneralizeEnv
+                        { geConstraint = solvedConstraint
+                        , geOriginalConstraint = solvedConstraint
+                        , geNodes = nodes
+                        , geCanonical = id
+                        , geCanonKey = getNodeId
+                        , geLookupNode = \key -> IntMap.lookup key nodes
+                        , geIsTyVarKey = const False
+                        , geIsTyForallKey = const False
+                        , geIsBaseLikeKey = (== getNodeId solvedN)
+                        , geBindParentsGa = Just ga
+                        , geRes = solved
+                        , geDebugEnabled = False
+                        }
+            case resolveContext env IntMap.empty (typeRef solvedN) solvedN of
+                Left (Elab.BindingTreeError (BindingCycleDetected _)) -> pure ()
+                _ -> expectationFailure "expected binding-cycle error"
 
         it "ga-invariant: validateCrossGenMapping succeeds when multi-base mapping shares ancestor" $ do
             -- Two base nodes both under g0, both map to same solved key.

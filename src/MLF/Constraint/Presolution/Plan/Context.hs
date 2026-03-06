@@ -142,17 +142,16 @@ resolveContext env bindParentsSoft scopeRootArg targetNodeArg = do
             case (root, mbBindParentsGa') of
                 (TypeRef nid, Just ga) ->
                     case resolveGaSolvedToBase ga nid of
-                        SolvedToBaseMapped baseN ->
-                            case bindingPathToRootLocal (gaBindParentsBase ga) (typeRef baseN) of
-                                Left _ -> root
-                                Right path ->
-                                    case listToMaybe [gid | GenRef gid <- drop 1 path] of
-                                        Just gid -> GenRef gid
-                                        Nothing -> root
-                        SolvedToBaseSameDomain _ -> root
+                        SolvedToBaseMapped baseN -> do
+                            path <- bindingPathToRootLocal (gaBindParentsBase ga) (typeRef baseN)
+                            pure $
+                                case listToMaybe [gid | GenRef gid <- drop 1 path] of
+                                    Just gid -> GenRef gid
+                                    Nothing -> root
+                        SolvedToBaseSameDomain _ -> pure root
                         SolvedToBaseMissing ->
-                            traceUnexpectedSolvedToBaseMissing ga nid root
-                _ -> root
+                            pure (traceUnexpectedSolvedToBaseMissing ga nid root)
+                _ -> pure root
         resolveOrderRoots root target =
             case root of
                 GenRef _ ->
@@ -175,13 +174,13 @@ resolveContext env bindParentsSoft scopeRootArg targetNodeArg = do
                     in case lookupNodeIn baseNodes target of
                         Just TyForall{ tnBody = b } -> b
                         _ -> target
-        resolveTargetPhase root node =
+        resolveTargetPhase root node = do
             let target0 = resolveTarget node
                 targetBase = resolveTargetBase target0
-                scopeRootC = resolveScopeRoot root
-                (orderRoot, typeRoot0) = resolveOrderRoots scopeRootC target0
+            scopeRootC <- resolveScopeRoot root
+            let (orderRoot, typeRoot0) = resolveOrderRoots scopeRootC target0
                 orderRootBase = resolveOrderRootBase orderRoot targetBase
-            in ResolveTarget
+            pure ResolveTarget
                 { rtTarget0 = target0
                 , rtTargetBase = targetBase
                 , rtScopeRootC = scopeRootC
@@ -189,8 +188,8 @@ resolveContext env bindParentsSoft scopeRootArg targetNodeArg = do
                 , rtTypeRoot0 = typeRoot0
                 , rtOrderRootBase = orderRootBase
                 }
-    let targetPhase = resolveTargetPhase scopeRoot0 targetNodeArg
-        ResolveTarget
+    targetPhase <- resolveTargetPhase scopeRoot0 targetNodeArg
+    let ResolveTarget
             { rtTarget0 = target0
             , rtTargetBase = targetBase
             , rtScopeRootC = scopeRootC
