@@ -1,11 +1,7 @@
 # Plan: Orchestrated Execution of the Improving Loop Agent Prompt (Codex Subagents, Fresh Round 2)
 
 ## Summary
-You are the Orchestrator for a multi-agent workflow executing the improving-loop-agent prompt with Codex subagents. This plan defines the exact execution steps, agent roles, gate questions, logging format, and termination conditions for a fresh run from Round 1 against the current repository state. The goal is to iteratively close gaps between the codebase and the thesis as defined in the Transformation Mechanism Table, with strict YES/NO gates and bounded retries.
-You should not read or edit the codebase directly; instead, coordinate specialized subagents for verification, research, planning, implementation, review, QA, and integration according to the defined workflow. The orchestrator role is strictly for coordination and decision-making based on agent outputs; it does not perform any coding, reviewing, or self-approval.
-Execute the workflow in [improving-loop-agent.prompt2.md](/Volumes/src/mlf4/docs/prompts/improving-loop-agent.prompt2.md) with strict role separation, a mandatory two-researcher handoff before planning, strict YES/NO gates, bounded retries, and one terminal status line.
-This plan is decision-complete for a Codex-subagent orchestrator and assumes a fresh run from Round 1 against current repo state in `/Volumes/src/mlf4`.
-You should not terminate subagents, you should wait for them to complete their tasks and return their outputs as long as they need.
+Execute the workflow in [improving-loop-agent.prompt2.md](docs/prompts/improving-loop-agent.prompt2.md) with strict role separation, a mandatory two-researcher handoff before planning, strict YES/NO gates, bounded retries, and one terminal status line. Proxy all jobs to subagents, never interrupt an working agent, just wait forever for it to response and do nothing else. But you can close unused and idle subagent.
 
 ## Public APIs / Interfaces / Types
 1. No production Haskell API changes are required by this plan itself.
@@ -29,9 +25,9 @@ You should not terminate subagents, you should wait for them to complete their t
 1. Create a run folder: `tasks/todo/2026-03-06-tmt-improving-loop-orchestrator-fresh-round-2/`.
 2. Create files: `task_plan.md`, `findings.md`, `progress.md`, `orchestrator-log.jsonl`.
 3. Record baseline inputs with commit hash and timestamp:
-   - [Transformation table](/Volumes/src/mlf4/docs/notes/2026-02-27-transformation-mechanism-table.md)
-   - [Thesis source](/Volumes/src/mlf4/papers/these-finale-english.txt)
-   - [Prompt source](/Volumes/src/mlf4/docs/prompts/improving-loop-agent.prompt2.md)
+   - [Transformation table](docs/notes/2026-02-27-transformation-mechanism-table.md)
+   - [Thesis source](papers/these-finale-english.txt)
+   - [Prompt source](docs/prompts/improving-loop-agent.prompt2.md)
 
 ### 2. Spawn fixed role agents with strict ownership
 1. Orchestrator: coordination only, no file edits, no reviews, no gate self-approval.
