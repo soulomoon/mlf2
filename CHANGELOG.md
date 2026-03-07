@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Changed
+- Extracted shared canonicalization helpers (2026-03-08):
+  - moved the duplicated canonical-map chase helpers (`buildCanonicalMap`, `chaseUfCanonical`, `equivCanonical`, `nodeIdKey`) into `MLF.Constraint.Canonicalization.Shared`;
+  - rewired `MLF.Constraint.Solved` and `MLF.Constraint.Presolution.View` to use that single implementation;
+  - added a focused source guard to prevent the helper block from reappearing in both modules;
+  - verified `Canonicalization helper dedup guards` (`1 example, 0 failures`), `PresolutionView mirrors solved canonical/node/bound queries` (`1 example, 0 failures`), `Canonicalizer` (`5 examples, 0 failures`), and `cabal build all && cabal test` (`975 examples, 0 failures`).
 - Guard-first surface `Expr` fold refactor (2026-03-08):
   - added direct row1 desugaring-contract coverage in `test/FrontendDesugarSpec.hs` for annotated terms, annotated lambdas, nested recursion, and typed-let coercion-only lowering;
   - added manual recursion-schemes support for `Expr 'Surface ty` in `MLF.Frontend.Syntax` and refactored `MLF.Frontend.Desugar.desugarSurface` to a local `cata` while preserving exact coercion insertion and let placement;

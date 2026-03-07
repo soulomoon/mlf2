@@ -156,6 +156,7 @@ library mlf2-internal
                       MLF.Constraint.Presolution.WitnessValidation,
                       MLF.Constraint.Solve.Internal,
                       MLF.Constraint.Canonicalize,
+                      MLF.Constraint.Canonicalization.Shared,
                       MLF.Constraint.Traversal,
                       MLF.Constraint.Unify.Core,
                       MLF.Constraint.Unify.Decompose,

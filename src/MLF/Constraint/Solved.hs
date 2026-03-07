@@ -67,6 +67,7 @@ import qualified Data.IntMap.Strict as IntMap
 import Data.IntSet (IntSet)
 import qualified Data.IntSet as IntSet
 
+import MLF.Constraint.Canonicalization.Shared (buildCanonicalMap, equivCanonical, nodeIdKey)
 import MLF.Constraint.Solve
     ( SolveError
     , SolveOutput(..)
@@ -195,47 +196,6 @@ fromPreRewriteStateStrict uf preRewrite = do
         , ebOriginalConstraint = preRewrite
         }
 
-buildCanonicalMap :: IntMap NodeId -> Constraint -> IntMap NodeId
-buildCanonicalMap uf c =
-    let nodeKeys = map (getNodeId . tnId) (NA.allNodes c)
-        allKeys = IntSet.toList (IntSet.fromList (nodeKeys ++ IntMap.keys uf))
-        -- Snapshot UF may contain parent cycles from intermediate states.
-        -- Use cycle-safe chasing to keep staged reconstruction total.
-        canonicalNode = chaseUfCanonical uf
-    in IntMap.fromList
-        [ (k, rep)
-        | k <- allKeys
-        , let rep = canonicalNode (NodeId k)
-        , rep /= NodeId k
-        ]
-
-chaseUfCanonical :: IntMap NodeId -> NodeId -> NodeId
-chaseUfCanonical uf = go IntSet.empty
-  where
-    step nid = IntMap.findWithDefault nid (nodeIdKey nid) uf
-
-    go seen current =
-        let next = step current
-        in if next == current
-            then current
-            else if IntSet.member (nodeIdKey next) seen
-                then cycleRepresentative next
-                else go (IntSet.insert (nodeIdKey current) seen) next
-
-    cycleRepresentative cycleStart = goCycle cycleStart cycleStart
-      where
-        goCycle minNode current =
-            let next = step current
-                minNode' = minByNodeId minNode next
-            in if next == cycleStart
-                then minNode'
-                else goCycle minNode' next
-
-    minByNodeId a b =
-        if nodeIdKey a <= nodeIdKey b
-            then a
-            else b
-
 buildEquivClasses :: IntMap NodeId -> Constraint -> IntMap [NodeId]
 buildEquivClasses canonMap c =
     foldr addNode IntMap.empty (map tnId (NA.allNodes c))
@@ -243,42 +203,6 @@ buildEquivClasses canonMap c =
     addNode nid classes =
         let rep = equivCanonical canonMap nid
         in IntMap.insertWith (++) (nodeIdKey rep) [nid] classes
-
-nodeIdKey :: NodeId -> Int
-nodeIdKey (NodeId k) = k
-
--- | Chase Equiv canonical links to a fixed point.
---
--- Unlike legacy union-find canonicalization (`frWith`), Equiv canonical data is
--- stored as direct links in `ebCanonicalMap`. We chase those links to a stable
--- representative and break cycles deterministically by choosing the smallest
--- `NodeId` in the cycle.
-equivCanonical :: IntMap NodeId -> NodeId -> NodeId
-equivCanonical canonMap = go IntSet.empty
-  where
-    step nid = IntMap.findWithDefault nid (nodeIdKey nid) canonMap
-
-    go seen current =
-        let next = step current
-        in if next == current
-            then current
-            else if IntSet.member (nodeIdKey next) seen
-                then cycleRepresentative next
-                else go (IntSet.insert (nodeIdKey current) seen) next
-
-    cycleRepresentative cycleStart = goCycle cycleStart cycleStart
-      where
-        goCycle minNode current =
-            let next = step current
-                minNode' = minByNodeId minNode next
-            in if next == cycleStart
-                then minNode'
-                else goCycle minNode' next
-
-    minByNodeId a b =
-        if nodeIdKey a <= nodeIdKey b
-            then a
-            else b
 
 -- -----------------------------------------------------------------
 -- Core queries

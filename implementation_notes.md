@@ -2,6 +2,16 @@
 
 ## Thesis Alignment (Phase A–E)
 
+### 2026-03-08 canonicalization helper extraction
+- Extracted the duplicated canonicalization helpers shared by `MLF.Constraint.Solved` and `MLF.Constraint.Presolution.View` into `MLF.Constraint.Canonicalization.Shared`.
+- Kept behavior unchanged by rewiring both consumer modules to the same implementation and preserving the existing solved/view semantic parity tests.
+- Added a direct source guard ensuring those two modules do not each reintroduce local copies of the helper block.
+- Verification:
+  - `Canonicalization helper dedup guards` — PASS (`1 example, 0 failures`)
+  - `PresolutionView mirrors solved canonical/node/bound queries` — PASS (`1 example, 0 failures`)
+  - `Canonicalizer` — PASS (`5 examples, 0 failures`)
+  - `cabal build all && cabal test` — PASS (`975 examples, 0 failures`)
+
 ### 2026-03-08 guard-first surface `Expr` fold refactor
 - Added direct row1 desugaring-contract tests in `test/FrontendDesugarSpec.hs` for annotated-term lowering, annotated-lambda lowering, nested structural recursion, and typed-let coercion-only behavior.
 - Added recursion-schemes support only for `Expr 'Surface ty` in `MLF.Frontend.Syntax` and refactored `MLF.Frontend.Desugar.desugarSurface` to a local `cata`.

@@ -197,6 +197,21 @@ spec = describe "MLF.Constraint.Solved" $ do
             it ("produces valid Solved for " ++ label ++ " (" ++ show expr ++ ")") $
                 runCase (label, expr)
 
+    describe "Canonicalization helper dedup guards" $ do
+        it "Solved and Presolution.View no longer each define local canonical-map chase helpers" $ do
+            solvedSrc <- readFile "src/MLF/Constraint/Solved.hs"
+            viewSrc <- readFile "src/MLF/Constraint/Presolution/View.hs"
+            helperSrc <- readFile "src/MLF/Constraint/Canonicalization/Shared.hs"
+            forM_
+                [ "buildCanonicalMap ::"
+                , "chaseUfCanonical ::"
+                , "equivCanonical ::"
+                , "nodeIdKey ::"
+                ] $ \marker -> do
+                    solvedSrc `shouldSatisfy` (not . isInfixOf marker)
+                    viewSrc `shouldSatisfy` (not . isInfixOf marker)
+                    helperSrc `shouldSatisfy` isInfixOf marker
+
     describe "Presolution view parity guards" $ do
         it "PresolutionView mirrors solved canonical/node/bound queries" $ do
             let fixtures =
