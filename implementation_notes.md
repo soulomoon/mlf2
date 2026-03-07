@@ -2,6 +2,16 @@
 
 ## Thesis Alignment (Phase A–E)
 
+### 2026-03-08 narrow `geRes` to canonical map
+- Replaced `GeneralizeEnv.geRes :: Solved` with `geCanonicalMap :: IntMap.IntMap NodeId` in the presolution planning context because the environment only used the solved handle to recover a sanitized canonical map for `presolutionViewFromSnapshot`.
+- Removed `buildSolvedFromPresolutionView` from `MLF.Constraint.Presolution.Plan` and now derive the preserved canonical map directly with `stepSanitizeSnapshotUf constraint (pvCanonicalMap presolutionView)`.
+- Added a direct migration guard in `test/PresolutionSpec.hs` asserting the planning layer stores canonical maps rather than solved handles.
+- Verification:
+  - `cabal build all && cabal test` — PASS
+  - `GeneralizeEnv stores canonical maps, not solved handles` — PASS (`1 example, 0 failures`)
+  - `Phase 4 — Principal Presolution` — PASS (`161 examples, 0 failures`)
+  - `Generalize shadow comparator` — PASS (`8 examples, 0 failures`)
+
 ### 2026-03-08 retire dead `Solved` mutation hooks
 - Removed `rebuildWithNodes`, `rebuildWithBindParents`, and `rebuildWithGenNodes` from `MLF.Constraint.Solved`; no live code callers remained, and the solved classification table had already marked them safe to retire from the production surface.
 - Added a direct migration guard in `test/Constraint/SolvedSpec.hs` asserting those dead mutation hooks do not reappear on the `Solved` surface.

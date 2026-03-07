@@ -34,7 +34,7 @@ import qualified Data.IntSet as IntSet
 
 import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Presolution.View (PresolutionView(..))
-import qualified MLF.Constraint.Solved as Solved
+import MLF.Constraint.Finalize (stepSanitizeSnapshotUf)
 import MLF.Constraint.Types hiding (lookupNode)
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Constraint.VarStore as VarStore
@@ -764,9 +764,9 @@ mkGeneralizeEnv
     -> Maybe GaBindParents
     -> PresolutionView
     -> Either ElabError GeneralizeEnv
-mkGeneralizeEnv traceCfg mbBindParentsGa presolutionView = do
-    solved <- buildSolvedFromPresolutionView presolutionView
+mkGeneralizeEnv traceCfg mbBindParentsGa presolutionView =
     let constraint = pvCanonicalConstraint presolutionView
+        canonicalMap = stepSanitizeSnapshotUf constraint (pvCanonicalMap presolutionView)
         nodes =
             IntMap.fromList
                 [ (getNodeId nid, node)
@@ -788,7 +788,7 @@ mkGeneralizeEnv traceCfg mbBindParentsGa presolutionView = do
         isTyVarKey key = maybe False isTyVarNode (lookupNode key)
         isTyForallKey key = maybe False isTyForallNode (lookupNode key)
         isBaseLikeKey key = maybe False isBaseLikeNode (lookupNode key)
-    pure GeneralizeEnv
+    in pure GeneralizeEnv
         { geConstraint = constraint
         , geOriginalConstraint = pvConstraint presolutionView
         , geNodes = nodes
@@ -799,29 +799,9 @@ mkGeneralizeEnv traceCfg mbBindParentsGa presolutionView = do
         , geIsTyForallKey = isTyForallKey
         , geIsBaseLikeKey = isBaseLikeKey
         , geBindParentsGa = mbBindParentsGa
-        , geRes = solved
+        , geCanonicalMap = canonicalMap
         , geDebugEnabled = tcGeneralize traceCfg
         }
-
-buildSolvedFromPresolutionView :: PresolutionView -> Either ElabError Solved.Solved
-buildSolvedFromPresolutionView presolutionView =
-    let constraint = pvCanonicalConstraint presolutionView
-        canonicalMap =
-            IntMap.mapMaybeWithKey
-                (\k rep ->
-                    let keyNode = NodeId k
-                        keyLive = case NodeAccess.lookupNode constraint keyNode of
-                            Just _ -> True
-                            Nothing -> False
-                        repLive = case NodeAccess.lookupNode constraint rep of
-                            Just _ -> True
-                            Nothing -> False
-                    in if keyLive && repLive && keyNode /= rep
-                        then Just rep
-                        else Nothing
-                )
-                (pvCanonicalMap presolutionView)
-    in Right (Solved.fromConstraintAndUf constraint canonicalMap)
 
 softenBindParents :: (NodeId -> NodeId) -> Constraint -> BindParents -> BindParents
 softenBindParents canonical constraint =

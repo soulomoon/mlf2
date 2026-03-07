@@ -4,6 +4,22 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 64 Narrow `geRes` to canonical map (completed 2026-03-08)
+
+- Completed:
+  - replaced `GeneralizeEnv.geRes :: Solved` with `geCanonicalMap :: IntMap.IntMap NodeId` in the presolution planning context;
+  - removed `buildSolvedFromPresolutionView` from `MLF.Constraint.Presolution.Plan` and preserved the sanitized canonical map directly from `PresolutionView` data;
+  - added a direct migration guard in `test/PresolutionSpec.hs` asserting the planning layer stores canonical maps rather than solved handles.
+- Verification:
+  - `cabal build all && cabal test`: PASS
+  - `GeneralizeEnv stores canonical maps, not solved handles`: PASS (`1 example, 0 failures`)
+  - `Phase 4 — Principal Presolution`: PASS (`161 examples, 0 failures`)
+  - `Generalize shadow comparator`: PASS (`8 examples, 0 failures`)
+- Rolling priorities (next):
+  1. Relocate the remaining compatibility builders (`fromConstraintAndUf`, `rebuildWithConstraint`, `fromSolved`, `solvedFromView`) into their local owner modules.
+  2. Keep the new presolution migration guard green during future `Solved` cleanup.
+  3. Continue narrowing the solved boundary only where the original↔canonical and replay-faithful semantics remain explicit.
+
 ## Task 63 Retire dead `Solved` mutation hooks (completed 2026-03-08)
 
 - Completed:
@@ -15,7 +31,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - `MLF.Constraint.Solved`: PASS (`44 examples, 0 failures`)
 - Rolling priorities (next):
   1. Narrow `geRes :: Solved` to the `canonicalMap` it actually uses.
-  2. Relocate compatibility builders (`fromConstraintAndUf`, `rebuildWithConstraint`, `fromSolved`, `buildSolvedFromPresolutionView`, `solvedFromView`) into their local owner modules.
+  2. Relocate compatibility builders (`fromConstraintAndUf`, `rebuildWithConstraint`, `fromSolved`, `solvedFromView`) into their local owner modules.
   3. Keep the new dead-hook migration guard green during future `Solved` cleanup.
 
 ## Task 62 Solved ecosystem classification table closeout (completed 2026-03-08)
