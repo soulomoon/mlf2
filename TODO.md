@@ -4,6 +4,21 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 68 Relocate `pruneBindParentsSolved` behind Finalize (completed 2026-03-08)
+
+- Completed:
+  - removed `pruneBindParentsSolved` from the public `MLF.Constraint.Solved` facade;
+  - kept the implementation owner-local behind `MLF.Constraint.Finalize` / `MLF.Constraint.Solved.Internal` and updated the one test caller to use `Finalize.stepPruneSolvedBindParents`.
+- Verification:
+  - `cabal build all && cabal test`: PASS
+  - `MLF.Constraint.Solved`: PASS (`49 examples, 0 failures`)
+  - `checked-authoritative does not adapt solved via prune helper at entry`: PASS (`1 example, 0 failures`)
+  - `prune helper is absent from the Solved facade`: PASS (`1 example, 0 failures`)
+- Rolling priorities (next):
+  1. Relocate the remaining production read-query helpers (`lookupNode`, `lookupBindParent`, `bindParents`, `lookupVarBound`, `genNodes`, `weakenedVars`, `isEliminatedVar`, `canonicalizedBindParents`) into stable owner-local or non-facade homes.
+  2. Keep the solved-facade guard stack green during future cleanup.
+  3. Preserve explicit replay-faithful and original↔canonical semantics while shrinking the facade further.
+
 ## Task 67 Move solved test/audit helper bundle behind test utility (completed 2026-03-08)
 
 - Completed:

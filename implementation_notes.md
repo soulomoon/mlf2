@@ -2,6 +2,15 @@
 
 ## Thesis Alignment (Phase A–E)
 
+### 2026-03-08 relocate `pruneBindParentsSolved` behind Finalize
+- Removed `pruneBindParentsSolved` from the public `MLF.Constraint.Solved` facade and kept the implementation behind `MLF.Constraint.Finalize`, where its only live production owner already was.
+- Updated the one test caller in `ElaborationSpec` to use `Finalize.stepPruneSolvedBindParents` and added a direct solved-facade guard asserting the prune helper no longer reappears there.
+- Verification:
+  - `cabal build all && cabal test` — PASS
+  - `MLF.Constraint.Solved` — PASS (`49 examples, 0 failures`)
+  - `checked-authoritative does not adapt solved via prune helper at entry` — PASS (`1 example, 0 failures`)
+  - `prune helper is absent from the Solved facade` — PASS (`1 example, 0 failures`)
+
 ### 2026-03-08 move solved test/audit helper bundle behind test utility
 - Added `test/SolvedFacadeTestUtil.hs` as the test-only home for `mkTestSolved`, `classMembers`, `originalNode`, `originalBindParent`, `wasOriginalBinder`, and `validateOriginalCanonicalAgreement`.
 - Removed that helper bundle from the public `MLF.Constraint.Solved` facade and added a direct guard in `test/Constraint/SolvedSpec.hs` proving the facade no longer exposes it.

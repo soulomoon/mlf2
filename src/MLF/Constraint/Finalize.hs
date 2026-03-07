@@ -17,8 +17,8 @@ import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Presolution.View (PresolutionView(..), fromPresolutionResult)
 import MLF.Constraint.Solve (SolveError, SolveResult(..))
 import qualified MLF.Constraint.Solve as Solve
-import qualified MLF.Constraint.Solved as Solved
 import qualified MLF.Constraint.Solved.Internal as SolvedInternal
+import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types (Constraint, NodeId(..), cNodes, lookupNodeIn)
 import MLF.Constraint.Types.Presolution (PresolutionSnapshot(..))
 
@@ -81,7 +81,7 @@ stepSolvedFromPresolutionView presolutionView =
     in SolvedInternal.rebuildWithConstraint solved0 canonicalConstraint
 
 stepPruneSolvedBindParents :: Solved.Solved -> Solved.Solved
-stepPruneSolvedBindParents = Solved.pruneBindParentsSolved
+stepPruneSolvedBindParents = SolvedInternal.pruneBindParentsSolved
 
 stepValidateSolvedStrict :: Solved.Solved -> Either SolveError Solved.Solved
 stepValidateSolvedStrict solved =

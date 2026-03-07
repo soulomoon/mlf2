@@ -173,6 +173,10 @@ spec = describe "MLF.Constraint.Solved" $ do
                 ] $ \marker ->
                     src `shouldSatisfy` (not . isInfixOf marker)
 
+        it "prune helper is absent from the Solved facade" $ do
+            src <- readFile "src/MLF/Constraint/Solved.hs"
+            src `shouldSatisfy` (not . isInfixOf "pruneBindParentsSolved")
+
     let s = testSolved
 
     describe "Constructor compatibility" $ do

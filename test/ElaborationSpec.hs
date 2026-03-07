@@ -14,6 +14,7 @@ import qualified SolvedFacadeTestUtil as SolvedTest
 import MLF.Frontend.Syntax (SurfaceExpr, Expr(..), Lit(..), SrcTy(..), SrcType, NormSrcType, mkSrcBound)
 import qualified MLF.Elab.Pipeline as Elab
 import qualified MLF.Util.Order as Order
+import qualified MLF.Constraint.Finalize as Finalize
 import MLF.Constraint.Types.Graph (BindingError(..))
 import MLF.Constraint.Types.Graph
     ( BaseTy(..)
@@ -241,7 +242,7 @@ resultTypeInputsForArtifacts
         , paSolved = solved0
         , paAnnotated = ann0
         } =
-    let solvedClean = Solved.pruneBindParentsSolved solved0
+    let solvedClean = Finalize.stepPruneSolvedBindParents solved0
         canon = makeCanonicalizer (Solved.canonicalMap solvedClean) (prRedirects pres)
         canonical = canonicalizeNode canon
         annRedirected = Elab.applyRedirectsToAnn (prRedirects pres) ann0

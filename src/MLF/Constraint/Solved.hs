@@ -24,9 +24,6 @@ module MLF.Constraint.Solved (
     genNodes,
     lookupVarBound,
 
-    -- * Mutation helpers
-    pruneBindParentsSolved,
-
     -- * Canonical-domain queries
     weakenedVars,
     isEliminatedVar,
@@ -51,7 +48,6 @@ import MLF.Constraint.Solved.Internal
     , lookupNode
     , lookupVarBound
     , originalConstraint
-    , pruneBindParentsSolved
     , validateCanonicalGraphStrict
     , weakenedVars
     )
