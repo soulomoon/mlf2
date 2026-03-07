@@ -17,6 +17,8 @@ import Data.Maybe (listToMaybe, isNothing)
 import MLF.Util.Trace (traceWhen)
 
 import MLF.Constraint.Types hiding (lookupNode)
+import MLF.Constraint.Presolution.View (PresolutionView)
+import MLF.Constraint.Finalize (presolutionViewFromSnapshot)
 import MLF.Constraint.Solved (Solved)
 import qualified MLF.Constraint.Solved as Solved
 import qualified MLF.Binding.Tree as Binding
@@ -75,7 +77,7 @@ data GeneralizeCtx = GeneralizeCtx
     , gcScopeGen :: Maybe GenNodeId
     , gcBindParents :: BindParents
     , gcFirstGenAncestor :: NodeRef -> Maybe GenNodeId
-    , gcResForReify :: Solved
+    , gcResForReify :: PresolutionView
     , gcBindParentsGaInfo :: Maybe GaBindParentsInfo
     , gcSchemeRootsPlan :: SchemeRootsPlan
     }
@@ -96,7 +98,7 @@ data ResolveScope = ResolveScope
 data ResolveBinds = ResolveBinds
     { rbBindParents :: BindParents
     , rbFirstGenAncestor :: NodeRef -> Maybe GenNodeId
-    , rbResForReify :: Solved
+    , rbResForReify :: PresolutionView
     }
 
 resolveContext
@@ -334,7 +336,9 @@ resolveContext env bindParentsSoft scopeRootArg targetNodeArg = do
             let firstGenAncestorGa = resolveFirstGenAncestor bindParents
                 constraintForReify = constraint { cBindParents = bindParents }
                 resForReify =
-                    Solved.rebuildWithConstraint (geRes env) constraintForReify
+                    presolutionViewFromSnapshot
+                        constraintForReify
+                        (Solved.canonicalMap (geRes env))
             pure ResolveBinds
                 { rbBindParents = bindParents
                 , rbFirstGenAncestor = firstGenAncestorGa

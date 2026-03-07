@@ -13,7 +13,7 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
 import MLF.Constraint.Presolution.Plan.BinderPlan.Order (GaBindParentsInfo)
-import MLF.Constraint.Solved (Solved)
+import MLF.Constraint.Presolution.View (PresolutionView)
 import MLF.Constraint.Types
 import MLF.Util.ElabError (ElabError)
 
@@ -51,7 +51,7 @@ data BinderPlanInput = BinderPlanInput
     , bpiTypeRootIsForall :: Bool
     , bpiLiftToForall :: NodeId -> NodeId
     , bpiReachableFromWithBounds :: NodeId -> IntSet.IntSet
-    , bpiResForReify :: Solved
+    , bpiResForReify :: PresolutionView
     , bpiGammaKeyFor :: Int -> Int -> Int
     , bpiNestedSchemeInteriorSet :: IntSet.IntSet
     , bpiBoundIsSchemeRootVar :: NodeId -> Bool

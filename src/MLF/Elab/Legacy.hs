@@ -8,6 +8,7 @@ import qualified Data.List.NonEmpty as NE
 import MLF.Constraint.Types (Expansion, ExpansionF(..))
 import MLF.Constraint.Solved (Solved)
 import qualified MLF.Constraint.Solved as Solved
+import MLF.Constraint.Presolution.View (fromSolved)
 import MLF.Elab.Run.TypeOps (inlineBoundVarsTypeForBound)
 import MLF.Elab.Types (ElabError, Instantiation(..))
 import MLF.Reify.Core (reifyTypeWithNamesNoFallback)
@@ -47,14 +48,15 @@ expansionToInst solved = cataM alg
     constraint = Solved.originalConstraint solved
     canonical = Solved.canonical solved
     resolveBaseBound = resolveBaseBoundForInstConstraint constraint canonical
+    presolutionView = fromSolved solved
     reifyArg arg =
         let argC = canonical arg
         in case resolveBaseBound argC of
-            Just baseC -> reifyTypeWithNamesNoFallback solved IntMap.empty baseC
-            Nothing -> reifyTypeWithNamesNoFallback solved IntMap.empty argC
+            Just baseC -> reifyTypeWithNamesNoFallback presolutionView IntMap.empty baseC
+            Nothing -> reifyTypeWithNamesNoFallback presolutionView IntMap.empty argC
     -- See Note [Instantiation arg sanitization] in
     -- docs/notes/2026-01-27-elab-changes.md.
-    sanitizeArg = inlineBoundVarsTypeForBound solved
+    sanitizeArg = inlineBoundVarsTypeForBound presolutionView
     alg layer = case layer of
         ExpIdentityF -> Right InstId
         ExpInstantiateF args -> do

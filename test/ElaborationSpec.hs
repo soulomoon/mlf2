@@ -121,7 +121,7 @@ generalizeAtWith mbGa s =
     Elab.generalizeAtWithBuilder
         (defaultPlanBuilder defaultTraceConfig)
         mbGa
-        (s)
+        (presolutionViewFromSolved s)
 
 generalizeAt
     :: Solved.Solved
@@ -145,10 +145,10 @@ recoverLiveSchemeAt artifacts nodeId = do
         pres = paPresolution artifacts
         solved = paSolved artifacts
         (inputs, _annCanon, _annPre) = resultTypeInputsForArtifacts artifacts
-    scopeRoot <- requireRight (resolveCanonicalScope c1 solved (prRedirects pres) nodeId)
+    scopeRoot <- requireRight (resolveCanonicalScope c1 (presolutionViewFromSolved solved) (prRedirects pres) nodeId)
     (scheme, _subst) <-
         requireRight
-            (generalizeAtWithActive solved (Just (rtcBindParentsGa inputs)) scopeRoot (schemeBodyTarget solved nodeId))
+            (generalizeAtWithActive solved (Just (rtcBindParentsGa inputs)) scopeRoot (schemeBodyTarget (presolutionViewFromSolved solved) nodeId))
     pure scheme
 
 expectWellFormedScheme :: Elab.ElabScheme -> Expectation
@@ -824,7 +824,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         case mbGa of
                             Just _ -> Left (Elab.SchemeFreeVars root ["ga-first-pass"])
                             Nothing -> Left (Elab.ValidationFailed ["ga-fallback-no-ga"])
-            generalizeWithPlan planBuilder ga solved (typeRef root) root
+            generalizeWithPlan planBuilder ga (presolutionViewFromSolved solved) (typeRef root) root
                 `shouldBe` Left (Elab.ValidationFailed ["ga-fallback-no-ga"])
 
         it "generalizeWithPlan falls back to reifyType after double SchemeFreeVars" $ do
@@ -845,7 +845,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 planBuilder =
                     PresolutionPlanBuilder $ \_ _ _ _ ->
                         Left (Elab.SchemeFreeVars root ["double-schemefreevars"])
-            generalizeWithPlan planBuilder ga solved (typeRef root) root
+            generalizeWithPlan planBuilder ga (presolutionViewFromSolved solved) (typeRef root) root
                 `shouldBe` Right (Elab.Forall [] (Elab.TBase (BaseTy "Int")), IntMap.empty)
 
         it "result-type fallback core handles gaSolvedToBase same-domain roots" $ do
@@ -4775,10 +4775,10 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 noRedirects = IntMap.empty
                 withRedirects = IntMap.fromList [(getNodeId e1, n2)]
             -- Without redirects: scope of e1 should be GenRef g0
-            scopeNoRedir <- requireRight (resolveCanonicalScope constraint (solved) noRedirects e1)
+            scopeNoRedir <- requireRight (resolveCanonicalScope constraint (presolutionViewFromSolved solved) noRedirects e1)
             scopeNoRedir `shouldBe` GenRef g0
             -- With redirects: scope of e1 should still be GenRef g0
-            scopeWithRedir <- requireRight (resolveCanonicalScope constraint (solved) withRedirects e1)
+            scopeWithRedir <- requireRight (resolveCanonicalScope constraint (presolutionViewFromSolved solved) withRedirects e1)
             scopeWithRedir `shouldBe` GenRef g0
 
         it "ga′ stable when UF merges nodes under same gen scope" $ do
@@ -4802,9 +4802,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 uf = IntMap.fromList [(getNodeId n2, n1)]
                 solved = Solved.mkTestSolved constraint uf
                 noRedirects = IntMap.empty
-            scope1 <- requireRight (resolveCanonicalScope constraint (solved) noRedirects n1)
+            scope1 <- requireRight (resolveCanonicalScope constraint (presolutionViewFromSolved solved) noRedirects n1)
             scope1 `shouldBe` GenRef g0
-            scope2 <- requireRight (resolveCanonicalScope constraint (solved) noRedirects n2)
+            scope2 <- requireRight (resolveCanonicalScope constraint (presolutionViewFromSolved solved) noRedirects n2)
             scope2 `shouldBe` GenRef g0
 
         it "binding-parent canonicalization drops self-edges from UF merge" $ do
@@ -4897,7 +4897,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 solved = Solved.mkTestSolved solvedForGen IntMap.empty
                 ann = ALet "x" g0 e1 (ExpVarId 0) g0
                     (AVar "y" n2) (AVar "z" n3) n3
-                overrides = letScopeOverrides base solvedForGen (solved) redirects ann
+                overrides = letScopeOverrides base solvedForGen (presolutionViewFromSolved solved) redirects ann
             IntMap.lookup (getNodeId n2) overrides `shouldBe` Just (GenRef g0)
 
         it "letScopeOverrides returns empty when base and solved scopes agree" $ do
@@ -4923,7 +4923,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 noRedirects = IntMap.empty
                 ann = ALet "x" g0 n1 (ExpVarId 0) g0
                     (AVar "y" n2) (AVar "z" n2) n2
-                overrides = letScopeOverrides constraint constraint (solved) noRedirects ann
+                overrides = letScopeOverrides constraint constraint (presolutionViewFromSolved solved) noRedirects ann
             overrides `shouldBe` IntMap.empty
 
         it "ga-invariant: validateCrossGenMapping filters out cross-scope nodes" $ do
