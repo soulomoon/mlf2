@@ -18,16 +18,6 @@ module MLF.Constraint.Solved (
     canonicalMap,
     originalConstraint,
     canonicalConstraint,
-    lookupNode,
-    lookupBindParent,
-    bindParents,
-    genNodes,
-    lookupVarBound,
-
-    -- * Canonical-domain queries
-    weakenedVars,
-    isEliminatedVar,
-    canonicalizedBindParents,
 
     -- * Validation helpers
     validateCanonicalGraphStrict,
@@ -35,19 +25,11 @@ module MLF.Constraint.Solved (
 
 import MLF.Constraint.Solved.Internal
     ( Solved
-    , bindParents
     , canonical
     , canonicalConstraint
     , canonicalMap
-    , canonicalizedBindParents
     , fromPreRewriteState
     , fromSolveOutput
-    , genNodes
-    , isEliminatedVar
-    , lookupBindParent
-    , lookupNode
-    , lookupVarBound
     , originalConstraint
     , validateCanonicalGraphStrict
-    , weakenedVars
     )

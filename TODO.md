@@ -4,6 +4,22 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 69 Retire final non-must-stay solved facade helper cluster (completed 2026-03-08)
+
+- Completed:
+  - removed `lookupVarBound`, `genNodes`, `weakenedVars`, `isEliminatedVar`, and `canonicalizedBindParents` from the public `MLF.Constraint.Solved` facade;
+  - replaced their owner-local use with direct constraint/canonical logic in `Reify.Core`, `MLF.Constraint.Presolution.View`, and the solved-view parity tests.
+- Verification:
+  - `cabal build all && cabal test`: PASS
+  - `MLF.Constraint.Solved`: PASS (`51 examples, 0 failures`)
+  - `migration guardrail: thesis-core boundary matches legacy outcome`: PASS (`1 example, 0 failures`)
+  - `PresolutionView mirrors solved canonical/node/bound queries`: PASS (`1 example, 0 failures`)
+  - `final reify/view helper cluster is absent from the Solved facade`: PASS (`1 example, 0 failures`)
+- Rolling priorities (next):
+  1. Keep the public `Solved` facade restricted to the thesis-relevant core.
+  2. Only revisit `Solved` again if the must-stay core itself can be replaced by an equally explicit boundary.
+  3. Keep the full solved-facade guard stack green during future cleanup.
+
 ## Task 68 Relocate `pruneBindParentsSolved` behind Finalize (completed 2026-03-08)
 
 - Completed:

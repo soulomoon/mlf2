@@ -80,6 +80,8 @@ The fifth low-risk cleanup landed on 2026-03-08 by moving the remaining test/aud
 
 The sixth low-risk cleanup landed on 2026-03-08 by moving `pruneBindParentsSolved` off the public facade and keeping it only behind `MLF.Constraint.Finalize`, its real owner.
 
+The seventh and final table-driven facade cleanup landed on 2026-03-08 by retiring the remaining non-must-stay helper cluster (`lookupVarBound`, `genNodes`, `weakenedVars`, `isEliminatedVar`, `canonicalizedBindParents`) from the public facade and replacing their owner-local use with direct constraint/canonical logic. At this point, the public `Solved` facade is reduced to the thesis-relevant core: replay-faithful construction, explicit original↔canonical boundary primitives, and strict solved-graph validation.
+
 The detailed evidence matrix for this classification lives in `tasks/archive/2026-03-08-solved-classification-table/findings.md`.
 
 ## Witness Representation (Φ/Σ)

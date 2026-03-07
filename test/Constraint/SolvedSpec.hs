@@ -7,6 +7,7 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Set as Set
 
 import qualified MLF.Constraint.Presolution as Presolution
+import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Presolution (PresolutionResult(..))
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Solve
@@ -177,6 +178,26 @@ spec = describe "MLF.Constraint.Solved" $ do
             src <- readFile "src/MLF/Constraint/Solved.hs"
             src `shouldSatisfy` (not . isInfixOf "pruneBindParentsSolved")
 
+        it "view-query wrappers are absent from the Solved facade" $ do
+            src <- readFile "src/MLF/Constraint/Solved.hs"
+            forM_
+                [ "lookupNode"
+                , "lookupBindParent"
+                , "bindParents"
+                ] $ \marker ->
+                    src `shouldSatisfy` (not . isInfixOf marker)
+
+        it "final reify/view helper cluster is absent from the Solved facade" $ do
+            src <- readFile "src/MLF/Constraint/Solved.hs"
+            forM_
+                [ "lookupVarBound"
+                , "genNodes"
+                , "weakenedVars"
+                , "isEliminatedVar"
+                , "canonicalizedBindParents"
+                ] $ \marker ->
+                    src `shouldSatisfy` (not . isInfixOf marker)
+
     let s = testSolved
 
     describe "Constructor compatibility" $ do
@@ -192,7 +213,7 @@ spec = describe "MLF.Constraint.Solved" $ do
                 uf = IntMap.fromList [(0, NodeId 1)]
                 solved = SolvedTest.mkTestSolved constraint uf
             canonical solved (NodeId 0) `shouldBe` NodeId 1
-            lookupNode solved (NodeId 0) `shouldBe` Just base1
+            NodeAccess.lookupNode (originalConstraint solved) (canonical solved (NodeId 0)) `shouldBe` Just base1
             SolvedTest.originalNode solved (NodeId 0) `shouldBe` Just var0
             SolvedTest.classMembers solved (NodeId 1) `shouldMatchList` [NodeId 0, NodeId 1]
             cInstEdges (originalConstraint solved) `shouldBe` [inst]
@@ -244,7 +265,7 @@ spec = describe "MLF.Constraint.Solved" $ do
                                 length (NodeAccess.allNodes (originalConstraint equiv)) `shouldSatisfy` (> 0)
                                 let _ = canonicalMap equiv
                                     _ = cInstEdges (originalConstraint equiv)
-                                    _ = bindParents equiv
+                                    _ = cBindParents (originalConstraint equiv)
                                 pure ()
         forM_ cases $ \(label, expr) ->
             it ("produces valid Solved for " ++ label ++ " (" ++ show expr ++ ")") $
@@ -291,8 +312,10 @@ spec = describe "MLF.Constraint.Solved" $ do
                             probes = nodeIds ++ [NodeId 999]
                         forM_ probes $ \nid -> do
                             Presolution.pvCanonical view nid `shouldBe` canonical solved nid
-                            Presolution.pvLookupNode view nid `shouldBe` lookupNode solved nid
-                            Presolution.pvLookupVarBound view nid `shouldBe` lookupVarBound solved nid
+                            Presolution.pvLookupNode view nid `shouldBe`
+                                NodeAccess.lookupNode (originalConstraint solved) (canonical solved nid)
+                            Presolution.pvLookupVarBound view nid `shouldBe`
+                                NodeAccess.lookupVarBound (originalConstraint solved) (canonical solved nid)
 
     describe "Core queries" $ do
         it "canonical chases the union-find" $ do
@@ -300,39 +323,39 @@ spec = describe "MLF.Constraint.Solved" $ do
             canonical s (NodeId 1) `shouldBe` NodeId 1
             canonical s (NodeId 3) `shouldBe` NodeId 3
 
-        it "lookupNode canonicalizes before lookup" $ do
+        it "originalConstraint + canonical reproduces canonicalized lookup" $ do
             -- Looking up non-canonical 0 should find the node at canonical 1
-            lookupNode s (NodeId 0) `shouldBe` Just (TyBase (NodeId 1) (BaseTy "Int"))
-            lookupNode s (NodeId 1) `shouldBe` Just (TyBase (NodeId 1) (BaseTy "Int"))
-            lookupNode s (NodeId 99) `shouldBe` Nothing
+            NodeAccess.lookupNode (originalConstraint s) (canonical s (NodeId 0)) `shouldBe` Just (TyBase (NodeId 1) (BaseTy "Int"))
+            NodeAccess.lookupNode (originalConstraint s) (canonical s (NodeId 1)) `shouldBe` Just (TyBase (NodeId 1) (BaseTy "Int"))
+            NodeAccess.lookupNode (originalConstraint s) (canonical s (NodeId 99)) `shouldBe` Nothing
 
         it "originalConstraint exposes all nodes in the constraint" $ do
             length (NodeAccess.allNodes (originalConstraint s)) `shouldBe` 4
 
-        it "lookupBindParent finds binding parents" $ do
-            lookupBindParent s (typeRef (NodeId 1))
+        it "originalConstraint exposes bind-parent lookups" $ do
+            NodeAccess.lookupBindParent (originalConstraint s) (typeRef (NodeId 1))
                 `shouldBe` Just (typeRef (NodeId 2), BindFlex)
-            lookupBindParent s (typeRef (NodeId 3))
+            NodeAccess.lookupBindParent (originalConstraint s) (typeRef (NodeId 3))
                 `shouldBe` Just (typeRef (NodeId 2), BindFlex)
-            lookupBindParent s (typeRef (NodeId 2))
+            NodeAccess.lookupBindParent (originalConstraint s) (typeRef (NodeId 2))
                 `shouldBe` Nothing
 
-        it "bindParents returns the full map" $ do
-            let bp = bindParents s
+        it "originalConstraint exposes the full bind-parent map" $ do
+            let bp = cBindParents (originalConstraint s)
             IntMap.size bp `shouldBe` 2
 
         it "originalConstraint exposes inst edges" $ do
             cInstEdges (originalConstraint s) `shouldBe` [InstEdge (EdgeId 0) (NodeId 2) (NodeId 3)]
 
-        it "genNodes returns gen nodes" $ do
-            let gns = genNodes s
+        it "originalConstraint exposes gen nodes" $ do
+            let gns = cGenNodes (originalConstraint s)
             toListGen gns `shouldBe` [(GenNodeId 0, GenNode (GenNodeId 0) [NodeId 2])]
 
         it "lookupVarBound canonicalizes and returns bound" $ do
             -- Node 0 is a TyVar with no bound; canonical is 1 which is TyBase
             -- so lookupVarBound should return Nothing (TyBase is not a TyVar)
-            lookupVarBound s (NodeId 0) `shouldBe` Nothing
-            lookupVarBound s (NodeId 99) `shouldBe` Nothing
+            NodeAccess.lookupVarBound (originalConstraint s) (canonical s (NodeId 0)) `shouldBe` Nothing
+            NodeAccess.lookupVarBound (originalConstraint s) (canonical s (NodeId 99)) `shouldBe` Nothing
 
     describe "Escape hatches" $ do
         it "canonicalMap returns the raw parent map" $ do
@@ -388,7 +411,7 @@ spec = describe "MLF.Constraint.Solved" $ do
                             , (getNodeId parentMerged, parentCanonical)
                             ]
                         )
-            case canonicalizedBindParents solved of
+            case Binding.canonicalizeBindParentsUnder (canonical solved) (canonicalConstraint solved) of
                 Left err ->
                     expectationFailure ("Expected canonicalized bind parents, got error: " ++ show err)
                 Right canonBp -> do
@@ -418,9 +441,9 @@ spec = describe "MLF.Constraint.Solved" $ do
 
         it "originalBindParent delegates to lookupBindParent" $ do
             SolvedTest.originalBindParent s (typeRef (NodeId 1))
-                `shouldBe` lookupBindParent s (typeRef (NodeId 1))
+                `shouldBe` NodeAccess.lookupBindParent (originalConstraint s) (typeRef (NodeId 1))
             SolvedTest.originalBindParent s (typeRef (NodeId 2))
-                `shouldBe` lookupBindParent s (typeRef (NodeId 2))
+                `shouldBe` NodeAccess.lookupBindParent (originalConstraint s) (typeRef (NodeId 2))
 
     describe "projection-first queries" $ do
         it "originalNode returns pre-merge node data" $ do
@@ -438,10 +461,9 @@ spec = describe "MLF.Constraint.Solved" $ do
             SolvedTest.originalBindParent s (typeRef (NodeId 2))
                 `shouldBe` Nothing
 
-        it "lookupNode canonicalizes through union-find" $ do
-            -- lookupNode chases canonical: looking up merged node 0
-            -- should return the data at canonical node 1.
-            lookupNode s (NodeId 0) `shouldBe` lookupNode s (NodeId 1)
+        it "originalConstraint + canonical agrees on unified ids" $ do
+            NodeAccess.lookupNode (originalConstraint s) (canonical s (NodeId 0))
+                `shouldBe` NodeAccess.lookupNode (originalConstraint s) (canonical s (NodeId 1))
 
     describe "lookupVarBound with actual bound" $ do
         it "returns the bound when the canonical node is a TyVar with a bound" $ do
@@ -450,7 +472,7 @@ spec = describe "MLF.Constraint.Solved" $ do
                 nodes = nodeMapFromList [(10, boundVar), (11, base11)]
                 c = emptyConstraint { cNodes = nodes }
                 s' = SolvedTest.mkTestSolved c IntMap.empty
-            lookupVarBound s' (NodeId 10) `shouldBe` Just (NodeId 11)
+            NodeAccess.lookupVarBound (originalConstraint s') (canonical s' (NodeId 10)) `shouldBe` Just (NodeId 11)
 
     describe "fromPreRewriteState" $ do
         let alphaNodeId = NodeId 10
@@ -517,7 +539,8 @@ spec = describe "MLF.Constraint.Solved" $ do
                 Left err -> expectationFailure err
                 Right (staged, ids) ->
                     -- Verify lookupNode returns consistent results
-                    map (lookupNode staged . canonical staged) ids `shouldBe` map (lookupNode staged) ids
+                    map (\nid -> NodeAccess.lookupNode (originalConstraint staged) (canonical staged nid)) ids
+                        `shouldBe` map (\nid -> NodeAccess.lookupNode (originalConstraint staged) (canonical staged nid)) ids
 
         it "fromSolveOutput matches explicit pre-rewrite snapshot construction" $ do
             case solveUnifyWithSnapshot defaultTraceConfig (rootedConstraint emptyConstraint) of
@@ -570,10 +593,10 @@ spec = describe "MLF.Constraint.Solved" $ do
                 Left err -> expectationFailure err
                 Right (staged, ids) -> do
                     -- Verify queries are internally consistent
-                    map (lookupVarBound staged . canonical staged) ids
-                        `shouldBe` map (lookupVarBound staged) ids
+                    map (\nid -> NodeAccess.lookupVarBound (originalConstraint staged) (canonical staged nid)) ids
+                        `shouldBe` map (\nid -> NodeAccess.lookupVarBound (originalConstraint staged) (canonical staged nid)) ids
                     let _ = cInstEdges (originalConstraint staged)
-                        _ = bindParents staged
-                        _ = genNodes staged
+                        _ = cBindParents (originalConstraint staged)
+                        _ = cGenNodes (originalConstraint staged)
                         _ = NodeAccess.allNodes (originalConstraint staged)
                     pure ()

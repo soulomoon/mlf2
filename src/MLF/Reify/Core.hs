@@ -94,11 +94,16 @@ reifyWith _contextLabel solved nameForVar isNamed rootMode nid =
             RootBound -> goBoundRoot
     in snd <$> start emptyCache (canonical nid)
   where
-    nodes = cNodes (Solved.canonicalConstraint solved)
+    originalConstraint = Solved.originalConstraint solved
+    canonicalConstraint = Solved.canonicalConstraint solved
+    nodes = cNodes canonicalConstraint
     canonical = Solved.canonical solved
-    weakened = Solved.weakenedVars solved
+    lookupVarBoundS queryNid = VarStore.lookupVarBound originalConstraint (canonical queryNid)
+    originalGenNodes = cGenNodes originalConstraint
+    weakened = cWeakenedVars canonicalConstraint
+    isEliminatedVarS queryNid = IntSet.member (getNodeId queryNid) (cEliminatedVars canonicalConstraint)
     canonicalGenNodesList =
-        map snd (IntMap.toList (getGenNodeMap (Solved.genNodes solved)))
+        map snd (IntMap.toList (getGenNodeMap originalGenNodes))
     schemeRootSetRaw =
         IntSet.fromList
             [ getNodeId root
@@ -136,7 +141,7 @@ reifyWith _contextLabel solved nameForVar isNamed rootMode nid =
     lookupNode k = maybe (Left (MissingNode k)) Right (lookupNodeIn nodes k)
 
     bindParentsE = do
-        bindParents0 <- bindingToElab (Solved.canonicalizedBindParents solved)
+        bindParents0 <- bindingToElab (canonicalizeBindParentsUnder canonical canonicalConstraint)
         pure (softenBindParents canonical weakened bindParents0)
 
     boundIsSimple start =
@@ -156,7 +161,7 @@ reifyWith _contextLabel solved nameForVar isNamed rootMode nid =
                                         TyCon{ tnArgs = args } ->
                                             all (go visited') (NE.toList args)
                                         TyVar{} ->
-                                            case Solved.lookupVarBound solved nidC of
+                                            case lookupVarBoundS nidC of
                                                 Nothing -> True
                                                 Just bnd -> go visited' bnd
                                         TyExp{ tnBody = b } -> go visited' b
@@ -165,7 +170,7 @@ reifyWith _contextLabel solved nameForVar isNamed rootMode nid =
             in go IntSet.empty start
 
     boundIsSimpleFor n =
-        case Solved.lookupVarBound solved (canonical n) of
+        case lookupVarBoundS (canonical n) of
             Nothing -> False
             Just bnd -> boundIsSimple bnd
 
@@ -177,7 +182,7 @@ reifyWith _contextLabel solved nameForVar isNamed rootMode nid =
                 Just _ -> True
                 Nothing -> False
         GenRef gid ->
-            IntMap.member (getGenNodeId gid) (getGenNodeMap (Solved.genNodes solved))
+            IntMap.member (getGenNodeId gid) (getGenNodeMap (originalGenNodes))
 
     lookupBindParentUnderSoft ref0 = do
         bindParents <- bindParentsE
@@ -216,7 +221,7 @@ reifyWith _contextLabel solved nameForVar isNamed rootMode nid =
                                                 InvalidBindingTree $
                                                     "boundFlexChildrenAllUnderSoft: child " ++ show childN ++ " not in cNodes"
                             GenRef gid ->
-                                if IntMap.member (getGenNodeId gid) (getGenNodeMap (Solved.genNodes solved))
+                                if IntMap.member (getGenNodeId gid) (getGenNodeMap (originalGenNodes))
                                     then pure acc
                                     else
                                         Left $
@@ -265,7 +270,7 @@ reifyWith _contextLabel solved nameForVar isNamed rootMode nid =
                         case node of
                             TyVar{} ->
                                 let cache0' = cacheInsertLocal mode key (varFor n) cache0 namedExtra
-                                in if Solved.isEliminatedVar solved n
+                                in if isEliminatedVarS n
                                     then
                                         let t = TBottom
                                             cache' = cacheInsertLocal mode key t cache0' namedExtra
@@ -273,7 +278,7 @@ reifyWith _contextLabel solved nameForVar isNamed rootMode nid =
                                     else case mode of
                                         ModeBound
                                             | IntSet.member key schemeRootSet ->
-                                                case Solved.lookupVarBound solved n of
+                                                case lookupVarBoundS n of
                                                     Nothing -> do
                                                         let t = varFor n
                                                             cache' = cacheInsertLocal mode key t cache0' namedExtra
@@ -292,13 +297,13 @@ reifyWith _contextLabel solved nameForVar isNamed rootMode nid =
                                         _ -> do
                                             mbParent <- lookupBindParentUnderSoft (typeRef n)
                                             let mbSchemeBound =
-                                                    case Solved.lookupVarBound solved (canonical n) of
+                                                    case lookupVarBoundS (canonical n) of
                                                         Just bnd
                                                             | IntSet.member (getNodeId (canonical bnd)) schemeRootSet ->
                                                                 Just (canonical bnd)
                                                         _ -> Nothing
                                                 boundIsBaseOrBottom =
-                                                    case Solved.lookupVarBound solved n of
+                                                    case lookupVarBoundS n of
                                                         Nothing -> False
                                                         Just bnd ->
                                                             case lookupNodeIn nodes (canonical bnd) of
@@ -306,7 +311,7 @@ reifyWith _contextLabel solved nameForVar isNamed rootMode nid =
                                                                 Just TyBottom{} -> True
                                                                 _ -> False
                                                 boundIsSchemeRootVar =
-                                                    case Solved.lookupVarBound solved (canonical n) of
+                                                    case lookupVarBoundS (canonical n) of
                                                         Just bnd ->
                                                             IntSet.member (getNodeId (canonical bnd)) schemeRootSet
                                                         Nothing -> False
@@ -417,9 +422,9 @@ reifyWith _contextLabel solved nameForVar isNamed rootMode nid =
         node <- lookupNode n
         case node of
             TyVar{} ->
-                if Solved.isEliminatedVar solved n
+                if isEliminatedVarS n
                     then pure (cache, TBottom)
-                    else case Solved.lookupVarBound solved n of
+                    else case lookupVarBoundS n of
                         Nothing ->
                             if isNamedLocal namedExtra n
                                 then pure (cache, varFor n)
@@ -451,7 +456,7 @@ reifyWith _contextLabel solved nameForVar isNamed rootMode nid =
             _ -> goFull cache namedExtra ModeBound n
 
     boundIsPoly n =
-        case Solved.lookupVarBound solved (canonical n) of
+        case lookupVarBoundS (canonical n) of
             Nothing -> False
             Just bnd -> boundHasForall IntSet.empty bnd
       where
@@ -464,7 +469,7 @@ reifyWith _contextLabel solved nameForVar isNamed rootMode nid =
                     case lookupNodeIn nodes nidC of
                         Just TyForall{} -> True
                         Just TyVar{} ->
-                            case Solved.lookupVarBound solved nidC of
+                            case lookupVarBoundS nidC of
                                 Just bnd' | canonical bnd' /= nidC ->
                                     boundHasForall (IntSet.insert key visited) bnd'
                                 _ -> False
@@ -476,7 +481,7 @@ reifyWith _contextLabel solved nameForVar isNamed rootMode nid =
         let childC = canonical child
             childKey = getNodeId childC
             boundIsBaseOrBottom =
-                case Solved.lookupVarBound solved childC of
+                case lookupVarBoundS childC of
                     Nothing -> False
                     Just bnd ->
                         case lookupNodeIn nodes (canonical bnd) of
@@ -504,7 +509,7 @@ reifyWith _contextLabel solved nameForVar isNamed rootMode nid =
                 case mode of
                     ModeBound ->
                         case lookupNodeIn nodes (canonical child) of
-                            Just TyVar{} | Solved.isEliminatedVar solved (canonical child) ->
+                            Just TyVar{} | isEliminatedVarS (canonical child) ->
                                 goBound cache namedExtra child
                             Just TyVar{} -> pure (cache, varFor child)
                             _ -> goFull cache namedExtra mode child
@@ -515,7 +520,7 @@ reifyWith _contextLabel solved nameForVar isNamed rootMode nid =
                             Just TyVar{} ->
                                 let childKey' = getNodeId (canonical child)
                                     isBoundHere = IntSet.member childKey' namedExtra
-                                in case Solved.lookupVarBound solved (canonical child) of
+                                in case lookupVarBoundS (canonical child) of
                                     Just bnd
                                         | IntSet.member (getNodeId (canonical bnd)) schemeRootSet
                                         , not isBoundHere
