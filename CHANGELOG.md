@@ -3,6 +3,12 @@
 ## Unreleased
 
 ### Changed
+- Shared frontend/XMLF parser scaffolding (2026-03-08):
+  - extracted common lexer/literal helpers into `MLF.Parse.Common` and the shared type-grammar core into `MLF.Parse.Type`;
+  - rewired `MLF.Frontend.Parse` and `MLF.XMLF.Parse` to use the shared scaffolding while keeping term/computation grammar entrypoints local;
+  - preserved the XMLF-specific forall-binder stopping rule via a parser-config hook rather than forcing one binder-list grammar across both parsers;
+  - added a source guard proving the duplicated lexer/type-helper block no longer lives in both parser modules;
+  - verified `frontend and XMLF parsers share lexer/type scaffolding modules` (`1 example, 0 failures`), `Frontend eMLF parser` (`30 examples, 0 failures`), `xMLF parser` (`8 examples, 0 failures`), and `cabal build all && cabal test` (`976 examples, 0 failures`).
 - Extracted shared canonicalization helpers (2026-03-08):
   - moved the duplicated canonical-map chase helpers (`buildCanonicalMap`, `chaseUfCanonical`, `equivCanonical`, `nodeIdKey`) into `MLF.Constraint.Canonicalization.Shared`;
   - rewired `MLF.Constraint.Solved` and `MLF.Constraint.Presolution.View` to use that single implementation;

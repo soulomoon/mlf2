@@ -4,6 +4,22 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 60 Shared frontend/XMLF parser scaffolding (completed 2026-03-08)
+
+- Completed:
+  - extracted shared lexer/literal helpers into `MLF.Parse.Common` and shared type-parser scaffolding into `MLF.Parse.Type`;
+  - rewired `MLF.Frontend.Parse` and `MLF.XMLF.Parse` to consume that common core while keeping term/computation grammar entrypoints separate;
+  - added a direct source guard proving the duplicated lexer/type-helper block no longer lives in both parser modules.
+- Verification:
+  - `frontend and XMLF parsers share lexer/type scaffolding modules`: PASS (`1 example, 0 failures`)
+  - `Frontend eMLF parser`: PASS (`30 examples, 0 failures`)
+  - `xMLF parser`: PASS (`8 examples, 0 failures`)
+  - `cabal build all && cabal test`: PASS (`976 examples, 0 failures`)
+- Rolling priorities (next):
+  1. Continue Task 58 queue item 3 (`schemeBodyTarget` audit/consolidation) only as a separate semantics-checked refactor.
+  2. Keep the new parser scaffolding dedup guard green when touching either parser.
+  3. Preserve the XMLF-specific binder-list stopping rule unless new tests justify changing it.
+
 ## Task 59 Canonicalization helper extraction (completed 2026-03-08)
 
 - Completed:
@@ -25,8 +41,8 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 - Goal:
   - record the next Haskell-oriented deduplication/refactor candidates in strict one-by-one order, so follow-up work stays focused and easy to verify.
 - Queue (do in order):
-  1. Extract canonicalization helpers shared by `MLF.Constraint.Solved` and `MLF.Constraint.Presolution.View` (`buildCanonicalMap`, `chaseUfCanonical`, `equivCanonical`, `nodeIdKey`) into one internal utility module.
-  2. Commonize shared lexer/type-parser scaffolding between `MLF.Frontend.Parse` and `MLF.XMLF.Parse`, while preserving grammar-specific entrypoints and avoiding forced unification of the full term grammars.
+  1. Extract canonicalization helpers shared by `MLF.Constraint.Solved` and `MLF.Constraint.Presolution.View` (`buildCanonicalMap`, `chaseUfCanonical`, `equivCanonical`, `nodeIdKey`) into one internal utility module. (completed 2026-03-08)
+  2. Commonize shared lexer/type-parser scaffolding between `MLF.Frontend.Parse` and `MLF.XMLF.Parse`, while preserving grammar-specific entrypoints and avoiding forced unification of the full term grammars. (completed 2026-03-08)
   3. Audit and consolidate `schemeBodyTarget` between `MLF.Elab.Elaborate` and `MLF.Elab.Run.Scope`, but only if the more complete run-scope semantics can be adopted without changing elaboration behavior.
   4. Extract the low-risk pure helper duplicates (`mapBound`, `freshNameLike`) into shared internal helpers after the higher-value refactors are done.
 - Constraints:

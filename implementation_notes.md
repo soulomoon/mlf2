@@ -2,6 +2,17 @@
 
 ## Thesis Alignment (Phase A–E)
 
+### 2026-03-08 shared frontend/XMLF parser scaffolding
+- Extracted shared lexer/literal helpers into `MLF.Parse.Common` and the common type-grammar core into `MLF.Parse.Type`.
+- Rewired `MLF.Frontend.Parse` and `MLF.XMLF.Parse` to use that shared scaffolding while keeping their term/computation grammars local.
+- Preserved the XMLF-specific forall-binder stopping rule by parameterizing binder-list parsing instead of forcing the frontend and XMLF parsers onto the same exact binder-sequence grammar.
+- Added a source guard proving the duplicated lexer/type-helper block no longer lives in both parser modules.
+- Verification:
+  - `frontend and XMLF parsers share lexer/type scaffolding modules` — PASS (`1 example, 0 failures`)
+  - `Frontend eMLF parser` — PASS (`30 examples, 0 failures`)
+  - `xMLF parser` — PASS (`8 examples, 0 failures`)
+  - `cabal build all && cabal test` — PASS (`976 examples, 0 failures`)
+
 ### 2026-03-08 canonicalization helper extraction
 - Extracted the duplicated canonicalization helpers shared by `MLF.Constraint.Solved` and `MLF.Constraint.Presolution.View` into `MLF.Constraint.Canonicalization.Shared`.
 - Kept behavior unchanged by rewiring both consumer modules to the same implementation and preserving the existing solved/view semantic parity tests.
