@@ -21,7 +21,7 @@ import qualified InertSpec
 import qualified NormalizeSpec
 import qualified PipelineSpec
 import qualified Phi.AlignmentSpec
-import qualified Phi.IdentityBridgeSpec
+import qualified Phi.WitnessDomainSpec
 import qualified PresolutionSpec
 import qualified Presolution.UnificationClosureSpec
 import qualified ReduceSpec
@@ -72,7 +72,7 @@ main = do
         XMLFParseSpec.spec
         XMLFPrettySpec.spec
         FrozenParitySpec.spec
-        Phi.IdentityBridgeSpec.spec
+        Phi.WitnessDomainSpec.spec
         Phi.AlignmentSpec.spec
         TranslatablePresolutionSpec.spec
         PhiSoundnessSpec.spec

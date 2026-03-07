@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Changed
+- Retired library-side Φ test hooks (2026-03-07):
+  - removed `MLF.Elab.Phi.TestOnly` and `MLF.Elab.Phi.IdentityBridge` from `mlf2-internal`;
+  - moved pure witness-domain ranking helpers into `test/Phi/WitnessDomainUtil.hs` and renamed the dedicated unit suite to `WitnessDomain`;
+  - switched `GeneralizeSpec` to real production `MLF.Elab.Generalize` imports, rewrote the two `normalizeInst` checks to behavior-level assertions, and kept production `MLF.Elab.Phi.Omega` on the same direct replay-spine fail-fast path with local diagnostics only;
+  - verified `WitnessDomain` (`23 examples, 0 failures`), `Generalize shadow comparator` (`8 examples, 0 failures`), `no-trace test entrypoint fails fast with MissingEdgeTrace` (`1 example, 0 failures`), `elab-input thesis-exact guard` (`2 examples, 0 failures`), `elab-input absolute thesis-exact guard` (`1 example, 0 failures`), `row9-11 direct-target guard` (`1 example, 0 failures`), and `cabal build all && cabal test` (`966 examples, 0 failures`).
 - Thesis-exact Phi identity cleanup (2026-03-07):
   - removed the stale compiled `MLF.Elab.Phi.Binder` module and retired its helper re-exports from `MLF.Elab.Phi`;
   - kept runtime `MLF.Elab.Phi.Omega` on the accepted direct replay-spine fail-fast contract, while tightening `MLF.Elab.Phi.IdentityBridge` notes/tests to describe it as a witness-domain utility/test surface rather than a runtime repair engine;

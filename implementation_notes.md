@@ -2,6 +2,19 @@
 
 ## Thesis Alignment (Phase A–E)
 
+### 2026-03-07 retire library-side Φ test hooks
+- Removed `MLF.Elab.Phi.TestOnly` and `MLF.Elab.Phi.IdentityBridge` from the main library; no test-only Φ helper surface remains exposed from `mlf2-internal`.
+- Moved the pure witness-domain ranking/de-dup logic into `test/Phi/WitnessDomainUtil.hs` and renamed the dedicated unit suite to `WitnessDomain`.
+- `MLF.Elab.Phi.Omega` keeps the same direct replay-spine fail-fast runtime behavior, but now computes witness-domain diagnostic matches locally instead of importing a test-facing bridge module.
+- Verification:
+  - `WitnessDomain` — PASS (`23 examples, 0 failures`)
+  - `Generalize shadow comparator` — PASS (`8 examples, 0 failures`)
+  - `no-trace test entrypoint fails fast with MissingEdgeTrace` — PASS (`1 example, 0 failures`)
+  - `elab-input thesis-exact guard` — PASS (`2 examples, 0 failures`)
+  - `elab-input absolute thesis-exact guard` — PASS (`1 example, 0 failures`)
+  - `row9-11 direct-target guard` — PASS (`1 example, 0 failures`)
+  - `cabal build all && cabal test` — PASS (`966 examples, 0 failures`)
+
 ### 2026-03-07 Thesis-exact Φ identity cleanup
 - Removed the stale compiled `MLF.Elab.Phi.Binder` module and retired its helper re-exports from `MLF.Elab.Phi`, so no compiled Phi surface still advertises the old canonical/base-key/copy-map reconciliation helpers.
 - `MLF.Elab.Phi.Omega` remains on the accepted direct replay-spine fail-fast contract; `MLF.Elab.Phi.IdentityBridge` is now documented explicitly as a witness-domain utility/diagnostic/test surface rather than a runtime target-repair engine.
