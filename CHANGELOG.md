@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Changed
+- Thesis-exact Phi identity cleanup (2026-03-07):
+  - removed the stale compiled `MLF.Elab.Phi.Binder` module and retired its helper re-exports from `MLF.Elab.Phi`;
+  - kept runtime `MLF.Elab.Phi.Omega` on the accepted direct replay-spine fail-fast contract, while tightening `MLF.Elab.Phi.IdentityBridge` notes/tests to describe it as a witness-domain utility/test surface rather than a runtime repair engine;
+  - added a row9-11 facade source guard plus a dedicated `OpGraft` missing-from-spine regression alongside the existing `OpWeaken` fail-fast coverage;
+  - verified `row9-11 facade cleanup guard`, `row9-11 direct-target guard`, `OpWeaken on binder target missing from quantifier spine fails fast`, `OpGraft on binder target missing from quantifier spine still fails fast even when IdentityBridge finds witness-domain matches`, `IdentityBridge`, and `cabal build all && cabal test` (`966 examples, 0 failures`).
 - Thesis-exact recursion-refactor verifier sweep (2026-03-07):
   - ran the fresh verifier-owned sweep over the new 8-row recursion-refactor mechanism table;
   - closed all 8 rows to `YES` against the live thesis/code/test evidence;

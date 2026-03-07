@@ -4,10 +4,12 @@ Description : Centralised trace-domain/source-key reconciliation
 Copyright   : (c) 2026
 License     : BSD-3-Clause
 
-Pure data structure that captures witness-domain key provenance for a
-single edge, centralising the ranking and de-duplication logic currently
-duplicated between "MLF.Elab.Phi.Omega" and
-"MLF.Elab.Phi.Translate".
+Pure witness-domain utility/test surface for a single edge.
+
+It records source-key provenance and deterministic witness-domain ranking for
+diagnostics, focused tests, and non-runtime helper logic. The live `Omega`
+path remains direct and fail-fast on replay-spine targets; this module is not
+its target-repair engine.
 -}
 module MLF.Elab.Phi.IdentityBridge (
     IdentityBridge,
@@ -66,6 +68,8 @@ bridgeCopyMap = ibCopyMap
 traceBinderKeysInOrder :: IdentityBridge -> [Int]
 traceBinderKeysInOrder = ibTraceBinderOrder
 
+-- | Compatibility accessors retained for the exported bridge API.
+-- In strict witness-domain mode these are identity projections.
 canonicalKeyForNode :: IdentityBridge -> NodeId -> Int
 canonicalKeyForNode _ib nid = getNodeId nid
 
@@ -146,7 +150,9 @@ raw witness key-space and includes only:
   2. copy-map forward/reverse aliases
   3. trace binder aliases (same raw key-space)
 
-No runtime equivalence-class expansion is performed here.
+No runtime equivalence-class expansion is performed here. The live runtime
+path in `MLF.Elab.Phi.Omega` may consult this module for diagnostics, but it
+still resolves replay targets directly from the quantifier spine.
 -}
 
 -- | All source-domain keys for a node, de-duplicated and ranked by

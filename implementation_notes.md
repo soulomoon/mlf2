@@ -2,6 +2,18 @@
 
 ## Thesis Alignment (Phase A–E)
 
+### 2026-03-07 Thesis-exact Φ identity cleanup
+- Removed the stale compiled `MLF.Elab.Phi.Binder` module and retired its helper re-exports from `MLF.Elab.Phi`, so no compiled Phi surface still advertises the old canonical/base-key/copy-map reconciliation helpers.
+- `MLF.Elab.Phi.Omega` remains on the accepted direct replay-spine fail-fast contract; `MLF.Elab.Phi.IdentityBridge` is now documented explicitly as a witness-domain utility/diagnostic/test surface rather than a runtime target-repair engine.
+- Added a row9-11 facade cleanup source guard and a dedicated `OpGraft` missing-from-spine regression alongside the existing `OpWeaken` fail-fast coverage.
+- Verification:
+  - `row9-11 facade cleanup guard` — PASS (`1 example, 0 failures`)
+  - `row9-11 direct-target guard` — PASS (`1 example, 0 failures`)
+  - `OpWeaken on binder target missing from quantifier spine fails fast` — PASS (`1 example, 0 failures`)
+  - `OpGraft on binder target missing from quantifier spine still fails fast even when IdentityBridge finds witness-domain matches` — PASS (`1 example, 0 failures`)
+  - `IdentityBridge` — PASS (`24 examples, 0 failures`)
+  - `cabal build all && cabal test` — PASS (`966 examples, 0 failures`)
+
 ### 2026-03-07 TMT improving-loop rerun reclosed row2 and row8
 - Row2 `Result-type context wiring` is back to `Yes`: the live pipeline now builds finalized clean/generalized `PresolutionView` artifacts directly from `Finalize.finalizePresolutionViewFromSnapshot`, `ResultType.View` validates from canonical constraint + canonical map, and `ChiQuery` no longer exposes solved-compat shims.
 - Row8 `Translatability normalization` is back to `Yes`: `rigidifyTranslatablePresolutionM` now applies §15.2.8 all-inert `W`-normalization before and after rigidification, and the frozen parity oracle is refreshed to freeze the resulting solved artifacts.

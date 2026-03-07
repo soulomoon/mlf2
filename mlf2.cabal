@@ -177,7 +177,6 @@ library mlf2-internal
                       MLF.Elab.Legacy,
                       MLF.Elab.Phi,
                       MLF.Elab.Phi.Context,
-                      MLF.Elab.Phi.Binder,
                       MLF.Elab.Phi.Env,
                       MLF.Elab.Phi.Omega,
                       MLF.Elab.Phi.VSpine,

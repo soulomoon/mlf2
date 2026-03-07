@@ -4,28 +4,40 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 
 ## Open
 
+
+## Resolved
+
 ### BUG-2026-03-06-001
-- Status: Open
+- Status: Resolved
 - Priority: Medium
 - Discovered: 2026-03-06
-- Summary: Φ identity handling remains split across an active runtime reconciliation object model (`Translate` replay bridge + `IdentityBridge`/Ω source recovery) and a legacy internal helper surface (`MLF.Elab.Phi.Binder`).
+- Resolved: 2026-03-07
+- Summary: Φ identity handling remained split across an active runtime reconciliation object model and a legacy internal helper surface (`MLF.Elab.Phi.Binder`).
 - Minimal reproducer:
-  - `rg -n "baseKeyFor|gaSolvedToBase|askCanonical|askCopyMap|askInvCopyMap" src/MLF/Elab/Phi/Binder.hs`
   - `rg -n "MLF\.Elab\.Phi\.Binder|lookupBinderIndexM|binderIndexM" src/MLF/Elab/Phi.hs mlf2.cabal`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "row9-11 facade cleanup guard"'`
 - Expected vs actual:
   - Expected: Φ identity handling should reduce to thesis-shaped witness-domain identity only (node/source identity from witness artifacts and replay-spine position), with no separate runtime reconciliation subsystem or solved/canonical fallback helper surface.
-  - Actual: production code still splits identity handling across `Translate`, `IdentityBridge`/`Omega`, and the internal helper `MLF.Elab.Phi.Binder`; the last of these still reconciles binders through `canonical`, `gaSolvedToBase`, and copy-map inversion.
+  - Actual before fix: production code still split identity handling across `Translate`, `IdentityBridge`/`Omega`, and the internal helper `MLF.Elab.Phi.Binder`.
 - Suspected/owning area:
   - `/Volumes/src/mlf4/src/MLF/Elab/Phi/Translate.hs`
   - `/Volumes/src/mlf4/src/MLF/Elab/Phi/IdentityBridge.hs`
   - `/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs`
-  - `/Volumes/src/mlf4/src/MLF/Elab/Phi/Binder.hs`
   - `/Volumes/src/mlf4/src/MLF/Elab/Phi.hs`
   - `/Volumes/src/mlf4/mlf2.cabal`
 - Thesis impact:
-  - Fresh 2026-03-07 closeout review keeps TMT row `Identity reconciliation mechanism` at `Yes`: this helper surface remains cleanup follow-up material, but it is not on the active runtime target-selection path used by the current thesis-exact pipeline.
-
-## Resolved
+  - The codebase now matches the accepted direct-runtime Φ identity model: `Omega` stays direct/fail-fast, and `IdentityBridge` remains utility/test-only rather than a runtime repair engine.
+- Fix:
+  - Removed `src/MLF/Elab/Phi/Binder.hs` and its `mlf2.cabal` entry.
+  - Retired the helper re-exports from `src/MLF/Elab/Phi.hs` and pruned the dead inverse-copy accessor path from `src/MLF/Elab/Phi/Env.hs`.
+  - Tightened `src/MLF/Elab/Phi/Omega.hs` and `src/MLF/Elab/Phi/IdentityBridge.hs` notes to document the accepted direct-runtime vs utility/test split.
+- Regression tests:
+  - `/Volumes/src/mlf4/test/PipelineSpec.hs` (`row9-11 facade cleanup guard: Phi no longer re-exports or compiles Binder helpers`)
+  - `/Volumes/src/mlf4/test/PipelineSpec.hs` (`row9-11 direct-target guard: Omega does not define source-candidate reconciliation helpers`)
+  - `/Volumes/src/mlf4/test/ElaborationSpec.hs` (`OpWeaken on binder target missing from quantifier spine fails fast`)
+  - `/Volumes/src/mlf4/test/ElaborationSpec.hs` (`OpGraft on binder target missing from quantifier spine still fails fast even when IdentityBridge finds witness-domain matches`)
+  - `/Volumes/src/mlf4/test/Phi/IdentityBridgeSpec.hs` (`IdentityBridge`)
+  - `cabal build all && cabal test`
 
 ### BUG-2026-03-07-005
 - Status: Resolved

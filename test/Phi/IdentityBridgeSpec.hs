@@ -156,7 +156,7 @@ spec = describe "IdentityBridge" $ do
     -- ---------------------------------------------------------------
     -- Canonical alias fallback ordering
     -- ---------------------------------------------------------------
-    describe "canonical alias fallback" $ do
+    describe "strict witness-domain matching" $ do
         it "includes inverse copy map entries" $ do
             -- invCopyMap: if copyMap has 40 -> NodeId 5, then inv has 5 -> NodeId 40
             let copyMap = IntMap.fromList [(40, NodeId 5)]
@@ -314,7 +314,7 @@ spec = describe "IdentityBridge" $ do
     -- Witness-domain-first resolution (pipeline integration)
     -- ---------------------------------------------------------------
     describe "witness-domain-first resolution" $ do
-        it "sourceKeysForNode ranks trace/copy-map keys before class members" $ do
+        it "sourceKeysForNode ranks trace/copy-map keys without class-member fallback" $ do
             let result = runPipelineArtifactsDefault Set.empty
                     (ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (EVar "id")))
             case result of
@@ -334,7 +334,8 @@ spec = describe "IdentityBridge" $ do
                     -- At least one trace should have copies in let-poly
                     length tracesWithCopies `shouldSatisfy` (>= 0)
                     -- The ranking invariant is structurally enforced by
-                    -- sourceKeysForNode's construction order:
-                    -- raw, canonical, fwd/inv copy, class members.
+                    -- sourceKeysForNode's witness-domain construction order:
+                    -- raw, forward/reverse copy, then trace-ranked keys.
                     -- This test confirms the pipeline produces the artifacts
-                    -- needed for that ranking to be meaningful.
+                    -- needed for that ranking to be meaningful without any
+                    -- solved-class fallback.
