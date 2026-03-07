@@ -8,35 +8,41 @@ module MLF.XMLF.Parse (
 ) where
 
 import Control.Monad (void)
-import Data.Char (isAsciiLower, isAsciiUpper, isDigit)
-import Data.List.NonEmpty (NonEmpty (..))
 import Data.Set (Set)
-import qualified Data.Set as Set
 import Data.Void (Void)
-import MLF.Frontend.Syntax (Lit (..))
+import qualified Data.Set as Set
 import MLF.XMLF.Syntax
     ( XmlfComp (..)
     , XmlfTerm (..)
     , XmlfType (..)
     )
 import Text.Megaparsec
-    ( Parsec
-    , ParseErrorBundle
-    , between
+    ( ParseErrorBundle
     , choice
     , eof
     , errorBundlePretty
     , many
     , optional
     , parse
-    , satisfy
     , try
     , (<|>)
     )
-import qualified Text.Megaparsec.Char as C
-import qualified Text.Megaparsec.Char.Lexer as L
-
-type Parser = Parsec Void String
+import MLF.Parse.Common
+    ( Parser
+    , bigLambdaTok
+    , bottomTok
+    , brackets
+    , forallTok
+    , geTok
+    , lambdaTok
+    , lowerIdent
+    , parens
+    , pLit
+    , sc
+    , symbol
+    , upperIdent
+    )
+import MLF.Parse.Type (TypeParserConfig(..), parseArrowTypeWith, parseTypeWith)
 
 newtype XmlfParseError = XmlfParseError (ParseErrorBundle String Void)
     deriving (Eq, Show)
@@ -62,25 +68,6 @@ parseXmlfTerm input =
 renderXmlfParseError :: XmlfParseError -> String
 renderXmlfParseError (XmlfParseError err) = errorBundlePretty err
 
-sc :: Parser ()
-sc =
-    L.space
-        C.space1
-        (L.skipLineComment "--")
-        (L.skipBlockCommentNested "{-" "-}")
-
-lexeme :: Parser a -> Parser a
-lexeme = L.lexeme sc
-
-symbol :: String -> Parser String
-symbol = L.symbol sc
-
-parens :: Parser a -> Parser a
-parens = between (symbol "(") (symbol ")")
-
-brackets :: Parser a -> Parser a
-brackets = between (symbol "[") (symbol "]")
-
 reservedWords :: Set String
 reservedWords =
     Set.fromList
@@ -92,125 +79,53 @@ reservedWords =
         , "epsilon"
         ]
 
-identifier :: Parser String
-identifier = lexeme $ try $ do
-    x <- satisfy isIdentStart
-    xs <- many (satisfy isIdentContinue)
-    let name = x : xs
-    if Set.member name reservedWords
-        then fail ("reserved word " ++ show name)
-        else pure name
-
-lowerIdent :: Parser String
-lowerIdent = try $ do
-    name <- identifier
-    case name of
-        (c:_) | isAsciiLower c || c == '_' -> pure name
-        _ -> fail ("expected lowercase identifier, got " ++ show name)
-
-upperIdent :: Parser String
-upperIdent = try $ do
-    name <- identifier
-    case name of
-        (c:_) | isAsciiUpper c -> pure name
-        _ -> fail ("expected uppercase identifier, got " ++ show name)
-
-isIdentStart :: Char -> Bool
-isIdentStart c = c == '_' || isAsciiLower c || isAsciiUpper c
-
-isIdentContinue :: Char -> Bool
-isIdentContinue c =
-    isAsciiLower c
-        || isAsciiUpper c
-        || isDigit c
-        || c == '_'
-        || c == '\''
-
-forallTok :: Parser ()
-forallTok = void (symbol "∀" <|> symbol "forall")
-
-lambdaTok :: Parser ()
-lambdaTok = void (symbol "λ" <|> symbol "\\")
-
-bigLambdaTok :: Parser ()
-bigLambdaTok = void (symbol "Λ" <|> symbol "Lambda")
-
-geTok :: Parser ()
-geTok = void (symbol "⩾" <|> symbol ">=")
-
-bottomTok :: Parser ()
-bottomTok = void (symbol "⊥" <|> symbol "_|_" <|> symbol "bottom")
-
 botCompTok :: Parser ()
 botCompTok = void (symbol "⊲")
 
 hypCompTok :: Parser ()
 hypCompTok = void (symbol "⊳")
 
-pType :: Parser XmlfType
-pType = try pForallType <|> pArrowType
-
-pForallType :: Parser XmlfType
-pForallType = try $ do
-    forallTok
-    firstBinder <- pForallBinder
-    restBinders <- optional . try $ do
-        more <- many pForallBinder
-        void (symbol ".")
-        pure more
-    case restBinders of
-        Nothing -> void (optional (symbol "."))
-        Just _ -> pure ()
-    body <- pType
-    let binders = case restBinders of
-            Nothing -> [firstBinder]
-            Just more -> firstBinder : more
-    pure (foldr (\(v, b) acc -> XTForall v b acc) body binders)
-
-pForallBinder :: Parser (String, XmlfType)
-pForallBinder =
-    try
-        (parens $ do
-            v <- lowerIdent
-            geTok
-            bound <- pType
-            pure (v, bound))
-        <|> do
-            v <- lowerIdent
+xmlfTypeConfig :: TypeParserConfig XmlfType XmlfType
+xmlfTypeConfig =
+    TypeParserConfig
+        { tpcForallTok = forallTok
+        , tpcGeTok = geTok
+        , tpcSymbol = symbol
+        , tpcParens = parens
+        , tpcLowerIdent = lowerIdent reservedWords
+        , tpcUpperIdent = upperIdent reservedWords
+        , tpcBottomTok = bottomTok
+        , tpcMkVar = XTVar
+        , tpcMkArrow = XTArrow
+        , tpcMkBase = XTBase
+        , tpcMkCon = XTCon
+        , tpcMkForall = XTForall
+        , tpcMkBottom = XTBottom
+        , tpcBoundedBinder = \pTy ->
+            parens $ do
+                v <- lowerIdent reservedWords
+                geTok
+                bound <- pTy
+                pure (v, bound)
+        , tpcUnboundedBinder = do
+            v <- lowerIdent reservedWords
             pure (v, XTBottom)
+        , tpcForallBinders = \pTy -> do
+            firstBinder <- try ((tpcBoundedBinder xmlfTypeConfig) pTy) <|> tpcUnboundedBinder xmlfTypeConfig
+            restBinders <- optional . try $ do
+                more <- many (try ((tpcBoundedBinder xmlfTypeConfig) pTy) <|> tpcUnboundedBinder xmlfTypeConfig)
+                void (symbol ".")
+                pure more
+            case restBinders of
+                Nothing -> void (optional (symbol "."))
+                Just _ -> pure ()
+            pure $ case restBinders of
+                Nothing -> [firstBinder]
+                Just more -> firstBinder : more
+        }
 
-pArrowType :: Parser XmlfType
-pArrowType = do
-    lhs <- pTypeApp
-    rhs <- optional (symbol "->" *> pType)
-    pure $ case rhs of
-        Nothing -> lhs
-        Just r -> XTArrow lhs r
-
-pTypeApp :: Parser XmlfType
-pTypeApp = do
-    headTy <- pTypeAtom
-    case headTy of
-        Left conName -> do
-            args <- many pTypeArg
-            pure $ case args of
-                [] -> XTBase conName
-                (arg:rest) -> XTCon conName (arg :| rest)
-        Right ty -> pure ty
-
-pTypeArg :: Parser XmlfType
-pTypeArg = pTypeAtom >>= \case
-    Left conName -> pure (XTBase conName)
-    Right ty -> pure ty
-
-pTypeAtom :: Parser (Either String XmlfType)
-pTypeAtom =
-    choice
-        [ Left <$> upperIdent
-        , Right . XTVar <$> lowerIdent
-        , Right XTBottom <$ bottomTok
-        , Right <$> parens pType
-        ]
+pType :: Parser XmlfType
+pType = parseTypeWith xmlfTypeConfig
 
 pComp :: Parser XmlfComp
 pComp = do
@@ -250,14 +165,14 @@ pCompBot = do
 
 pCompHyp :: Parser XmlfComp
 pCompHyp = do
-    v <- lowerIdent
+    v <- lowerIdent reservedWords
     hypCompTok
     pure (XCHyp v)
 
 pCompHypLegacy :: Parser XmlfComp
 pCompHypLegacy = do
     void (symbol "!")
-    XCHyp <$> lowerIdent
+    XCHyp <$> lowerIdent reservedWords
 
 pCompInner :: Parser XmlfComp
 pCompInner = do
@@ -272,7 +187,7 @@ pCompOuter = do
     forallTok
     (v, c) <- do
         v <- parens $ do
-            name <- lowerIdent
+            name <- lowerIdent reservedWords
             geTok
             pure name
         comp <- pCompAtom
@@ -281,11 +196,15 @@ pCompOuter = do
 
 pCompLegacyApp :: Parser XmlfComp
 pCompLegacyApp = do
-    ty <- between (symbol "⟨") (symbol "⟩") pType
+    ty <- do
+        void (symbol "⟨")
+        ty0 <- pType
+        void (symbol "⟩")
+        pure ty0
     pure (compFromType ty)
 
 pCompTypeSugar :: Parser XmlfComp
-pCompTypeSugar = compFromType <$> pArrowType
+pCompTypeSugar = compFromType <$> parseArrowTypeWith xmlfTypeConfig pType
 
 compFromType :: XmlfType -> XmlfComp
 compFromType ty = XCSeq (XCInner (XCBot ty)) XCElim
@@ -296,7 +215,7 @@ pTerm = choice [try pLet, try pLam, try pTyAbs, pApp]
 pLet :: Parser XmlfTerm
 pLet = do
     void (symbol "let")
-    v <- lowerIdent
+    v <- lowerIdent reservedWords
     void (symbol "=")
     rhs <- pTerm
     void (symbol "in")
@@ -310,7 +229,7 @@ pLamParen :: Parser XmlfTerm
 pLamParen = do
     lambdaTok
     (v, ty) <- parens $ do
-        name <- lowerIdent
+        name <- lowerIdent reservedWords
         void (symbol ":")
         annTy <- pType
         pure (name, annTy)
@@ -320,7 +239,7 @@ pLamParen = do
 pLamLegacy :: Parser XmlfTerm
 pLamLegacy = do
     lambdaTok
-    v <- lowerIdent
+    v <- lowerIdent reservedWords
     void (symbol ":")
     ty <- pType
     void (symbol ".")
@@ -334,7 +253,7 @@ pTyAbsParen :: Parser XmlfTerm
 pTyAbsParen = do
     bigLambdaTok
     (v, bound) <- parens $ do
-        name <- lowerIdent
+        name <- lowerIdent reservedWords
         geTok
         b <- pType
         pure (name, b)
@@ -344,7 +263,7 @@ pTyAbsParen = do
 pTyAbsLegacy :: Parser XmlfTerm
 pTyAbsLegacy = do
     bigLambdaTok
-    v <- lowerIdent
+    v <- lowerIdent reservedWords
     void (symbol ".")
     body <- pTerm
     pure (XTyAbs v XTBottom body)
@@ -366,18 +285,6 @@ pAtom =
     choice
         [ parens pTerm
         , XLit <$> pLit
-        , XVar <$> lowerIdent
-        , XVar <$> upperIdent
+        , XVar <$> lowerIdent reservedWords
+        , XVar <$> upperIdent reservedWords
         ]
-
-pLit :: Parser Lit
-pLit =
-    choice
-        [ LBool True <$ symbol "true"
-        , LBool False <$ symbol "false"
-        , LString <$> pString
-        , LInt <$> lexeme (L.signed sc L.decimal)
-        ]
-
-pString :: Parser String
-pString = lexeme (C.char '"' *> many L.charLiteral <* C.char '"')

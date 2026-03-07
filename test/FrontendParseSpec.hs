@@ -1,5 +1,7 @@
 module FrontendParseSpec (spec) where
 
+import Control.Monad (forM_)
+import Data.List (isInfixOf)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Set as Set
 import Test.Hspec
@@ -26,6 +28,37 @@ import MLF.API
 
 spec :: Spec
 spec = describe "Frontend eMLF parser" $ do
+    describe "parser scaffolding dedup guards" $ do
+        it "frontend and XMLF parsers share lexer/type scaffolding modules" $ do
+            frontendSrc <- readFile "src/MLF/Frontend/Parse.hs"
+            xmlfSrc <- readFile "src/MLF/XMLF/Parse.hs"
+            frontendSrc `shouldSatisfy` isInfixOf "MLF.Parse.Common"
+            frontendSrc `shouldSatisfy` isInfixOf "MLF.Parse.Type"
+            xmlfSrc `shouldSatisfy` isInfixOf "MLF.Parse.Common"
+            xmlfSrc `shouldSatisfy` isInfixOf "MLF.Parse.Type"
+            forM_
+                [ "sc :: Parser ()"
+                , "lexeme :: Parser a -> Parser a"
+                , "symbol :: String -> Parser String"
+                , "parens :: Parser a -> Parser a"
+                , "identifier :: Parser String"
+                , "lowerIdent :: Parser String"
+                , "upperIdent :: Parser String"
+                , "forallTok :: Parser ()"
+                , "lambdaTok :: Parser ()"
+                , "geTok :: Parser ()"
+                , "bottomTok :: Parser ()"
+                , "pForallType ::"
+                , "pForallBinder ::"
+                , "pArrowType ::"
+                , "pTypeApp ::"
+                , "pTypeArg ::"
+                , "pTypeAtom ::"
+                , "pLit :: Parser Lit"
+                , "pString :: Parser String"
+                ] $ \marker -> do
+                    frontendSrc `shouldSatisfy` (not . isInfixOf marker)
+                    xmlfSrc `shouldSatisfy` (not . isInfixOf marker)
     describe "raw expressions" $ do
         it "parses variables" $
             parseRawEmlfExpr "x" `shouldBe` Right (EVar "x")

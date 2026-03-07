@@ -168,6 +168,8 @@ library mlf2-internal
                       MLF.Util.Names,
                       MLF.Util.OrderKey,
                       MLF.Util.RecursionSchemes,
+                      MLF.Parse.Common,
+                      MLF.Parse.Type,
                       MLF.Util.Trace,
                       MLF.Reify.TypeOps,
                       MLF.Elab.Inst,

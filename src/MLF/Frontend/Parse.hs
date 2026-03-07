@@ -13,11 +13,9 @@ module MLF.Frontend.Parse (
 ) where
 
 import Control.Monad (void)
-import Data.Char (isAsciiLower, isAsciiUpper, isDigit)
-import Data.List.NonEmpty (NonEmpty (..))
 import Data.Set (Set)
-import qualified Data.Set as Set
 import Data.Void (Void)
+import qualified Data.Set as Set
 import MLF.Frontend.Normalize
     ( NormalizationError
     , normalizeExpr
@@ -25,7 +23,6 @@ import MLF.Frontend.Normalize
     )
 import MLF.Frontend.Syntax
     ( Expr (..)
-    , Lit (..)
     , NormSrcType
     , NormSurfaceExpr
     , SrcTy (..)
@@ -34,24 +31,31 @@ import MLF.Frontend.Syntax
     , mkSrcBound
     )
 import Text.Megaparsec
-    ( Parsec
-    , ParseErrorBundle
-    , between
+    ( ParseErrorBundle
     , choice
     , eof
     , errorBundlePretty
     , many
     , optional
     , parse
-    , satisfy
     , some
     , try
     , (<|>)
     )
-import qualified Text.Megaparsec.Char as C
-import qualified Text.Megaparsec.Char.Lexer as L
-
-type Parser = Parsec Void String
+import MLF.Parse.Common
+    ( Parser
+    , bottomTok
+    , forallTok
+    , geTok
+    , lambdaTok
+    , lowerIdent
+    , parens
+    , pLit
+    , sc
+    , symbol
+    , upperIdent
+    )
+import MLF.Parse.Type (TypeParserConfig(..), parseTypeWith)
 
 newtype EmlfParseError = EmlfParseError (ParseErrorBundle String Void)
     deriving (Eq, Show)
@@ -118,22 +122,6 @@ mapLeft :: (a -> c) -> Either a b -> Either c b
 mapLeft f (Left a) = Left (f a)
 mapLeft _ (Right b) = Right b
 
-sc :: Parser ()
-sc =
-    L.space
-        C.space1
-        (L.skipLineComment "--")
-        (L.skipBlockCommentNested "{-" "-}")
-
-lexeme :: Parser a -> Parser a
-lexeme = L.lexeme sc
-
-symbol :: String -> Parser String
-symbol = L.symbol sc
-
-parens :: Parser a -> Parser a
-parens = between (symbol "(") (symbol ")")
-
 reservedWords :: Set String
 reservedWords =
     Set.fromList
@@ -144,107 +132,39 @@ reservedWords =
         , "forall"
         ]
 
-identifier :: Parser String
-identifier = lexeme $ try $ do
-    x <- satisfy isIdentStart
-    xs <- many (satisfy isIdentContinue)
-    let name = x : xs
-    if Set.member name reservedWords
-        then fail ("reserved word " ++ show name)
-        else pure name
-
-lowerIdent :: Parser String
-lowerIdent = try $ do
-    name <- identifier
-    case name of
-        (c:_) | isAsciiLower c || c == '_' -> pure name
-        _ -> fail ("expected lowercase identifier, got " ++ show name)
-
-upperIdent :: Parser String
-upperIdent = try $ do
-    name <- identifier
-    case name of
-        (c:_) | isAsciiUpper c -> pure name
-        _ -> fail ("expected uppercase identifier, got " ++ show name)
-
-isIdentStart :: Char -> Bool
-isIdentStart c = c == '_' || isAsciiLower c || isAsciiUpper c
-
-isIdentContinue :: Char -> Bool
-isIdentContinue c =
-    isAsciiLower c
-        || isAsciiUpper c
-        || isDigit c
-        || c == '_'
-        || c == '\''
-
-forallTok :: Parser ()
-forallTok = void (symbol "∀" <|> symbol "forall")
-
-lambdaTok :: Parser ()
-lambdaTok = void (symbol "λ" <|> symbol "\\")
-
-geTok :: Parser ()
-geTok = void (symbol "⩾" <|> symbol ">=")
-
-bottomTok :: Parser ()
-bottomTok = void (symbol "⊥" <|> symbol "_|_" <|> symbol "bottom")
+frontendTypeConfig :: TypeParserConfig SrcType (Maybe SrcType)
+frontendTypeConfig =
+    TypeParserConfig
+        { tpcForallTok = forallTok
+        , tpcGeTok = geTok
+        , tpcSymbol = symbol
+        , tpcParens = parens
+        , tpcLowerIdent = lowerIdent reservedWords
+        , tpcUpperIdent = upperIdent reservedWords
+        , tpcBottomTok = bottomTok
+        , tpcMkVar = STVar
+        , tpcMkArrow = STArrow
+        , tpcMkBase = STBase
+        , tpcMkCon = STCon
+        , tpcMkForall = \v mb body -> STForall v (fmap mkSrcBound mb) body
+        , tpcMkBottom = STBottom
+        , tpcBoundedBinder = \pTy ->
+            parens $ do
+                v <- lowerIdent reservedWords
+                geTok
+                bound <- pTy
+                pure (v, Just bound)
+        , tpcUnboundedBinder = do
+            v <- lowerIdent reservedWords
+            pure (v, Nothing)
+        , tpcForallBinders = \pTy -> do
+            binders <- some (try ((tpcBoundedBinder frontendTypeConfig) pTy) <|> tpcUnboundedBinder frontendTypeConfig)
+            void (optional (symbol "."))
+            pure binders
+        }
 
 pType :: Parser SrcType
-pType = try pForallType <|> pArrowType
-
-pForallType :: Parser SrcType
-pForallType = try $ do
-    forallTok
-    binders <- some pForallBinder
-    void (optional (symbol "."))
-    body <- pType
-    pure (foldr (\(v, mb) acc -> STForall v (fmap mkSrcBound mb) acc) body binders)
-
-pForallBinder :: Parser (String, Maybe SrcType)
-pForallBinder =
-    try
-        (parens $ do
-            v <- lowerIdent
-            geTok
-            bound <- pType
-            pure (v, Just bound))
-        <|> do
-            v <- lowerIdent
-            pure (v, Nothing)
-
-pArrowType :: Parser SrcType
-pArrowType = do
-    lhs <- pTypeApp
-    rhs <- optional (symbol "->" *> pType)
-    pure $ case rhs of
-        Nothing -> lhs
-        Just r -> STArrow lhs r
-
-pTypeApp :: Parser SrcType
-pTypeApp = do
-    headTy <- pTypeAtom
-    case headTy of
-        Left conName -> do
-            args <- many pTypeArg
-            pure $ case args of
-                [] -> STBase conName
-                (arg:rest) -> STCon conName (arg :| rest)
-        Right ty -> pure ty
-
-pTypeArg :: Parser SrcType
-pTypeArg = pTypeAtom >>= \case
-    Left conName -> pure (STBase conName)
-    Right ty -> pure ty
-
-pTypeAtom :: Parser (Either String SrcType)
-pTypeAtom =
-    choice
-        [ Left <$> upperIdent
-        , Right . STVar <$> lowerIdent
-        , Right STBottom <$ bottomTok
-        , Right <$> parens pType
-        ]
+pType = parseTypeWith frontendTypeConfig
 
 pExpr :: Parser SurfaceExpr
 pExpr = choice [try pLet, try pLambda, pAnnOrApp]
@@ -252,7 +172,7 @@ pExpr = choice [try pLet, try pLambda, pAnnOrApp]
 pLet :: Parser SurfaceExpr
 pLet = do
     void (symbol "let")
-    v <- lowerIdent
+    v <- lowerIdent reservedWords
     mAnn <- optional (symbol ":" *> pType)
     void (symbol "=")
     rhs <- pExpr
@@ -269,7 +189,7 @@ pLambdaParen :: Parser SurfaceExpr
 pLambdaParen = do
     lambdaTok
     (v, mTy) <- parens $ do
-        name <- lowerIdent
+        name <- lowerIdent reservedWords
         mAnn <- optional (symbol ":" *> pType)
         pure (name, mAnn)
     body <- pExpr
@@ -280,7 +200,7 @@ pLambdaParen = do
 pLambdaLegacy :: Parser SurfaceExpr
 pLambdaLegacy = do
     lambdaTok
-    v <- lowerIdent
+    v <- lowerIdent reservedWords
     mTy <- optional (symbol ":" *> pType)
     void (symbol ".")
     body <- pExpr
@@ -308,8 +228,8 @@ pAtom =
     choice
         [ pParenExpr
         , ELit <$> pLit
-        , EVar <$> lowerIdent
-        , EVar <$> upperIdent
+        , EVar <$> lowerIdent reservedWords
+        , EVar <$> upperIdent reservedWords
         ]
 
 pParenExpr :: Parser SurfaceExpr
@@ -321,17 +241,3 @@ pParenExpr = do
     pure $ case mTy of
         Nothing -> e
         Just ty -> EAnn e ty
-
-pLit :: Parser Lit
-pLit =
-    choice
-        [ LBool True <$ symbol "true"
-        , LBool False <$ symbol "false"
-        , LString <$> pString
-        , LInt <$> lexeme (L.signed sc L.decimal)
-        ]
-
-pString :: Parser String
-pString = lexeme (C.char '"' *> manyTillChar <* C.char '"')
-  where
-    manyTillChar = many L.charLiteral
