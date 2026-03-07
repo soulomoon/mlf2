@@ -9,6 +9,7 @@ import qualified Data.Set as Set
 import MLF.Constraint.Presolution (PresolutionResult(..))
 import MLF.Constraint.Types.Graph
     ( TyNode(..) )
+import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Elab.Pipeline (runPipelineElab, runPipelineElabChecked)
 import MLF.Frontend.Syntax (Expr(..), SrcTy(..))
@@ -31,7 +32,7 @@ spec = describe "Thesis alignment invariants" $ do
                     Left err -> expectationFailure err
                     Right pa -> do
                         let solved = paSolved pa
-                            nodes = Solved.allNodes solved
+                            nodes = NodeAccess.allNodes (Solved.originalConstraint solved)
                             tyExpNodes = [ n | n@TyExp{} <- nodes ]
                         tyExpNodes `shouldBe` []
 
