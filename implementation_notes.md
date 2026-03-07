@@ -2,6 +2,15 @@
 
 ## Thesis Alignment (Phase A–E)
 
+### 2026-03-08 solved ecosystem classification table closeout
+- Expanded `docs/architecture.md` from a coarse `Solved` cleanup note into a full grouped 3-column classification covering the `Solved` surface plus adjacent solved-related seams.
+- Recorded the authoritative evidence matrix in `tasks/archive/2026-03-08-solved-classification-table/findings.md`, including exact classifications for every exported `Solved` symbol and the main view/finalize/reify/planner compatibility seams.
+- Locked the thesis-exact cleanup rule to: keep replay-faithful construction, original↔canonical correspondence, and strict solved-graph validation explicit; relocate compat glue; retire dead/test-only surface from the production API.
+- Verification:
+  - static audit counts (`32` export entries, `13` direct `src/` importers, `12` direct `test/` importers, `6` named adjacent seams)
+  - `MLF.Constraint.Solved` — PASS (`43 examples, 0 failures`)
+  - `chi-first guard: runtime and reify modules no longer adapt Solved through fromSolved` — PASS (`1 example, 0 failures`)
+
 ### 2026-03-08 deduplicate low-risk helper pairs
 - Moved `freshNameLike` into `MLF.Util.Names` and `mapBoundType` into `MLF.Elab.Types`, removing duplicate local helper definitions from their former call sites.
 - This was a pure deduplication pass only; no behavior or API shape changed beyond the internal helper homes.

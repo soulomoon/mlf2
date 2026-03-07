@@ -1,0 +1,630 @@
+--- solved definitions ---
+   120	        , ebEquivClasses :: IntMap [NodeId]
+   121	        , ebOriginalConstraint :: Constraint
+   122	        }
+   123	    deriving (Eq, Show)
+   124	
+   125	newtype Solved = Solved { unSolved :: SolvedBackend }
+   126	    deriving (Eq, Show)
+   127	
+   128	-- | Construct an Equiv backend directly from a constraint and
+   129	-- union-find map. The input constraint is used as both original and
+   130	-- canonical; callers should only use this when no solve replay is needed.
+   131	fromConstraintAndUf :: Constraint -> IntMap NodeId -> Solved
+   132	fromConstraintAndUf c uf =
+   133	    let canonMap = buildCanonicalMap uf c
+   134	        equivClasses = buildEquivClasses canonMap c
+   135	    in Solved EquivBackend
+   136	        { ebCanonicalMap = canonMap
+   137	        , ebCanonicalNodes = cNodes c
+   138	        , ebCanonicalInstEdges = cInstEdges c
+   139	        , ebCanonicalUnifyEdges = cUnifyEdges c
+   140	        , ebCanonicalBindParents = cBindParents c
+   141	        , ebCanonicalPolySyms = cPolySyms c
+   142	        , ebCanonicalEliminatedVars = cEliminatedVars c
+   143	        , ebCanonicalWeakenedVars = cWeakenedVars c
+   144	        , ebCanonicalAnnEdges = cAnnEdges c
+   145	        , ebCanonicalLetEdges = cLetEdges c
+   146	        , ebCanonicalGenNodes = cGenNodes c
+   147	        , ebEquivClasses = equivClasses
+   148	        , ebOriginalConstraint = c
+   149	        }
+   150	
+   151	-- | Backward-compatible alias used by tests and legacy call sites.
+   152	mkTestSolved :: Constraint -> IntMap NodeId -> Solved
+   153	mkTestSolved = fromConstraintAndUf
+   154	
+   155	-- | Build a staged equivalence backend from snapshot-enabled solve output.
+   156	fromSolveOutput :: SolveOutput -> Either SolveError Solved
+   157	fromSolveOutput out =
+   158	    let snapshot = soSnapshot out
+   159	    in fromPreRewriteStateStrict
+   160	        (snapUnionFind snapshot)
+   161	        (snapPreRewriteConstraint snapshot)
+   162	
+   163	-- | Build a staged equivalence-backend snapshot from solver pre-rewrite state.
+   164	--
+   165	-- The input pair should come from solve after unification has converged:
+   166	-- a pre-rewrite constraint and the final union-find map.
+   167	fromPreRewriteState :: IntMap NodeId -> Constraint -> Either SolveError Solved
+   168	fromPreRewriteState = fromPreRewriteStateStrict
+   169	
+   170	-- | Strict snapshot replay used by production solve output conversion.
+   171	fromPreRewriteStateStrict :: IntMap NodeId -> Constraint -> Either SolveError Solved
+   172	fromPreRewriteStateStrict uf preRewrite = do
+   173	    let snapshot =
+   174	            SolveSnapshot
+   175	                { snapUnionFind = uf
+   176	                , snapPreRewriteConstraint = preRewrite
+   177	                }
+   178	    replayed <- solveResultFromSnapshot snapshot
+   179	    let
+   180	        canonMap = buildCanonicalMap (srUnionFind replayed) preRewrite
+   181	        canonicalC = srConstraint replayed
+   182	        equivClasses = buildEquivClasses canonMap preRewrite
+   183	    pure $ Solved EquivBackend
+   184	        { ebCanonicalMap = canonMap
+   185	        , ebCanonicalNodes = cNodes canonicalC
+   186	        , ebCanonicalInstEdges = cInstEdges canonicalC
+   187	        , ebCanonicalUnifyEdges = cUnifyEdges canonicalC
+   188	        , ebCanonicalBindParents = cBindParents canonicalC
+   189	        , ebCanonicalPolySyms = cPolySyms canonicalC
+   190	        , ebCanonicalEliminatedVars = cEliminatedVars canonicalC
+   191	        , ebCanonicalWeakenedVars = cWeakenedVars canonicalC
+   192	        , ebCanonicalAnnEdges = cAnnEdges canonicalC
+   193	        , ebCanonicalLetEdges = cLetEdges canonicalC
+   194	        , ebCanonicalGenNodes = cGenNodes canonicalC
+   195	        , ebEquivClasses = equivClasses
+   196	        , ebOriginalConstraint = preRewrite
+   197	        }
+   198	
+   199	buildEquivClasses :: IntMap NodeId -> Constraint -> IntMap [NodeId]
+   200	buildEquivClasses canonMap c =
+   201	    foldr addNode IntMap.empty (map tnId (NA.allNodes c))
+   202	  where
+   203	    addNode nid classes =
+   204	        let rep = equivCanonical canonMap nid
+   205	        in IntMap.insertWith (++) (nodeIdKey rep) [nid] classes
+   206	
+   207	-- -----------------------------------------------------------------
+   208	-- Core queries
+   209	-- -----------------------------------------------------------------
+   210	
+   211	canonicalConstraintFromBackend :: SolvedBackend -> Constraint
+   212	canonicalConstraintFromBackend EquivBackend
+   213	    { ebCanonicalNodes = nodes
+   214	    , ebCanonicalInstEdges = instEdges0
+   215	    , ebCanonicalUnifyEdges = unifyEdges0
+   216	    , ebCanonicalBindParents = bindParents0
+   217	    , ebCanonicalPolySyms = polySyms
+   218	    , ebCanonicalEliminatedVars = eliminatedVars
+   219	    , ebCanonicalWeakenedVars = weakenedVars0
+   220	    , ebCanonicalAnnEdges = annEdges
+   221	    , ebCanonicalLetEdges = letEdges
+   222	    , ebCanonicalGenNodes = genNodes0
+   223	    } =
+   224	    Constraint
+   225	        { cNodes = nodes
+   226	        , cInstEdges = instEdges0
+   227	        , cUnifyEdges = unifyEdges0
+   228	        , cBindParents = bindParents0
+   229	        , cPolySyms = polySyms
+   230	        , cEliminatedVars = eliminatedVars
+   231	        , cWeakenedVars = weakenedVars0
+   232	        , cAnnEdges = annEdges
+   233	        , cLetEdges = letEdges
+   234	        , cGenNodes = genNodes0
+   235	        }
+   236	
+   237	setCanonicalConstraint :: Constraint -> SolvedBackend -> SolvedBackend
+   238	setCanonicalConstraint c eb =
+   239	    eb
+   240	        { ebCanonicalNodes = cNodes c
+   241	        , ebCanonicalInstEdges = cInstEdges c
+   242	        , ebCanonicalUnifyEdges = cUnifyEdges c
+   243	        , ebCanonicalBindParents = cBindParents c
+   244	        , ebCanonicalPolySyms = cPolySyms c
+   245	        , ebCanonicalEliminatedVars = cEliminatedVars c
+   246	        , ebCanonicalWeakenedVars = cWeakenedVars c
+   247	        , ebCanonicalAnnEdges = cAnnEdges c
+   248	        , ebCanonicalLetEdges = cLetEdges c
+   249	        , ebCanonicalGenNodes = cGenNodes c
+   250	        }
+   251	
+   252	-- | Chase the canonical map to the canonical representative.
+   253	canonical :: Solved -> NodeId -> NodeId
+   254	canonical (Solved EquivBackend { ebCanonicalMap = canonMap }) nid =
+   255	    equivCanonical canonMap nid
+   256	
+   257	-- | The raw canonical map (equivalent to the old union-find accessor).
+   258	canonicalMap :: Solved -> IntMap NodeId
+   259	canonicalMap (Solved EquivBackend { ebCanonicalMap = cm }) = cm
+   260	
+   261	-- | The original (pre-solving) constraint.  Primary accessor for all
+   262	-- post-solve operations (thesis-exact).
+   263	originalConstraint :: Solved -> Constraint
+   264	originalConstraint (Solved EquivBackend { ebOriginalConstraint = c }) = c
+   265	
+   266	-- | The canonical (post-solving) constraint.
+   267	canonicalConstraint :: Solved -> Constraint
+   268	canonicalConstraint (Solved eb) = canonicalConstraintFromBackend eb
+   269	
+   270	-- | Look up a type node, canonicalizing the id first.
+   271	lookupNode :: Solved -> NodeId -> Maybe TyNode
+   272	lookupNode s@(Solved EquivBackend { ebOriginalConstraint = c }) nid =
+   273	    NA.lookupNode c (canonical s nid)
+   274	
+   275	-- | All type nodes in the solved constraint.
+   276	allNodes :: Solved -> [TyNode]
+   277	allNodes (Solved EquivBackend { ebOriginalConstraint = c }) = NA.allNodes c
+   278	
+   279	-- | Look up the binding parent of a node reference.
+   280	lookupBindParent :: Solved -> NodeRef -> Maybe (NodeRef, BindFlag)
+   281	lookupBindParent (Solved EquivBackend { ebOriginalConstraint = c }) ref =
+   282	    NA.lookupBindParent c ref
+   283	
+   284	-- | The full bind-parents map.
+   285	bindParents :: Solved -> BindParents
+   286	bindParents (Solved EquivBackend { ebOriginalConstraint = c }) = cBindParents c
+   287	
+   288	-- | All instantiation edges.
+   289	instEdges :: Solved -> [InstEdge]
+   290	instEdges (Solved EquivBackend { ebOriginalConstraint = c }) = cInstEdges c
+   291	
+   292	-- | The gen-node map.
+   293	genNodes :: Solved -> GenNodeMap GenNode
+   294	genNodes (Solved EquivBackend { ebOriginalConstraint = c }) = cGenNodes c
+   295	
+   296	-- | Look up the instance bound of a variable, canonicalizing the id first.
+   297	lookupVarBound :: Solved -> NodeId -> Maybe NodeId
+   298	lookupVarBound s@(Solved EquivBackend { ebOriginalConstraint = c }) nid =
+   299	    NA.lookupVarBound c (canonical s nid)
+   300	
+   301	-- -----------------------------------------------------------------
+   302	-- Constraint rebuilding
+   303	-- -----------------------------------------------------------------
+   304	
+   305	-- | Rebuild a Solved with a different constraint, preserving the
+   306	-- canonical map. Used by callers that modify the constraint
+   307	-- (e.g., alias insertion, canonicalization).
+   308	rebuildWithConstraint :: Solved -> Constraint -> Solved
+   309	rebuildWithConstraint (Solved eb) c =
+   310	    Solved (setCanonicalConstraint c eb)
+   311	
+   312	-- -----------------------------------------------------------------
+   313	-- Mutation helpers
+   314	-- -----------------------------------------------------------------
+   315	
+   316	-- | Prune dead bind-parent entries from the canonical constraint.
+   317	-- Used by Pipeline.hs.
+   318	pruneBindParentsSolved :: Solved -> Solved
+   319	pruneBindParentsSolved (Solved eb@EquivBackend { ebCanonicalNodes = nodes, ebCanonicalGenNodes = genNodes0, ebCanonicalBindParents = bindParents0 }) =
+   320	    let liveNodes = getNodeMap nodes
+   321	        liveGens = getGenNodeMap genNodes0
+   322	        liveRef ref =
+   323	            case ref of
+   324	                TypeRef nid -> IntMap.member (getNodeId nid) liveNodes
+   325	                GenRef gid -> IntMap.member (genNodeKey gid) liveGens
+   326	        liveChild childKey = liveRef (nodeRefFromKey childKey)
+   327	        bindParents' =
+   328	            IntMap.filterWithKey
+   329	                (\childKey (parentRef, _flag) ->
+   330	                    liveChild childKey && liveRef parentRef
+   331	                )
+   332	                bindParents0
+   333	    in Solved eb { ebCanonicalBindParents = bindParents' }
+   334	
+   335	-- | Replace the canonical node map.
+   336	-- Used by Generalize phases that build merged node maps.
+   337	rebuildWithNodes :: Solved -> NodeMap TyNode -> Solved
+   338	rebuildWithNodes (Solved eb) nodes =
+   339	    Solved eb { ebCanonicalNodes = nodes }
+   340	
+   341	-- | Replace the canonical bind parents.
+   342	rebuildWithBindParents :: Solved -> BindParents -> Solved
+   343	rebuildWithBindParents (Solved eb) bp =
+   344	    Solved eb { ebCanonicalBindParents = bp }
+   345	
+   346	-- | Replace the canonical gen nodes.
+   347	rebuildWithGenNodes :: Solved -> GenNodeMap GenNode -> Solved
+   348	rebuildWithGenNodes (Solved eb) gn =
+   349	    Solved eb { ebCanonicalGenNodes = gn }
+   350	
+   351	-- -----------------------------------------------------------------
+   352	-- Extended queries
+   353	-- -----------------------------------------------------------------
+   354	
+   355	-- | Members of the equivalence class containing @nid@.
+   356	classMembers :: Solved -> NodeId -> [NodeId]
+   357	classMembers s@(Solved EquivBackend { ebEquivClasses = classes }) nid =
+   358	    let nidC = canonical s nid
+   359	    in IntMap.findWithDefault [] (nodeIdKey nidC) classes
+   360	
+   361	-- | Look up the /original/ (pre-merge) node.
+   362	originalNode :: Solved -> NodeId -> Maybe TyNode
+   363	originalNode (Solved EquivBackend { ebOriginalConstraint = c }) nid =
+   364	    NA.lookupNode c nid
+   365	
+   366	-- | Look up the /original/ (pre-merge) binding parent.
+   367	originalBindParent :: Solved -> NodeRef -> Maybe (NodeRef, BindFlag)
+   368	originalBindParent (Solved EquivBackend { ebOriginalConstraint = c }) ref =
+   369	    NA.lookupBindParent c ref
+   370	
+   371	-- | Was @nid@ a binder (forall body owner) before merges?
+   372	wasOriginalBinder :: Solved -> NodeId -> Bool
+   373	wasOriginalBinder s@(Solved EquivBackend { ebOriginalConstraint = c }) nid =
+   374	    any isForall (classMembers s nid)
+   375	  where
+   376	    isForall member =
+   377	        case NA.lookupNode c member of
+   378	            Just TyForall {} -> True
+   379	            _ -> False
+   380	
+   381	-- -----------------------------------------------------------------
+   382	-- Canonical-domain queries
+   383	-- -----------------------------------------------------------------
+   384	
+   385	-- | Weakened variable IDs from the canonical (post-solve) constraint.
+   386	weakenedVars :: Solved -> IntSet
+   387	weakenedVars (Solved EquivBackend { ebCanonicalWeakenedVars = ws }) = ws
+   388	
+   389	-- | Is the node an eliminated variable in the canonical constraint?
+   390	isEliminatedVar :: Solved -> NodeId -> Bool
+   391	isEliminatedVar (Solved EquivBackend { ebCanonicalEliminatedVars = evs }) nid =
+   392	    IntSet.member (getNodeId nid) evs
+   393	
+   394	-- | Bind parents from the canonical (post-solve) constraint.
+   395	canonicalBindParents :: Solved -> BindParents
+   396	canonicalBindParents (Solved EquivBackend { ebCanonicalBindParents = bp }) = bp
+   397	
+   398	-- | Canonicalized bind parents in canonical domain (with UF/redirect collapse).
+   399	canonicalizedBindParents :: Solved -> Either BindingError BindParents
+   400	canonicalizedBindParents s =
+   401	    Binding.canonicalizeBindParentsUnder (canonical s) (canonicalConstraint s)
+   402	
+   403	-- | Gen nodes from the canonical constraint.
+   404	canonicalGenNodes :: Solved -> GenNodeMap GenNode
+   405	canonicalGenNodes (Solved EquivBackend { ebCanonicalGenNodes = gn }) = gn
+   406	
+   407	-- | Run strict solved-graph validation against the canonical solved view.
+   408	validateCanonicalGraphStrict :: Solved -> [String]
+   409	validateCanonicalGraphStrict s =
+   410	    Solve.validateSolvedGraphStrict
+   411	        SolveResult
+   412	            { srConstraint = canonicalConstraint s
+   413	            , srUnionFind = canonicalMap s
+   414	            }
+   415	
+   416	-- | Check that original-domain and canonical-domain queries agree
+   417	-- for all nodes.  Returns a list of mismatch descriptions.
+   418	--
+   419	-- Used by the projection-first pipeline variant (Phase E) to detect
+   420	-- divergence between the two domains.
+   421	validateOriginalCanonicalAgreement :: Solved -> [String]
+   422	validateOriginalCanonicalAgreement s =
+   423	    [ "Node " ++ show (getNodeId nid) ++ ": original=" ++ show origTag
+   424	        ++ " canonical=" ++ show canonTag
+   425	    | node <- allNodes s
+   426	    , let nid = tnId node
+   427	          nidC = canonical s nid
+   428	          origNode = originalNode s nid
+   429	          canonNode = NA.lookupNode (canonicalConstraint s) nidC
+   430	          origTag = fmap tnTag origNode
+
+--- src importer usage matrix ---
+FILE src/MLF/Constraint/Finalize.hs
+  20:import qualified MLF.Constraint.Solved as Solved
+  74:stepSolvedFromPresolutionView :: PresolutionView -> Solved.Solved
+  79:        solved0 = Solved.fromConstraintAndUf constraint canonicalMap
+  80:    in Solved.rebuildWithConstraint solved0 canonicalConstraint
+  82:stepPruneSolvedBindParents :: Solved.Solved -> Solved.Solved
+  83:stepPruneSolvedBindParents = Solved.pruneBindParentsSolved
+  85:stepValidateSolvedStrict :: Solved.Solved -> Either SolveError Solved.Solved
+  87:    case Binding.checkBindingTree (Solved.canonicalConstraint solved) of
+  90:            case Solved.validateCanonicalGraphStrict solved of
+  94:finalizeSolvedFromSnapshot :: Constraint -> IntMap NodeId -> Either SolveError Solved.Solved
+  100:        let solved0 = Solved.fromConstraintAndUf constraint ufFinal
+  101:            solved1 = Solved.rebuildWithConstraint solved0 canonicalConstraint
+  105:finalizeSolvedForConstraint :: Solved.Solved -> Constraint -> Either SolveError Solved.Solved
+  107:    let uf = Solved.canonicalMap solved
+  111:        let solved0 = Solved.rebuildWithConstraint solved canonicalConstraint
+
+FILE src/MLF/Reify/Core.hs
+  32:import MLF.Constraint.Solved (Solved)
+  33:import qualified MLF.Constraint.Solved as Solved
+  83:    -> Solved
+  96:    nodes = cNodes (Solved.canonicalConstraint solved)
+  97:    canonical = Solved.canonical solved
+  98:    weakened = Solved.weakenedVars solved
+  100:        map snd (IntMap.toList (getGenNodeMap (Solved.genNodes solved)))
+  138:        bindParents0 <- bindingToElab (Solved.canonicalizedBindParents solved)
+  158:                                            case Solved.lookupVarBound solved nidC of
+  167:        case Solved.lookupVarBound solved (canonical n) of
+  179:            IntMap.member (getGenNodeId gid) (getGenNodeMap (Solved.genNodes solved))
+  218:                                if IntMap.member (getGenNodeId gid) (getGenNodeMap (Solved.genNodes solved))
+  267:                                in if Solved.isEliminatedVar solved n
+  275:                                                case Solved.lookupVarBound solved n of
+  294:                                                    case Solved.lookupVarBound solved (canonical n) of
+  300:                                                    case Solved.lookupVarBound solved n of
+  308:                                                    case Solved.lookupVarBound solved (canonical n) of
+  419:                if Solved.isEliminatedVar solved n
+  421:                    else case Solved.lookupVarBound solved n of
+  453:        case Solved.lookupVarBound solved (canonical n) of
+  466:                            case Solved.lookupVarBound solved nidC of
+  478:                case Solved.lookupVarBound solved childC of
+  506:                            Just TyVar{} | Solved.isEliminatedVar solved (canonical child) ->
+  517:                                in case Solved.lookupVarBound solved (canonical child) of
+  666:    -> Solved
+  700:    :: Solved
+  705:    let canonical = Solved.canonical solved
+  729:    :: Solved
+  737:    canonical = Solved.canonical solved
+  751:    :: Solved
+  759:    canonical = Solved.canonical solved
+  782:    :: Solved
+  789:    canonical = Solved.canonical solved
+  810:    :: Solved
+  818:    canonical = Solved.canonical solved
+  861:solvedFromView :: PresolutionView -> Solved
+  864:            Solved.fromConstraintAndUf
+  867:    in Solved.rebuildWithConstraint solved0 (pvCanonicalConstraint presolutionView)
+  870:freeVars :: Solved -> NodeId -> IntSet.IntSet -> IntSet.IntSet
+  893:    constraint = Solved.originalConstraint solved
+  895:    canonical = Solved.canonical solved
+
+FILE src/MLF/Reify/TypeOps.hs
+  36:import qualified MLF.Constraint.Solved as Solved
+  342:resolveBaseBoundForInstSolved :: Solved.Solved -> NodeId -> Maybe NodeId
+  344:    let constraint = Solved.originalConstraint solved
+  345:        canonical = Solved.canonical solved
+
+FILE src/MLF/Util/Order.hs
+  28:import MLF.Constraint.Solved (Solved)
+  29:import qualified MLF.Constraint.Solved as Solved
+  40:orderKeysFromRoot :: Solved -> NodeId -> IntMap OrderKey
+  42:    orderKeysFromConstraintWith (Solved.canonical solved) (Solved.originalConstraint solved) root0 Nothing
+  44:orderKeysFromRootRestricted :: Solved -> NodeId -> IntSet.IntSet -> IntMap OrderKey
+  46:    orderKeysFromConstraintWith (Solved.canonical solved) (Solved.originalConstraint solved) root0 (Just allowed)
+
+FILE src/MLF/Constraint/Presolution/Plan.hs
+  37:import qualified MLF.Constraint.Solved as Solved
+  806:buildSolvedFromPresolutionView :: PresolutionView -> Either ElabError Solved.Solved
+  824:    in Right (Solved.fromConstraintAndUf constraint canonicalMap)
+
+FILE src/MLF/Constraint/Presolution/View.hs
+  13:import qualified MLF.Constraint.Solved as Solved
+  53:fromSolved :: Solved.Solved -> PresolutionView
+  56:        { pvConstraint = Solved.originalConstraint solved
+  57:        , pvCanonicalMap = Solved.canonicalMap solved
+  58:        , pvCanonical = Solved.canonical solved
+  59:        , pvLookupNode = Solved.lookupNode solved
+  60:        , pvLookupVarBound = Solved.lookupVarBound solved
+  61:        , pvLookupBindParent = Solved.lookupBindParent solved
+  62:        , pvBindParents = Solved.bindParents solved
+  63:        , pvCanonicalConstraint = Solved.canonicalConstraint solved
+
+FILE src/MLF/Constraint/Presolution/Plan/Context.hs
+  22:import MLF.Constraint.Solved (Solved)
+  23:import qualified MLF.Constraint.Solved as Solved
+  66:    , geRes :: Solved
+  341:                        (Solved.canonicalMap (geRes env))
+
+FILE src/MLF/Elab/Legacy.hs
+  9:import MLF.Constraint.Solved (Solved)
+  10:import qualified MLF.Constraint.Solved as Solved
+  45:expansionToInst :: Solved -> Expansion -> Either ElabError Instantiation
+  48:    constraint = Solved.originalConstraint solved
+  49:    canonical = Solved.canonical solved
+
+FILE src/MLF/Elab/Run/Pipeline.hs
+  24:import qualified MLF.Constraint.Solved as Solved
+  92:    let canonNode = makeCanonicalizer (Solved.canonicalMap solvedClean) (prRedirects pres)
+  112:    presolutionViewForGen <- fromSolveError (Finalize.finalizePresolutionViewFromSnapshot constraintForGen (Solved.canonicalMap solvedClean))
+
+--- test importer usage matrix ---
+FILE test/ScopeSpec.hs
+  36:                solved = Solved.mkTestSolved constraint IntMap.empty
+
+FILE test/AlignmentInvariantSpec.hs
+  34:                            nodes = Solved.allNodes solved
+
+FILE test/ElaborationSpec.hs
+  116:    -> Solved.Solved
+  127:    :: Solved.Solved
+  134:    :: Solved.Solved
+  181:mkSolved :: Constraint -> IntMap.IntMap NodeId -> Solved.Solved
+  182:mkSolved = Solved.mkTestSolved
+  184:presolutionViewFromSolved :: Solved.Solved -> PresolutionView
+  187:        { pvConstraint = Solved.originalConstraint solved
+  188:        , pvCanonicalMap = Solved.canonicalMap solved
+  189:        , pvCanonical = Solved.canonical solved
+  190:        , pvLookupNode = Solved.lookupNode solved
+  191:        , pvLookupVarBound = Solved.lookupVarBound solved
+  192:        , pvLookupBindParent = Solved.lookupBindParent solved
+  193:        , pvBindParents = Solved.bindParents solved
+  194:        , pvCanonicalConstraint = Solved.canonicalConstraint solved
+  219:    :: Solved.Solved
+  243:    let solvedClean = Solved.pruneBindParentsSolved solved0
+  244:        canon = makeCanonicalizer (Solved.canonicalMap solvedClean) (prRedirects pres)
+  407:            src `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
+  440:            src `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
+  442:        it "chi-first ResultType|checked-authoritative query guard avoids direct Solved.lookup usage" $ do
+  444:            viewSrc `shouldSatisfy` (not . isInfixOf "Solved.lookup")
+  909:        let runSolvedWithScope :: SurfaceExpr -> Either String (Solved.Solved, NodeRef, NodeId)
+  914:                scopeRoot <- case Binding.bindingRoots (Solved.originalConstraint solved) of
+  940:            freeVarsUnder :: Solved.Solved -> NodeId -> Either BindingError IntSet.IntSet
+  942:                let constraint = Solved.originalConstraint s
+  944:                    canonical = Solved.canonical s
+  984:                let canonical = Solved.canonical solved
+  985:                    constraint = Solved.originalConstraint solved
+  1078:            solved <- requireRight (Solved.fromSolveOutput solveOut)
+  1106:            solved <- requireRight (Solved.fromSolveOutput solveOut)
+  1132:            solved <- requireRight (Solved.fromSolveOutput solveOut)
+  1139:        it "originalConstraint preserves solved-away binder after unification" $ do
+  1142:            -- but originalConstraint should still have the TyVar for α.
+  1165:            solved <- requireRight (Solved.fromSolveOutput solveOut)
+  1168:            Solved.canonical solved alpha `shouldBe` intNode
+  1170:            -- originalConstraint should still have the TyVar for alpha
+  1171:            let origC = Solved.originalConstraint solved
+  1175:                    "Expected TyVar for alpha in originalConstraint, got: " ++ show other
+  1178:            let solvedC = Solved.canonicalConstraint solved
+  1179:            case lookupNodeIn (cNodes solvedC) (Solved.canonical solved alpha) of
+  1974:            let runToSolved :: SurfaceExpr -> Either String (Solved.Solved, IntMap.IntMap EdgeWitness, IntMap.IntMap EdgeTrace)
+  3708:                                canonical = Solved.canonical solved
+  3717:                                    path <- Binding.bindingPathToRoot (Solved.originalConstraint solved) (typeRef (canonical nid))
+  3748:                                canonical = Solved.canonical solved
+  3757:                                    path <- Binding.bindingPathToRoot (Solved.originalConstraint solved) (typeRef (canonical nid))
+  4803:                solved = Solved.mkTestSolved constraint uf
+  4897:                solved = Solved.mkTestSolved solvedForGen IntMap.empty
+  4922:                solved = Solved.mkTestSolved constraint IntMap.empty
+
+FILE test/Constraint/SolvedSpec.hs
+  86:    in mkTestSolved constraint uf
+  115:            case fromSolveOutput out of
+  124:            src <- readFile "src/MLF/Constraint/Solved.hs"
+  143:            originalNode solved (NodeId 0) `shouldBe` Just var0
+  144:            classMembers solved (NodeId 1) `shouldMatchList` [NodeId 0, NodeId 1]
+  146:            originalConstraint solved `shouldBe` constraint
+  189:                                equiv <- requireRight (fromSolveOutput out)
+  202:            solvedSrc <- readFile "src/MLF/Constraint/Solved.hs"
+  232:                            (Solved.fromPreRewriteState
+  290:        it "originalConstraint returns the raw constraint" $ do
+  291:            let c = originalConstraint s
+  295:        it "validateOriginalCanonicalAgreement reports original/canonical tag mismatches" $ do
+  296:            let mismatches = validateOriginalCanonicalAgreement s
+  306:        it "validateOriginalCanonicalAgreement is empty when original and canonical domains align" $ do
+  310:                aligned = mkTestSolved (emptyConstraint { cNodes = nodes }) IntMap.empty
+  311:            validateOriginalCanonicalAgreement aligned `shouldBe` []
+  313:        it "canonicalizedBindParents rewrites non-canonical child/parent refs into canonical-domain refs" $ do
+  331:                    mkTestSolved
+  338:            case canonicalizedBindParents solved of
+  348:        it "classMembers returns equivalence class members" $ do
+  349:            classMembers s (NodeId 0) `shouldMatchList` [NodeId 0, NodeId 1]
+  350:            classMembers s (NodeId 3) `shouldBe` [NodeId 3]
+  352:        it "wasOriginalBinder always returns False" $ do
+  353:            wasOriginalBinder s (NodeId 0) `shouldBe` False
+  354:            wasOriginalBinder s (NodeId 1) `shouldBe` False
+  355:            wasOriginalBinder s (NodeId 2) `shouldBe` False
+  357:        it "originalNode returns pre-merge node data" $ do
+  359:            -- originalNode returns the pre-merge TyVar, not the canonical TyBase.
+  360:            originalNode s (NodeId 0)
+  362:            originalNode s (NodeId 2)
+  364:            originalNode s (NodeId 99) `shouldBe` Nothing
+  366:        it "originalBindParent delegates to lookupBindParent" $ do
+  367:            originalBindParent s (typeRef (NodeId 1))
+  369:            originalBindParent s (typeRef (NodeId 2))
+  373:        it "originalNode returns pre-merge node data" $ do
+  375:            -- originalNode should still return the pre-merge TyVar.
+  376:            originalNode s (NodeId 0)
+  378:            originalNode s (NodeId 1)
+  380:            originalNode s (NodeId 99) `shouldBe` Nothing
+  382:        it "originalBindParent returns pre-merge binding parents" $ do
+  383:            originalBindParent s (typeRef (NodeId 1))
+  385:            originalBindParent s (typeRef (NodeId 2))
+  399:                s' = mkTestSolved c IntMap.empty
+  432:        it "classMembers returns all original nodes in class" $ do
+  434:            classMembers equiv intNodeId `shouldMatchList` [alphaNodeId, intNodeId]
+  435:            classMembers equiv alphaNodeId `shouldMatchList` [alphaNodeId, intNodeId]
+  437:        it "wasOriginalBinder returns True for unified-away binder" $ do
+  439:            wasOriginalBinder equiv intNodeId `shouldBe` True
+  440:            wasOriginalBinder equiv alphaNodeId `shouldBe` True
+  441:            wasOriginalBinder equiv alphaBodyId `shouldBe` False
+  443:        it "originalNode returns pre-solving node data" $ do
+  445:            originalNode equiv alphaNodeId `shouldBe` Just alphaNode
+  446:            originalNode equiv intNodeId `shouldBe` Just intNode
+  448:        it "originalBindParent preserves pre-solving binding tree" $ do
+  450:            originalBindParent equiv (typeRef alphaNodeId)
+  452:            originalBindParent equiv (typeRef alphaBodyId)
+  469:        it "fromSolveOutput matches explicit pre-rewrite snapshot construction" $ do
+  479:                        actual <- requireRight (fromSolveOutput out)
+  482:        it "fromSolveOutput derives canonical constraint from snapshot, not soResult payload" $ do
+  512:            actual <- requireRight (fromSolveOutput out)
+
+FILE test/Phi/WitnessDomainSpec.hs
+  31:mkTestSolved :: IntMap.IntMap NodeId -> Solved
+  32:mkTestSolved uf = Solved.mkTestSolved emptyConstraint uf
+  37:        { pvConstraint = Solved.originalConstraint solved
+  38:        , pvCanonicalMap = Solved.canonicalMap solved
+  39:        , pvCanonical = Solved.canonical solved
+  40:        , pvLookupNode = Solved.lookupNode solved
+  41:        , pvLookupVarBound = Solved.lookupVarBound solved
+  42:        , pvLookupBindParent = Solved.lookupBindParent solved
+  43:        , pvBindParents = Solved.bindParents solved
+  44:        , pvCanonicalConstraint = Solved.canonicalConstraint solved
+  53:idSolved = mkTestSolved IntMap.empty
+  57:mergeSolved = mkTestSolved (IntMap.fromList [(20, NodeId 10)])
+  108:                solved = Solved.mkTestSolved c (IntMap.fromList [(getNodeId binder, alias)])
+  233:            let threeWaySolved = mkTestSolved (IntMap.fromList [(30, NodeId 10), (20, NodeId 10)])
+  260:                solved = Solved.mkTestSolved c (IntMap.fromList [(1, alias), (2, alias)])
+  280:                solved = Solved.mkTestSolved c (IntMap.fromList [(1, alias), (2, alias)])
+
+FILE test/Parity/FrozenArtifacts.hs
+  128:    solved <- firstShowE (Solved.fromPreRewriteState (snapshotUnionFind pres) (snapshotConstraint pres))
+  132:        , farCanonicalConstraint = show (Solved.canonicalConstraint solved)
+  133:        , farOriginalConstraint = show (Solved.originalConstraint solved)
+  134:        , farCanonicalMap = canonicalMapPairs (Solved.canonicalMap solved)
+
+FILE test/PipelineSpec.hs
+  83:                        root' = Solved.canonical res rootRedirected
+  87:                            case Binding.bindingRoots (Solved.originalConstraint res) of
+  129:                res = Solved.mkTestSolved constraint IntMap.empty
+  155:                res = Solved.mkTestSolved constraint IntMap.empty
+  174:            src `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
+  221:        it "row1 closeout guard|checked-authoritative keeps representative corpus parity: elaborateWithEnv has no entry-time Solved.rebuildWithConstraint" $ do
+  223:            isInfixOf "solved = Solved.rebuildWithConstraint" src `shouldBe` False
+  243:                , "Solved.rebuildWithConstraint"
+  253:            isInfixOf "Solved.fromConstraintAndUf" chiQuerySrc `shouldBe` False
+  254:            isInfixOf "Solved.rebuildWithConstraint" chiQuerySrc `shouldBe` False
+  439:            elabSrc `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
+  440:            rtSrc `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
+  446:            elabSrc `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
+  447:            rtSrc `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
+  455:            elabSrc `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
+  456:            rtSrc `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
+  468:                        Solved.fromConstraintAndUf
+  484:                        [ "Solved.fromPreRewriteState"
+  516:                    nodeIds = map fst (toListNode (cNodes (Solved.originalConstraint solved)))
+  520:                pvConstraint view `shouldBe` Solved.originalConstraint solved
+  521:                pvCanonicalMap view `shouldBe` Solved.canonicalMap solved
+  522:                pvBindParents view `shouldBe` Solved.bindParents solved
+  523:                pvCanonicalConstraint view `shouldBe` Solved.canonicalConstraint solved
+  526:                    pvCanonical view nid `shouldBe` Solved.canonical solved nid
+  527:                    pvLookupNode view nid `shouldBe` Solved.lookupNode solved nid
+  528:                    pvLookupVarBound view nid `shouldBe` Solved.lookupVarBound solved nid
+  531:                    pvLookupBindParent view ref `shouldBe` Solved.lookupBindParent solved ref
+  544:                    (Solved.fromPreRewriteState (snapshotUnionFind pres) (snapshotConstraint pres))
+  546:                Solved.validateCanonicalGraphStrict (paSolved artifacts)
+  571:                (Solved.fromPreRewriteState (snapshotUnionFind pres) (snapshotConstraint pres))
+  582:                    let nodes = cNodes (Solved.originalConstraint solved)
+  596:                    let nodes = cNodes (Solved.originalConstraint res)
+  609:                    case Solved.validateCanonicalGraphStrict solved of
+  611:                            let canon = canonicalizerFrom (\nid -> Solved.canonical solved (chaseRedirects (prRedirects pres) nid))
+  648:                    let canon = canonicalizerFrom (\nid -> Solved.canonical solved (chaseRedirects (prRedirects pres) nid))
+  702:                let c = Solved.originalConstraint res
+  763:                let canonicalize = canonicalizeNode (canonicalizerFrom (\nid -> Solved.canonical solved (chaseRedirects redirects nid)))
+  764:                    hasCanonicalizationWork = not (IntMap.null (Solved.canonicalMap solved))
+  794:                let c = Solved.originalConstraint res
+  1047:                let c = Solved.originalConstraint res
+  1066:                let c = Solved.originalConstraint res
+  1085:                let c = Solved.originalConstraint res
+  1462:                (liveNodeKeySet (Solved.originalConstraint legacy))
+  1464:        `shouldBe` projectCanonicalMap sharedLiveDomain (Solved.canonicalMap legacy)
+  1465:    pvCanonicalConstraint view `shouldBe` Solved.canonicalConstraint legacy
+  1472:                (toListNode (cNodes (Solved.originalConstraint legacy)))
+  1477:        pvCanonical view nid `shouldBe` Solved.canonical legacy nid
+  1478:        pvLookupNode view nid `shouldBe` Solved.lookupNode legacy nid
+  1479:        pvLookupVarBound view nid `shouldBe` Solved.lookupVarBound legacy nid
+  1482:        pvLookupBindParent view ref `shouldBe` Solved.lookupBindParent legacy ref
+  1616:    case Solved.validateCanonicalGraphStrict s of
+
+FILE test/SpecUtil.hs
+  169:    , paSolved :: Solved.Solved
+  210:    solved <- firstShowE (Solved.fromPreRewriteState (snapshotUnionFind pres) (snapshotConstraint pres))
+  220:runToSolvedDefault :: PolySyms -> SurfaceExpr -> Either String Solved.Solved
+  223:    firstShowE (Solved.fromPreRewriteState (snapshotUnionFind pres) (snapshotConstraint pres))
+
+FILE test/ConstraintGenSpec.hs
+  15:import MLF.Constraint.Solved (fromSolveOutput, originalConstraint)
+  741:            solved <- requireRight (fromSolveOutput solveOut)
+  742:            let cSolved = originalConstraint solved
+
