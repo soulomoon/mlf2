@@ -4,6 +4,20 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 63 Retire dead `Solved` mutation hooks (completed 2026-03-08)
+
+- Completed:
+  - removed `rebuildWithNodes`, `rebuildWithBindParents`, and `rebuildWithGenNodes` from `MLF.Constraint.Solved`;
+  - added a direct migration guard in `test/Constraint/SolvedSpec.hs` asserting those hooks are absent from the `Solved` surface.
+- Verification:
+  - `cabal build all && cabal test`: PASS
+  - `dead mutation hooks are absent from the Solved surface`: PASS (`1 example, 0 failures`)
+  - `MLF.Constraint.Solved`: PASS (`44 examples, 0 failures`)
+- Rolling priorities (next):
+  1. Narrow `geRes :: Solved` to the `canonicalMap` it actually uses.
+  2. Relocate compatibility builders (`fromConstraintAndUf`, `rebuildWithConstraint`, `fromSolved`, `buildSolvedFromPresolutionView`, `solvedFromView`) into their local owner modules.
+  3. Keep the new dead-hook migration guard green during future `Solved` cleanup.
+
 ## Task 62 Solved ecosystem classification table closeout (completed 2026-03-08)
 
 - Completed:

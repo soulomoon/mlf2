@@ -124,6 +124,15 @@ spec = describe "MLF.Constraint.Solved" $ do
             src <- readFile "src/MLF/Constraint/Solved.hs"
             src `shouldSatisfy` (not . isInfixOf "fromPresolutionResult")
 
+        it "dead mutation hooks are absent from the Solved surface" $ do
+            src <- readFile "src/MLF/Constraint/Solved.hs"
+            forM_
+                [ "rebuildWithNodes"
+                , "rebuildWithBindParents"
+                , "rebuildWithGenNodes"
+                ] $ \marker ->
+                    src `shouldSatisfy` (not . isInfixOf marker)
+
     let s = testSolved
 
     describe "Constructor compatibility" $ do
