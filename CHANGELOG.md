@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Changed
+- Docs thesis-exact recursion-refactor campaign scaffolding (2026-03-07):
+  - added a new thesis-exact recursion-refactor mechanism table with 8 fixed rows spanning frontend preprocessing, elaboration ordering/scope, tree-recursion targets, and graph-phase guardrails;
+  - added a matching improving-loop prompt with a simplified role model where `Planner` owns thesis/code research and evidence reconciliation;
+  - added a JSONL orchestrator log template plus companion design/implementation-plan docs and synced `TODO.md` to track the campaign.
 - TMT fresh round-2 closeout (2026-03-07):
   - row2 `Result-type context wiring` now uses finalized snapshot-native `PresolutionView`s in the live pipeline/result-type path and no longer exposes the row2 solved-compat shim in `ChiQuery`;
   - row8 `Translatability normalization` now performs §15.2.8 all-inert `W`-normalization on the live presolution path;

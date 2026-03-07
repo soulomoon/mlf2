@@ -4,6 +4,18 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 51 Thesis-exact recursion-refactor goal loop (completed 2026-03-07)
+
+- Completed:
+  - studied the thesis and the live Haskell codebase specifically for thesis-safe recursion-schemes and simplification work;
+  - authored a new 8-row mechanism table that mixes positive tree-refactor targets with explicit graph-phase guardrails;
+  - added a simplified improving-loop prompt whose `Planner` owns thesis/code research and evidence reconciliation;
+  - added a matching JSONL event-log template plus design/implementation-plan docs for the campaign.
+- Rolling priorities (next):
+  1. Run a fresh verifier-owned sweep over the 8 new rows before attempting any code refactor.
+  2. Start with `Binder-Safe Tree Recursion Coverage` only after the preprocessing / Σ / let-scope rows have been re-audited.
+  3. Keep `Translatable Presolution Boundary` and `Graph-Phase Explicitness Guardrail` as explicit non-goal guardrails for broad recursion-schemes rewrites.
+
 ## Task 50 TMT fresh round-2 closeout (completed 2026-03-07)
 
 - Completed:
