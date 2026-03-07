@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Changed
+- Relocated remaining shared `Solved` compatibility builders (2026-03-08):
+  - split `MLF.Constraint.Solved` into a thin facade plus non-exposed `MLF.Constraint.Solved.Internal` to preserve opacity while moving `fromConstraintAndUf` and `rebuildWithConstraint` off the public surface;
+  - redirected `MLF.Constraint.Finalize` and `MLF.Reify.Core` to use the internal builders locally and updated the public solved tests to assert the facade no longer exposes those compat builders;
+  - verified `cabal build all && cabal test`, `MLF.Constraint.Solved` (`45 examples, 0 failures`), `migration guardrail: thesis-core boundary matches legacy outcome` (`1 example, 0 failures`), and `GeneralizeEnv stores canonical maps, not solved handles` (`1 example, 0 failures`).
 - Narrowed `geRes` to a canonical map (2026-03-08):
   - replaced `GeneralizeEnv.geRes :: Solved` with `geCanonicalMap :: IntMap.IntMap NodeId` in the presolution planning context;
   - removed `buildSolvedFromPresolutionView` from `MLF.Constraint.Presolution.Plan` and now preserve the sanitized canonical map directly from `PresolutionView` data;

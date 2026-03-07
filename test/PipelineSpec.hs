@@ -31,6 +31,7 @@ import MLF.Elab.Pipeline
 import MLF.Frontend.Syntax
 import MLF.Frontend.ConstraintGen
 import MLF.Constraint.Canonicalizer (canonicalizerFrom, canonicalizeNode)
+import qualified MLF.Constraint.Finalize as Finalize
 import MLF.Constraint.Presolution
 import qualified MLF.Constraint.Presolution.View as PresolutionViewBoundary
 import qualified MLF.Constraint.Solved as Solved
@@ -464,10 +465,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 let pres = paPresolution artifacts
                     view = PresolutionViewBoundary.fromPresolutionResult pres
                     legacy = paSolved artifacts
-                    thesisCoreValidated =
-                        Solved.fromConstraintAndUf
-                            (pvCanonicalConstraint view)
-                            (pvCanonicalMap view)
+                    thesisCoreValidated = Finalize.stepSolvedFromPresolutionView view
                 validateStrict thesisCoreValidated
                 validateStrict legacy
                 assertViewParity view legacy

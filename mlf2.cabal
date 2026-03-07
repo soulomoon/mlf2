@@ -115,7 +115,8 @@ library mlf2-internal
                       MLF.Elab.Run.ResultType,
                       MLF.Constraint.Presolution.Plan.Context
 
-    other-modules:    MLF.Constraint.Types.Ids,
+    other-modules:    MLF.Constraint.Solved.Internal,
+                      MLF.Constraint.Types.Ids,
                       MLF.Constraint.Types.SynthesizedExpVar,
                       MLF.Constraint.Presolution.Base,
                       MLF.Constraint.Presolution.Core,

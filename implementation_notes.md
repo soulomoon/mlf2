@@ -2,6 +2,15 @@
 
 ## Thesis Alignment (Phase A–E)
 
+### 2026-03-08 relocate remaining shared `Solved` compatibility builders
+- Split `MLF.Constraint.Solved` into a thin public facade plus non-exposed `MLF.Constraint.Solved.Internal`, preserving `Solved` opacity while moving the shared compatibility builders out of the public surface.
+- Redirected `MLF.Constraint.Finalize` and `MLF.Reify.Core` to use the internal builder functions locally, and updated the public-facing solved tests to use `mkTestSolved` plus a direct facade-absence guard for `fromConstraintAndUf` / `rebuildWithConstraint`.
+- Verification:
+  - `cabal build all && cabal test` — PASS
+  - `MLF.Constraint.Solved` — PASS (`45 examples, 0 failures`)
+  - `migration guardrail: thesis-core boundary matches legacy outcome` — PASS (`1 example, 0 failures`)
+  - `GeneralizeEnv stores canonical maps, not solved handles` — PASS (`1 example, 0 failures`)
+
 ### 2026-03-08 narrow `geRes` to canonical map
 - Replaced `GeneralizeEnv.geRes :: Solved` with `geCanonicalMap :: IntMap.IntMap NodeId` in the presolution planning context because the environment only used the solved handle to recover a sanitized canonical map for `presolutionViewFromSnapshot`.
 - Removed `buildSolvedFromPresolutionView` from `MLF.Constraint.Presolution.Plan` and now derive the preserved canonical map directly with `stepSanitizeSnapshotUf constraint (pvCanonicalMap presolutionView)`.

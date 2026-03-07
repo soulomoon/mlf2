@@ -4,6 +4,22 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 65 Relocate remaining shared `Solved` compatibility builders (completed 2026-03-08)
+
+- Completed:
+  - split `MLF.Constraint.Solved` into a thin facade plus non-exposed `MLF.Constraint.Solved.Internal`;
+  - moved `fromConstraintAndUf` and `rebuildWithConstraint` off the public `Solved` surface and into local owner-module usage in `MLF.Constraint.Finalize` and `MLF.Reify.Core`;
+  - updated public solved tests to use `mkTestSolved` and added a direct facade-absence guard for the relocated compat builders.
+- Verification:
+  - `cabal build all && cabal test`: PASS
+  - `MLF.Constraint.Solved`: PASS (`45 examples, 0 failures`)
+  - `migration guardrail: thesis-core boundary matches legacy outcome`: PASS (`1 example, 0 failures`)
+  - `GeneralizeEnv stores canonical maps, not solved handles`: PASS (`1 example, 0 failures`)
+- Rolling priorities (next):
+  1. Keep `fromSolved` and `solvedFromView` local to their owner modules and continue shrinking those compatibility seams only when their callers disappear.
+  2. Continue narrowing the public `Solved` facade only where replay-faithful and original↔canonical semantics remain explicit.
+  3. Keep the new solved-facade absence guard green during future cleanup.
+
 ## Task 64 Narrow `geRes` to canonical map (completed 2026-03-08)
 
 - Completed:
