@@ -1,8 +1,6 @@
 {-# LANGUAGE GADTs #-}
 module MLF.Reify.Core (
     reifyType,
-    reifyTypeWithNamedSetNoFallbackFromView,
-    reifyTypeWithNamedSetFromView,
     reifyTypeWithNames,
     reifyTypeWithNamesNoFallback,
     reifyTypeWithNamesNoFallbackOnConstraint,
@@ -15,12 +13,6 @@ module MLF.Reify.Core (
     reifyBoundWithNamesOnConstraintBound,
     freeVars,
     namedNodes,
-    reifyTypeFromView,
-    reifyTypeWithNamesFromView,
-    reifyTypeWithNamesNoFallbackFromView,
-    reifyBoundWithNamesFromView,
-    reifyBoundWithNamesBoundFromView,
-    namedNodesFromView,
 ) where
 
 import Control.Monad (foldM, unless)
@@ -684,10 +676,7 @@ reifyWithAs contextLabel solved nameForVar isNamed rootMode convert nid =
 -- | Reify a solved NodeId into an elaborated type.
 -- This version doesn't compute instance bounds (all foralls are unbounded).
 reifyType :: PresolutionView -> NodeId -> Either ElabError ElabType
-reifyType = reifyTypeFromView
-
-reifyTypeFromView :: PresolutionView -> NodeId -> Either ElabError ElabType
-reifyTypeFromView presolutionView =
+reifyType presolutionView =
     let solved = solvedFromView presolutionView
     in reifyWith "reifyType" solved nameFor (const False) RootType
   where
@@ -695,30 +684,16 @@ reifyTypeFromView presolutionView =
 
 -- | Reify with an explicit name substitution for vars (Schi': named nodes become variables).
 reifyTypeWithNames :: PresolutionView -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
-reifyTypeWithNames = reifyTypeWithNamesFromView
-
-reifyTypeWithNamesFromView
-    :: PresolutionView
-    -> IntMap.IntMap String
-    -> NodeId
-    -> Either ElabError ElabType
-reifyTypeWithNamesFromView presolutionView subst nid = do
-    namedSet <- namedNodesFromView presolutionView
-    reifyTypeWithNamedSetFromView presolutionView subst namedSet nid
+reifyTypeWithNames presolutionView subst nid = do
+    namedSet <- namedNodes presolutionView
+    reifyTypeWithNamedSet presolutionView subst namedSet nid
 
 -- | Reify with an explicit name substitution, but without ancestor fallback
 -- quantifiers (used when an outer scheme already quantifies binders).
 -- See Note [No-fallback reify preserves explicit bounds] in
 -- docs/notes/2026-01-27-elab-changes.md.
 reifyTypeWithNamesNoFallback :: PresolutionView -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
-reifyTypeWithNamesNoFallback = reifyTypeWithNamesNoFallbackFromView
-
-reifyTypeWithNamesNoFallbackFromView
-    :: PresolutionView
-    -> IntMap.IntMap String
-    -> NodeId
-    -> Either ElabError ElabType
-reifyTypeWithNamesNoFallbackFromView presolutionView subst nid =
+reifyTypeWithNamesNoFallback presolutionView subst nid =
     reifyTypeWithNamesNoFallbackSolved (solvedFromView presolutionView) subst nid
 
 reifyTypeWithNamesNoFallbackSolved
@@ -747,15 +722,7 @@ reifyTypeWithNamesNoFallbackOnConstraint constraint subst nid =
 
 -- | Reify with an explicit named-node set (Schi').
 reifyTypeWithNamedSet :: PresolutionView -> IntMap.IntMap String -> IntSet.IntSet -> NodeId -> Either ElabError ElabType
-reifyTypeWithNamedSet = reifyTypeWithNamedSetFromView
-
-reifyTypeWithNamedSetFromView
-    :: PresolutionView
-    -> IntMap.IntMap String
-    -> IntSet.IntSet
-    -> NodeId
-    -> Either ElabError ElabType
-reifyTypeWithNamedSetFromView presolutionView subst namedSet =
+reifyTypeWithNamedSet presolutionView subst namedSet =
     reifyTypeWithNamedSetSolved (solvedFromView presolutionView) subst namedSet
 
 reifyTypeWithNamedSetSolved
@@ -779,8 +746,6 @@ reifyTypeWithNamedSetSolved solved subst namedSet =
     isNamed nodeId = IntSet.member (getNodeId (canonical nodeId)) namedSet
 
 -- | Reify with an explicit named-node set, without ancestor fallback quantifiers.
-reifyTypeWithNamedSetNoFallback :: PresolutionView -> IntMap.IntMap String -> IntSet.IntSet -> NodeId -> Either ElabError ElabType
-reifyTypeWithNamedSetNoFallback = reifyTypeWithNamedSetNoFallbackFromView
 
 reifyTypeWithNamedSetNoFallbackSolved
     :: Solved
@@ -802,18 +767,16 @@ reifyTypeWithNamedSetNoFallbackSolved solved subst namedSet =
 
     isNamed nodeId = IntSet.member (getNodeId (canonical nodeId)) namedSet
 
-reifyTypeWithNamedSetNoFallbackFromView
+reifyTypeWithNamedSetNoFallback
     :: PresolutionView
     -> IntMap.IntMap String
     -> IntSet.IntSet
     -> NodeId
     -> Either ElabError ElabType
-reifyTypeWithNamedSetNoFallbackFromView presolutionView subst namedSet nid =
+reifyTypeWithNamedSetNoFallback presolutionView subst namedSet nid =
     reifyTypeWithNamedSetNoFallbackSolved (solvedFromView presolutionView) subst namedSet nid
 
 -- | Reify a node for use as a binder bound (T(n) in the paper, Schi_p).
-reifyBoundWithNames :: PresolutionView -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
-reifyBoundWithNames = reifyBoundWithNamesFromView
 
 reifyBoundWithNamesSolved
     :: Solved
@@ -834,23 +797,13 @@ reifyBoundWithNamesSolved solved subst =
 
     isNamed nodeId = IntMap.member (getNodeId (canonical nodeId)) subst
 
-reifyBoundWithNamesFromView
-    :: PresolutionView
-    -> IntMap.IntMap String
-    -> NodeId
-    -> Either ElabError ElabType
-reifyBoundWithNamesFromView presolutionView subst nid =
+reifyBoundWithNames :: PresolutionView -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
+reifyBoundWithNames presolutionView subst nid =
     reifyBoundWithNamesSolved (solvedFromView presolutionView) subst nid
 
-reifyBoundWithNamesBound :: PresolutionView -> IntMap.IntMap String -> NodeId -> Either ElabError BoundType
-reifyBoundWithNamesBound = reifyBoundWithNamesBoundFromView
 
-reifyBoundWithNamesBoundFromView
-    :: PresolutionView
-    -> IntMap.IntMap String
-    -> NodeId
-    -> Either ElabError BoundType
-reifyBoundWithNamesBoundFromView presolutionView subst nid =
+reifyBoundWithNamesBound :: PresolutionView -> IntMap.IntMap String -> NodeId -> Either ElabError BoundType
+reifyBoundWithNamesBound presolutionView subst nid =
     reifyBoundWithNamesBoundSolved (solvedFromView presolutionView) subst nid
 
 reifyBoundWithNamesBoundSolved
@@ -885,10 +838,7 @@ reifyBoundWithNamesOnConstraintBound constraint subst nid =
     in reifyBoundWithNamesBound presolutionView subst nid
 
 namedNodes :: PresolutionView -> Either ElabError IntSet.IntSet
-namedNodes = namedNodesFromView
-
-namedNodesFromView :: PresolutionView -> Either ElabError IntSet.IntSet
-namedNodesFromView presolutionView = do
+namedNodes presolutionView = do
     let constraint = pvConstraint presolutionView
         canonical = pvCanonical presolutionView
         nodes = cNodes constraint

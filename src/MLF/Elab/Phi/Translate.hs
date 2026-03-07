@@ -46,10 +46,10 @@ import MLF.Elab.Types
 import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Constraint.BindingUtil (bindingPathToRootLocal)
 import MLF.Reify.Core
-    ( namedNodesFromView
-    , reifyBoundWithNamesFromView
-    , reifyTypeFromView
-    , reifyTypeWithNamedSetNoFallbackFromView
+    ( namedNodes
+    , reifyBoundWithNames
+    , reifyType
+    , reifyTypeWithNamedSetNoFallback
     )
 import MLF.Constraint.Presolution (EdgeTrace(..), PresolutionView(..))
 import MLF.Constraint.Presolution.Base (CopyMapping(..), InteriorNodes(..), copiedNodes)
@@ -108,7 +108,7 @@ phiFromEdgeWitnessCore
     -> Either ElabError Instantiation
 phiFromEdgeWitnessCore traceCfg generalizeAtWith presolutionView mbGaParents mSchemeInfo mTrace ew = do
     requireValidBindingTree
-    namedSet0 <- namedNodesFromView presolutionView
+    namedSet0 <- namedNodes presolutionView
     case debugPhi
         ("phi ewLeft=" ++ show (ewLeft ew)
             ++ " ewRight=" ++ show (ewRight ew)
@@ -251,20 +251,20 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith presolutionView mbGaParents mSc
     constraint = pvConstraint presolutionView
 
     reifyDebugType :: NodeId -> Either ElabError ElabType
-    reifyDebugType = reifyTypeFromView presolutionView
+    reifyDebugType = reifyType presolutionView
 
     reifyBoundWithNamesAt
         :: IntMap.IntMap String
         -> NodeId
         -> Either ElabError ElabType
-    reifyBoundWithNamesAt = reifyBoundWithNamesFromView presolutionView
+    reifyBoundWithNamesAt = reifyBoundWithNames presolutionView
 
     reifyTypeWithNamedSetNoFallbackAt
         :: IntMap.IntMap String
         -> IntSet.IntSet
         -> NodeId
         -> Either ElabError ElabType
-    reifyTypeWithNamedSetNoFallbackAt = reifyTypeWithNamedSetNoFallbackFromView presolutionView
+    reifyTypeWithNamedSetNoFallbackAt = reifyTypeWithNamedSetNoFallback presolutionView
 
     computeTraceBinderReplayBridge
         :: Maybe EdgeTrace

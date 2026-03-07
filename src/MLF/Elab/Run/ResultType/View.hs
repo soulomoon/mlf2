@@ -38,7 +38,7 @@ import MLF.Constraint.Types
     )
 import MLF.Elab.Generalize (GaBindParents)
 import qualified MLF.Elab.Run.ChiQuery as ChiQuery
-import MLF.Elab.Run.Scope (schemeBodyTargetView)
+import MLF.Elab.Run.Scope (schemeBodyTarget)
 import MLF.Elab.Run.ResultType.Types (ResultTypeInputs(..))
 import MLF.Util.ElabError (ElabError(..))
 import MLF.Util.Trace (TraceConfig)
@@ -124,7 +124,7 @@ rtvCanonicalBindParents :: ResultTypeView -> BindParents
 rtvCanonicalBindParents = ChiQuery.chiCanonicalBindParents . rtvPresolutionView
 
 rtvSchemeBodyTarget :: ResultTypeView -> NodeId -> NodeId
-rtvSchemeBodyTarget view nid = schemeBodyTargetView (rtvPresolutionViewOverlay view) nid
+rtvSchemeBodyTarget view nid = schemeBodyTarget (rtvPresolutionViewOverlay view) nid
 
 rtvPresolutionView :: ResultTypeView -> PresolutionView
 rtvPresolutionView = rtcPresolutionView . rtvInputs0

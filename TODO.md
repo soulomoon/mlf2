@@ -4,6 +4,26 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 56 Remove final χp `...View` alias duplicates (completed 2026-03-07)
+
+- Completed:
+  - removed the remaining duplicate `...View` / `...FromView` aliases from runtime and reify helpers now that the unsuffixed APIs are already `PresolutionView`-typed;
+  - updated runtime, result-type, elaboration, Phi, and test call sites to use the canonical unsuffixed names only;
+  - added a direct source guard that the duplicate alias names are retired from runtime and reify modules.
+- Verification:
+  - `ga scope`: PASS (`2 examples, 0 failures`)
+  - `Generalize shadow comparator`: PASS (`8 examples, 0 failures`)
+  - `runtime and reify modules no longer adapt Solved through fromSolved`: PASS (`1 example, 0 failures`)
+  - `duplicate ...View aliases are retired from runtime and reify modules`: PASS (`1 example, 0 failures`)
+  - `row2 absolute thesis-exact guard`: PASS (`1 example, 0 failures`)
+  - `checked-authoritative`: PASS (`8 examples, 0 failures`)
+  - `Dual-path verification`: PASS (`4 examples, 0 failures`)
+  - `cabal build all && cabal test`: PASS (`970 examples, 0 failures`)
+- Rolling priorities (next):
+  1. Keep the runtime/reify helper surface on one canonical `PresolutionView`-typed name per operation.
+  2. Keep the row2/chi-first guard stack green during future elaboration cleanup.
+  3. Continue Task 52’s frontend preprocessing guard-first work before any recursion-schemes refactor.
+
 ## Task 55 χp/view-native elaboration closeout (completed 2026-03-07)
 
 - Completed:

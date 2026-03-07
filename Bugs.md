@@ -7,6 +7,34 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 
 ## Resolved
 
+### BUG-2026-03-07-008
+- Status: Resolved
+- Priority: Low
+- Discovered: 2026-03-07
+- Resolved: 2026-03-07
+- Summary: After the χp/view-native cleanup, duplicate `...View` / `...FromView` aliases still lingered on the runtime/reify surface, leaving two names for the same `PresolutionView`-typed operations.
+- Minimal reproducer:
+  - `rg -n "bindingScopeRefCanonicalView|schemeBodyTargetView|canonicalizeScopeRefView|resolveCanonicalScopeView|letScopeOverridesView|inlineBoundVarsTypeView|inlineBoundVarsTypeForBoundView|generalizeAtWithBuilderView|mkGeneralizeAtWithBuilderView|generalizeWithPlanView|reifyTypeFromView|reifyTypeWithNamesFromView|reifyTypeWithNamesNoFallbackFromView|reifyTypeWithNamedSetFromView|reifyTypeWithNamedSetNoFallbackFromView|reifyBoundWithNamesFromView|reifyBoundWithNamesBoundFromView|namedNodesFromView" src`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "duplicate ...View aliases are retired from runtime and reify modules"'`
+- Expected vs actual:
+  - Expected: one canonical `PresolutionView`-typed name per runtime/reify helper.
+  - Actual before fix: the unsuffixed names and `...View` / `...FromView` names coexisted and pointed at the same implementation.
+- Suspected/owning area:
+  - `/Volumes/src/mlf4/src/MLF/Elab/Run/Scope.hs`
+  - `/Volumes/src/mlf4/src/MLF/Elab/Run/Generalize.hs`
+  - `/Volumes/src/mlf4/src/MLF/Elab/Run/ResultType/Util.hs`
+  - `/Volumes/src/mlf4/src/MLF/Reify/Core.hs`
+- Thesis impact:
+  - No semantic divergence remained, but the duplicate naming weakened the χp/view-native closeout by leaving two internal surfaces for the same operations.
+- Fix:
+  - Removed the duplicate alias exports/definitions and updated callers to the unsuffixed names only.
+- Regression tests:
+  - `/Volumes/src/mlf4/test/PipelineSpec.hs` (`duplicate ...View aliases are retired from runtime and reify modules`)
+  - `/Volumes/src/mlf4/test/PipelineSpec.hs` (`runtime and reify modules no longer adapt Solved through fromSolved`, `row2 absolute thesis-exact guard`, `checked-authoritative`, `Dual-path verification`)
+  - `/Volumes/src/mlf4/test/ScopeSpec.hs` (`ga scope`)
+  - `/Volumes/src/mlf4/test/GeneralizeSpec.hs` (`Generalize shadow comparator`)
+  - `cabal build all && cabal test`
+
 ### BUG-2026-03-07-007
 - Status: Resolved
 - Priority: Medium

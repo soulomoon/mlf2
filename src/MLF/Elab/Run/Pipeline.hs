@@ -42,14 +42,14 @@ import MLF.Elab.TermClosure (closeTermWithSchemeSubst, substInTerm)
 import MLF.Elab.Run.Annotation (applyRedirectsToAnn, canonicalizeAnn, annNode)
 import MLF.Elab.Run.Generalize
     ( constraintForGeneralization
-    , generalizeAtWithBuilderView
+    , generalizeAtWithBuilder
     , instantiationCopyNodes
     )
 import MLF.Elab.Run.Provenance (buildTraceCopyMap, collectBaseNamedKeys)
 import MLF.Elab.Run.Scope
-    ( letScopeOverridesView
-    , resolveCanonicalScopeView
-    , schemeBodyTargetView
+    ( letScopeOverrides
+    , resolveCanonicalScope
+    , schemeBodyTarget
     )
 import MLF.Elab.Run.Util
     ( canonicalizeExpansion
@@ -58,7 +58,7 @@ import MLF.Elab.Run.Util
     , makeCanonicalizer
     )
 import MLF.Elab.Run.ResultType (mkResultTypeInputs, computeResultTypeFromAnn, computeResultTypeFallback)
-import MLF.Reify.Core (reifyTypeFromView)
+import MLF.Reify.Core (reifyType)
 import MLF.Reify.TypeOps (freeTypeVarsType)
 import MLF.Util.Trace (TraceConfig, traceGeneralize)
 
@@ -112,7 +112,7 @@ runPipelineElabWith traceCfg genConstraints expr = do
     presolutionViewForGen <- fromSolveError (Finalize.finalizePresolutionViewFromSnapshot constraintForGen (Solved.canonicalMap solvedClean))
     let
         generalizeAtWithView mbGa =
-            generalizeAtWithBuilderView
+            generalizeAtWithBuilder
                 planBuilder
                 mbGa
                 presolutionViewForGen
@@ -122,7 +122,7 @@ runPipelineElabWith traceCfg genConstraints expr = do
         edgeTraces = IntMap.map (canonicalizeTrace canonNode) (prEdgeTraces pres)
         edgeExpansions = IntMap.map (canonicalizeExpansion canonNode) (prEdgeExpansions pres)
     let scopeOverrides =
-            letScopeOverridesView
+            letScopeOverrides
                 c1
                 constraintForGen
                 presolutionViewClean
@@ -145,8 +145,8 @@ runPipelineElabWith traceCfg genConstraints expr = do
         () -> pure ()
     rootScope <- fromElabError $
         bindingToElab $
-            resolveCanonicalScopeView c1 presolutionViewForGen (prRedirects pres) (annNode ann)
-    let rootTarget = schemeBodyTargetView presolutionViewForGen (annNode annCanon)
+            resolveCanonicalScope c1 presolutionViewForGen (prRedirects pres) (annNode ann)
+    let rootTarget = schemeBodyTarget presolutionViewForGen (annNode annCanon)
     let generalizeNeedsFallback err = case err of
             SchemeFreeVars{} -> True
             _ -> False
@@ -159,7 +159,7 @@ runPipelineElabWith traceCfg genConstraints expr = do
                         Right out -> Right out
                         Left err2
                             | generalizeNeedsFallback err2 -> do
-                                tyFallback <- reifyTypeFromView presolutionViewForGen rootTarget
+                                tyFallback <- reifyType presolutionViewForGen rootTarget
                                 pure (schemeFromType tyFallback, IntMap.empty)
                         Left err2 -> Left err2
             Left err -> Left err

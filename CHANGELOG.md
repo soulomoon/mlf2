@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Changed
+- Removed final χp `...View` alias duplicates (2026-03-07):
+  - collapsed the remaining duplicate `...View` / `...FromView` aliases in runtime and reify helpers so only the unsuffixed `PresolutionView`-typed APIs remain;
+  - updated runtime, result-type, elaboration, Phi, and test call sites to use the canonical unsuffixed names;
+  - added a source guard asserting the duplicate alias names are retired from runtime and reify modules;
+  - verified `ga scope` (`2 examples, 0 failures`), `Generalize shadow comparator` (`8 examples, 0 failures`), `runtime and reify modules no longer adapt Solved through fromSolved` (`1 example, 0 failures`), `duplicate ...View aliases are retired from runtime and reify modules` (`1 example, 0 failures`), `row2 absolute thesis-exact guard` (`1 example, 0 failures`), `checked-authoritative` (`8 examples, 0 failures`), `Dual-path verification` (`4 examples, 0 failures`), and `cabal build all && cabal test` (`970 examples, 0 failures`).
 - χp/view-native elaboration closeout (2026-03-07):
   - removed non-test/non-legacy `fromSolved` usage from `MLF.Elab.Run.Scope`, `MLF.Elab.Run.TypeOps`, `MLF.Elab.Run.Generalize`, `MLF.Elab.Run.ResultType.Util`, and `MLF.Reify.Core`;
   - promoted `PresolutionView` to the primary internal/runtime API for scope resolution, bound/alias inlining, generalization helpers, result-type generalization, and the non-legacy reify surface;
