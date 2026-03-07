@@ -8,6 +8,7 @@ import qualified Data.Set as Set
 
 import qualified MLF.Constraint.Presolution as Presolution
 import MLF.Constraint.Presolution (PresolutionResult(..))
+import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Solve
     ( SolveOutput(..)
     , SolveResult(..)
@@ -151,6 +152,14 @@ spec = describe "MLF.Constraint.Solved" $ do
                 ] $ \marker ->
                     src `shouldSatisfy` (not . isInfixOf marker)
 
+        it "enumeration helpers are absent from the Solved facade" $ do
+            src <- readFile "src/MLF/Constraint/Solved.hs"
+            forM_
+                [ "allNodes"
+                , "instEdges"
+                ] $ \marker ->
+                    src `shouldSatisfy` (not . isInfixOf marker)
+
     let s = testSolved
 
     describe "Constructor compatibility" $ do
@@ -169,7 +178,7 @@ spec = describe "MLF.Constraint.Solved" $ do
             lookupNode solved (NodeId 0) `shouldBe` Just base1
             originalNode solved (NodeId 0) `shouldBe` Just var0
             classMembers solved (NodeId 1) `shouldMatchList` [NodeId 0, NodeId 1]
-            instEdges solved `shouldBe` [inst]
+            cInstEdges (originalConstraint solved) `shouldBe` [inst]
             originalConstraint solved `shouldBe` constraint
 
     describe "Backend equivalence" $ do
@@ -215,9 +224,9 @@ spec = describe "MLF.Constraint.Solved" $ do
                             Right out -> do
                                 equiv <- requireRight (fromSolveOutput out)
                                 -- Verify the Solved is well-formed by exercising core queries
-                                length (allNodes equiv) `shouldSatisfy` (> 0)
+                                length (NodeAccess.allNodes (originalConstraint equiv)) `shouldSatisfy` (> 0)
                                 let _ = canonicalMap equiv
-                                    _ = instEdges equiv
+                                    _ = cInstEdges (originalConstraint equiv)
                                     _ = bindParents equiv
                                 pure ()
         forM_ cases $ \(label, expr) ->
@@ -280,8 +289,8 @@ spec = describe "MLF.Constraint.Solved" $ do
             lookupNode s (NodeId 1) `shouldBe` Just (TyBase (NodeId 1) (BaseTy "Int"))
             lookupNode s (NodeId 99) `shouldBe` Nothing
 
-        it "allNodes returns all nodes in the constraint" $ do
-            length (allNodes s) `shouldBe` 4
+        it "originalConstraint exposes all nodes in the constraint" $ do
+            length (NodeAccess.allNodes (originalConstraint s)) `shouldBe` 4
 
         it "lookupBindParent finds binding parents" $ do
             lookupBindParent s (typeRef (NodeId 1))
@@ -295,8 +304,8 @@ spec = describe "MLF.Constraint.Solved" $ do
             let bp = bindParents s
             IntMap.size bp `shouldBe` 2
 
-        it "instEdges returns inst edges" $ do
-            instEdges s `shouldBe` [InstEdge (EdgeId 0) (NodeId 2) (NodeId 3)]
+        it "originalConstraint exposes inst edges" $ do
+            cInstEdges (originalConstraint s) `shouldBe` [InstEdge (EdgeId 0) (NodeId 2) (NodeId 3)]
 
         it "genNodes returns gen nodes" $ do
             let gns = genNodes s
@@ -546,8 +555,8 @@ spec = describe "MLF.Constraint.Solved" $ do
                     -- Verify queries are internally consistent
                     map (lookupVarBound staged . canonical staged) ids
                         `shouldBe` map (lookupVarBound staged) ids
-                    let _ = instEdges staged
+                    let _ = cInstEdges (originalConstraint staged)
                         _ = bindParents staged
                         _ = genNodes staged
-                        _ = allNodes staged
+                        _ = NodeAccess.allNodes (originalConstraint staged)
                     pure ()

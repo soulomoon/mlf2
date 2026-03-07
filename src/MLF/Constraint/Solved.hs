@@ -20,10 +20,8 @@ module MLF.Constraint.Solved (
     originalConstraint,
     canonicalConstraint,
     lookupNode,
-    allNodes,
     lookupBindParent,
     bindParents,
-    instEdges,
     genNodes,
     lookupVarBound,
 
@@ -48,7 +46,6 @@ module MLF.Constraint.Solved (
 
 import MLF.Constraint.Solved.Internal
     ( Solved
-    , allNodes
     , bindParents
     , canonical
     , canonicalConstraint
@@ -58,7 +55,6 @@ import MLF.Constraint.Solved.Internal
     , fromPreRewriteState
     , fromSolveOutput
     , genNodes
-    , instEdges
     , isEliminatedVar
     , lookupBindParent
     , lookupNode
