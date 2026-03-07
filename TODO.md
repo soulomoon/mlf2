@@ -4,6 +4,36 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 59 Canonicalization helper extraction (completed 2026-03-08)
+
+- Completed:
+  - extracted the duplicated canonicalization helpers (`buildCanonicalMap`, `chaseUfCanonical`, `equivCanonical`, `nodeIdKey`) into `MLF.Constraint.Canonicalization.Shared`;
+  - rewired `MLF.Constraint.Solved` and `MLF.Constraint.Presolution.View` to share that single implementation;
+  - added a direct source guard preventing both modules from reintroducing local copies of the helper block.
+- Verification:
+  - `Canonicalization helper dedup guards`: PASS (`1 example, 0 failures`)
+  - `PresolutionView mirrors solved canonical/node/bound queries`: PASS (`1 example, 0 failures`)
+  - `Canonicalizer`: PASS (`5 examples, 0 failures`)
+  - `cabal build all && cabal test`: PASS (`975 examples, 0 failures`)
+- Rolling priorities (next):
+  1. Continue Task 58 queue item 2 (shared frontend/XMLF parser scaffolding) only as a separate follow-up.
+  2. Keep the new canonicalization dedup guard green when touching solved/view reconstruction.
+  3. Preserve thesis-faithful canonicalization semantics while extracting any future shared helper blocks.
+
+## Task 58 Haskell dedup refactor queue (planned 2026-03-08)
+
+- Goal:
+  - record the next Haskell-oriented deduplication/refactor candidates in strict one-by-one order, so follow-up work stays focused and easy to verify.
+- Queue (do in order):
+  1. Extract canonicalization helpers shared by `MLF.Constraint.Solved` and `MLF.Constraint.Presolution.View` (`buildCanonicalMap`, `chaseUfCanonical`, `equivCanonical`, `nodeIdKey`) into one internal utility module.
+  2. Commonize shared lexer/type-parser scaffolding between `MLF.Frontend.Parse` and `MLF.XMLF.Parse`, while preserving grammar-specific entrypoints and avoiding forced unification of the full term grammars.
+  3. Audit and consolidate `schemeBodyTarget` between `MLF.Elab.Elaborate` and `MLF.Elab.Run.Scope`, but only if the more complete run-scope semantics can be adopted without changing elaboration behavior.
+  4. Extract the low-risk pure helper duplicates (`mapBound`, `freshNameLike`) into shared internal helpers after the higher-value refactors are done.
+- Constraints:
+  - do not batch multiple queue items into one change;
+  - keep thesis-faithfulness guards green after each item;
+  - treat parser commonization and `schemeBodyTarget` consolidation as behavior-sensitive refactors that require targeted tests before code movement.
+
 ## Task 57 Guard-first surface `Expr` fold refactor (completed 2026-03-08)
 
 - Completed:
