@@ -19,8 +19,6 @@ import MLF.Util.Trace (traceWhen)
 import MLF.Constraint.Types hiding (lookupNode)
 import MLF.Constraint.Presolution.View (PresolutionView)
 import MLF.Constraint.Finalize (presolutionViewFromSnapshot)
-import MLF.Constraint.Solved (Solved)
-import qualified MLF.Constraint.Solved as Solved
 import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.BindingUtil (bindingPathToRootLocal, firstGenAncestorFrom)
 import MLF.Constraint.Presolution.Plan.BinderPlan (GaBindParentsInfo(..))
@@ -63,7 +61,7 @@ data GeneralizeEnv = GeneralizeEnv
     , geIsTyForallKey :: Int -> Bool
     , geIsBaseLikeKey :: Int -> Bool
     , geBindParentsGa :: Maybe GaBindParents
-    , geRes :: Solved
+    , geCanonicalMap :: IntMap.IntMap NodeId
     , geDebugEnabled :: Bool
     }
 
@@ -338,7 +336,7 @@ resolveContext env bindParentsSoft scopeRootArg targetNodeArg = do
                 resForReify =
                     presolutionViewFromSnapshot
                         constraintForReify
-                        (Solved.canonicalMap (geRes env))
+                        (geCanonicalMap env)
             pure ResolveBinds
                 { rbBindParents = bindParents
                 , rbFirstGenAncestor = firstGenAncestorGa

@@ -21,6 +21,13 @@ spec = describe "Phase 4 — Principal Presolution" $ do
             src `shouldSatisfy` (isInfixOf ":: PresolutionView")
             src `shouldSatisfy` (not . isInfixOf ":: Solved")
 
+        it "GeneralizeEnv stores canonical maps, not solved handles" $ do
+            planSrc <- readFile "src/MLF/Constraint/Presolution/Plan.hs"
+            ctxSrc <- readFile "src/MLF/Constraint/Presolution/Plan/Context.hs"
+            ctxSrc `shouldSatisfy` (isInfixOf "geCanonicalMap :: IntMap.IntMap NodeId")
+            ctxSrc `shouldSatisfy` (not . isInfixOf "geRes :: Solved")
+            planSrc `shouldSatisfy` (not . isInfixOf "buildSolvedFromPresolutionView ::")
+
     Presolution.EnforcementSpec.spec
     Presolution.InstantiateSpec.spec
     Presolution.EdgeTraceSpec.spec

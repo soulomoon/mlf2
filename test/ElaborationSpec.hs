@@ -5017,7 +5017,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , geIsTyForallKey = const False
                         , geIsBaseLikeKey = (== getNodeId solvedN)
                         , geBindParentsGa = Just ga
-                        , geRes = solved
+                        , geCanonicalMap = Solved.canonicalMap solved
                         , geDebugEnabled = False
                         }
             case resolveContext env IntMap.empty (typeRef solvedN) solvedN of
