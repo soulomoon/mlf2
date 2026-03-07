@@ -27,6 +27,94 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 
 ## Resolved
 
+### BUG-2026-03-07-005
+- Status: Resolved
+- Priority: Medium
+- Discovered: 2026-03-07
+- Resolved: 2026-03-07
+- Summary: Graph-phase explicitness lacked an explicit campaign-level negative guardrail keeping graph-sensitive phases out of broad recursion-schemes rewrites.
+- Minimal reproducer:
+  - `rg -n 'Graph-Phase Explicitness Guardrail|graph-phase|non-goal|explicit-by-default' docs/notes/2026-03-07-thesis-exact-recursion-refactor-mechanism-table.md implementation_notes.md TODO.md`
+  - `rg -n 'Driver|Validation|WitnessCanon|Reify/Core' src/MLF/Constraint/Presolution src/MLF/Reify`
+- Expected vs actual:
+  - Expected: the campaign should include a verifier-owned negative guardrail that explicitly keeps graph-sensitive phases out of generic recursion-schemes pressure unless row-specific thesis evidence says otherwise.
+  - Actual before fix: the live code remained explicit and well-tested, but the campaign docs did not yet give that negative guardrail enough explicit force to close row8.
+- Suspected/owning area:
+  - `/Volumes/src/mlf4/docs/notes/2026-03-07-thesis-exact-recursion-refactor-mechanism-table.md`
+  - `/Volumes/src/mlf4/implementation_notes.md`
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/Driver.hs`
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/Validation.hs`
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/WitnessCanon.hs`
+  - `/Volumes/src/mlf4/src/MLF/Reify/Core.hs`
+- Thesis impact:
+  - Reopened row8 `Graph-Phase Explicitness Guardrail` until the campaign explicitly marked graph-sensitive phases as non-goals for broad recursion-schemes rewrites.
+- Fix:
+  - Added the explicit negative graph-phase guardrail to `implementation_notes.md`.
+  - Refreshed row8 in the recursion-refactor mechanism table to point at that explicit non-goal boundary.
+- Regression tests:
+  - `/Volumes/src/mlf4/test/TranslatablePresolutionSpec.hs`
+  - `/Volumes/src/mlf4/test/Presolution/EnforcementSpec.hs`
+  - `cabal build all && cabal test`
+
+### BUG-2026-03-07-004
+- Status: Resolved
+- Priority: Medium
+- Discovered: 2026-03-07
+- Resolved: 2026-03-07
+- Summary: Binder-safe tree recursion coverage lacked a verifier-owned exhaustive inventory separating safe tree folds from binder-sensitive or graph-boundary traversals.
+- Minimal reproducer:
+  - `rg -n 'cata|para|hylo|Recursive|Corecursive' src/MLF src/Util`
+  - `rg -n 'Binder-Safe Tree Recursion Coverage|safe fold|graph-boundary|keep explicit' docs/notes/2026-03-07-thesis-exact-recursion-refactor-mechanism-table.md implementation_notes.md`
+- Expected vs actual:
+  - Expected: the campaign should have a complete per-traversal audit that tags remaining manual traversals as `safe fold`, `keep explicit`, or `graph-boundary`.
+  - Actual before fix: there were good positive examples and partial notes, but no exhaustive verifier-owned inventory, so row7 could not close.
+- Suspected/owning area:
+  - `/Volumes/src/mlf4/docs/notes/2026-03-07-thesis-exact-recursion-refactor-mechanism-table.md`
+  - `/Volumes/src/mlf4/implementation_notes.md`
+  - `/Volumes/src/mlf4/src/MLF/Frontend/Normalize.hs`
+  - `/Volumes/src/mlf4/src/MLF/Frontend/Desugar.hs`
+  - `/Volumes/src/mlf4/src/MLF/Elab/TermClosure.hs`
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Presolution/WitnessCanon.hs`
+- Thesis impact:
+  - Reopened row7 `Binder-Safe Tree Recursion Coverage` until the campaign carried an explicit exhaustive traversal inventory.
+- Fix:
+  - Added the exhaustive active-campaign traversal inventory to `implementation_notes.md`.
+  - Refreshed row7 in the recursion-refactor mechanism table to treat that inventory as the authoritative scope boundary.
+- Regression tests:
+  - `cabal build all && cabal test`
+
+### BUG-2026-03-07-003
+- Status: Resolved
+- Priority: Medium
+- Discovered: 2026-03-07
+- Resolved: 2026-03-07
+- Summary: Typing-environment construction lacked a direct verifier-owned production-path anchor for `Definition 15.3.6` / `Property 15.3.7`.
+- Minimal reproducer:
+  - `rg -n 'Definition 15\.3\.6|Property 15\.3\.7|O15-ENV|row5 typing-environment' docs/thesis-obligations.yaml test/ElaborationSpec.hs implementation_notes.md docs/notes/2026-03-07-thesis-exact-recursion-refactor-mechanism-table.md`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "row5 typing-environment"'`
+- Expected vs actual:
+  - Expected: the production elaboration path should have direct row-owned regressions proving the lambda-side and let-side `Γ_{a′}` rules plus their well-scoped environment entries on the live path.
+  - Actual before fix: adjacent scope/`ga′` behavior was tested, but the verifier still had only indirect evidence for row5.
+- Suspected/owning area:
+  - `/Volumes/src/mlf4/src/MLF/Elab/Run/Pipeline.hs`
+  - `/Volumes/src/mlf4/src/MLF/Elab/Elaborate.hs`
+  - `/Volumes/src/mlf4/src/MLF/Elab/Run/Scope.hs`
+  - `/Volumes/src/mlf4/test/ElaborationSpec.hs`
+  - `/Volumes/src/mlf4/docs/thesis-obligations.yaml`
+- Thesis impact:
+  - Reopened recursion-refactor row5 `Typing Environment Construction` until the live path had direct `Γ_{a′}` / well-formedness anchors.
+- Fix:
+  - Added direct `O15-ENV-LAMBDA`, `O15-ENV-LET`, and `O15-ENV-WF` anchors to `docs/thesis-obligations.yaml`.
+  - Added live-path row5 regressions in `test/ElaborationSpec.hs` for the lambda-side and let-side environment rules.
+  - Refreshed the recursion-refactor mechanism table and implementation notes to treat row5 as closed under the new production-path evidence.
+- Regression tests:
+  - `/Volumes/src/mlf4/test/ElaborationSpec.hs` (`row5 typing-environment O15-ENV-LAMBDA O15-ENV-WF: lambda body inherits the enclosing binder on the live path`)
+  - `/Volumes/src/mlf4/test/ElaborationSpec.hs` (`row5 typing-environment O15-ENV-LET O15-ENV-WF: let body receives x : Typ(b) on the live path`)
+  - `/Volumes/src/mlf4/test/ElaborationSpec.hs` (`ga′ redirect stability`)
+  - `/Volumes/src/mlf4/test/ElaborationSpec.hs` (`letScopeOverrides`)
+  - `/Volumes/src/mlf4/test/ScopeSpec.hs` (`ga scope`)
+  - `cabal build all && cabal test`
+
 ### BUG-2026-03-07-002
 - Status: Resolved
 - Priority: Medium

@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Changed
+- Thesis-exact recursion-refactor verifier sweep (2026-03-07):
+  - ran the fresh verifier-owned sweep over the new 8-row recursion-refactor mechanism table;
+  - closed all 8 rows to `YES` against the live thesis/code/test evidence;
+  - added direct row5 production-path `Γ_{a′}` anchors/tests for the lambda-side and let-side environment rules;
+  - completed the row7 exhaustive traversal inventory and the row8 explicit graph-phase non-goal guardrail, and resolved the related campaign-faithfulness gaps in `Bugs.md`.
 - Docs thesis-exact recursion-refactor campaign scaffolding (2026-03-07):
   - added a new thesis-exact recursion-refactor mechanism table with 8 fixed rows spanning frontend preprocessing, elaboration ordering/scope, tree-recursion targets, and graph-phase guardrails;
   - added a matching improving-loop prompt with a simplified role model where `Planner` owns thesis/code research and evidence reconciliation;
