@@ -4,6 +4,23 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 61 Deduplicate low-risk helper pairs (completed 2026-03-08)
+
+- Completed:
+  - extracted `freshNameLike` into `MLF.Util.Names` and `mapBoundType` into `MLF.Elab.Types`;
+  - removed the duplicate local helper definitions from `MLF.Frontend.Normalize`, `MLF.Reify.TypeOps`, `MLF.Elab.Run.TypeOps`, and `MLF.Constraint.Presolution.Plan.Finalize`;
+  - added direct source guards for the shared helper homes.
+- Verification:
+  - `freshNameLike is shared via MLF.Util.Names`: PASS (`1 example, 0 failures`)
+  - `mapBoundType is shared via MLF.Elab.Types`: PASS (`1 example, 0 failures`)
+  - `MLF.Frontend.Normalize`: PASS (`5 examples, 0 failures`)
+  - `Generalize shadow comparator`: PASS (`8 examples, 0 failures`)
+  - `cabal build all && cabal test`: PASS (`978 examples, 0 failures`)
+- Rolling priorities (next):
+  1. Keep `MLF.Util.Names` and `MLF.Elab.Types` as the single helper homes for those utility functions.
+  2. Keep the new source guards green when touching name generation or bound mapping logic.
+  3. Continue architectural cleanup only where semantic audits say it is safe.
+
 ## Task 60 Shared frontend/XMLF parser scaffolding (completed 2026-03-08)
 
 - Completed:

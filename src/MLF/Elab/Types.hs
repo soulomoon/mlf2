@@ -57,6 +57,7 @@ module MLF.Elab.Types (
     applyContext,
     buildForalls,
     schemeFromType,
+    mapBoundType,
     selectMinPrecInsertionIndex,
 ) where
 
@@ -305,6 +306,16 @@ instance PrettyDisplay ElabTerm where
 
 schemeToTypeLocal :: ElabScheme -> ElabType
 schemeToTypeLocal (Forall binds body) = buildForalls binds body
+
+mapBoundType :: (ElabType -> ElabType) -> BoundType -> BoundType
+mapBoundType f bound = case bound of
+    TArrow a b -> TArrow (f a) (f b)
+    TCon c args -> TCon c (fmap f args)
+    TBase b -> TBase b
+    TBottom -> TBottom
+    TForall v mb body ->
+        let mb' = fmap (mapBoundType f) mb
+        in TForall v mb' (f body)
 
 buildForalls :: [(String, Maybe BoundType)] -> ElabType -> ElabType
 buildForalls binds body = foldr (\(v, b) t -> TForall v b t) body binds

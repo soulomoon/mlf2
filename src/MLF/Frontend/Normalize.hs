@@ -15,6 +15,7 @@ module MLF.Frontend.Normalize (
 import qualified Data.Set as Set
 
 import MLF.Frontend.Syntax
+import MLF.Util.Names (freshNameLike)
 
 {- Note [Frontend type normalization]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -105,15 +106,6 @@ substSrcType x s = goSub
 -- ---------------------------------------------------------------------------
 -- Fresh name generation
 -- ---------------------------------------------------------------------------
-
-freshNameLike :: String -> Set.Set String -> String
-freshNameLike base used =
-    case filter (`Set.notMember` used) candidates of
-        (x:_) -> x
-        []    -> base  -- unreachable: infinite list always has a match
-  where
-    candidates = base : [base ++ show i | i <- [(1::Int)..]]
-
 -- ---------------------------------------------------------------------------
 -- Type normalization: SrcType → NormSrcType
 -- ---------------------------------------------------------------------------

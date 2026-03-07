@@ -36,7 +36,7 @@ import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Types.Elab
 import MLF.Util.ElabError (ElabError(..))
-import MLF.Util.Names (parseNameId)
+import MLF.Util.Names (parseNameId, freshNameLike)
 
 newtype BoundFun (i :: TopVar) =
     BoundFun { runBoundFun :: Set.Set String -> Set.Set String }
@@ -190,14 +190,6 @@ substTypeSimple name replacement = paraIx alg
             | otherwise ->
                 let mb' = fmap (substBoundSimpleLocal name replacement . fst . unIxPair) mb
                 in TForall v mb' (snd (unIxPair body))
-
-freshNameLike :: String -> Set.Set String -> String
-freshNameLike base used =
-    let candidates = base : [base ++ show i | i <- [(1::Int)..]]
-    in case filter (`Set.notMember` used) candidates of
-        (x:_) -> x
-        [] -> base
-
 freshTypeName :: Set.Set String -> String
 freshTypeName used =
     let candidates = ["u" ++ show i | i <- [(0::Int)..]]

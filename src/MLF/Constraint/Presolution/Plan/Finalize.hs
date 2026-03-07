@@ -37,18 +37,8 @@ import MLF.Types.Elab
     , mkElabScheme
     , tyToElab
     )
+import MLF.Elab.Types (mapBoundType)
 import MLF.Util.ElabError (ElabError(..))
-
-mapBound :: (ElabType -> ElabType) -> BoundType -> BoundType
-mapBound f bound = case bound of
-    TArrow a b -> TArrow (f a) (f b)
-    TCon c args -> TCon c (fmap f args)
-    TBase b -> TBase b
-    TBottom -> TBottom
-    TForall v mb body ->
-        let mb' = fmap (mapBound f) mb
-        in TForall v mb' (f body)
-
 -- | Inputs needed to finalize a generalized scheme.
 data FinalizeInput = FinalizeInput
     { fiEnv :: GeneralizeEnv
@@ -193,7 +183,7 @@ finalizeScheme FinalizeInput{..} =
                         TArrow a b -> TArrow (goReplace a) (goReplace b)
                         TCon c args -> TCon c (fmap goReplace args)
                         TForall name mb body ->
-                            TForall name (fmap (mapBound goReplace) mb) (goReplace body)
+                            TForall name (fmap (mapBoundType goReplace) mb) (goReplace body)
                         _ -> ty
         stripAliasForall ty = case ty of
             TForall v (Just bound) body
@@ -332,7 +322,7 @@ finalizeScheme FinalizeInput{..} =
                 ]
         renameName name = Map.findWithDefault name name renameMap
         bindingsRenamed =
-            [ (renameName name, fmap (mapBound renameTypeVars) mb)
+            [ (renameName name, fmap (mapBoundType renameTypeVars) mb)
             | (name, mb) <- bindingsFinal'
             ]
         tyRenamed = renameTypeVars tyNorm

@@ -2,6 +2,16 @@
 
 ## Thesis Alignment (Phase A–E)
 
+### 2026-03-08 deduplicate low-risk helper pairs
+- Moved `freshNameLike` into `MLF.Util.Names` and `mapBoundType` into `MLF.Elab.Types`, removing duplicate local helper definitions from their former call sites.
+- This was a pure deduplication pass only; no behavior or API shape changed beyond the internal helper homes.
+- Verification:
+  - `freshNameLike is shared via MLF.Util.Names` — PASS (`1 example, 0 failures`)
+  - `mapBoundType is shared via MLF.Elab.Types` — PASS (`1 example, 0 failures`)
+  - `MLF.Frontend.Normalize` — PASS (`5 examples, 0 failures`)
+  - `Generalize shadow comparator` — PASS (`8 examples, 0 failures`)
+  - `cabal build all && cabal test` — PASS (`978 examples, 0 failures`)
+
 ### 2026-03-08 shared frontend/XMLF parser scaffolding
 - Extracted shared lexer/literal helpers into `MLF.Parse.Common` and the common type-grammar core into `MLF.Parse.Type`.
 - Rewired `MLF.Frontend.Parse` and `MLF.XMLF.Parse` to use that shared scaffolding while keeping their term/computation grammars local.
