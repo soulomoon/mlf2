@@ -27,17 +27,11 @@ import MLF.Reify.TypeOps (
     substTypeSimple
     )
 import MLF.Elab.Types
-
-mapBound :: (ElabType -> ElabType) -> BoundType -> BoundType
-mapBound f bound = case bound of
-    TArrow a b -> TArrow (f a) (f b)
-    TCon c args -> TCon c (fmap f args)
-    TBase b -> TBase b
-    TBottom -> TBottom
-    TForall v mb body ->
-        let mb' = fmap (mapBound f) mb
-        in TForall v mb' (f body)
-
+    ( ElabType
+    , Ty(..)
+    , tyToElab
+    , mapBoundType
+    )
 inlineBoundVarsType :: PresolutionView -> ElabType -> ElabType
 inlineBoundVarsType = inlineBoundVarsTypeWith False
 
@@ -88,7 +82,7 @@ simplifyAnnotationType = go
 
     normalizeForalls (binds0, body0) =
         let binds1 =
-                [ (v, fmap (mapBound go) mb)
+                [ (v, fmap (mapBoundType go) mb)
                 | (v, mb) <- binds0
                 ]
             body1 = go body0
@@ -154,7 +148,7 @@ simplifyAnnotationType = go
 
     inlineAlias ty = case ty of
         TForall v mb body ->
-            let mb' = fmap (mapBound go) mb
+            let mb' = fmap (mapBoundType go) mb
                 body' = go body
                 mb'' = case mb' of
                     Just bound
@@ -174,9 +168,9 @@ simplifyAnnotationType = go
         _ -> False
 
     substBind v v0 (name, mb) =
-        let mb' = fmap (mapBound (renameTypeVar v v0)) mb
+        let mb' = fmap (mapBoundType (renameTypeVar v v0)) mb
         in (name, mb')
 
     substBindType v replacement (name, mb) =
-        let mb' = fmap (mapBound (substTypeSimple v replacement)) mb
+        let mb' = fmap (mapBoundType (substTypeSimple v replacement)) mb
         in (name, mb')

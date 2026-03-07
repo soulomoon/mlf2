@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Changed
+- Deduplicated low-risk helper pairs (2026-03-08):
+  - moved `freshNameLike` into `MLF.Util.Names` and removed the duplicate local copies from `MLF.Frontend.Normalize` and `MLF.Reify.TypeOps`;
+  - moved `mapBoundType` into `MLF.Elab.Types` and removed the duplicate local `mapBound` helpers from `MLF.Elab.Run.TypeOps` and `MLF.Constraint.Presolution.Plan.Finalize`;
+  - added focused source guards for both helper homes;
+  - verified `freshNameLike is shared via MLF.Util.Names` (`1 example, 0 failures`), `mapBoundType is shared via MLF.Elab.Types` (`1 example, 0 failures`), `MLF.Frontend.Normalize` (`5 examples, 0 failures`), `Generalize shadow comparator` (`8 examples, 0 failures`), and `cabal build all && cabal test` (`978 examples, 0 failures`).
 - Shared frontend/XMLF parser scaffolding (2026-03-08):
   - extracted common lexer/literal helpers into `MLF.Parse.Common` and the shared type-grammar core into `MLF.Parse.Type`;
   - rewired `MLF.Frontend.Parse` and `MLF.XMLF.Parse` to use the shared scaffolding while keeping term/computation grammar entrypoints local;

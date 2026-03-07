@@ -1,7 +1,10 @@
 module MLF.Util.Names (
     alphaName,
-    parseNameId
+    parseNameId,
+    freshNameLike,
 ) where
+
+import qualified Data.Set as Set
 
 alphaName :: Int -> Int -> String
 alphaName idx _ = letters !! (idx `mod` length letters) ++ suffix
@@ -17,3 +20,11 @@ parseNameId name =
                 [(n, "")] -> Just n
                 _ -> Nothing
         _ -> Nothing
+
+freshNameLike :: String -> Set.Set String -> String
+freshNameLike base used =
+    case filter (`Set.notMember` used) candidates of
+        (x:_) -> x
+        [] -> base
+  where
+    candidates = base : [base ++ show i | i <- [(1::Int)..]]

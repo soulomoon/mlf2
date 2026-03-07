@@ -13,6 +13,15 @@ import MLF.Elab.Pipeline (ElabError(..), Ty(..))
 
 spec :: Spec
 spec = do
+    describe "helper dedup guards" $ do
+        it "mapBoundType is shared via MLF.Elab.Types" $ do
+            typesSrc <- readFile "src/MLF/Elab/Types.hs"
+            runTypeOpsSrc <- readFile "src/MLF/Elab/Run/TypeOps.hs"
+            finalizeSrc <- readFile "src/MLF/Constraint/Presolution/Plan/Finalize.hs"
+            typesSrc `shouldSatisfy` isInfixOf "mapBoundType ::"
+            runTypeOpsSrc `shouldSatisfy` (not . isInfixOf "mapBound ::")
+            finalizeSrc `shouldSatisfy` (not . isInfixOf "mapBound ::")
+
     describe "Generalize shadow comparator" $ do
         it "accepts alpha-equivalent types" $ do
             let solvedTy = TForall "a" Nothing (TVar "a")

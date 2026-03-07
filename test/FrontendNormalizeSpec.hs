@@ -1,6 +1,7 @@
 {-# LANGUAGE GADTs #-}
 module FrontendNormalizeSpec (spec) where
 
+import Data.List (isInfixOf)
 import Test.Hspec
 import qualified Data.Set as Set
 import Data.List.NonEmpty (NonEmpty(..))
@@ -10,6 +11,15 @@ import MLF.Frontend.Normalize
 
 spec :: Spec
 spec = describe "MLF.Frontend.Normalize" $ do
+    describe "helper dedup guards" $ do
+        it "freshNameLike is shared via MLF.Util.Names" $ do
+            namesSrc <- readFile "src/MLF/Util/Names.hs"
+            normSrc <- readFile "src/MLF/Frontend/Normalize.hs"
+            reifyTypeOpsSrc <- readFile "src/MLF/Reify/TypeOps.hs"
+            namesSrc `shouldSatisfy` isInfixOf "freshNameLike ::"
+            normSrc `shouldSatisfy` (not . isInfixOf "freshNameLike ::")
+            reifyTypeOpsSrc `shouldSatisfy` (not . isInfixOf "freshNameLike ::")
+
     freeVarsSpec
     substSpec
     normalizeTypeSpec
