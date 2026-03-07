@@ -4,6 +4,7 @@ import qualified Data.IntMap.Strict as IntMap
 import Test.Hspec
 
 import qualified MLF.Constraint.Solved as Solved
+import qualified MLF.Constraint.Presolution.View as PresolutionViewBoundary
 import MLF.Constraint.Types
     ( BindFlag(..)
     , BindingError(..)
@@ -33,7 +34,7 @@ spec =
                 cycleNode = NodeId 2
                 constraint = cyclicConstraint root cycleNode
                 solved = Solved.mkTestSolved constraint IntMap.empty
-            resolveCanonicalScope constraint solved IntMap.empty root
+            resolveCanonicalScope constraint (PresolutionViewBoundary.fromSolved solved) IntMap.empty root
                 `shouldSatisfy` isBindingCycleError
 
 isBindingCycleError :: Either BindingError a -> Bool

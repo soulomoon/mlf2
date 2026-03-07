@@ -4,6 +4,44 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 55 χp/view-native elaboration closeout (completed 2026-03-07)
+
+- Completed:
+  - removed non-test/non-legacy `fromSolved` usage from `MLF.Elab.Run.Scope`, `MLF.Elab.Run.TypeOps`, `MLF.Elab.Run.Generalize`, `MLF.Elab.Run.ResultType.Util`, and `MLF.Reify.Core`;
+  - promoted `PresolutionView` to the primary internal/runtime API across the elaboration/runtime helper surface while keeping `fromSolved` only in `MLF.Constraint.Presolution.View`, `MLF.Elab.Legacy`, and tests;
+  - updated tests/internal facades to pass explicit `PresolutionView`s and added source guards for the wrapper retirement.
+- Verification:
+  - `chi-p global cleanup guard: runtime elaboration helpers no longer import fromSolved`: PASS (`1 example, 0 failures`)
+  - `chi-p wrapper retirement guard: primary helper signatures are PresolutionView-native`: PASS (`1 example, 0 failures`)
+  - `resolveCanonicalScope propagates binding tree cycle errors`: PASS (`1 example, 0 failures`)
+  - `Generalize shadow comparator`: PASS (`8 examples, 0 failures`)
+  - `row2 absolute thesis-exact guard`: PASS (`1 example, 0 failures`)
+  - `cabal build all && cabal test`: PASS (`969 examples, 0 failures`)
+- Rolling priorities (next):
+  1. Keep `fromSolved` confined to `MLF.Constraint.Presolution.View`, `MLF.Elab.Legacy`, and tests.
+  2. Keep the row2/chi-first source guards green during future runtime/reify cleanup.
+  3. Continue Task 52’s frontend preprocessing guard-first work before any recursion-schemes refactor.
+
+## Task 55 Finish χp/view-native elaboration cleanup (completed 2026-03-07)
+
+- Completed:
+  - removed the remaining non-legacy `fromSolved` wrappers from `MLF.Elab.Run.Scope`, `MLF.Elab.Run.TypeOps`, `MLF.Elab.Run.Generalize`, `MLF.Elab.Run.ResultType.Util`, and `MLF.Reify.Core`;
+  - made `PresolutionView` the primary internal/runtime API across those elaboration/reify helpers while confining `fromSolved` to the presolution boundary, `MLF.Elab.Legacy`, and tests;
+  - updated internal facades/tests to pass explicit `PresolutionView`s and added a direct source guard that runtime/reify modules no longer adapt `Solved` through `fromSolved`.
+- Verification:
+  - `ga scope`: PASS (`2 examples, 0 failures`)
+  - `Generalize shadow comparator`: PASS (`8 examples, 0 failures`)
+  - `runtime and reify modules no longer adapt Solved through fromSolved`: PASS (`1 example, 0 failures`)
+  - `row2 absolute thesis-exact guard`: PASS (`1 example, 0 failures`)
+  - `ResultType|Phase 6 — Elaborate|chi-first gate stays green`: PASS (`1 example, 0 failures`)
+  - `checked-authoritative`: PASS (`8 examples, 0 failures`)
+  - `Dual-path verification`: PASS (`4 examples, 0 failures`)
+  - `cabal build all && cabal test`: PASS (`969 examples, 0 failures`)
+- Rolling priorities (next):
+  1. Keep `fromSolved` confined to the presolution boundary, legacy path, and tests.
+  2. Keep the row2/chi-first guard stack green during future elaboration/reify cleanup.
+  3. Continue Task 52’s frontend preprocessing guard-first work before any recursion-schemes refactor.
+
 ## Task 54 Retire library-side Φ test hooks (completed 2026-03-07)
 
 - Completed:

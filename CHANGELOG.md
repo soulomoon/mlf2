@@ -3,6 +3,16 @@
 ## Unreleased
 
 ### Changed
+- χp/view-native elaboration closeout (2026-03-07):
+  - removed non-test/non-legacy `fromSolved` usage from `MLF.Elab.Run.Scope`, `MLF.Elab.Run.TypeOps`, `MLF.Elab.Run.Generalize`, `MLF.Elab.Run.ResultType.Util`, and `MLF.Reify.Core`;
+  - promoted `PresolutionView` to the primary internal/runtime API for scope resolution, bound/alias inlining, generalization helpers, result-type generalization, and the non-legacy reify surface;
+  - updated the planning/generalization reify context to carry `PresolutionView` snapshots directly and confined `fromSolved` to `MLF.Constraint.Presolution.View`, `MLF.Elab.Legacy`, and tests;
+  - added source guards for the cleanup and revalidated `chi-p global cleanup guard`, `chi-p wrapper retirement guard`, `resolveCanonicalScope propagates binding tree cycle errors`, `Generalize shadow comparator`, `row2 absolute thesis-exact guard`, and `cabal build all && cabal test` (`969 examples, 0 failures`).
+- Finished χp/view-native elaboration cleanup (2026-03-07):
+  - removed the remaining non-legacy `fromSolved` wrappers from `MLF.Elab.Run.Scope`, `MLF.Elab.Run.TypeOps`, `MLF.Elab.Run.Generalize`, `MLF.Elab.Run.ResultType.Util`, and `MLF.Reify.Core`;
+  - made `PresolutionView` the primary internal/runtime API for scope lookup, type inlining, generalization, result-type fallback generalization, and reification helpers, while keeping `fromSolved` only in the presolution boundary, `MLF.Elab.Legacy`, and tests;
+  - updated internal/test callers to pass explicit `PresolutionView`s and added a source guard that runtime/reify modules no longer adapt `Solved` through `fromSolved`;
+  - verified `ga scope` (`2 examples, 0 failures`), `Generalize shadow comparator` (`8 examples, 0 failures`), `runtime and reify modules no longer adapt Solved through fromSolved` (`1 example, 0 failures`), `row2 absolute thesis-exact guard` (`1 example, 0 failures`), `ResultType|Phase 6 — Elaborate|chi-first gate stays green` (`1 example, 0 failures`), `checked-authoritative` (`8 examples, 0 failures`), `Dual-path verification` (`4 examples, 0 failures`), and `cabal build all && cabal test` (`969 examples, 0 failures`).
 - Retired library-side Φ test hooks (2026-03-07):
   - removed `MLF.Elab.Phi.TestOnly` and `MLF.Elab.Phi.IdentityBridge` from `mlf2-internal`;
   - moved pure witness-domain ranking helpers into `test/Phi/WitnessDomainUtil.hs` and renamed the dedicated unit suite to `WitnessDomain`;

@@ -32,11 +32,12 @@ import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
+import MLF.Constraint.Finalize (presolutionViewFromSnapshot)
+import MLF.Constraint.Presolution.View (pvCanonicalMap)
 import MLF.Constraint.Presolution.Plan
     ( GeneralizePlan(..)
     , ReifyPlan(..)
     )
-import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Constraint.VarStore as VarStore
@@ -412,7 +413,7 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
                         resAlias =
                             if useConstraintReify
                                 then resForReify
-                                else Solved.rebuildWithConstraint resForReify constraintAlias
+                                else presolutionViewFromSnapshot constraintAlias (pvCanonicalMap resForReify)
                     ty <- reifyWithOrig originalConstraintAlias bodyRoot substAlias constraintAlias resAlias
                     inlineRigidOrig originalConstraintAlias substAlias constraintAlias resAlias ty
           where

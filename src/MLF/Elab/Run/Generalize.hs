@@ -16,8 +16,6 @@ import MLF.Constraint.Presolution
     ( PresolutionPlanBuilder(..)
     , PresolutionView(..)
     )
-import MLF.Constraint.Presolution.View (fromSolved)
-import MLF.Constraint.Solved (Solved)
 import MLF.Constraint.Types
     ( Constraint
     , NodeId(..)
@@ -156,19 +154,17 @@ generalizeAtWithBuilderView planBuilder mbBindParentsGa presolutionView scopeRoo
 generalizeAtWithBuilder
     :: PresolutionPlanBuilder
     -> Maybe GaBindParents
-    -> Solved
+    -> PresolutionView
     -> NodeRef
     -> NodeId
     -> Either ElabError (ElabScheme, IntMap.IntMap String)
-generalizeAtWithBuilder planBuilder mbBindParentsGa solved scopeRoot targetNode =
-    generalizeAtWithBuilderView planBuilder mbBindParentsGa (fromSolved solved) scopeRoot targetNode
+generalizeAtWithBuilder = generalizeAtWithBuilderView
 
 mkGeneralizeAtWithBuilder
     :: PresolutionPlanBuilder
-    -> Solved
+    -> PresolutionView
     -> GeneralizeAtView
-mkGeneralizeAtWithBuilder planBuilder solved =
-    mkGeneralizeAtWithBuilderView planBuilder (fromSolved solved)
+mkGeneralizeAtWithBuilder = mkGeneralizeAtWithBuilderView
 
 mkGeneralizeAtWithBuilderView
     :: PresolutionPlanBuilder

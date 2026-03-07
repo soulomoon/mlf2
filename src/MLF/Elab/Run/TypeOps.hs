@@ -13,9 +13,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
 import MLF.Constraint.Presolution (PresolutionView(..))
-import MLF.Constraint.Presolution.View (fromSolved)
 import qualified MLF.Constraint.VarStore as VarStore
-import MLF.Constraint.Solved (Solved)
 import MLF.Constraint.Types.Graph (TyNode(..), cNodes, fromListNode, toListNode)
 import MLF.Reify.Core
     ( namedNodesFromView
@@ -42,13 +40,11 @@ mapBound f bound = case bound of
         let mb' = fmap (mapBound f) mb
         in TForall v mb' (f body)
 
-inlineBoundVarsType :: Solved -> ElabType -> ElabType
-inlineBoundVarsType solved =
-    inlineBoundVarsTypeWith False (fromSolved solved)
+inlineBoundVarsType :: PresolutionView -> ElabType -> ElabType
+inlineBoundVarsType = inlineBoundVarsTypeWith False
 
-inlineBoundVarsTypeForBound :: Solved -> ElabType -> ElabType
-inlineBoundVarsTypeForBound solved =
-    inlineBoundVarsTypeWith True (fromSolved solved)
+inlineBoundVarsTypeForBound :: PresolutionView -> ElabType -> ElabType
+inlineBoundVarsTypeForBound = inlineBoundVarsTypeWith True
 
 inlineBoundVarsTypeView :: PresolutionView -> ElabType -> ElabType
 inlineBoundVarsTypeView = inlineBoundVarsTypeWith False

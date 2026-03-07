@@ -14,14 +14,12 @@ import Data.Functor.Foldable (cata)
 import qualified Data.IntMap.Strict as IntMap
 
 import MLF.Constraint.Presolution (PresolutionPlanBuilder(..), PresolutionView)
-import MLF.Constraint.Presolution.View (fromSolved)
-import MLF.Constraint.Solved (Solved)
 import MLF.Constraint.Types.Graph
     ( NodeId(..)
     , NodeRef(..)
     )
 import MLF.Elab.Generalize (GaBindParents(..))
-import MLF.Elab.Run.Generalize (generalizeAtWithBuilderView)
+import MLF.Elab.Run.Generalize (generalizeAtWithBuilder)
 import MLF.Elab.Inst (applyInstantiation)
 import MLF.Elab.Types
 import MLF.Frontend.ConstraintGen (AnnExpr(..))
@@ -32,17 +30,11 @@ import MLF.Reify.Core (reifyTypeFromView)
 generalizeWithPlan
     :: PresolutionPlanBuilder
     -> GaBindParents
-    -> Solved
+    -> PresolutionView
     -> NodeRef
     -> NodeId
     -> Either ElabError (ElabScheme, IntMap.IntMap String)
-generalizeWithPlan planBuilder bindParentsGa solved scopeRoot targetNode =
-    generalizeWithPlanView
-        planBuilder
-        bindParentsGa
-        (fromSolved solved)
-        scopeRoot
-        targetNode
+generalizeWithPlan = generalizeWithPlanView
 
 generalizeWithPlanView
     :: PresolutionPlanBuilder
@@ -56,7 +48,7 @@ generalizeWithPlanView planBuilder bindParentsGa presolutionView scopeRoot targe
             SchemeFreeVars{} -> True
             _ -> False
         runWithGa mbGa =
-            generalizeAtWithBuilderView
+            generalizeAtWithBuilder
                 planBuilder
                 mbGa
                 presolutionView

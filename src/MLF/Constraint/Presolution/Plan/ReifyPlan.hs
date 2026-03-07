@@ -19,7 +19,7 @@ import qualified Data.Set as Set
 
 import MLF.Constraint.Types
 import qualified MLF.Constraint.NodeAccess as NodeAccess
-import MLF.Constraint.Solved (Solved)
+import MLF.Constraint.Presolution.View (PresolutionView)
 import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.BindingUtil (bindingScopeFor)
@@ -98,7 +98,7 @@ data ReifyBindingEnv = ReifyBindingEnv
     , rbeNamedUnderGaSet :: IntSet.IntSet
     , rbeBinderSet :: IntSet.IntSet
     , rbeUniqueUnboundedName :: Maybe String
-    , rbeResForReify :: Solved
+    , rbeResForReify :: PresolutionView
     , rbeBindParentsGa :: Maybe GaBindParentsInfo
     , rbeBindingScopeGen :: NodeId -> Maybe GenNodeId
     , rbeHasExplicitBound :: NodeId -> Bool
@@ -176,7 +176,7 @@ buildReifyPlan ReifyPlanInput{..} =
                             | (baseKey, solvedKey) <- IntMap.toList rpiBaseGammaRep
                             , Just name <- [IntMap.lookup solvedKey substBaseLocal]
                             ]
-                        fromSolved =
+                        fromSolvedPref =
                             [ (getNodeId baseN, name)
                             | (solvedKey, name) <- IntMap.toList substBaseLocal
                             , Just baseN <- [IntMap.lookup solvedKey rpiSolvedToBasePref]
@@ -189,7 +189,7 @@ buildReifyPlan ReifyPlanInput{..} =
                             ]
                     in IntMap.unions
                         [ IntMap.fromListWith (\_ old -> old) fromBaseRep
-                        , IntMap.fromListWith (\_ old -> old) fromSolved
+                        , IntMap.fromListWith (\_ old -> old) fromSolvedPref
                         , IntMap.fromListWith (\_ old -> old) fromBaseToSolved
                         ]
                 Nothing -> IntMap.empty

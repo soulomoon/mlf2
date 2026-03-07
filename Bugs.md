@@ -7,6 +7,36 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 
 ## Resolved
 
+### BUG-2026-03-07-007
+- Status: Resolved
+- Priority: Medium
+- Discovered: 2026-03-07
+- Resolved: 2026-03-07
+- Summary: The runtime/reify surface still exposed non-legacy `Solved -> PresolutionView` convenience wrappers, leaving χp/view-native cleanup incomplete after the row2 closeout.
+- Minimal reproducer:
+  - `rg -n "fromSolved" src/MLF/Elab/Run src/MLF/Reify/Core.hs`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "runtime and reify modules no longer adapt Solved through fromSolved"'`
+- Expected vs actual:
+  - Expected: runtime elaboration/reify helpers should consume `PresolutionView` directly, with `fromSolved` confined to the boundary, legacy compatibility, and tests.
+  - Actual before fix: `MLF.Elab.Run.Scope`, `MLF.Elab.Run.TypeOps`, `MLF.Elab.Run.Generalize`, `MLF.Elab.Run.ResultType.Util`, and `MLF.Reify.Core` still exposed `Solved` convenience wrappers implemented via `fromSolved`.
+- Suspected/owning area:
+  - `/Volumes/src/mlf4/src/MLF/Elab/Run/Scope.hs`
+  - `/Volumes/src/mlf4/src/MLF/Elab/Run/TypeOps.hs`
+  - `/Volumes/src/mlf4/src/MLF/Elab/Run/Generalize.hs`
+  - `/Volumes/src/mlf4/src/MLF/Elab/Run/ResultType/Util.hs`
+  - `/Volumes/src/mlf4/src/MLF/Reify/Core.hs`
+- Thesis impact:
+  - This was a row2/chi-first hardening gap: the live runtime and reify surfaces still allowed solved-compat convenience APIs to creep back into non-legacy code.
+- Fix:
+  - Removed the non-legacy `fromSolved` wrappers and made `PresolutionView` the primary internal/runtime API across those modules.
+  - Updated internal/test callers to pass explicit `PresolutionView`s; `MLF.Elab.Legacy` remains the designated non-test compatibility zone.
+- Regression tests:
+  - `/Volumes/src/mlf4/test/PipelineSpec.hs` (`runtime and reify modules no longer adapt Solved through fromSolved`, `row2 absolute thesis-exact guard`, `ResultType|Phase 6 — Elaborate|chi-first gate stays green`)
+  - `/Volumes/src/mlf4/test/ScopeSpec.hs` (`ga scope`)
+  - `/Volumes/src/mlf4/test/GeneralizeSpec.hs` (`Generalize shadow comparator`)
+  - `/Volumes/src/mlf4/test/PipelineSpec.hs` (`checked-authoritative`, `Dual-path verification`)
+  - `cabal build all && cabal test`
+
 ### BUG-2026-03-07-006
 - Status: Resolved
 - Priority: Medium

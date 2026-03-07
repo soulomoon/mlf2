@@ -88,7 +88,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                                 [GenRef gid] -> genRef gid
                                 roots -> error ("PipelineSpec: unexpected binding roots " ++ show roots)
                     let generalizeAt = generalizeAtWithBuilder (defaultPlanBuilder defaultTraceConfig) Nothing
-                    case generalizeAt (res) scopeRoot root' of
+                    case generalizeAt (PresolutionViewBoundary.fromSolved res) scopeRoot root' of
                         Right (Forall binds ty, _subst) -> do
                             binds `shouldBe` []
                             let tyStr = pretty ty
@@ -110,7 +110,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                      case ann of
                          ALet _ schemeGen schemeRoot _ _ _ _ _ -> do
                              let generalizeAt = generalizeAtWithBuilder (defaultPlanBuilder defaultTraceConfig) Nothing
-                             case generalizeAt (res) (genRef schemeGen) schemeRoot of
+                             case generalizeAt (PresolutionViewBoundary.fromSolved res) (genRef schemeGen) schemeRoot of
                                  Right scheme -> show scheme `shouldSatisfy` ("Forall" `isInfixOf`)
                                  Left err -> expectationFailure $ "Generalize error: " ++ show err
                          _ -> expectationFailure "Expected ALet annotation"
@@ -127,7 +127,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 nodes = fromListNode [(var0, baseNode), (var1, listNode)]
                 constraint = emptyConstraint { cNodes = nodes }
                 res = Solved.mkTestSolved constraint IntMap.empty
-            case reifyType res var1 of
+            case reifyType (PresolutionViewBoundary.fromSolved res) var1 of
                 Right ty ->
                     case ty of
                         TCon con args -> do
@@ -153,7 +153,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 nodes = fromListNode [(var0, intNode), (var1, maybeNode), (var2, listNode)]
                 constraint = emptyConstraint { cNodes = nodes }
                 res = Solved.mkTestSolved constraint IntMap.empty
-            case reifyType res var2 of
+            case reifyType (PresolutionViewBoundary.fromSolved res) var2 of
                 Right ty ->
                     case ty of
                         TCon outerCon outerArgs -> do
@@ -253,6 +253,50 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             isInfixOf "Solved.fromConstraintAndUf" chiQuerySrc `shouldBe` False
             isInfixOf "Solved.rebuildWithConstraint" chiQuerySrc `shouldBe` False
 
+        it "chi-p global cleanup guard: runtime elaboration helpers no longer import fromSolved" $ do
+            scopeSrc <- readFile "src/MLF/Elab/Run/Scope.hs"
+            typeOpsSrc <- readFile "src/MLF/Elab/Run/TypeOps.hs"
+            generalizeSrc <- readFile "src/MLF/Elab/Run/Generalize.hs"
+            resultTypeUtilSrc <- readFile "src/MLF/Elab/Run/ResultType/Util.hs"
+            reifySrc <- readFile "src/MLF/Reify/Core.hs"
+            legacySrc <- readFile "src/MLF/Elab/Legacy.hs"
+            forM_ [scopeSrc, typeOpsSrc, generalizeSrc, resultTypeUtilSrc, reifySrc] $ \src ->
+                src `shouldSatisfy` (not . isInfixOf "fromSolved")
+            legacySrc `shouldSatisfy` isInfixOf "fromSolved"
+
+        it "chi-p wrapper retirement guard: primary helper signatures are PresolutionView-native" $ do
+            scopeSrc <- readFile "src/MLF/Elab/Run/Scope.hs"
+            typeOpsSrc <- readFile "src/MLF/Elab/Run/TypeOps.hs"
+            generalizeSrc <- readFile "src/MLF/Elab/Run/Generalize.hs"
+            resultTypeUtilSrc <- readFile "src/MLF/Elab/Run/ResultType/Util.hs"
+            reifySrc <- readFile "src/MLF/Reify/Core.hs"
+            forM_
+                [ "bindingScopeRefCanonical :: Solved"
+                , "schemeBodyTarget :: Solved"
+                , "canonicalizeScopeRef :: Solved"
+                , "resolveCanonicalScope :: Constraint -> Solved"
+                , "letScopeOverrides :: Constraint -> Constraint -> Solved"
+                ] $ \marker ->
+                    scopeSrc `shouldSatisfy` (not . isInfixOf marker)
+            forM_
+                [ "inlineBoundVarsType :: Solved"
+                , "inlineBoundVarsTypeForBound :: Solved"
+                ] $ \marker ->
+                    typeOpsSrc `shouldSatisfy` (not . isInfixOf marker)
+            generalizeSrc `shouldSatisfy` (not . isInfixOf "-> Solved")
+            resultTypeUtilSrc `shouldSatisfy` (not . isInfixOf "-> Solved")
+            forM_
+                [ "reifyType :: Solved"
+                , "reifyTypeWithNames :: Solved"
+                , "reifyTypeWithNamesNoFallback :: Solved"
+                , "reifyTypeWithNamedSet :: Solved"
+                , "reifyTypeWithNamedSetNoFallback :: Solved"
+                , "reifyBoundWithNames :: Solved"
+                , "reifyBoundWithNamesBound :: Solved"
+                , "namedNodes :: Solved"
+                ] $ \marker ->
+                    reifySrc `shouldSatisfy` (not . isInfixOf marker)
+
         it "row3 ordering thesis-exact guard: Driver removes global post-loop weaken flush" $ do
             driverSrc <- readFile "src/MLF/Constraint/Presolution/Driver.hs"
             driverSrc `shouldSatisfy` (not . isInfixOf "flushPendingWeakens")
@@ -323,6 +367,22 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             case binderSrcOrErr of
                 Left _ -> pure ()
                 Right _ -> expectationFailure "Expected src/MLF/Elab/Phi/Binder.hs to be retired"
+
+        it "chi-first guard: runtime and reify modules no longer adapt Solved through fromSolved" $ do
+            scopeSrc <- readFile "src/MLF/Elab/Run/Scope.hs"
+            typeOpsSrc <- readFile "src/MLF/Elab/Run/TypeOps.hs"
+            generalizeSrc <- readFile "src/MLF/Elab/Run/Generalize.hs"
+            resultTypeUtilSrc <- readFile "src/MLF/Elab/Run/ResultType/Util.hs"
+            reifySrc <- readFile "src/MLF/Reify/Core.hs"
+            legacySrc <- readFile "src/MLF/Elab/Legacy.hs"
+            boundarySrc <- readFile "src/MLF/Constraint/Presolution/View.hs"
+            scopeSrc `shouldSatisfy` (not . isInfixOf "fromSolved")
+            typeOpsSrc `shouldSatisfy` (not . isInfixOf "fromSolved")
+            generalizeSrc `shouldSatisfy` (not . isInfixOf "fromSolved")
+            resultTypeUtilSrc `shouldSatisfy` (not . isInfixOf "fromSolved")
+            reifySrc `shouldSatisfy` (not . isInfixOf "fromSolved")
+            legacySrc `shouldSatisfy` isInfixOf "fromSolved"
+            boundarySrc `shouldSatisfy` isInfixOf "fromSolved ::"
 
         it "chi-first guard: internals use shared ChiQuery facade" $ do
             elabSrc <- readFile "src/MLF/Elab/Elaborate.hs"
@@ -748,7 +808,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         etBinderArgs tr0 `shouldBe` []
         etBinderReplayMap tr0 `shouldBe` IntMap.empty
         Binding.orderedBinders id (prConstraint pres) (typeRef c1SchemeRoot) `shouldBe` Right []
-        case generalizeAt solved (genRef c1Gen) c1SchemeRoot of
+        case generalizeAt (PresolutionViewBoundary.fromSolved solved) (genRef c1Gen) c1SchemeRoot of
             Right (Forall binds ty, _subst) -> do
                 binds `shouldBe` []
                 pretty ty `shouldSatisfy` ("Int" `isInfixOf`)
