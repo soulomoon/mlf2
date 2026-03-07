@@ -1,0 +1,12 @@
+# Findings
+
+- Local uncommitted edits already exist in `src/MLF/Elab/Elaborate.hs`, `test/PipelineSpec.hs`, and `test/ScopeSpec.hs`; the audit must avoid conflating those changes with `Solved` cleanup readiness.
+- `src/MLF/Constraint/Solved.hs` is not a thin view wrapper anymore; it owns construction from solver snapshots, canonical/original graph accessors, canonical-domain queries, validation helpers, and mutation-style rebuild helpers.
+- `MLF.Constraint.Solved` is imported directly by elaboration, reification, presolution planning/view layers, finalize logic, utility ordering code, and multiple test suites, so cleanup risk is cross-cutting rather than local.
+- `implementation_notes.md` documents a recent migration that made `PresolutionView` the primary runtime/internal API; `fromSolved` now remains only in `MLF.Constraint.Presolution.View`, `MLF.Elab.Legacy`, and tests.
+- `MLF.Constraint.Presolution.View.fromSolved` is a thin adapter over `Solved`, which suggests the read-only query surface is already being superseded, but `Solved` still owns canonical/original dual-domain state, snapshot replay construction, and strict validation helpers.
+- The remaining production-side `Solved` dependencies are concentrated in construction/finalization paths (`MLF.Constraint.Finalize`, `MLF.Constraint.Presolution.Plan`, `MLF.Reify.Core`) plus a few read/query consumers; many richer exports are either test-only or currently unused outside `Solved.hs`.
+- `rebuildWithNodes`, `rebuildWithBindParents`, and `rebuildWithGenNodes` appear unused outside `MLF.Constraint.Solved` itself, making them strong cleanup candidates if no pending branch depends on them.
+- Direct binary test execution confirms `MLF.Constraint.Solved` core/parity coverage is green (`43 examples`) and the guard `chi-first guard: runtime and reify modules no longer adapt Solved through fromSolved` also passes.
+- `test/Constraint/SolvedSpec.hs` still labels part of the API surface as `Degraded stubs (Phase 1)`, which is a signal that some exported functionality exists mainly for compatibility/testing rather than as a settled long-term design.
+- `GeneralizeEnv.geRes :: Solved` in `MLF.Constraint.Presolution.Plan.Context` is now nearly vestigial: within the planner/context code it is only read for `Solved.canonicalMap`, so that remaining `Solved` plumbing looks like an easy follow-up cleanup rather than a hard architectural dependency.

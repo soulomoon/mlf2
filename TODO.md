@@ -4,6 +4,21 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 62 Solved ecosystem classification table closeout (completed 2026-03-08)
+
+- Completed:
+  - expanded `docs/architecture.md` from a coarse `Solved` cleanup note into a full grouped 3-column classification of the `Solved` surface and adjacent solved-related seams;
+  - recorded the authoritative evidence matrix in `tasks/archive/2026-03-08-solved-classification-table/findings.md`, covering every exported `Solved` symbol plus the main view/finalize/reify/planner compatibility seams;
+  - locked the thesis-exact cleanup rule to preserve replay-faithful construction, original↔canonical correspondence, and strict solved-graph validation while relocating compat glue and retiring dead/test-only production surface.
+- Verification:
+  - static audit counts: PASS (`32` export entries, `13` direct `src/` importers, `12` direct `test/` importers, `6` named adjacent seams)
+  - `MLF.Constraint.Solved`: PASS (`43 examples, 0 failures`)
+  - `chi-first guard: runtime and reify modules no longer adapt Solved through fromSolved`: PASS (`1 example, 0 failures`)
+- Rolling priorities (next):
+  1. Use the new classification table as the sole architectural reference for future `Solved` cleanup decisions.
+  2. Keep `docs/architecture.md` and the evidence matrix in sync when solved/view/finalize/reify call sites change.
+  3. Treat narrowing `geRes`, relocating compat builders, and removing dead mutation hooks as separate follow-up changes with targeted verification.
+
 ## Task 61 Deduplicate low-risk helper pairs (completed 2026-03-08)
 
 - Completed:
