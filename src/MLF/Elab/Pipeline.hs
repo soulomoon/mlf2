@@ -32,6 +32,7 @@ module MLF.Elab.Pipeline (
     schemeToType,
     applyInstantiation,
     schemeFromType,
+    freeTypeVarsType,
     sigmaReorder,
     -- * Witness translation (production path)
     phiFromEdgeWitnessWithTrace,
@@ -79,6 +80,7 @@ import MLF.Elab.TypeCheck (Env(..), checkInstantiation, typeCheck, typeCheckWith
 import MLF.Elab.Reduce (isValue, normalize, step)
 import MLF.Elab.Phi (contextToNodeBound, phiFromEdgeWitnessWithTrace)
 import MLF.Reify.Core (namedNodes, reifyBoundWithNames, reifyType, reifyTypeWithNamedSet, reifyTypeWithNames)
+import MLF.Reify.TypeOps (freeTypeVarsType)
 import MLF.Elab.Run
     ( applyRedirectsToAnn
     , canonicalizeAnn

@@ -1254,6 +1254,40 @@
   - `test/FrontendPrettySpec.hs` — `pretty-prints normalized staged types`
   - `test/ConstraintGenSpec.hs` — `internalizes normalized forall bounds using indexed StructBound alias`
 
+### 2026-03-07 thesis-exact recursion-refactor verifier sweep
+
+- Fresh verifier sweep outcome: rows 1–4 and 6 in `docs/notes/2026-03-07-thesis-exact-recursion-refactor-mechanism-table.md` are thesis exact against the live codebase and the thesis references named there; rows 5, 7, and 8 remain open evidence/guardrail gaps.
+- Row 1 `Surface Preprocessing Exactness`:
+  - `MLF.Frontend.Normalize` remains the alias-bound normalization boundary; capture-avoiding substitution and alpha-renaming keep it binder-sensitive, so this module stays explicit rather than a blind recursion-schemes target.
+  - `MLF.Frontend.Desugar.desugarSurface` is the tree-only preprocessing rewrite boundary.
+  - `MLF.Frontend.ConstraintGen.Translate` remains the semantic boundary where annotations become explicit coercion/graphic constraints; typed lets stay coercion-only sugar (`ELet x (EAnn rhs σ) body`), not declared-scheme syntax.
+- Row 2 `Leftmost-Lowermost Quantifier Ordering`:
+  - `sigmaReorder` plus the O15 reorder guard cases are the authoritative freeze points for `§15.2.4` / `§15.3.4` binder-order semantics.
+- Row 3 `Let-Scope Translation Discipline`:
+  - The live parser/frontend/constraint path preserves the revised let-scope translation from `§15.2.6`; typed-let syntax remains sugar for an annotated RHS and does not reintroduce declared-scheme behavior.
+- Row 4 `Translatable Presolution Boundary`:
+  - Validation/rigidification is an explicit graph/presolution guardrail, not a recursion-schemes target.
+- Row 5 `Typing Environment Construction`:
+  - Scope and environment helpers stay under fail-fast binding-tree error propagation, and row5 now has direct production-path anchors for `Definition 15.3.6` / `Property 15.3.7` in `docs/thesis-obligations.yaml` plus live-path elaboration regressions in `test/ElaborationSpec.hs`.
+- Row 6 `Computation Context Construction`:
+  - `Phi.Context` / `Phi.Omega` remain explicit context-search logic; future cleanup must preserve context-find/reject behavior and binder/order-sensitive insertion points.
+- Row 7 `Binder-Safe Tree Recursion Coverage` per-traversal audit:
+  - Exhaustive active-campaign traversal inventory:
+    - `src/MLF/Frontend/Desugar.hs` — `safe fold`: pure tree rewrite over normalized surface syntax; candidate for `cata`-style cleanup only.
+    - `src/MLF/Frontend/Normalize.hs` — `keep explicit`: alias inlining uses capture-avoiding substitution and alpha-renaming, so binder/capture semantics remain the primary concern.
+    - `src/MLF/Elab/TermClosure.hs` — `already recursion-schemes-backed`: retain as the positive reference example for genuinely tree-shaped elaboration helpers.
+    - `src/MLF/Elab/Reduce.hs` — `already recursion-schemes-backed`: keep as a second positive reference example for tree-shaped term/type substitution.
+    - `src/MLF/Elab/Elaborate.hs` — `keep explicit`: environment threading and subterm-specific elaboration rules are semantic control flow, not a blanket fold target.
+    - `src/MLF/Constraint/Presolution/WitnessCanon.hs` — `graph-boundary`: localized folds are acceptable internally, but witness normalization remains graph-sensitive overall.
+    - `src/MLF/Constraint/Presolution/Driver.hs` — `graph-boundary`: presolution scheduling/finalization is not a recursion-schemes simplification target.
+    - `src/MLF/Constraint/Presolution/Validation.hs` — `graph-boundary`: translatability validation/rigidification is an explicit thesis guardrail.
+    - `src/MLF/Reify/Core.hs` — `graph-boundary`: reification follows graph-aware naming/boundary rules and is outside broad tree-fold refactors.
+  - Inventory rule: future recursion-refactor work may touch only entries classified `safe fold` or `already recursion-schemes-backed` unless a new verifier-owned thesis audit explicitly reclassifies a module.
+- Row 8 `Graph-Phase Explicitness Guardrail`:
+  - Explicit negative guardrail: broad recursion-schemes rewrites are a non-goal for graph-sensitive phases unless a later row-specific verifier pass says otherwise.
+  - Guardrail-owned modules for this campaign are: `src/MLF/Constraint/Presolution/Driver.hs`, `src/MLF/Constraint/Presolution/Validation.hs`, `src/MLF/Constraint/Presolution/WitnessCanon.hs`, `src/MLF/Reify/Core.hs`, and their graph-aware companions.
+  - Allowed local changes in those modules are limited to thesis-preserving helper extraction, documentation, or tests; proposals to replace the explicit graph algorithms themselves require new row-specific thesis evidence first.
+
 ### 2026-02-08 Phase 6 crash hardening (BUG-2026-02-06-001)
 
 - Before the solved-order cutover, `MLF.Elab.Generalize.reifyWithGaBase` validated `solvedToBasePref` targets before any base-constraint reification.

@@ -10,11 +10,25 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - studied the thesis and the live Haskell codebase specifically for thesis-safe recursion-schemes and simplification work;
   - authored a new 8-row mechanism table that mixes positive tree-refactor targets with explicit graph-phase guardrails;
   - added a simplified improving-loop prompt whose `Planner` owns thesis/code research and evidence reconciliation;
-  - added a matching JSONL event-log template plus design/implementation-plan docs for the campaign.
+  - added a matching JSONL event-log template plus design/implementation-plan docs for the campaign;
+  - ran the fresh verifier sweep requested by the campaign and closed all 8 rows to `YES` against the live code/test/thesis evidence;
+  - added direct row5 production-path `Γ_{a′}` anchors/tests for the lambda-side and let-side environment rules;
+  - completed the row7 exhaustive traversal inventory and the row8 explicit graph-phase non-goal guardrail, so the recursion-refactor mechanism table is now fully green.
 - Rolling priorities (next):
-  1. Run a fresh verifier-owned sweep over the 8 new rows before attempting any code refactor.
-  2. Start with `Binder-Safe Tree Recursion Coverage` only after the preprocessing / Σ / let-scope rows have been re-audited.
-  3. Keep `Translatable Presolution Boundary` and `Graph-Phase Explicitness Guardrail` as explicit non-goal guardrails for broad recursion-schemes rewrites.
+  1. Keep the 8-row recursion-refactor guard stack green under future frontend/elaboration/presolution cleanup.
+  2. Restrict future recursion-schemes work to the row7 inventory and require row-specific verifier evidence before widening scope.
+  3. Preserve the row5 production-path environment anchors and the row8 graph-phase non-goal guardrail through future changes.
+
+## Task 52 Surface preprocessing exactness round-1 planner (in progress 2026-03-07)
+
+- In progress:
+  - reconciled thesis `§12.3.2.2` / `§15.3.8`, supplementary `xmlf` desugaring notes, and the live frontend code/tests for alias-bound normalization plus coercion-based annotation lowering;
+  - current evidence points to a bounded guardrail-first round: add direct preprocessing-contract guards before any recursion-schemes cleanup across normalization/desugaring traversals;
+  - keep typed-let sugar and coercion-domain/codomain handling inside this row’s audit boundary, but avoid widening into broader let-scope/elaboration rewrites unless the new guards expose a mismatch.
+- Rolling priorities (next):
+  1. Add direct frontend guard tests for exact desugaring/normalization contracts (`ELamAnn`, `EAnn`, typed-let sugar, alias-bound inlining before Phase 1).
+  2. Reassess whether any residual tree-only traversal is still worth a tiny recursion-schemes refactor after those guards are green.
+  3. If a new guard fails because of scope placement rather than preprocessing shape, explicitly expand to `Let-Scope Translation Discipline` instead of patching across rows silently.
 
 ## Task 50 TMT fresh round-2 closeout (completed 2026-03-07)
 

@@ -737,6 +737,54 @@ obligations:
     rationale: Surface elaboration anchors for Figure 15.3.5 case split.
   status: anchored
   supports_claims: [CLM-ELABORATION-CORRECTNESS]
+- id: O15-ENV-LAMBDA
+  chapter: 15
+  section: 15.3.3
+  figure_or_definition: Definition 15.3.6
+  thesis_rule_label: Typing environment lambda extension
+  judgment_or_equation: Γ_{a′} extends with x:S′ for the immediately enclosing λ(x)a′
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/Run/Pipeline.hs#runPipelineElab"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Elaborate.hs#scopeRootForNode"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Elaborate.hs#generalizeAtNode"
+  test_anchor:
+    matcher: O15-ENV-LAMBDA
+    file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
+    rationale: Direct production-path guard for the lambda case of Definition 15.3.6.
+  status: anchored
+  supports_claims: [CLM-ELABORATION-CORRECTNESS]
+- id: O15-ENV-LET
+  chapter: 15
+  section: 15.3.3
+  figure_or_definition: Definition 15.3.6
+  thesis_rule_label: Typing environment let extension
+  judgment_or_equation: Γ_{a′} extends with x:Typ(b) for the immediately enclosing let x = b in a′
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/Run/Pipeline.hs#runPipelineElab"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Elaborate.hs#scopeRootForNode"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Elaborate.hs#generalizeAtNode"
+  test_anchor:
+    matcher: O15-ENV-LET
+    file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
+    rationale: Direct production-path guard for the let case of Definition 15.3.6.
+  status: anchored
+  supports_claims: [CLM-ELABORATION-CORRECTNESS]
+- id: O15-ENV-WF
+  chapter: 15
+  section: 15.3.3
+  figure_or_definition: Property 15.3.7
+  thesis_rule_label: Typing environments are well formed
+  judgment_or_equation: Γ_{a′} is a well-formed xMLF environment
+  code_anchors:
+  - "/Volumes/src/mlf4/src/MLF/Elab/Run/Pipeline.hs#runPipelineElab"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Elaborate.hs#generalizeAtNode"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Run/Scope.hs#resolveCanonicalScope"
+  test_anchor:
+    matcher: O15-ENV-WF
+    file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
+    rationale: Direct production-path guard that recovered live-path environment entries remain well-scoped.
+  status: anchored
+  supports_claims: [CLM-ELABORATION-CORRECTNESS]
 - id: O15-TR-SEQ-EMPTY
   chapter: 15
   section: 15.3.5

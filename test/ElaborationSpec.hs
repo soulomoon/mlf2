@@ -41,7 +41,7 @@ import MLF.Constraint.Types.Witness (EdgeWitness(..), InstanceOp(..), InstanceWi
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Binding.Canonicalization as BindCanon
 import MLF.Constraint.Canonicalizer (canonicalizeNode)
-import MLF.Elab.Run.Scope (letScopeOverrides, resolveCanonicalScope)
+import MLF.Elab.Run.Scope (letScopeOverrides, resolveCanonicalScope, schemeBodyTarget)
 import MLF.Constraint.Presolution
     ( PresolutionView(..)
     , PresolutionPlanBuilder(..)
@@ -137,6 +137,45 @@ generalizeAtWithActive
     -> Either Elab.ElabError (Elab.ElabScheme, IntMap.IntMap String)
 generalizeAtWithActive solved mbGa scopeRoot targetNode =
     generalizeAtWith mbGa solved scopeRoot targetNode
+
+recoverLiveSchemeAt :: PipelineArtifacts -> NodeId -> IO Elab.ElabScheme
+recoverLiveSchemeAt artifacts nodeId = do
+    let c1 = paConstraintNorm artifacts
+        pres = paPresolution artifacts
+        solved = paSolved artifacts
+        (inputs, _annCanon, _annPre) = resultTypeInputsForArtifacts artifacts
+    scopeRoot <- requireRight (resolveCanonicalScope c1 solved (prRedirects pres) nodeId)
+    (scheme, _subst) <-
+        requireRight
+            (generalizeAtWithActive solved (Just (rtcBindParentsGa inputs)) scopeRoot (schemeBodyTarget solved nodeId))
+    pure scheme
+
+expectWellFormedScheme :: Elab.ElabScheme -> Expectation
+expectWellFormedScheme (Elab.Forall binds _body0) = go Set.empty binds
+  where
+    go _ [] = pure ()
+    go inScope ((name, mbBound) : rest) = do
+        case mbBound of
+            Nothing -> pure ()
+            Just boundTy ->
+                Elab.freeTypeVarsType (boundToType boundTy)
+                    `shouldSatisfy` (`Set.isSubsetOf` inScope)
+        go (Set.insert name inScope) rest
+
+isMonomorphicVar :: Elab.ElabType -> Bool
+isMonomorphicVar ty = case ty of
+    Elab.TVar _ -> True
+    _ -> False
+
+isMonomorphicArrow :: Elab.ElabType -> Bool
+isMonomorphicArrow ty = case ty of
+    Elab.TArrow (Elab.TVar _) (Elab.TVar _) -> True
+    _ -> False
+
+dropLeadingTyAbs :: Elab.ElabTerm -> Elab.ElabTerm
+dropLeadingTyAbs term = case term of
+    Elab.ETyAbs _ _ body -> dropLeadingTyAbs body
+    _ -> term
 
 mkSolved :: Constraint -> IntMap.IntMap NodeId -> Solved.Solved
 mkSolved = Solved.mkTestSolved
@@ -504,6 +543,34 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             (term, ty) <- requirePipeline expr
             Elab.prettyDisplay term `shouldBe` "let x : Int = 1 in x"
             Elab.prettyDisplay ty `shouldBe` "Int"
+
+        it "row5 typing-environment O15-ENV-LAMBDA O15-ENV-WF: lambda body inherits the enclosing binder on the live path" $ do
+            let expr = ELam "x" (ELam "y" (EVar "x"))
+            (term, _ty) <- requirePipeline expr
+            case dropLeadingTyAbs term of
+                Elab.ELam "x" xTy (Elab.ELam "y" yTy (Elab.EVar "x")) -> do
+                    xTy `shouldSatisfy` isMonomorphicVar
+                    yTy `shouldSatisfy` isMonomorphicVar
+                other -> expectationFailure ("Expected nested lambda elaboration, got " ++ show other)
+
+        it "row5 typing-environment O15-ENV-LET O15-ENV-WF: let body receives x : Typ(b) on the live path" $ do
+            let expr = ELet "id" (ELam "x" (EVar "x")) (EVar "id")
+                expectedTy = Elab.TForall "a" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+            artifacts@PipelineArtifacts{ paAnnotated = ann } <-
+                requireRight (runPipelineArtifactsDefault Set.empty expr)
+            bodyNode <-
+                case ann of
+                    ALet _ _ _ _ _ _ body _ -> pure (annExprNode body)
+                    other -> expectationFailure ("Expected ALet, got " ++ show other) >> fail "no body node"
+            scheme <- recoverLiveSchemeAt artifacts bodyNode
+            expectWellFormedScheme scheme
+            Elab.schemeToType scheme `shouldSatisfy` isMonomorphicArrow
+            (term, ty) <- requirePipeline expr
+            case term of
+                Elab.ELet "id" sch _ (Elab.EVar "id") ->
+                    Elab.schemeToType sch `shouldAlphaEqType` expectedTy
+                other -> expectationFailure ("Expected elaborated let, got " ++ show other)
+            ty `shouldAlphaEqType` expectedTy
 
         it "elaborates polymorphic instantiation" $ do
             -- let id = \x. x in id 1
