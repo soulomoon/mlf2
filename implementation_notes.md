@@ -2,6 +2,17 @@
 
 ## Thesis Alignment (Phase A–E)
 
+### 2026-03-08 guard-first surface `Expr` fold refactor
+- Added direct row1 desugaring-contract tests in `test/FrontendDesugarSpec.hs` for annotated-term lowering, annotated-lambda lowering, nested structural recursion, and typed-let coercion-only behavior.
+- Added recursion-schemes support only for `Expr 'Surface ty` in `MLF.Frontend.Syntax` and refactored `MLF.Frontend.Desugar.desugarSurface` to a local `cata`.
+- `MLF.Frontend.Normalize` remains explicit and unchanged because binder/capture semantics still dominate there.
+- Verification:
+  - `MLF.Frontend.Desugar` — PASS (`4 examples, 0 failures`)
+  - `desugars annotated lambda parameters via let` — PASS (`1 example, 0 failures`)
+  - `ELet with EAnn RHS does not create explicit-scheme instantiation structure` — PASS (`1 example, 0 failures`)
+  - `row1 closeout guard|checked-authoritative` — PASS (`2 examples, 0 failures`)
+  - `cabal build all && cabal test` — PASS (`974 examples, 0 failures`)
+
 ### 2026-03-07 remove final χp `...View` alias duplicates
 - Removed the remaining duplicate `...View` / `...FromView` aliases from runtime and reify helpers; the unsuffixed `PresolutionView`-typed names are now the only canonical APIs.
 - Updated runtime, result-type, elaboration, Phi, and test call sites to use the unsuffixed names only.

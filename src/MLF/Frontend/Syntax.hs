@@ -12,6 +12,7 @@ module MLF.Frontend.Syntax (
     Lit (..),
     ExprStage (..),
     Expr (..),
+    SurfaceExprF (..),
     -- * Raw expression aliases (backward-compatible)
     SurfaceExpr,
     CoreExpr,
@@ -285,6 +286,38 @@ data Expr (s :: ExprStage) ty where
 
 deriving instance Eq ty => Eq (Expr s ty)
 deriving instance Show ty => Show (Expr s ty)
+
+data SurfaceExprF ty a
+    = EVarSurfaceF VarName
+    | ELitSurfaceF Lit
+    | ELamSurfaceF VarName a
+    | EAppSurfaceF a a
+    | ELetSurfaceF VarName a a
+    | ELamAnnSurfaceF VarName ty a
+    | EAnnSurfaceF a ty
+    deriving (Functor, Foldable, Traversable)
+
+type instance Base (Expr 'Surface ty) = SurfaceExprF ty
+
+instance Recursive (Expr 'Surface ty) where
+    project expr = case expr of
+        EVar v -> EVarSurfaceF v
+        ELit l -> ELitSurfaceF l
+        ELam v body -> ELamSurfaceF v body
+        EApp fun arg -> EAppSurfaceF fun arg
+        ELet v rhs body -> ELetSurfaceF v rhs body
+        ELamAnn v ty body -> ELamAnnSurfaceF v ty body
+        EAnn expr0 ty -> EAnnSurfaceF expr0 ty
+
+instance Corecursive (Expr 'Surface ty) where
+    embed expr = case expr of
+        EVarSurfaceF v -> EVar v
+        ELitSurfaceF l -> ELit l
+        ELamSurfaceF v body -> ELam v body
+        EAppSurfaceF fun arg -> EApp fun arg
+        ELetSurfaceF v rhs body -> ELet v rhs body
+        ELamAnnSurfaceF v ty body -> ELamAnn v ty body
+        EAnnSurfaceF expr0 ty -> EAnn expr0 ty
 
 -- | Raw surface expression (backward-compatible alias).
 type SurfaceExpr = Expr 'Surface SrcType

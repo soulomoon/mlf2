@@ -12,6 +12,7 @@ import qualified CanonicalizerSpec
 import qualified ConstraintGenSpec
 import qualified ElaborationSpec
 import qualified FrontendNormalizeSpec
+import qualified FrontendDesugarSpec
 import qualified FrontendParseSpec
 import qualified FrontendPrettySpec
 import qualified FrozenParitySpec
@@ -69,6 +70,7 @@ main = do
         FrontendParseSpec.spec
         FrontendPrettySpec.spec
         FrontendNormalizeSpec.spec
+        FrontendDesugarSpec.spec
         XMLFParseSpec.spec
         XMLFPrettySpec.spec
         FrozenParitySpec.spec
