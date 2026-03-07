@@ -2,6 +2,16 @@
 
 ## Thesis Alignment (Phase A–E)
 
+### 2026-03-08 move solved test/audit helper bundle behind test utility
+- Added `test/SolvedFacadeTestUtil.hs` as the test-only home for `mkTestSolved`, `classMembers`, `originalNode`, `originalBindParent`, `wasOriginalBinder`, and `validateOriginalCanonicalAgreement`.
+- Removed that helper bundle from the public `MLF.Constraint.Solved` facade and added a direct guard in `test/Constraint/SolvedSpec.hs` proving the facade no longer exposes it.
+- Verification:
+  - `cabal build all && cabal test` — PASS
+  - `MLF.Constraint.Solved` — PASS (`48 examples, 0 failures`)
+  - `WitnessDomain` — PASS (`23 examples, 0 failures`)
+  - `ga scope` — PASS (`2 examples, 0 failures`)
+  - `test-only helper bundle is absent from the Solved facade` — PASS (`1 example, 0 failures`)
+
 ### 2026-03-08 retire dead raw canonical container accessors
 - Removed `canonicalBindParents` and `canonicalGenNodes` from the `Solved` facade and internal implementation after confirming they had no live code callers.
 - Added a direct migration guard in `test/Constraint/SolvedSpec.hs` asserting those raw canonical container accessors do not reappear on the `Solved` facade.

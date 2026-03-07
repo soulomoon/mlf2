@@ -62,6 +62,7 @@ import SpecUtil
 import MLF.Types.Elab (Ty(..), containsArrowTy, containsForallTy)
 import MLF.Reify.Core (reifyType)
 import Data.List.NonEmpty (NonEmpty(..))
+import qualified SolvedFacadeTestUtil as SolvedTest
 
 spec :: Spec
 spec = describe "Pipeline (Phases 1-5)" $ do
@@ -127,7 +128,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 listNode = TyCon var1 listBase (var0 :| [])
                 nodes = fromListNode [(var0, baseNode), (var1, listNode)]
                 constraint = emptyConstraint { cNodes = nodes }
-                res = Solved.mkTestSolved constraint IntMap.empty
+                res = SolvedTest.mkTestSolved constraint IntMap.empty
             case reifyType (PresolutionViewBoundary.fromSolved res) var1 of
                 Right ty ->
                     case ty of
@@ -153,7 +154,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 listNode = TyCon var2 listBase (var1 :| [])
                 nodes = fromListNode [(var0, intNode), (var1, maybeNode), (var2, listNode)]
                 constraint = emptyConstraint { cNodes = nodes }
-                res = Solved.mkTestSolved constraint IntMap.empty
+                res = SolvedTest.mkTestSolved constraint IntMap.empty
             case reifyType (PresolutionViewBoundary.fromSolved res) var2 of
                 Right ty ->
                     case ty of

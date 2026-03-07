@@ -18,6 +18,7 @@ import MLF.Constraint.Solve
 import MLF.Constraint.Types.Presolution (PresolutionSnapshot(..))
 import MLF.Constraint.Solved
 import qualified MLF.Constraint.Solved as Solved
+import qualified SolvedFacadeTestUtil as SolvedTest
 import MLF.Frontend.Syntax
     ( Lit(..)
     , SrcTy(..)
@@ -84,7 +85,7 @@ testSolved =
             , cGenNodes = fromListGen [(GenNodeId 0, gn)]
             }
         uf = IntMap.fromList [(0, NodeId 1)]
-    in mkTestSolved constraint uf
+    in SolvedTest.mkTestSolved constraint uf
 
 snapshotEquiv :: Either String (Solved, [NodeId])
 snapshotEquiv =
@@ -160,10 +161,22 @@ spec = describe "MLF.Constraint.Solved" $ do
                 ] $ \marker ->
                     src `shouldSatisfy` (not . isInfixOf marker)
 
+        it "test-only helper bundle is absent from the Solved facade" $ do
+            src <- readFile "src/MLF/Constraint/Solved.hs"
+            forM_
+                [ "mkTestSolved"
+                , "classMembers"
+                , "originalNode"
+                , "originalBindParent"
+                , "wasOriginalBinder"
+                , "validateOriginalCanonicalAgreement"
+                ] $ \marker ->
+                    src `shouldSatisfy` (not . isInfixOf marker)
+
     let s = testSolved
 
     describe "Constructor compatibility" $ do
-        it "mkTestSolved builds canonical queries from union-find and preserves original graph" $ do
+        it "test mkTestSolved helper builds canonical queries from union-find and preserves original graph" $ do
             let var0 = TyVar { tnId = NodeId 0, tnBound = Nothing }
                 base1 = TyBase (NodeId 1) (BaseTy "Int")
                 inst = InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)
@@ -173,11 +186,11 @@ spec = describe "MLF.Constraint.Solved" $ do
                     , cInstEdges = [inst]
                     }
                 uf = IntMap.fromList [(0, NodeId 1)]
-                solved = mkTestSolved constraint uf
+                solved = SolvedTest.mkTestSolved constraint uf
             canonical solved (NodeId 0) `shouldBe` NodeId 1
             lookupNode solved (NodeId 0) `shouldBe` Just base1
-            originalNode solved (NodeId 0) `shouldBe` Just var0
-            classMembers solved (NodeId 1) `shouldMatchList` [NodeId 0, NodeId 1]
+            SolvedTest.originalNode solved (NodeId 0) `shouldBe` Just var0
+            SolvedTest.classMembers solved (NodeId 1) `shouldMatchList` [NodeId 0, NodeId 1]
             cInstEdges (originalConstraint solved) `shouldBe` [inst]
             originalConstraint solved `shouldBe` constraint
 
@@ -329,7 +342,7 @@ spec = describe "MLF.Constraint.Solved" $ do
 
     describe "Solved invariants" $ do
         it "validateOriginalCanonicalAgreement reports original/canonical tag mismatches" $ do
-            let mismatches = validateOriginalCanonicalAgreement s
+            let mismatches = SolvedTest.validateOriginalCanonicalAgreement s
             mismatches `shouldSatisfy` (not . null)
             mismatches `shouldSatisfy`
                 any
@@ -343,8 +356,8 @@ spec = describe "MLF.Constraint.Solved" $ do
             let var0 = TyVar { tnId = NodeId 0, tnBound = Nothing }
                 var1 = TyVar { tnId = NodeId 1, tnBound = Nothing }
                 nodes = nodeMapFromList [(0, var0), (1, var1)]
-                aligned = mkTestSolved (emptyConstraint { cNodes = nodes }) IntMap.empty
-            validateOriginalCanonicalAgreement aligned `shouldBe` []
+                aligned = SolvedTest.mkTestSolved (emptyConstraint { cNodes = nodes }) IntMap.empty
+            SolvedTest.validateOriginalCanonicalAgreement aligned `shouldBe` []
 
         it "canonicalizedBindParents rewrites non-canonical child/parent refs into canonical-domain refs" $ do
             let childMerged = NodeId 0
@@ -364,7 +377,7 @@ spec = describe "MLF.Constraint.Solved" $ do
                           )
                         ]
                 solved =
-                    mkTestSolved
+                    SolvedTest.mkTestSolved
                         (emptyConstraint { cNodes = nodes, cBindParents = bp })
                         (IntMap.fromList
                             [ (getNodeId childMerged, childCanonical)
@@ -382,43 +395,43 @@ spec = describe "MLF.Constraint.Solved" $ do
 
     describe "Degraded stubs (Phase 1)" $ do
         it "classMembers returns equivalence class members" $ do
-            classMembers s (NodeId 0) `shouldMatchList` [NodeId 0, NodeId 1]
-            classMembers s (NodeId 3) `shouldBe` [NodeId 3]
+            SolvedTest.classMembers s (NodeId 0) `shouldMatchList` [NodeId 0, NodeId 1]
+            SolvedTest.classMembers s (NodeId 3) `shouldBe` [NodeId 3]
 
         it "wasOriginalBinder always returns False" $ do
-            wasOriginalBinder s (NodeId 0) `shouldBe` False
-            wasOriginalBinder s (NodeId 1) `shouldBe` False
-            wasOriginalBinder s (NodeId 2) `shouldBe` False
+            SolvedTest.wasOriginalBinder s (NodeId 0) `shouldBe` False
+            SolvedTest.wasOriginalBinder s (NodeId 1) `shouldBe` False
+            SolvedTest.wasOriginalBinder s (NodeId 2) `shouldBe` False
 
         it "originalNode returns pre-merge node data" $ do
             -- Node 0 is a TyVar that was merged into node 1 (TyBase "Int").
             -- originalNode returns the pre-merge TyVar, not the canonical TyBase.
-            originalNode s (NodeId 0)
+            SolvedTest.originalNode s (NodeId 0)
                 `shouldBe` Just (TyVar { tnId = NodeId 0, tnBound = Nothing })
-            originalNode s (NodeId 2)
+            SolvedTest.originalNode s (NodeId 2)
                 `shouldBe` Just (TyArrow (NodeId 2) (NodeId 1) (NodeId 3))
-            originalNode s (NodeId 99) `shouldBe` Nothing
+            SolvedTest.originalNode s (NodeId 99) `shouldBe` Nothing
 
         it "originalBindParent delegates to lookupBindParent" $ do
-            originalBindParent s (typeRef (NodeId 1))
+            SolvedTest.originalBindParent s (typeRef (NodeId 1))
                 `shouldBe` lookupBindParent s (typeRef (NodeId 1))
-            originalBindParent s (typeRef (NodeId 2))
+            SolvedTest.originalBindParent s (typeRef (NodeId 2))
                 `shouldBe` lookupBindParent s (typeRef (NodeId 2))
 
     describe "projection-first queries" $ do
         it "originalNode returns pre-merge node data" $ do
             -- Node 0 was merged into node 1 via union-find, but
-            -- originalNode should still return the pre-merge TyVar.
-            originalNode s (NodeId 0)
+            -- SolvedTest.originalNode should still return the pre-merge TyVar.
+            SolvedTest.originalNode s (NodeId 0)
                 `shouldBe` Just (TyVar { tnId = NodeId 0, tnBound = Nothing })
-            originalNode s (NodeId 1)
+            SolvedTest.originalNode s (NodeId 1)
                 `shouldBe` Just (TyBase (NodeId 1) (BaseTy "Int"))
-            originalNode s (NodeId 99) `shouldBe` Nothing
+            SolvedTest.originalNode s (NodeId 99) `shouldBe` Nothing
 
         it "originalBindParent returns pre-merge binding parents" $ do
-            originalBindParent s (typeRef (NodeId 1))
+            SolvedTest.originalBindParent s (typeRef (NodeId 1))
                 `shouldBe` Just (typeRef (NodeId 2), BindFlex)
-            originalBindParent s (typeRef (NodeId 2))
+            SolvedTest.originalBindParent s (typeRef (NodeId 2))
                 `shouldBe` Nothing
 
         it "lookupNode canonicalizes through union-find" $ do
@@ -432,7 +445,7 @@ spec = describe "MLF.Constraint.Solved" $ do
                 base11 = TyBase (NodeId 11) (BaseTy "Int")
                 nodes = nodeMapFromList [(10, boundVar), (11, base11)]
                 c = emptyConstraint { cNodes = nodes }
-                s' = mkTestSolved c IntMap.empty
+                s' = SolvedTest.mkTestSolved c IntMap.empty
             lookupVarBound s' (NodeId 10) `shouldBe` Just (NodeId 11)
 
     describe "fromPreRewriteState" $ do
@@ -467,25 +480,25 @@ spec = describe "MLF.Constraint.Solved" $ do
 
         it "classMembers returns all original nodes in class" $ do
             equiv <- requireRight equivE
-            classMembers equiv intNodeId `shouldMatchList` [alphaNodeId, intNodeId]
-            classMembers equiv alphaNodeId `shouldMatchList` [alphaNodeId, intNodeId]
+            SolvedTest.classMembers equiv intNodeId `shouldMatchList` [alphaNodeId, intNodeId]
+            SolvedTest.classMembers equiv alphaNodeId `shouldMatchList` [alphaNodeId, intNodeId]
 
         it "wasOriginalBinder returns True for unified-away binder" $ do
             equiv <- requireRight equivE
-            wasOriginalBinder equiv intNodeId `shouldBe` True
-            wasOriginalBinder equiv alphaNodeId `shouldBe` True
-            wasOriginalBinder equiv alphaBodyId `shouldBe` False
+            SolvedTest.wasOriginalBinder equiv intNodeId `shouldBe` True
+            SolvedTest.wasOriginalBinder equiv alphaNodeId `shouldBe` True
+            SolvedTest.wasOriginalBinder equiv alphaBodyId `shouldBe` False
 
         it "originalNode returns pre-solving node data" $ do
             equiv <- requireRight equivE
-            originalNode equiv alphaNodeId `shouldBe` Just alphaNode
-            originalNode equiv intNodeId `shouldBe` Just intNode
+            SolvedTest.originalNode equiv alphaNodeId `shouldBe` Just alphaNode
+            SolvedTest.originalNode equiv intNodeId `shouldBe` Just intNode
 
         it "originalBindParent preserves pre-solving binding tree" $ do
             equiv <- requireRight equivE
-            originalBindParent equiv (typeRef alphaNodeId)
+            SolvedTest.originalBindParent equiv (typeRef alphaNodeId)
                 `shouldBe` Just (typeRef parentNodeId, BindFlex)
-            originalBindParent equiv (typeRef alphaBodyId)
+            SolvedTest.originalBindParent equiv (typeRef alphaBodyId)
                 `shouldBe` Just (typeRef alphaNodeId, BindFlex)
 
         it "canonical works correctly for solver snapshots" $ do
