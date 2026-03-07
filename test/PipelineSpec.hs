@@ -305,6 +305,20 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             omegaSrc `shouldSatisfy` (not . isInfixOf "adoptOpNode :: NodeId -> NodeId")
             omegaSrc `shouldSatisfy` (not . isInfixOf "graftArgFor :: NodeId -> NodeId -> NodeId")
 
+        it "row9-11 facade cleanup guard: Phi no longer re-exports or compiles Binder helpers" $ do
+            phiSrc <- readFile "src/MLF/Elab/Phi.hs"
+            cabalSrc <- readFile "mlf2.cabal"
+            binderSrcOrErr <- tryIOError (readFile "src/MLF/Elab/Phi/Binder.hs")
+            phiSrc `shouldSatisfy` (not . isInfixOf "MLF.Elab.Phi.Binder")
+            phiSrc `shouldSatisfy` (not . isInfixOf "isBinderNodeM")
+            phiSrc `shouldSatisfy` (not . isInfixOf "lookupBinderIndexM")
+            phiSrc `shouldSatisfy` (not . isInfixOf "binderIndexM")
+            phiSrc `shouldSatisfy` (not . isInfixOf "binderNameForM")
+            cabalSrc `shouldSatisfy` (not . isInfixOf "MLF.Elab.Phi.Binder")
+            case binderSrcOrErr of
+                Left _ -> pure ()
+                Right _ -> expectationFailure "Expected src/MLF/Elab/Phi/Binder.hs to be retired"
+
         it "chi-first guard: internals use shared ChiQuery facade" $ do
             elabSrc <- readFile "src/MLF/Elab/Elaborate.hs"
             rtViewSrc <- readFile "src/MLF/Elab/Run/ResultType/View.hs"

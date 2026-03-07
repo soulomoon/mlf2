@@ -118,11 +118,12 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
     mTrace = ocTrace ctx
 
     ib :: IB.IdentityBridge
-    -- Note [gaSolvedToBase subsumption]: The bridge's source-key expansion
-    -- (copy-map reverse, trace reverse, canonical alias) subsumes the old
-    -- gaSolvedToBase lookup for all known cases.  If future binder-index
-    -- resolution failures surface, consider integrating GaBindParents into
-    -- the bridge rather than re-adding local resolution here.
+    -- Note [IdentityBridge diagnostics, not runtime repair]: The bridge stays
+    -- available for witness-domain diagnostics (`sourceKeysForNode`) and
+    -- dedicated tests. Runtime binder selection below remains direct and
+    -- fail-fast on replay-spine targets; if a replay target is absent from the
+    -- current quantifier spine, Omega rejects it instead of consulting ranked
+    -- bridge candidates.
     ib = IB.mkIdentityBridge presolutionView mTrace copyMap
 
     mSchemeInfo :: Maybe SchemeInfo

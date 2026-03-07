@@ -4,6 +4,24 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 53 Thesis-exact Φ identity cleanup (completed 2026-03-07)
+
+- Completed:
+  - removed the stale compiled `MLF.Elab.Phi.Binder` helper surface and retired its re-exports from `MLF.Elab.Phi`;
+  - kept runtime `Ω` on the direct replay-spine fail-fast contract, while tightening `IdentityBridge` notes/tests so it is explicitly a witness-domain utility/test surface rather than a runtime repair engine;
+  - added a dedicated row9-11 facade source guard and an `OpGraft` missing-from-spine regression next to the existing `OpWeaken` fail-fast coverage.
+- Verification:
+  - `row9-11 facade cleanup guard`: PASS (`1 example, 0 failures`)
+  - `row9-11 direct-target guard`: PASS (`1 example, 0 failures`)
+  - `OpWeaken on binder target missing from quantifier spine fails fast`: PASS (`1 example, 0 failures`)
+  - `OpGraft on binder target missing from quantifier spine still fails fast even when IdentityBridge finds witness-domain matches`: PASS (`1 example, 0 failures`)
+  - `IdentityBridge`: PASS (`24 examples, 0 failures`)
+  - `cabal build all && cabal test`: PASS (`966 examples, 0 failures`)
+- Rolling priorities (next):
+  1. Keep the row9-11 facade/direct-target guards green during future Phi/Omega cleanup.
+  2. Continue Task 52’s frontend preprocessing guard-first work before any recursion-schemes refactor.
+  3. Keep `IdentityBridge` in the utility/test lane unless a fresh verifier-owned thesis audit widens scope.
+
 ## Task 51 Thesis-exact recursion-refactor goal loop (completed 2026-03-07)
 
 - Completed:

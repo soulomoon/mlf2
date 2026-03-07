@@ -47,6 +47,7 @@ import MLF.Constraint.Presolution
     , PresolutionPlanBuilder(..)
     , PresolutionResult(..)
     , EdgeTrace(..)
+    , CopyMapping(..)
     , GaBindParents(..)
     , validateCrossGenMapping
     , defaultPlanBuilder
@@ -54,6 +55,7 @@ import MLF.Constraint.Presolution
     , insertCopy
     , lookupCopy
     )
+import qualified MLF.Elab.Phi.IdentityBridge as IdentityBridge
 import MLF.Constraint.Presolution.Plan.Context
     ( GeneralizeEnv(..)
     , SolvedToBaseResolution(..)
@@ -2869,6 +2871,70 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         expectationFailure ("Expected PhiTranslatabilityError, got " ++ show err)
                     Right inst ->
                         expectationFailure ("Expected fail-fast OpWeaken, got inst: " ++ show inst)
+
+            it "OpGraft on binder target missing from quantifier spine still fails fast even when IdentityBridge finds witness-domain matches" $ do
+                let root = NodeId 100
+                    binderA = NodeId 1
+                    binderB = NodeId 2
+                    argNode = NodeId 3
+                    c = rootedConstraint emptyConstraint
+                        { cNodes = nodeMapFromList
+                                [ (getNodeId root, TyArrow root binderA binderA)
+                                , (getNodeId binderA, TyVar { tnId = binderA, tnBound = Nothing })
+                                , (getNodeId binderB, TyVar { tnId = binderB, tnBound = Nothing })
+                                , (getNodeId argNode, TyBase argNode (BaseTy "Int"))
+                                ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef binderA), (genRef (GenNodeId 0), BindFlex))
+                                , (nodeRefKey (typeRef binderB), (genRef (GenNodeId 0), BindFlex))
+                                ]
+                        }
+                    solved = mkSolved c IntMap.empty
+                    scheme =
+                        Elab.schemeFromType
+                            (Elab.TForall "a" Nothing
+                                (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
+                    si = Elab.SchemeInfo
+                        { Elab.siScheme = scheme
+                        , Elab.siSubst =
+                            IntMap.fromList
+                                [ (getNodeId binderA, "a")
+                                , (getNodeId binderB, "b")
+                                ]
+                        }
+                    tr =
+                        EdgeTrace
+                            { etRoot = root
+                            , etBinderArgs = []
+                            , etInterior = fromListInterior [root, binderA, binderB, argNode]
+                            , etBinderReplayMap = mempty
+                            , etCopyMap = insertCopy binderA binderB mempty
+                            , etReplayContract = ReplayContractNone
+                            }
+                    presolutionView = presolutionViewFromSolved solved
+                    bridge =
+                        IdentityBridge.mkIdentityBridge
+                            presolutionView
+                            (Just tr)
+                            (getCopyMapping (etCopyMap tr))
+                    ew = EdgeWitness
+                        { ewEdgeId = EdgeId 0
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewForallIntros = 0
+                        , ewWitness = InstanceWitness [OpGraft argNode binderB]
+                        }
+                IdentityBridge.sourceKeysForNode bridge binderB
+                    `shouldSatisfy` elem (getNodeId binderA)
+                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) presolutionView Nothing (Just si) (Just tr) ew of
+                    Left (Elab.PhiTranslatabilityError msgs) ->
+                        unlines msgs `shouldSatisfy` ("OpGraft: binder not found in quantifier spine" `isInfixOf`)
+                    Left err ->
+                        expectationFailure ("Expected PhiTranslatabilityError, got " ++ show err)
+                    Right inst ->
+                        expectationFailure ("Expected fail-fast OpGraft, got inst: " ++ show inst)
 
             it "O15-TR-RIGID-MERGE: OpMerge with rigid operated node n translates to identity" $ do
                 let root = NodeId 100

@@ -13,7 +13,6 @@ module MLF.Elab.Phi.Env (
     PhiM,
     askCanonical,
     askCopyMap,
-    askInvCopyMap,
     askGaParents,
     askTrace
 ) where
@@ -36,13 +35,11 @@ import MLF.Elab.Types (ElabError)
 -- Fields:
 --   * peCanonical: Function to get the canonical node id
 --   * peCopyMap: Copy mapping from edge trace (original -> copied)
---   * peInvCopyMap: Inverse copy mapping (copied -> original)
 --   * peGaParents: Optional generalized binding parents
 --   * peTrace: Optional edge trace with interior/copy info
 data PhiEnv = PhiEnv
     { peCanonical :: NodeId -> NodeId
     , peCopyMap :: IntMap.IntMap NodeId
-    , peInvCopyMap :: IntMap.IntMap NodeId
     , peGaParents :: Maybe GaBindParents
     , peTrace :: Maybe EdgeTrace
     }
@@ -60,10 +57,6 @@ askCanonical = asks peCanonical
 -- | Get the copy map from the environment.
 askCopyMap :: PhiM (IntMap.IntMap NodeId)
 askCopyMap = asks peCopyMap
-
--- | Get the inverse copy map (copied -> original) from the environment.
-askInvCopyMap :: PhiM (IntMap.IntMap NodeId)
-askInvCopyMap = asks peInvCopyMap
 
 -- | Get the optional GaBindParents from the environment.
 askGaParents :: PhiM (Maybe GaBindParents)
