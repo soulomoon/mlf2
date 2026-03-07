@@ -49,9 +49,7 @@ module MLF.Constraint.Solved.Internal (
     -- * Canonical-domain queries
     weakenedVars,
     isEliminatedVar,
-    canonicalBindParents,
     canonicalizedBindParents,
-    canonicalGenNodes,
 
     -- * Validation helpers
     validateCanonicalGraphStrict,
@@ -372,18 +370,10 @@ isEliminatedVar :: Solved -> NodeId -> Bool
 isEliminatedVar (Solved EquivBackend { ebCanonicalEliminatedVars = evs }) nid =
     IntSet.member (getNodeId nid) evs
 
--- | Bind parents from the canonical (post-solve) constraint.
-canonicalBindParents :: Solved -> BindParents
-canonicalBindParents (Solved EquivBackend { ebCanonicalBindParents = bp }) = bp
-
 -- | Canonicalized bind parents in canonical domain (with UF/redirect collapse).
 canonicalizedBindParents :: Solved -> Either BindingError BindParents
 canonicalizedBindParents s =
     Binding.canonicalizeBindParentsUnder (canonical s) (canonicalConstraint s)
-
--- | Gen nodes from the canonical constraint.
-canonicalGenNodes :: Solved -> GenNodeMap GenNode
-canonicalGenNodes (Solved EquivBackend { ebCanonicalGenNodes = gn }) = gn
 
 -- | Run strict solved-graph validation against the canonical solved view.
 validateCanonicalGraphStrict :: Solved -> [String]

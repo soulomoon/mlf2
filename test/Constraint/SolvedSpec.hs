@@ -143,6 +143,14 @@ spec = describe "MLF.Constraint.Solved" $ do
                 ] $ \marker ->
                     src `shouldSatisfy` (not . isInfixOf marker)
 
+        it "raw canonical container accessors are absent from the Solved facade" $ do
+            src <- readFile "src/MLF/Constraint/Solved.hs"
+            forM_
+                [ "canonicalBindParents"
+                , "canonicalGenNodes"
+                ] $ \marker ->
+                    src `shouldSatisfy` (not . isInfixOf marker)
+
     let s = testSolved
 
     describe "Constructor compatibility" $ do

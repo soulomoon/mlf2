@@ -74,6 +74,8 @@ The second low-risk cleanup landed on 2026-03-08 by narrowing `GeneralizeEnv` fr
 
 The third low-risk cleanup landed on 2026-03-08 by splitting `MLF.Constraint.Solved` into a thin public facade plus `MLF.Constraint.Solved.Internal`, moving `fromConstraintAndUf` and `rebuildWithConstraint` off the public surface and into local owner-module usage.
 
+The fourth low-risk cleanup landed on 2026-03-08 by retiring the dead raw canonical container accessors `canonicalBindParents` and `canonicalGenNodes` from both the public facade and internal implementation.
+
 The detailed evidence matrix for this classification lives in `tasks/archive/2026-03-08-solved-classification-table/findings.md`.
 
 ## Witness Representation (Φ/Σ)
