@@ -4,6 +4,20 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 66 Retire dead raw canonical container accessors (completed 2026-03-08)
+
+- Completed:
+  - removed `canonicalBindParents` and `canonicalGenNodes` from the `Solved` facade and internal implementation;
+  - added a direct migration guard in `test/Constraint/SolvedSpec.hs` asserting those raw canonical container accessors are absent from the facade.
+- Verification:
+  - `cabal build all && cabal test`: PASS
+  - `MLF.Constraint.Solved`: PASS (`46 examples, 0 failures`)
+  - `raw canonical container accessors are absent from the Solved facade`: PASS (`1 example, 0 failures`)
+- Rolling priorities (next):
+  1. Retire the remaining test/audit-only enumeration helpers from the public `Solved` facade (`allNodes`, `instEdges`) by moving their test usage to direct constraint inspection.
+  2. Continue shrinking the public facade by moving test-only helpers off it before touching the production-read query cluster.
+  3. Keep the new raw-container absence guard green during future cleanup.
+
 ## Task 65 Relocate remaining shared `Solved` compatibility builders (completed 2026-03-08)
 
 - Completed:

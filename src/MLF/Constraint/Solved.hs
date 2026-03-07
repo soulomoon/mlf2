@@ -39,9 +39,7 @@ module MLF.Constraint.Solved (
     -- * Canonical-domain queries
     weakenedVars,
     isEliminatedVar,
-    canonicalBindParents,
     canonicalizedBindParents,
-    canonicalGenNodes,
 
     -- * Validation helpers
     validateCanonicalGraphStrict,
@@ -53,9 +51,7 @@ import MLF.Constraint.Solved.Internal
     , allNodes
     , bindParents
     , canonical
-    , canonicalBindParents
     , canonicalConstraint
-    , canonicalGenNodes
     , canonicalMap
     , canonicalizedBindParents
     , classMembers

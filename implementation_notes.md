@@ -2,6 +2,14 @@
 
 ## Thesis Alignment (Phase A–E)
 
+### 2026-03-08 retire dead raw canonical container accessors
+- Removed `canonicalBindParents` and `canonicalGenNodes` from the `Solved` facade and internal implementation after confirming they had no live code callers.
+- Added a direct migration guard in `test/Constraint/SolvedSpec.hs` asserting those raw canonical container accessors do not reappear on the `Solved` facade.
+- Verification:
+  - `cabal build all && cabal test` — PASS
+  - `MLF.Constraint.Solved` — PASS (`46 examples, 0 failures`)
+  - `raw canonical container accessors are absent from the Solved facade` — PASS (`1 example, 0 failures`)
+
 ### 2026-03-08 relocate remaining shared `Solved` compatibility builders
 - Split `MLF.Constraint.Solved` into a thin public facade plus non-exposed `MLF.Constraint.Solved.Internal`, preserving `Solved` opacity while moving the shared compatibility builders out of the public surface.
 - Redirected `MLF.Constraint.Finalize` and `MLF.Reify.Core` to use the internal builder functions locally, and updated the public-facing solved tests to use `mkTestSolved` plus a direct facade-absence guard for `fromConstraintAndUf` / `rebuildWithConstraint`.
