@@ -22,7 +22,7 @@ import Control.Monad (foldM, unless, when)
 import Data.Functor.Foldable (cata)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import Data.List (elemIndex)
+import Data.List (elemIndex, sortOn)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
 import qualified Data.Set as Set
@@ -40,7 +40,6 @@ import qualified MLF.Binding.Tree as Binding
 import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Elab.Inst (applyInstantiation, composeInst, instMany, schemeToType, splitForalls)
 import MLF.Elab.Phi.Context (contextToNodeBoundWithOrderKeys)
-import qualified MLF.Elab.Phi.IdentityBridge as IB
 import MLF.Elab.Phi.VSpine (VSpine(..), BodyShape(..), mkVSpine, vSpineNames, vSpineBounds, vSpineIds, vSpineLength, vSpineNull, vSpineNameAt, vSpineBoundAt, vsDeleteAt, vsInsertAt, vsUpdateBound)
 import MLF.Elab.Sigma (bubbleReorderTo)
 import MLF.Elab.Types
@@ -117,14 +116,10 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
     mTrace :: Maybe EdgeTrace
     mTrace = ocTrace ctx
 
-    ib :: IB.IdentityBridge
-    -- Note [IdentityBridge diagnostics, not runtime repair]: The bridge stays
-    -- available for witness-domain diagnostics (`sourceKeysForNode`) and
-    -- dedicated tests. Runtime binder selection below remains direct and
-    -- fail-fast on replay-spine targets; if a replay target is absent from the
-    -- current quantifier spine, Omega rejects it instead of consulting ranked
-    -- bridge candidates.
-    ib = IB.mkIdentityBridge presolutionView mTrace copyMap
+    -- Note [Witness-domain diagnostics only]: failure messages may report raw
+    -- witness-domain source matches derived from trace/copy-map artifacts, but
+    -- runtime binder selection below remains direct and fail-fast on replay-
+    -- spine targets. These diagnostics never participate in target recovery.
 
     mSchemeInfo :: Maybe SchemeInfo
     mSchemeInfo = ocSchemeInfo ctx
@@ -1215,6 +1210,77 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
     --
     -- Strict runtime contract: target must resolve to a binder in the current
     -- replay spine directly; otherwise fail fast.
+    traceBinderOrder :: [Int]
+    traceBinderOrder =
+        case mTrace of
+            Nothing -> []
+            Just tr ->
+                reverse $
+                    snd $
+                        foldl
+                            (\(seen, acc) (binder, _arg) ->
+                                let key = getNodeId binder
+                                in if IntSet.member key seen
+                                    then (seen, acc)
+                                    else (IntSet.insert key seen, key : acc)
+                            )
+                            (IntSet.empty, [])
+                            (etBinderArgs tr)
+
+    traceBinderOrderIx :: IntMap.IntMap Int
+    traceBinderOrderIx = IntMap.fromList (zip traceBinderOrder [0 :: Int ..])
+
+    reverseCopyByTarget :: IntMap.IntMap [Int]
+    reverseCopyByTarget =
+        IntMap.fromListWith (++)
+            [ (getNodeId dst, [src])
+            | (src, dst) <- IntMap.toList copyMap
+            ]
+
+    reverseTraceByTarget :: IntMap.IntMap [Int]
+    reverseTraceByTarget =
+        case mTrace of
+            Nothing -> IntMap.empty
+            Just tr ->
+                IntMap.fromListWith (++)
+                    [ (getNodeId binder, [getNodeId binder])
+                    | (binder, _arg) <- etBinderArgs tr
+                    ]
+
+    invCopyMap :: IntMap.IntMap NodeId
+    invCopyMap =
+        IntMap.fromList
+            [ (getNodeId v, NodeId k)
+            | (k, v) <- IntMap.toList copyMap
+            , k /= getNodeId v
+            ]
+
+    witnessDomainSourceKeys :: NodeId -> [Int]
+    witnessDomainSourceKeys nid =
+        let keyRaw = getNodeId nid
+            fwdRaw = maybe [] (pure . getNodeId) (IntMap.lookup keyRaw copyMap)
+            invRaw = maybe [] (pure . getNodeId) (IntMap.lookup keyRaw invCopyMap)
+            revCopy = IntMap.findWithDefault [] keyRaw reverseCopyByTarget
+            traceRaw = IntMap.findWithDefault [] keyRaw reverseTraceByTarget
+            rank key = (IntMap.findWithDefault maxBound key traceBinderOrderIx, key)
+            (_seen, keysRev) =
+                foldl
+                    (\(seenAcc, acc) key ->
+                        if IntSet.member key seenAcc
+                            then (seenAcc, acc)
+                            else (IntSet.insert key seenAcc, key : acc)
+                    )
+                    (IntSet.empty, [])
+                    (keyRaw : fwdRaw ++ invRaw ++ revCopy ++ traceRaw)
+        in sortOn rank (reverse keysRev)
+
+    witnessDomainSourceMatches :: IntSet.IntSet -> NodeId -> [NodeId]
+    witnessDomainSourceMatches binderKeys nid =
+        [ NodeId member
+        | member <- witnessDomainSourceKeys nid
+        , IntSet.member member binderKeys
+        ]
+
     resolveNonRootWeakenBinder :: IntSet.IntSet -> VSpine -> NodeId -> NodeId -> Either ElabError NodeId
     resolveNonRootWeakenBinder binderKeys vs sourceTarget replayTarget
         | not (isBinderNode binderKeys replayTarget) =
@@ -1226,11 +1292,7 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
       where
         replayCanonical = canonicalNode replayTarget
 
-        traceSourceMatch =
-            [ NodeId member
-            | member <- IB.sourceKeysForNode ib replayTarget
-            , IB.isBinderNode ib binderKeys (NodeId member)
-            ]
+        traceSourceMatch = witnessDomainSourceMatches binderKeys replayTarget
         unresolvedWeakenError reason =
             PhiTranslatabilityError
                 [ "OpWeaken: unresolved non-root binder target"

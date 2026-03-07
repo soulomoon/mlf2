@@ -4,6 +4,25 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 54 Retire library-side Φ test hooks (completed 2026-03-07)
+
+- Completed:
+  - removed `MLF.Elab.Phi.TestOnly` and `MLF.Elab.Phi.IdentityBridge` from `mlf2-internal`;
+  - moved pure witness-domain ranking helpers into the test suite (`test/Phi/WitnessDomainUtil.hs` + `test/Phi/WitnessDomainSpec.hs`) and switched `GeneralizeSpec` to direct production imports;
+  - kept production `Ω` on the direct replay-spine fail-fast contract while replacing the old `IdentityBridge` dependency with a tiny local diagnostic helper.
+- Verification:
+  - `WitnessDomain`: PASS (`23 examples, 0 failures`)
+  - `Generalize shadow comparator`: PASS (`8 examples, 0 failures`)
+  - `no-trace test entrypoint fails fast with MissingEdgeTrace`: PASS (`1 example, 0 failures`)
+  - `elab-input thesis-exact guard`: PASS (`2 examples, 0 failures`)
+  - `elab-input absolute thesis-exact guard`: PASS (`1 example, 0 failures`)
+  - `row9-11 direct-target guard`: PASS (`1 example, 0 failures`)
+  - `cabal build all && cabal test`: PASS (`966 examples, 0 failures`)
+- Rolling priorities (next):
+  1. Keep `mlf2-internal` free of new test-only helper modules.
+  2. Keep the row9-11 direct-target guards green during future `Ω` cleanup.
+  3. Continue Task 52’s frontend preprocessing guard-first work before any recursion-schemes refactor.
+
 ## Task 53 Thesis-exact Φ identity cleanup (completed 2026-03-07)
 
 - Completed:

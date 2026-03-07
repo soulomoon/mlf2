@@ -1,4 +1,4 @@
-module Phi.IdentityBridgeSpec (spec) where
+module Phi.WitnessDomainSpec (spec) where
 
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
@@ -24,7 +24,7 @@ import MLF.Constraint.Presolution
     )
 import MLF.Constraint.Types.Witness (ReplayContract(..))
 import MLF.Frontend.Syntax (Expr(..))
-import MLF.Elab.Phi.IdentityBridge
+import Phi.WitnessDomainUtil
 import SpecUtil (emptyConstraint, nodeMapFromList, runPipelineArtifactsDefault, PipelineArtifacts(..))
 
 -- | Build a Solved with the given union-find for testing.
@@ -44,9 +44,9 @@ solvedToPresolutionView solved =
         , pvCanonicalConstraint = Solved.canonicalConstraint solved
         }
 
-mkBridge :: Solved -> Maybe EdgeTrace -> IntMap.IntMap NodeId -> IdentityBridge
+mkBridge :: Solved -> Maybe EdgeTrace -> IntMap.IntMap NodeId -> WitnessDomainBridge
 mkBridge solved mTrace copyMap =
-    mkIdentityBridge (solvedToPresolutionView solved) mTrace copyMap
+    mkWitnessDomainBridge (solvedToPresolutionView solved) mTrace copyMap
 
 -- | Solved with identity canonical (empty union-find).
 idSolved :: Solved
@@ -69,7 +69,7 @@ mkTrace binderArgs copyPairs =
         }
 
 spec :: Spec
-spec = describe "IdentityBridge" $ do
+spec = describe "WitnessDomain" $ do
 
     -- ---------------------------------------------------------------
     -- Source key de-duplication

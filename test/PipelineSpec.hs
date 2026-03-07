@@ -176,7 +176,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         it "elab-input thesis-exact guard: Elaborate active input path does not materialize chiSolved" $ do
             elabSrc <- readFile "src/MLF/Elab/Elaborate.hs"
             phiSrc <- readFile "src/MLF/Elab/Phi/Translate.hs"
-            phiTestOnlySrc <- readFile "src/MLF/Elab/Phi/TestOnly.hs"
+            cabalSrc <- readFile "mlf2.cabal"
             let legacySolvedTypedElabApiMarkers =
                     [ "type GeneralizeAtWithLegacy ="
                     , "elaborate\n    :: TraceConfig\n    -> GeneralizeAtWithLegacy\n    -> Solved"
@@ -200,18 +200,23 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             forM_ legacySolvedTypedPhiApiMarkers $ \marker ->
                 isInfixOf marker phiSrc `shouldBe` False
             forM_ solvedTypedPhiTestOnlyApiMarkers $ \marker ->
-                isInfixOf marker phiTestOnlySrc `shouldBe` False
+                isInfixOf marker phiSrc `shouldBe` False
+            isInfixOf "MLF.Elab.Phi.TestOnly" cabalSrc `shouldBe` False
+            isInfixOf "MLF.Elab.Phi.IdentityBridge" cabalSrc `shouldBe` False
 
         it "elab-input absolute thesis-exact guard" $ do
             phiEnvSrc <- readFile "src/MLF/Elab/Phi/Env.hs"
             scopeSrc <- readFile "src/MLF/Elab/Run/Scope.hs"
             contextSrc <- readFile "src/MLF/Constraint/Presolution/Plan/Context.hs"
-            phiTestOnlySrc <- readFile "src/MLF/Elab/Phi/TestOnly.hs"
+            cabalSrc <- readFile "mlf2.cabal"
+            omegaSrc <- readFile "src/MLF/Elab/Phi/Omega.hs"
             isInfixOf "peResult :: Solved" phiEnvSrc `shouldBe` False
             isInfixOf "askResult ::" phiEnvSrc `shouldBe` False
             isInfixOf "Left _ -> ref" scopeSrc `shouldBe` False
             isInfixOf "Left _ -> root" contextSrc `shouldBe` False
-            isInfixOf "phiFromEdgeWitnessAutoTrace" phiTestOnlySrc `shouldBe` False
+            isInfixOf "MLF.Elab.Phi.TestOnly" cabalSrc `shouldBe` False
+            isInfixOf "MLF.Elab.Phi.IdentityBridge" cabalSrc `shouldBe` False
+            isInfixOf "MLF.Elab.Phi.IdentityBridge" omegaSrc `shouldBe` False
 
         it "row1 closeout guard|checked-authoritative keeps representative corpus parity: elaborateWithEnv has no entry-time Solved.rebuildWithConstraint" $ do
             src <- readFile "src/MLF/Elab/Elaborate.hs"

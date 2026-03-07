@@ -7,6 +7,37 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 
 ## Resolved
 
+### BUG-2026-03-07-006
+- Status: Resolved
+- Priority: Medium
+- Discovered: 2026-03-07
+- Resolved: 2026-03-07
+- Summary: Library-side Φ test hooks (`MLF.Elab.Phi.TestOnly` and `MLF.Elab.Phi.IdentityBridge`) lingered in `mlf2-internal` even though their remaining behavior was test-only or diagnostics-only.
+- Minimal reproducer:
+  - `rg -n "MLF\.Elab\.Phi\.TestOnly|MLF\.Elab\.Phi\.IdentityBridge" mlf2.cabal`
+  - `rg -n "import qualified MLF\.Elab\.Phi\.TestOnly|import qualified MLF\.Elab\.Phi\.IdentityBridge" test`
+- Expected vs actual:
+  - Expected: pure witness-domain helpers and test-only fail-fast shims should live in the test package, while production `Ω` keeps only the runtime behavior it actually needs.
+  - Actual before fix: the main library still exposed `MLF.Elab.Phi.TestOnly` and `MLF.Elab.Phi.IdentityBridge`, and tests imported them directly.
+- Suspected/owning area:
+  - `/Volumes/src/mlf4/mlf2.cabal`
+  - `/Volumes/src/mlf4/src/MLF/Elab/Phi/TestOnly.hs`
+  - `/Volumes/src/mlf4/src/MLF/Elab/Phi/IdentityBridge.hs`
+  - `/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs`
+  - `/Volumes/src/mlf4/test/Phi/WitnessDomainUtil.hs`
+- Thesis impact:
+  - This was an architecture hygiene/theory-boundary gap: test-only support code remained on the main-library surface after the runtime path had already been narrowed to direct replay-spine behavior.
+- Fix:
+  - Removed both modules from `mlf2-internal`.
+  - Exposed `MLF.Elab.Generalize` for test use and moved pure witness-domain helpers to `test/Phi/WitnessDomainUtil.hs`.
+  - Replaced the `IdentityBridge` production dependency in `MLF.Elab.Phi.Omega` with a tiny local diagnostic helper.
+- Regression tests:
+  - `/Volumes/src/mlf4/test/Phi/WitnessDomainSpec.hs` (`WitnessDomain`)
+  - `/Volumes/src/mlf4/test/GeneralizeSpec.hs` (`Generalize shadow comparator`)
+  - `/Volumes/src/mlf4/test/ElaborationSpec.hs` (`no-trace test entrypoint fails fast with MissingEdgeTrace`)
+  - `/Volumes/src/mlf4/test/PipelineSpec.hs` (`elab-input thesis-exact guard`, `elab-input absolute thesis-exact guard`, `row9-11 direct-target guard`)
+  - `cabal build all && cabal test`
+
 ### BUG-2026-03-06-001
 - Status: Resolved
 - Priority: Medium

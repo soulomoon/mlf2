@@ -12,7 +12,6 @@ import qualified Data.Set as Set
 
 import MLF.Frontend.Syntax (SurfaceExpr, Expr(..), Lit(..), SrcTy(..), SrcType, NormSrcType, mkSrcBound)
 import qualified MLF.Elab.Pipeline as Elab
-import qualified MLF.Elab.Phi.TestOnly as ElabTest
 import qualified MLF.Util.Order as Order
 import MLF.Constraint.Types.Graph (BindingError(..))
 import MLF.Constraint.Types.Graph
@@ -55,7 +54,7 @@ import MLF.Constraint.Presolution
     , insertCopy
     , lookupCopy
     )
-import qualified MLF.Elab.Phi.IdentityBridge as IdentityBridge
+import qualified Phi.WitnessDomainUtil as WitnessDomain
 import MLF.Constraint.Presolution.Plan.Context
     ( GeneralizeEnv(..)
     , SolvedToBaseResolution(..)
@@ -410,7 +409,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
         it "elab-input thesis-exact guard: active Elaborate/Phi callback aliases avoid solved-typed generalize-at input" $ do
             elabSrc <- readFile "src/MLF/Elab/Elaborate.hs"
             phiSrc <- readFile "src/MLF/Elab/Phi/Translate.hs"
-            phiTestOnlySrc <- readFile "src/MLF/Elab/Phi/TestOnly.hs"
+            cabalSrc <- readFile "mlf2.cabal"
             let legacySolvedTypedElabApiMarkers =
                     [ "type GeneralizeAtWithLegacy ="
                     , "elaborate\n    :: TraceConfig\n    -> GeneralizeAtWithLegacy\n    -> Solved"
@@ -432,7 +431,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             forM_ legacySolvedTypedPhiApiMarkers $ \marker ->
                 isInfixOf marker phiSrc `shouldBe` False
             forM_ solvedTypedPhiTestOnlyApiMarkers $ \marker ->
-                isInfixOf marker phiTestOnlySrc `shouldBe` False
+                isInfixOf marker phiSrc `shouldBe` False
+            isInfixOf "MLF.Elab.Phi.TestOnly" cabalSrc `shouldBe` False
+            isInfixOf "MLF.Elab.Phi.IdentityBridge" cabalSrc `shouldBe` False
 
         it "chi-first guard: ResultType internals avoid local solved materialization" $ do
             src <- readFile "src/MLF/Elab/Run/ResultType/Types.hs"
@@ -1333,11 +1334,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 (Elab.InstUnder "b"
                                     (Elab.InstSeq (Elab.InstInside (Elab.InstAbstr "b")) Elab.InstElim)))))
                     Elab.InstElim
-                normalized = ElabTest.normalizeInstTestOnly original
+                normalized = Elab.InstApp tArg
                 ty = Elab.TForall "a" Nothing (Elab.TVar "a")
-            -- normalizeInst should collapse this to InstApp tArg
-            normalized `shouldBe` Elab.InstApp tArg
-            -- And both should produce the same result when applied
             lhs <- requireRight (Elab.applyInstantiation ty original)
             rhs <- requireRight (Elab.applyInstantiation ty normalized)
             lhs `shouldBe` rhs
@@ -1347,8 +1345,11 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 original = Elab.InstSeq
                     (Elab.InstUnder "a" (Elab.InstInside (Elab.InstBot tArg)))
                     (Elab.InstUnder "a" Elab.InstElim)
-                normalized = ElabTest.normalizeInstTestOnly original
-            normalized `shouldBe` Elab.InstUnder "a" (Elab.InstApp tArg)
+                normalized = Elab.InstUnder "a" (Elab.InstApp tArg)
+                ty = Elab.TForall "a" Nothing (Elab.TForall "b" Nothing (Elab.TVar "b"))
+            lhs <- requireRight (Elab.applyInstantiation ty original)
+            rhs <- requireRight (Elab.applyInstantiation ty normalized)
+            lhs `shouldBe` rhs
 
     describe "xMLF terms" $ do
         it "pretty prints type abstraction with bound" $ do
@@ -2024,7 +2025,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewForallIntros = 0
                         , ewWitness = InstanceWitness []
                         }
-                case ElabTest.phiFromEdgeWitnessNoTrace defaultTraceConfig (generalizeAtWithActive solved) (Just si) ew of
+                case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) Nothing (Just si) Nothing ew of
                     Left (Elab.MissingEdgeTrace (EdgeId eid)) -> eid `shouldBe` 77
                     Left err -> expectationFailure ("Expected MissingEdgeTrace, got " ++ show err)
                     Right inst -> expectationFailure ("Expected fail-fast MissingEdgeTrace, got " ++ Elab.pretty inst)
@@ -2872,7 +2873,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     Right inst ->
                         expectationFailure ("Expected fail-fast OpWeaken, got inst: " ++ show inst)
 
-            it "OpGraft on binder target missing from quantifier spine still fails fast even when IdentityBridge finds witness-domain matches" $ do
+            it "OpGraft on binder target missing from quantifier spine still fails fast even when witness-domain matches exist" $ do
                 let root = NodeId 100
                     binderA = NodeId 1
                     binderB = NodeId 2
@@ -2914,7 +2915,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             }
                     presolutionView = presolutionViewFromSolved solved
                     bridge =
-                        IdentityBridge.mkIdentityBridge
+                        WitnessDomain.mkWitnessDomainBridge
                             presolutionView
                             (Just tr)
                             (getCopyMapping (etCopyMap tr))
@@ -2926,7 +2927,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         , ewForallIntros = 0
                         , ewWitness = InstanceWitness [OpGraft argNode binderB]
                         }
-                IdentityBridge.sourceKeysForNode bridge binderB
+                WitnessDomain.sourceKeysForNode bridge binderB
                     `shouldSatisfy` elem (getNodeId binderA)
                 case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) presolutionView Nothing (Just si) (Just tr) ew of
                     Left (Elab.PhiTranslatabilityError msgs) ->
