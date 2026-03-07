@@ -4,6 +4,23 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 57 Guard-first surface `Expr` fold refactor (completed 2026-03-08)
+
+- Completed:
+  - added direct row1 desugaring-contract coverage in `test/FrontendDesugarSpec.hs`;
+  - added manual recursion-schemes support for `Expr 'Surface ty` and refactored `MLF.Frontend.Desugar.desugarSurface` to use `cata` only on the surface AST;
+  - kept `MLF.Frontend.Normalize` explicit and unchanged as the binder/capture-sensitive boundary.
+- Verification:
+  - `MLF.Frontend.Desugar`: PASS (`4 examples, 0 failures`)
+  - `desugars annotated lambda parameters via let`: PASS (`1 example, 0 failures`)
+  - `ELet with EAnn RHS does not create explicit-scheme instantiation structure`: PASS (`1 example, 0 failures`)
+  - `row1 closeout guard|checked-authoritative`: PASS (`2 examples, 0 failures`)
+  - `cabal build all && cabal test`: PASS (`974 examples, 0 failures`)
+- Rolling priorities (next):
+  1. Keep the new direct row1 desugaring guards green during future frontend cleanup.
+  2. Keep `MLF.Frontend.Normalize` explicit unless a fresh binder/capture audit widens scope.
+  3. Continue the frontend preprocessing roadmap only inside the row1 audit boundary unless a guard exposes a let-scope mismatch.
+
 ## Task 56 Remove final χp `...View` alias duplicates (completed 2026-03-07)
 
 - Completed:

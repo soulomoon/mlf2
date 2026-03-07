@@ -4,7 +4,9 @@ module MLF.Frontend.Desugar (
     desugarSurface
 ) where
 
-import MLF.Frontend.Syntax (Expr (..), NormCoreExpr, NormSurfaceExpr)
+import Data.Functor.Foldable (cata)
+
+import MLF.Frontend.Syntax (Expr (..), NormCoreExpr, NormSurfaceExpr, SurfaceExprF(..))
 
 {- Note [κσ coercions and desugaring]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -39,14 +41,14 @@ the constraint generator sees only `ELam` and processes the let normally.
 -}
 
 desugarSurface :: NormSurfaceExpr -> NormCoreExpr
-desugarSurface expr = case expr of
-    EVar v -> EVar v
-    ELit l -> ELit l
-    ELam v body -> ELam v (desugarSurface body)
-    -- Annotated lambda desugars to plain lambda with let + coercion (thesis §12.3.2)
-    -- λ(x : τ) body  ≜  λ(x) let x = cτ x in body
-    ELamAnn v ty body ->
-        ELam v (ELet v (EApp (ECoerceConst ty) (EVar v)) (desugarSurface body))
-    EApp f a -> EApp (desugarSurface f) (desugarSurface a)
-    ELet v rhs body -> ELet v (desugarSurface rhs) (desugarSurface body)
-    EAnn e ty -> EApp (ECoerceConst ty) (desugarSurface e)
+desugarSurface = cata alg
+  where
+    alg = \case
+        EVarSurfaceF v -> EVar v
+        ELitSurfaceF l -> ELit l
+        ELamSurfaceF v body -> ELam v body
+        EAppSurfaceF fun arg -> EApp fun arg
+        ELetSurfaceF v rhs body -> ELet v rhs body
+        ELamAnnSurfaceF v ty body ->
+            ELam v (ELet v (EApp (ECoerceConst ty) (EVar v)) body)
+        EAnnSurfaceF expr0 ty -> EApp (ECoerceConst ty) expr0

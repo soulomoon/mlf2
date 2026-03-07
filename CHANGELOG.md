@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Changed
+- Guard-first surface `Expr` fold refactor (2026-03-08):
+  - added direct row1 desugaring-contract coverage in `test/FrontendDesugarSpec.hs` for annotated terms, annotated lambdas, nested recursion, and typed-let coercion-only lowering;
+  - added manual recursion-schemes support for `Expr 'Surface ty` in `MLF.Frontend.Syntax` and refactored `MLF.Frontend.Desugar.desugarSurface` to a local `cata` while preserving exact coercion insertion and let placement;
+  - kept `MLF.Frontend.Normalize` explicit and unchanged as the binder/capture-sensitive boundary;
+  - verified `MLF.Frontend.Desugar` (`4 examples, 0 failures`), `desugars annotated lambda parameters via let` (`1 example, 0 failures`), `ELet with EAnn RHS does not create explicit-scheme instantiation structure` (`1 example, 0 failures`), `row1 closeout guard|checked-authoritative` (`2 examples, 0 failures`), and `cabal build all && cabal test` (`974 examples, 0 failures`).
 - Removed final χp `...View` alias duplicates (2026-03-07):
   - collapsed the remaining duplicate `...View` / `...FromView` aliases in runtime and reify helpers so only the unsuffixed `PresolutionView`-typed APIs remain;
   - updated runtime, result-type, elaboration, Phi, and test call sites to use the canonical unsuffixed names;
