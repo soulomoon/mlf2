@@ -2,8 +2,6 @@
 module MLF.Elab.Run.TypeOps (
     inlineBoundVarsType,
     inlineBoundVarsTypeForBound,
-    inlineBoundVarsTypeView,
-    inlineBoundVarsTypeForBoundView,
     simplifyAnnotationType
 ) where
 
@@ -16,8 +14,8 @@ import MLF.Constraint.Presolution (PresolutionView(..))
 import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Constraint.Types.Graph (TyNode(..), cNodes, fromListNode, toListNode)
 import MLF.Reify.Core
-    ( namedNodesFromView
-    , reifyTypeWithNamedSetNoFallbackFromView
+    ( namedNodes
+    , reifyTypeWithNamedSetNoFallback
     )
 import MLF.Reify.TypeOps (
     freeTypeVarsType,
@@ -46,12 +44,6 @@ inlineBoundVarsType = inlineBoundVarsTypeWith False
 inlineBoundVarsTypeForBound :: PresolutionView -> ElabType -> ElabType
 inlineBoundVarsTypeForBound = inlineBoundVarsTypeWith True
 
-inlineBoundVarsTypeView :: PresolutionView -> ElabType -> ElabType
-inlineBoundVarsTypeView = inlineBoundVarsTypeWith False
-
-inlineBoundVarsTypeForBoundView :: PresolutionView -> ElabType -> ElabType
-inlineBoundVarsTypeForBoundView = inlineBoundVarsTypeWith True
-
 -- See Note [Scope-aware bound/alias inlining] in
 -- docs/notes/2026-01-27-elab-changes.md.
 inlineBoundVarsTypeWith :: Bool -> PresolutionView -> ElabType -> ElabType
@@ -65,7 +57,7 @@ inlineBoundVarsTypeWith unboundToBottom presolutionView =
   where
     constraint = pvConstraint presolutionView
     canonical = pvCanonical presolutionView
-    namedSet = either (const IntSet.empty) id (namedNodesFromView presolutionView)
+    namedSet = either (const IntSet.empty) id (namedNodes presolutionView)
     nodesVarOnly =
         fromListNode
             [ (nid, node)
@@ -77,7 +69,7 @@ inlineBoundVarsTypeWith unboundToBottom presolutionView =
         _ -> False
     reifyBoundWithSeen seen bnd = do
         let bndRoot = resolveBoundBodyConstraint canonical constraint seen bnd
-        t0 <- reifyTypeWithNamedSetNoFallbackFromView presolutionView IntMap.empty namedSet bndRoot
+        t0 <- reifyTypeWithNamedSetNoFallback presolutionView IntMap.empty namedSet bndRoot
         pure (inlineBaseBoundsType constraint canonical t0)
 
 simplifyAnnotationType :: ElabType -> ElabType

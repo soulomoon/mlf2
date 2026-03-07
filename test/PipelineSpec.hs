@@ -384,6 +384,39 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             legacySrc `shouldSatisfy` isInfixOf "fromSolved"
             boundarySrc `shouldSatisfy` isInfixOf "fromSolved ::"
 
+        it "chi-first guard: duplicate ...View aliases are retired from runtime and reify modules" $ do
+            scopeSrc <- readFile "src/MLF/Elab/Run/Scope.hs"
+            typeOpsSrc <- readFile "src/MLF/Elab/Run/TypeOps.hs"
+            generalizeSrc <- readFile "src/MLF/Elab/Run/Generalize.hs"
+            resultTypeUtilSrc <- readFile "src/MLF/Elab/Run/ResultType/Util.hs"
+            reifySrc <- readFile "src/MLF/Reify/Core.hs"
+            let banned =
+                    [ "bindingScopeRefCanonicalView"
+                    , "schemeBodyTargetView"
+                    , "canonicalizeScopeRefView"
+                    , "resolveCanonicalScopeView"
+                    , "letScopeOverridesView"
+                    , "inlineBoundVarsTypeView"
+                    , "inlineBoundVarsTypeForBoundView"
+                    , "generalizeAtWithBuilderView"
+                    , "mkGeneralizeAtWithBuilderView"
+                    , "generalizeWithPlanView"
+                    , "reifyTypeFromView"
+                    , "reifyTypeWithNamesFromView"
+                    , "reifyTypeWithNamesNoFallbackFromView"
+                    , "reifyTypeWithNamedSetFromView"
+                    , "reifyTypeWithNamedSetNoFallbackFromView"
+                    , "reifyBoundWithNamesFromView"
+                    , "reifyBoundWithNamesBoundFromView"
+                    , "namedNodesFromView"
+                    ]
+            forM_ banned $ \marker -> do
+                scopeSrc `shouldSatisfy` (not . isInfixOf marker)
+                typeOpsSrc `shouldSatisfy` (not . isInfixOf marker)
+                generalizeSrc `shouldSatisfy` (not . isInfixOf marker)
+                resultTypeUtilSrc `shouldSatisfy` (not . isInfixOf marker)
+                reifySrc `shouldSatisfy` (not . isInfixOf marker)
+
         it "chi-first guard: internals use shared ChiQuery facade" $ do
             elabSrc <- readFile "src/MLF/Elab/Elaborate.hs"
             rtViewSrc <- readFile "src/MLF/Elab/Run/ResultType/View.hs"

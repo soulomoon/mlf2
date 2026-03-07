@@ -35,14 +35,14 @@ import MLF.Elab.Types
 import MLF.Elab.Run.Annotation (annNode)
 import MLF.Elab.Run.Debug (debugGaScope, debugGaScopeEnabled, debugWhenCondM, debugWhenM)
 import MLF.Elab.Run.Scope
-    ( bindingScopeRefCanonicalView
-    , canonicalizeScopeRefView
-    , resolveCanonicalScopeView
-    , schemeBodyTargetView
+    ( bindingScopeRefCanonical
+    , canonicalizeScopeRef
+    , resolveCanonicalScope
+    , schemeBodyTarget
     )
-import MLF.Elab.Run.Generalize (generalizeAtWithBuilderView)
+import MLF.Elab.Run.Generalize (generalizeAtWithBuilder)
 import MLF.Elab.Run.ResultType.Util
-    ( generalizeWithPlanView
+    ( generalizeWithPlan
     , stripAnn
     , collectEdges
     )
@@ -100,10 +100,10 @@ computeResultTypeFallback ctx annCanon ann = do
                     c1 = View.rtvBaseConstraint view
                     redirects = View.rtvRedirects view
                 -- Find the scope root for the annotation node
-                scopeRoot <- bindingToElab (resolveCanonicalScopeView c1 presolutionViewForGen redirects annNodeId)
-                let targetC = schemeBodyTargetView presolutionViewForGen annNodeId
+                scopeRoot <- bindingToElab (resolveCanonicalScope c1 presolutionViewForGen redirects annNodeId)
+                let targetC = schemeBodyTarget presolutionViewForGen annNodeId
                 (paramSch, _subst) <-
-                    generalizeWithPlanView
+                    generalizeWithPlan
                         planBuilder
                         bindParentsGa
                         presolutionViewForGen
@@ -182,7 +182,7 @@ computeResultTypeFallbackCore ctx annCanon ann = do
         redirects = View.rtvRedirects viewBase
         traceCfg = View.rtvTraceConfig viewBase
         generalizeAtWith mbGa =
-            generalizeAtWithBuilderView planBuilder mbGa presolutionView
+            generalizeAtWithBuilder planBuilder mbGa presolutionView
 
     let edgeTraceCounts =
             IntMap.fromListWith
@@ -496,10 +496,10 @@ computeResultTypeFallbackCore ctx annCanon ann = do
                         Just baseN -> View.rtvWithBoundOverlay rootC baseN viewBase
                 presolutionViewFinal = withResultTypeViewOverlay ctx viewFinalBounded
             let scopeRootNodePre = rootForTypePre
-            scopeRootPre <- bindingToElab (resolveCanonicalScopeView c1 presolutionViewFinal redirects scopeRootNodePre)
+            scopeRootPre <- bindingToElab (resolveCanonicalScope c1 presolutionViewFinal redirects scopeRootNodePre)
             let scopeRootPost =
-                    case bindingScopeRefCanonicalView presolutionViewFinal rootC of
-                        Right ref -> canonicalizeScopeRefView presolutionViewFinal redirects ref
+                    case bindingScopeRefCanonical presolutionViewFinal rootC of
+                        Right ref -> canonicalizeScopeRef presolutionViewFinal redirects ref
                         Left _ -> scopeRootPre
                 scopeRoot = scopeRootPre
             debugWhenCondM traceCfg (scopeRootPre /= scopeRootPost)
@@ -536,7 +536,7 @@ computeResultTypeFallbackCore ctx annCanon ann = do
                     rootIsSchemeRoot
                         && maybe False (const True) rootBound
                 rootBoundIsBaseLike = rootBoundIsBase
-                boundVarTargetRoot = canonicalFinal (schemeBodyTargetView presolutionViewFinal rootC)
+                boundVarTargetRoot = canonicalFinal (schemeBodyTarget presolutionViewFinal rootC)
                 schemeRootSetFinal =
                     IntSet.fromList
                         [ getNodeId (canonicalFinal root)
@@ -639,7 +639,7 @@ computeResultTypeFallbackCore ctx annCanon ann = do
                             let candidates =
                                     [ ( canonicalFinal child
                                       , canonicalFinal bnd
-                                      , canonicalFinal (schemeBodyTargetView presolutionViewFinal bnd)
+                                      , canonicalFinal (schemeBodyTarget presolutionViewFinal bnd)
                                       , boundHasForallFrom bnd
                                       )
                                     | (childKey, (parentRef, _flag)) <- IntMap.toList (View.rtvCanonicalBindParents viewFinalBounded)
@@ -686,8 +686,8 @@ computeResultTypeFallbackCore ctx annCanon ann = do
                                         _ ->
                                             case boundVarTarget of
                                                 Just v -> v
-                                                Nothing -> schemeBodyTargetView presolutionViewFinal rootC
-                                else schemeBodyTargetView presolutionViewFinal rootC
+                                                Nothing -> schemeBodyTarget presolutionViewFinal rootC
+                                else schemeBodyTarget presolutionViewFinal rootC
             let bindParentsGaFinal =
                     case boundTarget of
                         Just baseN ->
@@ -711,7 +711,7 @@ computeResultTypeFallbackCore ctx annCanon ann = do
                             in bindParentsGa { gaBaseConstraint = baseConstraint' }
                         Nothing -> bindParentsGa
             (sch, _subst) <-
-                generalizeWithPlanView planBuilder bindParentsGaFinal presolutionViewFinal scopeRoot targetC
+                generalizeWithPlan planBuilder bindParentsGaFinal presolutionViewFinal scopeRoot targetC
             debugWhenM traceCfg
                 ("runPipelineElab: final scheme="
                     ++ pretty sch

@@ -30,7 +30,7 @@ import MLF.Elab.Types
 import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Elab.Legacy (expansionToInst)
 import MLF.Elab.TermClosure (closeTermWithSchemeSubstIfNeeded, substInTerm)
-import MLF.Elab.Run.TypeOps (inlineBoundVarsTypeView, simplifyAnnotationType)
+import MLF.Elab.Run.TypeOps (inlineBoundVarsType, simplifyAnnotationType)
 import MLF.Elab.Run.Annotation (adjustAnnotationInst)
 import qualified MLF.Elab.Run.ChiQuery as ChiQuery
 import MLF.Constraint.BindingUtil (bindingPathToRootLocal)
@@ -40,10 +40,10 @@ import MLF.Elab.TypeCheck (typeCheck)
 import qualified MLF.Elab.TypeCheck as TypeCheck (Env(..), typeCheckWithEnv)
 import qualified MLF.Elab.Inst as Inst
 import MLF.Reify.Core
-    ( namedNodesFromView
-    , reifyTypeFromView
-    , reifyBoundWithNamesFromView
-    , reifyTypeWithNamedSetNoFallbackFromView
+    ( namedNodes
+    , reifyType
+    , reifyBoundWithNames
+    , reifyTypeWithNamedSetNoFallback
     )
 import MLF.Constraint.Presolution
     ( PresolutionView(..)
@@ -100,7 +100,7 @@ elaborateWithEnv
     -> AnnExpr
     -> Either ElabError ElabTerm
 elaborateWithEnv config elabEnv ann = do
-    namedSet <- namedNodesFromView presolutionView
+    namedSet <- namedNodes presolutionView
     let namedSetPhi = namedSet
         namedSetReify = namedSet
     let ElabOut { elabTerm = runElab } = para (elabAlg namedSetPhi namedSetReify) ann
@@ -149,11 +149,11 @@ elaborateWithEnv config elabEnv ann = do
                         case generalizeAtWithRaw Nothing scopeRoot targetNode of
                             Right out -> Right out
                             Left err2 | generalizeNeedsFallback err2 -> do
-                                ty <- reifyTypeFromView presolutionView targetNode
+                                ty <- reifyType presolutionView targetNode
                                 pure (schemeFromType ty, IntMap.empty)
                             Left err3 -> Left err3
                     Nothing -> do
-                        ty <- reifyTypeFromView presolutionView targetNode
+                        ty <- reifyType presolutionView targetNode
                         pure (schemeFromType ty, IntMap.empty)
             Left err -> Left err
 
@@ -268,7 +268,7 @@ elaborateWithEnv config elabEnv ann = do
 
     reifyNodeTypePreferringBound :: NodeId -> Either ElabError ElabType
     reifyNodeTypePreferringBound nodeId = do
-        namedSet <- namedNodesFromView presolutionView
+        namedSet <- namedNodes presolutionView
         let nodeC = canonical nodeId
         case chiLookupVarBound nodeC of
             Just bnd -> reifyTypeForParam presolutionView namedSet bnd
@@ -454,7 +454,7 @@ elaborateWithEnv config elabEnv ann = do
                                     si <- Map.lookup v env
                                     let paramTy' =
                                             if shouldInlineParamTy
-                                                then inlineBoundVarsTypeView presolutionView paramTy
+                                                then inlineBoundVarsType presolutionView paramTy
                                                 else paramTy
                                     args <- inferInstAppArgs (siScheme si) paramTy'
                                     pure (instSeqApps args)
@@ -464,7 +464,7 @@ elaborateWithEnv config elabEnv ann = do
                                         Right (TArrow paramTy _) -> do
                                             let paramTy' =
                                                     if shouldInlineParamTy
-                                                        then inlineBoundVarsTypeView presolutionView paramTy
+                                                        then inlineBoundVarsType presolutionView paramTy
                                                         else paramTy
                                             args <- inferInstAppArgs (siScheme si) paramTy'
                                             pure (instSeqApps args)
@@ -943,12 +943,12 @@ elaborateWithEnv config elabEnv ann = do
                                     reifyArg arg =
                                         let argC = canonical arg
                                         in case chiLookupVarBound argC of
-                                            Just bnd -> reifyBoundWithNamesFromView presolutionView substForArgs bnd
-                                            Nothing -> reifyTypeWithNamedSetNoFallbackFromView presolutionView substForArgs namedSetReify argC
+                                            Just bnd -> reifyBoundWithNames presolutionView substForArgs bnd
+                                            Nothing -> reifyTypeWithNamedSetNoFallback presolutionView substForArgs namedSetReify argC
                                 argTys <- case targetArgs of
                                     Just inferred -> pure inferred
                                     Nothing -> mapM reifyArg argNodes'
-                                let argTys' = map (inlineBoundVarsTypeView presolutionView) argTys
+                                let argTys' = map (inlineBoundVarsType presolutionView) argTys
                                 case debugGeneralize
                                     ("reifyInst fallback edge=" ++ show eid
                                         ++ " argTys=" ++ show argTys
@@ -966,8 +966,8 @@ elaborateWithEnv config elabEnv ann = do
     reifyTargetType namedSetReify ew si =
         let subst = siSubst si
         in case chiLookupVarBound (ewRight ew) of
-            Just bnd -> reifyTypeWithNamedSetNoFallbackFromView presolutionView subst namedSetReify bnd
-            Nothing -> reifyTypeWithNamedSetNoFallbackFromView presolutionView subst namedSetReify (ewRight ew)
+            Just bnd -> reifyTypeWithNamedSetNoFallback presolutionView subst namedSetReify bnd
+            Nothing -> reifyTypeWithNamedSetNoFallback presolutionView subst namedSetReify (ewRight ew)
 
     inferInstAppArgs :: ElabScheme -> ElabType -> Maybe [ElabType]
     inferInstAppArgs scheme targetTy =
@@ -1065,9 +1065,9 @@ instSeqApps tys = case map InstApp tys of
 
 reifyTypeForParam :: PresolutionView -> IntSet.IntSet -> NodeId -> Either ElabError ElabType
 reifyTypeForParam presolutionView namedSet nid = do
-    ty <- reifyTypeWithNamedSetNoFallbackFromView presolutionView IntMap.empty namedSet nid
+    ty <- reifyTypeWithNamedSetNoFallback presolutionView IntMap.empty namedSet nid
     let ty' = inlineBaseBounds presolutionView ty
-    pure (inlineBoundVarsTypeView presolutionView ty')
+    pure (inlineBoundVarsType presolutionView ty')
 
 inlineBaseBounds :: PresolutionView -> ElabType -> ElabType
 inlineBaseBounds presolutionView =

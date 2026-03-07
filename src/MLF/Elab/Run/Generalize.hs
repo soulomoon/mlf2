@@ -4,8 +4,6 @@ module MLF.Elab.Run.Generalize (
     instantiationCopyNodes,
     constraintForGeneralization,
     mkGeneralizeAtWithBuilder,
-    mkGeneralizeAtWithBuilderView,
-    generalizeAtWithBuilderView,
     generalizeAtWithBuilder
 ) where
 
@@ -136,21 +134,6 @@ buildGeneralizeEnv traceCfg presolutionView redirects instCopyNodes instCopyMap 
         , geTraceConfig = traceCfg
         }
 
-generalizeAtWithBuilderView
-    :: PresolutionPlanBuilder
-    -> Maybe GaBindParents
-    -> PresolutionView
-    -> NodeRef
-    -> NodeId
-    -> Either ElabError (ElabScheme, IntMap.IntMap String)
-generalizeAtWithBuilderView planBuilder mbBindParentsGa presolutionView scopeRoot targetNode =
-    let PresolutionPlanBuilder buildPlans = planBuilder
-        go mbGa scope target = do
-            (genPlan, reifyPlan) <- buildPlans presolutionView mbGa scope target
-            let fallback scope' target' = fst <$> go mbGa scope' target'
-            applyGeneralizePlan fallback genPlan reifyPlan
-    in go mbBindParentsGa scopeRoot targetNode
-
 generalizeAtWithBuilder
     :: PresolutionPlanBuilder
     -> Maybe GaBindParents
@@ -158,17 +141,17 @@ generalizeAtWithBuilder
     -> NodeRef
     -> NodeId
     -> Either ElabError (ElabScheme, IntMap.IntMap String)
-generalizeAtWithBuilder = generalizeAtWithBuilderView
+generalizeAtWithBuilder planBuilder mbBindParentsGa presolutionView scopeRoot targetNode =
+    let PresolutionPlanBuilder buildPlans = planBuilder
+        go mbGa scope target = do
+            (genPlan, reifyPlan) <- buildPlans presolutionView mbGa scope target
+            let fallback scope' target' = fst <$> go mbGa scope' target'
+            applyGeneralizePlan fallback genPlan reifyPlan
+    in go mbBindParentsGa scopeRoot targetNode
 
 mkGeneralizeAtWithBuilder
     :: PresolutionPlanBuilder
     -> PresolutionView
     -> GeneralizeAtView
-mkGeneralizeAtWithBuilder = mkGeneralizeAtWithBuilderView
-
-mkGeneralizeAtWithBuilderView
-    :: PresolutionPlanBuilder
-    -> PresolutionView
-    -> GeneralizeAtView
-mkGeneralizeAtWithBuilderView planBuilder presolutionView mbGa scopeRoot targetNode =
-    generalizeAtWithBuilderView planBuilder mbGa presolutionView scopeRoot targetNode
+mkGeneralizeAtWithBuilder planBuilder presolutionView mbGa scopeRoot targetNode =
+    generalizeAtWithBuilder planBuilder mbGa presolutionView scopeRoot targetNode
