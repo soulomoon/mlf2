@@ -11,7 +11,6 @@ module MLF.Constraint.Solved (
     -- * Opaque type
     Solved,
     fromSolveOutput,
-    mkTestSolved,
     fromPreRewriteState,
 
     -- * Core queries
@@ -28,12 +27,6 @@ module MLF.Constraint.Solved (
     -- * Mutation helpers
     pruneBindParentsSolved,
 
-    -- * Extended queries
-    classMembers,
-    originalNode,
-    originalBindParent,
-    wasOriginalBinder,
-
     -- * Canonical-domain queries
     weakenedVars,
     isEliminatedVar,
@@ -41,7 +34,6 @@ module MLF.Constraint.Solved (
 
     -- * Validation helpers
     validateCanonicalGraphStrict,
-    validateOriginalCanonicalAgreement,
 ) where
 
 import MLF.Constraint.Solved.Internal
@@ -51,7 +43,6 @@ import MLF.Constraint.Solved.Internal
     , canonicalConstraint
     , canonicalMap
     , canonicalizedBindParents
-    , classMembers
     , fromPreRewriteState
     , fromSolveOutput
     , genNodes
@@ -59,13 +50,8 @@ import MLF.Constraint.Solved.Internal
     , lookupBindParent
     , lookupNode
     , lookupVarBound
-    , mkTestSolved
-    , originalBindParent
     , originalConstraint
-    , originalNode
     , pruneBindParentsSolved
     , validateCanonicalGraphStrict
-    , validateOriginalCanonicalAgreement
-    , wasOriginalBinder
     , weakenedVars
     )

@@ -25,11 +25,12 @@ import MLF.Constraint.Presolution
 import MLF.Constraint.Types.Witness (ReplayContract(..))
 import MLF.Frontend.Syntax (Expr(..))
 import Phi.WitnessDomainUtil
+import qualified SolvedFacadeTestUtil as SolvedTest
 import SpecUtil (emptyConstraint, nodeMapFromList, runPipelineArtifactsDefault, PipelineArtifacts(..))
 
 -- | Build a Solved with the given union-find for testing.
 mkTestSolved :: IntMap.IntMap NodeId -> Solved
-mkTestSolved uf = Solved.mkTestSolved emptyConstraint uf
+mkTestSolved uf = SolvedTest.mkTestSolved emptyConstraint uf
 
 solvedToPresolutionView :: Solved -> PresolutionView
 solvedToPresolutionView solved =
@@ -105,7 +106,7 @@ spec = describe "WitnessDomain" $ do
                         , (getNodeId alias, TyBase alias (BaseTy "Bool"))
                         ]
                     }
-                solved = Solved.mkTestSolved c (IntMap.fromList [(getNodeId binder, alias)])
+                solved = SolvedTest.mkTestSolved c (IntMap.fromList [(getNodeId binder, alias)])
                 ib = mkBridge solved Nothing IntMap.empty
             sourceKeysForNode ib alias `shouldSatisfy` notElem (getNodeId binder)
 
@@ -257,7 +258,7 @@ spec = describe "WitnessDomain" $ do
                         , (31, TyBase alias (BaseTy "Bool"))
                         ]
                     }
-                solved = Solved.mkTestSolved c (IntMap.fromList [(1, alias), (2, alias)])
+                solved = SolvedTest.mkTestSolved c (IntMap.fromList [(1, alias), (2, alias)])
                 ib = mkBridge solved Nothing IntMap.empty
                 binderKeys = IntSet.fromList [1, 2, 31]
                 spine = [Just b1, Just b2]
@@ -277,7 +278,7 @@ spec = describe "WitnessDomain" $ do
                         , (31, TyBase alias (BaseTy "Bool"))
                         ]
                     }
-                solved = Solved.mkTestSolved c (IntMap.fromList [(1, alias), (2, alias)])
+                solved = SolvedTest.mkTestSolved c (IntMap.fromList [(1, alias), (2, alias)])
                 ib = mkBridge solved Nothing IntMap.empty
                 binderKeys = IntSet.fromList [1, 2]
                 spine = [Just b1, Just b2]

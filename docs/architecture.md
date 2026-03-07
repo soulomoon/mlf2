@@ -76,6 +76,8 @@ The third low-risk cleanup landed on 2026-03-08 by splitting `MLF.Constraint.Sol
 
 The fourth low-risk cleanup landed on 2026-03-08 by retiring the dead raw canonical container accessors `canonicalBindParents` and `canonicalGenNodes` from both the public facade and internal implementation.
 
+The fifth low-risk cleanup landed on 2026-03-08 by moving the remaining test/audit-only helper bundle (`mkTestSolved`, `classMembers`, `originalNode`, `originalBindParent`, `wasOriginalBinder`, `validateOriginalCanonicalAgreement`) into `test/SolvedFacadeTestUtil.hs` and removing it from the public facade.
+
 The detailed evidence matrix for this classification lives in `tasks/archive/2026-03-08-solved-classification-table/findings.md`.
 
 ## Witness Representation (Φ/Σ)

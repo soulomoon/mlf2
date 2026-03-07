@@ -17,6 +17,7 @@ import MLF.Constraint.Types
     , typeRef
     )
 import MLF.Elab.Run.Scope (preferGenScope, resolveCanonicalScope)
+import qualified SolvedFacadeTestUtil as SolvedTest
 import SpecUtil (emptyConstraint, nodeMapFromList)
 
 spec :: Spec
@@ -33,7 +34,7 @@ spec =
             let root = NodeId 1
                 cycleNode = NodeId 2
                 constraint = cyclicConstraint root cycleNode
-                solved = Solved.mkTestSolved constraint IntMap.empty
+                solved = SolvedTest.mkTestSolved constraint IntMap.empty
             resolveCanonicalScope constraint (PresolutionViewBoundary.fromSolved solved) IntMap.empty root
                 `shouldSatisfy` isBindingCycleError
 

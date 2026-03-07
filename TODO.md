@@ -4,6 +4,22 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 67 Move solved test/audit helper bundle behind test utility (completed 2026-03-08)
+
+- Completed:
+  - added `test/SolvedFacadeTestUtil.hs` as the test-only home for `mkTestSolved`, `classMembers`, `originalNode`, `originalBindParent`, `wasOriginalBinder`, and `validateOriginalCanonicalAgreement`;
+  - removed that helper bundle from the public `MLF.Constraint.Solved` facade and added a direct solved-facade guard in `test/Constraint/SolvedSpec.hs`.
+- Verification:
+  - `cabal build all && cabal test`: PASS
+  - `MLF.Constraint.Solved`: PASS (`48 examples, 0 failures`)
+  - `WitnessDomain`: PASS (`23 examples, 0 failures`)
+  - `ga scope`: PASS (`2 examples, 0 failures`)
+  - `test-only helper bundle is absent from the Solved facade`: PASS (`1 example, 0 failures`)
+- Rolling priorities (next):
+  1. Move `pruneBindParentsSolved` into `MLF.Constraint.Finalize`, where its only live owner already is.
+  2. Then relocate the remaining production read-query helpers (`lookupNode`, `lookupBindParent`, `bindParents`, `lookupVarBound`, `genNodes`, `weakenedVars`, `isEliminatedVar`, `canonicalizedBindParents`) into their local owner modules or stable non-facade homes.
+  3. Keep the new solved-facade guard stack green during future cleanup.
+
 ## Task 66 Retire dead raw canonical container accessors (completed 2026-03-08)
 
 - Completed:

@@ -9,6 +9,7 @@ import qualified Data.List.NonEmpty as NE
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Set as Set
+import qualified SolvedFacadeTestUtil as SolvedTest
 
 import MLF.Frontend.Syntax (SurfaceExpr, Expr(..), Lit(..), SrcTy(..), SrcType, NormSrcType, mkSrcBound)
 import qualified MLF.Elab.Pipeline as Elab
@@ -179,7 +180,7 @@ dropLeadingTyAbs term = case term of
     _ -> term
 
 mkSolved :: Constraint -> IntMap.IntMap NodeId -> Solved.Solved
-mkSolved = Solved.mkTestSolved
+mkSolved = SolvedTest.mkTestSolved
 
 presolutionViewFromSolved :: Solved.Solved -> PresolutionView
 presolutionViewFromSolved solved =
@@ -4800,7 +4801,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     , cGenNodes = fromListGen [(g0, GenNode g0 [n1, n2])]
                     }
                 uf = IntMap.fromList [(getNodeId n2, n1)]
-                solved = Solved.mkTestSolved constraint uf
+                solved = SolvedTest.mkTestSolved constraint uf
                 noRedirects = IntMap.empty
             scope1 <- requireRight (resolveCanonicalScope constraint (presolutionViewFromSolved solved) noRedirects n1)
             scope1 `shouldBe` GenRef g0
@@ -4894,7 +4895,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     , cBindParents = solvedForGenBP
                     }
                 redirects = IntMap.fromList [(getNodeId e1, n2)]
-                solved = Solved.mkTestSolved solvedForGen IntMap.empty
+                solved = SolvedTest.mkTestSolved solvedForGen IntMap.empty
                 ann = ALet "x" g0 e1 (ExpVarId 0) g0
                     (AVar "y" n2) (AVar "z" n3) n3
                 overrides = letScopeOverrides base solvedForGen (presolutionViewFromSolved solved) redirects ann
@@ -4919,7 +4920,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     , cBindParents = bp
                     , cGenNodes = fromListGen [(g0, GenNode g0 [n1, n2])]
                     }
-                solved = Solved.mkTestSolved constraint IntMap.empty
+                solved = SolvedTest.mkTestSolved constraint IntMap.empty
                 noRedirects = IntMap.empty
                 ann = ALet "x" g0 n1 (ExpVarId 0) g0
                     (AVar "y" n2) (AVar "z" n2) n2
