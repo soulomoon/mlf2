@@ -3,7 +3,6 @@ module ScopeSpec (spec) where
 import qualified Data.IntMap.Strict as IntMap
 import Test.Hspec
 
-import qualified MLF.Constraint.Solved as Solved
 import qualified MLF.Constraint.Presolution.View as PresolutionViewBoundary
 import MLF.Constraint.Types
     ( BindFlag(..)

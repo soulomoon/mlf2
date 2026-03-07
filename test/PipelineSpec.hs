@@ -32,6 +32,7 @@ import MLF.Frontend.Syntax
 import MLF.Frontend.ConstraintGen
 import MLF.Constraint.Canonicalizer (canonicalizerFrom, canonicalizeNode)
 import qualified MLF.Constraint.Finalize as Finalize
+import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Presolution
 import qualified MLF.Constraint.Presolution.View as PresolutionViewBoundary
 import qualified MLF.Constraint.Solved as Solved
@@ -522,16 +523,19 @@ spec = describe "Pipeline (Phases 1-5)" $ do
 
                 pvConstraint view `shouldBe` Solved.originalConstraint solved
                 pvCanonicalMap view `shouldBe` Solved.canonicalMap solved
-                pvBindParents view `shouldBe` Solved.bindParents solved
+                pvBindParents view `shouldBe` cBindParents (Solved.originalConstraint solved)
                 pvCanonicalConstraint view `shouldBe` Solved.canonicalConstraint solved
 
                 forM_ probeIds $ \nid -> do
                     pvCanonical view nid `shouldBe` Solved.canonical solved nid
-                    pvLookupNode view nid `shouldBe` Solved.lookupNode solved nid
-                    pvLookupVarBound view nid `shouldBe` Solved.lookupVarBound solved nid
+                    pvLookupNode view nid `shouldBe`
+                        NodeAccess.lookupNode (Solved.originalConstraint solved) (Solved.canonical solved nid)
+                    pvLookupVarBound view nid `shouldBe`
+                        NodeAccess.lookupVarBound (Solved.originalConstraint solved) (Solved.canonical solved nid)
 
                 forM_ probeRefs $ \ref ->
-                    pvLookupBindParent view ref `shouldBe` Solved.lookupBindParent solved ref
+                    pvLookupBindParent view ref `shouldBe`
+                        NodeAccess.lookupBindParent (Solved.originalConstraint solved) ref
 
         it "runtime snapshot rebuild stays stable across representative corpus" $ do
             let corpus =
@@ -1478,11 +1482,14 @@ assertViewParity view legacy = do
 
     forM_ probeIds $ \nid -> do
         pvCanonical view nid `shouldBe` Solved.canonical legacy nid
-        pvLookupNode view nid `shouldBe` Solved.lookupNode legacy nid
-        pvLookupVarBound view nid `shouldBe` Solved.lookupVarBound legacy nid
+        pvLookupNode view nid `shouldBe`
+            NodeAccess.lookupNode (Solved.originalConstraint legacy) (Solved.canonical legacy nid)
+        pvLookupVarBound view nid `shouldBe`
+            NodeAccess.lookupVarBound (Solved.originalConstraint legacy) (Solved.canonical legacy nid)
 
     forM_ probeRefs $ \ref ->
-        pvLookupBindParent view ref `shouldBe` Solved.lookupBindParent legacy ref
+        pvLookupBindParent view ref `shouldBe`
+            NodeAccess.lookupBindParent (Solved.originalConstraint legacy) ref
 
 projectCanonicalMap :: IntSet.IntSet -> IntMap.IntMap NodeId -> IntMap.IntMap NodeId
 projectCanonicalMap domain =

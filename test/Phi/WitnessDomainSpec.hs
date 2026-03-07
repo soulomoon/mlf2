@@ -5,6 +5,7 @@ import qualified Data.IntSet as IntSet
 import qualified Data.Set as Set
 import Test.Hspec
 
+import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Types.Graph
     ( BaseTy(..)
     , Constraint(..)
@@ -34,14 +35,16 @@ mkTestSolved uf = SolvedTest.mkTestSolved emptyConstraint uf
 
 solvedToPresolutionView :: Solved -> PresolutionView
 solvedToPresolutionView solved =
-    PresolutionView
-        { pvConstraint = Solved.originalConstraint solved
+    let constraint = Solved.originalConstraint solved
+        canonical = Solved.canonical solved
+    in PresolutionView
+        { pvConstraint = constraint
         , pvCanonicalMap = Solved.canonicalMap solved
-        , pvCanonical = Solved.canonical solved
-        , pvLookupNode = Solved.lookupNode solved
-        , pvLookupVarBound = Solved.lookupVarBound solved
-        , pvLookupBindParent = Solved.lookupBindParent solved
-        , pvBindParents = Solved.bindParents solved
+        , pvCanonical = canonical
+        , pvLookupNode = \nid -> NodeAccess.lookupNode constraint (canonical nid)
+        , pvLookupVarBound = \nid -> NodeAccess.lookupVarBound constraint (canonical nid)
+        , pvLookupBindParent = NodeAccess.lookupBindParent constraint
+        , pvBindParents = cBindParents constraint
         , pvCanonicalConstraint = Solved.canonicalConstraint solved
         }
 

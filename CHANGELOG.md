@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Changed
+- Retired the final non-must-stay solved facade helper cluster (2026-03-08):
+  - removed `lookupVarBound`, `genNodes`, `weakenedVars`, `isEliminatedVar`, and `canonicalizedBindParents` from the public `MLF.Constraint.Solved` facade;
+  - replaced their owner-local use with direct constraint/canonical logic in `Reify.Core`, `MLF.Constraint.Presolution.View`, and the solved-view parity tests;
+  - verified `cabal build all && cabal test`, `MLF.Constraint.Solved` (`51 examples, 0 failures`), `migration guardrail: thesis-core boundary matches legacy outcome` (`1 example, 0 failures`), `PresolutionView mirrors solved canonical/node/bound queries` (`1 example, 0 failures`), and `final reify/view helper cluster is absent from the Solved facade` (`1 example, 0 failures`).
 - Relocated `pruneBindParentsSolved` behind Finalize (2026-03-08):
   - removed `pruneBindParentsSolved` from the public `MLF.Constraint.Solved` facade and kept the implementation owner-local to `MLF.Constraint.Finalize` / `MLF.Constraint.Solved.Internal`;
   - updated the one test caller to use `Finalize.stepPruneSolvedBindParents` and added a direct facade-absence guard in `Constraint.SolvedSpec`;
