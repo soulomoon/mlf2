@@ -18,6 +18,7 @@ import MLF.Constraint.Presolution.View (PresolutionView(..), fromPresolutionResu
 import MLF.Constraint.Solve (SolveError, SolveResult(..))
 import qualified MLF.Constraint.Solve as Solve
 import qualified MLF.Constraint.Solved as Solved
+import qualified MLF.Constraint.Solved.Internal as SolvedInternal
 import MLF.Constraint.Types (Constraint, NodeId(..), cNodes, lookupNodeIn)
 import MLF.Constraint.Types.Presolution (PresolutionSnapshot(..))
 
@@ -76,8 +77,8 @@ stepSolvedFromPresolutionView presolutionView =
     let constraint = pvConstraint presolutionView
         canonicalMap = pvCanonicalMap presolutionView
         canonicalConstraint = stepCanonicalizeConstraint constraint canonicalMap
-        solved0 = Solved.fromConstraintAndUf constraint canonicalMap
-    in Solved.rebuildWithConstraint solved0 canonicalConstraint
+        solved0 = SolvedInternal.fromConstraintAndUf constraint canonicalMap
+    in SolvedInternal.rebuildWithConstraint solved0 canonicalConstraint
 
 stepPruneSolvedBindParents :: Solved.Solved -> Solved.Solved
 stepPruneSolvedBindParents = Solved.pruneBindParentsSolved
@@ -97,8 +98,8 @@ finalizeSolvedFromSnapshot constraint uf =
     in do
         SolveResult{ srConstraint = canonicalConstraint, srUnionFind = ufFinal } <-
             Solve.finalizeConstraintWithUF ufSanitized constraint
-        let solved0 = Solved.fromConstraintAndUf constraint ufFinal
-            solved1 = Solved.rebuildWithConstraint solved0 canonicalConstraint
+        let solved0 = SolvedInternal.fromConstraintAndUf constraint ufFinal
+            solved1 = SolvedInternal.rebuildWithConstraint solved0 canonicalConstraint
             solved2 = stepPruneSolvedBindParents solved1
         stepValidateSolvedStrict solved2
 
@@ -108,6 +109,6 @@ finalizeSolvedForConstraint solved constraint =
     in do
         SolveResult{ srConstraint = canonicalConstraint } <-
             Solve.finalizeConstraintWithUF uf constraint
-        let solved0 = Solved.rebuildWithConstraint solved canonicalConstraint
+        let solved0 = SolvedInternal.rebuildWithConstraint solved canonicalConstraint
             solved1 = stepPruneSolvedBindParents solved0
         stepValidateSolvedStrict solved1

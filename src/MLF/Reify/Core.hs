@@ -31,6 +31,7 @@ import qualified Data.List.NonEmpty as NE
 import MLF.Util.Graph (topoSortBy)
 import MLF.Constraint.Solved (Solved)
 import qualified MLF.Constraint.Solved as Solved
+import qualified MLF.Constraint.Solved.Internal as SolvedInternal
 import qualified MLF.Constraint.Traversal as Traversal
 import MLF.Binding.Tree (canonicalizeBindParentsUnder, lookupBindParent)
 import qualified MLF.Constraint.VarStore as VarStore
@@ -861,10 +862,10 @@ namedNodes presolutionView = do
 solvedFromView :: PresolutionView -> Solved
 solvedFromView presolutionView =
     let solved0 =
-            Solved.fromConstraintAndUf
+            SolvedInternal.fromConstraintAndUf
                 (pvConstraint presolutionView)
                 (pvCanonicalMap presolutionView)
-    in Solved.rebuildWithConstraint solved0 (pvCanonicalConstraint presolutionView)
+    in SolvedInternal.rebuildWithConstraint solved0 (pvCanonicalConstraint presolutionView)
 
 -- | Collect free variables by NodeId, skipping vars under TyForall.
 freeVars :: Solved -> NodeId -> IntSet.IntSet -> IntSet.IntSet

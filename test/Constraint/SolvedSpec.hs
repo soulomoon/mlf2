@@ -133,10 +133,20 @@ spec = describe "MLF.Constraint.Solved" $ do
                 ] $ \marker ->
                     src `shouldSatisfy` (not . isInfixOf marker)
 
+        it "compat builders are absent from the Solved facade" $ do
+            src <- readFile "src/MLF/Constraint/Solved.hs"
+            forM_
+                [ "fromConstraintAndUf ::"
+                , "rebuildWithConstraint ::"
+                , "    fromConstraintAndUf,"
+                , "    rebuildWithConstraint,"
+                ] $ \marker ->
+                    src `shouldSatisfy` (not . isInfixOf marker)
+
     let s = testSolved
 
     describe "Constructor compatibility" $ do
-        it "fromConstraintAndUf builds canonical queries from union-find and preserves original graph" $ do
+        it "mkTestSolved builds canonical queries from union-find and preserves original graph" $ do
             let var0 = TyVar { tnId = NodeId 0, tnBound = Nothing }
                 base1 = TyBase (NodeId 1) (BaseTy "Int")
                 inst = InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)
@@ -146,7 +156,7 @@ spec = describe "MLF.Constraint.Solved" $ do
                     , cInstEdges = [inst]
                     }
                 uf = IntMap.fromList [(0, NodeId 1)]
-                solved = fromConstraintAndUf constraint uf
+                solved = mkTestSolved constraint uf
             canonical solved (NodeId 0) `shouldBe` NodeId 1
             lookupNode solved (NodeId 0) `shouldBe` Just base1
             originalNode solved (NodeId 0) `shouldBe` Just var0
