@@ -224,6 +224,10 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             src <- readFile "src/MLF/Elab/Elaborate.hs"
             isInfixOf "solved = Solved.rebuildWithConstraint" src `shouldBe` False
 
+        it "row1 closeout guard|checked-authoritative does not adapt solved via prune helper at entry" $ do
+            src <- readFile "src/MLF/Elab/Elaborate.hs"
+            isInfixOf "pruneBindParentsSolved" src `shouldBe` False
+
         it "row2 closeout guard: ResultTypeInputs no longer exposes rtcSolvedCompat" $ do
             src <- readFile "src/MLF/Elab/Run/ResultType/Types.hs"
             isInfixOf "rtcSolvedCompat" src `shouldBe` False
