@@ -68,6 +68,8 @@ Everything else should be:
 
 So the project goal is **not** “delete `Solved` no matter what”; it is “remove non-thesis glue first, and only delete `Solved` if no thesis-relevant semantic boundary remains.”
 
+The first low-risk cleanup implied by this table landed on 2026-03-08 by retiring the dead `Solved` mutation hooks `rebuildWithNodes`, `rebuildWithBindParents`, and `rebuildWithGenNodes`.
+
 The detailed evidence matrix for this classification lives in `tasks/archive/2026-03-08-solved-classification-table/findings.md`.
 
 ## Witness Representation (Φ/Σ)

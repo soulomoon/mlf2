@@ -39,9 +39,6 @@ module MLF.Constraint.Solved (
 
     -- * Mutation helpers
     pruneBindParentsSolved,
-    rebuildWithNodes,
-    rebuildWithBindParents,
-    rebuildWithGenNodes,
 
     -- * Extended queries
     classMembers,
@@ -331,22 +328,6 @@ pruneBindParentsSolved (Solved eb@EquivBackend { ebCanonicalNodes = nodes, ebCan
                 )
                 bindParents0
     in Solved eb { ebCanonicalBindParents = bindParents' }
-
--- | Replace the canonical node map.
--- Used by Generalize phases that build merged node maps.
-rebuildWithNodes :: Solved -> NodeMap TyNode -> Solved
-rebuildWithNodes (Solved eb) nodes =
-    Solved eb { ebCanonicalNodes = nodes }
-
--- | Replace the canonical bind parents.
-rebuildWithBindParents :: Solved -> BindParents -> Solved
-rebuildWithBindParents (Solved eb) bp =
-    Solved eb { ebCanonicalBindParents = bp }
-
--- | Replace the canonical gen nodes.
-rebuildWithGenNodes :: Solved -> GenNodeMap GenNode -> Solved
-rebuildWithGenNodes (Solved eb) gn =
-    Solved eb { ebCanonicalGenNodes = gn }
 
 -- -----------------------------------------------------------------
 -- Extended queries

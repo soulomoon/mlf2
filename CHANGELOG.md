@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Changed
+- Retired dead `Solved` mutation hooks (2026-03-08):
+  - removed `rebuildWithNodes`, `rebuildWithBindParents`, and `rebuildWithGenNodes` from `MLF.Constraint.Solved` after confirming they had no live code callers;
+  - added a direct migration guard in `test/Constraint/SolvedSpec.hs` preventing those hooks from reappearing on the `Solved` surface;
+  - verified `cabal build all && cabal test`, `dead mutation hooks are absent from the Solved surface` (`1 example, 0 failures`), and `MLF.Constraint.Solved` (`44 examples, 0 failures`).
 - Completed solved ecosystem classification table closeout (2026-03-08):
   - expanded `docs/architecture.md` from a coarse `Solved` cleanup note into a full grouped 3-column classification of the `Solved` surface and adjacent solved-related seams;
   - recorded the authoritative evidence matrix in `tasks/archive/2026-03-08-solved-classification-table/findings.md`, covering every exported `Solved` symbol plus the main view/finalize/reify/planner compatibility seams;

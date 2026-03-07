@@ -2,6 +2,14 @@
 
 ## Thesis Alignment (Phase A–E)
 
+### 2026-03-08 retire dead `Solved` mutation hooks
+- Removed `rebuildWithNodes`, `rebuildWithBindParents`, and `rebuildWithGenNodes` from `MLF.Constraint.Solved`; no live code callers remained, and the solved classification table had already marked them safe to retire from the production surface.
+- Added a direct migration guard in `test/Constraint/SolvedSpec.hs` asserting those dead mutation hooks do not reappear on the `Solved` surface.
+- Verification:
+  - `cabal build all && cabal test` — PASS
+  - `dead mutation hooks are absent from the Solved surface` — PASS (`1 example, 0 failures`)
+  - `MLF.Constraint.Solved` — PASS (`44 examples, 0 failures`)
+
 ### 2026-03-08 solved ecosystem classification table closeout
 - Expanded `docs/architecture.md` from a coarse `Solved` cleanup note into a full grouped 3-column classification covering the `Solved` surface plus adjacent solved-related seams.
 - Recorded the authoritative evidence matrix in `tasks/archive/2026-03-08-solved-classification-table/findings.md`, including exact classifications for every exported `Solved` symbol and the main view/finalize/reify/planner compatibility seams.
