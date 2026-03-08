@@ -103,7 +103,7 @@
 
 ### 2026-03-08 solved ecosystem classification table closeout
 - Expanded `docs/architecture.md` from a coarse `Solved` cleanup note into a full grouped 3-column classification covering the `Solved` surface plus adjacent solved-related seams.
-- Recorded the authoritative evidence matrix in `tasks/archive/2026-03-08-solved-classification-table/findings.md`, including exact classifications for every exported `Solved` symbol and the main view/finalize/reify/planner compatibility seams.
+- Recorded the authoritative evidence matrix in the 2026-03-08 solved classification audit notes, including exact classifications for every exported `Solved` symbol and the main view/finalize/reify/planner compatibility seams.
 - Locked the thesis-exact cleanup rule to: keep replay-faithful construction, original↔canonical correspondence, and strict solved-graph validation explicit; relocate compat glue; retire dead/test-only surface from the production API.
 - Verification:
   - static audit counts (`32` export entries, `13` direct `src/` importers, `12` direct `test/` importers, `6` named adjacent seams)
@@ -272,7 +272,7 @@
 - The 2026-03-05 row6 `MAXIMUMRETRY` orchestrator run is now historical-only evidence.
 - It was superseded first by the 2026-03-06 row6 replay-contract recovery and
   then by the fresh round-2 full verifier sweep archived under
-  `/Volumes/src/mlf4/tasks/archive/2026-03-06-tmt-improving-loop-orchestrator-fresh-round-2/`.
+  `/Volumes/src/mlf4/docs/plans/2026-03-06-orchestrated-execution-improving-loop-agent-prompt-codex-subagents-fresh-round-2.md`.
 - Historical result at the time: that fresh sweep re-evaluated all 14 TMT mechanisms from a green base and returned `YES` for every row, with `cabal build all && cabal test` passing (`959 examples, 0 failures`).
 - Later on 2026-03-07, a stricter per-row thesis/code review reopened row2 and row8; treat the sweep as historical verifier evidence, not the final live classification.
 
@@ -306,7 +306,7 @@
 - Executed
   `/Volumes/src/mlf4/docs/plans/archive/2026-03-05-orchestrated-execution-improving-loop-agent-prompt-codex-subagents-fresh-round-1.md`
   against task tracker
-  `/Volumes/src/mlf4/tasks/archive/2026-03-05-tmt-improving-loop-orchestrator-fresh/`.
+  `/Volumes/src/mlf4/docs/plans/archive/2026-03-05-orchestrated-execution-improving-loop-agent-prompt-codex-subagents-fresh-round-1.md`.
 - Round-1 target was row6 (`Replay-map producer normalization`), with strict
   role-separated gates across six attempts.
 - Terminal outcome for this run: attempt-limit exhaustion (`MAXIMUMRETRY`).
@@ -437,7 +437,7 @@
 
 ### 2026-03-04 Wave 4 docs closeout (Task 38 agent-team replan)
 - Closed Team E docs/verifier handoff for
-  `tasks/archive/2026-03-04-elab-input-thesis-exact-agent-team-replan/`.
+  the historical 2026-03-04 elab-input replan tracker (not retained as a standalone archive directory).
 - Thesis contract references for this migration are now explicit in closeout
   docs:
   - `papers/these-finale-english.txt` Def. 15.3.12 (translation starts from
@@ -1448,7 +1448,7 @@
   - `runPipelineElab` and `runPipelineElabChecked` now both elaborate the bounded aliasing baseline to a type alpha-equivalent to `∀a. a -> a -> a`.
   - Regression test anchor: `test/ElaborationSpec.hs` case `bounded aliasing (b ⩾ a) elaborates to ∀a. a -> a -> a in unchecked and checked pipelines`.
 - Tracking:
-  - Ralph task: `tasks/todo/2026-02-08-staged-src-types-structural-raise-merge/prd.json`
+  - Ralph task: historical PRD path not retained in the current task tree
   - Related bug: `BUG-2026-02-06-003` (resolved in `Bugs.md`)
 
 ### 2026-02-08 strict SrcTy indexed model + staged pretty (implemented)

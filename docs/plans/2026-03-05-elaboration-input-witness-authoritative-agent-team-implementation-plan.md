@@ -238,9 +238,9 @@ git commit -m "refactor: close elaboration-input witness-authoritative strictnes
 - Modify: `CHANGELOG.md`
 - Modify: `TODO.md`
 - Modify: `Bugs.md`
-- Modify: `tasks/todo/2026-03-05-elaboration-input-witness-authoritative-agent-team-plan/task_plan.md`
-- Modify: `tasks/todo/2026-03-05-elaboration-input-witness-authoritative-agent-team-plan/findings.md`
-- Modify: `tasks/todo/2026-03-05-elaboration-input-witness-authoritative-agent-team-plan/progress.md`
+- Modify: `tasks/archive/2026-03-05-elaboration-input-witness-authoritative-agent-team-plan/task_plan.md`
+- Modify: `tasks/archive/2026-03-05-elaboration-input-witness-authoritative-agent-team-plan/findings.md`
+- Modify: `tasks/archive/2026-03-05-elaboration-input-witness-authoritative-agent-team-plan/progress.md`
 
 **Step 1: Update row narrative with current evidence**
 
@@ -259,7 +259,7 @@ git commit -m "refactor: close elaboration-input witness-authoritative strictnes
 **Step 4: Commit docs closeout**
 
 ```bash
-git add docs/notes/2026-02-27-transformation-mechanism-table.md implementation_notes.md CHANGELOG.md TODO.md Bugs.md tasks/todo/2026-03-05-elaboration-input-witness-authoritative-agent-team-plan/*
+git add docs/notes/2026-02-27-transformation-mechanism-table.md implementation_notes.md CHANGELOG.md TODO.md Bugs.md tasks/archive/2026-03-05-elaboration-input-witness-authoritative-agent-team-plan/
 git commit -m "docs: record witness-authoritative elaboration-input closeout evidence"
 ```
 

@@ -242,7 +242,7 @@ git commit -m "refactor: remove migration scaffolding and lock final row1 bounda
 - Modify: `docs/notes/2026-02-27-transformation-mechanism-table.md`
 - Modify: `implementation_notes.md`
 - Modify: `CHANGELOG.md`
-- Optional Modify: `tasks/todo/2026-03-01-transformation-mechanism-table-review/findings.md`
+- Optional Modify: `historical task-tracker path (not retained as a live folder)`
 
 **Step 1: Write the failing check**
 
@@ -271,7 +271,7 @@ Expected: PASS.
 **Step 5: Commit**
 
 ```bash
-git add docs/notes/2026-02-27-transformation-mechanism-table.md implementation_notes.md CHANGELOG.md tasks/todo/2026-03-01-transformation-mechanism-table-review/findings.md
+git add docs/notes/2026-02-27-transformation-mechanism-table.md implementation_notes.md CHANGELOG.md historical task-tracker path (not retained as a live folder)
 git commit -m "docs: record row1 thesis-exact boundary migration and verification evidence"
 ```
 

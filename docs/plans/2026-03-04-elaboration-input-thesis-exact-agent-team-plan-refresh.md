@@ -184,7 +184,7 @@ Run:
 
 **Step 3: Commit verification notes (if tracked in task files)**
 ```bash
-git add tasks/todo/<task-folder>/progress.md tasks/todo/<task-folder>/findings.md
+git add the task tracker progress file the task tracker findings file
 git commit -m "chore: record elaboration-input thesis-exact verification evidence"
 ```
 

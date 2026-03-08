@@ -68,7 +68,7 @@
   - verified `cabal build all && cabal test`, `dead mutation hooks are absent from the Solved surface` (`1 example, 0 failures`), and `MLF.Constraint.Solved` (`44 examples, 0 failures`).
 - Completed solved ecosystem classification table closeout (2026-03-08):
   - expanded `docs/architecture.md` from a coarse `Solved` cleanup note into a full grouped 3-column classification of the `Solved` surface and adjacent solved-related seams;
-  - recorded the authoritative evidence matrix in `tasks/archive/2026-03-08-solved-classification-table/findings.md`, covering every exported `Solved` symbol plus the main view/finalize/reify/planner compatibility seams;
+  - recorded the authoritative evidence matrix in the 2026-03-08 solved classification audit notes, covering every exported `Solved` symbol plus the main view/finalize/reify/planner compatibility seams;
   - locked the thesis-exact cleanup rule to preserve replay-faithful construction, original↔canonical correspondence, and strict solved-graph validation while relocating compat glue and retiring dead/test-only production surface;
   - verified static audit counts (`32` export entries, `13` direct `src/` importers, `12` direct `test/` importers, `6` named adjacent seams), `MLF.Constraint.Solved` (`43 examples, 0 failures`), and `chi-first guard: runtime and reify modules no longer adapt Solved through fromSolved` (`1 example, 0 failures`).
 - Deduplicated low-risk helper pairs (2026-03-08):

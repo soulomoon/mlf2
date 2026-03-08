@@ -4,7 +4,7 @@
 Audit lingering folders under `tasks/todo/`, verify whether each is still active, and archive any stale or completed trackers so the task tree matches current project reality.
 
 ## Scope
-- Inventory every current `tasks/todo/*` folder.
+- Inventory every current `the former `tasks/todo` tracker set` folder.
 - Cross-check each against `TODO.md` and its local task files.
 - Move stale/completed folders to `tasks/archive/` after marking closure in their task plans.
 

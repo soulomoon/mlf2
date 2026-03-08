@@ -135,7 +135,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 - Completed:
   - expanded `docs/architecture.md` from a coarse `Solved` cleanup note into a full grouped 3-column classification of the `Solved` surface and adjacent solved-related seams;
-  - recorded the authoritative evidence matrix in `tasks/archive/2026-03-08-solved-classification-table/findings.md`, covering every exported `Solved` symbol plus the main view/finalize/reify/planner compatibility seams;
+  - recorded the authoritative evidence matrix in the 2026-03-08 solved classification audit notes, covering every exported `Solved` symbol plus the main view/finalize/reify/planner compatibility seams;
   - locked the thesis-exact cleanup rule to preserve replay-faithful construction, original↔canonical correspondence, and strict solved-graph validation while relocating compat glue and retiring dead/test-only production surface.
 - Verification:
   - static audit counts: PASS (`32` export entries, `13` direct `src/` importers, `12` direct `test/` importers, `6` named adjacent seams)
@@ -465,7 +465,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - Added focused `ScopeSpec` coverage and registered it in test harness/cabal.
 - Plan/tracker:
   - `/Volumes/src/mlf4/docs/plans/2026-03-05-elaboration-input-absolute-thesis-exact-agent-team-implementation-plan.md`
-  - `/Volumes/src/mlf4/tasks/archive/2026-03-05-elaboration-input-absolute-thesis-exact-agent-team/`
+  - Historical task tracker folder for this 2026-03-05 work was not retained as a standalone archive directory.
 - Verification:
   - RED baseline before Wave 1:
     - `cabal test mlf2-test --test-show-details=direct --test-options='--match "elab-input absolute thesis-exact guard"'`
@@ -489,7 +489,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
     `buildResultTypeView` boundary.
 - Plan/tracker:
   - `/Volumes/src/mlf4/docs/plans/2026-03-05-tmt-row2-absolute-thesis-exact-agent-team-implementation-plan.md`
-  - `/Volumes/src/mlf4/tasks/archive/2026-03-05-tmt-row2-absolute-thesis-exact-agent-team/`
+  - Historical task tracker folder for this 2026-03-05 work was not retained as a standalone archive directory.
 - Verification:
   - RED baseline before Wave 1:
     - `cabal test mlf2-test --test-show-details=direct --test-options='--match "row2 absolute thesis-exact guard"'`
@@ -736,7 +736,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
     and task folder archived.
 - Plan + archive:
   - `/Volumes/src/mlf4/docs/plans/2026-03-04-elaboration-input-thesis-exact-agent-team-replan.md`
-  - `/Volumes/src/mlf4/tasks/archive/2026-03-04-elab-input-thesis-exact-agent-team-replan/`
+  - Historical task tracker folder for this 2026-03-04 replan was not retained as a standalone archive directory.
 - Next work:
   1. Task 34: reduce `ResultType.View` solved-overlay scaffolding (`rtvSolved`
      + bound-overlay rebuild path) where equivalent `χp`-native reads exist.
@@ -754,7 +754,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
     required closeout gates passed in the integrated workspace.
 - Plan/tracker:
   - `/Volumes/src/mlf4/docs/plans/2026-03-04-elab-input-thesis-exact-legacy-retirement-agent-team-implementation-plan.md`
-  - `/Volumes/src/mlf4/tasks/archive/2026-03-04-elab-input-thesis-exact-agent-team-plan/`
+  - Historical task tracker folder for this 2026-03-04 closeout was not retained as a standalone archive directory.
 - Verification:
   - `cabal test mlf2-test --test-show-details=direct --test-options='--match "elab-input thesis-exact guard"'`
     - PASS (`2 examples, 0 failures`)
@@ -791,7 +791,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - Gate B: `cabal test mlf2-test --test-show-details=direct --test-options='--match "ResultType|Phase 6 — Elaborate|chi-first"'` -> PASS
   - Gate C: `cabal build all && cabal test` -> PASS (`923 examples, 0 failures`)
 - Archive:
-  - Task records in `tasks/archive/2026-03-03-chi-p-query-first-elab-resulttype-agent-team/`.
+  - Historical task records for this 2026-03-03 work were not retained as a standalone archive directory.
 
 ## Task 30 Reduce internal solved compatibility reads (completed 2026-03-03)
 
@@ -807,7 +807,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - Focused matrix checks: PASS (carry-forward + 4 new tests).
   - `cabal build all && cabal test` -> `917 examples, 0 failures`.
 - Archive:
-  - Task records moved under `tasks/archive/2026-03-03-solved-compat-read-reduction/`.
+  - Historical task records for this 2026-03-03 work were not retained as a standalone archive directory.
 
 ## Task 29 Solved module audit follow-up execution (completed 2026-03-03)
 
@@ -820,7 +820,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 - Verification:
   - `cabal build all && cabal test` -> `913 examples, 0 failures`.
 - Archive:
-  - Task records moved under `tasks/archive/2026-03-03-task-29-solved-followup/`.
+  - Historical task records for this 2026-03-03 work were not retained as a standalone archive directory.
 
 ## Task 28 Eliminate solved indirection via presolution view (completed 2026-03-02)
 
@@ -831,7 +831,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - Hygiene guard added for elaboration entrypoint modules to prevent direct solved imports.
   - Detailed plan and session tracking:
     - `docs/plans/2026-03-02-eliminate-solved-indirection-agent-team-implementation-plan.md`
-    - `tasks/archive/2026-03-02-eliminate-solved-indirection/`
+    - historical task tracker folder not retained as a standalone archive directory
 - Next:
   - Optional follow-up: continue reducing internal elaboration compatibility reads of `Solved` (result-type/generalize internals) once architecture allows full replacement without regressing paper baseline slices.
 

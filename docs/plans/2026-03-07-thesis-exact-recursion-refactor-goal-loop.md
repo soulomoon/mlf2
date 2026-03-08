@@ -159,7 +159,7 @@ git commit -m "docs: add thesis-exact recursion-refactor JSONL log template"
 **Files:**
 - Modify: `TODO.md`
 - Modify: `CHANGELOG.md`
-- Reference: `tasks/archive/2026-03-07-thesis-exact-recursion-refactor-goal-loop/`
+- Reference: `historical archive path not retained as a standalone directory`
 
 **Step 1: Add the in-progress / completed tracker note**
 
@@ -183,6 +183,6 @@ Expected: the same fixed mechanism order appears across all three artifacts.
 **Step 4: Commit**
 
 ```bash
-git add TODO.md CHANGELOG.md tasks/archive/2026-03-07-thesis-exact-recursion-refactor-goal-loop/
+git add TODO.md CHANGELOG.md historical archive path not retained as a standalone directory
 git commit -m "docs: sync thesis-exact recursion-refactor campaign trackers"
 ```

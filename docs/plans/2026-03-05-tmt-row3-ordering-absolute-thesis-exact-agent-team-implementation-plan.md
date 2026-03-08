@@ -231,9 +231,9 @@ git commit -m "fix: harden row3 boundary scheduling against locked-node regressi
 - Modify: `implementation_notes.md`
 - Modify: `CHANGELOG.md`
 - Modify: `TODO.md`
-- Modify: `tasks/todo/2026-03-05-row3-ordering-absolute-thesis-exact-agent-team-replan/task_plan.md`
-- Modify: `tasks/todo/2026-03-05-row3-ordering-absolute-thesis-exact-agent-team-replan/findings.md`
-- Modify: `tasks/todo/2026-03-05-row3-ordering-absolute-thesis-exact-agent-team-replan/progress.md`
+- Modify: `tasks/archive/2026-03-05-row3-ordering-absolute-thesis-exact-agent-team-replan/task_plan.md`
+- Modify: `tasks/archive/2026-03-05-row3-ordering-absolute-thesis-exact-agent-team-replan/findings.md`
+- Modify: `tasks/archive/2026-03-05-row3-ordering-absolute-thesis-exact-agent-team-replan/progress.md`
 - Modify: `Bugs.md` (if needed)
 
 **Step 1: Update row narrative with post-integration facts**
@@ -247,7 +247,7 @@ git commit -m "fix: harden row3 boundary scheduling against locked-node regressi
 
 **Step 3: Commit**
 ```bash
-git add docs/notes/2026-02-27-transformation-mechanism-table.md implementation_notes.md CHANGELOG.md TODO.md tasks/todo/2026-03-05-row3-ordering-absolute-thesis-exact-agent-team-replan/task_plan.md tasks/todo/2026-03-05-row3-ordering-absolute-thesis-exact-agent-team-replan/findings.md tasks/todo/2026-03-05-row3-ordering-absolute-thesis-exact-agent-team-replan/progress.md Bugs.md
+git add docs/notes/2026-02-27-transformation-mechanism-table.md implementation_notes.md CHANGELOG.md TODO.md tasks/archive/2026-03-05-row3-ordering-absolute-thesis-exact-agent-team-replan/task_plan.md tasks/archive/2026-03-05-row3-ordering-absolute-thesis-exact-agent-team-replan/findings.md tasks/archive/2026-03-05-row3-ordering-absolute-thesis-exact-agent-team-replan/progress.md Bugs.md
 git commit -m "docs: close row3 absolute ordering follow-up evidence"
 ```
 

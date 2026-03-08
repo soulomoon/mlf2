@@ -96,7 +96,7 @@ Update:
 - `implementation_notes.md`
 - `docs/architecture.md`
 - `CHANGELOG.md`
-- task artifacts under `tasks/todo/2026-03-08-thesis-exact-fallback-rework/`
+- task artifacts under `historical task-tracker path (not retained as a live folder)`
 
 The closeout must describe the actually strict behavior and record any discovered keeper explicitly. Silent residual fallback is not allowed.
 

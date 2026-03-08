@@ -172,9 +172,7 @@ Note: thesis exact includes test-only code paths
 ## 2026-03-07 fresh round-2 full sweep closeout (historical verifier result)
 
 - Fresh sweep source:
-  - `tasks/archive/2026-03-06-tmt-improving-loop-orchestrator-fresh-round-2/task_plan.md`
-  - `tasks/archive/2026-03-06-tmt-improving-loop-orchestrator-fresh-round-2/findings.md`
-  - `tasks/archive/2026-03-06-tmt-improving-loop-orchestrator-fresh-round-2/orchestrator-log.jsonl`
+  - `/Volumes/src/mlf4/docs/plans/2026-03-06-orchestrated-execution-improving-loop-agent-prompt-codex-subagents-fresh-round-2.md`
 - Historical outcome at the time: the verifier sweep returned `YES` for all 14 mechanisms from a green base.
 - This section is now superseded by the per-row thesis/code re-audit below, which reopened row2 and row8 after a stricter row-by-row review of the current codebase against the thesis text.
 

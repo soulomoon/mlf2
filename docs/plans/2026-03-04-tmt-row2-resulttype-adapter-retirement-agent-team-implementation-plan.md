@@ -244,9 +244,9 @@ git commit -m "refactor: complete row2 adapter retirement in result-type and ela
 - Modify: `implementation_notes.md`
 - Modify: `CHANGELOG.md`
 - Modify: `TODO.md`
-- Modify: `tasks/todo/2026-03-04-tmt-row2-resulttype-adapter-retirement-agent-team/task_plan.md`
-- Modify: `tasks/todo/2026-03-04-tmt-row2-resulttype-adapter-retirement-agent-team/findings.md`
-- Modify: `tasks/todo/2026-03-04-tmt-row2-resulttype-adapter-retirement-agent-team/progress.md`
+- Modify: `historical task-tracker path (not retained as a live folder)`
+- Modify: `historical task-tracker path (not retained as a live folder)`
+- Modify: `historical task-tracker path (not retained as a live folder)`
 - Modify: `Bugs.md` (only if a real defect is discovered)
 
 **Step 1: Run final verification gates**
@@ -270,7 +270,7 @@ Expected: PASS.
 **Step 3: Commit**
 
 ```bash
-git add docs/notes/2026-02-27-transformation-mechanism-table.md implementation_notes.md CHANGELOG.md TODO.md tasks/todo/2026-03-04-tmt-row2-resulttype-adapter-retirement-agent-team/task_plan.md tasks/todo/2026-03-04-tmt-row2-resulttype-adapter-retirement-agent-team/findings.md tasks/todo/2026-03-04-tmt-row2-resulttype-adapter-retirement-agent-team/progress.md Bugs.md
+git add docs/notes/2026-02-27-transformation-mechanism-table.md implementation_notes.md CHANGELOG.md TODO.md historical task-tracker path (not retained as a live folder) historical task-tracker path (not retained as a live folder) historical task-tracker path (not retained as a live folder) Bugs.md
 git commit -m "docs: record row2 adapter retirement and verification evidence"
 ```
 
