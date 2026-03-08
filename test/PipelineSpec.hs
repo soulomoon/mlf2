@@ -281,6 +281,8 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             isInfixOf "withResultTypeViewOverlay ctx view" fallbackSrc `shouldBe` False
             isInfixOf "pvLookupNode = View.rtvLookupNode" fallbackSrc `shouldBe` False
             isInfixOf "pvLookupVarBound = View.rtvLookupVarBound" fallbackSrc `shouldBe` False
+            isInfixOf "buildResultTypeView" annSrc `shouldBe` False
+            isInfixOf "buildResultTypeView" fallbackSrc `shouldBe` False
             forM_
                 [ "rtvCanonical ::"
                 , "rtvEdgeWitnesses ::"
