@@ -280,6 +280,35 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             isInfixOf "withResultTypeViewOverlay ctx view" fallbackSrc `shouldBe` False
             isInfixOf "pvLookupNode = View.rtvLookupNode" fallbackSrc `shouldBe` False
             isInfixOf "pvLookupVarBound = View.rtvLookupVarBound" fallbackSrc `shouldBe` False
+            forM_
+                [ "rtvCanonical ::"
+                , "rtvEdgeWitnesses ::"
+                , "rtvEdgeTraces ::"
+                , "rtvEdgeExpansions ::"
+                , "rtvBindParentsGa ::"
+                , "rtvPlanBuilder ::"
+                , "rtvBaseConstraint ::"
+                , "rtvRedirects ::"
+                , "rtvTraceConfig ::"
+                , "rtvGenNodes ::"
+                , "rtvCanonicalBindParents ::"
+                ] $ \marker ->
+                    isInfixOf marker viewSrc `shouldBe` False
+            forM_
+                [ "View.rtvCanonical"
+                , "View.rtvEdgeWitnesses"
+                , "View.rtvEdgeTraces"
+                , "View.rtvEdgeExpansions"
+                , "View.rtvBindParentsGa"
+                , "View.rtvPlanBuilder"
+                , "View.rtvBaseConstraint"
+                , "View.rtvRedirects"
+                , "View.rtvTraceConfig"
+                , "View.rtvGenNodes"
+                , "View.rtvCanonicalBindParents"
+                ] $ \marker -> do
+                    isInfixOf marker annSrc `shouldBe` False
+                    isInfixOf marker fallbackSrc `shouldBe` False
             isInfixOf "rtvPresolutionViewOverlay ::" viewSrc `shouldBe` True
             isInfixOf "fromSolved solvedClean" pipelineSrc `shouldBe` False
             isInfixOf "fromSolved solvedForGen" pipelineSrc `shouldBe` False

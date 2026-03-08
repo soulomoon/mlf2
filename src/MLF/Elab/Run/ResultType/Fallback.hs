@@ -17,6 +17,7 @@ import MLF.Constraint.Types.Graph
     , NodeId(..)
     , NodeRef(..)
     , TyNode(..)
+    , cGenNodes
     , cLetEdges
     , cNodes
     , fromListNode
@@ -26,6 +27,7 @@ import MLF.Constraint.Types.Graph
     , gnId
     , gnSchemes
     , nodeRefFromKey
+    , toListGen
     , toListNode
     )
 import MLF.Constraint.Types.Witness (EdgeWitness(..))
@@ -41,6 +43,7 @@ import MLF.Elab.Run.Scope
     , schemeBodyTarget
     )
 import MLF.Elab.Run.Generalize (generalizeAtWithBuilder)
+import qualified MLF.Elab.Run.ChiQuery as ChiQuery
 import MLF.Elab.Run.ResultType.Util
     ( generalizeWithPlan
     , stripAnn
@@ -87,10 +90,10 @@ computeResultTypeFallback ctx annCanon ann = do
                 -- Get the parameter type from the coercion's codomain.
                 -- We need to generalize at the annotation node to get the full
                 -- type with any forall wrappers.
-                let bindParentsGa = View.rtvBindParentsGa view
-                    planBuilder = View.rtvPlanBuilder view
-                    c1 = View.rtvBaseConstraint view
-                    redirects = View.rtvRedirects view
+                let bindParentsGa = rtcBindParentsGa ctx
+                    planBuilder = rtcPlanBuilder ctx
+                    c1 = rtcBaseConstraint ctx
+                    redirects = rtcRedirects ctx
                 -- Find the scope root for the annotation node
                 scopeRoot <- bindingToElab (resolveCanonicalScope c1 presolutionViewForGen redirects annNodeId)
                 let targetC = schemeBodyTarget presolutionViewForGen annNodeId
@@ -163,16 +166,16 @@ computeResultTypeFallbackCore
     -> Either ElabError ElabType
 computeResultTypeFallbackCore ctx annCanon ann = do
     viewBase <- View.buildResultTypeView ctx
-    let canonical = View.rtvCanonical viewBase
-        edgeWitnesses = View.rtvEdgeWitnesses viewBase
-        edgeTraces = View.rtvEdgeTraces viewBase
-        edgeExpansions = View.rtvEdgeExpansions viewBase
+    let canonical = rtcCanonical ctx
+        edgeWitnesses = rtcEdgeWitnesses ctx
+        edgeTraces = rtcEdgeTraces ctx
+        edgeExpansions = rtcEdgeExpansions ctx
         presolutionView = View.rtvPresolutionViewOverlay viewBase
-        bindParentsGa = View.rtvBindParentsGa viewBase
-        planBuilder = View.rtvPlanBuilder viewBase
-        c1 = View.rtvBaseConstraint viewBase
-        redirects = View.rtvRedirects viewBase
-        traceCfg = View.rtvTraceConfig viewBase
+        bindParentsGa = rtcBindParentsGa ctx
+        planBuilder = rtcPlanBuilder ctx
+        c1 = rtcBaseConstraint ctx
+        redirects = rtcRedirects ctx
+        traceCfg = rtcTraceConfig ctx
         generalizeAtWith mbGa =
             generalizeAtWithBuilder planBuilder mbGa presolutionView
 
@@ -182,7 +185,7 @@ computeResultTypeFallbackCore ctx annCanon ann = do
                 [ (getNodeId (etRoot tr), 1 :: Int)
                 | tr <- IntMap.elems edgeTraces
                 ]
-    let genNodesOriginal = View.rtvGenNodes viewBase
+    let genNodesOriginal = map snd (toListGen (cGenNodes (ChiQuery.chiConstraint presolutionView)))
     let schemeRootSet =
             IntSet.fromList
                 [ getNodeId (canonical root)
@@ -504,10 +507,10 @@ computeResultTypeFallbackCore ctx annCanon ann = do
                     ++ " postNode="
                     ++ show rootC
                 )
-            let canonicalFinal = View.rtvCanonical viewFinalBounded
+            let canonicalFinal = rtcCanonical ctx
                 rootFinal = canonicalFinal rootC
                 nodesFinal = cNodes (pvConstraint presolutionViewFinal)
-                genNodesFinal = View.rtvGenNodes viewFinalBounded
+                genNodesFinal = map snd (toListGen (cGenNodes (ChiQuery.chiConstraint presolutionViewFinal)))
                 rootBound =
                     case lookupNodeIn nodesFinal rootFinal of
                         Just TyVar{ tnBound = Just bnd } -> Just (canonicalFinal bnd)
@@ -634,7 +637,7 @@ computeResultTypeFallbackCore ctx annCanon ann = do
                                       , canonicalFinal (schemeBodyTarget presolutionViewFinal bnd)
                                       , boundHasForallFrom bnd
                                       )
-                                    | (childKey, (parentRef, _flag)) <- IntMap.toList (View.rtvCanonicalBindParents viewFinalBounded)
+                                    | (childKey, (parentRef, _flag)) <- IntMap.toList (ChiQuery.chiCanonicalBindParents presolutionViewFinal)
                                     , parentRef == GenRef gid
                                     , TypeRef child <- [nodeRefFromKey childKey]
                                     , Just bnd <- [View.rtvLookupVarBound viewFinalBounded (canonicalFinal child)]

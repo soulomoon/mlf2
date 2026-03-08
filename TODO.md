@@ -738,8 +738,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - `/Volumes/src/mlf4/docs/plans/2026-03-04-elaboration-input-thesis-exact-agent-team-replan.md`
   - Historical task tracker folder for this 2026-03-04 replan was not retained as a standalone archive directory.
 - Next work:
-  1. Task 34: reduce `ResultType.View` solved-overlay scaffolding (`rtvSolved`
-     + bound-overlay rebuild path) where equivalent `χp`-native reads exist.
+  1. Task 34 follow-on is complete: `ResultType.View` is now narrowed to overlay-aware queries only; keep the row-2 guard green if future result-type cleanup lands.
   2. Task 36: trim remaining non-active compatibility aliases in
      generalize/reify internals while keeping closeout guard slices mandatory.
 
