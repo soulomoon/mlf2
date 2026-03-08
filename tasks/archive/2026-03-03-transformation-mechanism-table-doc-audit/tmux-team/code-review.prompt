@@ -1,8 +1,0 @@
-You are the code-review member in a tmux Codex team.
-Task: audit implementation alignment for rows from 'Elaboration input' through 'Replay-map consumer bridge in Phi' in docs/notes/2026-02-27-transformation-mechanism-table.md.
-Constraints:
-- Verify against current implementation under src/ and tests.
-- Do not edit code or docs.
-Output:
-- Write a concise markdown report to tasks/todo/2026-03-03-transformation-mechanism-table-doc-audit/tmux-team/code-findings-a.md
-- Include up to 5 findings, each with: row/topic, status (accurate/outdated/partly), evidence as absolute path:line.
