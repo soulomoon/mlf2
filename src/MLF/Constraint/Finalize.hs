@@ -11,66 +11,41 @@ module MLF.Constraint.Finalize (
 ) where
 
 import Data.IntMap.Strict (IntMap)
-import qualified Data.IntMap.Strict as IntMap
 
 import qualified MLF.Binding.Tree as Binding
-import MLF.Constraint.Presolution.View (PresolutionView(..), fromPresolutionResult)
+import MLF.Constraint.Presolution.View
+    ( PresolutionView(..)
+    , SnapshotPreparation(..)
+    , buildPresolutionView
+    , prepareSnapshotPreparationFromParts
+    )
 import MLF.Constraint.Solve (SolveError, SolveResult(..))
 import qualified MLF.Constraint.Solve as Solve
 import qualified MLF.Constraint.Solved.Internal as SolvedInternal
 import qualified MLF.Constraint.Solved as Solved
-import MLF.Constraint.Types (Constraint, NodeId(..), cNodes, lookupNodeIn)
-import MLF.Constraint.Types.Presolution (PresolutionSnapshot(..))
+import MLF.Constraint.Types (Constraint, NodeId)
 
 stepSanitizeSnapshotUf :: Constraint -> IntMap NodeId -> IntMap NodeId
-stepSanitizeSnapshotUf constraint =
-    IntMap.mapMaybeWithKey keepLive
-  where
-    isLive nid = case lookupNodeIn (cNodes constraint) nid of
-        Just _ -> True
-        Nothing -> False
-
-    keepLive key rep =
-        let keyNode = NodeId key
-        in if isLive keyNode && isLive rep && keyNode /= rep
-            then Just rep
-            else Nothing
+stepSanitizeSnapshotUf constraint uf =
+    spSanitizedUf (prepareSnapshotPreparationFromParts constraint uf)
 
 stepCanonicalizeConstraint :: Constraint -> IntMap NodeId -> Constraint
 stepCanonicalizeConstraint constraint uf =
     let ufSanitized = stepSanitizeSnapshotUf constraint uf
     in Solve.repairNonUpperParents (Solve.rewriteConstraintWithUF ufSanitized constraint)
 
-data FinalizeSnapshot = FinalizeSnapshot
-    { fsConstraint :: Constraint
-    , fsUnionFind :: IntMap NodeId
-    }
-
-instance PresolutionSnapshot FinalizeSnapshot where
-    snapshotConstraint = fsConstraint
-    snapshotUnionFind = fsUnionFind
-
 presolutionViewFromSnapshot :: Constraint -> IntMap NodeId -> PresolutionView
 presolutionViewFromSnapshot constraint uf =
-    let ufSanitized = stepSanitizeSnapshotUf constraint uf
-        view0 =
-            fromPresolutionResult
-                FinalizeSnapshot
-                    { fsConstraint = constraint
-                    , fsUnionFind = ufSanitized
-                    }
-    in view0
-        { pvCanonicalConstraint = stepCanonicalizeConstraint constraint ufSanitized
-        }
+    let prepared = prepareSnapshotPreparationFromParts constraint uf
+    in buildPresolutionView prepared (stepCanonicalizeConstraint constraint (spSanitizedUf prepared))
 
 finalizePresolutionViewFromSnapshot :: Constraint -> IntMap NodeId -> Either SolveError PresolutionView
 finalizePresolutionViewFromSnapshot constraint uf = do
+    let prepared0 = prepareSnapshotPreparationFromParts constraint uf
     SolveResult{ srConstraint = canonicalConstraint, srUnionFind = ufFinal } <-
-        Solve.finalizeConstraintWithUF (stepSanitizeSnapshotUf constraint uf) constraint
-    let view = presolutionViewFromSnapshot constraint ufFinal
-    pure view
-        { pvCanonicalConstraint = canonicalConstraint
-        }
+        Solve.finalizeConstraintWithUF (spSanitizedUf prepared0) constraint
+    let preparedFinal = prepareSnapshotPreparationFromParts constraint ufFinal
+    pure (buildPresolutionView preparedFinal canonicalConstraint)
 
 stepSolvedFromPresolutionView :: PresolutionView -> Solved.Solved
 stepSolvedFromPresolutionView presolutionView =
