@@ -61,13 +61,10 @@ import MLF.Constraint.Presolution.Base (
 import qualified MLF.Constraint.Presolution.Ops as Ops
 import qualified MLF.Constraint.Presolution.Unify as Unify
 import MLF.Constraint.Presolution.StateAccess (
-    WithCanonicalT,
     getConstraintAndCanonical,
     instEdgeOwnerM,
     liftBindingError,
-    lookupBindParentR,
-    pendingWeakenOwnerM,
-    runWithCanonical
+    pendingWeakenOwnerM
     )
 import qualified MLF.Constraint.Unify.Decompose as UnifyDecompose
 import qualified MLF.Constraint.Traversal as Traversal
@@ -573,10 +570,11 @@ preferBinderMetaRoot root1 root2 = do
 --
 -- Requirements: 5.2
 checkNodeLocked :: NodeId -> EdgeUnifyM Bool
-checkNodeLocked nid = lift $ runWithCanonical $ do
-    let lookupParent :: NodeId -> WithCanonicalT PresolutionM (Maybe (NodeId, BindFlag))
+checkNodeLocked nid = lift $ do
+    (c0, canonical) <- getConstraintAndCanonical
+    let lookupParent :: NodeId -> PresolutionM (Maybe (NodeId, BindFlag))
         lookupParent n = do
-            mbParent <- lookupBindParentR (typeRef n)
+            mbParent <- liftBindingError $ Binding.lookupBindParentUnder canonical c0 (typeRef n)
             pure $ case mbParent of
                 Nothing -> Nothing
                 Just (TypeRef parent, flag) -> Just (parent, flag)
@@ -585,7 +583,7 @@ checkNodeLocked nid = lift $ runWithCanonical $ do
         -- Paper `locked`/"under rigid binder" check: consider only strict ancestors,
         -- so a restricted node (its own edge rigid) is not treated as locked
         -- solely because of that edge.
-        goStrict :: NodeId -> WithCanonicalT PresolutionM Bool
+        goStrict :: NodeId -> PresolutionM Bool
         goStrict n = do
             mbParent <- lookupParent n
             case mbParent of

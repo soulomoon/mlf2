@@ -452,6 +452,32 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             edgeSrc `shouldSatisfy` (not . isInfixOf "canonicalizeEdgeTraceInteriorsM,")
             presolutionSrc `shouldSatisfy` isInfixOf "processInstEdge,"
 
+        it "presolution state access guard" $ do
+            stateAccessSrc <- readFile "src/MLF/Constraint/Presolution/StateAccess.hs"
+            edgeUnifySrc <- readFile "src/MLF/Constraint/Presolution/EdgeUnify.hs"
+            baseSrc <- readFile "src/MLF/Constraint/Presolution/Base.hs"
+            forM_
+                [ "withCanonical,"
+                , "CanonicalEnv(..)"
+                , "WithCanonicalT"
+                , "runWithCanonical"
+                , "askConstraint"
+                , "askCanonical"
+                , "canonicalize :: Monad m => NodeId ->"
+                , "lookupBindParentR"
+                , "liftBindingErrorR"
+                , "Control.Monad.Reader"
+                ] $ \marker ->
+                    stateAccessSrc `shouldSatisfy` (not . isInfixOf marker)
+            forM_
+                [ "WithCanonicalT"
+                , "runWithCanonical"
+                , "lookupBindParentR"
+                ] $ \marker ->
+                    edgeUnifySrc `shouldSatisfy` (not . isInfixOf marker)
+            baseSrc `shouldSatisfy` (not . isInfixOf "WithCanonicalT")
+            stateAccessSrc `shouldSatisfy` isInfixOf "getConstraintAndCanonical"
+
         it "row4 per-edge propagation thesis-exact guard: Interpreter removes synthesized-wrapper branch markers" $ do
             interpSrc <- readFile "src/MLF/Constraint/Presolution/EdgeProcessing/Interpreter.hs"
             forM_
