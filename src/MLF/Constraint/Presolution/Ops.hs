@@ -3,11 +3,11 @@ Module      : MLF.Constraint.Presolution.Ops
 Description : Low-level stateful operations for presolution
 
 This module is a small “foundation” layer for presolution submodules. It
-contains stateful operations on `PresolutionState` / `Constraint` that were
-previously embedded in `MLF.Constraint.Presolution.Core`.
+contains stateful operations on `PresolutionState` / `Constraint` shared by
+the public presolution entrypoint and its owner modules.
 
-Keeping these operations separate makes it easier to split `Core` into
-cohesive submodules without introducing import cycles.
+Keeping these operations separate makes it easier to keep those modules
+cohesive without introducing import cycles.
 -}
 module MLF.Constraint.Presolution.Ops (
     createFreshNodeId,

@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Changed
+- Retired the thin presolution compatibility facade so the public Phase 4 entrypoint now imports its owner modules directly while preserving the exported testing/runtime surface (2026-03-09).
 - Shared the snapshot canonicalization preparation prelude between `MLF.Constraint.Presolution.View` and `MLF.Constraint.Finalize` without changing thesis-facing semantics (2026-03-09):
   - extracted one shared preparation path for dead/self UF sanitization plus canonical map/query derivation from the sanitized UF;
   - kept the intentional canonical-constraint split intact, with `fromPresolutionResult` still doing raw snapshot rewrite and finalize entrypoints still using repaired/finalized canonical-constraint construction;
