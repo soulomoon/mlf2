@@ -576,26 +576,25 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
     owner-boundary scheduled (not loop-final-only), but still uses
     compatibility-conservative boundary flushing.
 
-## Task 46 Elaboration-input witness-authoritative strictness plan (planned 2026-03-05; narrowed 2026-03-08)
+## Task 46 Elaboration-input witness-authoritative strictness plan (completed 2026-03-08)
 
-- Status update (2026-03-08):
-  - most of the originally targeted fallback ladders were removed by Task 70, so this is no longer a full fallback-removal campaign;
-  - the remaining explicit follow-up here is the Elaborate scope-root fallback swallowing (`Left _ -> typeRef root`) if we still want to tighten that path to strict fail-fast behavior.
-- Originally targeted gaps now closed:
-  - Elaborate/Pipeline `SchemeFreeVars` fallback ladders
-  - Let-level fallback scheme chooser (`fallbackChoiceFrom*`)
-  - `reifyInst` trace/expansion-based fallback synthesis when `phi = InstId`
+- Completed:
+  - removed the residual Elaborate scope-root fallback swallowing by making `scopeRootFromBase` propagate base binding-path failures instead of collapsing them to `typeRef root`;
+  - added the focused source guard `elab-input witness-authoritative guard` so future row-1 cleanup cannot silently reintroduce `Left _ -> typeRef root` in `MLF.Elab.Elaborate`;
+  - closed the narrowed follow-up after Task 70, which had already retired the broader fallback ladders originally tracked here.
 - Plan/tracker:
   - `/Volumes/src/mlf4/docs/plans/2026-03-05-elaboration-input-witness-authoritative-agent-team-implementation-plan.md`
-  - `/Volumes/src/mlf4/tasks/todo/2026-03-05-elaboration-input-witness-authoritative-agent-team-plan/`
-- Execution requirement:
-  - If pursued, treat this as a small strictness follow-up rather than reopening the original Team A-E wave plan.
-- Required verification gates (during execution):
-  - `--match "elab-input witness-authoritative guard"`
-  - `--match "elab-input absolute thesis-exact guard"`
-  - `--match "checked-authoritative"`
-  - `--match "Dual-path verification"`
-  - `cabal build all && cabal test`
+  - `/Volumes/src/mlf4/tasks/archive/2026-03-05-elaboration-input-witness-authoritative-agent-team-plan/`
+- Verification:
+  - `elab-input witness-authoritative guard`: PASS (`1 example, 0 failures`)
+  - `elab-input absolute thesis-exact guard`: PASS (`1 example, 0 failures`)
+  - `checked-authoritative`: PASS (`9 examples, 0 failures`)
+  - `Dual-path verification`: PASS (`4 examples, 0 failures`)
+  - `cabal build all && cabal test`: PASS (`1005 examples, 0 failures`)
+- Rolling priorities (next):
+  1. Keep the new row-1 witness-authoritative guard green during future elaboration cleanup.
+  2. Preserve fail-fast handling for malformed base binding trees unless a thesis citation requires a recovery path.
+  3. Treat any future elaboration-input simplification as guard-first work anchored to the existing row-1 verification stack.
 
 ## Task 47 TMT row3 strict owner-boundary scheduling closeout (completed 2026-03-05)
 

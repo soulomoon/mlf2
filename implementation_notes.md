@@ -13,6 +13,17 @@
 
 # Implementation Notes
 
+### 2026-03-08 Task 46 narrowed witness-authoritative closeout
+- Removed the last live `Elaborate` scope-root swallow: `scopeRootFromBase` now propagates base `bindingPathToRootLocal` failures instead of silently collapsing to `typeRef root`.
+- Kept the successful no-gen-ancestor path unchanged (`Nothing -> typeRef root`), so only malformed base binding trees now fail fast.
+- Added a focused `PipelineSpec` source guard, `elab-input witness-authoritative guard`, to prevent the old `Left _ -> typeRef root` fallback from returning in row-1 elaboration.
+- Verification:
+  - `elab-input witness-authoritative guard` — PASS (`1 example, 0 failures`)
+  - `elab-input absolute thesis-exact guard` — PASS (`1 example, 0 failures`)
+  - `checked-authoritative` — PASS (`9 examples, 0 failures`)
+  - `Dual-path verification` — PASS (`4 examples, 0 failures`)
+  - `cabal build all && cabal test` — PASS (`1005 examples, 0 failures`)
+
 ### 2026-03-08 single-source `schemeBodyTarget` ownership
 - Removed the duplicate local `schemeBodyTarget` definition from `MLF.Elab.Elaborate` and made `MLF.Elab.Run.Scope` the single owner of scheme-target selection helpers.
 - Kept `schemeBodyTarget` as the thesis `S′`-style subterm target selector, but added `generalizeTargetNode` beside it for the `S`-style named-node generalization case after the richer helper duplicated quantifiers on nested-let / alias regressions.

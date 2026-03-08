@@ -102,16 +102,16 @@ elaborateWithEnv config elabEnv ann = do
     canonical = ChiQuery.chiCanonical presolutionView
     chiLookupNode = ChiQuery.chiLookupNode presolutionView
     chiLookupVarBound = ChiQuery.chiLookupVarBound presolutionView
+    scopeRootFromBase :: NodeId -> Either ElabError NodeRef
     scopeRootFromBase root =
         case IntMap.lookup (getNodeId (canonical root)) (gaSolvedToBase gaParents) of
-            Nothing -> typeRef root
-            Just baseN ->
-                case bindingPathToRootLocal (gaBindParentsBase gaParents) (typeRef baseN) of
-                    Left _ -> typeRef root
-                    Right path ->
-                        case listToMaybe [gid | GenRef gid <- drop 1 path] of
-                            Just gid -> GenRef gid
-                            Nothing -> typeRef root
+            Nothing -> pure (typeRef root)
+            Just baseN -> do
+                path <- bindingPathToRootLocal (gaBindParentsBase gaParents) (typeRef baseN)
+                pure $
+                    case listToMaybe [gid | GenRef gid <- drop 1 path] of
+                        Just gid -> GenRef gid
+                        Nothing -> typeRef root
 
     generalizeAtWith
         :: Maybe GaBindParents
@@ -121,17 +121,17 @@ elaborateWithEnv config elabEnv ann = do
     generalizeAtWith mbGa scopeRoot targetNode =
         generalizeAtWithRaw mbGa scopeRoot targetNode
 
-    scopeRootForNode :: NodeId -> NodeRef
+    scopeRootForNode :: NodeId -> Either ElabError NodeRef
     scopeRootForNode nodeId =
         case IntMap.lookup (getNodeId (canonical nodeId)) scopeOverrides of
-            Just ref -> ref
+            Just ref -> pure ref
             Nothing -> scopeRootFromBase nodeId
 
     generalizeAtNode :: NodeId -> Either ElabError (ElabScheme, IntMap.IntMap String)
-    generalizeAtNode nodeId =
-        let scopeRoot = scopeRootForNode nodeId
-            targetC = generalizeTargetNode presolutionView nodeId
-        in generalizeAtWith (Just gaParents) scopeRoot targetC
+    generalizeAtNode nodeId = do
+        scopeRoot <- scopeRootForNode nodeId
+        let targetC = generalizeTargetNode presolutionView nodeId
+        generalizeAtWith (Just gaParents) scopeRoot targetC
 
     normalizeSchemeSubstPair :: (ElabScheme, IntMap.IntMap String) -> (ElabScheme, IntMap.IntMap String)
     normalizeSchemeSubstPair (schRaw, substRaw) =

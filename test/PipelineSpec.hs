@@ -240,6 +240,10 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             isInfixOf "MLF.Elab.Phi.IdentityBridge" cabalSrc `shouldBe` False
             isInfixOf "MLF.Elab.Phi.IdentityBridge" omegaSrc `shouldBe` False
 
+        it "elab-input witness-authoritative guard" $ do
+            elaborateSrc <- readFile "src/MLF/Elab/Elaborate.hs"
+            isInfixOf "Left _ -> typeRef root" elaborateSrc `shouldBe` False
+
         it "row1 closeout guard|checked-authoritative keeps representative corpus parity: elaborateWithEnv has no entry-time Solved.rebuildWithConstraint" $ do
             src <- readFile "src/MLF/Elab/Elaborate.hs"
             isInfixOf "solved = Solved.rebuildWithConstraint" src `shouldBe` False
