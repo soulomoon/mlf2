@@ -18,15 +18,18 @@ import MLF.Constraint.Types.Graph
     ( Constraint
     , EdgeId(..)
     , NodeId(..)
+    , cGenNodes
     , cLetEdges
     , getNodeId
     , gnSchemes
+    , toListGen
     )
 import MLF.Constraint.Types.Witness (EdgeWitness, Expansion)
 import MLF.Elab.Generalize (GaBindParents)
 import MLF.Elab.Types (ElabType, ElabError)
 import MLF.Util.Trace (TraceConfig)
 import MLF.Elab.Run.Instantiation (inferInstAppArgsFromScheme)
+import qualified MLF.Elab.Run.ChiQuery as ChiQuery
 import MLF.Elab.Run.ResultType.Types (ResultTypeInputs(..))
 import MLF.Elab.Run.ResultType.Util (generalizeWithPlan)
 import qualified MLF.Elab.Run.ResultType.View as View
@@ -72,13 +75,13 @@ computeResultTypeFallback
     -> AnnExpr      -- ^ ann (pre-redirect)
     -> Either ElabError ElabType
 computeResultTypeFallback ctx annCanon ann = do
-    view <- View.buildResultTypeView ctx
+    _view <- View.buildResultTypeView ctx
     -- First, determine the root (same logic as before to check for AAnn)
-    let canonical = View.rtvCanonical view
+    let canonical = rtcCanonical ctx
         c1 = rtcBaseConstraint ctx
 
     let schemeRootSet =
-            let allGenNodes = View.rtvGenNodes view
+            let allGenNodes = map snd (toListGen (cGenNodes (ChiQuery.chiConstraint (rtcPresolutionView ctx))))
             in IntSet.fromList
                 [ getNodeId (canonical root)
                 | gen <- allGenNodes
