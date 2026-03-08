@@ -13,6 +13,16 @@
 
 # Implementation Notes
 
+### 2026-03-08 single-source `schemeBodyTarget` ownership
+- Removed the duplicate local `schemeBodyTarget` definition from `MLF.Elab.Elaborate` and made `MLF.Elab.Run.Scope` the single owner of scheme-target selection helpers.
+- Kept `schemeBodyTarget` as the thesis `S′`-style subterm target selector, but added `generalizeTargetNode` beside it for the `S`-style named-node generalization case after the richer helper duplicated quantifiers on nested-let / alias regressions.
+- Added direct `ScopeSpec` coverage for named non-scheme-root, scheme-root, forall-body, canonical scheme-body alias, and generalization-target behavior, plus a `PipelineSpec` source guard that `Elaborate` no longer defines `schemeBodyTarget ::`.
+- Verification:
+  - `schemeBodyTarget` — PASS (`6 examples, 0 failures`)
+  - `nested` — PASS (`27 examples, 0 failures`)
+  - `BUG-002-V2` — PASS (`1 example, 0 failures`)
+  - `cabal build all && cabal test` — PASS (`1004 examples, 0 failures`)
+
 ## Thesis Alignment (Phase A–E)
 
 ### 2026-03-08 retire final non-must-stay solved facade helper cluster

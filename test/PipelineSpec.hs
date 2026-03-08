@@ -323,6 +323,10 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 ] $ \marker ->
                     reifySrc `shouldSatisfy` (not . isInfixOf marker)
 
+        it "helper dedup guard: Elaborate no longer defines local schemeBodyTarget" $ do
+            elaborateSrc <- readFile "src/MLF/Elab/Elaborate.hs"
+            elaborateSrc `shouldSatisfy` (not . isInfixOf "schemeBodyTarget ::")
+
         it "fallback-removal guard: generalization helpers no longer define live fallback ladders" $ do
             elaborateSrc <- readFile "src/MLF/Elab/Elaborate.hs"
             runPipelineSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"

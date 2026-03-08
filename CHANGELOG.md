@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Changed
+- Single-sourced `schemeBodyTarget` ownership in `MLF.Elab.Run.Scope` (2026-03-08):
+  - removed the duplicate local `schemeBodyTarget` helper from `MLF.Elab.Elaborate`;
+  - kept `schemeBodyTarget` as the thesis `S′`-style subterm target selector and added `generalizeTargetNode` alongside it for the `S`-style named-node generalization case needed by nested-let / alias elaboration;
+  - added direct `ScopeSpec` coverage plus a `PipelineSpec` source guard proving `Elaborate` no longer redefines `schemeBodyTarget ::`;
+  - verified `schemeBodyTarget` (`6 examples, 0 failures`), `nested` (`27 examples, 0 failures`), `BUG-002-V2` (`1 example, 0 failures`), and `cabal build all && cabal test` (`1004 examples, 0 failures`).
 - Swept live docs for stale workflow terminology beyond skill names/paths (2026-03-08):
   - replaced platform-specific execution-note wording with the current generic `@executing-plans` phrasing across live plan docs;
   - renamed older parallel-work headings/titles in live plans to the current `Parallel Work` terminology where those docs still describe current execution guidance.

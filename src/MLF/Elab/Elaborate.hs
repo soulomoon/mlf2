@@ -32,6 +32,7 @@ import MLF.Elab.TermClosure (alignTermTypeVarsToScheme, alignTermTypeVarsToTopTy
 import MLF.Elab.Run.TypeOps (inlineBoundVarsType, simplifyAnnotationType)
 import MLF.Elab.Run.Annotation (adjustAnnotationInst)
 import MLF.Elab.Run.Instantiation (inferInstAppArgsFromScheme)
+import MLF.Elab.Run.Scope (generalizeTargetNode, schemeBodyTarget)
 import qualified MLF.Elab.Run.ChiQuery as ChiQuery
 import MLF.Constraint.BindingUtil (bindingPathToRootLocal)
 import MLF.Elab.Phi (phiFromEdgeWitnessWithTrace)
@@ -75,18 +76,6 @@ data ElabOut = ElabOut
     { elabTerm :: Env -> Either ElabError ElabTerm
     , elabStripped :: Env -> Either ElabError ElabTerm
     }
-
-schemeBodyTarget :: PresolutionView -> NodeId -> NodeId
-schemeBodyTarget presolutionView target =
-    let canonical = ChiQuery.chiCanonical presolutionView
-        targetC = canonical target
-    in case ChiQuery.chiLookupNode presolutionView targetC of
-        Just TyVar{ tnBound = Just bnd } ->
-            case ChiQuery.chiLookupNode presolutionView (canonical bnd) of
-                Just TyForall{ tnBody = body } -> canonical body
-                _ -> canonical bnd
-        Just TyForall{ tnBody = body } -> canonical body
-        _ -> targetC
 
 elaborateWithEnv
     :: ElabConfig
@@ -141,7 +130,7 @@ elaborateWithEnv config elabEnv ann = do
     generalizeAtNode :: NodeId -> Either ElabError (ElabScheme, IntMap.IntMap String)
     generalizeAtNode nodeId =
         let scopeRoot = scopeRootForNode nodeId
-            targetC = schemeBodyTarget presolutionView nodeId
+            targetC = generalizeTargetNode presolutionView nodeId
         in generalizeAtWith (Just gaParents) scopeRoot targetC
 
     normalizeSchemeSubstPair :: (ElabScheme, IntMap.IntMap String) -> (ElabScheme, IntMap.IntMap String)
