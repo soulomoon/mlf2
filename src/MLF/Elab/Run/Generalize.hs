@@ -145,8 +145,7 @@ generalizeAtWithBuilder planBuilder mbBindParentsGa presolutionView scopeRoot ta
     let PresolutionPlanBuilder buildPlans = planBuilder
         go mbGa scope target = do
             (genPlan, reifyPlan) <- buildPlans presolutionView mbGa scope target
-            let fallback scope' target' = fst <$> go mbGa scope' target'
-            applyGeneralizePlan fallback genPlan reifyPlan
+            applyGeneralizePlan genPlan reifyPlan
     in go mbBindParentsGa scopeRoot targetNode
 
 mkGeneralizeAtWithBuilder

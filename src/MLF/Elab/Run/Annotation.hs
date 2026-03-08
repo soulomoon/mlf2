@@ -14,7 +14,7 @@ import MLF.Frontend.ConstraintGen (AnnExpr(..))
 import MLF.Frontend.ConstraintGen.Types (AnnExprF(..))
 import MLF.Constraint.Types.Graph (NodeId(..))
 import MLF.Elab.Run.Util (chaseRedirects)
-import MLF.Elab.Types (ElabType, Instantiation(..), Ty(..))
+import MLF.Elab.Types (Instantiation(..))
 
 mapAnnNodes :: (NodeId -> NodeId) -> AnnExpr -> AnnExpr
 mapAnnNodes f = cata $ \case
@@ -52,8 +52,9 @@ annNode = cata alg
 -- docs/notes/2026-01-27-elab-changes.md.
 adjustAnnotationInst :: Instantiation -> Instantiation
 adjustAnnotationInst inst = case inst of
-    InstApp ty -> InstInside (InstBot (sanitizeBoundTop ty))
     InstElim -> InstId
+    InstApp ty -> InstInside (InstBot ty)
+    InstBot ty -> InstInside (InstBot ty)
     InstSeq a b ->
         let a' = adjustAnnotationInst a
             b' = adjustAnnotationInst b
@@ -64,10 +65,3 @@ adjustAnnotationInst inst = case inst of
     InstInside a -> InstInside (adjustAnnotationInst a)
     InstUnder v a -> InstUnder v (adjustAnnotationInst a)
     _ -> inst
-
--- See Note [Instantiation arg sanitization] in
--- docs/notes/2026-01-27-elab-changes.md.
-sanitizeBoundTop :: ElabType -> ElabType
-sanitizeBoundTop ty = case ty of
-    TVar _ -> TBottom
-    _ -> ty

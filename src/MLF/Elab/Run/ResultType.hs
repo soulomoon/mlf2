@@ -2,6 +2,7 @@
 module MLF.Elab.Run.ResultType (
     ResultTypeInputs(..),
     generalizeWithPlan,
+    inferInstAppArgsFromScheme,
     mkResultTypeInputs,
     computeResultTypeFromAnn,
     computeResultTypeFallback
@@ -25,6 +26,7 @@ import MLF.Constraint.Types.Witness (EdgeWitness, Expansion)
 import MLF.Elab.Generalize (GaBindParents)
 import MLF.Elab.Types (ElabType, ElabError)
 import MLF.Util.Trace (TraceConfig)
+import MLF.Elab.Run.Instantiation (inferInstAppArgsFromScheme)
 import MLF.Elab.Run.ResultType.Types (ResultTypeInputs(..))
 import MLF.Elab.Run.ResultType.Util (generalizeWithPlan)
 import qualified MLF.Elab.Run.ResultType.View as View

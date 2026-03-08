@@ -9,6 +9,7 @@ import MLF.Elab.Generalize
     ( selectSolvedOrderWithShadow
     , shadowCompareTypes
     )
+import MLF.Elab.Run.ResultType (inferInstAppArgsFromScheme)
 import MLF.Elab.Pipeline (ElabError(..), Ty(..))
 
 spec :: Spec
@@ -126,3 +127,11 @@ spec = do
                     msgs `shouldSatisfy` any (isInfixOf "base=")
                 other ->
                     expectationFailure ("Expected ValidationFailed diagnostics, got: " ++ show other)
+
+    describe "Instantiation inference strictness" $ do
+        it "returns Nothing when a bounded body variable only matches via fallback recovery" $ do
+            inferInstAppArgsFromScheme
+                [("a", Just (TBase (BaseTy "Bool")))]
+                (TVar "a")
+                (TBase (BaseTy "Int"))
+                `shouldBe` Nothing

@@ -17,9 +17,8 @@ module MLF.Constraint.Presolution.EdgeProcessing.Planner (
 import Control.Monad.Except (throwError)
 import Control.Monad.Reader (ask)
 import qualified Data.IntSet as IntSet
-import Data.Maybe (listToMaybe)
 
-import MLF.Constraint.Presolution.Base (PresolutionError (..), PresolutionM, bindingPathToRootUnderM)
+import MLF.Constraint.Presolution.Base (PresolutionError (..), PresolutionM)
 import MLF.Constraint.Presolution.EdgeProcessing.Plan
 import MLF.Constraint.Presolution.Ops (findRoot, getCanonicalNode, getNode)
 import MLF.Constraint.Presolution.StateAccess (findSchemeIntroducerM, getConstraintAndCanonical)
@@ -104,29 +103,12 @@ planEdge edge = do
 
 -- | Resolve the owning scheme introducer for a TyExp-left edge.
 --
--- For frontend TyExp nodes we keep strict body-root provenance.
--- For synthesized wrappers we tolerate sparse test/fixture bind trees by
--- falling back from body-root lookup to wrapper-root lookup.
+-- Ownership is always derived from the wrapped body root.  Synthesized
+-- wrappers no longer get a wrapper-root recovery path; missing body-root
+-- ownership fails fast so the planner remains thesis-authoritative.
 resolveSchemeOwnerGen :: (NodeId -> NodeId) -> Constraint -> ResolvedTyExp -> PresolutionM GenNodeId
-resolveSchemeOwnerGen canonical constraint0 leftTyExp
-    | isSynthesizedExpVar (rteExpVar leftTyExp) = do
-        mbBody <- firstGenOnPath canonical constraint0 (rteBodyId leftTyExp)
-        case mbBody of
-            Just gid -> pure gid
-            Nothing -> do
-                mbWrapper <- firstGenOnPath canonical constraint0 (rteNodeId leftTyExp)
-                case mbWrapper of
-                    Just gid -> pure gid
-                    Nothing ->
-                        throwError
-                            (InternalError ("scheme introducer not found for " ++ show (canonical (rteBodyId leftTyExp))))
-    | otherwise =
-        findSchemeIntroducerM canonical constraint0 (rteBodyId leftTyExp)
-
-firstGenOnPath :: (NodeId -> NodeId) -> Constraint -> NodeId -> PresolutionM (Maybe GenNodeId)
-firstGenOnPath canonical constraint0 start = do
-    path <- bindingPathToRootUnderM canonical constraint0 (typeRef (canonical start))
-    pure (listToMaybe [gid | GenRef gid <- path])
+resolveSchemeOwnerGen canonical constraint0 leftTyExp =
+    findSchemeIntroducerM canonical constraint0 (rteBodyId leftTyExp)
 
 nodeTag :: TyNode -> String
 nodeTag = \case

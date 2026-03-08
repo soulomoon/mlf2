@@ -1,5 +1,6 @@
 module Presolution.EdgePlannerSpec (spec) where
 
+import Data.List (isInfixOf)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import MLF.Constraint.Presolution
@@ -14,10 +15,15 @@ import MLF.Constraint.Types.Graph
     , Constraint(..)
     , EdgeId(..)
     , ExpVarId(..)
+    , GenNode(..)
     , GenNodeId(..)
     , InstEdge(..)
     , NodeId(..)
     , TyNode(..)
+    , fromListGen
+    , genRef
+    , nodeRefKey
+    , typeRef
     )
 import MLF.Constraint.Types.Presolution (Presolution(..))
 import SpecUtil (bindParentsFromPairs, defaultTraceConfig, emptyConstraint, nodeMapFromList, rootedConstraint)
@@ -125,6 +131,9 @@ spec = describe "Edge plan types" $ do
                     { cNodes = nodeMapFromList [(0, n0), (1, n1), (2, nExp)]
                     , cInstEdges = [edge]
                     , cLetEdges = IntSet.singleton 5
+                    , cBindParents = bindParentsFromPairs
+                        [ (body, expNode, BindFlex)
+                        ]
                     }
                 st0 = PresolutionState constraint (Presolution IntMap.empty)
                     IntMap.empty 3 IntSet.empty IntMap.empty
@@ -147,6 +156,9 @@ spec = describe "Edge plan types" $ do
                     { cNodes = nodeMapFromList [(0, n0), (1, n1), (2, nExp)]
                     , cInstEdges = [edge]
                     , cAnnEdges = IntSet.singleton 3
+                    , cBindParents = bindParentsFromPairs
+                        [ (body, expNode, BindFlex)
+                        ]
                     }
                 st0 = PresolutionState constraint (Presolution IntMap.empty)
                     IntMap.empty 3 IntSet.empty IntMap.empty
@@ -155,3 +167,57 @@ spec = describe "Edge plan types" $ do
                 Left err -> expectationFailure ("planEdge failed: " ++ show err)
                 Right (plan, _) -> do
                     eprSchemeOwnerGen plan `shouldBe` GenNodeId 0
+
+        it "fails fast when a synthesized wrapper owner is only recoverable from the wrapper root" $ do
+            let body = NodeId 0
+                target = NodeId 1
+                expNode = NodeId 2
+                n0 = TyVar { tnId = body, tnBound = Nothing }
+                n1 = TyVar { tnId = target, tnBound = Nothing }
+                nExp = TyExp { tnId = expNode, tnExpVar = ExpVarId (-3), tnBody = body }
+                edge = InstEdge (EdgeId 6) expNode target
+                constraint = rootedConstraint emptyConstraint
+                    { cNodes = nodeMapFromList [(0, n0), (1, n1), (2, nExp)]
+                    , cInstEdges = [edge]
+                    }
+                st0 = PresolutionState constraint (Presolution IntMap.empty)
+                    IntMap.empty 3 IntSet.empty IntMap.empty
+                    IntMap.empty IntMap.empty IntMap.empty IntMap.empty
+            case runPresolutionM defaultTraceConfig st0 (planEdge edge) of
+                Left (InternalError msg) ->
+                    msg `shouldSatisfy` isInfixOf "scheme introducer not found"
+                Left err ->
+                    expectationFailure ("expected strict synthesized-wrapper owner failure, got " ++ show err)
+                Right _ ->
+                    expectationFailure "expected planner fail-fast when body-root ownership is missing"
+
+        it "fails fast when a synthesized wrapper owner would only be recoverable from wrapper-root fallback" $ do
+            let gid = GenNodeId 0
+                body = NodeId 0
+                target = NodeId 1
+                expNode = NodeId 2
+                n0 = TyVar { tnId = body, tnBound = Nothing }
+                n1 = TyVar { tnId = target, tnBound = Nothing }
+                nExp = TyExp { tnId = expNode, tnExpVar = ExpVarId (-4), tnBody = body }
+                edge = InstEdge (EdgeId 7) expNode target
+                constraint = emptyConstraint
+                    { cNodes = nodeMapFromList [(0, n0), (1, n1), (2, nExp)]
+                    , cInstEdges = [edge]
+                    , cGenNodes = fromListGen [(gid, GenNode gid [expNode])]
+                    , cBindParents = IntMap.singleton (nodeRefKey (typeRef expNode)) (genRef gid, BindFlex)
+                    }
+                st0 = PresolutionState constraint (Presolution IntMap.empty)
+                    IntMap.empty 3 IntSet.empty IntMap.empty
+                    IntMap.empty IntMap.empty IntMap.empty IntMap.empty
+            case runPresolutionM defaultTraceConfig st0 (planEdge edge) of
+                Left (InternalError msg) ->
+                    msg `shouldSatisfy` isInfixOf "scheme introducer not found"
+                Left err ->
+                    expectationFailure ("expected strict wrapper-root fallback rejection, got " ++ show err)
+                Right _ ->
+                    expectationFailure "expected planner fail-fast instead of wrapper-root recovery"
+
+        it "source guard: planner no longer defines synthesized wrapper-root owner fallback" $ do
+            src <- readFile "src/MLF/Constraint/Presolution/EdgeProcessing/Planner.hs"
+            src `shouldSatisfy`
+                (not . isInfixOf "mbWrapper <- firstGenOnPath canonical constraint0 (rteNodeId leftTyExp)")

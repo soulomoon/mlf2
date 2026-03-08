@@ -59,6 +59,7 @@ import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Elab.Phi.Env (PhiM, askCanonical)
 import MLF.Elab.Phi.Omega (OmegaContext(..), phiWithSchemeOmega)
 import MLF.Util.Trace (TraceConfig, traceGeneralize)
+import MLF.Elab.Run.Scope (schemeBodyTarget)
 
 -- | Canonicalize a node id using the union-find from the solve result.
 canonicalNodeM :: NodeId -> PhiM NodeId
@@ -369,11 +370,19 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith presolutionView mbGaParents mSc
 
     schemeInfoForRoot :: NodeId -> Either ElabError SchemeInfo
     schemeInfoForRoot root0 = do
+        let rootC = canonicalNode root0
+            targetNode =
+                case pvLookupVarBound presolutionView rootC of
+                    Just bnd ->
+                        case pvLookupNode presolutionView bnd of
+                            Just TyForall{ tnBody = body } -> canonicalNode body
+                            _ -> canonicalNode bnd
+                    Nothing -> schemeBodyTarget presolutionView root0
         scopeRoot <- instScopeRoot root0
         (sch, subst) <-
             case mbGaParents of
-                Nothing -> generalizeAtWith Nothing scopeRoot root0
-                Just ga -> generalizeAtWith (Just ga) scopeRoot root0
+                Nothing -> generalizeAtWith Nothing scopeRoot targetNode
+                Just ga -> generalizeAtWith (Just ga) scopeRoot targetNode
         pure SchemeInfo { siScheme = sch, siSubst = subst }
 
     instScopeRoot :: NodeId -> Either ElabError NodeRef

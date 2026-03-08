@@ -38,7 +38,7 @@ import MLF.Elab.PipelineError
     )
 import MLF.Elab.TypeCheck (typeCheck)
 import MLF.Elab.Types
-import MLF.Elab.TermClosure (closeTermWithSchemeSubst, substInTerm)
+import MLF.Elab.TermClosure (closeTermWithSchemeSubstIfNeeded, substInTerm)
 import MLF.Elab.Run.Annotation (applyRedirectsToAnn, canonicalizeAnn, annNode)
 import MLF.Elab.Run.Generalize
     ( constraintForGeneralization
@@ -58,7 +58,6 @@ import MLF.Elab.Run.Util
     , makeCanonicalizer
     )
 import MLF.Elab.Run.ResultType (mkResultTypeInputs, computeResultTypeFromAnn, computeResultTypeFallback)
-import MLF.Reify.Core (reifyType)
 import MLF.Reify.TypeOps (freeTypeVarsType)
 import MLF.Util.Trace (TraceConfig, traceGeneralize)
 
@@ -147,41 +146,9 @@ runPipelineElabWith traceCfg genConstraints expr = do
         bindingToElab $
             resolveCanonicalScope c1 presolutionViewForGen (prRedirects pres) (annNode ann)
     let rootTarget = schemeBodyTarget presolutionViewForGen (annNode annCanon)
-    let generalizeNeedsFallback err = case err of
-            SchemeFreeVars{} -> True
-            _ -> False
     (rootScheme, rootSubst) <- fromElabError $
-        case generalizeAtWithView (Just bindParentsGa) rootScope rootTarget of
-            Right out -> Right out
-            Left err
-                | generalizeNeedsFallback err ->
-                    case generalizeAtWithView Nothing rootScope rootTarget of
-                        Right out -> Right out
-                        Left err2
-                            | generalizeNeedsFallback err2 -> do
-                                tyFallback <- reifyType presolutionViewForGen rootTarget
-                                pure (schemeFromType tyFallback, IntMap.empty)
-                        Left err2 -> Left err2
-            Left err -> Left err
+        generalizeAtWithView (Just bindParentsGa) rootScope rootTarget
     let termSubst = substInTerm rootSubst term
-        termClosed =
-            case typeCheck termSubst of
-                Right ty | null (freeTypeVarsType ty) -> termSubst
-                Right ty ->
-                    case rootScheme of
-                        Forall binds _
-                            | null binds ->
-                                let freeBinds =
-                                        [ (name, Nothing)
-                                        | name <- Set.toList (freeTypeVarsType ty)
-                                        ]
-                                    freeScheme = Forall freeBinds ty
-                                in closeTermWithSchemeSubst IntMap.empty freeScheme termSubst
-                        _ -> closeTermWithSchemeSubst rootSubst rootScheme term
-                Left _ -> closeTermWithSchemeSubst rootSubst rootScheme term
-    let checkedAuthoritative = do
-            tyChecked <- fromTypeCheckError (typeCheck termClosed)
-            pure (termClosed, tyChecked)
 
     -- Build context for result type computation
     let canonical = pvCanonical presolutionViewForGen
@@ -197,6 +164,24 @@ runPipelineElabWith traceCfg genConstraints expr = do
                 c1
                 (prRedirects pres)
                 traceCfg
+        termClosed =
+            case typeCheck termSubst of
+                Right ty | null (freeTypeVarsType ty) -> termSubst
+                Right ty ->
+                    case rootScheme of
+                        Forall binds _
+                            | null binds ->
+                                let freeBinds =
+                                        [ (name, Nothing)
+                                        | name <- Set.toList (freeTypeVarsType ty)
+                                        ]
+                                    freeScheme = Forall freeBinds ty
+                                in closeTermWithSchemeSubstIfNeeded IntMap.empty freeScheme termSubst
+                        _ -> closeTermWithSchemeSubstIfNeeded rootSubst rootScheme term
+                Left _ -> closeTermWithSchemeSubstIfNeeded rootSubst rootScheme term
+    let checkedAuthoritative = do
+            tyChecked <- fromTypeCheckError (typeCheck termClosed)
+            pure (termClosed, tyChecked)
 
     -- Keep result-type reconstruction for diagnostics, but report the
     -- type-checker result as authoritative.

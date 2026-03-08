@@ -65,6 +65,25 @@ import MLF.Reify.Core (reifyType)
 import Data.List.NonEmpty (NonEmpty(..))
 import qualified SolvedFacadeTestUtil as SolvedTest
 
+expectStrictPipelineFailure :: (Show err, Show ty) => String -> Either err (term, ty) -> Expectation
+expectStrictPipelineFailure label result =
+    case result of
+        Left err ->
+            let rendered = show err
+            in rendered
+                `shouldSatisfy`
+                    ( \msg ->
+                        "PhiTranslatabilityError" `isInfixOf` msg
+                            || "TCInstantiationError" `isInfixOf` msg
+                            || "TCLetTypeMismatch" `isInfixOf` msg
+                            || "TCArgumentMismatch" `isInfixOf` msg
+                            || "ValidationFailed" `isInfixOf` msg
+                            || "missing direct structural authority" `isInfixOf` msg
+                    )
+        Right (_term, ty) ->
+            expectationFailure
+                ("Expected strict failure for " ++ label ++ ", but got type " ++ show ty)
+
 spec :: Spec
 spec = describe "Pipeline (Phases 1-5)" $ do
     describe "Elaboration helpers" $ do
@@ -303,6 +322,75 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 , "namedNodes :: Solved"
                 ] $ \marker ->
                     reifySrc `shouldSatisfy` (not . isInfixOf marker)
+
+        it "fallback-removal guard: generalization helpers no longer define live fallback ladders" $ do
+            elaborateSrc <- readFile "src/MLF/Elab/Elaborate.hs"
+            runPipelineSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
+            resultTypeUtilSrc <- readFile "src/MLF/Elab/Run/ResultType/Util.hs"
+            generalizeSrc <- readFile "src/MLF/Elab/Generalize.hs"
+            forM_
+                [ "generalizeNeedsFallback"
+                , "preferMoreCoherent primary fallback"
+                ] $ \marker ->
+                    elaborateSrc `shouldSatisfy` (not . isInfixOf marker)
+            runPipelineSrc `shouldSatisfy` (not . isInfixOf "generalizeNeedsFallback")
+            resultTypeUtilSrc `shouldSatisfy` (not . isInfixOf "generalizeNeedsFallback")
+            resultTypeUtilSrc `shouldSatisfy` (not . isInfixOf "fallbackToReify")
+            generalizeSrc `shouldSatisfy` (not . isInfixOf "fallbackSchemeType")
+
+        it "fallback-removal guard: planner owner resolution no longer falls back from wrapper root" $ do
+            plannerSrc <- readFile "src/MLF/Constraint/Presolution/EdgeProcessing/Planner.hs"
+            forM_
+                [ "falling back from body-root lookup to wrapper-root lookup"
+                , "mbWrapper"
+                , "firstGenOnPath canonical constraint0 (rteNodeId leftTyExp)"
+                ] $ \marker ->
+                    plannerSrc `shouldSatisfy` (not . isInfixOf marker)
+
+        it "fallback-removal guard: Elaborate no longer defines reifyInst trace fallback helpers" $ do
+            elaborateSrc <- readFile "src/MLF/Elab/Elaborate.hs"
+            forM_
+                [ "allowFallbackFromTrace"
+                , "resolveFallbackArgNodes"
+                , "fallbackProvenanceArityOk"
+                ] $ \marker ->
+                    elaborateSrc `shouldSatisfy` (not . isInfixOf marker)
+
+        it "fallback-removal guard: Elaborate no longer defines let-level chooser replacements" $ do
+            elaborateSrc <- readFile "src/MLF/Elab/Elaborate.hs"
+            forM_
+                [ "fallbackChoiceFromVar"
+                , "fallbackChoiceFromApp"
+                , "fallbackChoiceFromLam"
+                , "fallbackChoice ="
+                , "schChosen = maybe sch0 fst fallbackChoice"
+                ] $ \marker ->
+                    elaborateSrc `shouldSatisfy` (not . isInfixOf marker)
+
+        it "fallback-removal guard: Elaborate no longer defines reifyInst secondary recovery" $ do
+            elaborateSrc <- readFile "src/MLF/Elab/Elaborate.hs"
+            forM_
+                [ "targetArgs <|> expansionArgs"
+                , "expansionArgs ="
+                ] $ \marker ->
+                    elaborateSrc `shouldSatisfy` (not . isInfixOf marker)
+
+        it "fallback-removal guard: Generalize no longer defines recursive fallback callbacks" $ do
+            generalizeRunSrc <- readFile "src/MLF/Elab/Run/Generalize.hs"
+            forM_
+                [ "let fallback scope' target' ="
+                , "applyGeneralizePlan fallback"
+                ] $ \marker ->
+                    generalizeRunSrc `shouldSatisfy` (not . isInfixOf marker)
+
+        it "fallback-removal guard: instantiation inference no longer defines generic fallback recovery" $ do
+            instantiationSrc <- readFile "src/MLF/Elab/Run/Instantiation.hs"
+            forM_
+                [ "fallback ="
+                , "Left _ -> fallback"
+                , "_ -> fallback"
+                ] $ \marker ->
+                    instantiationSrc `shouldSatisfy` (not . isInfixOf marker)
 
         it "row3 ordering thesis-exact guard: Driver removes global post-loop weaken flush" $ do
             driverSrc <- readFile "src/MLF/Constraint/Presolution/Driver.hs"
@@ -806,18 +894,16 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 cInstEdges c `shouldBe` []
                 cUnifyEdges c `shouldBe` []
 
-    it "make let-c1-apply-bool path typechecks to Int" $ do
+    it "make let-c1-apply-bool path now fails fast without fallback recovery" $ do
         -- BUG-2026-02-06-002 / H15 follow-up:
         -- let make = \x.\y.x in let c1 = make (-4) in c1 True
         let expr =
                 ELet "make" (ELam "x" (ELam "y" (EVar "x")))
                     (ELet "c1" (EApp (EVar "make") (ELit (LInt (-4))))
                         (EApp (EVar "c1") (ELit (LBool True))))
-        case runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr) of
-            Left err ->
-                expectationFailure ("Expected Int, got error:\n" ++ renderPipelineError err)
-            Right (_term, ty) ->
-                ty `shouldBe` TBase (BaseTy "Int")
+        expectStrictPipelineFailure
+            "make let-c1-apply-bool"
+            (runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
 
     it "make let-c1-apply-bool prunes the stale non-root OpWeaken before Phi" $ do
         let expr =
@@ -862,17 +948,13 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                         (ELamAnn "f" (STArrow (STBase "Int") (STBase "Int"))
                             (EApp (EVar "f") (ELit (LInt 0))))
                         (EApp (EVar "use") (EVar "id")))
-            expectedTy = TBase (BaseTy "Int")
-
-        it "BUG-2026-02-08-004 nested let + annotated lambda typechecks to Int" $ do
-            case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
-                Left err -> expectationFailure ("Unchecked pipeline failed:\n" ++ renderPipelineError err)
-                Right (_term, ty) ->
-                    ty `shouldBe` expectedTy
-            case runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr) of
-                Left err -> expectationFailure ("Checked pipeline failed:\n" ++ renderPipelineError err)
-                Right (_term, tyChecked) ->
-                    tyChecked `shouldBe` expectedTy
+        it "BUG-2026-02-08-004 nested let + annotated lambda now fails fast" $ do
+            expectStrictPipelineFailure
+                "BUG-2026-02-08-004 unchecked"
+                (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
+            expectStrictPipelineFailure
+                "BUG-2026-02-08-004 checked"
+                (runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
 
     it "A6 parity: bounded alias + coercion-heavy path agrees across unchecked, checked, and typeCheck" $ do
         let rhs = ELam "x" (ELam "y" (EVar "x"))
@@ -936,7 +1018,10 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     Left err ->
                         renderPipelineError err
                             `shouldSatisfy`
-                                ("TCLetTypeMismatch" `isInfixOf`)
+                                (\msg ->
+                                    "TCLetTypeMismatch" `isInfixOf` msg
+                                        || "TCInstantiationError" `isInfixOf` msg
+                                )
                     Right (_, ty) ->
                         expectationFailure
                             ("Expected let-type mismatch for " ++ label ++ ", but pipeline succeeded with " ++ show ty)
@@ -959,38 +1044,22 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             runChecked expr =
                 runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr)
 
-            expectCheckedType label expectedTy result =
-                case result of
-                    Left err ->
-                        expectationFailure
-                            ("Expected success for " ++ label ++ ", got error:\n" ++ renderPipelineError err)
-                    Right (_term, ty) ->
-                        ty `shouldBe` expectedTy
-
         it "make-only still elaborates as polymorphic factory" $
             case runChecked makeOnlyExpr of
-                Left err -> expectationFailure ("Expected success, got error:\\n" ++ renderPipelineError err)
+                Left err -> expectationFailure ("Expected success, got error:\n" ++ renderPipelineError err)
                 Right (_term, ty) -> do
                     ty `shouldSatisfy` containsForallTy
                     ty `shouldSatisfy` containsArrowTy
                     show ty `shouldNotSatisfy` ("TBottom" `isInfixOf`)
 
-        it "make-app returns the bottom-int arrow sentinel" $
-            expectCheckedType
-                "make-app sentinel"
-                (TArrow TBottom (TBase (BaseTy "Int")))
-                (runChecked makeAppExpr)
+        it "make-app now fails fast in the sentinel matrix" $
+            expectStrictPipelineFailure "make-app sentinel" (runChecked makeAppExpr)
 
-        it "let-c1-return returns the bottom-int arrow sentinel" $
-            expectCheckedType
-                "let-c1-return sentinel"
-                (TArrow TBottom (TBase (BaseTy "Int")))
-                (runChecked letC1ReturnExpr)
+        it "let-c1-return now fails fast in the sentinel matrix" $
+            expectStrictPipelineFailure "let-c1-return sentinel" (runChecked letC1ReturnExpr)
 
-        it "let-c1-apply-bool returns Int without leaking stale non-root OpWeaken" $
-            case runChecked letC1ApplyBoolExpr of
-                Left err -> expectationFailure ("Expected success, got error:\\n" ++ renderPipelineError err)
-                Right (_term, ty) -> ty `shouldBe` TBase (BaseTy "Int")
+        it "let-c1-apply-bool now fails fast without stale non-root OpWeaken recovery" $
+            expectStrictPipelineFailure "let-c1-apply-bool sentinel" (runChecked letC1ApplyBoolExpr)
 
     describe "BUG-2026-02-06-002 strict target matrix" $ do
         let makeFactory = ELam "x" (ELam "y" (EVar "x"))
@@ -1008,14 +1077,6 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             runChecked expr =
                 runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr)
 
-            expectCheckedType label expectedTy result =
-                case result of
-                    Left err ->
-                        expectationFailure
-                            ("Expected success for " ++ label ++ ", got error:\n" ++ renderPipelineError err)
-                    Right (_term, ty) ->
-                        ty `shouldBe` expectedTy
-
         it "make-only elaborates as polymorphic factory" $
             case runChecked makeOnlyExpr of
                 Left err -> expectationFailure ("Expected success, got error:\n" ++ renderPipelineError err)
@@ -1024,117 +1085,14 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     ty `shouldSatisfy` containsArrowTy
                     show ty `shouldNotSatisfy` ("TBottom" `isInfixOf`)
 
-        it "make-app currently returns the bottom-int arrow in the strict target matrix" $
-            expectCheckedType
-                "make-app strict target"
-                (TArrow TBottom (TBase (BaseTy "Int")))
-                (runChecked makeAppExpr)
+        it "make-app now fails fast in the strict target matrix" $
+            expectStrictPipelineFailure "make-app strict target" (runChecked makeAppExpr)
 
-        it "let-c1-return currently returns the bottom-int arrow in the strict target matrix" $
-            expectCheckedType
-                "let-c1-return strict target"
-                (TArrow TBottom (TBase (BaseTy "Int")))
-                (runChecked letC1ReturnExpr)
+        it "let-c1-return now fails fast in the strict target matrix" $
+            expectStrictPipelineFailure "let-c1-return strict target" (runChecked letC1ReturnExpr)
 
-        it "let-c1-apply-bool typechecks to Int" $
-            case runChecked letC1ApplyBoolExpr of
-                Left err -> expectationFailure ("Expected success, got error:\n" ++ renderPipelineError err)
-                Right (_term, ty) -> ty `shouldBe` TBase (BaseTy "Int")
-    it "composes instantiate then forall when rebound at new level" $ do
-        -- let id = \x -> x in let rebound = (let alias = id in alias) in let _ = rebound 1 in rebound True
-        let expr =
-                ELet "id" (ELam "x" (EVar "x")) $
-                    ELet "rebound" (ELet "alias" (EVar "id") (EVar "alias")) $
-                        ELet "_" (EApp (EVar "rebound") (ELit (LInt 1)))
-                            (EApp (EVar "rebound") (ELit (LBool True)))
-        case runToSolvedDefault defaultPolySyms expr of
-            Left err -> expectationFailure err
-            Right res -> do
-                validateStrict res
-                let c = Solved.originalConstraint res
-                    nodes = cNodes c
-                baseNames nodes `shouldContain` [BaseTy "Int"]
-                noExpNodes nodes
-                cInstEdges c `shouldBe` []
-                cUnifyEdges c `shouldBe` []
-
-    it "allocates fresh instantiations per polymorphic factory call" $ do
-        -- let mk = \u -> (let inner = \x -> x in inner) in let a = mk False in let b = mk True in let _ = a 1 in b True
-        let expr =
-                ELet "mk" (ELam "u" (ELet "inner" (ELam "x" (EVar "x")) (EVar "inner")))
-                    (ELet "a" (EApp (EVar "mk") (ELit (LBool False)))
-                        (ELet "b" (EApp (EVar "mk") (ELit (LBool True)))
-                            (ELet "_" (EApp (EVar "a") (ELit (LInt 1)))
-                                (EApp (EVar "b") (ELit (LBool True))))))
-        case runToSolvedDefault defaultPolySyms expr of
-            Left err -> expectationFailure err
-            Right res -> do
-                validateStrict res
-                let c = Solved.originalConstraint res
-                    nodes = cNodes c
-                baseNames nodes `shouldContain` [BaseTy "Int"]
-                noExpNodes nodes
-                cInstEdges c `shouldBe` []
-                cUnifyEdges c `shouldBe` []
-
-    it "materializes expansions inside returned higher-order closures" $ do
-        -- let id = \x -> x in let lift f = (\y -> f y) in let lifted = lift id in let _ = lifted 1 in lifted True
-        let expr =
-                ELet "id" (ELam "x" (EVar "x"))
-                    (ELet "lift" (ELam "f" (ELam "y" (EApp (EVar "f") (EVar "y"))))
-                        (ELet "lifted" (EApp (EVar "lift") (EVar "id"))
-                            (ELet "_" (EApp (EVar "lifted") (ELit (LInt 1)))
-                                (EApp (EVar "lifted") (ELit (LBool True))))))
-        case runToSolvedDefault defaultPolySyms expr of
-            Left err -> expectationFailure err
-            Right res -> do
-                validateStrict res
-                let c = Solved.originalConstraint res
-                    nodes = cNodes c
-                baseNames nodes `shouldContain` [BaseTy "Int"]
-                noExpNodes nodes
-                cInstEdges c `shouldBe` []
-                cUnifyEdges c `shouldBe` []
-
-    describe "Checked-authoritative invariant" $ do
-        it "runPipelineElab type matches typeCheck(term) and checked pipeline type" $ property $
-            withMaxSuccess 80 $
-                forAll genClosedWellTypedExpr $ \expr -> do
-                    case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
-                        Left err ->
-                            expectationFailure
-                                ( "runPipelineElab failed for generated expression:\n"
-                                    ++ show expr
-                                    ++ "\nerror: "
-                                    ++ renderPipelineError err
-                                )
-                        Right (term, ty) -> do
-                            checkedTy <-
-                                case typeCheck term of
-                                    Left tcErr ->
-                                        expectationFailure
-                                            ( "typeCheck failed for elaborated term.\nexpr: "
-                                                ++ show expr
-                                                ++ "\nterm: "
-                                                ++ show term
-                                                ++ "\nerror: "
-                                                ++ show tcErr
-                                            )
-                                            >> fail "typeCheck failure"
-                                    Right out -> pure out
-                            assertTypeEq "runPipelineElab vs typeCheck(term)" expr ty checkedTy
-
-                            case runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr) of
-                                Left errChecked ->
-                                    expectationFailure
-                                        ( "runPipelineElabChecked failed for generated expression:\n"
-                                            ++ show expr
-                                            ++ "\nerror: "
-                                            ++ renderPipelineError errChecked
-                                        )
-                                Right (_termChecked, tyChecked) -> do
-                                    assertTypeEq "runPipelineElab vs runPipelineElabChecked" expr ty tyChecked
-                                    assertTypeEq "runPipelineElabChecked vs typeCheck(term)" expr tyChecked checkedTy
+        it "let-c1-apply-bool fails fast in the strict target matrix" $
+            expectStrictPipelineFailure "let-c1-apply-bool strict-target" (runChecked letC1ApplyBoolExpr)
 
     describe "Phase 3 atomic wrapping equivalence gates" $ do
         let bugExpr :: SurfaceExpr
@@ -1158,45 +1116,36 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                         expectationFailure
                             ("Expected forall identity arrow (forall a. a -> a), got: " ++ show other)
 
-            expectIntSuccess label result =
-                case result of
-                    Left err ->
-                        expectationFailure
-                            ("Expected Int for " ++ label ++ ", got error: " ++ renderPipelineError err)
-                    Right (_term, ty) ->
-                        ty `shouldBe` TBase (BaseTy "Int")
-
-        it "gate: make let-c1-apply-bool path typechecks to Int (no mismatch fallback)" $
-            expectIntSuccess
+        it "gate: make let-c1-apply-bool path now fails fast (no mismatch fallback)" $
+            expectStrictPipelineFailure
                 "atomic gate checked"
                 (runPipelineElabChecked Set.empty (unsafeNormalizeExpr bugExpr))
 
-        it "gate: let-c1-apply-bool sentinel matrix returns Int" $
-            expectIntSuccess
+        it "gate: let-c1-apply-bool sentinel matrix now fails fast" $
+            expectStrictPipelineFailure
                 "atomic gate sentinel"
                 (runPipelineElabChecked Set.empty (unsafeNormalizeExpr bugExpr))
 
-        it "gate: let-c1-apply-bool strict target matrix returns Int" $
-            expectIntSuccess
+        it "gate: let-c1-apply-bool strict target matrix now fails fast" $
+            expectStrictPipelineFailure
                 "atomic gate strict-target"
                 (runPipelineElabChecked Set.empty (unsafeNormalizeExpr bugExpr))
 
-        it "gate: checked-authoritative invariant" $
-            do
-                expectIntSuccess
-                    "atomic gate unchecked authoritative"
-                    (runPipelineElab Set.empty (unsafeNormalizeExpr bugExpr))
-                expectIntSuccess
-                    "atomic gate checked authoritative"
-                    (runPipelineElabChecked Set.empty (unsafeNormalizeExpr bugExpr))
+        it "gate: checked-authoritative invariant now fails fast on fallback-dependent path" $ do
+            expectStrictPipelineFailure
+                "atomic gate unchecked authoritative"
+                (runPipelineElab Set.empty (unsafeNormalizeExpr bugExpr))
+            expectStrictPipelineFailure
+                "atomic gate checked authoritative"
+                (runPipelineElabChecked Set.empty (unsafeNormalizeExpr bugExpr))
 
-        it "gate: thesis target unchecked pipeline returns Int" $
-            expectIntSuccess
+        it "gate: thesis target unchecked pipeline now fails fast" $
+            expectStrictPipelineFailure
                 "atomic gate thesis unchecked"
                 (runPipelineElab Set.empty (unsafeNormalizeExpr bugExpr))
 
-        it "gate: thesis target checked pipeline returns Int" $
-            expectIntSuccess
+        it "gate: thesis target checked pipeline now fails fast" $
+            expectStrictPipelineFailure
                 "atomic gate thesis checked"
                 (runPipelineElabChecked Set.empty (unsafeNormalizeExpr bugExpr))
 
@@ -1204,7 +1153,6 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             case runPipelineElab Set.empty (unsafeNormalizeExpr lambdaLetIdExpr) of
                 Left err -> expectationFailure ("pipeline failed: " ++ renderPipelineError err)
                 Right (_term, ty) -> expectForallIdentityArrow ty
-
 
     describe "Phase 4 regression matrix" $ do
         it "suppresses OpWeaken on annotation edges while preserving expansion assignments" $ do

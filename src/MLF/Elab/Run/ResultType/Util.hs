@@ -23,7 +23,6 @@ import MLF.Elab.Inst (applyInstantiation)
 import MLF.Elab.Types
 import MLF.Frontend.ConstraintGen (AnnExpr(..))
 import MLF.Constraint.Types.Graph (EdgeId(..))
-import MLF.Reify.Core (reifyType)
 
 -- | Generalize with plan helper
 generalizeWithPlan
@@ -34,30 +33,14 @@ generalizeWithPlan
     -> NodeId
     -> Either ElabError (ElabScheme, IntMap.IntMap String)
 generalizeWithPlan planBuilder bindParentsGa presolutionView scopeRoot targetNode =
-    let generalizeNeedsFallback err = case err of
-            SchemeFreeVars{} -> True
-            _ -> False
-        runWithGa mbGa =
+    let runWithGa mbGa =
             generalizeAtWithBuilder
                 planBuilder
                 mbGa
                 presolutionView
                 scopeRoot
                 targetNode
-        fallbackToReify = do
-            ty <- reifyType presolutionView targetNode
-            pure (schemeFromType ty, IntMap.empty)
-    in case runWithGa (Just bindParentsGa) of
-        Right out -> Right out
-        Left err
-            | generalizeNeedsFallback err ->
-                case runWithGa Nothing of
-                    Right out -> Right out
-                    Left err2
-                        | generalizeNeedsFallback err2 ->
-                            fallbackToReify
-                    Left err2 -> Left err2
-        Left err -> Left err
+    in runWithGa (Just bindParentsGa)
 
 -- | Check if a type contains foralls in bounds
 containsBoundForall :: ElabType -> Bool

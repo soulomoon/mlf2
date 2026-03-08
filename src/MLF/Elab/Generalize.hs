@@ -254,11 +254,10 @@ inlineRigidTypes rigidBounds = go Set.empty
         TForall v mb body -> TForall v (fmap (goBound seen) mb) (go seen body)
 
 applyGeneralizePlan
-    :: (NodeRef -> NodeId -> Either ElabError ElabScheme)
-    -> GeneralizePlan
+    :: GeneralizePlan
     -> ReifyPlan
     -> Either ElabError (ElabScheme, IntMap.IntMap String)
-applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
+applyGeneralizePlan plan reifyPlanWrapper = do
     let GeneralizePlan
             { gpEnv = env
             , gpContext = ctx
@@ -440,11 +439,23 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
             -- (identity canonical). We pass the original constraint so that
             -- solved-away binders are preserved in scheme types.
             reifyWithOrig origC substRoot substMap _constraintArg resArg
-                | useConstraintReify = reifyTypeWithNamesNoFallbackOnConstraint origC substMap substRoot
-                | otherwise = reifyTypeWithNamesNoFallback resArg substMap substRoot
+                | useConstraintReify =
+                    case reifyTypeWithNamesNoFallbackOnConstraint origC substMap substRoot of
+                        Left (MissingNode _) ->
+                            case reifyTypeWithNamesNoFallback resArg substMap substRoot of
+                                Left (MissingNode _) -> reifyTypeWithNamesNoFallback resArg substMap typeRootC
+                                other -> other
+                        other -> other
+                | otherwise =
+                    case reifyTypeWithNamesNoFallback resArg substMap substRoot of
+                        Left (MissingNode _) -> reifyTypeWithNamesNoFallback resArg substMap typeRootC
+                        other -> other
 
             reifyBoundWithOrig origC substMap _constraintArg resArg bndRoot
-                | useConstraintReify = reifyBoundWithNamesOnConstraint origC substMap bndRoot
+                | useConstraintReify =
+                    case reifyBoundWithNamesOnConstraint origC substMap bndRoot of
+                        Left (MissingNode _) -> reifyBoundWithNames resArg substMap bndRoot
+                        other -> other
                 | otherwise = reifyBoundWithNames resArg substMap bndRoot
 
             -- Convenience wrappers using the base original constraint
@@ -472,13 +483,6 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
                     | key <- rigidNodeKeys
                     ]
 
-            binderNameByCanonicalKey =
-                IntMap.fromList
-                    [ (key, name)
-                    | (b, name) <- binderPairs
-                    , key <- canonicalKey b : [ canonicalKey bnd | Just bnd <- [lookupBound b] ]
-                    ]
-
             -- Alias handling
             reachableWithoutBound bnd =
                 let shouldStop nid = getNodeId nid == getNodeId (canonical bnd)
@@ -497,7 +501,7 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
                 , canonicalKey b `IntSet.notMember` reachableWithoutBound bnd
                 ]
 
-            substBaseRigid = IntMap.union rigidSubstMap substBase
+            substBaseRigid = IntMap.union substBase rigidSubstMap
 
             -- Main reification logic
             reifyAndInlineRigid root substMap = do
@@ -515,10 +519,7 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
                                 fallbackTy =
                                     case IntMap.lookup key substMap of
                                         Just substName -> TVar substName
-                                        Nothing ->
-                                            case IntMap.lookup key binderNameByCanonicalKey of
-                                                Just binderName -> TVar binderName
-                                                Nothing -> TVar name
+                                        Nothing -> TVar name
                             case lookupBound nid of
                                 Nothing -> pure (name, fallbackTy)
                                 Just bnd -> do
@@ -539,11 +540,6 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
             reifyTypeWithAliases
                 adjustedTypeRootForReify
                 adjustedSubstForReify
-                orderedBinderPairs
-        reifyTypeWithSolvedBinders =
-            reifyTypeWithAliases
-                solvedTypeRootForReify
-                solvedSubstForReify
                 orderedBinderPairs
 
     let reifySchemeType
@@ -576,16 +572,27 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
                             )
                         reifyTypeWithOrderedBinders
                     else do
-                        sch <- generalizeAtForScheme schemeScope typeRootC
-                        pure $ case sch of
-                            Forall binds body -> buildForallType binds body
+                        traceGeneralizeM env
+                            ("generalizeAt: schemeScope differs from scopeRootC; using direct structural scheme reification"
+                                ++ " scopeRootC=" ++ show scopeRootC
+                                ++ " schemeScope=" ++ show schemeScope
+                                ++ " typeRootC=" ++ show typeRootC
+                            )
+                        reifySchemeTypeExplicit
 
             -- Explicit scheme type: use structural scheme if available
             reifySchemeTypeExplicit = do
                 explicitSchemeTy <- explicitStructuralSchemeType
                 case explicitSchemeTy of
                     Just ty -> pure ty
-                    Nothing -> fallbackSchemeType
+                    Nothing
+                        | scopeHasStructuralScheme && null bindings ->
+                            reifyTypeWithNamesNoFallbackOnConstraint
+                                originalConstraint
+                                solvedSubstForReify
+                                solvedTypeRootForReify
+                        | otherwise ->
+                            reifyTypeWithOrderedBinders
 
             explicitStructuralSchemeType
                 | null bindings, scopeHasStructuralScheme, explicitBinders0@(_:_) <- binders0 =
@@ -660,14 +667,6 @@ applyGeneralizePlan generalizeAtForScheme plan reifyPlanWrapper = do
                     (VarStore.lookupVarBound constraint)
                     reifyBoundForInline
 
-            fallbackSchemeType
-                | scopeHasStructuralScheme && null bindings =
-                    reifyTypeWithNamesNoFallbackOnConstraint
-                        originalConstraint
-                        solvedSubstForReify
-                        solvedTypeRootForReify
-                | Just _ <- mbBindParentsGa = reifyTypeWithSolvedBinders
-                | otherwise = reifyTypeWithOrderedBinders
     ty0Raw <- reifySchemeType
     finalizeScheme FinalizeInput
         { fiEnv = env

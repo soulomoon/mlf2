@@ -4,6 +4,7 @@
 
 - Keep the implementation paper-faithful to `papers/these-finale-english.txt` (thesis + graphic-constraint pipeline; more detailed than `papers/xmlf.txt`). Document and test any intentional deviations.
 - Treat `papers/these-finale-english.txt` as the source of truth. Implement supplementary details from `papers/xmlf.txt` only when the thesis is silent, and document any conflicts or deviations.
+- Before proceeding, review the guidelines and update them if any issues are identified. You can design the guidelines structure and content as you see fit.
 
 ## Project Structure & Module Organization
 

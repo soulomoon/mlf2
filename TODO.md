@@ -4,6 +4,26 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 70 Remove remaining live fallback mechanisms for thesis-exactness (completed 2026-03-08)
+
+- Completed:
+  - removed the live GA→no-GA→reify ladders from elaboration/runtime/result-type generalization;
+  - removed the planner synthesized-wrapper body-root→wrapper-root owner fallback and the generic `inferInstAppArgsFromScheme` fallback branch;
+  - removed the residual let chooser, recursive generalization callback, and recursive scheme fallback;
+  - made `reifyInst` witness/domain-only apart from exact source-scheme reuse for already-authoritative annotations;
+  - updated the remaining fallback-dependent sentinels/corpora (`BUG-2026-02-06-002`, `BUG-2026-02-08-004`, nested-let alignment, dual annotated coercion consumers) to strict fail-fast expectations and regenerated frozen parity.
+- Verification:
+  - `cabal build all && cabal test`: PASS
+  - final full gate: `998 examples, 0 failures`
+  - `Phi alignment`: PASS (`7 examples, 0 failures`)
+  - `Paper alignment baselines`: PASS (`25 examples, 0 failures`)
+  - `Phase 4 — Principal Presolution`: PASS (`164 examples, 0 failures`)
+  - `Instantiation inference strictness`: PASS (`1 example, 0 failures`)
+- Rolling priorities (next):
+  1. Keep the fallback-removal guards green during future elaboration/runtime cleanup.
+  2. Prefer witness-/scheme-authoritative fail-fast behavior over new compatibility recovery paths.
+  3. Revisit only if a thesis citation demonstrates a removed fallback was semantically required.
+
 ## Task 69 Retire final non-must-stay solved facade helper cluster (completed 2026-03-08)
 
 - Completed:
@@ -1428,5 +1448,5 @@ Progress (2026-02-08, Group 1): duplicated binding-core helpers are now single-s
 
 ## Active bug closures
 
-- [x] `BUG-2026-02-06-002`: upstream witness shaping now prunes only stale non-root `OpWeaken` residue, so `let-c1-apply-bool` again elaborates to `Int` while Ω still fails fast on real unresolved non-root weaken operations.
-- [x] `BUG-2026-02-08-004`: nested let + annotated lambda remains green under the same strict Ω regime.
+- [x] `BUG-2026-02-06-002`: under the final thesis-exact fallback rework, the old `let-c1-apply-bool` compatibility success path is now explicitly classified as fallback-dependent and asserted as structured fail-fast when only expansion-derived recovery remains.
+- [x] `BUG-2026-02-08-004`: under the same strict policy, the nested let + annotated-lambda family is now documented as deliberate fail-fast rather than a compatibility success anchor.

@@ -1,3 +1,16 @@
+### 2026-03-08 remaining fallback-removal closeout
+
+- Removed the last GA→no-GA→reify retry ladders from the active elaboration/runtime entrypoints. `SchemeFreeVars` is now surfaced directly rather than retried through weaker generalization or raw reify routes.
+- Removed the residual let-level chooser in `MLF.Elab.Elaborate`; let-bound schemes now come only from the authoritative `generalizeAtNode` result, with post-generalization normalization limited to shape-preserving simplification.
+- Removed the recursive fallback callback from `MLF.Elab.Run.Generalize` and the recursive scheme fallback branch from `MLF.Elab.Generalize`; when scheme ownership differs, elaboration now uses the already-computed structural scheme plan rather than recursively generalizing another scope.
+- Planner scheme-owner resolution is now body-root-only for synthesized wrappers; wrapper-root recovery is no longer representable in `MLF.Constraint.Presolution.EdgeProcessing.Planner`.
+- `inferInstAppArgsFromScheme` now uses only structurally justified inference. The old generic fallback branch is gone; partial-application recovery comes from explicit arrow-prefix structure rather than catch-all matching.
+- Empty-Ω witness translation now reconstructs instantiations from witness/domain-owned authority only: direct target nodes, trace binder args, and copied nodes from `etCopyMap`. `reifyInst` no longer falls back to `expansionArgs`, and expansion-only application/annotation sites now fail fast unless the source scheme already exactly matches the demanded annotation.
+- Annotation closure now distinguishes between genuinely polymorphic annotation subjects and monomorphic/coercion-only subjects, so explicit-forall annotations preserve the intended binders without reintroducing the old compatibility ladders.
+- Final scheme normalization/finalization now preserves explicit-forall bounds and rewrites residual rigid placeholder names into stable binders when the authoritative plan proves they are the remaining abstracted variables.
+- Verification:
+  - `cabal build all && cabal test` — PASS (`998 examples, 0 failures`)
+
 # Implementation Notes
 
 ## Thesis Alignment (Phase A–E)
@@ -1873,3 +1886,9 @@ This repo’s design is primarily informed by:
 - `OpRaise` now fails fast when no direct replay/source target exists, including the formerly silent non-trace no-op case.
 - Source-domain interior membership keeps one bounded exception: direct forward `etCopyMap` alias evidence may justify interior membership, but reverse-copy/canonical candidate expansion no longer participates in runtime target recovery.
 - `IdentityBridge` remains in the codebase as a witness-domain utility/test surface; runtime Ω binder selection is direct and no longer driven by local candidate ranking helpers.
+## 2026-03-08 — Final live fallback removal closeout
+
+- Generalization now uses a single strict thesis-shaped path at elaboration/runtime/result-type entrypoints; `SchemeFreeVars` and related closure problems surface directly instead of retrying through weaker no-GA/reify ladders.
+- Planner owner resolution for synthesized wrappers now derives ownership from the wrapped body only; missing body-root ownership fails explicitly.
+- `inferInstAppArgsFromScheme` keeps only structurally justified inference.
+- `Phi` / annotation elaboration no longer uses the old trace/copy-map fallback search helpers. Instead it relies on explicit witness/trace/expansion authority, plus narrow term-closure alignment for already-introduced type abstractions.
