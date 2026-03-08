@@ -1,0 +1,1 @@
+{"type":"object","additionalProperties":false,"required":["gate","commands_run","failures_if_any"],"properties":{"gate":{"type":"string","enum":["YES","NO"]},"commands_run":{"type":"array","items":{"type":"string"}},"failures_if_any":{"type":"array","items":{"type":"string"}}}}

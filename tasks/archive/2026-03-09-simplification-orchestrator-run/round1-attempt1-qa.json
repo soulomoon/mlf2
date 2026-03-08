@@ -1,0 +1,1 @@
+{"decision":"YES","commands_run":["cabal test mlf2-test --test-options='--match \"boundFlexChildren\"'","cabal build all && cabal test"],"failures_if_any":[]}

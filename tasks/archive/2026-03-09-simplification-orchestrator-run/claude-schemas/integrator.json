@@ -1,0 +1,1 @@
+{"type":"object","additionalProperties":false,"required":["branch","worktree","commit_hash","merge_result"],"properties":{"branch":{"type":"string"},"worktree":{"type":"string"},"commit_hash":{"type":"string"},"merge_result":{"type":"string"}}}
