@@ -276,6 +276,11 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     isInfixOf marker viewSrc `shouldBe` False
             isInfixOf "View.rtvSolved" annSrc `shouldBe` False
             isInfixOf "View.rtvSolved" fallbackSrc `shouldBe` False
+            isInfixOf "withResultTypeViewOverlay ::" fallbackSrc `shouldBe` False
+            isInfixOf "withResultTypeViewOverlay ctx view" fallbackSrc `shouldBe` False
+            isInfixOf "pvLookupNode = View.rtvLookupNode" fallbackSrc `shouldBe` False
+            isInfixOf "pvLookupVarBound = View.rtvLookupVarBound" fallbackSrc `shouldBe` False
+            isInfixOf "rtvPresolutionViewOverlay ::" viewSrc `shouldBe` True
             isInfixOf "fromSolved solvedClean" pipelineSrc `shouldBe` False
             isInfixOf "fromSolved solvedForGen" pipelineSrc `shouldBe` False
             isInfixOf "chiSolvedCompat" chiQuerySrc `shouldBe` False
