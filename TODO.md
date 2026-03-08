@@ -195,15 +195,28 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   2. Keep the new canonicalization dedup guard green when touching solved/view reconstruction.
   3. Preserve thesis-faithful canonicalization semantics while extracting any future shared helper blocks.
 
-## Task 58 Haskell dedup refactor queue (planned 2026-03-08)
+## Task 58 Haskell dedup refactor queue (completed 2026-03-08)
 
 - Goal:
   - record the next Haskell-oriented deduplication/refactor candidates in strict one-by-one order, so follow-up work stays focused and easy to verify.
 - Queue (do in order):
   1. Extract canonicalization helpers shared by `MLF.Constraint.Solved` and `MLF.Constraint.Presolution.View` (`buildCanonicalMap`, `chaseUfCanonical`, `equivCanonical`, `nodeIdKey`) into one internal utility module. (completed 2026-03-08)
   2. Commonize shared lexer/type-parser scaffolding between `MLF.Frontend.Parse` and `MLF.XMLF.Parse`, while preserving grammar-specific entrypoints and avoiding forced unification of the full term grammars. (completed 2026-03-08)
-  3. Audit and consolidate `schemeBodyTarget` between `MLF.Elab.Elaborate` and `MLF.Elab.Run.Scope`, but only if the more complete run-scope semantics can be adopted without changing elaboration behavior.
-  4. Extract the low-risk pure helper duplicates (`mapBound`, `freshNameLike`) into shared internal helpers after the higher-value refactors are done.
+  3. Audit and consolidate `schemeBodyTarget` between `MLF.Elab.Elaborate` and `MLF.Elab.Run.Scope`, but only if the more complete run-scope semantics can be adopted without changing elaboration behavior. (completed 2026-03-08)
+  4. Extract the low-risk pure helper duplicates (`mapBound`, `freshNameLike`) into shared internal helpers after the higher-value refactors are done. (completed 2026-03-08 via Task 61)
+- Completed:
+  - removed the duplicate local `schemeBodyTarget` from `MLF.Elab.Elaborate` and made `MLF.Elab.Run.Scope` the single owner of scheme-target selection helpers;
+  - kept `schemeBodyTarget` as the richer thesis `S′`-style subterm target selector and added `generalizeTargetNode` there for the `S`-style named-node generalization case that nested-let / alias elaboration still needs;
+  - added direct `ScopeSpec` coverage for named non-scheme-root, scheme-root, forall-body, canonical scheme-body alias, and generalization-target behavior, plus a `PipelineSpec` source guard that `Elaborate` no longer defines `schemeBodyTarget ::`.
+- Verification:
+  - `schemeBodyTarget` — PASS (`6 examples, 0 failures`)
+  - `nested` — PASS (`27 examples, 0 failures`)
+  - `BUG-002-V2` — PASS (`1 example, 0 failures`)
+  - `cabal build all && cabal test` — PASS (`1004 examples, 0 failures`)
+- Rolling priorities (next):
+  1. Keep `MLF.Elab.Run.Scope` as the single owner of scheme-target selection helpers.
+  2. Preserve the thesis `S` vs `S′` distinction when touching named-node generalization or subterm translation.
+  3. Keep the new scope/source guards green during future elaboration cleanup.
 - Constraints:
   - do not batch multiple queue items into one change;
   - keep thesis-faithfulness guards green after each item;
@@ -336,15 +349,15 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   2. Restrict future recursion-schemes work to the row7 inventory and require row-specific verifier evidence before widening scope.
   3. Preserve the row5 production-path environment anchors and the row8 graph-phase non-goal guardrail through future changes.
 
-## Task 52 Surface preprocessing exactness round-1 planner (in progress 2026-03-07)
+## Task 52 Surface preprocessing exactness round-1 planner (completed 2026-03-08 via Task 57)
 
-- In progress:
+- Completed:
   - reconciled thesis `§12.3.2.2` / `§15.3.8`, supplementary `xmlf` desugaring notes, and the live frontend code/tests for alias-bound normalization plus coercion-based annotation lowering;
-  - current evidence points to a bounded guardrail-first round: add direct preprocessing-contract guards before any recursion-schemes cleanup across normalization/desugaring traversals;
-  - keep typed-let sugar and coercion-domain/codomain handling inside this row’s audit boundary, but avoid widening into broader let-scope/elaboration rewrites unless the new guards expose a mismatch.
+  - added the direct preprocessing-contract guards originally queued here across normalization/desugaring traversals (`ELamAnn`, `EAnn`, typed-let sugar, alias-bound normalization before Phase 1);
+  - completed the bounded tree-only follow-up in Task 57 while keeping `MLF.Frontend.Normalize` explicit as the binder/capture-sensitive boundary.
 - Rolling priorities (next):
-  1. Add direct frontend guard tests for exact desugaring/normalization contracts (`ELamAnn`, `EAnn`, typed-let sugar, alias-bound inlining before Phase 1).
-  2. Reassess whether any residual tree-only traversal is still worth a tiny recursion-schemes refactor after those guards are green.
+  1. Keep the direct row1 frontend guards green during future frontend cleanup.
+  2. Keep `MLF.Frontend.Normalize` explicit unless a fresh binder/capture audit widens scope.
   3. If a new guard fails because of scope placement rather than preprocessing shape, explicitly expand to `Let-Scope Translation Discipline` instead of patching across rows silently.
 
 ## Task 50 TMT fresh round-2 closeout (completed 2026-03-07)
@@ -563,23 +576,20 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
     owner-boundary scheduled (not loop-final-only), but still uses
     compatibility-conservative boundary flushing.
 
-## Task 46 Elaboration-input witness-authoritative strictness plan (planned 2026-03-05)
+## Task 46 Elaboration-input witness-authoritative strictness plan (planned 2026-03-05; narrowed 2026-03-08)
 
-- Planned:
-  - Drafted a new agent-team execution plan to retire remaining fallback
-    synthesis in the elaboration-input path so row-1 is closer to thesis
-    witness-authoritative shape (Def. 15.3.12, §15.3.6).
-  - Targeted residual gaps include:
-    - Elaborate scope-root fallback swallowing (`Left _ -> typeRef root`)
-    - Elaborate/Pipeline `SchemeFreeVars` fallback ladders
-    - Let-level fallback scheme chooser (`fallbackChoiceFrom*`)
-    - `reifyInst` trace/expansion-based fallback synthesis when `phi = InstId`
+- Status update (2026-03-08):
+  - most of the originally targeted fallback ladders were removed by Task 70, so this is no longer a full fallback-removal campaign;
+  - the remaining explicit follow-up here is the Elaborate scope-root fallback swallowing (`Left _ -> typeRef root`) if we still want to tighten that path to strict fail-fast behavior.
+- Originally targeted gaps now closed:
+  - Elaborate/Pipeline `SchemeFreeVars` fallback ladders
+  - Let-level fallback scheme chooser (`fallbackChoiceFrom*`)
+  - `reifyInst` trace/expansion-based fallback synthesis when `phi = InstId`
 - Plan/tracker:
   - `/Volumes/src/mlf4/docs/plans/2026-03-05-elaboration-input-witness-authoritative-agent-team-implementation-plan.md`
   - `/Volumes/src/mlf4/tasks/todo/2026-03-05-elaboration-input-witness-authoritative-agent-team-plan/`
 - Execution requirement:
-  - Implement via Team A-E waves (RED guard -> parallel core refactors ->
-    integration gates -> docs closeout).
+  - If pursued, treat this as a small strictness follow-up rather than reopening the original Team A-E wave plan.
 - Required verification gates (during execution):
   - `--match "elab-input witness-authoritative guard"`
   - `--match "elab-input absolute thesis-exact guard"`
@@ -756,19 +766,12 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - `cabal build all && cabal test`
     - PASS (`931 examples, 0 failures`)
 
-## Task 36 Post-task35 compatibility cleanup (planned)
+## Task 36 Post-task35 compatibility cleanup (closed as stale 2026-03-08)
 
-- Goal:
-  - Reduce residual compatibility aliases in elaboration/result-type internals
-    where they are no longer active runtime requirements, without changing
-    checked-authoritative behavior.
-- Initial priorities:
-  1. Trim non-active `GeneralizeAtWithCompat` plumbing where active
-     `χp`-native signatures already carry runtime flow.
-  2. Reduce solved-overlay scaffolding in result-type view paths where direct
-     `PresolutionView` queries are equivalent.
-  3. Keep `elab-input thesis-exact guard`, `checked-authoritative`, and
-     `Dual-path verification` as mandatory closeout gates for each reduction.
+- Closed:
+  - the named compatibility aliases from the original plan are already gone from production (`GeneralizeAtWithCompat`, `rtcSolvedCompat`, `eeSolvedCompat`);
+  - later completed tasks absorbed the remaining live elaboration/result-type cleanup, so there is no standalone compatibility-alias work item left here;
+  - remaining `fromSolved` usage is boundary-/legacy-only and should be tracked separately if it ever needs further reduction.
 
 ## Task 31 χp-first elaboration/result-type internal cleanup (completed 2026-03-03)
 

@@ -2,6 +2,7 @@ module MLF.Elab.Run.Scope (
     bindingScopeRef,
     bindingScopeRefCanonical,
     preferGenScope,
+    generalizeTargetNode,
     schemeBodyTarget,
     canonicalizeScopeRef,
     resolveCanonicalScope,
@@ -98,6 +99,40 @@ preferGenScope constraint ref = case ref of
                     Just gid -> Right (GenRef gid)
                     Nothing -> Right ref
             Left err -> Left err
+
+{- Note [S vs S' target selection]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Section 15.3.1/15.3.2 distinguishes two translations of a type subpart:
+
+  * in general the thesis uses `S'`, so named nodes stay named when computing
+    subterm types;
+  * the thesis also says plain `S` is still needed to compute the bounds of
+    named nodes themselves.
+
+We reflect that distinction with two owner-local selectors here. This mapping is
+an implementation choice guided by the thesis text plus the checked regressions
+in this codebase; it is not meant as a verbatim restatement that the thesis
+names these helper boundaries explicitly.
+
+  * `schemeBodyTarget` keeps non-scheme-root named aliases at the named node,
+    matching the `S'`-style subterm translation used for reification/target
+    types.
+
+  * `generalizeTargetNode` descends through a named alias to its bound/body on
+    the current path that computes the named node's own scheme/bound, matching
+    the role the thesis reserves for plain `S`.
+-}
+generalizeTargetNode :: PresolutionView -> NodeId -> NodeId
+generalizeTargetNode presolutionView target =
+    let canonical = ChiQuery.chiCanonical presolutionView
+        targetC = canonical target
+    in case ChiQuery.chiLookupNode presolutionView targetC of
+        Just TyVar{ tnBound = Just bnd } ->
+            case ChiQuery.chiLookupNode presolutionView (canonical bnd) of
+                Just TyForall{ tnBody = body } -> canonical body
+                _ -> canonical bnd
+        Just TyForall{ tnBody = body } -> canonical body
+        _ -> targetC
 
 schemeBodyTarget :: PresolutionView -> NodeId -> NodeId
 schemeBodyTarget presolutionView target =
