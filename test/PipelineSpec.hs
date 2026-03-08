@@ -277,6 +277,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             isInfixOf "View.rtvSolved" annSrc `shouldBe` False
             isInfixOf "View.rtvSolved" fallbackSrc `shouldBe` False
             isInfixOf "withResultTypeViewOverlay ::" fallbackSrc `shouldBe` False
+            isInfixOf "computeResultTypeFromAnnLocal" fallbackSrc `shouldBe` False
             isInfixOf "withResultTypeViewOverlay ctx view" fallbackSrc `shouldBe` False
             isInfixOf "pvLookupNode = View.rtvLookupNode" fallbackSrc `shouldBe` False
             isInfixOf "pvLookupVarBound = View.rtvLookupVarBound" fallbackSrc `shouldBe` False
