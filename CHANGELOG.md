@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Changed
+- Retired the one-off `WithCanonicalT` presolution reader layer so `MLF.Constraint.Presolution.EdgeUnify.checkNodeLocked` now uses the shared direct `PresolutionM` state-access helpers, with a focused source guard keeping the reader API retired (2026-03-09).
 - Retired stale internal presolution re-export surfaces so `MLF.Constraint.Presolution.Driver` and `MLF.Constraint.Presolution.EdgeProcessing` now expose only the helpers they own, while the public Phase 4 boundary still exports `processInstEdge` (2026-03-09).
 - Retired the dead flush-all delayed-weaken entrypoint from `MLF.Constraint.Presolution.EdgeUnify`, leaving owner-boundary flushing as the only supported drain surface in the live presolution path (2026-03-09).
 - Retired the thin presolution compatibility facade so the public Phase 4 entrypoint now imports its owner modules directly while preserving the exported testing/runtime surface (2026-03-09).
