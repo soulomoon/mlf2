@@ -1,6 +1,6 @@
 # OpWeaken Fallback Removal Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **Execution Note:** Use `@executing-plans` to implement this plan task-by-task.
 
 **Goal:** Remove all `OpWeaken` no-op fallback exits in Φ Ω replay so non-root weaken always maps to thesis-shaped elimination (`N`) or fails fast.
 

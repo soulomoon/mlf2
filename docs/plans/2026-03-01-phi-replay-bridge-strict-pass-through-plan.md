@@ -1,6 +1,6 @@
 # Phi Replay Bridge Strict Pass-Through Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **Execution Note:** Use `@executing-plans` to implement this plan task-by-task.
 
 **Goal:** Remove runtime fallback projection from `computeTraceBinderReplayBridge` so the replay map is validated and passed through unchanged — no synthesis, no repair.
 

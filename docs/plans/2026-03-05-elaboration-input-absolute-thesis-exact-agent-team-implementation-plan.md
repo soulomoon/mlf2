@@ -1,6 +1,6 @@
-# Elaboration Input Absolute Thesis-Exact (Agent Team) Implementation Plan
+# Elaboration Input Absolute Thesis-Exact (Parallel Work) Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **Execution Note:** Use `@executing-plans` to implement this plan task-by-task.
 
 **Goal:** Make the `Elaboration input` mechanism more thesis-exact under strict all-path interpretation by removing residual solved/env indirection, removing scope-error swallowing in ga' selection, and retiring synthetic test-only trace shortcuts.
 
@@ -10,7 +10,7 @@
 
 ---
 
-## Agent Team Topology
+## Parallel Work Topology
 
 - Team A (`guards-red`): Add failing absolute-contract guards and protect against regression.
 - Team B (`phi-env-chi-only`): Remove residual `Solved` handle surfaces from Phi environment/facade/translate helpers.
@@ -250,7 +250,7 @@ git add docs/notes/2026-02-27-transformation-mechanism-table.md implementation_n
 git commit -m "docs: close out elaboration-input absolute thesis-exact migration"
 ```
 
-## Controller Playbook (Agent-Team Execution)
+## Controller Playbook (Parallel Work Execution)
 
 1. Spawn Team A and land RED guard commit first.
 2. Spawn Teams B/C/D in parallel with strict file ownership and explicit "do not touch other teams' files" prompts.

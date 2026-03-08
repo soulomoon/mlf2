@@ -1,6 +1,6 @@
 # TMT Row 2 Result-Type Context Wiring Absolute Thesis-Exact Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **Execution Note:** Use `@executing-plans` to implement this plan task-by-task.
 
 **Goal:** Make the Transformation Mechanism Table row `Result-type context wiring` absolute thesis-exact by removing ResultType-local solved-overlay materialization and finishing `χp`-native query wiring end-to-end.
 
@@ -12,7 +12,7 @@
 
 ---
 
-## Team Topology (Agent Teams)
+## Team Topology (Parallel Work)
 
 | Team | Scope | File Ownership |
 |---|---|---|

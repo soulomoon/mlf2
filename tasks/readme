@@ -1,1 +1,8 @@
-create new task in a new foler with format YYYY-MM-DD-description
+Create new task folders under `tasks/todo/` with the format `YYYY-MM-DD-description/`.
+
+Each task folder should contain:
+- `task_plan.md`
+- `findings.md`
+- `progress.md`
+
+Move completed tasks to `tasks/archive/` with the same folder name.

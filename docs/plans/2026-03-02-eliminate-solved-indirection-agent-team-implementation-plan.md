@@ -1,6 +1,6 @@
 # Eliminate Solved Indirection Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **Execution Note:** Use `@executing-plans` to implement this plan task-by-task.
 
 **Goal:** Remove production dependence on `Solved` as the elaboration/planning boundary by introducing `PresolutionView` and migrating all consumers to presolution-backed queries, while preserving thesis-aligned behavior and test parity.
 
@@ -12,7 +12,7 @@
 
 ---
 
-## Agent Team Topology
+## Parallel Work Topology
 
 | Team | Ownership | Parallel Window | Notes |
 |---|---|---|---|
@@ -464,7 +464,7 @@ git commit -m "docs: finalize solved-indirection removal and cleanup exports"
 
 ---
 
-## Orchestration Notes (Agent-Team Execution)
+## Orchestration Notes (Parallel Work Execution)
 
 1. Wave 0 (Team A) must merge first: Tasks 1-2.
 2. Wave 1 runs in parallel after rebase on Wave 0:

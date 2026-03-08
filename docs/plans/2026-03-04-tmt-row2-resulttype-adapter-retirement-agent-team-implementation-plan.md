@@ -1,6 +1,6 @@
 # TMT Row 2 Result-Type/Elab Adapter Retirement Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **Execution Note:** Use `@executing-plans` to implement this plan task-by-task.
 
 **Goal:** Retire the remaining row-2 compatibility adapters (`rtcSolvedCompat`, `rtcSolveLike`, and `ElabConfig.ecSolved`) while preserving checked-authoritative output and thesis-faithful `χp`-first runtime behavior.
 
@@ -12,7 +12,7 @@
 
 ---
 
-## Team Topology (Agent Teams)
+## Team Topology (Parallel Work)
 
 | Team | Scope | File Ownership |
 |---|---|---|

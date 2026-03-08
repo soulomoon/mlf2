@@ -3,6 +3,16 @@
 ## Unreleased
 
 ### Changed
+- Swept live docs for stale workflow terminology beyond skill names/paths (2026-03-08):
+  - replaced platform-specific execution-note wording with the current generic `@executing-plans` phrasing across live plan docs;
+  - renamed older parallel-work headings/titles in live plans to the current `Parallel Work` terminology where those docs still describe current execution guidance.
+- Swept live non-archival docs for stale skill references (2026-03-08):
+  - confirmed the only live stale skill link was a retired team-orchestration skill reference in `docs/plans/2026-03-03-chi-p-query-first-elab-resulttype-agent-team-implementation-plan.md`;
+  - replaced it with the current `dispatching-parallel-agents` + `tmux` execution-skills pairing and left archival history untouched.
+- Refreshed the repository guidance entry points (2026-03-08):
+  - reorganized `AGENTS.md` to make maintenance expectations, instruction precedence, workspace-safety rules, and task-planning norms explicit;
+  - replaced the stale parallel-skill reference in current guidance with the active parallel-agent skills;
+  - expanded `tasks/readme` to match the required task-folder structure.
 - Completed the thesis-exact fallback rework closeout (2026-03-08):
   - removed the residual let-level chooser in `MLF.Elab.Elaborate`, the recursive callback from `MLF.Elab.Run.Generalize`, and the recursive scheme fallback from `MLF.Elab.Generalize`;
   - made `reifyInst` fail-fast unless witness/domain-owned authority is sufficient (`ewLeft`/`ewRight`, `etBinderArgs`, `etCopyMap` copied nodes), while preserving exact-annotation identity reuse for already-authoritative explicit-forall subjects;

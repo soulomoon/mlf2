@@ -1,6 +1,6 @@
 # χp-First Elaboration/ResultType Internal Cleanup Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **Execution Note:** Use `@executing-plans` to implement this plan task-by-task.
 
 **Goal:** Reduce solved materialization/query dependence inside elaboration and result-type internals, and prefer direct `χp` (`PresolutionView`) queries where behavior allows.
 
@@ -8,11 +8,11 @@
 
 **Tech Stack:** Haskell (`cabal`, `hspec`), modules under `src/MLF/Elab/*` and `src/MLF/Constraint/Presolution/*`, tests in `test/*Spec.hs`.
 
-**Execution Discipline:** `@haskell-pro`, `[$codex-tmux-team](/Users/ares/.codex/skills/public/codex-tmux-team/SKILL.md)`, `@test-driven-development`, `@subagent-driven-development`, `@verification-before-completion`.
+**Execution Discipline:** `@haskell-pro`, `@dispatching-parallel-agents`, `@tmux`, `@test-driven-development`, `@subagent-driven-development`, `@verification-before-completion`.
 
 ---
 
-## Agent Team Topology (tmux)
+## Parallel Work Topology (tmux)
 
 | Team | Ownership | Files | Parallel Window |
 |---|---|---|---|

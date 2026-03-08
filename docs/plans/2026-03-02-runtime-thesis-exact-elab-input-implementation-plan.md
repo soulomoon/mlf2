@@ -1,6 +1,6 @@
 # Runtime Thesis-Exact Elaboration Input (TMT Row 1) Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **Execution Note:** Use `@executing-plans` to implement this plan task-by-task.
 
 **Goal:** Make the elaboration input boundary thesis-exact by removing runtime mediation/reconstruction semantics and using presolution-authoritative inputs for elaboration.
 
