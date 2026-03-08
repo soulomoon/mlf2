@@ -37,6 +37,12 @@
 
 # Implementation Notes
 
+## 2026-03-09 — ResultTypeView validation single-sourced per computation
+
+- The runtime result-type facade now builds and validates the base `ResultTypeView` once per computation, then threads that validated view through the annotation and fallback workers.
+- `MLF.Elab.Run.ResultType.Ann` and `MLF.Elab.Run.ResultType.Fallback` no longer rebuild the base view on the normal runtime path; they consume the already-validated view and only derive overlay variants when overlay semantics are actually needed.
+- This preserves the strict malformed-view fail-fast boundary at `buildResultTypeView` while removing redundant setup and keeping row-2/result-type behavior unchanged.
+
 ## 2026-03-09 — Presolution compatibility facade retired
 
 - The public Phase 4 presolution entrypoint now imports its owner modules directly instead of routing shared helpers through an extra compatibility layer.

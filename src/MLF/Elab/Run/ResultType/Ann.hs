@@ -1,6 +1,6 @@
 {-# LANGUAGE GADTs #-}
 module MLF.Elab.Run.ResultType.Ann (
-    computeResultTypeFromAnn,
+    computeResultTypeFromAnnWithView,
 ) where
 
 import qualified Data.IntMap.Strict as IntMap
@@ -61,16 +61,15 @@ import MLF.Elab.Run.ResultType.Util
 import MLF.Elab.Run.ResultType.Types (ResultTypeInputs(..))
 import qualified MLF.Elab.Run.ResultType.View as View
 
--- | Compute result type from an annotation edge.
-computeResultTypeFromAnn
+computeResultTypeFromAnnWithView
     :: ResultTypeInputs
-    -> AnnExpr      -- ^ inner (post-redirect)
-    -> AnnExpr      -- ^ innerPre (pre-redirect)
-    -> NodeId       -- ^ annNodeId
-    -> EdgeId       -- ^ eid
+    -> View.ResultTypeView
+    -> AnnExpr
+    -> AnnExpr
+    -> NodeId
+    -> EdgeId
     -> Either ElabError ElabType
-computeResultTypeFromAnn ctx inner innerPre annNodeId eid = do
-    view <- View.buildResultTypeView ctx
+computeResultTypeFromAnnWithView ctx view inner innerPre annNodeId eid = do
     let presolutionViewForGen = rtcPresolutionView ctx
         canonical = rtcCanonical ctx
         edgeWitnesses = rtcEdgeWitnesses ctx
