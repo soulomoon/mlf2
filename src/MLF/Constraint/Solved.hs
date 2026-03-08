@@ -11,7 +11,6 @@ module MLF.Constraint.Solved (
     -- * Opaque type
     Solved,
     fromSolveOutput,
-    fromPreRewriteState,
 
     -- * Core queries
     canonical,
@@ -28,7 +27,6 @@ import MLF.Constraint.Solved.Internal
     , canonical
     , canonicalConstraint
     , canonicalMap
-    , fromPreRewriteState
     , fromSolveOutput
     , originalConstraint
     , validateCanonicalGraphStrict

@@ -1,5 +1,6 @@
 module SolvedFacadeTestUtil (
     mkTestSolved,
+    solvedFromSnapshot,
     classMembers,
     originalNode,
     originalBindParent,
@@ -25,6 +26,10 @@ import MLF.Constraint.Types.Graph
 mkTestSolved :: Constraint -> IntMap.IntMap NodeId -> Solved.Solved
 mkTestSolved constraint uf =
     stepSolvedFromPresolutionView (presolutionViewFromSnapshot constraint uf)
+
+solvedFromSnapshot :: IntMap.IntMap NodeId -> Constraint -> Solved.Solved
+solvedFromSnapshot uf constraint =
+    mkTestSolved constraint uf
 
 classMembers :: Solved.Solved -> NodeId -> [NodeId]
 classMembers solved nid =

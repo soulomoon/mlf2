@@ -1,0 +1,7 @@
+# Findings
+
+- `TODO.md`, `implementation_notes.md`, `CHANGELOG.md`, and `Bugs.md` were rechecked against the current working tree; `Bugs.md` currently has no open entries, so the remaining opportunity is an owner-boundary simplification rather than an active defect repair.
+- The accepted round themes already cover solved-helper quarantine removal, `MLF.Reify.Core`’s `solvedFromView` rewrite, `WithCanonicalT` retirement, `rtvSchemeBodyTarget` retirement, and edge witness/trace canonicalization, so round 6 must avoid those seams even where some verifier/implementation work is still pending.
+- `src/MLF/Elab/Run/Scope.hs` still exports `preferGenScope`, and its note for Def. 15.3.2 explicitly says the helper re-runs the same lookup as `bindingScopeRef` on the same constraint and is therefore "redundant but harmless."
+- Production references show `preferGenScope` is only consumed by `resolveCanonicalScope`; test references show a single dedicated `ScopeSpec` error-propagation example. This keeps the cleanup bounded to one owner module plus focused test/docs guards.
+- The thesis-facing rule for `ga′` remains the nearest gen ancestor of the original binding root (`papers/these-finale-english.txt`, Definition 15.3.2). `bindingScopeRef` already computes that directly from the original constraint; removing `preferGenScope` would simplify the implementation to that single authoritative step before canonicalization.
