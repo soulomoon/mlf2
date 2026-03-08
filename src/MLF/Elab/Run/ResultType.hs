@@ -64,7 +64,9 @@ mkResultTypeInputs canonical edgeWitnesses edgeTraces edgeExpansions presolution
 
 -- Re-export computeResultTypeFromAnn from Ann module
 computeResultTypeFromAnn :: ResultTypeInputs -> AnnExpr -> AnnExpr -> NodeId -> EdgeId -> Either ElabError ElabType
-computeResultTypeFromAnn = Ann.computeResultTypeFromAnn
+computeResultTypeFromAnn ctx inner innerPre annNodeId eid = do
+    view <- View.buildResultTypeView ctx
+    Ann.computeResultTypeFromAnnWithView ctx view inner innerPre annNodeId eid
 
 -- | Compute result type when there's no direct annotation (fallback path).
 -- This is a facade that handles the AAnn case by delegating to computeResultTypeFromAnn,
@@ -75,15 +77,16 @@ computeResultTypeFallback
     -> AnnExpr      -- ^ ann (pre-redirect)
     -> Either ElabError ElabType
 computeResultTypeFallback ctx annCanon ann = do
-    computeResultTypeDispatch ctx annCanon ann
+    view <- View.buildResultTypeView ctx
+    computeResultTypeDispatch ctx view annCanon ann
 
 computeResultTypeDispatch
     :: ResultTypeInputs
+    -> View.ResultTypeView
     -> AnnExpr
     -> AnnExpr
     -> Either ElabError ElabType
-computeResultTypeDispatch ctx annCanon ann = do
-    _view <- View.buildResultTypeView ctx
+computeResultTypeDispatch ctx view annCanon ann = do
     -- First, determine the root (same logic as before to check for AAnn)
     let canonical = rtcCanonical ctx
         c1 = rtcBaseConstraint ctx
@@ -136,6 +139,6 @@ computeResultTypeDispatch ctx annCanon ann = do
                     case rootForTypePreAnn of
                         AAnn innerPre0 _ _ -> innerPre0
                         _ -> rootForTypePreAnn
-            computeResultTypeFromAnn ctx inner innerPre annNodeId eid
+            Ann.computeResultTypeFromAnnWithView ctx view inner innerPre annNodeId eid
         _ ->
-            Fallback.computeResultTypeFallback computeResultTypeDispatch ctx annCanon ann
+            Fallback.computeResultTypeFallback computeResultTypeDispatch ctx view annCanon ann
