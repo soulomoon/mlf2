@@ -6,8 +6,8 @@ This module implements the "expansion application" part of presolution:
 applying an `Expansion` recipe to a `TyExp` node, including the χe-style copying
 performed during instantiation.
 
-It is extracted from `MLF.Constraint.Presolution.Core` to reduce module size and
-to keep expansion/copy responsibilities cohesive.
+It keeps expansion/copy responsibilities cohesive while the public presolution
+entrypoint stays as a thin orchestration layer.
 -}
 module MLF.Constraint.Presolution.Expansion (
     applyExpansion,
