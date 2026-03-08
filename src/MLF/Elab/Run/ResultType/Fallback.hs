@@ -1,6 +1,7 @@
 {-# LANGUAGE GADTs #-}
 module MLF.Elab.Run.ResultType.Fallback (
     computeResultTypeFallback,
+    computeResultTypeFallbackWithView,
 ) where
 
 import qualified Data.IntMap.Strict as IntMap
@@ -54,6 +55,7 @@ import qualified MLF.Elab.Run.ResultType.View as View
 
 type ResultTypeRecursor
     = ResultTypeInputs
+    -> View.ResultTypeView
     -> AnnExpr
     -> AnnExpr
     -> Either ElabError ElabType
@@ -64,11 +66,21 @@ type ResultTypeRecursor
 computeResultTypeFallback
     :: ResultTypeRecursor
     -> ResultTypeInputs
+    -> View.ResultTypeView
     -> AnnExpr      -- ^ annCanon (post-redirect)
     -> AnnExpr      -- ^ ann (pre-redirect)
     -> Either ElabError ElabType
-computeResultTypeFallback recurse ctx annCanon ann = do
-    view <- View.buildResultTypeView ctx
+computeResultTypeFallback recurse ctx view annCanon ann =
+    computeResultTypeFallbackWithView recurse ctx view annCanon ann
+
+computeResultTypeFallbackWithView
+    :: ResultTypeRecursor
+    -> ResultTypeInputs
+    -> View.ResultTypeView
+    -> AnnExpr
+    -> AnnExpr
+    -> Either ElabError ElabType
+computeResultTypeFallbackWithView recurse ctx view annCanon ann = do
     let presolutionViewForGen = View.rtvPresolutionViewOverlay view
     -- Note [Annotated Lambda Result Type]
     -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -116,7 +128,7 @@ computeResultTypeFallback recurse ctx annCanon ann = do
                 -- Compute the result type from the body.
                 -- The body may be wrapped in AAnn (from alternative let scoping),
                 -- so we need to handle that case.
-                bodyTy <- computeBodyResultType recurse ctx bodyAnn
+                bodyTy <- computeBodyResultType recurse ctx view bodyAnn
                 -- Check if the parameter type is a rank-2 type (contains forall).
                 -- For rank-2 annotations, wrap the result in a bounded quantifier.
                 -- For simple annotations, just return the arrow type.
@@ -136,29 +148,30 @@ computeResultTypeFallback recurse ctx annCanon ann = do
                     else
                         -- For simple annotations, just return the arrow type.
                         pure (TArrow paramTy bodyTy)
-        _ -> computeResultTypeFallbackCore ctx annCanon ann
+        _ -> computeResultTypeFallbackCore ctx view annCanon ann
 
 -- | Compute result type for the body of an annotated lambda.
 -- This handles the case where the body is wrapped in AAnn.
 computeBodyResultType
     :: ResultTypeRecursor
     -> ResultTypeInputs
+    -> View.ResultTypeView
     -> AnnExpr
     -> Either ElabError ElabType
-computeBodyResultType recurse ctx bodyAnn =
+computeBodyResultType recurse ctx view bodyAnn =
     case bodyAnn of
-        AAnn inner _ _ -> recurse ctx inner inner
+        AAnn inner _ _ -> recurse ctx view inner inner
         _ ->
-            computeResultTypeFallbackCore ctx bodyAnn bodyAnn
+            computeResultTypeFallbackCore ctx view bodyAnn bodyAnn
 
 -- | Core implementation of computeResultTypeFallback (non-annotated-lambda case).
 computeResultTypeFallbackCore
     :: ResultTypeInputs
+    -> View.ResultTypeView
     -> AnnExpr      -- ^ annCanon (post-redirect)
     -> AnnExpr      -- ^ ann (pre-redirect)
     -> Either ElabError ElabType
-computeResultTypeFallbackCore ctx annCanon ann = do
-    viewBase <- View.buildResultTypeView ctx
+computeResultTypeFallbackCore ctx viewBase annCanon ann = do
     let canonical = rtcCanonical ctx
         edgeWitnesses = rtcEdgeWitnesses ctx
         edgeTraces = rtcEdgeTraces ctx
