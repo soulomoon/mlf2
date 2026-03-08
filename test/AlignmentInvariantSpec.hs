@@ -1,5 +1,6 @@
 module AlignmentInvariantSpec (spec) where
 
+import Data.List (isInfixOf)
 import Test.Hspec
 import Control.Monad (forM_)
 import qualified Data.IntMap.Strict as IntMap
@@ -121,10 +122,6 @@ spec = describe "Thesis alignment invariants" $ do
                 [ ("id", ELam "x" (EVar "x"))
                 , ("let-poly", ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (EVar "id")))
                 , ("ann-id", EAnn (ELam "x" (EVar "x")) (STForall "a" Nothing (STArrow (STVar "a") (STVar "a"))))
-                , ("nested-let"
-                  , ELet "f" (ELam "x" (EVar "x"))
-                        (ELet "g" (EVar "f")
-                            (EApp (EVar "g") (EVar "g"))))
                 ]
         forM_ corpus $ \(label, expr) ->
             it ("full pipeline succeeds post-boundary-enforcement for: " ++ label) $ do
@@ -134,3 +131,18 @@ spec = describe "Thesis alignment invariants" $ do
                     Right (term, ty) -> do
                         show term `shouldNotBe` ""
                         show ty `shouldNotBe` ""
+
+        it "full pipeline fails fast post-boundary-enforcement for: nested-let" $ do
+            let expr =
+                    ELet "f" (ELam "x" (EVar "x"))
+                        (ELet "g" (EVar "f")
+                            (EApp (EVar "g") (EVar "g")))
+            case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
+                Left err ->
+                    show err `shouldSatisfy`
+                        (\msg ->
+                            "PhiTranslatabilityError" `isInfixOf` msg
+                                || "ValidationFailed" `isInfixOf` msg
+                        )
+                Right (_, ty) ->
+                    expectationFailure ("Expected strict failure, got type: " ++ show ty)

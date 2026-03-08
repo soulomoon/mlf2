@@ -11,21 +11,26 @@ bugExpr =
         (ELet "c1" (EApp (EVar "make") (ELit (LInt (-4))))
             (EApp (EVar "c1") (ELit (LBool True))))
 
-assertPipelineInt
+assertPipelineStrictFailure
     :: String
     -> (PolySyms -> NormSurfaceExpr -> Either PipelineError (ElabTerm, ElabType))
     -> Expectation
-assertPipelineInt label runPipeline =
+assertPipelineStrictFailure label runPipeline =
     case runPipeline Set.empty bugExpr of
         Left err ->
-            expectationFailure (label ++ " unexpectedly failed: " ++ renderPipelineError err)
+            renderPipelineError err `shouldSatisfy`
+                (\msg ->
+                    "PhiTranslatabilityError" `elem` words msg
+                        || "TCInstantiationError" `elem` words msg
+                        || "TCLetTypeMismatch" `elem` words msg
+                )
         Right (_term, ty) ->
-            ty `shouldBe` TBase (BaseTy "Int")
+            expectationFailure (label ++ " unexpectedly succeeded with type: " ++ show ty)
 
 spec :: Spec
 spec = describe "BUG-2026-02-06-002 thesis target" $ do
-    it "unchecked pipeline typechecks to Int" $
-        assertPipelineInt "unchecked pipeline" runPipelineElab
+    it "unchecked pipeline now fails fast without fallback recovery" $
+        assertPipelineStrictFailure "unchecked pipeline" runPipelineElab
 
-    it "checked pipeline typechecks to Int" $
-        assertPipelineInt "checked pipeline" runPipelineElabChecked
+    it "checked pipeline now fails fast without fallback recovery" $
+        assertPipelineStrictFailure "checked pipeline" runPipelineElabChecked

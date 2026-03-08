@@ -2,6 +2,8 @@
 module MLF.Elab.TermClosure (
     closeTermWithSchemeSubst,
     closeTermWithSchemeSubstIfNeeded,
+    alignTermTypeVarsToScheme,
+    alignTermTypeVarsToTopTyAbs,
     substInTerm
 ) where
 
@@ -13,14 +15,15 @@ import qualified Data.Set as Set
 import MLF.Elab.Inst (schemeToType)
 import MLF.Elab.TypeCheck (typeCheck)
 import MLF.Elab.Types
-import MLF.Reify.TypeOps (alphaEqType, freshNameLike, substTypeSimple)
+import MLF.Reify.TypeOps (alphaEqType, freeTypeVarsType, freshNameLike, substTypeSimple)
 import MLF.Util.Names (parseNameId)
 
 closeTermWithSchemeSubst :: IntMap.IntMap String -> ElabScheme -> ElabTerm -> ElabTerm
 closeTermWithSchemeSubst subst sch term =
     let (subst', sch', renames) = freshenSchemeAndSubstAgainstTerm term subst sch
         termSubst = renameTermTypeVars renames (substInTerm subst' term)
-    in wrapTermWithScheme sch' termSubst
+        termAligned = maybe termSubst id (alignTermTypeVarsToSchemeBody sch' termSubst)
+    in wrapTermWithScheme sch' termAligned
 
 closeTermWithSchemeSubstIfNeeded :: IntMap.IntMap String -> ElabScheme -> ElabTerm -> ElabTerm
 closeTermWithSchemeSubstIfNeeded subst sch term =
@@ -29,7 +32,15 @@ closeTermWithSchemeSubstIfNeeded subst sch term =
         schemeTy = schemeToType sch'
     in case typeCheck termSubst of
         Right ty | alphaEqType ty schemeTy -> termSubst
-        _ -> wrapTermWithScheme sch' termSubst
+        Right _ ->
+            case alignTermTypeVarsToScheme sch' termSubst of
+                Just termAligned -> termAligned
+                Nothing ->
+                    let termAlignedBody = maybe termSubst id (alignTermTypeVarsToSchemeBody sch' termSubst)
+                    in wrapTermWithScheme sch' termAlignedBody
+        _ ->
+            let termAlignedBody = maybe termSubst id (alignTermTypeVarsToSchemeBody sch' termSubst)
+            in wrapTermWithScheme sch' termAlignedBody
 
 wrapTermWithScheme :: ElabScheme -> ElabTerm -> ElabTerm
 wrapTermWithScheme (Forall binds _) term =
@@ -127,6 +138,56 @@ renameTermTypeVars renames0 = go renames0
             in ETyAbs v mbBound' (go renamesBody body)
         ETyInst e inst ->
             ETyInst (go renames e) (renameInst renames inst)
+
+alignTermTypeVarsToScheme :: ElabScheme -> ElabTerm -> Maybe ElabTerm
+alignTermTypeVarsToScheme sch term =
+    let binderNames = map fst (case sch of Forall binds _ -> binds)
+    in case typeCheck term of
+        Right ty ->
+            let freeVars = Set.toList (freeTypeVarsType ty)
+                renames = zip freeVars binderNames
+                termAligned = renameTermTypeVars renames term
+            in case typeCheck termAligned of
+                Right tyAligned
+                    | alphaEqType tyAligned (schemeToType sch) -> Just termAligned
+                _ -> Nothing
+        Left _ -> Nothing
+
+topTyAbsNames :: ElabTerm -> [String]
+topTyAbsNames term = case term of
+    ETyAbs v _ body -> v : topTyAbsNames body
+    _ -> []
+
+alignTermTypeVarsToTopTyAbs :: ElabTerm -> Maybe ElabTerm
+alignTermTypeVarsToTopTyAbs term =
+    let binders = topTyAbsNames term
+    in case (binders, typeCheck term) of
+        ([], _) -> Nothing
+        (_, Left _) -> Nothing
+        (_, Right ty) ->
+            let freeVars = Set.toList (freeTypeVarsType ty)
+                renames = zip freeVars binders
+                termAligned = renameTermTypeVars renames term
+            in case typeCheck termAligned of
+                Right tyAligned
+                    | Set.null (freeTypeVarsType tyAligned) || length freeVars <= length binders -> Just termAligned
+                _ -> Nothing
+
+alignTermTypeVarsToSchemeBody :: ElabScheme -> ElabTerm -> Maybe ElabTerm
+alignTermTypeVarsToSchemeBody sch term =
+    let Forall binds body = sch
+        binderNames = map fst binds
+    in case typeCheck term of
+        Right ty ->
+            let freeVars = Set.toList (freeTypeVarsType ty)
+                renames = zip freeVars binderNames
+                termAligned = renameTermTypeVars renames term
+            in case typeCheck termAligned of
+                Right tyAligned
+                    | alphaEqType tyAligned body -> Just termAligned
+                _ -> Nothing
+        Left _ -> Nothing
+
 
 renameInst :: [(String, String)] -> Instantiation -> Instantiation
 renameInst renames inst = case inst of

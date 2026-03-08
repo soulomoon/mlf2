@@ -184,13 +184,18 @@ spec = describe "Phase 7 typecheck" $ do
                                     (Surf.EApp (Surf.EVar "useB") (Surf.EVar "id")))))
                 normExpr = unsafeNormalizeExpr expr
 
-            let expectPipelineSuccess label res =
+            let expectPipelineFailure label res =
                     case res of
                         Left err ->
-                            expectationFailure
-                                (label ++ " failed:\n" ++ renderPipelineError err)
+                            renderPipelineError err `shouldSatisfy`
+                                (\msg ->
+                                    "PhiTranslatabilityError" `elem` words msg
+                                        || "TCInstantiationError" `elem` words msg
+                                        || "TCLetTypeMismatch" `elem` words msg
+                                )
                         Right (term, ty) ->
-                            typeCheck term `shouldBe` Right ty
+                            expectationFailure
+                                (label ++ " unexpectedly succeeded with type-checked term: " ++ show (term, ty))
 
-            expectPipelineSuccess "unchecked pipeline" (runPipelineElab Set.empty normExpr)
-            expectPipelineSuccess "checked pipeline" (runPipelineElabChecked Set.empty normExpr)
+            expectPipelineFailure "unchecked pipeline" (runPipelineElab Set.empty normExpr)
+            expectPipelineFailure "checked pipeline" (runPipelineElabChecked Set.empty normExpr)

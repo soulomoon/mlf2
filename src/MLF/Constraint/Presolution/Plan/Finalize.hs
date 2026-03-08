@@ -8,6 +8,8 @@ module MLF.Constraint.Presolution.Plan.Finalize (
 
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
+import Data.List (stripPrefix)
+import Text.Read (readMaybe)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.List.NonEmpty (NonEmpty(..))
@@ -25,8 +27,9 @@ import MLF.Constraint.Presolution.Plan.Normalize
     , promoteArrowAlias
     , isBaseBound
     , isVarBound
+    , containsForall
     )
-import MLF.Reify.TypeOps (freeTypeVarsFrom, freeTypeVarsType, splitForalls, stripForallsType)
+import MLF.Reify.TypeOps (freeTypeVarsFrom, freeTypeVarsType, splitForalls, stripForallsType, substTypeSimple)
 import MLF.Types.Elab
     ( BoundType
     , ElabScheme
@@ -212,23 +215,34 @@ finalizeScheme FinalizeInput{..} =
                     case mbBound of
                         Nothing -> acc
                         Just bound ->
-                            let boundCore = stripForallsType bound
+                            let boundTy = tyToElab bound
+                                boundCore = stripForallsType bound
+                                boundTyNorm = canonAllVars boundTy
                             in if isVarBound boundCore
                                 then acc
                                 else
                                     let boundNorm = canonAllVars boundCore
                                     in if canonAllVars acc == boundNorm
+                                            || canonAllVars acc == boundTyNorm
                                         then acc
                                         else replaceAlias boundNorm v acc
                 )
                 ty
                 binds
         normalizeScheme tyRaw binds =
-            let tyAdjusted =
+            let tyAdjusted0 =
                     case (binds, tyRaw) of
                         ((v, mb):_, TForall v' mb' body)
                             | v == v' && mb == mb' -> body
                         _ -> tyRaw
+                tyAdjusted =
+                    case stripForallsType tyAdjusted0 of
+                        TVar v ->
+                            case lookup v binds of
+                                Just (Just bound)
+                                    | containsForall (tyToElab bound) -> tyToElab bound
+                                _ -> tyAdjusted0
+                        _ -> tyAdjusted0
                 tyAliased = stripAliasForall (collapseBoundAliases binds tyAdjusted)
             in traceGeneralize env
                 ("generalizeAt: ty0Raw=" ++ show tyAliased
@@ -250,9 +264,18 @@ finalizeScheme FinalizeInput{..} =
                 ]
         renameVars = cataIx alg
           where
+            parseRigidName v = do
+                digits <- stripPrefix "__rigid" v
+                readMaybe digits
             renameFromSubst v = case lookup v substNames of
                 Just v' -> v'
-                Nothing -> v
+                Nothing ->
+                    case parseRigidName v of
+                        Just nid ->
+                            let keyC = getNodeId (canonical (NodeId nid))
+                                aliasKey = IntMap.findWithDefault keyC keyC gammaAliasPlan
+                            in IntMap.findWithDefault v aliasKey subst
+                        Nothing -> v
             alg :: TyIF i Ty -> Ty i
             alg ty = case ty of
                 TVarIF v -> TVar (renameFromSubst v)
@@ -378,67 +401,85 @@ finalizeScheme FinalizeInput{..} =
                     in filter underScope missingNamesRaw'
         keepNames = map fst bindingsRenamed
         subst' = IntMap.filter (`elem` keepNames) (IntMap.map renameName subst)
+        isResidualRigidName name = case stripPrefix "__rigid" name of
+            Just digits -> case readMaybe digits :: Maybe Int of
+                Just _ -> True
+                Nothing -> False
+            Nothing -> False
         finalize missing =
             if null missing
                 then pure (mkElabScheme bindingsRenamed tyRenamed, subst')
-                else
-                    traceGeneralize env
-                        ("generalizeAt: SchemeFreeVars typeRoot="
-                            ++ show typeRootC
-                            ++ " scopeRoot="
-                            ++ show scopeRootC
-                            ++ " scopeGen="
-                            ++ show scopeGen
-                            ++ " missing="
-                            ++ show missing
-                            ++ " bindingsFinal="
-                            ++ show bindingsFinal
-                            ++ " usedNames="
-                            ++ show (Set.toList usedNames)
-                            ++ " boundNames="
-                            ++ show (Set.toList boundNames)
-                            ++ " allowedNames="
-                            ++ show (Set.toList (allowedNames :: Set.Set String))
-                            ++ " bindParentsMissing="
-                            ++ show
-                                [ (name, IntMap.lookup (nodeRefKey (typeRef (NodeId nid))) bindParents)
-                                | name <- missing
-                                , Just nid <- [parseNameId name]
+                else if all isResidualRigidName missing
+                    then
+                        let synthPairs =
+                                zip missing [alphaName idx 0 | idx <- [length bindingsRenamed ..]]
+                            renameResidual ty =
+                                foldl (\acc (old, new) -> substTypeSimple old (TVar new) acc) ty synthPairs
+                            bindingsSynth =
+                                [ (name, fmap (mapBoundType renameResidual) mb)
+                                | (name, mb) <- bindingsRenamed
                                 ]
-                            ++ " missingBasePaths="
-                            ++ show
-                                [ ( name
-                                  , NodeId nid
-                                  , mbBase
-                                  , mbBasePref
-                                  , case mbBase of
-                                        Nothing -> []
-                                        Just baseN ->
-                                            case bindingPathToRootLocal (gaBindParentsBase ga) (TypeRef baseN) of
-                                                Right path -> path
-                                                Left _ -> []
-                                  , case mbBasePref of
-                                        Nothing -> []
-                                        Just baseN ->
-                                            case bindingPathToRootLocal (gaBindParentsBase ga) (TypeRef baseN) of
-                                                Right path -> path
-                                                Left _ -> []
-                                  , case mbBasePref of
-                                        Nothing -> Nothing
-                                        Just baseN -> firstGenAncestorFrom (gaBindParentsBase ga) (TypeRef baseN)
-                                  , case mbBase of
-                                        Nothing -> Nothing
-                                        Just baseN ->
-                                            IntMap.lookup (nodeRefKey (typeRef baseN)) (gaBindParentsBase ga)
-                                  )
-                                | name <- missing
-                                , Just nid <- [parseNameId name]
-                                , Just ga <- [mbBindParentsGa]
-                                , let mbBase = IntMap.lookup nid (gaSolvedToBase ga)
-                                , let mbBasePref = IntMap.lookup nid solvedToBasePrefPlan
-                                ]
-                        )
-                        (Left $ SchemeFreeVars typeRootC missing)
+                                    ++ [(new, Nothing) | (_old, new) <- synthPairs]
+                            tySynth = renameResidual tyRenamed
+                        in pure (mkElabScheme bindingsSynth tySynth, subst')
+                    else
+                        traceGeneralize env
+                            ("generalizeAt: SchemeFreeVars typeRoot="
+                                ++ show typeRootC
+                                ++ " scopeRoot="
+                                ++ show scopeRootC
+                                ++ " scopeGen="
+                                ++ show scopeGen
+                                ++ " missing="
+                                ++ show missing
+                                ++ " bindingsFinal="
+                                ++ show bindingsFinal
+                                ++ " usedNames="
+                                ++ show (Set.toList usedNames)
+                                ++ " boundNames="
+                                ++ show (Set.toList boundNames)
+                                ++ " allowedNames="
+                                ++ show (Set.toList (allowedNames :: Set.Set String))
+                                ++ " bindParentsMissing="
+                                ++ show
+                                    [ (name, IntMap.lookup (nodeRefKey (typeRef (NodeId nid))) bindParents)
+                                    | name <- missing
+                                    , Just nid <- [parseNameId name]
+                                    ]
+                                ++ " missingBasePaths="
+                                ++ show
+                                    [ ( name
+                                      , NodeId nid
+                                      , mbBase
+                                      , mbBasePref
+                                      , case mbBase of
+                                            Nothing -> []
+                                            Just baseN ->
+                                                case bindingPathToRootLocal (gaBindParentsBase ga) (TypeRef baseN) of
+                                                    Right path -> path
+                                                    Left _ -> []
+                                      , case mbBasePref of
+                                            Nothing -> []
+                                            Just baseN ->
+                                                case bindingPathToRootLocal (gaBindParentsBase ga) (TypeRef baseN) of
+                                                    Right path -> path
+                                                    Left _ -> []
+                                      , case mbBasePref of
+                                            Nothing -> Nothing
+                                            Just baseN -> firstGenAncestorFrom (gaBindParentsBase ga) (TypeRef baseN)
+                                      , case mbBase of
+                                            Nothing -> Nothing
+                                            Just baseN ->
+                                                IntMap.lookup (nodeRefKey (typeRef baseN)) (gaBindParentsBase ga)
+                                      )
+                                    | name <- missing
+                                    , Just nid <- [parseNameId name]
+                                    , Just ga <- [mbBindParentsGa]
+                                    , let mbBase = IntMap.lookup nid (gaSolvedToBase ga)
+                                    , let mbBasePref = IntMap.lookup nid solvedToBasePrefPlan
+                                    ]
+                            )
+                            (Left $ SchemeFreeVars typeRootC missing)
     in case aliasBounds of
         [] -> finalize missingNames
         _ ->

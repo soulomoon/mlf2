@@ -809,7 +809,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 ++ show other
                             )
 
-        it "generalizeWithPlan falls back from GA to no-GA on SchemeFreeVars" $ do
+        it "generalizeWithPlan surfaces SchemeFreeVars instead of falling back from GA to no-GA" $ do
             let root = NodeId 0
                 constraint =
                     emptyConstraint
@@ -830,9 +830,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                             Just _ -> Left (Elab.SchemeFreeVars root ["ga-first-pass"])
                             Nothing -> Left (Elab.ValidationFailed ["ga-fallback-no-ga"])
             generalizeWithPlan planBuilder ga (presolutionViewFromSolved solved) (typeRef root) root
-                `shouldBe` Left (Elab.ValidationFailed ["ga-fallback-no-ga"])
+                `shouldBe` Left (Elab.SchemeFreeVars root ["ga-first-pass"])
 
-        it "generalizeWithPlan falls back to reifyType after double SchemeFreeVars" $ do
+        it "generalizeWithPlan surfaces SchemeFreeVars instead of falling back to reifyType" $ do
             let root = NodeId 0
                 constraint =
                     emptyConstraint
@@ -851,7 +851,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     PresolutionPlanBuilder $ \_ _ _ _ ->
                         Left (Elab.SchemeFreeVars root ["double-schemefreevars"])
             generalizeWithPlan planBuilder ga (presolutionViewFromSolved solved) (typeRef root) root
-                `shouldBe` Right (Elab.Forall [] (Elab.TBase (BaseTy "Int")), IntMap.empty)
+                `shouldBe` Left (Elab.SchemeFreeVars root ["double-schemefreevars"])
 
         it "result-type fallback core handles gaSolvedToBase same-domain roots" $ do
             let expr = ELit (LInt 1)
@@ -4325,15 +4325,48 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 ( \msg ->
                                     "OpWeaken: unresolved non-root binder target" `isInfixOf` msg
                                         || "OpGraft: binder not found in quantifier spine" `isInfixOf` msg
+                                        || "PhiTranslatabilityError" `isInfixOf` msg
+                                        || "TCInstantiationError" `isInfixOf` msg
                                 )
                     Right _ ->
                         pure ()
+
+            expectStrictRejection _label result =
+                case result of
+                    Left err ->
+                        let rendered = Elab.renderPipelineError err
+                        in rendered
+                            `shouldSatisfy`
+                                ( \msg ->
+                                    "OpWeaken: unresolved non-root binder target" `isInfixOf` msg
+                                        || "OpGraft: binder not found in quantifier spine" `isInfixOf` msg
+                                        || "PhiTranslatabilityError" `isInfixOf` msg
+                                        || "TCInstantiationError" `isInfixOf` msg
+                                        || "TCLetTypeMismatch" `isInfixOf` msg
+                                        || "TCArgumentMismatch" `isInfixOf` msg
+                                        || "SchemeFreeVars" `isInfixOf` msg
+                                        || "ValidationFailed" `isInfixOf` msg
+                                        || "missing direct structural authority" `isInfixOf` msg
+                                )
+                    Right (_term, ty) ->
+                        expectationFailure
+                            ( "Expected strict failure, but pipeline succeeded with type "
+                                ++ show ty
+                            )
 
             assertBothPipelinesFailFast expr = do
                 expectStrictOpWeakenFailure
                     "runPipelineElab"
                     (Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr))
                 expectStrictOpWeakenFailure
+                    "runPipelineElabChecked"
+                    (Elab.runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+
+            assertBothPipelinesReject expr = do
+                expectStrictRejection
+                    "runPipelineElab"
+                    (Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr))
+                expectStrictRejection
                     "runPipelineElabChecked"
                     (Elab.runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
 
@@ -4588,7 +4621,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 (ELamAnn "f" intArrow
                                     (EApp (EVar "f") (ELit (LInt 0))))
                                 (EApp (EVar "use") (EAnn (EVar "id") intArrow)))
-                assertBothPipelinesMono expr (Elab.TBase (BaseTy "Int"))
+                assertBothPipelinesReject expr
 
             it "BUG-004-V3: dual annotated consumers reuse one let-polymorphic id in checked and unchecked" $ do
                 let useInt =
@@ -4603,7 +4636,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                 (ELet "useB" useBool
                                     (ELet "_" (EApp (EVar "useI") (EVar "id"))
                                         (EApp (EVar "useB") (EVar "id")))))
-                assertBothPipelinesMono expr (Elab.TBase (BaseTy "Bool"))
+                assertBothPipelinesReject expr
 
             it "BUG-004-V4: annotated parameter + inner let preserves Int result" $ do
                 let expr =
@@ -4616,6 +4649,52 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                         (EApp (EVar "use") (EVar "id")))))
                             (ELit (LInt 1))
                 assertBothPipelinesMono expr (Elab.TBase (BaseTy "Int"))
+
+            describe "Thesis-exact fallback rework strict regressions" $ do
+                it "rejects alias-indirection let elaboration that only succeeds via let-var chooser" $ do
+                    let expr =
+                            ELet "make" makeFactory
+                                (ELet "f" (EVar "make")
+                                    (ELet "c1" (EApp (EVar "f") (ELit (LInt 3)))
+                                        (EApp (EVar "c1") (ELit (LBool True)))))
+                    assertBothPipelinesReject expr
+
+                it "uses direct structural authority for bounded-chain generalization without recursive fallback" $ do
+                    let rhs = ELam "x" (ELam "y" (ELam "z" (EVar "x")))
+                        schemeTy =
+                            mkForalls
+                                [ ("a", Nothing)
+                                , ("b", Just (STVar "a"))
+                                , ("c", Just (STVar "b"))
+                                ]
+                                (STArrow (STVar "a")
+                                    (STArrow (STVar "b")
+                                        (STArrow (STVar "c") (STVar "a"))))
+                        ann =
+                            STForall "a" Nothing
+                                (STArrow (STVar "a")
+                                    (STArrow (STVar "a")
+                                        (STArrow (STVar "a") (STVar "a"))))
+                        expr =
+                            ELet "c" (EAnn rhs schemeTy) (EAnn (EVar "c") ann)
+                        expected =
+                            Elab.TForall "a" Nothing
+                                (Elab.TArrow
+                                    (Elab.TVar "a")
+                                    (Elab.TArrow
+                                        (Elab.TVar "a")
+                                        (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))))
+                    assertBothPipelinesAlphaEq expr expected
+
+                it "rejects annotated call-site instantiation that only succeeds via expansion-derived recovery" $ do
+                    let intArrow = STArrow (STBase "Int") (STBase "Int")
+                        expr =
+                            ELet "id" (ELam "x" (EVar "x"))
+                                (ELet "use"
+                                    (ELamAnn "f" intArrow
+                                        (EApp (EVar "f") (ELit (LInt 0))))
+                                    (EApp (EVar "use") (EAnn (EVar "id") intArrow)))
+                    assertBothPipelinesReject expr
 
             it "BUG-003-PRES: edge-0 presolution does not leave self-bound binder metas" $ do
                 let rhs = ELam "x" (ELam "y" (ELam "z" (EVar "x")))

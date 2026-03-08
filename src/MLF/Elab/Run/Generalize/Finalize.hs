@@ -145,8 +145,16 @@ finalizeConstraint env phase1 phase2 _phase3 phase4 =
                         )
                         IntMap.empty
                         baseToSolvedAligned
-                solvedToBaseAligned =
+                solvedToBaseAligned0' =
                     IntMap.union copyOverrides (IntMap.union solvedToBaseAligned0 qAlignSolvedToBase)
+                solvedToBaseAligned =
+                    IntMap.filter
+                        (\baseN ->
+                            case NodeAccess.lookupNode base baseN of
+                                Just _ -> True
+                                Nothing -> False
+                        )
+                        solvedToBaseAligned0'
             in NodeMapping
                 { mapBaseToSolved = baseToSolvedAligned
                 , mapSolvedToBase = solvedToBaseAligned

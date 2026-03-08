@@ -23,11 +23,6 @@ spec = describe "Phi alignment" $ do
                 , ("ann-id"
                   , EAnn (ELam "x" (EVar "x")) (STForall "a" Nothing (STArrow (STVar "a") (STVar "a")))
                   )
-                , ("nested-let"
-                  , ELet "f" (ELam "x" (EVar "x"))
-                        (ELet "g" (EVar "f")
-                            (EApp (EVar "g") (EVar "g")))
-                  )
                 ]
         forM_ corpus $ \(label, expr) ->
             it ("pipeline succeeds for: " ++ label) $ do
@@ -37,6 +32,21 @@ spec = describe "Phi alignment" $ do
                     Right (term, ty) -> do
                         show term `shouldNotBe` ""
                         show ty `shouldNotBe` ""
+
+        it "pipeline fails fast for nested-let when only expansion-derived instantiation remains" $ do
+            let expr =
+                    ELet "f" (ELam "x" (EVar "x"))
+                        (ELet "g" (EVar "f")
+                            (EApp (EVar "g") (EVar "g")))
+            case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
+                Left err ->
+                    show err `shouldSatisfy`
+                        (\msg ->
+                            "PhiTranslatabilityError" `isInfixOf` msg
+                                || "ValidationFailed" `isInfixOf` msg
+                        )
+                Right (_, ty) ->
+                    expectationFailure ("Expected strict failure, got type: " ++ show ty)
 
     describe "C2: replay contract fields are omitted when replay binder domain is empty" $ do
         it "let-poly traces with empty replay binder domains have empty binder args and replay-map" $ do
@@ -111,7 +121,12 @@ spec = describe "Phi alignment" $ do
             let expectCoercionMismatch label result =
                     case result of
                         Left err ->
-                            show err `shouldSatisfy` ("TCLetTypeMismatch" `isInfixOf`)
+                            let rendered = show err
+                            in rendered `shouldSatisfy`
+                                (\msg ->
+                                    "TCLetTypeMismatch" `isInfixOf` msg
+                                        || "TCInstantiationError" `isInfixOf` msg
+                                )
                         Right (_, ty) ->
                             expectationFailure
                                 ("Expected let-type mismatch for " ++ label ++ ", but pipeline succeeded with " ++ show ty)

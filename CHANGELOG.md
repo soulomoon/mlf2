@@ -3,6 +3,21 @@
 ## Unreleased
 
 ### Changed
+- Completed the thesis-exact fallback rework closeout (2026-03-08):
+  - removed the residual let-level chooser in `MLF.Elab.Elaborate`, the recursive callback from `MLF.Elab.Run.Generalize`, and the recursive scheme fallback from `MLF.Elab.Generalize`;
+  - made `reifyInst` fail-fast unless witness/domain-owned authority is sufficient (`ewLeft`/`ewRight`, `etBinderArgs`, `etCopyMap` copied nodes), while preserving exact-annotation identity reuse for already-authoritative explicit-forall subjects;
+  - updated the remaining fallback-dependent sentinels/corpora (`BUG-2026-02-06-002`, `BUG-2026-02-08-004`, nested-let alignment, dual annotated coercion consumers) to assert strict fail-fast behavior where only expansion-derived recovery had previously kept them green;
+  - regenerated `test/golden/legacy-replay-baseline-v1.json` to the new strict semantics;
+  - verified `cabal build all && cabal test` (`998 examples, 0 failures`).
+- Removed the remaining live thesis-inexact fallback families from elaboration/planner/instantiation (2026-03-08):
+  - removed the GA→no-GA→reify retry ladders from `MLF.Elab.Elaborate`, `MLF.Elab.Run.Pipeline`, and `MLF.Elab.Run.ResultType.Util`, and tightened `MLF.Elab.Generalize` so `SchemeFreeVars` now surfaces directly instead of retrying weaker routes;
+  - removed synthesized wrapper owner fallback from `MLF.Constraint.Presolution.EdgeProcessing.Planner` and removed the generic fallback branch from `MLF.Elab.Run.Instantiation.inferInstAppArgsFromScheme`;
+  - replaced empty-Ω compatibility recovery with authoritative witness/scheme-driven instantiation reconstruction in `MLF.Elab.Phi.Omega`, `MLF.Elab.Phi.Translate`, and `MLF.Elab.Elaborate`, while updating annotation closure/finalization to preserve the thesis-facing explicit-forall and bounded-coercion cases;
+  - updated the fallback-removal guards/regressions in `PipelineSpec`, `GeneralizeSpec`, `EdgePlannerSpec`, `Phi.AlignmentSpec`, and the frozen parity baseline;
+  - verified `cabal build all && cabal test` (`992 examples, 0 failures`).
+- removed the remaining live GA/no-GA/reify ladders, planner wrapper-root fallback, and generic instantiation-inference fallback;
+- tightened `Phi`/annotation elaboration to use explicit witness/trace/expansion authority, repaired the strict thesis-facing regressions that surfaced (BUG-003/BUG-004, explicit-forall annotation paths, let-polymorphic `id id`), and refreshed the stale sentinel/frozen-parity expectations to the new strict behavior;
+- verified the campaign with focused guard slices and `cabal build all && cabal test` (`992 examples, 0 failures`).
 - Retired the final non-must-stay solved facade helper cluster (2026-03-08):
   - removed `lookupVarBound`, `genNodes`, `weakenedVars`, `isEliminatedVar`, and `canonicalizedBindParents` from the public `MLF.Constraint.Solved` facade;
   - replaced their owner-local use with direct constraint/canonical logic in `Reify.Core`, `MLF.Constraint.Presolution.View`, and the solved-view parity tests;

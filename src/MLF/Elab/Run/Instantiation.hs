@@ -9,6 +9,7 @@ module MLF.Elab.Run.Instantiation (
     containsForallType
 ) where
 
+import Control.Applicative ((<|>))
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
@@ -37,25 +38,58 @@ inferInstAppArgsFromScheme binds body targetTy =
                     _ -> False
                 | (name, arg) <- zip names args
                 ]
-        fallback =
-            case matchType binderSet body targetCore of
-                Left _ -> Nothing
-                Right subst ->
-                    let present = map (\name -> Map.member name subst) binderNames
-                        prefixLen = length (takeWhile id present)
-                        hasOutOfOrder = or (drop prefixLen present)
-                        prefixNames = take prefixLen binderNames
-                        args = [ty | name <- prefixNames, Just ty <- [Map.lookup name subst]]
-                    in if hasOutOfOrder
-                        then Nothing
-                        else if argsAreIdentity prefixNames args
+        inferFromBody =
+            let fromMatch =
+                    case matchType binderSet body targetCore of
+                        Left _ -> Nothing
+                        Right subst ->
+                            let present = map (\name -> Map.member name subst) binderNames
+                                prefixLen = length (takeWhile id present)
+                                hasOutOfOrder = or (drop prefixLen present)
+                                prefixNames = take prefixLen binderNames
+                                args = [ty | name <- prefixNames, Just ty <- [Map.lookup name subst]]
+                            in if hasOutOfOrder
+                                then Nothing
+                                else if argsAreIdentity prefixNames args
+                                    then Nothing
+                                    else Just args
+                fromArrowPrefix =
+                    let bindDomain substAcc bodyDom targetDom =
+                            case bodyDom of
+                                TVar v
+                                    | v `elem` binderNames ->
+                                        case Map.lookup v substAcc of
+                                            Nothing -> Just (Map.insert v targetDom substAcc)
+                                            Just prev
+                                                | alphaEqType prev targetDom -> Just substAcc
+                                                | otherwise -> Nothing
+                                _
+                                    | alphaEqType bodyDom targetDom -> Just substAcc
+                                    | otherwise -> Nothing
+                        go substAcc bodyTy targetTy =
+                            case (bodyTy, targetTy) of
+                                (TArrow bodyDom bodyCod, TArrow targetDom targetCod) -> do
+                                    substNext <- bindDomain substAcc bodyDom targetDom
+                                    go substNext bodyCod targetCod
+                                _ -> Just substAcc
+                    in do
+                        subst <- go Map.empty body targetCore
+                        let present = map (\name -> Map.member name subst) binderNames
+                            prefixLen = length (takeWhile id present)
+                            hasOutOfOrder = or (drop prefixLen present)
+                            prefixNames = take prefixLen binderNames
+                            args = [ty | name <- prefixNames, Just ty <- [Map.lookup name subst]]
+                        if hasOutOfOrder
                             then Nothing
-                            else Just args
+                            else if argsAreIdentity prefixNames args
+                                then Nothing
+                                else Just args
+            in fromMatch <|> fromArrowPrefix
         inferFromBound v bound =
             let boundCore = stripForallsType bound
                 matchVars = varsInType boundCore
             in case matchType matchVars boundCore targetCore of
-                Left _ -> fallback
+                Left _ -> Nothing
                 Right subst ->
                     let innerVars = Set.difference matchVars binderSet
                         pickInnerArg =
@@ -85,8 +119,9 @@ inferInstAppArgsFromScheme binds body targetTy =
         TVar v ->
             case lookup v binds of
                 Just (Just bound) -> inferFromBound v (tyToElab bound)
-                _ -> fallback
-        _ -> fallback
+                Just Nothing -> inferFromBody
+                Nothing -> Nothing
+        _ -> inferFromBody
 
 varsInType :: ElabType -> Set.Set String
 varsInType = cataIxConst alg

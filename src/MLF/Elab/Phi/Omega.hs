@@ -22,7 +22,7 @@ import Control.Monad (foldM, unless, when)
 import Data.Functor.Foldable (cata)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import Data.List (elemIndex, sortOn)
+import Data.List (elemIndex, findIndex, sortOn)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
 import qualified Data.Set as Set
@@ -41,9 +41,10 @@ import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Elab.Inst (applyInstantiation, composeInst, instMany, schemeToType, splitForalls)
 import MLF.Elab.Phi.Context (contextToNodeBoundWithOrderKeys)
 import MLF.Elab.Phi.VSpine (VSpine(..), BodyShape(..), mkVSpine, vSpineNames, vSpineBounds, vSpineIds, vSpineLength, vSpineNull, vSpineNameAt, vSpineBoundAt, vsDeleteAt, vsInsertAt, vsUpdateBound)
+import MLF.Elab.Run.Instantiation (containsForallType, inferInstAppArgsFromScheme)
 import MLF.Elab.Sigma (bubbleReorderTo)
 import MLF.Elab.Types
-import MLF.Reify.TypeOps (alphaEqType, freeTypeVarsList, inlineAliasBoundsWithBy, inlineBaseBoundsType, matchType, substTypeCapture)
+import MLF.Reify.TypeOps (alphaEqType, freeTypeVarsList, inlineAliasBoundsWithBy, inlineBaseBoundsType, substTypeCapture)
 import MLF.Util.Graph (topoSortBy)
 import MLF.Util.Trace (TraceConfig, traceGeneralize)
 import MLF.Util.Names (parseNameId)
@@ -276,9 +277,19 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                 let subst = siSubst si'
                     nameFor nid = IntMap.lookup (getNodeId (canonicalNode nid)) subst
                     reifyArg arg =
-                        case lookupVarBound (canonicalNode arg) of
-                            Just bnd -> reifyBoundWithNamesAt subst bnd
-                            Nothing -> reifyTypeWithNamedSetNoFallbackAt subst namedSet' (canonicalNode arg)
+                        let argC = canonicalNode arg
+                            direct = reifyTypeWithNamedSetNoFallbackAt subst namedSet' argC
+                            viaBound = case lookupVarBound argC of
+                                Just bnd -> reifyBoundWithNamesAt subst bnd
+                                Nothing -> direct
+                        in case (direct, viaBound) of
+                            (Right tyDirect, Right tyBound)
+                                | containsForallType tyDirect -> Right tyDirect
+                                | containsBottomTy tyDirect && not (containsBottomTy tyBound) -> Right tyBound
+                                | otherwise -> Right tyDirect
+                            (Right tyDirect, Left _) -> Right tyDirect
+                            (Left _, Right tyBound) -> Right tyBound
+                            (Left err, Left _) -> Left err
                     entries =
                         [ (name, ty)
                         | (binder, arg) <- etBinderArgs tr
@@ -307,11 +318,16 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                             names = map fst binds
                         in Map.fromList (zip names args)
 
+    preferInferredArg :: ElabType -> ElabType -> ElabType
+    preferInferredArg targetArg traceArg =
+        case targetArg of
+            TVar _
+                | not (containsBottomTy traceArg) -> traceArg
+            _ -> targetArg
+
     inferredArgMap :: IntSet.IntSet -> Map.Map String ElabType
     inferredArgMap namedSet' =
-        -- Prefer target/scheme inference over trace args when both are present;
-        -- trace reification can collapse to ⊥ too early for copied binder nodes.
-        Map.union (inferredArgMapFromTarget namedSet') (traceArgMap namedSet')
+        Map.unionWith preferInferredArg (inferredArgMapFromTarget namedSet') (traceArgMap namedSet')
 
     applyInferredArgs :: IntSet.IntSet -> ElabType -> ElabType
     applyInferredArgs namedSet' = applyInferredArgsWith namedSet' Set.empty
@@ -462,13 +478,7 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
     inferInstAppArgs :: ElabScheme -> ElabType -> Maybe [ElabType]
     inferInstAppArgs scheme targetTy =
         let (binds, body) = splitForalls (schemeToType scheme)
-            binderNames = map fst binds
-        in case matchType (Set.fromList binderNames) body targetTy of
-            Left _ -> Nothing
-            Right subst ->
-                if all (`Map.member` subst) binderNames
-                    then Just [ty | name <- binderNames, Just ty <- [Map.lookup name subst]]
-                    else Nothing
+        in inferInstAppArgsFromScheme binds body targetTy
 
     -- | Paper Def. 15.3.4 / Fig. 15.3.5: Φ(e) = Σ; O; Φχe(Ω).
     -- Thesis treats quantifier introduction (O) and witness replay (Ω) as
@@ -488,7 +498,11 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
         let phiIntro = instMany (replicate introCount InstIntro)
         -- Phase Ω: replay witness operations on the intro-extended type.
         let vs2 = mkVSpine ty2 ids2
-        phiOmega <- go binderKeys namedSet vs2 [] omegaOps lookupBinder
+        phiOmegaRaw <- go binderKeys namedSet vs2 [] omegaOps lookupBinder
+        let phiOmega =
+                case phiOmegaRaw of
+                    InstId -> inferredOmegaInst namedSet vs2
+                    _ -> phiOmegaRaw
         pure (normalizeInst (instMany [sigma, phiIntro, phiOmega]))
 
 
@@ -506,6 +520,35 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                 label ++ ": " ++ msg ++ " ; inst=" ++ pretty inst ++ " ; ty=" ++ pretty ty0
         other -> other
 
+    inferredOmegaInst :: IntSet.IntSet -> VSpine -> Instantiation
+    inferredOmegaInst namedSet' vs =
+        let inferred = inferredArgMap namedSet'
+            names = vSpineNames vs
+            isIdentityArg :: String -> ElabType -> Bool
+            isIdentityArg name ty = case ty of
+                TVar v -> v == name
+                _ -> False
+            isPresent = maybe False (const True)
+            firstUseful =
+                findIndex
+                    (\name ->
+                        case Map.lookup name inferred of
+                            Just ty -> not (isIdentityArg name ty)
+                            Nothing -> False
+                    )
+                    names
+        in case firstUseful of
+            Nothing -> InstId
+            Just startIdx ->
+                let suffixNames = drop startIdx names
+                    argsMaybe = map (`Map.lookup` inferred) suffixNames
+                    prefixLen = length (takeWhile isPresent argsMaybe)
+                    hasOutOfOrder = any isPresent (drop prefixLen argsMaybe)
+                    args = mapMaybe id (take prefixLen argsMaybe)
+                    prefixBefore = take startIdx names
+                in if prefixLen == 0 || hasOutOfOrder
+                    then InstId
+                    else underContext prefixBefore (instMany (map InstApp args))
 
     reorderBindersByPrec :: ElabType -> [Maybe NodeId] -> Either ElabError (Instantiation, ElabType, [Maybe NodeId])
     reorderBindersByPrec ty ids = do

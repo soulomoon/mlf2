@@ -84,6 +84,12 @@ The seventh and final table-driven facade cleanup landed on 2026-03-08 by retiri
 
 The detailed evidence matrix for this classification lives in `tasks/archive/2026-03-08-solved-classification-table/findings.md`.
 
+## Fallback Policy
+
+- Elaborative/runtime fallback ladders are now removed: the production path prefers explicit witness/scheme authority and surfaces structured errors when that authority is insufficient.
+- Planner scheme ownership for synthesized wrappers is body-root only; there is no wrapper-root recovery path.
+- Instantiation inference keeps only structurally justified argument recovery.
+
 ## Witness Representation (Φ/Σ)
 
 - `EdgeWitness.ewWitness` stores the Ω-only instance operations (Graft/Merge/Raise/Weaken/RaiseMerge).
@@ -102,3 +108,16 @@ The test suite depends on both:
 - `mlf2:mlf2-internal` (private internal library)
 
 This keeps the downstream surface small while still allowing specs to import internal modules.
+
+## 2026-03-08 fallback-removal architecture note
+
+The active elaboration path is now intentionally fail-fast around the old fallback seams:
+
+- generalization does not retry through GA-disabled or raw reify ladders;
+- let elaboration no longer chooses among RHS-/env-derived alternate schemes; the authoritative generalization result is the only live let scheme source;
+- `MLF.Elab.Run.Generalize` no longer passes a recursive generalization callback into `applyGeneralizePlan`, and `MLF.Elab.Generalize` now uses the existing structural scheme plan instead of recursively generalizing another scope;
+- planner scheme-owner resolution is body-root authoritative;
+- instantiation inference is structural and prefix-based rather than catch-all heuristic;
+- `reifyInst` is witness/domain-only apart from exact source-scheme reuse for already-authoritative annotations; the live authority set is `ewLeft`/`ewRight`, `etBinderArgs`, and copied witness-domain nodes from `etCopyMap`, and if only expansion-derived recovery would make an application/annotation succeed, the pipeline now fails fast.
+
+This keeps the runtime path closer to the thesis boundary: if witness/scheme information is insufficient, the code now fails explicitly instead of silently switching to a weaker reconstruction mode.

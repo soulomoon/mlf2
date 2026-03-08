@@ -8,6 +8,7 @@ module MLF.Elab.Elaborate (
     elaborateWithEnv
 ) where
 
+import Control.Applicative ((<|>))
 import Data.Functor.Foldable (para)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
@@ -19,9 +20,7 @@ import MLF.Reify.TypeOps
     ( alphaEqType
     , freeTypeVarsType
     , inlineBaseBoundsType
-    , matchType
     , parseNameId
-    , substTypeSimple
     )
 
 import MLF.Frontend.Syntax (VarName)
@@ -29,9 +28,10 @@ import MLF.Constraint.Types
 import MLF.Elab.Types
 import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Elab.Legacy (expansionToInst)
-import MLF.Elab.TermClosure (closeTermWithSchemeSubstIfNeeded, substInTerm)
+import MLF.Elab.TermClosure (alignTermTypeVarsToScheme, alignTermTypeVarsToTopTyAbs, closeTermWithSchemeSubstIfNeeded)
 import MLF.Elab.Run.TypeOps (inlineBoundVarsType, simplifyAnnotationType)
 import MLF.Elab.Run.Annotation (adjustAnnotationInst)
+import MLF.Elab.Run.Instantiation (inferInstAppArgsFromScheme)
 import qualified MLF.Elab.Run.ChiQuery as ChiQuery
 import MLF.Constraint.BindingUtil (bindingPathToRootLocal)
 import MLF.Elab.Phi (phiFromEdgeWitnessWithTrace)
@@ -41,17 +41,11 @@ import qualified MLF.Elab.TypeCheck as TypeCheck (Env(..), typeCheckWithEnv)
 import qualified MLF.Elab.Inst as Inst
 import MLF.Reify.Core
     ( namedNodes
-    , reifyType
-    , reifyBoundWithNames
     , reifyTypeWithNamedSetNoFallback
     )
 import MLF.Constraint.Presolution
     ( PresolutionView(..)
-    , EdgeTrace
-    , CopyMapping(..)
-    , etBinderArgs
-    , etCopyMap
-    , lookupCopy
+    , EdgeTrace(..)
     )
 import MLF.Frontend.ConstraintGen.Types (AnnExpr(..), AnnExprF(..))
 
@@ -135,27 +129,8 @@ elaborateWithEnv config elabEnv ann = do
         -> NodeRef
         -> NodeId
         -> Either ElabError (ElabScheme, IntMap.IntMap String)
-    generalizeNeedsFallback :: ElabError -> Bool
-    generalizeNeedsFallback err = case err of
-        SchemeFreeVars{} -> True
-        _ -> False
-
     generalizeAtWith mbGa scopeRoot targetNode =
-        case generalizeAtWithRaw mbGa scopeRoot targetNode of
-            Right out -> Right out
-            Left err | generalizeNeedsFallback err ->
-                case mbGa of
-                    Just _ ->
-                        case generalizeAtWithRaw Nothing scopeRoot targetNode of
-                            Right out -> Right out
-                            Left err2 | generalizeNeedsFallback err2 -> do
-                                ty <- reifyType presolutionView targetNode
-                                pure (schemeFromType ty, IntMap.empty)
-                            Left err3 -> Left err3
-                    Nothing -> do
-                        ty <- reifyType presolutionView targetNode
-                        pure (schemeFromType ty, IntMap.empty)
-            Left err -> Left err
+        generalizeAtWithRaw mbGa scopeRoot targetNode
 
     scopeRootForNode :: NodeId -> NodeRef
     scopeRootForNode nodeId =
@@ -167,24 +142,7 @@ elaborateWithEnv config elabEnv ann = do
     generalizeAtNode nodeId =
         let scopeRoot = scopeRootForNode nodeId
             targetC = schemeBodyTarget presolutionView nodeId
-            preferMoreCoherent primary fallback =
-                case fallback of
-                    Right alt
-                        | schemeSubstCoherenceScore alt > schemeSubstCoherenceScore primary -> alt
-                    _ -> primary
-        in case generalizeAtWith (Just gaParents) scopeRoot targetC of
-            Right out ->
-                let fallback = generalizeAtWith Nothing scopeRoot targetC
-                    out' = preferMoreCoherent out fallback
-                in Right out'
-            Left err | generalizeNeedsFallback err ->
-                case generalizeAtWith Nothing scopeRoot targetC of
-                    Right out -> Right out
-                    Left err2 | generalizeNeedsFallback err2 -> do
-                        tyFallback <- reifyNodeTypePreferringBound targetC
-                        pure (schemeFromType tyFallback, IntMap.empty)
-                    Left err3 -> Left err3
-            Left err -> Left err
+        in generalizeAtWith (Just gaParents) scopeRoot targetC
 
     normalizeSchemeSubstPair :: (ElabScheme, IntMap.IntMap String) -> (ElabScheme, IntMap.IntMap String)
     normalizeSchemeSubstPair (schRaw, substRaw) =
@@ -206,66 +164,6 @@ elaborateWithEnv config elabEnv ann = do
             substRaw
             binds
 
-    schemeFromForallSpine :: ElabType -> ElabScheme
-    schemeFromForallSpine ty =
-        let (binds, body) = Inst.splitForalls ty
-        in Forall binds body
-
-    schemeFromRhsBodyCoherentWithSubst :: ElabType -> (ElabScheme, IntMap.IntMap String)
-    schemeFromRhsBodyCoherentWithSubst ty =
-        let (binds, body0) = Inst.splitForalls ty
-            binderNames = map fst binds
-            bodyFvs = Set.toList (freeTypeVarsType body0)
-            bodyFvSet = Set.fromList bodyFvs
-            externalFvs =
-                [ v
-                | v <- bodyFvs
-                , v `notElem` binderNames
-                ]
-            unusedBinders =
-                [ v
-                | v <- binderNames
-                , not (Set.member v bodyFvSet)
-                ]
-            replacements =
-                if length externalFvs <= length unusedBinders && not (null externalFvs)
-                    then zip externalFvs unusedBinders
-                    else []
-            body =
-                if null replacements
-                    then body0
-                    else
-                        foldl'
-                            (\acc (fromV, toV) -> substTypeSimple fromV (TVar toV) acc)
-                            body0
-                            replacements
-            substExtra =
-                IntMap.fromList
-                    [ (key, toV)
-                    | (fromV, toV) <- replacements
-                    , Just key <- [parseNameId fromV]
-                    ]
-        in (Forall binds body, substExtra)
-
-    schemeFromRhsBodyCoherent :: ElabType -> ElabScheme
-    schemeFromRhsBodyCoherent ty =
-        fst (schemeFromRhsBodyCoherentWithSubst ty)
-
-    schemeFromRhsBodyCoherentSubst :: ElabType -> IntMap.IntMap String
-    schemeFromRhsBodyCoherentSubst ty =
-        snd (schemeFromRhsBodyCoherentWithSubst ty)
-
-    schemeSubstCoherenceScore :: (ElabScheme, IntMap.IntMap String) -> (Int, Int, Int, Int)
-    schemeSubstCoherenceScore pairRaw =
-        let (sch, subst) = normalizeSchemeSubstPair pairRaw
-            (binds, _) = Inst.splitForalls (schemeToType sch)
-            binderNames = Set.fromList (map fst binds)
-            binderCount = Set.size binderNames
-            substNames = Set.fromList (IntMap.elems subst)
-            covered = Set.size (Set.intersection binderNames substNames)
-            missing = Set.size (Set.difference binderNames substNames)
-        in (covered, binderCount, negate missing, IntMap.size subst)
-
     reifyNodeTypePreferringBound :: NodeId -> Either ElabError ElabType
     reifyNodeTypePreferringBound nodeId = do
         namedSet <- namedNodes presolutionView
@@ -283,15 +181,17 @@ elaborateWithEnv config elabEnv ann = do
                 in closeTermWithSchemeSubstIfNeeded IntMap.empty sch term
             Left _ -> term
 
-    closeTermWithSchemeSubstNoFreshen :: IntMap.IntMap String -> ElabScheme -> ElabTerm -> ElabTerm
-    closeTermWithSchemeSubstNoFreshen subst sch term =
-        let termSubst = substInTerm subst term
-        in case sch of
-            Forall binds _ ->
-                foldr
-                    (\(name, bound) acc -> ETyAbs name bound acc)
-                    termSubst
-                    binds
+    stripUnusedTopTyAbs :: ElabTerm -> ElabTerm
+    stripUnusedTopTyAbs term =
+        case term of
+            ETyAbs v mbBound body ->
+                let body' = stripUnusedTopTyAbs body
+                    term' = ETyAbs v mbBound body'
+                in case typeCheck term' of
+                    Right (TForall _ _ bodyTy)
+                        | v `notElem` freeTypeVarsType bodyTy -> body'
+                    _ -> term'
+            _ -> term
 
     resolvedLambdaParamNode :: NodeId -> Maybe NodeId
     resolvedLambdaParamNode lamNodeId =
@@ -303,11 +203,6 @@ elaborateWithEnv config elabEnv ann = do
                     Just TyArrow{ tnDom = dom } -> Just dom
                     _ -> Nothing
             _ -> Nothing
-
-    termStartsWithTypeAbstraction :: ElabTerm -> Bool
-    termStartsWithTypeAbstraction term = case term of
-        ETyAbs{} -> True
-        _ -> False
 
     mkOut :: (Env -> Either ElabError ElabTerm) -> ElabOut
     mkOut f = ElabOut f f
@@ -508,21 +403,6 @@ elaborateWithEnv config elabEnv ann = do
                             ()
                     (sch0Raw, subst0Raw) <- generalizeAtNode schemeRootId
                     let tcEnv = TypeCheck.Env (Map.map (schemeToType . siScheme) env) Map.empty
-                        annIsApp annExpr =
-                            case annExpr of
-                                AApp{} -> True
-                                AAnn inner _ _ -> annIsApp inner
-                                _ -> False
-                        rhsIsApp = annIsApp rhsAnn
-                        annIsLam annExpr =
-                            case annExpr of
-                                ALam{} -> True
-                                AAnn inner _ _ -> annIsLam inner
-                                _ -> False
-                        rhsIsLam = annIsLam rhsAnn
-                        binderCount scheme0 =
-                            let (binds, _) = Inst.splitForalls (schemeToType scheme0)
-                            in length binds
                         lambdaParamNodes annExpr =
                             case annExpr of
                                 ALam _ paramNode _ body _ -> paramNode : lambdaParamNodes body
@@ -548,183 +428,22 @@ elaborateWithEnv config elabEnv ann = do
                                         binderPairs
                                 else subst0'
                         (sch0Norm, subst0Norm) = normalizeSchemeSubstPair (sch0Raw, subst0Raw)
-                        sch0 = sch0Norm
-                        subst0 = deriveLambdaBinderSubst sch0Norm subst0Norm
-                        schemeUnbounded =
-                            case sch0 of
-                                Forall binds _ -> all ((== Nothing) . snd) binds
-                        fallbackEligible = rhsIsApp && schemeUnbounded
-                        containsBottomTy ty =
-                            case ty of
-                                TVar _ -> False
-                                TArrow d c -> containsBottomTy d || containsBottomTy c
-                                TCon _ args -> any containsBottomTy args
-                                TBase _ -> False
-                                TForall _ mb body ->
-                                    maybe False (containsBottomTy . tyToElab) mb
-                                        || containsBottomTy body
-                                TBottom -> True
-                        fallbackFromRhsTy rhsTy =
-                            let freeVars = Set.toList (freeTypeVarsType rhsTy)
-                                rhsSch = Forall [(name, Nothing) | name <- freeVars] rhsTy
-                            in if alphaEqType (schemeToType rhsSch) (schemeToType sch0)
-                                then Nothing
-                                else Just rhsSch
-                        fallbackCoherent schCandidate substCandidate =
-                            let (binds, _) = Inst.splitForalls (schemeToType schCandidate)
-                                binderNames = Set.fromList (map fst binds)
-                                substNames = Set.fromList (IntMap.elems substCandidate)
-                            in Set.isSubsetOf binderNames substNames
-                        rhsSourceVar annExpr =
-                            case annExpr of
-                                AVar name _ -> Just name
-                                AAnn inner _ _ -> rhsSourceVar inner
-                                _ -> Nothing
-                        rhsAppArgIsVar annExpr =
-                            case annExpr of
-                                AApp _ argAnn _ _ _ ->
-                                    case argAnn of
-                                        AVar _ _ -> True
-                                        AAnn inner _ _ -> rhsAppArgIsVar inner
-                                        _ -> False
-                                AAnn inner _ _ -> rhsAppArgIsVar inner
-                                _ -> False
-                        rhsTypeChecked = TypeCheck.typeCheckWithEnv tcEnv rhs'
-                        fallbackChoiceFromVar =
-                            case rhsSourceVar rhsAnn of
-                                Just sourceName -> do
-                                    si <- Map.lookup sourceName env
-                                    pure (siScheme si, siSubst si)
-                                Nothing -> Nothing
-                        fallbackChoiceFromApp =
-                            if fallbackEligible
-                                then
-                                    case rhsTypeChecked of
-                                        Right rhsTy ->
-                                            case fallbackFromRhsTy rhsTy of
-                                                Just schApp -> Just (schApp, subst0)
-                                                Nothing -> Nothing
-                                        Left _ -> Nothing
-                                else Nothing
-                        fallbackChoiceFromLam =
-                            if rhsIsLam
-                                then
-                                    case rhsTypeChecked of
-                                        Right rhsTy ->
-                                            case fallbackFromRhsTy rhsTy of
-                                                Just schLam
-                                                    | containsBottomTy (schemeToType schLam) -> Nothing
-                                                    | binderCount schLam < binderCount sch0 -> Nothing
-                                                    | otherwise -> Just (schLam, IntMap.empty)
-                                                Nothing -> Nothing
-                                        Left _ -> Nothing
-                                else Nothing
-                        fallbackChoiceRaw =
-                            case fallbackChoiceFromApp of
-                                Just appChoice -> Just appChoice
-                                Nothing ->
-                                    case fallbackChoiceFromLam of
-                                        Just lamChoice -> Just lamChoice
-                                        Nothing -> fallbackChoiceFromVar
-                        fallbackChoice =
-                            case fallbackChoiceRaw of
-                                Just candidateRaw ->
-                                    let candidate@(schCandidate, substCandidate) =
-                                            normalizeSchemeSubstPair candidateRaw
-                                    in if fallbackCoherent schCandidate substCandidate
-                                        then Just candidate
-                                        else Nothing
-                                Nothing -> Nothing
-                        fallbackFromVarSelected =
-                            case (fallbackChoiceFromApp, fallbackChoiceFromLam, fallbackChoiceFromVar, fallbackChoiceRaw) of
-                                (Nothing, Nothing, Just _, Just _) -> True
-                                _ -> False
-                        fallbackScheme = fmap fst fallbackChoice
-                        schChosen = maybe sch0 fst fallbackChoice
-                        substChosen = maybe subst0 snd fallbackChoice
-                        schSimplified =
-                            if fallbackFromVarSelected
-                                then schChosen
-                                else schemeFromType (simplifyAnnotationType (schemeToType schChosen))
-                        (schBase, substBase) = normalizeSchemeSubstPair (schSimplified, substChosen)
-                        rhsAbsBase =
-                            if
-                                fallbackFromVarSelected
-                                    || (rhsIsApp && rhsAppArgIsVar rhsAnn)
-                                    || (rhsIsLam && isJust fallbackChoice)
-                                then rhs'
-                                else closeTermWithSchemeSubstIfNeeded substBase schBase rhs'
-                        lamAligned =
-                            case (rhsIsLam, TypeCheck.typeCheckWithEnv tcEnv rhsAbsBase) of
-                                (_isLam, Right rhsTy)
-                                    | not (alphaEqType rhsTy (schemeToType schBase)) ->
-                                        let shouldAlign = rhsIsLam
-                                        in if shouldAlign
-                                            then
-                                                let (schLam, substLam) =
-                                                        normalizeSchemeSubstPair (schemeFromType rhsTy, substBase)
-                                                in if fallbackCoherent schLam substLam
-                                                    then
-                                                        let rhsAbsLam = closeTermWithSchemeSubstIfNeeded substLam schLam rhs'
-                                                        in (schLam, substLam, rhsAbsLam, Right rhsTy)
-                                                    else (schBase, substBase, rhsAbsBase, Right rhsTy)
-                                            else (schBase, substBase, rhsAbsBase, Right rhsTy)
-                                (_, Right rhsTy) -> (schBase, substBase, rhsAbsBase, Right rhsTy)
-                                (_, Left rhsTyErr) -> (schBase, substBase, rhsAbsBase, Left rhsTyErr)
-                        (sch0Final, subst0Final, rhsAbs0Final, rhsAbsTyChecked0) = lamAligned
-                        appAligned =
-                            case (rhsIsApp, rhsAbsTyChecked0) of
-                                (True, Right rhsTy)
-                                    | not (alphaEqType rhsTy (schemeToType sch0Final)) ->
-                                        let candidateNorm@(schAppNorm, substAppNorm) =
-                                                normalizeSchemeSubstPair (schemeFromType rhsTy, subst0Final)
-                                            schAppBody = schemeFromRhsBodyCoherent rhsTy
-                                            substAppBodyExtra = schemeFromRhsBodyCoherentSubst rhsTy
-                                            substAppBody =
-                                                normalizeSubstForScheme schAppBody (IntMap.union subst0Final substAppBodyExtra)
-                                            candidateBody = (schAppBody, substAppBody)
-                                            schAppPreserve = schemeFromForallSpine rhsTy
-                                            substAppPreserve = normalizeSubstForScheme schAppPreserve subst0Final
-                                            candidatePreserve = (schAppPreserve, substAppPreserve)
-                                            bodyCoherent = fallbackCoherent schAppBody substAppBody
-                                            normCoherent = fallbackCoherent schAppNorm substAppNorm
-                                            preserveCoherent = fallbackCoherent schAppPreserve substAppPreserve
-                                            selected =
-                                                if bodyCoherent
-                                                    then Just candidateBody
-                                                    else
-                                                        if normCoherent
-                                                            then Just candidateNorm
-                                                            else
-                                                                if preserveCoherent
-                                                            then Just candidatePreserve
-                                                            else Nothing
-                                        in case selected of
-                                            Just (schApp, substApp) ->
-                                                let (bindsApp, _) = Inst.splitForalls (schemeToType schApp)
-                                                    substApp' =
-                                                        if null bindsApp
-                                                            then IntMap.empty
-                                                            else substApp
-                                                    rhsAbsApp = closeTermWithSchemeSubstNoFreshen substApp' schApp rhs'
-                                                in (schApp, substApp', rhsAbsApp, Right rhsTy)
-                                            Nothing -> (sch0Final, subst0Final, rhsAbs0Final, rhsAbsTyChecked0)
-                                _ -> (sch0Final, subst0Final, rhsAbs0Final, rhsAbsTyChecked0)
-                        (schRawFinal, substRawFinal, rhsAbs, rhsAbsTyChecked) = appAligned
-                        substFinal =
-                            let (bindsFinal, _) = Inst.splitForalls (schemeToType schRawFinal)
-                            in if null bindsFinal then IntMap.empty else substRawFinal
-                        sch = schRawFinal
-                        subst = substFinal
+                        sch = schemeFromType (simplifyAnnotationType (schemeToType sch0Norm))
+                        subst0 = normalizeSubstForScheme sch (deriveLambdaBinderSubst sch0Norm subst0Norm)
+                        subst =
+                            let (binds, _) = Inst.splitForalls (schemeToType sch)
+                            in if null binds then IntMap.empty else subst0
+                        rhsAbs0 = closeTermWithSchemeSubstIfNeeded subst sch rhs'
+                        rhsAbs =
+                            case sch of
+                                Forall binds _ | not (null binds) -> rhsAbs0
+                                _ -> stripUnusedTopTyAbs rhsAbs0
+                        rhsAbsTyChecked = TypeCheck.typeCheckWithEnv tcEnv rhsAbs
                     case debugGeneralize
-                        ("elaborate let(" ++ v ++ "): sch0=" ++ show sch0
-                            ++ " subst0=" ++ show subst0
+                        ("elaborate let(" ++ v ++ "): sch0=" ++ show sch
+                            ++ " subst0=" ++ show subst
                             ++ " scheme=" ++ show sch
                             ++ " subst=" ++ show subst
-                            ++ " rhsIsApp=" ++ show rhsIsApp
-                            ++ " rhsIsLam=" ++ show rhsIsLam
-                            ++ " fallback=" ++ show (fmap schemeToType fallbackScheme)
-                            ++ " fallback-raw=" ++ show (fmap (schemeToType . fst) fallbackChoiceRaw)
                             ++ " rhsAbsTy=" ++ show rhsAbsTyChecked
                         )
                         () of
@@ -751,37 +470,104 @@ elaborateWithEnv config elabEnv ann = do
             ElabOut
                 { elabTerm = \env -> do
                     expr' <- elabTerm exprOut env
-                    inst <- reifyInst namedSetReify env exprAnn eid
-                    mExpectedBound <- case generalizeAtNode annNodeId of
-                        Right (Forall ((_, Just bnd) : _) _, _) -> pure (Just (tyToElab bnd))
+                    expectedSchemeInfo <- case generalizeAtNode annNodeId of
+                        Right pair -> pure (Just pair)
                         Left _ -> pure Nothing
-                        _ -> pure Nothing
-                    let instAdjusted0 = adjustAnnotationInst inst
-                        sourceAnnIsVar annExpr =
-                            case annExpr of
-                                AVar _ _ -> True
-                                AAnn inner _ _ -> sourceAnnIsVar inner
+                    let sourceSchemeInfo = sourceAnnSchemeInfo env exprAnn
+                        canReuseSourceScheme =
+                            case (sourceSchemeInfo, expectedSchemeInfo) of
+                                (Just si, Just (schExpected, _substExpected)) ->
+                                    alphaEqType (schemeToType (siScheme si)) (schemeToType schExpected)
                                 _ -> False
+                        requiresExplicitAnnotationInst =
+                            case (sourceSchemeInfo, expectedSchemeInfo) of
+                                (Just SchemeInfo{ siScheme = srcScheme }, Just (schExpected, _substExpected)) ->
+                                    let sourcePoly = case srcScheme of
+                                            Forall binds _ -> not (null binds)
+                                    in sourcePoly
+                                        && not (alphaEqType (schemeToType srcScheme) (schemeToType schExpected))
+                                _ -> False
+                    inst <-
+                        case reifyInst namedSetReify env exprAnn eid of
+                            Right inst0 -> pure inst0
+                            Left (PhiTranslatabilityError _)
+                                | canReuseSourceScheme -> pure InstId
+                            Left err -> Left err
+                    let expectedSchemeResult = fmap fst expectedSchemeInfo
+                    let mExpectedBound = case expectedSchemeResult of
+                            Just (Forall ((_, Just bnd) : _) _) -> Just (tyToElab bnd)
+                            _ -> Nothing
+                    let dropAnnotationElims inst0 = case inst0 of
+                            InstElim -> InstId
+                            InstSeq a b ->
+                                let a' = dropAnnotationElims a
+                                    b' = dropAnnotationElims b
+                                in case (a', b') of
+                                    (InstId, x) -> x
+                                    (x, InstId) -> x
+                                    _ -> InstSeq a' b'
+                            InstInside a -> InstInside (dropAnnotationElims a)
+                            InstUnder v a -> InstUnder v (dropAnnotationElims a)
+                            _ -> inst0
+                        preservesForalls =
+                            isJust mExpectedBound
+                                || isJust (alignTermTypeVarsToTopTyAbs expr')
+                                || case expr' of
+                                    ETyAbs{} -> True
+                                    _ -> False
+                        instAdjusted0 =
+                            if preservesForalls
+                                then adjustAnnotationInst inst
+                                else dropAnnotationElims inst
                         instAdjusted =
                             case (mExpectedBound, instAdjusted0) of
                                 (Just expectedBound, InstInside (InstBot _)) ->
                                     InstInside (InstBot expectedBound)
-                                (Just expectedBound, InstId)
-                                    | not (sourceAnnIsVar exprAnn) ->
-                                    InstInside (InstBot expectedBound)
                                 _ -> instAdjusted0
-                    exprClosed <-
-                        if instAdjusted == InstId
-                            then pure expr'
-                            else
-                                if termStartsWithTypeAbstraction expr' || sourceAnnIsPolymorphic env exprAnn
+                    exprClosed0 <-
+                        if instAdjusted == InstId && requiresExplicitAnnotationInst
+                            then
+                                Left
+                                    (PhiTranslatabilityError
+                                        [ "AAnnF: missing authoritative instantiation for annotation edge " ++ show eid
+                                        ]
+                                    )
+                        else if instAdjusted == InstId
+                            then
+                                if canReuseSourceScheme && sourceAnnIsPolymorphic env exprAnn
                                     then pure expr'
-                                    else pure (closeTermForAnnotation expr')
+                                else case expectedSchemeInfo of
+                                    Just (schExpected, substExpected) ->
+                                        case expr' of
+                                            ETyAbs{} ->
+                                                pure (fromMaybe expr' (alignTermTypeVarsToScheme schExpected expr' <|> alignTermTypeVarsToTopTyAbs expr'))
+                                            _ -> pure (closeTermWithSchemeSubstIfNeeded substExpected schExpected expr')
+                                    Nothing -> pure (fromMaybe expr' (alignTermTypeVarsToTopTyAbs expr'))
+                            else
+                                let instHasUnder inst0 = case inst0 of
+                                        InstUnder{} -> True
+                                        InstSeq a b -> instHasUnder a || instHasUnder b
+                                        InstInside a -> instHasUnder a
+                                        _ -> False
+                                in if sourceAnnIsPolymorphic env exprAnn
+                                    then pure expr'
+                                    else if instHasUnder instAdjusted
+                                        then
+                                            case expectedSchemeInfo of
+                                                Just (schExpected, substExpected) ->
+                                                    pure (closeTermWithSchemeSubstIfNeeded substExpected schExpected expr')
+                                                Nothing -> pure (closeTermForAnnotation expr')
+                                        else pure (closeTermForAnnotation expr')
+                    let exprClosed = stripUnusedTopTyAbs exprClosed0
                     let instFinal =
                             case instAdjusted of
                                 InstId -> InstId
                                 _ ->
                                     case typeCheck exprClosed of
+                                        Right tyExpr
+                                            | Just expectedScheme <- expectedSchemeResult
+                                            , alphaEqType tyExpr (schemeToType expectedScheme) ->
+                                                InstId
                                         Right tyExpr ->
                                             case tyExpr of
                                                 TForall{} ->
@@ -806,6 +592,13 @@ elaborateWithEnv config elabEnv ann = do
                     _ -> False
             AAnn inner _ _ -> sourceAnnIsPolymorphic env inner
             _ -> False
+
+    sourceAnnSchemeInfo :: Env -> AnnExpr -> Maybe SchemeInfo
+    sourceAnnSchemeInfo env sourceAnn =
+        case sourceAnn of
+            AVar v _ -> Map.lookup v env
+            AAnn inner _ _ -> sourceAnnSchemeInfo env inner
+            _ -> Nothing
 
     desugaredAnnLambdaInfo :: VarName -> AnnExpr -> Maybe (NodeId, AnnExpr)
     desugaredAnnLambdaInfo param bodyAnn =
@@ -834,6 +627,11 @@ elaborateWithEnv config elabEnv ann = do
     reifyInst namedSetReify env funAnn (EdgeId eid) =
         let debugGeneralize :: String -> a -> a
             debugGeneralize = traceGeneralize traceCfg
+            schemeInfoForInst annExpr =
+                case annExpr of
+                    AVar v _ -> Map.lookup v env
+                    AAnn inner _ _ -> schemeInfoForInst inner
+                    _ -> Nothing
             dbg =
                 debugGeneralize
                     ("reifyInst: edge=" ++ show eid
@@ -851,9 +649,7 @@ elaborateWithEnv config elabEnv ann = do
             Just ew -> do
                 let mTrace = IntMap.lookup eid edgeTraces
                     mExpansion = IntMap.lookup eid edgeExpansions
-                let mSchemeInfo = case funAnn of
-                        AVar v _ -> Map.lookup v env
-                        _ -> Nothing
+                let mSchemeInfo = schemeInfoForInst funAnn
                     mSchemeInfo' = mSchemeInfo
                 case debugGeneralize
                     ("reifyInst scheme edge=" ++ show eid
@@ -861,201 +657,152 @@ elaborateWithEnv config elabEnv ann = do
                     )
                     () of
                     () -> pure ()
-                phi <- phiFromEdgeWitnessWithTrace traceCfg generalizeAtWith presolutionView (Just gaParents) mSchemeInfo' mTrace ew
+                phi0 <- phiFromEdgeWitnessWithTrace traceCfg generalizeAtWith presolutionView (Just gaParents) mSchemeInfo' mTrace ew
+                let substForPhi = maybe IntMap.empty siSubst mSchemeInfo
+                    resolvePhiVar v = do
+                        nid <- parseNameId v
+                        bnd <- chiLookupVarBound (canonical (NodeId nid))
+                        either (const Nothing) Just
+                            (reifyTypeWithNamedSetNoFallback presolutionView substForPhi namedSetReify bnd)
+                    normalizePhiInst inst = case inst of
+                        InstApp (TVar v) -> maybe inst InstApp (resolvePhiVar v)
+                        InstBot (TVar v) -> maybe inst InstBot (resolvePhiVar v)
+                        _ -> inst
+                    phi = normalizePhiInst phi0
                 case debugGeneralize
                     ("reifyInst phi edge=" ++ show eid ++ " phi=" ++ show phi)
                     () of
                     () -> pure ()
-                let allowFallbackFromTrace =
-                        case mSchemeInfo of
-                            Just si ->
+                instFromAuthority <- case (mExpansion, mSchemeInfo) of
+                    (Just (ExpInstantiate args), Just si) -> do
+                        let schemeArity =
                                 case siScheme si of
-                                    Forall binds _ -> not (null binds)
-                            Nothing -> False
-                instFromTrace <- case (allowFallbackFromTrace, phi, mExpansion, mSchemeInfo) of
-                    (True, InstId, Just (ExpInstantiate args), mSi) -> do
-                        let traceArgNodes =
+                                    Forall binds _ -> length binds
+                            targetTy = authoritativeTargetType namedSetReify ew si
+                            traceArgs =
                                 case mTrace of
                                     Just tr | not (null (etBinderArgs tr)) ->
-                                        Just (map snd (etBinderArgs tr))
+                                        reifyTraceBinderInstArgs namedSetReify si (map snd (etBinderArgs tr))
                                     _ -> Nothing
-                            argNodesPrimary = fromMaybe args traceArgNodes
-                            resolvedPrimary = resolveFallbackArgNodes mTrace argNodesPrimary
-                            (argNodes, resolvedArgNodes) =
-                                case (traceArgNodes, resolvedPrimary) of
-                                    (Just _, Nothing) ->
-                                        (args, resolveFallbackArgNodes mTrace args)
-                                    _ -> (argNodesPrimary, resolvedPrimary)
-                            fallbackOk =
-                                fallbackProvenanceArityOk mTrace mSi argNodes
-                                    && isJust resolvedArgNodes
-                            tracePairCount =
-                                case mTrace of
-                                    Just tr -> length (etBinderArgs tr)
-                                    Nothing -> 0
-                            traceBinderArity =
-                                case mTrace of
-                                    Just tr ->
-                                        IntSet.size $
-                                            IntSet.fromList
-                                                [ getNodeId binder
-                                                | (binder, _arg) <- etBinderArgs tr
-                                                ]
-                                    Nothing -> 0
-                            schemeArity =
-                                case mSi of
-                                    Just si ->
-                                        case siScheme si of
-                                            Forall binds _ -> length binds
-                                    Nothing -> 0
-                        let targetArgs =
-                                case mSi of
-                                    Just si ->
-                                        case reifyTargetType namedSetReify ew si of
-                                            Right targetTy ->
-                                                case inferInstAppArgs (siScheme si) targetTy of
-                                                    Just inferred
-                                                        | length inferred == length argNodes ->
-                                                            Just inferred
-                                                    _ -> Nothing
-                                            Left _ -> Nothing
-                                    Nothing -> Nothing
+                            targetArgs =
+                                if schemeArity == 0
+                                    then Nothing
+                                    else inferAuthoritativeInstArgs namedSetReify ew si
+                            authoritativeArgs =
+                                case targetArgs of
+                                    Just inferred -> Just inferred
+                                    Nothing -> traceArgs
+                            shouldRefine =
+                                instNeedsAuthoritativeRefinement phi
+                                    || case targetTy of
+                                        Just ty -> not (alphaEqType ty (schemeToType (siScheme si)))
+                                        Nothing -> phi == InstId
                         case debugGeneralize
-                            ("reifyInst fallback edge=" ++ show eid
-                                ++ " argNodes=" ++ show argNodes
-                                ++ " fallbackOk=" ++ show fallbackOk
-                                ++ " tracePairCount=" ++ show tracePairCount
-                                ++ " traceBinderArity=" ++ show traceBinderArity
+                            ("reifyInst authoritative edge=" ++ show eid
+                                ++ " expansionArity=" ++ show (length args)
                                 ++ " schemeArity=" ++ show schemeArity
-                                ++ " resolvedArgNodes=" ++ show resolvedArgNodes
+                                ++ " targetTy=" ++ show targetTy
                                 ++ " targetArgs=" ++ show targetArgs
+                                ++ " traceArgs=" ++ show traceArgs
+                                ++ " shouldRefine=" ++ show shouldRefine
                             )
                             () of
                             () -> pure ()
-                        if not fallbackOk
-                            then pure Nothing
-                            else do
-                                let argNodes' = fromMaybe argNodes resolvedArgNodes
-                                let substForArgs =
-                                        case mSi of
-                                            Just si -> siSubst si
-                                            Nothing -> IntMap.empty
-                                    reifyArg arg =
-                                        let argC = canonical arg
-                                        in case chiLookupVarBound argC of
-                                            Just bnd -> reifyBoundWithNames presolutionView substForArgs bnd
-                                            Nothing -> reifyTypeWithNamedSetNoFallback presolutionView substForArgs namedSetReify argC
-                                argTys <- case targetArgs of
-                                    Just inferred -> pure inferred
-                                    Nothing -> mapM reifyArg argNodes'
-                                let argTys' = map (inlineBoundVarsType presolutionView) argTys
-                                case debugGeneralize
-                                    ("reifyInst fallback edge=" ++ show eid
-                                        ++ " argTys=" ++ show argTys
-                                        ++ " argTys'=" ++ show argTys'
-                                    )
-                                    () of
-                                    () -> pure ()
-                                pure (Just (instSeqApps argTys'))
+                        case authoritativeArgs of
+                            Just (_binds, inferred)
+                                | shouldRefine
+                                , schemeArity > 0
+                                , not (null inferred) ->
+                                    let usableLen = min schemeArity (length inferred)
+                                    in pure
+                                        (Just
+                                            ( instSeqApps
+                                                (map (inlineBoundVarsType presolutionView) (take usableLen inferred))
+                                            )
+                                        )
+                            _
+                                | shouldRefine
+                                , schemeArity > 0 ->
+                                    Left
+                                        (PhiTranslatabilityError
+                                            [ "reifyInst: missing authoritative instantiation translation for edge " ++ show eid
+                                            , "expansion args=" ++ show args
+                                            ]
+                                        )
+                            _ -> pure Nothing
                     _ -> pure Nothing
-                case instFromTrace of
+                case instFromAuthority of
                     Just inst -> Right inst
                     Nothing -> Right phi
 
-    reifyTargetType :: IntSet.IntSet -> EdgeWitness -> SchemeInfo -> Either ElabError ElabType
-    reifyTargetType namedSetReify ew si =
+    inferAuthoritativeInstArgs :: IntSet.IntSet -> EdgeWitness -> SchemeInfo -> Maybe ([(String, Maybe BoundType)], [ElabType])
+    inferAuthoritativeInstArgs namedSetReify ew si =
+        case inferFromNode (ewRight ew) of
+            Just args -> Just args
+            Nothing -> inferFromNode (ewLeft ew)
+      where
+        inferFromNode nid =
+            case reifyTargetType namedSetReify si nid of
+                Right targetTy ->
+                    let (binds, body) = Inst.splitForalls (schemeToType (siScheme si))
+                    in fmap ((,) binds) (inferInstAppArgsFromScheme binds body targetTy)
+                Left _ -> Nothing
+
+    authoritativeTargetType :: IntSet.IntSet -> EdgeWitness -> SchemeInfo -> Maybe ElabType
+    authoritativeTargetType namedSetReify ew si =
+        case reifyTargetNodeType namedSetReify si (ewRight ew) of
+            Right targetTy -> Just targetTy
+            Left _ ->
+                case reifyTargetNodeType namedSetReify si (ewLeft ew) of
+                    Right targetTy -> Just targetTy
+                    Left _ -> Nothing
+
+    reifyTraceBinderInstArgs :: IntSet.IntSet -> SchemeInfo -> [NodeId] -> Maybe ([(String, Maybe BoundType)], [ElabType])
+    reifyTraceBinderInstArgs namedSetReify si nodes0 =
+        let (binds, _) = Inst.splitForalls (schemeToType (siScheme si))
+        in fmap ((,) binds) (mapM reifyArg nodes0)
+      where
+        subst = siSubst si
+        reifyArg nid =
+            let nidC = canonical nid
+                tyE =
+                    case chiLookupVarBound nidC of
+                        Just bnd -> reifyTypeWithNamedSetNoFallback presolutionView subst namedSetReify bnd
+                        Nothing -> reifyTypeWithNamedSetNoFallback presolutionView subst namedSetReify nidC
+            in either (const Nothing) Just tyE
+
+    reifyTargetType :: IntSet.IntSet -> SchemeInfo -> NodeId -> Either ElabError ElabType
+    reifyTargetType namedSetReify si nid =
         let subst = siSubst si
-        in case chiLookupVarBound (ewRight ew) of
-            Just bnd -> reifyTypeWithNamedSetNoFallback presolutionView subst namedSetReify bnd
-            Nothing -> reifyTypeWithNamedSetNoFallback presolutionView subst namedSetReify (ewRight ew)
+            targetNode = schemeBodyTarget presolutionView nid
+        in reifyTypeWithNamedSetNoFallback presolutionView subst namedSetReify targetNode
+
+    reifyTargetNodeType :: IntSet.IntSet -> SchemeInfo -> NodeId -> Either ElabError ElabType
+    reifyTargetNodeType namedSetReify si nid =
+        let subst = siSubst si
+            targetNode = canonical nid
+        in reifyTypeWithNamedSetNoFallback presolutionView subst namedSetReify targetNode
 
     inferInstAppArgs :: ElabScheme -> ElabType -> Maybe [ElabType]
     inferInstAppArgs scheme targetTy =
         let (binds, body) = Inst.splitForalls (schemeToType scheme)
-            binderNames = map fst binds
-        in case matchType (Set.fromList binderNames) body targetTy of
-            Left _ -> Nothing
-            Right subst ->
-                if all (`Map.member` subst) binderNames
-                    then Just [ty | name <- binderNames, Just ty <- [Map.lookup name subst]]
-                    else Nothing
+        in inferInstAppArgsFromScheme binds body targetTy
 
-    fallbackProvenanceArityOk :: Maybe EdgeTrace -> Maybe SchemeInfo -> [NodeId] -> Bool
-    fallbackProvenanceArityOk mTrace mSi argNodes =
-        case mTrace of
-            Just tr
-                | not (null (etBinderArgs tr)) ->
-                    let pairCount = length (etBinderArgs tr)
-                        binderArity =
-                            IntSet.size $
-                                IntSet.fromList
-                                    [ getNodeId binder
-                                    | (binder, _arg) <- etBinderArgs tr
-                                    ]
-                        schemeArityOk =
-                            case mSi of
-                                Nothing -> True
-                                Just si ->
-                                    case siScheme si of
-                                        Forall binds _ -> length binds == binderArity
-                    in pairCount == binderArity
-                        && length argNodes == binderArity
-                        && schemeArityOk
-            _ ->
-                case mSi of
-                    Nothing -> True
-                    Just si ->
-                        case siScheme si of
-                            Forall binds _ -> length argNodes == length binds
-
-    resolveFallbackArgNodes :: Maybe EdgeTrace -> [NodeId] -> Maybe [NodeId]
-    resolveFallbackArgNodes mTrace = mapM (resolveFallbackArgNode mTrace)
-
-    resolveFallbackArgNode :: Maybe EdgeTrace -> NodeId -> Maybe NodeId
-    resolveFallbackArgNode mTrace arg =
-        listToMaybe
-            [ canonical cand
-            | cand <- fallbackArgCandidates mTrace arg
-            , nodeExists cand
-            ]
+    instNeedsAuthoritativeRefinement :: Instantiation -> Bool
+    instNeedsAuthoritativeRefinement inst =
+        case collectApps inst of
+            Just tys -> any isPlaceholderTy tys
+            Nothing -> False
       where
-        nodeExists nid =
-            isJust (chiLookupNode (canonical nid))
+        isPlaceholderTy ty = case ty of
+            TVar _ -> True
+            _ -> False
+        collectApps inner = case inner of
+            InstId -> Just []
+            InstApp ty -> Just [ty]
+            InstSeq a b -> (++) <$> collectApps a <*> collectApps b
+            _ -> Nothing
 
-    fallbackArgCandidates :: Maybe EdgeTrace -> NodeId -> [NodeId]
-    fallbackArgCandidates mTrace arg =
-        reverse candidatesRev
-      where
-        key = getNodeId arg
-        keyC = getNodeId (canonical arg)
-        traceForward nid =
-            case mTrace of
-                Nothing -> []
-                Just tr -> maybe [] pure (lookupCopy nid (etCopyMap tr))
-        traceReverseByKey k =
-            case mTrace of
-                Nothing -> []
-                Just tr ->
-                    [ NodeId src
-                    | (src, dst) <- IntMap.toList (getCopyMapping (etCopyMap tr))
-                    , getNodeId dst == k
-                    ]
-        rawCandidates =
-            [arg, canonical arg]
-                ++ traceForward arg
-                ++ traceForward (canonical arg)
-                ++ traceReverseByKey key
-                ++ traceReverseByKey keyC
-        (candidatesRev, _) =
-            foldl'
-                (\(acc, seen) nid ->
-                    let k = getNodeId nid
-                    in if IntSet.member k seen
-                        then (acc, seen)
-                        else (nid : acc, IntSet.insert k seen)
-                )
-                ([], IntSet.empty)
-                rawCandidates
 
 instSeqApps :: [ElabType] -> Instantiation
 instSeqApps tys = case map InstApp tys of
