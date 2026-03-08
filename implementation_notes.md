@@ -1,3 +1,9 @@
+### 2026-03-09 presolution internal export-surface cleanup
+
+- Retired stale internal presolution re-export surfaces so `MLF.Constraint.Presolution.Driver` no longer re-exports `processInstEdge` and `MLF.Constraint.Presolution.EdgeProcessing` no longer re-exports solve-owned helper operations.
+- Kept the public `MLF.Constraint.Presolution` boundary unchanged so the test/runtime-facing `processInstEdge` surface still comes from the actual `EdgeProcessing` owner module.
+- Added a focused source guard to keep those stale internal export surfaces from reappearing while preserving the existing public Phase 4 boundary shape.
+
 ### 2026-03-09 delayed-weaken owner-boundary surface cleanup
 
 - Retired the dead `flushPendingWeakens` flush-all entrypoint from `MLF.Constraint.Presolution.EdgeUnify` now that owner-boundary delayed-weaken scheduling is the only live presolution drain path.

@@ -436,6 +436,17 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             edgeSrc `shouldSatisfy` (not . isInfixOf "forM_ owners flushPendingWeakensAtOwnerBoundary")
             edgeSrc `shouldSatisfy` isInfixOf "let boundaryOwner = pendingWeakenOwnerFromMaybe mbCurrentOwner"
 
+        it "presolution internal export surface guard: Driver and EdgeProcessing expose only their owned helpers" $ do
+            driverSrc <- readFile "src/MLF/Constraint/Presolution/Driver.hs"
+            edgeSrc <- readFile "src/MLF/Constraint/Presolution/EdgeProcessing.hs"
+            presolutionSrc <- readFile "src/MLF/Constraint/Presolution.hs"
+            driverSrc `shouldSatisfy` (not . isInfixOf "processInstEdge,")
+            edgeSrc `shouldSatisfy` (not . isInfixOf "unifyStructure,")
+            edgeSrc `shouldSatisfy` (not . isInfixOf "recordEdgeWitness,")
+            edgeSrc `shouldSatisfy` (not . isInfixOf "recordEdgeTrace,")
+            edgeSrc `shouldSatisfy` (not . isInfixOf "canonicalizeEdgeTraceInteriorsM,")
+            presolutionSrc `shouldSatisfy` isInfixOf "processInstEdge,"
+
         it "row4 per-edge propagation thesis-exact guard: Interpreter removes synthesized-wrapper branch markers" $ do
             interpSrc <- readFile "src/MLF/Constraint/Presolution/EdgeProcessing/Interpreter.hs"
             forM_
