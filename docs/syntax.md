@@ -2,9 +2,9 @@
 
 This document is the syntax source of truth for parser and pretty-printer behavior.
 
-## Current Implemented Syntax (As-Is, pre-canonical migration)
+## Transition Compatibility Reference
 
-Legacy `MLF.Elab.Types.Pretty` output that existed before this migration:
+Canonical xMLF pretty-printers now emit the paper-aligned syntax described below. The legacy `MLF.Elab.Types.Pretty` output is retained here only as a parser-compatibility reference; current internal and CLI pretty-print paths no longer emit these spellings.
 
 ### Legacy Type Syntax
 

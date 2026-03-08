@@ -3,6 +3,9 @@
 ## Unreleased
 
 ### Changed
+- Closed the stale legacy-syntax stretch TODO and refreshed syntax wording (2026-03-08):
+  - confirmed xMLF pretty emitters and elaboration display paths already emit canonical syntax via `MLF.XMLF.Pretty` / `MLF.Elab.Types`;
+  - updated `docs/syntax.md` to describe legacy spellings as parser-only transition syntax instead of an active migration state.
 - Closed the narrowed Task 46 elaboration-input strictness follow-up (2026-03-08):
   - made `MLF.Elab.Elaborate.scopeRootFromBase` propagate base binding-path failures instead of falling back to `typeRef root`;
   - added `PipelineSpec` guard coverage for the retired `Left _ -> typeRef root` fallback;
