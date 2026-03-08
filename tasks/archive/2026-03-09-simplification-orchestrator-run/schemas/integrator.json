@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["branch_name","worktree_path","commit_hash","merge_result","commands_run"],
+  "properties": {
+    "branch_name": {"type": "string"},
+    "worktree_path": {"type": "string"},
+    "commit_hash": {"type": "string"},
+    "merge_result": {"type": "string"},
+    "commands_run": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,23 @@
+title:
+Collapse the unused `MLF.Constraint.Presolution.Core` facade; it is a small, worthwhile cleanup, but low priority.
+
+problem:
+`src/MLF/Constraint/Presolution/Core.hs` no longer provides real architectural value: it only re-exports symbols from `Driver`, `Expansion`, `EdgeUnify`, and `Unify`; `src/MLF/Constraint/Presolution.hs` is its only importer; and the “kept for tests and internal tooling” rationale appears stale given the current repo search.
+
+why_this_is_simpler:
+Removing `Core` deletes one indirection layer from the presolution public entrypoint, makes `src/MLF/Constraint/Presolution.hs` import the real implementation modules directly, removes one Cabal-managed internal module, and aligns the code with the already-completed trend of trimming compatibility facades that no longer carry distinct behavior.
+
+why_thesis_exactness_should_be_preserved:
+This is a module-wiring refactor, not an algorithm change. If `MLF.Constraint.Presolution` keeps exporting the same functions from the same underlying implementation modules, the presolution pipeline, witness handling, and expansion logic remain identical, so thesis-faithful behavior should be preserved exactly.
+
+likely_files:
+`src/MLF/Constraint/Presolution/Core.hs`, `src/MLF/Constraint/Presolution.hs`, `mlf2.cabal`, and likely comment-only cleanup in `src/MLF/Constraint/Presolution/Expansion.hs`, `src/MLF/Constraint/Presolution/EdgeUnify.hs`, `src/MLF/Constraint/Presolution/ForallIntro.hs`, `src/MLF/Constraint/Presolution/Witness.hs`, `src/MLF/Constraint/Presolution/Ops.hs`.
+
+expected_benefits:
+Slightly clearer module boundaries; one fewer compatibility surface to maintain; fewer stale comments/rationales; easier navigation from the public presolution module to the actual implementation modules; consistency with the repo’s recent duplicate-wrapper cleanup direction.
+
+risks:
+The payoff is modest, so it is easy to overvalue; removal touches import/export wiring and Cabal bookkeeping, which can cause trivial breakage if any hidden downstream/internal consumer was missed; some module headers currently describe being “extracted from `Core`”, so doc drift must be cleaned up at the same time.
+
+required_validation:
+At minimum, rerun a repo search for `MLF.Constraint.Presolution.Core`, then run `cabal build` to catch import/Cabal regressions. If actually merged as a code change, `cabal test` is the appropriate full confirmation because this should be behavior-preserving rather than semantics-changing.

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["decision", "reason"],
+  "properties": {
+    "decision": {"type": "string", "enum": ["YES", "NO"]},
+    "reason": {"type": "string"},
+    "PLAN_DELTA": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["what_failed", "what_changes_now", "why_next_attempt_should_work"],
+      "properties": {
+        "what_failed": {"type": "string"},
+        "what_changes_now": {"type": "string"},
+        "why_next_attempt_should_work": {"type": "string"}
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"decision": {"const": "NO"}}},
+      "then": {"required": ["PLAN_DELTA"]}
+    }
+  ]
+}

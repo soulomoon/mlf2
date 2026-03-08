@@ -1,0 +1,10 @@
+You are the QA agent for round 1 attempt 1.
+Use only the evidence in this prompt. Do not use shell commands.
+
+Evidence:
+- Implementer result JSON:
+{"feasible":"NO","meaningful_diff":"NO","blockers":["Current plan JSON is `null`, so there are no concrete implementation steps to execute without exceeding scope.","The repository root `task_plan.md` describes an unrelated analysis task, so it cannot safely substitute for the missing round-1 attempt-1 plan.","Inspected the worktree diff before finishing; the tree is clean (`git diff --stat`, `git diff --cached --stat`, `git status --short`)."],"files_changed":[],"change_summary":["Reviewed the repo instructions, active task files, and worktree state.","Made no changes because there is no safe, plan-scoped implementation to apply from a `null` plan payload."]}
+- Scratch worktree status count after attempt 1: 1 changed paths.
+- Because the implementer received a null plan and made no diff, no plan-scoped validation commands were run.
+
+Return JSON only matching the QA schema. If there is no meaningful implementation to validate, answer NO and explain that the attempt failed before validation.

@@ -1,0 +1,11 @@
+{
+  "gate": "YES",
+  "reason": "This simplification is still needed because the duplicate snapshot-UF sanitization/canonicalization prelude is still live in both `Finalize` and `Presolution.View`, and `presolutionViewFromSnapshot` currently has an awkward build-then-override shape that directly signals extractable shared setup. The competing simplifications are either already stale or intentionally non-duplicative, so this remains the strongest bounded cleanup. The extraction should stay narrow—share only the snapshot preparation, not the final canonical-constraint semantics—to preserve the current thesis-sensitive distinction between presolution-view rewriting and finalized/repaired constraint construction.",
+  "evidence": [
+    "`src/MLF/Constraint/Finalize.hs` exports `stepSanitizeSnapshotUf`, `stepCanonicalizeConstraint`, and `presolutionViewFromSnapshot`, while `src/MLF/Constraint/Presolution/View.hs` still defines its own `sanitizeSnapshotUf` and `fromPresolutionResult` path.",
+    "`Finalize.presolutionViewFromSnapshot` currently calls `fromPresolutionResult` and then overrides `pvCanonicalConstraint`, which shows a shared snapshot-prelude is being recomputed while the final canonical-constraint policy intentionally differs.",
+    "Candidate 1 is stale in the current codebase: `TODO.md` now focuses on the restricted `Solved` facade, `Bugs.md` has no open bugs, and `src/MLF/Constraint/Solved.hs` no longer exports `allNodes` or `instEdges`.",
+    "Candidate 3 is weaker because `ResultType/Fallback.hs` explicitly describes `computeResultTypeFromAnnLocal` as a local simplified helper to avoid circular imports, not a drop-in duplicate of `Ann.computeResultTypeFromAnn`.",
+    "The evidence packet explicitly flags the thesis-exactness constraint: any extraction must preserve the current distinction between raw snapshot rewriting and finalized/repaired canonical constraints."
+  ]
+}

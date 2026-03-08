@@ -1,0 +1,1 @@
+{"gate":"YES","commands_run":["cabal test mlf2-test --test-show-details=direct --test-options='--match \"PresolutionView mirrors solved canonical/node/bound queries\"'","cabal test mlf2-test --test-show-details=direct --test-options='--match \"fromSolveOutput matches explicit pre-rewrite snapshot construction\"'","cabal build all && cabal test"],"failures_if_any":[]}

@@ -1,0 +1,7 @@
+{
+  "gate": "NO",
+  "commands_run": [],
+  "failures_if_any": [
+    "QA schema output missing; no validation executed"
+  ]
+}
