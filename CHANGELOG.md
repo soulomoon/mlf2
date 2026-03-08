@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Changed
+- Shared the snapshot canonicalization preparation prelude between `MLF.Constraint.Presolution.View` and `MLF.Constraint.Finalize` without changing thesis-facing semantics (2026-03-09):
+  - extracted one shared preparation path for dead/self UF sanitization plus canonical map/query derivation from the sanitized UF;
+  - kept the intentional canonical-constraint split intact, with `fromPresolutionResult` still doing raw snapshot rewrite and finalize entrypoints still using repaired/finalized canonical-constraint construction;
+  - removed the finalize build-then-override `PresolutionView` construction shape while preserving the existing parity/finalization behavior;
+  - verified `PresolutionView mirrors solved canonical/node/bound queries` (`1 example, 0 failures`), `fromSolveOutput matches explicit pre-rewrite snapshot construction` (`1 example, 0 failures`), `cabal test --test-show-details=direct`, and `cabal build all && cabal test`.
 - Closed the stale legacy-syntax stretch TODO and refreshed syntax wording (2026-03-08):
   - confirmed xMLF pretty emitters and elaboration display paths already emit canonical syntax via `MLF.XMLF.Pretty` / `MLF.Elab.Types`;
   - updated `docs/syntax.md` to describe legacy spellings as parser-only transition syntax instead of an active migration state.
