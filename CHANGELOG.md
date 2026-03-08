@@ -530,3 +530,4 @@
 ## 0.1.0.0 -- YYYY-mm-dd
 
 * First version. Released on an unsuspecting world.
+- single-sourced the result-type bound-overlay `PresolutionView` query path through `MLF.Elab.Run.ResultType.View` and removed the duplicate fallback-local overlay rebuild.
