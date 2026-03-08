@@ -1,3 +1,9 @@
+### 2026-03-09 delayed-weaken owner-boundary surface cleanup
+
+- Retired the dead `flushPendingWeakens` flush-all entrypoint from `MLF.Constraint.Presolution.EdgeUnify` now that owner-boundary delayed-weaken scheduling is the only live presolution drain path.
+- Kept `flushPendingWeakensAtOwnerBoundary` and the owner lookup helpers as the authoritative pending-weaken API surface; `EdgeProcessing` scheduling semantics stay unchanged.
+- Tightened the row3 guard slices so they continue asserting owner-boundary scheduling markers and additionally forbid the legacy flush-all helper from reappearing in `EdgeUnify`.
+
 ### 2026-03-08 snapshot preparation single-owner cleanup
 
 - Extracted the shared snapshot-preparation prelude for `PresolutionView` / finalize construction into `MLF.Constraint.Presolution.View` as `SnapshotPreparation`, `prepareSnapshotPreparation`, `prepareSnapshotPreparationFromParts`, and `buildPresolutionView`.

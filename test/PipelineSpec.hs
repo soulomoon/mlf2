@@ -406,8 +406,17 @@ spec = describe "Pipeline (Phases 1-5)" $ do
 
         it "row3 ordering thesis-exact guard: EdgeProcessing flushes delayed weakens at each edge boundary" $ do
             edgeSrc <- readFile "src/MLF/Constraint/Presolution/EdgeProcessing.hs"
-            edgeSrc `shouldSatisfy` isInfixOf "flushPendingWeakens"
+            edgeSrc `shouldSatisfy` isInfixOf "flushPendingWeakensAtOwnerBoundary"
             edgeSrc `shouldSatisfy` isInfixOf "assertNoPendingUnifyEdges \"after-inst-edge-closure\""
+
+        it "row3 ordering thesis-exact guard: EdgeUnify no longer exposes the legacy flush-all helper" $ do
+            edgeUnifySrc <- readFile "src/MLF/Constraint/Presolution/EdgeUnify.hs"
+            forM_
+                [ "flushPendingWeakens,"
+                , "flushPendingWeakens :: PresolutionM ()"
+                , "flushPendingWeakens = flushPendingWeakensWhere (const True)"
+                ] $ \marker ->
+                    edgeUnifySrc `shouldSatisfy` (not . isInfixOf marker)
 
         it "row3 absolute thesis-exact guard: EdgeProcessing forbids loop-final weaken flush fallback" $ do
             edgeSrc <- readFile "src/MLF/Constraint/Presolution/EdgeProcessing.hs"

@@ -214,6 +214,15 @@ spec = describe "Phase 4 thesis-exact unification closure" $ do
             ] $ \marker ->
                 edgeSrc `shouldSatisfy` isInfixOf marker
 
+    it "row3 absolute thesis-exact guard: unification closure retires the legacy flush-all entrypoint" $ do
+        edgeUnifySrc <- readFile "src/MLF/Constraint/Presolution/EdgeUnify.hs"
+        forM_
+            [ "flushPendingWeakens,"
+            , "flushPendingWeakens :: PresolutionM ()"
+            , "flushPendingWeakens = flushPendingWeakensWhere (const True)"
+            ] $ \marker ->
+                edgeUnifySrc `shouldSatisfy` (not . isInfixOf marker)
+
     it "row3 absolute thesis-exact guard: unification closure forbids flush-all-owner boundary fallback" $ do
         edgeSrc <- readFile "src/MLF/Constraint/Presolution/EdgeProcessing.hs"
         edgeSrc `shouldSatisfy` (not . isInfixOf "forM_ owners flushPendingWeakensAtOwnerBoundary")
