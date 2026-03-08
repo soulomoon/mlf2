@@ -1,3 +1,9 @@
+### 2026-03-08 snapshot preparation single-owner cleanup
+
+- Extracted the shared snapshot-preparation prelude for `PresolutionView` / finalize construction into `MLF.Constraint.Presolution.View` as `SnapshotPreparation`, `prepareSnapshotPreparation`, `prepareSnapshotPreparationFromParts`, and `buildPresolutionView`.
+- `MLF.Constraint.Finalize` now reuses that shared preparation instead of maintaining a second UF-sanitization/live-node-filter copy or rebuilding a raw view just to override `pvCanonicalConstraint`.
+- The raw-vs-finalized canonical-constraint split remains intentional: `fromPresolutionResult` still uses raw `rewriteConstraintWithUF`, while finalize paths still use repaired/finalized constraint construction.
+
 ### 2026-03-08 remaining fallback-removal closeout
 
 - Removed the last GA→no-GA→reify retry ladders from the active elaboration/runtime entrypoints. `SchemeFreeVars` is now surfaced directly rather than retried through weaker generalization or raw reify routes.
@@ -130,6 +136,16 @@
   - `Frontend eMLF parser` — PASS (`30 examples, 0 failures`)
   - `xMLF parser` — PASS (`8 examples, 0 failures`)
   - `cabal build all && cabal test` — PASS (`976 examples, 0 failures`)
+
+### 2026-03-09 snapshot canonicalization prelude extraction
+- Shared the snapshot-UF preparation seam between `MLF.Constraint.Presolution.View` and `MLF.Constraint.Finalize` by extracting one `SnapshotPreparation` path that sanitizes dead/self union-find entries once and derives the canonical map/query function from that sanitized UF.
+- Kept the thesis-sensitive canonical-constraint split unchanged: `fromPresolutionResult` still uses raw `rewriteConstraintWithUF`, while finalize entrypoints still use `repairNonUpperParents` / `finalizeConstraintWithUF` for their canonical constraints.
+- Removed the old finalize build-then-override shape so snapshot-driven finalize views now reuse the shared preparation directly instead of constructing a raw `PresolutionView` only to replace `pvCanonicalConstraint`.
+- Verification:
+  - `PresolutionView mirrors solved canonical/node/bound queries` — PASS (`1 example, 0 failures`)
+  - `fromSolveOutput matches explicit pre-rewrite snapshot construction` — PASS (`1 example, 0 failures`)
+  - `cabal test --test-show-details=direct` — PASS
+  - `cabal build all && cabal test` — PASS
 
 ### 2026-03-08 canonicalization helper extraction
 - Extracted the duplicated canonicalization helpers shared by `MLF.Constraint.Solved` and `MLF.Constraint.Presolution.View` into `MLF.Constraint.Canonicalization.Shared`.

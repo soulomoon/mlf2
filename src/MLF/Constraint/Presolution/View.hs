@@ -1,7 +1,11 @@
 module MLF.Constraint.Presolution.View (
     PresolutionView(..),
+    SnapshotPreparation(..),
+    buildPresolutionView,
     fromPresolutionResult,
-    fromSolved
+    fromSolved,
+    prepareSnapshotPreparation,
+    prepareSnapshotPreparationFromParts
 ) where
 
 import Data.IntMap.Strict (IntMap)
@@ -33,22 +37,18 @@ data PresolutionView = PresolutionView
     , pvCanonicalConstraint :: Constraint
     }
 
+-- | Shared snapshot preparation for presolution/finalize view construction.
+data SnapshotPreparation = SnapshotPreparation
+    { spConstraint :: Constraint
+    , spSanitizedUf :: IntMap NodeId
+    , spCanonicalMap :: IntMap NodeId
+    , spCanonical :: NodeId -> NodeId
+    }
+
 fromPresolutionResult :: PresolutionSnapshot a => a -> PresolutionView
 fromPresolutionResult pres =
-    let constraint = snapshotConstraint pres
-        uf = sanitizeSnapshotUf constraint (snapshotUnionFind pres)
-        canonMap = buildCanonicalMap uf constraint
-        canonical = equivCanonical canonMap
-    in PresolutionView
-        { pvConstraint = constraint
-        , pvCanonicalMap = canonMap
-        , pvCanonical = canonical
-        , pvLookupNode = \nid -> NodeAccess.lookupNode constraint (canonical nid)
-        , pvLookupVarBound = \nid -> NodeAccess.lookupVarBound constraint (canonical nid)
-        , pvLookupBindParent = NodeAccess.lookupBindParent constraint
-        , pvBindParents = cBindParents constraint
-        , pvCanonicalConstraint = rewriteConstraintWithUF uf constraint
-        }
+    let prepared = prepareSnapshotPreparation pres
+    in buildPresolutionView prepared (rewriteConstraintWithUF (spSanitizedUf prepared) (spConstraint prepared))
 
 fromSolved :: Solved.Solved -> PresolutionView
 fromSolved solved =
@@ -63,6 +63,36 @@ fromSolved solved =
         , pvLookupBindParent = NodeAccess.lookupBindParent constraint
         , pvBindParents = cBindParents constraint
         , pvCanonicalConstraint = Solved.canonicalConstraint solved
+        }
+
+prepareSnapshotPreparation :: PresolutionSnapshot a => a -> SnapshotPreparation
+prepareSnapshotPreparation pres =
+    prepareSnapshotPreparationFromParts (snapshotConstraint pres) (snapshotUnionFind pres)
+
+prepareSnapshotPreparationFromParts :: Constraint -> IntMap NodeId -> SnapshotPreparation
+prepareSnapshotPreparationFromParts constraint uf =
+    let ufSanitized = sanitizeSnapshotUf constraint uf
+        canonMap = buildCanonicalMap ufSanitized constraint
+    in SnapshotPreparation
+        { spConstraint = constraint
+        , spSanitizedUf = ufSanitized
+        , spCanonicalMap = canonMap
+        , spCanonical = equivCanonical canonMap
+        }
+
+buildPresolutionView :: SnapshotPreparation -> Constraint -> PresolutionView
+buildPresolutionView prepared canonicalConstraint =
+    let constraint = spConstraint prepared
+        canonical = spCanonical prepared
+    in PresolutionView
+        { pvConstraint = constraint
+        , pvCanonicalMap = spCanonicalMap prepared
+        , pvCanonical = canonical
+        , pvLookupNode = \nid -> NodeAccess.lookupNode constraint (canonical nid)
+        , pvLookupVarBound = \nid -> NodeAccess.lookupVarBound constraint (canonical nid)
+        , pvLookupBindParent = NodeAccess.lookupBindParent constraint
+        , pvBindParents = cBindParents constraint
+        , pvCanonicalConstraint = canonicalConstraint
         }
 
 sanitizeSnapshotUf :: Constraint -> IntMap NodeId -> IntMap NodeId
