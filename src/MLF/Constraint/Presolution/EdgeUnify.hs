@@ -16,7 +16,6 @@ module MLF.Constraint.Presolution.EdgeUnify (
     EdgeUnifyM,
     MonadEdgeUnify(..),
     executeEdgeLocalOmegaOps,
-    flushPendingWeakens,
     flushPendingWeakensAtOwnerBoundary,
     pendingWeakenOwners,
     pendingWeakenOwnerForNode,
@@ -286,16 +285,11 @@ pendingWeakenOwners = do
             Nothing -> pendingWeakenOwnerForNode (NodeId nidInt)
     pure (nub owners)
 
-flushPendingWeakens :: PresolutionM ()
-flushPendingWeakens = flushPendingWeakensWhere (const True)
-
 -- | Flush delayed `Weaken` operations for one owner boundary.
 --
--- Compatibility-first migration behavior:
+-- Owner-boundary scheduling behavior:
 -- * pending nodes owned by the given boundary owner are flushed now
 -- * all other pending nodes remain queued
---
--- The legacy entrypoint `flushPendingWeakens` still flushes every owner.
 flushPendingWeakensAtOwnerBoundary :: PendingWeakenOwner -> PresolutionM ()
 flushPendingWeakensAtOwnerBoundary owner =
     flushPendingWeakensWhere shouldFlush
