@@ -34,3 +34,16 @@
   - `/Volumes/src/mlf4/tasks/todo/2026-03-05-elaboration-input-witness-authoritative-agent-team-plan/task_plan.md`
   - `/Volumes/src/mlf4/tasks/todo/2026-03-05-elaboration-input-witness-authoritative-agent-team-plan/findings.md`
   - `/Volumes/src/mlf4/tasks/todo/2026-03-05-elaboration-input-witness-authoritative-agent-team-plan/progress.md`
+
+## 2026-03-08 narrowing update
+
+- `TODO.md` narrowed this task on 2026-03-08 after Task 70 removed the other live fallback ladders originally listed here.
+- Items 2-5 above are now closed by later work and should no longer be treated as active residual gaps for this task.
+- The remaining live code gap is item 1 only: `src/MLF/Elab/Elaborate.hs:110` still swallows base binding-path failures with `Left _ -> typeRef root`.
+- The planned regression `elab-input witness-authoritative guard` is still missing from the test suite (`--match` currently yields `0 examples, 0 failures`), so any future closeout should add a focused guard before or alongside removing the fallback.
+
+## 2026-03-08 closeout
+
+- The narrowed follow-up is now complete: `src/MLF/Elab/Elaborate.hs` no longer swallows `bindingPathToRootLocal` failure as `typeRef root`.
+- `test/PipelineSpec.hs` now includes `elab-input witness-authoritative guard` to keep that fallback retired.
+- Verification passed for the new guard, the existing row-1 strictness slices, and the full Cabal gate (`1005 examples, 0 failures`).

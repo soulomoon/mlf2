@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Changed
+- Closed the narrowed Task 46 elaboration-input strictness follow-up (2026-03-08):
+  - made `MLF.Elab.Elaborate.scopeRootFromBase` propagate base binding-path failures instead of falling back to `typeRef root`;
+  - added `PipelineSpec` guard coverage for the retired `Left _ -> typeRef root` fallback;
+  - verified `elab-input witness-authoritative guard` (`1 example, 0 failures`), `elab-input absolute thesis-exact guard` (`1 example, 0 failures`), `checked-authoritative` (`9 examples, 0 failures`), `Dual-path verification` (`4 examples, 0 failures`), and `cabal build all && cabal test` (`1005 examples, 0 failures`).
 - Single-sourced `schemeBodyTarget` ownership in `MLF.Elab.Run.Scope` (2026-03-08):
   - removed the duplicate local `schemeBodyTarget` helper from `MLF.Elab.Elaborate`;
   - kept `schemeBodyTarget` as the thesis `S′`-style subterm target selector and added `generalizeTargetNode` alongside it for the `S`-style named-node generalization case needed by nested-let / alias elaboration;

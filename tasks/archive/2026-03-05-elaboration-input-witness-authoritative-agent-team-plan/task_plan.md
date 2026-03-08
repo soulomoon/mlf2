@@ -14,7 +14,7 @@
 - Update root `TODO.md` with the new planning item.
 
 ## Current Phase
-Planning complete; awaiting execution selection.
+Implementation complete; verification passed and task ready for archive.
 
 ## Phase Status
 | Phase | Description | Status |
@@ -24,8 +24,10 @@ Planning complete; awaiting execution selection.
 | 2 | Initialize task tracking artifacts under `tasks/todo/...` | complete |
 | 3 | Sync root `TODO.md` with new plan priority | complete |
 | 4 | Ready for execution with agent teams | complete |
+| 5 | Execute narrowed strictness follow-up | complete |
 
 ## Decisions
+| 2026-03-08 narrowed execution | Execute only the residual `Elaborate` scope-root fallback removal plus a focused guard, because Task 70 already closed the broader fallback campaign. |
 | Decision | Rationale |
 |---|---|
 | Treat this as a fresh strictness wave despite prior "absolute" closeout | Live code re-audit found additional fallback mechanisms not covered by prior absolute guard markers. |
