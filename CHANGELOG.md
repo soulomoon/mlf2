@@ -532,4 +532,5 @@
 
 * First version. Released on an unsuspecting world.
 - single-sourced the result-type bound-overlay `PresolutionView` query path through `MLF.Elab.Run.ResultType.View` and removed the duplicate fallback-local overlay rebuild.
+- narrowed `MLF.Elab.Run.ResultType.View` to overlay-aware queries only and removed the remaining pass-through accessor scaffolding from result-type runtime call sites.
 - retire the thin `EdgeProcessing.Witness` wrapper so per-edge witness/trace assembly is single-sourced under `MLF.Constraint.Presolution.Witness`;

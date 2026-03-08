@@ -72,14 +72,14 @@ computeResultTypeFromAnn
 computeResultTypeFromAnn ctx inner innerPre annNodeId eid = do
     view <- View.buildResultTypeView ctx
     let presolutionViewForGen = rtcPresolutionView ctx
-        canonical = View.rtvCanonical view
-        edgeWitnesses = View.rtvEdgeWitnesses view
-        edgeTraces = View.rtvEdgeTraces view
-        bindParentsGa = View.rtvBindParentsGa view
-        planBuilder = View.rtvPlanBuilder view
-        c1 = View.rtvBaseConstraint view
-        redirects = View.rtvRedirects view
-        traceCfg = View.rtvTraceConfig view
+        canonical = rtcCanonical ctx
+        edgeWitnesses = rtcEdgeWitnesses ctx
+        edgeTraces = rtcEdgeTraces ctx
+        bindParentsGa = rtcBindParentsGa ctx
+        planBuilder = rtcPlanBuilder ctx
+        c1 = rtcBaseConstraint ctx
+        redirects = rtcRedirects ctx
+        traceCfg = rtcTraceConfig ctx
         generalizeAtWith mbGa =
             generalizeAtWithBuilder planBuilder mbGa presolutionViewForGen
 
