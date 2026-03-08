@@ -66,8 +66,8 @@ inferInstAppArgsFromScheme binds body targetTy =
                                 _
                                     | alphaEqType bodyDom targetDom -> Just substAcc
                                     | otherwise -> Nothing
-                        go substAcc bodyTy targetTy =
-                            case (bodyTy, targetTy) of
+                        go substAcc bodyTy targetTy' =
+                            case (bodyTy, targetTy') of
                                 (TArrow bodyDom bodyCod, TArrow targetDom targetCod) -> do
                                     substNext <- bindDomain substAcc bodyDom targetDom
                                     go substNext bodyCod targetCod
