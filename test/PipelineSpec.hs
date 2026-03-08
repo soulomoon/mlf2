@@ -1587,19 +1587,6 @@ noExpNodes nodes =
 baseNames :: NodeMap TyNode -> [BaseTy]
 baseNames nodes = [ b | TyBase _ b <- map snd (toListNode nodes) ]
 
-assertTypeEq :: String -> SurfaceExpr -> ElabType -> ElabType -> Expectation
-assertTypeEq label expr actual expected =
-    unless (actual == expected) $
-        expectationFailure
-            ( label
-                ++ " mismatch.\nexpr: "
-                ++ show expr
-                ++ "\nactual: "
-                ++ pretty actual
-                ++ "\nexpected: "
-                ++ pretty expected
-            )
-
 genClosedWellTypedExpr :: Gen SurfaceExpr
 genClosedWellTypedExpr = do
     n <- chooseInt (-5, 5)
