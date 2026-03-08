@@ -16,7 +16,8 @@ module MLF.Elab.Run.ResultType.View (
     rtvLookupVarBound,
     rtvGenNodes,
     rtvCanonicalBindParents,
-    rtvSchemeBodyTarget
+    rtvSchemeBodyTarget,
+    rtvPresolutionViewOverlay
 ) where
 
 import qualified Data.IntMap.Strict as IntMap

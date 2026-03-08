@@ -49,14 +49,6 @@ import MLF.Elab.Run.ResultType.Util
 import MLF.Elab.Run.ResultType.Types (ResultTypeInputs(..))
 import qualified MLF.Elab.Run.ResultType.View as View
 
-withResultTypeViewOverlay :: ResultTypeInputs -> View.ResultTypeView -> PresolutionView
-withResultTypeViewOverlay ctx view =
-    let presolutionView = rtcPresolutionView ctx
-    in presolutionView
-        { pvLookupNode = View.rtvLookupNode view
-        , pvLookupVarBound = View.rtvLookupVarBound view
-        }
-
 -- | Compute result type when there's no direct annotation (fallback path).
 -- Note: This function handles the non-AAnn case. When the root is an AAnn,
 -- the facade (ResultType.hs) dispatches to computeResultTypeFromAnn instead.
@@ -67,7 +59,7 @@ computeResultTypeFallback
     -> Either ElabError ElabType
 computeResultTypeFallback ctx annCanon ann = do
     view <- View.buildResultTypeView ctx
-    let presolutionViewForGen = withResultTypeViewOverlay ctx view
+    let presolutionViewForGen = View.rtvPresolutionViewOverlay view
     -- Note [Annotated Lambda Result Type]
     -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     -- When we have an annotated lambda like `\x : τ. body`, it desugars to:
@@ -175,7 +167,7 @@ computeResultTypeFallbackCore ctx annCanon ann = do
         edgeWitnesses = View.rtvEdgeWitnesses viewBase
         edgeTraces = View.rtvEdgeTraces viewBase
         edgeExpansions = View.rtvEdgeExpansions viewBase
-        presolutionView = withResultTypeViewOverlay ctx viewBase
+        presolutionView = View.rtvPresolutionViewOverlay viewBase
         bindParentsGa = View.rtvBindParentsGa viewBase
         planBuilder = View.rtvPlanBuilder viewBase
         c1 = View.rtvBaseConstraint viewBase
@@ -494,7 +486,7 @@ computeResultTypeFallbackCore ctx annCanon ann = do
                     case boundTarget of
                         Nothing -> viewBase
                         Just baseN -> View.rtvWithBoundOverlay rootC baseN viewBase
-                presolutionViewFinal = withResultTypeViewOverlay ctx viewFinalBounded
+                presolutionViewFinal = View.rtvPresolutionViewOverlay viewFinalBounded
             let scopeRootNodePre = rootForTypePre
             scopeRootPre <- bindingToElab (resolveCanonicalScope c1 presolutionViewFinal redirects scopeRootNodePre)
             let scopeRootPost =
