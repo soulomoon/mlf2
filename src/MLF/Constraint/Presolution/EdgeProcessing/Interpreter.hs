@@ -25,7 +25,7 @@ import MLF.Constraint.Presolution.EdgeProcessing.Unify (
     EdgeExpansionResult (..),
     runExpansionUnify
     )
-import MLF.Constraint.Presolution.EdgeProcessing.Witness (
+import MLF.Constraint.Presolution.Witness (
     EdgeWitnessPlan (..),
     buildEdgeTrace,
     buildEdgeWitness,
