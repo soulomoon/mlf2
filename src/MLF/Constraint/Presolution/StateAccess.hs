@@ -38,15 +38,6 @@ module MLF.Constraint.Presolution.StateAccess (
     -- * Canonical function access
     getCanonical,
     getConstraintAndCanonical,
-    withCanonical,
-
-    -- * Reader-based canonical environment
-    CanonicalEnv(..),
-    WithCanonicalT,
-    runWithCanonical,
-    askConstraint,
-    askCanonical,
-    canonicalize,
 
     -- * Binding tree operations (lifted to PresolutionM)
     lookupBindParentM,
@@ -56,10 +47,6 @@ module MLF.Constraint.Presolution.StateAccess (
     boundFlexChildrenAllM,
     orderedBindersM,
     checkBindingTreeM,
-
-    -- * Binding tree operations (Reader-based)
-    lookupBindParentR,
-    liftBindingErrorR,
 
     -- * Node lookups with canonicalization
     lookupNodeCanonM,
@@ -77,7 +64,6 @@ module MLF.Constraint.Presolution.StateAccess (
 
 import Control.Monad.State (gets)
 import Control.Monad.Except (throwError)
-import Control.Monad.Reader (ReaderT, runReaderT, asks)
 import qualified Data.IntSet as IntSet
 import Data.IntSet (IntSet)
 
@@ -86,7 +72,6 @@ import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Util.UnionFind as UnionFind
 import MLF.Constraint.Types
 import MLF.Constraint.Presolution.Base (
-    MonadPresolution(throwPresolutionError),
     PendingWeakenOwner(..),
     PresolutionM,
     PresolutionError(..),
@@ -94,76 +79,6 @@ import MLF.Constraint.Presolution.Base (
     bindingPathToRootUnderM,
     pendingWeakenOwnerFromMaybe
     )
-
--- -----------------------------------------------------------------------------
--- Reader-based canonical environment
--- -----------------------------------------------------------------------------
-
--- | Environment containing constraint and canonical function.
---
--- This captures a snapshot of the constraint and union-find state at a point
--- in time. Use 'runWithCanonical' to enter this environment.
---
--- = Design Rationale
---
--- Many functions need to pass @(Constraint, NodeId -> NodeId)@ through nested
--- helpers. Using 'ReaderT' with 'CanonicalEnv' eliminates this threading:
---
--- @
--- -- Before: manual threading
--- checkNodeLocked nid = do
---     (c, canonical) <- getConstraintAndCanonical
---     let lookupParent n = ... Binding.lookupBindParentUnder canonical c ...
---     ...
---
--- -- After: Reader-based
--- checkNodeLocked nid = runWithCanonical $ do
---     let lookupParent n = do
---             mbParent <- lookupBindParentR (typeRef n)
---             ...
---     ...
--- @
-data CanonicalEnv = CanonicalEnv
-    { ceConstraint :: !Constraint
-    , ceCanonical :: !(NodeId -> NodeId)
-    }
-
--- | Monad transformer for computations with canonical environment.
---
--- Use 'runWithCanonical' to enter this monad from 'PresolutionM'.
-type WithCanonicalT m = ReaderT CanonicalEnv m
-
--- | Run a computation with the current constraint and canonical function.
---
--- The environment is captured at the start; if you need fresh state mid-computation,
--- use 'lift getConstraintAndCanonical' or exit and re-enter.
---
--- Example:
--- @
--- checkSomething :: NodeId -> PresolutionM Bool
--- checkSomething nid = runWithCanonical $ do
---     c <- askConstraint
---     canonical <- askCanonical
---     ...
--- @
-runWithCanonical :: WithCanonicalT PresolutionM a -> PresolutionM a
-runWithCanonical action = do
-    (c, canonical) <- getConstraintAndCanonical
-    runReaderT action (CanonicalEnv c canonical)
-
--- | Get the constraint from the environment.
-askConstraint :: Monad m => WithCanonicalT m Constraint
-askConstraint = asks ceConstraint
-
--- | Get the canonical function from the environment.
-askCanonical :: Monad m => WithCanonicalT m (NodeId -> NodeId)
-askCanonical = asks ceCanonical
-
--- | Canonicalize a node ID using the environment's canonical function.
-canonicalize :: Monad m => NodeId -> WithCanonicalT m NodeId
-canonicalize nid = do
-    canonical <- askCanonical
-    pure (canonical nid)
 
 -- -----------------------------------------------------------------------------
 -- Canonical function access
@@ -200,20 +115,6 @@ getConstraintAndCanonical = do
     c <- gets psConstraint
     uf <- gets psUnionFind
     pure (c, UnionFind.frWith uf)
-
--- | Run an action with canonical function and constraint.
---
--- Useful for pure computations that need both values.
---
--- Example:
--- @
--- result <- withCanonical $ \canonical c ->
---     someComputation canonical c nodeId
--- @
-withCanonical :: ((NodeId -> NodeId) -> Constraint -> a) -> PresolutionM a
-withCanonical f = do
-    (c, canonical) <- getConstraintAndCanonical
-    pure (f canonical c)
 
 -- -----------------------------------------------------------------------------
 -- Binding tree operations (lifted to PresolutionM)
@@ -330,38 +231,6 @@ getCanonicalNodeM nid = do
     case NodeAccess.lookupNode c canonNid of
         Just node -> pure node
         Nothing -> throwError $ NodeLookupFailed canonNid
-
--- -----------------------------------------------------------------------------
--- Binding tree operations (Reader-based)
--- -----------------------------------------------------------------------------
-
--- | Lift a BindingError to PresolutionError within WithCanonicalT.
-liftBindingErrorR :: Either BindingError a -> WithCanonicalT PresolutionM a
-liftBindingErrorR = \case
-    Left err -> throwPresolutionError (BindingTreeError err)
-    Right result -> pure result
-
--- | Look up the binding parent of a node within WithCanonicalT.
---
--- This is the Reader-based equivalent of 'lookupBindParentM', useful
--- for nested helpers that need repeated access to the canonical environment.
---
--- Example:
--- @
--- checkNodeLocked nid = runWithCanonical $ do
---     let lookupParent n = do
---             mbParent <- lookupBindParentR (typeRef n)
---             pure $ case mbParent of
---                 Nothing -> Nothing
---                 Just (TypeRef parent, flag) -> Just (parent, flag)
---                 Just (GenRef _, _) -> Nothing
---     ...
--- @
-lookupBindParentR :: NodeRef -> WithCanonicalT PresolutionM (Maybe (NodeRef, BindFlag))
-lookupBindParentR ref = do
-    c <- askConstraint
-    canonical <- askCanonical
-    liftBindingErrorR $ Binding.lookupBindParentUnder canonical c ref
 
 -- -----------------------------------------------------------------------------
 -- Scheme provenance
