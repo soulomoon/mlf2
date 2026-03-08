@@ -75,6 +75,14 @@ computeResultTypeFallback
     -> AnnExpr      -- ^ ann (pre-redirect)
     -> Either ElabError ElabType
 computeResultTypeFallback ctx annCanon ann = do
+    computeResultTypeDispatch ctx annCanon ann
+
+computeResultTypeDispatch
+    :: ResultTypeInputs
+    -> AnnExpr
+    -> AnnExpr
+    -> Either ElabError ElabType
+computeResultTypeDispatch ctx annCanon ann = do
     _view <- View.buildResultTypeView ctx
     -- First, determine the root (same logic as before to check for AAnn)
     let canonical = rtcCanonical ctx
@@ -130,4 +138,4 @@ computeResultTypeFallback ctx annCanon ann = do
                         _ -> rootForTypePreAnn
             computeResultTypeFromAnn ctx inner innerPre annNodeId eid
         _ ->
-            Fallback.computeResultTypeFallback ctx annCanon ann
+            Fallback.computeResultTypeFallback computeResultTypeDispatch ctx annCanon ann
