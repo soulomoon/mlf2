@@ -8,8 +8,8 @@ This module contains the edge-local unification machinery used during
 presolution to execute and witness χe operations (paper `Raise`/`Merge`/`Weaken`)
 while processing a single instantiation edge.
 
-It is extracted from `MLF.Constraint.Presolution.Core` to keep the presolution
-driver cohesive and to avoid further growth in the main phase module.
+It houses the edge-local unification machinery used by the public presolution
+entrypoint so the driver stays cohesive without growing the main phase module.
 -}
 module MLF.Constraint.Presolution.EdgeUnify (
     EdgeUnifyState(..),

@@ -6,8 +6,8 @@ Description : Witness (Ω) helpers for presolution
 This module hosts helper routines for constructing and normalizing the
 instance-operation witnesses that presolution records for later Φ/Σ translation.
 
-These helpers are extracted from `MLF.Constraint.Presolution.Core` so `Core` can
-shrink into a driver/wiring layer over time.
+These helpers keep witness assembly isolated while the public presolution
+entrypoint stays focused on orchestration.
 -}
 module MLF.Constraint.Presolution.Witness (
     binderArgsFromExpansion,
