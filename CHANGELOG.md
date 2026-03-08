@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Changed
+- Retired stale internal presolution re-export surfaces so `MLF.Constraint.Presolution.Driver` and `MLF.Constraint.Presolution.EdgeProcessing` now expose only the helpers they own, while the public Phase 4 boundary still exports `processInstEdge` (2026-03-09).
 - Retired the dead flush-all delayed-weaken entrypoint from `MLF.Constraint.Presolution.EdgeUnify`, leaving owner-boundary flushing as the only supported drain surface in the live presolution path (2026-03-09).
 - Retired the thin presolution compatibility facade so the public Phase 4 entrypoint now imports its owner modules directly while preserving the exported testing/runtime surface (2026-03-09).
 - Shared the snapshot canonicalization preparation prelude between `MLF.Constraint.Presolution.View` and `MLF.Constraint.Finalize` without changing thesis-facing semantics (2026-03-09):

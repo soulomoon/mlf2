@@ -30,7 +30,6 @@ to extract shared state into explicit parameter passing or reader patterns.
 -}
 module MLF.Constraint.Presolution.Driver (
     computePresolution,
-    processInstEdge,
     validateReplayMapTraceContract
 ) where
 
@@ -70,8 +69,7 @@ import MLF.Constraint.Presolution.Materialization (
     materializeExpansions
     )
 import MLF.Constraint.Presolution.EdgeProcessing (
-    runPresolutionLoop,
-    processInstEdge
+    runPresolutionLoop
     )
 import MLF.Constraint.Presolution.EdgeUnify (pendingWeakenOwners)
 import MLF.Constraint.Presolution.StateAccess (getConstraintAndCanonical)
