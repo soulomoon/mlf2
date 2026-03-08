@@ -1428,7 +1428,8 @@ Progress (2026-02-08, Group 1): duplicated binding-core helpers are now single-s
 - [x] Parser + pretty-printer for eMLF surface syntax (`MLF.Frontend.Parse`, `MLF.Frontend.Pretty`)
 - [x] Parser + pretty-printer for paper-faithful xMLF syntax (`MLF.XMLF.Parse`, `MLF.XMLF.Pretty`)
 - [x] Canonical syntax docs (`docs/syntax.md`) and parser/pretty test coverage
-- [ ] Push toward removing the Legacy syntax (keep parser compatibility transition-only; remove legacy pretty forms from internal/debug paths)
+- [x] Push toward removing the Legacy syntax (keep parser compatibility transition-only; remove legacy pretty forms from internal/debug paths)
+  - Status (2026-03-08): closed as stale; canonical xMLF pretty output already ships via `MLF.XMLF.Pretty` / `MLF.Elab.Types`, and legacy spellings remain parser-accepted transition syntax only.
 - [ ] Visualization of constraint graph (Graphviz / DOT)
 - [ ] REPL that prints the inferred type and the elaborated xMLF term
 
