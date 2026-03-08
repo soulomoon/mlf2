@@ -1,6 +1,6 @@
 # TMT Elaboration Input Thesis-Exact Remediation Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **Execution Note:** Use `@executing-plans` to implement this plan task-by-task.
 
 **Goal:** Make the `Elaboration input` row thesis-exact by removing solved-typed compatibility from the active elaboration/Phi runtime path while preserving checked-authoritative behavior.
 
@@ -24,7 +24,7 @@
 2. `src/MLF/Elab/Phi/Translate.hs` still exposes solved-typed compat callback aliases and takes `Solved` in active entrypoint signature.
 3. Guard tests do not currently fail on those exact gaps.
 
-## Agent Team Topology
+## Parallel Work Topology
 
 | Team | Scope | File Ownership |
 |---|---|---|

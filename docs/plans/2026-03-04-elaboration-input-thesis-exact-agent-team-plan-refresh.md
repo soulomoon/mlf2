@@ -1,6 +1,6 @@
-# Elaboration Input Thesis-Exact Agent-Team Implementation Plan (Refresh)
+# Elaboration Input Thesis-Exact Parallel Work Implementation Plan (Refresh)
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **Execution Note:** Use `@executing-plans` to implement this plan task-by-task.
 
 **Goal:** Make the Transformation Mechanism Table row `Elaboration input` thesis-exact under the repo's strict criterion (`includes test-only code paths`) by removing solved-typed test-only Phi helper surfaces and migrating tests to `χp`-native helper signatures.
 
@@ -28,7 +28,7 @@ Thesis anchors for row closure:
 
 ---
 
-## 1. Agent Team Topology
+## 1. Parallel Work Topology
 
 | Team | Mission | File Ownership |
 |---|---|---|

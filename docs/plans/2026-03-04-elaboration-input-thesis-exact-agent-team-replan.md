@@ -1,6 +1,6 @@
-# Elaboration Input Thesis-Exact Agent-Team Replan Implementation Plan
+# Elaboration Input Thesis-Exact Parallel Work Replan Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **Execution Note:** Use `@executing-plans` to implement this plan task-by-task.
 
 **Goal:** Make the `Elaboration input` row thesis-exact by removing the active Elaborate -> Phi solved-adapter handoff and running elaboration-edge translation from `chi`-native inputs end-to-end.
 
@@ -28,7 +28,7 @@
 
 ---
 
-## Agent-Team Topology
+## Parallel Work Topology
 
 | Team | Focus | Ownership (no cross-edits) |
 |---|---|---|
@@ -290,7 +290,7 @@ git commit -m "docs: close elaboration-input thesis-exact migration after agent-
 
 ---
 
-## Dispatch Rules (Agent Teams)
+## Dispatch Rules (Parallel Work)
 
 - Use isolated worktrees per team; no two teams edit the same file.
 - Team C rebases/cherry-picks Team B's API commit before Task 3A.

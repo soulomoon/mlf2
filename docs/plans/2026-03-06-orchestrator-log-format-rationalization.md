@@ -1,6 +1,6 @@
 # Orchestrator Log Format Rationalization Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **Execution Note:** Use `@executing-plans` to implement this plan task-by-task.
 
 **Goal:** Standardize orchestrator workflow logging on `orchestrator-log.jsonl` as the single authoritative execution log.
 

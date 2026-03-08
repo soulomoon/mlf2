@@ -1,10 +1,18 @@
 # Repository Guidelines
 
+## Guideline Maintenance
+
+- `AGENTS.md` is the repository guidance entry point. Keep it accurate, well-structured, and up to date when gaps or stale instructions are discovered.
+- Before starting substantive work, review these guidelines and update them if they are stale, contradictory, or missing important workflow constraints.
+- Apply instruction precedence in this order: direct system/developer/user instructions, deeper nested `AGENTS.md` files, this file, then supporting project docs.
+- Keep adjacent guidance surfaces synchronized when relevant: `tasks/readme`, `TODO.md`, `implementation_notes.md`, `CHANGELOG.md`, and `Bugs.md`.
+- Respect existing workspace changes: do not overwrite, revert, or “clean up” unrelated uncommitted edits unless the user explicitly asks.
+
 ## Project Goals
 
 - Keep the implementation paper-faithful to `papers/these-finale-english.txt` (thesis + graphic-constraint pipeline; more detailed than `papers/xmlf.txt`). Document and test any intentional deviations.
 - Treat `papers/these-finale-english.txt` as the source of truth. Implement supplementary details from `papers/xmlf.txt` only when the thesis is silent, and document any conflicts or deviations.
-- Before proceeding, review the guidelines and update them if any issues are identified. You can design the guidelines structure and content as you see fit.
+- When thesis-faithfulness and code convenience conflict, prefer the thesis and record the reasoning in tests/docs.
 
 ## Project Structure & Module Organization
 
@@ -15,16 +23,16 @@
 - `papers/` holds reference material (PDF/TXT) used to align the implementation with the xMLF/MLF papers; it is not required to build.
 - Witness metadata lives in `MLF.Constraint.Types.Witness`; `EdgeWitness` records per-edge reconstruction metadata including `ewForallIntros` and Ω witness payload `ewWitness`.
 - Shared unification logic lives in `MLF.Constraint.Unify.Core`; configure phase-specific behavior via `UnifyStrategy` instead of duplicating unification loops.
-- Shared structural decomposition lives in `MLF.Constraint.Unify.Decompose`; presolution structural unification should call `decomposeUnifyChildren` after handling TyVar/TyExp special cases.
+- Shared structural decomposition lives in `MLF.Constraint.Unify.Decompose`; presolution structural unification should call `decomposeUnifyChildren` after handling `TyVar`/`TyExp` special cases.
 - Legacy expansion-to-instantiation translation lives in `MLF.Elab.Legacy`; `MLF.Elab.Elaborate`/`MLF.Elab.Pipeline` re-export `expansionToInst` for compatibility.
 
 ### Key Data Types
 
 - `Expr` (`MLF.Frontend.Syntax`): Surface language (eMLF terms)
 - `Constraint` (`MLF.Constraint.Types`): The constraint graph with nodes, edges, and binding tree
-- `TyNode`: Type nodes in the term-DAG (TyVar, TyArrow, TyForall, TyBase, TyExp, TyBottom)
-- `InstEdge`: Instantiation edges (≤) between nodes
-- `BindParents`: Binding tree as child → (parent, BindFlag) map
+- `TyNode`: Type nodes in the term-DAG (`TyVar`, `TyArrow`, `TyForall`, `TyBase`, `TyExp`, `TyBottom`)
+- `InstEdge`: Instantiation edges (`≤`) between nodes
+- `BindParents`: Binding tree as child → `(parent, BindFlag)` map
 - `Expansion`: Presolution recipes (identity, ∀-intro, instantiation, composition)
 - `EdgeWitness`: Per-edge witness metadata for xMLF instantiation reconstruction
 
@@ -36,6 +44,15 @@
 - `cabal run mlf2` — run the demo executable.
 - `cabal run frozen-parity-gen -- --generated-on YYYY-MM-DD --source-commit <sha>` — regenerate the frozen parity baseline JSON (defaults to `test/golden/legacy-replay-baseline-v1.json`).
 - `cabal repl mlf2` / `cabal repl mlf2-test` — open GHCi with the chosen target loaded.
+- Full verification gate for code changes: `cabal build all && cabal test`.
+
+## Working Norms
+
+- Fix problems at the root cause when feasible; do not introduce new compatibility layers or convenience fallbacks without a paper-backed reason.
+- Keep changes minimal, local, and warning-free; avoid unrelated refactors unless they are required for correctness or guideline hygiene.
+- Update tests and docs in the same change whenever behavior, architecture, or thesis-alignment expectations move.
+- Prefer targeted validation first; run the full Cabal gate before claiming behavior-changing work is complete. Pure guidance-only edits do not require the full gate.
+- Guidance-only cleanups belong in docs/changelog, not `Bugs.md`, unless they reveal a real implementation defect or thesis-faithfulness gap.
 
 ## Coding Style & Naming Conventions
 
@@ -68,6 +85,7 @@
 - When adding a new spec module, wire it into both:
   - `mlf2.cabal` → `test-suite mlf2-test` → `other-modules`
   - `test/Main.hs` (import the module and call `spec`)
+- Prefer the narrowest test slice that covers the change, then expand to broader suites as confidence increases.
 
 ## Commit & Pull Request Guidelines
 
@@ -77,12 +95,17 @@
 
 ## Task Management (Skill-Driven File Planning)
 
-The `tasks/` folder contains task plans and execution tracking for autonomous agent execution using:
+The `tasks/` folder contains task plans and execution tracking for autonomous agent execution.
+
+Preferred process skills:
 - `[$using-superpowers](/Users/ares/.codex/superpowers/skills/using-superpowers/SKILL.md)`
 - `[$planning-with-files](/Users/ares/.codex/skills/planning-with-files/SKILL.md)`
-- `[$codex-tmux-team](/Users/ares/.codex/skills/public/codex-tmux-team/SKILL.md)` for parallel team sessions in tmux
 
-Create a new task under `tasks/todo/` as a folder named `YYYY-MM-DD-description/` (e.g. `2026-02-03-thesis-exact-coercions/`). Completed tasks move to `tasks/archive/` with the same folder name.
+Parallel execution helpers, when the work genuinely splits into independent tracks:
+- `[$dispatching-parallel-agents](/Users/ares/.codex/superpowers/skills/dispatching-parallel-agents/SKILL.md)`
+- `[$subagent-driven-development](/Users/ares/.codex/superpowers/skills/subagent-driven-development/SKILL.md)`
+
+Create a new task under `tasks/todo/` as a folder named `YYYY-MM-DD-description/` (for example `2026-02-03-thesis-exact-coercions/`). Completed tasks move to `tasks/archive/` with the same folder name.
 
 ```
 tasks/
@@ -101,16 +124,14 @@ tasks/
 
 **For autonomous agents (using-superpowers + planning-with-files):**
 - Invoke `[$using-superpowers](/Users/ares/.codex/superpowers/skills/using-superpowers/SKILL.md)` first, then follow `[$planning-with-files](/Users/ares/.codex/skills/planning-with-files/SKILL.md)` for execution.
-- Work from a single task folder under `tasks/todo/YYYY-MM-DD-description/`.
-- Initialize and maintain `task_plan.md`, `findings.md`, and `progress.md` in that task folder before substantial work.
+- Work from a single active task folder under `tasks/todo/YYYY-MM-DD-description/` for the current effort.
+- Initialize and maintain `task_plan.md`, `findings.md`, and `progress.md` in that task folder before substantial multi-step work.
 - Re-read `task_plan.md` before major decisions, and update phase status after each completed phase.
 - Log all errors and recovery attempts in `task_plan.md`; do not repeat the same failed action unchanged.
 - Write discoveries to `findings.md` throughout execution and keep `progress.md` as the running session log.
-- Maintain the repository root `TODO.md` as the rolling list of next goals; update it whenever priorities or upcoming work change.
+- Maintain the repository root `TODO.md` as the rolling list of next goals; update it whenever priorities or upcoming work change. If priorities stay the same, leave it untouched.
 - Maintain `implementation_notes.md` when behavior, architecture, or thesis-alignment details change, so documentation stays in sync with implementation.
 - Close a task by marking all phases complete in `task_plan.md` and moving the folder to `tasks/archive/`.
-
-**Validation command:** `cabal build all && cabal test`
 
 ## Bug Tracking
 
@@ -126,5 +147,5 @@ tasks/
 ## Paper References
 
 - Primary source: `papers/these-finale-english.txt` (thesis)
-- Supplementary: `papers/xmlf.txt` (used only when thesis is silent)
-- Document any conflicts or deviations from the papers
+- Supplementary: `papers/xmlf.txt` (used only when the thesis is silent)
+- Document any conflicts or deviations from the papers.

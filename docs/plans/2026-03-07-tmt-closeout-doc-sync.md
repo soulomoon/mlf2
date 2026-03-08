@@ -1,6 +1,6 @@
 # TMT Closeout Doc Sync Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **Execution Note:** Use `@executing-plans` to implement this plan task-by-task.
 
 **Goal:** Sync the live Transformation Mechanism Table note and directly coupled trackers to the current fully-closed thesis-exact state.
 

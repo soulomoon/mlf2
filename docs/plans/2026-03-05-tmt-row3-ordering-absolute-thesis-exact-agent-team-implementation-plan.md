@@ -1,6 +1,6 @@
-# TMT Row3 Ordering Absolute Thesis-Exact Agent-Team Implementation Plan
+# TMT Row3 Ordering Absolute Thesis-Exact Parallel Work Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **Execution Note:** Use `@executing-plans` to implement this plan task-by-task.
 
 **Goal:** Move TMT row `Ordering of transformations` from loop-final delayed-weaken flushing toward strict thesis-shaped ordering boundaries (per `SolveConstraint` semantics), while preserving current regression/parity behavior.
 
@@ -31,7 +31,7 @@
 
 ---
 
-## Team Topology (Agent Teams)
+## Team Topology (Parallel Work)
 
 | Team | Scope | File Ownership |
 |---|---|---|

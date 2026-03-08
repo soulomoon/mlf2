@@ -1,6 +1,6 @@
 # Thesis-Exact Strict Replay Cutover Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **Execution Note:** Use `@executing-plans` to implement this plan task-by-task.
 > **Design Doc:** [`docs/plans/2026-02-27-thesis-exact-strict-fix-first-replay-contract-hard-reject-design.md`](/Volumes/src/mlf4/docs/plans/2026-02-27-thesis-exact-strict-fix-first-replay-contract-hard-reject-design.md)
 
 **Goal:** Deliver one atomic strict cutover that makes presolution the sole owner of replay-target normalization and makes Phi/Omega hard-reject malformed replay targets (no runtime repair).

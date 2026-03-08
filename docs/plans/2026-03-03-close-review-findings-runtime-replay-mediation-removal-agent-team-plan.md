@@ -1,4 +1,4 @@
-# Agent-Team Plan: Close Review Findings and Achieve True Runtime Replay/Mediation Removal
+# Parallel Work Plan: Close Review Findings and Achieve True Runtime Replay/Mediation Removal
 
 ## Summary
 We will fix all review findings with a two-stage safety rollout and a strict runtime-semantics target:

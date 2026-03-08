@@ -1,6 +1,6 @@
 # Single-Solved Elaboration Input Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **Execution Note:** Use `@executing-plans` to implement this plan task-by-task.
 
 **Goal:** Collapse elaboration input wiring to one authoritative `Solved` snapshot while preserving checked-authoritative output behavior and existing regression expectations.
 

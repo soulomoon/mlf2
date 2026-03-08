@@ -1,6 +1,6 @@
-# Elaboration Input Witness-Authoritative Thesis-Exact (Agent Team) Implementation Plan
+# Elaboration Input Witness-Authoritative Thesis-Exact (Parallel Work) Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **Execution Note:** Use `@executing-plans` to implement this plan task-by-task.
 
 **Goal:** Make row `Elaboration input` materially more thesis-exact by removing remaining elaboration-time fallback synthesis so edge translation is witness-authoritative over `χp` (Def. 15.3.12, §15.3.6).
 
@@ -37,7 +37,7 @@
 5. `src/MLF/Elab/Run/Pipeline.hs:148-163`
 - Root generalization still falls back on `SchemeFreeVars` by retrying with `Nothing` ga and then reifying a scheme directly.
 
-## Agent Team Topology
+## Parallel Work Topology
 
 - Team A (`contracts-red`): Add RED guards for residual fallback surfaces.
 - Team B (`pipeline-root-strict`): Remove root-scheme fallback ladder in pipeline.

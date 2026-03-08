@@ -1,6 +1,6 @@
 # TMT Row 1 χp-First Elaboration/Generalization Closeout Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **Execution Note:** Use `@executing-plans` to implement this plan task-by-task.
 
 **Goal:** Complete the Transformation Mechanism Table row-1 migration by moving solved-typed elaboration/generalization helper reads to direct `χp` (`PresolutionView`) queries, then remove `eeSolvedCompat` and entry-time `Solved.rebuildWithConstraint` without changing checked-authoritative output.
 
@@ -12,7 +12,7 @@
 
 ---
 
-## Team Topology (Agent Teams)
+## Team Topology (Parallel Work)
 
 | Team | Scope | File Ownership |
 |---|---|---|

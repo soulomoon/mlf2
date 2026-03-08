@@ -1,6 +1,6 @@
 # Thesis-Exact Scheme Construction Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **Execution Note:** Use `@executing-plans` to implement this plan task-by-task.
 
 **Goal:** Eliminate the DEV-PHI-WEAKEN-SOLVED-BINDER-SKIP deviation by making the original (pre-solving) constraint primary for all post-solve operations, remove LegacyBackend, and remove all escape hatches.
 

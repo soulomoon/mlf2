@@ -1,6 +1,6 @@
 # Thesis-Exact Recursion Refactor Goal Loop Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **Execution Note:** Use `@executing-plans` to implement this plan task-by-task.
 
 **Goal:** Produce the thesis-exact mechanism table, simplified improving-loop prompt, and JSONL log template for the recursion-refactor campaign.
 

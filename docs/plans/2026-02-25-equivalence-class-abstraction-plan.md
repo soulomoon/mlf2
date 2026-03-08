@@ -1,6 +1,6 @@
 # Equivalence-Class Abstraction Layer Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **Execution Note:** Use `@executing-plans` to implement this plan task-by-task.
 
 **Goal:** Replace the union-find + canonical rewriting solver output with an opaque `Solved` abstraction backed by equivalence classes that preserve full node identity and structural edges.
 

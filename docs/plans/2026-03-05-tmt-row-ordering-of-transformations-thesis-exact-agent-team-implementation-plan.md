@@ -1,6 +1,6 @@
-# TMT Row Ordering of Transformations Thesis-Exact Agent-Team Implementation Plan
+# TMT Row Ordering of Transformations Thesis-Exact Parallel Work Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **Execution Note:** Use `@executing-plans` to implement this plan task-by-task.
 
 **Goal:** Make the Transformation Mechanism Table row `Ordering of transformations` materially more thesis-exact by tightening Phase-4 execution order around thesis `SolveConstraint` semantics (§12.1.3), reducing non-thesis global staging, and preserving delayed-weaken/translatability obligations from §15.2.
 
@@ -17,7 +17,7 @@
 
 ---
 
-## Team Topology (Agent Teams)
+## Team Topology (Parallel Work)
 
 | Team | Scope | File Ownership |
 |---|---|---|

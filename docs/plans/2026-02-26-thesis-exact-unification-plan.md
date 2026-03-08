@@ -1,6 +1,6 @@
 # Thesis-Exact Unification Pipeline Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **Execution Note:** Use `@executing-plans` to implement this plan task-by-task.
 
 **Goal:** Make unification thesis-exact by implementing SolveConstraint ordering in Phase 4 (initial unify drain, then per-edge propagation+unify), preserving raw `χp` identity as translation input, and removing production dependence on post-presolution solve.
 

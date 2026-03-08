@@ -1,6 +1,6 @@
-# TMT Elaboration Input Thesis-Exact Agent-Team Implementation Plan
+# TMT Elaboration Input Thesis-Exact Parallel Work Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **Execution Note:** Use `@executing-plans` to implement this plan task-by-task.
 
 **Goal:** Make the **Elaboration input** mechanism thesis-exact by removing remaining internal solved-adapter dependency from the elaboration input path (while preserving checked-authoritative runtime behavior).
 
@@ -14,7 +14,7 @@
 
 ---
 
-## Team Topology (Agent Teams)
+## Team Topology (Parallel Work)
 
 | Team | Scope | File Ownership |
 |---|---|---|

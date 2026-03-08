@@ -1,6 +1,6 @@
-# Elaboration Input Thesis-Exact Legacy Retirement Agent-Team Implementation Plan
+# Elaboration Input Thesis-Exact Legacy Retirement Parallel Work Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **Execution Note:** Use `@executing-plans` to implement this plan task-by-task.
 
 **Goal:** Make the Transformation Mechanism Table row `Elaboration input` thesis-exact by removing remaining solved-typed elaboration/Phi APIs (including test-only surfaces) while preserving checked-authoritative behavior.
 
@@ -29,7 +29,7 @@
 
 ---
 
-## Agent Team Topology
+## Parallel Work Topology
 
 | Team | Mission | File Ownership |
 |---|---|---|
