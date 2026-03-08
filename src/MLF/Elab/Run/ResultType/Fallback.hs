@@ -52,15 +52,22 @@ import MLF.Elab.Run.ResultType.Util
 import MLF.Elab.Run.ResultType.Types (ResultTypeInputs(..))
 import qualified MLF.Elab.Run.ResultType.View as View
 
+type ResultTypeRecursor
+    = ResultTypeInputs
+    -> AnnExpr
+    -> AnnExpr
+    -> Either ElabError ElabType
+
 -- | Compute result type when there's no direct annotation (fallback path).
 -- Note: This function handles the non-AAnn case. When the root is an AAnn,
 -- the facade (ResultType.hs) dispatches to computeResultTypeFromAnn instead.
 computeResultTypeFallback
-    :: ResultTypeInputs
+    :: ResultTypeRecursor
+    -> ResultTypeInputs
     -> AnnExpr      -- ^ annCanon (post-redirect)
     -> AnnExpr      -- ^ ann (pre-redirect)
     -> Either ElabError ElabType
-computeResultTypeFallback ctx annCanon ann = do
+computeResultTypeFallback recurse ctx annCanon ann = do
     view <- View.buildResultTypeView ctx
     let presolutionViewForGen = View.rtvPresolutionViewOverlay view
     -- Note [Annotated Lambda Result Type]
@@ -109,7 +116,7 @@ computeResultTypeFallback ctx annCanon ann = do
                 -- Compute the result type from the body.
                 -- The body may be wrapped in AAnn (from alternative let scoping),
                 -- so we need to handle that case.
-                bodyTy <- computeBodyResultType ctx bodyAnn
+                bodyTy <- computeBodyResultType recurse ctx bodyAnn
                 -- Check if the parameter type is a rank-2 type (contains forall).
                 -- For rank-2 annotations, wrap the result in a bounded quantifier.
                 -- For simple annotations, just return the arrow type.
@@ -134,29 +141,15 @@ computeResultTypeFallback ctx annCanon ann = do
 -- | Compute result type for the body of an annotated lambda.
 -- This handles the case where the body is wrapped in AAnn.
 computeBodyResultType
-    :: ResultTypeInputs
+    :: ResultTypeRecursor
+    -> ResultTypeInputs
     -> AnnExpr
     -> Either ElabError ElabType
-computeBodyResultType ctx bodyAnn =
+computeBodyResultType recurse ctx bodyAnn =
     case bodyAnn of
-        AAnn inner annNodeId eid ->
-            computeResultTypeFromAnnLocal ctx inner inner annNodeId eid
+        AAnn inner _ _ -> recurse ctx inner inner
         _ ->
             computeResultTypeFallbackCore ctx bodyAnn bodyAnn
-
--- | Local version of computeResultTypeFromAnn to avoid circular imports.
--- This is a simplified version that handles the common case.
-computeResultTypeFromAnnLocal
-    :: ResultTypeInputs
-    -> AnnExpr      -- ^ inner (post-redirect)
-    -> AnnExpr      -- ^ innerPre (pre-redirect)
-    -> NodeId       -- ^ annNodeId
-    -> EdgeId       -- ^ eid
-    -> Either ElabError ElabType
-computeResultTypeFromAnnLocal ctx inner _innerPre _annNodeId _eid = do
-    -- For the body of an annotated lambda, we just need to compute the
-    -- result type from the inner expression.
-    computeBodyResultType ctx inner
 
 -- | Core implementation of computeResultTypeFallback (non-annotated-lambda case).
 computeResultTypeFallbackCore
