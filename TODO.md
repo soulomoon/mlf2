@@ -516,7 +516,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
     and frozen parity baseline mismatch.
 - Plan/tracker:
   - `/Volumes/src/mlf4/docs/plans/2026-03-05-tmt-row-ordering-of-transformations-thesis-exact-agent-team-implementation-plan.md`
-  - `/Volumes/src/mlf4/tasks/todo/2026-03-05-tmt-ordering-of-transformations-thesis-exact-agent-team-plan/`
+  - `/Volumes/src/mlf4/tasks/archive/2026-03-05-tmt-ordering-of-transformations-thesis-exact-agent-team-plan/`
 - Verification:
   - RED baseline:
     - `--match "row3 ordering thesis-exact guard"`: FAIL (`2 examples, 2 failures`)
@@ -545,7 +545,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
     weaken owner buckets could remain after boundary checks.
 - Plan/tracker:
   - `/Volumes/src/mlf4/docs/plans/2026-03-05-tmt-row3-ordering-absolute-thesis-exact-agent-team-implementation-plan.md`
-  - `/Volumes/src/mlf4/tasks/todo/2026-03-05-row3-ordering-absolute-thesis-exact-agent-team-replan/`
+  - `/Volumes/src/mlf4/tasks/archive/2026-03-05-row3-ordering-absolute-thesis-exact-agent-team-replan/`
 - Verification:
   - RED baseline before Wave 1:
     - `cabal test mlf2-test --test-show-details=direct --test-options='--match "row3 absolute thesis-exact guard"'`
@@ -654,7 +654,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - Runtime production path remains single-path and checked-authoritative.
 - Plan/tracker:
   - `/Volumes/src/mlf4/docs/plans/2026-03-04-tmt-row2-resulttype-adapter-retirement-agent-team-implementation-plan.md`
-  - `/Volumes/src/mlf4/tasks/todo/2026-03-04-tmt-row2-resulttype-adapter-retirement-agent-team/`
+  - Historical task tracker folder for this 2026-03-04 work is no longer present in the live todo-task tree.
 - Verification:
   - `cabal test mlf2-test --test-show-details=direct --test-options='--match "row2 closeout guard"'`
     - PASS (`3 examples, 0 failures`)
@@ -691,7 +691,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - Checked-authoritative behavior remained unchanged on representative slices.
 - Plan/tracker:
   - `/Volumes/src/mlf4/docs/plans/2026-03-04-tmt-elaboration-input-thesis-exact-agent-team-implementation-plan.md`
-  - `/Volumes/src/mlf4/tasks/todo/2026-03-04-tmt-elaboration-input-thesis-exact-agent-team/`
+  - Historical task tracker folder for this 2026-03-04 work is no longer present in the live todo-task tree.
 - Verification:
   - `cabal test mlf2-test --test-show-details=direct --test-options='--match "elab-input thesis-exact guard"'`
     - PASS (`2 examples, 0 failures`)
@@ -710,7 +710,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
     code/guard references.
   - Synced `implementation_notes.md`, `CHANGELOG.md`, and task tracker files
     under
-    `tasks/todo/2026-03-04-tmt-elab-input-thesis-exact-remediation-plan/`
+    the historical 2026-03-04 remediation tracker (no longer present in the live todo-task tree)
     for final Wave 3 verifier closeout.
 - Verification evidence recorded (already-run gates):
   - `elab-input thesis-exact guard`: PASS (`2 examples, 0 failures`)
@@ -1444,7 +1444,7 @@ Progress (2026-02-08, Group 1): duplicated binding-core helpers are now single-s
   - [x] Post-phase cleanup landed (removed single-constructor `EdgeStage` phantom index from `EdgePlan`).
   - [ ] Next: run finishing-branch handoff + integration decision (merge/PR/cleanup).
   - Plan: `docs/plans/2026-02-10-master-4-phase-typed-two-pass-edge-dsl-implementation-plan.md`
-  - Task folder: `tasks/todo/2026-02-10-master-4-phase-typed-two-pass-edge-dsl/`
+  - Historical task folder for this campaign is no longer present in the live todo-task tree.
   - Scope highlights:
     - Enforce Phase-2 paper-shaped residual instantiation edges (`TyExp <= τ`).
     - Add Phase-4 fail-fast assertion on non-`TyExp` left inst edges.
