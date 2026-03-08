@@ -822,7 +822,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 - Archive:
   - Task records moved under `tasks/archive/2026-03-03-task-29-solved-followup/`.
 
-## Task 28 Eliminate solved indirection via presolution view (2026-03-02)
+## Task 28 Eliminate solved indirection via presolution view (completed 2026-03-02)
 
 - Current status:
   - Wave 0/1/2 migration work is complete in this worktree.
@@ -835,8 +835,11 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 - Next:
   - Optional follow-up: continue reducing internal elaboration compatibility reads of `Solved` (result-type/generalize internals) once architecture allows full replacement without regressing paper baseline slices.
 
-## Task 28 TMT identity row re-audit (2026-03-06)
+## Task 28 TMT identity row re-audit (closed as stale 2026-03-08)
 
+- Status update (2026-03-08):
+  - later row9-11 cleanup work removed the stale compiled `MLF.Elab.Phi.Binder` surface and confined `IdentityBridge` to the witness-domain utility/test lane;
+  - the Transformation Mechanism Table row `Identity reconciliation mechanism` is now `Yes`, so this re-audit follow-up no longer represents live work.
 - Completed:
   - Re-audited thesis elaboration identity handling against `papers/these-finale-english.txt` §15.3.1-§15.3.6 and the current Phi/Omega implementation.
   - Confirmed the live `IdentityBridge`/Ω path is witness-domain exact (`raw`/`copy`/`trace` only; no class-member fallback).
@@ -845,7 +848,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 - Next:
   - Collapse the active reconciliation object model in Φ (`Translate`/`IdentityBridge`/`Omega`) and retire or rewrite `MLF.Elab.Phi.Binder` so no compiled Phi path preserves a separate non-thesis identity-reconciliation mechanism.
 
-## Task 27 Transformation Mechanism Table thesis-exact classification campaign (2026-03-01)
+## Task 27 Transformation Mechanism Table thesis-exact classification campaign (completed 2026-03-01)
 
 - Completed:
   - Reclassified every row in `docs/notes/2026-02-27-transformation-mechanism-table.md`
@@ -865,7 +868,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
     branch.
   - No active `DEV-TMT-*` implementation-choice entries remain.
 
-## Task 26 Phi replay bridge strict pass-through follow-up (2026-03-01)
+## Task 26 Phi replay bridge strict pass-through follow-up (completed 2026-03-01)
 
 - Completed:
   - Removed remaining projection-era helper naming from `computeTraceBinderReplayBridge` (`projectOne` -> `validateTarget`) to keep bridge invariant explicit: validate + pass-through only.
@@ -875,7 +878,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 - Status:
   - Runtime replay projection/repair paths are absent from bridge code; replay map domain/codomain contract is enforced fail-fast.
 
-## Task 25 Thesis-Exact Phi Upfront Replay Normalization (2026-02-27)
+## Task 25 Thesis-Exact Phi Upfront Replay Normalization (completed 2026-02-27)
 
 - Completed:
   - Switched fully to strict `etBinderReplayMap` producer/consumer contract for Phi replay.
@@ -887,7 +890,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 - Status:
   - Runtime replay fallback is not active behavior; bridge handling is validate + pass-through only, and source-space replay targets are hard errors.
 
-## Task 24 Thesis-Exact Unification Ordering + Presolution-Centric Solved Path (2026-02-26)
+## Task 24 Thesis-Exact Unification Ordering + Presolution-Centric Solved Path (completed 2026-02-26)
 
 - Completed:
   - Phase-4 thesis-order closure draining is enforced in presolution (initial + per-edge).
@@ -906,7 +909,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - Done: removed explicit legacy fallback entrypoint and migrated parity checks to frozen baseline artifacts.
   - Optional follow-up: retire snapshot-only compatibility surfaces once no unit tests depend on `solveUnifyWithSnapshot`/`fromSolveOutput`.
 
-## Task 23 Milestone 5 gap closure (Tasks 14-16) — 2026-02-26
+## Task 23 Milestone 5 gap closure (Tasks 14-16) — completed 2026-02-26
 
 - Completed:
   - Ω `OpWeaken` now recovers binder elimination targets via solved equivalence classes instead of skipping to `ε` on alias targets.
@@ -924,7 +927,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
     - `uses class-member fallback when target has no exact binder key`
   - Full gate: `cabal build all && cabal test` (`827 examples, 0 failures`).
 
-## Task 22 Defensible Exactness — 2026-02-22
+## Task 22 Defensible Exactness — completed 2026-02-22
 
 - Scope:
   - Move from "tested" to "defensible exactness": every thesis claim has a traceable evidence chain (thesis clause -> claim -> code path -> test -> gate) continuously enforced by CI.
@@ -943,7 +946,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - `./scripts/thesis-conformance-gate.sh` (PASS)
   - `./scripts/check-thesis-claims.sh` (PASS)
 
-## Task 21 Phase 7 theorem obligations executable proxies — 2026-02-19
+## Task 21 Phase 7 theorem obligations executable proxies — completed 2026-02-19
 
 - Scope:
   - Address formalization debt by making Phase 7 theorem obligations executable via property-style proxies.
@@ -964,7 +967,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - `./scripts/thesis-conformance-gate.sh`
   - `cabal build all && cabal test`
 
-## Task 20 Formal Obligations Ledger (Chapters 14/15) — 2026-02-19
+## Task 20 Formal Obligations Ledger (Chapters 14/15) — completed 2026-02-19
 
 - Scope:
   - Build and enforce a canonical thesis rule-to-code-to-test ledger for Chapters 4–15 operational obligations (originally scoped to Ch. 14/15, expanded to cover sections `4.2`–`15.3`).
@@ -993,7 +996,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - [x] Thesis conformance gate includes obligations stage.
   - [x] Full verification green (`cabal build all && cabal test`).
 
-## Task 19 Thesis Conformance Gate Command/Profile — 2026-02-18
+## Task 19 Thesis Conformance Gate Command/Profile — completed 2026-02-18
 
 - Scope:
   - Add one canonical thesis-anchor gate command and a required CI profile that continuously enforces paper anchors.
@@ -1012,7 +1015,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - `./scripts/thesis-conformance-gate.sh`
   - `cabal build all && cabal test`
 
-## Task 18 BUG-2026-02-17-002 A6 applied bounded/coercion expected-pass gap — 2026-02-17
+## Task 18 BUG-2026-02-17-002 A6 applied bounded/coercion expected-pass gap — completed 2026-02-17
 
 - Scope:
   - Close the applied bounded/coercion-heavy A6 variant so it typechecks to thesis-expected `Int`.
@@ -1025,7 +1028,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - `cabal test mlf2-test --test-show-details=direct --test-options='--match "A6 parity"'`
   - `cabal build all && cabal test`
 
-## Task 17 BUG-2026-02-17-001 Φ keep-key + Graft/Raise/Weaken drift — 2026-02-17
+## Task 17 BUG-2026-02-17-001 Φ keep-key + Graft/Raise/Weaken drift — completed 2026-02-17
 
 - Root cause (deterministic seed `529747475`):
   - `computeTargetBinderKeys` retained replay keys even when target binders were empty.
@@ -1052,7 +1055,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
     - `PipelineSpec` canonicalization assertion tightened to require non-empty rewrites only when solve `union-find` is non-empty.
   - verification: `cabal build all && cabal test` passes (`678 examples, 0 failures`).
 
-## Task 16 BUG-2026-02-11-004 regression reopen (bounded-alias strict-success) — 2026-02-17
+## Task 16 BUG-2026-02-11-004 regression reopen (bounded-alias strict-success) — completed 2026-02-17
 
 - Targeted closure landed:
   - `MLF.Elab.Phi.Translate`: trace-free `computeTargetBinderKeys` now returns empty keep-key set (`mTrace = Nothing`), restoring StepIntro + weaken interleaving behavior.
@@ -1065,7 +1068,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 - Follow-up closure:
   - full gate is green (`cabal build all && cabal test`), and BUG tracker entries are closed in `/Volumes/src/mlf4/Bugs.md`.
 
-## Task 15 BUG-2026-02-16-001/002 planner scheme-introducer crash closure — 2026-02-17
+## Task 15 BUG-2026-02-16-001/002 planner scheme-introducer crash closure — completed 2026-02-17
 
 - Root cause:
   - `planEdge` resolved `eprSchemeOwnerGen` strictly from TyExp body root.
@@ -1085,8 +1088,10 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 - Tracker sync:
   - moved `BUG-2026-02-16-001` and `BUG-2026-02-16-002` to **Resolved** in `/Volumes/src/mlf4/Bugs.md`.
 
-## Task 14 BUG-2026-02-16-010 bridge-domain regression follow-up — 2026-02-16
+## Task 14 BUG-2026-02-16-010 bridge-domain regression follow-up — closed as stale 2026-03-08
 
+- Status update (2026-03-08):
+  - the narrowed BUG-004/BUG-002 follow-ups called out here were closed by later 2026-02-17 bug-fix tasks (`Task 16`, `Task 17`, `Task 18`), so this section is now historical rather than actionable.
 - Bridge hardening + replay-hint/positional replay seeding landed for Φ→Ω binder-target dispatch.
 - Progress update:
   - strict matrix `make-app keeps codomain Int without bottom-domain collapse` is green again.
@@ -1108,7 +1113,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - follow-up bound normalization in `ReifyPlan` now rewrites binder self-references in bounds to `⊥`, removing residual V2 alias-finalization drift while keeping strict alias-bound rejection.
   - residual cross-link remains: `BUG-004-V2` is still red in this workspace (`TCArgumentMismatch`), so BUG-2026-02-16-010 stays open as a narrowed follow-up.
 
-## Task 13 BUG-2026-02-16-007/008 sentinel drift closure — 2026-02-16
+## Task 13 BUG-2026-02-16-007/008 sentinel drift closure — completed 2026-02-16
 
 - Implemented generalization fallback alignment for plain `SchemeFreeVars`:
   - `MLF.Elab.Run.Pipeline` root generalization now retries `SchemeFreeVars` the same as `BindingTreeError GenSchemeFreeVars` and falls back to direct reification.
@@ -1122,7 +1127,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - `BUG-2026-02-16-007` and `BUG-2026-02-16-008` moved to resolved in `/Volumes/src/mlf4/Bugs.md`.
   - `BUG-2026-02-11-004` remains open as the underlying bounded-alias thesis-faithfulness gap.
 
-## Task 11 Source-domain `I(r)` closure — 2026-02-16 (BUG-2026-02-14-003)
+## Task 11 Source-domain `I(r)` closure — completed 2026-02-16 (BUG-2026-02-14-003)
 
 - Implemented surgical Ω/Φ domain contract fix:
   - `MLF.Elab.Phi.Omega`: `OpRaise` admissibility checks now use source-domain `etInterior` directly.
@@ -1141,7 +1146,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 - Full gate:
   - `cabal build all && cabal test` => `672 examples, 9 failures` (open buckets outside this surgical scope).
 
-## Task 12 Non-spine OpRaise context fallback — 2026-02-16 (BUG-2026-02-16-009)
+## Task 12 Non-spine OpRaise context fallback — completed 2026-02-16 (BUG-2026-02-16-009)
 
 - Implemented targeted Φ/Ω non-spine context fix:
   - `MLF.Elab.Phi.Omega`: `OpRaise` now tracks both adopted and source-domain raise targets.
@@ -1156,7 +1161,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 - Full gate:
   - `cabal build all && cabal test` => `672 examples, 4 failures` (historical snapshot before BUG-007/008 closure; current open trackers center on `BUG-2026-02-16-001/002` and umbrella `BUG-2026-02-11-004`).
 
-## Task 10 Variant Matrix Scan — 2026-02-11 (new bug variants triage)
+## Task 10 Variant Matrix Scan — completed 2026-02-11 (new bug variants triage)
 
 - Added systematic variant coverage:
   - `test/ElaborationSpec.hs` (`BUG-002-V1..V4`, `BUG-003-V1..V2`, `BUG-004-V1..V4`)
@@ -1171,7 +1176,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - `BUG-2026-02-11-003` is resolved thesis-exact: `BUG-004-V2`/`V4` are strict success assertions (`Int`) in both checked and unchecked pipelines, with compat InstBot and reify fallback paths removed.
   - Remaining variant tests for open bugs stay sentinel-guarded until strict expected-success closure.
 
-## Task 9 Verification Gate — 2026-02-11 (Phase-3 gate hardening + tracker sync)
+## Task 9 Verification Gate — completed 2026-02-11 (Phase-3 gate hardening + tracker sync)
 
 - Command: `cabal build all && cabal test`
 - Gate status: **Passed** (`633 examples, 0 failures`)
@@ -1187,7 +1192,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
     - `BUG-2026-02-06-002` and `BUG-2026-02-08-004` marked **Resolved** in `/Volumes/src/mlf4/Bugs.md`
     - open bug list currently empty
 
-## Task 7 Verification Gate — 2026-02-10 (BUG-2026-02-06-002 closure)
+## Task 7 Verification Gate — completed 2026-02-10 (BUG-2026-02-06-002 closure)
 
 - Command: `cabal build all && cabal test`
 - Gate status: **Passed** (`604 examples, 0 failures`)
@@ -1199,7 +1204,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 - Follow-up:
   - `BUG-2026-02-06-002` moves to resolved tracking (`/Volumes/src/mlf4/Bugs.md`).
 
-## Task 8 Verification Gate — 2026-02-10 (BUG-2026-02-08-004 closure)
+## Task 8 Verification Gate — completed 2026-02-10 (BUG-2026-02-08-004 closure)
 
 - Command: `cabal build all && cabal test`
 - Gate status: **Passed** (`604 examples, 0 failures`)
@@ -1210,7 +1215,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 - Follow-up:
   - `BUG-2026-02-08-004` moved to **Resolved** in `/Volumes/src/mlf4/Bugs.md`.
 
-## Task 7 Verification Gate — 2026-02-08
+## Task 7 Verification Gate — completed 2026-02-08
 
 - Command: `cabal build all && cabal test`
 - Gate status: **Passed** (post-fix 5/5 consecutive green after `cb5e51d`)
@@ -1233,7 +1238,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - Runtime base-shadow cutover completed: `MLF.Elab.Generalize` fallback no longer reifies or compares base-path output at runtime; solved-order output is authoritative.
   - `BUG-2026-02-06-002` remains open: current debugging indicates binder-representative filtering in generalization can drop required factory binders (`make` path), causing scheme specialization drift or `SchemeFreeVars`.
 
-## Task 7 Verification Gate — 2026-02-09 (H15)
+## Task 7 Verification Gate — completed 2026-02-09 (H15)
 
 - Command: `cabal build all && cabal test`
 - Gate status: **Passed** (H15 guard + regression test)
@@ -1243,7 +1248,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 - Follow-up:
   - `BUG-2026-02-06-002` remains open for the broader polymorphic-factory behavior (`TBottom -> Int` vs expected `b -> a`) after H13/H14/H15.
 
-## Task 7 Priority Plan — 2026-02-09 (H16 continuation)
+## Task 7 Priority Plan — completed 2026-02-09 (H16 continuation)
 
 - Selected strategy: **Option 1 — Upstream witness-shape correction**.
 - Design doc: `docs/plans/2026-02-09-bug-2026-02-06-002-upstream-witness-shape-correction-design.md`
