@@ -1954,3 +1954,4 @@ This repo’s design is primarily informed by:
 - `inferInstAppArgsFromScheme` keeps only structurally justified inference.
 - `Phi` / annotation elaboration no longer uses the old trace/copy-map fallback search helpers. Instead it relies on explicit witness/trace/expansion authority, plus narrow term-closure alignment for already-introduced type abstractions.
 - Result-type bound-overlay queries are now single-sourced through `MLF.Elab.Run.ResultType.View`; `ResultType.Fallback` no longer rebuilds a local overlayed `PresolutionView`, and the row-2 guard forbids that duplicate path from returning.
+- Presolution edge witness/trace assembly is now single-sourced under `MLF.Constraint.Presolution.Witness`; the thin `EdgeProcessing.Witness` wrapper and its one-off `EdgeWitnessPlan` boundary were retired without changing witness ingredients, TyExp-body root selection, or Phase-2 op integration.

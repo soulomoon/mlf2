@@ -160,9 +160,10 @@ spec = do
                         ]
         it "annotation edges preserve OpWeaken in witness (thesis-exact)" $ do
             -- Annotation edges previously had all OpWeaken stripped via dropWeakenOps
-            -- in edgeWitnessPlan. After eliminating DEV-PHI-WITNESS-WEAKEN-SUPPRESSION,
-            -- witnessFromExpansion emits OpWeaken unconditionally, and edgeWitnessPlan
-            -- (a thin wrapper) no longer strips them. Verify the underlying emission.
+            -- during per-edge witness assembly. After eliminating
+            -- DEV-PHI-WITNESS-WEAKEN-SUPPRESSION, witnessFromExpansion emits
+            -- OpWeaken unconditionally, and the surviving witness assembly path
+            -- no longer strips them. Verify the underlying emission.
             let expNodeId = NodeId 0
                 forallId = NodeId 1
                 binderId = NodeId 2

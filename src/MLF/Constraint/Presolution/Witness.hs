@@ -10,7 +10,11 @@ These helpers keep witness assembly isolated while the public presolution
 entrypoint stays focused on orchestration.
 -}
 module MLF.Constraint.Presolution.Witness (
+    EdgeWitnessPlan(..),
     binderArgsFromExpansion,
+    edgeWitnessPlan,
+    buildEdgeWitness,
+    buildEdgeTrace,
     integratePhase2Ops,
     integratePhase2Steps,
     witnessFromExpansion,
@@ -34,6 +38,7 @@ import Data.List (mapAccumL, partition, sortOn)
 import Data.Ord (Down(..))
 import qualified Data.List.NonEmpty as NE
 
+import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Types.Graph
     ( GenNodeId
     , NodeId
@@ -41,8 +46,11 @@ import MLF.Constraint.Types.Graph
     , getNodeId
     )
 import MLF.Constraint.Types.Witness (Expansion(..), ExpansionF(..), ForallSpec(..), InstanceOp(..))
-import MLF.Constraint.Presolution.Base (PresolutionM, PresolutionError(..), instantiationBindersM)
-import MLF.Constraint.Presolution.Ops (getCanonicalNode, lookupVarBound)
+import MLF.Constraint.Types (EdgeId, NodeRef(TypeRef), genRef, nodeRefFromKey)
+import MLF.Constraint.Types.Witness (EdgeWitness(..), InstanceWitness(..), ReplayContract(..))
+import MLF.Constraint.Presolution.Base (CopyMap, EdgeTrace(..), FrontierSet, InteriorSet, PresolutionM, PresolutionError(..), fromListInterior, instantiationBindersM)
+import MLF.Constraint.Presolution.Ops (findRoot, getCanonicalNode, lookupVarBound)
+import MLF.Constraint.Presolution.StateAccess (getConstraintAndCanonical, liftBindingError)
 import MLF.Constraint.Presolution.WitnessValidation (OmegaNormalizeEnv(..), OmegaNormalizeError(..), validateNormalizedWitness)
 import MLF.Constraint.Presolution.WitnessCanon (
     normalizeInstanceOpsCore,
@@ -52,6 +60,77 @@ import MLF.Constraint.Presolution.WitnessCanon (
     assertNoStandaloneGrafts
     )
 import MLF.Util.RecursionSchemes (cataM)
+
+-- | Precompute the base forall-intro count and ops for a witness.
+data EdgeWitnessPlan = EdgeWitnessPlan
+    { ewpForallIntros :: Int
+    , ewpBaseOps :: [InstanceOp]
+    }
+
+edgeWitnessPlan :: GenNodeId -> NodeId -> TyNode -> Expansion -> PresolutionM EdgeWitnessPlan
+edgeWitnessPlan gid leftId leftRaw expn = do
+    let root = case leftRaw of
+            TyExp{ tnBody = b } -> b
+            _ -> leftId
+    (introCount, baseOps) <- witnessFromExpansion gid root leftRaw expn
+    pure EdgeWitnessPlan { ewpForallIntros = introCount, ewpBaseOps = baseOps }
+
+buildEdgeWitness
+    :: EdgeId
+    -> NodeId
+    -> NodeId
+    -> TyNode
+    -> Int
+    -> [InstanceOp]
+    -> [InstanceOp]
+    -> PresolutionM EdgeWitness
+buildEdgeWitness eid left right leftRaw introCount baseOps extraOps = do
+    let root = case leftRaw of
+            TyExp{ tnBody = b } -> b
+            _ -> left
+        (intros, ops) = integratePhase2Steps (introCount, baseOps) extraOps
+        iw = InstanceWitness ops
+    pure EdgeWitness
+        { ewEdgeId = eid
+        , ewLeft = left
+        , ewRight = right
+        , ewRoot = root
+        , ewForallIntros = intros
+        , ewWitness = iw
+        }
+
+buildEdgeTrace
+    :: GenNodeId
+    -> EdgeId
+    -> NodeId
+    -> TyNode
+    -> Expansion
+    -> (CopyMap, InteriorSet, FrontierSet)
+    -> PresolutionM EdgeTrace
+buildEdgeTrace gid _eid left leftRaw expn (copyMap0, _interior0, _frontier0) = do
+    bas <- binderArgsFromExpansion gid leftRaw expn
+    let rootSeed = case leftRaw of
+            TyExp{ tnBody = b } -> b
+            _ -> left
+    root <- findRoot rootSeed
+    (constraint0, canonicalizeNode) <- getConstraintAndCanonical
+    let interiorRootRef = genRef gid
+    interiorNodesRaw <- do
+        s <- liftBindingError $ Binding.interiorOfUnder canonicalizeNode constraint0 interiorRootRef
+        pure
+            [ nid
+            | key <- IntSet.toList s
+            , TypeRef nid <- [nodeRefFromKey key]
+            ]
+    let interiorNodes = fromListInterior (map canonicalizeNode interiorNodesRaw)
+    pure EdgeTrace
+        { etRoot = root
+        , etBinderArgs = bas
+        , etInterior = interiorNodes
+        , etReplayContract = ReplayContractNone
+        , etBinderReplayMap = mempty
+        , etCopyMap = copyMap0
+        }
 
 binderArgsFromExpansion :: GenNodeId -> TyNode -> Expansion -> PresolutionM [(NodeId, NodeId)]
 binderArgsFromExpansion gid leftRaw expn = do

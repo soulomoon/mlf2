@@ -476,7 +476,21 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 ] $ \marker ->
                     edgeUnifySrc `shouldSatisfy` (not . isInfixOf marker)
             baseSrc `shouldSatisfy` (not . isInfixOf "WithCanonicalT")
-            stateAccessSrc `shouldSatisfy` isInfixOf "getConstraintAndCanonical"
+
+        it "presolution witness assembly guard" $ do
+            interpreterSrc <- readFile "src/MLF/Constraint/Presolution/EdgeProcessing/Interpreter.hs"
+            witnessSrc <- readFile "src/MLF/Constraint/Presolution/Witness.hs"
+            cabalSrc <- readFile "mlf2.cabal"
+            wrapperExists <-
+                either (const False) (const True)
+                    <$> tryIOError (readFile "src/MLF/Constraint/Presolution/EdgeProcessing/Witness.hs" >>= \s -> pure $! length s)
+            wrapperExists `shouldBe` False
+            interpreterSrc `shouldSatisfy` (not . isInfixOf "MLF.Constraint.Presolution.EdgeProcessing.Witness")
+            witnessSrc `shouldSatisfy` isInfixOf "data EdgeWitnessPlan ="
+            witnessSrc `shouldSatisfy` isInfixOf "edgeWitnessPlan ::"
+            witnessSrc `shouldSatisfy` isInfixOf "buildEdgeTrace"
+            witnessSrc `shouldSatisfy` isInfixOf "buildEdgeWitness"
+            cabalSrc `shouldSatisfy` (not . isInfixOf "MLF.Constraint.Presolution.EdgeProcessing.Witness")
 
         it "row4 per-edge propagation thesis-exact guard: Interpreter removes synthesized-wrapper branch markers" $ do
             interpSrc <- readFile "src/MLF/Constraint/Presolution/EdgeProcessing/Interpreter.hs"
