@@ -67,18 +67,22 @@ import MLF.Constraint.Presolution.Base (
     toListInterior,
     runPresolutionM
     )
-import MLF.Constraint.Presolution.Core (
-    applyExpansion,
-    computePresolution,
-    decideMinimalExpansion,
+import MLF.Constraint.Presolution.Copy (
     instantiateScheme,
-    instantiateSchemeWithTrace,
-    mergeExpansions,
-    processInstEdge,
-    validateReplayMapTraceContract,
-    runEdgeUnifyForTest,
-    unifyAcyclicRawWithRaiseTrace
+    instantiateSchemeWithTrace
     )
+import MLF.Constraint.Presolution.Driver (
+    computePresolution,
+    validateReplayMapTraceContract
+    )
+import MLF.Constraint.Presolution.EdgeProcessing (processInstEdge)
+import MLF.Constraint.Presolution.EdgeUnify (runEdgeUnifyForTest)
+import MLF.Constraint.Presolution.Expansion (
+    applyExpansion,
+    decideMinimalExpansion,
+    mergeExpansions
+    )
+import MLF.Constraint.Presolution.Unify (unifyAcyclicRawWithRaiseTrace)
 import MLF.Constraint.Presolution.View
     ( PresolutionView(..)
     , fromPresolutionResult

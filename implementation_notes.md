@@ -19,6 +19,12 @@
 
 # Implementation Notes
 
+## 2026-03-09 — Presolution compatibility facade retired
+
+- The public Phase 4 presolution entrypoint now imports its owner modules directly instead of routing shared helpers through an extra compatibility layer.
+- This keeps the exported presolution/testing surface unchanged while shrinking the maintained module graph and making owner boundaries explicit.
+- No thesis-facing behavior changed: presolution execution, replay-map validation, edge-unify test hooks, expansion helpers, and raw-with-raise unification still come from the same underlying owner modules as before.
+
 ### 2026-03-08 Task 46 narrowed witness-authoritative closeout
 - Removed the last live `Elaborate` scope-root swallow: `scopeRootFromBase` now propagates base `bindingPathToRootLocal` failures instead of silently collapsing to `typeRef root`.
 - Kept the successful no-gen-ancestor path unchanged (`Nothing -> typeRef root`), so only malformed base binding trees now fail fast.

@@ -4,7 +4,7 @@ Description : Materialize ∀-introductions during presolution
 
 This module hosts the helper routines that turn presolution’s `ExpForall`
 recipes into concrete `TyForall` nodes plus binding-tree / bound-store updates.
-It is extracted from `MLF.Constraint.Presolution.Core` to keep that module
+It keeps binder surgery localized so the public presolution entrypoint can stay
 focused on orchestration.
 -}
 module MLF.Constraint.Presolution.ForallIntro (

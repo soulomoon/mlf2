@@ -119,7 +119,6 @@ library mlf2-internal
                       MLF.Constraint.Types.Ids,
                       MLF.Constraint.Types.SynthesizedExpVar,
                       MLF.Constraint.Presolution.Base,
-                      MLF.Constraint.Presolution.Core,
                       MLF.Constraint.Presolution.Copy,
                       MLF.Constraint.Presolution.Driver,
                       MLF.Constraint.Presolution.EdgeUnify,
