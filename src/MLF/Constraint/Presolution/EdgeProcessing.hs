@@ -16,11 +16,6 @@ The two-pass architecture delegates to:
 module MLF.Constraint.Presolution.EdgeProcessing (
     runPresolutionLoop,
     processInstEdge,
-    -- * Re-exports from Solve
-    unifyStructure,
-    recordEdgeWitness,
-    recordEdgeTrace,
-    canonicalizeEdgeTraceInteriorsM,
 ) where
 
 import Control.Monad (foldM, unless, when)
@@ -43,12 +38,6 @@ import MLF.Constraint.Presolution.EdgeUnify
 import MLF.Constraint.Presolution.EdgeProcessing.Plan (EdgePlan(..))
 import MLF.Constraint.Presolution.EdgeProcessing.Planner (planEdge)
 import MLF.Constraint.Presolution.EdgeProcessing.Interpreter (executeEdgePlan)
-import MLF.Constraint.Presolution.EdgeProcessing.Solve (
-    unifyStructure,
-    recordEdgeWitness,
-    recordEdgeTrace,
-    canonicalizeEdgeTraceInteriorsM,
-    )
 import MLF.Constraint.Solve (repairNonUpperParents)
 import MLF.Constraint.Unify.Closure (SolveError, UnifyClosureResult(..), runUnifyClosureWithSeed)
 import MLF.Util.Trace (TraceConfig)
