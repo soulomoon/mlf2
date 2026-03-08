@@ -1,3 +1,9 @@
+### 2026-03-09 presolution state-access single-style cleanup
+
+- Retired the one-off `WithCanonicalT` reader layer from `MLF.Constraint.Presolution.StateAccess`; presolution canonical/constraint reads now use the shared direct `PresolutionM` helpers only.
+- Rewrote `MLF.Constraint.Presolution.EdgeUnify.checkNodeLocked` to capture `(Constraint, canonical)` once via `getConstraintAndCanonical` and perform the same strict-ancestor binding walk without the reader wrapper.
+- Added a focused source guard to keep the retired reader-layer API from reappearing and updated `Presolution.Base` notes so they describe only the direct state-access pattern.
+
 ### 2026-03-09 presolution internal export-surface cleanup
 
 - Retired stale internal presolution re-export surfaces so `MLF.Constraint.Presolution.Driver` no longer re-exports `processInstEdge` and `MLF.Constraint.Presolution.EdgeProcessing` no longer re-exports solve-owned helper operations.

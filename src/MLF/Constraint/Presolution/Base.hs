@@ -285,9 +285,8 @@ paper-faithful while avoiding ad-hoc state plumbing:
   * Preferred helper modules:
       - `MLF.Constraint.Presolution.Ops` for low-level stateful primitives
         (fresh IDs, node registration, union-find roots, variable bounds).
-      - `MLF.Constraint.Presolution.StateAccess` for canonical/constraint access,
-        binding-tree queries, and `WithCanonicalT` when threading the canonical
-        environment through nested helpers.
+      - `MLF.Constraint.Presolution.StateAccess` for canonical/constraint access
+        and binding-tree queries via the shared `PresolutionM` helper style.
 
   * Avoid adding new direct uses of `gets psConstraint` / `gets psUnionFind`,
     ad-hoc `UnionFind.frWith`, or manual `Binding.*` error lifting in submodules.
