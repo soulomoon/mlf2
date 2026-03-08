@@ -22,7 +22,7 @@ Execute the workflow in [improving-loop-agent.prompt2.md](docs/prompts/improving
 ## Execution Steps
 
 ### 1. Initialize run artifacts (fresh Round 1)
-1. Create a run folder: `tasks/todo/2026-03-06-tmt-improving-loop-orchestrator-fresh-round-2/`.
+1. Create a run folder: `historical task-tracker path (not retained as a live folder)`.
 2. Create files: `task_plan.md`, `findings.md`, `progress.md`, `orchestrator-log.jsonl`.
 3. Record baseline inputs with commit hash and timestamp:
    - [Transformation table](docs/notes/2026-02-27-transformation-mechanism-table.md)

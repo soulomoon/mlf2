@@ -103,9 +103,9 @@ Out of scope:
 - Modify `implementation_notes.md`
 - Modify `docs/architecture.md`
 - Modify `CHANGELOG.md`
-- Update `tasks/todo/2026-03-08-thesis-exact-fallback-rework/task_plan.md`
-- Update `tasks/todo/2026-03-08-thesis-exact-fallback-rework/findings.md`
-- Update `tasks/todo/2026-03-08-thesis-exact-fallback-rework/progress.md`
+- Update `historical task-tracker path (not retained as a live folder)`
+- Update `historical task-tracker path (not retained as a live folder)`
+- Update `historical task-tracker path (not retained as a live folder)`
 
 ### Steps
 1. Run `cabal build all && cabal test`.

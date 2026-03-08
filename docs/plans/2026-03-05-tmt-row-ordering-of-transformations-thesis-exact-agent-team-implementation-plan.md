@@ -224,9 +224,9 @@ Run:
 - Modify: `implementation_notes.md`
 - Modify: `CHANGELOG.md`
 - Modify: `TODO.md`
-- Modify: `tasks/todo/2026-03-05-tmt-ordering-of-transformations-thesis-exact-agent-team-plan/task_plan.md`
-- Modify: `tasks/todo/2026-03-05-tmt-ordering-of-transformations-thesis-exact-agent-team-plan/findings.md`
-- Modify: `tasks/todo/2026-03-05-tmt-ordering-of-transformations-thesis-exact-agent-team-plan/progress.md`
+- Modify: `tasks/archive/2026-03-05-tmt-ordering-of-transformations-thesis-exact-agent-team-plan/task_plan.md`
+- Modify: `tasks/archive/2026-03-05-tmt-ordering-of-transformations-thesis-exact-agent-team-plan/findings.md`
+- Modify: `tasks/archive/2026-03-05-tmt-ordering-of-transformations-thesis-exact-agent-team-plan/progress.md`
 - Modify: `Bugs.md` (if applicable)
 
 **Step 1: Update row narrative with evidence**
@@ -242,7 +242,7 @@ Run:
 **Step 3: Commit**
 
 ```bash
-git add docs/notes/2026-02-27-transformation-mechanism-table.md implementation_notes.md CHANGELOG.md TODO.md tasks/todo/2026-03-05-tmt-ordering-of-transformations-thesis-exact-agent-team-plan/task_plan.md tasks/todo/2026-03-05-tmt-ordering-of-transformations-thesis-exact-agent-team-plan/findings.md tasks/todo/2026-03-05-tmt-ordering-of-transformations-thesis-exact-agent-team-plan/progress.md Bugs.md
+git add docs/notes/2026-02-27-transformation-mechanism-table.md implementation_notes.md CHANGELOG.md TODO.md tasks/archive/2026-03-05-tmt-ordering-of-transformations-thesis-exact-agent-team-plan/task_plan.md tasks/archive/2026-03-05-tmt-ordering-of-transformations-thesis-exact-agent-team-plan/findings.md tasks/archive/2026-03-05-tmt-ordering-of-transformations-thesis-exact-agent-team-plan/progress.md Bugs.md
 git commit -m "docs: close row3 ordering thesis-exact alignment evidence"
 ```
 

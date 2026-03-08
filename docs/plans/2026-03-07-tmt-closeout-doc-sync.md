@@ -4,7 +4,7 @@
 
 **Goal:** Sync the live Transformation Mechanism Table note and directly coupled trackers to the current fully-closed thesis-exact state.
 
-**Architecture:** Treat the archived row6 blocked run and recovery/orchestrator artifacts as historical evidence, then rewrite only the live summaries that still present row6 as open. Keep the note’s row table and archived execution logs intact, but add superseding closeout context and move directly related completed task folders out of `tasks/todo/`.
+**Architecture:** Treat the archived row6 blocked run and recovery/orchestrator artifacts as historical evidence, then rewrite only the live summaries that still present row6 as open. Keep the note’s row table and archived execution logs intact, but add superseding closeout context and move directly related completed task folders out of `historical task-tracker path: tasks/todo/`.
 
 **Tech Stack:** Markdown trackers, repository task folders, lightweight shell validation.
 
@@ -61,12 +61,12 @@ Expected: new closeout wording appears.
 ### Task 3: Archive directly related completed task folders
 
 **Files:**
-- Move: `tasks/todo/2026-03-06-tmt-identity-row-update`
-- Move: `tasks/todo/2026-03-05-goal-table-orchestrator-loop-skill`
+- Move: `historical task-tracker path: historical task-tracker path not retained`
+- Move: `historical task-tracker path: historical task-tracker path not retained`
 
 **Step 1: Write the failing test**
 
-Use presence checks: the completed folders still live under `tasks/todo/`.
+Use presence checks: the completed folders still live under `historical task-tracker path: tasks/todo/`.
 
 **Step 2: Run test to verify it fails**
 

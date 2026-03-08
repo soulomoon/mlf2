@@ -428,7 +428,7 @@ git commit -m "cleanup: reduce solved module to compatibility and test surface"
 - Modify: `implementation_notes.md`
 - Modify: `TODO.md`
 - Modify: `CHANGELOG.md`
-- Modify: `tasks/todo/2026-03-02-eliminate-solved-indirection/{task_plan.md,findings.md,progress.md}`
+- Modify: `historical task-tracker files for this 2026-03-02 work (not retained as a live folder)`
 
 **Step 1: Write the failing test**
 
@@ -458,7 +458,7 @@ Expected: PASS.
 **Step 5: Commit**
 
 ```bash
-git add src/MLF/Elab/Run.hs src/MLF/Elab/Pipeline.hs src-public/MLF/API.hs src-public/MLF/Pipeline.hs implementation_notes.md TODO.md CHANGELOG.md tasks/todo/2026-03-02-eliminate-solved-indirection/task_plan.md tasks/todo/2026-03-02-eliminate-solved-indirection/findings.md tasks/todo/2026-03-02-eliminate-solved-indirection/progress.md test/PipelineSpec.hs
+git add src/MLF/Elab/Run.hs src/MLF/Elab/Pipeline.hs src-public/MLF/API.hs src-public/MLF/Pipeline.hs implementation_notes.md TODO.md CHANGELOG.md historical 2026-03-02 task_plan.md path (not retained) historical 2026-03-02 findings.md path (not retained) historical 2026-03-02 progress.md path (not retained) test/PipelineSpec.hs
 git commit -m "docs: finalize solved-indirection removal and cleanup exports"
 ```
 

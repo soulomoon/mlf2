@@ -12,7 +12,7 @@
 
 ### Step 3: Planning workspace setup
 - Created task folder:
-  - `tasks/todo/2026-03-05-tmt-ordering-of-transformations-thesis-exact-agent-team-plan/`
+  - `tasks/archive/2026-03-05-tmt-ordering-of-transformations-thesis-exact-agent-team-plan/`
 - Initialized:
   - `task_plan.md`
   - `findings.md`

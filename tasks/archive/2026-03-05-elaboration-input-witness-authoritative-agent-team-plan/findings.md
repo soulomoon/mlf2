@@ -31,9 +31,9 @@
 ## Artifacts Created
 - Plan: `/Volumes/src/mlf4/docs/plans/2026-03-05-elaboration-input-witness-authoritative-agent-team-implementation-plan.md`
 - Tracker folder:
-  - `/Volumes/src/mlf4/tasks/todo/2026-03-05-elaboration-input-witness-authoritative-agent-team-plan/task_plan.md`
-  - `/Volumes/src/mlf4/tasks/todo/2026-03-05-elaboration-input-witness-authoritative-agent-team-plan/findings.md`
-  - `/Volumes/src/mlf4/tasks/todo/2026-03-05-elaboration-input-witness-authoritative-agent-team-plan/progress.md`
+  - `/Volumes/src/mlf4/tasks/archive/2026-03-05-elaboration-input-witness-authoritative-agent-team-plan/task_plan.md`
+  - `/Volumes/src/mlf4/tasks/archive/2026-03-05-elaboration-input-witness-authoritative-agent-team-plan/findings.md`
+  - `/Volumes/src/mlf4/tasks/archive/2026-03-05-elaboration-input-witness-authoritative-agent-team-plan/progress.md`
 
 ## 2026-03-08 narrowing update
 

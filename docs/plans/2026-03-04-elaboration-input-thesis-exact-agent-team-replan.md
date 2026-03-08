@@ -267,9 +267,9 @@ git commit -m "docs: log elaboration-input migration defect discovered during ga
 - Modify: `implementation_notes.md`
 - Modify: `CHANGELOG.md`
 - Modify: `TODO.md`
-- Modify: `tasks/todo/2026-03-04-elab-input-thesis-exact-agent-team-replan/task_plan.md`
-- Modify: `tasks/todo/2026-03-04-elab-input-thesis-exact-agent-team-replan/findings.md`
-- Modify: `tasks/todo/2026-03-04-elab-input-thesis-exact-agent-team-replan/progress.md`
+- Modify: `historical task-tracker path (not retained as a live folder)`
+- Modify: `historical task-tracker path (not retained as a live folder)`
+- Modify: `historical task-tracker path (not retained as a live folder)`
 
 **Step 1: Update table row only after green gates**
 - Set `Elaboration input` row to `Thesis-exact = Yes` only when all gates pass.
@@ -284,7 +284,7 @@ git commit -m "docs: log elaboration-input migration defect discovered during ga
 **Step 4: Commit**
 
 ```bash
-git add docs/notes/2026-02-27-transformation-mechanism-table.md implementation_notes.md CHANGELOG.md TODO.md tasks/todo/2026-03-04-elab-input-thesis-exact-agent-team-replan/task_plan.md tasks/todo/2026-03-04-elab-input-thesis-exact-agent-team-replan/findings.md tasks/todo/2026-03-04-elab-input-thesis-exact-agent-team-replan/progress.md
+git add docs/notes/2026-02-27-transformation-mechanism-table.md implementation_notes.md CHANGELOG.md TODO.md historical task-tracker path (not retained as a live folder) historical task-tracker path (not retained as a live folder) historical task-tracker path (not retained as a live folder)
 git commit -m "docs: close elaboration-input thesis-exact migration after agent-team verification"
 ```
 

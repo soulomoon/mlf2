@@ -223,9 +223,9 @@ git commit -m "refactor: harden elaboration input toward absolute thesis-exact c
 - Modify: `CHANGELOG.md`
 - Modify: `Bugs.md`
 - Modify: `TODO.md`
-- Modify: `tasks/todo/2026-03-05-elaboration-input-absolute-thesis-exact-agent-team/task_plan.md`
-- Modify: `tasks/todo/2026-03-05-elaboration-input-absolute-thesis-exact-agent-team/findings.md`
-- Modify: `tasks/todo/2026-03-05-elaboration-input-absolute-thesis-exact-agent-team/progress.md`
+- Modify: `historical task-tracker path (not retained as a live folder)`
+- Modify: `historical task-tracker path (not retained as a live folder)`
+- Modify: `historical task-tracker path (not retained as a live folder)`
 
 **Step 1: Update row wording and evidence references**
 
@@ -246,7 +246,7 @@ Run: same gate commands from Task 5 and paste PASS counts in docs.
 **Step 4: Commit docs closeout**
 
 ```bash
-git add docs/notes/2026-02-27-transformation-mechanism-table.md implementation_notes.md CHANGELOG.md Bugs.md TODO.md tasks/todo/2026-03-05-elaboration-input-absolute-thesis-exact-agent-team/*
+git add docs/notes/2026-02-27-transformation-mechanism-table.md implementation_notes.md CHANGELOG.md Bugs.md TODO.md historical task-tracker path (not retained as a live folder)
 git commit -m "docs: close out elaboration-input absolute thesis-exact migration"
 ```
 
@@ -255,7 +255,7 @@ git commit -m "docs: close out elaboration-input absolute thesis-exact migration
 1. Spawn Team A and land RED guard commit first.
 2. Spawn Teams B/C/D in parallel with strict file ownership and explicit "do not touch other teams' files" prompts.
 3. Run controller integration and gates (Team E responsibilities).
-4. Only after all gates are green, perform docs closeout and move task folder from `tasks/todo/...` to `tasks/archive/...`.
+4. Only after all gates are green, perform docs closeout and move task folder from `historical task-tracker path (not retained as a live folder)` to `tasks/archive/...`.
 
 ## Exit Criteria
 

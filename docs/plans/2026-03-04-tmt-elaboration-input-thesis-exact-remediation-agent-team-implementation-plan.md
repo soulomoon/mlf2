@@ -188,9 +188,9 @@ git commit -m "refactor: remove solved-compat from active elaboration input runt
 - Modify: `implementation_notes.md`
 - Modify: `CHANGELOG.md`
 - Modify: `TODO.md`
-- Modify: `tasks/todo/2026-03-04-tmt-elab-input-thesis-exact-remediation-plan/task_plan.md`
-- Modify: `tasks/todo/2026-03-04-tmt-elab-input-thesis-exact-remediation-plan/findings.md`
-- Modify: `tasks/todo/2026-03-04-tmt-elab-input-thesis-exact-remediation-plan/progress.md`
+- Modify: `historical task-tracker path (not retained as a live folder)`
+- Modify: `historical task-tracker path (not retained as a live folder)`
+- Modify: `historical task-tracker path (not retained as a live folder)`
 - Modify: `Bugs.md` (only if a concrete defect is found)
 
 **Step 1: Final full verification**
@@ -210,7 +210,7 @@ Expected: PASS.
 
 **Step 4: Commit**
 ```bash
-git add docs/notes/2026-02-27-transformation-mechanism-table.md implementation_notes.md CHANGELOG.md TODO.md tasks/todo/2026-03-04-tmt-elab-input-thesis-exact-remediation-plan/task_plan.md tasks/todo/2026-03-04-tmt-elab-input-thesis-exact-remediation-plan/findings.md tasks/todo/2026-03-04-tmt-elab-input-thesis-exact-remediation-plan/progress.md
+git add docs/notes/2026-02-27-transformation-mechanism-table.md implementation_notes.md CHANGELOG.md TODO.md historical task-tracker path (not retained as a live folder) historical task-tracker path (not retained as a live folder) historical task-tracker path (not retained as a live folder)
 git commit -m "docs: close elaboration-input thesis-exact remediation with verification evidence"
 ```
 

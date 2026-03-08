@@ -10,7 +10,7 @@
 
 ## Step 3: Planning workspace setup
 - Created task folder:
-  - `tasks/todo/2026-03-05-elaboration-input-witness-authoritative-agent-team-plan/`
+  - `tasks/archive/2026-03-05-elaboration-input-witness-authoritative-agent-team-plan/`
 - Initialized tracking files:
   - `task_plan.md`
   - `findings.md`
