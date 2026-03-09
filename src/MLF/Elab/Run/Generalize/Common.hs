@@ -13,6 +13,7 @@ module MLF.Elab.Run.Generalize.Common (
     isTyVarNode,
     baseFirstGenAncestorWith,
     mapBaseRefWith,
+    canonicalSchemeRootOwners,
     ownerIsOther,
     chooseRootGenId
 ) where
@@ -202,6 +203,19 @@ mapBaseRefWith canonical baseToSolved nodesSolved ref =
                     if IntMap.member (getNodeId nid) nodesSolved
                         then Just (TypeRef (canonical nid))
                         else Nothing
+
+canonicalSchemeRootOwners
+    :: (NodeId -> NodeId)
+    -> IntMap.IntMap GenNode
+    -> (IntSet.IntSet, IntMap.IntMap GenNodeId)
+canonicalSchemeRootOwners canonical genNodes =
+    let ownerMap =
+            IntMap.fromList
+                [ (getNodeId (canonical root), gnId gen)
+                | gen <- IntMap.elems genNodes
+                , root <- gnSchemes gen
+                ]
+    in (IntSet.fromList (IntMap.keys ownerMap), ownerMap)
 
 -- | Check if a gen node ID differs from the given one.
 ownerIsOther :: GenNodeId -> Maybe GenNodeId -> Bool
