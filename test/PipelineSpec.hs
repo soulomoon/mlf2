@@ -691,6 +691,15 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 src `shouldSatisfy` isInfixOf "resultTypeRoots"
             utilSrc `shouldSatisfy` isInfixOf "resultTypeRoots"
 
+        it "scheme-root owner bookkeeping stays single-sourced" $ do
+            fallbackSrc <- readFile "src/MLF/Elab/Run/ResultType/Fallback.hs"
+            phase4Src <- readFile "src/MLF/Elab/Run/Generalize/Phase4.hs"
+            commonSrc <- readFile "src/MLF/Elab/Run/Generalize/Common.hs"
+            forM_ [fallbackSrc, phase4Src] $ \src -> do
+                src `shouldSatisfy` isInfixOf "canonicalSchemeRootOwners"
+                src `shouldSatisfy` (not . isInfixOf "IntMap.fromList\n                [ (getNodeId (canonical root), gnId gen)")
+            commonSrc `shouldSatisfy` isInfixOf "canonicalSchemeRootOwners"
+
         it "target unwrapping stays single-sourced inside Scope" $ do
             scopeSrc <- readFile "src/MLF/Elab/Run/Scope.hs"
             let section startMarker endMarker =

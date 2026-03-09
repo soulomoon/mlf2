@@ -23,6 +23,7 @@ import MLF.Constraint.Types.Graph
     , fromListNode
     , getEdgeId
     , getNodeId
+    , genNodeKey
     , lookupNodeIn
     , gnId
     , gnSchemes
@@ -36,6 +37,7 @@ import MLF.Elab.Phi (phiFromEdgeWitnessWithTrace)
 import MLF.Elab.Types
 import MLF.Elab.Run.Annotation (annNode)
 import MLF.Elab.Run.Debug (debugGaScope, debugGaScopeEnabled, debugWhenCondM, debugWhenM)
+import MLF.Elab.Run.Generalize.Common (canonicalSchemeRootOwners)
 import MLF.Elab.Run.Scope
     ( bindingScopeRefCanonical
     , canonicalizeScopeRef
@@ -507,18 +509,10 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                         && maybe False (const True) rootBound
                 rootBoundIsBaseLike = rootBoundIsBase
                 boundVarTargetRoot = canonicalFinal (schemeBodyTarget presolutionViewFinal rootC)
-                schemeRootSetFinal =
-                    IntSet.fromList
-                        [ getNodeId (canonicalFinal root)
-                        | gen <- genNodesFinal
-                        , root <- gnSchemes gen
-                        ]
-                schemeRootOwnerFinal =
-                    IntMap.fromList
-                        [ (getNodeId (canonicalFinal root), gnId gen)
-                        | gen <- genNodesFinal
-                        , root <- gnSchemes gen
-                        ]
+                (schemeRootSetFinal, schemeRootOwnerFinal) =
+                    canonicalSchemeRootOwners
+                        canonicalFinal
+                        (IntMap.fromList [(genNodeKey (gnId gen), gen) | gen <- genNodesFinal])
                 boundHasForallFrom start0 =
                     let go visited nid0 =
                             let nid = canonicalFinal nid0
