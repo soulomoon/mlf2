@@ -1,7 +1,6 @@
 module MLF.Elab.Run.Scope (
     bindingScopeRef,
     bindingScopeRefCanonical,
-    preferGenScope,
     generalizeTargetNode,
     schemeBodyTarget,
     canonicalizeScopeRef,
@@ -36,7 +35,7 @@ import MLF.Frontend.ConstraintGen.Types (AnnExprF(..))
 {- Note [ga′ scope selection — Def. 15.3.2 alignment]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 The thesis (Def. 15.3.2) defines ga′ as the nearest gen ancestor of the
-binding root in the original constraint χ_p.  The 3-step pipeline
+binding root in the original constraint χ_p.  The live pipeline in
 `resolveCanonicalScope` implements this as:
 
   1. `bindingScopeRef`: Computes `bindingPathToRoot`, takes the first GenRef
@@ -44,22 +43,18 @@ binding root in the original constraint χ_p.  The 3-step pipeline
      ancestor — thesis-aligned.  The `TypeRef root` fallback handles binding
      roots that have no gen ancestor (top-level nodes).
 
-  2. `preferGenScope`: Re-runs the same path lookup that `bindingScopeRef`
-     already performed.  When `bindingScopeRef` returned GenRef, this is a
-     no-op.  When it returned TypeRef, this re-attempts the same lookup on
-     the same constraint — redundant but harmless.
-
-  3. `canonicalizeScopeRef`: GenRef passes through unchanged (gen nodes are
+  2. `canonicalizeScopeRef`: GenRef passes through unchanged (gen nodes are
      stable identifiers not subject to redirect/UF).  TypeRef gets
      redirect-chased then UF-canonicalized.
 
-  4. `letScopeOverrides`: Computes scope on the base constraint c1, compares
+  3. `letScopeOverrides`: Computes scope on the base constraint c1, compares
      with the solved constraint's scope.  Prefers the base scope when they
      diverge.  This is correct: the thesis defines ga′ on the original χ_p,
      not the solved version.
 
-Conclusion: the pipeline is thesis-aligned and now propagates binding-tree
-errors consistently through scope preference and canonical scope resolution.
+Conclusion: the pipeline is thesis-aligned and propagates binding-tree errors
+consistently through original-constraint scope selection and canonical scope
+resolution without a redundant second binding-tree lookup.
 -}
 bindingScopeRef :: Constraint -> NodeId -> Either BindingError NodeRef
 bindingScopeRef constraint root = do
@@ -88,17 +83,6 @@ bindingScopeRefCanonical presolutionView root = do
                 in case IntMap.lookup key bindParents of
                     Nothing -> Right (reverse path')
                     Just (parent, _) -> go seen' path' parent
-
-preferGenScope :: Constraint -> NodeRef -> Either BindingError NodeRef
-preferGenScope constraint ref = case ref of
-    GenRef _ -> Right ref
-    TypeRef nid ->
-        case Binding.bindingPathToRoot constraint (typeRef nid) of
-            Right path ->
-                case listToMaybe [gid | GenRef gid <- drop 1 path] of
-                    Just gid -> Right (GenRef gid)
-                    Nothing -> Right ref
-            Left err -> Left err
 
 {- Note [S vs S' target selection]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -204,8 +188,7 @@ canonicalizeScopeRef presolutionView redirects scopeRef =
 resolveCanonicalScope :: Constraint -> PresolutionView -> IntMap.IntMap NodeId -> NodeId -> Either BindingError NodeRef
 resolveCanonicalScope constraint presolutionView redirects scopeRoot = do
     scope0 <- bindingScopeRef constraint scopeRoot
-    scopeBase <- preferGenScope constraint scope0
-    pure (canonicalizeScopeRef presolutionView redirects scopeBase)
+    pure (canonicalizeScopeRef presolutionView redirects scope0)
 
 letScopeOverrides :: Constraint -> Constraint -> PresolutionView -> IntMap.IntMap NodeId -> AnnExpr -> IntMap.IntMap NodeRef
 letScopeOverrides base solvedForGen presolutionView redirects ann =

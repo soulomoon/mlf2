@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Changed
+- Retired the redundant `preferGenScope` re-lookup from `MLF.Elab.Run.Scope` (2026-03-09): ga′ scope resolution now flows directly from `bindingScopeRef` to `canonicalizeScopeRef`, with the existing scope guards/tests updated around the surviving owner path.
 - Re-greened the baseline solved-snapshot test seams (2026-03-09): test/frozen-parity snapshot solved reconstruction now replays through the strict `SolveSnapshot` → `Solved.fromSolveOutput` seam, and `frozen-parity-gen` now wires `SolvedFacadeTestUtil` explicitly.
 - Built and validated the base `ResultTypeView` once per runtime result-type computation, threading that validated view through the annotated and fallback workers instead of rebuilding it in each submodule (2026-03-09).
 - Retired the one-off `WithCanonicalT` presolution reader layer so `MLF.Constraint.Presolution.EdgeUnify.checkNodeLocked` now uses the shared direct `PresolutionM` state-access helpers, with a focused source guard keeping the reader API retired (2026-03-09).
