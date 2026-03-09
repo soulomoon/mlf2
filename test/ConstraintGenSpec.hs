@@ -16,6 +16,7 @@ import MLF.Constraint.Solved (fromSolveOutput, originalConstraint)
 import MLF.Constraint.Types hiding (lookupNode)
 import MLF.Frontend.ConstraintGen (AnnExpr (..), generateConstraintsCore)
 import MLF.API
+import MLF.Pipeline (ConstraintError(..), ConstraintResult(..), defaultTraceConfig, inferConstraintGraph)
 import SpecUtil
     ( expectRight
     , lookupNode

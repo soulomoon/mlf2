@@ -53,7 +53,12 @@ import MLF.Elab.Run.ResultType.Util
     , stripAnn
     , collectEdges
     )
-import MLF.Elab.Run.ResultType.Types (ResultTypeInputs(..))
+import MLF.Elab.Run.ResultType.Types
+    ( ResultTypeInputs(..)
+    , rtcEdgeExpansions
+    , rtcEdgeTraces
+    , rtcEdgeWitnesses
+    )
 import qualified MLF.Elab.Run.ResultType.View as View
 
 type ResultTypeRecursor

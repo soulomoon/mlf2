@@ -1,6 +1,9 @@
 {-# LANGUAGE GADTs #-}
 module MLF.Elab.Run.ResultType (
     ResultTypeInputs(..),
+    rtcEdgeWitnesses,
+    rtcEdgeTraces,
+    rtcEdgeExpansions,
     generalizeWithPlan,
     inferInstAppArgsFromScheme,
     mkResultTypeInputs,
@@ -12,6 +15,7 @@ import qualified Data.IntMap.Strict as IntMap
 
 import MLF.Frontend.ConstraintGen (AnnExpr(..))
 import MLF.Constraint.Presolution (EdgeTrace, PresolutionPlanBuilder)
+import MLF.Constraint.Presolution.Base (EdgeArtifacts(..))
 import MLF.Constraint.Presolution.View (PresolutionView)
 import MLF.Constraint.Types.Graph
     ( Constraint
@@ -24,7 +28,12 @@ import MLF.Elab.Types (ElabType, ElabError)
 import MLF.Util.Trace (TraceConfig)
 import MLF.Elab.Run.Instantiation (inferInstAppArgsFromScheme)
 import qualified MLF.Elab.Run.ChiQuery as ChiQuery
-import MLF.Elab.Run.ResultType.Types (ResultTypeInputs(..))
+import MLF.Elab.Run.ResultType.Types
+    ( ResultTypeInputs(..)
+    , rtcEdgeExpansions
+    , rtcEdgeTraces
+    , rtcEdgeWitnesses
+    )
 import MLF.Elab.Run.ResultType.Util (generalizeWithPlan, resultTypeRoots)
 import qualified MLF.Elab.Run.ResultType.View as View
 import qualified MLF.Elab.Run.ResultType.Ann as Ann
@@ -32,9 +41,7 @@ import qualified MLF.Elab.Run.ResultType.Fallback as Fallback
 
 mkResultTypeInputs
     :: (NodeId -> NodeId)
-    -> IntMap.IntMap EdgeWitness
-    -> IntMap.IntMap EdgeTrace
-    -> IntMap.IntMap Expansion
+    -> EdgeArtifacts
     -> PresolutionView
     -> GaBindParents
     -> PresolutionPlanBuilder
@@ -42,12 +49,10 @@ mkResultTypeInputs
     -> IntMap.IntMap NodeId
     -> TraceConfig
     -> ResultTypeInputs
-mkResultTypeInputs canonical edgeWitnesses edgeTraces edgeExpansions presolutionView bindParentsGa planBuilder baseConstraint redirects traceCfg =
+mkResultTypeInputs canonical edgeArtifacts presolutionView bindParentsGa planBuilder baseConstraint redirects traceCfg =
     ResultTypeInputs
         { rtcCanonical = canonical
-        , rtcEdgeWitnesses = edgeWitnesses
-        , rtcEdgeTraces = edgeTraces
-        , rtcEdgeExpansions = edgeExpansions
+        , rtcEdgeArtifacts = edgeArtifacts
         , rtcPresolutionView = presolutionView
         , rtcBindParentsGa = bindParentsGa
         , rtcPlanBuilder = planBuilder

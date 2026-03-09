@@ -2,20 +2,17 @@
 Module      : MLF.API
 Description : Stable umbrella API for downstream eMLF/xMLF users
 
-`MLF.API` is the recommended downstream entrypoint when callers want one module
-covering surface syntax, parsing/pretty-printing, normalization, constraint
-generation, and pipeline execution.
+`MLF.API` is the frontend-oriented umbrella API for downstream callers that
+want surface syntax, parsing/pretty-printing, and normalization helpers.
 
-Choose `MLF.Pipeline` when you only need the normalized pipeline surface, and
-`MLF.XMLF` when you only need explicit xMLF syntax tooling.
+Choose `MLF.Pipeline` for constraint generation, elaboration, execution,
+typechecking, and runtime-facing xMLF helpers. Choose `MLF.XMLF` when you only
+need explicit xMLF syntax tooling.
 -}
 {-# LANGUAGE PatternSynonyms #-}
 module MLF.API
     ( -- * Frontend syntax (raw and staged types)
       module MLF.Frontend.Syntax
-    -- * Constraint generation
-    , ConstraintResult (..)
-    , ConstraintError (..)
     -- * Parse error types
     , EmlfParseError
     , NormParseError (..)
@@ -34,37 +31,6 @@ module MLF.API
     -- * Pretty-printing
     , prettyEmlfExpr
     , prettyEmlfType
-    -- * Constraint graph
-    , BaseTy (..)
-    , PolySyms
-    , inferConstraintGraph
-    -- * Elaboration types
-    , ElabType
-    , Ty (..)
-    , ElabScheme
-    , pattern Forall
-    , ElabTerm
-    , Instantiation (..)
-    , ElabError (..)
-    , TypeCheckError (..)
-    -- * Pipeline configuration
-    , PipelineConfig(..)
-    , defaultPipelineConfig
-    , TraceConfig(..)
-    , defaultTraceConfig
-    -- * Pipeline entrypoints (normalized-only)
-    , PipelineError(..)
-    , renderPipelineError
-    , Pretty (..)
-    , schemeFromType
-    , runPipelineElab
-    , runPipelineElabChecked
-    , runPipelineElabWithConfig
-    , runPipelineElabCheckedWithConfig
-    , typeCheck
-    , step
-    , normalize
-    , isValue
     ) where
 
 import MLF.Frontend.Syntax
@@ -87,33 +53,3 @@ import MLF.Frontend.Pretty
     ( prettyEmlfExpr
     , prettyEmlfType
     )
-import MLF.Constraint.Types.Graph (BaseTy (..), PolySyms)
-import MLF.Frontend.ConstraintGen (ConstraintError (..), ConstraintResult (..))
--- Keep legacy elaboration conversion helpers quarantined in MLF.Elab.Legacy.
-import MLF.Elab.Pipeline
-    ( ElabError (..)
-    , ElabScheme
-    , pattern Forall
-    , ElabTerm
-    , ElabType
-    , Ty (..)
-    , Instantiation (..)
-    , TypeCheckError (..)
-    , PipelineConfig(..)
-    , defaultPipelineConfig
-    , TraceConfig(..)
-    , defaultTraceConfig
-    , PipelineError(..)
-    , Pretty (..)
-    , isValue
-    , normalize
-    , renderPipelineError
-    , runPipelineElab
-    , runPipelineElabChecked
-    , runPipelineElabWithConfig
-    , runPipelineElabCheckedWithConfig
-    , schemeFromType
-    , step
-    , typeCheck
-    )
-import MLF.Pipeline (inferConstraintGraph)

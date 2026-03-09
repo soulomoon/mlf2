@@ -18,11 +18,9 @@ spec = describe "Public surface contracts" $ do
             expectRight (parseRawEmlfType "∀(b ⩾ a). b") $ \ty ->
                 normalizeType ty `shouldBe` Right (STVar "a")
 
-        it "runs the umbrella pipeline and produces a typechecked term" $ do
-            expectRight (parseNormEmlfExpr "λ(x) x") $ \expr ->
-                expectRight (runPipelineElab Set.empty expr) $ \(term, ty) -> do
-                    typeCheck term `shouldBe` Right ty
-                    isValue term `shouldBe` True
+        it "keeps frontend-only conveniences on the umbrella API" $ do
+            parseNormEmlfExpr "λ(x) x"
+                `shouldBe` Right (ELam "x" (EVar "x"))
 
     describe "MLF.Pipeline" $ do
         it "elaborates normalized programs through the focused pipeline surface" $ do
@@ -36,6 +34,12 @@ spec = describe "Public surface contracts" $ do
                 case Pipeline.inferConstraintGraph Set.empty expr of
                     Left err -> expectationFailure ("Expected constraint graph, got " ++ show err)
                     Right _ -> pure ()
+
+        it "owns checked runtime helpers and pipeline diagnostics" $ do
+            expectRight (parseNormEmlfExpr "λ(x) x") $ \expr ->
+                expectRight (Pipeline.runPipelineElabChecked Set.empty expr) $ \(term, ty) -> do
+                    Pipeline.typeCheck term `shouldBe` Right ty
+                    Pipeline.isValue term `shouldBe` True
 
     describe "MLF.XMLF" $ do
         it "roundtrips parsed xMLF terms through pretty printing" $ do

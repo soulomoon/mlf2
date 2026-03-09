@@ -36,8 +36,8 @@ cabal repl mlf2-test
 
 ## Public entry points
 
-- `MLF.API` — surface syntax + pipeline helpers + eMLF parse/pretty
-- `MLF.Pipeline` — pipeline-focused API
+- `MLF.API` — surface syntax, parsing, pretty-printing, and normalization helpers
+- `MLF.Pipeline` — canonical public constraint-generation / elaboration / runtime API
 - `MLF.XMLF` — xMLF syntax, parser, and pretty-printer
 
 Active multi-step work is tracked under `tasks/todo/`; root-level `task_plan.md`,

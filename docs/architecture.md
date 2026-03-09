@@ -7,8 +7,8 @@ Goal: keep the implementation paper-faithful to the thesis and document any devi
 
 Downstream code should import:
 
-- `MLF.API` — umbrella module (surface syntax + pipeline entry points + xMLF result types + xMLF checking/reduction helpers)
-- `MLF.Pipeline` — pipeline entry points + xMLF checking/reduction helpers (e.g. `inferConstraintGraph`, `runPipelineElab`, `typeCheck`, `step`, `normalize`)
+- `MLF.API` — umbrella frontend module (surface syntax + eMLF parse/pretty + normalization helpers)
+- `MLF.Pipeline` — canonical pipeline/runtime module (e.g. `inferConstraintGraph`, `runPipelineElab`, `typeCheck`, `step`, `normalize`)
 - `MLF.XMLF` — explicit xMLF syntax, parser, and pretty-printing helpers
 
 Public modules live under `src-public/` and the public Cabal library only exposes:

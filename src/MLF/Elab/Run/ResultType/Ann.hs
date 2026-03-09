@@ -58,7 +58,11 @@ import MLF.Elab.Run.ResultType.Util
     , instHasBoundForall
     , instantiateImplicitForalls
     )
-import MLF.Elab.Run.ResultType.Types (ResultTypeInputs(..))
+import MLF.Elab.Run.ResultType.Types
+    ( ResultTypeInputs(..)
+    , rtcEdgeTraces
+    , rtcEdgeWitnesses
+    )
 import qualified MLF.Elab.Run.ResultType.View as View
 
 computeResultTypeFromAnnWithView

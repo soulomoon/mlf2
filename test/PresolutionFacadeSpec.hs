@@ -16,6 +16,26 @@ spec = describe "MLF.Constraint.Presolution facade" $ do
         forM_ supportMarkers $ \marker ->
             src `shouldSatisfy` isInfixOf marker
 
+
+    it "EdgeUnify stays a thin façade over State/Omega/Unify owners" $ do
+        src <- readFile "src/MLF/Constraint/Presolution/EdgeUnify.hs"
+        forM_
+            [ "import MLF.Constraint.Presolution.EdgeUnify.State"
+            , "import qualified MLF.Constraint.Presolution.EdgeUnify.Omega as Omega"
+            , "import MLF.Constraint.Presolution.EdgeUnify.Unify"
+            , "executeEdgeLocalOmegaOps omegaEnv baseOps action = do"
+            ] $ \marker ->
+                src `shouldSatisfy` isInfixOf marker
+        forM_
+            [ "data EdgeUnifyState = EdgeUnifyState"
+            , "pendingWeakenOwners = do"
+            , "flushPendingWeakensAtOwnerBoundary owner ="
+            , "unifyAcyclicEdge n1 n2 = do"
+            , "unifyStructureEdge n1 n2 = do"
+            , "mkOmegaExecEnv copyMap ="
+            ] $ \marker ->
+                src `shouldSatisfy` (not . isInfixOf marker)
+
 bannedMarkers :: [String]
 bannedMarkers =
     [ "PresolutionState(..)"

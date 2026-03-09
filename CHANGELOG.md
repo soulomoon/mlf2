@@ -3,6 +3,15 @@
 ## Unreleased
 
 ### Changed
+- Completed the post-split stabilization-and-landing pass for the live tree: the split runtime façades now have explicit thin-façade guards, the public-topology docs are source-guarded, the split child modules are Cabal-guarded as implementation-only, and the ordered owner sweeps plus final full gate are green.
+- Made `MLF.Pipeline` the canonical public execution/runtime API and trimmed `MLF.API` back to frontend syntax/parse/pretty/normalization helpers.
+- Completed the remaining refactor loop for the major internal monoliths:
+  - `MLF.Elab.Phi.Omega` now delegates to `Omega.Domain`, `Omega.Interpret`, and `Omega.Normalize`;
+  - `MLF.Constraint.Presolution.EdgeUnify` now delegates to `EdgeUnify.State`, `EdgeUnify.Omega`, and `EdgeUnify.Unify`;
+  - `MLF.Reify.Core` now delegates to `Reify.Cache`, `Reify.Named`, `Reify.Type`, and `Reify.Bound`;
+  - `MLF.Constraint.Solve` now delegates to `Solve.Worklist`, `Solve.Harmonize`, and `Solve.Finalize`;
+  - `MLF.Elab.Elaborate` now delegates to `Elaborate.Algebra`, `Elaborate.Scope`, and `Elaborate.Annotation`.
+- Added explicit prep structures/helpers used by the split campaign: `EdgeArtifacts`, `TraceCopyArtifacts`, `prepareTraceCopyArtifacts`, `mkInitialPresolutionState`, and `tyExpNodeIds`.
 - Removed the legacy public `MyLib` wrapper and documented `MLF.API`, `MLF.Pipeline`, and `MLF.XMLF` as the supported downstream surfaces.
 - Added public-surface / repository guard coverage: `PublicSurfaceSpec`, `RepoGuardSpec`, and `PresolutionFacadeSpec` now protect public API behavior, test-harness wiring, `MyLib` absence, the `Constraint.Types`/`Constraint.Types.Graph` ownership boundary, and the narrowed presolution facade.
 - Moved presolution test-only helpers behind `MLF.Constraint.Presolution.TestSupport`, keeping `MLF.Constraint.Presolution` focused on runtime/internal Phase 4 entrypoints and runtime trace data.

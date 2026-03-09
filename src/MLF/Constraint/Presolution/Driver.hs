@@ -84,18 +84,7 @@ computePresolution
     -> Either PresolutionError PresolutionResult
 computePresolution traceCfg acyclicityResult constraint = do
     -- Initialize state
-    let initialState = PresolutionState
-            { psConstraint = constraint
-            , psPresolution = Presolution IntMap.empty
-            , psUnionFind = IntMap.empty -- Should initialize from constraint if needed
-            , psNextNodeId = maxNodeIdKeyOr0 constraint + 1
-            , psPendingWeakens = IntSet.empty
-            , psPendingWeakenOwners = IntMap.empty
-            , psBinderCache = IntMap.empty
-            , psEdgeExpansions = IntMap.empty
-            , psEdgeWitnesses = IntMap.empty
-            , psEdgeTraces = IntMap.empty
-            }
+    let initialState = mkInitialPresolutionState constraint
 
     -- Run the presolution loop.
     (_, presState) <- runPresolutionM traceCfg
@@ -116,19 +105,18 @@ computePresolution traceCfg acyclicityResult constraint = do
     when (not (null (cInstEdges finalConstraint))) $
         Left (ResidualInstEdges (cInstEdges finalConstraint))
     let residualTyExpNodes =
-            [ tnId node
-            | node@TyExp{} <- NodeAccess.allNodes finalConstraint
-            ]
+            tyExpNodeIds finalConstraint
     when (not (null residualTyExpNodes)) $
         Left (ResidualTyExpNodes residualTyExpNodes)
     validateTranslatablePresolution finalConstraint
 
-    let (edgeWitnesses, edgeTraces, edgeExpansions) =
+    let edgeArtifacts =
             dropTrivialSchemeEdges
                 finalConstraint
-                (psEdgeWitnesses finalState)
-                (psEdgeTraces finalState)
-                (psEdgeExpansions finalState)
+                (EdgeArtifacts (psEdgeExpansions finalState) (psEdgeWitnesses finalState) (psEdgeTraces finalState))
+        edgeWitnesses = eaEdgeWitnesses edgeArtifacts
+        edgeTraces = eaEdgeTraces edgeArtifacts
+        edgeExpansions = eaEdgeExpansions edgeArtifacts
         nonTrivialEdgeKeys =
             IntSet.fromList
                 [ getEdgeId (instEdgeId edge)
@@ -200,9 +188,9 @@ assertMaterializationCoverage :: IntMap NodeId -> PresolutionM ()
 assertMaterializationCoverage mapping = do
     c <- getConstraint
     let missing =
-            [ tnId node
-            | node@TyExp{} <- NodeAccess.allNodes c
-            , IntMap.notMember (getNodeId (tnId node)) mapping
+            [ nid
+            | nid <- tyExpNodeIds c
+            , IntMap.notMember (getNodeId nid) mapping
             ]
     when (not (null missing)) $
         throwError $
@@ -212,10 +200,7 @@ assertMaterializationCoverage mapping = do
 assertNoResidualTyExp :: String -> PresolutionM ()
 assertNoResidualTyExp phase = do
     c <- getConstraint
-    let residual =
-            [ tnId node
-            | node@TyExp{} <- NodeAccess.allNodes c
-            ]
+    let residual = tyExpNodeIds c
     when (not (null residual)) $
         throwError $
             InternalError $
@@ -366,7 +351,7 @@ rewriteConstraint mapping = do
     -- programs like `\y. let id = (\x. x) in id y` lose the “result = argument”
     -- relationship and get over-generalized types.
     identityRootMap <- do
-        let exps = [ n | n@TyExp{} <- NodeAccess.allNodes c ]
+        let exps = [ n | nid <- tyExpNodeIds c, Just n@TyExp{} <- [NodeAccess.lookupNode c nid] ]
         pairs <- forM exps $ \expNode -> do
             expn <- getExpansion (tnExpVar expNode)
             pure $ case expn of
@@ -475,3 +460,24 @@ rewriteConstraint mapping = do
         }
 
     return fullRedirects
+
+mkInitialPresolutionState :: Constraint -> PresolutionState
+mkInitialPresolutionState constraint =
+    PresolutionState
+        { psConstraint = constraint
+        , psPresolution = Presolution IntMap.empty
+        , psUnionFind = IntMap.empty
+        , psNextNodeId = maxNodeIdKeyOr0 constraint + 1
+        , psPendingWeakens = IntSet.empty
+        , psPendingWeakenOwners = IntMap.empty
+        , psBinderCache = IntMap.empty
+        , psEdgeExpansions = IntMap.empty
+        , psEdgeWitnesses = IntMap.empty
+        , psEdgeTraces = IntMap.empty
+        }
+
+tyExpNodeIds :: Constraint -> [NodeId]
+tyExpNodeIds c =
+    [ tnId node
+    | node@TyExp{} <- NodeAccess.allNodes c
+    ]

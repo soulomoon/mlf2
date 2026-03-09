@@ -53,6 +53,7 @@ import MLF.Constraint.Presolution
 import MLF.Constraint.Presolution.TestSupport
     ( CopyMapping(..)
     , defaultPlanBuilder
+    , EdgeArtifacts(..)
     , fromListInterior
     , insertCopy
     , lookupCopy
@@ -70,10 +71,12 @@ import MLF.Constraint.Solve (solveUnifyWithSnapshot)
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Elab.Run.ResultType
     ( ResultTypeInputs(..)
-    , mkResultTypeInputs
-    , generalizeWithPlan
     , computeResultTypeFromAnn
     , computeResultTypeFallback
+    , generalizeWithPlan
+    , mkResultTypeInputs
+    , rtcEdgeTraces
+    , rtcEdgeWitnesses
     )
 import MLF.Elab.Run.Util
     ( canonicalizeExpansion
@@ -285,9 +288,11 @@ resultTypeInputsForArtifacts
         inputs =
             mkResultTypeInputs
                 canonical
-                edgeWitnesses
-                edgeTraces
-                edgeExpansions
+                EdgeArtifacts
+                    { eaEdgeExpansions = edgeExpansions
+                    , eaEdgeWitnesses = edgeWitnesses
+                    , eaEdgeTraces = edgeTraces
+                    }
                 (presolutionViewFromSolved solvedClean)
                 bindParentsGa
                 (defaultPlanBuilder defaultTraceConfig)
@@ -492,8 +497,11 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 AAnn inner annNodeId eid -> do
                     let inputsMissingWitness =
                             inputs
-                                { rtcEdgeWitnesses =
-                                    IntMap.delete (getEdgeId eid) (rtcEdgeWitnesses inputs)
+                                { rtcEdgeArtifacts =
+                                    (rtcEdgeArtifacts inputs)
+                                        { eaEdgeWitnesses =
+                                            IntMap.delete (getEdgeId eid) (rtcEdgeWitnesses inputs)
+                                        }
                                 }
                     computeResultTypeFromAnn inputsMissingWitness inner inner annNodeId eid
                         `shouldBe` Left (Elab.ValidationFailed ["missing edge witness for annotation"])

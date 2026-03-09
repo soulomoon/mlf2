@@ -7,6 +7,7 @@ module MLF.Elab.Run.Pipeline (
 ) where
 
 import qualified Data.IntMap.Strict as IntMap
+import qualified Data.IntSet as IntSet
 import qualified Data.Set as Set
 
 import MLF.Frontend.Syntax (NormSurfaceExpr)
@@ -20,9 +21,10 @@ import MLF.Constraint.Presolution
     , computePresolution
     , EdgeTrace(..)
     )
+import MLF.Constraint.Presolution.Base (EdgeArtifacts(..))
 import MLF.Constraint.Presolution.View (PresolutionView, pvCanonical)
 import qualified MLF.Constraint.Solved as Solved
-import MLF.Constraint.Types (PolySyms, cNodes, lookupNodeIn)
+import MLF.Constraint.Types (Constraint, NodeId, PolySyms, cNodes, lookupNodeIn)
 import MLF.Constraint.Types.Presolution (PresolutionSnapshot(..))
 import MLF.Elab.Elaborate (ElabConfig(..), ElabEnv(..), elaborateWithEnv)
 import MLF.Elab.PipelineConfig (PipelineConfig(..), defaultPipelineConfig)
@@ -66,6 +68,12 @@ data SnapshotViews = SnapshotViews
     , svCanonNode :: Canonicalizer
     }
 
+data TraceCopyArtifacts = TraceCopyArtifacts
+    { tcaEdgeTracesForCopy :: IntMap.IntMap EdgeTrace
+    , tcaInstCopyNodes :: IntSet.IntSet
+    , tcaInstCopyMapFull :: IntMap.IntMap NodeId
+    }
+
 runPipelineElab :: PolySyms -> NormSurfaceExpr -> Either PipelineError (ElabTerm, ElabType)
 runPipelineElab = runPipelineElabWithConfig defaultPipelineConfig
 
@@ -95,24 +103,12 @@ runPipelineElabWith traceCfg genConstraints expr = do
         , svCanonNode = canonNode
         } <- prepareSnapshotViews pres
     let planBuilder = prPlanBuilder pres
+    TraceCopyArtifacts
+        { tcaInstCopyNodes = instCopyNodes
+        , tcaInstCopyMapFull = instCopyMapFull
+        } <-
+            pure (prepareTraceCopyArtifacts c1 presolutionViewClean (prRedirects pres) canonNode (prEdgeTraces pres))
     let
-        adoptNode = canonicalizeNode canonNode
-        baseNodes = cNodes c1
-        edgeTracesForCopy =
-            IntMap.filter
-                (\tr ->
-                    case lookupNodeIn baseNodes (etRoot tr) of
-                        Just _ -> True
-                        Nothing -> False
-                )
-                (prEdgeTraces pres)
-        instCopyNodes =
-            instantiationCopyNodes presolutionViewClean (prRedirects pres) edgeTracesForCopy
-        instCopyMapFull =
-            let baseNamedKeysAll = collectBaseNamedKeys c1
-                traceMaps = map (buildTraceCopyMap c1 baseNamedKeysAll adoptNode)
-                                 (IntMap.elems edgeTracesForCopy)
-            in foldl' IntMap.union IntMap.empty traceMaps
         (constraintForGen, bindParentsGa) =
             constraintForGeneralization traceCfg presolutionViewClean (prRedirects pres) instCopyNodes instCopyMapFull c1 ann
     presolutionViewForGen <- fromSolveError (Finalize.finalizePresolutionViewFromSnapshot constraintForGen (Solved.canonicalMap solvedClean))
@@ -123,9 +119,11 @@ runPipelineElabWith traceCfg genConstraints expr = do
                 mbGa
                 presolutionViewForGen
     let annCanon = redirectAndCanonicalizeAnn (canonicalizeNode canonNode) (prRedirects pres) ann
-    let edgeWitnesses = IntMap.map (canonicalizeWitness canonNode) (prEdgeWitnesses pres)
-        edgeTraces = IntMap.map (canonicalizeTrace canonNode) (prEdgeTraces pres)
-        edgeExpansions = IntMap.map (canonicalizeExpansion canonNode) (prEdgeExpansions pres)
+    let edgeArtifacts = EdgeArtifacts
+            { eaEdgeExpansions = IntMap.map (canonicalizeExpansion canonNode) (prEdgeExpansions pres)
+            , eaEdgeWitnesses = IntMap.map (canonicalizeWitness canonNode) (prEdgeWitnesses pres)
+            , eaEdgeTraces = IntMap.map (canonicalizeTrace canonNode) (prEdgeTraces pres)
+            }
     let scopeOverrides =
             letScopeOverrides
                 c1
@@ -140,9 +138,7 @@ runPipelineElabWith traceCfg genConstraints expr = do
         elabEnv = ElabEnv
             { eePresolutionView = presolutionViewForGen
             , eeGaParents = bindParentsGa
-            , eeEdgeWitnesses = edgeWitnesses
-            , eeEdgeTraces = edgeTraces
-            , eeEdgeExpansions = edgeExpansions
+            , eeEdgeArtifacts = edgeArtifacts
             , eeScopeOverrides = scopeOverrides
             }
     term <- fromElabError (elaborateWithEnv elabConfig elabEnv annCanon)
@@ -161,9 +157,7 @@ runPipelineElabWith traceCfg genConstraints expr = do
         resultTypeInputs =
             mkResultTypeInputs
                 canonical
-                edgeWitnesses
-                edgeTraces
-                edgeExpansions
+                edgeArtifacts
                 presolutionViewForGen
                 bindParentsGa
                 planBuilder
@@ -209,4 +203,37 @@ prepareSnapshotViews pres = do
         { svSolvedClean = solvedClean
         , svPresolutionViewClean = presolutionViewClean
         , svCanonNode = canonNode
+        }
+
+prepareTraceCopyArtifacts
+    :: Constraint
+    -> PresolutionView
+    -> IntMap.IntMap NodeId
+    -> Canonicalizer
+    -> IntMap.IntMap EdgeTrace
+    -> TraceCopyArtifacts
+prepareTraceCopyArtifacts baseConstraint presolutionView redirects canonNode edgeTraces =
+    let adoptNode = canonicalizeNode canonNode
+        baseNodes = cNodes baseConstraint
+        edgeTracesForCopy =
+            IntMap.filter
+                (\tr ->
+                    case lookupNodeIn baseNodes (etRoot tr) of
+                        Just _ -> True
+                        Nothing -> False
+                )
+                edgeTraces
+        instCopyNodes =
+            instantiationCopyNodes presolutionView redirects edgeTracesForCopy
+        instCopyMapFull =
+            let baseNamedKeysAll = collectBaseNamedKeys baseConstraint
+                traceMaps =
+                    map
+                        (buildTraceCopyMap baseConstraint baseNamedKeysAll adoptNode)
+                        (IntMap.elems edgeTracesForCopy)
+            in foldl' IntMap.union IntMap.empty traceMaps
+    in TraceCopyArtifacts
+        { tcaEdgeTracesForCopy = edgeTracesForCopy
+        , tcaInstCopyNodes = instCopyNodes
+        , tcaInstCopyMapFull = instCopyMapFull
         }

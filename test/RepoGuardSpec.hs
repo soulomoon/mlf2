@@ -1,5 +1,6 @@
 module RepoGuardSpec (spec) where
 
+import Control.Monad (forM_)
 import Data.List (intercalate, isInfixOf, isSuffixOf, sort)
 import System.Directory (doesFileExist, listDirectory)
 import System.FilePath ((</>), dropExtension, makeRelative, splitDirectories, takeExtension)
@@ -28,6 +29,59 @@ spec = describe "Repository guardrails" $ do
     it "modules do not import both MLF.Constraint.Types and .Graph" $ do
         offenders <- findDualImportOffenders ["src", "src-public", "test", "app"]
         offenders `shouldBe` []
+
+    it "MLF.API no longer exports pipeline/runtime helpers and MLF.Pipeline owns them" $ do
+        apiSrc <- readFile "src-public/MLF/API.hs"
+        pipelineSrc <- readFile "src-public/MLF/Pipeline.hs"
+        forM_
+            [ "inferConstraintGraph"
+            , "PipelineConfig(..)"
+            , "defaultPipelineConfig"
+            , "TraceConfig(..)"
+            , "defaultTraceConfig"
+            , "PipelineError(..)"
+            , "renderPipelineError"
+            , "runPipelineElab"
+            , "runPipelineElabChecked"
+            , "runPipelineElabWithConfig"
+            , "runPipelineElabCheckedWithConfig"
+            , "typeCheck"
+            , "step"
+            , "\n    , normalize\n"
+            , "isValue"
+            ] $ \marker -> do
+                apiSrc `shouldSatisfy` (not . isInfixOf marker)
+                pipelineSrc `shouldSatisfy` isInfixOf marker
+
+    it "README and architecture docs agree on the current public topology" $ do
+        readmeSrc <- readFile "README.md"
+        architectureSrc <- readFile "docs/architecture.md"
+        forM_
+            [ "- `MLF.API` — surface syntax, parsing, pretty-printing, and normalization helpers"
+            , "- `MLF.Pipeline` — canonical public constraint-generation / elaboration / runtime API"
+            , "- `MLF.XMLF` — xMLF syntax, parser, and pretty-printer"
+            ] $ \marker ->
+                readmeSrc `shouldSatisfy` isInfixOf marker
+        forM_
+            [ "- `MLF.API` — umbrella frontend module (surface syntax + eMLF parse/pretty + normalization helpers)"
+            , "- `MLF.Pipeline` — canonical pipeline/runtime module"
+            , "- `MLF.XMLF` — explicit xMLF syntax, parser, and pretty-printing helpers"
+            ] $ \marker ->
+                architectureSrc `shouldSatisfy` isInfixOf marker
+
+    it "split facades stay thin and child-owned" $ do
+        forM_ splitFacadeGuards $ \(path, maxLines, requiredMarkers) -> do
+            src <- readFile path
+            length (lines src) `shouldSatisfy` (<= maxLines)
+            forM_ requiredMarkers $ \marker ->
+                src `shouldSatisfy` isInfixOf marker
+
+    it "split child modules stay implementation-only in Cabal" $ do
+        cabalSrc <- readFile "mlf2.cabal"
+        let publicLibrarySrc = extractPublicLibraryStanza cabalSrc
+        forM_ splitChildModules $ \moduleName -> do
+            countModuleEntries moduleName cabalSrc `shouldBe` 1
+            publicLibrarySrc `shouldSatisfy` (not . isInfixOf moduleName)
 
 discoverSpecModules :: FilePath -> IO [String]
 discoverSpecModules root = do
@@ -160,3 +214,90 @@ stripPrefix [] ys = Just ys
 stripPrefix (x:xs) (y:ys)
     | x == y = stripPrefix xs ys
 stripPrefix _ _ = Nothing
+
+splitFacadeGuards :: [(FilePath, Int, [String])]
+splitFacadeGuards =
+    [ ( "src/MLF/Elab/Phi/Omega.hs"
+      , 30
+      , [ "import MLF.Elab.Phi.Omega.Domain"
+        , "import MLF.Elab.Phi.Omega.Interpret"
+        , "import MLF.Elab.Phi.Omega.Normalize"
+        ]
+      )
+    , ( "src/MLF/Constraint/Presolution/EdgeUnify.hs"
+      , 95
+      , [ "import MLF.Constraint.Presolution.EdgeUnify.State"
+        , "import qualified MLF.Constraint.Presolution.EdgeUnify.Omega as Omega"
+        , "import MLF.Constraint.Presolution.EdgeUnify.Unify"
+        ]
+      )
+    , ( "src/MLF/Reify/Core.hs"
+      , 95
+      , [ "import qualified MLF.Reify.Bound as Bound"
+        , "import qualified MLF.Reify.Named as Named"
+        , "import qualified MLF.Reify.Type as Type"
+        ]
+      )
+    , ( "src/MLF/Constraint/Solve.hs"
+      , 130
+      , [ "import MLF.Constraint.Solve.Finalize"
+        , "import MLF.Constraint.Solve.Internal"
+        , "import MLF.Constraint.Solve.Worklist"
+        ]
+      )
+    , ( "src/MLF/Elab/Elaborate.hs"
+      , 120
+      , [ "import MLF.Elab.Elaborate.Algebra"
+        , "import MLF.Elab.Elaborate.Annotation"
+        , "import MLF.Elab.Elaborate.Scope"
+        ]
+      )
+    ]
+
+splitChildModules :: [String]
+splitChildModules =
+    [ "MLF.Constraint.Presolution.EdgeUnify.State"
+    , "MLF.Constraint.Presolution.EdgeUnify.Omega"
+    , "MLF.Constraint.Presolution.EdgeUnify.Unify"
+    , "MLF.Constraint.Solve.Worklist"
+    , "MLF.Constraint.Solve.Harmonize"
+    , "MLF.Constraint.Solve.Finalize"
+    , "MLF.Reify.Cache"
+    , "MLF.Reify.Named"
+    , "MLF.Reify.Type"
+    , "MLF.Reify.Bound"
+    , "MLF.Elab.Elaborate.Algebra"
+    , "MLF.Elab.Elaborate.Scope"
+    , "MLF.Elab.Elaborate.Annotation"
+    , "MLF.Elab.Phi.Omega.Domain"
+    , "MLF.Elab.Phi.Omega.Interpret"
+    , "MLF.Elab.Phi.Omega.Normalize"
+    ]
+
+countModuleEntries :: String -> String -> Int
+countModuleEntries moduleName src =
+    length
+        [ ()
+        | line <- lines src
+        , normalizeModuleToken (dropFieldPrefix (trim line)) == moduleName
+        ]
+
+extractPublicLibraryStanza :: String -> String
+extractPublicLibraryStanza src =
+    unlines (takeWhile (not . isNextStanza) (drop 1 afterPublicLibrary))
+  where
+    ls = lines src
+    afterPublicLibrary = dropWhile (/= "library") ls
+    isNextStanza line =
+        any (`isPrefixOf` trim line)
+            [ "library "
+            , "executable "
+            , "test-suite "
+            , "benchmark "
+            , "foreign-library "
+            ]
+
+isPrefixOf :: Eq a => [a] -> [a] -> Bool
+isPrefixOf [] _ = True
+isPrefixOf _ [] = False
+isPrefixOf (x:xs) (y:ys) = x == y && isPrefixOf xs ys
