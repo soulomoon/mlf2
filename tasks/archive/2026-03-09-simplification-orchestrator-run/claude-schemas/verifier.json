@@ -1,1 +1,0 @@
-{"type":"object","additionalProperties":false,"required":["gate","reason","evidence"],"properties":{"gate":{"type":"string","enum":["YES","NO"]},"reason":{"type":"string"},"evidence":{"type":"array","items":{"type":"string"}}}}

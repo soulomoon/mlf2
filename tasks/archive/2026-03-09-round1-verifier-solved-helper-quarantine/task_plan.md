@@ -4,12 +4,13 @@
 Decide whether removing the duplicate solved test-helper bundle from `MLF.Constraint.Solved.Internal` is still needed, bounded, worthwhile, and thesis-safe.
 
 ## Phases
-- [in_progress] Set up task context and collect evidence
-- [pending] Inspect thesis, code, and project docs
-- [pending] Evaluate scope, risks, and current need
-- [pending] Emit YES/NO gate with supporting evidence
+- [completed] Set up task context and collect evidence
+- [completed] Inspect thesis, code, and project docs
+- [completed] Evaluate scope, risks, and current need
+- [completed] Emit YES/NO gate with supporting evidence
 
 ## Decisions
+- Gate outcome: YES, provided snapshot replay callers move to `MLF.Constraint.Finalize.finalizeSolvedFromSnapshot` (or an exact test wrapper) rather than the lighter `SolvedFacadeTestUtil.solvedFromSnapshot` path.
 - Use `papers/these-finale-english.txt` as the primary source of truth; consult `papers/xmlf.txt` only if the thesis is silent.
 - Treat this as a verification/research task; no code changes unless guidance files prove stale and require synchronization.
 

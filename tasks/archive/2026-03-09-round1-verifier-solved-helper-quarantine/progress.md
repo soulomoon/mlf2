@@ -10,3 +10,6 @@
 - Ran the proposed boundary test command; Hspec accepted the invocation but matched `0 examples`, so the current command is not a reliable targeted gate as written.
 - Reran the exact helper-name grep and confirmed the duplicate bundle still exists in `src/MLF/Constraint/Solved/Internal.hs` alongside the test utility.
 - Verified targeted Hspec runs: exact facade-absence example passes (`1 example, 0 failures`), and `MLF.Constraint.Solved` passes (`51 examples, 0 failures`).
+- Reproduced the baseline build break with `cabal build mlf2-test`; GHC reports `Solved.fromPreRewriteState` missing from the public facade at `test/Parity/FrozenArtifacts.hs:128` and `test/SpecUtil.hs:210,223`.
+- Verified `MLF.Constraint.Finalize` is exposed to tests via the internal library in `mlf2.cabal`, so tests can switch to owner-local finalize helpers without re-expanding the public facade.
+- Compared implementations and found `SolvedFacadeTestUtil.solvedFromSnapshot` is lighter than `Solved.fromPreRewriteState`; it does not run eliminated-binder rewrite, UF substitution repair, bind-parent pruning, or final validation.

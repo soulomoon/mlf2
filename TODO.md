@@ -4,6 +4,22 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 71 Restore green baseline after solved-facade test/import drift (completed 2026-03-09)
+
+- Completed:
+  - replaced the remaining test/frozen-parity snapshot callers of `Solved.fromPreRewriteState` with `SolvedFacadeTestUtil.solvedFromSnapshot`;
+  - updated `SolvedFacadeTestUtil.solvedFromSnapshot` to replay snapshots through `SolveSnapshot` / `solveResultFromSnapshot` / `Solved.fromSolveOutput`, matching the strict checked path without reopening the public facade;
+  - wired `SolvedFacadeTestUtil` into `exe:frozen-parity-gen` and merged the repair on `master` as `165c6dff8f85a7ca2a8a2a4c1627ce6fe9f405eb` (branch commit `658717fcfaa25c063c3e24440ae879ad719ca93e`).
+- Verification:
+  - `rg -n 'Solved\.fromPreRewriteState|\bfromPreRewriteState\b' test src src-public -g '!src/MLF/Constraint/Solved/Internal.hs'`: PASS
+  - `cabal build mlf2-test`: PASS
+  - `cabal test mlf2-test --test-show-details=direct`: PASS (`1010 examples, 0 failures`)
+  - `cabal build all && cabal test`: PASS
+- Rolling priorities (next):
+  1. Resume the simplification orchestrator from the repaired `master` baseline.
+  2. Keep the solved-snapshot replay seam green during future solved-facade and parity cleanup.
+  3. Revisit only if a thesis-backed boundary change requires a different exposed test seam.
+
 ## Task 70 Remove remaining live fallback mechanisms for thesis-exactness (completed 2026-03-08)
 
 - Completed:
