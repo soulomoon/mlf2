@@ -447,12 +447,13 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             edgeSrc `shouldSatisfy` isInfixOf "flushPendingWeakensAtOwnerBoundary"
             edgeSrc `shouldSatisfy` isInfixOf "assertNoPendingUnifyEdges \"after-inst-edge-closure\""
 
-        it "row3 ordering thesis-exact guard: EdgeUnify no longer exposes the legacy flush-all helper" $ do
+        it "row3 ordering thesis-exact guard: EdgeUnify no longer exposes retired pending-weaken alias helpers" $ do
             edgeUnifySrc <- readFile "src/MLF/Constraint/Presolution/EdgeUnify.hs"
             forM_
-                [ "flushPendingWeakens,"
-                , "flushPendingWeakens :: PresolutionM ()"
-                , "flushPendingWeakens = flushPendingWeakensWhere (const True)"
+                [ "pendingWeakenOwnerForNode,"
+                , "pendingWeakenOwnerForEdge,"
+                , "pendingWeakenOwnerForNode ::"
+                , "pendingWeakenOwnerForEdge ::"
                 ] $ \marker ->
                     edgeUnifySrc `shouldSatisfy` (not . isInfixOf marker)
 
