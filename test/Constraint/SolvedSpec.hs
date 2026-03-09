@@ -18,7 +18,6 @@ import MLF.Constraint.Solve
     )
 import MLF.Constraint.Types.Presolution (PresolutionSnapshot(..))
 import MLF.Constraint.Solved
-import qualified MLF.Constraint.Solved as Solved
 import qualified SolvedFacadeTestUtil as SolvedTest
 import MLF.Frontend.Syntax
     ( Lit(..)
@@ -303,7 +302,7 @@ spec = describe "MLF.Constraint.Solved" $ do
                             )
                     Right pres -> do
                         solved <- requireRight
-                            (Solved.fromPreRewriteState
+                            (SolvedTest.solvedFromSnapshot
                                 (snapshotUnionFind pres)
                                 (snapshotConstraint pres)
                             )
@@ -474,7 +473,7 @@ spec = describe "MLF.Constraint.Solved" $ do
                 s' = SolvedTest.mkTestSolved c IntMap.empty
             NodeAccess.lookupVarBound (originalConstraint s') (canonical s' (NodeId 10)) `shouldBe` Just (NodeId 11)
 
-    describe "fromPreRewriteState" $ do
+    describe "snapshot reconstruction" $ do
         let alphaNodeId = NodeId 10
             intNodeId = NodeId 11
             alphaBodyId = NodeId 12
@@ -502,7 +501,7 @@ spec = describe "MLF.Constraint.Solved" $ do
                 , cGenNodes = fromListGen [(GenNodeId 0, rootGen)]
                 }
             uf = IntMap.fromList [(10, intNodeId)]
-            equivE = fromPreRewriteState uf preRewriteConstraint
+            equivE = SolvedTest.solvedFromSnapshot uf preRewriteConstraint
 
         it "classMembers returns all original nodes in class" $ do
             equiv <- requireRight equivE
@@ -549,7 +548,7 @@ spec = describe "MLF.Constraint.Solved" $ do
                     do
                         let snapshot = soSnapshot out
                         explicit <- requireRight $
-                            fromPreRewriteState
+                            SolvedTest.solvedFromSnapshot
                                 (snapUnionFind snapshot)
                                 (snapPreRewriteConstraint snapshot)
                         actual <- requireRight (fromSolveOutput out)
@@ -584,7 +583,7 @@ spec = describe "MLF.Constraint.Solved" $ do
                                 , snapPreRewriteConstraint = preRewriteForOutput
                                 }
                         }
-            explicit <- requireRight (fromPreRewriteState snapshotUf preRewriteForOutput)
+            explicit <- requireRight (SolvedTest.solvedFromSnapshot snapshotUf preRewriteForOutput)
             actual <- requireRight (fromSolveOutput out)
             actual `shouldBe` explicit
 

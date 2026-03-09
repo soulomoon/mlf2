@@ -10,7 +10,16 @@ module SolvedFacadeTestUtil (
 
 import qualified Data.IntMap.Strict as IntMap
 
-import MLF.Constraint.Finalize (presolutionViewFromSnapshot, stepSolvedFromPresolutionView)
+import MLF.Constraint.Finalize
+    ( presolutionViewFromSnapshot
+    , stepSolvedFromPresolutionView
+    )
+import MLF.Constraint.Solve
+    ( SolveError
+    , SolveOutput(..)
+    , SolveSnapshot(..)
+    , solveResultFromSnapshot
+    )
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types.Graph
@@ -27,9 +36,19 @@ mkTestSolved :: Constraint -> IntMap.IntMap NodeId -> Solved.Solved
 mkTestSolved constraint uf =
     stepSolvedFromPresolutionView (presolutionViewFromSnapshot constraint uf)
 
-solvedFromSnapshot :: IntMap.IntMap NodeId -> Constraint -> Solved.Solved
-solvedFromSnapshot uf constraint =
-    mkTestSolved constraint uf
+solvedFromSnapshot :: IntMap.IntMap NodeId -> Constraint -> Either SolveError Solved.Solved
+solvedFromSnapshot uf constraint = do
+    let snapshot =
+            SolveSnapshot
+                { snapUnionFind = uf
+                , snapPreRewriteConstraint = constraint
+                }
+    replayed <- solveResultFromSnapshot snapshot
+    Solved.fromSolveOutput
+        SolveOutput
+            { soResult = replayed
+            , soSnapshot = snapshot
+            }
 
 classMembers :: Solved.Solved -> NodeId -> [NodeId]
 classMembers solved nid =
