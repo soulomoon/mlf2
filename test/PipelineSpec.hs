@@ -657,6 +657,12 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             elabSrc `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
             rtSrc `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
 
+        it "witness/trace canonicalizers stay single-sourced" $ do
+            utilSrc <- readFile "src/MLF/Elab/Run/Util.hs"
+            utilSrc `shouldSatisfy` (not . isInfixOf "canonicalizeWitness ::")
+            utilSrc `shouldSatisfy` (not . isInfixOf "canonicalizeTrace ::")
+            utilSrc `shouldSatisfy` isInfixOf "canonicalizeExpansion ::"
+
         it "Phase 6 — Elaborate|ResultType|Dual-path verification gate stays green" $ do
             forM_ representativeMigrationCorpus assertCheckedAuthoritative
 
