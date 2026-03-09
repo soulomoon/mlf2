@@ -88,23 +88,48 @@ names these helper boundaries explicitly.
     the current path that computes the named node's own scheme/bound, matching
     the role the thesis reserves for plain `S`.
 -}
+data TargetUnwrapInfo = TargetUnwrapInfo
+    { tuiTargetCanonical :: NodeId
+    , tuiTargetNode :: Maybe TyNode
+    , tuiBoundCanonical :: Maybe NodeId
+    , tuiBoundNode :: Maybe TyNode
+    }
+
+targetUnwrapInfo :: PresolutionView -> NodeId -> TargetUnwrapInfo
+targetUnwrapInfo presolutionView target =
+    let canonical = ChiQuery.chiCanonical presolutionView
+        targetC = canonical target
+        targetNode = ChiQuery.chiLookupNode presolutionView targetC
+        boundCanonical = case targetNode of
+            Just TyVar{ tnBound = Just bnd } -> Just (canonical bnd)
+            _ -> Nothing
+        boundNode = boundCanonical >>= ChiQuery.chiLookupNode presolutionView
+    in TargetUnwrapInfo
+        { tuiTargetCanonical = targetC
+        , tuiTargetNode = targetNode
+        , tuiBoundCanonical = boundCanonical
+        , tuiBoundNode = boundNode
+        }
+
 generalizeTargetNode :: PresolutionView -> NodeId -> NodeId
 generalizeTargetNode presolutionView target =
     let canonical = ChiQuery.chiCanonical presolutionView
-        targetC = canonical target
-    in case ChiQuery.chiLookupNode presolutionView targetC of
-        Just TyVar{ tnBound = Just bnd } ->
-            case ChiQuery.chiLookupNode presolutionView (canonical bnd) of
-                Just TyForall{ tnBody = body } -> canonical body
-                _ -> canonical bnd
+        info = targetUnwrapInfo presolutionView target
+    in case tuiTargetNode info of
+        Just TyVar{ tnBound = Just _ } ->
+            case (tuiBoundCanonical info, tuiBoundNode info) of
+                (Just _, Just TyForall{ tnBody = body }) -> canonical body
+                (Just bndC, _) -> bndC
+                _ -> tuiTargetCanonical info
         Just TyForall{ tnBody = body } -> canonical body
-        _ -> targetC
+        _ -> tuiTargetCanonical info
 
 schemeBodyTarget :: PresolutionView -> NodeId -> NodeId
 schemeBodyTarget presolutionView target =
     let constraint = ChiQuery.chiConstraint presolutionView
         canonical = ChiQuery.chiCanonical presolutionView
-        targetC = canonical target
+        info = targetUnwrapInfo presolutionView target
+        targetC = tuiTargetCanonical info
         isSchemeRoot =
             any
                 (\gen -> any (\root -> canonical root == targetC) (gnSchemes gen))
@@ -121,15 +146,15 @@ schemeBodyTarget presolutionView target =
                     Just TyBottom{} -> False
                     _ -> True
                 ]
-    in case ChiQuery.chiLookupNode presolutionView targetC of
-        Just TyVar{ tnBound = Just bnd } ->
-            let bndC = canonical bnd
-                boundIsSchemeBody = IntMap.member (getNodeId bndC) schemeRootByBody
+    in case tuiTargetNode info of
+        Just TyVar{ tnBound = Just _ } ->
+            let boundIsSchemeBody =
+                    maybe False (\bndC -> IntMap.member (getNodeId bndC) schemeRootByBody) (tuiBoundCanonical info)
             in if isSchemeRoot || boundIsSchemeBody
-                then
-                    case ChiQuery.chiLookupNode presolutionView bndC of
-                        Just TyForall{ tnBody = body } -> canonical body
-                        _ -> bndC
+                then case (tuiBoundCanonical info, tuiBoundNode info) of
+                    (Just _, Just TyForall{ tnBody = body }) -> canonical body
+                    (Just bndC, _) -> bndC
+                    _ -> targetC
                 else targetC
         Just TyForall{ tnBody = body } -> canonical body
         _ -> targetC
