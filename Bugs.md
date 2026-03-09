@@ -7,6 +7,44 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 
 ## Resolved
 
+### BUG-2026-03-09-001
+- Status: Resolved
+- Priority: High
+- Discovered: 2026-03-09
+- Resolved: 2026-03-09
+- Summary: The `master` baseline stopped building after the public `MLF.Constraint.Solved` facade dropped `fromPreRewriteState` while test/frozen-parity utilities still called it directly.
+- Minimal reproducer:
+  - `cabal build all && cabal test`
+  - `rg -n 'fromPreRewriteState' test/Parity/FrozenArtifacts.hs test/SpecUtil.hs test/PipelineSpec.hs test/Constraint/SolvedSpec.hs src/MLF/Constraint/Solved.hs src/MLF/Constraint/Solved/Internal.hs`
+- Expected vs actual:
+  - Expected: the baseline branch should compile and test cleanly, with test-only snapshot reconstruction using a thesis-safe, exposed replay seam instead of a removed public facade helper.
+  - Actual before fix: test/frozen-parity callers still referenced `Solved.fromPreRewriteState`, so `cabal build all && cabal test` failed before any new simplification round could start.
+- Suspected/owning area:
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Solved.hs`
+  - `/Volumes/src/mlf4/src/MLF/Constraint/Solved/Internal.hs`
+  - `/Volumes/src/mlf4/test/SolvedFacadeTestUtil.hs`
+  - `/Volumes/src/mlf4/test/SpecUtil.hs`
+  - `/Volumes/src/mlf4/test/Parity/FrozenArtifacts.hs`
+  - `/Volumes/src/mlf4/test/PipelineSpec.hs`
+  - `/Volumes/src/mlf4/test/Constraint/SolvedSpec.hs`
+  - `/Volumes/src/mlf4/mlf2.cabal`
+- Thesis impact:
+  - The defect did not change the thesis model itself, but it blocked the verification gate required to keep future simplifications thesis-exact and trustworthy.
+- Fix:
+  - Kept the public `MLF.Constraint.Solved` facade narrow and moved test/frozen-parity snapshot reconstruction onto `SolvedFacadeTestUtil.solvedFromSnapshot`.
+  - Updated that helper to mirror the checked replay path via `SolveSnapshot`, `solveResultFromSnapshot`, and `Solved.fromSolveOutput`.
+  - Migrated the remaining test callers and wired `SolvedFacadeTestUtil` into `frozen-parity-gen` in `mlf2.cabal`.
+  - Merged on `master` via `165c6dff8f85a7ca2a8a2a4c1627ce6fe9f405eb` (branch commit `658717fcfaa25c063c3e24440ae879ad719ca93e`).
+- Regression tests:
+  - `/Volumes/src/mlf4/test/SpecUtil.hs`
+  - `/Volumes/src/mlf4/test/Parity/FrozenArtifacts.hs`
+  - `/Volumes/src/mlf4/test/PipelineSpec.hs`
+  - `/Volumes/src/mlf4/test/Constraint/SolvedSpec.hs`
+  - `rg -n 'Solved\.fromPreRewriteState|\bfromPreRewriteState\b' test src src-public -g '!src/MLF/Constraint/Solved/Internal.hs'`
+  - `cabal build mlf2-test`
+  - `cabal test mlf2-test --test-show-details=direct`
+  - `cabal build all && cabal test`
+
 ### BUG-2026-03-07-008
 - Status: Resolved
 - Priority: Low
