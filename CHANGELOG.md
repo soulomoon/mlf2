@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Changed
+- Removed the legacy public `MyLib` wrapper and documented `MLF.API`, `MLF.Pipeline`, and `MLF.XMLF` as the supported downstream surfaces.
+- Added public-surface / repository guard coverage: `PublicSurfaceSpec`, `RepoGuardSpec`, and `PresolutionFacadeSpec` now protect public API behavior, test-harness wiring, `MyLib` absence, the `Constraint.Types`/`Constraint.Types.Graph` ownership boundary, and the narrowed presolution facade.
+- Moved presolution test-only helpers behind `MLF.Constraint.Presolution.TestSupport`, keeping `MLF.Constraint.Presolution` focused on runtime/internal Phase 4 entrypoints and runtime trace data.
+- Thinned low-risk orchestration seams without changing behavior: `MLF.Constraint.Presolution.Driver` now reuses `Rewrite.rebuildBindParents`, and `MLF.Elab.Run.Pipeline` now uses explicit snapshot-preparation and redirect-then-canonicalize helpers.
 - Moved `MLF.Constraint.Presolution.EdgeProcessing` pending-unify / closure-seed state reads behind `MLF.Constraint.Presolution.StateAccess` (2026-03-09), without changing owner-boundary scheduling or diagnostics.
 - Single-sourced canonical scheme-root owner/root-set bookkeeping between `ResultType.Fallback` and `Generalize.Phase4` (2026-03-09); only the shared root→owner/root-set construction moved, not result-type or generalization policy logic.
 - Retired the dead derived `chiCanonicalBindParents` helper from `MLF.Elab.Run.ChiQuery` (2026-03-09); the lone fallback caller now reads canonical bind parents directly from `chiCanonicalConstraint`.

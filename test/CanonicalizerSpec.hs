@@ -9,7 +9,8 @@ import Test.Hspec
 import Test.QuickCheck
 
 import MLF.Constraint.Canonicalizer
-import MLF.Constraint.Presolution (CopyMapping(..), EdgeTrace(..), fromListInterior)
+import MLF.Constraint.Presolution (EdgeTrace(..))
+import MLF.Constraint.Presolution.TestSupport (CopyMapping(..), fromListInterior)
 import MLF.Constraint.Types.Graph (EdgeId(..), NodeId(..))
 import MLF.Constraint.Types.Witness
     ( BoundRef(..)

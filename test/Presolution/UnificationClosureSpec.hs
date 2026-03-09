@@ -14,7 +14,9 @@ import MLF.Constraint.Presolution
     ( EdgeTrace(..)
     , PresolutionResult(..)
     , computePresolution
-    , toListInterior
+    )
+import MLF.Constraint.Presolution.TestSupport
+    ( toListInterior
     , validateTranslatablePresolution
     )
 import MLF.Constraint.Types.Graph (BaseTy(..), BindFlag(..), Constraint(..), EdgeId(..), ExpVarId(..), InstEdge(..), NodeId(..), TyNode(..), UnifyEdge(..))

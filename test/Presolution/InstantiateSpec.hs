@@ -6,9 +6,9 @@ import qualified Data.IntSet as IntSet
 
 import MLF.Constraint.Types.Presolution (Presolution(..))
 import MLF.Constraint.Types.Graph
-import MLF.Constraint.Presolution
-    ( PresolutionError(..)
-    , PresolutionState(..)
+import MLF.Constraint.Presolution (PresolutionError(..))
+import MLF.Constraint.Presolution.TestSupport
+    ( PresolutionState(..)
     , instantiateScheme
     , instantiateSchemeWithTrace
     , lookupCopy

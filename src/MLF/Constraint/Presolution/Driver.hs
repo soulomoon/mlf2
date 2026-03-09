@@ -33,13 +33,12 @@ module MLF.Constraint.Presolution.Driver (
     validateReplayMapTraceContract
 ) where
 
-import Control.Monad.Reader (ask)
 import Control.Monad.Except (throwError)
-import Control.Monad (foldM, forM, forM_, when)
+import Control.Monad (forM, forM_, when)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import MLF.Util.Trace (TraceConfig, traceBindingM)
+import MLF.Util.Trace (TraceConfig)
 import Data.Maybe (catMaybes, fromMaybe, mapMaybe)
 
 import qualified MLF.Binding.Tree as Binding
@@ -50,9 +49,11 @@ import MLF.Constraint.Types.Witness (isStrictReplayContract)
 import MLF.Constraint.Presolution.Base
 import MLF.Constraint.Presolution.Plan (buildGeneralizePlans)
 import MLF.Constraint.Presolution.Rewrite (
+    RebuildBindParentsEnv(..),
     canonicalizeExpansion,
     canonicalizeTrace,
     canonicalizeWitness,
+    rebuildBindParents,
     rewriteGenNodes,
     rewriteNode,
     rewriteVarSet,
@@ -74,13 +75,6 @@ import MLF.Constraint.Presolution.EdgeProcessing (
 import MLF.Constraint.Presolution.EdgeUnify (pendingWeakenOwners)
 import MLF.Constraint.Presolution.StateAccess (getConstraintAndCanonical)
 import MLF.Constraint.Acyclicity (AcyclicityResult(..))
-
--- | Debug binding operations (uses explicit trace config).
-debugBindParents :: String -> a -> PresolutionM a
-debugBindParents msg value = do
-    cfg <- ask
-    traceBindingM cfg msg
-    pure value
 
 -- | Main entry point: compute principal presolution.
 computePresolution
@@ -408,13 +402,6 @@ rewriteConstraint mapping = do
 
         newTraces0 = IntMap.map (canonicalizeTrace canon) edgeTraces0
 
-        bindingEdges0 = cBindParents c
-        cStruct = c { cNodes = NodeMap newNodes, cGenNodes = genNodes' }
-        rootGenRef =
-            case IntMap.keys (getGenNodeMap genNodes') of
-                [] -> Nothing
-                gids -> Just (genRef (GenNodeId (minimum gids)))
-
         incomingParents :: IntMap IntSet.IntSet
         incomingParents =
             let addOne parent child m =
@@ -440,242 +427,15 @@ rewriteConstraint mapping = do
             | nid <- map (getNodeId . fst) (toListNode (cNodes c))
             ]
 
-    newBindParents <- do
-        let genNodes0 = cGenNodes c
-            genExists gid =
-                IntMap.member (getGenNodeId gid) (getGenNodeMap genNodes0)
-            typeExists nid = IntMap.member (getNodeId nid) newNodes
-            schemeParents =
-                IntMap.fromListWith
-                    const
-                    [ (getNodeId child, genRef gid)
-                    | (childKey, (parent0, _flag)) <- IntMap.toList bindingEdges0
-                    , let childRef0 = nodeRefFromKey childKey
-                          childRef = canonicalRef childRef0
-                          parentRef = canonicalRef parent0
-                    , TypeRef child <- [childRef]
-                    , GenRef gid <- [parentRef]
-                    ]
-
-            canonicalRef = Canonicalize.canonicalRef canonical
-            entries0 =
-                [ (childRef, parentRef, flag)
-                | (childKey, (parent0, flag)) <- IntMap.toList bindingEdges0
-                , let childRef0 = nodeRefFromKey childKey
-                      childRef = canonicalRef childRef0
-                      parentRef = canonicalRef parent0
-                , case childRef of
-                    TypeRef nid -> typeExists nid
-                    GenRef gid -> genExists gid
-                ]
-
-            chooseBindParent :: NodeRef -> NodeRef -> PresolutionM NodeRef
-            chooseBindParent childRef parent0 =
-                case childRef of
-                    GenRef _ ->
-                        case parent0 of
-                            GenRef gid
-                                | genExists gid -> pure parent0
-                            _ ->
-                                throwError $
-                                    BindingTreeError $
-                                        InvalidBindingTree $
-                                            "rewriteConstraint: gen node has non-gen parent "
-                                                ++ show parent0
-                    TypeRef child' -> do
-                        let inNodes ref = case ref of
-                                TypeRef nid -> typeExists nid
-                                GenRef gid -> genExists gid
-                            upper parent = case parent of
-                                GenRef _ -> True
-                                _ -> Binding.isUpper cStruct parent childRef
-
-                            bindingAncestors :: NodeRef -> [NodeRef]
-                            bindingAncestors start =
-                                case Binding.bindingPathToRoot c start of
-                                    Left _ -> []
-                                    Right path -> drop 1 path
-
-                            expBody :: NodeRef -> Maybe NodeRef
-                            expBody ref =
-                                case ref of
-                                    TypeRef nid ->
-                                        case NodeAccess.lookupNode c nid of
-                                            Just TyExp{ tnBody = b } -> Just (TypeRef b)
-                                            _ -> Nothing
-                                    GenRef _ -> Nothing
-
-                            structuralParent :: NodeRef -> Maybe NodeRef
-                            structuralParent ref =
-                                case ref of
-                                    GenRef _ -> Nothing
-                                    TypeRef nid ->
-                                        case IntMap.lookup (getNodeId nid) incomingParents of
-                                            Nothing -> Nothing
-                                            Just ps ->
-                                                case IntSet.toList ps of
-                                                    [] -> Nothing
-                                                    (p:_) -> Just (TypeRef (NodeId p))
-
-                            candidates =
-                                map canonicalRef $
-                                    [ parent0 ]
-                                        ++ maybe [] pure (IntMap.lookup (getNodeId child') schemeParents)
-                                        ++ mapMaybe expBody [parent0]
-                                        ++ bindingAncestors parent0
-                                        ++ bindingAncestors childRef
-                                        ++ maybe [] pure (structuralParent childRef)
-
-                            firstValid = \case
-                                [] -> Nothing
-                                (p:ps) ->
-                                    if p == childRef || not (inNodes p) || not (upper p)
-                                        then firstValid ps
-                                        else Just p
-
-                        case firstValid candidates of
-                            Just p -> pure p
-                            Nothing ->
-                                case rootGenRef of
-                                    Just gref
-                                        | gref /= childRef
-                                        , inNodes gref
-                                        , upper gref ->
-                                            pure gref
-                                    _ ->
-                                        throwError $
-                                            BindingTreeError $
-                                                InvalidBindingTree $
-                                                    "rewriteConstraint: could not find a valid binding parent for "
-                                                        ++ show child'
-                                                        ++ " (original parent "
-                                                        ++ show parent0
-                                                        ++ ")"
-
-            insertOne :: BindParents -> (Int, (NodeRef, BindFlag)) -> PresolutionM BindParents
-            insertOne bp (childKey, (parent, flag)) =
-                case IntMap.lookup childKey bp of
-                    Nothing -> pure (IntMap.insert childKey (parent, flag) bp)
-                    Just (parent0, flag0)
-                        | parent0 == parent ->
-                            let flag' = max flag0 flag
-                            in pure (IntMap.insert childKey (parent, flag') bp)
-                        | otherwise ->
-                            let flag' = max flag0 flag
-                                childRef = nodeRefFromKey childKey
-                                schemeParent =
-                                    case childRef of
-                                        TypeRef nid -> IntMap.lookup (getNodeId nid) schemeParents
-                                        GenRef _ -> Nothing
-                                pickParent0 =
-                                    case schemeParent of
-                                        Just sp -> sp
-                                        Nothing -> parent0
-                                pickParent =
-                                    if Binding.isUpper cStruct pickParent0 childRef
-                                        then pickParent0
-                                        else parent
-                                bp' = IntMap.insert childKey (pickParent, flag') bp
-                                msg =
-                                    "presolution: bind-parent conflict child="
-                                        ++ show childRef
-                                        ++ " parent0="
-                                        ++ show parent0
-                                        ++ " parent1="
-                                        ++ show parent
-                                        ++ " schemeParent="
-                                        ++ show schemeParent
-                                        ++ " pick="
-                                        ++ show pickParent
-                            in debugBindParents msg bp'
-
-        entries' <- fmap concat $ forM entries0 $ \(childRef, parent0, flag) -> do
-            parent <- chooseBindParent childRef parent0
-            pure $ case parent == childRef of
-                True -> []
-                False -> [(nodeRefKey childRef, (parent, flag))]
-
-        bp0 <- foldM insertOne IntMap.empty entries'
-
-        let inNodesRef ref =
-                case ref of
-                    TypeRef nid -> typeExists nid
-                    GenRef gid -> genExists gid
-            bp0' =
-                IntMap.filterWithKey
-                    (\childKey (parent, _) ->
-                        inNodesRef (nodeRefFromKey childKey) && inNodesRef parent
-                    )
-                    bp0
-            rootGen =
-                case IntMap.keys (getGenNodeMap genNodes') of
-                    [] -> Nothing
-                    gids -> Just (GenNodeId (minimum gids))
-
-            addMissing bp nidInt = do
-                let childRef = typeRef (NodeId nidInt)
-                    childKey = nodeRefKey childRef
-                if IntMap.member childKey bp
-                    then pure bp
-                    else do
-                        let structuralParent =
-                                case IntMap.lookup nidInt incomingParents of
-                                    Nothing -> Nothing
-                                    Just ps ->
-                                        case IntSet.toList ps of
-                                            [] -> Nothing
-                                            (p:_) -> Just (typeRef (NodeId p))
-                            parent =
-                                case IntMap.lookup nidInt schemeParents of
-                                    Just gp -> Just gp
-                                    Nothing -> structuralParent
-                            parent' =
-                                case parent of
-                                    Just p -> Just p
-                                    Nothing ->
-                                        case rootGen of
-                                            Nothing -> Nothing
-                                            Just gid -> Just (genRef gid)
-                        case parent' of
-                            Nothing -> pure bp
-                            Just p ->
-                                if p == childRef
-                                    then pure bp
-                                    else pure (IntMap.insert childKey (p, BindFlex) bp)
-
-        bp1 <- foldM addMissing bp0' (IntMap.keys newNodes)
-        let rootGenRefLocal = fmap genRef rootGen
-            pickUpperParent childN =
-                case IntMap.lookup (getNodeId childN) incomingParents of
-                    Just ps ->
-                        case IntSet.toList ps of
-                            (p:_) -> Just (typeRef (NodeId p))
-                            [] -> rootGenRefLocal
-                    Nothing -> rootGenRefLocal
-            fixUpper bp =
-                IntMap.mapWithKey
-                    (\childKey (parentRef, flag) ->
-                        case nodeRefFromKey childKey of
-                            GenRef _ -> (parentRef, flag)
-                            TypeRef childN ->
-                                case parentRef of
-                                    GenRef _ -> (parentRef, flag)
-                                    _ ->
-                                        if Binding.isUpper cStruct parentRef (typeRef childN)
-                                            then (parentRef, flag)
-                                            else
-                                                case pickUpperParent childN of
-                                                    Just pRef ->
-                                                        if pRef == typeRef childN
-                                                            then
-                                                                case rootGenRefLocal of
-                                                                    Just gref -> (gref, flag)
-                                                                    Nothing -> (parentRef, flag)
-                                                            else (pRef, flag)
-                                                    Nothing -> (parentRef, flag)
-                    )
-                    bp
-        pure (fixUpper bp1)
+    newBindParents <-
+        rebuildBindParents
+            RebuildBindParentsEnv
+                { rbpOriginalConstraint = c
+                , rbpNewNodes = newNodes
+                , rbpGenNodes = genNodes'
+                , rbpCanonical = canonical
+                , rbpIncomingParents = incomingParents
+                }
 
     let c0' = c
             { cNodes = NodeMap newNodes

@@ -15,7 +15,9 @@ import MLF.Constraint.Types.Witness
 import MLF.Constraint.Presolution
     ( EdgeTrace(..)
     , PresolutionError(..)
-    , PresolutionState(..)
+    )
+import MLF.Constraint.Presolution.TestSupport
+    ( PresolutionState(..)
     , lookupCopy
     , processInstEdge
     , runEdgeUnifyForTest

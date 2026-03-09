@@ -7,6 +7,7 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Set as Set
 
 import qualified MLF.Constraint.Presolution as Presolution
+import qualified MLF.Constraint.Presolution.View as PresolutionViewBoundary
 import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Presolution (PresolutionResult(..))
 import qualified MLF.Constraint.NodeAccess as NodeAccess
@@ -306,7 +307,7 @@ spec = describe "MLF.Constraint.Solved" $ do
                                 (snapshotUnionFind pres)
                                 (snapshotConstraint pres)
                             )
-                        let view = Presolution.fromPresolutionResult pres
+                        let view = PresolutionViewBoundary.fromPresolutionResult pres
                             nodeIds = map fst (toListNode (cNodes (prConstraint pres)))
                             probes = nodeIds ++ [NodeId 999]
                         forM_ probes $ \nid -> do

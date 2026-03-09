@@ -1,3 +1,14 @@
+{- |
+Module      : MLF.API
+Description : Stable umbrella API for downstream eMLF/xMLF users
+
+`MLF.API` is the recommended downstream entrypoint when callers want one module
+covering surface syntax, parsing/pretty-printing, normalization, constraint
+generation, and pipeline execution.
+
+Choose `MLF.Pipeline` when you only need the normalized pipeline surface, and
+`MLF.XMLF` when you only need explicit xMLF syntax tooling.
+-}
 {-# LANGUAGE PatternSynonyms #-}
 module MLF.API
     ( -- * Frontend syntax (raw and staged types)

@@ -13,17 +13,16 @@ import MLF.Frontend.Syntax (NormSurfaceExpr)
 import MLF.Frontend.ConstraintGen (AnnExpr(..), ConstraintError, ConstraintResult(..), generateConstraints)
 import MLF.Constraint.Normalize (normalize)
 import MLF.Constraint.Acyclicity (checkAcyclicity)
-import MLF.Constraint.Canonicalizer (canonicalizeNode)
+import MLF.Constraint.Canonicalizer (Canonicalizer, canonicalizeNode)
 import qualified MLF.Constraint.Finalize as Finalize
 import MLF.Constraint.Presolution
     ( PresolutionResult(..)
     , computePresolution
     , EdgeTrace(..)
     )
-import MLF.Constraint.Presolution.View (pvCanonical)
+import MLF.Constraint.Presolution.View (PresolutionView, pvCanonical)
 import qualified MLF.Constraint.Solved as Solved
-import MLF.Constraint.Types.Graph (PolySyms)
-import MLF.Constraint.Types (cNodes, lookupNodeIn)
+import MLF.Constraint.Types (PolySyms, cNodes, lookupNodeIn)
 import MLF.Constraint.Types.Presolution (PresolutionSnapshot(..))
 import MLF.Elab.Elaborate (ElabConfig(..), ElabEnv(..), elaborateWithEnv)
 import MLF.Elab.PipelineConfig (PipelineConfig(..), defaultPipelineConfig)
@@ -39,7 +38,7 @@ import MLF.Elab.PipelineError
 import MLF.Elab.TypeCheck (typeCheck)
 import MLF.Elab.Types
 import MLF.Elab.TermClosure (closeTermWithSchemeSubstIfNeeded, substInTerm)
-import MLF.Elab.Run.Annotation (applyRedirectsToAnn, canonicalizeAnn, annNode)
+import MLF.Elab.Run.Annotation (annNode, redirectAndCanonicalizeAnn)
 import MLF.Elab.Run.Generalize
     ( constraintForGeneralization
     , generalizeAtWithBuilder
@@ -60,6 +59,12 @@ import MLF.Elab.Run.Util
 import MLF.Elab.Run.ResultType (mkResultTypeInputs, computeResultTypeFromAnn, computeResultTypeFallback)
 import MLF.Reify.TypeOps (freeTypeVarsType)
 import MLF.Util.Trace (TraceConfig, traceGeneralize)
+
+data SnapshotViews = SnapshotViews
+    { svSolvedClean :: Solved.Solved
+    , svPresolutionViewClean :: PresolutionView
+    , svCanonNode :: Canonicalizer
+    }
 
 runPipelineElab :: PolySyms -> NormSurfaceExpr -> Either PipelineError (ElabTerm, ElabType)
 runPipelineElab = runPipelineElabWithConfig defaultPipelineConfig
@@ -84,11 +89,13 @@ runPipelineElabWith traceCfg genConstraints expr = do
     let c1 = normalize c0
     acyc <- fromCycleError (checkAcyclicity c1)
     pres <- fromPresolutionError (computePresolution traceCfg acyc c1)
+    SnapshotViews
+        { svSolvedClean = solvedClean
+        , svPresolutionViewClean = presolutionViewClean
+        , svCanonNode = canonNode
+        } <- prepareSnapshotViews pres
     let planBuilder = prPlanBuilder pres
-        preRewrite = snapshotConstraint pres
-    solvedClean <- fromSolveError (Finalize.finalizeSolvedFromSnapshot preRewrite (snapshotUnionFind pres))
-    presolutionViewClean <- fromSolveError (Finalize.finalizePresolutionViewFromSnapshot preRewrite (snapshotUnionFind pres))
-    let canonNode = makeCanonicalizer (Solved.canonicalMap solvedClean) (prRedirects pres)
+    let
         adoptNode = canonicalizeNode canonNode
         baseNodes = cNodes c1
         edgeTracesForCopy =
@@ -115,8 +122,7 @@ runPipelineElabWith traceCfg genConstraints expr = do
                 planBuilder
                 mbGa
                 presolutionViewForGen
-    let ann' = applyRedirectsToAnn (prRedirects pres) ann
-    let annCanon = canonicalizeAnn (canonicalizeNode canonNode) ann'
+    let annCanon = redirectAndCanonicalizeAnn (canonicalizeNode canonNode) (prRedirects pres) ann
     let edgeWitnesses = IntMap.map (canonicalizeWitness canonNode) (prEdgeWitnesses pres)
         edgeTraces = IntMap.map (canonicalizeTrace canonNode) (prEdgeTraces pres)
         edgeExpansions = IntMap.map (canonicalizeExpansion canonNode) (prEdgeExpansions pres)
@@ -192,3 +198,15 @@ runPipelineElabWith traceCfg genConstraints expr = do
         _ -> do
             _ <- fromElabError (computeResultTypeFallback resultTypeInputs annCanon ann)
             checkedAuthoritative
+
+prepareSnapshotViews :: PresolutionResult -> Either PipelineError SnapshotViews
+prepareSnapshotViews pres = do
+    let preRewrite = snapshotConstraint pres
+    solvedClean <- fromSolveError (Finalize.finalizeSolvedFromSnapshot preRewrite (snapshotUnionFind pres))
+    presolutionViewClean <- fromSolveError (Finalize.finalizePresolutionViewFromSnapshot preRewrite (snapshotUnionFind pres))
+    let canonNode = makeCanonicalizer (Solved.canonicalMap solvedClean) (prRedirects pres)
+    pure SnapshotViews
+        { svSolvedClean = solvedClean
+        , svPresolutionViewClean = presolutionViewClean
+        , svCanonNode = canonNode
+        }

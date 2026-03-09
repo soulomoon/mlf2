@@ -13,8 +13,9 @@ import MLF.Binding.Tree (boundFlexChildren, checkBindingTree, isUnderRigidBinder
 import MLF.Constraint.Presolution (PresolutionResult(..))
 import MLF.Constraint.Solve (solveUnifyWithSnapshot)
 import MLF.Constraint.Solved (fromSolveOutput, originalConstraint)
+import MLF.Constraint.Types hiding (lookupNode)
 import MLF.Frontend.ConstraintGen (AnnExpr (..), generateConstraintsCore)
-import MyLib hiding (normalize, lookupNode)
+import MLF.API
 import SpecUtil
     ( expectRight
     , lookupNode

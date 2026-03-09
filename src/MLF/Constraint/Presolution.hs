@@ -14,90 +14,17 @@ module MLF.Constraint.Presolution (
     PresolutionResult(..),
     PresolutionView(..),
     PresolutionPlanBuilder(..),
-    fromPresolutionResult,
-    defaultPlanBuilder,
     PresolutionError(..),
-    GaBindParents(..),
-    validateCrossGenMapping,
-
-    -- * Internal types (exported for testing)
-    PresolutionState(..),
     EdgeTrace(..),
-    CopyMapping(..),
-    CopyMap,
-    lookupCopy,
-    insertCopy,
-    copiedNodes,
-    originalNodes,
-    InteriorNodes(..),
-    fromListInterior,
-    toListInterior,
-    runPresolutionM,
-
-    -- * Building blocks (exported for testing)
-    decideMinimalExpansion,
-    processInstEdge,
-    validateReplayMapTraceContract,
-    unifyAcyclicRawWithRaiseTrace,
-    runEdgeUnifyForTest,
-    instantiateScheme,
-    instantiateSchemeWithTrace,
-    mergeExpansions,
-    applyExpansion,
-    normalizeEdgeWitnessesM,
-    -- * Validation helpers (exported for obligations testing)
-    validateTranslatablePresolution,
-    translatableWeakenedNodes
 ) where
 
 import MLF.Constraint.Presolution.Base (
-    CopyMap,
-    CopyMapping(..),
     EdgeTrace(..),
-    InteriorNodes(..),
     PresolutionError(..),
     PresolutionPlanBuilder(..),
-    PresolutionResult(..),
-    PresolutionState(..),
-    copiedNodes,
-    fromListInterior,
-    insertCopy,
-    lookupCopy,
-    originalNodes,
-    toListInterior,
-    runPresolutionM
+    PresolutionResult(..)
     )
-import MLF.Constraint.Presolution.Copy (
-    instantiateScheme,
-    instantiateSchemeWithTrace
-    )
-import MLF.Constraint.Presolution.Driver (
-    computePresolution,
-    validateReplayMapTraceContract
-    )
-import MLF.Constraint.Presolution.EdgeProcessing (processInstEdge)
-import MLF.Constraint.Presolution.EdgeUnify (runEdgeUnifyForTest)
-import MLF.Constraint.Presolution.Expansion (
-    applyExpansion,
-    decideMinimalExpansion,
-    mergeExpansions
-    )
-import MLF.Constraint.Presolution.Unify (unifyAcyclicRawWithRaiseTrace)
+import MLF.Constraint.Presolution.Driver (computePresolution)
 import MLF.Constraint.Presolution.View
     ( PresolutionView(..)
-    , fromPresolutionResult
     )
-import MLF.Constraint.Presolution.WitnessNorm (normalizeEdgeWitnessesM)
-import MLF.Constraint.Presolution.Validation
-    ( translatableWeakenedNodes
-    , validateTranslatablePresolution
-    )
-import MLF.Constraint.Presolution.Plan (buildGeneralizePlans)
-import MLF.Constraint.Presolution.Plan.Context
-    ( GaBindParents(..)
-    , validateCrossGenMapping
-    )
-import MLF.Util.Trace (TraceConfig)
-
-defaultPlanBuilder :: TraceConfig -> PresolutionPlanBuilder
-defaultPlanBuilder traceCfg = PresolutionPlanBuilder (buildGeneralizePlans traceCfg)

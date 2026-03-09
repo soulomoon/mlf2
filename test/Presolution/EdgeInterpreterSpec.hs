@@ -2,7 +2,7 @@ module Presolution.EdgeInterpreterSpec (spec) where
 
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import MLF.Constraint.Presolution
+import MLF.Constraint.Presolution.TestSupport
     ( PresolutionState(..)
     , runPresolutionM
     )

@@ -49,9 +49,9 @@ import MLF.Constraint.Presolution
     , PresolutionPlanBuilder(..)
     , PresolutionResult(..)
     , EdgeTrace(..)
-    , CopyMapping(..)
-    , GaBindParents(..)
-    , validateCrossGenMapping
+    )
+import MLF.Constraint.Presolution.TestSupport
+    ( CopyMapping(..)
     , defaultPlanBuilder
     , fromListInterior
     , insertCopy
@@ -60,9 +60,11 @@ import MLF.Constraint.Presolution
 import qualified Phi.WitnessDomainUtil as WitnessDomain
 import MLF.Constraint.Presolution.Plan.Context
     ( GeneralizeEnv(..)
+    , GaBindParents(..)
     , SolvedToBaseResolution(..)
     , resolveContext
     , resolveGaSolvedToBase
+    , validateCrossGenMapping
     )
 import MLF.Constraint.Solve (solveUnifyWithSnapshot)
 import qualified MLF.Constraint.Solved as Solved

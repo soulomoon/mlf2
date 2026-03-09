@@ -29,14 +29,16 @@ import MLF.Constraint.Presolution.Witness
     )
 import MLF.Constraint.Types.Presolution (Presolution(..))
 import MLF.Constraint.Presolution
-    ( PresolutionState(..)
-    , PresolutionError(..)
+    ( PresolutionError(..)
     , PresolutionResult(..)
     , computePresolution
+    , EdgeTrace(..)
+    )
+import MLF.Constraint.Presolution.TestSupport
+    ( PresolutionState(..)
     , validateReplayMapTraceContract
     , runPresolutionM
     , normalizeEdgeWitnessesM
-    , EdgeTrace(..)
     , InteriorNodes(..)
     , fromListInterior
     )

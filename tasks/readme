@@ -1,8 +1,16 @@
-Create new task folders under `tasks/todo/` with the format `YYYY-MM-DD-description/`.
+Create active task folders under `tasks/todo/` with the format `YYYY-MM-DD-description/`.
 
-Each task folder should contain:
+Quick-start summary:
+- use one active task folder per effort;
+- keep `task_plan.md`, `findings.md`, and `progress.md` current throughout the session;
+- move completed tasks to `tasks/archive/` with the same folder name.
+
+Each active task folder should contain:
 - `task_plan.md`
 - `findings.md`
 - `progress.md`
 
-Move completed tasks to `tasks/archive/` with the same folder name.
+Source of truth:
+- detailed workflow rules live in `AGENTS.md`;
+- adjacent planning surfaces (`TODO.md`, `implementation_notes.md`, `CHANGELOG.md`, `Bugs.md`) must stay synchronized when relevant;
+- root-level `task_plan.md`, `findings.md`, and `progress.md` are historical artifacts, not the current active-task workflow.

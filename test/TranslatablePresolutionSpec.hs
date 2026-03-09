@@ -5,7 +5,8 @@ import Data.List (isInfixOf)
 import qualified Data.Set as Set
 import Test.Hspec
 
-import MLF.Constraint.Presolution (PresolutionResult(..), validateTranslatablePresolution)
+import MLF.Constraint.Presolution (PresolutionResult(..))
+import MLF.Constraint.Presolution.TestSupport (validateTranslatablePresolution)
 import MLF.Frontend.Syntax (Expr(..), Lit(..))
 import SpecUtil (runToPresolutionDefault)
 

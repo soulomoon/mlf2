@@ -11,8 +11,10 @@ import MLF.Constraint.Types.Witness (Expansion(..))
 import MLF.Constraint.Presolution
     ( EdgeTrace(..)
     , PresolutionResult(..)
-    , PresolutionState(..)
     , computePresolution
+    )
+import MLF.Constraint.Presolution.TestSupport
+    ( PresolutionState(..)
     , fromListInterior
     , lookupCopy
     , processInstEdge

@@ -3,9 +3,9 @@ module Presolution.EdgePlannerSpec (spec) where
 import Data.List (isInfixOf)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import MLF.Constraint.Presolution
-    ( PresolutionError(..)
-    , PresolutionState(..)
+import MLF.Constraint.Presolution (PresolutionError(..))
+import MLF.Constraint.Presolution.TestSupport
+    ( PresolutionState(..)
     , runPresolutionM
     )
 import MLF.Constraint.Presolution.EdgeProcessing.Plan

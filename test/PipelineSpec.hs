@@ -35,6 +35,11 @@ import qualified MLF.Constraint.Finalize as Finalize
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Presolution
 import qualified MLF.Constraint.Presolution.View as PresolutionViewBoundary
+import MLF.Constraint.Presolution.TestSupport
+    ( CopyMapping(..)
+    , defaultPlanBuilder
+    , toListInterior
+    )
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Solved (Solved)
 import MLF.Constraint.Types.Presolution (PresolutionSnapshot(..))
@@ -479,12 +484,14 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             driverSrc <- readFile "src/MLF/Constraint/Presolution/Driver.hs"
             edgeSrc <- readFile "src/MLF/Constraint/Presolution/EdgeProcessing.hs"
             presolutionSrc <- readFile "src/MLF/Constraint/Presolution.hs"
+            testSupportSrc <- readFile "src/MLF/Constraint/Presolution/TestSupport.hs"
             driverSrc `shouldSatisfy` (not . isInfixOf "processInstEdge,")
             edgeSrc `shouldSatisfy` (not . isInfixOf "unifyStructure,")
             edgeSrc `shouldSatisfy` (not . isInfixOf "recordEdgeWitness,")
             edgeSrc `shouldSatisfy` (not . isInfixOf "recordEdgeTrace,")
             edgeSrc `shouldSatisfy` (not . isInfixOf "canonicalizeEdgeTraceInteriorsM,")
-            presolutionSrc `shouldSatisfy` isInfixOf "processInstEdge,"
+            presolutionSrc `shouldSatisfy` (not . isInfixOf "processInstEdge,")
+            testSupportSrc `shouldSatisfy` isInfixOf "processInstEdge,"
 
         it "presolution state access guard" $ do
             stateAccessSrc <- readFile "src/MLF/Constraint/Presolution/StateAccess.hs"
