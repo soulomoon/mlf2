@@ -20,6 +20,7 @@ import MLF.Constraint.Types.Graph
     , TyNode(..)
     , cGenNodes
     , cNodes
+    , cBindParents
     , fromListNode
     , getEdgeId
     , getNodeId
@@ -606,7 +607,7 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                                       , canonicalFinal (schemeBodyTarget presolutionViewFinal bnd)
                                       , boundHasForallFrom bnd
                                       )
-                                    | (childKey, (parentRef, _flag)) <- IntMap.toList (ChiQuery.chiCanonicalBindParents presolutionViewFinal)
+                                    | (childKey, (parentRef, _flag)) <- IntMap.toList (cBindParents (ChiQuery.chiCanonicalConstraint presolutionViewFinal))
                                     , parentRef == GenRef gid
                                     , TypeRef child <- [nodeRefFromKey childKey]
                                     , Just bnd <- [View.rtvLookupVarBound viewFinalBounded (canonicalFinal child)]
