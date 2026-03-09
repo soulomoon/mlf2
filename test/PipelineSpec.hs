@@ -634,6 +634,12 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             elabSrc `shouldSatisfy` isInfixOf "MLF.Elab.Run.ChiQuery"
             rtViewSrc `shouldSatisfy` isInfixOf "MLF.Elab.Run.ChiQuery"
 
+        it "chi-first guard: ChiQuery no longer defines chiCanonicalBindParents" $ do
+            chiSrc <- readFile "src/MLF/Elab/Run/ChiQuery.hs"
+            fallbackSrc <- readFile "src/MLF/Elab/Run/ResultType/Fallback.hs"
+            chiSrc `shouldSatisfy` (not . isInfixOf "chiCanonicalBindParents")
+            fallbackSrc `shouldSatisfy` (not . isInfixOf "ChiQuery.chiCanonicalBindParents")
+
         it "single-solved refactor keeps checked pipeline authoritative on representative corpus" $ do
             forM_ representativeMigrationCorpus assertCheckedAuthoritative
 
