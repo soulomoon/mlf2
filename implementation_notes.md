@@ -18,6 +18,7 @@
 - Retired the dead `pendingWeakenOwnerForNode` / `pendingWeakenOwnerForEdge` alias wrappers so pending-weaken owner queries are now single-sourced directly in `MLF.Constraint.Presolution.StateAccess`, with `EdgeUnify` calling the authoritative helpers by name.
 - `MLF.Constraint.Presolution.EdgeProcessing` now reads pending-unify edges and closure seed data through shared `MLF.Constraint.Presolution.StateAccess` helpers instead of peeking `PresolutionState` fields directly; the owner-boundary scheduling algorithm and diagnostics remain unchanged.
 - Canonical scheme-root owner/root-set bookkeeping is now shared in `MLF.Elab.Run.Generalize.Common` via `canonicalSchemeRootOwners`; `ResultType.Fallback` and `Generalize.Phase4` consume the same mechanical construction while keeping their surrounding policy/reachability logic local.
+- `MLF.Elab.Run.ChiQuery` remains the shared chi-first facade, but no longer carries the derived `chiCanonicalBindParents` convenience helper; the lone fallback caller now reads canonical bind parents directly from `chiCanonicalConstraint`.
 
 ### 2026-03-08 snapshot preparation single-owner cleanup
 
