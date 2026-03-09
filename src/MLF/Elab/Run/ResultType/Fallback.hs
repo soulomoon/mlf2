@@ -19,7 +19,6 @@ import MLF.Constraint.Types.Graph
     , NodeRef(..)
     , TyNode(..)
     , cGenNodes
-    , cLetEdges
     , cNodes
     , fromListNode
     , getEdgeId
@@ -47,6 +46,7 @@ import MLF.Elab.Run.Generalize (generalizeAtWithBuilder)
 import qualified MLF.Elab.Run.ChiQuery as ChiQuery
 import MLF.Elab.Run.ResultType.Util
     ( generalizeWithPlan
+    , resultTypeRoots
     , stripAnn
     , collectEdges
     )
@@ -191,46 +191,15 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                 [ (getNodeId (etRoot tr), 1 :: Int)
                 | tr <- IntMap.elems edgeTraces
                 ]
-    let genNodesOriginal = map snd (toListGen (cGenNodes (ChiQuery.chiConstraint presolutionView)))
-    let schemeRootSet =
-            IntSet.fromList
-                [ getNodeId (canonical root)
-                | gen <- genNodesOriginal
-                , root <- gnSchemes gen
-                ]
-        isSchemeRoot nid =
-            IntSet.member (getNodeId (canonical nid)) schemeRootSet
-        letEdges = cLetEdges c1
-        isLetEdge (EdgeId eid) = IntSet.member eid letEdges
-    let rootForTypeAnn =
-            let peel ann0 = case ann0 of
-                    ALet _ _ _ _ _ _ bodyAnn nid ->
-                        case bodyAnn of
-                            AAnn inner target eid
-                                | canonical target == canonical nid
-                                    && isLetEdge eid ->
-                                        peel inner
-                                | canonical target == canonical nid
-                                    && not (isSchemeRoot target) ->
-                                        peel inner
-                            _ -> bodyAnn
-                    _ -> ann0
-            in peel annCanon
+    let (rootForTypeAnn, rootForTypePreAnn) =
+            resultTypeRoots
+                canonical
+                (ChiQuery.chiConstraint presolutionView)
+                c1
+                annCanon
+                ann
+    let
         rootForType = annNode rootForTypeAnn
-        rootForTypePreAnn =
-            let peel ann0 = case ann0 of
-                    ALet _ _ _ _ _ _ bodyAnn nid ->
-                        case bodyAnn of
-                            AAnn inner target eid
-                                | target == nid
-                                    && isLetEdge eid ->
-                                        peel inner
-                                | target == nid
-                                    && not (isSchemeRoot target) ->
-                                        peel inner
-                            _ -> bodyAnn
-                    _ -> ann0
-            in peel ann
         rootForTypePre = annNode rootForTypePreAnn
     -- Note: The AAnn case is handled by the facade in ResultType.hs
     -- which dispatches to computeResultTypeFromAnn. This module only

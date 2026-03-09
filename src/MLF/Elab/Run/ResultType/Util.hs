@@ -1,6 +1,7 @@
 {-# LANGUAGE GADTs #-}
 module MLF.Elab.Run.ResultType.Util (
     generalizeWithPlan,
+    resultTypeRoots,
     containsBoundForall,
     instHasBoundForall,
     instantiateImplicitForalls,
@@ -11,18 +12,25 @@ module MLF.Elab.Run.ResultType.Util (
 import Data.Functor.Foldable (cata)
 
 import qualified Data.IntMap.Strict as IntMap
+import qualified Data.IntSet as IntSet
 
 import MLF.Constraint.Presolution (PresolutionPlanBuilder(..), PresolutionView)
 import MLF.Constraint.Types.Graph
-    ( NodeId(..)
+    ( Constraint
+    , EdgeId(..)
+    , NodeId(..)
     , NodeRef(..)
+    , cGenNodes
+    , cLetEdges
+    , getNodeId
+    , gnSchemes
+    , toListGen
     )
 import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Elab.Run.Generalize (generalizeAtWithBuilder)
 import MLF.Elab.Inst (applyInstantiation)
 import MLF.Elab.Types
 import MLF.Frontend.ConstraintGen (AnnExpr(..))
-import MLF.Constraint.Types.Graph (EdgeId(..))
 
 -- | Generalize with plan helper
 generalizeWithPlan
@@ -41,6 +49,53 @@ generalizeWithPlan planBuilder bindParentsGa presolutionView scopeRoot targetNod
                 scopeRoot
                 targetNode
     in runWithGa (Just bindParentsGa)
+
+resultTypeRoots
+    :: (NodeId -> NodeId)
+    -> Constraint
+    -> Constraint
+    -> AnnExpr
+    -> AnnExpr
+    -> (AnnExpr, AnnExpr)
+resultTypeRoots canonical sourceConstraint baseConstraint annCanon ann =
+    (peelCanonical annCanon, peelPreCanonical ann)
+  where
+    schemeRootSet =
+        IntSet.fromList
+            [ getNodeId (canonical root)
+            | gen <- map snd (toListGen (cGenNodes sourceConstraint))
+            , root <- gnSchemes gen
+            ]
+    isSchemeRoot nid =
+        IntSet.member (getNodeId (canonical nid)) schemeRootSet
+    letEdges = cLetEdges baseConstraint
+    isLetEdge (EdgeId edgeId) = IntSet.member edgeId letEdges
+
+    peelCanonical ann0 = case ann0 of
+        ALet _ _ _ _ _ _ bodyAnn nid ->
+            case bodyAnn of
+                AAnn inner target eid
+                    | canonical target == canonical nid
+                        && isLetEdge eid ->
+                            peelCanonical inner
+                    | canonical target == canonical nid
+                        && not (isSchemeRoot target) ->
+                            peelCanonical inner
+                _ -> bodyAnn
+        _ -> ann0
+
+    peelPreCanonical ann0 = case ann0 of
+        ALet _ _ _ _ _ _ bodyAnn nid ->
+            case bodyAnn of
+                AAnn inner target eid
+                    | target == nid
+                        && isLetEdge eid ->
+                            peelPreCanonical inner
+                    | target == nid
+                        && not (isSchemeRoot target) ->
+                            peelPreCanonical inner
+                _ -> bodyAnn
+        _ -> ann0
 
 -- | Check if a type contains foralls in bounds
 containsBoundForall :: ElabType -> Bool
