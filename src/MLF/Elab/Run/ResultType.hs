@@ -9,7 +9,6 @@ module MLF.Elab.Run.ResultType (
 ) where
 
 import qualified Data.IntMap.Strict as IntMap
-import qualified Data.IntSet as IntSet
 
 import MLF.Frontend.ConstraintGen (AnnExpr(..))
 import MLF.Constraint.Presolution (EdgeTrace, PresolutionPlanBuilder)
@@ -18,11 +17,6 @@ import MLF.Constraint.Types.Graph
     ( Constraint
     , EdgeId(..)
     , NodeId(..)
-    , cGenNodes
-    , cLetEdges
-    , getNodeId
-    , gnSchemes
-    , toListGen
     )
 import MLF.Constraint.Types.Witness (EdgeWitness, Expansion)
 import MLF.Elab.Generalize (GaBindParents)
@@ -31,7 +25,7 @@ import MLF.Util.Trace (TraceConfig)
 import MLF.Elab.Run.Instantiation (inferInstAppArgsFromScheme)
 import qualified MLF.Elab.Run.ChiQuery as ChiQuery
 import MLF.Elab.Run.ResultType.Types (ResultTypeInputs(..))
-import MLF.Elab.Run.ResultType.Util (generalizeWithPlan)
+import MLF.Elab.Run.ResultType.Util (generalizeWithPlan, resultTypeRoots)
 import qualified MLF.Elab.Run.ResultType.View as View
 import qualified MLF.Elab.Run.ResultType.Ann as Ann
 import qualified MLF.Elab.Run.ResultType.Fallback as Fallback
@@ -88,49 +82,13 @@ computeResultTypeDispatch
     -> Either ElabError ElabType
 computeResultTypeDispatch ctx view annCanon ann = do
     -- First, determine the root (same logic as before to check for AAnn)
-    let canonical = rtcCanonical ctx
-        c1 = rtcBaseConstraint ctx
-
-    let schemeRootSet =
-            let allGenNodes = map snd (toListGen (cGenNodes (ChiQuery.chiConstraint (rtcPresolutionView ctx))))
-            in IntSet.fromList
-                [ getNodeId (canonical root)
-                | gen <- allGenNodes
-                , root <- gnSchemes gen
-                ]
-        isSchemeRoot nid =
-            IntSet.member (getNodeId (canonical nid)) schemeRootSet
-        letEdges = cLetEdges c1
-        isLetEdge (EdgeId eid) = IntSet.member eid letEdges
-
-    let rootForTypeAnn =
-            let peel ann0 = case ann0 of
-                    ALet _ _ _ _ _ _ bodyAnn nid ->
-                        case bodyAnn of
-                            AAnn inner target eid
-                                | canonical target == canonical nid
-                                    && isLetEdge eid ->
-                                        peel inner
-                                | canonical target == canonical nid
-                                    && not (isSchemeRoot target) ->
-                                        peel inner
-                            _ -> bodyAnn
-                    _ -> ann0
-            in peel annCanon
-        rootForTypePreAnn =
-            let peel ann0 = case ann0 of
-                    ALet _ _ _ _ _ _ bodyAnn nid ->
-                        case bodyAnn of
-                            AAnn inner target eid
-                                | target == nid
-                                    && isLetEdge eid ->
-                                        peel inner
-                                | target == nid
-                                    && not (isSchemeRoot target) ->
-                                        peel inner
-                            _ -> bodyAnn
-                    _ -> ann0
-            in peel ann
+    let (rootForTypeAnn, rootForTypePreAnn) =
+            resultTypeRoots
+                (rtcCanonical ctx)
+                (ChiQuery.chiConstraint (rtcPresolutionView ctx))
+                (rtcBaseConstraint ctx)
+                annCanon
+                ann
 
     -- Dispatch based on the root type
     case rootForTypeAnn of
