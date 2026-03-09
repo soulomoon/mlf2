@@ -12,7 +12,6 @@ import MLF.Constraint.Types
     , GenNode(..)
     , GenNodeId(..)
     , NodeId(..)
-    , NodeRef(..)
     , TyNode(..)
     , fromListGen
     , genRef
@@ -20,18 +19,18 @@ import MLF.Constraint.Types
     , nodeRefKey
     , typeRef
     )
-import MLF.Elab.Run.Scope (generalizeTargetNode, preferGenScope, resolveCanonicalScope, schemeBodyTarget)
+import MLF.Elab.Run.Scope (bindingScopeRef, generalizeTargetNode, resolveCanonicalScope, schemeBodyTarget)
 import qualified SolvedFacadeTestUtil as SolvedTest
 import SpecUtil (emptyConstraint, nodeMapFromList)
 
 spec :: Spec
 spec = do
     describe "ga scope" $ do
-        it "preferGenScope propagates binding tree cycle errors" $ do
+        it "bindingScopeRef propagates binding tree cycle errors" $ do
             let root = NodeId 1
                 cycleNode = NodeId 2
                 constraint = cyclicConstraint root cycleNode
-            preferGenScope constraint (TypeRef root)
+            bindingScopeRef constraint root
                 `shouldSatisfy` isBindingCycleError
 
         it "resolveCanonicalScope propagates binding tree cycle errors" $ do
