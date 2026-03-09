@@ -21,12 +21,11 @@ module MLF.Constraint.Presolution.EdgeProcessing (
 import Control.Monad (foldM, unless, when)
 import qualified Data.IntSet as IntSet
 
-import MLF.Constraint.Types (GenNodeId, InstEdge(..), cUnifyEdges)
+import MLF.Constraint.Types (GenNodeId, InstEdge(..))
 import MLF.Constraint.Presolution.Base
     ( MonadPresolution(..)
     , PresolutionError(..)
     , PresolutionM
-    , PresolutionState(..)
     , PendingWeakenOwner
     , pendingWeakenOwnerFromMaybe
     , requireValidBindingTree
@@ -34,6 +33,12 @@ import MLF.Constraint.Presolution.Base
 import MLF.Constraint.Presolution.EdgeUnify
     ( flushPendingWeakensAtOwnerBoundary
     , pendingWeakenOwners
+    )
+import MLF.Constraint.Presolution.StateAccess
+    ( getConstraintAndUnionFind
+    , getPendingUnifyEdgesM
+    , getPendingWeakensM
+    , putConstraintAndUnionFind
     )
 import MLF.Constraint.Presolution.EdgeProcessing.Plan (EdgePlan(..))
 import MLF.Constraint.Presolution.EdgeProcessing.Planner (planEdge)
@@ -126,24 +131,20 @@ assertNoPendingWeakensOutsideOwnerBoundary phase boundaryOwner mbNextOwner mbEdg
 
 drainPendingUnifyClosure :: TraceConfig -> PresolutionM ()
 drainPendingUnifyClosure traceCfg = do
-    st <- getPresolutionState
-    if null (cUnifyEdges (psConstraint st))
+    pendingUnify <- getPendingUnifyEdgesM
+    if null pendingUnify
         then pure ()
         else do
-            let cPrepared = repairNonUpperParents (psConstraint st)
-                closureResult = runUnifyClosureWithSeed traceCfg (psUnionFind st) cPrepared
+            (constraint0, unionFind0) <- getConstraintAndUnionFind
+            let cPrepared = repairNonUpperParents constraint0
+                closureResult = runUnifyClosureWithSeed traceCfg unionFind0 cPrepared
             closure <- either (throwPresolutionError . closureError) pure closureResult
-            putPresolutionState
-                st
-                    { psConstraint = ucConstraint closure
-                    , psUnionFind = ucUnionFind closure
-                    }
+            putConstraintAndUnionFind (ucConstraint closure) (ucUnionFind closure)
 
 assertNoPendingUnifyEdges :: String -> Maybe InstEdge -> PresolutionM ()
 assertNoPendingUnifyEdges phase mbEdge = do
-    st <- getPresolutionState
-    let pendingUnify = cUnifyEdges (psConstraint st)
-        pendingWeakens = psPendingWeakens st
+    pendingUnify <- getPendingUnifyEdgesM
+    pendingWeakens <- getPendingWeakensM
     unless (null pendingUnify && IntSet.null pendingWeakens) $
         do
             pendingOwners <- pendingWeakenOwners
@@ -167,9 +168,8 @@ assertNoPendingUnifyEdges phase mbEdge = do
 
 assertNoPendingUnifyEdgesOnly :: String -> Maybe InstEdge -> PresolutionM ()
 assertNoPendingUnifyEdgesOnly phase mbEdge = do
-    st <- getPresolutionState
-    let pendingUnify = cUnifyEdges (psConstraint st)
-        pendingWeakens = psPendingWeakens st
+    pendingUnify <- getPendingUnifyEdgesM
+    pendingWeakens <- getPendingWeakensM
     unless (null pendingUnify) $
         throwPresolutionError $
             InternalError

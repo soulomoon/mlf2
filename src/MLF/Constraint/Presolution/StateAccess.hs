@@ -38,6 +38,10 @@ module MLF.Constraint.Presolution.StateAccess (
     -- * Canonical function access
     getCanonical,
     getConstraintAndCanonical,
+    getConstraintAndUnionFind,
+    putConstraintAndUnionFind,
+    getPendingUnifyEdgesM,
+    getPendingWeakensM,
 
     -- * Binding tree operations (lifted to PresolutionM)
     lookupBindParentM,
@@ -62,8 +66,9 @@ module MLF.Constraint.Presolution.StateAccess (
     liftBindingError
 ) where
 
-import Control.Monad.State (gets)
+import Control.Monad.State (gets, modify')
 import Control.Monad.Except (throwError)
+import Data.IntMap.Strict (IntMap)
 import qualified Data.IntSet as IntSet
 import Data.IntSet (IntSet)
 
@@ -115,6 +120,26 @@ getConstraintAndCanonical = do
     c <- gets psConstraint
     uf <- gets psUnionFind
     pure (c, UnionFind.frWith uf)
+
+getConstraintAndUnionFind :: PresolutionM (Constraint, IntMap NodeId)
+getConstraintAndUnionFind = do
+    c <- gets psConstraint
+    uf <- gets psUnionFind
+    pure (c, uf)
+
+putConstraintAndUnionFind :: Constraint -> IntMap NodeId -> PresolutionM ()
+putConstraintAndUnionFind constraint uf = do
+    modify' $ \st ->
+        st
+            { psConstraint = constraint
+            , psUnionFind = uf
+            }
+
+getPendingUnifyEdgesM :: PresolutionM [UnifyEdge]
+getPendingUnifyEdgesM = cUnifyEdges . fst <$> getConstraintAndUnionFind
+
+getPendingWeakensM :: PresolutionM IntSet
+getPendingWeakensM = gets psPendingWeakens
 
 -- -----------------------------------------------------------------------------
 -- Binding tree operations (lifted to PresolutionM)
