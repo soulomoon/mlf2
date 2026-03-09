@@ -1,3 +1,13 @@
+{- |
+Module      : MLF.Pipeline
+Description : Focused normalized-pipeline API for downstream callers
+
+`MLF.Pipeline` exposes the normalized eMLF pipeline surface without the wider
+raw-syntax, parser, or pretty-printing conveniences re-exported by `MLF.API`.
+
+Prefer this module for consumers that already operate on normalized surface
+terms and want the smallest supported entrypoint for inference/elaboration.
+-}
 module MLF.Pipeline
     ( -- * Staged frontend types
       NormSurfaceExpr

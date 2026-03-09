@@ -17,7 +17,7 @@
 ## Project Structure & Module Organization
 
 - `src/` contains the private implementation library (`mlf2-internal`). Most logic lives in `src/MLF/` and is organized by domain: `MLF.Frontend.*`, `MLF.Constraint.*`, `MLF.Binding.*`, `MLF.Witness.*`, `MLF.Elab.*`, `MLF.XMLF.*`, `MLF.Reify.*`, `MLF.Types.*`, `MLF.Util.*`.
-- `src-public/` contains the public library entry points intended for downstream users: `MLF.API`, `MLF.Pipeline`, `MLF.XMLF`, and legacy `MyLib`.
+- `src-public/` contains the public library entry points intended for downstream users: `MLF.API`, `MLF.Pipeline`, and `MLF.XMLF`.
 - `app/` contains the executable entry point (`app/Main.hs`) for the `mlf2` binary.
 - `test/` contains the Hspec suite (`*Spec.hs`), the manual test runner (`test/Main.hs`), and frozen parity tooling/artifacts (`test/Parity/FrozenParityGenMain.hs`, `test/golden/legacy-replay-baseline-v1.json`).
 - `papers/` holds reference material (PDF/TXT) used to align the implementation with the xMLF/MLF papers; it is not required to build.
@@ -81,7 +81,7 @@
 ## Testing Guidelines
 
 - Framework: Hspec (`hspec`).
-- `mlf2-test` can only import exposed modules; if tests need helpers/types from internal modules, re-export them from an exposed entrypoint (e.g., `MLF.Constraint.Presolution`).
+- `mlf2-test` can only import exposed modules; if tests need low-level internal helpers/types, expose them through an explicit internal test-support entrypoint instead of widening a production facade.
 - When adding a new spec module, wire it into both:
   - `mlf2.cabal` → `test-suite mlf2-test` → `other-modules`
   - `test/Main.hs` (import the module and call `spec`)
@@ -129,6 +129,7 @@ tasks/
 - Re-read `task_plan.md` before major decisions, and update phase status after each completed phase.
 - Log all errors and recovery attempts in `task_plan.md`; do not repeat the same failed action unchanged.
 - Write discoveries to `findings.md` throughout execution and keep `progress.md` as the running session log.
+- Treat root-level `task_plan.md`, `findings.md`, and `progress.md` as historical artifacts unless a task explicitly says otherwise; current work belongs in the task folder.
 - Maintain the repository root `TODO.md` as the rolling list of next goals; update it whenever priorities or upcoming work change. If priorities stay the same, leave it untouched.
 - Maintain `implementation_notes.md` when behavior, architecture, or thesis-alignment details change, so documentation stays in sync with implementation.
 - Close a task by marking all phases complete in `task_plan.md` and moving the folder to `tasks/archive/`.

@@ -81,6 +81,7 @@ library mlf2-internal
                       MLF.Constraint.Acyclicity,
                       MLF.Constraint.Inert,
                       MLF.Constraint.Presolution,
+                      MLF.Constraint.Presolution.TestSupport,
                       MLF.Constraint.Presolution.View,
                       MLF.Constraint.Presolution.Witness,
                       MLF.Constraint.Presolution.EdgeProcessing.Plan,
@@ -234,8 +235,7 @@ library
     import:           warnings
 
     -- Modules exported by the public library.
-    exposed-modules:  MyLib,
-                      MLF.API,
+    exposed-modules:  MLF.API,
                       MLF.Pipeline,
                       MLF.XMLF
 
@@ -344,6 +344,9 @@ test-suite mlf2-test
                       AlignmentInvariantSpec,
                       ExpansionMinimalitySpec,
                       FrozenParitySpec,
+                      PublicSurfaceSpec,
+                      RepoGuardSpec,
+                      PresolutionFacadeSpec,
                       Constraint.SolvedSpec,
                       SolvedFacadeTestUtil,
                       Parity.FrozenArtifacts,
@@ -365,6 +368,8 @@ test-suite mlf2-test
     build-depends:
         base ^>=4.21.0.0,
         containers,
+        directory,
+        filepath,
         mtl,
         mlf2,
         mlf2:mlf2-internal,

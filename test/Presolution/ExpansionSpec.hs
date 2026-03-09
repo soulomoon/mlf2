@@ -16,9 +16,11 @@ import MLF.Constraint.Types.Witness
 import MLF.Constraint.Presolution
     ( PresolutionError(..)
     , PresolutionResult(..)
-    , PresolutionState(..)
-    , applyExpansion
     , computePresolution
+    )
+import MLF.Constraint.Presolution.TestSupport
+    ( PresolutionState(..)
+    , applyExpansion
     , mergeExpansions
     , runPresolutionM
     )

@@ -10,7 +10,9 @@ import MLF.Constraint.Presolution
     ( PresolutionResult(..)
     , PresolutionError(..)
     , computePresolution
-    , translatableWeakenedNodes
+    )
+import MLF.Constraint.Presolution.TestSupport
+    ( translatableWeakenedNodes
     , validateTranslatablePresolution
     )
 import MLF.Constraint.Acyclicity (AcyclicityResult(..))

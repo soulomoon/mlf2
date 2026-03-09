@@ -39,14 +39,17 @@ import Data.Ord (Down(..))
 import qualified Data.List.NonEmpty as NE
 
 import qualified MLF.Binding.Tree as Binding
-import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types
     ( GenNodeId
     , NodeId
     , TyNode(..)
+    , EdgeId
+    , NodeRef(TypeRef)
+    , genRef
     , getNodeId
+    , nodeRefFromKey
     )
 import MLF.Constraint.Types.Witness (Expansion(..), ExpansionF(..), ForallSpec(..), InstanceOp(..))
-import MLF.Constraint.Types (EdgeId, NodeRef(TypeRef), genRef, nodeRefFromKey)
 import MLF.Constraint.Types.Witness (EdgeWitness(..), InstanceWitness(..), ReplayContract(..))
 import MLF.Constraint.Presolution.Base (CopyMap, EdgeTrace(..), FrontierSet, InteriorSet, PresolutionM, PresolutionError(..), fromListInterior, instantiationBindersM)
 import MLF.Constraint.Presolution.Ops (findRoot, getCanonicalNode, lookupVarBound)

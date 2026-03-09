@@ -9,14 +9,17 @@ Downstream code should import:
 
 - `MLF.API` — umbrella module (surface syntax + pipeline entry points + xMLF result types + xMLF checking/reduction helpers)
 - `MLF.Pipeline` — pipeline entry points + xMLF checking/reduction helpers (e.g. `inferConstraintGraph`, `runPipelineElab`, `typeCheck`, `step`, `normalize`)
-
-`MyLib` remains as a legacy compatibility wrapper that re-exports `MLF.API`.
+- `MLF.XMLF` — explicit xMLF syntax, parser, and pretty-printing helpers
 
 Public modules live under `src-public/` and the public Cabal library only exposes:
 
 - `src-public/MLF/API.hs`
 - `src-public/MLF/Pipeline.hs`
-- `src-public/MyLib.hs`
+- `src-public/MLF/XMLF.hs`
+
+Active implementation planning lives under `tasks/todo/YYYY-MM-DD-description/`.
+Root-level `task_plan.md`, `findings.md`, and `progress.md` are historical
+artifacts and are not part of the current task workflow.
 
 ## Internal implementation (package-private)
 

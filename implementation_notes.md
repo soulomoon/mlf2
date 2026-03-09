@@ -1,3 +1,10 @@
+### 2026-03-10 public-boundary and presolution test-seam cleanup
+
+- Removed the legacy public `MyLib` wrapper and documented the supported downstream surfaces as `MLF.API`, `MLF.Pipeline`, and `MLF.XMLF` only.
+- Added explicit public-surface and repository-guard specs: public API contract coverage, test-harness wiring checks, `MyLib` absence checks, and a dual-import guard that rejects simultaneous `MLF.Constraint.Types` + `MLF.Constraint.Types.Graph` imports.
+- Narrowed `MLF.Constraint.Presolution` back toward a runtime-focused facade by moving test-only state/copy/interior/building-block helpers behind the new `MLF.Constraint.Presolution.TestSupport` entrypoint; runtime-facing `computePresolution`, `PresolutionResult`, `PresolutionView`, `PresolutionPlanBuilder`, `PresolutionError`, and `EdgeTrace` remain on the main facade.
+- Applied low-risk orchestration thinning without semantic changes: `MLF.Constraint.Presolution.Driver.rewriteConstraint` now delegates bind-parent rebuilding to the shared `MLF.Constraint.Presolution.Rewrite.rebuildBindParents`, and `MLF.Elab.Run.Pipeline` now uses explicit snapshot-preparation / redirect-then-canonicalize helpers to keep assembly order visible.
+
 ### 2026-03-09 presolution state-access single-style cleanup
 
 - Retired the one-off `WithCanonicalT` reader layer from `MLF.Constraint.Presolution.StateAccess`; presolution canonical/constraint reads now use the shared direct `PresolutionM` helpers only.

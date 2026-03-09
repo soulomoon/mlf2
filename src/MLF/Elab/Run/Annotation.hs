@@ -3,6 +3,7 @@ module MLF.Elab.Run.Annotation (
     mapAnnNodes,
     applyRedirectsToAnn,
     canonicalizeAnn,
+    redirectAndCanonicalizeAnn,
     annNode,
     adjustAnnotationInst
 ) where
@@ -33,6 +34,10 @@ applyRedirectsToAnn redirects = mapAnnNodes (chaseRedirects redirects)
 
 canonicalizeAnn :: (NodeId -> NodeId) -> AnnExpr -> AnnExpr
 canonicalizeAnn canonical = mapAnnNodes canonical
+
+redirectAndCanonicalizeAnn :: (NodeId -> NodeId) -> IntMap.IntMap NodeId -> AnnExpr -> AnnExpr
+redirectAndCanonicalizeAnn canonical redirects =
+    canonicalizeAnn canonical . applyRedirectsToAnn redirects
 
 annNode :: AnnExpr -> NodeId
 annNode = cata alg

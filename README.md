@@ -10,9 +10,10 @@ The pipeline takes eMLF terms, builds and solves graphic constraints, and elabor
 ## Repository layout
 
 - `src/` — internal implementation (`MLF.Frontend.*`, `MLF.Constraint.*`, `MLF.Elab.*`, etc.)
-- `src-public/` — public API modules (`MLF.API`, `MLF.Pipeline`, `MLF.XMLF`, `MyLib`)
+- `src-public/` — public API modules (`MLF.API`, `MLF.Pipeline`, `MLF.XMLF`)
 - `app/` — executable entrypoint (`mlf2`)
 - `test/` — Hspec test suite
+- `tasks/` — active/archive task execution logs
 - `papers/` — thesis/paper references
 - `docs/` — architecture/phase/syntax documentation
 
@@ -38,6 +39,10 @@ cabal repl mlf2-test
 - `MLF.API` — surface syntax + pipeline helpers + eMLF parse/pretty
 - `MLF.Pipeline` — pipeline-focused API
 - `MLF.XMLF` — xMLF syntax, parser, and pretty-printer
+
+Active multi-step work is tracked under `tasks/todo/`; root-level `task_plan.md`,
+`findings.md`, and `progress.md` are historical leftovers rather than the active
+workflow.
 
 ## Syntax and paper alignment
 

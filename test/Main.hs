@@ -21,8 +21,11 @@ import qualified GraphOpsSpec
 import qualified InertSpec
 import qualified NormalizeSpec
 import qualified PipelineSpec
+import qualified PresolutionFacadeSpec
 import qualified Phi.AlignmentSpec
 import qualified Phi.WitnessDomainSpec
+import qualified PublicSurfaceSpec
+import qualified RepoGuardSpec
 import qualified PresolutionSpec
 import qualified Presolution.UnificationClosureSpec
 import qualified ReduceSpec
@@ -56,6 +59,9 @@ main = do
         SolveSpec.spec
         ScopeSpec.spec
         PipelineSpec.spec
+        PublicSurfaceSpec.spec
+        RepoGuardSpec.spec
+        PresolutionFacadeSpec.spec
         ThesisFixDirectionSpec.spec
         TypeCheckSpec.spec
         TypeSoundnessSpec.spec

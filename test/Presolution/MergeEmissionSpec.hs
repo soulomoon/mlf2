@@ -16,8 +16,10 @@ import MLF.Constraint.Presolution
     ( EdgeTrace(..)
     , PresolutionError(..)
     , PresolutionResult(..)
-    , PresolutionState(..)
     , computePresolution
+    )
+import MLF.Constraint.Presolution.TestSupport
+    ( PresolutionState(..)
     , lookupCopy
     , processInstEdge
     , runPresolutionM

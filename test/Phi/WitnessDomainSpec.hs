@@ -18,9 +18,11 @@ import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Presolution
     ( PresolutionView(..)
     , EdgeTrace(..)
-    , CopyMapping(..)
-    , InteriorNodes(..)
     , PresolutionResult(..)
+    )
+import MLF.Constraint.Presolution.TestSupport
+    ( CopyMapping(..)
+    , InteriorNodes(..)
     , copiedNodes
     )
 import MLF.Constraint.Types.Witness (ReplayContract(..))
