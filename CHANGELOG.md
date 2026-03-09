@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Changed
+- Retired the dead `rtvSchemeBodyTarget` wrapper from `MLF.Elab.Run.ResultType.View` (2026-03-09): the result-type view boundary now matches its overlay-aware query surface exactly, while `schemeBodyTarget` remains owned by `MLF.Elab.Run.Scope`.
 - Retired the redundant `preferGenScope` re-lookup from `MLF.Elab.Run.Scope` (2026-03-09): ga′ scope resolution now flows directly from `bindingScopeRef` to `canonicalizeScopeRef`, with the existing scope guards/tests updated around the surviving owner path.
 - Re-greened the baseline solved-snapshot test seams (2026-03-09): test/frozen-parity snapshot solved reconstruction now replays through the strict `SolveSnapshot` → `Solved.fromSolveOutput` seam, and `frozen-parity-gen` now wires `SolvedFacadeTestUtil` explicitly.
 - Built and validated the base `ResultTypeView` once per runtime result-type computation, threading that validated view through the annotated and fallback workers instead of rebuilding it in each submodule (2026-03-09).
