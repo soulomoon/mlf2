@@ -235,6 +235,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             isInfixOf "peResult :: Solved" phiEnvSrc `shouldBe` False
             isInfixOf "askResult ::" phiEnvSrc `shouldBe` False
             isInfixOf "Left _ -> ref" scopeSrc `shouldBe` False
+            isInfixOf "preferGenScope" scopeSrc `shouldBe` False
             isInfixOf "Left _ -> root" contextSrc `shouldBe` False
             isInfixOf "MLF.Elab.Phi.TestOnly" cabalSrc `shouldBe` False
             isInfixOf "MLF.Elab.Phi.IdentityBridge" cabalSrc `shouldBe` False
