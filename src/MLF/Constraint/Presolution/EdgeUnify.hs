@@ -18,8 +18,6 @@ module MLF.Constraint.Presolution.EdgeUnify (
     executeEdgeLocalOmegaOps,
     flushPendingWeakensAtOwnerBoundary,
     pendingWeakenOwners,
-    pendingWeakenOwnerForNode,
-    pendingWeakenOwnerForEdge,
     initEdgeUnifyState,
     mkOmegaExecEnv,
     runEdgeUnifyForTest,
@@ -265,12 +263,6 @@ queuePendingWeaken owner nid =
                 IntMap.insertWith (\existing _new -> existing) (getNodeId nid) owner (psPendingWeakenOwners st)
             }
 
-pendingWeakenOwnerForNode :: NodeId -> PresolutionM PendingWeakenOwner
-pendingWeakenOwnerForNode = pendingWeakenOwnerM
-
-pendingWeakenOwnerForEdge :: InstEdge -> PresolutionM PendingWeakenOwner
-pendingWeakenOwnerForEdge = instEdgeOwnerM
-
 pendingWeakenOwners :: PresolutionM [PendingWeakenOwner]
 pendingWeakenOwners = do
     st <- getPresolutionState
@@ -279,7 +271,7 @@ pendingWeakenOwners = do
     owners <- forM (IntSet.toList pending) $ \nidInt ->
         case IntMap.lookup nidInt ownerMap of
             Just owner -> pure owner
-            Nothing -> pendingWeakenOwnerForNode (NodeId nidInt)
+            Nothing -> pendingWeakenOwnerM (NodeId nidInt)
     pure (nub owners)
 
 -- | Flush delayed `Weaken` operations for one owner boundary.
@@ -305,7 +297,7 @@ flushPendingWeakensWhere shouldFlush = do
         let nid = NodeId nidInt
         owner <- case IntMap.lookup nidInt ownerMap of
             Just stamped -> pure stamped
-            Nothing -> pendingWeakenOwnerForNode nid
+            Nothing -> pendingWeakenOwnerM nid
         pure (nid, owner)
     let (toFlush, toKeep) = partition (shouldFlush . snd) tagged
     forM_ toFlush (applyPendingWeaken . fst)
