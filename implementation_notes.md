@@ -428,8 +428,9 @@
 - Removed residual non-thesis surfaces targeted by the absolute guard:
   - `MLF.Elab.Phi.Env` no longer carries solved-backed `peResult` /
     `askResult` helper surface.
-  - `MLF.Elab.Run.Scope.preferGenScope` no longer swallows binding-tree
-    errors (`Left _ -> ref` removed; errors now propagate).
+  - `MLF.Elab.Run.Scope` no longer keeps the redundant `preferGenScope`
+    re-lookup helper; ga′ scope now flows directly from `bindingScopeRef` to
+    `canonicalizeScopeRef`, and binding-tree errors continue to propagate.
   - `MLF.Elab.Phi.TestOnly` no longer exports/implements
     `phiFromEdgeWitnessAutoTrace`; no-trace helper remains strict fail-fast
     (`MissingEdgeTrace`).
