@@ -678,6 +678,19 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             scopeSrc `shouldSatisfy` (not . isInfixOf "bindingPathToRootFromBindParents")
             scopeSrc `shouldSatisfy` isInfixOf "bindingScopeRef (ChiQuery.chiCanonicalConstraint presolutionView) root"
 
+        it "result-type root peeling stays single-sourced" $ do
+            rtSrc <- readFile "src/MLF/Elab/Run/ResultType.hs"
+            fallbackSrc <- readFile "src/MLF/Elab/Run/ResultType/Fallback.hs"
+            utilSrc <- readFile "src/MLF/Elab/Run/ResultType/Util.hs"
+            forM_ [rtSrc, fallbackSrc] $ \src -> do
+                src `shouldSatisfy` (not . isInfixOf "let schemeRootSet =")
+                src `shouldSatisfy` (not . isInfixOf "isSchemeRoot nid =")
+                src `shouldSatisfy` (not . isInfixOf "letEdges =")
+                src `shouldSatisfy` (not . isInfixOf "isLetEdge (EdgeId")
+                src `shouldSatisfy` (not . isInfixOf "let peel")
+                src `shouldSatisfy` isInfixOf "resultTypeRoots"
+            utilSrc `shouldSatisfy` isInfixOf "resultTypeRoots"
+
         it "Phase 6 — Elaborate|ResultType|Dual-path verification gate stays green" $ do
             forM_ representativeMigrationCorpus assertCheckedAuthoritative
 
