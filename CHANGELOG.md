@@ -4,6 +4,7 @@
 
 ### Changed
 - Moved `MLF.Constraint.Presolution.EdgeProcessing` pending-unify / closure-seed state reads behind `MLF.Constraint.Presolution.StateAccess` (2026-03-09), without changing owner-boundary scheduling or diagnostics.
+- Single-sourced canonical scheme-root owner/root-set bookkeeping between `ResultType.Fallback` and `Generalize.Phase4` (2026-03-09); only the shared root→owner/root-set construction moved, not result-type or generalization policy logic.
 - Single-sourced witness/trace canonicalization under `MLF.Constraint.Presolution.Rewrite` (2026-03-09): elaboration/runtime now reuses the same witness/trace canonicalizer contract directly, while the elaboration-local `canonicalizeExpansion` helper intentionally remains separate because its semantics still differ.
 - Retired the dead `pendingWeakenOwnerForNode` / `pendingWeakenOwnerForEdge` alias wrappers from `MLF.Constraint.Presolution.EdgeUnify`, keeping pending-weaken owner queries single-sourced in `StateAccess`.
 - Retired the dead `rtvSchemeBodyTarget` wrapper from `MLF.Elab.Run.ResultType.View` (2026-03-09): the result-type view boundary now matches its overlay-aware query surface exactly, while `schemeBodyTarget` remains owned by `MLF.Elab.Run.Scope`.
