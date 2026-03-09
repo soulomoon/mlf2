@@ -5,7 +5,6 @@ module MLF.Elab.Run.ResultType.View (
     rtvWithBoundOverlay,
     rtvLookupNode,
     rtvLookupVarBound,
-    rtvSchemeBodyTarget,
     rtvPresolutionViewOverlay
 ) where
 
@@ -20,7 +19,6 @@ import MLF.Constraint.Types
     , getNodeId
     )
 import qualified MLF.Elab.Run.ChiQuery as ChiQuery
-import MLF.Elab.Run.Scope (schemeBodyTarget)
 import MLF.Elab.Run.ResultType.Types (ResultTypeInputs(..))
 import MLF.Util.ElabError (ElabError(..))
 
@@ -68,10 +66,6 @@ rtvLookupVarBound view nid =
     case overlayBound view nid of
         Just bnd -> Just bnd
         Nothing -> ChiQuery.chiLookupVarBound (rtvPresolutionView view) nid
-
-
-rtvSchemeBodyTarget :: ResultTypeView -> NodeId -> NodeId
-rtvSchemeBodyTarget view nid = schemeBodyTarget (rtvPresolutionViewOverlay view) nid
 
 rtvPresolutionView :: ResultTypeView -> PresolutionView
 rtvPresolutionView = rtcPresolutionView . rtvInputs0

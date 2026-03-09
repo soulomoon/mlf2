@@ -653,6 +653,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             rtSrc <- readFile "src/MLF/Elab/Run/ResultType/Types.hs"
             elabSrc `shouldSatisfy` isInfixOf "MLF.Elab.Run.ChiQuery"
             rtViewSrc `shouldSatisfy` isInfixOf "MLF.Elab.Run.ChiQuery"
+            rtViewSrc `shouldSatisfy` (not . isInfixOf "rtvSchemeBodyTarget")
             elabSrc `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
             rtSrc `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
 
