@@ -12,11 +12,10 @@ import qualified Data.List.NonEmpty as NE
 
 import MLF.Constraint.Canonicalizer (Canonicalizer, canonicalizeNode, chaseRedirectsStable)
 import qualified MLF.Constraint.Canonicalizer as Canonicalizer
-import MLF.Constraint.Presolution (EdgeTrace(..))
+import MLF.Constraint.Presolution.Rewrite (canonicalizeTrace, canonicalizeWitness)
 import MLF.Constraint.Types.Graph (NodeId(..))
 import MLF.Constraint.Types.Witness
     ( BoundRef(..)
-    , EdgeWitness(..)
     , Expansion(..)
     , ForallSpec(..)
     )
@@ -28,35 +27,6 @@ chaseRedirects = chaseRedirectsStable
 -- | Build a canonicalizer that applies redirects before union-find canonicalization.
 makeCanonicalizer :: IntMap.IntMap NodeId -> IntMap.IntMap NodeId -> Canonicalizer
 makeCanonicalizer = Canonicalizer.makeCanonicalizer
-
-canonicalizeWitness :: Canonicalizer -> EdgeWitness -> EdgeWitness
-canonicalizeWitness canon w =
-    let canonNode = canonicalizeNode canon
-        -- Contract: preserve source-domain provenance (`ewWitness`)
-        -- and canonicalize only structural lookup fields.
-    in w
-        { ewLeft = canonNode (ewLeft w)
-        , ewRight = canonNode (ewRight w)
-        , ewRoot = canonNode (ewRoot w)
-        , ewForallIntros = ewForallIntros w
-        , ewWitness = ewWitness w
-        }
-
-canonicalizeTrace :: Canonicalizer -> EdgeTrace -> EdgeTrace
-canonicalizeTrace canon tr =
-    let canonNode = canonicalizeNode canon
-        -- Contract: preserve source-domain provenance in `etBinderArgs`,
-        -- `etInterior`, and `etCopyMap` for Φ/Omega. Preserve replay-map
-        -- metadata in `etBinderReplayMap`. `etRoot` is structural and may be
-        -- canonicalized for solved-graph lookup.
-    in tr
-        { etRoot = canonNode (etRoot tr)
-        , etBinderArgs = etBinderArgs tr
-        , etInterior = etInterior tr
-        , etReplayContract = etReplayContract tr
-        , etBinderReplayMap = etBinderReplayMap tr
-        , etCopyMap = etCopyMap tr
-        }
 
 canonicalizeExpansion :: Canonicalizer -> Expansion -> Expansion
 canonicalizeExpansion canon expn =
