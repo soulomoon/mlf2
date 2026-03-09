@@ -493,6 +493,88 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             presolutionSrc `shouldSatisfy` (not . isInfixOf "processInstEdge,")
             testSupportSrc `shouldSatisfy` isInfixOf "processInstEdge,"
 
+        it "edge artifact bundle guard: presolution/result-type/elab env share EdgeArtifacts" $ do
+            baseSrc <- readFile "src/MLF/Constraint/Presolution/Base.hs"
+            elabSrc <- readFile "src/MLF/Elab/Elaborate.hs"
+            resultTypeTypesSrc <- readFile "src/MLF/Elab/Run/ResultType/Types.hs"
+            baseSrc `shouldSatisfy` isInfixOf "data EdgeArtifacts = EdgeArtifacts"
+            baseSrc `shouldSatisfy` (not . isInfixOf "-> (IntMap EdgeWitness, IntMap EdgeTrace, IntMap Expansion)")
+            elabSrc `shouldSatisfy` isInfixOf "eeEdgeArtifacts :: EdgeArtifacts"
+            resultTypeTypesSrc `shouldSatisfy` isInfixOf "rtcEdgeArtifacts :: EdgeArtifacts"
+
+        it "assembly helper guard: pipeline and driver expose the remaining prep helpers explicitly" $ do
+            pipelineSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
+            driverSrc <- readFile "src/MLF/Constraint/Presolution/Driver.hs"
+            pipelineSrc `shouldSatisfy` isInfixOf "data TraceCopyArtifacts = TraceCopyArtifacts"
+            pipelineSrc `shouldSatisfy` isInfixOf "prepareTraceCopyArtifacts"
+            driverSrc `shouldSatisfy` isInfixOf "mkInitialPresolutionState ::"
+            driverSrc `shouldSatisfy` isInfixOf "tyExpNodeIds ::"
+
+        it "split façade guard: Omega remains a thin export owner over Domain/Interpret/Normalize" $ do
+            omegaSrc <- readFile "src/MLF/Elab/Phi/Omega.hs"
+            forM_
+                [ "import MLF.Elab.Phi.Omega.Domain"
+                , "import MLF.Elab.Phi.Omega.Interpret"
+                , "import MLF.Elab.Phi.Omega.Normalize"
+                ] $ \marker ->
+                    omegaSrc `shouldSatisfy` isInfixOf marker
+            forM_
+                [ "data OmegaDomainEnv = OmegaDomainEnv"
+                , "mkOmegaDomainEnv :: OmegaContext -> OmegaDomainEnv"
+                , "normalizeInst = cata alg"
+                ] $ \marker ->
+                    omegaSrc `shouldSatisfy` (not . isInfixOf marker)
+
+        it "split façade guard: Reify.Core delegates to Bound/Named/Type owners" $ do
+            reifySrc <- readFile "src/MLF/Reify/Core.hs"
+            forM_
+                [ "import qualified MLF.Reify.Bound as Bound"
+                , "import qualified MLF.Reify.Named as Named"
+                , "import qualified MLF.Reify.Type as Type"
+                , "reifyType = Type.reifyType"
+                , "freeVars = Bound.freeVars"
+                , "namedNodes = Named.namedNodes"
+                ] $ \marker ->
+                    reifySrc `shouldSatisfy` isInfixOf marker
+            forM_
+                [ "reifyBoundWithNamesSolved"
+                , "namedNodes presolutionView = do"
+                , "freeVars solved nid visited"
+                ] $ \marker ->
+                    reifySrc `shouldSatisfy` (not . isInfixOf marker)
+
+        it "split façade guard: Solve keeps worklist/finalize implementation in child modules" $ do
+            solveSrc <- readFile "src/MLF/Constraint/Solve.hs"
+            forM_
+                [ "import MLF.Constraint.Solve.Finalize"
+                , "import MLF.Constraint.Solve.Worklist"
+                ] $ \marker ->
+                    solveSrc `shouldSatisfy` isInfixOf marker
+            forM_
+                [ "runUnifyClosureWithSeed"
+                , "finalizeConstraintWithUF uf preRewrite = do"
+                , "rewriteConstraintWithUF = applyUFConstraint"
+                ] $ \marker ->
+                    solveSrc `shouldSatisfy` (not . isInfixOf marker)
+
+        it "split façade guard: Elaborate keeps algebra/scope/annotation logic in child modules" $ do
+            elaborateSrc <- readFile "src/MLF/Elab/Elaborate.hs"
+            forM_
+                [ "import MLF.Elab.Elaborate.Algebra"
+                , "import MLF.Elab.Elaborate.Annotation"
+                , "import MLF.Elab.Elaborate.Scope"
+                ] $ \marker ->
+                    elaborateSrc `shouldSatisfy` isInfixOf marker
+            forM_
+                [ "data AlgebraContext = AlgebraContext"
+                , "data ScopeContext = ScopeContext"
+                , "data AnnotationContext = AnnotationContext"
+                , "elabAlg :: AlgebraContext ->"
+                , "generalizeAtNode :: ScopeContext ->"
+                , "reifyInst annotationContext"
+                ] $ \marker ->
+                    elaborateSrc `shouldSatisfy` (not . isInfixOf marker)
+
         it "presolution state access guard" $ do
             stateAccessSrc <- readFile "src/MLF/Constraint/Presolution/StateAccess.hs"
             edgeUnifySrc <- readFile "src/MLF/Constraint/Presolution/EdgeUnify.hs"
@@ -571,6 +653,35 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             omegaSrc `shouldSatisfy` (not . isInfixOf "pickExistingSource :: [NodeId] -> Maybe NodeId")
             omegaSrc `shouldSatisfy` (not . isInfixOf "adoptOpNode :: NodeId -> NodeId")
             omegaSrc `shouldSatisfy` (not . isInfixOf "graftArgFor :: NodeId -> NodeId -> NodeId")
+
+        it "Loop 2 split-facade guard: runtime facades stay thin and child-owned" $ do
+            forM_
+                [ ( "src/MLF/Elab/Phi/Omega.hs"
+                  , 30
+                  , [ "import MLF.Elab.Phi.Omega.Domain"
+                    , "import MLF.Elab.Phi.Omega.Interpret"
+                    , "import MLF.Elab.Phi.Omega.Normalize"
+                    ]
+                  )
+                , ( "src/MLF/Constraint/Presolution/EdgeUnify.hs"
+                  , 95
+                  , [ "import MLF.Constraint.Presolution.EdgeUnify.State"
+                    , "import qualified MLF.Constraint.Presolution.EdgeUnify.Omega as Omega"
+                    , "import MLF.Constraint.Presolution.EdgeUnify.Unify"
+                    ]
+                  )
+                , ( "src/MLF/Elab/Elaborate.hs"
+                  , 120
+                  , [ "import MLF.Elab.Elaborate.Algebra"
+                    , "import MLF.Elab.Elaborate.Annotation"
+                    , "import MLF.Elab.Elaborate.Scope"
+                    ]
+                  )
+                ] $ \(path, maxLines, requiredMarkers) -> do
+                    src <- readFile path
+                    length (lines src) `shouldSatisfy` (<= maxLines)
+                    forM_ requiredMarkers $ \marker ->
+                        src `shouldSatisfy` isInfixOf marker
 
         it "row9-11 facade cleanup guard: Phi no longer re-exports or compiles Binder helpers" $ do
             phiSrc <- readFile "src/MLF/Elab/Phi.hs"

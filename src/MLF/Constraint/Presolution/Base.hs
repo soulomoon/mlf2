@@ -2,6 +2,8 @@
 
 module MLF.Constraint.Presolution.Base (
     PresolutionUf(..),
+    EdgeArtifacts(..),
+    emptyEdgeArtifacts,
     PresolutionResult(..),
     PresolutionPlanBuilder(..),
     PresolutionError(..),
@@ -73,6 +75,16 @@ import MLF.Util.ElabError (ElabError)
 
 newtype PresolutionUf = PresolutionUf { getPresolutionUf :: IntMap NodeId }
     deriving (Eq, Show)
+
+data EdgeArtifacts = EdgeArtifacts
+    { eaEdgeExpansions :: IntMap Expansion
+    , eaEdgeWitnesses :: IntMap EdgeWitness
+    , eaEdgeTraces :: IntMap EdgeTrace
+    }
+    deriving (Eq, Show)
+
+emptyEdgeArtifacts :: EdgeArtifacts
+emptyEdgeArtifacts = EdgeArtifacts IntMap.empty IntMap.empty IntMap.empty
 
 -- | Result of the presolution phase.
 data PresolutionResult = PresolutionResult
@@ -715,17 +727,15 @@ debugBinders msg = do
 -- See Note [Constraint simplification: Var-Let (Ch 12.4.1)]
 dropTrivialSchemeEdges
     :: Constraint
-    -> IntMap EdgeWitness
-    -> IntMap EdgeTrace
-    -> IntMap Expansion
-    -> (IntMap EdgeWitness, IntMap EdgeTrace, IntMap Expansion)
-dropTrivialSchemeEdges constraint witnesses traces expansions =
+    -> EdgeArtifacts
+    -> EdgeArtifacts
+dropTrivialSchemeEdges constraint edgeArtifacts =
     let dropEdgeIds = cLetEdges constraint
         keepEdge eid = not (IntSet.member eid dropEdgeIds)
-        witnesses' = IntMap.filterWithKey (\eid _ -> keepEdge eid) witnesses
-        traces' = IntMap.filterWithKey (\eid _ -> keepEdge eid) traces
-        expansions' = IntMap.filterWithKey (\eid _ -> keepEdge eid) expansions
-    in (witnesses', traces', expansions')
+        witnesses' = IntMap.filterWithKey (\eid _ -> keepEdge eid) (eaEdgeWitnesses edgeArtifacts)
+        traces' = IntMap.filterWithKey (\eid _ -> keepEdge eid) (eaEdgeTraces edgeArtifacts)
+        expansions' = IntMap.filterWithKey (\eid _ -> keepEdge eid) (eaEdgeExpansions edgeArtifacts)
+    in EdgeArtifacts expansions' witnesses' traces'
 
 {- Note [Constraint simplification: Var-Let (Ch 12.4.1)]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

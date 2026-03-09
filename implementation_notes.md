@@ -1,9 +1,55 @@
+### 2026-03-10 post-split stabilization-and-landing loop closeout
+
+- Treated the live tree as the already-split baseline and revalidated it with `cabal build all && cabal test` before doing any further stabilization work.
+- Confirmed the warning-free cleanup loop needed no additional production edits beyond the already-green split tree.
+- Added explicit thin-façade ownership guards for the split runtime façades:
+  - `test/PipelineSpec.hs` now locks `MLF.Elab.Phi.Omega`, `MLF.Constraint.Presolution.EdgeUnify`, and `MLF.Elab.Elaborate` to stay thin child-module façades;
+  - `test/RepoGuardSpec.hs` now locks `MLF.Reify.Core` and `MLF.Constraint.Solve` as thin façades as well.
+- Added stabilization guards for the landed public/module topology:
+  - `test/RepoGuardSpec.hs` now asserts `README.md` and `docs/architecture.md` agree on `MLF.API` / `MLF.Pipeline` / `MLF.XMLF` ownership;
+  - `test/RepoGuardSpec.hs` now asserts the split child modules stay implementation-only Cabal entries rather than drifting onto the public surface.
+- Ran the split-owner regression sweep in the fixed order `Omega` → `EdgeUnify` → `Reify.Core` → `Solve` → `Elaborate`, then reran the full gate; the landing loop completed without reopening the split design.
+
 ### 2026-03-10 public-boundary and presolution test-seam cleanup
 
 - Removed the legacy public `MyLib` wrapper and documented the supported downstream surfaces as `MLF.API`, `MLF.Pipeline`, and `MLF.XMLF` only.
 - Added explicit public-surface and repository-guard specs: public API contract coverage, test-harness wiring checks, `MyLib` absence checks, and a dual-import guard that rejects simultaneous `MLF.Constraint.Types` + `MLF.Constraint.Types.Graph` imports.
 - Narrowed `MLF.Constraint.Presolution` back toward a runtime-focused facade by moving test-only state/copy/interior/building-block helpers behind the new `MLF.Constraint.Presolution.TestSupport` entrypoint; runtime-facing `computePresolution`, `PresolutionResult`, `PresolutionView`, `PresolutionPlanBuilder`, `PresolutionError`, and `EdgeTrace` remain on the main facade.
 - Applied low-risk orchestration thinning without semantic changes: `MLF.Constraint.Presolution.Driver.rewriteConstraint` now delegates bind-parent rebuilding to the shared `MLF.Constraint.Presolution.Rewrite.rebuildBindParents`, and `MLF.Elab.Run.Pipeline` now uses explicit snapshot-preparation / redirect-then-canonicalize helpers to keep assembly order visible.
+
+### 2026-03-10 public pipeline hard-cut cleanup
+
+- `MLF.Pipeline` is now the canonical public owner of constraint generation, elaboration, execution, typechecking, and runtime-facing xMLF helpers.
+- `MLF.API` is now frontend-only: surface syntax, parsing, pretty-printing, and normalization helpers remain, while pipeline/runtime exports moved off the umbrella surface.
+- In-repo downstream callers (`app/Main.hs`, parser/strict-failure specs, and constraint-generation specs) now import execution/runtime behavior from `MLF.Pipeline` directly.
+
+### 2026-03-10 remaining refactor-loop monolith splits
+
+- Completed the low-risk prep loops before the large splits:
+  - introduced `EdgeArtifacts` in presolution base plumbing and routed it through `dropTrivialSchemeEdges`, `ElabEnv`, `ResultTypeInputs`, and pipeline/result-type construction;
+  - added explicit assembly helpers `TraceCopyArtifacts` / `prepareTraceCopyArtifacts`, `mkInitialPresolutionState`, and `tyExpNodeIds` so pipeline/driver preparation logic is named and localized.
+- Split `MLF.Elab.Phi.Omega` into façade + child modules:
+  - `MLF.Elab.Phi.Omega.Domain`
+  - `MLF.Elab.Phi.Omega.Interpret`
+  - `MLF.Elab.Phi.Omega.Normalize`
+- Split `MLF.Constraint.Presolution.EdgeUnify` into façade + child modules:
+  - `MLF.Constraint.Presolution.EdgeUnify.State`
+  - `MLF.Constraint.Presolution.EdgeUnify.Omega`
+  - `MLF.Constraint.Presolution.EdgeUnify.Unify`
+- Split `MLF.Reify.Core` into façade + child modules:
+  - `MLF.Reify.Cache`
+  - `MLF.Reify.Named`
+  - `MLF.Reify.Type`
+  - `MLF.Reify.Bound`
+- Split `MLF.Constraint.Solve` into façade + child modules:
+  - `MLF.Constraint.Solve.Worklist`
+  - `MLF.Constraint.Solve.Harmonize`
+  - `MLF.Constraint.Solve.Finalize`
+- Split `MLF.Elab.Elaborate` into façade + child modules:
+  - `MLF.Elab.Elaborate.Algebra`
+  - `MLF.Elab.Elaborate.Scope`
+  - `MLF.Elab.Elaborate.Annotation`
+- The façade modules remain the export owners; the new children own the internal implementation slices.
 
 ### 2026-03-09 presolution state-access single-style cleanup
 

@@ -36,6 +36,7 @@ import qualified Data.List.NonEmpty as NE
 
 import MLF.Constraint.Presolution.Base (
     CopyMap,
+    EdgeArtifacts(..),
     InteriorSet,
     FrontierSet,
     PresolutionError(..),

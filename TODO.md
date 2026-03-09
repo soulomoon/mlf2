@@ -4,6 +4,26 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 72 Stabilize and land the post-split refactor loop (completed 2026-03-10)
+
+- Completed:
+  - froze the live split-tree baseline from the current `master` workspace and re-verified the existing split state with `cabal build all && cabal test`;
+  - confirmed Loop 1 required no source cleanup beyond the existing warning-free state (`cabal build all` stayed green with no new warnings);
+  - added explicit Loop 2/3/4 stabilization guards in `test/PipelineSpec.hs` and `test/RepoGuardSpec.hs` covering thin split façades, current public-topology docs, and Cabal internal-child ownership for the split modules;
+  - ran the ordered Loop 5 owner sweeps for `Omega`, `EdgeUnify`, `Reify.Core`, `Solve`, and `Elaborate`, then reran the full gate;
+  - synced the task packet/docs and archived the completed run.
+- Verification:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Repository guardrails"'`: PASS (`7 examples, 0 failures`)
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Loop 2 split-facade guard: runtime facades stay thin and child-owned"'`: PASS (`1 example, 0 failures`)
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "MLF.Constraint.Presolution facade"'`: PASS (`3 examples, 0 failures`)
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Public surface contracts"'`: PASS (`8 examples, 0 failures`)
+  - ordered owner sweeps via the built `mlf2-test` binary: PASS for `Phi alignment`, `WitnessDomain`, `Pipeline (Phases 1-5)`, `Phase 4 — OpRaise for interior nodes`, `Phase 2 — Merge/RaiseMerge emission`, `EdgeTrace`, `Phase 3 — Witness normalization`, `Phase 4 thesis-exact unification closure`, `Phase 6 — Elaborate (xMLF)`, `ga scope`, `Generalize shadow comparator`, `MLF.Constraint.Solved`, `Phase 5 -- Solve`, `Phase 7 typecheck`, and `Phase 7 theorem obligations`
+  - `cabal build all && cabal test`: PASS
+- Rolling priorities (next):
+  1. Keep the new split-façade / public-topology / Cabal-ownership guards green during future cleanup.
+  2. Reopen this area only if a real thesis-faithfulness bug or ownership regression appears.
+  3. Treat the archived task packet as the source of truth for the landed stabilization loop.
+
 ## Task 71 Restore green baseline after solved-facade test/import drift (completed 2026-03-09)
 
 - Completed:

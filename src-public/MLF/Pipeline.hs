@@ -1,3 +1,4 @@
+{-# LANGUAGE PatternSynonyms #-}
 {- |
 Module      : MLF.Pipeline
 Description : Focused normalized-pipeline API for downstream callers
@@ -17,9 +18,22 @@ module MLF.Pipeline
     , normalizeExpr
     , normalizeType
     -- * Constraint generation
+    , ConstraintResult (..)
+    , ConstraintError (..)
     , BaseTy (..)
     , PolySyms
     , inferConstraintGraph
+    -- * Elaboration/runtime types
+    , ElabType
+    , Ty (..)
+    , ElabScheme
+    , pattern Forall
+    , ElabTerm
+    , Instantiation (..)
+    , ElabError (..)
+    , TypeCheckError (..)
+    , Pretty (..)
+    , schemeFromType
     -- * Pipeline configuration
     , PipelineConfig(..)
     , defaultPipelineConfig
@@ -41,12 +55,21 @@ module MLF.Pipeline
 
 import MLF.Frontend.Syntax (NormSurfaceExpr, NormSrcType, StructBound)
 import MLF.Frontend.Normalize (NormalizationError(..), normalizeExpr, normalizeType)
-import MLF.Frontend.ConstraintGen (ConstraintError, ConstraintResult, generateConstraints)
+import MLF.Frontend.ConstraintGen (ConstraintError(..), ConstraintResult(..), generateConstraints)
 import MLF.Constraint.Types.Graph (BaseTy(..), PolySyms)
 -- Keep legacy elaboration conversion helpers quarantined in MLF.Elab.Legacy.
 import MLF.Elab.Pipeline
-    ( PipelineConfig(..)
+    ( ElabError (..)
+    , ElabScheme
+    , pattern Forall
+    , ElabTerm
+    , ElabType
+    , Ty (..)
+    , Instantiation (..)
+    , TypeCheckError (..)
+    , PipelineConfig(..)
     , PipelineError(..)
+    , Pretty (..)
     , defaultPipelineConfig
     , TraceConfig(..)
     , defaultTraceConfig
@@ -57,6 +80,7 @@ import MLF.Elab.Pipeline
     , runPipelineElabChecked
     , runPipelineElabWithConfig
     , runPipelineElabCheckedWithConfig
+    , schemeFromType
     , step
     , typeCheck
     )

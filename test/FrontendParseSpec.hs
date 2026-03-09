@@ -7,13 +7,11 @@ import qualified Data.Set as Set
 import Test.Hspec
 
 import MLF.API
-    ( BaseTy (..)
-    , Expr (..)
+    ( Expr (..)
     , NormSrcType
     , NormParseError (..)
     , SrcTy (..)
     , SrcType
-    , Ty (..)
     , mkNormBound
     , mkSrcBound
     , parseNormEmlfExpr
@@ -22,9 +20,8 @@ import MLF.API
     , parseRawEmlfType
     , renderEmlfParseError
     , renderNormParseError
-    , renderPipelineError
-    , runPipelineElab
     )
+import MLF.Pipeline (BaseTy (..), Ty (..), renderPipelineError, runPipelineElab)
 
 spec :: Spec
 spec = describe "Frontend eMLF parser" $ do

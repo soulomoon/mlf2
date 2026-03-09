@@ -1,4 +1,5 @@
 module MLF.Constraint.Presolution.TestSupport (
+    EdgeArtifacts(..),
     PresolutionState(..),
     CopyMapping(..),
     CopyMap,
@@ -28,6 +29,7 @@ module MLF.Constraint.Presolution.TestSupport (
 import MLF.Constraint.Presolution.Base
     ( CopyMap
     , CopyMapping(..)
+    , EdgeArtifacts(..)
     , InteriorNodes(..)
     , PresolutionPlanBuilder(..)
     , PresolutionState(..)

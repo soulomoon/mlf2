@@ -4,6 +4,7 @@ import qualified Data.Set as Set
 import Test.Hspec
 
 import MLF.API
+import MLF.Pipeline
 
 bugExpr :: NormSurfaceExpr
 bugExpr =

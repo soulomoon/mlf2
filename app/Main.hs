@@ -2,9 +2,11 @@ module Main where
 
 import MLF.API
     ( Expr(..)
-    , Pretty(..)
-    , defaultPipelineConfig
     , normalizeExpr
+    )
+import MLF.Pipeline
+    ( Pretty(..)
+    , defaultPipelineConfig
     , renderPipelineError
     , runPipelineElabWithConfig
     )
