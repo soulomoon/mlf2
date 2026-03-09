@@ -66,6 +66,7 @@ import MLF.Frontend.ConstraintGen (AnnExpr(..), ConstraintResult(..), generateCo
 import MLF.Frontend.Normalize (normalizeExpr)
 import MLF.Frontend.Syntax (NormSurfaceExpr, SrcTy(..), SrcType, SurfaceExpr, VarName, mkSrcBound)
 import MLF.Elab.Pipeline (defaultTraceConfig)
+import qualified SolvedFacadeTestUtil as SolvedTest
 
 emptyConstraint :: Constraint
 emptyConstraint = Constraint
@@ -207,7 +208,7 @@ runPipelineArtifactsDefault
 runPipelineArtifactsDefault poly expr = do
     (ConstraintResult{ crAnnotated = ann, crRoot = root }, c1, pres) <-
         runToPresolutionDetailedDefault poly expr
-    solved <- firstShowE (Solved.fromPreRewriteState (snapshotUnionFind pres) (snapshotConstraint pres))
+    solved <- firstShowE (SolvedTest.solvedFromSnapshot (snapshotUnionFind pres) (snapshotConstraint pres))
     pure
         PipelineArtifacts
             { paConstraintNorm = c1
@@ -220,7 +221,7 @@ runPipelineArtifactsDefault poly expr = do
 runToSolvedDefault :: PolySyms -> SurfaceExpr -> Either String Solved.Solved
 runToSolvedDefault poly expr = do
     pres <- runToPresolutionDefault poly expr
-    firstShowE (Solved.fromPreRewriteState (snapshotUnionFind pres) (snapshotConstraint pres))
+    firstShowE (SolvedTest.solvedFromSnapshot (snapshotUnionFind pres) (snapshotConstraint pres))
 
 inferBindParents :: NodeMap TyNode -> BindParents
 inferBindParents nodes =

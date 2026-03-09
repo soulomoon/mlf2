@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Changed
+- Re-greened the baseline solved-snapshot test seams (2026-03-09): test/frozen-parity snapshot solved reconstruction now replays through the strict `SolveSnapshot` → `Solved.fromSolveOutput` seam, and `frozen-parity-gen` now wires `SolvedFacadeTestUtil` explicitly.
 - Built and validated the base `ResultTypeView` once per runtime result-type computation, threading that validated view through the annotated and fallback workers instead of rebuilding it in each submodule (2026-03-09).
 - Retired the one-off `WithCanonicalT` presolution reader layer so `MLF.Constraint.Presolution.EdgeUnify.checkNodeLocked` now uses the shared direct `PresolutionM` state-access helpers, with a focused source guard keeping the reader API retired (2026-03-09).
 - Retired stale internal presolution re-export surfaces so `MLF.Constraint.Presolution.Driver` and `MLF.Constraint.Presolution.EdgeProcessing` now expose only the helpers they own, while the public Phase 4 boundary still exports `processInstEdge` (2026-03-09).

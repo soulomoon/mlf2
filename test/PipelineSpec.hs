@@ -741,7 +741,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
                 let pres = paPresolution artifacts
                 expected <- requireRight
-                    (Solved.fromPreRewriteState (snapshotUnionFind pres) (snapshotConstraint pres))
+                    (SolvedTest.solvedFromSnapshot (snapshotUnionFind pres) (snapshotConstraint pres))
                 paSolved artifacts `shouldBe` expected
                 Solved.validateCanonicalGraphStrict (paSolved artifacts)
                     `shouldBe` []
@@ -768,7 +768,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             cUnifyEdges (prConstraint (paPresolution artifacts)) `shouldBe` []
             let pres = paPresolution artifacts
             expectedNative <- requireRight
-                (Solved.fromPreRewriteState (snapshotUnionFind pres) (snapshotConstraint pres))
+                (SolvedTest.solvedFromSnapshot (snapshotUnionFind pres) (snapshotConstraint pres))
             paSolved artifacts `shouldBe` expectedNative
             runPipelineElab Set.empty (unsafeNormalizeExpr (ELam "x" (EVar "x")))
                 `shouldSatisfy` isRight
