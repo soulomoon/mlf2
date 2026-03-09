@@ -16,6 +16,7 @@
 - Kept `flushPendingWeakensAtOwnerBoundary` and the owner lookup helpers as the authoritative pending-weaken API surface; `EdgeProcessing` scheduling semantics stay unchanged.
 - Tightened the row3 guard slices so they continue asserting owner-boundary scheduling markers and additionally forbid the legacy flush-all helper from reappearing in `EdgeUnify`.
 - Retired the dead `pendingWeakenOwnerForNode` / `pendingWeakenOwnerForEdge` alias wrappers so pending-weaken owner queries are now single-sourced directly in `MLF.Constraint.Presolution.StateAccess`, with `EdgeUnify` calling the authoritative helpers by name.
+- `MLF.Constraint.Presolution.EdgeProcessing` now reads pending-unify edges and closure seed data through shared `MLF.Constraint.Presolution.StateAccess` helpers instead of peeking `PresolutionState` fields directly; the owner-boundary scheduling algorithm and diagnostics remain unchanged.
 
 ### 2026-03-08 snapshot preparation single-owner cleanup
 

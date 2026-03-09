@@ -511,6 +511,15 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     edgeUnifySrc `shouldSatisfy` (not . isInfixOf marker)
             baseSrc `shouldSatisfy` (not . isInfixOf "WithCanonicalT")
 
+        it "presolution state access guard: EdgeProcessing uses helper-layer state access" $ do
+            edgeProcessingSrc <- readFile "src/MLF/Constraint/Presolution/EdgeProcessing.hs"
+            forM_
+                [ "psConstraint st"
+                , "psUnionFind st"
+                , "st <- getPresolutionState"
+                ] $ \marker ->
+                    edgeProcessingSrc `shouldSatisfy` (not . isInfixOf marker)
+
         it "presolution witness assembly guard" $ do
             interpreterSrc <- readFile "src/MLF/Constraint/Presolution/EdgeProcessing/Interpreter.hs"
             witnessSrc <- readFile "src/MLF/Constraint/Presolution/Witness.hs"
