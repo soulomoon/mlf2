@@ -929,6 +929,7 @@
   - `MLF.Elab.Run.ResultType.Fallback` (canonical bound lookup + scope-root post-check path)
 - Added `Solved.canonicalizedBindParents :: Solved -> Either BindingError BindParents` so reification can keep canonical bind-parent normalization semantics without extracting raw canonical constraints.
 - Added `bindingScopeRefCanonical :: Solved -> NodeId -> Either BindingError NodeRef` in `MLF.Elab.Run.Scope` for canonical-domain scope-root lookup over `Solved.canonicalBindParents`.
+- `bindingScopeRefCanonical` now delegates through the primary `bindingScopeRef` owner path on `chiCanonicalConstraint`; `MLF.Elab.Run.Scope` no longer keeps a separate handwritten canonical bind-parent traversal, while `letScopeOverrides` still owns base-vs-solved scope divergence behavior.
 - Fallback bound-resolution no longer depends on raw canonical `Constraint`; it now traverses canonical nodes/var-bounds via `Solved.lookupCanonicalNode` and `Solved.lookupCanonicalVarBound`.
 - Verification after migration: `cabal build all && cabal test` (`822 examples, 0 failures`).
 
@@ -1964,6 +1965,7 @@ This repo’s design is primarily informed by:
 - Result-type bound-overlay queries are now single-sourced through `MLF.Elab.Run.ResultType.View`; `ResultType.Fallback` no longer rebuilds a local overlayed `PresolutionView`, and the row-2 guard forbids that duplicate path from returning.
 - `MLF.Elab.Run.ResultType.View` is now narrowed to overlay-aware queries only; plain result-type context reads come directly from `ResultTypeInputs`/`ChiQuery`, and the row-2 guard forbids the retired pass-through accessor scaffolding.
 - The dead `rtvSchemeBodyTarget` pass-through is retired too, so `ResultType.View` now matches that documented overlay-aware boundary exactly and leaves `schemeBodyTarget` ownership in `MLF.Elab.Run.Scope`.
+- `bindingScopeRefCanonical` now reuses `bindingScopeRef` on the canonical constraint instead of maintaining a second bind-parent walker, while `letScopeOverrides` continues to own base-vs-solved scope divergence semantics.
 - Presolution edge witness/trace assembly is now single-sourced under `MLF.Constraint.Presolution.Witness`; the thin `EdgeProcessing.Witness` wrapper and its one-off `EdgeWitnessPlan` boundary were retired without changing witness ingredients, TyExp-body root selection, or Phase-2 op integration.
 - Witness/trace canonicalization is now single-sourced under `MLF.Constraint.Presolution.Rewrite`; elaboration/runtime reuses that owner contract directly, while the elaboration-local `canonicalizeExpansion` helper remains separate because its `ExpForall` behavior still differs.
 - Result-type annotated recursion is now single-sourced through the `ResultType` facade/`Ann` owner path; `ResultType.Fallback` no longer carries the local `computeResultTypeFromAnnLocal` workaround for nested `AAnn` cases.

@@ -664,6 +664,11 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             utilSrc `shouldSatisfy` (not . isInfixOf "canonicalizeTrace ::")
             utilSrc `shouldSatisfy` isInfixOf "canonicalizeExpansion ::"
 
+        it "canonical scope helper reuses the primary owner path" $ do
+            scopeSrc <- readFile "src/MLF/Elab/Run/Scope.hs"
+            scopeSrc `shouldSatisfy` (not . isInfixOf "bindingPathToRootFromBindParents")
+            scopeSrc `shouldSatisfy` isInfixOf "bindingScopeRef (ChiQuery.chiCanonicalConstraint presolutionView) root"
+
         it "Phase 6 — Elaborate|ResultType|Dual-path verification gate stays green" $ do
             forM_ representativeMigrationCorpus assertCheckedAuthoritative
 
