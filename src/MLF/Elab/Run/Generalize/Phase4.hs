@@ -30,6 +30,7 @@ import MLF.Elab.Run.Debug (debugGaScope)
 import MLF.Elab.Run.Generalize.Common
     ( applyBindParent
     , baseFirstGenAncestorWith
+    , canonicalSchemeRootOwners
     , childrenFrom
     , chooseRootGenId
     , flagFromExisting
@@ -80,12 +81,8 @@ computeSchemeOwnership env phase1 phase2 phase3 =
         allowBindEdge = mkAllowBindEdge okRef isUpperRef
         baseFirstGenAncestor = baseFirstGenAncestorWith solvedToBase bindParentsBase
         mapBaseRef = mapBaseRefWith canonical baseToSolved nodesSolved
-        schemeRootOwners =
-            IntMap.fromList
-                [ (getNodeId (canonical root), gnId gen)
-                | gen <- IntMap.elems genMerged
-                , root <- gnSchemes gen
-                ]
+        (_schemeRootSetIgnored, schemeRootOwners) =
+            canonicalSchemeRootOwners canonical genMerged
         schemeRootOwnersBase =
             IntMap.filterWithKey
                 (\k _ -> IntSet.member k schemeRootsAllSet)
@@ -692,12 +689,8 @@ computeSchemeOwnership env phase1 phase2 phase3 =
                     in gen { gnSchemes = roots }
                 )
                 genMerged
-        schemeRootOwnersFinal =
-            IntMap.fromList
-                [ (getNodeId (canonical root), gnId gen)
-                | gen <- IntMap.elems genMerged'
-                , root <- gnSchemes gen
-                ]
+        (_schemeRootSetFinalIgnored, schemeRootOwnersFinal) =
+            canonicalSchemeRootOwners canonical genMerged'
         schemeInteriorOwnersFinal =
             IntMap.fromListWith
                 keepOld
