@@ -33,6 +33,7 @@ import MLF.Frontend.Syntax
     , SurfaceExpr
     , mkSrcBound
     )
+import qualified SolvedFacadeTestUtil as SolvedTest
 baselineSchemaVersion :: Int
 baselineSchemaVersion = 1
 
@@ -125,7 +126,7 @@ buildAnchorResult (label, expr) = do
     let c1 = normalize c0
     acyc <- firstShowE (checkAcyclicity c1)
     pres <- firstShowE (computePresolution defaultTraceConfig acyc c1)
-    solved <- firstShowE (Solved.fromPreRewriteState (snapshotUnionFind pres) (snapshotConstraint pres))
+    solved <- firstShowE (SolvedTest.solvedFromSnapshot (snapshotUnionFind pres) (snapshotConstraint pres))
     (_, ty) <- firstShowE (runPipelineElab Set.empty norm)
     pure FrozenAnchorResult
         { farName = label

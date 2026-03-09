@@ -280,7 +280,8 @@ executable frozen-parity-gen
 
     main-is:          Parity/FrozenParityGenMain.hs
 
-    other-modules:    Parity.FrozenArtifacts
+    other-modules:    Parity.FrozenArtifacts,
+                      SolvedFacadeTestUtil
 
     build-depends:
         base ^>=4.21.0.0,
