@@ -691,6 +691,31 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 src `shouldSatisfy` isInfixOf "resultTypeRoots"
             utilSrc `shouldSatisfy` isInfixOf "resultTypeRoots"
 
+        it "target unwrapping stays single-sourced inside Scope" $ do
+            scopeSrc <- readFile "src/MLF/Elab/Run/Scope.hs"
+            let section startMarker endMarker =
+                    unlines
+                        . takeWhile (not . isPrefixOf endMarker)
+                        . drop 1
+                        . dropWhile (not . isPrefixOf startMarker)
+                        . lines
+                generalizeSection =
+                    section
+                        "generalizeTargetNode :: PresolutionView -> NodeId -> NodeId"
+                        "schemeBodyTarget :: PresolutionView -> NodeId -> NodeId"
+                        scopeSrc
+                schemeSection =
+                    section
+                        "schemeBodyTarget :: PresolutionView -> NodeId -> NodeId"
+                        "{- Note [ga′ preservation across redirects]"
+                        scopeSrc
+            scopeSrc `shouldSatisfy` isInfixOf "targetUnwrapInfo ::"
+            generalizeSection `shouldSatisfy` isInfixOf "targetUnwrapInfo presolutionView target"
+            schemeSection `shouldSatisfy` isInfixOf "targetUnwrapInfo presolutionView target"
+            generalizeSection `shouldSatisfy` (not . isInfixOf "case ChiQuery.chiLookupNode presolutionView targetC of")
+            schemeSection `shouldSatisfy` (not . isInfixOf "in case ChiQuery.chiLookupNode presolutionView targetC of")
+            schemeSection `shouldSatisfy` (not . isInfixOf "case ChiQuery.chiLookupNode presolutionView bndC of")
+
         it "Phase 6 — Elaborate|ResultType|Dual-path verification gate stays green" $ do
             forM_ representativeMigrationCorpus assertCheckedAuthoritative
 
