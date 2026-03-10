@@ -4,6 +4,136 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 82 Restore warning-free rebuild after dead-export loop (completed 2026-03-10)
+
+- Completed:
+  - removed the remaining redundant imports in `MLF.Elab.Phi.Omega.Interpret`, `MLF.Elab.Elaborate.Scope`, `MLF.Elab.Elaborate.Algebra`, `MLF.Elab.Elaborate.Annotation`, and `MLF.Elab.Run.ResultType`;
+  - confirmed the tree now rebuilds cleanly under `-Werror`.
+- Verification:
+  - `cabal build all --ghc-options='-fforce-recomp -Werror'`: PASS
+  - `cabal test`: PASS
+- Rolling priorities (next):
+  1. Keep the tree warning-free as future refactors land.
+  2. Prefer deleting redundant imports over suppressing warnings.
+  3. Revisit only if a later compiler/toolchain change introduces new warnings.
+
+## Task 81 Retire dead `MLF.Elab.TermClosure.closeTermWithSchemeSubst` export (completed 2026-03-10)
+
+- Completed:
+  - removed the unused `closeTermWithSchemeSubst` export and definition from `MLF.Elab.TermClosure`;
+  - added a focused `PipelineSpec` Phase 6 guard proving the dead term-closure helper stays absent.
+- Verification:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "TermClosure no longer exposes closeTermWithSchemeSubst"'`: PASS (`1 example, 0 failures`)
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Phase 6"'`: PASS (`192 examples, 0 failures`)
+  - `cabal build all && cabal test`: PASS
+- Rolling priorities (next):
+  1. Dead-export loop is complete; keep the new guards green during later refactors.
+  2. Reopen this area only if a future sweep finds another genuinely dead internal export.
+  3. Preserve the archived loop packet as the authoritative execution record.
+
+## Task 80 Retire dead `MLF.Elab.Run.Debug.edgeOrigins` export (completed 2026-03-10)
+
+- Completed:
+  - removed the unused `edgeOrigins` export and definition from `MLF.Elab.Run.Debug`;
+  - added a focused `PipelineSpec` ga-scope guard proving the dead debug helper stays absent.
+- Verification:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Debug no longer exposes edgeOrigins"'`: PASS (`1 example, 0 failures`)
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Pipeline (Phases 1-5)"'`: PASS (`114 examples, 0 failures`)
+  - `cabal build all && cabal test`: PASS
+- Rolling priorities (next):
+  1. Revalidate `closeTermWithSchemeSubst` immediately before deciding whether to retire it.
+  2. Keep the new ga-scope debug guard green during later cleanup.
+  3. Close the loop after the final medium-confidence row resolves.
+
+## Task 79 Retire dead `MLF.Constraint.Canonicalizer.canonicalizeRef` (completed 2026-03-10)
+
+- Completed:
+  - removed the unused `canonicalizeRef` export and definition from `MLF.Constraint.Canonicalizer`;
+  - added a focused `CanonicalizerSpec` guard proving the dead helper stays retired.
+- Verification:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "canonicalizeRef stays retired"'`: PASS (`1 example, 0 failures`)
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "MLF.Constraint.Canonicalizer"'`: PASS (`6 examples, 0 failures`)
+  - `cabal build all && cabal test`: PASS
+- Rolling priorities (next):
+  1. Revalidate `edgeOrigins` immediately before deciding whether to retire it.
+  2. Keep the new canonicalizer guard green during later cleanup.
+  3. Finish the remaining medium-confidence rows one by one.
+
+## Task 78 Retire stale `Binding.Validation.validateSingleGenRoot` export (completed 2026-03-10)
+
+- Completed:
+  - removed `validateSingleGenRoot` from the `MLF.Binding.Validation` export list while keeping the helper local;
+  - added a focused `BindingSpec` guard proving the stale export stays absent.
+- Verification:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Validation no longer exports validateSingleGenRoot"'`: PASS (`1 example, 0 failures`)
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "MLF.Binding.Tree"'`: PASS (`52 examples, 0 failures`)
+  - `cabal build all && cabal test`: PASS
+- Rolling priorities (next):
+  1. Revalidate `canonicalizeRef` immediately before deciding whether to retire it.
+  2. Keep the new binding guard green during later cleanup.
+  3. Continue resolving the medium-confidence export rows one by one.
+
+## Task 77 Retire dead `ChiQuery` bind-parent passthrough exports (completed 2026-03-10)
+
+- Completed:
+  - removed the unused `chiLookupBindParent` and `chiBindParents` exports/definitions from `MLF.Elab.Run.ChiQuery`;
+  - added a focused `PipelineSpec` chi-first guard proving those retired query aliases stay absent.
+- Verification:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "ChiQuery no longer exposes chiLookupBindParent or chiBindParents"'`: PASS (`1 example, 0 failures`)
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "chi-first"'`: PASS (`14 examples, 0 failures`)
+  - `cabal build all && cabal test`: PASS
+- Rolling priorities (next):
+  1. Continue the dead-export loop with `Binding.Validation.validateSingleGenRoot`.
+  2. Keep the chi-first guard slice green during later cleanup.
+  3. Revalidate medium-confidence dead exports immediately before mutating them.
+
+## Task 76 Retire dead `instEdgeOwnerM` state-access export (completed 2026-03-10)
+
+- Completed:
+  - removed the unused `instEdgeOwnerM` export and definition from `MLF.Constraint.Presolution.StateAccess`;
+  - added a focused `PipelineSpec` guard proving the retired state-access export/signature stay absent.
+- Verification:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "retired instEdgeOwnerM export stays absent"'`: PASS (`1 example, 0 failures`)
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "presolution state access guard"'`: PASS (`3 examples, 0 failures`)
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Phase 4 thesis-exact unification closure"'`: PASS (`12 examples, 0 failures`)
+  - `cabal build all && cabal test`: PASS
+- Rolling priorities (next):
+  1. Keep the state-access / façade guards green during future presolution cleanup.
+  2. Reopen this area only if another genuinely unused helper remains after call-site rechecks.
+  3. Prefer broader cleanups only when they still have a clear thesis-facing payoff.
+
+## Task 75 Retire `pendingWeakenOwners` from the `EdgeUnify` façade (completed 2026-03-10)
+
+- Completed:
+  - removed the remaining `pendingWeakenOwners` re-export from `MLF.Constraint.Presolution.EdgeUnify`;
+  - updated `MLF.Constraint.Presolution.Driver` and `MLF.Constraint.Presolution.EdgeProcessing` to import the helper directly from `MLF.Constraint.Presolution.EdgeUnify.Omega`;
+  - added a focused `PresolutionFacadeSpec` source guard proving the helper now bypasses the façade.
+- Verification:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "pendingWeakenOwners bypasses the EdgeUnify façade"'`: PASS (`1 example, 0 failures`)
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "MLF.Constraint.Presolution facade"'`: PASS (`4 examples, 0 failures`)
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Repository guardrails"'`: PASS (`7 examples, 0 failures`)
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Phase 4 thesis-exact unification closure"'`: PASS (`12 examples, 0 failures`)
+  - `cabal build all && cabal test`: PASS
+- Rolling priorities (next):
+  1. Optionally trim the apparently dead `instEdgeOwnerM` export if a similarly bounded pass confirms there are still no live call sites.
+  2. Keep `pendingWeakenOwners` owned by `MLF.Constraint.Presolution.EdgeUnify.Omega`; do not regrow the `EdgeUnify` façade surface.
+  3. If future cleanup in this seam widens beyond import ownership, rerun a broader verification gate.
+
+## Task 74 Backlog reset and next-step triage (completed 2026-03-10)
+
+- Completed:
+  - audited the live `tasks/todo/` folders against `CHANGELOG.md`, `implementation_notes.md`, `TODO.md`, `Bugs.md`, and the current source guards;
+  - confirmed the old `Solved.fromPreRewriteState` verifier blocker is stale by rerunning the focused `ga scope` slice successfully on the current tree;
+  - closed the stale 2026-03-09 verifier/thinker folders whose targets were already landed or superseded by current repository state;
+  - narrowed the remaining bounded cleanup seam to `pendingWeakenOwners` ownership on the `MLF.Constraint.Presolution.EdgeUnify` façade.
+- Verification:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "ga scope"'`: PASS (`2 examples, 0 failures`)
+  - tracker audit: `Bugs.md` open section is empty; landed guards still exist for `WithCanonicalT`, `rtvSchemeBodyTarget`, and `preferGenScope`
+- Rolling priorities (next):
+  1. Decide whether `pendingWeakenOwners` should remain re-exported by `MLF.Constraint.Presolution.EdgeUnify` or move to direct `EdgeUnify.Omega` imports in `Driver` / `EdgeProcessing`.
+  2. If that pass stays narrow, consider trimming the apparently dead `instEdgeOwnerM` export in `MLF.Constraint.Presolution.StateAccess` as the adjacent cleanup.
+  3. Keep `tasks/todo/` limited to genuinely active work; archive one-off verifier/thinker research once its target is landed or superseded.
+
 ## Task 73 Restore warning-free build after stabilization landing (completed 2026-03-10)
 
 - Completed:
@@ -1492,7 +1622,7 @@ Progress (2026-02-08, Group 1): duplicated binding-core helpers are now single-s
   - [x] Phase 5 landed (plan type refinement, structured planner invariant errors, synthesized `ExpVarId` boundary module).
   - [x] Phase 6 landed (single unified expansion execution path; synthesized-wrapper bridge function removed).
   - [x] Post-phase cleanup landed (removed single-constructor `EdgeStage` phantom index from `EdgePlan`).
-  - [ ] Next: run finishing-branch handoff + integration decision (merge/PR/cleanup).
+  - [x] Next: finishing-branch handoff + integration decision completed through the later `master` landings / cleanup follow-up.
   - Plan: `docs/plans/2026-02-10-master-4-phase-typed-two-pass-edge-dsl-implementation-plan.md`
   - Historical task folder for this campaign is no longer present in the live todo-task tree.
   - Scope highlights:

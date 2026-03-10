@@ -18,7 +18,7 @@ import Control.Applicative ((<|>))
 import Control.Monad (foldM, unless, when)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import Data.List (elemIndex, findIndex, foldl')
+import Data.List (elemIndex, findIndex)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
 import qualified Data.Set as Set

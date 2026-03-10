@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Changed
+- Restored a warning-free forced rebuild after the dead-export loop (2026-03-10): removed the remaining redundant imports in `MLF.Elab.Phi.Omega.Interpret`, `MLF.Elab.Elaborate.Scope`, `MLF.Elab.Elaborate.Algebra`, `MLF.Elab.Elaborate.Annotation`, and `MLF.Elab.Run.ResultType`, then re-verified with `cabal build all --ghc-options=' -fforce-recomp -Werror'` and `cabal test`.
 - Restored a warning-free forced rebuild after the stabilization landing by clearing the remaining local warning sites in presolution helpers and test fixtures.
 - Completed the post-split stabilization-and-landing pass for the live tree: the split runtime façades now have explicit thin-façade guards, the public-topology docs are source-guarded, the split child modules are Cabal-guarded as implementation-only, and the ordered owner sweeps plus final full gate are green.
 - Made `MLF.Pipeline` the canonical public execution/runtime API and trimmed `MLF.API` back to frontend syntax/parse/pretty/normalization helpers.
@@ -22,6 +23,13 @@
 - Retired the dead derived `chiCanonicalBindParents` helper from `MLF.Elab.Run.ChiQuery` (2026-03-09); the lone fallback caller now reads canonical bind parents directly from `chiCanonicalConstraint`.
 - Single-sourced witness/trace canonicalization under `MLF.Constraint.Presolution.Rewrite` (2026-03-09): elaboration/runtime now reuses the same witness/trace canonicalizer contract directly, while the elaboration-local `canonicalizeExpansion` helper intentionally remains separate because its semantics still differ.
 - Retired the dead `pendingWeakenOwnerForNode` / `pendingWeakenOwnerForEdge` alias wrappers from `MLF.Constraint.Presolution.EdgeUnify`, keeping pending-weaken owner queries single-sourced in `StateAccess`.
+- Narrowed the delayed-weaken diagnostic boundary further (2026-03-10): `pendingWeakenOwners` now stays owned by `MLF.Constraint.Presolution.EdgeUnify.Omega`, while `Driver` and `EdgeProcessing` import it directly instead of through the `EdgeUnify` façade; added a focused façade guard to keep the re-export retired.
+- Retired the dead `instEdgeOwnerM` state-access export (2026-03-10): `MLF.Constraint.Presolution.StateAccess` no longer exposes or defines the unused instantiation-edge owner helper, and a focused `PipelineSpec` guard keeps that export absent.
+- Narrowed the shared chi-query surface again (2026-03-10): `MLF.Elab.Run.ChiQuery` no longer exports the dead `chiLookupBindParent` / `chiBindParents` passthroughs, and a focused `PipelineSpec` guard keeps those query aliases retired.
+- Narrowed `MLF.Binding.Validation` to its still-used helper surface (2026-03-10): `validateSingleGenRoot` is now local-only, and a focused `BindingSpec` guard keeps that stale export retired.
+- Retired the dead `canonicalizeRef` canonicalizer helper (2026-03-10): `MLF.Constraint.Canonicalizer` now exports only the live node-level canonicalization surface, and a focused `CanonicalizerSpec` guard keeps the dead ref helper retired.
+- Narrowed `MLF.Elab.Run.Debug` to its live ga-scope tracing surface (2026-03-10): the unused `edgeOrigins` export is gone, and a focused `PipelineSpec` guard keeps that dead debug helper retired.
+- Narrowed `MLF.Elab.TermClosure` to its live closure surface (2026-03-10): the dead `closeTermWithSchemeSubst` export is gone, and a focused `PipelineSpec` Phase 6 guard keeps that helper retired.
 - Retired the dead `rtvSchemeBodyTarget` wrapper from `MLF.Elab.Run.ResultType.View` (2026-03-09): the result-type view boundary now matches its overlay-aware query surface exactly, while `schemeBodyTarget` remains owned by `MLF.Elab.Run.Scope`.
 - Simplified `bindingScopeRefCanonical` to reuse the primary `bindingScopeRef` owner path on the canonical constraint (2026-03-09), removing the bespoke canonical bind-parent walker while leaving `letScopeOverrides` scope-divergence semantics unchanged.
 - Single-sourced result-type root peeling (2026-03-09): `ResultType` and `ResultType.Fallback` now share one internal helper for scheme-root detection plus `rootForTypeAnn` / `rootForTypePreAnn` peeling, while preserving the canonical-vs-pre-canonical split and leaving broader result-type dispatch unchanged.

@@ -16,9 +16,8 @@ module MLF.Binding.Validation (
     checkSchemeClosureUnder,
     -- * Upper-than check
     isUpper,
-    -- * Internal helpers (for Tree.hs)
+    -- * Internal helpers
     liveNodeKeys,
-    validateSingleGenRoot,
     validateGenSchemeRoots,
     validateGenNodesFlexiblyBound,
 ) where

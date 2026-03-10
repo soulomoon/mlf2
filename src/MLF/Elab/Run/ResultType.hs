@@ -14,7 +14,7 @@ module MLF.Elab.Run.ResultType (
 import qualified Data.IntMap.Strict as IntMap
 
 import MLF.Frontend.ConstraintGen (AnnExpr(..))
-import MLF.Constraint.Presolution (EdgeTrace, PresolutionPlanBuilder)
+import MLF.Constraint.Presolution (PresolutionPlanBuilder)
 import MLF.Constraint.Presolution.Base (EdgeArtifacts(..))
 import MLF.Constraint.Presolution.View (PresolutionView)
 import MLF.Constraint.Types.Graph
@@ -22,7 +22,6 @@ import MLF.Constraint.Types.Graph
     , EdgeId(..)
     , NodeId(..)
     )
-import MLF.Constraint.Types.Witness (EdgeWitness, Expansion)
 import MLF.Elab.Generalize (GaBindParents)
 import MLF.Elab.Types (ElabType, ElabError)
 import MLF.Util.Trace (TraceConfig)

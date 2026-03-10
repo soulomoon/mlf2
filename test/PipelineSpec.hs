@@ -600,6 +600,14 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     edgeUnifySrc `shouldSatisfy` (not . isInfixOf marker)
             baseSrc `shouldSatisfy` (not . isInfixOf "WithCanonicalT")
 
+        it "presolution state access guard: retired instEdgeOwnerM export stays absent" $ do
+            stateAccessSrc <- readFile "src/MLF/Constraint/Presolution/StateAccess.hs"
+            forM_
+                [ "instEdgeOwnerM,"
+                , "instEdgeOwnerM ::"
+                ] $ \marker ->
+                    stateAccessSrc `shouldSatisfy` (not . isInfixOf marker)
+
         it "presolution state access guard: EdgeProcessing uses helper-layer state access" $ do
             edgeProcessingSrc <- readFile "src/MLF/Constraint/Presolution/EdgeProcessing.hs"
             forM_
@@ -758,6 +766,16 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             chiSrc `shouldSatisfy` (not . isInfixOf "chiCanonicalBindParents")
             fallbackSrc `shouldSatisfy` (not . isInfixOf "ChiQuery.chiCanonicalBindParents")
 
+        it "chi-first guard: ChiQuery no longer exposes chiLookupBindParent or chiBindParents" $ do
+            chiSrc <- readFile "src/MLF/Elab/Run/ChiQuery.hs"
+            forM_
+                [ "chiLookupBindParent,"
+                , "chiLookupBindParent ::"
+                , "chiBindParents"
+                , "chiBindParents ::"
+                ] $ \marker ->
+                    chiSrc `shouldSatisfy` (not . isInfixOf marker)
+
         it "single-solved refactor keeps checked pipeline authoritative on representative corpus" $ do
             forM_ representativeMigrationCorpus assertCheckedAuthoritative
 
@@ -790,6 +808,22 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             rtViewSrc `shouldSatisfy` (not . isInfixOf "rtvSchemeBodyTarget")
             elabSrc `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
             rtSrc `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
+
+        it "ga-scope debug guard: Debug no longer exposes edgeOrigins" $ do
+            debugSrc <- readFile "src/MLF/Elab/Run/Debug.hs"
+            forM_
+                [ "edgeOrigins"
+                , "edgeOrigins ::"
+                ] $ \marker ->
+                    debugSrc `shouldSatisfy` (not . isInfixOf marker)
+
+        it "term-closure guard: TermClosure no longer exposes closeTermWithSchemeSubst" $ do
+            termClosureSrc <- readFile "src/MLF/Elab/TermClosure.hs"
+            forM_
+                [ "closeTermWithSchemeSubst,"
+                , "closeTermWithSchemeSubst ::"
+                ] $ \marker ->
+                    termClosureSrc `shouldSatisfy` (not . isInfixOf marker)
 
         it "witness/trace canonicalizers stay single-sourced" $ do
             utilSrc <- readFile "src/MLF/Elab/Run/Util.hs"

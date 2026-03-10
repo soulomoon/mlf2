@@ -10,7 +10,6 @@ stable representative.
 module MLF.Constraint.Canonicalizer (
     Canonicalizer,
     canonicalizeNode,
-    canonicalizeRef,
     canonicalizerFrom,
     makeCanonicalizer,
     chaseRedirectsStable
@@ -19,16 +18,11 @@ module MLF.Constraint.Canonicalizer (
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
-import MLF.Constraint.Canonicalize (canonicalRef)
-import MLF.Constraint.Types.Graph (NodeId(..), NodeRef, getNodeId)
+import MLF.Constraint.Types.Graph (NodeId(..), getNodeId)
 import qualified MLF.Util.UnionFind as UnionFind
 
 -- | Canonicalization helper that is stable under repeated application.
 newtype Canonicalizer = Canonicalizer { canonicalizeNode :: NodeId -> NodeId }
-
--- | Canonicalize a node reference, leaving gen refs untouched.
-canonicalizeRef :: Canonicalizer -> NodeRef -> NodeRef
-canonicalizeRef canon = canonicalRef (canonicalizeNode canon)
 
 -- | Wrap a canonicalization function in a Canonicalizer.
 -- Caller is responsible for ensuring stability/idempotence.

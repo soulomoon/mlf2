@@ -72,7 +72,7 @@ import MLF.Constraint.Presolution.Materialization (
 import MLF.Constraint.Presolution.EdgeProcessing (
     runPresolutionLoop
     )
-import MLF.Constraint.Presolution.EdgeUnify (pendingWeakenOwners)
+import MLF.Constraint.Presolution.EdgeUnify.Omega (pendingWeakenOwners)
 import MLF.Constraint.Presolution.StateAccess (getConstraintAndCanonical)
 import MLF.Constraint.Acyclicity (AcyclicityResult(..))
 

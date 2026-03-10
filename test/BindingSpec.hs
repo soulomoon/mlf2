@@ -194,6 +194,11 @@ spec = do
 
 bindingTreeSpec :: Spec
 bindingTreeSpec = describe "MLF.Binding.Tree" $ do
+    describe "Source guards" $ do
+        it "binding guard: Validation no longer exports validateSingleGenRoot" $ do
+            validationSrc <- readFile "src/MLF/Binding/Validation.hs"
+            validationSrc `shouldSatisfy` (not . isInfixOf "validateSingleGenRoot,")
+
     describe "Basic operations" $ do
         it "lookupBindParent returns Nothing for root nodes" $ do
             let c = rootedConstraint emptyConstraint

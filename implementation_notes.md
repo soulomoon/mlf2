@@ -73,10 +73,58 @@
 - Retired the dead `flushPendingWeakens` flush-all entrypoint from `MLF.Constraint.Presolution.EdgeUnify` now that owner-boundary delayed-weaken scheduling is the only live presolution drain path.
 - Kept `flushPendingWeakensAtOwnerBoundary` and the owner lookup helpers as the authoritative pending-weaken API surface; `EdgeProcessing` scheduling semantics stay unchanged.
 - Tightened the row3 guard slices so they continue asserting owner-boundary scheduling markers and additionally forbid the legacy flush-all helper from reappearing in `EdgeUnify`.
+
+### 2026-03-10 pending-weaken façade-boundary cleanup
+
+- Retired the last remaining read-only delayed-weaken façade re-export: `pendingWeakenOwners` now stays owned by `MLF.Constraint.Presolution.EdgeUnify.Omega`, and the only live consumers (`Driver` and `EdgeProcessing`) import it directly.
+- Kept the thesis-sensitive mechanics untouched: owner lookup remains in `StateAccess`, owner-boundary flushing stays in `Omega`, and queue stamping still lives in `EdgeUnify.State`.
+- Added a focused `PresolutionFacadeSpec` source guard so `MLF.Constraint.Presolution.EdgeUnify` does not grow the `pendingWeakenOwners` façade surface back.
 - Retired the dead `pendingWeakenOwnerForNode` / `pendingWeakenOwnerForEdge` alias wrappers so pending-weaken owner queries are now single-sourced directly in `MLF.Constraint.Presolution.StateAccess`, with `EdgeUnify` calling the authoritative helpers by name.
 - `MLF.Constraint.Presolution.EdgeProcessing` now reads pending-unify edges and closure seed data through shared `MLF.Constraint.Presolution.StateAccess` helpers instead of peeking `PresolutionState` fields directly; the owner-boundary scheduling algorithm and diagnostics remain unchanged.
 - Canonical scheme-root owner/root-set bookkeeping is now shared in `MLF.Elab.Run.Generalize.Common` via `canonicalSchemeRootOwners`; `ResultType.Fallback` and `Generalize.Phase4` consume the same mechanical construction while keeping their surrounding policy/reachability logic local.
 - `MLF.Elab.Run.ChiQuery` remains the shared chi-first facade, but no longer carries the derived `chiCanonicalBindParents` convenience helper; the lone fallback caller now reads canonical bind parents directly from `chiCanonicalConstraint`.
+
+### 2026-03-10 state-access dead-export cleanup
+
+### 2026-03-10 chi-query dead-export cleanup
+
+### 2026-03-10 binding-validation dead-export cleanup
+
+### 2026-03-10 canonicalizer dead-export cleanup
+
+### 2026-03-10 run-debug dead-export cleanup
+
+### 2026-03-10 term-closure dead-export cleanup
+
+### 2026-03-10 warning-free import cleanup
+
+- Cleaned up the remaining redundant imports surfaced after the dead-export loop in `MLF.Elab.Phi.Omega.Interpret`, `MLF.Elab.Elaborate.Scope`, `MLF.Elab.Elaborate.Algebra`, `MLF.Elab.Elaborate.Annotation`, and `MLF.Elab.Run.ResultType`.
+- The fixes were purely syntactic import removals; no behavior or owner boundaries changed.
+- Verified the tree with `cabal build all --ghc-options='-fforce-recomp -Werror'` followed by `cabal test`.
+
+- Retired the unused `closeTermWithSchemeSubst` helper from `MLF.Elab.TermClosure` after revalidating that all live callers use the stricter `closeTermWithSchemeSubstIfNeeded` path or the other still-exported term-closure helpers.
+- Kept the Phase 6 term-closure behavior unchanged for live callers; this round removed only the unused eager wrapper.
+- Added a focused `PipelineSpec` Phase 6 guard so the dead term-closure export does not reappear.
+
+- Retired the unused `edgeOrigins` helper from `MLF.Elab.Run.Debug` after revalidating that the live result-type/generalize debug surface only uses `debugGaScope`, `debugGaScopeEnabled`, `debugWhenM`, and `debugWhenCondM`.
+- Kept the ga-scope debug owner boundary otherwise unchanged; this round removed only the dead edge-origin introspection helper.
+- Added a focused `PipelineSpec` guard so the dead debug export does not reappear.
+
+- Retired the unused `canonicalizeRef` helper from `MLF.Constraint.Canonicalizer` after revalidating that all live callers use node-level canonicalization only.
+- Kept the canonicalizer boundary focused on `canonicalizeNode`, construction helpers, and redirect-stability behavior; no runtime canonicalization semantics changed.
+- Added a focused `CanonicalizerSpec` source guard so the retired ref helper does not reappear.
+
+- Retired the stale `validateSingleGenRoot` export from `MLF.Binding.Validation` after confirming the helper is only used internally within that module.
+- Kept the function local so the binding-tree checks still share one implementation without widening the `Binding.Validation` owner surface.
+- Added a focused `BindingSpec` source guard so the helper does not reappear in the export list.
+
+- Retired the unused `chiLookupBindParent` and `chiBindParents` passthroughs from `MLF.Elab.Run.ChiQuery` after confirming there were no live production or test call sites.
+- Kept the active chi-query boundary focused on the lookups still used by `Elaborate`, `Scope`, `ResultType`, and `ResultType.View`.
+- Added a focused `PipelineSpec` chi-first guard so the retired passthrough exports/signatures do not reappear.
+
+- Retired the unused `instEdgeOwnerM` helper from `MLF.Constraint.Presolution.StateAccess` after confirming there were no live production or test call sites.
+- Kept the authoritative owner lookup path unchanged: live delayed-weaken ownership still flows through `pendingWeakenOwnerM` / `pendingWeakenOwnerUnder`, and no scheduling or planner logic moved.
+- Added a focused `PipelineSpec` source guard so the dead `instEdgeOwnerM` export/signature does not reappear in `StateAccess`.
 
 ### 2026-03-08 snapshot preparation single-owner cleanup
 

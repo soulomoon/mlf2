@@ -12,7 +12,6 @@ module MLF.Constraint.Presolution.EdgeUnify (
     MonadEdgeUnify(..),
     executeEdgeLocalOmegaOps,
     flushPendingWeakensAtOwnerBoundary,
-    pendingWeakenOwners,
     initEdgeUnifyState,
     mkOmegaExecEnv,
     runEdgeUnifyForTest,
@@ -37,8 +36,7 @@ import MLF.Constraint.Presolution.EdgeUnify.State (
     )
 import qualified MLF.Constraint.Presolution.EdgeUnify.Omega as Omega
 import MLF.Constraint.Presolution.EdgeUnify.Omega (
-    flushPendingWeakensAtOwnerBoundary,
-    pendingWeakenOwners
+    flushPendingWeakensAtOwnerBoundary
     )
 import MLF.Constraint.Presolution.EdgeUnify.Unify (
     unifyAcyclicEdge,

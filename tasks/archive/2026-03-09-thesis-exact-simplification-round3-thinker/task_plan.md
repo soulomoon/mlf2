@@ -8,7 +8,7 @@ Propose exactly one bounded simplification still needed in the current repositor
 - [complete] Re-check repo state and guidance surfaces
 - [complete] Inspect code for bounded simplification candidates
 - [complete] Select one thesis-safe proposal
-- [in_progress] Return schema-only result
+- [complete] Return schema-only result
 
 ## Decisions
 - Follow `papers/these-finale-english.txt` as the source of truth; consult `papers/xmlf.txt` only if the thesis is silent.
