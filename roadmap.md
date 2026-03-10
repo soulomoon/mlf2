@@ -5,7 +5,12 @@
 > **Supplementary Reference:** ICFP 2008 ("From ML to MLF") for the specific graphic constraint solving algorithm.
 > **Project Goal:** stay paper-faithful to `papers/these-finale-english.txt` and document/test any intentional deviations; use `papers/xmlf.txt` only when the thesis is silent.
 
-**Implementation progress:** See [TODO.md](TODO.md) for the current checklist.
+**Implementation progress:** See [TODO.md](TODO.md) for the current cleanup/stabilization checklist.
+
+**Status snapshot (2026-03-11):**
+*   **Pipeline coverage:** Phases 1–7 are implemented in-tree; current work is mostly guardrail tightening, façade cleanup, and warning-free maintenance rather than filling missing pipeline phases.
+*   **Public APIs:** `MLF.API` is the surface-syntax/parse/pretty umbrella, `MLF.Pipeline` is the normalized inference/elaboration/runtime API, and `MLF.XMLF` is the explicit xMLF syntax API.
+*   **Audit surfaces:** Paper alignment now lives in `docs/paper-map.md`, `docs/thesis-obligations.yaml`, `docs/thesis-claims.yaml`, and `docs/thesis-deviations.yaml`.
 
 This roadmap outlines the implementation of the full MLF pipeline as described in the thesis. The goal is to take an unannotated ML-like term, infer its principal type using graphic constraints, and **elaborate** it into a fully explicitly typed **xMLF** term. Finally, we implement the xMLF calculus itself to verify type soundness and reduction.
 
@@ -23,7 +28,7 @@ This roadmap outlines the implementation of the full MLF pipeline as described i
 *   **§3 Elaboration:** The translation process from eMLF to xMLF based on presolutions.
 *   **§1.4 Reduction:** Small-step reduction semantics for xMLF.
 
-### Thesis-faithful pipeline structure (target)
+### Thesis-faithful pipeline structure (implemented shape)
 
 1. **Frontend (syntax → constraints)**: parse/desugar/annotate; generate constraints (expansion vars, scopes, binding info).
 2. **Constraint normalization (graph form)**: normalize constraints; compute structural metadata (binding edges, ordering edges, interiors).
@@ -34,9 +39,16 @@ This roadmap now matches the implementation: Elab is *thin* and consumes explici
 
 **Current vs target:** The current codebase matches the Frontend/Normalize/Solve structure and records presolution witnesses, and generalization planning (binder selection, ordering, alias policy, scheme-root policy) now lives in presolution (`MLF.Constraint.Presolution.Plan`). Elab consumes `GeneralizePlan`/`ReifyPlan` outputs and applies them without new solving decisions.
 
-**Syntax frontend status (2026-02-07):** parser/pretty modules now exist for both eMLF (`MLF.Frontend.Parse`, `MLF.Frontend.Pretty`) and xMLF (`MLF.XMLF.Parse`, `MLF.XMLF.Pretty`), and public entrypoints are exposed via `MLF.API` and `MLF.XMLF`. Canonical syntax and migration deltas are documented in `docs/syntax.md`.
+**Syntax/frontend status (2026-03-11):** parser/pretty modules exist for both eMLF (`MLF.Frontend.Parse`, `MLF.Frontend.Pretty`) and xMLF (`MLF.XMLF.Parse`, `MLF.XMLF.Pretty`). `MLF.API` exposes surface syntax + parse/pretty/normalization, while `MLF.Pipeline` exposes the normalized constraint/elaboration/runtime path and `MLF.XMLF` exposes explicit xMLF tooling. Canonical syntax and migration deltas are documented in `docs/syntax.md`.
 
-**Known deviations (tracked):** See `.kiro/specs/2026-01-08-explicit-forall-genbinding/` and `.kiro/specs/thesis-exact-scheme-closure-audit/` for scope/explicit‑forall alignment and scheme‑closure edge cases. Remaining paper‑faithfulness deltas (stricter Φ translatability validation and witness‑normalization alignment) are tracked in `.kiro/specs/paper-faithfulness-remaining-deltas/`.
+**Known deviations / proof gaps (tracked):** `docs/thesis-deviations.yaml` is the live deviation register, and `docs/paper-map.md` / `docs/thesis-claims.yaml` / `docs/thesis-obligations.yaml` are the live paper-to-code ledgers. The current register records proof gaps and implementation choices rather than open semantic roadmap blockers.
+
+### Public entrypoints in this repo
+
+1. **`MLF.API`**: raw + normalized eMLF syntax, parsing, pretty-printing, and normalization helpers.
+2. **`MLF.Pipeline`**: normalized pipeline entrypoints (`inferConstraintGraph`, `runPipelineElab*`) plus Phase 7 helpers (`typeCheck`, `step`, `normalize`, `isValue`).
+3. **`MLF.XMLF`**: xMLF syntax, parsing, and pretty-printing.
+4. **`app/Main.hs`**: a minimal executable that normalizes an example term and runs the pipeline.
 
 ⸻
 
@@ -116,8 +128,11 @@ Re-traverse the original AST `a` and transform it into an xMLF term `a'` using t
     *   Reify the inferred parameter type from the solved graph and annotate the binder.
     *   Result: `λ(x : τ) a'`.
 
-**Key Deliverable (in this repo):**
-`MLF.Elab.Pipeline.elaborate` consumes the solved graph plus presolution witnesses and explicit planning records, and produces `MLF.Elab.Pipeline.ElabTerm`. `MLF.Elab.Pipeline.runPipelineElab` runs Phases 1–6 end-to-end.
+**Key Deliverables / owners (in this repo):**
+*   `MLF.Elab.Run.Pipeline` executes the end-to-end normalized path for Phases 1–6: constraint generation, normalization, acyclicity, presolution, finalize/view preparation, and elaboration.
+*   `MLF.Elab.Elaborate` + `MLF.Reify.Core` own the graph→xMLF reconstruction work.
+*   `MLF.Elab.Phi` translates per-edge witnesses to xMLF instantiations, and `MLF.Elab.Sigma` handles quantifier reordering.
+*   `MLF.Elab.Pipeline` is the stable elaboration/runtime facade, and `MLF.Pipeline.runPipelineElab*` is the downstream normalized public API.
 
 ⸻
 
@@ -136,7 +151,7 @@ Now that we have an xMLF term, we must treat it as a runnable program.
     *   Rules include: `(β)`, `(let)`, and significantly, the **instantiation reductions** (`ι-rules`) like `(Λ(α ≥ τ) a) N ⟶ a{!α ← 1}{α ← τ}`.
     *   These rules allow executing the code and simplifying the type instantiations.
 
-**Status in this repo:** Phase 7 is implemented. See `MLF.Elab.TypeCheck` (typing rules) and `MLF.Elab.Reduce` (small-step semantics), with regression coverage in the Phase 7 test sections.
+**Status in this repo:** Phase 7 is implemented. See `MLF.Elab.TypeCheck` (typing rules) and `MLF.Elab.Reduce` (small-step semantics), with downstream helpers re-exported by `MLF.Pipeline` and regression coverage in `test/TypeCheckSpec.hs`, `test/ReduceSpec.hs`, and `test/TypeSoundnessSpec.hs`.
 
 ⸻
 
@@ -150,17 +165,15 @@ Now that we have an xMLF term, we must treat it as a runnable program.
 
 ⸻
 
-## Minimal Worked Blueprint
+## Current Module Map
 
-This repo’s module-level decomposition:
+This repo’s current module-level decomposition is broader than the original “minimal blueprint” and is organized around both public APIs and internal owner boundaries:
 
-1. **`MLF.Frontend.Syntax`**: Source `Expr` (+ `SrcType` for annotations).
-2. **`MLF.Constraint.Types`**: Graphic constraints (`Constraint`, `TyNode`, binding edges + bound/elimination stores) + per-edge witness types (`EdgeWitness`, `InstanceOp`).
-3. **`MLF.Frontend.ConstraintGen`**: Phase 1 constraint generation (produces annotated AST with `NodeId`/`EdgeId`).
-4. **`MLF.Constraint.Normalize`**: Phase 2 local rewrites (grafting/merging).
-5. **`MLF.Constraint.Acyclicity`**: Phase 3 dependency ordering.
-6. **`MLF.Constraint.Presolution`**: Phase 4 minimal expansions + per-edge witnesses.
-7. **`MLF.Constraint.Solve`**: Phase 5 unification solve.
-8. **`MLF.Elab.Pipeline`** (+ `MLF.Elab.Types`): Phase 6 elaboration to xMLF (`ElabTerm`, `ElabType`, `Instantiation`, Φ/Σ). Elab is thin and plan-driven.
-9. **`MLF.Constraint.Presolution.Plan`**: explicit generalization/reify plans, consumed by Elab.
-10. **Phase 7**: xMLF typechecker + reduction semantics (`MLF.Elab.TypeCheck`, `MLF.Elab.Reduce`).
+1. **Public surfaces:** `MLF.API`, `MLF.Pipeline`, `MLF.XMLF`, plus `app/Main.hs` as the demo executable.
+2. **Surface frontend:** `MLF.Frontend.Syntax`, `MLF.Frontend.Parse`, `MLF.Frontend.Pretty`, `MLF.Frontend.Normalize`, and `MLF.Frontend.ConstraintGen` (+ `ConstraintGen.*`) cover source syntax, canonicalization/normalization, and annotated constraint generation.
+3. **Constraint core:** `MLF.Constraint.Types.Graph`, `MLF.Constraint.Types.Witness`, and `MLF.Constraint.Types.Presolution` hold the split core data types, re-exported via `MLF.Constraint.Types` for compatibility.
+4. **Solver pipeline:** `MLF.Constraint.Normalize`, `MLF.Constraint.Acyclicity`, `MLF.Constraint.Presolution` (+ `Presolution.Plan`, `Presolution.View`, `Presolution.EdgeProcessing.*`, `Presolution.EdgeUnify.*`, `Presolution.Witness*`), `MLF.Constraint.Solve`, `MLF.Constraint.Finalize`, and `MLF.Constraint.Canonicalizer` cover Phases 2–5 plus snapshot/finalization support.
+5. **Reify + elaboration internals:** `MLF.Reify.Core`, `MLF.Elab.Elaborate`, `MLF.Elab.Run`, `MLF.Elab.Phi`, `MLF.Elab.Sigma`, and `MLF.Elab.Pipeline` cover graph reification, Φ/Σ translation, and the executable elaboration pipeline.
+6. **xMLF execution:** `MLF.Elab.TypeCheck` and `MLF.Elab.Reduce` implement local typechecking and small-step reduction.
+7. **Explicit xMLF syntax tooling:** `MLF.XMLF.Syntax`, `MLF.XMLF.Parse`, and `MLF.XMLF.Pretty` provide the standalone Church-style language surface.
+8. **Audit/test surfaces:** `test/PipelineSpec.hs`, `test/PresolutionSpec.hs`, `test/TypeCheckSpec.hs`, `test/ReduceSpec.hs`, `test/TypeSoundnessSpec.hs`, `docs/paper-map.md`, `docs/thesis-obligations.yaml`, `docs/thesis-claims.yaml`, and `docs/thesis-deviations.yaml` are the main regression/audit anchors for keeping the roadmap aligned with the implementation.
