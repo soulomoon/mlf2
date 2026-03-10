@@ -747,12 +747,14 @@ spec = describe "Phase 2 — Normalization" $ do
                 e = InstEdge (EdgeId 7) (NodeId 0) (NodeId 1)
                 c0 = emptyConstraint { cNodes = nodeMapFromList [(0, n0), (1, n1)], cInstEdges = [e] }
                 c1 = normalize c0
-            let [InstEdge eid l r] = cInstEdges c1
-            eid `shouldBe` EdgeId 7
-            r `shouldBe` NodeId 1
-            case lookupNodeMaybe (cNodes c1) l of
-                Just TyExp { tnBody = b } -> b `shouldBe` NodeId 0
-                other -> expectationFailure ("expected TyExp-left edge, got " ++ show other)
+            case cInstEdges c1 of
+                [InstEdge eid l r] -> do
+                    eid `shouldBe` EdgeId 7
+                    r `shouldBe` NodeId 1
+                    case lookupNodeMaybe (cNodes c1) l of
+                        Just TyExp { tnBody = b } -> b `shouldBe` NodeId 0
+                        other -> expectationFailure ("expected TyExp-left edge, got " ++ show other)
+                other -> expectationFailure ("expected one residual edge, got " ++ show other)
 
         it "wraps residual type-error edges too" $ do
             let base = TyBase (NodeId 0) (BaseTy "Int")
@@ -765,10 +767,12 @@ spec = describe "Phase 2 — Normalization" $ do
                     , cInstEdges = [e]
                     }
                 c1 = normalize c0
-            let [InstEdge _ l _] = cInstEdges c1
-            case lookupNodeMaybe (cNodes c1) l of
-                Just TyExp {} -> pure ()
-                other -> expectationFailure ("expected TyExp-left error edge, got " ++ show other)
+            case cInstEdges c1 of
+                [InstEdge _ l _] ->
+                    case lookupNodeMaybe (cNodes c1) l of
+                        Just TyExp {} -> pure ()
+                        other -> expectationFailure ("expected TyExp-left error edge, got " ++ show other)
+                other -> expectationFailure ("expected one residual error edge, got " ++ show other)
 
         it "allocates distinct ExpVarIds for synthesized wrappers" $ do
             let n0 = TyVar { tnId = NodeId 0, tnBound = Nothing }

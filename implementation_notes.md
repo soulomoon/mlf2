@@ -1,3 +1,8 @@
+### 2026-03-10 warning-free closeout
+
+- Restored a warning-free rebuild after the stabilization landing without changing behavior.
+- Cleared the remaining live warning sites by removing redundant imports, renaming shadowed locals, filling the new `psPendingWeakenOwners` field in `PresolutionState` test fixtures, and replacing incomplete test-only list-pattern binds with explicit case analysis.
+
 ### 2026-03-10 post-split stabilization-and-landing loop closeout
 
 - Treated the live tree as the already-split baseline and revalidated it with `cabal build all && cabal test` before doing any further stabilization work.

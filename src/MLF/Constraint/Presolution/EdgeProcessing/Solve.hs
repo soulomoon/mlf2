@@ -144,11 +144,11 @@ unifyStructure n1 n2 = do
             _ -> do
                 (resNodeId, (copyMap, _interior, frontier)) <- applyExpansionEdgeTraced gid finalExp expNode
                 _targetBinder <- bindExpansionRootLikeTarget resNodeId targetId
-                canonical <- getCanonical
+                canonicalizeNodeId <- getCanonical
                 let copyMapCanon =
                         IntMap.fromListWith
                             const
-                            [ (getNodeId (canonical (NodeId orig)), copy)
+                            [ (getNodeId (canonicalizeNodeId (NodeId orig)), copy)
                             | (orig, copy) <- IntMap.toList (getCopyMapping copyMap)
                             ]
                 forM_ (IntSet.toList frontier) $ \nidInt -> do

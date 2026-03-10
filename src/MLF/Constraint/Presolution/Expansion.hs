@@ -36,7 +36,6 @@ import qualified Data.List.NonEmpty as NE
 
 import MLF.Constraint.Presolution.Base (
     CopyMap,
-    EdgeArtifacts(..),
     InteriorSet,
     FrontierSet,
     PresolutionError(..),
@@ -219,11 +218,11 @@ decideMinimalExpansion gid allowTrivial (TyExp { tnBody = bodyId }) targetNode =
             mbGen <- nearestGenAncestor targetId
             case mbGen of
                 Nothing -> pure False
-                Just gid -> do
+                Just targetGenId -> do
                     (c0, canonical) <- getConstraintAndCanonical
                     let targetC = canonical targetId
                         schemeRoots =
-                            case NodeAccess.lookupGenNode c0 gid of
+                            case NodeAccess.lookupGenNode c0 targetGenId of
                                 Just gen -> map canonical (gnSchemes gen)
                                 Nothing -> []
                     pure (allowTrivial && targetC `elem` schemeRoots)
