@@ -1,6 +1,5 @@
 {-# LANGUAGE GADTs #-}
 module MLF.Elab.TermClosure (
-    closeTermWithSchemeSubst,
     closeTermWithSchemeSubstIfNeeded,
     alignTermTypeVarsToScheme,
     alignTermTypeVarsToTopTyAbs,
@@ -17,13 +16,6 @@ import MLF.Elab.TypeCheck (typeCheck)
 import MLF.Elab.Types
 import MLF.Reify.TypeOps (alphaEqType, freeTypeVarsType, freshNameLike, substTypeSimple)
 import MLF.Util.Names (parseNameId)
-
-closeTermWithSchemeSubst :: IntMap.IntMap String -> ElabScheme -> ElabTerm -> ElabTerm
-closeTermWithSchemeSubst subst sch term =
-    let (subst', sch', renames) = freshenSchemeAndSubstAgainstTerm term subst sch
-        termSubst = renameTermTypeVars renames (substInTerm subst' term)
-        termAligned = maybe termSubst id (alignTermTypeVarsToSchemeBody sch' termSubst)
-    in wrapTermWithScheme sch' termAligned
 
 closeTermWithSchemeSubstIfNeeded :: IntMap.IntMap String -> ElabScheme -> ElabTerm -> ElabTerm
 closeTermWithSchemeSubstIfNeeded subst sch term =

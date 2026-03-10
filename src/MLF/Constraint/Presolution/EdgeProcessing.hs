@@ -32,7 +32,9 @@ import MLF.Constraint.Presolution.Base
     )
 import MLF.Constraint.Presolution.EdgeUnify
     ( flushPendingWeakensAtOwnerBoundary
-    , pendingWeakenOwners
+    )
+import MLF.Constraint.Presolution.EdgeUnify.Omega
+    ( pendingWeakenOwners
     )
 import MLF.Constraint.Presolution.StateAccess
     ( getConstraintAndUnionFind

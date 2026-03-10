@@ -1,9 +1,10 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module CanonicalizerSpec (spec) where
 
-import Control.Monad (forM)
+import Control.Monad (forM, forM_)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.List.NonEmpty as NE
+import Data.List (isInfixOf)
 import Data.Maybe (catMaybes)
 import Test.Hspec
 import Test.QuickCheck
@@ -37,6 +38,14 @@ instance Arbitrary RedirectMap where
 
 spec :: Spec
 spec = describe "MLF.Constraint.Canonicalizer" $ do
+    it "canonicalizer guard: canonicalizeRef stays retired" $ do
+        src <- readFile "src/MLF/Constraint/Canonicalizer.hs"
+        forM_
+            [ "canonicalizeRef,"
+            , "canonicalizeRef ::"
+            ] $ \marker ->
+                src `shouldSatisfy` (not . isInfixOf marker)
+
     it "redirect cycles pick a stable representative" $ do
         let redirects = IntMap.fromList
                 [ (1, NodeId 2)

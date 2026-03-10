@@ -59,7 +59,6 @@ module MLF.Constraint.Presolution.StateAccess (
 
     -- * Scheme provenance
     pendingWeakenOwnerM,
-    instEdgeOwnerM,
     findSchemeIntroducerM,
 
     -- * Convenience re-exports
@@ -270,18 +269,6 @@ pendingWeakenOwnerM :: NodeId -> PresolutionM PendingWeakenOwner
 pendingWeakenOwnerM nid = do
     (c, canonical) <- getConstraintAndCanonical
     pure (pendingWeakenOwnerUnder canonical c nid)
-
--- | Resolve the owner bucket for an instantiation edge.
---
--- For TyExp-left edges, ownership is derived from the wrapped body root.
--- Non-TyExp-left edges fall back to the left node itself.
-instEdgeOwnerM :: InstEdge -> PresolutionM PendingWeakenOwner
-instEdgeOwnerM edge = do
-    (c, canonical) <- getConstraintAndCanonical
-    let leftC = canonical (instLeft edge)
-    pure $ case NodeAccess.lookupNode c leftC of
-        Just TyExp { tnBody = body } -> pendingWeakenOwnerUnder canonical c body
-        _ -> pendingWeakenOwnerUnder canonical c leftC
 
 pendingWeakenOwnerUnder :: (NodeId -> NodeId) -> Constraint -> NodeId -> PendingWeakenOwner
 pendingWeakenOwnerUnder canonical c0 nid0 = go IntSet.empty (typeRef (canonical nid0))

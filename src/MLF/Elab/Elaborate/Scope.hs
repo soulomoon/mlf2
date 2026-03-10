@@ -12,7 +12,6 @@ module MLF.Elab.Elaborate.Scope (
     scopeRootForNode
 ) where
 
-import Data.List (foldl')
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.Maybe (listToMaybe)

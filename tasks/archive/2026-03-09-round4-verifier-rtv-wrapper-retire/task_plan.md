@@ -6,7 +6,7 @@ Determine whether retiring the dead `rtvSchemeBodyTarget` wrapper from `MLF.Elab
 ## Phases
 - [completed] Gather current evidence from thesis, code, and docs.
 - [completed] Evaluate whether the simplification remains needed, bounded, worthwhile, and thesis-safe.
-- [in_progress] Deliver schema-only YES/NO verdict with concise evidence.
+- [completed] Deliver schema-only YES/NO verdict with concise evidence.
 
 ## Notes
 - Verification-only task; no implementation changes planned.

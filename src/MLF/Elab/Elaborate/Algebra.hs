@@ -10,7 +10,6 @@ module MLF.Elab.Elaborate.Algebra (
 ) where
 
 import Data.Functor.Foldable (para)
-import Data.List (foldl')
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Map.Strict as Map
@@ -48,7 +47,6 @@ import qualified MLF.Elab.TypeCheck as TypeCheck (Env(..), typeCheckWithEnv)
 import MLF.Elab.Types
     ( ElabError(..)
     , ElabTerm(..)
-    , ElabType
     , Instantiation(..)
     , SchemeInfo(..)
     , Ty(..)
@@ -58,7 +56,7 @@ import MLF.Elab.Types
     )
 import MLF.Frontend.ConstraintGen.Types (AnnExpr(..), AnnExprF(..))
 import MLF.Frontend.Syntax (VarName)
-import MLF.Reify.TypeOps (alphaEqType, freeTypeVarsType, parseNameId)
+import MLF.Reify.TypeOps (freeTypeVarsType, parseNameId)
 import MLF.Util.Trace (TraceConfig, traceGeneralize)
 
 type Env = Map.Map VarName SchemeInfo

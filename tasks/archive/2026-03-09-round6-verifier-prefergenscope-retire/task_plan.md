@@ -9,7 +9,7 @@ Decide whether retiring redundant `preferGenScope` from `MLF.Elab.Run.Scope` is 
 | Initialize verifier context | complete | Created task notes and aligned with adjacent round artifacts |
 | Inspect scope implementation and call sites | complete | Confirmed live export, single production caller, and bounded test surface |
 | Check thesis and tracking docs | complete | Re-read thesis anchor and repo tracking docs; no positive semantic justification found |
-| Evaluate verdict | in_progress | Weigh cleanup value against the current unrelated compile blocker |
+| Evaluate verdict | complete | Compile blocker was later fixed on `master`; cleanup is already landed and guarded in the current tree |
 
 ## Decisions
 - Follow `papers/these-finale-english.txt` as the primary source of truth and consult `papers/xmlf.txt` only if the thesis is silent.

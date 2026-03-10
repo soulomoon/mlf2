@@ -36,6 +36,15 @@ spec = describe "MLF.Constraint.Presolution facade" $ do
             ] $ \marker ->
                 src `shouldSatisfy` (not . isInfixOf marker)
 
+    it "pendingWeakenOwners bypasses the EdgeUnify façade" $ do
+        edgeUnifySrc <- readFile "src/MLF/Constraint/Presolution/EdgeUnify.hs"
+        driverSrc <- readFile "src/MLF/Constraint/Presolution/Driver.hs"
+        edgeProcessingSrc <- readFile "src/MLF/Constraint/Presolution/EdgeProcessing.hs"
+        edgeUnifySrc `shouldSatisfy` (not . isInfixOf "pendingWeakenOwners")
+        driverSrc `shouldSatisfy` isInfixOf "MLF.Constraint.Presolution.EdgeUnify.Omega (pendingWeakenOwners)"
+        edgeProcessingSrc `shouldSatisfy` isInfixOf "MLF.Constraint.Presolution.EdgeUnify.Omega"
+        edgeProcessingSrc `shouldSatisfy` isInfixOf "pendingWeakenOwners"
+
 bannedMarkers :: [String]
 bannedMarkers =
     [ "PresolutionState(..)"

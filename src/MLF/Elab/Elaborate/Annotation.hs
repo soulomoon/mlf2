@@ -47,8 +47,7 @@ import MLF.Elab.TermClosure
     )
 import MLF.Elab.TypeCheck (typeCheck)
 import MLF.Elab.Types
-    ( BoundType
-    , ElabError(..)
+    ( ElabError(..)
     , ElabTerm(..)
     , ElabType
     , Instantiation(..)
