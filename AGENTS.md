@@ -13,6 +13,7 @@
 - Keep the implementation paper-faithful to `papers/these-finale-english.txt` (thesis + graphic-constraint pipeline; more detailed than `papers/xmlf.txt`). Document and test any intentional deviations.
 - Treat `papers/these-finale-english.txt` as the source of truth. Implement supplementary details from `papers/xmlf.txt` only when the thesis is silent, and document any conflicts or deviations.
 - When thesis-faithfulness and code convenience conflict, prefer the thesis and record the reasoning in tests/docs.
+- You do not need to be backwards-compatible, you should not add new compatibility layers or convenience fallbacks, and you should fix problems at the root cause even if that requires more work upfront. The goal is a clean, faithful implementation, not a smooth migration or a convenient API.
 
 ## Project Structure & Module Organization
 
