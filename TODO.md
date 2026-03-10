@@ -4,6 +4,20 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 73 Restore warning-free build after stabilization landing (completed 2026-03-10)
+
+- Completed:
+  - removed the redundant `EdgeArtifacts` import and shadowed local names in presolution expansion/edge-processing helpers;
+  - initialized the new `psPendingWeakenOwners` field across the remaining `PresolutionState` test fixtures in `Presolution.WitnessSpec`;
+  - fixed the residual test-hygiene warnings in `Presolution.InstantiateSpec`, `NormalizeSpec`, and `InertSpec`.
+- Verification:
+  - `cabal build all --ghc-options=-fforce-recomp`: PASS (zero warnings)
+  - `cabal test`: PASS
+- Rolling priorities (next):
+  1. Keep the tree warning-free during future refactors by rerunning a forced rebuild when state-record or façade splits change.
+  2. Prefer small local warning fixes over suppressions.
+  3. Revisit only if a future compiler/toolchain update introduces new warnings.
+
 ## Task 72 Stabilize and land the post-split refactor loop (completed 2026-03-10)
 
 - Completed:

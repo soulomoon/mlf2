@@ -418,7 +418,7 @@ spec = describe "instantiateScheme" $ do
                 constraint = rootedConstraint $ emptyConstraint { cNodes = nodes }
                 st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 11 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
             case runPresolutionM defaultTraceConfig st0 (instantiateScheme body [(bound, fresh)]) of
-                Right (copyRoot, _st1) -> pure ()  -- instantiateScheme succeeds
+                Right _ -> pure ()  -- instantiateScheme succeeds
                 Left err -> expectationFailure $ "instantiateScheme failed: " ++ show err
 
         it "O12-COPY-INST" $ do

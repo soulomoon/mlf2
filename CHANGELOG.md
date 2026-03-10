@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Changed
+- Restored a warning-free forced rebuild after the stabilization landing by clearing the remaining local warning sites in presolution helpers and test fixtures.
 - Completed the post-split stabilization-and-landing pass for the live tree: the split runtime façades now have explicit thin-façade guards, the public-topology docs are source-guarded, the split child modules are Cabal-guarded as implementation-only, and the ordered owner sweeps plus final full gate are green.
 - Made `MLF.Pipeline` the canonical public execution/runtime API and trimmed `MLF.API` back to frontend syntax/parse/pretty/normalization helpers.
 - Completed the remaining refactor loop for the major internal monoliths:

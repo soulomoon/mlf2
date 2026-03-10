@@ -2,8 +2,6 @@ module InertSpec (spec) where
 
 import Test.Hspec
 import qualified Data.IntSet as IntSet
-import qualified Data.Set as Set
-
 import MLF.Constraint.Types.Graph
 import qualified MLF.Constraint.Inert as Inert
 import SpecUtil
