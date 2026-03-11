@@ -115,18 +115,25 @@ tasks/
 │   └── YYYY-MM-DD-description/
 │       ├── task_plan.md        # Phase plan, status, decisions, and error log
 │       ├── findings.md         # Key discoveries and paper/code alignment notes
-│       └── progress.md         # Iteration log, commands run, and outcomes
+│       ├── progress.md         # Iteration log, commands run, and outcomes
+│       ├── mechanism_table.md  # Optional YES/NO goal table for orchestrated loop tasks
+│       ├── orchestrator_prompt.md  # Optional role-separated orchestration brief
+│       └── orchestrator-log.jsonl  # Optional authoritative machine-readable loop log
 └── archive/                    # Completed tasks organized by date and description
     └── YYYY-MM-DD-description/
         ├── task_plan.md
         ├── findings.md
-        └── progress.md
+        ├── progress.md
+        ├── mechanism_table.md
+        ├── orchestrator_prompt.md
+        └── orchestrator-log.jsonl
 ```
 
 **For autonomous agents (using-superpowers + planning-with-files):**
 - Invoke `[$using-superpowers](/Users/ares/.codex/superpowers/skills/using-superpowers/SKILL.md)` first, then follow `[$planning-with-files](/Users/ares/.codex/skills/planning-with-files/SKILL.md)` for execution.
 - Work from a single active task folder under `tasks/todo/YYYY-MM-DD-description/` for the current effort.
 - Initialize and maintain `task_plan.md`, `findings.md`, and `progress.md` in that task folder before substantial multi-step work.
+- For orchestrated loop campaigns, also keep `mechanism_table.md`, `orchestrator_prompt.md`, and `orchestrator-log.jsonl` in the same task folder; treat the JSONL file as the authoritative round log.
 - Re-read `task_plan.md` before major decisions, and update phase status after each completed phase.
 - Log all errors and recovery attempts in `task_plan.md`; do not repeat the same failed action unchanged.
 - Write discoveries to `findings.md` throughout execution and keep `progress.md` as the running session log.

@@ -9,6 +9,7 @@ Each active task folder should contain:
 - `task_plan.md`
 - `findings.md`
 - `progress.md`
+- optionally `mechanism_table.md`, `orchestrator_prompt.md`, and `orchestrator-log.jsonl` for YES/NO-gated orchestration campaigns
 
 Source of truth:
 - detailed workflow rules live in `AGENTS.md`;

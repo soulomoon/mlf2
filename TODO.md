@@ -4,6 +4,20 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 83 Recursive-types orchestration packet (completed 2026-03-11)
+
+- Completed:
+  - created `tasks/todo/2026-03-11-recursive-types-orchestration/` with `task_plan.md`, `findings.md`, `progress.md`, `mechanism_table.md`, `orchestrator_prompt.md`, and `orchestrator-log.jsonl`;
+  - corrected the recursive-types roadmap overview so the source-of-truth milestone order is consistently `M0`..`M7`;
+  - updated `AGENTS.md` and `tasks/readme` so orchestration campaigns explicitly document their optional mechanism/prompt/log artifacts.
+- Verification:
+  - `python3` JSONL parse of `tasks/todo/2026-03-11-recursive-types-orchestration/orchestrator-log.jsonl`: PASS
+  - `python3` milestone/vocabulary consistency check across `docs/plans/2026-03-11-recursive-types-roadmap.md`, `tasks/todo/2026-03-11-recursive-types-orchestration/mechanism_table.md`, and `tasks/todo/2026-03-11-recursive-types-orchestration/orchestrator_prompt.md`: PASS
+- Rolling priorities (next):
+  1. Start the campaign with the verifier-owned `M0` gate using the existing roadmap/design evidence.
+  2. Keep each round scoped to the smallest slice in the lowest unfinished milestone.
+  3. Stop escalation if `M6` or `M7` require cyclic graph semantics or equi-recursive inference without a separate research decision.
+
 ## Task 82 Restore warning-free rebuild after dead-export loop (completed 2026-03-10)
 
 - Completed:
