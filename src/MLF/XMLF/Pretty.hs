@@ -21,6 +21,8 @@ prettyXmlfType = goType 0
             paren (p > 1) (goType 2 a ++ " -> " ++ goType 1 b)
         XTForall v bound body ->
             paren (p > 0) ("∀(" ++ v ++ " ⩾ " ++ goType 0 bound ++ ") " ++ goType 0 body)
+        XTMu v body ->
+            paren (p > 0) ("μ" ++ v ++ ". " ++ goType 0 body)
 
     goArg :: Int -> XmlfType -> String
     goArg prec ty = case ty of
@@ -54,6 +56,7 @@ prettyXmlfComp = goComp 0
         XTCon{} -> "(" ++ prettyXmlfType ty ++ ")"
         XTArrow{} -> "(" ++ prettyXmlfType ty ++ ")"
         XTForall{} -> "(" ++ prettyXmlfType ty ++ ")"
+        XTMu{} -> "(" ++ prettyXmlfType ty ++ ")"
 
 prettyXmlfTerm :: XmlfTerm -> String
 prettyXmlfTerm = goTerm 0

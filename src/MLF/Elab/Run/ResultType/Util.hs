@@ -143,6 +143,7 @@ instantiateImplicitForalls ty0 =
             TBase _ -> ty
             TBottom -> ty
             TVar _ -> ty
+            TMu v body -> TMu v (go body)
         goBound bound = case bound of
             TArrow a b -> TArrow (go a) (go b)
             TCon c args -> TCon c (fmap go args)
@@ -150,6 +151,7 @@ instantiateImplicitForalls ty0 =
             TBottom -> TBottom
             TForall v mb body ->
                 TForall v (fmap goBound mb) (go body)
+            TMu v body -> TMu v (go body)
     in go ty0
 
 -- | Strip annotations from an AnnExpr

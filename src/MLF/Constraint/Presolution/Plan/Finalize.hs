@@ -146,6 +146,11 @@ finalizeScheme FinalizeInput{..} =
                                     in (Just bnd', free', n')
                         (body', free2, n3) = go ((v, v') : boundEnv) free1 n2 body
                     in (TForall v' mb' body', free2, n3)
+                TMu v body ->
+                    let v' = "v" ++ show n
+                        n1 = n + 1
+                        (body', free1, n2) = go ((v, v') : boundEnv) freeEnv n1 body
+                    in (TMu v' body', free1, n2)
 
             goBound boundEnv freeEnv n bound = case bound of
                 TArrow a b ->
@@ -177,6 +182,11 @@ finalizeScheme FinalizeInput{..} =
                                     in (Just bnd', free', n')
                         (body', free2, n3) = go ((v, v') : boundEnv) free1 n2 body
                     in (TForall v' mb' body', free2, n3)
+                TMu v body ->
+                    let v' = "v" ++ show n
+                        n1 = n + 1
+                        (body', free1, n2) = go ((v, v') : boundEnv) freeEnv n1 body
+                    in (TMu v' body', free1, n2)
         replaceAlias boundNorm v = goReplace
           where
             goReplace ty
@@ -187,6 +197,7 @@ finalizeScheme FinalizeInput{..} =
                         TCon c args -> TCon c (fmap goReplace args)
                         TForall name mb body ->
                             TForall name (fmap (mapBoundType goReplace) mb) (goReplace body)
+                        TMu name body -> TMu name (goReplace body)
                         _ -> ty
         stripAliasForall ty = case ty of
             TForall v (Just bound) body
@@ -199,6 +210,7 @@ finalizeScheme FinalizeInput{..} =
                 TForall v Nothing (stripAliasForall body)
             TArrow a b -> TArrow (stripAliasForall a) (stripAliasForall b)
             TCon c args -> TCon c (fmap stripAliasForall args)
+            TMu v body -> TMu v (stripAliasForall body)
             _ -> ty
         stripAliasForallBound bound = case bound of
             TArrow a b -> TArrow (stripAliasForall a) (stripAliasForall b)
@@ -209,6 +221,7 @@ finalizeScheme FinalizeInput{..} =
                 let mb' = fmap stripAliasForallBound mb
                     body' = stripAliasForall body
                 in TForall v mb' body'
+            TMu v body -> TMu v (stripAliasForall body)
         collapseBoundAliases binds ty =
             foldr
                 (\(v, mbBound) acc ->
@@ -286,6 +299,9 @@ finalizeScheme FinalizeInput{..} =
                 TForallIF v mb body ->
                     let v' = renameFromSubst v
                     in TForall v' mb body
+                TMuIF v body ->
+                    let v' = renameFromSubst v
+                    in TMu v' body
         ty0 = renameVars ty0RawAdjusted
         inlineBaseBounds = False
         (bindingsNorm0, tyNorm0) =
@@ -338,6 +354,9 @@ finalizeScheme FinalizeInput{..} =
                 TForallIF v mb body ->
                     let v' = renameFromMap v
                     in TForall v' mb body
+                TMuIF v body ->
+                    let v' = renameFromMap v
+                    in TMu v' body
         renameMap =
             Map.fromList
                 [ (old, alphaName idx 0)

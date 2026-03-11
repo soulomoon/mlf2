@@ -80,6 +80,7 @@ import Util.IndexedRecursion
 --   * TForall: Flexible quantification ∀(α ⩾ τ). σ.
 --       - Nothing bound implies ⩾ ⊥ (standard System F unbounded quantification)
 --       - Just bound implies explicit instance bound
+--   * TMu: Explicit iso-recursive type μ α. τ.
 --   * TBottom: The bottom type ⊥ (minimal type), used as the default bound.
 data TopVar = AllowVar | NoTopVar
 
@@ -89,6 +90,7 @@ data Ty (v :: TopVar) where
     TCon :: BaseTy -> NonEmpty (Ty AllowVar) -> Ty a
     TBase :: BaseTy -> Ty a
     TForall :: String -> Maybe (Ty 'NoTopVar) -> Ty AllowVar -> Ty a -- ∀(α ⩾ τ?). σ
+    TMu :: String -> Ty 'AllowVar -> Ty a
     TBottom :: Ty a
 
 deriving instance Eq (Ty v)
@@ -104,6 +106,7 @@ data TyIF (v :: TopVar) (r :: TopVar -> Type) where
     TConIF :: BaseTy -> NonEmpty (r 'AllowVar) -> TyIF v r
     TBaseIF :: BaseTy -> TyIF v r
     TForallIF :: String -> Maybe (r 'NoTopVar) -> r 'AllowVar -> TyIF v r
+    TMuIF :: String -> r 'AllowVar -> TyIF v r
     TBottomIF :: TyIF v r
 
 instance IxFunctor TyIF where
@@ -113,6 +116,7 @@ instance IxFunctor TyIF where
         TConIF c args -> TConIF c (fmap f args)
         TBaseIF b -> TBaseIF b
         TForallIF v mb body -> TForallIF v (fmap f mb) (f body)
+        TMuIF v body -> TMuIF v (f body)
         TBottomIF -> TBottomIF
 
 type instance IxBase Ty = TyIF
@@ -124,6 +128,7 @@ instance IxRecursive Ty where
         TCon c args -> TConIF c args
         TBase b -> TBaseIF b
         TForall v mb body -> TForallIF v mb body
+        TMu v body -> TMuIF v body
         TBottom -> TBottomIF
 
 instance IxCorecursive Ty where
@@ -133,6 +138,7 @@ instance IxCorecursive Ty where
         TConIF c args -> TCon c args
         TBaseIF b -> TBase b
         TForallIF v mb body -> TForall v mb body
+        TMuIF v body -> TMu v body
         TBottomIF -> TBottom
 
 tyToElab :: Ty v -> ElabType
@@ -143,6 +149,7 @@ tyToElab ty = case ty of
     TBase b -> TBase b
     TBottom -> TBottom
     TForall v mb body -> TForall v mb (tyToElab body)
+    TMu v body -> TMu v (tyToElab body)
 
 elabToBound :: ElabType -> Either String BoundType
 elabToBound ty = case ty of
@@ -152,6 +159,7 @@ elabToBound ty = case ty of
     TCon c args -> Right (TCon c args)
     TBase b -> Right (TBase b)
     TForall v mb body -> Right (TForall v mb body)
+    TMu v body -> Right (TMu v body)
     TBottom -> Right TBottom
 
 containsForallTy :: Ty v -> Bool
@@ -159,6 +167,7 @@ containsForallTy = cataIxConst alg
   where
     alg node = case node of
         TForallIF _ _ _ -> True
+        TMuIF _ body -> unK body
         TArrowIF a b -> unK a || unK b
         TConIF _ args -> any unK args
         _ -> False
@@ -169,6 +178,7 @@ containsArrowTy = cataIxConst alg
     alg node = case node of
         TArrowIF _ _ -> True
         TForallIF _ mb body -> maybe False unK mb || unK body
+        TMuIF _ body -> unK body
         TConIF _ args -> any unK args
         _ -> False
 

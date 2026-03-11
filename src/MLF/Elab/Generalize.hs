@@ -246,12 +246,14 @@ inlineRigidTypes rigidBounds = go Set.empty
         TArrow a b -> TArrow (go seen a) (go seen b)
         TForall v mb body ->
             TForall v (fmap (goBound seen) mb) (go seen body)
+        TMu v body -> TMu v (go seen body)
     goBound seen = \case
         TArrow a b -> TArrow (go seen a) (go seen b)
         TCon c args -> TCon c (fmap (go seen) args)
         TBase b -> TBase b
         TBottom -> TBottom
         TForall v mb body -> TForall v (fmap (goBound seen) mb) (go seen body)
+        TMu v body -> TMu v (go seen body)
 
 applyGeneralizePlan
     :: GeneralizePlan

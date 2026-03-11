@@ -23,6 +23,10 @@ spec = describe "xMLF parser" $ do
         it "parses constructor application" $
             parseXmlfType "List Int" `shouldBe` Right (XTCon "List" (XTBase "Int" :| []))
 
+        it "parses μ types" $
+            parseXmlfType "μa. a -> Int"
+                `shouldBe` Right (XTMu "a" (XTArrow (XTVar "a") (XTBase "Int")))
+
     describe "computations" $ do
         it "parses canonical computations" $
             parseXmlfComp "∀(⩾ ⊲Int); N"
