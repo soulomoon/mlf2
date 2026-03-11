@@ -75,6 +75,7 @@ simplifyAnnotationType = go
         TBase _ -> ty
         TBottom -> ty
         TArrow a b -> TArrow (go a) (go b)
+        TMu v body -> TMu v (go body)
         TForall{} ->
             normalizeForalls (stripForalls ty)
 

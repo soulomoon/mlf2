@@ -92,6 +92,9 @@ freeTypeVarsFromWith bindInBound bound0 ty =
                     freeBound = maybe Set.empty (\f -> runBoundFun f boundBound) mb
                     freeBody = runBoundFun body boundBody
                 in Set.union freeBound freeBody
+        TMuIF v body ->
+            BoundFun $ \boundSet ->
+                runBoundFun body (Set.insert v boundSet)
 
 substTypeCapture :: String -> ElabType -> ElabType -> ElabType
 substTypeCapture x s = goSub
@@ -124,6 +127,20 @@ substTypeCapture x s = goSub
             | otherwise ->
                 let mb' = fmap (substBoundCaptureLocal name replacement) mb
                 in TForall v mb' (substTypeCapture name replacement body)
+        TMu v body
+            | v == name -> TMu v body
+            | v `Set.member` freeS ->
+                let used =
+                        Set.unions
+                            [ freeS
+                            , freeTypeVarsType body
+                            , Set.singleton v
+                            ]
+                    v' = freshNameLike v used
+                    body' = substTypeCapture v (TVar v') body
+                in TMu v' (substTypeCapture name replacement body')
+            | otherwise ->
+                TMu v (substTypeCapture name replacement body)
 
     goSub = paraIx alg
       where
@@ -155,6 +172,20 @@ substTypeCapture x s = goSub
                 | otherwise ->
                     let mb' = fmap (substBoundCaptureLocal x s . fst . unIxPair) mb
                     in TForall v mb' (snd (unIxPair body))
+            TMuIF v body
+                | v == x -> TMu v (fst (unIxPair body))
+                | v `Set.member` freeS ->
+                    let used =
+                            Set.unions
+                                [ freeS
+                                , freeTypeVarsType (fst (unIxPair body))
+                                , Set.singleton v
+                                ]
+                        v' = freshNameLike v used
+                        body' = substTypeCapture v (TVar v') (fst (unIxPair body))
+                    in TMu v' (substTypeCapture x s body')
+                | otherwise ->
+                    TMu v (snd (unIxPair body))
 
 substTypeSimple :: String -> ElabType -> ElabType -> ElabType
 substTypeSimple name replacement = paraIx alg
@@ -173,6 +204,9 @@ substTypeSimple name replacement = paraIx alg
             | otherwise ->
                 let mb' = fmap (substBoundSimpleLocal name0 replacement0) mb
                 in TForall v mb' (substTypeSimple name0 replacement0 body)
+        TMu v body
+            | v == name0 -> TMu v body
+            | otherwise -> TMu v (substTypeSimple name0 replacement0 body)
 
     alg :: TyIF i (IxPair Ty Ty) -> Ty i
     alg ty = case ty of
@@ -190,6 +224,9 @@ substTypeSimple name replacement = paraIx alg
             | otherwise ->
                 let mb' = fmap (substBoundSimpleLocal name replacement . fst . unIxPair) mb
                 in TForall v mb' (snd (unIxPair body))
+        TMuIF v body
+            | v == name -> TMu v (fst (unIxPair body))
+            | otherwise -> TMu v (snd (unIxPair body))
 freshTypeName :: Set.Set String -> String
 freshTypeName used =
     let candidates = ["u" ++ show i | i <- [(0::Int)..]]
@@ -229,6 +266,10 @@ alphaEqType = go Map.empty Map.empty
             let envL' = Map.insert v1 v2 envL
                 envR' = Map.insert v2 v1 envR
             in alphaEqMaybeBound envL envR mb1 mb2 && go envL' envR' body1 body2
+        (TMu v1 body1, TMu v2 body2) ->
+            let envL' = Map.insert v1 v2 envL
+                envR' = Map.insert v2 v1 envR
+            in go envL' envR' body1 body2
         _ -> False
 
     alphaEqArgs envL envR as bs = case (as, bs) of
@@ -252,6 +293,10 @@ alphaEqType = go Map.empty Map.empty
             let envL' = Map.insert v1 v2 envL
                 envR' = Map.insert v2 v1 envR
             in alphaEqMaybeBound envL envR mb1 mb2 && go envL' envR' body1 body2
+        (TMu v1 body1, TMu v2 body2) ->
+            let envL' = Map.insert v1 v2 envL
+                envR' = Map.insert v2 v1 envR
+            in go envL' envR' body1 body2
         _ -> False
 
 matchType
@@ -289,6 +334,8 @@ matchType binderSet = goMatch Map.empty Map.empty
                 (Just x, Just y) -> matchBound env subst x y
                 _ -> Left (InstantiationError "matchType: forall bound mismatch")
             goMatch (Map.insert v v' env) subst1 b b'
+        (TMu v b, TMu v' b') ->
+            goMatch (Map.insert v v' env) subst b b'
         _ -> Left (InstantiationError "matchType: structure mismatch")
 
     matchArgs env subst0 argsP argsT = case (argsP, argsT) of
@@ -314,6 +361,8 @@ matchType binderSet = goMatch Map.empty Map.empty
                 (Just x, Just y) -> matchBound env subst x y
                 _ -> Left (InstantiationError "matchType: forall bound mismatch")
             goMatch (Map.insert v v' env) subst1 b b'
+        (TMu v b, TMu v' b') ->
+            goMatch (Map.insert v v' env) subst b b'
         _ -> Left (InstantiationError "matchType: structure mismatch")
 
 resolveBaseBoundForInstConstraint
@@ -381,6 +430,7 @@ inlineBaseBoundsType constraint canonical = cataIx alg
                 Nothing -> TVar v
         TArrowIF a b -> TArrow a b
         TForallIF v mb body -> TForall v mb body
+        TMuIF v body -> TMu v body
         TConIF c args -> TCon c args
         TBaseIF b -> TBase b
         TBottomIF -> TBottom
@@ -448,6 +498,9 @@ inlineAliasBoundsWithBySeen fallbackToBottom canonical nodes lookupBound reifyBo
                 mb' = fmap (goBound seen boundNames') mb
                 body' = goAlias seen boundNames' body
             in TForall v mb' body'
+        TMu v body ->
+            let boundNames' = Set.insert v boundNames
+            in TMu v (goAlias seen boundNames' body)
         TBase _ -> ty
         TBottom -> ty
 
@@ -461,3 +514,6 @@ inlineAliasBoundsWithBySeen fallbackToBottom canonical nodes lookupBound reifyBo
                 mb' = fmap (goBound seen boundNames') mb
                 body' = goAlias seen boundNames' body
             in TForall v mb' body'
+        TMu v body ->
+            let boundNames' = Set.insert v boundNames
+            in TMu v (goAlias seen boundNames' body)

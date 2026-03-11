@@ -377,6 +377,10 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                     let bound' = Set.insert v bound
                         mb' = fmap (\f -> runApplyFun f bound) mb
                     in TForall v mb' (runApplyFun body bound')
+            TMuIF v body ->
+                ApplyFun $ \bound ->
+                    let bound' = Set.insert v bound
+                    in TMu v (runApplyFun body bound')
 
     _binderArgType :: IntSet.IntSet -> NodeId -> Maybe ElabType
     _binderArgType namedSet' binder = do
@@ -449,6 +453,7 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
             TConIF c args -> TCon c args
             TBaseIF b -> TBase b
             TForallIF v mb body -> TForall v mb body
+            TMuIF v body -> TMu v body
             TBottomIF -> TBottom
 
     containsBottomTy :: Ty v -> Bool
@@ -459,6 +464,7 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
         TArrow a b -> containsBottomTy a || containsBottomTy b
         TCon _ args -> any containsBottomTy args
         TForall _ mb body -> maybe False containsBottomTy mb || containsBottomTy body
+        TMu _ body -> containsBottomTy body
 
     reifyBoundType :: NodeId -> Either ElabError ElabType
     reifyBoundType = reifyBoundWithNamesAt substForTypes
