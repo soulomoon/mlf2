@@ -38,6 +38,14 @@ spec = describe "xMLF pretty printer" $ do
         prettyXmlfTerm tm
             `shouldBe` "let id = Λ(a ⩾ ⊥) λ(x : a) x in id[∀(⩾ ⊲Int); N]"
 
+    it "prints canonical recursive roll syntax" $ do
+        let tm = XRoll (XTMu "self" (XTArrow (XTVar "self") (XTBase "Int"))) (XVar "x")
+        prettyXmlfTerm tm `shouldBe` "roll[μself. self -> Int] x"
+
+    it "prints canonical recursive unroll syntax" $ do
+        let tm = XUnroll (XRoll (XTMu "self" (XTArrow (XTVar "self") (XTBase "Int"))) (XVar "x"))
+        prettyXmlfTerm tm `shouldBe` "unroll (roll[μself. self -> Int] x)"
+
     it "roundtrips type parse(pretty(type))" $ do
         let ty = XTForall "a" (XTBase "Int") (XTCon "List" (XTVar "a" :| []))
         parseXmlfType (prettyXmlfType ty) `shouldBe` Right ty
@@ -56,4 +64,11 @@ spec = describe "xMLF pretty printer" $ do
                     (XApp
                         (XTyInst (XVar "f") (XCInner (XCBot (XTVar "a"))))
                         (XLit (LBool True)))
+        parseXmlfTerm (prettyXmlfTerm tm) `shouldBe` Right tm
+
+    it "roundtrips recursive terms through parse(pretty(term))" $ do
+        let tm =
+                XLet "wrap"
+                    (XRoll (XTMu "self" (XTArrow (XTVar "self") (XTBase "Int"))) (XVar "x"))
+                    (XUnroll (XVar "wrap"))
         parseXmlfTerm (prettyXmlfTerm tm) `shouldBe` Right tm
