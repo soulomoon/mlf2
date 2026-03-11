@@ -106,6 +106,10 @@ prettyTermCanonical term = case term of
             ++ prettyTermCanonical rhs
             ++ " in "
             ++ prettyTermCanonical body
+    ERoll ty body ->
+        "ERoll[" ++ pretty ty ++ "](" ++ prettyTermCanonical body ++ ")"
+    EUnroll body ->
+        "EUnroll(" ++ prettyTermCanonical body ++ ")"
     _ ->
         XMLFPretty.prettyXmlfTerm (toXmlfTerm term)
 
@@ -160,6 +164,8 @@ toXmlfTerm term = case term of
         let bound = maybe XMLF.XTBottom toXmlfBound mb
         in XMLF.XTyAbs v bound (toXmlfTerm body)
     ETyInst e inst -> XMLF.XTyInst (toXmlfTerm e) (toXmlfComp inst)
+    ERoll{} -> error "toXmlfTerm: internal ERoll terms have no public/XMLF surface form"
+    EUnroll{} -> error "toXmlfTerm: internal EUnroll terms have no public/XMLF surface form"
 
 data OccInfo = OccInfo
     { oiFreeVars :: Set.Set String
@@ -365,7 +371,9 @@ schemeFromType ty =
 data TypeCheckError
     = TCUnboundVar String
     | TCExpectedArrow ElabType
+    | TCExpectedRecursive ElabType
     | TCArgumentMismatch ElabType ElabType
+    | TCRollBodyMismatch ElabType ElabType
     | TCInstantiationError Instantiation ElabType String
     | TCTypeAbsVarInScope String
     | TCTypeAbsBoundMentionsVar String

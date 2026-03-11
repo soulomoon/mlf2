@@ -24,6 +24,8 @@ import SpecUtil (mkForalls, unsafeNormalizeExpr)
 spec :: Spec
 spec = describe "Phase 7 typecheck" $ do
     let intTy = TBase (BaseTy "Int")
+        recursiveIntTy = TMu "self" (TArrow (TVar "self") intTy)
+        recursiveBody = ELam "self" recursiveIntTy (ELit (LInt 1))
 
     describe "Formal obligations ledger anchors (Chapter 14 typing/instance)" $ do
         it "O14-WF-EMPTY O14-WF-TVAR O14-WF-VAR: environment well-formedness proxies" $ do
@@ -86,6 +88,19 @@ spec = describe "Phase 7 typecheck" $ do
     it "typechecks instantiations" $ do
         let term = ETyInst (ETyAbs "a" Nothing (ELam "x" (TVar "a") (EVar "x"))) (InstApp intTy)
         typeCheck term `shouldBe` Right (TArrow intTy intTy)
+
+    it "typechecks internal recursive roll/unroll runtime terms" $ do
+        typeCheck (ERoll recursiveIntTy recursiveBody) `shouldBe` Right recursiveIntTy
+        typeCheck (EUnroll (ERoll recursiveIntTy recursiveBody))
+            `shouldBe` Right (TArrow recursiveIntTy intTy)
+
+    it "rejects malformed recursive roll/unroll runtime terms" $ do
+        case typeCheck (ERoll recursiveIntTy (ELit (LInt 1))) of
+            Left TCRollBodyMismatch{} -> pure ()
+            other -> expectationFailure ("Expected recursive roll body mismatch, got: " ++ show other)
+        case typeCheck (EUnroll (ELit (LInt 1))) of
+            Left TCExpectedRecursive{} -> pure ()
+            other -> expectationFailure ("Expected recursive unroll rejection, got: " ++ show other)
 
     it "reports instantiation errors" $ do
         case typeCheck (ETyInst (ELit (LInt 1)) InstElim) of

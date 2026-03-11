@@ -18,6 +18,7 @@ isValue term = case term of
     ELit{} -> True
     ELam{} -> True
     ETyAbs{} -> True
+    ERoll _ body -> isValue body
     _ -> False
 
 step :: ElabTerm -> Maybe ElabTerm
@@ -35,6 +36,15 @@ step term = case term of
     ETyInst e inst
         | not (isValue e) -> (`ETyInst` inst) <$> step e
         | otherwise -> reduceInst e inst
+    ERoll ty body
+        | not (isValue body) -> ERoll ty <$> step body
+        | otherwise -> Nothing
+    EUnroll e
+        | not (isValue e) -> EUnroll <$> step e
+        | otherwise ->
+            case e of
+                ERoll _ body | isValue body -> Just body
+                _ -> Nothing
     _ -> Nothing
 
 normalize :: ElabTerm -> ElabTerm
@@ -100,6 +110,8 @@ freeTermVars = foldElabTerm alg
             Set.union rhs (Set.delete v body)
         ETyAbsF _ _ body -> body
         ETyInstF e _ -> e
+        ERollF _ body -> body
+        EUnrollF body -> body
 
 freeTypeVarsScheme :: ElabScheme -> Set.Set String
 freeTypeVarsScheme sch = freeTypeVarsType (schemeToType sch)
@@ -134,6 +146,9 @@ freeTypeVarsTerm = foldElabTerm alg
             in Set.union boundFv bodyFv
         ETyInstF e inst ->
             Set.union e (freeTypeVarsInst inst)
+        ERollF ty body ->
+            Set.union (freeTypeVarsType ty) body
+        EUnrollF body -> body
 
 freshTermNameFrom :: String -> Set.Set String -> String
 freshTermNameFrom base used =
@@ -172,6 +187,8 @@ substTermVar x s = goSub
                 | otherwise -> ELet v sch (snd rhs) (snd body)
             ETyAbsF v b body -> ETyAbs v b (snd body)
             ETyInstF e i -> ETyInst (snd e) i
+            ERollF ty body -> ERoll ty (snd body)
+            EUnrollF body -> EUnroll (snd body)
 
 substTypeVarTerm :: String -> ElabType -> ElabTerm -> ElabTerm
 substTypeVarTerm x s = goSub
@@ -202,6 +219,8 @@ substTypeVarTerm x s = goSub
                     in ETyAbs v' (substBoundVar mb) (goSub body')
                 | otherwise -> ETyAbs v (substBoundVar mb) (snd body)
             ETyInstF e i -> ETyInst (snd e) (substTypeVarInst x s i)
+            ERollF ty body -> ERoll (substTypeCapture x s ty) (snd body)
+            EUnrollF body -> EUnroll (snd body)
 
 substTypeVarScheme :: String -> ElabType -> ElabScheme -> ElabScheme
 substTypeVarScheme x s sch =
@@ -238,6 +257,8 @@ replaceAbstrInTerm target replacement = para alg
             | v == target -> ETyAbs v mb (fst body)
             | otherwise -> ETyAbs v mb (snd body)
         ETyInstF e inst -> ETyInst (snd e) (replaceAbstrInInst target replacement inst)
+        ERollF ty body -> ERoll ty (snd body)
+        EUnrollF body -> EUnroll (snd body)
 
 replaceAbstrInInst :: String -> Instantiation -> Instantiation -> Instantiation
 replaceAbstrInInst target replacement = para alg
