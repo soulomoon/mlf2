@@ -16,6 +16,7 @@ import MLF.Reify.TypeOps
     ( alphaEqType
     , freeTypeVarsType
     , matchType
+    , substTypeCapture
     , splitForalls
     )
 import MLF.Frontend.Syntax (Lit(..))
@@ -72,6 +73,20 @@ typeCheckWithEnv env term = case term of
     ETyInst e inst -> do
         ty <- typeCheckWithEnv env e
         checkInstantiation env ty inst
+    ERoll recursiveTy body ->
+        case recursiveTy of
+            TMu name unfoldedBody -> do
+                bodyTy <- typeCheckWithEnv env body
+                let expectedBodyTy = substTypeCapture name recursiveTy unfoldedBody
+                if alphaEqType expectedBodyTy bodyTy
+                    then Right recursiveTy
+                    else Left (TCRollBodyMismatch expectedBodyTy bodyTy)
+            _ -> Left (TCExpectedRecursive recursiveTy)
+    EUnroll e -> do
+        ty <- typeCheckWithEnv env e
+        case ty of
+            TMu name body -> Right (substTypeCapture name ty body)
+            _ -> Left (TCExpectedRecursive ty)
 
 checkInstantiation :: Env -> ElabType -> Instantiation -> Either TypeCheckError ElabType
 checkInstantiation env ty inst = snd <$> evalInstantiationWith spec inst (0, env, ty)
