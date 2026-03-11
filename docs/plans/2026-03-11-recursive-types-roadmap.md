@@ -22,9 +22,10 @@
 2. **M1 — Explicit xMLF/core recursive types**
 3. **M2 — Runtime/typechecker/reduction support**
 4. **M3 — Public XMLF syntax + roundtrip tooling**
-5. **M4 — Surface eMLF syntax exposure**
-6. **M5 — Constraint/inference feasibility spike**
-7. **M6 — Optional inference implementation**
+5. **M4 — Add contractiveness validation**
+6. **M5 — Surface eMLF syntax exposure**
+7. **M6 — Pipeline acceptance for explicit annotations only**
+8. **M7 — Optional inference implementation**
 
 Each milestone has a gate. Do not start the next milestone until the current gate is green.
 

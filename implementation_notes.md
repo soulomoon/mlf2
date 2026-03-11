@@ -1,3 +1,10 @@
+### 2026-03-11 recursive-types orchestration packet
+
+- Added a repo-tracked, docs-only orchestration packet under `tasks/todo/2026-03-11-recursive-types-orchestration/` for the recursive-types campaign: task memory, milestone mechanism table, orchestration prompt, and authoritative JSONL event log now live together in one task folder.
+- The packet fixes role separation explicitly: the orchestrator stays dispatch-only, every planner/researcher/implementer/reviewer/QA/verifier/integrator action uses a fresh agent, retries stay within a round on a clean branch/worktree rooted at the same captured `master`, and only the integrator performs the final commit + `--no-ff` merge.
+- Corrected the recursive-types roadmap overview so the milestone order now matches the detailed task breakdown (`M0` semantic freeze, `M1` explicit/core types, `M2` runtime/typechecker/reducer, `M3` public XMLF, `M4` contractiveness, `M5` source syntax, `M6` pipeline-acceptance spike, `M7` optional inference).
+- Updated task-workflow guidance to acknowledge optional orchestration artifacts (`mechanism_table.md`, `orchestrator_prompt.md`, `orchestrator-log.jsonl`) for YES/NO-gated campaigns.
+
 ### 2026-03-10 warning-free closeout
 
 - Restored a warning-free rebuild after the stabilization landing without changing behavior.

@@ -4,6 +4,7 @@
 
 ### Changed
 - Added the recursive-types design artifacts and staged implementation roadmap under `tasks/todo/2026-03-11-recursive-types-design/` and `docs/plans/2026-03-11-recursive-types-roadmap.md`.
+- Added a docs-only recursive-types orchestration packet under `tasks/todo/2026-03-11-recursive-types-orchestration/`, including the milestone mechanism table, orchestrator prompt, and authoritative JSONL event log; also corrected the roadmap overview so it consistently lists milestones `M0` through `M7`.
 - Refreshed `roadmap.md` to match the current codebase layout (2026-03-11): documented the live public API split (`MLF.API` / `MLF.Pipeline` / `MLF.XMLF`), replaced stale deviation references with the `docs/thesis-*` audit surfaces, and expanded the module map to reflect the current solver/elaboration ownership boundaries.
 - Restored a warning-free forced rebuild after the dead-export loop (2026-03-10): removed the remaining redundant imports in `MLF.Elab.Phi.Omega.Interpret`, `MLF.Elab.Elaborate.Scope`, `MLF.Elab.Elaborate.Algebra`, `MLF.Elab.Elaborate.Annotation`, and `MLF.Elab.Run.ResultType`, then re-verified with `cabal build all --ghc-options=' -fforce-recomp -Werror'` and `cabal test`.
 - Restored a warning-free forced rebuild after the stabilization landing by clearing the remaining local warning sites in presolution helpers and test fixtures.
