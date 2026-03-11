@@ -29,6 +29,8 @@ spec = do
     let intTy = TBase (BaseTy "Int")
         idLam = ELam "x" intTy (EVar "x")
         polyLam = ELam "x" (TVar "a") (EVar "x")
+        recursiveIntTy = TMu "self" (TArrow (TVar "self") intTy)
+        recursiveBody = ELam "self" recursiveIntTy (ELit (LInt 1))
         boundFromType ty = case ty of
             TVar v -> error ("boundFromType: unexpected variable bound " ++ show v)
             TArrow a b -> TArrow a b
@@ -47,6 +49,8 @@ spec = do
             ELet v _ rhs body -> "let:" ++ v ++ "(" ++ erase rhs ++ "," ++ erase body ++ ")"
             ETyAbs _ _ body -> erase body
             ETyInst e _ -> erase e
+            ERoll _ body -> "roll(" ++ erase body ++ ")"
+            EUnroll body -> "unroll(" ++ erase body ++ ")"
 
     describe "Formal obligations ledger anchors (Chapter 14 reduction)" $ do
         it "O14-RED-BETA O14-RED-BETALET O14-RED-REFLEX O14-RED-TRANS O14-RED-QUANT-INTRO O14-RED-QUANT-ELIM O14-RED-INNER O14-RED-OUTER O14-RED-CONTEXT: reduction-rule anchors and erasure proxy" $ do
@@ -112,6 +116,13 @@ spec = do
             let inner = EApp (ELam "y" intTy (EVar "y")) (ELit (LInt 1))
                 term = EApp idLam inner
             step term `shouldBe` Just (EApp idLam (ELit (LInt 1)))
+
+        it "reduces recursive unroll-roll pairs" $ do
+            step (EUnroll (ERoll recursiveIntTy recursiveBody)) `shouldBe` Just recursiveBody
+
+        it "reduces inside recursive roll bodies before the outer constructor becomes a value" $ do
+            let inner = EApp idLam (ELit (LInt 1))
+            step (ERoll recursiveIntTy inner) `shouldBe` Just (ERoll recursiveIntTy (ELit (LInt 1)))
 
     describe "Phase 7 preservation (sanity)" $ do
         it "preserves types across normalization for a fixed set of terms" $ do
