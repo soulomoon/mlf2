@@ -52,6 +52,11 @@ spec = describe "Public surface contracts" $ do
             expectRight (parseXmlfType src) $ \ty ->
                 parseXmlfType (prettyXmlfType ty) `shouldBe` Right ty
 
+        it "exports explicit recursive XMLF term constructors" $ do
+            let term = XUnroll (XRoll (XTMu "self" (XTArrow (XTVar "self") (XTBase "Int"))) (XVar "x"))
+            prettyXmlfTerm term `shouldBe` "unroll (roll[μself. self -> Int] x)"
+            parseXmlfTerm (prettyXmlfTerm term) `shouldBe` Right term
+
 expectRight :: Show err => Either err a -> (a -> Expectation) -> Expectation
 expectRight result k =
     case result of

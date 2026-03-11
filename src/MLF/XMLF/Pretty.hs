@@ -68,18 +68,29 @@ prettyXmlfTerm = goTerm 0
         XLam v ty body ->
             paren (p > 0) ("λ(" ++ v ++ " : " ++ prettyXmlfType ty ++ ") " ++ goTerm 0 body)
         XApp f a ->
-            paren (p > 1) (goTerm 1 f ++ " " ++ goArg a)
+            paren (p > 1) (goTerm 1 f ++ " " ++ goAppArg a)
         XTyAbs v bound body ->
             paren (p > 0) ("Λ(" ++ v ++ " ⩾ " ++ prettyXmlfType bound ++ ") " ++ goTerm 0 body)
         XTyInst e comp ->
             paren (p > 1) (goTerm 1 e ++ "[" ++ prettyXmlfComp comp ++ "]")
+        XRoll ty body ->
+            paren (p > 0) ("roll[" ++ prettyXmlfType ty ++ "] " ++ goPrefixArg body)
+        XUnroll body ->
+            paren (p > 0) ("unroll " ++ goPrefixArg body)
         XLet v rhs body ->
             paren (p > 0) ("let " ++ v ++ " = " ++ goTerm 0 rhs ++ " in " ++ goTerm 0 body)
 
-    goArg :: XmlfTerm -> String
-    goArg tm = case tm of
+    goAppArg :: XmlfTerm -> String
+    goAppArg tm = case tm of
         XVar{} -> goTerm 2 tm
         XLit{} -> goTerm 2 tm
+        _ -> "(" ++ goTerm 0 tm ++ ")"
+
+    goPrefixArg :: XmlfTerm -> String
+    goPrefixArg tm = case tm of
+        XVar{} -> goTerm 1 tm
+        XLit{} -> goTerm 1 tm
+        XTyInst{} -> goTerm 1 tm
         _ -> "(" ++ goTerm 0 tm ++ ")"
 
     prettyLit :: Lit -> String
