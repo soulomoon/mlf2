@@ -462,6 +462,8 @@ bindingFor env plan (name, nidInt) = do
                 let mb' = fmap (substAliasBound boundSet) mb
                     body' = substAliasTy (Set.insert v boundSet) body
                 in TForall v mb' body'
+            TMu v body ->
+                TMu v (substAliasTy (Set.insert v boundSet) body)
         substAliasBound boundSet bound = case bound of
             TArrow a b -> TArrow (substAliasTy boundSet a) (substAliasTy boundSet b)
             TCon c args -> TCon c (fmap (substAliasTy boundSet) args)
@@ -471,6 +473,8 @@ bindingFor env plan (name, nidInt) = do
                 let mb' = fmap (substAliasBound boundSet) mb
                     body' = substAliasTy (Set.insert v boundSet) body
                 in TForall v mb' body'
+            TMu v body ->
+                TMu v (substAliasTy (Set.insert v boundSet) body)
         normalizeSelfTy selfName = goTy Set.empty
           where
             goTy shadow ty = case ty of
@@ -487,6 +491,9 @@ bindingFor env plan (name, nidInt) = do
                         mb' = fmap (goBound shadow') mb
                         body' = goTy shadow' body
                     in TForall v mb' body'
+                TMu v body ->
+                    let shadow' = Set.insert v shadow
+                    in TMu v (goTy shadow' body)
             goBound shadow bound = case bound of
                 TArrow a b -> TArrow (goTy shadow a) (goTy shadow b)
                 TCon c args -> TCon c (fmap (goTy shadow) args)
@@ -497,6 +504,9 @@ bindingFor env plan (name, nidInt) = do
                         mb' = fmap (goBound shadow') mb
                         body' = goTy shadow' body
                     in TForall v mb' body'
+                TMu v body ->
+                    let shadow' = Set.insert v shadow
+                    in TMu v (goTy shadow' body)
         boundTy0' =
             case (boundTy0, mbBoundNode) of
                 (TBottom, Just _)

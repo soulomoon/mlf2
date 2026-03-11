@@ -22,6 +22,10 @@ spec = describe "xMLF pretty printer" $ do
         let ty = XTForall "a" XTBottom (XTArrow (XTVar "a") (XTVar "a"))
         prettyXmlfType ty `shouldBe` "∀(a ⩾ ⊥) a -> a"
 
+    it "prints μ types canonically" $ do
+        let ty = XTMu "a" (XTArrow (XTVar "a") (XTBase "Int"))
+        prettyXmlfType ty `shouldBe` "μa. a -> Int"
+
     it "prints canonical computation syntax" $ do
         let comp = XCSeq (XCInner (XCBot (XTBase "Int"))) XCElim
         prettyXmlfComp comp `shouldBe` "∀(⩾ ⊲Int); N"
@@ -36,6 +40,10 @@ spec = describe "xMLF pretty printer" $ do
 
     it "roundtrips type parse(pretty(type))" $ do
         let ty = XTForall "a" (XTBase "Int") (XTCon "List" (XTVar "a" :| []))
+        parseXmlfType (prettyXmlfType ty) `shouldBe` Right ty
+
+    it "roundtrips μ type parse(pretty(type))" $ do
+        let ty = XTMu "a" (XTCon "List" (XTVar "a" :| []))
         parseXmlfType (prettyXmlfType ty) `shouldBe` Right ty
 
     it "roundtrips computation parse(pretty(comp))" $ do

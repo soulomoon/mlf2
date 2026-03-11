@@ -136,6 +136,7 @@ varsInType = cataIxConst alg
         TForallIF _ mb body ->
             let varsBound = maybe Set.empty unK mb
             in Set.union varsBound (unK body)
+        TMuIF _ body -> unK body
 
 substTypeSelective :: Set.Set String -> Map.Map String ElabType -> ElabType -> ElabType
 substTypeSelective binderSet subst ty0 = runSubstFun (cataIx alg ty0) Set.empty
@@ -161,6 +162,10 @@ substTypeSelective binderSet subst ty0 = runSubstFun (cataIx alg ty0) Set.empty
                     mb' = fmap (\f -> runSubstFun f bound') mb
                     body' = runSubstFun body bound'
                 in TForall v mb' body'
+        TMuIF v body ->
+            SubstFun $ \bound ->
+                let bound' = Set.insert v bound
+                in TMu v (runSubstFun body bound')
 
 instInsideFromArgsWithBounds :: [(String, Maybe BoundType)] -> [ElabType] -> Maybe Instantiation
 instInsideFromArgsWithBounds binds args = go binds args
@@ -192,6 +197,7 @@ containsForallType = cataIxConst alg
   where
     alg ty = case ty of
         TForallIF _ _ _ -> True
+        TMuIF _ body -> unK body
         TArrowIF a b -> unK a || unK b
         TConIF _ args -> any unK args
         _ -> False

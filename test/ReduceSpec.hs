@@ -36,6 +36,7 @@ spec = do
             TBase b -> TBase b
             TBottom -> TBottom
             TForall v mb body -> TForall v mb body
+            TMu v body -> TMu v body
 
         erase :: ElabTerm -> String
         erase term = case term of
