@@ -55,8 +55,37 @@ spec = describe "xMLF parser" $ do
                 expected = XLet "id" (XLam "x" (XTBase "Int") (XVar "x")) (XApp (XVar "id") (XLit (LInt 1)))
             parseXmlfTerm src `shouldBe` Right expected
 
+        it "parses recursive roll terms with recursive types" $ do
+            let src = "roll[μself. self -> Int] x"
+                expected =
+                    XRoll
+                        (XTMu "self" (XTArrow (XTVar "self") (XTBase "Int")))
+                        (XVar "x")
+            parseXmlfTerm src `shouldBe` Right expected
+
+        it "parses recursive unroll terms" $ do
+            let src = "unroll (roll[μself. self -> Int] x)"
+                expected =
+                    XUnroll
+                        (XRoll
+                            (XTMu "self" (XTArrow (XTVar "self") (XTBase "Int")))
+                            (XVar "x"))
+            parseXmlfTerm src `shouldBe` Right expected
+
         it "rejects malformed lambda binder" $
             parseXmlfTerm "λ(x) x" `shouldSatisfy` isLeft
+
+        it "rejects roll without bracketed type" $
+            parseXmlfTerm "roll μself. self -> Int x" `shouldSatisfy` isLeft
+
+        it "rejects roll without body" $
+            parseXmlfTerm "roll[μself. self -> Int]" `shouldSatisfy` isLeft
+
+        it "rejects unroll without body" $
+            parseXmlfTerm "unroll" `shouldSatisfy` isLeft
+
+        it "rejects malformed roll bracketed type" $
+            parseXmlfTerm "roll[μself. self -> Int x" `shouldSatisfy` isLeft
 
 isLeft :: Either a b -> Bool
 isLeft (Left _) = True
