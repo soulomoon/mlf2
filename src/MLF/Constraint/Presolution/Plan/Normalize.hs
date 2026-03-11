@@ -153,6 +153,9 @@ substBound v replacement bound = case bound of
         | otherwise ->
             let mb' = fmap (substBound v replacement) mb
             in TForall name mb' (substType v replacement body)
+    TMu name body
+        | name == v -> TMu name body
+        | otherwise -> TMu name (substType v replacement body)
 
 isBaseBound :: Ty v -> Bool
 isBaseBound ty = case ty of
@@ -170,6 +173,7 @@ containsForall = cataIxConst alg
   where
     alg ty = case ty of
         TForallIF _ _ _ -> True
+        TMuIF _ body -> unK body
         TArrowIF d c -> unK d || unK c
         TConIF _ args -> any unK args
         _ -> False
@@ -182,5 +186,6 @@ containsArrow = cataIxConst alg
         TForallIF _ mb body ->
             let boundHasArrow = maybe False unK mb
             in boundHasArrow || unK body
+        TMuIF _ body -> unK body
         TConIF _ args -> any unK args
         _ -> False

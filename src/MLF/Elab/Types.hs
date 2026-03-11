@@ -118,6 +118,7 @@ toXmlfType ty = case ty of
     TForall v mb body ->
         let bound = maybe XMLF.XTBottom toXmlfBound mb
         in XMLF.XTForall v bound (toXmlfType body)
+    TMu v body -> XMLF.XTMu v (toXmlfType body)
     TBottom -> XMLF.XTBottom
 
 toXmlfBound :: BoundType -> XMLF.XmlfType
@@ -128,6 +129,7 @@ toXmlfBound bound = case bound of
     TForall v mb body ->
         let boundTy = maybe XMLF.XTBottom toXmlfBound mb
         in XMLF.XTForall v boundTy (toXmlfType body)
+    TMu v body -> XMLF.XTMu v (toXmlfType body)
     TBottom -> XMLF.XTBottom
 
 toXmlfComp :: Instantiation -> XMLF.XmlfComp
@@ -176,6 +178,7 @@ inlineBoundsForDisplay = go
             let mb' = fmap goBound mb
                 body' = go body
             in simplifyForall v mb' body'
+        TMu v body -> TMu v (go body)
         TVar v -> TVar v
         TBase b -> TBase b
         TBottom -> TBottom
@@ -220,6 +223,7 @@ inlineBoundsForDisplay = go
             let mb' = fmap goBound mb
                 body' = go body
             in TForall v mb' body'
+        TMu v body -> TMu v (go body)
 
     occurrencesVar :: String -> ElabType -> (Int, Int)
     occurrencesVar name = Map.findWithDefault (0, 0) name . oiOccMap . occInfo
@@ -261,6 +265,11 @@ inlineBoundsForDisplay = go
                     occBody' = Map.delete v (oiOccMap occBody)
                     occBound' = Map.delete v (oiOccMap occBound)
                 in K (OccInfo freeVars (mergeOccMaps occBound' occBody'))
+            TMuIF v body ->
+                let occBody = unK (snd (unIxPair body))
+                    freeVars = Set.delete v (oiFreeVars occBody)
+                    occBody' = Map.delete v (oiOccMap occBody)
+                in K (OccInfo freeVars occBody')
 
     mergeOccMaps = Map.unionWith addCounts
     addCounts (p1, n1) (p2, n2) = (p1 + p2, n1 + n2)
@@ -290,6 +299,11 @@ inlineBoundsForDisplay = go
                 occBody' = Map.delete v (oiOccMap occBody)
                 occBound' = Map.delete v (oiOccMap occBound)
             in OccInfo freeVars (mergeOccMaps occBound' occBody')
+        TMu v body ->
+            let occBody = occInfo body
+                freeVars = Set.delete v (oiFreeVars occBody)
+                occBody' = Map.delete v (oiOccMap occBody)
+            in OccInfo freeVars occBody'
 
 -- | Pretty-printing with display-only bound inlining.
 instance PrettyDisplay ElabType where
@@ -316,6 +330,7 @@ mapBoundType f bound = case bound of
     TForall v mb body ->
         let mb' = fmap (mapBoundType f) mb
         in TForall v mb' (f body)
+    TMu v body -> TMu v (f body)
 
 buildForalls :: [(String, Maybe BoundType)] -> ElabType -> ElabType
 buildForalls binds body = foldr (\(v, b) t -> TForall v b t) body binds

@@ -108,6 +108,7 @@ boundToType bound = case bound of
     Elab.TBase b -> Elab.TBase b
     Elab.TBottom -> Elab.TBottom
     Elab.TForall v mb body -> Elab.TForall v mb body
+    Elab.TMu v body -> Elab.TMu v body
 
 boundFromType :: Elab.ElabType -> Elab.BoundType
 boundFromType ty = case ty of
@@ -118,6 +119,7 @@ boundFromType ty = case ty of
     Elab.TBase b -> Elab.TBase b
     Elab.TBottom -> Elab.TBottom
     Elab.TForall v mb body -> Elab.TForall v mb body
+    Elab.TMu v body -> Elab.TMu v body
 
 generalizeAtWith
     :: Maybe GaBindParents
@@ -355,6 +357,10 @@ canonType = go [] (0 :: Int)
                 mb' = fmap (boundFromType . go env n . boundToType) mb
                 body' = go env' (n + 1) body
             in Elab.TForall v' mb' body'
+        Elab.TMu v body ->
+            let v' = "a" ++ show n
+                env' = (v, v') : env
+            in Elab.TMu v' (go env' (n + 1) body)
 
 shouldAlphaEqType :: Elab.ElabType -> Elab.ElabType -> Expectation
 shouldAlphaEqType actual expected =
@@ -381,6 +387,8 @@ stripUnusedTopForalls ty =
                 let inBound = maybe False (occursInBound shadowed) mb
                     bodyShadowed = shadowed || v == needle
                 in inBound || go bodyShadowed body
+            Elab.TMu v body ->
+                go (shadowed || v == needle) body
 
         occursInBound shadowed b = case b of
             Elab.TArrow a c -> go shadowed a || go shadowed c
@@ -391,9 +399,29 @@ stripUnusedTopForalls ty =
                 let inBound = maybe False (occursInBound shadowed) mb
                     bodyShadowed = shadowed || v == needle
                 in inBound || go bodyShadowed body
+            Elab.TMu v body ->
+                go (shadowed || v == needle) body
 
 spec :: Spec
 spec = describe "Phase 6 — Elaborate (xMLF)" $ do
+    describe "Recursive structural types" $ do
+        let recursiveInt :: Elab.ElabType
+            recursiveInt = Elab.TMu "a" (Elab.TArrow (Elab.TVar "a") (Elab.TBase (BaseTy "Int")))
+
+        it "prints μ types through the elaborated pretty path" $ do
+            Elab.pretty recursiveInt `shouldBe` "μa. a -> Int"
+
+        it "does not identify μ with its unfolding" $ do
+            let unfolded = Elab.TArrow recursiveInt (Elab.TBase (BaseTy "Int"))
+            recursiveInt `shouldNotBe` unfolded
+
+        it "tracks only free variables outside μ binders" $ do
+            let ty = Elab.TMu "a" (Elab.TArrow (Elab.TVar "a") (Elab.TVar "x"))
+            Elab.freeTypeVarsType ty `shouldBe` Set.singleton "x"
+
+        it "roundtrips μ through bound conversion helpers" $ do
+            boundToType (boundFromType recursiveInt) `shouldBe` recursiveInt
+
     describe "Migration guards" $ do
         it "chi-first Elaborate|Phase 6 keeps representative behavior" $ do
             let corpus =

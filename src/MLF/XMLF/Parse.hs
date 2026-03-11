@@ -42,7 +42,7 @@ import MLF.Parse.Common
     , symbol
     , upperIdent
     )
-import MLF.Parse.Type (TypeParserConfig(..), parseArrowTypeWith, parseTypeWith)
+import MLF.Parse.Type (TypeParserConfig(..), parseArrowTypeWith)
 
 newtype XmlfParseError = XmlfParseError (ParseErrorBundle String Void)
     deriving (Eq, Show)
@@ -73,11 +73,15 @@ reservedWords =
     Set.fromList
         [ "let"
         , "in"
+        , "mu"
         , "true"
         , "false"
         , "forall"
         , "epsilon"
         ]
+
+muTok :: Parser ()
+muTok = void (symbol "μ" <|> symbol "mu")
 
 botCompTok :: Parser ()
 botCompTok = void (symbol "⊲")
@@ -125,7 +129,30 @@ xmlfTypeConfig =
         }
 
 pType :: Parser XmlfType
-pType = parseTypeWith xmlfTypeConfig
+pType = try pForallType <|> try pMuType <|> pArrowType
+  where
+    pForallType = try $ do
+        forallTok
+        binders <- tpcForallBinders xmlfTypeConfig pType
+        body <- pType
+        pure (foldr (\(v, bnd) acc -> XTForall v bnd acc) body binders)
+
+    pMuType = do
+        muTok
+        v <- lowerIdent reservedWords
+        void (symbol ".")
+        XTMu v <$> pType
+
+    pArrowType = parseArrowTypeWith xmlfTypeConfig pType
+
+pTypeNoTopForall :: Parser XmlfType
+pTypeNoTopForall = try pMuType <|> parseArrowTypeWith xmlfTypeConfig pType
+  where
+    pMuType = do
+        muTok
+        v <- lowerIdent reservedWords
+        void (symbol ".")
+        XTMu v <$> pType
 
 pComp :: Parser XmlfComp
 pComp = do
@@ -204,7 +231,7 @@ pCompLegacyApp = do
     pure (compFromType ty)
 
 pCompTypeSugar :: Parser XmlfComp
-pCompTypeSugar = compFromType <$> parseArrowTypeWith xmlfTypeConfig pType
+pCompTypeSugar = compFromType <$> pTypeNoTopForall
 
 compFromType :: XmlfType -> XmlfComp
 compFromType ty = XCSeq (XCInner (XCBot ty)) XCElim
