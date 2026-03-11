@@ -164,8 +164,8 @@ toXmlfTerm term = case term of
         let bound = maybe XMLF.XTBottom toXmlfBound mb
         in XMLF.XTyAbs v bound (toXmlfTerm body)
     ETyInst e inst -> XMLF.XTyInst (toXmlfTerm e) (toXmlfComp inst)
-    ERoll{} -> error "toXmlfTerm: internal ERoll terms have no public/XMLF surface form"
-    EUnroll{} -> error "toXmlfTerm: internal EUnroll terms have no public/XMLF surface form"
+    ERoll ty body -> XMLF.XRoll (toXmlfType ty) (toXmlfTerm body)
+    EUnroll body -> XMLF.XUnroll (toXmlfTerm body)
 
 data OccInfo = OccInfo
     { oiFreeVars :: Set.Set String

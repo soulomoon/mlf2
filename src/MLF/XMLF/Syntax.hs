@@ -38,5 +38,7 @@ data XmlfTerm
     | XApp XmlfTerm XmlfTerm
     | XTyAbs String XmlfType XmlfTerm
     | XTyInst XmlfTerm XmlfComp
+    | XRoll XmlfType XmlfTerm
+    | XUnroll XmlfTerm
     | XLet String XmlfTerm XmlfTerm
     deriving (Eq, Show)

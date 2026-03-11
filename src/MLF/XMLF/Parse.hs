@@ -42,7 +42,7 @@ import MLF.Parse.Common
     , symbol
     , upperIdent
     )
-import MLF.Parse.Type (TypeParserConfig(..), parseArrowTypeWith)
+import MLF.Parse.Type (TypeParserConfig (..), parseArrowTypeWith)
 
 newtype XmlfParseError = XmlfParseError (ParseErrorBundle String Void)
     deriving (Eq, Show)
@@ -74,6 +74,8 @@ reservedWords =
         [ "let"
         , "in"
         , "mu"
+        , "roll"
+        , "unroll"
         , "true"
         , "false"
         , "forall"
@@ -297,9 +299,25 @@ pTyAbsLegacy = do
 
 pApp :: Parser XmlfTerm
 pApp = do
-    f <- pPostfix
-    args <- many pPostfix
+    f <- pPrefix
+    args <- many pPrefix
     pure (foldl XApp f args)
+
+pPrefix :: Parser XmlfTerm
+pPrefix = choice [try pRoll, try pUnroll, pPostfix]
+
+pRoll :: Parser XmlfTerm
+pRoll = do
+    void (symbol "roll")
+    ty <- brackets pType
+    body <- pPrefix
+    pure (XRoll ty body)
+
+pUnroll :: Parser XmlfTerm
+pUnroll = do
+    void (symbol "unroll")
+    body <- pPrefix
+    pure (XUnroll body)
 
 pPostfix :: Parser XmlfTerm
 pPostfix = do

@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Changed
+- Added explicit public xMLF recursive-term surface forms `XRoll`/`XUnroll`, including canonical `roll[τ] e` / `unroll e` parser+pretty support, roundtrip coverage, rejection coverage, and internal XMLF display bridging for recursive runtime terms.
 - Added the recursive-types design artifacts and staged implementation roadmap under `tasks/todo/2026-03-11-recursive-types-design/` and `docs/plans/2026-03-11-recursive-types-roadmap.md`.
 - Added a docs-only recursive-types orchestration packet under `tasks/todo/2026-03-11-recursive-types-orchestration/`, including the milestone mechanism table, orchestrator prompt, and authoritative JSONL event log; also corrected the roadmap overview so it consistently lists milestones `M0` through `M7`.
 - Refreshed `roadmap.md` to match the current codebase layout (2026-03-11): documented the live public API split (`MLF.API` / `MLF.Pipeline` / `MLF.XMLF`), replaced stale deviation references with the `docs/thesis-*` audit surfaces, and expanded the module map to reflect the current solver/elaboration ownership boundaries.
