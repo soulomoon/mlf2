@@ -1133,6 +1133,21 @@
   - `/Volumes/src/mlf4/scripts/thesis-conformance-gate.sh` now runs matcher `Phase 7 theorem obligations` (min `2` examples).
 - This closes part of the remaining non-semantic formalization debt by making theorem proxies executable, while not claiming a mechanized proof.
 
+### 2026-03-12 Phase 7 recursive runtime forms (M2 internal-only)
+
+- Added internal-only elaborated runtime terms `ERoll ElabType ElabTerm` and `EUnroll ElabTerm` for iso-recursive runtime semantics.
+- Typechecking now enforces the M2 runtime rules inside `MLF.Elab.TypeCheck`:
+  - `ERoll (μa. τ) e : μa. τ` only when `e : τ[μa.τ / a]`.
+  - `EUnroll e : τ[μa.τ / a]` only when `e : μa. τ`.
+- Reduction now enforces call-by-value recursive runtime behavior inside `MLF.Elab.Reduce`:
+  - `ERoll` is a value exactly when its payload is a value.
+  - Reduction steps under `ERoll` / `EUnroll` until the payload is ready.
+  - `EUnroll (ERoll (μa. τ) v) → v`.
+- `MLF.Elab.Types` intentionally keeps these forms internal to M2: it does not lower or render `ERoll` / `EUnroll` as public/XMLF or pseudo-surface `roll[...]` / `unroll` syntax, and XMLF conversion rejects them if reached.
+- Added focused Phase 7 recursive-runtime theorem-obligation proxies in `test/TypeSoundnessSpec.hs`:
+  - positive correspondence: roll obligation ⇒ `ERoll` evidence, unroll obligation ⇒ `EUnroll` evidence, recursive-context obligation ⇒ recursive runtime-context evidence;
+  - negative correspondence: the property fails when any of those obligation tags is present without the matching term/context evidence.
+
 ### 2026-02-19 Formal obligations ledger (thesis Ch. 4–15) hard-fail enforcement
 
 - Added canonical obligations ledger source:

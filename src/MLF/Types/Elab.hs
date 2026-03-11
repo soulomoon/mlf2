@@ -296,6 +296,8 @@ data ElabTerm
     | ELet String ElabScheme ElabTerm ElabTerm
     | ETyAbs String (Maybe BoundType) ElabTerm  -- Λ(α ⩾ τ?). e (bounded type abstraction)
     | ETyInst ElabTerm Instantiation           -- e φ (instantiation)
+    | ERoll ElabType ElabTerm                  -- internal iso-recursive runtime constructor
+    | EUnroll ElabTerm                         -- internal iso-recursive runtime destructor
     deriving (Eq, Show)
 
 data ElabTermF a
@@ -306,6 +308,8 @@ data ElabTermF a
     | ELetF String ElabScheme a a
     | ETyAbsF String (Maybe BoundType) a
     | ETyInstF a Instantiation
+    | ERollF ElabType a
+    | EUnrollF a
     deriving (Eq, Show, Functor, Foldable, Traversable)
 
 type instance Base ElabTerm = ElabTermF
@@ -319,6 +323,8 @@ instance Recursive ElabTerm where
         ELet v sch rhs body -> ELetF v sch rhs body
         ETyAbs v mb body -> ETyAbsF v mb body
         ETyInst e inst -> ETyInstF e inst
+        ERoll ty body -> ERollF ty body
+        EUnroll body -> EUnrollF body
 
 instance Corecursive ElabTerm where
     embed term = case term of
@@ -329,3 +335,5 @@ instance Corecursive ElabTerm where
         ELetF v sch rhs body -> ELet v sch rhs body
         ETyAbsF v mb body -> ETyAbs v mb body
         ETyInstF e inst -> ETyInst e inst
+        ERollF ty body -> ERoll ty body
+        EUnrollF body -> EUnroll body

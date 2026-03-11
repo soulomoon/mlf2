@@ -178,6 +178,159 @@ spec = describe "Phase 7 theorem obligations" $ do
                                     (isLitBool term)
                             | otherwise -> property True  -- non-base types: skip
 
+    it "Recursive-runtime obligations carry matching ERoll/EUnroll/context evidence" $
+        property $
+            withMaxSuccess 120 $
+                forAll genRecursiveRuntimeWitness $ \witness ->
+                    checkCoverage $
+                        cover 25 (hasRuntimeObligation RollObligation witness) "roll-obligation" $
+                        cover 25 (hasRuntimeObligation UnrollObligation witness) "unroll-obligation" $
+                        cover 25 (hasRuntimeObligation RecursiveContextObligation witness) "recursive-context-obligation" $
+                        cover 20 (termHasRollEvidence (rrTerm witness)) "ERoll-evidence" $
+                        cover 20 (termHasUnrollEvidence (rrTerm witness)) "EUnroll-evidence" $
+                        cover 20 (hasRecursiveContextEvidence (rrContext witness)) "recursive-context-evidence" $
+                            counterexample
+                                ( "recursive-runtime obligation mismatch\nobligations: "
+                                    ++ show (rrObligations witness)
+                                    ++ "\nterm: "
+                                    ++ show (rrTerm witness)
+                                    ++ "\ncontext: "
+                                    ++ show (rrContext witness)
+                                )
+                                (recursiveRuntimeObligationsSatisfied witness)
+
+    it "Recursive-runtime obligation matcher fails when roll/unroll/context evidence is missing" $
+        property $
+            withMaxSuccess 90 $
+                forAll genBrokenRecursiveRuntimeWitness $ \witness ->
+                    checkCoverage $
+                        cover 20 (hasRuntimeObligation RollObligation witness) "missing-roll-obligation" $
+                        cover 20 (hasRuntimeObligation UnrollObligation witness) "missing-unroll-obligation" $
+                        cover 20 (hasRuntimeObligation RecursiveContextObligation witness) "missing-context-obligation" $
+                        cover 20 (not (termHasRollEvidence (rrTerm witness))) "missing-ERoll-evidence" $
+                        cover 20 (not (termHasUnrollEvidence (rrTerm witness))) "missing-EUnroll-evidence" $
+                        cover 20 (not (hasRecursiveContextEvidence (rrContext witness))) "missing-recursive-context-evidence" $
+                            counterexample
+                                ( "recursive-runtime obligation unexpectedly passed\nobligations: "
+                                    ++ show (rrObligations witness)
+                                    ++ "\nterm: "
+                                    ++ show (rrTerm witness)
+                                    ++ "\ncontext: "
+                                    ++ show (rrContext witness)
+                                )
+                                (recursiveRuntimeObligationsSatisfied witness === False)
+
+data RecursiveRuntimeObligation
+    = RollObligation
+    | UnrollObligation
+    | RecursiveContextObligation
+    deriving (Eq, Show)
+
+data RuntimeContextEvidence
+    = RuntimeCtxRoll ElabType
+    | RuntimeCtxUnroll
+    deriving (Eq, Show)
+
+data RecursiveRuntimeWitness = RecursiveRuntimeWitness
+    { rrObligations :: [RecursiveRuntimeObligation]
+    , rrTerm :: ElabTerm
+    , rrContext :: [RuntimeContextEvidence]
+    }
+    deriving (Eq, Show)
+
+recursiveRuntimeTy :: ElabType
+recursiveRuntimeTy = TMu "self" (TArrow (TVar "self") intTy)
+
+recursiveRuntimeBody :: ElabTerm
+recursiveRuntimeBody = ELam "self" recursiveRuntimeTy (ELit (LInt 1))
+
+recursiveRollTerm :: ElabTerm
+recursiveRollTerm = ERoll recursiveRuntimeTy recursiveRuntimeBody
+
+recursiveUnrollTerm :: ElabTerm
+recursiveUnrollTerm = EUnroll recursiveRollTerm
+
+genRecursiveRuntimeWitness :: Gen RecursiveRuntimeWitness
+genRecursiveRuntimeWitness =
+    elements
+        [ RecursiveRuntimeWitness
+            [RollObligation]
+            recursiveRollTerm
+            []
+        , RecursiveRuntimeWitness
+            [UnrollObligation]
+            recursiveUnrollTerm
+            []
+        , RecursiveRuntimeWitness
+            [RecursiveContextObligation]
+            recursiveRollTerm
+            [RuntimeCtxUnroll]
+        , RecursiveRuntimeWitness
+            [RollObligation, UnrollObligation, RecursiveContextObligation]
+            recursiveUnrollTerm
+            [RuntimeCtxRoll recursiveRuntimeTy, RuntimeCtxUnroll]
+        ]
+
+genBrokenRecursiveRuntimeWitness :: Gen RecursiveRuntimeWitness
+genBrokenRecursiveRuntimeWitness =
+    elements
+        [ RecursiveRuntimeWitness
+            [RollObligation]
+            recursiveRuntimeBody
+            []
+        , RecursiveRuntimeWitness
+            [UnrollObligation]
+            recursiveRollTerm
+            []
+        , RecursiveRuntimeWitness
+            [RecursiveContextObligation]
+            recursiveRollTerm
+            []
+        ]
+
+hasRuntimeObligation :: RecursiveRuntimeObligation -> RecursiveRuntimeWitness -> Bool
+hasRuntimeObligation obligation witness = obligation `elem` rrObligations witness
+
+recursiveRuntimeObligationsSatisfied :: RecursiveRuntimeWitness -> Bool
+recursiveRuntimeObligationsSatisfied witness =
+    all obligationSatisfied (rrObligations witness)
+  where
+    obligationSatisfied obligation = case obligation of
+        RollObligation -> termHasRollEvidence (rrTerm witness)
+        UnrollObligation -> termHasUnrollEvidence (rrTerm witness)
+        RecursiveContextObligation -> hasRecursiveContextEvidence (rrContext witness)
+
+termHasRollEvidence :: ElabTerm -> Bool
+termHasRollEvidence term = case term of
+    EVar _ -> False
+    ELit _ -> False
+    ELam _ _ body -> termHasRollEvidence body
+    EApp f a -> termHasRollEvidence f || termHasRollEvidence a
+    ELet _ _ rhs body -> termHasRollEvidence rhs || termHasRollEvidence body
+    ETyAbs _ _ body -> termHasRollEvidence body
+    ETyInst e _ -> termHasRollEvidence e
+    ERoll _ _ -> True
+    EUnroll body -> termHasRollEvidence body
+
+termHasUnrollEvidence :: ElabTerm -> Bool
+termHasUnrollEvidence term = case term of
+    EVar _ -> False
+    ELit _ -> False
+    ELam _ _ body -> termHasUnrollEvidence body
+    EApp f a -> termHasUnrollEvidence f || termHasUnrollEvidence a
+    ELet _ _ rhs body -> termHasUnrollEvidence rhs || termHasUnrollEvidence body
+    ETyAbs _ _ body -> termHasUnrollEvidence body
+    ETyInst e _ -> termHasUnrollEvidence e
+    ERoll _ body -> termHasUnrollEvidence body
+    EUnroll _ -> True
+
+hasRecursiveContextEvidence :: [RuntimeContextEvidence] -> Bool
+hasRecursiveContextEvidence = any isRecursiveContextFrame
+  where
+    isRecursiveContextFrame evidence = case evidence of
+        RuntimeCtxRoll _ -> True
+        RuntimeCtxUnroll -> True
+
 -- ---------------------------------------------------------------------------
 -- Sized typed-by-construction generator
 -- ---------------------------------------------------------------------------
@@ -380,6 +533,8 @@ freeTermVars term = case term of
         Set.union (freeTermVars rhs) (Set.delete v (freeTermVars body))
     ETyAbs _ _ body -> freeTermVars body
     ETyInst e _ -> freeTermVars e
+    ERoll _ body -> freeTermVars body
+    EUnroll body -> freeTermVars body
 
 -- | Cover-label predicates for polymorphic constructor families.
 isETyAbsBounded :: ElabTerm -> Bool

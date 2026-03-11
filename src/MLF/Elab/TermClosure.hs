@@ -130,6 +130,10 @@ renameTermTypeVars renames0 = go renames0
             in ETyAbs v mbBound' (go renamesBody body)
         ETyInst e inst ->
             ETyInst (go renames e) (renameInst renames inst)
+        ERoll ty body ->
+            ERoll (applyTypeRenames renames ty) (go renames body)
+        EUnroll body ->
+            EUnroll (go renames body)
 
 alignTermTypeVarsToScheme :: ElabScheme -> ElabTerm -> Maybe ElabTerm
 alignTermTypeVarsToScheme sch term =
@@ -210,6 +214,8 @@ typeAbsNamesInTerm = cata alg
         ELetF _ _ rhs body -> Set.union rhs body
         ETyAbsF v _ body -> Set.insert v body
         ETyInstF e _ -> e
+        ERollF _ body -> body
+        EUnrollF body -> body
 
 substInTerm :: IntMap.IntMap String -> ElabTerm -> ElabTerm
 substInTerm subst = cata alg
@@ -222,6 +228,8 @@ substInTerm subst = cata alg
         ELetF v sch rhs body -> ELet v (substInScheme subst sch) rhs body
         ETyAbsF v b body -> ETyAbs v (fmap (substInTy subst) b) body
         ETyInstF e i -> ETyInst e (substInInst subst i)
+        ERollF ty body -> ERoll (substInTy subst ty) body
+        EUnrollF body -> EUnroll body
 
 substInTy :: IntMap.IntMap String -> Ty v -> Ty v
 substInTy subst = cataIx alg
@@ -233,6 +241,7 @@ substInTy subst = cataIx alg
         TConIF c args -> TCon c args
         TBaseIF b -> TBase b
         TForallIF v mb body -> TForall v mb body
+        TMuIF v body -> TMu v body
         TBottomIF -> TBottom
 
     applySubst name =
