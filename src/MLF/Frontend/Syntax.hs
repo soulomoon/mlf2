@@ -40,11 +40,13 @@ module MLF.Frontend.Syntax (
     pattern NSTBase,
     pattern NSTCon,
     pattern NSTForall,
+    pattern NSTMu,
     pattern NSTBottom,
     pattern SBArrow,
     pattern SBBase,
     pattern SBCon,
     pattern SBForall,
+    pattern SBMu,
     pattern SBBottom,
     -- * Metadata
     AnnotatedExpr (..),
@@ -163,6 +165,7 @@ data SrcTy (n :: SrcNorm) (v :: SrcTopVar) where
     STBase :: String -> SrcTy n v
     STCon :: String -> NonEmpty (SrcTy n 'TopVarAllowed) -> SrcTy n v
     STForall :: String -> Maybe (SrcBound n) -> SrcTy n 'TopVarAllowed -> SrcTy n v
+    STMu :: String -> SrcTy n 'TopVarAllowed -> SrcTy n v
     STBottom :: SrcTy n v
 
 deriving instance Eq (SrcTy n v)
@@ -198,6 +201,9 @@ pattern NSTForall v mb body <- STForall v (fmap unNormBound -> mb) body
   where
     NSTForall v mb body = STForall v (fmap mkNormBound mb) body
 
+pattern NSTMu :: String -> NormSrcType -> NormSrcType
+pattern NSTMu v body = STMu v body
+
 pattern NSTBottom :: NormSrcType
 pattern NSTBottom = STBottom
 
@@ -215,11 +221,14 @@ pattern SBForall v mb body <- STForall v (fmap unNormBound -> mb) body
   where
     SBForall v mb body = STForall v (fmap mkNormBound mb) body
 
+pattern SBMu :: String -> NormSrcType -> StructBound
+pattern SBMu v body = STMu v body
+
 pattern SBBottom :: StructBound
 pattern SBBottom = STBottom
 
-{-# COMPLETE NSTVar, NSTArrow, NSTBase, NSTCon, NSTForall, NSTBottom #-}
-{-# COMPLETE SBArrow, SBBase, SBCon, SBForall, SBBottom #-}
+{-# COMPLETE NSTVar, NSTArrow, NSTBase, NSTCon, NSTForall, NSTMu, NSTBottom #-}
+{-# COMPLETE SBArrow, SBBase, SBCon, SBForall, SBMu, SBBottom #-}
 
 data SrcTypeF a
     = STVarF String
@@ -227,6 +236,7 @@ data SrcTypeF a
     | STBaseF String
     | STConF String (NonEmpty a)
     | STForallF String (Maybe a) a
+    | STMuF String a
     | STBottomF
     deriving (Eq, Show, Functor, Foldable, Traversable)
 
@@ -239,6 +249,7 @@ instance Recursive (SrcTy 'RawN 'TopVarAllowed) where
         STBase b -> STBaseF b
         STCon c args -> STConF c args
         STForall v mb body -> STForallF v (fmap unSrcBound mb) body
+        STMu v body -> STMuF v body
         STBottom -> STBottomF
 
 instance Corecursive (SrcTy 'RawN 'TopVarAllowed) where
@@ -248,6 +259,7 @@ instance Corecursive (SrcTy 'RawN 'TopVarAllowed) where
         STBaseF b -> STBase b
         STConF c args -> STCon c args
         STForallF v mb body -> STForall v (fmap mkSrcBound mb) body
+        STMuF v body -> STMu v body
         STBottomF -> STBottom
 
 data ExprStage = Surface | Core

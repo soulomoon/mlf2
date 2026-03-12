@@ -37,6 +37,14 @@ spec = describe "Frontend eMLF pretty printer" $ do
         let ty = STForall "a" (Just (mkSrcBound (STBase "Int"))) (STArrow (STVar "a") (STVar "a"))
         prettyEmlfType ty `shouldBe` "∀(a ⩾ Int). a -> a"
 
+    it "prints recursive types canonically with unicode mu" $ do
+        let ty = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+        prettyEmlfType ty `shouldBe` "μa. a -> Int"
+
+    it "prints canonical recursive annotation syntax" $ do
+        let expr = EAnn (EVar "x") (STMu "a" (STCon "List" (STVar "a" :| [])))
+        prettyEmlfExpr expr `shouldBe` "(x : μa. List a)"
+
     it "roundtrips expression parse(pretty(expr))" $ do
         let expr =
                 ELet "f"
@@ -47,3 +55,11 @@ spec = describe "Frontend eMLF pretty printer" $ do
     it "roundtrips type parse(pretty(type))" $ do
         let ty = STForall "a" Nothing (STCon "List" (STVar "a" :| []))
         parseRawEmlfType (prettyEmlfType ty) `shouldBe` Right ty
+
+    it "roundtrips recursive type parse(pretty(type))" $ do
+        let ty = STMu "a" (STCon "List" (STVar "a" :| []))
+        parseRawEmlfType (prettyEmlfType ty) `shouldBe` Right ty
+
+    it "roundtrips recursive expression parse(pretty(expr))" $ do
+        let expr = EAnn (EVar "x") (STMu "a" (STArrow (STVar "a") (STBase "Int")))
+        parseRawEmlfExpr (prettyEmlfExpr expr) `shouldBe` Right expr

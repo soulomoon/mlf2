@@ -55,7 +55,7 @@ import MLF.Parse.Common
     , symbol
     , upperIdent
     )
-import MLF.Parse.Type (TypeParserConfig(..), parseTypeWith)
+import MLF.Parse.Type (TypeParserConfig(..), parseArrowTypeWith)
 
 newtype EmlfParseError = EmlfParseError (ParseErrorBundle String Void)
     deriving (Eq, Show)
@@ -127,10 +127,14 @@ reservedWords =
     Set.fromList
         [ "let"
         , "in"
+        , "mu"
         , "true"
         , "false"
         , "forall"
         ]
+
+muTok :: Parser ()
+muTok = void (symbol "μ" <|> symbol "mu")
 
 frontendTypeConfig :: TypeParserConfig SrcType (Maybe SrcType)
 frontendTypeConfig =
@@ -164,7 +168,19 @@ frontendTypeConfig =
         }
 
 pType :: Parser SrcType
-pType = parseTypeWith frontendTypeConfig
+pType = try pFrontendForall <|> try pFrontendMu <|> parseArrowTypeWith frontendTypeConfig pType
+  where
+    pFrontendForall = do
+        forallTok
+        binders <- tpcForallBinders frontendTypeConfig pType
+        body <- pType
+        pure (foldr (\(v, bnd) acc -> tpcMkForall frontendTypeConfig v bnd acc) body binders)
+
+    pFrontendMu = do
+        muTok
+        v <- lowerIdent reservedWords
+        void (symbol ".")
+        STMu v <$> pType
 
 pExpr :: Parser SurfaceExpr
 pExpr = choice [try pLet, try pLambda, pAnnOrApp]

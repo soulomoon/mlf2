@@ -32,6 +32,8 @@ prettyEmlfType = goType 0
                 binds = (v, fmap unSrcBound mb) : tailBinds
                 bindStr = unwords (map prettyBind binds)
             in paren (p > 0) ("∀" ++ bindStr ++ ". " ++ goType 0 tailBody)
+        STMu v body ->
+            paren (p > 0) ("μ" ++ v ++ ". " ++ goType 0 body)
 
     goArg :: Int -> SrcTy n v -> String
     goArg p ty = case ty of
