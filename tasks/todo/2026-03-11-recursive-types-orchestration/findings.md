@@ -231,3 +231,9 @@
 - `COMPLETED` is now explicitly verifier-owned packet truth on current `master`; the prompt no longer allows terminal completion to be inferred from the mechanism table alone when prose drifts ahead of the log.
 - Retry exhaustion now distinguishes `MAXIMUMRETRY` from genuine `FAILED`: hitting the 20-attempt per-round ceiling defaults to `MAXIMUMRETRY` unless delegated verifier/recovery evidence proves a stronger failure condition.
 - The integrator/verifier path now has an explicit blocked-integration branch: `integration_result = NO` preserves the committed branch/worktree, keeps `master` unchanged, and still routes milestone/completion/blockage decisions through a fresh verifier on current `master`.
+
+## 2026-03-12T21:01:20Z — Authority resync after repo drift
+- Read-only verification confirms the live repo has moved beyond the last logged external-recovery state: `master` and `HEAD` are now `8a7e437af3f1e4287673c19536966a92c2333a7b`, not `0d38bb1b6c88903a44c5b051ab96d57eabb88d23`.
+- The preserved M5 artifact still exists exactly where the verifier left it: branch `codex/rt-r06-m5-surface-mu` and worktree `/Volumes/src/mlf4-worktrees/rt-r06-m5-surface-mu-a1` both still point to commit `4fccce32d382f06a645eb6a19bc48c3a22c5f3e8`.
+- This drift is packet-authority relevant even though it is not merged-history contamination: a new authority-sync event is required because the prior packet still described `master` as `0d38...`, while the live repo has advanced to `8a7e...`.
+- `.git` metadata writability is still the operational blocker. Fresh lock-like file probes in `/Volumes/src/mlf4/.git`, `/Volumes/src/mlf4/.git/logs`, and `/Volumes/src/mlf4/.git/refs/heads` still fail with `Operation not permitted`, so any lawful retry path still begins with another fresh external-recovery `authority_check` from current `master` after recovery is attempted again.

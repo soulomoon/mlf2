@@ -29,6 +29,14 @@
 
 Each milestone has a gate. Do not start the next milestone until the current gate is green.
 
+## Current Status
+
+- Current `master`: `9e1214b485527b8064dbe640c3350725c1085d15`
+- `M0`, `M1`, `M2`, and `M3` are closed `YES` on `master`.
+- Current open anchor: `M4 — Add contractiveness validation`
+- Round 5 Attempt 1 on branch `codex/rt-r05-m4-contractiveness` in worktree `/Volumes/src/mlf4-worktrees/rt-r05-m4-contractiveness-a1` already ended at review `NO` because the diff widened the public library with unnecessary `MLF.TestSupport.RecursiveTypes` surface.
+- Next safe action: stay inside Round 5 on `M4` and run a fresh `PlannerDelta` retry; do not restart Round 5.
+
 ---
 
 ### Task 1: M0 — Freeze semantics and extension boundary
