@@ -67,6 +67,11 @@ spec = describe "Frontend eMLF parser" $ do
             let ty = STForall "a" Nothing (STArrow (STVar "a") (STVar "a"))
             parseRawEmlfExpr "λ(x : ∀a. a -> a) x" `shouldBe` Right (ELamAnn "x" ty (EVar "x"))
 
+        it "parses recursive annotations with ascii mu syntax" $ do
+            let ty = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+            parseRawEmlfExpr "λ(x : mu a. a -> Int) x"
+                `shouldBe` Right (ELamAnn "x" ty (EVar "x"))
+
         it "parses let-expression" $
             parseRawEmlfExpr "let id = λ(x) x in id" `shouldBe` Right (ELet "id" (ELam "x" (EVar "x")) (EVar "id"))
 
@@ -79,6 +84,9 @@ spec = describe "Frontend eMLF parser" $ do
 
         it "rejects malformed let syntax" $
             parseRawEmlfExpr "let x = in x" `shouldSatisfy` isLeft
+
+        it "treats mu as a reserved frontend keyword" $
+            parseRawEmlfExpr "let mu = x in mu" `shouldSatisfy` isLeft
 
     describe "raw types" $ do
         it "parses raw forall binder and keeps raw alias type" $
@@ -98,6 +106,10 @@ spec = describe "Frontend eMLF parser" $ do
 
         it "parses constructor application" $
             parseRawEmlfType "List Int" `shouldBe` Right (STCon "List" (STBase "Int" :| []))
+
+        it "parses unicode mu recursive types" $
+            parseRawEmlfType "μa. List a"
+                `shouldBe` Right (STMu "a" (STCon "List" (STVar "a" :| [])))
 
         it "rejects malformed forall binders" $
             parseRawEmlfType "∀(a) a" `shouldSatisfy` isLeft
@@ -121,6 +133,10 @@ spec = describe "Frontend eMLF parser" $ do
         it "inlines alias bound during normalization" $
             parseNormEmlfType "∀(b ⩾ a). b"
                 `shouldBe` Right (STVar "a")
+
+        it "normalizes alias bounds nested under recursive wrappers" $
+            parseNormEmlfType "μa. ∀(b ⩾ a). b"
+                `shouldBe` Right (STMu "a" (STVar "a"))
 
         it "rejects self-bound forall" $
             parseNormEmlfType "∀(a ⩾ a). a" `shouldSatisfy` isNormErr
@@ -149,6 +165,10 @@ spec = describe "Frontend eMLF parser" $ do
 
         it "rejects expression with self-bound annotation" $
             parseNormEmlfExpr "(x : ∀(a ⩾ a). a)" `shouldSatisfy` isNormExprErr
+
+        it "normalizes recursive annotations in expressions" $
+            parseNormEmlfExpr "(x : μa. ∀(b ⩾ a). b)"
+                `shouldBe` Right (EAnn (EVar "x") (STMu "a" (STVar "a")))
 
         it "parseNormEmlfExpr output feeds runPipelineElab normalized-only API" $ do
             let input = "let id = λ(x) x in let a = id 1 in id 2"
