@@ -372,6 +372,7 @@ data TypeCheckError
     = TCUnboundVar String
     | TCExpectedArrow ElabType
     | TCExpectedRecursive ElabType
+    | TCNonContractiveRecursiveType ElabType
     | TCArgumentMismatch ElabType ElabType
     | TCRollBodyMismatch ElabType ElabType
     | TCInstantiationError Instantiation ElabType String

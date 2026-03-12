@@ -14,6 +14,7 @@ import MLF.Elab.Inst (InstEvalSpec(..), evalInstantiationWith, renameInstBound, 
 import MLF.Elab.Types
 import MLF.Reify.TypeOps
     ( alphaEqType
+    , firstNonContractiveRecursiveType
     , freeTypeVarsType
     , matchType
     , substTypeCapture
@@ -40,6 +41,7 @@ typeCheckWithEnv env term = case term of
             Nothing -> Left (TCUnboundVar v)
     ELit lit -> Right (litType lit)
     ELam v ty body -> do
+        ensureContractiveType ty
         let env' = env { termEnv = Map.insert v ty (termEnv env) }
         bodyTy <- typeCheckWithEnv env' body
         Right (TArrow ty bodyTy)
@@ -53,6 +55,7 @@ typeCheckWithEnv env term = case term of
                     else Left (TCArgumentMismatch argTy aTy)
             _ -> Left (TCExpectedArrow fTy)
     ELet v sch rhs body -> do
+        ensureContractiveType (schemeToType sch)
         rhsTy <- typeCheckWithEnv env rhs
         let schTy = schemeToType sch
         if letSchemeAccepts rhsTy schTy
@@ -61,6 +64,7 @@ typeCheckWithEnv env term = case term of
                 typeCheckWithEnv env' body
             else Left (TCLetTypeMismatch rhsTy schTy)
     ETyAbs v mbBound body -> do
+        maybe (Right ()) (ensureContractiveType . tyToElab) mbBound
         let boundTy = boundType mbBound
         if v `Set.member` freeTypeVarsType boundTy
             then Left (TCTypeAbsBoundMentionsVar v)
@@ -71,9 +75,11 @@ typeCheckWithEnv env term = case term of
                     bodyTy <- typeCheckWithEnv env' body
                     Right (TForall v mbBound bodyTy)
     ETyInst e inst -> do
+        ensureContractiveInstantiation inst
         ty <- typeCheckWithEnv env e
         checkInstantiation env ty inst
-    ERoll recursiveTy body ->
+    ERoll recursiveTy body -> do
+        ensureContractiveType recursiveTy
         case recursiveTy of
             TMu name unfoldedBody -> do
                 bodyTy <- typeCheckWithEnv env body
@@ -87,6 +93,23 @@ typeCheckWithEnv env term = case term of
         case ty of
             TMu name body -> Right (substTypeCapture name ty body)
             _ -> Left (TCExpectedRecursive ty)
+
+ensureContractiveType :: ElabType -> Either TypeCheckError ()
+ensureContractiveType ty = case firstNonContractiveRecursiveType ty of
+    Just badTy -> Left (TCNonContractiveRecursiveType badTy)
+    Nothing -> Right ()
+
+ensureContractiveInstantiation :: Instantiation -> Either TypeCheckError ()
+ensureContractiveInstantiation inst = case inst of
+    InstId -> Right ()
+    InstApp ty -> ensureContractiveType ty
+    InstBot ty -> ensureContractiveType ty
+    InstIntro -> Right ()
+    InstElim -> Right ()
+    InstAbstr _ -> Right ()
+    InstUnder _ inner -> ensureContractiveInstantiation inner
+    InstInside inner -> ensureContractiveInstantiation inner
+    InstSeq a b -> ensureContractiveInstantiation a >> ensureContractiveInstantiation b
 
 checkInstantiation :: Env -> ElabType -> Instantiation -> Either TypeCheckError ElabType
 checkInstantiation env ty inst = snd <$> evalInstantiationWith spec inst (0, env, ty)

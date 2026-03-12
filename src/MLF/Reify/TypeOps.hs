@@ -15,6 +15,7 @@ module MLF.Reify.TypeOps (
     freshTypeName,
     freshTypeNameFromCounter,
     alphaEqType,
+    firstNonContractiveRecursiveType,
     matchType,
     parseNameId,
     resolveBaseBoundForInstConstraint,
@@ -25,6 +26,7 @@ module MLF.Reify.TypeOps (
     inlineAliasBoundsWithBySeen
 ) where
 
+import Control.Applicative ((<|>))
 import qualified Data.IntSet as IntSet
 import Data.Foldable (toList)
 import qualified Data.Map.Strict as Map
@@ -244,6 +246,70 @@ freshTypeNameFromCounter n used =
 
 renameTypeVar :: String -> String -> ElabType -> ElabType
 renameTypeVar old new = substTypeSimple old (TVar new)
+
+-- | Return the first explicit recursive type that violates the M4 v1
+-- contractiveness policy.
+--
+-- Contractive occurrences must be guarded by an arrow or constructor node.
+-- `forall` binders do not introduce a guard, but they still shadow the
+-- recursive variable when names coincide.
+firstNonContractiveRecursiveType :: ElabType -> Maybe ElabType
+firstNonContractiveRecursiveType = goType
+  where
+    goType :: ElabType -> Maybe ElabType
+    goType ty = case ty of
+        TVar _ -> Nothing
+        TArrow a b -> goType a <|> goType b
+        TCon _ args -> foldr (\arg acc -> goType arg <|> acc) Nothing args
+        TBase _ -> Nothing
+        TBottom -> Nothing
+        TForall _ mb body -> maybe Nothing goBound mb <|> goType body
+        TMu v body
+            | muBodyContractive v body -> goType body
+            | otherwise -> Just ty
+
+    goBound :: BoundType -> Maybe ElabType
+    goBound bound = case bound of
+        TArrow a b -> goType a <|> goType b
+        TCon _ args -> foldr (\arg acc -> goType arg <|> acc) Nothing args
+        TBase _ -> Nothing
+        TBottom -> Nothing
+        TForall _ mb body -> maybe Nothing goBound mb <|> goType body
+        TMu v body
+            | muBodyContractive v body -> goType body
+            | otherwise -> Just (tyToElab bound)
+
+    muBodyContractive :: String -> ElabType -> Bool
+    muBodyContractive needle = bodyType False False
+      where
+        bodyType :: Bool -> Bool -> ElabType -> Bool
+        bodyType guarded shadowed ty = case ty of
+            TVar v -> shadowed || v /= needle || guarded
+            TArrow a b -> bodyType True shadowed a && bodyType True shadowed b
+            TCon _ args -> all (bodyType True shadowed) args
+            TBase _ -> True
+            TBottom -> True
+            TForall v mb body ->
+                let shadowed' = shadowed || v == needle
+                    boundOk = maybe True (bodyBound guarded shadowed') mb
+                in boundOk && bodyType guarded shadowed' body
+            TMu v body ->
+                let shadowed' = shadowed || v == needle
+                in bodyType guarded shadowed' body
+
+        bodyBound :: Bool -> Bool -> BoundType -> Bool
+        bodyBound guarded shadowed bound = case bound of
+            TArrow a b -> bodyType True shadowed a && bodyType True shadowed b
+            TCon _ args -> all (bodyType True shadowed) args
+            TBase _ -> True
+            TBottom -> True
+            TForall v mb body ->
+                let shadowed' = shadowed || v == needle
+                    boundOk = maybe True (bodyBound guarded shadowed') mb
+                in boundOk && bodyType guarded shadowed' body
+            TMu v body ->
+                let shadowed' = shadowed || v == needle
+                in bodyType guarded shadowed' body
 
 alphaEqType :: ElabType -> ElabType -> Bool
 alphaEqType = go Map.empty Map.empty

@@ -31,7 +31,7 @@ module MLF.Pipeline
     , ElabTerm
     , Instantiation (..)
     , ElabError (..)
-    , TypeCheckError (..)
+    , TypeCheckError
     , Pretty (..)
     , schemeFromType
     -- * Pipeline configuration
@@ -66,7 +66,7 @@ import MLF.Elab.Pipeline
     , ElabType
     , Ty (..)
     , Instantiation (..)
-    , TypeCheckError (..)
+    , TypeCheckError
     , PipelineConfig(..)
     , PipelineError(..)
     , Pretty (..)
