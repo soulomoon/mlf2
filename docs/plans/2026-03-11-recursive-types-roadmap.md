@@ -53,19 +53,6 @@ Write down the non-negotiable semantic choices before code changes begin.
 - A written semantic note exists and is agreed upon.
 - Everyone implementing the feature can answer: “Are recursive types explicit? Are they iso-recursive? Do we unfold during equality?”
 
-#### M0 Acceptance / Agreement Note (2026-03-11)
-
-The recursive-types campaign accepts and freezes the M0 semantic baseline as follows:
-
-- recursive types are an explicit **iso-recursive** extension, not an equi-recursive one;
-- the new type former is `μ a. τ`;
-- the new term forms are `roll[μ a. τ] e` and `unroll e`;
-- `alphaEqType` remains structural/α-only and must not implicitly unfold `μ`;
-- v1 requires contractiveness; and
-- v1 must not represent recursive types as cyclic constraint graphs.
-
-With this acceptance note and the existing design evidence in `tasks/todo/2026-03-11-recursive-types-design/findings.md`, **M0 is closed/completed** for this roadmap. Later milestones may build on this baseline, but they must not relax or reinterpret it unless a future roadmap update explicitly reopens `M0`.
-
 ---
 
 ### Task 2: M1 — Extend explicit type ASTs only
