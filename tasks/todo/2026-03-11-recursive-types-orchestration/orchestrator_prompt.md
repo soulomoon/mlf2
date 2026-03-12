@@ -25,7 +25,7 @@ Authoritative packet rules:
 - Unlogged live worktree, branch, or task-folder state is never adoptable evidence. Recover it only through the delegated Authority Recovery Lane.
 
 Current authoritative state:
-- `master` base: `0d38bb1b6c88903a44c5b051ab96d57eabb88d23`
+- `master` base: `8a7e437af3f1e4287673c19536966a92c2333a7b`
 - `M0 = YES`
 - `M1 = YES`
 - `M2 = YES`
@@ -34,15 +34,16 @@ Current authoritative state:
 - `M5 = NO`
 - Current anchor milestone: `M5 — Surface eMLF syntax exposure`
 - Round 5 Attempt 2 is the last authoritative implementation attempt and ended with verifier-owned `milestone_gate = YES` for `M4`
-- The latest logged authority audit is the user-directed external-recovery continuation check for Round 6 Attempt 1, and it returned `authority_gate = NO`
-- The latest logged repo-state snapshot is the Round 6 Attempt 1 `research_result`: `branch`/`HEAD`/`master` all match `0d38bb1b6c88903a44c5b051ab96d57eabb88d23`, dirty state is limited to roadmap/orchestration artifacts, and no orphan round state remains
+- The latest logged authority audit is the Round 6 Attempt 1 authority-resync check, and it returned `authority_gate = NO` while recording that live `master` advanced from the prior packet anchor `0d38bb1b6c88903a44c5b051ab96d57eabb88d23` to `8a7e437af3f1e4287673c19536966a92c2333a7b`
+- The latest logged repo-state snapshot remains the earlier Round 6 Attempt 1 `research_result`: at that time `branch`/`HEAD`/`master` all matched `0d38bb1b6c88903a44c5b051ab96d57eabb88d23`, dirty state was limited to roadmap/orchestration artifacts, and no orphan round state remained
 - The latest logged planner result is the Round 6 Attempt 1 `planner_round_plan`, which selected the public-surface-only `STMu` slice plus an explicit Phase 1 rejection boundary
 - The latest logged launch result is the Round 6 Attempt 1 `round_started`: branch `codex/rt-r06-m5-surface-mu` and worktree `/Volumes/src/mlf4-worktrees/rt-r06-m5-surface-mu-a1` launched cleanly from `0d38bb1b6c88903a44c5b051ab96d57eabb88d23`, `HEAD` stayed on that base SHA, and the intentionally dirty root docs remained preserved
-- Current packet authority is intact: no orphan round state is detected, `master_contaminated = NO`, and `merged_history_contaminated = NO`
+- The latest authority resync records no orphan round state and no merged-history contamination, but it also records `packet_matches_repo_state = NO` until this divergence is reconciled operationally: current `master` is `8a7e437af3f1e4287673c19536966a92c2333a7b`, preserved branch artifact `codex/rt-r06-m5-surface-mu` still points to `4fccce32d382f06a645eb6a19bc48c3a22c5f3e8`, and `.git` metadata writability remains `NO`
 - Round 6 repo-state research, planning, launch, implementation, review, QA, integration attempt, and verifier-owned blockage decision are complete; the authoritative packet now records `review_gate = YES`, `qa_gate = YES`, `integration_result = NO`, `milestone_gate = NO`, `blockage_gate = YES`, and `terminal_status = FAILED` for Round 6 Attempt 1 while `M5` remains `NO`
-- The approved M5 slice exists as branch commit `4fccce32d382f06a645eb6a19bc48c3a22c5f3e8` on `codex/rt-r06-m5-surface-mu`, but `master` stayed unchanged at `0d38bb1b6c88903a44c5b051ab96d57eabb88d23` because environment-level git metadata lockfile creation in `/Volumes/src/mlf4/.git` was denied
-- The user-directed `continue` path has already been exercised lawfully: a fresh delegated `.git` writability probe still failed in `/Volumes/src/mlf4/.git`, `/Volumes/src/mlf4/.git/logs`, and `/Volumes/src/mlf4/.git/refs/heads` with `Operation not permitted`, so no integration retry, planner restart, or new round work is currently authorized
-- The current run remains terminal `FAILED` for environment reasons rather than code-quality reasons; `M5` remains the next anchor milestone for a future resumed run once `/Volumes/src/mlf4/.git` lockfile creation works again and a fresh external-recovery authority check returns `YES`
+- The approved M5 slice still exists as branch commit `4fccce32d382f06a645eb6a19bc48c3a22c5f3e8` on `codex/rt-r06-m5-surface-mu`, but it is still not on current `master`; the current root checkout is now `8a7e437af3f1e4287673c19536966a92c2333a7b`
+- `.git` metadata writability is still `NO`: fresh lock-like file probes in `/Volumes/src/mlf4/.git`, `/Volumes/src/mlf4/.git/logs`, and `/Volumes/src/mlf4/.git/refs/heads` still fail with `Operation not permitted`
+- No integration retry, planner restart, or new round work is currently authorized; the next immediate step is a fresh external-recovery `authority_check` from current `master` `8a7e437af3f1e4287673c19536966a92c2333a7b` only after `.git` metadata recovery is attempted again
+- The current run remains terminal `FAILED` for environment reasons rather than code-quality reasons; `M5` remains the next anchor milestone for a future resumed run
 
 Hard constraints:
 - The orchestrator is not allowed to perform repo work directly.
