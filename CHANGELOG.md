@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Changed
+- Added explicit M4 contractiveness validation for elaborated recursive types in Phase 7: `typeCheck` now rejects non-contractive `μ` types across term annotations, let schemes, type-abstraction bounds, instantiation arguments, and `ERoll`, while keeping the v1 policy conservative (`forall` does not count as a guard, arrows/constructors do).
 - Added explicit public xMLF recursive-term surface forms `XRoll`/`XUnroll`, including canonical `roll[τ] e` / `unroll e` parser+pretty support, roundtrip coverage, rejection coverage, and internal XMLF display bridging for recursive runtime terms.
 - Added the recursive-types design artifacts and staged implementation roadmap under `tasks/todo/2026-03-11-recursive-types-design/` and `docs/plans/2026-03-11-recursive-types-roadmap.md`.
 - Added a docs-only recursive-types orchestration packet under `tasks/todo/2026-03-11-recursive-types-orchestration/`, including the milestone mechanism table, orchestrator prompt, and authoritative JSONL event log; also corrected the roadmap overview so it consistently lists milestones `M0` through `M7`.

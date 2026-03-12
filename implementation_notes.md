@@ -1148,6 +1148,24 @@
   - positive correspondence: roll obligation ⇒ `ERoll` evidence, unroll obligation ⇒ `EUnroll` evidence, recursive-context obligation ⇒ recursive runtime-context evidence;
   - negative correspondence: the property fails when any of those obligation tags is present without the matching term/context evidence.
 
+### 2026-03-12 Phase 7 contractiveness validation (M4 explicit-layer only)
+
+- Added a shared internal recursive-type contractiveness check in `MLF.Reify.TypeOps` and enforced it centrally from `MLF.Elab.TypeCheck`.
+- Kept the dedicated contractiveness `TypeCheckError` case internal to the elaboration surface; the public `MLF.Pipeline` facade continues to expose `TypeCheckError` abstractly rather than widening the downstream constructor set.
+- Phase 7 now validates recursive types at every term-embedded type boundary that currently accepts elaborated types:
+  - lambda annotations,
+  - let schemes,
+  - type-abstraction bounds,
+  - instantiation arguments,
+  - recursive runtime `ERoll` annotations.
+- The v1 policy is intentionally conservative and thesis-aligned:
+  - `TArrow` and `TCon` count as guards for recursive occurrences,
+  - bare self-reference is rejected,
+  - `forall` does not count as a guard,
+  - shadowing binders still suppress the outer recursive variable.
+- This keeps M4 as an explicit-layer containment step only. It does not add equi-recursive equality, cyclic graph support, parser/frontend recursive syntax, or inference-time recursive reasoning.
+- Added focused regressions in `test/TypeCheckSpec.hs` for guarded acceptance plus non-contractive rejection across annotations, let schemes, bounds, instantiation arguments, and `ERoll`, and added an `ElaborationSpec` regression that locks the conservative `forall` policy.
+
 ### 2026-02-19 Formal obligations ledger (thesis Ch. 4–15) hard-fail enforcement
 
 - Added canonical obligations ledger source:

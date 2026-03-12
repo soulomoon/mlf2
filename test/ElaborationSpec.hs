@@ -407,6 +407,10 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
     describe "Recursive structural types" $ do
         let recursiveInt :: Elab.ElabType
             recursiveInt = Elab.TMu "a" (Elab.TArrow (Elab.TVar "a") (Elab.TBase (BaseTy "Int")))
+            recursiveList :: Elab.ElabType
+            recursiveList = Elab.TMu "a" (Elab.TCon (BaseTy "List") (NE.singleton (Elab.TVar "a")))
+            forallRecursive :: Elab.ElabType
+            forallRecursive = Elab.TMu "a" (Elab.TForall "b" Nothing (Elab.TVar "a"))
 
         it "prints μ types through the elaborated pretty path" $ do
             Elab.pretty recursiveInt `shouldBe` "μa. a -> Int"
@@ -421,6 +425,15 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
         it "roundtrips μ through bound conversion helpers" $ do
             boundToType (boundFromType recursiveInt) `shouldBe` recursiveInt
+
+        it "keeps the v1 contractiveness policy conservative around forall" $ do
+            Elab.typeCheck (Elab.ELam "x" recursiveList (Elab.EVar "x"))
+                `shouldBe` Right (Elab.TArrow recursiveList recursiveList)
+            case Elab.typeCheck (Elab.ELam "x" forallRecursive (Elab.EVar "x")) of
+                Left (Elab.TCNonContractiveRecursiveType ty) | ty == forallRecursive -> pure ()
+                other ->
+                    expectationFailure
+                        ("Expected forall-only recursive type rejection, got: " ++ show other)
 
     describe "Migration guards" $ do
         it "chi-first Elaborate|Phase 6 keeps representative behavior" $ do

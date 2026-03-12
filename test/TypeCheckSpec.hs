@@ -2,6 +2,7 @@
 -- TypeSoundnessSpec / PipelineSpec into fixed regression tests here.
 module TypeCheckSpec (spec) where
 
+import Data.List.NonEmpty (NonEmpty(..))
 import qualified Data.Set as Set
 import Test.Hspec
 
@@ -24,6 +25,9 @@ import SpecUtil (mkForalls, unsafeNormalizeExpr)
 spec :: Spec
 spec = describe "Phase 7 typecheck" $ do
     let intTy = TBase (BaseTy "Int")
+        listSelfTy = TMu "self" (TCon (BaseTy "List") (TVar "self" :| []))
+        bareRecursiveTy = TMu "self" (TVar "self")
+        forallRecursiveTy = TMu "self" (TForall "b" Nothing (TVar "self"))
         recursiveIntTy = TMu "self" (TArrow (TVar "self") intTy)
         recursiveBody = ELam "self" recursiveIntTy (ELit (LInt 1))
 
@@ -94,6 +98,13 @@ spec = describe "Phase 7 typecheck" $ do
         typeCheck (EUnroll (ERoll recursiveIntTy recursiveBody))
             `shouldBe` Right (TArrow recursiveIntTy intTy)
 
+    it "accepts guarded recursive types in annotations and instantiation arguments" $ do
+        let polyId = ETyAbs "a" Nothing (ELam "x" (TVar "a") (EVar "x"))
+        typeCheck (ELam "x" listSelfTy (EVar "x"))
+            `shouldBe` Right (TArrow listSelfTy listSelfTy)
+        typeCheck (ETyInst polyId (InstApp listSelfTy))
+            `shouldBe` Right (TArrow listSelfTy listSelfTy)
+
     it "rejects malformed recursive roll/unroll runtime terms" $ do
         case typeCheck (ERoll recursiveIntTy (ELit (LInt 1))) of
             Left TCRollBodyMismatch{} -> pure ()
@@ -101,6 +112,28 @@ spec = describe "Phase 7 typecheck" $ do
         case typeCheck (EUnroll (ELit (LInt 1))) of
             Left TCExpectedRecursive{} -> pure ()
             other -> expectationFailure ("Expected recursive unroll rejection, got: " ++ show other)
+
+    it "rejects bare recursive self-reference in lambda annotations, let schemes, bounds, instantiation, and rolls" $ do
+        let polyId = ETyAbs "a" Nothing (ELam "x" (TVar "a") (EVar "x"))
+            expectNonContractive term =
+                case typeCheck term of
+                    Left (TCNonContractiveRecursiveType ty) | ty == bareRecursiveTy -> pure ()
+                    other ->
+                        expectationFailure
+                            ("Expected non-contractive recursive type rejection for "
+                                ++ show bareRecursiveTy ++ ", got: " ++ show other)
+        expectNonContractive (ELam "x" bareRecursiveTy (EVar "x"))
+        expectNonContractive (ELet "x" (schemeFromType bareRecursiveTy) (ELit (LInt 1)) (EVar "x"))
+        expectNonContractive (ETyAbs "a" (Just bareRecursiveTy) (ELit (LInt 1)))
+        expectNonContractive (ETyInst polyId (InstApp bareRecursiveTy))
+        expectNonContractive (ERoll bareRecursiveTy (ELit (LInt 1)))
+
+    it "rejects forall-only recursive types under the conservative v1 policy" $ do
+        case typeCheck (ELam "x" forallRecursiveTy (EVar "x")) of
+            Left (TCNonContractiveRecursiveType ty) | ty == forallRecursiveTy -> pure ()
+            other ->
+                expectationFailure
+                    ("Expected forall-only recursive type rejection, got: " ++ show other)
 
     it "reports instantiation errors" $ do
         case typeCheck (ETyInst (ELit (LInt 1)) InstElim) of
