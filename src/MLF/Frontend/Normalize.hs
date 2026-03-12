@@ -63,6 +63,8 @@ freeVarsSrcType = go Set.empty
             let bound' = Set.insert v bound
                 freeBound = maybe Set.empty (go bound . unSrcBound) mb
             in Set.union freeBound (go bound' body)
+        STMu v body ->
+            go (Set.insert v bound) body
         STBottom -> Set.empty
 
 -- ---------------------------------------------------------------------------
@@ -102,6 +104,20 @@ substSrcType x s = goSub
                 in STForall v' (fmap (mapRawBound goSub) mb) (goSub body')
             | otherwise ->
                 STForall v (fmap (mapRawBound goSub) mb) (goSub body)
+        STMu v body
+            | v == x ->
+                STMu v body
+            | Set.member v freeS ->
+                let used = Set.unions
+                        [ freeS
+                        , freeVarsSrcType body
+                        , Set.singleton v
+                        ]
+                    v' = freshNameLike v used
+                    body' = substSrcType v (STVar v') body
+                in STMu v' (goSub body')
+            | otherwise ->
+                STMu v (goSub body)
 
 -- ---------------------------------------------------------------------------
 -- Fresh name generation
@@ -141,6 +157,8 @@ normalizeType = go
                 -- Structural bound: normalize and convert to StructBound
                 sb <- normalizeBound boundTy
                 STForall v (Just (mkNormBound sb)) <$> go body
+        STMu v body ->
+            STMu v <$> go body
 
     normalizeBound :: SrcType -> Either NormalizationError StructBound
     normalizeBound = \case
@@ -163,6 +181,8 @@ normalizeType = go
             SrcBound boundTy -> do
                 sb <- normalizeBound boundTy
                 STForall v (Just (mkNormBound sb)) <$> go body
+        STMu v body ->
+            STMu v <$> go body
 
 -- ---------------------------------------------------------------------------
 -- Expression normalization: Expr s SrcType → Expr s NormSrcType

@@ -607,6 +607,13 @@ internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared srcType 
             setGenNodeSchemes schemeGenId [bodyNode]
             pure (bodyNode, shared2)
 
+        STMu v body ->
+            -- M5 exposes recursive annotations on the surface, but Phase 1 does
+            -- not internalize them yet. `generateConstraints` rejects them
+            -- before desugaring; this case is a defensive backstop for direct
+            -- core-only entrypoints.
+            throwError (RecursiveAnnotationNotSupported (STMu v body))
+
         STBottom -> do
             varNode <- allocVar
             pure (varNode, shared)
@@ -645,6 +652,7 @@ structBoundToNormSrcType sb = case sb of
     STBase name -> STBase name
     STCon name args -> STCon name args
     STForall v mb body -> STForall v mb body
+    STMu v body -> STMu v body
     STBottom -> STBottom
 
 -- | Check if a type variable name occurs free in a 'StructBound'.
@@ -658,6 +666,8 @@ structBoundFreeVars = go Set.empty
         STForall v mb body ->
             let bound' = Set.insert v bound
             in maybe Set.empty (go bound . unNormBound) mb <> normFreeVars bound' body
+        STMu v body ->
+            normFreeVars (Set.insert v bound) body
         STBottom -> Set.empty
 
     normFreeVars bound ty = case ty of
@@ -668,4 +678,6 @@ structBoundFreeVars = go Set.empty
         STForall v mb body ->
             let bound' = Set.insert v bound
             in maybe Set.empty (go bound . unNormBound) mb <> normFreeVars bound' body
+        STMu v body ->
+            normFreeVars (Set.insert v bound) body
         STBottom -> Set.empty

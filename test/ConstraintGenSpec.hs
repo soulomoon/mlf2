@@ -1060,6 +1060,23 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 let arrowNodes = [n | n@TyArrow{} <- nodeMapElems nodes]
                 length arrowNodes `shouldSatisfy` (> 0)
 
+    describe "Recursive surface annotation boundary" $ do
+        it "rejects top-level recursive annotations before internalization" $ do
+            let ann = STMu "self" (STArrow (STVar "self") (STBase "Int"))
+                expr :: NormSurfaceExpr
+                expr = EAnn (ELit (LInt 1)) ann
+            inferConstraintGraph Set.empty expr
+                `shouldBe` Left (RecursiveAnnotationNotSupported ann)
+
+        it "rejects recursive annotations nested inside normalized forall bounds" $ do
+            let recursiveBound = STMu "self" (STVar "self")
+                ann :: NormSrcType
+                ann = STForall "a" (Just (mkNormBound recursiveBound)) (STVar "a")
+                expr :: NormSurfaceExpr
+                expr = EAnn (ELit (LInt 1)) ann
+            inferConstraintGraph Set.empty expr
+                `shouldBe` Left (RecursiveAnnotationNotSupported recursiveBound)
+
         -- US-003 Regression: ELet x (EAnn e σ) should NOT introduce explicit-scheme
         -- instantiation edge structure. With coercion-only semantics, an annotated
         -- let is just a normal let whose RHS happens to be a coercion term.
