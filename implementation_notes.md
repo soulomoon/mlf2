@@ -154,6 +154,21 @@
 
 # Implementation Notes
 
+## 2026-03-12 — M5 surface `μ` exposure with explicit Phase 1 boundary
+
+- The eMLF frontend surface now admits recursive annotation syntax through
+  `SrcTy`/`NormSrcType` via `STMu`, with parser acceptance for both `μa. τ` and
+  `mu a. τ` and canonical pretty-printing back to `μ`.
+- Normalization treats `STMu` as a structural wrapper: it recurses into the
+  body, preserves the recursive binder, and still performs the existing
+  alias-bound `forall` normalization inside recursive bodies and recursive
+  structural bounds.
+- M5 intentionally stops at the public/frontend boundary. `generateConstraints`
+  and `generateConstraintsCore` now detect any normalized recursive annotation
+  subtree and fail with `RecursiveAnnotationNotSupported` before Phase 1
+  internalization, so `inferConstraintGraph` / `runPipelineElab` still reject
+  recursive surface annotations until explicit M6 lowering work lands.
+
 ## 2026-03-09 — ResultTypeView validation single-sourced per computation
 
 - The runtime result-type facade now builds and validates the base `ResultTypeView` once per computation, then threads that validated view through the annotation and fallback workers.

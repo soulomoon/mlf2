@@ -55,6 +55,11 @@ freeVarsSpec = describe "freeVarsSrcType" $ do
                 (STForall "b" (Just (mkSrcBound (STVar "a"))) (STVar "c")))
             `shouldBe` Set.fromList ["c"]
 
+    it "recursive binders scope over their bodies" $
+        freeVarsSrcType
+            (STMu "a" (STArrow (STVar "a") (STVar "b")))
+            `shouldBe` Set.fromList ["b"]
+
 -- -----------------------------------------------------------------------
 -- Capture-avoiding substitution
 -- -----------------------------------------------------------------------
@@ -93,6 +98,11 @@ substSpec = describe "substSrcType" $ do
         substSrcType "a" (STBase "Int")
             (STForall "b" (Just (mkSrcBound (STVar "a"))) (STVar "b"))
             `shouldBe` STForall "b" (Just (mkSrcBound (STBase "Int"))) (STVar "b")
+
+    it "does not substitute under a shadowing recursive binder" $
+        substSrcType "a" (STBase "Int")
+            (STMu "a" (STArrow (STVar "a") (STVar "b")))
+            `shouldBe` STMu "a" (STArrow (STVar "a") (STVar "b"))
 
 -- -----------------------------------------------------------------------
 -- Type normalization
@@ -168,6 +178,21 @@ normalizeTypeSpec = describe "normalizeType" $ do
         normalizeType (STCon "List" (STVar "a" :| []))
             `shouldBe` Right (STCon "List" (STVar "a" :| []))
 
+    it "preserves recursive wrappers while normalizing nested alias bounds" $
+        let input =
+                STMu "a"
+                    (STForall "b" (Just (mkSrcBound (STVar "a")))
+                        (STArrow (STVar "b") (STVar "a")))
+        in normalizeType input
+            `shouldBe` Right (STMu "a" (STArrow (STVar "a") (STVar "a")))
+
+    it "accepts recursive types as structural normalized forall bounds" $
+        let recursiveBound = STMu "a" (STCon "List" (STVar "a" :| []))
+            input = STForall "x" (Just (mkSrcBound recursiveBound)) (STVar "x")
+        in normalizeType input
+            `shouldBe` Right
+                (STForall "x" (Just (mkNormBound recursiveBound)) (STVar "x"))
+
     it "normalizes structural arrow bound" $
         normalizeType
             (STForall "a" (Just (mkSrcBound (STArrow (STBase "Int") (STBase "Bool"))))
@@ -204,6 +229,14 @@ normalizeExprSpec = describe "normalizeExpr" $ do
             expr = EAnn (EVar "x") ty
         in normalizeExpr expr
             `shouldBe` Left (SelfBoundVariable "a" (STVar "a"))
+
+    it "normalizes recursive annotations in expressions" $
+        let ty =
+                STMu "a"
+                    (STForall "b" (Just (mkSrcBound (STVar "a"))) (STVar "b"))
+            expr = EAnn (EVar "x") ty
+        in normalizeExpr expr
+            `shouldBe` Right (EAnn (EVar "x") (STMu "a" (STVar "a")))
 
     it "normalizes nested expressions" $
         let expr = ELet "f"

@@ -14,7 +14,7 @@ import Data.Functor.Foldable (Base, Corecursive (..), Recursive (..), cata)
 import Data.Map.Strict (Map)
 
 import MLF.Constraint.Types
-import MLF.Frontend.Syntax (Lit, VarName)
+import MLF.Frontend.Syntax (Lit, NormSrcType, VarName)
 
 -- | Errors that can surface during constraint generation.
 data ConstraintError
@@ -23,6 +23,7 @@ data ConstraintError
     | UnexpectedBareCoercionConst
     | TypeConstructorArityMismatch BaseTy Int Int  -- ^ Constructor, expected arity, actual arity
     | ForallBoundMentionsBinder String  -- ^ Binder name that appears in its own bound
+    | RecursiveAnnotationNotSupported NormSrcType
     deriving (Eq, Show)
 
 -- | Successful constraint generation returns the full constraint graph and the

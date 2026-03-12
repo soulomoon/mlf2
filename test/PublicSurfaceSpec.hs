@@ -1,5 +1,6 @@
 module PublicSurfaceSpec (spec) where
 
+import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Set as Set
 import Test.Hspec
 
@@ -14,9 +15,17 @@ spec = describe "Public surface contracts" $ do
             let expr = ELet "id" (ELam "x" (EVar "x")) (EVar "id")
             parseRawEmlfExpr (prettyEmlfExpr expr) `shouldBe` Right expr
 
+        it "roundtrips recursive surface types through parse(pretty(type))" $ do
+            let ty = STMu "a" (STCon "List" (STVar "a" :| []))
+            parseRawEmlfType (prettyEmlfType ty) `shouldBe` Right ty
+
         it "normalizes raw surface types through the umbrella API" $ do
             expectRight (parseRawEmlfType "∀(b ⩾ a). b") $ \ty ->
                 normalizeType ty `shouldBe` Right (STVar "a")
+
+        it "normalizes recursive raw surface types through the umbrella API" $ do
+            expectRight (parseRawEmlfType "mu a. ∀(b ⩾ a). b") $ \ty ->
+                normalizeType ty `shouldBe` Right (STMu "a" (STVar "a"))
 
         it "keeps frontend-only conveniences on the umbrella API" $ do
             parseNormEmlfExpr "λ(x) x"
@@ -34,6 +43,14 @@ spec = describe "Public surface contracts" $ do
                 case Pipeline.inferConstraintGraph Set.empty expr of
                     Left err -> expectationFailure ("Expected constraint graph, got " ++ show err)
                     Right _ -> pure ()
+
+        it "rejects recursive surface annotations at the Phase 1 boundary" $ do
+            expectRight (parseNormEmlfExpr "(x : μa. a -> Int)") $ \expr -> do
+                let ann = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+                Pipeline.inferConstraintGraph Set.empty expr
+                    `shouldBe` Left (Pipeline.RecursiveAnnotationNotSupported ann)
+                Pipeline.runPipelineElab Set.empty expr
+                    `shouldBe` Left (Pipeline.PipelineConstraintError (Pipeline.RecursiveAnnotationNotSupported ann))
 
         it "owns checked runtime helpers and pipeline diagnostics" $ do
             expectRight (parseNormEmlfExpr "λ(x) x") $ \expr ->
