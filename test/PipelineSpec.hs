@@ -1020,6 +1020,39 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                             tyUnchecked `shouldBe` tyChecked
                             tyChecked `shouldSatisfy` matchesRecursiveArrow expectedTy
 
+        describe "ARI-C1 feasibility characterization (bounded prototype-only)" $ do
+            it "keeps annotation-anchored recursive shape processable" $ do
+                let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+                    expr = ELamAnn "x" recursiveAnn (EVar "x")
+                    isRecursiveArrow ty = case ty of
+                        TArrow (TMu _ _) (TMu _ _) -> True
+                        _ -> False
+                case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
+                    Left err -> expectationFailure (renderPipelineError err)
+                    Right (_term, ty) ->
+                        ty `shouldSatisfy` isRecursiveArrow
+
+            it "does not infer recursive shape for the corresponding unannotated variant" $ do
+                let expr = ELam "x" (EVar "x")
+                    containsMu ty = case ty of
+                        TMu _ _ -> True
+                        TArrow dom cod -> containsMu dom || containsMu cod
+                        TCon _ args -> any containsMu args
+                        TForall _ _ body -> containsMu body
+                        _ -> False
+                case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
+                    Left err -> expectationFailure (renderPipelineError err)
+                    Right (_term, ty) ->
+                        containsMu ty `shouldBe` False
+
+            it "keeps out-of-scope unannotated recursive proxy unresolved" $ do
+                let expr = ELam "f" (EApp (EVar "f") (EVar "f"))
+                case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
+                    Left _ -> pure ()
+                    Right (_term, ty) ->
+                        expectationFailure
+                            ("Expected rejection for out-of-scope unannotated recursive proxy, got type: " ++ show ty)
+
         it "uses presolution-native solved artifacts" $ do
             artifacts <- requireRight (runPipelineArtifactsDefault Set.empty (ELam "x" (EVar "x")))
             cUnifyEdges (prConstraint (paPresolution artifacts)) `shouldBe` []
