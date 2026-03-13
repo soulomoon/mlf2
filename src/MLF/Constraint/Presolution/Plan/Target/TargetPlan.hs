@@ -134,6 +134,7 @@ buildTargetPlan TargetPlanInput{..} =
             case targetBoundLocal >>= (\bnd -> IntMap.lookup (getNodeId bnd) nodes) of
                 Just TyArrow{} -> True
                 Just TyForall{} -> True
+                Just TyMu{} -> True
                 Just TyExp{} -> True
                 _ -> False
         boundIsChildLocal =

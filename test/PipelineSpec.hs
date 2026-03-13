@@ -1,3 +1,4 @@
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE PatternSynonyms #-}
 module PipelineSpec (spec) where
 
@@ -88,6 +89,33 @@ expectStrictPipelineFailure label result =
         Right (_term, ty) ->
             expectationFailure
                 ("Expected strict failure for " ++ label ++ ", but got type " ++ show ty)
+
+matchesRecursiveArrow :: ElabType -> ElabType -> Bool
+matchesRecursiveArrow actual expected = case (actual, expected) of
+    (TArrow domA codA, TArrow domE codE) ->
+        matchesRecursiveMu domA domE && matchesRecursiveMu codA codE
+    _ -> False
+  where
+    matchesRecursiveMu tyA tyE = case (tyA, tyE) of
+        (TMu _ bodyA, TMu _ bodyE) -> stripMuNames bodyA == stripMuNames bodyE
+        _ -> False
+
+    stripMuNames ty = case ty of
+        TVar _ -> TVar "_"
+        TArrow dom cod -> TArrow (stripMuNames dom) (stripMuNames cod)
+        TBase base -> TBase base
+        TCon con args -> TCon con (fmap stripMuNames args)
+        TForall _ mb body -> TForall "_" (fmap stripBoundNames mb) (stripMuNames body)
+        TMu _ body -> TMu "_" (stripMuNames body)
+        TBottom -> TBottom
+
+    stripBoundNames bound = case bound of
+        TArrow dom cod -> TArrow (stripMuNames dom) (stripMuNames cod)
+        TBase base -> TBase base
+        TCon con args -> TCon con (fmap stripMuNames args)
+        TForall _ mb body -> TForall "_" (fmap stripBoundNames mb) (stripMuNames body)
+        TMu _ body -> TMu "_" (stripMuNames body)
+        TBottom -> TBottom
 
 spec :: Spec
 spec = describe "Pipeline (Phases 1-5)" $ do
@@ -977,10 +1005,10 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     `shouldSatisfy` isRight
 
         it "annotation-heavy path still reports checked-authoritative type" $ do
-            let expr =
-                    EAnn
-                        (ELam "x" (EVar "x"))
-                        (STForall "a" Nothing (STArrow (STVar "a") (STVar "a")))
+            let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+                expr = ELamAnn "x" recursiveAnn (EVar "x")
+                expectedTy = TArrow (TMu "a" (TArrow (TVar "a") (TBase (BaseTy "Int"))))
+                                    (TMu "a" (TArrow (TVar "a") (TBase (BaseTy "Int"))))
             case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
                 Left err -> expectationFailure (renderPipelineError err)
                 Right (termUnchecked, tyUnchecked) -> do
@@ -990,6 +1018,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                         Right (termChecked, tyChecked) -> do
                             typeCheck termChecked `shouldBe` Right tyChecked
                             tyUnchecked `shouldBe` tyChecked
+                            tyChecked `shouldSatisfy` matchesRecursiveArrow expectedTy
 
         it "uses presolution-native solved artifacts" $ do
             artifacts <- requireRight (runPipelineArtifactsDefault Set.empty (ELam "x" (EVar "x")))

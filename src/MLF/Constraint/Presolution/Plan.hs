@@ -686,6 +686,12 @@ planReify _ plan = do
                             , isQuantifiable' child
                             , not (IntMap.member (getNodeId (canonical child)) subst0')
                             ]
+                        Just TyMu{} ->
+                            [ canonical child
+                            | child <- IntMapUtils.typeChildrenOf bindParents (typeRef (canonical typeRoot))
+                            , isQuantifiable' child
+                            , not (IntMap.member (getNodeId (canonical child)) subst0')
+                            ]
                         _ -> []
     orderedExtra <- orderBinders (map getNodeId extraCandidates)
     let reifyPlan =

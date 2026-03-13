@@ -128,6 +128,7 @@ reifyWith _contextLabel solved nameForVar isNamed rootMode nid =
                                         TyExp{ tnBody = b } -> go visited' b
                                         TyArrow{} -> False
                                         TyForall{} -> False
+                                        TyMu{} -> False
             in go IntSet.empty start
 
     boundIsSimpleFor n =
@@ -347,6 +348,26 @@ reifyWith _contextLabel solved nameForVar isNamed rootMode nid =
                                     let t = varFor n
                                         cache' = cacheInsertLocal mode key t cache0 namedExtra
                                     in pure (markDone cache', t)
+                                | TyMu{ tnBody = b } <- node -> do
+                                    binders <- orderedFlexChildren mode namedExtra n
+                                    binder <-
+                                        case binders of
+                                            [bndr] -> pure (canonical bndr)
+                                            [] ->
+                                                Left $
+                                                    BindingTreeError $
+                                                        InvalidBindingTree $
+                                                            "reifyType: TyMu " ++ show n ++ " has no binder child"
+                                            _ ->
+                                                Left $
+                                                    BindingTreeError $
+                                                        InvalidBindingTree $
+                                                            "reifyType: TyMu " ++ show n ++ " has multiple binder children " ++ show binders
+                                    let namedExtra' = IntSet.insert (getNodeId binder) namedExtra
+                                    (cache', bodyTy) <- vChild cache0 namedExtra' mode (canonical b)
+                                    let t = TMu (varName binder) bodyTy
+                                        cacheFinal = cacheInsertLocal mode key t cache' namedExtra
+                                    pure (markDone cacheFinal, t)
                                 | otherwise -> do
                                     binders <- orderedFlexChildren mode namedExtra n
                                     let binderKeys =
@@ -408,6 +429,7 @@ reifyWith _contextLabel solved nameForVar isNamed rootMode nid =
                                                 Just (TypeRef parent, _) ->
                                                     case lookupNodeIn nodes (canonical parent) of
                                                         Just TyForall{} -> canonical parent
+                                                        Just TyMu{} -> canonical parent
                                                         _ -> bndC
                                                 _ -> bndC
                                     if isRigid
@@ -435,6 +457,8 @@ reifyWith _contextLabel solved nameForVar isNamed rootMode nid =
                                     boundHasForall (IntSet.insert key visited) bnd'
                                 _ -> False
                         Just TyExp{ tnBody = b } ->
+                            boundHasForall (IntSet.insert key visited) b
+                        Just TyMu{ tnBody = b } ->
                             boundHasForall (IntSet.insert key visited) b
                         _ -> False
 
@@ -516,6 +540,7 @@ reifyWith _contextLabel solved nameForVar isNamed rootMode nid =
         let orderRoot =
                 case node of
                     TyForall{ tnBody = body } -> canonical body
+                    TyMu{ tnBody = body } -> canonical body
                     _ -> n
             reachable =
                 Traversal.reachableFromWithBounds
@@ -771,6 +796,8 @@ freeVars solved nid visited
             Just TyCon{ tnArgs = args } ->
                 IntSet.unions (map (freeVarsChild visited') (NE.toList args))
             Just TyForall{ tnBody = b } ->
+                freeVarsChild visited' b
+            Just TyMu{ tnBody = b } ->
                 freeVarsChild visited' b
             Just TyExp{ tnBody = b } ->
                 freeVars solved (canonical b) visited'

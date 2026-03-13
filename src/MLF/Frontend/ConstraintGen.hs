@@ -8,18 +8,12 @@ module MLF.Frontend.ConstraintGen (
     generateConstraintsCore
 ) where
 
-import Control.Applicative ((<|>))
 import Data.Functor.Foldable (cata)
 import qualified Data.IntSet as IntSet
 
 import MLF.Frontend.Syntax
-    ( Expr (..)
-    , NormCoreExpr
-    , NormSrcType
+    ( NormCoreExpr
     , NormSurfaceExpr
-    , SrcNorm (..)
-    , SrcTy (..)
-    , unNormBound
     )
 import MLF.Frontend.Desugar (desugarSurface)
 import MLF.Constraint.Types.Graph (NodeId, PolySyms, cAnnEdges, getEdgeId)
@@ -105,8 +99,7 @@ Paper references:
 -}
 
 generateConstraints :: PolySyms -> NormSurfaceExpr -> Either ConstraintError ConstraintResult
-generateConstraints polySyms expr = do
-    rejectRecursiveSurfaceAnnotations expr
+generateConstraints polySyms expr =
     generateConstraintsCore polySyms (desugarSurface expr)
 
 -- | Generate constraints from a normalized core expression.
@@ -116,7 +109,6 @@ generateConstraints polySyms expr = do
 -- constructible through the surface parser/normalizer pipeline.
 generateConstraintsCore :: PolySyms -> NormCoreExpr -> Either ConstraintError ConstraintResult
 generateConstraintsCore polySyms expr = do
-    rejectRecursiveCoreAnnotations expr
     let initialState = mkInitialStateWithPolySyms polySyms
     ((_rootGen, rootNode, annRoot), finalState) <-
         runConstraintM (buildRootExpr expr) initialState
@@ -127,56 +119,6 @@ generateConstraintsCore polySyms expr = do
         , crRoot = rootNode
         , crAnnotated = annRoot
         }
-
-rejectRecursiveSurfaceAnnotations :: NormSurfaceExpr -> Either ConstraintError ()
-rejectRecursiveSurfaceAnnotations expr = case firstRecursiveSurfaceAnnotation expr of
-    Nothing -> Right ()
-    Just ty -> Left (RecursiveAnnotationNotSupported ty)
-
-rejectRecursiveCoreAnnotations :: NormCoreExpr -> Either ConstraintError ()
-rejectRecursiveCoreAnnotations expr = case firstRecursiveCoreAnnotation expr of
-    Nothing -> Right ()
-    Just ty -> Left (RecursiveAnnotationNotSupported ty)
-
-firstRecursiveSurfaceAnnotation :: NormSurfaceExpr -> Maybe NormSrcType
-firstRecursiveSurfaceAnnotation expr = case expr of
-    EVar _ -> Nothing
-    ELit _ -> Nothing
-    ELam _ body -> firstRecursiveSurfaceAnnotation body
-    EApp fun arg ->
-        firstRecursiveSurfaceAnnotation fun <|> firstRecursiveSurfaceAnnotation arg
-    ELet _ rhs body ->
-        firstRecursiveSurfaceAnnotation rhs <|> firstRecursiveSurfaceAnnotation body
-    ELamAnn _ ty body ->
-        firstRecursiveAnnotationType ty <|> firstRecursiveSurfaceAnnotation body
-    EAnn inner ty ->
-        firstRecursiveAnnotationType ty <|> firstRecursiveSurfaceAnnotation inner
-
-firstRecursiveCoreAnnotation :: NormCoreExpr -> Maybe NormSrcType
-firstRecursiveCoreAnnotation expr = case expr of
-    EVar _ -> Nothing
-    ELit _ -> Nothing
-    ELam _ body -> firstRecursiveCoreAnnotation body
-    EApp fun arg ->
-        firstRecursiveCoreAnnotation fun <|> firstRecursiveCoreAnnotation arg
-    ELet _ rhs body ->
-        firstRecursiveCoreAnnotation rhs <|> firstRecursiveCoreAnnotation body
-    ECoerceConst ty -> firstRecursiveAnnotationType ty
-
-firstRecursiveAnnotationType :: SrcTy 'NormN v -> Maybe NormSrcType
-firstRecursiveAnnotationType ty = case ty of
-    STVar _ -> Nothing
-    STArrow dom cod ->
-        firstRecursiveAnnotationType dom <|> firstRecursiveAnnotationType cod
-    STBase _ -> Nothing
-    STCon _ args ->
-        foldr ((<|>) . firstRecursiveAnnotationType) Nothing args
-    STForall _ mb body ->
-        maybe Nothing (firstRecursiveAnnotationType . unNormBound) mb
-            <|> firstRecursiveAnnotationType body
-    STMu v body ->
-        Just (STMu v body)
-    STBottom -> Nothing
 
 data AnnEdges = AnnEdges
     { aeAll :: IntSet.IntSet

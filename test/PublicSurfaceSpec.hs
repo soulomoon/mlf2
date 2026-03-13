@@ -44,13 +44,14 @@ spec = describe "Public surface contracts" $ do
                     Left err -> expectationFailure ("Expected constraint graph, got " ++ show err)
                     Right _ -> pure ()
 
-        it "rejects recursive surface annotations at the Phase 1 boundary" $ do
-            expectRight (parseNormEmlfExpr "(x : μa. a -> Int)") $ \expr -> do
-                let ann = STMu "a" (STArrow (STVar "a") (STBase "Int"))
-                Pipeline.inferConstraintGraph Set.empty expr
-                    `shouldBe` Left (Pipeline.RecursiveAnnotationNotSupported ann)
-                Pipeline.runPipelineElab Set.empty expr
-                    `shouldBe` Left (Pipeline.PipelineConstraintError (Pipeline.RecursiveAnnotationNotSupported ann))
+        it "accepts recursive surface annotations on the explicit-only path" $ do
+            expectRight (parseNormEmlfExpr "λ(x : μa. a -> Int) x") $ \expr -> do
+                case Pipeline.inferConstraintGraph Set.empty expr of
+                    Left err -> expectationFailure ("Expected constraint graph, got " ++ show err)
+                    Right _ -> pure ()
+                expectRight (Pipeline.runPipelineElab Set.empty expr) $ \(term, ty) -> do
+                    Pipeline.typeCheck term `shouldBe` Right ty
+                    ty `shouldSatisfy` hasRecursiveArrow
 
         it "owns checked runtime helpers and pipeline diagnostics" $ do
             expectRight (parseNormEmlfExpr "λ(x) x") $ \expr ->
@@ -79,3 +80,8 @@ expectRight result k =
     case result of
         Left err -> expectationFailure ("Expected Right, got Left " ++ show err)
         Right value -> k value
+
+hasRecursiveArrow :: Pipeline.ElabType -> Bool
+hasRecursiveArrow ty = case ty of
+    Pipeline.TArrow (Pipeline.TMu _ _) (Pipeline.TMu _ _) -> True
+    _ -> False

@@ -422,6 +422,8 @@ instantiateSchemeWithMode replaceFrontier bodyId substList = do
                                                                 TyArrow freshId d c
                                                             TyForall { tnBody = b } ->
                                                                 TyForall freshId b
+                                                            TyMu { tnBody = b } ->
+                                                                TyMu freshId b
                                                             TyVar { tnBound = mb } ->
                                                                 TyVar { tnId = freshId, tnBound = mb }
                                                             TyBottom {} ->
@@ -441,6 +443,9 @@ instantiateSchemeWithMode replaceFrontier bodyId substList = do
                                                     TyForall { tnBody = b } -> do
                                                         b' <- copyNode copyInterior frontierSet degenerateRoot canonical subst b
                                                         return $ TyForall freshId b'
+                                                    TyMu { tnBody = b } -> do
+                                                        b' <- copyNode copyInterior frontierSet degenerateRoot canonical subst b
+                                                        return $ TyMu freshId b'
                                                     TyVar { tnBound = mb } -> do
                                                         mb' <- traverse (copyNode copyInterior frontierSet degenerateRoot canonical subst) mb
                                                         pure $ TyVar { tnId = freshId, tnBound = mb' }

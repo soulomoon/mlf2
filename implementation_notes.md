@@ -154,6 +154,24 @@
 
 # Implementation Notes
 
+## 2026-03-13 — M7 explicit-only acyclic graph `TyMu` path
+
+- Phase 1 no longer rejects normalized recursive annotations outright. Instead,
+  explicit surface `STMu` annotations lower into a first-class graph `TyMu`
+  node whose single structural child is the recursive body, while the binding
+  tree records the explicit binder relationship.
+- The graph/runtime structural walkers that reason about explicit binders now
+  treat `TyMu` like `TyForall`-style structure rather than as a cyclic back
+  edge: traversal, copying, normalization, plan/root resolution, and
+  acyclicity-sensitive ownership code all descend through the body child.
+- Structural reconstruction now preserves the explicit recursive binder
+  end-to-end. Constructor-matching unification decomposes `TyMu` by body only,
+  and reification/result-type reconstruction rebuild elaborated `TMu` instead
+  of falling back to an unfolded surrogate.
+- This remains an explicit-only slice. Unannotated programs still do not
+  synthesize recursive types, and no equi-recursive equality, cyclic term-DAG
+  encoding, implicit unfolding, or solver-wide recursive unification was added.
+
 ## 2026-03-12 — M5 surface `μ` exposure with explicit Phase 1 boundary
 
 - The eMLF frontend surface now admits recursive annotation syntax through

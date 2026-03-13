@@ -4,9 +4,11 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Test.Hspec
 
+import MLF.API (Lit(..), SrcTy(..), Expr(..))
 import MLF.Constraint.Types.Presolution (DepGraph(..))
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Acyclicity
+import MLF.Pipeline (ConstraintResult(..), inferConstraintGraph)
 import SpecUtil (emptyConstraint, nodeMapFromList, nodeMapSingleton)
 
 spec :: Spec
@@ -120,6 +122,13 @@ spec = do
             checkAcyclicity constraint `shouldSatisfy` isRight
 
     describe "Edges through structured types" $ do
+        it "explicit TyMu annotations remain acyclic without a cyclic escape hatch" $ do
+            let expr = EAnn (ELit (LInt 1)) (STMu "self" (STArrow (STVar "self") (STBase "Int")))
+            case inferConstraintGraph mempty expr of
+                Left err -> expectationFailure ("Expected constraint graph, got " ++ show err)
+                Right result ->
+                    checkAcyclicity (crConstraint result) `shouldSatisfy` isRight
+
         it "dependency through arrow domain is tracked" $ do
             -- e₁: α ≤ (β → Int)  (right side reaches β through arrow domain)
             -- e₂: β ≤ γ          (left side is β)

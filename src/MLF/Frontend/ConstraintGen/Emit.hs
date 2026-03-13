@@ -1,5 +1,6 @@
 module MLF.Frontend.ConstraintGen.Emit (
     allocForall,
+    allocMu,
     allocVar,
     allocBase,
     allocArrow,
@@ -38,6 +39,16 @@ allocForall bodyNode = do
     -- but only if it doesn't already have a binding parent.
     -- This ensures all non-root nodes have binding parents while preserving
     -- existing binding structure.
+    setBindParentIfMissing (typeRef bodyNode) (typeRef nid) BindFlex
+    pure nid
+
+allocMu :: NodeId -> ConstraintM NodeId
+allocMu bodyNode = do
+    nid <- freshNodeId
+    insertNode TyMu
+        { tnId = nid
+        , tnBody = bodyNode
+        }
     setBindParentIfMissing (typeRef bodyNode) (typeRef nid) BindFlex
     pure nid
 
