@@ -41,6 +41,9 @@ decomposeUnifyChildren n1 n2 = case (n1, n2) of
     (TyForall { tnBody = b1 }, TyForall { tnBody = b2 }) ->
         Right [UnifyEdge b1 b2]
 
+    (TyMu { tnBody = b1 }, TyMu { tnBody = b2 }) ->
+        Right [UnifyEdge b1 b2]
+
     (TyBase { tnBase = b1 }, TyBase { tnBase = b2 })
         | b1 == b2 -> Right []
         | otherwise -> Left (MismatchBase b1 b2)

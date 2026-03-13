@@ -82,6 +82,7 @@ buildTypeRootPlan TypeRootPlanInput{..} =
                 Just bnd ->
                     case IntMap.lookup (getNodeId (canonical bnd)) nodes of
                         Just TyForall{ tnBody = b } -> canonical b
+                        Just TyMu{ tnBody = b } -> canonical b
                         _ -> canonical bnd
                 Nothing -> typeRoot0
         targetInGammaLocal =
