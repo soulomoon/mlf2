@@ -411,3 +411,4 @@ validateOriginalCanonicalAgreement s =
     tnTag TyCon{}    = "con"
     tnTag TyForall{} = "forall"
     tnTag TyExp{}    = "exp"
+    tnTag TyMu{}     = "mu"

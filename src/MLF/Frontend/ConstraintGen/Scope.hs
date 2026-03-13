@@ -134,6 +134,7 @@ rebindScopeNodes binder root frame = do
                     case IntMap.lookup (getNodeId pid) nodes of
                         Just TyVar{} -> True
                         Just TyForall{} -> True
+                        Just TyMu{} -> True
                         Just TyArrow{} -> True
                         Just TyCon{} -> True
                         Just TyExp{} -> True
@@ -145,6 +146,7 @@ rebindScopeNodes binder root frame = do
                             case IntMap.lookup (getNodeId pid) nodes of
                                 Just TyVar{} -> True
                                 Just TyForall{} -> True
+                                Just TyMu{} -> True
                                 Just TyExp{} -> True
                                 _ -> False
                         GenRef _ -> False

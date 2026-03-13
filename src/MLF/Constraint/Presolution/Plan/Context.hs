@@ -159,10 +159,16 @@ resolveContext env bindParentsSoft scopeRootArg targetNodeArg = do
                         Just TyForall{ tnBody = b } ->
                             let bodyRoot = canonical b
                             in (bodyRoot, target)
+                        Just TyMu{ tnBody = b } ->
+                            let bodyRoot = canonical b
+                            in (bodyRoot, target)
                         _ -> (target, target)
                 TypeRef _ ->
                     case lookupNode (canonKey target) of
                         Just TyForall{ tnBody = b } ->
+                            let bodyRoot = canonical b
+                            in (bodyRoot, target)
+                        Just TyMu{ tnBody = b } ->
                             let bodyRoot = canonical b
                             in (bodyRoot, target)
                         _ -> (target, target)
@@ -173,6 +179,7 @@ resolveContext env bindParentsSoft scopeRootArg targetNodeArg = do
                     let baseNodes = cNodes (gaBaseConstraint ga)
                     in case lookupNodeIn baseNodes target of
                         Just TyForall{ tnBody = b } -> b
+                        Just TyMu{ tnBody = b } -> b
                         _ -> target
         resolveTargetPhase root node = do
             let target0 = resolveTarget node

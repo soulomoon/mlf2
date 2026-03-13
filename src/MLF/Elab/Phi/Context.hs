@@ -86,6 +86,7 @@ contextToNodeBoundWithOrderKeys canonicalNode keys c root target = do
                         Just TyVar{} -> True
                         Just TyArrow{} -> True
                         Just TyCon{} -> True
+                        Just TyMu{} -> True
                         Just TyBase{} -> True
                         Just TyBottom{} -> True
                         Nothing -> False
@@ -118,6 +119,7 @@ contextToNodeBoundWithOrderKeys canonicalNode keys c root target = do
         let orderRoot =
                 case NodeAccess.lookupNode c binder of
                     Just TyForall{ tnBody = body } -> canonicalNode body
+                    Just TyMu{ tnBody = body } -> canonicalNode body
                     _ -> binder
             reachable = reachableFromStructural orderRoot
             bindersReachable =
@@ -176,6 +178,9 @@ contextToNodeBoundWithOrderKeys canonicalNode keys c root target = do
                                             finish res memo'
                                         TyCon{ tnArgs = args } -> do
                                             (memo', res) <- goChildren visiting' memo (NE.toList args)
+                                            finish res memo'
+                                        TyMu{ tnBody = body } -> do
+                                            (memo', res) <- go visiting' memo body
                                             finish res memo'
                                         TyExp{ tnBody = body } -> do
                                             (memo', res) <- go visiting' memo body

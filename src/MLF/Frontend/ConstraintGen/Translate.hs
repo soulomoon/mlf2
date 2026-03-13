@@ -607,12 +607,17 @@ internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared srcType 
             setGenNodeSchemes schemeGenId [bodyNode]
             pure (bodyNode, shared2)
 
-        STMu v body ->
-            -- M5 exposes recursive annotations on the surface, but Phase 1 does
-            -- not internalize them yet. `generateConstraints` rejects them
-            -- before desugaring; this case is a defensive backstop for direct
-            -- core-only entrypoints.
-            throwError (RecursiveAnnotationNotSupported (STMu v body))
+        STMu v body -> do
+            ((varNode, bodyNode, shared1), scopeFrame) <- withScopedBuild $ do
+                varNode <- allocVar
+                let tyEnv' = Map.insert v varNode tyEnv
+                (bodyNode, shared1) <-
+                    internalizeCoercionCopy bindFlag False coerceGen currentGen tyEnv' shared body
+                pure (varNode, bodyNode, shared1)
+            muNode <- allocMu bodyNode
+            rebindScopeRoot (typeRef muNode) bodyNode scopeFrame
+            attachUnder (typeRef varNode) (typeRef muNode) bindFlag
+            withWrappedNode bindFlag wrap currentGen muNode shared1
 
         STBottom -> do
             varNode <- allocVar

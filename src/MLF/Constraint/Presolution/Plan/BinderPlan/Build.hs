@@ -182,6 +182,7 @@ buildBinderPlan BinderPlanInput{..} = do
                     case lookupNodeInMap nodes bndC of
                         Just TyArrow{} -> True
                         Just TyForall{} -> True
+                        Just TyMu{} -> True
                         Just TyExp{} -> True
                         _ -> False
                   where
@@ -643,4 +644,3 @@ buildBinderPlan BinderPlanInput{..} = do
             case IntMap.lookup (getNodeId (bpiCanonical v)) bpiNodes of
                 Just TyVar{} -> VarStore.lookupVarBound bpiConstraint (bpiCanonical v) /= Nothing
                 _ -> False
-

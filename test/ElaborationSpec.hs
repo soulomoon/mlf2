@@ -1027,6 +1027,13 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                             bound `IntSet.union`
                                             IntSet.fromList (map (getNodeId . canonical) binders)
                                     go bound' visited' (canonical b)
+                                Just TyMu{ tnId = muId, tnBody = b } -> do
+                                    let visited' = IntSet.insert key visited
+                                    binders <- Binding.boundFlexChildrenUnder canonical constraint (typeRef (canonical muId))
+                                    let bound' =
+                                            bound `IntSet.union`
+                                            IntSet.fromList (map (getNodeId . canonical) binders)
+                                    go bound' visited' (canonical b)
                                 Just TyExp{ tnBody = b } -> do
                                     let visited' = IntSet.insert key visited
                                     go bound visited' (canonical b)

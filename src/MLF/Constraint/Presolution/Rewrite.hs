@@ -117,6 +117,9 @@ rewriteNode canonical = \case
     TyForall { tnId = nid, tnBody = b } ->
         let nid' = canonical nid
         in Just (getNodeId nid', TyForall nid' (canonical b))
+    TyMu { tnId = nid, tnBody = b } ->
+        let nid' = canonical nid
+        in Just (getNodeId nid', TyMu nid' (canonical b))
 
 -- | Rewrite a set of variable IDs through canonicalization, keeping only those
 -- that still exist as TyVar nodes in the rewritten node map.

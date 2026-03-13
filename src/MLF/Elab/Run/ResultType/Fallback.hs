@@ -539,6 +539,7 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                                                         Just TyVar{} -> "var"
                                                         Just TyArrow{} -> "arrow"
                                                         Just TyForall{} -> "forall"
+                                                        Just TyMu{} -> "mu"
                                                         Just TyExp{} -> "exp"
                                                         Just TyBase{} -> "base"
                                                         Just TyCon{} -> "con"
