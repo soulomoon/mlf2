@@ -30,6 +30,6 @@
    Depends on: item 3
    Completion notes: completed by accepted round 004 (squash-merged as `c9a7d15`), documented in `docs/plans/2026-03-14-automatic-recursive-inference-ari-c1-feasibility-spike.md`; the bounded `ARI-C1` prototype+docs evidence supports item-5 handoff signal `feasible-continue` while preserving the explicit-only / non-equi-recursive / non-cyclic-graph boundary.
 
-5. [pending] Decide implementation handoff or research stop
+5. [done] Decide implementation handoff or research stop
    Depends on: item 4
-   Completion notes: either the orchestrator writes a concrete implementation-handoff target with explicit boundaries, or it records a no-go / not-yet-go decision and why the research track stops there.
+   Completion notes: completed by accepted round 005 (squash-merged as `c6391ea`, `docs: record item-5 ARI-C1 implementation-handoff decision`), documented in `docs/plans/2026-03-14-automatic-recursive-inference-item5-handoff-decision.md`; it records final signal `implementation-handoff` for bounded `ARI-C1` while preserving the explicit-only / non-equi-recursive / non-cyclic-graph boundary.
