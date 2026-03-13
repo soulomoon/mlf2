@@ -14,9 +14,9 @@
 
 ## Items
 
-1. [pending] Write the inherited-baseline and acceptance contract for automatic recursive-type inference
+1. [done] Write the inherited-baseline and acceptance contract for automatic recursive-type inference
    Depends on: completed recursive-types campaign under `tasks/todo/2026-03-11-recursive-types-orchestration/`
-   Completion notes: a reviewed document defines the current explicit-only boundary, what “automatic recursive-type inference” means in this repo, the non-goals that stay out of scope, and the evidence required before any code-changing spike is allowed.
+   Completion notes: completed by accepted round 001 (squash-merged as `154f788`), documented in `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`; it preserves the inherited explicit-only, acyclic `TyMu` baseline, keeps automatic recursive-type inference unresolved, and records evidence gates required before any code-changing spike.
 
 2. [pending] Audit thesis and solver invariants threatened by automatic recursive-type inference
    Depends on: item 1
