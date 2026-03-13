@@ -26,9 +26,9 @@
    Depends on: item 2
    Completion notes: completed by accepted round 003 (squash-merged as `15094cb`), documented in `docs/plans/2026-03-14-automatic-recursive-inference-candidate-subset-selection.md`; it selects exactly one candidate subset (`ARI-C1`), defers/rejects broader alternatives, and records verifier-visible item-4 spike preconditions/success/failure/stop gates while preserving the explicit-only / non-equi-recursive / non-cyclic-graph boundary.
 
-4. [pending] Execute a bounded feasibility spike for the selected subset
+4. [done] Execute a bounded feasibility spike for the selected subset
    Depends on: item 3
-   Completion notes: the spike produces concrete evidence, docs, and if needed a narrowly-scoped prototype showing whether the chosen subset can be pursued without silently enabling broader recursive-type inference.
+   Completion notes: completed by accepted round 004 (squash-merged as `c9a7d15`), documented in `docs/plans/2026-03-14-automatic-recursive-inference-ari-c1-feasibility-spike.md`; the bounded `ARI-C1` prototype+docs evidence supports item-5 handoff signal `feasible-continue` while preserving the explicit-only / non-equi-recursive / non-cyclic-graph boundary.
 
 5. [pending] Decide implementation handoff or research stop
    Depends on: item 4
