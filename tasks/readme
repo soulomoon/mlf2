@@ -14,4 +14,5 @@ Each active task folder should contain:
 Source of truth:
 - detailed workflow rules live in `AGENTS.md`;
 - adjacent planning surfaces (`TODO.md`, `implementation_notes.md`, `CHANGELOG.md`, `Bugs.md`) must stay synchronized when relevant;
+- a repo-local top-level `orchestrator/` (when present) is a separate successor control plane for repo-wide round execution, not a replacement for the active task folder;
 - root-level `task_plan.md`, `findings.md`, and `progress.md` are historical artifacts, not the current active-task workflow.

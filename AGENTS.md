@@ -134,6 +134,8 @@ tasks/
 - Work from a single active task folder under `tasks/todo/YYYY-MM-DD-description/` for the current effort.
 - Initialize and maintain `task_plan.md`, `findings.md`, and `progress.md` in that task folder before substantial multi-step work.
 - For orchestrated loop campaigns, also keep `mechanism_table.md`, `orchestrator_prompt.md`, and `orchestrator-log.jsonl` in the same task folder; treat the JSONL file as the authoritative round log.
+- When a repo-local top-level `orchestrator/` exists, treat it as the live successor control plane for repo-wide round execution: `orchestrator/state.json` is machine state, `orchestrator/roadmap.md` is the live roadmap, and `orchestrator/verification.md` plus `orchestrator/roles/*.md` define the round contract.
+- If that top-level `orchestrator/` explicitly takes over an older task-folder campaign, keep the predecessor packet immutable as historical evidence unless a round explicitly says it is updating a human-facing summary; do not rewrite the predecessor authoritative log.
 - Re-read `task_plan.md` before major decisions, and update phase status after each completed phase.
 - Log all errors and recovery attempts in `task_plan.md`; do not repeat the same failed action unchanged.
 - Write discoveries to `findings.md` throughout execution and keep `progress.md` as the running session log.
