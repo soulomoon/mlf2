@@ -25,25 +25,21 @@ Authoritative packet rules:
 - Unlogged live worktree, branch, or task-folder state is never adoptable evidence. Recover it only through the delegated Authority Recovery Lane.
 
 Current authoritative state:
-- `master` base: `8a7e437af3f1e4287673c19536966a92c2333a7b`
+- `master` base: `49953d848c403ebc8acad06c772d2b504f36ee83`
 - `M0 = YES`
 - `M1 = YES`
 - `M2 = YES`
 - `M3 = YES`
 - `M4 = YES`
-- `M5 = NO`
-- Current anchor milestone: `M5 — Surface eMLF syntax exposure`
-- Round 5 Attempt 2 is the last authoritative implementation attempt and ended with verifier-owned `milestone_gate = YES` for `M4`
-- The latest logged authority audit is the Round 6 Attempt 1 authority-resync check, and it returned `authority_gate = NO` while recording that live `master` advanced from the prior packet anchor `0d38bb1b6c88903a44c5b051ab96d57eabb88d23` to `8a7e437af3f1e4287673c19536966a92c2333a7b`
-- The latest logged repo-state snapshot remains the earlier Round 6 Attempt 1 `research_result`: at that time `branch`/`HEAD`/`master` all matched `0d38bb1b6c88903a44c5b051ab96d57eabb88d23`, dirty state was limited to roadmap/orchestration artifacts, and no orphan round state remained
-- The latest logged planner result is the Round 6 Attempt 1 `planner_round_plan`, which selected the public-surface-only `STMu` slice plus an explicit Phase 1 rejection boundary
-- The latest logged launch result is the Round 6 Attempt 1 `round_started`: branch `codex/rt-r06-m5-surface-mu` and worktree `/Volumes/src/mlf4-worktrees/rt-r06-m5-surface-mu-a1` launched cleanly from `0d38bb1b6c88903a44c5b051ab96d57eabb88d23`, `HEAD` stayed on that base SHA, and the intentionally dirty root docs remained preserved
-- The latest authority resync records no orphan round state and no merged-history contamination, but it also records `packet_matches_repo_state = NO` until this divergence is reconciled operationally: current `master` is `8a7e437af3f1e4287673c19536966a92c2333a7b`, preserved branch artifact `codex/rt-r06-m5-surface-mu` still points to `4fccce32d382f06a645eb6a19bc48c3a22c5f3e8`, and `.git` metadata writability remains `NO`
-- Round 6 repo-state research, planning, launch, implementation, review, QA, integration attempt, and verifier-owned blockage decision are complete; the authoritative packet now records `review_gate = YES`, `qa_gate = YES`, `integration_result = NO`, `milestone_gate = NO`, `blockage_gate = YES`, and `terminal_status = FAILED` for Round 6 Attempt 1 while `M5` remains `NO`
-- The approved M5 slice still exists as branch commit `4fccce32d382f06a645eb6a19bc48c3a22c5f3e8` on `codex/rt-r06-m5-surface-mu`, but it is still not on current `master`; the current root checkout is now `8a7e437af3f1e4287673c19536966a92c2333a7b`
-- `.git` metadata writability is still `NO`: fresh lock-like file probes in `/Volumes/src/mlf4/.git`, `/Volumes/src/mlf4/.git/logs`, and `/Volumes/src/mlf4/.git/refs/heads` still fail with `Operation not permitted`
-- No integration retry, planner restart, or new round work is currently authorized; the next immediate step is a fresh external-recovery `authority_check` from current `master` `8a7e437af3f1e4287673c19536966a92c2333a7b` only after `.git` metadata recovery is attempted again
-- The current run remains terminal `FAILED` for environment reasons rather than code-quality reasons; `M5` remains the next anchor milestone for a future resumed run
+- `M5 = YES`
+- `M6 = YES`
+- `M7 = NO`
+- Current anchor milestone: `M7 — Optional inference implementation`
+- Round 8 Attempt 3 is the latest authoritative merged attempt: it closed `M6` on `master` via commit `e11b2dc6b6b22d0c59351e5537824b2dc67a123e` and merge `49953d848c403ebc8acad06c772d2b504f36ee83`.
+- Historical verifier output after Round 8 marked `blockage_gate = YES` because current `master` intentionally remains explicit-layer-only and lacks a verifier-backed safe `TyMu` pipeline/graph path.
+- Under the current packet contract, that architectural stop is treated as a recoverable design-gap state when a safe thesis-backed design slice still exists under the same milestone.
+- The packet is synchronized with current repo truth, and the next immediate step is a fresh Round 9 `authority_check` from current `master` `49953d848c403ebc8acad06c772d2b504f36ee83`, followed by planner selection of the smallest `M7` design-resolution slice.
+- Preserved branch/worktree `codex/rt-r06-m5-surface-mu` at `/Volumes/src/mlf4-worktrees/rt-r06-m5-surface-mu-a1` still exist as known post-merge artifacts with a local task folder; they may be cleaned later but no longer define milestone truth or current blockage.
 
 Hard constraints:
 - The orchestrator is not allowed to perform repo work directly.
@@ -122,6 +118,8 @@ Roles:
   - decides transitions strictly from delegated evidence
 - Planner
   - chooses exactly one smallest shippable slice for the current round
+  - may choose code, docs, tests, or design artifacts as long as they are the smallest safe slice that advances the current milestone
+  - when no safe implementation slice exists but a thesis-backed design slice could resolve an architectural gap, chooses that design slice instead of forcing terminal failure
   - emits a decision-complete `RoundPlan`
   - on rejection, emits a `PlannerDelta` for the same round
 - Researchers
@@ -138,7 +136,7 @@ Roles:
 - Verifier
   - decides whether the milestone is complete on current `master`
   - decides whether the whole roadmap goal is complete
-  - decides whether a claimed stop condition is a genuine blockage
+  - classifies any claimed stop condition as either a recoverable design gap or a terminal blocker when packet authority is otherwise intact
 - Integrator
   - creates the final round commit
   - merges it into `master` with `--no-ff`
@@ -282,8 +280,10 @@ For `PlannerDelta`, use:
   "milestone_gate": "YES|NO",
   "completion_gate": "YES|NO",
   "blockage_gate": "YES|NO",
+  "blockage_class": "none|recoverable_design_gap|terminal_blocker",
   "completion_reason": "<brief>",
   "blockage_reason": "<brief-or-null>",
+  "safe_design_slice": "<brief-or-null>",
   "next_anchor_milestone": "<milestone-or-null>"
 }
 ```
@@ -304,6 +304,7 @@ Read packet
 → if authority NO: recovery snapshot + quarantine + recovery verifier + recovery resume or failure sync
 → delegate repo snapshot
 → delegate planner
+→ planner may choose a code slice or a design-resolution slice for the same milestone
 → delegate worktree setup
 → delegate implementer
 → delegate reviewer
@@ -314,6 +315,7 @@ Read packet
 → if integration YES: delegate verifier on merged master
 → if integration NO: delegate verifier on unchanged current master
 → if milestone YES and completion NO: advance to next round
+→ if verifier says blockage = recoverable design gap: authority check → design-resolution lane on same milestone
 → if completion YES: COMPLETED
 → before FAILED: delegate authority check → if recoverable packet fault: recovery lane else FAILED
 → if round exhausts retries: MAXIMUMRETRY, unless delegated evidence proves a stronger FAILED condition
@@ -330,7 +332,8 @@ Round loop:
    - lowest unfinished milestone
    - smallest mergeable unit
    - unblockers before polish
-   - docs-only or tests-only slices only when they unblock or finish the current milestone
+   - if no safe implementation slice exists but a safe thesis-backed design artifact could reduce uncertainty or establish acceptance criteria, choose that design-resolution slice on the same milestone
+   - docs-only, design-only, or tests-only slices are allowed when they unblock or finish the current milestone
 8. If the planner lacks evidence, it must explicitly ask for researchers instead of guessing. Dispatch the requested fresh researchers, collect their summaries, then dispatch a new fresh planner to reconcile the evidence and emit the final `RoundPlan`.
 9. `RoundPlan` must include exactly these fields:
    - `round`
@@ -376,12 +379,14 @@ Round loop:
     - delete the round branch and worktree only if the attempt tree is clean and integration succeeded
 20. If `integration_result = YES`, dispatch a fresh verifier with two ordered decisions:
     - completion question: `Is the roadmap goal complete on current master?`
-    - blockage question: whenever the round may terminate without completion, `Is the campaign genuinely blocked?`
+    - blockage question: whenever the round may terminate without completion, `Is the campaign genuinely blocked, or is the remaining gap a recoverable design gap?`
 21. If `integration_result = NO`, append `integration_result`, then dispatch a fresh verifier on unchanged current `master` so milestone, completion, and blockage decisions remain verifier-owned packet truth rather than branch-local inference from the preserved artifact.
 22. Update the current milestone row evidence only from logged reviewer, QA, verifier, integrator, and recovery outcomes.
 23. If the verifier answers `milestone_gate = YES` and `completion_gate = NO`, append `round_complete`, update the milestone row to reflect verifier-owned truth, and advance to the next round.
 24. If the verifier answers `completion_gate = YES`, append `terminal_status = COMPLETED`, print `FINAL STATUS: COMPLETED`, and stop.
-25. If a verifier-backed blockage is reached before completion, dispatch one final authority audit; append `terminal_status = FAILED`, print `FINAL STATUS: FAILED`, and stop only if delegated recovery evidence says the packet fault is unrecoverable or the blockage is not a packet-authority issue.
+25. If a verifier-backed blockage is reached before completion:
+    - if `blockage_class = recoverable_design_gap`, dispatch one final authority audit for the just-finished transition; if `authority_gate = NO`, use the delegated Authority Recovery Lane; if `authority_gate = YES`, keep the same milestone row active, route into the Design Resolution Lane, and do not emit terminal status.
+    - if `blockage_class = terminal_blocker`, dispatch one final authority audit; append `terminal_status = FAILED`, print `FINAL STATUS: FAILED`, and stop only if delegated recovery evidence says the packet fault is unrecoverable or no safe design or implementation slice exists on the current milestone.
 26. If Round 10 completes successfully but the verifier still answers `completion_gate = NO`, append `terminal_status = MAXIMUMRETRY`, print `FINAL STATUS: MAXIMUMRETRY`, and stop.
 
 Authority Recovery Lane:
@@ -406,12 +411,25 @@ Authority Recovery Lane:
 - Orphan worktree, branch, and task-folder state is never reviewed, merged, or adopted into the packet as if it were a logged attempt.
 - Recovery artifacts are forensic only and do not count as implementation handoff.
 
+Design Resolution Lane:
+- Use this whenever the verifier returns `blockage_gate = YES` with `blockage_class = recoverable_design_gap` and packet authority is otherwise intact.
+- The sequence is fixed:
+  1. dispatch one final authority audit for the just-finished transition and log `authority_check`
+  2. if `authority_gate = NO`, run the delegated Authority Recovery Lane instead of continuing
+  3. if `authority_gate = YES`, keep the same milestone row active and do not emit terminal status
+  4. dispatch fresh researchers only if the planner requests more thesis/code evidence for the design gap
+  5. dispatch a fresh planner for the same milestone and require the smallest design-resolution slice that could make later implementation or closure decisions verifier-checkable
+  6. allowed design-resolution deliverables include thesis-backed design docs, roadmap decisions, architecture notes, invariants, acceptance-test specifications, and other docs/tests that narrow the same milestone safely
+  7. design-resolution slices may stay docs-only or tests-only; they do not need to contain product code if the missing information is architectural rather than implementational
+  8. after the design-resolution slice merges, dispatch a fresh verifier to decide whether the milestone is now `YES`, still `NO` but unblocked for another slice, or truly a `terminal_blocker`
+- A recoverable design gap is not terminal by itself. Emit `FAILED` only after verifier plus authority evidence says there is neither a safe implementation slice nor a safe design-resolution slice.
+
 Agent output contracts:
 - Researcher output must be machine-parseable when used for repo-state collection and include requested facts such as `branch`, `head_sha`, `dirty_state`, `master_sha_before`, `diff_summary`, or symbol-presence checks.
 - Authority-audit and recovery-snapshot outputs must additionally report `authority_gate`, orphan paths when present, and whether `master` or merged history remain untouched.
 - Reviewer output must be machine-parseable with `review_gate = YES|NO`, `reason`, and `required_changes` when `NO`.
 - QA output must be machine-parseable with `qa_gate = YES|NO`, `commands_run`, and `reason` when `NO`.
-- Verifier output must be machine-parseable with `milestone_gate = YES|NO`, `completion_gate = YES|NO`, `completion_reason`, and optionally `blockage_gate = YES|NO`, `blockage_reason`, `next_anchor_milestone`.
+- Verifier output must be machine-parseable with `milestone_gate = YES|NO`, `completion_gate = YES|NO`, `completion_reason`, and optionally `blockage_gate = YES|NO`, `blockage_class = none|recoverable_design_gap|terminal_blocker`, `blockage_reason`, `safe_design_slice`, and `next_anchor_milestone`.
 - Integrator output must be machine-parseable with `integration_result = YES|NO`, `commit_sha`, `merge_sha`, `verification_commands`, `cleanup_result`, and `reason` when `NO`.
 - Recovery-verifier output must be machine-parseable with `authority_gate = YES|NO`, `cleanup_verification = YES|NO`, `master_contaminated = YES|NO`, `merged_history_contaminated = YES|NO`, and a reason when recovery cannot safely resume.
 
@@ -499,8 +517,9 @@ Dry-run scenarios to rehearse against this prompt and log contract:
 5. Orphan attempt after review `NO` — review is logged, authority audit returns `NO`, the orphan worktree is quarantined rather than adopted, and only then does a fresh `PlannerDelta` reopen the retry.
 6. Recovery failure — authority audit returns `NO`, quarantine succeeds, but recovery verifier still returns `NO`; log `plan_interpretation`, sync the packet, and terminate `FAILED`.
 7. Early completion — verifier answers completion = `YES` immediately after a successful merge and the campaign stops before Round 10.
-8. Blocked execution — planner or verifier conclude that no safe next slice exists, or delegated recovery proves the packet fault is unrecoverable; terminal status becomes `FAILED`.
-9. Max-round exhaustion — Round 10 finishes without verifier-confirmed completion; terminal status becomes `MAXIMUMRETRY`.
+8. Recoverable design gap — verifier answers `blockage_gate = YES` with `blockage_class = recoverable_design_gap`, authority remains intact, and the same milestone continues through the Design Resolution Lane with a design-only slice.
+9. True terminal blocker — verifier answers `blockage_gate = YES` with `blockage_class = terminal_blocker`, or delegated recovery proves the packet fault is unrecoverable; terminal status becomes `FAILED`.
+10. Max-round exhaustion — Round 10 finishes without verifier-confirmed completion; terminal status becomes `MAXIMUMRETRY`.
 
 Terminal reporting:
 - At terminal state, report exactly:

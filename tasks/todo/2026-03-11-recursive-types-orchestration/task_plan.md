@@ -2,7 +2,7 @@
 
 Task: Recursive Types 10-Round Non-Coding Orchestrator
 Created: 2026-03-11
-Status: IN PROGRESS
+Status: COMPLETE
 
 ## Objective
 - Build a repo-tracked orchestration packet under `tasks/todo/2026-03-11-recursive-types-orchestration/` that can drive up to 10 live-planned rounds from `master` against `docs/plans/2026-03-11-recursive-types-roadmap.md`.
@@ -18,7 +18,7 @@ Status: IN PROGRESS
 
 ## Live Run Baseline
 - Current branch: `master`
-- Current `HEAD` / `master`: `901fb85f8e445a0db40becae675d1f1ad0a18086`
+- Current `HEAD` / `master`: `49953d848c403ebc8acad06c772d2b504f36ee83`
 - Worktree state at live run start: clean
 - Live run started from delegated repo-state snapshot at `2026-03-11T10:59:58Z`
 
@@ -60,6 +60,31 @@ Status: IN PROGRESS
 | 25. Round 6 M5 blocked integration sync | complete | Appended the Round 6 Attempt 1 blocked `integration_result = NO`, recorded the committed branch artifact `4fccce32d382f06a645eb6a19bc48c3a22c5f3e8`, captured the environment-level `.git` lockfile denial that kept `master` unchanged, and advanced the next immediate step to a fresh delegated verifier |
 | 26. Round 6 M5 verifier sync | complete | Appended the verifier-owned Round 6 Attempt 1 blockage outcome with `milestone_gate = NO`, `blockage_gate = YES`, `terminal_status = FAILED`, while preserving `M5` as the next anchor milestone and the committed branch artifact for future resume |
 | 27. Round 6 authority resync after repo divergence | complete | Appended a fresh Round 6 Attempt 1 `authority_check = NO` recording that live `master` advanced to `8a7e437af3f1e4287673c19536966a92c2333a7b` while the preserved M5 artifact stayed on `codex/rt-r06-m5-surface-mu` at `4fccce32d382f06a645eb6a19bc48c3a22c5f3e8`, and reset the next immediate step to a fresh external-recovery authority check from current `master` after recovery is attempted again |
+| 28. Round 6 external-recovery authority failure after live merge contamination | complete | Appended a fresh Round 6 Attempt 1 `authority_check = NO` on `master` `9b87bf5e5f85327daa4f4e39d4f2cc3c69189e34` showing `.git` metadata writability restored but unlogged commit `4b07b03680e4b21682a0c6237abadaee9719e914` and merge `9b87bf5e5f85327daa4f4e39d4f2cc3c69189e34` already carried the preserved M5 artifact onto `master`, then synchronized the packet to `fail_now` with `master_contaminated = YES` and `merged_history_contaminated = YES` |
+| 29. Manual packet repair for live M5 merge | complete | Appended a fresh verifier-owned Round 6 Attempt 1 `round_complete` on current `master` `9b87bf5e5f85327daa4f4e39d4f2cc3c69189e34`, flipped `M5` to `YES`, repaired packet truth with `packet_matches_repo_state = YES`, cleared blockage for continued work, and reanchored the campaign on `M6` |
+| 30. Round 7 M6 decision-sync landing | complete | Round 7 Attempt 2 merged the docs-only roadmap/decision sync as commit `4bf832b6144a19240c1574a6434665f14ef01e3a` and merge `38411ad0b210869e31ce7189fc80b6c232361455`, narrowing M6 to a dedicated feasibility-spike doc slice |
+| 31. Round 8 M6 feasibility-spike landing | complete | Round 8 Attempt 3 merged `docs/plans/2026-03-13-m6-pipeline-feasibility-spike.md` as commit `e11b2dc6b6b22d0c59351e5537824b2dc67a123e` and merge `49953d848c403ebc8acad06c772d2b504f36ee83`, and the verifier flipped `M6` to `YES` |
+| 32. Final authority audit and terminal blockage | complete | Final authority audit on current `master` `49953d848c403ebc8acad06c772d2b504f36ee83` found no recoverable Round 7/8 packet fault; the run terminates `FAILED` because `M7` is genuinely blocked on the explicit-layer-only decision |
+| 33. Packet design-gap recovery update | complete | Updated the recursive-types orchestration packet so verifier-backed architectural gaps on an unchanged milestone can route into a design-resolution lane; current packet truth is now resumable on `M7` rather than terminal |
+| 34. Round 9 authority audit | complete | Fresh Round 9 Attempt 1 authority audit returned `YES` on current `master` `49953d848c403ebc8acad06c772d2b504f36ee83`; no unlogged Round 9 attempt state exists, and the only extra linked worktree remains the already-logged M5 artifact |
+| 35. Round 9 repo-state research | complete | Fresh Round 9 Attempt 1 repo-state research confirmed `master`/`HEAD` still at `49953d848c403ebc8acad06c772d2b504f36ee83`, root dirt limited to orchestration/planning docs, and the only lingering linked worktree is the already-authorized M5 artifact |
+| 36. Round 9 M7 planning sync | complete | Fresh Round 9 Attempt 1 planner selected the smallest safe M7 slice: a single docs-only thesis-backed design-resolution note at `docs/plans/2026-03-13-m7-tymu-design-resolution.md` on branch `codex/rt-r09-m7-tymu-design` |
+| 37. Round 9 M7 launch sync | complete | Delegated worktree setup created clean branch/worktree `codex/rt-r09-m7-tymu-design` at `/Volumes/src/mlf4-worktrees/rt-r09-m7-tymu-design-a1` from exact base `49953d848c403ebc8acad06c772d2b504f36ee83` while preserving dirty root docs |
+| 38. Round 9 M7 implementation sync | complete | Delegated implementer authored the one-file M7 design-resolution note at `docs/plans/2026-03-13-m7-tymu-design-resolution.md`, kept product-code paths untouched, and passed the focused review-prep checks |
+| 39. Round 9 M7 review sync | complete | Fresh Round 9 Attempt 1 review returned `YES` with no required changes; the one-file docs-only note matches the planner’s scope and acceptance criteria |
+| 40. Round 9 M7 QA sync | complete | Fresh Round 9 Attempt 1 QA returned `YES`; the design note exists, required terms are present, product-code paths remain untouched, and both targeted test selections passed |
+| 41. Round 9 M7 integration sync | complete | Fresh Round 9 Attempt 1 integration committed the docs-only note as `885d1ec1c148eb051a53d60319594d78893ee364`, merged it onto `master` as `17ee4e22f409dbe01bfd70df9961e8a2aa108d33`, reran the planned docs-only checks, and removed the clean attempt worktree/branch |
+| 42. Round 9 M7 verifier sync | complete | Fresh verifier on merged `master` `17ee4e22f409dbe01bfd70df9961e8a2aa108d33` kept `M7 = NO` but cleared blockage; the merged design note unblocks a concrete implementation slice for Round 10 on the same milestone |
+| 43. Round 10 authority audit | complete | Fresh Round 10 Attempt 1 authority audit returned `YES` on current `master` `17ee4e22f409dbe01bfd70df9961e8a2aa108d33`; no unlogged Round 10 attempt state exists, and the only extra linked worktree remains the already-logged M5 artifact |
+| 44. Round 10 repo-state research | complete | Fresh Round 10 Attempt 1 repo-state research confirmed `master`/`HEAD` still at `17ee4e22f409dbe01bfd70df9961e8a2aa108d33`, root dirt limited to planning/orchestration docs, and the only lingering linked worktree is the already-authorized M5 artifact |
+| 45. Round 10 M7 planning sync | complete | Fresh Round 10 Attempt 1 planner selected the smallest implementation slice as an end-to-end explicit-only acyclic `TyMu` annotation path on branch `codex/rt-r10-m7-tymu-explicit` |
+| 46. Round 10 M7 launch sync | complete | Delegated worktree setup created clean branch/worktree `codex/rt-r10-m7-tymu-explicit` at `/Volumes/src/mlf4-worktrees/rt-r10-m7-tymu-explicit-a1` from exact base `17ee4e22f409dbe01bfd70df9961e8a2aa108d33` while preserving dirty root docs |
+| 47. Round 10 M7 implementation sync | complete | Delegated implementer reports the explicit-only acyclic graph `TyMu` path is implemented end-to-end with focused recursive-annotation and acyclicity coverage passing plus full `cabal build all && cabal test` (`1096 examples, 0 failures`) |
+| 48. Round 10 M7 review sync | complete | Fresh Round 10 Attempt 1 review returned `YES` with no required changes; the explicit-only graph `TyMu` path matches the RoundPlan and stays inside its non-inference / non-equi-recursive boundary |
+| 49. Round 10 M7 QA sync | complete | Fresh Round 10 Attempt 1 QA returned `YES`; the focused recursive-annotation tests, acyclicity tests, and the full `cabal build all && cabal test` gate all passed (`1096 examples, 0 failures`) |
+| 50. Round 10 M7 integration sync | complete | Fresh Round 10 Attempt 1 integration committed the explicit-only `TyMu` slice as `eacfb405da1c025770f7483e0ebc4fe6c169a03e`, merged it onto `master` as `9e2945dd41d115742c0184ecb59e00bc326f2580`, reran the planned implementation checks, and removed the clean attempt worktree/branch |
+| 51. Round 10 M7 verifier sync | complete | Fresh verifier on merged `master` `9e2945dd41d115742c0184ecb59e00bc326f2580` marked `M7 = YES` and `completion_gate = YES`; merged-master verification stayed green with `cabal build all && cabal test` (`1096 examples, 0 failures`) |
+| 52. Terminal completion | complete | The orchestrator packet is now terminal `COMPLETED`: `M0` through `M7` are verifier-green on current `master`, and no further packet action is required unless a later verifier finds regression |
 
 ## Decisions
 | Decision | Rationale |
@@ -89,6 +114,10 @@ Status: IN PROGRESS
 | Delegated Round 5 recovery quarantine removed the orphan filesystem state, but the recovery verifier still returned `authority_gate = NO` and `cleanup_verification = NO` because lingering git metadata continued to register the orphan linked worktree/branch | 1 | Applied plan interpretation `fail_now`; this run terminated `FAILED` with no new authoritative attempt started, no branch merged, and `M4` still `NO` |
 | Attempt-worktree commit initially failed because `.git/worktrees/rt-r05-m4-contractiveness-a2/index.lock` was left behind transiently | 1 | Confirmed there was no live git process for this repo, verified the lock had already cleared, and retried the commit successfully without changing the reviewed snapshot |
 | Post-merge cleanup attempted branch deletion in parallel with worktree removal, so Git still saw the branch as checked out | 1 | Rechecked that the worktree path was absent and `git worktree list --porcelain` showed only `master`, then reran branch deletion sequentially and completed cleanup safely |
+| External `.git` recovery succeeded, but live `master` advanced through unlogged history that already merged the preserved M5 artifact outside the packet | 1 | Recorded `master_contaminated = YES`, `merged_history_contaminated = YES`, and `allowed_next_step = fail_now`; synchronized the packet to terminal `FAILED` instead of attempting any further automated retry |
+| Live `master` absorbed the preserved M5 artifact outside the original orchestration path, leaving the packet behind repo truth | 1 | Ran a fresh verifier on current `master`, recorded verifier-owned `M5 = YES`, and repaired the packet baseline so future orchestration can resume from `M6` instead of replaying Round 6 |
+| Fresh Round 9 authority-audit dispatch on `gpt-5.2` errored before inspection because that model/runtime combination did not support the hidden `tool_search` request path | 1 | Relaunched the same read-only authority-audit role as a fresh `gpt-5.4` subagent and captured the required JSON authority result without changing packet state |
+| Round 9 implementer validation initially hit a `dist-newstyle` packagedb conflict when Cabal commands overlapped in the attempt worktree | 1 | Reran the focused validation commands serially in the same worktree and captured the final passing evidence without changing the reviewed docs-only diff |
 
 ## Terminal Outcome
 - Historical live-run status under the prior 3-attempt budget: `FAILED`
@@ -99,10 +128,10 @@ Status: IN PROGRESS
 
 ## Resumed Run Outcome
 - Earlier resumed-run attempt under the new 20-attempt budget: `FAILED` during initialization
-- Current packet status: the historical failed runs remain archived, and the latest resumed run is terminal `FAILED` after the verifier-owned Round 6 Attempt 1 blockage outcome on `M5`
-- Current anchor: `M5 — Surface eMLF syntax exposure`
-- Current authority state: Round 5 Attempt 2 fast-forward merged `master` from `9e1214b485527b8064dbe640c3350725c1085d15` to `0d38bb1b6c88903a44c5b051ab96d57eabb88d23`, verifier-owned `round_complete` set `milestone_gate = YES` for `M4`, Round 6 Attempt 1 produced a review/QA-green but blocked M5 branch artifact at `4fccce32d382f06a645eb6a19bc48c3a22c5f3e8`, and the latest authority resync now records that live `master` has advanced to `8a7e437af3f1e4287673c19536966a92c2333a7b` while `.git` metadata writability still remains `NO`
-- Required next action: do not retry integration, planning, or a new round yet; first attempt external `.git` metadata recovery, then run a fresh external-recovery `authority_check` from current `master` `8a7e437af3f1e4287673c19536966a92c2333a7b`, and only proceed if that gate returns `YES`
+- Current packet status: `COMPLETED`
+- Current anchor: none; the recursive-types roadmap is fully verifier-green through `M7`
+- Current authority state: Round 10 Attempt 1 merged the explicit-only acyclic `TyMu` slice onto current `master` `9e2945dd41d115742c0184ecb59e00bc326f2580`, and the fresh verifier marked both `milestone_gate = YES` and `completion_gate = YES`; the only extra linked worktree remains the already-recorded preserved M5 artifact branch/worktree and does not affect milestone truth
+- Required next action: none within this packet unless a later verifier finds regression and opens a new task
 
 ## Resume Sync — 2026-03-11T17:45:48Z
 - Verified from the local authoritative packet/log that `M0` and `M1` are already merged and verifier-green on `master`, while `M2` remains the active `NO` milestone.
@@ -240,3 +269,35 @@ Status: IN PROGRESS
 - Fresh read-only verification confirms `master` and `HEAD` now point to `8a7e437af3f1e4287673c19536966a92c2333a7b`, while preserved branch `codex/rt-r06-m5-surface-mu` and worktree `/Volumes/src/mlf4-worktrees/rt-r06-m5-surface-mu-a1` still point to committed artifact `4fccce32d382f06a645eb6a19bc48c3a22c5f3e8`.
 - The packet now explicitly records `packet_matches_repo_state = NO` for the prior stale anchor and keeps `.git` metadata writability at `NO`: lock-like file creation still fails in `/Volumes/src/mlf4/.git`, `/Volumes/src/mlf4/.git/logs`, and `/Volumes/src/mlf4/.git/refs/heads` with `Operation not permitted`.
 - `M5` remains `NO`, no integration retry or new round work is authorized, and the next immediate step is a fresh external-recovery `authority_check` from current `master` only after external recovery is attempted again.
+
+## 2026-03-12T21:36:29Z — Round 6 M5 integration retry (no-ff) blocked
+- Appended exactly one Round 6 Attempt 1 `integration_result` event for `codex/rt-r06-m5-surface-mu` with `integration_result = NO` after `git merge --no-ff codex/rt-r06-m5-surface-mu` failed.
+- The integrator reasoned `fatal: update_ref failed for ref 'ORIG_HEAD': cannot lock ref 'ORIG_HEAD': Unable to create '/Volumes/src/mlf4/.git/ORIG_HEAD.lock': Operation not permitted`.
+- `master` at that transition remained `4b07b03680e4b21682a0c6237abadaee9719e914` (`master_sha_before` and `master_sha_after`), while the committed artifact `4fccce32d382f06a645eb6a19bc48c3a22c5f3e8` and worktree `/Volumes/src/mlf4-worktrees/rt-r06-m5-surface-mu-a1` stayed intact.
+- The log and task artifacts now explicitly record the `packet_matches_repo_state = NO` condition with `8a7e437af3f1e4287673c19536966a92c2333a7b` as the live repo anchor, `cleanup_result = NO`, and `M5` still blocked on `.git` metadata writability with no authorized retry.
+
+## 2026-03-12T21:40:28Z — Fresh authority audit found merged-history contamination
+- Appended exactly one fresh Round 6 Attempt 1 `authority_check` event for the external-recovery gate from current `master`.
+- The delegated audit confirms that the old lockfile blocker is gone: `.git`, `.git/logs`, and `.git/refs/heads` all accepted temporary lock-like probe files that were then removed cleanly.
+- The authority failure is now different and stronger: current `master` / `HEAD` are `9b87bf5e5f85327daa4f4e39d4f2cc3c69189e34`, the packet anchor `8a7e437af3f1e4287673c19536966a92c2333a7b` is stale, and unlogged commit `4b07b03680e4b21682a0c6237abadaee9719e914` plus merge `9b87bf5e5f85327daa4f4e39d4f2cc3c69189e34` already carried the preserved M5 artifact `4fccce32d382f06a645eb6a19bc48c3a22c5f3e8` onto live `master`.
+- Because the branch/worktree are logged preserved Attempt 1 artifacts rather than a fresh orphan attempt, the prompt interprets this as `master_contaminated = YES` and `merged_history_contaminated = YES`, not as a recovery-lane quarantine case.
+- Appended matching `plan_interpretation`, `packet_sync`, and `terminal_status = FAILED` events. No new authoritative attempt started, `M5` remains `NO`, and no further automated retry is authorized until manual authority reconstruction repairs the packet truth.
+
+## 2026-03-12T21:52:10Z — Manual packet repair reanchored the campaign on M6
+- Ran a fresh verifier against current `master` `9b87bf5e5f85327daa4f4e39d4f2cc3c69189e34` after confirming it already contains preserved artifact commit `4fccce32d382f06a645eb6a19bc48c3a22c5f3e8`.
+- The verifier returned `milestone_gate = YES`, `completion_gate = NO`, and `blockage_gate = NO` for Round 6 Attempt 1: `M5` is satisfied on current `master`, while `M6` and `M7` remain open.
+- Appended a repair `packet_sync` event to mark `packet_matches_repo_state = YES` again, reclassify the previous fail-now state as historical, and set the next anchor milestone to `M6 — Pipeline acceptance for explicit annotations only`.
+- The old branch/worktree remain as known post-merge artifacts because the worktree still has an untracked local task folder; cleanup can happen later, but it no longer blocks campaign state or milestone truth.
+
+## 2026-03-13T09:48:51Z — Round 7/8 terminal blockage sync
+- Round 7 Attempt 2 merged the docs-only M6 decision-sync slice as commit `4bf832b6144a19240c1574a6434665f14ef01e3a` and merge `38411ad0b210869e31ce7189fc80b6c232361455`, which repaired roadmap current-status drift and narrowed the remaining M6 work to a dedicated feasibility-spike doc.
+- Round 8 Attempt 3 then merged `docs/plans/2026-03-13-m6-pipeline-feasibility-spike.md` as commit `e11b2dc6b6b22d0c59351e5537824b2dc67a123e` and merge `49953d848c403ebc8acad06c772d2b504f36ee83`; the verifier marked `M6 = YES`, `completion_gate = NO`, and `blockage_gate = YES`.
+- The verifier-owned blockage is product-level rather than packet-authority-level: current `master` explicitly keeps recursive types at the explicit layer only, Phase 1 still rejects recursive annotations, and no verifier-backed safe `TyMu` pipeline/graph path exists on current `master`.
+- Final authority audit on `master` `49953d848c403ebc8acad06c772d2b504f36ee83` found no recoverable Round 7/8 orphan state and no merged-history contamination; only the already-recorded M5 artifact worktree remains linked.
+- The authoritative run therefore ends `FAILED` with `M7` still `NO`.
+
+## 2026-03-13T10:11:01Z — Packet reopened through design-gap recovery
+- Updated `orchestrator_prompt.md` so verifier-backed architectural gaps can be classified as `recoverable_design_gap` instead of forcing immediate terminal `FAILED` under the same milestone.
+- Added a first-class Design Resolution Lane: when authority is intact and a safe thesis-backed design slice exists, the planner may choose docs/tests/design artifacts to resolve the same milestone before any later implementation slice.
+- Synchronized the mechanism table and current packet status so `M7` is again the active anchor rather than a terminal stop.
+- The next lawful action is a fresh Round 9 `authority_check` on current `master` `49953d848c403ebc8acad06c772d2b504f36ee83`, followed by planner selection of the smallest design-resolution slice for safe `TyMu` graph/elaboration support.
