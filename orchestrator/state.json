@@ -7,6 +7,6 @@
   "worktree_path": null,
   "active_round_dir": null,
   "round_artifacts": {},
-  "last_completed_round": null,
+  "last_completed_round": "round-001",
   "resume_error": null
 }
