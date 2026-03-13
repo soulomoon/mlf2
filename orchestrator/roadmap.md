@@ -22,9 +22,9 @@
    Depends on: item 1
    Completion notes: completed by accepted round 002 (squash-merged as `07b0815`), documented in `docs/plans/2026-03-14-automatic-recursive-inference-invariant-audit.md`; the audit captures acyclicity, binding, occurs-check/termination, reconstruction/reification/witness, and principality risks with concrete module obligations while preserving the explicit-only / non-equi-recursive / non-cyclic-graph boundary.
 
-3. [pending] Select one bounded candidate subset and research plan
+3. [done] Select one bounded candidate subset and research plan
    Depends on: item 2
-   Completion notes: one candidate subset/representation is chosen for evaluation, alternatives are explicitly deferred or rejected, and the verifier-visible success/failure criteria for the spike are written down.
+   Completion notes: completed by accepted round 003 (squash-merged as `15094cb`), documented in `docs/plans/2026-03-14-automatic-recursive-inference-candidate-subset-selection.md`; it selects exactly one candidate subset (`ARI-C1`), defers/rejects broader alternatives, and records verifier-visible item-4 spike preconditions/success/failure/stop gates while preserving the explicit-only / non-equi-recursive / non-cyclic-graph boundary.
 
 4. [pending] Execute a bounded feasibility spike for the selected subset
    Depends on: item 3
