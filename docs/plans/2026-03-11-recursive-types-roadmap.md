@@ -31,11 +31,11 @@ Each milestone has a gate. Do not start the next milestone until the current gat
 
 ## Current Status
 
-- Current `master`: `9e1214b485527b8064dbe640c3350725c1085d15`
-- `M0`, `M1`, `M2`, and `M3` are closed `YES` on `master`.
-- Current open anchor: `M4 — Add contractiveness validation`
-- Round 5 Attempt 1 on branch `codex/rt-r05-m4-contractiveness` in worktree `/Volumes/src/mlf4-worktrees/rt-r05-m4-contractiveness-a1` already ended at review `NO` because the diff widened the public library with unnecessary `MLF.TestSupport.RecursiveTypes` surface.
-- Next safe action: stay inside Round 5 on `M4` and run a fresh `PlannerDelta` retry; do not restart Round 5.
+- Current `master`: `9b87bf5e5f85327daa4f4e39d4f2cc3c69189e34`
+- `M0` through `M5` are closed `YES` on `master`.
+- Current open anchor: `M6 — Pipeline acceptance for explicit annotations only`
+- Round 7 M6 feasibility spike conclusion on `master`: keep recursive types explicit-layer-only for now; do not add `TyMu` pipeline/graph support in this slice.
+- Next safe action: treat M6 as docs-only decision closure on current `master`, preserve the explicit-layer-only boundary, and leave product code/tests unchanged.
 
 ---
 
