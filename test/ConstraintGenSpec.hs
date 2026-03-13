@@ -1,6 +1,6 @@
 module ConstraintGenSpec (spec) where
 
-import Control.Monad (filterM, forM, when)
+import Control.Monad (filterM, forM, forM_, when)
 import Data.List (nub)
 import Data.List.NonEmpty (NonEmpty(..))
 import Data.Maybe (catMaybes)
@@ -1061,21 +1061,38 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 length arrowNodes `shouldSatisfy` (> 0)
 
     describe "Recursive surface annotation boundary" $ do
-        it "rejects top-level recursive annotations before internalization" $ do
+        it "internalizes top-level recursive annotations into acyclic TyMu nodes" $ do
             let ann = STMu "self" (STArrow (STVar "self") (STBase "Int"))
                 expr :: NormSurfaceExpr
                 expr = EAnn (ELit (LInt 1)) ann
-            inferConstraintGraph Set.empty expr
-                `shouldBe` Left (RecursiveAnnotationNotSupported ann)
+            expectRight (inferConstraintGraph Set.empty expr) $ \result -> do
+                let nodes = cNodes (crConstraint result)
+                    muNodes = [node | node@TyMu{} <- nodeMapElems nodes]
+                length muNodes `shouldBe` 2
+                case muNodes of
+                    [TyMu{ tnBody = body1 }, TyMu{ tnBody = body2 }] -> do
+                        body1 `shouldNotBe` body2
+                        lookupNode nodes body1 >>= (`shouldSatisfy` isArrow)
+                        lookupNode nodes body2 >>= (`shouldSatisfy` isArrow)
+                    other ->
+                        expectationFailure ("Expected two TyMu nodes, saw " ++ show other)
 
-        it "rejects recursive annotations nested inside normalized forall bounds" $ do
+        it "internalizes recursive annotations nested inside normalized forall bounds" $ do
             let recursiveBound = STMu "self" (STVar "self")
                 ann :: NormSrcType
                 ann = STForall "a" (Just (mkNormBound recursiveBound)) (STVar "a")
                 expr :: NormSurfaceExpr
                 expr = EAnn (ELit (LInt 1)) ann
-            inferConstraintGraph Set.empty expr
-                `shouldBe` Left (RecursiveAnnotationNotSupported recursiveBound)
+            expectRight (inferConstraintGraph Set.empty expr) $ \result -> do
+                let nodes = cNodes (crConstraint result)
+                    muNodes = [node | node@TyMu{} <- nodeMapElems nodes]
+                length muNodes `shouldBe` 2
+                forM_ muNodes $ \node ->
+                    case node of
+                        TyMu{ tnBody = body } ->
+                            lookupNode nodes body >>= (`shouldSatisfy` isVarNode)
+                        other ->
+                            expectationFailure ("Expected TyMu node, saw " ++ show other)
 
         -- US-003 Regression: ELet x (EAnn e σ) should NOT introduce explicit-scheme
         -- instantiation edge structure. With coercion-only semantics, an annotated
@@ -1143,3 +1160,11 @@ spec = describe "Phase 1 — Constraint generation" $ do
             expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let constraint = crConstraint result
                 nodeMapSize (cNodes constraint) `shouldSatisfy` (> 1)
+
+isArrow :: TyNode -> Bool
+isArrow TyArrow{} = True
+isArrow _ = False
+
+isVarNode :: TyNode -> Bool
+isVarNode TyVar{} = True
+isVarNode _ = False

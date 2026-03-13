@@ -189,6 +189,7 @@ processUnifyEdgesWith strategy findRoot lookupNode unionNodes = foldM processOne
         TyCon{} -> acc ++ newEdges
         TyExp{} -> newEdges ++ acc
         TyForall{} -> newEdges ++ acc
+        TyMu{} -> newEdges ++ acc
         _ -> acc
 
     prependEdges newEdges acc = newEdges ++ acc

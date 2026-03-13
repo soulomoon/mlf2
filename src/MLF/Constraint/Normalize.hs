@@ -808,6 +808,8 @@ applyToStructure uf node = case node of
         TyCon { tnId = nid, tnCon = con, tnArgs = fmap (findRoot uf) args }
     TyForall { tnId = nid, tnBody = body } ->
         TyForall { tnId = nid, tnBody = findRoot uf body }
+    TyMu { tnId = nid, tnBody = body } ->
+        TyMu { tnId = nid, tnBody = findRoot uf body }
     TyExp { tnId = nid, tnExpVar = ev, tnBody = body } ->
         TyExp { tnId = nid, tnExpVar = ev, tnBody = findRoot uf body }
 

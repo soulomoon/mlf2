@@ -280,6 +280,16 @@ data TyNode
         , tnExpVar :: ExpVarId
         , tnBody :: NodeId
         }
+    -- | Explicit recursive type node (μ).
+    --
+    -- Like `TyForall`, the binder variable is represented in the binding tree
+    -- rather than as a structural edge. The term-DAG remains acyclic: the body
+    -- references the binder through an ordinary bound `TyVar`, not by pointing
+    -- back to this node.
+    | TyMu
+        { tnId :: NodeId
+        , tnBody :: NodeId
+        }
     deriving (Eq, Show)
 
 -- | Immediate structural children of a term-DAG node.
@@ -298,6 +308,7 @@ structuralChildren TyCon{ tnArgs = args } = NE.toList args
 structuralChildren TyArrow{ tnDom = d, tnCod = c } = [d, c]
 structuralChildren TyForall{ tnBody = b } = [b]
 structuralChildren TyExp{ tnBody = b } = [b]
+structuralChildren TyMu{ tnBody = b } = [b]
 
 -- | Structural children plus the bound child for TyVar nodes (when present).
 structuralChildrenWithBounds :: TyNode -> [NodeId]
