@@ -4,6 +4,21 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 84 Automatic recursive-type inference orchestrator scaffold (completed 2026-03-14)
+
+- Completed:
+  - scaffolded a new top-level `orchestrator/` successor control plane from the repo-local template, including a takeover-specific roadmap, state file, verification contract, role prompts, and round artifact directory;
+  - anchored the new control plane on branch `codex/automatic-recursive-type-inference`, explicitly inherited the completed recursive-types packet under `tasks/todo/2026-03-11-recursive-types-orchestration/`, and defined the new target as research-first automatic recursive-type inference beyond the current explicit-only boundary;
+  - updated `.gitignore`, `AGENTS.md`, and `tasks/readme` so the repo-level orchestrator/worktree workflow is documented alongside the existing task-folder conventions.
+- Verification:
+  - `python3 -m json.tool orchestrator/state.json`: PASS
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`: PASS
+  - `git diff --check`: PASS
+- Rolling priorities (next):
+  1. Use the new top-level `orchestrator/` to land the inherited-baseline and acceptance-contract slice before any solver-facing spike work.
+  2. Treat `tasks/todo/2026-03-11-recursive-types-orchestration/` as immutable predecessor evidence unless a future round explicitly updates its human-facing summaries.
+  3. Keep early rounds research-first: no silent widening from explicit-only recursive-type support into automatic inference until the roadmap explicitly authorizes a bounded spike.
+
 ## Task 83 Recursive-types orchestration packet (completed 2026-03-11)
 
 - Completed:
@@ -14,9 +29,9 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - `python3` JSONL parse of `tasks/todo/2026-03-11-recursive-types-orchestration/orchestrator-log.jsonl`: PASS
   - `python3` milestone/vocabulary consistency check across `docs/plans/2026-03-11-recursive-types-roadmap.md`, `tasks/todo/2026-03-11-recursive-types-orchestration/mechanism_table.md`, and `tasks/todo/2026-03-11-recursive-types-orchestration/orchestrator_prompt.md`: PASS
 - Rolling priorities (next):
-  1. Start the campaign with the verifier-owned `M0` gate using the existing roadmap/design evidence.
-  2. Keep each round scoped to the smallest slice in the lowest unfinished milestone.
-  3. Stop escalation if `M6` or `M7` require cyclic graph semantics or equi-recursive inference without a separate research decision.
+  1. Resume the packet from `M7` with a fresh authority audit on current `master`, then let the planner choose the smallest thesis-backed design-resolution slice.
+  2. Keep each round scoped to the smallest slice in the lowest unfinished milestone, including design-only slices when architecture is the real blocker.
+  3. Only terminal-fail `M7` if verifier plus authority evidence says there is neither a safe implementation slice nor a safe design-resolution slice.
 
 ## Task 82 Restore warning-free rebuild after dead-export loop (completed 2026-03-10)
 

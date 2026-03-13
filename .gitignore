@@ -68,3 +68,4 @@ cabal.project.local
 .cabal
 tmp/
 *.pdf
+.worktrees/
