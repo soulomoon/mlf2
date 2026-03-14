@@ -6,7 +6,7 @@
   "branch": null,
   "worktree_path": null,
   "active_round_dir": null,
-  "round_artifacts": {},
-  "last_completed_round": "round-016",
+  "round_artifacts": null,
+  "last_completed_round": "round-017",
   "resume_error": null
 }
