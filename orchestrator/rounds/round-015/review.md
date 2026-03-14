@@ -1,0 +1,106 @@
+# Round `round-015`
+
+- Baseline checks:
+  - `git diff --check`
+    - Result: pass.
+    - Evidence: no output.
+  - `python3 -m json.tool orchestrator/state.json >/dev/null`
+    - Result: pass.
+    - Evidence: command exited successfully with no output.
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+    - Result: pass.
+    - Evidence:
+      - `20:1. [done] Write the \`RE1\` provenance-authority evidence contract for \`URI-R3-O4\``
+      - `24:2. [done] Write the \`RE2\` uniqueness-evidence contract for \`URI-R3-O5\``
+      - `28:3. [done] Write the \`RE3\` prototype-free positive-evidence contract for \`URI-R3-O1\` through \`URI-R3-O3\``
+      - `32:4. [done] Execute the \`RE4\` bounded re-entry gate for \`URI-R2-C1\``
+      - `36:5. [pending] Write the \`RE5\` final successor recommendation`
+  - `cabal build all && cabal test`
+    - Result: skipped by contract.
+    - Evidence: `git diff --name-only` produced no tracked code-path changes, and `git ls-files --others --exclude-standard` showed only docs/round artifacts:
+      - `docs/plans/2026-03-14-uri-r2-c1-re5-final-successor-recommendation.md`
+      - `orchestrator/rounds/round-015/implementation-notes.md`
+      - `orchestrator/rounds/round-015/plan.md`
+      - `orchestrator/rounds/round-015/selection.md`
+  - Continuity check against inherited evidence
+    - Result: pass.
+    - Evidence: the RE5 artifact cites the approved re-entry design, accepted `R5`, accepted `RE1` / `RE2` / `RE3`, accepted `RE4`, and the invariant audit, and its continuity section states that completed rounds `001` through `014` and the predecessor recursive-types packet remain inherited evidence only and are not rewritten.
+
+- Task-specific checks:
+  - Docs-only boundary
+    - `git status --short`
+      - Result: docs-only/untracked round artifacts only.
+      - Evidence:
+        - `?? docs/plans/2026-03-14-uri-r2-c1-re5-final-successor-recommendation.md`
+        - `?? orchestrator/rounds/round-015/`
+    - `git diff --name-only`
+      - Result: pass.
+      - Evidence: no tracked diff output.
+    - `git ls-files --others --exclude-standard`
+      - Result: pass.
+      - Evidence limited to the four round artifacts listed above.
+    - `git diff --name-only | rg '^(src/|src-public/|app/|test/|mlf2\.cabal$)'`
+    - `git diff --name-only | rg '^orchestrator/state\.json$'`
+    - `git diff --name-only | rg '^orchestrator/roadmap\.md$'`
+    - `git diff --name-only | rg '^tasks/todo/'`
+    - `git diff --name-only | rg '^orchestrator/rounds/round-00(1|2|3|4|5|6|7|8|9|10|11|12|13|14)/'`
+    - `git diff --name-only | rg '^orchestrator/rounds/round-015/(review|merge|implementation-notes)\.md$'`
+      - Result for each: pass.
+      - Evidence: each command exited with status 1 and no matches.
+  - Recommendation markers present
+    - `rg -n 'RE5|URI-R2-C1|remain-stop|not-yet-reopen|RE1|RE2|RE3|RE4|prototype-free|single-SCC|single-binder-family|updated re-entry requirements' docs/plans/2026-03-14-uri-r2-c1-re5-final-successor-recommendation.md`
+      - Result: pass.
+      - Evidence includes:
+        - `36:- Because \`RE4\` already recorded \`not-yet-reopen\`, the only admissible live recommendation in this round is renewed bounded stop, recorded as \`remain-stop\`.`
+        - `43:- \`single-SCC\` obligation-level recursion only;`
+        - `44:- \`single-binder-family\` ownership only;`
+        - `73:Final successor recommendation: \`remain-stop\``
+  - Fixed-boundary and fail-closed checks
+    - `rg -n 'single-SCC|single-binder-family|cross-family|non-cyclic|equi-recursive|default-on widening|prototype-free' ...re5...md`
+      - Result: pass.
+      - Evidence includes lines `43-49`, `87`, `95`, `105`, `108`.
+    - `rg -n 'manufactured provenance|late repair|heuristic ranking|tie-breaking|widened comparison|widened ownership|owner repair|parent-chain repair|widened search|non-local propagation|multi-cluster|multi-SCC|cyclic structural|implicit unfolding|termination weakening|implementation drift' ...re5...md`
+      - Result: pass.
+      - Evidence includes lines `65-67`, `93-109`.
+  - RE4 alignment
+    - `rg -n 'Decision outcome: \`not-yet-reopen\`|not-yet-reopen' docs/plans/2026-03-14-uri-r2-c1-re4-bounded-reentry-gate.md`
+      - Result: pass.
+      - Evidence: `143:Decision outcome: \`not-yet-reopen\``
+    - `rg -n 'renewed bounded stop|remain-stop|not-yet-reopen' docs/plans/2026-03-14-uri-r2-c1-re5-final-successor-recommendation.md`
+      - Result: pass.
+      - Evidence: lines `36`, `57`, `73`, `84`, `111`, `115`.
+    - Reviewer judgment:
+      - pass. The RE5 artifact treats RE4 as inherited controlling authority, says `RE5` "does not re-judge that gate", and translates the fixed `not-yet-reopen` result into a single successor consequence.
+  - No-handoff drift
+    - `rg -n 'handoff-track|implementation-handoff|implementation-ready|prototype|experiment' docs/plans/2026-03-14-uri-r2-c1-re5-final-successor-recommendation.md`
+      - Result: pass.
+      - Evidence:
+        - `15:... not a prototype request, not a handoff-track design, and not implementation clearance.`
+        - `78:- Do not reopen a handoff-track roadmap.`
+        - `79:- Do not authorize implementation-handoff design.`
+        - `115:This round does not draft a handoff-track roadmap because accepted \`RE4\` ended \`not-yet-reopen\`.`
+        - `119:This document is therefore not implementation-ready, not an implementation-handoff artifact, and not implementation authorization.`
+    - Reviewer judgment:
+      - pass. `reopen-handoff-track` appears only as a rejected conditional label inherited from the roadmap, never as a live recommendation.
+  - Continuity references
+    - `rg -n '2026-03-14-uri-r2-c1-reentry-roadmap-design|2026-03-14-unannotated-iso-recursive-r5-research-stop-decision|2026-03-14-uri-r2-c1-re1-provenance-authority-evidence-contract|2026-03-14-uri-r2-c1-re2-uniqueness-evidence-contract|2026-03-14-uri-r2-c1-re3-positive-evidence-contract|2026-03-14-uri-r2-c1-re4-bounded-reentry-gate|2026-03-14-automatic-recursive-inference-invariant-audit' docs/plans/2026-03-14-uri-r2-c1-re5-final-successor-recommendation.md`
+      - Result: pass.
+      - Evidence: lines `23-29` cite the full inherited authority chain.
+  - Reviewer logic checks
+    - Result: pass.
+    - Evidence:
+      - Exactly one live successor recommendation is present: `73:Final successor recommendation: \`remain-stop\``.
+      - Updated re-entry requirements at lines `91-111` match the unresolved bounded conditions stated by accepted RE4 and stay within `URI-R2-C1`.
+      - The artifact remains recommendation-only, prototype-free, fail-closed, and does not authorize implementation work.
+
+- Decision:
+  - approve
+
+- Evidence:
+  - The round stayed at `RE5` and used the approved `RE1` -> `RE5` staging authority.
+  - The inherited invariant-audit authority was preserved and cited as controlling.
+  - Accepted `RE4` input was preserved as the controlling predecessor result `not-yet-reopen`; the artifact did not reopen or rewrite `RE1`, `RE2`, `RE3`, or `RE4`.
+  - `URI-R2-C1` remained fixed, with explicit `single-SCC`, `single-binder-family`, non-equi-recursive, non-cyclic, prototype-free, and no-default-on-widening boundaries.
+  - The round remained prototype-free and fail-closed.
+  - Because RE4 was `not-yet-reopen`, the artifact recorded only the renewed bounded stop and updated re-entry requirements.
+  - No handoff-track recommendation, implementation-handoff design, or implementation authorization was introduced.
