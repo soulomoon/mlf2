@@ -24,12 +24,14 @@ Status: IN PROGRESS
 | 2. Brainstorming and scope clarification | complete | Confirmed staged research-only track, conservative ladder shape, three bridge stages, and single-SCC endpoint |
 | 3. Draft design / roadmap proposal | complete | Presented and validated roadmap skeleton, fixed boundaries, milestone breakdown, and fail-closed validation model |
 | 4. Write design doc | complete | Saved approved roadmap design to `docs/superpowers/specs/2026-03-14-unannotated-iso-recursive-roadmap-design.md` |
-| 5. User review gate | pending | Wait for user approval before any implementation-planning step |
+| 5. Review and refinement gate | complete | Fourth delegated review approved the revised spec after tightening milestone gates and inherited boundary/invariant continuity |
 
 ## Open Questions
 
-- None currently. Waiting for user review of the written design spec.
+- User decision on whether to treat the approved spec as final or request another planning step.
 
 ## Errors Encountered
 
-- None yet.
+- 2026-03-14: First delegated spec-review pass found three design gaps in the written roadmap: missing bounded subset-selection milestone, missing explicit feasibility-decision stage before handoff, and an underspecified `single-SCC` boundary. Recovery: patch the spec to add those gates and rerun delegated review.
+- 2026-03-14: Second delegated spec-review pass found one remaining ambiguity: the revised spec loosened the accepted `single binder family / no cross-family SCC linking` boundary while claiming to widen only one boundary at a time. Recovery: patch the spec to keep the endpoint single-binder-family and define the obligation-graph model explicitly, then rerun delegated review.
+- 2026-03-14: Third delegated spec-review pass found a continuity gap with the accepted item-2 invariant audit: the roadmap text did not explicitly carry forward acyclicity and witness/replay obligations into later gates. Recovery: patch the spec so item-2 audit obligations remain authoritative and rerun delegated review.

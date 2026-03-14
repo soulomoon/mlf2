@@ -7,7 +7,7 @@ Status: Proposed design
 
 Define a new research-only roadmap that starts from the accepted bounded `ARI-C1` handoff and stages toward a final implementation-handoff target for **unannotated, single-SCC, iso-recursive type inference**.
 
-This design does **not** authorize implementation. It defines the next roadmap only.
+This design does **not** authorize a production implementation milestone. It defines the next roadmap only, while allowing a later bounded feasibility pass if a future roadmap item explicitly authorizes that research step under non-default, fail-closed conditions.
 
 ## Starting Point
 
@@ -16,6 +16,7 @@ The completed top-level orchestrator reached a bounded result:
 - explicit-only recursive support is the current accepted baseline;
 - `ARI-C1` is the accepted bounded candidate;
 - `ARI-C1` is annotation-anchored, single-SCC, single recursive binder family;
+- the accepted item-2 invariant audit remains authoritative for acyclicity, binding-tree discipline, occurs-check/termination, and reconstruction/reification/witness replay obligations;
 - equi-recursive equality/unfolding is out of scope;
 - cyclic structural graph encoding is out of scope; and
 - fully unannotated recursive-type synthesis is still unresolved.
@@ -27,14 +28,14 @@ The new roadmap should end at a **research-backed implementation handoff**, not 
 That handoff target is:
 
 - unannotated iso-recursive inference;
-- limited to **single-SCC** cases only;
+- limited to **single-SCC, single-binder-family** cases only, where the SCC is taken over the inference-dependency graph for candidate recursive binder obligations rather than the structural `TyNode`/constraint graph;
 - still non-equi-recursive;
 - still non-cyclic-graph; and
 - still fail-closed if the bounded target cannot be justified without widening.
 
 ## Non-Goals
 
-- No implementation milestone in this roadmap.
+- No production implementation milestone in this roadmap.
 - No multi-SCC recursive inference target.
 - No equi-recursive reasoning or implicit unfolding semantics.
 - No cyclic `TyNode` or cyclic constraint-graph representation.
@@ -48,8 +49,9 @@ Use a **conservative ladder** from `ARI-C1`, widening one boundary at a time ins
 The roadmap uses:
 
 - the accepted `ARI-C1` result as the baseline (`R0`);
-- three bridge stages (`R1` to `R3`);
-- one final handoff stage (`R4`).
+- three design bridge stages (`R1` to `R3`);
+- one bounded feasibility gate (`R4`); and
+- one final handoff stage (`R5`).
 
 ## Fixed Boundary Model
 
@@ -57,9 +59,11 @@ These constraints remain mandatory for the entire roadmap:
 
 - **Iso-recursive only**: recursive types stay explicit fixed-point constructors, not equi-recursive equalities.
 - **Non-cyclic graph**: recursive structure must not require cyclic structural graph encoding.
+- **Single-SCC means obligation-level recursion, not structural graph cycles**: each node in the inference-dependency graph is a candidate recursive binder obligation owned by one recursive binder family, and there is an edge `A -> B` when discharging obligation `A` requires recursive-shape facts introduced by obligation `B`; the only allowed SCC is one component in that obligation graph, while the `TyNode`/constraint graph itself must remain acyclic.
+- **Single binder family only**: the endpoint inherits the accepted `ARI-C1` shape restriction that all admitted obligations belong to one recursive binder family, with no cross-family SCC linking.
 - **Fail closed**: if a stage discovers it needs forbidden widening, the roadmap records `not-yet-go` instead of stretching scope.
 - **No silent enablement**: research progress must not imply default-on implementation behavior.
-- **Single-SCC endpoint only**: the roadmap stops at a handoff for unannotated single-SCC inference.
+- **Single-SCC endpoint only**: the roadmap stops at a handoff for unannotated single-SCC, single-binder-family inference.
 
 ## Roadmap Milestones
 
@@ -87,55 +91,81 @@ Exit condition:
 
 - a reviewer can point to a finite, concrete gap list between accepted `ARI-C1` behavior and the target unannotated single-SCC behavior.
 
-### `R2` Inference-Obligation Contract
+### `R2` Bounded Subset Selection and Admissibility Contract
 
 Deliverable:
 
-- one artifact that defines the exact obligations a bounded unannotated single-SCC inference design must satisfy.
+- one artifact that selects exactly one bounded unannotated single-SCC candidate subset; and
+- one admissibility statement that records deferred and rejected alternatives.
 
 Required focus:
 
+- one candidate only, with a stable identifier;
+- a precise statement of which unannotated cases are admitted by that candidate;
+- an explicit statement that the candidate remains single-binder-family with no cross-family SCC linking unless a later roadmap explicitly widens that boundary;
+- deferred alternatives that are still plausible later; and
+- rejected alternatives that would already breach the fixed boundary model.
+
+Purpose:
+
+- prevent the roadmap from silently broadening from `ARI-C1` to a vague notion of “unannotated inference.”
+
+Exit condition:
+
+- all later milestones can refer to one chosen bounded subset rather than the whole unannotated design space.
+
+### `R3` Inference-Obligation Contract
+
+Deliverable:
+
+- one artifact that defines the exact obligations the `R2` chosen subset must satisfy.
+
+Required contents:
+
+- acyclicity obligations for the non-cyclic structural graph boundary;
 - binder ownership and scope discipline;
 - occurs-check and termination constraints;
-- reconstruction and reification obligations;
+- reconstruction, reification, and witness replay obligations;
 - principality risk boundaries; and
 - failure cases that must remain rejected.
 
 Purpose:
 
-- turn “maybe inferable” into explicit proof obligations.
+- turn the selected subset from “admitted candidate” into explicit proof obligations.
 
 Exit condition:
 
-- the bounded target is specified tightly enough that an implementation attempt would know which invariants must hold and which failures are expected.
+- the selected subset is specified tightly enough that a feasibility pass would know which invariants must hold and which failures are expected.
 
-### `R3` Verifier-Facing Feasibility Contract
+### `R4` Bounded Feasibility Decision
 
 Deliverable:
 
-- one artifact that defines the exact evidence a later bounded feasibility pass would need.
+- one artifact that defines the exact evidence required to judge the `R2` chosen subset; and
+- one explicit decision outcome, either `feasible-continue` or `not-yet-go`.
 
 Required contents:
 
-- positive example classes for unannotated single-SCC cases;
+- positive example classes for the chosen unannotated single-SCC subset;
 - negative example classes that must still fail;
-- success evidence;
-- no-go triggers; and
-- immediate stop conditions.
+- success evidence, including acyclicity preservation and witness/replay safety;
+- no-go triggers;
+- immediate stop conditions; and
+- a reviewer-visible explanation for the final decision outcome.
 
 Purpose:
 
-- ensure any later experimentation is judgeable by explicit reviewer/verifier evidence rather than intuition.
+- ensure the roadmap does not move from obligations straight to handoff without a bounded feasibility judgment, mirroring the accepted `selection -> feasibility -> handoff` chain used for `ARI-C1`.
 
 Exit condition:
 
-- a future spike or prototype could be accepted or rejected with no ambiguity about the criteria.
+- the chosen subset is either explicitly cleared as `feasible-continue` under the fixed boundaries or explicitly stopped as `not-yet-go`.
 
-### `R4` Implementation-Handoff Spec
+### `R5` Implementation-Handoff Spec
 
 Deliverable:
 
-- one final implementation-handoff document for bounded unannotated single-SCC iso-recursive inference.
+- one final implementation-handoff document for bounded unannotated single-SCC iso-recursive inference, but only if `R4` concluded `feasible-continue`.
 
 Required contents:
 
@@ -159,9 +189,10 @@ Exit condition:
 Each stage must produce a reviewer-visible artifact with an explicit gate.
 
 - `R1` gate: the gap map is concrete and finite.
-- `R2` gate: the obligation contract is specific enough to define admissible and inadmissible designs.
-- `R3` gate: feasibility can be judged by explicit success/no-go/stop criteria.
-- `R4` gate: the handoff target is concrete enough for implementation planning.
+- `R2` gate: exactly one bounded subset is selected and all alternatives are explicitly deferred or rejected.
+- `R3` gate: the obligation contract is specific enough to define admissible and inadmissible designs for the chosen subset.
+- `R4` gate: feasibility is judged with an explicit `feasible-continue` or `not-yet-go` result.
+- `R5` gate: the handoff target is concrete enough for implementation planning.
 
 ## Fail-Closed Rules
 
@@ -182,4 +213,4 @@ It is the smallest design that:
 - moves meaningfully closer to true automatic recursive-type inference;
 - stays honest about what the repo has and has not established;
 - preserves the thesis-sensitive boundaries already accepted; and
-- ends at a usable implementation handoff rather than prematurely forcing code.
+- preserves the accepted `selection -> feasibility -> handoff` evidence chain instead of collapsing those gates into one step.
