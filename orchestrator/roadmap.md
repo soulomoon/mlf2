@@ -19,7 +19,7 @@
 
 ## Items
 
-1. [pending] Execute the `P1` subject-discovery prototype for `URI-R2-C1`
+1. [done] Execute the `P1` subject-discovery prototype for `URI-R2-C1`
    Depends on: the approved prototype-evidence roadmap design, the accepted prototype-free `RE1` through `RE5` stop track, and the inherited invariant audit
    Completion notes: complete when `docs/plans/2026-03-15-uri-r2-c1-p1-subject-discovery-prototype.md` is accepted, the reviewer record names the authoritative `P1` attempt, and the round either emits exactly one canonical subject token for `uri-r2-c1-only-v1` or records a bounded `semantic-negative` or `inconclusive` result without heuristic choice or widened search.
 
