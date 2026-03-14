@@ -13,3 +13,4 @@
 - Presented the proposed `R1`..`R4` roadmap skeleton and received user approval to continue.
 - Presented the fixed boundary model and milestone-detail section; user approved both.
 - Wrote the approved design spec to `docs/superpowers/specs/2026-03-14-unannotated-iso-recursive-roadmap-design.md`.
+- Committed the design spec and task packet as `76a75af Add staged unannotated iso-recursive roadmap design`.
