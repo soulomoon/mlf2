@@ -33,6 +33,6 @@
    Depends on: item 3
    Completion notes: completed in accepted round `014` via `docs/plans/2026-03-14-uri-r2-c1-re4-bounded-reentry-gate.md`; the gate stays at `RE4`, keeps `URI-R2-C1` fixed and prototype-free, preserves the single-SCC / single-binder-family / non-equi-recursive / non-cyclic-graph boundary, and records the explicit bounded outcome `not-yet-reopen` because `RE1`, `RE2`, and `RE3` remain unsatisfied for lack of affirmative inherited bounded evidence rather than any rewritten or widened contract.
 
-5. [pending] Write the `RE5` final successor recommendation
+5. [done] Write the `RE5` final successor recommendation
    Depends on: item 4
-   Completion notes: not started; if item 4 resolves to `reopen-handoff-track`, write the bounded recommendation for a later handoff-track roadmap, otherwise record the renewed bounded stop and updated re-entry requirements.
+   Completion notes: completed in accepted round `015` via `docs/plans/2026-03-14-uri-r2-c1-re5-final-successor-recommendation.md`; the final successor recommendation preserves accepted `RE4` as controlling, translates `not-yet-reopen` into the single live outcome `remain-stop`, keeps `URI-R2-C1` fixed within the single-SCC / single-binder-family / non-equi-recursive / non-cyclic / prototype-free boundary, records updated re-entry requirements, and withholds any handoff-track or implementation authorization.
