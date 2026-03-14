@@ -1,0 +1,71 @@
+# Round `round-014`
+
+- Baseline checks:
+  - `git diff --check`
+    - Pass. Exit code `0`; no whitespace or conflict-marker issues.
+  - `python3 -m json.tool orchestrator/state.json >/dev/null`
+    - Pass. Exit code `0`.
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+    - Pass. Ordered roadmap entries remain parseable; item `4` is still `[pending]`, so this round did not rewrite roadmap state.
+  - `cabal build all && cabal test`
+    - Skipped with justification. `git diff --name-only` produced no tracked-file diff, and `git ls-files --others --exclude-standard` lists only docs/round artifacts:
+      - `docs/plans/2026-03-14-uri-r2-c1-re4-bounded-reentry-gate.md`
+      - `orchestrator/rounds/round-014/implementation-notes.md`
+      - `orchestrator/rounds/round-014/plan.md`
+      - `orchestrator/rounds/round-014/review.md`
+      - `orchestrator/rounds/round-014/selection.md`
+    - No changed or untracked file touches `src/`, `src-public/`, `app/`, `test/`, or `mlf2.cabal`.
+  - Continuity check against inherited evidence
+    - Pass. The gate artifact cites the approved re-entry design, accepted `R5`, accepted `RE1` / `RE2` / `RE3`, and the invariant audit directly, and its continuity section preserves completed rounds `001` through `013` plus the predecessor recursive-types packet as inherited authority only, not rewritten history.
+
+- Task-specific checks:
+  - Filename correction and legacy-path removal
+    - `test -f docs/plans/2026-03-14-uri-r2-c1-re4-bounded-reentry-gate.md`
+    - Pass. The required bounded filename now exists.
+    - `test ! -e docs/plans/2026-03-14-uri-r2-c1-re4-reentry-gate.md`
+    - Pass. The legacy shorter filename is gone.
+  - Docs-only boundary checks
+    - `git status --short`
+    - Shows only untracked docs/round artifacts:
+      - `?? docs/plans/2026-03-14-uri-r2-c1-re4-bounded-reentry-gate.md`
+      - `?? orchestrator/rounds/round-014/`
+    - `git diff --name-only`
+    - No tracked-file diff.
+    - `git ls-files --others --exclude-standard`
+    - Lists only the bounded gate artifact plus round-014 artifacts.
+    - `git diff --name-only | rg '^(src/|src-public/|app/|test/|mlf2\.cabal$)'`
+    - `git diff --name-only | rg '^orchestrator/state\.json$'`
+    - `git diff --name-only | rg '^orchestrator/roadmap\.md$'`
+    - `git diff --name-only | rg '^tasks/todo/2026-03-11-recursive-types-orchestration/'`
+    - `git diff --name-only | rg '^orchestrator/rounds/round-00(1|2|3|4|5|6|7|8|9|10|11|12|13)/'`
+    - `git diff --name-only | rg '^orchestrator/rounds/round-014/(review|merge|implementation-notes)\.md$'`
+    - All six `rg` commands returned no matches. No tracked diff broadens the round beyond docs-only scope.
+  - Gate markers present
+    - `rg -n 'RE4|URI-R2-C1|RE1|RE2|RE3|reopen-handoff-track|not-yet-reopen|prototype-free|fail-closed|single-SCC|single-binder-family' docs/plans/2026-03-14-uri-r2-c1-re4-bounded-reentry-gate.md`
+    - Pass. The artifact explicitly stays at `RE4`, keeps `URI-R2-C1` fixed, carries `RE1` / `RE2` / `RE3`, and records the bounded `not-yet-reopen` outcome.
+  - Fixed-boundary and no-broadening checks
+    - `rg -n 'single-SCC|single-binder-family|cross-family|non-cyclic|equi-recursive|default-on widening|prototype-free' docs/plans/2026-03-14-uri-r2-c1-re4-bounded-reentry-gate.md`
+    - `rg -n 'manufactured provenance|late repair|heuristic ranking|tie-breaking|widened comparison|widened ownership|owner repair|parent-chain repair|widened search|non-local propagation|multi-cluster|multi-SCC|cyclic structural|implicit unfolding|termination weakening|implementation drift' docs/plans/2026-03-14-uri-r2-c1-re4-bounded-reentry-gate.md`
+    - Pass. The artifact keeps the `single-SCC`, `single-binder-family`, non-cyclic, non-equi-recursive, prototype-free, fail-closed boundary and rejects the forbidden widening, repair, heuristic, and prototype triggers.
+  - Explicit-decision checks
+    - `rg -n '^- Planned round outcome: \`not-yet-reopen\`\.$' orchestrator/rounds/round-014/plan.md`
+    - Pass. The plan still requires `not-yet-reopen`.
+    - `rg -n 'reopen-handoff-track|not-yet-reopen' docs/plans/2026-03-14-uri-r2-c1-re4-bounded-reentry-gate.md`
+    - Pass. The artifact records one live decision, `Decision outcome: \`not-yet-reopen\``, while `reopen-handoff-track` appears only as the alternative label and bounded successor conditional.
+  - Stage-preservation checks
+    - `rg -n 'RE5|handoff-track|implementation-handoff|implementation-ready|recommendation' docs/plans/2026-03-14-uri-r2-c1-re4-bounded-reentry-gate.md`
+    - Pass. `RE5` and handoff mentions are limited to the minimal successor-boundary note; the artifact does not become a recommendation or implementation-clearance document.
+  - Continuity-reference checks
+    - `rg -n '2026-03-14-uri-r2-c1-reentry-roadmap-design|2026-03-14-unannotated-iso-recursive-r5-research-stop-decision|2026-03-14-uri-r2-c1-re1-provenance-authority-evidence-contract|2026-03-14-uri-r2-c1-re2-uniqueness-evidence-contract|2026-03-14-uri-r2-c1-re3-positive-evidence-contract|2026-03-14-automatic-recursive-inference-invariant-audit' docs/plans/2026-03-14-uri-r2-c1-re4-bounded-reentry-gate.md`
+    - Pass. All required inherited authorities are cited directly.
+  - Reviewer logic checks
+    - Pass. The artifact distinguishes evidence contracts from affirmative evidence, treats `RE1` / `RE2` / `RE3` as prerequisite contracts rather than automatic clearance, preserves the invariant-audit authority, stays prototype-free and fail-closed, keeps `URI-R2-C1` fixed, and names bounded unsatisfied conditions without broadening the subject.
+
+- Decision:
+  - `approve`
+
+- Evidence:
+  - The filename-fix revision resolves the only prior blocker: `docs/plans/2026-03-14-uri-r2-c1-re4-bounded-reentry-gate.md` now exists and the legacy `...re4-reentry-gate.md` path is absent.
+  - The round still stays at `RE4`, preserves the approved `RE1` -> `RE5` staging, and does not settle `RE5` beyond the minimal successor-boundary note.
+  - The artifact remains prototype-free and fail-closed, keeps the active subject fixed to `URI-R2-C1`, preserves `single-SCC` and `single-binder-family` boundaries, and rejects broadening into cross-family, multi-SCC, equi-recursive, cyclic-graph, widened-search, widened-ownership, heuristic, or prototype-backed reasoning.
+  - The gate records a justified `not-yet-reopen` outcome because `RE1`, `RE2`, and `RE3` remain unsatisfied for lack of affirmative inherited bounded evidence, not because the contracts were rewritten or silently widened.
