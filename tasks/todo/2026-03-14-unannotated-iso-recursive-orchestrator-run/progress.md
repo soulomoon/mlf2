@@ -35,3 +35,11 @@
 - Delegated `round-008` `merge`; the merger wrote the merge notes, the controller committed the round branch as `554301c`, squash-merged `codex/round-008`, and recorded the base-branch result as `a2d386b`.
 - Delegated the `round-008` `update-roadmap` stage; the guider marked roadmap item 3 as `done`.
 - Advanced `orchestrator/state.json` from `update-roadmap` to `done`, making the control plane ready to start `round-009`.
+- Started `round-009` from the clean post-round-008 baseline by creating branch `codex/round-009`, worktree `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-009`, and the matching round artifact directory, then updating `orchestrator/state.json` to resume at `select-task`.
+- Delegated `round-009` `select-task`; the guider chose roadmap item 4, the bounded feasibility-decision stage for `URI-R2-C1`.
+- Delegated `round-009` `plan`; the planner kept the round docs-only and targeted the `R4` feasibility-decision artifact plus round implementation notes, with explicit fail-closed `not-yet-go` if inherited evidence stayed insufficient.
+- Delegated `round-009` `implement`; the implementer wrote the `R4` feasibility-decision artifact and round implementation notes, concluding `not-yet-go` from docs-only inherited evidence.
+- Delegated `round-009` `review`; the reviewer approved the docs-only round and skipped the full Cabal gate only because the diff excluded code/test surfaces.
+- Delegated `round-009` `merge`; the merger wrote the merge notes, the controller committed the round branch as `600bd49`, squash-merged `codex/round-009`, and recorded the base-branch result as `a6fc936`.
+- Delegated the `round-009` `update-roadmap` stage; the guider marked roadmap item 4 as `done` with the accepted bounded `not-yet-go` feasibility result.
+- Advanced `orchestrator/state.json` from `update-roadmap` to `done`, making the control plane ready to start `round-010`.
