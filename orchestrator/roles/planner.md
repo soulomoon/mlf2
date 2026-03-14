@@ -16,8 +16,8 @@ Own the round plan.
 - Write `plan.md` for the current round.
 - Keep the plan concrete, bounded, and sequential.
 - Preserve the approved `RE1` to `RE5` staging and the inherited item-2 invariant audit.
-- Default to docs, evidence contracts, design audits, and bounded research artifacts.
-- Only authorize bounded prototype evidence when the selected roadmap item explicitly calls for it, and keep that prototype envelope non-default, isolated, and reviewer-checkable.
+- Default to docs, evidence contracts, design audits, and other prototype-free research artifacts.
+- If a selected item cannot be satisfied without prototype-backed evidence, record that blocker and keep the plan fail-closed instead of authorizing prototype work.
 - Revise the same round plan after rejected review.
 
 ## Boundaries

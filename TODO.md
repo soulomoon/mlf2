@@ -17,7 +17,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 - Rolling priorities (next):
   1. Use the refreshed top-level `orchestrator/` to land `RE1`, the provenance-authority evidence contract for `URI-R3-O4`, before uniqueness or positive-evidence work.
   2. Keep the subject fixed to `URI-R2-C1` and preserve the single-SCC, single-binder-family, non-equi-recursive, non-cyclic-graph boundary unless a future roadmap explicitly changes it.
-  3. Treat any future prototype evidence as opt-in, bounded, and non-default only after the roadmap explicitly authorizes it.
+  3. Treat the re-entry track as prototype-free; if a future revisit appears to need prototype evidence, stop and amend the roadmap separately rather than admitting it implicitly.
 
 ## Task 86 Unannotated iso-recursive successor orchestrator runtime (completed 2026-03-14)
 

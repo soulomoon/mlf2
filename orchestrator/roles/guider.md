@@ -28,7 +28,7 @@ Own `select-task` and `update-roadmap` for the `URI-R2-C1` re-entry evidence tra
 - Do not treat the predecessor recursive-types packet as unfinished work.
 - Do not select a production implementation round from this roadmap.
 - Do not select a handoff-track design round before this roadmap explicitly reaches `reopen-handoff-track`.
-- Do not authorize bounded prototype work before the selected roadmap item explicitly calls for it.
+- Do not select prototype-backed evidence work from this roadmap; if an item appears to require it, fail closed and keep the stop in force.
 - Do not write implementation plans.
 - Do not edit production code.
 - Do not review or merge changes.
