@@ -1,0 +1,13 @@
+{
+  "research_entrypoint_id": "uri-r2-c1-prototype-entrypoint-v1",
+  "stage_selector": "P3-safety-validation",
+  "scenario_id": "uri-r2-c1-only-v1",
+  "attempt_id": 1,
+  "check_id": "P3-A",
+  "correlation_id": "uri-r2-c1-only-v1-p3-attempt-1",
+  "subject_id": "uri-r2-c1/cluster-1",
+  "evidence_ref": "orchestrator/rounds/round-018/evidence/P3/attempt-1/trace-bundle.json",
+  "verdict": "inconclusive",
+  "rejection_trigger": "blocking-stop-condition",
+  "details": "Structural-acyclicity check was not executed because the stage was blocked at the inherited P2 non-pass precondition."
+}

@@ -1,0 +1,26 @@
+{
+  "research_entrypoint_id": "uri-r2-c1-prototype-entrypoint-v1",
+  "stage_selector": "P3-safety-validation",
+  "scenario_id": "uri-r2-c1-only-v1",
+  "attempt_id": 2,
+  "stage": "P3",
+  "correlation_id": "uri-r2-c1-only-v1-p3-attempt-2",
+  "subject_id": null,
+  "trace_refs": [
+    "trace://uri-r2-c1/p3/precondition/no-p2-token-handoff/authoritative-p2-semantic-negative-no-token",
+    "trace://uri-r2-c1/p3/scc-check/no-p2-token-handoff/blocked-by-p2-non-pass",
+    "trace://uri-r2-c1/p3/acyclicity-check/no-p2-token-handoff/blocked-by-p2-non-pass",
+    "trace://uri-r2-c1/p3/ownership-check/no-p2-token-handoff/blocked-by-p2-non-pass",
+    "trace://uri-r2-c1/p3/constructor-check/no-p2-token-handoff/blocked-by-p2-non-pass"
+  ],
+  "trace_summary": [
+    "P3 consumed only authoritative P2 handoff continuity for stage input.",
+    "Observed no P2->P3 handoff token, as required by authoritative semantic-negative P2.",
+    "No widened search, no surrogate substitution, and no production-path behavior changes were introduced.",
+    "All attempt-local check files use a shared correlation_id and a null subject_id because no P2 handoff token exists.",
+    "P3-S: Local obligation-SCC check is blocked because authoritative P2 is semantic-negative and emits no handoff token for P3.",
+    "P3-A: Structural-acyclicity check was not executed because P3 is blocked by authoritative P2 non-pass and no-token continuity.",
+    "P3-B: Single-family ownership check was not executed because P3 is blocked by authoritative P2 non-pass and no-token continuity.",
+    "P3-C: Constructor-directed reasoning check was not executed because P3 is blocked by authoritative P2 non-pass and no-token continuity."
+  ]
+}

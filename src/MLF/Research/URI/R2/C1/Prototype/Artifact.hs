@@ -1,12 +1,14 @@
 module MLF.Research.URI.R2.C1.Prototype.Artifact (
     writeP1Artifact,
-    writeP2Artifact
+    writeP2Artifact,
+    writeP3Artifact
 ) where
 
 import System.Directory (createDirectoryIfMissing)
 import System.FilePath (takeDirectory)
 
 import MLF.Research.URI.R2.C1.Prototype.P2 (P2Execution(..), P2CheckArtifact(..))
+import MLF.Research.URI.R2.C1.Prototype.P3 (P3Execution(..), P3CheckArtifact(..))
 import MLF.Research.URI.R2.C1.Prototype.Types
 
 writeP1Artifact :: PrototypeReport -> IO FilePath
@@ -21,6 +23,13 @@ writeP2Artifact execution = do
     let path = ppArtifactPath (prototypePaths (prototypeRequest (p2AppReport execution)))
     createDirectoryIfMissing True (takeDirectory path)
     writeFile path (renderP2Artifact execution)
+    pure path
+
+writeP3Artifact :: P3Execution -> IO FilePath
+writeP3Artifact execution = do
+    let path = ppArtifactPath (prototypePaths (prototypeRequest (p3AppReport execution)))
+    createDirectoryIfMissing True (takeDirectory path)
+    writeFile path (renderP3Artifact execution)
     pure path
 
 renderP1Artifact :: PrototypeReport -> String
@@ -142,6 +151,76 @@ renderP2Artifact execution =
                     ]
                 else []
 
+renderP3Artifact :: P3Execution -> String
+renderP3Artifact execution =
+    let report = p3AppReport execution
+        req = prototypeRequest report
+        attemptId = prAttemptId req
+        tokenObservation =
+            if p3P2TokenPresent execution
+                then "present (unexpected for authoritative semantic-negative P2)"
+                else "absent (required for authoritative semantic-negative P2)"
+    in unlines $
+        [ "# `P3` Safety-Validation Prototype For `URI-R2-C1`"
+        , ""
+        , "Date: 2026-03-15"
+        , "Roadmap item: 3"
+        , "Stage: `P3`"
+        , "Attempt: " ++ show attemptId
+        , "Active subject: `URI-R2-C1`"
+        , "Active scenario: `uri-r2-c1-only-v1`"
+        , "Artifact kind: safety-validation prototype"
+        , ""
+        , "## Inherited Inputs"
+        , ""
+        , "- `docs/superpowers/specs/2026-03-15-uri-r2-c1-prototype-evidence-roadmap-design.md`"
+        , "- `docs/plans/2026-03-15-uri-r2-c1-p2-provenance-preservation-prototype.md`"
+        , "- `" ++ p3ReviewRecordPath execution ++ "`"
+        , "- `orchestrator/rounds/round-018/selection.md`"
+        , ""
+        , "## Stage Input Interface"
+        , ""
+        , "- Expected `P2 -> P3` handoff token path: `" ++ p3P2TokenPath execution ++ "`."
+        , "- Observed `P2 -> P3` handoff token state: " ++ tokenObservation ++ "."
+        , "- Inherited review-record path: `" ++ p3ReviewRecordPath execution ++ "`."
+        , "- Shared entrypoint tuple: `{ research_entrypoint_id: uri-r2-c1-prototype-entrypoint-v1, stage_selector: P3-safety-validation, scenario_id: uri-r2-c1-only-v1, attempt_id: "
+            ++ show attemptId
+            ++ " }`."
+        , ""
+        , "## Method"
+        , ""
+        , "- Ordered checks: `P3-S`, `P3-A`, `P3-B`, `P3-C`."
+        , "- The bounded stage consumes only authoritative `P2` handoff continuity; when `P2` is non-pass and emits no token, `P3` records bounded non-pass without fallback to `P1`."
+        , "- Shared `correlation_id`: `" ++ p3CorrelationId execution ++ "`."
+        , ""
+        , "## Evidence"
+        , ""
+        , "- Attempt-local evidence directory: `" ++ p3AttemptEvidenceRelativeDir attemptId ++ "`."
+        , "- Trace bundle: `" ++ p3TraceBundleRelativePath attemptId ++ "`."
+        ]
+            ++ map renderP3CheckLine (p3Checks execution)
+            ++ [ "- Trace refs: " ++ unwords (map (\ref -> "`" ++ ref ++ "`") (p3TraceRefs execution))
+               , "- Observations:"
+               ]
+            ++ map ("- " ++) (p3TraceSummary execution)
+            ++ [ ""
+               , "## Rejection Triggers"
+               , ""
+               , renderP3RejectionTriggers execution
+               , ""
+               , "## Stage Result"
+               , ""
+               , "`" ++ prototypeStageResult report ++ "`"
+               ]
+            ++ if prototypeStageResult report == "pass"
+                then
+                    [ ""
+                    , "## Next-Stage Handoff"
+                    , ""
+                    , "Reaffirmed subject token: `" ++ p3AttemptEvidenceRelativeDir attemptId ++ "/subject-token.json`."
+                    ]
+                else []
+
 renderCandidate :: CandidateRecord -> String
 renderCandidate candidate =
     "- `"
@@ -200,6 +279,32 @@ renderP2RejectionTriggers execution =
                 _ -> "Observed triggers: " ++ unwords (map (\trigger -> "`" ++ trigger ++ "`") observed) ++ "."
         detailsLine =
             unlines (map (\check -> "`" ++ ckCheckId (p2caResult check) ++ "`: " ++ ckDetails (p2caResult check)) (p2Checks execution))
+        vocabularyLine =
+            "Normalized vocabulary: " ++ unwords (map (\trigger -> "`" ++ trigger ++ "`") normalizedRejectionTriggers) ++ "."
+    in observedLine ++ "\n\n" ++ detailsLine ++ "\n" ++ vocabularyLine
+
+renderP3CheckLine :: P3CheckArtifact -> String
+renderP3CheckLine check =
+    let result = p3caResult check
+    in "- `"
+        ++ ckCheckId result
+        ++ "`: `"
+        ++ ckStatus result
+        ++ "` via `"
+        ++ p3caEvidenceRef check
+        ++ "`."
+
+renderP3RejectionTriggers :: P3Execution -> String
+renderP3RejectionTriggers execution =
+    let observed =
+            filter (/= "none")
+                (map (ckRejectionTrigger . p3caResult) (p3Checks execution))
+        observedLine =
+            case observed of
+                [] -> "Observed triggers: `none`."
+                _ -> "Observed triggers: " ++ unwords (map (\trigger -> "`" ++ trigger ++ "`") observed) ++ "."
+        detailsLine =
+            unlines (map (\check -> "`" ++ ckCheckId (p3caResult check) ++ "`: " ++ ckDetails (p3caResult check)) (p3Checks execution))
         vocabularyLine =
             "Normalized vocabulary: " ++ unwords (map (\trigger -> "`" ++ trigger ++ "`") normalizedRejectionTriggers) ++ "."
     in observedLine ++ "\n\n" ++ detailsLine ++ "\n" ++ vocabularyLine

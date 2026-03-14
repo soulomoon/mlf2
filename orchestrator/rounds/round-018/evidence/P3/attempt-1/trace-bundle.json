@@ -1,0 +1,25 @@
+{
+  "research_entrypoint_id": "uri-r2-c1-prototype-entrypoint-v1",
+  "stage_selector": "P3-safety-validation",
+  "scenario_id": "uri-r2-c1-only-v1",
+  "attempt_id": 1,
+  "stage": "P3",
+  "correlation_id": "uri-r2-c1-only-v1-p3-attempt-1",
+  "subject_id": "uri-r2-c1/cluster-1",
+  "trace_refs": [
+    "trace://uri-r2-c1/p3/precondition/uri-r2-c1-cluster-1/authoritative-p2-semantic-negative",
+    "trace://uri-r2-c1/p3/scc-check/uri-r2-c1-cluster-1/blocked-by-p2-non-pass",
+    "trace://uri-r2-c1/p3/acyclicity-check/uri-r2-c1-cluster-1/blocked-by-p2-non-pass",
+    "trace://uri-r2-c1/p3/ownership-check/uri-r2-c1-cluster-1/blocked-by-p2-non-pass",
+    "trace://uri-r2-c1/p3/constructor-check/uri-r2-c1-cluster-1/blocked-by-p2-non-pass"
+  ],
+  "trace_summary": [
+    "P3 consumed the authoritative P1 token while honoring authoritative P2 semantic-negative as a bounded stop precondition.",
+    "No widened search, no surrogate substitution, and no production-path behavior changes were introduced.",
+    "All attempt-local check files repeat the inherited subject_id and shared correlation_id.",
+    "P3-S: Local obligation-SCC check is blocked because the authoritative P2 result is semantic-negative and provides no reaffirmed subject handoff token.",
+    "P3-A: Structural-acyclicity check was not executed because the stage was blocked at the inherited P2 non-pass precondition.",
+    "P3-B: Single-family ownership check was not executed because the stage was blocked at the inherited P2 non-pass precondition.",
+    "P3-C: Constructor-directed reasoning check was not executed because the stage was blocked at the inherited P2 non-pass precondition."
+  ]
+}
