@@ -4,6 +4,21 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 85 Unannotated iso-recursive successor orchestrator scaffold (completed 2026-03-14)
+
+- Completed:
+  - refreshed the live top-level `orchestrator/` so it now succeeds the completed automatic-recursive-inference rounds while preserving `orchestrator/rounds/round-001` through `round-005` as historical evidence;
+  - reset `orchestrator/state.json` to `stage: "select-task"` on branch `codex/automatic-recursive-type-inference` while keeping `last_completed_round: "round-005"` so future successor rounds can continue without colliding with historical round directories;
+  - replaced the live roadmap, verification contract, and role prompts with the approved unannotated iso-recursive successor track rooted in `docs/superpowers/specs/2026-03-14-unannotated-iso-recursive-roadmap-design.md`, with `R1` gap mapping as the next concrete item.
+- Verification:
+  - `python3 -m json.tool orchestrator/state.json`: PASS
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`: PASS
+  - `git diff --check`: PASS
+- Rolling priorities (next):
+  1. Use the refreshed top-level `orchestrator/` to land the `R1` gap map before any candidate-selection or feasibility work.
+  2. Keep successor rounds research-first and bounded to single-SCC, single-binder-family, non-equi-recursive, and non-cyclic-graph rules until the roadmap itself explicitly changes.
+  3. Preserve completed rounds `001` through `005` plus the recursive-types predecessor packet as inherited evidence, not live work.
+
 ## Task 84 Automatic recursive-type inference orchestrator scaffold (completed 2026-03-14)
 
 - Completed:
