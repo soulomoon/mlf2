@@ -1,0 +1,41 @@
+# Round `round-013`
+
+- Baseline checks:
+  - `git diff --check` -> pass.
+  - `python3 -m json.tool orchestrator/state.json >/dev/null` -> pass.
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md` -> pass; roadmap remains parseable and item 3 is still `pending`.
+  - `cabal build all && cabal test` -> skipped by contract because `git diff --name-only` is empty and the round has no tracked edits under `src/`, `src-public/`, `app/`, `test/`, or `mlf2.cabal`.
+  - Continuity check -> pass. The new `RE3` contract explicitly cites the approved re-entry design, accepted `R5`, accepted `RE1`, accepted `RE2`, and the invariant audit, and its continuity section preserves completed rounds `001` through `012` plus the predecessor recursive-types packet as inherited evidence only.
+- Task-specific checks:
+  - Docs-only boundary checks:
+    - `git diff --name-only` -> no tracked diff.
+    - `git status --short` / `git ls-files --others --exclude-standard` -> only untracked round-owned packet files plus `docs/plans/2026-03-14-uri-r2-c1-re3-positive-evidence-contract.md`; no evidence of tracked edits to forbidden paths.
+    - `git diff --name-only | rg '^(src/|src-public/|app/|test/|mlf2\.cabal$)'` -> no matches.
+    - `git diff --name-only | rg '^orchestrator/state\.json$'` -> no matches.
+    - `git diff --name-only | rg '^orchestrator/roadmap\.md$'` -> no matches.
+    - `git diff --name-only | rg '^tasks/todo/2026-03-11-recursive-types-orchestration/'` -> no matches.
+    - `git diff --name-only | rg '^orchestrator/rounds/round-00(1|2|3|4|5|6|7|8|9|10|11|12)/'` -> no matches.
+    - `git diff --name-only | rg '^orchestrator/rounds/round-013/(review|merge|implementation-notes)\.md$'` -> no matches before review authoring.
+  - Positive-evidence markers:
+    - `rg -n 'RE3|URI-R3-O1|URI-R3-O2|URI-R3-O3|URI-R2-C1|positive evidence|acyclic|binder|owner|occurs-check|termination|prototype-free|RE1|RE2|RE4|RE5' docs/plans/2026-03-14-uri-r2-c1-re3-positive-evidence-contract.md` -> pass; the artifact is explicitly an `RE3` evidence contract, scoped to `URI-R2-C1`, and ties `URI-R3-O1` through `URI-R3-O3` to acyclicity, owner stability, and occurs-check/termination requirements.
+  - Fixed-boundary checks:
+    - `rg -n 'single-SCC|single-binder-family|cross-family|non-cyclic|equi-recursive|default-on widening|prototype-free' docs/plans/2026-03-14-uri-r2-c1-re3-positive-evidence-contract.md` -> pass; required phrases are present in the fixed-boundary section.
+    - `rg -n 'explicit-anchor replay substitution|widened ownership|widened search|non-local propagation|multi-cluster|multi-SCC|cyclic structural|implicit unfolding|termination weakening' docs/plans/2026-03-14-uri-r2-c1-re3-positive-evidence-contract.md` -> pass; all required rejection terms are present.
+  - Stage-preservation checks:
+    - `rg -n 'reopen-handoff-track|not-yet-reopen|remain-stop|implementation-handoff|implementation-ready|feasible-continue|not-yet-go' docs/plans/2026-03-14-uri-r2-c1-re3-positive-evidence-contract.md` -> no matches.
+    - Manual review -> pass; the artifact says it executes `RE3` only, does not settle `RE4` or `RE5`, and does not reopen or rewrite `RE1` or `RE2`.
+  - Positive-evidence rejection checks:
+    - `rg -n 'prototype-backed|experiment-backed|implementation-drift|explicit-anchor replay substitution|owner repair|parent-chain repair|widened search|non-local propagation|multi-cluster|multi-SCC|cyclic structural|implicit unfolding|equi-recursive|termination weakening' docs/plans/2026-03-14-uri-r2-c1-re3-positive-evidence-contract.md` -> pass; the explicit rejection list is complete and fail-closed.
+  - Continuity-reference checks:
+    - `rg -n '2026-03-14-uri-r2-c1-reentry-roadmap-design|2026-03-14-unannotated-iso-recursive-r5-research-stop-decision|2026-03-14-unannotated-iso-recursive-r4-feasibility-decision|2026-03-14-unannotated-iso-recursive-r3-inference-obligation-contract|2026-03-14-uri-r2-c1-re1-provenance-authority-evidence-contract|2026-03-14-uri-r2-c1-re2-uniqueness-evidence-contract|2026-03-14-automatic-recursive-inference-invariant-audit' docs/plans/2026-03-14-uri-r2-c1-re3-positive-evidence-contract.md` -> pass; all required inherited authorities are cited directly.
+  - Reviewer logic checks:
+    - The artifact stays at `RE3` and answers the roadmap-design exit question by defining finite reviewer-checkable conditions for what would and would not clear `URI-R3-O1` through `URI-R3-O3`.
+    - The contract keeps `URI-R2-C1` fixed, preserves inherited invariant-audit authority, preserves accepted `RE1` and `RE2` as prerequisites without rewriting them, remains prototype-free and fail-closed, and rejects widened ownership/search, prototype runs, implementation drift, cyclic encoding, implicit unfolding, equi-recursive reasoning, and termination weakening.
+- Decision:
+  - approve
+- Evidence:
+  - `docs/plans/2026-03-14-uri-r2-c1-re3-positive-evidence-contract.md` is an evidence-contract artifact only, not a feasibility verdict, re-entry decision, or implementation handoff.
+  - The fixed-boundary section preserves `URI-R2-C1`, `single-SCC`, `single-binder-family`, non-equi-recursive, non-cyclic, no-default-on-widening, and prototype-free constraints.
+  - The contract-subject and reviewer-gate sections keep all three obligations on the same bounded local root or equivalent local cluster already controlled by `RE1` and `RE2`.
+  - The rejection list and fail-closed source section explicitly bar prototype-backed claims, implementation drift, explicit-anchor replay substitution, widened ownership/search, multi-cluster or multi-SCC salvage, cyclic structural encoding, implicit unfolding, equi-recursive reasoning, and termination weakening.
+  - No live `RE4` or `RE5` outcome appears, and no broadened ownership/search or prototype-backed re-entry claim is introduced.
