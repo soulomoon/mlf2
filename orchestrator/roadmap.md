@@ -31,6 +31,6 @@
    Depends on: item 3
    Completion notes: completed in accepted `round-009` via `docs/plans/2026-03-14-unannotated-iso-recursive-r4-feasibility-decision.md`; the accepted `R4` result records the bounded feasibility outcome `not-yet-go` for `URI-R2-C1` while keeping the fixed boundary explicit: `single-SCC` obligation-level recursion only, `single-binder-family` ownership only, no cross-family SCC linking, non-equi-recursive semantics only, non-cyclic structural graph only, docs-only inherited evidence only, and no default-on widening or prototype-backed expansion.
 
-5. [pending] Write the final implementation-handoff spec or explicit research-stop decision
+5. [done] Write the final implementation-handoff spec or explicit research-stop decision
    Depends on: item 4
-   Completion notes: not started; if item 4 resolves to `feasible-continue`, write the bounded implementation handoff for the unannotated target, otherwise record the `not-yet-go` stop with explicit reasons.
+   Completion notes: completed in accepted `round-010` via `docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md`; the accepted `R5` result takes the explicit `research-stop` branch for `URI-R2-C1`, carrying forward the accepted `R4` outcome `not-yet-go` and recording the bounded reasons to stop without widening beyond the fixed single-SCC, single-binder-family, non-equi-recursive, non-cyclic-graph boundary.

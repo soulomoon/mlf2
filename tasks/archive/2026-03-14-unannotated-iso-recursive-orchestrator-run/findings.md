@@ -19,3 +19,5 @@
 - After the delegated `update-roadmap` stage for `round-007`, successor roadmap items 1 and 2 are `done`; items 3 through 5 remain `pending`.
 - `round-008` completed roadmap item 3 as a docs-only obligation-contract round for the fixed subset `URI-R2-C1`; the accepted `R3` artifact fixed obligation classes, rejection classes, and inherited-audit mappings without entering feasibility or handoff work.
 - `round-009` completed roadmap item 4 as a docs-only bounded feasibility decision for `URI-R2-C1`, and the accepted outcome is `not-yet-go` rather than `feasible-continue`.
+- `round-010` converted the accepted `R4` `not-yet-go` result into the final bounded item-5 `research-stop` decision, so the successor roadmap terminates without implementation handoff approval.
+- After the delegated `update-roadmap` stage for `round-010`, all successor roadmap items are `done`.

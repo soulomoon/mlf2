@@ -4,6 +4,25 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 86 Unannotated iso-recursive successor orchestrator runtime (completed 2026-03-14)
+
+- Completed:
+  - ran the refreshed top-level `orchestrator/` end-to-end through accepted successor rounds `round-006` through `round-010`, each with delegated guider/planner/implementer/reviewer/merger stages plus controller squash-merge bookkeeping;
+  - landed the successor-track research artifacts:
+    - `R1` gap map,
+    - `R2` bounded subset selection (`URI-R2-C1`),
+    - `R3` inference-obligation contract,
+    - `R4` bounded feasibility decision (`not-yet-go`),
+    - `R5` explicit bounded `research-stop` decision;
+  - completed the successor roadmap with all items marked `done` and returned `orchestrator/state.json` to idle `stage: "done"` with `last_completed_round: "round-010"`.
+- Verification:
+  - each accepted round carried reviewer-recorded docs-only baseline checks (`git diff --check`, `python3 -m json.tool orchestrator/state.json`, roadmap marker parse, continuity evidence) and explicitly skipped `cabal build all && cabal test` only because no round touched `src/`, `src-public/`, `app/`, `test/`, or `mlf2.cabal`;
+  - final roadmap/result state is recorded in `orchestrator/roadmap.md`, `orchestrator/state.json`, and `docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md`.
+- Rolling priorities (next):
+  1. Treat the accepted `research-stop` for `URI-R2-C1` as the current boundary; do not reopen implementation-handoff work without new bounded evidence that addresses the recorded `R4`/`R5` blockers.
+  2. Preserve successor rounds `round-006` through `round-010` as the authoritative execution record for this track.
+  3. If a future effort revisits unannotated inference, start from the recorded `R5` re-entry requirements rather than from `ARI-C1` directly.
+
 ## Task 85 Unannotated iso-recursive successor orchestrator scaffold (completed 2026-03-14)
 
 - Completed:
