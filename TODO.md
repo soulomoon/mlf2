@@ -4,6 +4,21 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 87 `URI-R2-C1` re-entry successor orchestrator scaffold (completed 2026-03-14)
+
+- Completed:
+  - wrote the approved next-track design source at `docs/superpowers/specs/2026-03-14-uri-r2-c1-reentry-roadmap-design.md`, defining a bounded re-entry evidence ladder `RE1` through `RE5` rather than another implementation-handoff track;
+  - refreshed the live top-level `orchestrator/` so it now succeeds the completed `research-stop` track while preserving rounds `001` through `010` as historical evidence;
+  - replaced the live roadmap, verification contract, and role prompts with the new `URI-R2-C1` re-entry evidence track and reset `orchestrator/state.json` to idle `select-task` with `last_completed_round: "round-010"` so future runtime rounds can continue without colliding with historical directories.
+- Verification:
+  - `python3 -m json.tool orchestrator/state.json`: PASS
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`: PASS
+  - `git diff --check`: PASS
+- Rolling priorities (next):
+  1. Use the refreshed top-level `orchestrator/` to land `RE1`, the provenance-authority evidence contract for `URI-R3-O4`, before uniqueness or positive-evidence work.
+  2. Keep the subject fixed to `URI-R2-C1` and preserve the single-SCC, single-binder-family, non-equi-recursive, non-cyclic-graph boundary unless a future roadmap explicitly changes it.
+  3. Treat any future prototype evidence as opt-in, bounded, and non-default only after the roadmap explicitly authorizes it.
+
 ## Task 86 Unannotated iso-recursive successor orchestrator runtime (completed 2026-03-14)
 
 - Completed:

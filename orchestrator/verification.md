@@ -7,19 +7,20 @@
 - Command: `python3 -m json.tool orchestrator/state.json >/dev/null`
   Why: `orchestrator/state.json` is machine state and must remain valid JSON after every round.
 - Command: `rg -n '^\d+\\. \\[(pending|in-progress|done)\\]' orchestrator/roadmap.md`
-  Why: the successor roadmap must keep a parseable ordered item list with explicit status markers.
+  Why: the re-entry roadmap must keep a parseable ordered item list with explicit status markers.
 - Command: `cabal build all && cabal test`
-  Why: this repo’s full gate is mandatory whenever a round touches `src/`, `src-public/`, `app/`, `test/`, or `mlf2.cabal`.
+  Why: the full repo gate is mandatory whenever a round touches `src/`, `src-public/`, `app/`, `test/`, or `mlf2.cabal`, including any explicitly authorized bounded prototype work.
 - Command: reviewer-recorded continuity check against inherited evidence
-  Why: each round must record whether it preserved the completed automatic-recursive-inference rounds (`orchestrator/rounds/round-001` through `round-005`), the approved successor design spec, and the predecessor recursive-types packet.
+  Why: each round must record whether it preserved completed rounds `001` through `010`, the accepted `R5` stop decision, the approved re-entry design spec, and the predecessor recursive-types packet.
 
 ## Task-Specific Checks
 
 - Add round-specific checks required by the selected roadmap item, especially:
-- gap-map/doc consistency against `docs/superpowers/specs/2026-03-14-unannotated-iso-recursive-roadmap-design.md`;
-- candidate-selection checks proving exactly one bounded subset stays active and alternatives are explicitly deferred or rejected;
-- invariant checks proving acyclicity, binding, occurs-check/termination, reconstruction/reification/witness replay, and principality obligations remain explicit when item 3 is active;
-- feasibility-decision checks proving item 4 records explicit `feasible-continue` or `not-yet-go` evidence without forbidden widening;
+- provenance-authority checks proving `RE1` does not manufacture replay/reification authority, late repair, or widened provenance roots for `URI-R2-C1`;
+- uniqueness checks proving `RE2` does not rely on heuristic ranking, competing roots, or widening-dependent comparisons;
+- positive-evidence / prototype-envelope checks proving `RE3` keeps any experiment explicit, bounded, non-default, and inside the fixed `URI-R2-C1` boundary;
+- re-entry-gate checks proving `RE4` records explicit `reopen-handoff-track` or `not-yet-reopen` evidence without broadening the active subject;
+- final-recommendation checks proving `RE5` matches the accepted `RE4` result and does not silently become implementation clearance;
 - docs-diff review when a round intentionally changes only `orchestrator/`, `docs/`, or task artifacts.
 
 ## Approval Criteria
