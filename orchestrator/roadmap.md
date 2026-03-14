@@ -23,9 +23,9 @@
    Depends on: item 1
    Completion notes: completed in accepted `round-007` via `docs/plans/2026-03-14-unannotated-iso-recursive-r2-candidate-subset-selection.md`; the accepted `R2` result selects candidate `URI-R2-C1` ("Unique local obligation root with one closed binder-family cluster") and keeps the fixed boundary explicit: single-SCC obligation-level recursion only, single-binder-family ownership only, no cross-family SCC linking, non-equi-recursive semantics only, non-cyclic structural graph only, and fail-closed rejection of ambiguous or widening-dependent cases.
 
-3. [pending] Write the `R3` inference-obligation contract for the chosen subset
+3. [done] Write the `R3` inference-obligation contract for the chosen subset
    Depends on: item 2
-   Completion notes: not started; this item must carry forward acyclicity, binding-tree discipline, occurs-check/termination, reconstruction/reification/witness replay, and principality obligations for the chosen subset.
+   Completion notes: completed in accepted `round-008` via `docs/plans/2026-03-14-unannotated-iso-recursive-r3-inference-obligation-contract.md`; the accepted `R3` result fixes the `URI-R2-C1` obligation contract across structural acyclicity, binder ownership/scope discipline, occurs-check/termination, reconstruction/reification/witness replay, and principality-risk boundaries while keeping the fixed boundary explicit: single-SCC obligation-level recursion only, single-binder-family ownership only, no cross-family SCC linking, non-equi-recursive semantics only, non-cyclic structural graph only, and fail-closed rejection of ambiguous or widening-dependent cases.
 
 4. [pending] Execute the bounded feasibility decision for the chosen subset
    Depends on: item 3
