@@ -27,7 +27,7 @@
    Depends on: item 1
    Completion notes: complete when `docs/plans/2026-03-15-uri-r2-c1-p2-provenance-preservation-prototype.md` is accepted, the reviewer record names the authoritative `P2` attempt, and the round either preserves the exact `P1` canonical subject across `generalizeWithPlan -> schemeToType -> reifyTypeWithNamedSetNoFallback` and witness replay or records the bounded negative or inconclusive outcome explicitly.
 
-3. [pending] Execute the `P3` safety-validation prototype for `URI-R2-C1`
+3. [done] Execute the `P3` safety-validation prototype for `URI-R2-C1`
    Depends on: item 2
    Completion notes: complete when `docs/plans/2026-03-15-uri-r2-c1-p3-safety-validation-prototype.md` is accepted, the reviewer record names the authoritative `P3` attempt, and the round records explicit bounded evidence for or against the same subject on local-SCC, structural-acyclicity, single-family ownership, and constructor-directed termination obligations.
 
