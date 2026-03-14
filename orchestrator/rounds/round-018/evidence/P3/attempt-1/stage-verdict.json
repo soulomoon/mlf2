@@ -1,0 +1,16 @@
+{
+  "research_entrypoint_id": "uri-r2-c1-prototype-entrypoint-v1",
+  "stage_selector": "P3-safety-validation",
+  "scenario_id": "uri-r2-c1-only-v1",
+  "attempt_id": 1,
+  "stage": "P3",
+  "subject_token_ref": null,
+  "checker_results": [
+    "orchestrator/rounds/round-018/evidence/P3/attempt-1/check-P3-S.json",
+    "orchestrator/rounds/round-018/evidence/P3/attempt-1/check-P3-A.json",
+    "orchestrator/rounds/round-018/evidence/P3/attempt-1/check-P3-B.json",
+    "orchestrator/rounds/round-018/evidence/P3/attempt-1/check-P3-C.json"
+  ],
+  "stage_result": "semantic-negative",
+  "terminal_reason": "blocking-stop-condition"
+}

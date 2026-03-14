@@ -1,0 +1,13 @@
+{
+  "research_entrypoint_id": "uri-r2-c1-prototype-entrypoint-v1",
+  "stage_selector": "P3-safety-validation",
+  "scenario_id": "uri-r2-c1-only-v1",
+  "attempt_id": 2,
+  "check_id": "P3-C",
+  "correlation_id": "uri-r2-c1-only-v1-p3-attempt-2",
+  "subject_id": null,
+  "evidence_ref": "orchestrator/rounds/round-018/evidence/P3/attempt-2/trace-bundle.json",
+  "verdict": "inconclusive",
+  "rejection_trigger": "blocking-stop-condition",
+  "details": "Constructor-directed reasoning check was not executed because P3 is blocked by authoritative P2 non-pass and no-token continuity."
+}

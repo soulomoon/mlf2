@@ -28,12 +28,14 @@ import MLF.Research.URI.R2.C1.Prototype.Types
     , boundedSubjectId
     , candidateInventoryRelativePath
     , p2AttemptEvidenceRelativeDir
+    , p3AttemptEvidenceRelativeDir
     , prototypeStageResult
     , prototypeSubjectId
     , researchEntrypointId
     , scenarioIdUriR2C1OnlyV1
     , stageSelectorP1
     , stageSelectorP2
+    , stageSelectorP3
     )
 
 spec :: Spec
@@ -71,11 +73,11 @@ spec = do
                 PrototypeRequest
                     { prRepoRoot = root
                     , prResearchEntrypointId = researchEntrypointId
-                    , prStageSelector = "P3-safety-validation"
+                    , prStageSelector = "wrong-stage"
                     , prScenarioId = scenarioIdUriR2C1OnlyV1
                     , prAttemptId = 1
                     }
-            result `shouldBe` Left (UnsupportedStageSelector "P3-safety-validation")
+            result `shouldBe` Left (UnsupportedStageSelector "wrong-stage")
             doesDirectoryExist (attemptDir root 1) >>= (`shouldBe` False)
 
         it "writes the mandatory P1 evidence files" $ do
@@ -247,6 +249,58 @@ spec = do
             artifact `shouldSatisfy` isInfixOf "`semantic-negative`"
             artifact `shouldSatisfy` (not . isInfixOf "## Next-Stage Handoff")
 
+    describe "URI-R2-C1 P3 prototype entrypoint" $ do
+        it "runs P3 from authoritative P2 no-token continuity and emits bounded non-pass evidence" $ do
+            root <- freshRoot "p3-bounded-non-pass"
+            seedAuthoritativeP2ReviewRecord root
+            report <- requirePrototypeReportFor stageSelectorP3 root 1
+            files <- listDirectory (attemptDirP3 root 1)
+            sort files `shouldBe`
+                [ "check-P3-A.json"
+                , "check-P3-B.json"
+                , "check-P3-C.json"
+                , "check-P3-S.json"
+                , "stage-verdict.json"
+                , "trace-bundle.json"
+                ]
+            prototypeStageResult report `shouldBe` "semantic-negative"
+            doesFileExist (attemptDirP3 root 1 </> "subject-token.json") >>= (`shouldBe` False)
+
+            traceBundle <- readFile (attemptDirP3 root 1 </> "trace-bundle.json")
+            extractStringField "correlation_id" traceBundle `shouldBe` Just "uri-r2-c1-only-v1-p3-attempt-1"
+            traceBundle `shouldSatisfy` isInfixOf "\"subject_id\": null"
+
+            mapM_
+                (assertP3CheckerSchema root 1 Nothing)
+                [ "check-P3-S.json"
+                , "check-P3-A.json"
+                , "check-P3-B.json"
+                , "check-P3-C.json"
+                ]
+
+            checkS <- readFile (attemptDirP3 root 1 </> "check-P3-S.json")
+            extractStringField "verdict" checkS `shouldBe` Just "semantic-negative"
+            extractStringField "rejection_trigger" checkS `shouldBe` Just "blocking-stop-condition"
+
+            stageVerdict <- readFile (attemptDirP3 root 1 </> "stage-verdict.json")
+            extractStringField "subject_token_ref" stageVerdict `shouldBe` Nothing
+            extractStringField "stage_result" stageVerdict `shouldBe` Just "semantic-negative"
+            extractStringField "terminal_reason" stageVerdict `shouldBe` Just "blocking-stop-condition"
+
+        it "rejects wrong-scenario P3 runs without writing attempt-local evidence" $ do
+            root <- freshRoot "p3-wrong-scenario"
+            seedAuthoritativeP2ReviewRecord root
+            result <- runResearchPrototype $
+                PrototypeRequest
+                    { prRepoRoot = root
+                    , prResearchEntrypointId = researchEntrypointId
+                    , prStageSelector = stageSelectorP3
+                    , prScenarioId = "wrong-scenario"
+                    , prAttemptId = 1
+                    }
+            result `shouldBe` Left (UnsupportedScenario "wrong-scenario")
+            doesDirectoryExist (attemptDirP3 root 1) >>= (`shouldBe` False)
+
 runAccepted :: FilePath -> Int -> Expectation
 runAccepted root attemptId = do
     result <- runPrototype stageSelectorP1 root attemptId
@@ -287,6 +341,41 @@ runPrototype stageSelector root attemptId =
 seedAuthoritativeP1Token :: FilePath -> IO PrototypeReport
 seedAuthoritativeP1Token root = requirePrototypePass root 2
 
+seedAuthoritativeP2ReviewRecord :: FilePath -> IO ()
+seedAuthoritativeP2ReviewRecord root = do
+    let reviewRecordPath =
+            root
+                </> "orchestrator"
+                </> "rounds"
+                </> "round-017"
+                </> "review-record.json"
+        reviewRecordContent =
+            unlines
+                [ "{"
+                , "  \"research_entrypoint_id\": \"uri-r2-c1-prototype-entrypoint-v1\","
+                , "  \"scenario_id\": \"uri-r2-c1-only-v1\","
+                , "  \"stages\": {"
+                , "    \"P1\": {"
+                , "      \"status\": \"authoritative\","
+                , "      \"authoritative_attempt\": 2,"
+                , "      \"authoritative_result\": \"pass\""
+                , "    },"
+                , "    \"P2\": {"
+                , "      \"status\": \"authoritative\","
+                , "      \"authoritative_attempt\": 2,"
+                , "      \"authoritative_result\": \"semantic-negative\""
+                , "    },"
+                , "    \"P3\": {"
+                , "      \"status\": \"not-yet-run\","
+                , "      \"authoritative_attempt\": null,"
+                , "      \"authoritative_result\": null"
+                , "    }"
+                , "  }"
+                , "}"
+                ]
+    createDirectoryIfMissing True (root </> "orchestrator" </> "rounds" </> "round-017")
+    writeFile reviewRecordPath reviewRecordContent
+
 freshRoot :: FilePath -> IO FilePath
 freshRoot label = do
     tmp <- getTemporaryDirectory
@@ -302,6 +391,10 @@ attemptDir root attemptId =
 attemptDirP2 :: FilePath -> Int -> FilePath
 attemptDirP2 root attemptId =
     root </> p2AttemptEvidenceRelativeDir attemptId
+
+attemptDirP3 :: FilePath -> Int -> FilePath
+attemptDirP3 root attemptId =
+    root </> p3AttemptEvidenceRelativeDir attemptId
 
 swallowMissing :: IOError -> IO ()
 swallowMissing err
@@ -384,6 +477,19 @@ assertP2CheckerSchema root attemptId subjectId fileName = do
     extractStringField "subject_id" content `shouldBe` Just subjectId
     extractStringField "evidence_ref" content
         `shouldSatisfy` maybeAttemptEvidenceRefFor (p2AttemptEvidenceRelativeDir attemptId </> "trace-bundle.json")
+    extractStringField "verdict" content `shouldSatisfy` maybeAllowedVerdict
+    extractStringField "rejection_trigger" content `shouldSatisfy` maybeAllowedTrigger
+
+assertP3CheckerSchema :: FilePath -> Int -> Maybe String -> FilePath -> Expectation
+assertP3CheckerSchema root attemptId mSubjectId fileName = do
+    content <- readFile (attemptDirP3 root attemptId </> fileName)
+    extractStringField "correlation_id" content
+        `shouldBe` Just ("uri-r2-c1-only-v1-p3-attempt-" ++ show attemptId)
+    case mSubjectId of
+        Nothing -> content `shouldSatisfy` isInfixOf "\"subject_id\": null"
+        Just subjectId -> extractStringField "subject_id" content `shouldBe` Just subjectId
+    extractStringField "evidence_ref" content
+        `shouldSatisfy` maybeAttemptEvidenceRefFor (p3AttemptEvidenceRelativeDir attemptId </> "trace-bundle.json")
     extractStringField "verdict" content `shouldSatisfy` maybeAllowedVerdict
     extractStringField "rejection_trigger" content `shouldSatisfy` maybeAllowedTrigger
 
