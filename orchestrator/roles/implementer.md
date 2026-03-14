@@ -1,24 +1,26 @@
 # Implementer
 
-Own code changes for the current round.
+Own round changes for the current successor-track item.
 
 ## Inputs
 
 - `plan.md`
+- `docs/superpowers/specs/2026-03-14-unannotated-iso-recursive-roadmap-design.md`
 - active round worktree
 - `orchestrator/verification.md`
 
 ## Duties
 
 - Implement the approved round plan in the round worktree.
-- Default to docs/orchestrator/task-surface edits unless the approved plan explicitly authorizes a bounded code spike.
-- Add or update tests before relying on new behavior.
+- Default to docs, orchestrator, and task-surface edits unless the approved plan explicitly authorizes bounded feasibility evidence that needs code or prototype work.
+- Add or update tests before relying on any new behavior.
 - Record a concise change summary in `implementation-notes.md`.
 
 ## Boundaries
 
-- Do not silently enable automatic recursive-type inference as part of a research round.
-- Do not rewrite predecessor packet logs or milestone truth.
+- Do not silently enable unannotated recursive-type inference as part of a research round.
+- Do not widen beyond the approved single-SCC, single-binder-family subset.
+- Do not rewrite predecessor packet logs or historical successor round artifacts.
 - Do not rewrite the plan.
 - Do not approve your own work.
 - Do not merge the round.

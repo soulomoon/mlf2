@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Changed
+- Refreshed the top-level `orchestrator/` into a successor control plane for the approved unannotated iso-recursive research track: the live roadmap now starts at the `R1` gap-map stage, `orchestrator/state.json` is reset to `select-task` while preserving historical `round-005` continuity, and the verification/role prompts now inherit the prior automatic-recursive-inference evidence chain instead of the completed roadmap.
 - Added a top-level `orchestrator/` successor control plane for research-first automatic recursive-type inference on branch `codex/automatic-recursive-type-inference`: the new roadmap, verification contract, role prompts, and state file inherit the completed recursive-types packet as predecessor evidence, and `.worktrees/` is now gitignored for future round worktrees.
 - Added M5 eMLF recursive-annotation surface exposure without pipeline lowering: `SrcTy` now includes `STMu`, the frontend parser/pretty-printer/normalizer accept and emit canonical `μa. τ` surface syntax (`mu a. τ` remains accepted on input), and Phase 1 now rejects normalized recursive annotations explicitly via `RecursiveAnnotationNotSupported` until later M6 lowering work lands.
 - Added explicit M4 contractiveness validation for elaborated recursive types in Phase 7: `typeCheck` now rejects non-contractive `μ` types across term annotations, let schemes, type-abstraction bounds, instantiation arguments, and `ERoll`, while keeping the v1 policy conservative (`forall` does not count as a guard, arrows/constructors do).
