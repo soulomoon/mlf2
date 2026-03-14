@@ -17,9 +17,9 @@
 
 ## Items
 
-1. [pending] Write the `RE1` provenance-authority evidence contract for `URI-R3-O4`
+1. [done] Write the `RE1` provenance-authority evidence contract for `URI-R3-O4`
    Depends on: completed rounds `001` through `010`, the accepted `R5` stop decision, and the approved re-entry roadmap design
-   Completion notes: not started; this item must define what counts as authoritative provenance-stable evidence for one unannotated root/cluster inside `URI-R2-C1`, and what remains rejected because it depends on manufactured authority, late repair, replay-domain widening, or unstable binder naming.
+   Completion notes: completed in accepted round `011` via `docs/plans/2026-03-14-uri-r2-c1-re1-provenance-authority-evidence-contract.md`; the contract keeps `URI-R2-C1` fixed and prototype-free, preserves inherited invariant-audit authority for replay/reification and safety boundaries, and fail-closes on manufactured authority, late repair, replay-domain widening, surrogate-root substitution, unstable binder naming, competing roots, and implementation- or prototype-backed claims.
 
 2. [pending] Write the `RE2` uniqueness-evidence contract for `URI-R3-O5`
    Depends on: item 1
