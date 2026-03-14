@@ -1,0 +1,94 @@
+# Round `round-011`
+
+- Baseline checks:
+  - `git diff --check`
+    - Exit `0`.
+    - Evidence: no whitespace errors or conflict markers reported.
+  - `python3 -m json.tool orchestrator/state.json >/dev/null`
+    - Exit `0`.
+    - Evidence: `orchestrator/state.json` remains valid JSON.
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+    - Exit `0`.
+    - Evidence:
+      - `20:1. [pending] Write the \`RE1\` provenance-authority evidence contract for \`URI-R3-O4\``
+      - `24:2. [pending] Write the \`RE2\` uniqueness-evidence contract for \`URI-R3-O5\``
+      - `28:3. [pending] Write the \`RE3\` prototype-free positive-evidence contract for \`URI-R3-O1\` through \`URI-R3-O3\``
+      - `32:4. [pending] Execute the \`RE4\` bounded re-entry gate for \`URI-R2-C1\``
+      - `36:5. [pending] Write the \`RE5\` final successor recommendation`
+  - `cabal build all && cabal test`
+    - Skipped.
+    - Rationale: the round diff does not touch `src/`, `src-public/`, `app/`, `test/`, or `mlf2.cabal`. `git diff --name-only` returned no tracked source/test/Cabal paths, and the only untracked paths are docs/round artifacts.
+  - Continuity check against inherited evidence
+    - Evidence:
+      - `git -C .worktrees/round-011 diff --name-only | rg '^orchestrator/rounds/round-00(1|2|3|4|5|6|7|8|9|10)/'` exited `1` (no prior accepted round artifacts modified).
+      - `git -C .worktrees/round-011 diff --name-only | rg '^tasks/todo/2026-03-11-recursive-types-orchestration/'` exited `1` (no predecessor recursive-types packet paths modified).
+      - `docs/plans/2026-03-14-uri-r2-c1-re1-provenance-authority-evidence-contract.md` explicitly preserves inherited authority:
+        - line 30 keeps `2026-03-14-automatic-recursive-inference-invariant-audit.md` authoritative for reconstruction, reification, witness replay, binding-tree discipline, acyclicity, and occurs-check/termination boundaries.
+        - lines 211-214 state completed rounds `001` through `010`, the accepted `R5` stop, and the approved re-entry design remain inherited authority and are not rewritten.
+
+- Task-specific checks:
+  - Docs-only boundary
+    - `git -C .worktrees/round-011 status --short --untracked-files=all`
+      - Evidence:
+        - `?? docs/plans/2026-03-14-uri-r2-c1-re1-provenance-authority-evidence-contract.md`
+        - `?? orchestrator/rounds/round-011/implementation-notes.md`
+        - `?? orchestrator/rounds/round-011/plan.md`
+        - `?? orchestrator/rounds/round-011/selection.md`
+    - `git -C .worktrees/round-011 ls-files --others --exclude-standard`
+      - Evidence:
+        - `docs/plans/2026-03-14-uri-r2-c1-re1-provenance-authority-evidence-contract.md`
+        - `orchestrator/rounds/round-011/implementation-notes.md`
+        - `orchestrator/rounds/round-011/plan.md`
+        - `orchestrator/rounds/round-011/selection.md`
+    - `git -C .worktrees/round-011 diff --name-only`
+      - Exit `0` with no output.
+    - Prohibited-path probes:
+      - `rg '^(src/|src-public/|app/|test/|mlf2\.cabal$)'` on `git diff --name-only` exited `1`.
+      - `rg '^orchestrator/state\.json$'` on `git diff --name-only` exited `1`.
+      - `rg '^orchestrator/roadmap\.md$'` on `git diff --name-only` exited `1`.
+      - `rg '^tasks/todo/2026-03-11-recursive-types-orchestration/'` on `git diff --name-only` exited `1`.
+      - `rg '^orchestrator/rounds/round-00(1|2|3|4|5|6|7|8|9|10)/'` on `git diff --name-only` exited `1`.
+      - `rg '^orchestrator/rounds/round-011/(review|merge|implementation-notes)\.md$'` on `git diff --name-only` exited `1`.
+    - Reviewer assessment: the round remains docs-only and does not touch prohibited tracked paths; the visible untracked files are confined to the planned RE1 artifact plus round-local metadata.
+  - Provenance-authority contract markers
+    - `rg -n 'RE1|URI-R3-O4|URI-R2-C1|provenance|authority|generalizeWithPlan|schemeToType|reifyTypeWithNamedSetNoFallback|witness replay|late repair|surrogate|binder|replay-domain|prototype-free|fail closed|RE2|RE3|RE4|RE5' docs/plans/2026-03-14-uri-r2-c1-re1-provenance-authority-evidence-contract.md`
+    - Evidence:
+      - line 1 identifies `RE1` and `URI-R3-O4`.
+      - lines 60-63 bind the same subject to `generalizeWithPlan`, `schemeToType`, `reifyTypeWithNamedSetNoFallback`, and witness replay.
+      - lines 193-200 explicitly state the document executes `RE1` only and does not settle `RE2`, `RE3`, `RE4`, or `RE5`.
+  - Fixed-boundary checks
+    - `rg -n 'single-SCC|single-binder-family|cross-family|non-cyclic|equi-recursive|default-on widening|prototype-free' docs/plans/2026-03-14-uri-r2-c1-re1-provenance-authority-evidence-contract.md`
+    - Evidence:
+      - lines 44-50 restate the fixed boundary as `single-SCC`, `single-binder-family`, no cross-family linking, non-equi-recursive, non-cyclic, no default-on widening, and prototype-free.
+    - `rg -n '^Candidate ID:' docs/plans/2026-03-14-uri-r2-c1-re1-provenance-authority-evidence-contract.md`
+      - Exit `1`.
+      - Evidence: no candidate-ranking scaffold was introduced.
+  - Stage-preservation checks
+    - `rg -n 'reopen-handoff-track|not-yet-reopen|remain-stop|implementation-handoff|implementation-ready|feasible-continue|not-yet-go' docs/plans/2026-03-14-uri-r2-c1-re1-provenance-authority-evidence-contract.md`
+    - Evidence:
+      - only line 28 matched (`not-yet-go`) inside the inherited-authority chain describing the accepted `R4` input.
+      - lines 193-202 explicitly say this document is not a feasibility decision, re-entry verdict, implementation handoff, or implementation clearance.
+    - Reviewer assessment: the artifact stays at `RE1` and does not contain a live `RE2`, `RE3`, `RE4`, or `RE5` decision.
+  - Provenance-rejection checks
+    - `rg -n 'manufactured authority|late root repair|replay-domain widening|surrogate-root substitution|unstable binder naming|competing roots|prototype-backed|implementation-drift' docs/plans/2026-03-14-uri-r2-c1-re1-provenance-authority-evidence-contract.md`
+    - Evidence:
+      - lines 139-154 explicitly reject manufactured authority, late root repair, replay-domain widening, surrogate-root substitution, unstable binder naming, competing roots, prototype-backed claims, and implementation-drift-backed claims.
+  - Continuity-reference checks
+    - `rg -n '2026-03-14-uri-r2-c1-reentry-roadmap-design|2026-03-14-unannotated-iso-recursive-r5-research-stop-decision|2026-03-14-unannotated-iso-recursive-r4-feasibility-decision|2026-03-14-unannotated-iso-recursive-r3-inference-obligation-contract|2026-03-14-automatic-recursive-inference-invariant-audit' docs/plans/2026-03-14-uri-r2-c1-re1-provenance-authority-evidence-contract.md`
+    - Evidence:
+      - lines 26-30 cite every required inherited authority input directly.
+  - Reviewer logic check
+    - Evidence:
+      - lines 79-133 define a finite, bounded admissible-evidence contract: one local root or equivalent local cluster inside `URI-R2-C1`, continuity across generalization/reconstruction/reification/replay, no manufactured authority, no replay-domain ambiguity, and binding-tree/witness-domain consistency.
+      - lines 160-176 define exactly what later evidence would clear `URI-R3-O4` and exactly what findings force it to remain uncleared.
+    - Reviewer assessment: the contract is reviewer-checkable, bounded to `URI-R2-C1`, prototype-free, and fail-closed. It does not manufacture replay or reification authority; it requires any later clearance to derive from the inherited bounded subject itself.
+
+- Decision:
+  - `approve`
+
+- Evidence:
+  - The round stayed at `RE1` only; the artifact explicitly says it does not settle `RE2`, `RE3`, `RE4`, or `RE5` (lines 193-200).
+  - The inherited invariant-audit authority remains controlling; the artifact cites the invariant audit as authoritative and carries it forward instead of inventing new replay/reification semantics (lines 30 and 35).
+  - `URI-R2-C1` stayed fixed, along with the required `single-SCC`, `single-binder-family`, non-equi-recursive, non-cyclic, no-default-on-widening boundary (lines 43-50).
+  - The round remained prototype-free and fail-closed; the artifact rejects prototype-backed and implementation-drift-backed evidence and says the later gate must remain closed if prototype-backed evidence is required (lines 152-156 and 182-187).
+  - The artifact does not manufacture replay/reification authority for `URI-R3-O4`; instead it requires one bounded subject already present in the unannotated local root/cluster to survive `generalizeWithPlan -> schemeToType -> reifyTypeWithNamedSetNoFallback` plus witness replay without late repair, surrogate substitution, replay-domain widening, or binder drift (lines 56-71, 92-133, and 160-176).
