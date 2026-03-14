@@ -1,0 +1,13 @@
+{
+  "research_entrypoint_id": "uri-r2-c1-prototype-entrypoint-v1",
+  "stage_selector": "P2-provenance-preservation",
+  "scenario_id": "uri-r2-c1-only-v1",
+  "attempt_id": 1,
+  "check_id": "P2-S",
+  "correlation_id": "uri-r2-c1-only-v1-p2-attempt-1",
+  "subject_id": "uri-r2-c1/cluster-1",
+  "evidence_ref": "orchestrator/rounds/round-017/evidence/P2/attempt-1/trace-bundle.json",
+  "verdict": "pass",
+  "rejection_trigger": "none",
+  "details": "schemeToType => ∀(a ⩾ ⊥) ∀(b ⩾ a -> a) b"
+}

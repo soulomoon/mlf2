@@ -1,0 +1,24 @@
+{
+  "research_entrypoint_id": "uri-r2-c1-prototype-entrypoint-v1",
+  "stage_selector": "P2-provenance-preservation",
+  "scenario_id": "uri-r2-c1-only-v1",
+  "attempt_id": 2,
+  "stage": "P2",
+  "correlation_id": "uri-r2-c1-only-v1-p2-attempt-2",
+  "subject_id": "uri-r2-c1/cluster-1",
+  "trace_refs": [
+    "trace://uri-r2-c1/p2/generalize/uri-r2-c1-cluster-1/a-b-a-a-b",
+    "trace://uri-r2-c1/p2/scheme-to-type/uri-r2-c1-cluster-1/a-b-a-a-b",
+    "trace://uri-r2-c1/p2/reify-no-fallback/uri-r2-c1-cluster-1/t5-t5",
+    "trace://uri-r2-c1/p2/witness-replay/uri-r2-c1-cluster-1/t9-n-a-a-n"
+  ],
+  "trace_summary": [
+    "P2 consumed only the authoritative P1 subject token from round-016.",
+    "The bounded fixture executed generalization, reconstruction, no-fallback reification, and witness replay through the shared prototype entrypoint.",
+    "All attempt-local check files repeat the inherited subject_id and shared correlation_id.",
+    "P2-G: generalizeWithPlan => ∀(a ⩾ ⊥) ∀(b ⩾ a -> a) b",
+    "P2-S: schemeToType => ∀(a ⩾ ⊥) ∀(b ⩾ a -> a) b",
+    "P2-R: reifyTypeWithNamedSetNoFallback => t5 -> t5",
+    "P2-W: witness replay => ∀(⩾ ⊲t9); N; (∀(⩾ ⊲(a -> a)); N) (applyInstantiation diagnostic failed: InstantiationError \"InstBot expects \\8869, got: t9 -> t9\")"
+  ]
+}

@@ -1,21 +1,30 @@
 module MLF.Research.URI.R2.C1.Prototype.Artifact (
-    writeP1Artifact
+    writeP1Artifact,
+    writeP2Artifact
 ) where
 
 import System.Directory (createDirectoryIfMissing)
 import System.FilePath (takeDirectory)
 
+import MLF.Research.URI.R2.C1.Prototype.P2 (P2Execution(..), P2CheckArtifact(..))
 import MLF.Research.URI.R2.C1.Prototype.Types
 
 writeP1Artifact :: PrototypeReport -> IO FilePath
 writeP1Artifact report = do
     let path = ppArtifactPath (prototypePaths (prototypeRequest report))
     createDirectoryIfMissing True (takeDirectory path)
-    writeFile path (renderArtifact report)
+    writeFile path (renderP1Artifact report)
     pure path
 
-renderArtifact :: PrototypeReport -> String
-renderArtifact report =
+writeP2Artifact :: P2Execution -> IO FilePath
+writeP2Artifact execution = do
+    let path = ppArtifactPath (prototypePaths (prototypeRequest (p2AppReport execution)))
+    createDirectoryIfMissing True (takeDirectory path)
+    writeFile path (renderP2Artifact execution)
+    pure path
+
+renderP1Artifact :: PrototypeReport -> String
+renderP1Artifact report =
     unlines $
         [ "# `P1` Subject-Discovery Prototype For `URI-R2-C1`"
         , ""
@@ -58,7 +67,7 @@ renderArtifact report =
                , ""
                , "## Rejection Triggers"
                , ""
-               , renderRejectionTriggers report
+               , renderP1RejectionTriggers report
                , ""
                , "## Stage Result"
                , ""
@@ -66,8 +75,72 @@ renderArtifact report =
                , ""
                , "## Next-Stage Handoff"
                , ""
-               , renderHandoff report
+               , renderP1Handoff report
                ]
+
+renderP2Artifact :: P2Execution -> String
+renderP2Artifact execution =
+    let report = p2AppReport execution
+        req = prototypeRequest report
+        attemptId = prAttemptId req
+    in unlines $
+        [ "# `P2` Provenance-Preservation Prototype For `URI-R2-C1`"
+        , ""
+        , "Date: 2026-03-15"
+        , "Roadmap item: 2"
+        , "Stage: `P2`"
+        , "Attempt: " ++ show attemptId
+        , "Active subject: `URI-R2-C1`"
+        , "Active scenario: `uri-r2-c1-only-v1`"
+        , "Artifact kind: provenance-preservation prototype"
+        , ""
+        , "## Inherited Inputs"
+        , ""
+        , "- `docs/superpowers/specs/2026-03-15-uri-r2-c1-prototype-evidence-roadmap-design.md`"
+        , "- `docs/plans/2026-03-15-uri-r2-c1-p1-subject-discovery-prototype.md`"
+        , "- `" ++ p2InheritedTokenPath execution ++ "`"
+        , "- `orchestrator/rounds/round-017/selection.md`"
+        , ""
+        , "## Stage Input Interface"
+        , ""
+        , "- Inherited token path: `" ++ p2InheritedTokenPath execution ++ "`."
+        , "- Shared entrypoint tuple: `{ research_entrypoint_id: uri-r2-c1-prototype-entrypoint-v1, stage_selector: P2-provenance-preservation, scenario_id: uri-r2-c1-only-v1, attempt_id: "
+            ++ show attemptId
+            ++ " }`."
+        , ""
+        , "## Method"
+        , ""
+        , "- Ordered checks: `P2-G`, `P2-S`, `P2-R`, `P2-W`."
+        , "- The bounded fixture executes `generalizeWithPlan -> schemeToType -> reifyTypeWithNamedSetNoFallback -> witness replay` under the existing shared entrypoint."
+        , "- Shared `correlation_id`: `" ++ p2CorrelationId execution ++ "`."
+        , ""
+        , "## Evidence"
+        , ""
+        , "- Attempt-local evidence directory: `" ++ p2AttemptEvidenceRelativeDir attemptId ++ "`."
+        , "- Trace bundle: `" ++ p2TraceBundleRelativePath attemptId ++ "`."
+        ]
+            ++ map renderP2CheckLine (p2Checks execution)
+            ++ [ "- Trace refs: " ++ unwords (map (\ref -> "`" ++ ref ++ "`") (p2TraceRefs execution))
+               , "- Observations:"
+               ]
+            ++ map ("- " ++) (p2TraceSummary execution)
+            ++ [ ""
+               , "## Rejection Triggers"
+               , ""
+               , renderP2RejectionTriggers execution
+               , ""
+               , "## Stage Result"
+               , ""
+               , "`" ++ prototypeStageResult report ++ "`"
+               ]
+            ++ if prototypeStageResult report == "pass"
+                then
+                    [ ""
+                    , "## Next-Stage Handoff"
+                    , ""
+                    , "Reaffirmed subject token: `" ++ p2AttemptEvidenceRelativeDir attemptId ++ "/subject-token.json`."
+                    ]
+                else []
 
 renderCandidate :: CandidateRecord -> String
 renderCandidate candidate =
@@ -83,8 +156,8 @@ renderCandidate candidate =
         ++ crRejectionTrigger candidate
         ++ "`."
 
-renderRejectionTriggers :: PrototypeReport -> String
-renderRejectionTriggers report =
+renderP1RejectionTriggers :: PrototypeReport -> String
+renderP1RejectionTriggers report =
     let triggers =
             filter (/= "none")
                 [ ckRejectionTrigger (prototypeP1C report)
@@ -95,8 +168,8 @@ renderRejectionTriggers report =
         [] -> "No non-`none` rejection triggers were observed."
         _ -> unwords (map (\trigger -> "`" ++ trigger ++ "`") triggers)
 
-renderHandoff :: PrototypeReport -> String
-renderHandoff report =
+renderP1Handoff :: PrototypeReport -> String
+renderP1Handoff report =
     case prototypeSubjectToken report of
         Nothing ->
             "No handoff token exists because the stage did not pass."
@@ -104,3 +177,29 @@ renderHandoff report =
             "Canonical subject token: `"
                 ++ attemptEvidenceRelativeDir (prAttemptId (prototypeRequest report))
                 ++ "/subject-token.json`."
+
+renderP2CheckLine :: P2CheckArtifact -> String
+renderP2CheckLine check =
+    let result = p2caResult check
+    in "- `"
+        ++ ckCheckId result
+        ++ "`: `"
+        ++ ckStatus result
+        ++ "` via `"
+        ++ p2caEvidenceRef check
+        ++ "`."
+
+renderP2RejectionTriggers :: P2Execution -> String
+renderP2RejectionTriggers execution =
+    let observed =
+            filter (/= "none")
+                (map (ckRejectionTrigger . p2caResult) (p2Checks execution))
+        observedLine =
+            case observed of
+                [] -> "Observed triggers: `none`."
+                _ -> "Observed triggers: " ++ unwords (map (\trigger -> "`" ++ trigger ++ "`") observed) ++ "."
+        detailsLine =
+            unlines (map (\check -> "`" ++ ckCheckId (p2caResult check) ++ "`: " ++ ckDetails (p2caResult check)) (p2Checks execution))
+        vocabularyLine =
+            "Normalized vocabulary: " ++ unwords (map (\trigger -> "`" ++ trigger ++ "`") normalizedRejectionTriggers) ++ "."
+    in observedLine ++ "\n\n" ++ detailsLine ++ "\n" ++ vocabularyLine
