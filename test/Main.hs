@@ -26,6 +26,7 @@ import qualified Phi.AlignmentSpec
 import qualified Phi.WitnessDomainSpec
 import qualified PublicSurfaceSpec
 import qualified RepoGuardSpec
+import qualified Research.UriR2C1PrototypeP1Spec
 import qualified PresolutionSpec
 import qualified Presolution.UnificationClosureSpec
 import qualified ReduceSpec
@@ -61,6 +62,7 @@ main = do
         PipelineSpec.spec
         PublicSurfaceSpec.spec
         RepoGuardSpec.spec
+        Research.UriR2C1PrototypeP1Spec.spec
         PresolutionFacadeSpec.spec
         ThesisFixDirectionSpec.spec
         TypeCheckSpec.spec

@@ -1,25 +1,20 @@
 module Main where
 
-import MLF.API
-    ( Expr(..)
-    , normalizeExpr
+import System.Environment (getArgs)
+import System.Exit (die)
+
+import MLF.Research.URI.R2.C1.Prototype.Entrypoint
+    ( AppRun(..)
+    , runAppFromCurrentDirectory
     )
-import MLF.Pipeline
-    ( Pretty(..)
-    , defaultPipelineConfig
-    , renderPipelineError
-    , runPipelineElabWithConfig
-    )
+import MLF.Research.URI.R2.C1.Prototype.Types (prototypeStageResult)
 
 main :: IO ()
 main = do
-  let expr = ELam "x" (EVar "x")
-  case normalizeExpr expr of
-    Left err ->
-      putStrLn ("Normalization failed: " ++ show err)
-    Right normExpr ->
-      case runPipelineElabWithConfig defaultPipelineConfig mempty normExpr of
-        Left err ->
-          putStrLn ("Pipeline failed: " ++ renderPipelineError err)
-        Right (_term, ty) ->
-          putStrLn ("Type: " ++ pretty ty)
+    args <- getArgs
+    runAppFromCurrentDirectory args >>= \result ->
+        case result of
+            Left err -> die err
+            Right (AppDefaultDemo output) -> putStrLn output
+            Right (AppPrototype report) ->
+                putStrLn ("Prototype result: " ++ prototypeStageResult report)

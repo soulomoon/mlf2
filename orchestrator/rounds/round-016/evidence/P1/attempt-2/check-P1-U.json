@@ -1,0 +1,11 @@
+{
+  "research_entrypoint_id": "uri-r2-c1-prototype-entrypoint-v1",
+  "stage_selector": "P1-subject-discovery",
+  "scenario_id": "uri-r2-c1-only-v1",
+  "attempt_id": 2,
+  "check_id": "P1-U",
+  "subject_id": "uri-r2-c1/cluster-1",
+  "evidence_ref": "orchestrator/rounds/round-016/evidence/P1/attempt-2/candidate-selection-rule.json",
+  "verdict": "pass",
+  "rejection_trigger": "none"
+}

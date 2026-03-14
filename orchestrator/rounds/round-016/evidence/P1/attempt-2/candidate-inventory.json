@@ -1,0 +1,15 @@
+{
+  "research_entrypoint_id": "uri-r2-c1-prototype-entrypoint-v1",
+  "stage_selector": "P1-subject-discovery",
+  "scenario_id": "uri-r2-c1-only-v1",
+  "attempt_id": 2,
+  "candidates": [
+    {
+      "candidate_id": "cluster-1",
+      "candidate_kind": "equivalent-local-cluster",
+      "normalization_basis": "cluster-equivalence-v1",
+      "admissibility_verdict": "admissible",
+      "rejection_trigger": "none"
+    }
+  ]
+}

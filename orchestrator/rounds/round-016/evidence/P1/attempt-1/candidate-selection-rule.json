@@ -1,0 +1,12 @@
+{
+  "stage": "P1",
+  "research_entrypoint_id": "uri-r2-c1-prototype-entrypoint-v1",
+  "scenario_id": "uri-r2-c1-only-v1",
+  "candidate_universe": "bounded local recursive roots or equivalent local clusters inside URI-R2-C1, one SCC, one binder family",
+  "normalization": "cluster-equivalence-v1",
+  "admissibility_test": "exactly one normalized candidate may remain admissible after bounded discovery",
+  "outcome": {
+  "stage_result": "pass",
+  "selected_candidate_id": "cluster-1"
+}
+}

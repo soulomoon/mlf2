@@ -1,0 +1,10 @@
+{
+  "stage": "P1",
+  "research_entrypoint_id": "uri-r2-c1-prototype-entrypoint-v1",
+  "scenario_id": "uri-r2-c1-only-v1",
+  "check_id": "P1-U",
+  "status": "pass",
+  "rejection_trigger": "none",
+  "details": "Ambiguity exclusion selected the sole admissible normalized candidate.",
+  "stage_result": "pass"
+}

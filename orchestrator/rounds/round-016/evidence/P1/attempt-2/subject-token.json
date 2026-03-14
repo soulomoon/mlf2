@@ -1,0 +1,26 @@
+{
+  "research_entrypoint_id": "uri-r2-c1-prototype-entrypoint-v1",
+  "stage_selector": "P1-subject-discovery",
+  "scenario_id": "uri-r2-c1-only-v1",
+  "attempt_id": 2,
+  "subject_id": "uri-r2-c1/cluster-1",
+  "subject_kind": "equivalent-local-cluster",
+  "subject_scope": {
+    "scenario_id": "uri-r2-c1-only-v1",
+    "bounded_subject": "URI-R2-C1"
+  },
+  "provenance_anchor": {
+    "origin_stage": "P1",
+    "candidate_id": "cluster-1",
+    "candidate_inventory_ref": "orchestrator/rounds/round-016/evidence/P1/attempt-2/candidate-inventory.json",
+    "normalization_basis": "cluster-equivalence-v1",
+    "discovery_trace_ref": "trace://uri-r2-c1/p1/discovery-cluster-1"
+  },
+  "owner_family_status": {
+    "kind": "unknown",
+    "family_id": null
+  },
+  "trace_handles": [
+    "trace://uri-r2-c1/p1/discovery-cluster-1"
+  ]
+}

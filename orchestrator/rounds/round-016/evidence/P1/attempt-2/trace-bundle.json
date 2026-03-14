@@ -1,0 +1,12 @@
+{
+  "research_entrypoint_id": "uri-r2-c1-prototype-entrypoint-v1",
+  "stage_selector": "P1-subject-discovery",
+  "scenario_id": "uri-r2-c1-only-v1",
+  "attempt_id": 2,
+  "stage": "P1",
+  "correlation_id": "uri-r2-c1-only-v1-attempt-2",
+  "subject_id": "uri-r2-c1/cluster-1",
+  "trace_refs": [
+    "trace://uri-r2-c1/p1/discovery-cluster-1"
+  ]
+}
