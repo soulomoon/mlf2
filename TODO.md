@@ -4,6 +4,21 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 88 `URI-R2-C1` prototype evidence orchestrator scaffold (completed 2026-03-15)
+
+- Completed:
+  - refreshed the live top-level `orchestrator/` so it now succeeds the finished prototype-free `RE1` through `RE5` campaign while preserving `orchestrator/rounds/round-001` through `round-015` as historical evidence;
+  - reset `orchestrator/state.json` to `stage: "select-task"` on branch `codex/automatic-recursive-type-inference` while keeping `last_completed_round: "round-015"` so future prototype-evidence rounds can continue without colliding with historical directories;
+  - replaced the live roadmap, verification contract, and role prompts with the approved `URI-R2-C1` prototype-evidence track rooted in `docs/superpowers/specs/2026-03-15-uri-r2-c1-prototype-evidence-roadmap-design.md`, with `P1` subject discovery as the next concrete item.
+- Verification:
+  - `python3 -m json.tool orchestrator/state.json`: PASS
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`: PASS
+  - `git diff --check`: PASS
+- Rolling priorities (next):
+  1. Use the refreshed top-level `orchestrator/` to land `P1`, the bounded subject-discovery prototype for `URI-R2-C1`, before provenance or safety stages.
+  2. Keep prototype work isolated behind the shared research entrypoint `uri-r2-c1-prototype-entrypoint-v1` and the exact scenario `uri-r2-c1-only-v1`.
+  3. Preserve the accepted prototype-free `RE4`/`RE5` stop results plus rounds `001` through `015` as historical evidence rather than live work.
+
 ## Task 87 `URI-R2-C1` re-entry successor orchestrator scaffold (completed 2026-03-14)
 
 - Completed:
