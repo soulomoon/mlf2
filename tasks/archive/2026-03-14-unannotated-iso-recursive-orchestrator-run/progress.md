@@ -43,3 +43,11 @@
 - Delegated `round-009` `merge`; the merger wrote the merge notes, the controller committed the round branch as `600bd49`, squash-merged `codex/round-009`, and recorded the base-branch result as `a6fc936`.
 - Delegated the `round-009` `update-roadmap` stage; the guider marked roadmap item 4 as `done` with the accepted bounded `not-yet-go` feasibility result.
 - Advanced `orchestrator/state.json` from `update-roadmap` to `done`, making the control plane ready to start `round-010`.
+- Started `round-010` from the clean post-round-009 baseline by creating branch `codex/round-010`, worktree `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-010`, and the matching round artifact directory, then updating `orchestrator/state.json` to resume at `select-task`.
+- Delegated `round-010` `select-task`; the guider chose roadmap item 5 and correctly routed it to a bounded `research-stop` decision because `round-009` had already concluded `not-yet-go`.
+- Delegated `round-010` `plan`; the planner kept the round docs-only and targeted the `R5` research-stop decision artifact.
+- Delegated `round-010` `implement`; the implementer wrote the `R5` research-stop decision artifact and round implementation notes without touching production code.
+- Delegated `round-010` `review`; the reviewer approved the docs-only round and skipped the full Cabal gate only because the diff excluded code/test surfaces.
+- Delegated `round-010` `merge`; the merger wrote the merge notes, the controller committed the round branch as `e4aee39`, squash-merged `codex/round-010`, and recorded the base-branch result as `bc56bfb`.
+- Delegated the `round-010` `update-roadmap` stage; the guider marked roadmap item 5 as `done`, leaving the roadmap fully complete.
+- Advanced `orchestrator/state.json` from `update-roadmap` to `done`; the control plane is now idle with `last_completed_round: "round-010"` and no active round.
