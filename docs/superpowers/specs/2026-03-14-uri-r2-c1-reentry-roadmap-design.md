@@ -46,7 +46,7 @@ This roadmap does **not** itself write an implementation handoff.
 - No cross-family SCC linking.
 - No equi-recursive reasoning or implicit unfolding semantics.
 - No cyclic structural-graph encoding.
-- No silent default-on behavior from any prototype or experiment.
+- No prototype-backed or experiment-backed re-entry evidence.
 - No rewriting of predecessor packet history or accepted rounds `001` through `010`.
 
 ## Chosen Roadmap Shape
@@ -71,7 +71,7 @@ These constraints remain mandatory for the entire roadmap:
 - No equi-recursive reasoning or implicit unfolding is admitted.
 - No default-on widening is admitted.
 - The structural `TyNode` / constraint graph must remain non-cyclic.
-- Any prototype evidence must be explicitly authorized by a roadmap stage, remain bounded and non-default, and never be treated as implementation clearance by itself.
+- All re-entry evidence in this roadmap must remain prototype-free; if a question cannot be answered from bounded research artifacts alone, the roadmap fails closed instead of authorizing an experiment.
 - The authoritative inherited invariant audit remains controlling for safety boundaries.
 
 ## Roadmap Milestones
@@ -118,17 +118,11 @@ Exit condition:
 
 Deliverable:
 
-- one artifact that defines the positive evidence needed for:
+- one artifact that defines the prototype-free positive evidence needed for:
   - structural acyclicity preservation,
   - deterministic single-family owner stability, and
   - constructor-directed occurs-check/termination clearance;
-- one explicit statement of whether docs-only evidence is sufficient or whether bounded prototype evidence is authorized;
-- if bounded prototype evidence is authorized, one explicit non-default prototype envelope:
-  - touched surfaces,
-  - disallowed widenings,
-  - required tests/guards,
-  - stop triggers,
-  - and how prototype output may be cited without becoming implementation behavior.
+- one rejection list for claims that still depend on prototype runs, implementation drift, explicit-anchor replay substitution, or widened ownership/search.
 
 Purpose:
 
@@ -136,7 +130,7 @@ Purpose:
 
 Exit condition:
 
-- the repository has one approved evidence contract for `URI-R3-O1` through `URI-R3-O3`, including an explicit yes/no on bounded prototype authorization.
+- the repository has one approved prototype-free evidence contract for `URI-R3-O1` through `URI-R3-O3`.
 
 ### `RE4` Execute The Bounded Re-Entry Gate
 
@@ -152,7 +146,6 @@ Required contents:
 - the evidence actually gathered;
 - which re-entry contracts were satisfied and which were not;
 - no-go triggers and immediate stop conditions;
-- prototype-boundary audit, if prototypes were authorized;
 - reviewer-visible explanation for the decision.
 
 Purpose:
@@ -185,7 +178,7 @@ Each stage must produce a reviewer-visible artifact with an explicit gate.
 
 - `RE1` gate: provenance-authority requirements are concrete and bounded.
 - `RE2` gate: uniqueness requirements are concrete and bounded.
-- `RE3` gate: positive-evidence requirements are concrete and any prototype envelope is explicit, narrow, and non-default.
+- `RE3` gate: positive-evidence requirements are concrete, bounded, and prototype-free.
 - `RE4` gate: the re-entry verdict is explicit and justified against the `RE1` through `RE3` contracts.
 - `RE5` gate: the final recommendation is concrete enough to tell the next effort whether to start a new handoff-track roadmap or preserve the bounded stop.
 
@@ -197,7 +190,7 @@ The roadmap must stop and record `remain-stop` / `not-yet-reopen` if any stage d
 - multi-SCC or cross-family exploration;
 - equi-recursive reasoning or implicit unfolding;
 - cyclic graph representation;
-- default-on prototype behavior;
+- any prototype-backed or experiment-backed evidence requirement;
 - unverifiable claims about replay authority, uniqueness, soundness, principality, or termination.
 
 ## Recommendation
@@ -208,6 +201,6 @@ It is the smallest honest next step because it:
 
 - starts from the recorded stop instead of pretending implementation is next;
 - turns the accepted blockers into explicit evidence contracts;
-- allows bounded experimental evidence only if a reviewed stage explicitly authorizes it;
+- keeps re-entry evidence prototype-free, matching the accepted `R5` stop contract;
 - keeps the subject fixed to `URI-R2-C1`; and
 - ends at a re-entry verdict rather than collapsing directly into implementation planning.

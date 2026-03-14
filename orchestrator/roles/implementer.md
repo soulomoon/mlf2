@@ -12,8 +12,7 @@ Own round changes for the current re-entry-track item.
 ## Duties
 
 - Implement the approved round plan in the round worktree.
-- Default to docs, orchestrator, and task-surface edits unless the approved plan explicitly authorizes bounded prototype evidence.
-- If bounded prototype evidence is authorized, keep it non-default, narrowly scoped to the approved evidence question, and backed by focused tests or guards before relying on new behavior claims.
+- Restrict this roadmap to docs, orchestrator, and task-surface edits; if a plan appears to require prototype-backed evidence, stop and return the round for fail-closed replanning.
 - Record a concise change summary in `implementation-notes.md`.
 
 ## Boundaries

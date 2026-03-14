@@ -25,13 +25,13 @@
    Depends on: item 1
    Completion notes: not started; this item must define bounded evidence for one uniquely admissible local root/cluster inside `URI-R2-C1` and explicitly reject heuristic ranking, competing roots, multi-cluster comparison, or widening-dependent uniqueness claims.
 
-3. [pending] Write the `RE3` positive-evidence contract for `URI-R3-O1` through `URI-R3-O3`
+3. [pending] Write the `RE3` prototype-free positive-evidence contract for `URI-R3-O1` through `URI-R3-O3`
    Depends on: item 2
-   Completion notes: not started; this item must define the positive evidence needed for structural acyclicity preservation, deterministic single-family owner stability, and constructor-directed occurs-check/termination clearance, and must explicitly state whether any bounded prototype evidence is authorized, with a non-default envelope if so.
+   Completion notes: not started; this item must define the prototype-free positive evidence needed for structural acyclicity preservation, deterministic single-family owner stability, and constructor-directed occurs-check/termination clearance, and must reject claims that depend on prototype runs, implementation drift, explicit-anchor replay substitution, or widened ownership/search.
 
 4. [pending] Execute the `RE4` bounded re-entry gate for `URI-R2-C1`
    Depends on: item 3
-   Completion notes: not started; this item must record explicit `reopen-handoff-track` or `not-yet-reopen` evidence for `URI-R2-C1` while keeping the subject fixed, preserving the single-SCC / single-binder-family / non-equi-recursive / non-cyclic-graph boundary, and keeping any prototype evidence explicitly bounded and non-default.
+   Completion notes: not started; this item must record explicit `reopen-handoff-track` or `not-yet-reopen` evidence for `URI-R2-C1` while keeping the subject fixed, preserving the single-SCC / single-binder-family / non-equi-recursive / non-cyclic-graph boundary, and rejecting any re-entry case that depends on prototype-backed evidence.
 
 5. [pending] Write the `RE5` final successor recommendation
    Depends on: item 4

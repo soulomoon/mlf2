@@ -9,7 +9,7 @@
 - Command: `rg -n '^\d+\\. \\[(pending|in-progress|done)\\]' orchestrator/roadmap.md`
   Why: the re-entry roadmap must keep a parseable ordered item list with explicit status markers.
 - Command: `cabal build all && cabal test`
-  Why: the full repo gate is mandatory whenever a round touches `src/`, `src-public/`, `app/`, `test/`, or `mlf2.cabal`, including any explicitly authorized bounded prototype work.
+  Why: the full repo gate is mandatory whenever a round touches `src/`, `src-public/`, `app/`, `test/`, or `mlf2.cabal`.
 - Command: reviewer-recorded continuity check against inherited evidence
   Why: each round must record whether it preserved completed rounds `001` through `010`, the accepted `R5` stop decision, the approved re-entry design spec, and the predecessor recursive-types packet.
 
@@ -18,7 +18,7 @@
 - Add round-specific checks required by the selected roadmap item, especially:
 - provenance-authority checks proving `RE1` does not manufacture replay/reification authority, late repair, or widened provenance roots for `URI-R2-C1`;
 - uniqueness checks proving `RE2` does not rely on heuristic ranking, competing roots, or widening-dependent comparisons;
-- positive-evidence / prototype-envelope checks proving `RE3` keeps any experiment explicit, bounded, non-default, and inside the fixed `URI-R2-C1` boundary;
+- prototype-free positive-evidence checks proving `RE3` does not rely on prototype runs, implementation drift, or widened ownership/search while staying inside the fixed `URI-R2-C1` boundary;
 - re-entry-gate checks proving `RE4` records explicit `reopen-handoff-track` or `not-yet-reopen` evidence without broadening the active subject;
 - final-recommendation checks proving `RE5` matches the accepted `RE4` result and does not silently become implementation clearance;
 - docs-diff review when a round intentionally changes only `orchestrator/`, `docs/`, or task artifacts.
