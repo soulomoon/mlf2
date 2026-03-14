@@ -1,0 +1,94 @@
+# Round `round-012`
+
+- Baseline checks:
+  - `git diff --check`
+    - Exit `0`.
+    - Evidence: no whitespace errors or conflict markers reported.
+  - `python3 -m json.tool orchestrator/state.json >/dev/null`
+    - Exit `0`.
+    - Evidence: `orchestrator/state.json` remains valid JSON.
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+    - Exit `0`.
+    - Evidence:
+      - `20:1. [done] Write the \`RE1\` provenance-authority evidence contract for \`URI-R3-O4\``
+      - `24:2. [pending] Write the \`RE2\` uniqueness-evidence contract for \`URI-R3-O5\``
+      - `28:3. [pending] Write the \`RE3\` prototype-free positive-evidence contract for \`URI-R3-O1\` through \`URI-R3-O3\``
+      - `32:4. [pending] Execute the \`RE4\` bounded re-entry gate for \`URI-R2-C1\``
+      - `36:5. [pending] Write the \`RE5\` final successor recommendation`
+  - `cabal build all && cabal test`
+    - Skipped.
+    - Rationale: `git diff --name-only` is empty, and `git status --short` / `git ls-files --others --exclude-standard` show only docs/round-local untracked files. No tracked paths under `src/`, `src-public/`, `app/`, `test/`, or `mlf2.cabal` changed, so the verification contract does not require the full Cabal gate for this docs-only round.
+  - Continuity check against inherited evidence
+    - Evidence:
+      - `git diff --name-only | rg '^orchestrator/rounds/round-00(1|2|3|4|5|6|7|8|9|10|11)/'` exited `1` (no prior accepted round artifacts modified).
+      - `git diff --name-only | rg '^tasks/todo/2026-03-11-recursive-types-orchestration/'` exited `1` (no predecessor recursive-types packet paths modified).
+      - `docs/plans/2026-03-14-uri-r2-c1-re2-uniqueness-evidence-contract.md` lines 26-32 cite the approved re-entry design, accepted `R2`/`R3`/`R4`/`R5`, accepted `RE1`, and the invariant audit as the authority chain.
+      - `docs/plans/2026-03-14-uri-r2-c1-re2-uniqueness-evidence-contract.md` lines 206-213 state completed rounds `001` through `011` and the predecessor recursive-types packet remain inherited evidence only and are not rewritten.
+
+- Task-specific checks:
+  - Docs-only boundary
+    - `git status --short`
+      - Evidence:
+        - `?? docs/plans/2026-03-14-uri-r2-c1-re2-uniqueness-evidence-contract.md`
+        - `?? orchestrator/rounds/round-012/`
+    - `git ls-files --others --exclude-standard`
+      - Evidence:
+        - `docs/plans/2026-03-14-uri-r2-c1-re2-uniqueness-evidence-contract.md`
+        - `orchestrator/rounds/round-012/implementation-notes.md`
+        - `orchestrator/rounds/round-012/plan.md`
+        - `orchestrator/rounds/round-012/selection.md`
+    - `git diff --name-only`
+      - Exit `0` with no output.
+    - Prohibited-path probes:
+      - `git diff --name-only | rg '^(src/|src-public/|app/|test/|mlf2\.cabal$)'` exited `1`.
+      - `git diff --name-only | rg '^orchestrator/state\.json$'` exited `1`.
+      - `git diff --name-only | rg '^orchestrator/roadmap\.md$'` exited `1`.
+      - `git diff --name-only | rg '^tasks/todo/2026-03-11-recursive-types-orchestration/'` exited `1`.
+      - `git diff --name-only | rg '^orchestrator/rounds/round-00(1|2|3|4|5|6|7|8|9|10|11)/'` exited `1`.
+      - `git diff --name-only | rg '^orchestrator/rounds/round-012/(review|merge|implementation-notes)\.md$'` exited `1`.
+    - Reviewer assessment: the round remains docs-only, with no tracked modifications outside the planned docs/round-local area and no prohibited tracked path edits.
+  - Uniqueness-contract markers
+    - `rg -n 'RE2|URI-R3-O5|URI-R2-C1|uniqueness|unique|admissible|heuristic|ranking|competing roots|competing clusters|multi-cluster|multi-SCC|prototype-free|fail closed|RE1|RE3|RE4|RE5' docs/plans/2026-03-14-uri-r2-c1-re2-uniqueness-evidence-contract.md`
+    - Evidence:
+      - line 1 identifies `RE2` and `URI-R3-O5`;
+      - lines 13-18 define the artifact as an evidence contract only;
+      - lines 192-200 explicitly state the document executes `RE2` only and does not settle `RE3`, `RE4`, or `RE5` or reopen `RE1`.
+  - Fixed-boundary checks
+    - `rg -n 'single-SCC|single-binder-family|cross-family|non-cyclic|equi-recursive|default-on widening|prototype-free' docs/plans/2026-03-14-uri-r2-c1-re2-uniqueness-evidence-contract.md`
+    - Evidence:
+      - lines 46-53 restate the required fixed boundary: `URI-R2-C1`, `single-SCC`, `single-binder-family`, no cross-family SCC linking, non-equi-recursive semantics, non-cyclic structural graph, no default-on widening, and prototype-free evidence only.
+    - `rg -n '^Candidate ID:' docs/plans/2026-03-14-uri-r2-c1-re2-uniqueness-evidence-contract.md`
+      - Exit `1`.
+      - Evidence: no candidate-ranking scaffold or widened comparison list was introduced.
+  - Stage-preservation checks
+    - `rg -n 'reopen-handoff-track|not-yet-reopen|remain-stop|implementation-handoff|implementation-ready|feasible-continue|not-yet-go' docs/plans/2026-03-14-uri-r2-c1-re2-uniqueness-evidence-contract.md`
+    - Evidence:
+      - only line 28 matched (`not-yet-go`) inside the inherited-authority chain describing the accepted `R4` input;
+      - lines 192-202 explicitly say this document is not a feasibility decision, re-entry verdict, implementation handoff, or implementation clearance.
+    - Reviewer assessment: the artifact stayed at `RE2`; it does not contain a live `RE3`, `RE4`, or `RE5` decision and it does not revise the accepted `RE1` contract.
+  - Uniqueness-rejection checks
+    - `rg -n 'heuristic ranking|tie-breaking|competing roots|competing clusters|multi-cluster|multi-SCC|widened search|non-local propagation|replay-domain widening|owner repair|prototype-backed|implementation-drift' docs/plans/2026-03-14-uri-r2-c1-re2-uniqueness-evidence-contract.md`
+    - Evidence:
+      - lines 101-120 reject heuristic ranking, tie-breaking, competing roots/clusters, multi-cluster or multi-SCC salvage, widened search, non-local propagation, replay-domain widening, owner repair, and provenance repair in the admissible-evidence contract;
+      - lines 138-152 repeat those classes in the explicit rejection list, including prototype-backed and implementation-drift-backed claims.
+  - Continuity-reference checks
+    - `rg -n '2026-03-14-uri-r2-c1-reentry-roadmap-design|2026-03-14-unannotated-iso-recursive-r5-research-stop-decision|2026-03-14-unannotated-iso-recursive-r4-feasibility-decision|2026-03-14-unannotated-iso-recursive-r3-inference-obligation-contract|2026-03-14-unannotated-iso-recursive-r2-candidate-subset-selection|2026-03-14-uri-r2-c1-re1-provenance-authority-evidence-contract|2026-03-14-automatic-recursive-inference-invariant-audit' docs/plans/2026-03-14-uri-r2-c1-re2-uniqueness-evidence-contract.md`
+    - Evidence:
+      - lines 26-32 cite every required inherited authority input directly.
+  - Reviewer logic checks
+    - Evidence:
+      - lines 59-71 keep the contract subject fixed to the already-bounded local root or equivalent local cluster inside `URI-R2-C1`, with no widened comparison class.
+      - lines 77-132 define a finite reviewer-checkable admissible-evidence contract: one fixed admissible subject only, uniqueness by exclusion inside the fixed boundary, no heuristic or solver-choice dependence, no widened comparison or repair, and consistency with inherited invariant boundaries.
+      - lines 159-176 define exactly what later evidence would clear `URI-R3-O5` and what findings force it to remain uncleared.
+    - Reviewer assessment: the contract proves uniqueness only by exclusion inside the fixed `URI-R2-C1` boundary. It does not rely on heuristic uniqueness ranking, widened comparisons, prototype evidence, or newly manufactured authority.
+
+- Decision:
+  - `approve`
+
+- Evidence:
+  - The round stayed at `RE2` only; the artifact explicitly says it does not settle `RE3`, `RE4`, or `RE5`, and it does not reopen or rewrite `RE1` (lines 192-200).
+  - The inherited invariant-audit authority remains controlling; the artifact cites `2026-03-14-automatic-recursive-inference-invariant-audit.md` as authoritative and carries it forward rather than inventing new principality, replay, search, or ownership semantics (lines 32 and 37).
+  - The accepted `RE1` prerequisite is preserved without rewriting; the artifact treats `2026-03-14-uri-r2-c1-re1-provenance-authority-evidence-contract.md` as prerequisite authority and states that uniqueness is not collapsed into provenance (lines 31 and 38).
+  - `URI-R2-C1` stayed fixed, along with the mandatory `single-SCC`, `single-binder-family`, non-equi-recursive, non-cyclic, no-default-on-widening boundary (lines 46-55).
+  - The round remained prototype-free and fail-closed; the artifact rejects prototype-backed and implementation-drift-backed evidence and states that later review must keep the gate closed if uniqueness needs heuristic ranking, widened comparison, or prototype-backed evidence (lines 138-155 and 181-188).
+  - `URI-R3-O5` remains bounded and reviewer-checkable: later clearance requires exactly one admissible local root or equivalent local cluster inside the fixed subject boundary, established by exclusion, with no competing roots/clusters, widened search, owner repair, replay-domain widening, or heuristic ranking (lines 90-120 and 159-176).
