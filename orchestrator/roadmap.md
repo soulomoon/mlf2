@@ -19,9 +19,9 @@
    Depends on: completed automatic-recursive-inference rounds `001` through `005`, plus the approved successor design spec
    Completion notes: completed in accepted `round-006` via `docs/plans/2026-03-14-unannotated-iso-recursive-r1-gap-map.md`; the accepted `R1` artifact maps the finite delta from `R0`/`ARI-C1` by separating explicit-anchor inputs, potentially locally recoverable facts, and still-blocked unannotated cases while keeping the fixed boundary explicit: single-SCC only, single-binder-family only, obligation-level recursion only, non-cyclic structural graph only, non-equi-recursive only, and no default-on widening.
 
-2. [pending] Select exactly one bounded unannotated candidate subset and admissibility contract
+2. [done] Select exactly one bounded unannotated candidate subset and admissibility contract
    Depends on: item 1
-   Completion notes: not started; this item must choose one stable candidate identifier, keep the single-binder-family / no-cross-family-linking boundary explicit, and record deferred or rejected alternatives.
+   Completion notes: completed in accepted `round-007` via `docs/plans/2026-03-14-unannotated-iso-recursive-r2-candidate-subset-selection.md`; the accepted `R2` result selects candidate `URI-R2-C1` ("Unique local obligation root with one closed binder-family cluster") and keeps the fixed boundary explicit: single-SCC obligation-level recursion only, single-binder-family ownership only, no cross-family SCC linking, non-equi-recursive semantics only, non-cyclic structural graph only, and fail-closed rejection of ambiguous or widening-dependent cases.
 
 3. [pending] Write the `R3` inference-obligation contract for the chosen subset
    Depends on: item 2
