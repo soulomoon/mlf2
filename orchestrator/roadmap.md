@@ -15,9 +15,9 @@
 
 ## Items
 
-1. [pending] Write the `R1` gap map from `ARI-C1` to unannotated single-SCC, single-binder-family inference
+1. [done] Write the `R1` gap map from `ARI-C1` to unannotated single-SCC, single-binder-family inference
    Depends on: completed automatic-recursive-inference rounds `001` through `005`, plus the approved successor design spec
-   Completion notes: not started; this item should enumerate what information currently comes only from explicit anchors, what may be recoverable locally without widening semantics, and which unannotated cases remain blocked while preserving the accepted item-2 invariant audit.
+   Completion notes: completed in accepted `round-006` via `docs/plans/2026-03-14-unannotated-iso-recursive-r1-gap-map.md`; the accepted `R1` artifact maps the finite delta from `R0`/`ARI-C1` by separating explicit-anchor inputs, potentially locally recoverable facts, and still-blocked unannotated cases while keeping the fixed boundary explicit: single-SCC only, single-binder-family only, obligation-level recursion only, non-cyclic structural graph only, non-equi-recursive only, and no default-on widening.
 
 2. [pending] Select exactly one bounded unannotated candidate subset and admissibility contract
    Depends on: item 1
