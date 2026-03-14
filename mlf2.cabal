@@ -91,6 +91,10 @@ library mlf2-internal
                       MLF.Constraint.Unify.Closure,
                       MLF.Constraint.Solved,
                       MLF.Elab.Pipeline,
+                      MLF.Research.URI.R2.C1.Prototype.Types,
+                      MLF.Research.URI.R2.C1.Prototype.P1,
+                      MLF.Research.URI.R2.C1.Prototype.Artifact,
+                      MLF.Research.URI.R2.C1.Prototype.Entrypoint,
                       MLF.Elab.Generalize,
                       MLF.Elab.Run.Provenance,
                       MLF.Elab.Run.Util,
@@ -234,6 +238,8 @@ library mlf2-internal
     -- Other library packages from which modules are imported.
     build-depends:    base ^>=4.21.0.0,
                       containers,
+                      directory,
+                      filepath,
                       megaparsec,
                       mtl,
                       recursion-schemes
@@ -283,7 +289,8 @@ executable mlf2
     -- Other library packages from which modules are imported.
     build-depends:
         base ^>=4.21.0.0,
-        mlf2
+        mlf2,
+        mlf2:mlf2-internal
 
     -- Directories containing source files.
     hs-source-dirs:   app
@@ -362,6 +369,7 @@ test-suite mlf2-test
                       FrozenParitySpec,
                       PublicSurfaceSpec,
                       RepoGuardSpec,
+                      Research.UriR2C1PrototypeP1Spec,
                       PresolutionFacadeSpec,
                       Constraint.SolvedSpec,
                       SolvedFacadeTestUtil,

@@ -1,0 +1,12 @@
+{
+  "research_entrypoint_id": "uri-r2-c1-prototype-entrypoint-v1",
+  "stage_selector": "P1-subject-discovery",
+  "scenario_id": "uri-r2-c1-only-v1",
+  "attempt_id": 2,
+  "candidate_selection_rule": {
+    "candidate_universe": "local roots or equivalent local clusters inside URI-R2-C1",
+    "normalization": "cluster-equivalence-v1",
+    "admissibility_test": "exclude widened, repaired, or heuristic candidates",
+    "outcome": "exactly-one-subject"
+  }
+}

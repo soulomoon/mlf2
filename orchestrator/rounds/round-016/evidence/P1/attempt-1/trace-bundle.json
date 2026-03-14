@@ -1,0 +1,19 @@
+{
+  "stage": "P1",
+  "research_entrypoint_id": "uri-r2-c1-prototype-entrypoint-v1",
+  "scenario_id": "uri-r2-c1-only-v1",
+  "bounded_subject": "URI-R2-C1",
+  "attempt_id": 1,
+  "raw_observations": [{
+  "observation_id": "root-alpha",
+  "binder_family": "family-uri-r2-c1",
+  "scc_id": "scc-uri-r2-c1",
+  "type": "TMu \"self\" (TArrow (TVar \"self\") (TBase (BaseTy {getBaseName = \"Int\"})))"
+}, {
+  "observation_id": "root-beta",
+  "binder_family": "family-uri-r2-c1",
+  "scc_id": "scc-uri-r2-c1",
+  "type": "TMu \"loop\" (TArrow (TVar \"loop\") (TBase (BaseTy {getBaseName = \"Int\"})))"
+}],
+  "trace_summary": ["Bounded discovery remained inside one SCC and one binder family.", "Normalization used cluster-equivalence-v1 over alpha-equivalent recursive roots.", "Ambiguity exclusion accepted exactly one normalized candidate."]
+}

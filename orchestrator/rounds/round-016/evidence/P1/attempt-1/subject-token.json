@@ -1,0 +1,12 @@
+{
+  "subject_id": "uri-r2-c1/cluster-1",
+  "subject_kind": "equivalent-local-cluster",
+  "subject_scope": {
+  "scenario_id": "uri-r2-c1-only-v1",
+  "bounded_subject": "URI-R2-C1"
+},
+  "provenance_anchor": {
+  "origin_stage": "P1",
+  "candidate_inventory_ref": "orchestrator/rounds/round-016/evidence/P1/attempt-1/candidate-inventory.json"
+}
+}

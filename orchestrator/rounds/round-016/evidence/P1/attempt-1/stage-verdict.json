@@ -1,0 +1,8 @@
+{
+  "stage": "P1",
+  "research_entrypoint_id": "uri-r2-c1-prototype-entrypoint-v1",
+  "scenario_id": "uri-r2-c1-only-v1",
+  "bounded_subject": "URI-R2-C1",
+  "stage_result": "pass",
+  "selected_subject_id": "uri-r2-c1/cluster-1"
+}
