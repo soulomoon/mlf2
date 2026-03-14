@@ -17,3 +17,4 @@
 - After the delegated `update-roadmap` stage, successor roadmap item 1 is now marked `done`; items 2 through 5 remain `pending`.
 - `round-007` selected roadmap item 2 and completed it as a docs-only bounded-subset decision: the accepted `R2` artifact chose candidate subset `URI-R2-C1` plus its admissibility contract.
 - After the delegated `update-roadmap` stage for `round-007`, successor roadmap items 1 and 2 are `done`; items 3 through 5 remain `pending`.
+- `round-008` completed roadmap item 3 as a docs-only obligation-contract round for the fixed subset `URI-R2-C1`; the accepted `R3` artifact fixed obligation classes, rejection classes, and inherited-audit mappings without entering feasibility or handoff work.

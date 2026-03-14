@@ -27,3 +27,11 @@
 - Delegated `round-007` `merge`; the merger wrote the merge notes, the controller committed the round branch as `e7efa0e`, squash-merged `codex/round-007`, and recorded the base-branch result as `c225b2d`.
 - Delegated the `round-007` `update-roadmap` stage; the guider marked roadmap item 2 as `done` and left items 3 through 5 pending.
 - Advanced `orchestrator/state.json` from `update-roadmap` to `done`, making the control plane ready to start `round-008`.
+- Started `round-008` from the clean post-round-007 baseline by creating branch `codex/round-008`, worktree `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-008`, and the matching round artifact directory, then updating `orchestrator/state.json` to resume at `select-task`.
+- Delegated `round-008` `select-task`; the guider chose roadmap item 3, the `R3` inference-obligation-contract stage for fixed subset `URI-R2-C1`.
+- Delegated `round-008` `plan`; the planner kept the round docs-only and targeted the `R3` obligation-contract artifact plus round implementation notes.
+- Delegated `round-008` `implement`; the implementer wrote the `R3` obligation-contract artifact and round implementation notes without touching production code.
+- Delegated `round-008` `review`; the reviewer approved the docs-only round and skipped the full Cabal gate only because the diff excluded code/test surfaces.
+- Delegated `round-008` `merge`; the merger wrote the merge notes, the controller committed the round branch as `554301c`, squash-merged `codex/round-008`, and recorded the base-branch result as `a2d386b`.
+- Delegated the `round-008` `update-roadmap` stage; the guider marked roadmap item 3 as `done`.
+- Advanced `orchestrator/state.json` from `update-roadmap` to `done`, making the control plane ready to start `round-009`.
