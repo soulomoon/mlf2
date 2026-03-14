@@ -27,9 +27,9 @@
    Depends on: item 2
    Completion notes: completed in accepted `round-008` via `docs/plans/2026-03-14-unannotated-iso-recursive-r3-inference-obligation-contract.md`; the accepted `R3` result fixes the `URI-R2-C1` obligation contract across structural acyclicity, binder ownership/scope discipline, occurs-check/termination, reconstruction/reification/witness replay, and principality-risk boundaries while keeping the fixed boundary explicit: single-SCC obligation-level recursion only, single-binder-family ownership only, no cross-family SCC linking, non-equi-recursive semantics only, non-cyclic structural graph only, and fail-closed rejection of ambiguous or widening-dependent cases.
 
-4. [pending] Execute the bounded feasibility decision for the chosen subset
+4. [done] Execute the bounded feasibility decision for the chosen subset
    Depends on: item 3
-   Completion notes: not started; this item must record explicit `feasible-continue` or `not-yet-go` evidence for the chosen subset without equi-recursive, cyclic-graph, multi-SCC, or cross-family widening. Any prototype evidence must stay bounded and non-default.
+   Completion notes: completed in accepted `round-009` via `docs/plans/2026-03-14-unannotated-iso-recursive-r4-feasibility-decision.md`; the accepted `R4` result records the bounded feasibility outcome `not-yet-go` for `URI-R2-C1` while keeping the fixed boundary explicit: `single-SCC` obligation-level recursion only, `single-binder-family` ownership only, no cross-family SCC linking, non-equi-recursive semantics only, non-cyclic structural graph only, docs-only inherited evidence only, and no default-on widening or prototype-backed expansion.
 
 5. [pending] Write the final implementation-handoff spec or explicit research-stop decision
    Depends on: item 4
