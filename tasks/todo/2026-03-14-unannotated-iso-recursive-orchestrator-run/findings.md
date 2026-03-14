@@ -15,3 +15,5 @@
 - The delegated implementer produced both planned docs artifacts without touching production code or tests.
 - The delegated reviewer approved `round-006`; the only intentionally skipped baseline check was `cabal build all && cabal test`, which the contract allows for docs-only diffs.
 - After the delegated `update-roadmap` stage, successor roadmap item 1 is now marked `done`; items 2 through 5 remain `pending`.
+- `round-007` selected roadmap item 2 and completed it as a docs-only bounded-subset decision: the accepted `R2` artifact chose candidate subset `URI-R2-C1` plus its admissibility contract.
+- After the delegated `update-roadmap` stage for `round-007`, successor roadmap items 1 and 2 are `done`; items 3 through 5 remain `pending`.
