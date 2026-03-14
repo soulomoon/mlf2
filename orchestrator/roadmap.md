@@ -29,9 +29,9 @@
    Depends on: item 2
    Completion notes: completed in accepted round `013` via `docs/plans/2026-03-14-uri-r2-c1-re3-positive-evidence-contract.md`; the contract stays at `RE3`, keeps `URI-R2-C1` fixed and prototype-free, defines reviewer-checkable positive evidence for structural acyclicity preservation, deterministic single-family owner stability, and constructor-directed occurs-check/termination clearance, and fail-closes on prototype-backed claims, implementation drift, explicit-anchor replay substitution, widened ownership/search, multi-cluster or multi-SCC salvage, cyclic structural encoding, implicit unfolding, equi-recursive reasoning, and termination weakening.
 
-4. [pending] Execute the `RE4` bounded re-entry gate for `URI-R2-C1`
+4. [done] Execute the `RE4` bounded re-entry gate for `URI-R2-C1`
    Depends on: item 3
-   Completion notes: not started; this item must record explicit `reopen-handoff-track` or `not-yet-reopen` evidence for `URI-R2-C1` while keeping the subject fixed, preserving the single-SCC / single-binder-family / non-equi-recursive / non-cyclic-graph boundary, and rejecting any re-entry case that depends on prototype-backed evidence.
+   Completion notes: completed in accepted round `014` via `docs/plans/2026-03-14-uri-r2-c1-re4-bounded-reentry-gate.md`; the gate stays at `RE4`, keeps `URI-R2-C1` fixed and prototype-free, preserves the single-SCC / single-binder-family / non-equi-recursive / non-cyclic-graph boundary, and records the explicit bounded outcome `not-yet-reopen` because `RE1`, `RE2`, and `RE3` remain unsatisfied for lack of affirmative inherited bounded evidence rather than any rewritten or widened contract.
 
 5. [pending] Write the `RE5` final successor recommendation
    Depends on: item 4
