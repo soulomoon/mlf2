@@ -17,21 +17,31 @@ module MLF.Research.URI.R2.C1.Prototype.Types (
     PrototypePaths(..),
     researchEntrypointId,
     stageSelectorP1,
+    stageSelectorP2,
     scenarioIdUriR2C1OnlyV1,
     boundedSubjectId,
     artifactRelativePath,
+    p2ArtifactRelativePath,
     attemptEvidenceRelativeDir,
+    p2AttemptEvidenceRelativeDir,
     attemptEvidenceFileRelativePath,
+    p2AttemptEvidenceFileRelativePath,
     candidateInventoryRelativePath,
     candidateSelectionRuleRelativePath,
     checkResultRelativePath,
+    p2CheckResultRelativePath,
     stageVerdictRelativePath,
+    p2StageVerdictRelativePath,
     subjectTokenRelativePath,
+    p2SubjectTokenRelativePath,
     traceBundleRelativePath,
+    p2TraceBundleRelativePath,
+    p1AuthoritativeSubjectTokenRelativePath,
     prototypePaths,
     candidateKindText,
     stageResultText,
-    prototypeSubjectId
+    prototypeSubjectId,
+    normalizedRejectionTriggers
 ) where
 
 import System.FilePath ((</>))
@@ -50,6 +60,10 @@ data PrototypeError
     | UnsupportedStageSelector String
     | UnsupportedScenario String
     | UnsupportedAttemptId Int
+    | MissingStageInputToken FilePath
+    | MalformedStageInputToken FilePath String
+    | UnsupportedBoundedSubject String
+    | TokenScenarioMismatch String
     deriving (Eq, Show)
 
 data CandidateKind
@@ -175,6 +189,9 @@ researchEntrypointId = "uri-r2-c1-prototype-entrypoint-v1"
 stageSelectorP1 :: String
 stageSelectorP1 = "P1-subject-discovery"
 
+stageSelectorP2 :: String
+stageSelectorP2 = "P2-provenance-preservation"
+
 scenarioIdUriR2C1OnlyV1 :: String
 scenarioIdUriR2C1OnlyV1 = "uri-r2-c1-only-v1"
 
@@ -187,6 +204,12 @@ artifactRelativePath =
         </> "plans"
         </> "2026-03-15-uri-r2-c1-p1-subject-discovery-prototype.md"
 
+p2ArtifactRelativePath :: FilePath
+p2ArtifactRelativePath =
+    "docs"
+        </> "plans"
+        </> "2026-03-15-uri-r2-c1-p2-provenance-preservation-prototype.md"
+
 attemptEvidenceRelativeDir :: Int -> FilePath
 attemptEvidenceRelativeDir attemptId =
     "orchestrator"
@@ -194,6 +217,15 @@ attemptEvidenceRelativeDir attemptId =
         </> "round-016"
         </> "evidence"
         </> "P1"
+        </> ("attempt-" ++ show attemptId)
+
+p2AttemptEvidenceRelativeDir :: Int -> FilePath
+p2AttemptEvidenceRelativeDir attemptId =
+    "orchestrator"
+        </> "rounds"
+        </> "round-017"
+        </> "evidence"
+        </> "P2"
         </> ("attempt-" ++ show attemptId)
 
 candidateInventoryRelativePath :: Int -> FilePath
@@ -204,6 +236,10 @@ attemptEvidenceFileRelativePath :: Int -> FilePath -> FilePath
 attemptEvidenceFileRelativePath attemptId fileName =
     attemptEvidenceRelativeDir attemptId </> fileName
 
+p2AttemptEvidenceFileRelativePath :: Int -> FilePath -> FilePath
+p2AttemptEvidenceFileRelativePath attemptId fileName =
+    p2AttemptEvidenceRelativeDir attemptId </> fileName
+
 candidateSelectionRuleRelativePath :: Int -> FilePath
 candidateSelectionRuleRelativePath attemptId =
     attemptEvidenceFileRelativePath attemptId "candidate-selection-rule.json"
@@ -212,24 +248,55 @@ checkResultRelativePath :: Int -> String -> FilePath
 checkResultRelativePath attemptId checkId =
     attemptEvidenceFileRelativePath attemptId ("check-" ++ checkId ++ ".json")
 
+p2CheckResultRelativePath :: Int -> String -> FilePath
+p2CheckResultRelativePath attemptId checkId =
+    p2AttemptEvidenceFileRelativePath attemptId ("check-" ++ checkId ++ ".json")
+
 stageVerdictRelativePath :: Int -> FilePath
 stageVerdictRelativePath attemptId =
     attemptEvidenceFileRelativePath attemptId "stage-verdict.json"
+
+p2StageVerdictRelativePath :: Int -> FilePath
+p2StageVerdictRelativePath attemptId =
+    p2AttemptEvidenceFileRelativePath attemptId "stage-verdict.json"
 
 subjectTokenRelativePath :: Int -> FilePath
 subjectTokenRelativePath attemptId =
     attemptEvidenceFileRelativePath attemptId "subject-token.json"
 
+p2SubjectTokenRelativePath :: Int -> FilePath
+p2SubjectTokenRelativePath attemptId =
+    p2AttemptEvidenceFileRelativePath attemptId "subject-token.json"
+
 traceBundleRelativePath :: Int -> FilePath
 traceBundleRelativePath attemptId =
     attemptEvidenceFileRelativePath attemptId "trace-bundle.json"
 
+p2TraceBundleRelativePath :: Int -> FilePath
+p2TraceBundleRelativePath attemptId =
+    p2AttemptEvidenceFileRelativePath attemptId "trace-bundle.json"
+
+p1AuthoritativeSubjectTokenRelativePath :: FilePath
+p1AuthoritativeSubjectTokenRelativePath = subjectTokenRelativePath 2
+
 prototypePaths :: PrototypeRequest -> PrototypePaths
 prototypePaths req =
     PrototypePaths
-        { ppEvidenceDir = prRepoRoot req </> attemptEvidenceRelativeDir (prAttemptId req)
-        , ppArtifactPath = prRepoRoot req </> artifactRelativePath
+        { ppEvidenceDir = prRepoRoot req </> evidenceDirForSelector (prStageSelector req) (prAttemptId req)
+        , ppArtifactPath = prRepoRoot req </> artifactPathForSelector (prStageSelector req)
         }
+
+evidenceDirForSelector :: String -> Int -> FilePath
+evidenceDirForSelector stageSelector attemptId
+    | stageSelector == stageSelectorP1 = attemptEvidenceRelativeDir attemptId
+    | stageSelector == stageSelectorP2 = p2AttemptEvidenceRelativeDir attemptId
+    | otherwise = attemptEvidenceRelativeDir attemptId
+
+artifactPathForSelector :: String -> FilePath
+artifactPathForSelector stageSelector
+    | stageSelector == stageSelectorP1 = artifactRelativePath
+    | stageSelector == stageSelectorP2 = p2ArtifactRelativePath
+    | otherwise = artifactRelativePath
 
 candidateKindText :: CandidateKind -> String
 candidateKindText kind = case kind of
@@ -244,3 +311,26 @@ prototypeSubjectId report =
     case prototypeSubjectToken report of
         Nothing -> ""
         Just token -> stSubjectId token
+
+normalizedRejectionTriggers :: [String]
+normalizedRejectionTriggers =
+    [ "none"
+    , "widened-search"
+    , "multi-scc"
+    , "cross-family"
+    , "heuristic-choice"
+    , "late-repair"
+    , "manufactured-provenance"
+    , "surrogate-substitution"
+    , "replay-domain-widening"
+    , "non-local-salvage"
+    , "structural-cycle"
+    , "implicit-unfolding"
+    , "equi-recursive-reasoning"
+    , "termination-weakening"
+    , "nondeterministic-output"
+    , "inconsistent-trace"
+    , "partial-replay"
+    , "production-path-dependence"
+    , "blocking-stop-condition"
+    ]

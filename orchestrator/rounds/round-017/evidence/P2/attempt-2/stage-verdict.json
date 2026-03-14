@@ -1,0 +1,16 @@
+{
+  "research_entrypoint_id": "uri-r2-c1-prototype-entrypoint-v1",
+  "stage_selector": "P2-provenance-preservation",
+  "scenario_id": "uri-r2-c1-only-v1",
+  "attempt_id": 2,
+  "stage": "P2",
+  "subject_token_ref": null,
+  "checker_results": [
+    "orchestrator/rounds/round-017/evidence/P2/attempt-2/check-P2-G.json",
+    "orchestrator/rounds/round-017/evidence/P2/attempt-2/check-P2-S.json",
+    "orchestrator/rounds/round-017/evidence/P2/attempt-2/check-P2-R.json",
+    "orchestrator/rounds/round-017/evidence/P2/attempt-2/check-P2-W.json"
+  ],
+  "stage_result": "semantic-negative",
+  "terminal_reason": "none"
+}

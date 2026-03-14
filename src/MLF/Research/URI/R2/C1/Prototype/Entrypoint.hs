@@ -16,8 +16,9 @@ import MLF.Elab.Pipeline
 import MLF.Frontend.Normalize (normalizeExpr)
 import MLF.Frontend.Syntax (Expr(..))
 
-import MLF.Research.URI.R2.C1.Prototype.Artifact (writeP1Artifact)
+import MLF.Research.URI.R2.C1.Prototype.Artifact (writeP1Artifact, writeP2Artifact)
 import MLF.Research.URI.R2.C1.Prototype.P1 (executeP1)
+import MLF.Research.URI.R2.C1.Prototype.P2 (executeP2, p2AppReport)
 import MLF.Research.URI.R2.C1.Prototype.Types
 
 data AppRun
@@ -45,16 +46,25 @@ runResearchPrototype :: PrototypeRequest -> IO (Either PrototypeError PrototypeR
 runResearchPrototype req
     | prResearchEntrypointId req /= researchEntrypointId =
         pure (Left (UnsupportedResearchEntrypoint (prResearchEntrypointId req)))
-    | prStageSelector req /= stageSelectorP1 =
-        pure (Left (UnsupportedStageSelector (prStageSelector req)))
     | prScenarioId req /= scenarioIdUriR2C1OnlyV1 =
         pure (Left (UnsupportedScenario (prScenarioId req)))
-    | prAttemptId req < 1 || prAttemptId req > 3 =
+    | prStageSelector req == stageSelectorP1 && (prAttemptId req < 1 || prAttemptId req > 3) =
         pure (Left (UnsupportedAttemptId (prAttemptId req)))
-    | otherwise = do
+    | prStageSelector req == stageSelectorP2 && (prAttemptId req < 1 || prAttemptId req > 3) =
+        pure (Left (UnsupportedAttemptId (prAttemptId req)))
+    | prStageSelector req == stageSelectorP1 = do
         report <- executeP1 req
         _ <- writeP1Artifact report
         pure (Right report)
+    | prStageSelector req == stageSelectorP2 = do
+        execution <- executeP2 req
+        case execution of
+            Left err -> pure (Left err)
+            Right ok -> do
+                _ <- writeP2Artifact ok
+                pure (Right (p2AppReport ok))
+    | otherwise =
+        pure (Left (UnsupportedStageSelector (prStageSelector req)))
 
 parsePrototypeRequest :: FilePath -> [String] -> Either String PrototypeRequest
 parsePrototypeRequest repoRoot args = do
