@@ -21,9 +21,9 @@
    Depends on: completed rounds `001` through `010`, the accepted `R5` stop decision, and the approved re-entry roadmap design
    Completion notes: completed in accepted round `011` via `docs/plans/2026-03-14-uri-r2-c1-re1-provenance-authority-evidence-contract.md`; the contract keeps `URI-R2-C1` fixed and prototype-free, preserves inherited invariant-audit authority for replay/reification and safety boundaries, and fail-closes on manufactured authority, late repair, replay-domain widening, surrogate-root substitution, unstable binder naming, competing roots, and implementation- or prototype-backed claims.
 
-2. [pending] Write the `RE2` uniqueness-evidence contract for `URI-R3-O5`
+2. [done] Write the `RE2` uniqueness-evidence contract for `URI-R3-O5`
    Depends on: item 1
-   Completion notes: not started; this item must define bounded evidence for one uniquely admissible local root/cluster inside `URI-R2-C1` and explicitly reject heuristic ranking, competing roots, multi-cluster comparison, or widening-dependent uniqueness claims.
+   Completion notes: completed in accepted round `012` via `docs/plans/2026-03-14-uri-r2-c1-re2-uniqueness-evidence-contract.md`; the contract keeps `URI-R2-C1` fixed and prototype-free, defines bounded uniqueness evidence for one admissible local root or equivalent local cluster by exclusion inside the fixed boundary, and fail-closes on heuristic ranking, competing roots or clusters, widened comparison, repair/salvage paths, and prototype- or implementation-drift-backed claims.
 
 3. [pending] Write the `RE3` prototype-free positive-evidence contract for `URI-R3-O1` through `URI-R3-O3`
    Depends on: item 2
