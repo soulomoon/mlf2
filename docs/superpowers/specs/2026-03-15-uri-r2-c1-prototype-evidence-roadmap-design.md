@@ -84,16 +84,18 @@ Execution model:
 
 Research entrypoint interface:
 
+- `research_entrypoint_id`: `uri-r2-c1-prototype-entrypoint-v1`;
 - invocation shape: one research entrypoint command or function with arguments `{ stage_selector, scenario_id, attempt_id }`;
 - `stage_selector` enum: `P1-subject-discovery`, `P2-provenance-preservation`, `P3-safety-validation`;
-- `scenario_id`: fixed bounded scenario name for `URI-R2-C1` only;
-- `attempt_id`: monotonically increasing attempt number within the current stage;
+- `scenario_id`: must be exactly `uri-r2-c1-only-v1`; no aliases or alternate scenario names are admissible in this roadmap;
+- `attempt_id`: integer `1`, `2`, or `3`, monotonically increasing within the current stage;
 - emitted outputs:
   - machine-readable trace bundle under `orchestrator/rounds/<round-id>/evidence/<stage>/attempt-<n>/`;
   - reviewer-facing artifact draft inputs under the same attempt directory;
   - no writes to production outputs or default runtime caches;
 - deterministic reproduction rule:
-  - the same `{ stage_selector, scenario_id, attempt_id }` over unchanged code must regenerate the same trace bundle or explicitly classify the run as `inconclusive`.
+  - the same `{ stage_selector, scenario_id, attempt_id }` over unchanged code must regenerate the same trace bundle or explicitly classify the run as `inconclusive`;
+  - every reviewer-facing artifact and machine-readable stage output must repeat the exact `research_entrypoint_id` and `scenario_id` verbatim.
 
 Permitted prototype facilities:
 
@@ -111,7 +113,8 @@ Forbidden prototype behavior:
 
 Operational isolation rules:
 
-- every prototype capability must enter through the shared research entrypoint or an explicit non-default flag that is absent from the production path by default;
+- every prototype capability must enter through the shared research entrypoint and no second executable interface is admissible in this roadmap;
+- non-default flags are permitted only as internal modifiers of the shared research entrypoint and never as standalone prototype entrypoints;
 - research-only metadata may flow into research-only reports, traces, or test fixtures, but may not become required input for ordinary solver execution;
 - shared pure helper code may be reused only if it remains semantics-preserving for the production path and the prototype-specific behavior still lives behind research-only constructors, wrappers, or entrypoints;
 - no review may treat a production-path dependency on research-only metadata as acceptable isolation;
@@ -191,16 +194,49 @@ Reviewer record:
 
 - path: `orchestrator/rounds/<round-id>/review-record.json`;
 - owner: the reviewer for the active round;
-- purpose: map each stage to its authoritative attempt and final result.
+- purpose: authoritative stage map for the active round, including the accepted attempt and result for every stage that ran.
 
 Reviewer record schema:
 
 ```json
 {
-  "stage": "P1|P2|P3|P4",
-  "authoritative_attempt": 1,
-  "authoritative_result": "pass|semantic-negative|inconclusive|reopen-handoff-track|hard-stop",
-  "evidence_dir": "orchestrator/rounds/<round-id>/evidence/<stage>/attempt-<n>/"
+  "research_entrypoint_id": "uri-r2-c1-prototype-entrypoint-v1",
+  "scenario_id": "uri-r2-c1-only-v1",
+  "stages": {
+    "P1": {
+      "authoritative_attempt": 1,
+      "authoritative_result": "pass|semantic-negative|inconclusive",
+      "artifact_path": "docs/plans/2026-03-15-uri-r2-c1-p1-subject-discovery-prototype.md",
+      "evidence_dir": "orchestrator/rounds/<round-id>/evidence/P1/attempt-1/",
+      "terminal_reason": "none|budget-exhausted-inconclusive|blocking-stop-condition"
+    },
+    "P2": {
+      "authoritative_attempt": 1,
+      "authoritative_result": "pass|semantic-negative|inconclusive",
+      "artifact_path": "docs/plans/2026-03-15-uri-r2-c1-p2-provenance-preservation-prototype.md",
+      "evidence_dir": "orchestrator/rounds/<round-id>/evidence/P2/attempt-1/",
+      "terminal_reason": "none|budget-exhausted-inconclusive|blocking-stop-condition"
+    },
+    "P3": {
+      "authoritative_attempt": 1,
+      "authoritative_result": "pass|semantic-negative|inconclusive",
+      "artifact_path": "docs/plans/2026-03-15-uri-r2-c1-p3-safety-validation-prototype.md",
+      "evidence_dir": "orchestrator/rounds/<round-id>/evidence/P3/attempt-1/",
+      "terminal_reason": "none|budget-exhausted-inconclusive|blocking-stop-condition"
+    },
+    "P4": {
+      "authoritative_attempt": 1,
+      "authoritative_result": "reopen-handoff-track|hard-stop",
+      "artifact_path": "docs/plans/2026-03-15-uri-r2-c1-p4-prototype-decision-gate.md",
+      "evidence_dir": "orchestrator/rounds/<round-id>/evidence/P4/attempt-1/",
+      "consumed_stage_results": {
+        "P1": "pass|semantic-negative|inconclusive",
+        "P2": "pass|semantic-negative|inconclusive",
+        "P3": "pass|semantic-negative|inconclusive"
+      },
+      "terminal_reason": "none|budget-exhausted-inconclusive|blocking-stop-condition"
+    }
+  }
 }
 ```
 
@@ -215,32 +251,56 @@ Reviewer record schema:
 
 Canonical subject token schema:
 
+- the canonical subject token is a normative machine-readable object, not an illustrative example;
 - `subject_id`:
-  required from `P1` onward; stable canonical identifier for the candidate recursive subject.
+  required from `P1` onward; stable canonical identifier for the candidate recursive subject, and it must equal `uri-r2-c1/<candidate_id>`;
 - `subject_kind`:
-  required from `P1` onward; `local-root` or `equivalent-local-cluster`.
+  required from `P1` onward; exactly `local-root` or `equivalent-local-cluster`;
 - `subject_scope`:
-  required from `P1` onward; proof that the subject remains inside `URI-R2-C1` only.
+  required from `P1` onward; object proving that the subject remains inside `URI-R2-C1` only;
 - `provenance_anchor`:
-  required from `P1` onward; the bounded discovery account produced by `P1`.
+  required from `P1` onward; object naming the `P1` discovery basis that created the token;
 - `owner_family_status`:
-  required from `P1` onward; one of `unknown`, `single-family(<id>)`, or `invalid`.
+  required from `P1` onward; object with `kind` equal to `unknown`, `single-family`, or `invalid`;
 - `trace_handles`:
-  required from `P1` onward; references to research traces that justify identity across later stages, possibly empty at `P1` if no later-stage traces exist yet.
+  required from `P1` onward; array of research trace references that justify identity across stages, possibly empty at `P1` only if the discovery stage produced no persisted discovery trace.
 
-Illustrative exchange format:
+Normative canonical subject token shape:
 
-```yaml
-subject_id: "uri-r2-c1/root-01"
-subject_kind: "local-root"
-subject_scope: "URI-R2-C1"
-provenance_anchor:
-  discovery_entrypoint: "research-uri-r2-c1-discovery"
-  local_basis: "candidate-set-01"
-owner_family_status: "unknown"
-trace_handles:
-  - "trace://uri-r2-c1/p1/discovery-01"
+```json
+{
+  "subject_id": "uri-r2-c1/cand-01",
+  "subject_kind": "local-root|equivalent-local-cluster",
+  "subject_scope": {
+    "scenario_id": "uri-r2-c1-only-v1",
+    "bounded_subject": "URI-R2-C1"
+  },
+  "provenance_anchor": {
+    "origin_stage": "P1",
+    "candidate_id": "cand-01",
+    "candidate_inventory_ref": "orchestrator/rounds/<round-id>/evidence/P1/attempt-<n>/candidate-inventory.json",
+    "normalization_basis": "cluster-equivalence-v1",
+    "discovery_trace_ref": "trace://uri-r2-c1/p1/discovery-01"
+  },
+  "owner_family_status": {
+    "kind": "unknown|single-family|invalid",
+    "family_id": "binder-family-01|null"
+  },
+  "trace_handles": [
+    "trace://uri-r2-c1/p1/discovery-01"
+  ]
+}
 ```
+
+Normative token rules:
+
+- `subject_scope.scenario_id` must equal `uri-r2-c1-only-v1`;
+- `subject_scope.bounded_subject` must equal `URI-R2-C1`;
+- `provenance_anchor.origin_stage` must equal `P1`;
+- `provenance_anchor.candidate_id` must name an admissible candidate from the authoritative `P1` candidate inventory;
+- `provenance_anchor.candidate_inventory_ref` must point to the exact attempt-local inventory file that justified the token;
+- `owner_family_status.family_id` must be `null` when `kind` is `unknown` or `invalid`, and must be present only when `kind` is `single-family`;
+- no later stage may alter `subject_id`, `subject_kind`, `subject_scope`, or `provenance_anchor`; later stages may only append `trace_handles` and refine `owner_family_status` according to the interface rules below.
 
 Candidate-selection rule representation:
 
@@ -250,6 +310,77 @@ candidate_selection_rule:
   normalization: "cluster-equivalence-v1"
   admissibility_test: "exclude widened, repaired, or heuristic candidates"
   outcome: "exactly-one-subject" # or "bounded-ambiguity"
+```
+
+Normalized rejection-trigger vocabulary:
+
+```json
+[
+  "none",
+  "widened-search",
+  "multi-scc",
+  "cross-family",
+  "heuristic-choice",
+  "late-repair",
+  "manufactured-provenance",
+  "surrogate-substitution",
+  "replay-domain-widening",
+  "non-local-salvage",
+  "structural-cycle",
+  "implicit-unfolding",
+  "equi-recursive-reasoning",
+  "termination-weakening",
+  "nondeterministic-output",
+  "inconsistent-trace",
+  "partial-replay",
+  "production-path-dependence",
+  "blocking-stop-condition"
+]
+```
+
+Trace bundle schema:
+
+```json
+{
+  "research_entrypoint_id": "uri-r2-c1-prototype-entrypoint-v1",
+  "scenario_id": "uri-r2-c1-only-v1",
+  "stage": "P1|P2|P3",
+  "attempt_id": 1,
+  "correlation_id": "corr-01|null",
+  "subject_id": "uri-r2-c1/cand-01|null",
+  "trace_refs": [
+    "trace://uri-r2-c1/p1/discovery-01"
+  ]
+}
+```
+
+Checker result schema:
+
+```json
+{
+  "check_id": "P1-C|P1-N|P1-U|P2-G|P2-S|P2-R|P2-W|P3-S|P3-A|P3-B|P3-C",
+  "subject_id": "uri-r2-c1/cand-01|null",
+  "evidence_ref": "orchestrator/rounds/<round-id>/evidence/<stage>/attempt-<n>/...",
+  "verdict": "pass|semantic-negative|inconclusive",
+  "rejection_trigger": "none|widened-search|multi-scc|cross-family|heuristic-choice|late-repair|manufactured-provenance|surrogate-substitution|replay-domain-widening|non-local-salvage|structural-cycle|implicit-unfolding|equi-recursive-reasoning|termination-weakening|nondeterministic-output|inconsistent-trace|partial-replay|production-path-dependence|blocking-stop-condition"
+}
+```
+
+Aggregated stage verdict schema:
+
+```json
+{
+  "research_entrypoint_id": "uri-r2-c1-prototype-entrypoint-v1",
+  "scenario_id": "uri-r2-c1-only-v1",
+  "stage": "P1|P2|P3",
+  "attempt_id": 1,
+  "subject_token_ref": "orchestrator/rounds/<round-id>/evidence/<stage>/attempt-<n>/subject-token.json|null",
+  "checker_results": [
+    "orchestrator/rounds/<round-id>/evidence/<stage>/attempt-<n>/check-*.json"
+  ],
+  "stage_result": "pass|semantic-negative|inconclusive",
+  "terminal_reason": "none|budget-exhausted-inconclusive|blocking-stop-condition"
+}
 ```
 
 Interface rules:
@@ -368,7 +499,7 @@ Normalized candidate inventory schema:
   "candidate_kind": "local-root|equivalent-local-cluster",
   "normalization_basis": "cluster-equivalence-v1",
   "admissibility_verdict": "admissible|inadmissible",
-  "rejection_trigger": "none|widened-search|heuristic-choice|late-repair|non-local-salvage"
+  "rejection_trigger": "<value from normalized rejection-trigger vocabulary>"
 }
 ```
 
@@ -420,7 +551,7 @@ Trace correlation rule for `P2`:
 Required `P2` machine-readable outputs:
 
 - one correlated trace bundle keyed by `{ subject_id, correlation_id }`;
-- one per-subcheck result object with fields `{ check_id, input_trace, output_subject, verdict, rejection_trigger }`;
+- one per-subcheck result object conforming to the shared checker result schema in [Stage Interface];
 - one final subject-preservation verdict for the exact canonical subject token.
 
 ### `P3` Safety Validation Prototype
@@ -469,8 +600,8 @@ Required checks inside `P3`:
 
 Required `P3` machine-readable outputs:
 
-- one checker result object per `P3-S`, `P3-A`, `P3-B`, and `P3-C`, each with fields `{ check_id, subject_id, evidence_ref, verdict, rejection_trigger }`;
-- one stage summary object that names the canonical subject token, the four checker verdicts, and the final `P3` verdict.
+- one checker result object per `P3-S`, `P3-A`, `P3-B`, and `P3-C`, each conforming to the shared checker result schema in [Stage Interface];
+- one stage summary object conforming to the aggregated stage verdict schema in [Stage Interface].
 
 ### `P4` Prototype Decision Gate
 
