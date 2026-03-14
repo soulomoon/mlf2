@@ -25,9 +25,9 @@
    Depends on: item 1
    Completion notes: completed in accepted round `012` via `docs/plans/2026-03-14-uri-r2-c1-re2-uniqueness-evidence-contract.md`; the contract keeps `URI-R2-C1` fixed and prototype-free, defines bounded uniqueness evidence for one admissible local root or equivalent local cluster by exclusion inside the fixed boundary, and fail-closes on heuristic ranking, competing roots or clusters, widened comparison, repair/salvage paths, and prototype- or implementation-drift-backed claims.
 
-3. [pending] Write the `RE3` prototype-free positive-evidence contract for `URI-R3-O1` through `URI-R3-O3`
+3. [done] Write the `RE3` prototype-free positive-evidence contract for `URI-R3-O1` through `URI-R3-O3`
    Depends on: item 2
-   Completion notes: not started; this item must define the prototype-free positive evidence needed for structural acyclicity preservation, deterministic single-family owner stability, and constructor-directed occurs-check/termination clearance, and must reject claims that depend on prototype runs, implementation drift, explicit-anchor replay substitution, or widened ownership/search.
+   Completion notes: completed in accepted round `013` via `docs/plans/2026-03-14-uri-r2-c1-re3-positive-evidence-contract.md`; the contract stays at `RE3`, keeps `URI-R2-C1` fixed and prototype-free, defines reviewer-checkable positive evidence for structural acyclicity preservation, deterministic single-family owner stability, and constructor-directed occurs-check/termination clearance, and fail-closes on prototype-backed claims, implementation drift, explicit-anchor replay substitution, widened ownership/search, multi-cluster or multi-SCC salvage, cyclic structural encoding, implicit unfolding, equi-recursive reasoning, and termination weakening.
 
 4. [pending] Execute the `RE4` bounded re-entry gate for `URI-R2-C1`
    Depends on: item 3
