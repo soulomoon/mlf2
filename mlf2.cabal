@@ -92,6 +92,7 @@ library mlf2-internal
                       MLF.Constraint.Solved,
                       MLF.Elab.Pipeline,
                       MLF.Research.URI.R2.C1.Prototype.Types,
+                      MLF.Research.URI.R2.C1.Prototype.D1,
                       MLF.Research.URI.R2.C1.Prototype.P1,
                       MLF.Research.URI.R2.C1.Prototype.P2,
                       MLF.Research.URI.R2.C1.Prototype.P3,

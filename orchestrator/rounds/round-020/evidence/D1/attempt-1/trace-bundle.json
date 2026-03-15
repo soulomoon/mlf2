@@ -1,0 +1,25 @@
+{
+  "research_entrypoint_id": "uri-r2-c1-p2-replay-root-cause-v1",
+  "stage_selector": "D1-replay-reproduction",
+  "scenario_id": "uri-r2-c1-only-v1",
+  "attempt_id": 1,
+  "stage": "D1",
+  "correlation_id": "uri-r2-c1-only-v1-d1-attempt-1",
+  "subject_id": "uri-r2-c1/cluster-1",
+  "trace_refs": [
+    "trace://uri-r2-c1/d1/replay/generalize/uri-r2-c1-cluster-1/a-b-a-a-b",
+    "trace://uri-r2-c1/d1/replay/scheme-to-type/uri-r2-c1-cluster-1/a-b-a-a-b",
+    "trace://uri-r2-c1/d1/replay/reify-no-fallback/uri-r2-c1-cluster-1/t5-t5",
+    "trace://uri-r2-c1/d1/replay/witness-replay/uri-r2-c1-cluster-1/t9-n-a-a-n"
+  ],
+  "trace_summary": [
+    "D1-I consumed only authoritative inherited inputs from round-016/P1 attempt-2 and round-017/P2 attempt-2.",
+    "D1-R reran the bounded replay lane (`generalizeWithPlan -> schemeToType -> reifyTypeWithNamedSetNoFallback -> witness replay`) via the root-cause entrypoint.",
+    "D1-M compared the new replay outcome against the accepted P2-W boundary (`partial-replay`, `InstBot expects ⊥, got: t9 -> t9`).",
+    "D1 replay classification: exact-bounded-replay-failure.",
+    "D1-I: Inherited continuity confirmed: subject_id uri-r2-c1/cluster-1, scenario uri-r2-c1-only-v1, P2-W trigger partial-replay, mismatch InstBot expects \\8869, got: t9 -> t9.",
+    "D1-R: classification=exact-bounded-replay-failure; witness replay verdict=pass; trigger=partial-replay; details=witness replay => ∀(⩾ ⊲t9); N; (∀(⩾ ⊲(a -> a)); N) (applyInstantiation diagnostic failed: InstantiationError \"InstBot expects \\8869, got: t9 -> t9\")",
+    "D1-M: target trigger=partial-replay; target mismatch=InstBot expects ⊥, got: t9 -> t9; observed trigger=partial-replay; observed mismatch=InstBot expects ⊥, got: t9 -> t9; continuity=ok"
+  ],
+  "replay_classification": "exact-bounded-replay-failure"
+}

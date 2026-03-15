@@ -1,0 +1,15 @@
+{
+  "research_entrypoint_id": "uri-r2-c1-p2-replay-root-cause-v1",
+  "stage_selector": "D1-replay-reproduction",
+  "scenario_id": "uri-r2-c1-only-v1",
+  "attempt_id": 1,
+  "stage": "D1",
+  "subject_token_ref": null,
+  "checker_results": [
+    "orchestrator/rounds/round-020/evidence/D1/attempt-1/check-D1-I.json",
+    "orchestrator/rounds/round-020/evidence/D1/attempt-1/check-D1-R.json",
+    "orchestrator/rounds/round-020/evidence/D1/attempt-1/check-D1-M.json"
+  ],
+  "stage_result": "pass",
+  "terminal_reason": "none"
+}

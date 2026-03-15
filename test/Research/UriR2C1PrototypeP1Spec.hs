@@ -27,13 +27,16 @@ import MLF.Research.URI.R2.C1.Prototype.Types
     , attemptEvidenceRelativeDir
     , boundedSubjectId
     , candidateInventoryRelativePath
+    , d1AttemptEvidenceRelativeDir
     , p2AttemptEvidenceRelativeDir
     , p3AttemptEvidenceRelativeDir
     , p4AttemptEvidenceRelativeDir
     , prototypeStageResult
     , prototypeSubjectId
+    , replayRootCauseEntrypointId
     , researchEntrypointId
     , scenarioIdUriR2C1OnlyV1
+    , stageSelectorD1
     , stageSelectorP1
     , stageSelectorP2
     , stageSelectorP3
@@ -351,6 +354,133 @@ spec = do
             result `shouldBe` Left (UnsupportedScenario "wrong-scenario")
             doesDirectoryExist (attemptDirP4 root 1) >>= (`shouldBe` False)
 
+    describe "URI-R2-C1 D1 replay root-cause entrypoint" $ do
+        it "runs D1 attempt-1 via the root-cause tuple and emits only the planned evidence files" $ do
+            root <- freshRoot "d1-attempt-1-pass"
+            _ <- seedAuthoritativeReplayBoundary root
+            report <- requireD1Report root 1
+            files <- listDirectory (attemptDirD1 root 1)
+            sort files `shouldBe`
+                [ "check-D1-I.json"
+                , "check-D1-M.json"
+                , "check-D1-R.json"
+                , "stage-verdict.json"
+                , "trace-bundle.json"
+                ]
+            prototypeStageResult report `shouldBe` "pass"
+            doesFileExist (attemptDirD1 root 1 </> "subject-token.json") >>= (`shouldBe` False)
+
+            mapM_ (assertInvocationMetadataForEntrypoint root attemptDirD1 1 replayRootCauseEntrypointId stageSelectorD1 (Just "D1"))
+                [ "trace-bundle.json"
+                , "check-D1-I.json"
+                , "check-D1-R.json"
+                , "check-D1-M.json"
+                , "stage-verdict.json"
+                ]
+
+            checkI <- readFile (attemptDirD1 root 1 </> "check-D1-I.json")
+            extractStringField "verdict" checkI `shouldBe` Just "pass"
+            extractStringField "rejection_trigger" checkI `shouldBe` Just "none"
+            checkI `shouldSatisfy` isInfixOf "uri-r2-c1/cluster-1"
+
+            checkR <- readFile (attemptDirD1 root 1 </> "check-D1-R.json")
+            extractStringField "verdict" checkR `shouldBe` Just "pass"
+            extractStringField "rejection_trigger" checkR `shouldBe` Just "partial-replay"
+            checkR `shouldSatisfy` isInfixOf "classification=exact-bounded-replay-failure"
+            checkR `shouldSatisfy` isInfixOf "applyInstantiation diagnostic failed"
+
+            checkM <- readFile (attemptDirD1 root 1 </> "check-D1-M.json")
+            extractStringField "verdict" checkM `shouldBe` Just "pass"
+            checkM `shouldSatisfy` isInfixOf "target trigger=partial-replay"
+            checkM `shouldSatisfy` isInfixOf "InstBot expects"
+
+            stageVerdict <- readFile (attemptDirD1 root 1 </> "stage-verdict.json")
+            extractStringField "subject_token_ref" stageVerdict `shouldBe` Nothing
+            extractStringField "stage_result" stageVerdict `shouldBe` Just "pass"
+            extractStringField "terminal_reason" stageVerdict `shouldBe` Just "none"
+
+            artifact <- readFile (root </> "docs" </> "plans" </> "2026-03-16-uri-r2-c1-d1-replay-reproduction-contract.md")
+            artifact `shouldSatisfy` isInfixOf "Stage: `D1`"
+            artifact `shouldSatisfy` isInfixOf "Attempt: 1"
+            artifact `shouldSatisfy` isInfixOf "`D1-I`"
+            artifact `shouldSatisfy` isInfixOf "`D1-R`"
+            artifact `shouldSatisfy` isInfixOf "`D1-M`"
+
+        it "rejects wrong scenario, stage, entrypoint, and out-of-range attempt before writing D1 evidence" $ do
+            root <- freshRoot "d1-invalid-tuple"
+            _ <- seedAuthoritativeReplayBoundary root
+
+            wrongScenario <- runResearchPrototype $
+                PrototypeRequest
+                    { prRepoRoot = root
+                    , prResearchEntrypointId = replayRootCauseEntrypointId
+                    , prStageSelector = stageSelectorD1
+                    , prScenarioId = "wrong-scenario"
+                    , prAttemptId = 1
+                    }
+            wrongScenario `shouldBe` Left (UnsupportedScenario "wrong-scenario")
+
+            wrongStage <- runResearchPrototype $
+                PrototypeRequest
+                    { prRepoRoot = root
+                    , prResearchEntrypointId = replayRootCauseEntrypointId
+                    , prStageSelector = "wrong-stage"
+                    , prScenarioId = scenarioIdUriR2C1OnlyV1
+                    , prAttemptId = 1
+                    }
+            wrongStage `shouldBe` Left (UnsupportedStageSelector "wrong-stage")
+
+            wrongEntrypoint <- runResearchPrototype $
+                PrototypeRequest
+                    { prRepoRoot = root
+                    , prResearchEntrypointId = "wrong-entrypoint"
+                    , prStageSelector = stageSelectorD1
+                    , prScenarioId = scenarioIdUriR2C1OnlyV1
+                    , prAttemptId = 1
+                    }
+            wrongEntrypoint `shouldBe` Left (UnsupportedResearchEntrypoint "wrong-entrypoint")
+
+            wrongAttempt <- runResearchPrototype $
+                PrototypeRequest
+                    { prRepoRoot = root
+                    , prResearchEntrypointId = replayRootCauseEntrypointId
+                    , prStageSelector = stageSelectorD1
+                    , prScenarioId = scenarioIdUriR2C1OnlyV1
+                    , prAttemptId = 0
+                    }
+            wrongAttempt `shouldBe` Left (UnsupportedAttemptId 0)
+
+            doesDirectoryExist (attemptDirD1 root 1) >>= (`shouldBe` False)
+
+        it "does not mutate existing D1 attempt-1 evidence on rejected reruns" $ do
+            root <- freshRoot "d1-rejected-no-mutation"
+            _ <- seedAuthoritativeReplayBoundary root
+            _ <- requireD1Report root 1
+            baselineStageVerdict <- readFile (attemptDirD1 root 1 </> "stage-verdict.json")
+            baselineFiles <- fmap sort (listDirectory (attemptDirD1 root 1))
+
+            _ <- runResearchPrototype $
+                PrototypeRequest
+                    { prRepoRoot = root
+                    , prResearchEntrypointId = replayRootCauseEntrypointId
+                    , prStageSelector = "wrong-stage"
+                    , prScenarioId = scenarioIdUriR2C1OnlyV1
+                    , prAttemptId = 1
+                    }
+            _ <- runResearchPrototype $
+                PrototypeRequest
+                    { prRepoRoot = root
+                    , prResearchEntrypointId = replayRootCauseEntrypointId
+                    , prStageSelector = stageSelectorD1
+                    , prScenarioId = "wrong-scenario"
+                    , prAttemptId = 1
+                    }
+
+            afterStageVerdict <- readFile (attemptDirD1 root 1 </> "stage-verdict.json")
+            afterFiles <- fmap sort (listDirectory (attemptDirD1 root 1))
+            afterStageVerdict `shouldBe` baselineStageVerdict
+            afterFiles `shouldBe` baselineFiles
+
 runAccepted :: FilePath -> Int -> Expectation
 runAccepted root attemptId = do
     result <- runPrototype stageSelectorP1 root attemptId
@@ -377,6 +507,13 @@ requirePrototypeReportFor stageSelector root attemptId = do
         Left err -> expectationFailure ("Expected prototype execution, got: " ++ show err) >> fail "prototype failed"
         Right report -> pure report
 
+requireD1Report :: FilePath -> Int -> IO PrototypeReport
+requireD1Report root attemptId = do
+    result <- runD1 root attemptId
+    case result of
+        Left err -> expectationFailure ("Expected D1 execution, got: " ++ show err) >> fail "d1 failed"
+        Right report -> pure report
+
 runPrototype :: String -> FilePath -> Int -> IO (Either PrototypeError PrototypeReport)
 runPrototype stageSelector root attemptId =
     runResearchPrototype $
@@ -388,8 +525,24 @@ runPrototype stageSelector root attemptId =
             , prAttemptId = attemptId
             }
 
+runD1 :: FilePath -> Int -> IO (Either PrototypeError PrototypeReport)
+runD1 root attemptId =
+    runResearchPrototype $
+        PrototypeRequest
+            { prRepoRoot = root
+            , prResearchEntrypointId = replayRootCauseEntrypointId
+            , prStageSelector = stageSelectorD1
+            , prScenarioId = scenarioIdUriR2C1OnlyV1
+            , prAttemptId = attemptId
+            }
+
 seedAuthoritativeP1Token :: FilePath -> IO PrototypeReport
 seedAuthoritativeP1Token root = requirePrototypePass root 2
+
+seedAuthoritativeReplayBoundary :: FilePath -> IO PrototypeReport
+seedAuthoritativeReplayBoundary root = do
+    _ <- seedAuthoritativeP1Token root
+    requirePrototypeReportFor stageSelectorP2 root 2
 
 seedAuthoritativeP1ReviewRecord :: FilePath -> IO ()
 seedAuthoritativeP1ReviewRecord root = do
@@ -540,6 +693,10 @@ attemptDirP4 :: FilePath -> Int -> FilePath
 attemptDirP4 root attemptId =
     root </> p4AttemptEvidenceRelativeDir attemptId
 
+attemptDirD1 :: FilePath -> Int -> FilePath
+attemptDirD1 root attemptId =
+    root </> d1AttemptEvidenceRelativeDir attemptId
+
 swallowMissing :: IOError -> IO ()
 swallowMissing err
     | isDoesNotExistError err = pure ()
@@ -572,6 +729,25 @@ assertInvocationMetadata :: FilePath -> Int -> FilePath -> Expectation
 assertInvocationMetadata root attemptId =
     assertInvocationMetadataFor root attemptDir attemptId stageSelectorP1 (Just "P1")
 
+assertInvocationMetadataForEntrypoint
+    :: FilePath
+    -> (FilePath -> Int -> FilePath)
+    -> Int
+    -> String
+    -> String
+    -> Maybe String
+    -> FilePath
+    -> Expectation
+assertInvocationMetadataForEntrypoint root attemptDirFn attemptId expectedEntrypoint stageSelector expectedStage fileName = do
+    content <- readFile (attemptDirFn root attemptId </> fileName)
+    extractStringField "research_entrypoint_id" content `shouldBe` Just expectedEntrypoint
+    extractStringField "stage_selector" content `shouldBe` Just stageSelector
+    extractStringField "scenario_id" content `shouldBe` Just scenarioIdUriR2C1OnlyV1
+    extractIntField "attempt_id" content `shouldBe` Just attemptId
+    case (expectedStage, fileName `elem` ["trace-bundle.json", "stage-verdict.json"]) of
+        (Just stageName, True) -> extractStringField "stage" content `shouldBe` Just stageName
+        _ -> pure ()
+
 assertInvocationMetadataFor
     :: FilePath
     -> (FilePath -> Int -> FilePath)
@@ -581,14 +757,14 @@ assertInvocationMetadataFor
     -> FilePath
     -> Expectation
 assertInvocationMetadataFor root attemptDirFn attemptId stageSelector expectedStage fileName = do
-    content <- readFile (attemptDirFn root attemptId </> fileName)
-    extractStringField "research_entrypoint_id" content `shouldBe` Just researchEntrypointId
-    extractStringField "stage_selector" content `shouldBe` Just stageSelector
-    extractStringField "scenario_id" content `shouldBe` Just scenarioIdUriR2C1OnlyV1
-    extractIntField "attempt_id" content `shouldBe` Just attemptId
-    case (expectedStage, fileName `elem` ["trace-bundle.json", "stage-verdict.json"]) of
-        (Just stageName, True) -> extractStringField "stage" content `shouldBe` Just stageName
-        _ -> pure ()
+    assertInvocationMetadataForEntrypoint
+        root
+        attemptDirFn
+        attemptId
+        researchEntrypointId
+        stageSelector
+        expectedStage
+        fileName
 
 assertCheckerSchema :: FilePath -> Int -> String -> FilePath -> Expectation
 assertCheckerSchema root attemptId subjectId fileName = do

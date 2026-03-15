@@ -1,0 +1,13 @@
+{
+  "research_entrypoint_id": "uri-r2-c1-p2-replay-root-cause-v1",
+  "stage_selector": "D1-replay-reproduction",
+  "scenario_id": "uri-r2-c1-only-v1",
+  "attempt_id": 1,
+  "check_id": "D1-I",
+  "correlation_id": "uri-r2-c1-only-v1-d1-attempt-1",
+  "subject_id": "uri-r2-c1/cluster-1",
+  "evidence_ref": "orchestrator/rounds/round-020/evidence/D1/attempt-1/trace-bundle.json",
+  "verdict": "pass",
+  "rejection_trigger": "none",
+  "details": "Inherited continuity confirmed: subject_id uri-r2-c1/cluster-1, scenario uri-r2-c1-only-v1, P2-W trigger partial-replay, mismatch InstBot expects \\8869, got: t9 -> t9."
+}
