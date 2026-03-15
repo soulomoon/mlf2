@@ -1,0 +1,50 @@
+{
+  "research_entrypoint_id": "uri-r2-c1-p2-replay-root-cause-v1",
+  "stage_selector": "D4-repair-track-decision-gate",
+  "scenario_id": "uri-r2-c1-only-v1",
+  "attempt_id": 1,
+  "stage": "D4",
+  "mode": "aggregate-only",
+  "semantic_retry_allowed": false,
+  "correlation_id": "uri-r2-c1-only-v1-d4-attempt-1",
+  "consumed_stages": [
+    {
+      "stage": "D1",
+      "authoritative_attempt": 1,
+      "authoritative_result": "pass",
+      "attempt_verdict": "accepted",
+      "stage_action": "finalize",
+      "retry_reason": "none",
+      "fix_hypothesis": "none",
+      "source_review_record": "orchestrator/rounds/round-020/review-record.json",
+      "source_artifact": "docs/plans/2026-03-16-uri-r2-c1-d1-replay-reproduction-contract.md"
+    },
+    {
+      "stage": "D2",
+      "authoritative_attempt": 1,
+      "authoritative_result": "pass",
+      "attempt_verdict": "accepted",
+      "stage_action": "finalize",
+      "retry_reason": "none",
+      "fix_hypothesis": "none",
+      "source_review_record": "orchestrator/rounds/round-021/review-record.json",
+      "source_artifact": "docs/plans/2026-03-16-uri-r2-c1-d2-replay-mismatch-localization.md"
+    },
+    {
+      "stage": "D3",
+      "authoritative_attempt": 1,
+      "authoritative_result": "pass",
+      "attempt_verdict": "accepted",
+      "stage_action": "finalize",
+      "retry_reason": "none",
+      "fix_hypothesis": "none",
+      "source_review_record": "orchestrator/rounds/round-022/review-record.json",
+      "source_artifact": "docs/plans/2026-03-16-uri-r2-c1-d3-bounded-fixability-probe.md"
+    }
+  ],
+  "consumed_stage_results": {
+    "D1": "pass",
+    "D2": "pass",
+    "D3": "pass"
+  }
+}

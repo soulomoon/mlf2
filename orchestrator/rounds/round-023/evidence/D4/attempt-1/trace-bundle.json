@@ -1,0 +1,21 @@
+{
+  "research_entrypoint_id": "uri-r2-c1-p2-replay-root-cause-v1",
+  "stage_selector": "D4-repair-track-decision-gate",
+  "scenario_id": "uri-r2-c1-only-v1",
+  "attempt_id": 1,
+  "stage": "D4",
+  "correlation_id": "uri-r2-c1-only-v1-d4-attempt-1",
+  "subject_id": "URI-R2-C1",
+  "trace_refs": [
+    "trace://uri-r2-c1/d4/consume/d1-pass-finalize",
+    "trace://uri-r2-c1/d4/consume/d2-pass-finalize",
+    "trace://uri-r2-c1/d4/consume/d3-pass-finalize",
+    "trace://uri-r2-c1/d4/decision/reopen-repair-track"
+  ],
+  "trace_summary": [
+    "D4 consumed only authoritative D1/D2/D3 review records and artifacts.",
+    "All predecessor stages are accepted + finalize with pass results in URI-R2-C1 bounded scope.",
+    "Decision threshold evaluated true for D1 continuity, D2 localization, and D3 repair-supporting bounded fixability.",
+    "D4 emitted terminal aggregate outcome reopen-repair-track without authorizing production implementation."
+  ]
+}

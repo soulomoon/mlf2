@@ -1,0 +1,23 @@
+{
+  "research_entrypoint_id": "uri-r2-c1-p2-replay-root-cause-v1",
+  "stage_selector": "D4-repair-track-decision-gate",
+  "scenario_id": "uri-r2-c1-only-v1",
+  "attempt_id": 1,
+  "stage": "D4",
+  "correlation_id": "uri-r2-c1-only-v1-d4-attempt-1",
+  "decision_evidence_ref": "orchestrator/rounds/round-023/evidence/D4/attempt-1/decision-verdict.json",
+  "stage_consumption_ref": "orchestrator/rounds/round-023/evidence/D4/attempt-1/stage-consumption.json",
+  "check_ref": "orchestrator/rounds/round-023/evidence/D4/attempt-1/check-D4-DECISION.json",
+  "final_outcome": "reopen-repair-track",
+  "terminal_reason": "none",
+  "consumed_stage_results": {
+    "D1": "pass",
+    "D2": "pass",
+    "D3": "pass"
+  },
+  "decision_rationale": "All bounded D4 threshold predicates are satisfied by authoritative D1-D3 finalized results, so the only legal D4 outcome is reopen-repair-track.",
+  "allowed_terminal_outcomes": [
+    "reopen-repair-track",
+    "remain-stop"
+  ]
+}
