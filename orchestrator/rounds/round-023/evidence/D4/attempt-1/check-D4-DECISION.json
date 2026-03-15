@@ -1,0 +1,23 @@
+{
+  "check_id": "D4-DECISION",
+  "status": "pass",
+  "stage": "D4",
+  "attempt_id": 1,
+  "correlation_id": "uri-r2-c1-only-v1-d4-attempt-1",
+  "decision_rule": "reopen-repair-track iff D1 pass exact bounded replay continuity AND D2 pass bounded divergence+owner localization AND D3 pass repair-supporting bounded fixability without widening; else remain-stop",
+  "threshold_evaluation": {
+    "d1_exact_bounded_replay_continuity": true,
+    "d2_bounded_divergence_and_owner": true,
+    "d3_repair_supporting_without_widening": true
+  },
+  "final_outcome": "reopen-repair-track",
+  "allowed_outcomes": [
+    "reopen-repair-track",
+    "remain-stop"
+  ],
+  "details": [
+    "All threshold predicates evaluate true from authoritative D1/D2/D3 results.",
+    "D4 remained aggregate-only and terminal.",
+    "No production implementation milestone is authorized by this decision itself."
+  ]
+}

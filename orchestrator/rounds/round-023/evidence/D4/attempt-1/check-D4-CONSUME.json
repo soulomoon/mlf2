@@ -1,0 +1,20 @@
+{
+  "check_id": "D4-CONSUME",
+  "status": "pass",
+  "stage": "D4",
+  "attempt_id": 1,
+  "correlation_id": "uri-r2-c1-only-v1-d4-attempt-1",
+  "evidence_ref": "orchestrator/rounds/round-023/evidence/D4/attempt-1/stage-consumption.json",
+  "assertions": {
+    "authoritative_inputs_present": true,
+    "authoritative_inputs_finalized": true,
+    "retry_schema_continuity_preserved": true,
+    "scope_locked_to_uri_r2_c1": true,
+    "scenario_locked_to_uri_r2_c1_only_v1": true
+  },
+  "details": [
+    "Consumed only D1/D2/D3 authoritative review records and artifacts.",
+    "All predecessor records are accepted + finalize with retry_reason=none and fix_hypothesis=none.",
+    "No widened subject, scenario, or ownership scope was introduced."
+  ]
+}
