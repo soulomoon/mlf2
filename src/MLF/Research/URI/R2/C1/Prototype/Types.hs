@@ -16,30 +16,37 @@ module MLF.Research.URI.R2.C1.Prototype.Types (
     PrototypeReport(..),
     PrototypePaths(..),
     researchEntrypointId,
+    replayRootCauseEntrypointId,
+    stageSelectorD1,
     stageSelectorP1,
     stageSelectorP2,
     stageSelectorP3,
     stageSelectorP4,
     scenarioIdUriR2C1OnlyV1,
     boundedSubjectId,
+    d1ArtifactRelativePath,
     artifactRelativePath,
     p2ArtifactRelativePath,
     p3ArtifactRelativePath,
     p4ArtifactRelativePath,
+    d1AttemptEvidenceRelativeDir,
     attemptEvidenceRelativeDir,
     p2AttemptEvidenceRelativeDir,
     p3AttemptEvidenceRelativeDir,
     p4AttemptEvidenceRelativeDir,
+    d1AttemptEvidenceFileRelativePath,
     attemptEvidenceFileRelativePath,
     p2AttemptEvidenceFileRelativePath,
     p3AttemptEvidenceFileRelativePath,
     p4AttemptEvidenceFileRelativePath,
     candidateInventoryRelativePath,
     candidateSelectionRuleRelativePath,
+    d1CheckResultRelativePath,
     checkResultRelativePath,
     p2CheckResultRelativePath,
     p3CheckResultRelativePath,
     p4CheckResultRelativePath,
+    d1StageVerdictRelativePath,
     stageVerdictRelativePath,
     p2StageVerdictRelativePath,
     p3StageVerdictRelativePath,
@@ -48,11 +55,15 @@ module MLF.Research.URI.R2.C1.Prototype.Types (
     subjectTokenRelativePath,
     p2SubjectTokenRelativePath,
     p3SubjectTokenRelativePath,
+    d1TraceBundleRelativePath,
     traceBundleRelativePath,
     p2TraceBundleRelativePath,
     p3TraceBundleRelativePath,
     p4TraceBundleRelativePath,
     p1AuthoritativeSubjectTokenRelativePath,
+    p2AuthoritativeCheckWRelativePath,
+    p2AuthoritativeStageVerdictRelativePath,
+    p2AuthoritativeTraceBundleRelativePath,
     p2AuthoritativeReviewRecordRelativePath,
     p1AuthoritativeReviewRecordRelativePath,
     p3AuthoritativeReviewRecordRelativePath,
@@ -205,6 +216,12 @@ data PrototypePaths = PrototypePaths
 researchEntrypointId :: String
 researchEntrypointId = "uri-r2-c1-prototype-entrypoint-v1"
 
+replayRootCauseEntrypointId :: String
+replayRootCauseEntrypointId = "uri-r2-c1-p2-replay-root-cause-v1"
+
+stageSelectorD1 :: String
+stageSelectorD1 = "D1-replay-reproduction"
+
 stageSelectorP1 :: String
 stageSelectorP1 = "P1-subject-discovery"
 
@@ -222,6 +239,12 @@ scenarioIdUriR2C1OnlyV1 = "uri-r2-c1-only-v1"
 
 boundedSubjectId :: String
 boundedSubjectId = "URI-R2-C1"
+
+d1ArtifactRelativePath :: FilePath
+d1ArtifactRelativePath =
+    "docs"
+        </> "plans"
+        </> "2026-03-16-uri-r2-c1-d1-replay-reproduction-contract.md"
 
 artifactRelativePath :: FilePath
 artifactRelativePath =
@@ -246,6 +269,15 @@ p4ArtifactRelativePath =
     "docs"
         </> "plans"
         </> "2026-03-15-uri-r2-c1-p4-prototype-decision-gate.md"
+
+d1AttemptEvidenceRelativeDir :: Int -> FilePath
+d1AttemptEvidenceRelativeDir attemptId =
+    "orchestrator"
+        </> "rounds"
+        </> "round-020"
+        </> "evidence"
+        </> "D1"
+        </> ("attempt-" ++ show attemptId)
 
 attemptEvidenceRelativeDir :: Int -> FilePath
 attemptEvidenceRelativeDir attemptId =
@@ -303,9 +335,17 @@ p4AttemptEvidenceFileRelativePath :: Int -> FilePath -> FilePath
 p4AttemptEvidenceFileRelativePath attemptId fileName =
     p4AttemptEvidenceRelativeDir attemptId </> fileName
 
+d1AttemptEvidenceFileRelativePath :: Int -> FilePath -> FilePath
+d1AttemptEvidenceFileRelativePath attemptId fileName =
+    d1AttemptEvidenceRelativeDir attemptId </> fileName
+
 candidateSelectionRuleRelativePath :: Int -> FilePath
 candidateSelectionRuleRelativePath attemptId =
     attemptEvidenceFileRelativePath attemptId "candidate-selection-rule.json"
+
+d1CheckResultRelativePath :: Int -> String -> FilePath
+d1CheckResultRelativePath attemptId checkId =
+    d1AttemptEvidenceFileRelativePath attemptId ("check-" ++ checkId ++ ".json")
 
 checkResultRelativePath :: Int -> String -> FilePath
 checkResultRelativePath attemptId checkId =
@@ -322,6 +362,10 @@ p3CheckResultRelativePath attemptId checkId =
 p4CheckResultRelativePath :: Int -> String -> FilePath
 p4CheckResultRelativePath attemptId checkId =
     p4AttemptEvidenceFileRelativePath attemptId ("check-" ++ checkId ++ ".json")
+
+d1StageVerdictRelativePath :: Int -> FilePath
+d1StageVerdictRelativePath attemptId =
+    d1AttemptEvidenceFileRelativePath attemptId "stage-verdict.json"
 
 stageVerdictRelativePath :: Int -> FilePath
 stageVerdictRelativePath attemptId =
@@ -355,6 +399,10 @@ p3SubjectTokenRelativePath :: Int -> FilePath
 p3SubjectTokenRelativePath attemptId =
     p3AttemptEvidenceFileRelativePath attemptId "subject-token.json"
 
+d1TraceBundleRelativePath :: Int -> FilePath
+d1TraceBundleRelativePath attemptId =
+    d1AttemptEvidenceFileRelativePath attemptId "trace-bundle.json"
+
 traceBundleRelativePath :: Int -> FilePath
 traceBundleRelativePath attemptId =
     attemptEvidenceFileRelativePath attemptId "trace-bundle.json"
@@ -373,6 +421,18 @@ p4TraceBundleRelativePath attemptId =
 
 p1AuthoritativeSubjectTokenRelativePath :: FilePath
 p1AuthoritativeSubjectTokenRelativePath = subjectTokenRelativePath 2
+
+p2AuthoritativeCheckWRelativePath :: FilePath
+p2AuthoritativeCheckWRelativePath =
+    p2AttemptEvidenceFileRelativePath 2 "check-P2-W.json"
+
+p2AuthoritativeStageVerdictRelativePath :: FilePath
+p2AuthoritativeStageVerdictRelativePath =
+    p2AttemptEvidenceFileRelativePath 2 "stage-verdict.json"
+
+p2AuthoritativeTraceBundleRelativePath :: FilePath
+p2AuthoritativeTraceBundleRelativePath =
+    p2AttemptEvidenceFileRelativePath 2 "trace-bundle.json"
 
 p1AuthoritativeReviewRecordRelativePath :: FilePath
 p1AuthoritativeReviewRecordRelativePath =
@@ -404,6 +464,7 @@ prototypePaths req =
 
 evidenceDirForSelector :: String -> Int -> FilePath
 evidenceDirForSelector stageSelector attemptId
+    | stageSelector == stageSelectorD1 = d1AttemptEvidenceRelativeDir attemptId
     | stageSelector == stageSelectorP1 = attemptEvidenceRelativeDir attemptId
     | stageSelector == stageSelectorP2 = p2AttemptEvidenceRelativeDir attemptId
     | stageSelector == stageSelectorP3 = p3AttemptEvidenceRelativeDir attemptId
@@ -412,6 +473,7 @@ evidenceDirForSelector stageSelector attemptId
 
 artifactPathForSelector :: String -> FilePath
 artifactPathForSelector stageSelector
+    | stageSelector == stageSelectorD1 = d1ArtifactRelativePath
     | stageSelector == stageSelectorP1 = artifactRelativePath
     | stageSelector == stageSelectorP2 = p2ArtifactRelativePath
     | stageSelector == stageSelectorP3 = p3ArtifactRelativePath

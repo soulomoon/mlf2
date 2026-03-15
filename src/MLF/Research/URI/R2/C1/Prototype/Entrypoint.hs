@@ -16,7 +16,8 @@ import MLF.Elab.Pipeline
 import MLF.Frontend.Normalize (normalizeExpr)
 import MLF.Frontend.Syntax (Expr(..))
 
-import MLF.Research.URI.R2.C1.Prototype.Artifact (writeP1Artifact, writeP2Artifact, writeP3Artifact, writeP4Artifact)
+import MLF.Research.URI.R2.C1.Prototype.Artifact (writeD1Artifact, writeP1Artifact, writeP2Artifact, writeP3Artifact, writeP4Artifact)
+import MLF.Research.URI.R2.C1.Prototype.D1 (executeD1, d1AppReport)
 import MLF.Research.URI.R2.C1.Prototype.P1 (executeP1)
 import MLF.Research.URI.R2.C1.Prototype.P2 (executeP2, p2AppReport)
 import MLF.Research.URI.R2.C1.Prototype.P3 (executeP3, p3AppReport)
@@ -46,6 +47,8 @@ runApp repoRoot args =
 
 runResearchPrototype :: PrototypeRequest -> IO (Either PrototypeError PrototypeReport)
 runResearchPrototype req
+    | prResearchEntrypointId req == replayRootCauseEntrypointId =
+        runReplayRootCause req
     | prResearchEntrypointId req /= researchEntrypointId =
         pure (Left (UnsupportedResearchEntrypoint (prResearchEntrypointId req)))
     | prScenarioId req /= scenarioIdUriR2C1OnlyV1 =
@@ -85,6 +88,22 @@ runResearchPrototype req
                 pure (Right (p4AppReport ok))
     | otherwise =
         pure (Left (UnsupportedStageSelector (prStageSelector req)))
+
+runReplayRootCause :: PrototypeRequest -> IO (Either PrototypeError PrototypeReport)
+runReplayRootCause req
+    | prScenarioId req /= scenarioIdUriR2C1OnlyV1 =
+        pure (Left (UnsupportedScenario (prScenarioId req)))
+    | prStageSelector req /= stageSelectorD1 =
+        pure (Left (UnsupportedStageSelector (prStageSelector req)))
+    | prAttemptId req < 1 || prAttemptId req > 100 =
+        pure (Left (UnsupportedAttemptId (prAttemptId req)))
+    | otherwise = do
+        execution <- executeD1 req
+        case execution of
+            Left err -> pure (Left err)
+            Right ok -> do
+                _ <- writeD1Artifact ok
+                pure (Right (d1AppReport ok))
 
 parsePrototypeRequest :: FilePath -> [String] -> Either String PrototypeRequest
 parsePrototypeRequest repoRoot args = do
