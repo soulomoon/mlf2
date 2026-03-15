@@ -16,9 +16,10 @@ import MLF.Elab.Pipeline
 import MLF.Frontend.Normalize (normalizeExpr)
 import MLF.Frontend.Syntax (Expr(..))
 
-import MLF.Research.URI.R2.C1.Prototype.Artifact (writeD1Artifact, writeD2Artifact, writeP1Artifact, writeP2Artifact, writeP3Artifact, writeP4Artifact)
+import MLF.Research.URI.R2.C1.Prototype.Artifact (writeD1Artifact, writeD2Artifact, writeD3Artifact, writeP1Artifact, writeP2Artifact, writeP3Artifact, writeP4Artifact)
 import MLF.Research.URI.R2.C1.Prototype.D1 (executeD1, d1AppReport)
 import MLF.Research.URI.R2.C1.Prototype.D2 (d2AppReport, executeD2)
+import MLF.Research.URI.R2.C1.Prototype.D3 (d3AppReport, executeD3)
 import MLF.Research.URI.R2.C1.Prototype.P1 (executeP1)
 import MLF.Research.URI.R2.C1.Prototype.P2 (executeP2, p2AppReport)
 import MLF.Research.URI.R2.C1.Prototype.P3 (executeP3, p3AppReport)
@@ -95,7 +96,8 @@ runReplayRootCause req
     | prScenarioId req /= scenarioIdUriR2C1OnlyV1 =
         pure (Left (UnsupportedScenario (prScenarioId req)))
     | prStageSelector req /= stageSelectorD1
-        && prStageSelector req /= stageSelectorD2 =
+        && prStageSelector req /= stageSelectorD2
+        && prStageSelector req /= stageSelectorD3 =
         pure (Left (UnsupportedStageSelector (prStageSelector req)))
     | prAttemptId req < 1 || prAttemptId req > 100 =
         pure (Left (UnsupportedAttemptId (prAttemptId req)))
@@ -113,6 +115,13 @@ runReplayRootCause req
             Right ok -> do
                 _ <- writeD2Artifact ok
                 pure (Right (d2AppReport ok))
+    | prStageSelector req == stageSelectorD3 = do
+        execution <- executeD3 req
+        case execution of
+            Left err -> pure (Left err)
+            Right ok -> do
+                _ <- writeD3Artifact ok
+                pure (Right (d3AppReport ok))
     | otherwise = do
         pure (Left (UnsupportedStageSelector (prStageSelector req)))
 

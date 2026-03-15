@@ -29,6 +29,7 @@ import MLF.Research.URI.R2.C1.Prototype.Types
     , candidateInventoryRelativePath
     , d1AttemptEvidenceRelativeDir
     , d2AttemptEvidenceRelativeDir
+    , d3AttemptEvidenceRelativeDir
     , p2AttemptEvidenceRelativeDir
     , p3AttemptEvidenceRelativeDir
     , p4AttemptEvidenceRelativeDir
@@ -39,6 +40,7 @@ import MLF.Research.URI.R2.C1.Prototype.Types
     , scenarioIdUriR2C1OnlyV1
     , stageSelectorD1
     , stageSelectorD2
+    , stageSelectorD3
     , stageSelectorP1
     , stageSelectorP2
     , stageSelectorP3
@@ -592,6 +594,123 @@ spec = do
 
             doesDirectoryExist (attemptDirD2 root 1) >>= (`shouldBe` False)
 
+    describe "URI-R2-C1 D3 replay root-cause entrypoint" $ do
+        it "runs D3 attempt-1 via the root-cause tuple and emits bounded fixability evidence" $ do
+            root <- freshRoot "d3-attempt-1-pass"
+            _ <- seedAuthoritativeReplayBoundary root
+            _ <- requireD1Report root 1
+            seedAuthoritativeD1ReviewRecord root
+            _ <- requireD2Report root 1
+            seedAuthoritativeD2ReviewRecord root
+            report <- requireD3Report root 1
+            files <- listDirectory (attemptDirD3 root 1)
+            sort files `shouldBe`
+                [ "check-D3-B.json"
+                , "check-D3-H.json"
+                , "check-D3-V.json"
+                , "stage-verdict.json"
+                , "trace-bundle.json"
+                ]
+            prototypeStageResult report `shouldBe` "pass"
+            doesFileExist (attemptDirD3 root 1 </> "subject-token.json") >>= (`shouldBe` False)
+
+            mapM_ (assertInvocationMetadataForEntrypoint root attemptDirD3 1 replayRootCauseEntrypointId stageSelectorD3 (Just "D3"))
+                [ "trace-bundle.json"
+                , "check-D3-H.json"
+                , "check-D3-B.json"
+                , "check-D3-V.json"
+                , "stage-verdict.json"
+                ]
+
+            checkH <- readFile (attemptDirD3 root 1 </> "check-D3-H.json")
+            extractStringField "verdict" checkH `shouldBe` Just "pass"
+            extractStringField "rejection_trigger" checkH `shouldBe` Just "none"
+            checkH `shouldSatisfy` isInfixOf "H1 support established"
+            checkH `shouldSatisfy` isInfixOf "applyInstantiation-instbot-precondition"
+
+            checkB <- readFile (attemptDirD3 root 1 </> "check-D3-B.json")
+            extractStringField "verdict" checkB `shouldBe` Just "pass"
+            extractStringField "rejection_trigger" checkB `shouldBe` Just "none"
+            checkB `shouldSatisfy` isInfixOf "no second executable interface"
+
+            checkV <- readFile (attemptDirD3 root 1 </> "check-D3-V.json")
+            extractStringField "verdict" checkV `shouldBe` Just "pass"
+            extractStringField "rejection_trigger" checkV `shouldBe` Just "none"
+            checkV `shouldSatisfy` isInfixOf "repair-supporting"
+
+            stageVerdict <- readFile (attemptDirD3 root 1 </> "stage-verdict.json")
+            extractStringField "subject_token_ref" stageVerdict `shouldBe` Nothing
+            extractStringField "attempt_verdict" stageVerdict `shouldBe` Just "repair-supporting"
+            extractStringField "stage_result" stageVerdict `shouldBe` Just "pass"
+            extractStringField "terminal_reason" stageVerdict `shouldBe` Just "none"
+
+            traceBundle <- readFile (attemptDirD3 root 1 </> "trace-bundle.json")
+            extractStringField "attempt_verdict" traceBundle `shouldBe` Just "repair-supporting"
+            extractStringField "fix_hypothesis" traceBundle
+                `shouldSatisfy` maybe False (isInfixOf "H1:")
+            extractStringField "divergence_boundary" traceBundle
+                `shouldBe` Just "witness-replay/applyInstantiation-instbot-precondition"
+            extractStringField "owner_account" traceBundle
+                `shouldSatisfy` maybe False (isInfixOf "MLF.Elab.Inst.applyInstantiation")
+
+            artifact <- readFile (root </> "docs" </> "plans" </> "2026-03-16-uri-r2-c1-d3-bounded-fixability-probe.md")
+            artifact `shouldSatisfy` isInfixOf "Stage: `D3`"
+            artifact `shouldSatisfy` isInfixOf "Attempt: 1"
+            artifact `shouldSatisfy` isInfixOf "`D3-H`"
+            artifact `shouldSatisfy` isInfixOf "`D3-B`"
+            artifact `shouldSatisfy` isInfixOf "`D3-V`"
+            artifact `shouldSatisfy` isInfixOf "repair-supporting"
+
+        it "rejects wrong scenario, stage, entrypoint, and out-of-range attempt before writing D3 evidence" $ do
+            root <- freshRoot "d3-invalid-tuple"
+            _ <- seedAuthoritativeReplayBoundary root
+            _ <- requireD1Report root 1
+            seedAuthoritativeD1ReviewRecord root
+            _ <- requireD2Report root 1
+            seedAuthoritativeD2ReviewRecord root
+
+            wrongScenario <- runResearchPrototype $
+                PrototypeRequest
+                    { prRepoRoot = root
+                    , prResearchEntrypointId = replayRootCauseEntrypointId
+                    , prStageSelector = stageSelectorD3
+                    , prScenarioId = "wrong-scenario"
+                    , prAttemptId = 1
+                    }
+            wrongScenario `shouldBe` Left (UnsupportedScenario "wrong-scenario")
+
+            wrongStage <- runResearchPrototype $
+                PrototypeRequest
+                    { prRepoRoot = root
+                    , prResearchEntrypointId = replayRootCauseEntrypointId
+                    , prStageSelector = "wrong-stage"
+                    , prScenarioId = scenarioIdUriR2C1OnlyV1
+                    , prAttemptId = 1
+                    }
+            wrongStage `shouldBe` Left (UnsupportedStageSelector "wrong-stage")
+
+            wrongEntrypoint <- runResearchPrototype $
+                PrototypeRequest
+                    { prRepoRoot = root
+                    , prResearchEntrypointId = "wrong-entrypoint"
+                    , prStageSelector = stageSelectorD3
+                    , prScenarioId = scenarioIdUriR2C1OnlyV1
+                    , prAttemptId = 1
+                    }
+            wrongEntrypoint `shouldBe` Left (UnsupportedResearchEntrypoint "wrong-entrypoint")
+
+            wrongAttempt <- runResearchPrototype $
+                PrototypeRequest
+                    { prRepoRoot = root
+                    , prResearchEntrypointId = replayRootCauseEntrypointId
+                    , prStageSelector = stageSelectorD3
+                    , prScenarioId = scenarioIdUriR2C1OnlyV1
+                    , prAttemptId = 0
+                    }
+            wrongAttempt `shouldBe` Left (UnsupportedAttemptId 0)
+
+            doesDirectoryExist (attemptDirD3 root 1) >>= (`shouldBe` False)
+
 runAccepted :: FilePath -> Int -> Expectation
 runAccepted root attemptId = do
     result <- runPrototype stageSelectorP1 root attemptId
@@ -632,6 +751,13 @@ requireD2Report root attemptId = do
         Left err -> expectationFailure ("Expected D2 execution, got: " ++ show err) >> fail "d2 failed"
         Right report -> pure report
 
+requireD3Report :: FilePath -> Int -> IO PrototypeReport
+requireD3Report root attemptId = do
+    result <- runD3 root attemptId
+    case result of
+        Left err -> expectationFailure ("Expected D3 execution, got: " ++ show err) >> fail "d3 failed"
+        Right report -> pure report
+
 runPrototype :: String -> FilePath -> Int -> IO (Either PrototypeError PrototypeReport)
 runPrototype stageSelector root attemptId =
     runResearchPrototype $
@@ -661,6 +787,17 @@ runD2 root attemptId =
             { prRepoRoot = root
             , prResearchEntrypointId = replayRootCauseEntrypointId
             , prStageSelector = stageSelectorD2
+            , prScenarioId = scenarioIdUriR2C1OnlyV1
+            , prAttemptId = attemptId
+            }
+
+runD3 :: FilePath -> Int -> IO (Either PrototypeError PrototypeReport)
+runD3 root attemptId =
+    runResearchPrototype $
+        PrototypeRequest
+            { prRepoRoot = root
+            , prResearchEntrypointId = replayRootCauseEntrypointId
+            , prStageSelector = stageSelectorD3
             , prScenarioId = scenarioIdUriR2C1OnlyV1
             , prAttemptId = attemptId
             }
@@ -702,6 +839,37 @@ seedAuthoritativeD1ReviewRecord root = do
                 , "}"
                 ]
     createDirectoryIfMissing True (root </> "orchestrator" </> "rounds" </> "round-020")
+    writeFile reviewRecordPath reviewRecordContent
+
+seedAuthoritativeD2ReviewRecord :: FilePath -> IO ()
+seedAuthoritativeD2ReviewRecord root = do
+    let reviewRecordPath =
+            root
+                </> "orchestrator"
+                </> "rounds"
+                </> "round-021"
+                </> "review-record.json"
+        reviewRecordContent =
+            unlines
+                [ "{"
+                , "  \"research_entrypoint_id\": \"uri-r2-c1-p2-replay-root-cause-v1\","
+                , "  \"scenario_id\": \"uri-r2-c1-only-v1\","
+                , "  \"stage_id\": \"D2\","
+                , "  \"attempt\": 1,"
+                , "  \"attempt_verdict\": \"accepted\","
+                , "  \"stage_result\": \"pass\","
+                , "  \"stage_action\": \"finalize\","
+                , "  \"retry_reason\": \"none\","
+                , "  \"fix_hypothesis\": \"none\","
+                , "  \"status\": \"authoritative\","
+                , "  \"authoritative_attempt\": 1,"
+                , "  \"authoritative_result\": \"pass\","
+                , "  \"artifact_path\": \"docs/plans/2026-03-16-uri-r2-c1-d2-replay-mismatch-localization.md\","
+                , "  \"evidence_dir\": \"orchestrator/rounds/round-021/evidence/D2/attempt-1/\","
+                , "  \"terminal_reason\": \"none\""
+                , "}"
+                ]
+    createDirectoryIfMissing True (root </> "orchestrator" </> "rounds" </> "round-021")
     writeFile reviewRecordPath reviewRecordContent
 
 seedAuthoritativeP1ReviewRecord :: FilePath -> IO ()
@@ -860,6 +1028,10 @@ attemptDirD1 root attemptId =
 attemptDirD2 :: FilePath -> Int -> FilePath
 attemptDirD2 root attemptId =
     root </> d2AttemptEvidenceRelativeDir attemptId
+
+attemptDirD3 :: FilePath -> Int -> FilePath
+attemptDirD3 root attemptId =
+    root </> d3AttemptEvidenceRelativeDir attemptId
 
 swallowMissing :: IOError -> IO ()
 swallowMissing err

@@ -1,6 +1,7 @@
 module MLF.Research.URI.R2.C1.Prototype.Artifact (
     writeD1Artifact,
     writeD2Artifact,
+    writeD3Artifact,
     writeP1Artifact,
     writeP2Artifact,
     writeP3Artifact,
@@ -12,6 +13,7 @@ import System.FilePath (takeDirectory)
 
 import MLF.Research.URI.R2.C1.Prototype.D1 (D1Execution(..), D1CheckArtifact(..))
 import MLF.Research.URI.R2.C1.Prototype.D2 (D2Execution(..), D2CheckArtifact(..))
+import MLF.Research.URI.R2.C1.Prototype.D3 (D3Execution(..), D3CheckArtifact(..))
 import MLF.Research.URI.R2.C1.Prototype.P2 (P2Execution(..), P2CheckArtifact(..))
 import MLF.Research.URI.R2.C1.Prototype.P3 (P3Execution(..), P3CheckArtifact(..))
 import MLF.Research.URI.R2.C1.Prototype.P4 (P4Execution(..), P4CheckArtifact(..), P4StageAuthority(..))
@@ -29,6 +31,13 @@ writeD2Artifact execution = do
     let path = ppArtifactPath (prototypePaths (prototypeRequest (d2AppReport execution)))
     createDirectoryIfMissing True (takeDirectory path)
     writeFile path (renderD2Artifact execution)
+    pure path
+
+writeD3Artifact :: D3Execution -> IO FilePath
+writeD3Artifact execution = do
+    let path = ppArtifactPath (prototypePaths (prototypeRequest (d3AppReport execution)))
+    createDirectoryIfMissing True (takeDirectory path)
+    writeFile path (renderD3Artifact execution)
     pure path
 
 writeP1Artifact :: PrototypeReport -> IO FilePath
@@ -175,6 +184,71 @@ renderD2Artifact execution =
                , "## Stage Result"
                , ""
                , "`" ++ d2StageResult execution ++ "`"
+               ]
+
+renderD3Artifact :: D3Execution -> String
+renderD3Artifact execution =
+    let report = d3AppReport execution
+        req = prototypeRequest report
+        attemptId = prAttemptId req
+    in unlines $
+        [ "# `D3` Bounded Fixability Probe For `URI-R2-C1`"
+        , ""
+        , "Date: 2026-03-16"
+        , "Roadmap item: 3"
+        , "Stage: `D3`"
+        , "Attempt: " ++ show attemptId
+        , "Active subject: `URI-R2-C1`"
+        , "Active scenario: `uri-r2-c1-only-v1`"
+        , "Artifact kind: bounded fixability probe"
+        , ""
+        , "## Inherited Authoritative Inputs"
+        , ""
+        , "- `" ++ d3InheritedSubjectTokenPath execution ++ "`"
+        , "- `" ++ d3InheritedP2CheckWPath execution ++ "`"
+        , "- `" ++ d3InheritedP2StageVerdictPath execution ++ "`"
+        , "- `" ++ d3InheritedD1StageVerdictPath execution ++ "`"
+        , "- `" ++ d3InheritedD1ReviewRecordPath execution ++ "`"
+        , "- `" ++ d3InheritedD2CheckLPath execution ++ "`"
+        , "- `" ++ d3InheritedD2CheckOPath execution ++ "`"
+        , "- `" ++ d3InheritedD2StageVerdictPath execution ++ "`"
+        , "- `" ++ d3InheritedD2TraceBundlePath execution ++ "`"
+        , "- `" ++ d3InheritedD2ReviewRecordPath execution ++ "`"
+        , ""
+        , "## Stage Input Interface"
+        , ""
+        , "- Shared entrypoint tuple: `{ research_entrypoint_id: uri-r2-c1-p2-replay-root-cause-v1, stage_selector: D3-fixability-probe, scenario_id: uri-r2-c1-only-v1, attempt_id: "
+            ++ show attemptId
+            ++ " }`."
+        , "- Correlation id: `" ++ d3CorrelationId execution ++ "`."
+        , ""
+        , "## Evidence"
+        , ""
+        , "- Attempt-local evidence directory: `" ++ d3AttemptEvidenceRelativeDir attemptId ++ "`."
+        , "- Trace bundle: `" ++ d3TraceBundleRelativePath attemptId ++ "`."
+        ]
+            ++ map renderD3CheckLine (d3Checks execution)
+            ++ [ "- Attempt verdict: `" ++ d3AttemptVerdict execution ++ "`."
+               , "- Scope note: `D3` is a bounded fixability probe only; no repair-track implementation is performed in this stage."
+               , "- Fix hypothesis: `" ++ d3FixHypothesis execution ++ "`."
+               , "- Bounded repair direction (probe-only): `" ++ d3RepairDirection execution ++ "`."
+               , "- Divergence boundary statement: `" ++ d3DivergenceBoundary execution ++ "`."
+               , "- Owner account statement: `" ++ d3OwnerAccount execution ++ "`."
+               , "- Trace refs: " ++ unwords (map (\ref -> "`" ++ ref ++ "`") (d3TraceRefs execution))
+               , "- Observations:"
+               ]
+            ++ map ("- " ++) (d3TraceSummary execution)
+            ++ [ ""
+               , "## D3 Outcomes"
+               , ""
+               , "- `D3-H`: `" ++ showD3CheckStatus "D3-H" (d3Checks execution) ++ "`"
+               , "- `D3-B`: `" ++ showD3CheckStatus "D3-B" (d3Checks execution) ++ "`"
+               , "- `D3-V`: `" ++ showD3CheckStatus "D3-V" (d3Checks execution) ++ "`"
+               , "- Attempt verdict class: `" ++ d3AttemptVerdict execution ++ "`"
+               , ""
+               , "## Stage Result"
+               , ""
+               , "`" ++ d3StageResult execution ++ "`"
                ]
 
 renderP1Artifact :: PrototypeReport -> String
@@ -489,6 +563,17 @@ renderD2CheckLine check =
         ++ d2caEvidenceRef check
         ++ "`."
 
+renderD3CheckLine :: D3CheckArtifact -> String
+renderD3CheckLine check =
+    let result = d3caResult check
+    in "- `"
+        ++ ckCheckId result
+        ++ "`: `"
+        ++ ckStatus result
+        ++ "` via `"
+        ++ d3caEvidenceRef check
+        ++ "`."
+
 showD1CheckStatus :: String -> [D1CheckArtifact] -> String
 showD1CheckStatus checkId checks =
     case filter (\check -> ckCheckId (d1caResult check) == checkId) checks of
@@ -499,6 +584,12 @@ showD2CheckStatus :: String -> [D2CheckArtifact] -> String
 showD2CheckStatus checkId checks =
     case filter (\check -> ckCheckId (d2caResult check) == checkId) checks of
         (check : _) -> ckStatus (d2caResult check)
+        [] -> "missing"
+
+showD3CheckStatus :: String -> [D3CheckArtifact] -> String
+showD3CheckStatus checkId checks =
+    case filter (\check -> ckCheckId (d3caResult check) == checkId) checks of
+        (check : _) -> ckStatus (d3caResult check)
         [] -> "missing"
 
 renderP2RejectionTriggers :: P2Execution -> String
