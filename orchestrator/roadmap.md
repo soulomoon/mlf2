@@ -30,7 +30,7 @@
    Depends on: item 1
    Completion notes: complete when `docs/plans/2026-03-16-uri-r2-c1-d2-replay-mismatch-localization.md` is accepted, the reviewer record names the authoritative `D2` attempt, and the round either localizes one exact bounded divergence boundary and owner account or records a bounded non-pass explicitly.
 
-3. [pending] Execute the `D3` bounded fixability probe for `URI-R2-C1`
+3. [done] Execute the `D3` bounded fixability probe for `URI-R2-C1`
    Depends on: item 2
    Completion notes: complete when `docs/plans/2026-03-16-uri-r2-c1-d3-bounded-fixability-probe.md` is accepted, the reviewer record names the authoritative `D3` attempt, and the round records either one bounded repair-supporting direction or an explicit bounded non-reopen result.
 
