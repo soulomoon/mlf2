@@ -4,6 +4,37 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 90 `URI-R2-C1` P2 replay root-cause orchestrator scaffold (completed 2026-03-16)
+
+- Completed:
+  - refreshed the live top-level `orchestrator/` so it now succeeds the finished prototype-evidence `P1` through `P4` campaign while preserving `orchestrator/rounds/round-001` through `round-019` as historical evidence;
+  - wrote the approved successor design source at `docs/superpowers/specs/2026-03-16-uri-r2-c1-p2-replay-root-cause-roadmap-design.md`, defining a bounded `D1` through `D4` diagnosis ladder rooted in the authoritative `P2-W` `partial-replay` mismatch;
+  - updated the live roadmap, verification contract, retry-subloop doc, and role prompts so the next lawful run targets replay-failure reproduction, localization, bounded fixability probing, and a final `reopen-repair-track | remain-stop` decision.
+- Verification:
+  - `python3 -m json.tool orchestrator/state.json`: PASS
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`: PASS
+  - `test -f docs/superpowers/specs/2026-03-16-uri-r2-c1-p2-replay-root-cause-roadmap-design.md && test -f orchestrator/retry-subloop.md`: PASS
+  - `git diff --check`: PASS
+- Rolling priorities (next):
+  1. Run `round-020` on the new live roadmap, starting with `D1` replay-failure reproduction under `contract_version: 2`.
+  2. Keep the investigation bounded to the authoritative `P1` subject token, the accepted `P2` replay mismatch, and the exact scenario `uri-r2-c1-only-v1`.
+  3. Do not open any repair implementation track unless `D4` explicitly reaches `reopen-repair-track`.
+
+## Task 89 `URI-R2-C1` orchestrator retry-subloop contract (completed 2026-03-16)
+
+- Completed:
+  - amended the live top-level `orchestrator/` from the single-shot prototype-evidence contract to a forward-only `contract_version: 2` retry model for future `P1` through `P3` rounds;
+  - added the approved retry-subloop amendment spec at `docs/superpowers/specs/2026-03-16-uri-r2-c1-prototype-evidence-retry-subloop-amendment.md` plus the repo-local operational contract at `orchestrator/retry-subloop.md`;
+  - updated `orchestrator/state.json`, `orchestrator/verification.md`, `orchestrator/roadmap.md`, and the live role prompts so review now distinguishes `attempt_verdict` from `stage_action`, preserves immutable per-attempt review history, and finalizes authority only on `accepted + finalize`.
+- Verification:
+  - `python3 -m json.tool orchestrator/state.json`: PASS
+  - `git diff --check`: PASS
+  - `rg -n 'contract_version|retry-subloop|accepted \+ retry|accepted \+ finalize|rejected \+ retry' orchestrator docs/superpowers/specs AGENTS.md`: PASS
+- Rolling priorities (next):
+  1. If `URI-R2-C1` is revisited, add a new bounded roadmap item or successor roadmap before restarting the loop; the original `P1` through `P4` roadmap remains complete.
+  2. Use the new retry-subloop contract only for future rounds; preserve `round-016` through `round-019` as immutable `contract_version: 1` evidence.
+  3. If the real target is reopening `URI-R2-C1`, start with a bounded root-cause task on the `P2` replay mismatch rather than fabricating more terminal rounds.
+
 ## Task 88 `URI-R2-C1` prototype evidence orchestrator scaffold (completed 2026-03-15)
 
 - Completed:

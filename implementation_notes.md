@@ -154,6 +154,21 @@
 
 # Implementation Notes
 
+## 2026-03-16 — Live orchestrator successor track now targets the `P2` replay root cause
+
+- The top-level `orchestrator/` no longer points at the completed prototype-evidence `P1` through `P4` roadmap as live work. That finished track is now explicit predecessor evidence for a new successor roadmap focused only on the authoritative `P2-W` replay mismatch.
+- The live successor design source is `docs/superpowers/specs/2026-03-16-uri-r2-c1-p2-replay-root-cause-roadmap-design.md`, and the live roadmap now stages `D1` through `D4`: replay reproduction, mismatch localization, bounded fixability probing, and a repair-track decision gate.
+- The v2 retry contract remains active, but its live retry-eligible stages are now `D1`, `D2`, and `D3`; `D4` is terminal and may not use accepted semantic retries.
+- This is still a control-plane-only change. No production solver/runtime behavior changed.
+
+## 2026-03-16 — Orchestrator `contract_version: 2` retry subloop
+
+- The live top-level `orchestrator/` now carries a forward-only retry amendment for future `URI-R2-C1` prototype-evidence rounds. `orchestrator/state.json` records `contract_version: 2` and an optional `retry` block that keeps same-round retries explicit instead of overloading the outer stage machine.
+- Review authority is now two-dimensional for `P1` through `P3`: `attempt_verdict` says whether the current attempt counts as valid evidence, while `stage_action` says whether the stage finalizes now or loops back to `plan`. Only `accepted + finalize` becomes authoritative carry-forward for downstream stages.
+- Retry history is now meant to stay immutable and auditable: `review.md` remains the latest live review, `reviews/attempt-<n>.md` stores per-attempt snapshots, `attempt-log.jsonl` is controller-owned machine state history, and `review-record.json` is written only when a stage becomes authoritative.
+- `P4` remains an aggregate gate, not a semantic retry sink. It may still bounce on ordinary implementation rejection, but it must never emit `accepted + retry`.
+- This is a control-plane-only change. Historical rounds `round-016` through `round-019` remain valid `contract_version: 1` evidence, and no production solver/runtime behavior changed.
+
 ## 2026-03-13 — M7 explicit-only acyclic graph `TyMu` path
 
 - Phase 1 no longer rejects normalized recursive annotations outright. Instead,

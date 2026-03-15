@@ -3,6 +3,8 @@
 Date: 2026-03-15
 Status: Proposed design
 
+Amendment note (2026-03-16): future rounds under this control plane now inherit `docs/superpowers/specs/2026-03-16-uri-r2-c1-prototype-evidence-retry-subloop-amendment.md`. That amendment supersedes the earlier three-attempt cap and v1 reviewer-record/control-plane assumptions for new rounds while preserving historical rounds `round-016` through `round-019` as valid v1 evidence.
+
 ## Purpose
 
 Define a separate experimental branch-of-record for `URI-R2-C1` that follows the completed prototype-free `RE1` through `RE5` track.
@@ -88,7 +90,7 @@ Research entrypoint interface:
 - invocation shape: one research entrypoint command or function with arguments `{ stage_selector, scenario_id, attempt_id }`;
 - `stage_selector` enum: `P1-subject-discovery`, `P2-provenance-preservation`, `P3-safety-validation`;
 - `scenario_id`: must be exactly `uri-r2-c1-only-v1`; no aliases or alternate scenario names are admissible in this roadmap;
-- `attempt_id`: integer `1`, `2`, or `3`, monotonically increasing within the current stage;
+- `attempt_id`: integer `>= 1`, monotonically increasing within the current stage under the active retry-subloop budget;
 - emitted outputs:
   - machine-readable trace bundle under `orchestrator/rounds/<round-id>/evidence/<stage>/attempt-<n>/`;
   - reviewer-facing artifact draft inputs under the same attempt directory;
@@ -180,7 +182,7 @@ Artifact versioning rule:
 - the canonical stage artifact path always points to the latest accepted attempt for that stage;
 - failed or inconclusive reruns do not overwrite prior evidence silently; they must be recorded in the round-local review or progress artifacts for the current attempt;
 - if a stage is rerun, the stage artifact must include an `Attempt: N` line in metadata, and the reviewer record must note which attempt became authoritative;
-- each stage receives one initial attempt plus at most two repair-and-rerun attempts, so the maximum total is three attempts per stage before `P4` must consume the failure classification.
+- the original three-attempt cap is superseded for future rounds by the 2026-03-16 retry-subloop amendment; new rounds use that amendment's budget, finalization, and carry-forward rules.
 
 Attempt storage model:
 
@@ -197,6 +199,8 @@ Reviewer record:
 - purpose: authoritative stage map for the active round, including the accepted attempt and result for every stage that ran.
 
 Reviewer record schema:
+
+For `contract_version: 2` rounds, this schema is extended by the 2026-03-16 retry-subloop amendment with retry summaries and finalization mode. The schema below remains valid historical evidence for the earlier v1 rounds.
 
 ```json
 {
@@ -655,7 +659,7 @@ Handling rules:
 - `semantic-negative` is an admissible research result and may feed `hard-stop`;
 - `inconclusive` is not evidence for reopening and is not automatically a semantic negative;
 - an `inconclusive` stage must first be rerun or repaired within the same bounded track;
-- the rerun policy is bounded to one initial attempt plus at most two repair-and-rerun attempts per stage before the failure must be classified for `P4`;
+- the original three-attempt rerun policy is superseded for future rounds by the 2026-03-16 retry-subloop amendment; `P4` still consumes only authoritative finalized upstream stage results.
 - if the inconclusive condition cannot be eliminated without violating the fixed boundary, the later gate must resolve to `hard-stop` rather than manufacturing a positive result.
 
 `P4` does not use the non-terminal stage-result enum. It consumes prior stage classifications and emits only the terminal decision enum:
