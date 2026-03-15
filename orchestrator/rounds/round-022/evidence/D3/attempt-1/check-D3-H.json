@@ -1,0 +1,13 @@
+{
+  "research_entrypoint_id": "uri-r2-c1-p2-replay-root-cause-v1",
+  "stage_selector": "D3-fixability-probe",
+  "scenario_id": "uri-r2-c1-only-v1",
+  "attempt_id": 1,
+  "check_id": "D3-H",
+  "correlation_id": "uri-r2-c1-only-v1-d3-attempt-1",
+  "subject_id": "uri-r2-c1/cluster-1",
+  "evidence_ref": "orchestrator/rounds/round-022/evidence/D3/attempt-1/trace-bundle.json",
+  "verdict": "pass",
+  "rejection_trigger": "none",
+  "details": "H1 support established at witness-replay/applyInstantiation-instbot-precondition: localized boundary and owner are stable, and one bounded paper-faithful repair direction exists without widening. direction=Bounded direction: align InstBot precondition handling with the no-fallback replay shape (`t5 -> t5`) at the localized applyInstantiation boundary, preserving URI-R2-C1 and uri-r2-c1-only-v1 scope."
+}

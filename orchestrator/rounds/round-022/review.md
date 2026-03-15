@@ -1,0 +1,51 @@
+# Round `round-022` Attempt `1` Review (`D3`)
+
+- Baseline checks:
+  - `git diff --check` (pass)
+  - `python3 -m json.tool orchestrator/state.json >/dev/null` (pass)
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json` (pass; `contract_version: 2`, `retry: null`)
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md` (pass; ordered status list present)
+  - `test -f docs/superpowers/specs/2026-03-16-uri-r2-c1-p2-replay-root-cause-roadmap-design.md` (pass)
+  - `test -f docs/superpowers/specs/2026-03-16-uri-r2-c1-prototype-evidence-retry-subloop-amendment.md` (pass)
+  - `test -f orchestrator/retry-subloop.md` (pass)
+  - `cabal build all && cabal test` (pass; `1121 examples, 0 failures`; no post-success Cabal log-permission failure observed)
+  - Continuity guards:
+  - `git diff --name-only | rg '^orchestrator/rounds/round-(00[1-9]|01[0-9])/' || true` (pass; no edits under rounds `001..019`)
+  - `git ls-files --others --exclude-standard | rg '^orchestrator/rounds/round-(00[1-9]|01[0-9])/' || true` (pass; no untracked files under rounds `001..019`)
+  - `git diff --name-only | rg '^tasks/todo/2026-03-11-recursive-types-orchestration/' || true` (pass)
+  - `git ls-files --others --exclude-standard | rg '^tasks/todo/2026-03-11-recursive-types-orchestration/' || true` (pass)
+
+- Task-specific checks:
+  - Shared-entrypoint invocation verified: `cabal run mlf2 -- --research-entrypoint uri-r2-c1-p2-replay-root-cause-v1 --stage-selector D3-fixability-probe --scenario-id uri-r2-c1-only-v1 --attempt-id 1` (pass; `Prototype result: pass`)
+  - Default path remains unchanged and no second executable interface was introduced: `cabal run mlf2` (pass; `Type: ∀(a ⩾ ⊥) a -> a`)
+  - Attempt-local D3 output set is exact: `check-D3-H.json`, `check-D3-B.json`, `check-D3-V.json`, `stage-verdict.json`, `trace-bundle.json`
+  - JSON validation sweep for all `attempt-1` files (pass)
+  - `subject-token.json` absence verified in `orchestrator/rounds/round-022/evidence/D3/attempt-1/`
+  - D3-H/D3-B/D3-V claims verified from machine-readable evidence:
+  - `check-D3-H.json`: `verdict=pass`, `rejection_trigger=none`, localized boundary `witness-replay/applyInstantiation-instbot-precondition`, single bounded hypothesis `H1`
+  - `check-D3-B.json`: `verdict=pass`, `rejection_trigger=none`, tuple lock preserved and explicit no-widening/no-second-interface statement
+  - `check-D3-V.json`: `verdict=pass`, `rejection_trigger=none`, attempt classified `repair-supporting`
+  - Stage verdict consistency verified: `attempt_verdict=repair-supporting`, `stage_result=pass`, `terminal_reason=none`, `subject_token_ref=null`
+  - Bounded-fixability honesty probe: evidence supports one repair direction only at the inherited D2-localized boundary/owner (`applyInstantiation` `InstBot` precondition) and does not claim implementation completion or widened scope
+  - Rejection-path immutability verified:
+  - wrong tuple invocations fail fast with `UnsupportedScenario`, `UnsupportedResearchEntrypoint`, `UnsupportedStageSelector`, `UnsupportedAttemptId`
+  - SHA-256 hashes of all `attempt-1` D3 evidence files are unchanged before/after rejection probes
+  - Forbidden widening and controller-file checks:
+  - no edits to `orchestrator/state.json`, `orchestrator/roadmap.md`, or `orchestrator/attempt-log.jsonl`
+  - no `src-public/` or `app/` changes, and no evidence of widened subject/scenario ownership claims
+
+- Implemented stage result: `pass`
+- Attempt verdict: `accepted`
+- Stage action: `finalize`
+- Retry reason: `none`
+- Fix hypothesis: `none`
+- Decision summary:
+  - D3 attempt 1 satisfies the bounded fixability probe contract under the required tuple, validates D3-H/D3-B/D3-V without widening, and records a probe-only repair-supporting direction at the exact D2-localized boundary.
+  - Stage should finalize and become authoritative for D3.
+- Evidence summary:
+  - `docs/plans/2026-03-16-uri-r2-c1-d3-bounded-fixability-probe.md`
+  - `orchestrator/rounds/round-022/evidence/D3/attempt-1/check-D3-H.json`
+  - `orchestrator/rounds/round-022/evidence/D3/attempt-1/check-D3-B.json`
+  - `orchestrator/rounds/round-022/evidence/D3/attempt-1/check-D3-V.json`
+  - `orchestrator/rounds/round-022/evidence/D3/attempt-1/stage-verdict.json`
+  - `orchestrator/rounds/round-022/evidence/D3/attempt-1/trace-bundle.json`

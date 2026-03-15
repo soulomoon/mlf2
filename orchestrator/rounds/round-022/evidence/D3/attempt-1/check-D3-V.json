@@ -1,0 +1,13 @@
+{
+  "research_entrypoint_id": "uri-r2-c1-p2-replay-root-cause-v1",
+  "stage_selector": "D3-fixability-probe",
+  "scenario_id": "uri-r2-c1-only-v1",
+  "attempt_id": 1,
+  "check_id": "D3-V",
+  "correlation_id": "uri-r2-c1-only-v1-d3-attempt-1",
+  "subject_id": "uri-r2-c1/cluster-1",
+  "evidence_ref": "orchestrator/rounds/round-022/evidence/D3/attempt-1/trace-bundle.json",
+  "verdict": "pass",
+  "rejection_trigger": "none",
+  "details": "attempt classified repair-supporting: one bounded repair direction is justified and remains within D3 scope"
+}
