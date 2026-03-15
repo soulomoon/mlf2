@@ -4,6 +4,24 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 
 ## Open
 
+### BUG-2026-03-16-001
+- Status: Open
+- Priority: High
+- Discovered: 2026-03-16
+- Summary: The authoritative `URI-R2-C1` replay path fails at `MLF.Elab.Inst.applyInstantiation` because the `InstBot` branch still requires bottom while the bounded no-fallback replay path carries the localized shape `t9 -> t9` / `t5 -> t5`.
+- Minimal reproducer:
+  - `python3 -m json.tool orchestrator/rounds/round-017/evidence/P2/attempt-2/check-P2-W.json`
+  - `python3 -m json.tool orchestrator/rounds/round-021/evidence/D2/attempt-1/check-D2-L.json`
+  - `python3 -m json.tool orchestrator/rounds/round-022/evidence/D3/attempt-1/trace-bundle.json`
+- Expected vs actual:
+  - Expected: the bounded `generalizeWithPlan -> schemeToType -> reifyTypeWithNamedSetNoFallback -> witness replay` path should preserve the authoritative `P1` subject through replay, with `applyInstantiation` accepting the replay shape established by the no-fallback path at the localized boundary.
+  - Actual: `P2-W` finalized as `partial-replay`; the localized replay step reaches `witness-replay/applyInstantiation-instbot-precondition`, where `InstBot` rejects the carried non-bottom shape (`InstBot expects ⊥, got: t9 -> t9`).
+- Suspected/owning area:
+  - `/Users/ares/.codex/worktrees/d432/mlf4/src/MLF/Elab/Inst.hs`
+  - `MLF.Elab.Inst.applyInstantiation` (`InstBot` branch)
+- Thesis impact:
+  - This blocks the paper-faithful bounded replay continuity required to carry the authoritative `P1` subject through the `P2` provenance-preservation path for `URI-R2-C1`.
+  - The successor diagnostic roadmap (`D1` through `D4`) narrowed the defect to one owner boundary and justified a later bounded repair-track reopen, but did not repair runtime behavior.
 
 ## Resolved
 

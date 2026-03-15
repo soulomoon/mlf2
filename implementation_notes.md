@@ -154,6 +154,14 @@
 
 # Implementation Notes
 
+## 2026-03-16 - `URI-R2-C1` replay root-cause successor track completed
+
+- The live top-level `orchestrator/` successor roadmap for the authoritative `P2-W` replay mismatch is now complete. Rounds `round-020` through `round-023` are accepted historical evidence, not active live work.
+- `D2` localized the bounded divergence to `witness-replay/applyInstantiation-instbot-precondition` and assigned the owner account to `MLF.Elab.Inst.applyInstantiation` (`InstBot` branch).
+- `D3` established one bounded repair-supporting direction without scope widening: align the `InstBot` precondition handling with the no-fallback replay shape (`t5 -> t5`) at the localized boundary.
+- `D4` finalized the successor-track aggregate result as `reopen-repair-track`.
+- No production repair landed in this track. Any actual implementation change now requires a separate repair-track roadmap that treats `round-020` through `round-023` as predecessor evidence.
+
 ## 2026-03-16 — Live orchestrator successor track now targets the `P2` replay root cause
 
 - The top-level `orchestrator/` no longer points at the completed prototype-evidence `P1` through `P4` roadmap as live work. That finished track is now explicit predecessor evidence for a new successor roadmap focused only on the authoritative `P2-W` replay mismatch.
