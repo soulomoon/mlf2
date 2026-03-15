@@ -26,7 +26,7 @@
    Depends on: the completed `P1` through `P4` prototype-evidence track, the authoritative `P1` subject token, and the accepted `P2` replay-failure artifact
    Completion notes: complete when `docs/plans/2026-03-16-uri-r2-c1-d1-replay-reproduction-contract.md` is accepted, the reviewer record names the authoritative `D1` attempt, and the round either reproduces the authoritative bounded replay failure under the root-cause entrypoint or records a bounded non-pass without widening.
 
-2. [pending] Execute the `D2` replay mismatch localization for `URI-R2-C1`
+2. [done] Execute the `D2` replay mismatch localization for `URI-R2-C1`
    Depends on: item 1
    Completion notes: complete when `docs/plans/2026-03-16-uri-r2-c1-d2-replay-mismatch-localization.md` is accepted, the reviewer record names the authoritative `D2` attempt, and the round either localizes one exact bounded divergence boundary and owner account or records a bounded non-pass explicitly.
 
