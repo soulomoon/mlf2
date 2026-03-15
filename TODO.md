@@ -4,6 +4,21 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 91 `URI-R2-C1` P2 replay root-cause orchestrator run (completed 2026-03-16)
+
+- Completed:
+  - executed the live top-level successor roadmap through `round-020` to `round-023` under `contract_version: 2`, with all substantive stage work delegated under the repo-local orchestrator contract;
+  - landed `D1`, `D2`, and `D3` as authoritative `pass` results, then finalized `D4` with the terminal outcome `reopen-repair-track`;
+  - returned `orchestrator/state.json` to terminal `stage: "done"` with `last_completed_round: "round-023"` so the finished diagnostic track is now historical evidence rather than live work.
+- Verification:
+  - `python3 -m json.tool orchestrator/state.json`: PASS
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`: PASS
+  - `git diff --check`: PASS
+- Rolling priorities (next):
+  1. Start a separate bounded repair-track roadmap before making any implementation change for `URI-R2-C1`; the completed `D1` through `D4` diagnostic roadmap is no longer live work.
+  2. Keep any repair scope locked to `URI-R2-C1`, `uri-r2-c1-only-v1`, and the localized boundary `witness-replay/applyInstantiation-instbot-precondition`.
+  3. Preserve `round-020` through `round-023` as predecessor evidence for the repair track instead of reopening the diagnostic rounds.
+
 ## Task 90 `URI-R2-C1` P2 replay root-cause orchestrator scaffold (completed 2026-03-16)
 
 - Completed:
