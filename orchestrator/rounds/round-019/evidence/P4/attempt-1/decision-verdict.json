@@ -1,0 +1,22 @@
+{
+  "research_entrypoint_id": "uri-r2-c1-prototype-entrypoint-v1",
+  "stage_selector": "P4-prototype-decision-gate",
+  "scenario_id": "uri-r2-c1-only-v1",
+  "attempt_id": 1,
+  "stage": "P4",
+  "correlation_id": "uri-r2-c1-only-v1-p4-attempt-1",
+  "decision_evidence_ref": "orchestrator/rounds/round-019/evidence/P4/attempt-1/decision-verdict.json",
+  "stage_consumption_ref": "orchestrator/rounds/round-019/evidence/P4/attempt-1/stage-consumption.json",
+  "final_decision": "hard-stop",
+  "terminal_reason": "blocking-stop-condition",
+  "consumed_stage_results": {
+    "P1": "pass",
+    "P2": "semantic-negative",
+    "P3": "semantic-negative"
+  },
+  "decision_rationale": "At least one inherited stage is semantic-negative or terminally blocked, so bounded P4 resolves to hard-stop.",
+  "allowed_terminal_decisions": [
+    "reopen-handoff-track",
+    "hard-stop"
+  ]
+}

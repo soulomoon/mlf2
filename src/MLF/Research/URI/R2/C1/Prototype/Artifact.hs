@@ -1,7 +1,8 @@
 module MLF.Research.URI.R2.C1.Prototype.Artifact (
     writeP1Artifact,
     writeP2Artifact,
-    writeP3Artifact
+    writeP3Artifact,
+    writeP4Artifact
 ) where
 
 import System.Directory (createDirectoryIfMissing)
@@ -9,6 +10,7 @@ import System.FilePath (takeDirectory)
 
 import MLF.Research.URI.R2.C1.Prototype.P2 (P2Execution(..), P2CheckArtifact(..))
 import MLF.Research.URI.R2.C1.Prototype.P3 (P3Execution(..), P3CheckArtifact(..))
+import MLF.Research.URI.R2.C1.Prototype.P4 (P4Execution(..), P4CheckArtifact(..), P4StageAuthority(..))
 import MLF.Research.URI.R2.C1.Prototype.Types
 
 writeP1Artifact :: PrototypeReport -> IO FilePath
@@ -30,6 +32,13 @@ writeP3Artifact execution = do
     let path = ppArtifactPath (prototypePaths (prototypeRequest (p3AppReport execution)))
     createDirectoryIfMissing True (takeDirectory path)
     writeFile path (renderP3Artifact execution)
+    pure path
+
+writeP4Artifact :: P4Execution -> IO FilePath
+writeP4Artifact execution = do
+    let path = ppArtifactPath (prototypePaths (prototypeRequest (p4AppReport execution)))
+    createDirectoryIfMissing True (takeDirectory path)
+    writeFile path (renderP4Artifact execution)
     pure path
 
 renderP1Artifact :: PrototypeReport -> String
@@ -221,6 +230,60 @@ renderP3Artifact execution =
                     ]
                 else []
 
+renderP4Artifact :: P4Execution -> String
+renderP4Artifact execution =
+    let report = p4AppReport execution
+        req = prototypeRequest report
+        attemptId = prAttemptId req
+    in unlines $
+        [ "# `P4` Prototype Decision Gate For `URI-R2-C1`"
+        , ""
+        , "Date: 2026-03-15"
+        , "Roadmap item: 4"
+        , "Stage: `P4`"
+        , "Attempt: " ++ show attemptId
+        , "Active subject: `URI-R2-C1`"
+        , "Active scenario: `uri-r2-c1-only-v1`"
+        , "Artifact kind: prototype decision gate"
+        , ""
+        , "## Inherited Inputs"
+        , ""
+        , "- `docs/superpowers/specs/2026-03-15-uri-r2-c1-prototype-evidence-roadmap-design.md`"
+        , "- `docs/plans/2026-03-15-uri-r2-c1-p1-subject-discovery-prototype.md`"
+        , "- `docs/plans/2026-03-15-uri-r2-c1-p2-provenance-preservation-prototype.md`"
+        , "- `docs/plans/2026-03-15-uri-r2-c1-p3-safety-validation-prototype.md`"
+        ]
+            ++ map (\path -> "- `" ++ path ++ "`") (p4ReviewRecordPaths execution)
+            ++ [ ""
+               , "## Method"
+               , ""
+               , "- Ordered checks: `P4-CONSUME`, `P4-DECISION`."
+               , "- Decision threshold: `reopen-handoff-track` only when `P1`, `P2`, and `P3` are all `pass` with no unresolved caveat."
+               , "- Shared `correlation_id`: `" ++ p4CorrelationId execution ++ "`."
+               , ""
+               , "## Evidence"
+               , ""
+               , "- Attempt-local evidence directory: `" ++ p4AttemptEvidenceRelativeDir attemptId ++ "`."
+               , "- Stage consumption summary: `" ++ p4StageConsumptionRelativePath attemptId ++ "`."
+               , "- Decision verdict: `" ++ p4DecisionVerdictRelativePath attemptId ++ "`."
+               , "- Trace bundle: `" ++ p4TraceBundleRelativePath attemptId ++ "`."
+               ]
+            ++ map renderP4ConsumedStage (p4ConsumedStages execution)
+            ++ map renderP4CheckLine (p4Checks execution)
+            ++ [ "- Trace refs: " ++ unwords (map (\ref -> "`" ++ ref ++ "`") (p4TraceRefs execution))
+               , "- Observations:"
+               ]
+            ++ map ("- " ++) (p4TraceSummary execution)
+            ++ [ ""
+               , "## Rejection Triggers"
+               , ""
+               , renderP4RejectionTriggers execution
+               , ""
+               , "## Final Decision"
+               , ""
+               , "`" ++ p4Decision execution ++ "`"
+               ]
+
 renderCandidate :: CandidateRecord -> String
 renderCandidate candidate =
     "- `"
@@ -305,6 +368,46 @@ renderP3RejectionTriggers execution =
                 _ -> "Observed triggers: " ++ unwords (map (\trigger -> "`" ++ trigger ++ "`") observed) ++ "."
         detailsLine =
             unlines (map (\check -> "`" ++ ckCheckId (p3caResult check) ++ "`: " ++ ckDetails (p3caResult check)) (p3Checks execution))
+        vocabularyLine =
+            "Normalized vocabulary: " ++ unwords (map (\trigger -> "`" ++ trigger ++ "`") normalizedRejectionTriggers) ++ "."
+    in observedLine ++ "\n\n" ++ detailsLine ++ "\n" ++ vocabularyLine
+
+renderP4ConsumedStage :: P4StageAuthority -> String
+renderP4ConsumedStage authority =
+    "- `"
+        ++ p4saStage authority
+        ++ "` authoritative attempt `"
+        ++ show (p4saAttempt authority)
+        ++ "` => `"
+        ++ p4saResult authority
+        ++ "` (terminal_reason `"
+        ++ p4saTerminalReason authority
+        ++ "`), source `"
+        ++ p4saSourceReviewRecord authority
+        ++ "`."
+
+renderP4CheckLine :: P4CheckArtifact -> String
+renderP4CheckLine check =
+    let result = p4caResult check
+    in "- `"
+        ++ ckCheckId result
+        ++ "`: `"
+        ++ ckStatus result
+        ++ "` via `"
+        ++ p4caEvidenceRef check
+        ++ "`."
+
+renderP4RejectionTriggers :: P4Execution -> String
+renderP4RejectionTriggers execution =
+    let observed =
+            filter (/= "none")
+                (map (ckRejectionTrigger . p4caResult) (p4Checks execution))
+        observedLine =
+            case observed of
+                [] -> "Observed triggers: `none`."
+                _ -> "Observed triggers: " ++ unwords (map (\trigger -> "`" ++ trigger ++ "`") observed) ++ "."
+        detailsLine =
+            unlines (map (\check -> "`" ++ ckCheckId (p4caResult check) ++ "`: " ++ ckDetails (p4caResult check)) (p4Checks execution))
         vocabularyLine =
             "Normalized vocabulary: " ++ unwords (map (\trigger -> "`" ++ trigger ++ "`") normalizedRejectionTriggers) ++ "."
     in observedLine ++ "\n\n" ++ detailsLine ++ "\n" ++ vocabularyLine
