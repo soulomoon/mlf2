@@ -1,0 +1,35 @@
+{
+  "research_entrypoint_id": "uri-r2-c1-prototype-entrypoint-v1",
+  "stage_selector": "P4-prototype-decision-gate",
+  "scenario_id": "uri-r2-c1-only-v1",
+  "attempt_id": 1,
+  "stage": "P4",
+  "consumed_stages": [
+    {
+      "stage": "P1",
+      "authoritative_attempt": 2,
+      "authoritative_result": "pass",
+      "terminal_reason": "none",
+      "source_review_record": "orchestrator/rounds/round-016/review-record.json"
+    },
+    {
+      "stage": "P2",
+      "authoritative_attempt": 2,
+      "authoritative_result": "semantic-negative",
+      "terminal_reason": "none",
+      "source_review_record": "orchestrator/rounds/round-017/review-record.json"
+    },
+    {
+      "stage": "P3",
+      "authoritative_attempt": 2,
+      "authoritative_result": "semantic-negative",
+      "terminal_reason": "none",
+      "source_review_record": "orchestrator/rounds/round-018/review-record.json"
+    }
+  ],
+  "consumed_stage_results": {
+    "P1": "pass",
+    "P2": "semantic-negative",
+    "P3": "semantic-negative"
+  }
+}

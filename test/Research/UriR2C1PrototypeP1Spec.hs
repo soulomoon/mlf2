@@ -29,6 +29,7 @@ import MLF.Research.URI.R2.C1.Prototype.Types
     , candidateInventoryRelativePath
     , p2AttemptEvidenceRelativeDir
     , p3AttemptEvidenceRelativeDir
+    , p4AttemptEvidenceRelativeDir
     , prototypeStageResult
     , prototypeSubjectId
     , researchEntrypointId
@@ -36,6 +37,7 @@ import MLF.Research.URI.R2.C1.Prototype.Types
     , stageSelectorP1
     , stageSelectorP2
     , stageSelectorP3
+    , stageSelectorP4
     )
 
 spec :: Spec
@@ -301,6 +303,54 @@ spec = do
             result `shouldBe` Left (UnsupportedScenario "wrong-scenario")
             doesDirectoryExist (attemptDirP3 root 1) >>= (`shouldBe` False)
 
+    describe "URI-R2-C1 P4 prototype entrypoint" $ do
+        it "runs P4 from authoritative P1/P2/P3 review records and emits hard-stop evidence" $ do
+            root <- freshRoot "p4-hard-stop"
+            seedAuthoritativeP1ReviewRecord root
+            seedAuthoritativeP2ReviewRecord root
+            seedAuthoritativeP3ReviewRecord root
+            report <- requirePrototypeReportFor stageSelectorP4 root 1
+            files <- listDirectory (attemptDirP4 root 1)
+            sort files `shouldBe`
+                [ "decision-verdict.json"
+                , "stage-consumption.json"
+                , "trace-bundle.json"
+                ]
+            prototypeStageResult report `shouldBe` "hard-stop"
+
+            mapM_ (assertInvocationMetadataFor root attemptDirP4 1 stageSelectorP4 (Just "P4"))
+                [ "trace-bundle.json"
+                , "stage-consumption.json"
+                , "decision-verdict.json"
+                ]
+
+            decision <- readFile (attemptDirP4 root 1 </> "decision-verdict.json")
+            extractStringField "final_decision" decision `shouldBe` Just "hard-stop"
+            extractStringField "terminal_reason" decision `shouldBe` Just "blocking-stop-condition"
+            decision `shouldSatisfy` isInfixOf "\"P1\": \"pass\""
+            decision `shouldSatisfy` isInfixOf "\"P2\": \"semantic-negative\""
+            decision `shouldSatisfy` isInfixOf "\"P3\": \"semantic-negative\""
+
+            stageConsumption <- readFile (attemptDirP4 root 1 </> "stage-consumption.json")
+            stageConsumption `shouldSatisfy` isInfixOf "\"stage\": \"P1\""
+            stageConsumption `shouldSatisfy` isInfixOf "\"stage\": \"P2\""
+            stageConsumption `shouldSatisfy` isInfixOf "\"stage\": \"P3\""
+            stageConsumption `shouldSatisfy` isInfixOf "\"authoritative_attempt\": 2"
+
+        it "rejects wrong-scenario P4 runs without writing attempt-local evidence" $ do
+            root <- freshRoot "p4-wrong-scenario"
+            seedAuthoritativeP3ReviewRecord root
+            result <- runResearchPrototype $
+                PrototypeRequest
+                    { prRepoRoot = root
+                    , prResearchEntrypointId = researchEntrypointId
+                    , prStageSelector = stageSelectorP4
+                    , prScenarioId = "wrong-scenario"
+                    , prAttemptId = 1
+                    }
+            result `shouldBe` Left (UnsupportedScenario "wrong-scenario")
+            doesDirectoryExist (attemptDirP4 root 1) >>= (`shouldBe` False)
+
 runAccepted :: FilePath -> Int -> Expectation
 runAccepted root attemptId = do
     result <- runPrototype stageSelectorP1 root attemptId
@@ -341,6 +391,51 @@ runPrototype stageSelector root attemptId =
 seedAuthoritativeP1Token :: FilePath -> IO PrototypeReport
 seedAuthoritativeP1Token root = requirePrototypePass root 2
 
+seedAuthoritativeP1ReviewRecord :: FilePath -> IO ()
+seedAuthoritativeP1ReviewRecord root = do
+    let reviewRecordPath =
+            root
+                </> "orchestrator"
+                </> "rounds"
+                </> "round-016"
+                </> "review-record.json"
+        reviewRecordContent =
+            unlines
+                [ "{"
+                , "  \"research_entrypoint_id\": \"uri-r2-c1-prototype-entrypoint-v1\","
+                , "  \"scenario_id\": \"uri-r2-c1-only-v1\","
+                , "  \"stages\": {"
+                , "    \"P1\": {"
+                , "      \"status\": \"authoritative\","
+                , "      \"authoritative_attempt\": 2,"
+                , "      \"authoritative_result\": \"pass\","
+                , "      \"terminal_reason\": \"none\""
+                , "    },"
+                , "    \"P2\": {"
+                , "      \"status\": \"not-yet-run\","
+                , "      \"authoritative_attempt\": null,"
+                , "      \"authoritative_result\": null,"
+                , "      \"terminal_reason\": \"none\""
+                , "    },"
+                , "    \"P3\": {"
+                , "      \"status\": \"not-yet-run\","
+                , "      \"authoritative_attempt\": null,"
+                , "      \"authoritative_result\": null,"
+                , "      \"terminal_reason\": \"none\""
+                , "    },"
+                , "    \"P4\": {"
+                , "      \"status\": \"not-yet-run\","
+                , "      \"authoritative_attempt\": null,"
+                , "      \"authoritative_result\": null,"
+                , "      \"consumed_stage_results\": null,"
+                , "      \"terminal_reason\": \"none\""
+                , "    }"
+                , "  }"
+                , "}"
+                ]
+    createDirectoryIfMissing True (root </> "orchestrator" </> "rounds" </> "round-016")
+    writeFile reviewRecordPath reviewRecordContent
+
 seedAuthoritativeP2ReviewRecord :: FilePath -> IO ()
 seedAuthoritativeP2ReviewRecord root = do
     let reviewRecordPath =
@@ -376,6 +471,51 @@ seedAuthoritativeP2ReviewRecord root = do
     createDirectoryIfMissing True (root </> "orchestrator" </> "rounds" </> "round-017")
     writeFile reviewRecordPath reviewRecordContent
 
+seedAuthoritativeP3ReviewRecord :: FilePath -> IO ()
+seedAuthoritativeP3ReviewRecord root = do
+    let reviewRecordPath =
+            root
+                </> "orchestrator"
+                </> "rounds"
+                </> "round-018"
+                </> "review-record.json"
+        reviewRecordContent =
+            unlines
+                [ "{"
+                , "  \"research_entrypoint_id\": \"uri-r2-c1-prototype-entrypoint-v1\","
+                , "  \"scenario_id\": \"uri-r2-c1-only-v1\","
+                , "  \"stages\": {"
+                , "    \"P1\": {"
+                , "      \"status\": \"authoritative\","
+                , "      \"authoritative_attempt\": 2,"
+                , "      \"authoritative_result\": \"pass\","
+                , "      \"terminal_reason\": \"none\""
+                , "    },"
+                , "    \"P2\": {"
+                , "      \"status\": \"authoritative\","
+                , "      \"authoritative_attempt\": 2,"
+                , "      \"authoritative_result\": \"semantic-negative\","
+                , "      \"terminal_reason\": \"none\""
+                , "    },"
+                , "    \"P3\": {"
+                , "      \"status\": \"authoritative\","
+                , "      \"authoritative_attempt\": 2,"
+                , "      \"authoritative_result\": \"semantic-negative\","
+                , "      \"terminal_reason\": \"none\""
+                , "    },"
+                , "    \"P4\": {"
+                , "      \"status\": \"not-yet-run\","
+                , "      \"authoritative_attempt\": null,"
+                , "      \"authoritative_result\": null,"
+                , "      \"consumed_stage_results\": null,"
+                , "      \"terminal_reason\": \"none\""
+                , "    }"
+                , "  }"
+                , "}"
+                ]
+    createDirectoryIfMissing True (root </> "orchestrator" </> "rounds" </> "round-018")
+    writeFile reviewRecordPath reviewRecordContent
+
 freshRoot :: FilePath -> IO FilePath
 freshRoot label = do
     tmp <- getTemporaryDirectory
@@ -395,6 +535,10 @@ attemptDirP2 root attemptId =
 attemptDirP3 :: FilePath -> Int -> FilePath
 attemptDirP3 root attemptId =
     root </> p3AttemptEvidenceRelativeDir attemptId
+
+attemptDirP4 :: FilePath -> Int -> FilePath
+attemptDirP4 root attemptId =
+    root </> p4AttemptEvidenceRelativeDir attemptId
 
 swallowMissing :: IOError -> IO ()
 swallowMissing err

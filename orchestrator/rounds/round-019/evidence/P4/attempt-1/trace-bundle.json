@@ -1,0 +1,23 @@
+{
+  "research_entrypoint_id": "uri-r2-c1-prototype-entrypoint-v1",
+  "stage_selector": "P4-prototype-decision-gate",
+  "scenario_id": "uri-r2-c1-only-v1",
+  "attempt_id": 1,
+  "stage": "P4",
+  "correlation_id": "uri-r2-c1-only-v1-p4-attempt-1",
+  "subject_id": null,
+  "trace_refs": [
+    "trace://uri-r2-c1/p4/consume/p1-pass",
+    "trace://uri-r2-c1/p4/consume/p2-semantic-negative",
+    "trace://uri-r2-c1/p4/consume/p3-semantic-negative",
+    "trace://uri-r2-c1/p4/decision/hard-stop-blocking-stop-condition"
+  ],
+  "trace_summary": [
+    "P4 consumed authoritative stage outcomes from round-016, round-017, and round-018 review records.",
+    "Decision threshold respected: reopen requires all pass and no unresolved caveat.",
+    "Given inherited results, terminal decision is hard-stop.",
+    "P1 authoritative attempt 2 => pass (terminal_reason: none)",
+    "P2 authoritative attempt 2 => semantic-negative (terminal_reason: none)",
+    "P3 authoritative attempt 2 => semantic-negative (terminal_reason: none)"
+  ]
+}
