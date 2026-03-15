@@ -34,6 +34,6 @@
    Depends on: item 2
    Completion notes: complete when `docs/plans/2026-03-16-uri-r2-c1-d3-bounded-fixability-probe.md` is accepted, the reviewer record names the authoritative `D3` attempt, and the round records either one bounded repair-supporting direction or an explicit bounded non-reopen result.
 
-4. [pending] Execute the `D4` repair-track decision gate for `URI-R2-C1`
+4. [done] Execute the `D4` repair-track decision gate for `URI-R2-C1`
    Depends on: item 3
    Completion notes: complete when `docs/plans/2026-03-16-uri-r2-c1-d4-repair-track-decision-gate.md` is accepted, the reviewer record names the authoritative `D4` attempt, and the final bounded outcome is recorded as exactly one of `reopen-repair-track` or `remain-stop`.
