@@ -1,0 +1,15 @@
+{
+  "research_entrypoint_id": "uri-r2-c1-p2-replay-root-cause-v1",
+  "stage_selector": "D2-mismatch-localization",
+  "scenario_id": "uri-r2-c1-only-v1",
+  "attempt_id": 1,
+  "stage": "D2",
+  "subject_token_ref": null,
+  "checker_results": [
+    "orchestrator/rounds/round-021/evidence/D2/attempt-1/check-D2-T.json",
+    "orchestrator/rounds/round-021/evidence/D2/attempt-1/check-D2-L.json",
+    "orchestrator/rounds/round-021/evidence/D2/attempt-1/check-D2-O.json"
+  ],
+  "stage_result": "pass",
+  "terminal_reason": "none"
+}
