@@ -1,0 +1,41 @@
+# Round `round-021` Attempt `1` Review (`D2`)
+
+- Baseline checks:
+  - `git diff --check` (pass)
+  - `python3 -m json.tool orchestrator/state.json >/dev/null` (pass)
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json` (pass; shows `contract_version: 2` and `retry: null`)
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md` (pass; ordered status list present)
+  - `test -f docs/superpowers/specs/2026-03-16-uri-r2-c1-p2-replay-root-cause-roadmap-design.md` (pass)
+  - `test -f docs/superpowers/specs/2026-03-16-uri-r2-c1-prototype-evidence-retry-subloop-amendment.md` (pass)
+  - `test -f orchestrator/retry-subloop.md` (pass)
+  - `cabal build all && cabal test` (pass; `1119 examples, 0 failures`; no post-success Cabal log-permission failure observed in this run)
+  - Continuity check: only `orchestrator/rounds/round-021/` is new in this round; inherited review/evidence records for rounds `016..020` remain untouched.
+
+- Task-specific checks:
+  - Shared-entrypoint isolation verified: D2 evidence/artifact tuple fields are exactly `research_entrypoint_id=uri-r2-c1-p2-replay-root-cause-v1`, `stage_selector=D2-mismatch-localization`, `scenario_id=uri-r2-c1-only-v1`, `attempt_id=1`.
+  - Bounded scenario/subject continuity verified against inherited authoritative inputs (`P1` attempt-2 token, `P2` attempt-2 replay evidence, `D1` attempt-1 evidence + `round-020/review-record.json`).
+  - D2 checks verified from attempt-local evidence:
+    - `D2-T`: `pass` with aligned replay-lane suffix chain.
+    - `D2-L`: `pass` with exact first-divergence boundary `witness-replay/applyInstantiation-instbot-precondition` and authoritative mismatch `InstBot expects ⊥, got: t9 -> t9`.
+    - `D2-O`: `pass` with one owner account `applyInstantiation semantics (MLF.Elab.Inst.applyInstantiation, InstBot branch)` and explicit non-owner exclusions.
+  - `subject-token.json` absence verified in `orchestrator/rounds/round-021/evidence/D2/attempt-1/`.
+  - Forbidden widening checks:
+    - no scenario/subject widening in D2 evidence or artifact;
+    - no second executable interface introduced (entrypoint extension remains inside existing replay-root-cause route);
+    - no controller-file edits (`orchestrator/state.json`, `orchestrator/roadmap.md` unchanged).
+
+- Implemented stage result: `pass`
+- Attempt verdict: `accepted`
+- Stage action: `finalize`
+- Retry reason: `none`
+- Fix hypothesis: `none`
+- Decision summary:
+  - D2 attempt 1 satisfies the round contract and records a bounded, localized first divergence plus a single owner account without widening or control-plane drift.
+  - Stage should finalize and become authoritative for D2.
+- Evidence summary:
+  - `docs/plans/2026-03-16-uri-r2-c1-d2-replay-mismatch-localization.md`
+  - `orchestrator/rounds/round-021/evidence/D2/attempt-1/check-D2-T.json`
+  - `orchestrator/rounds/round-021/evidence/D2/attempt-1/check-D2-L.json`
+  - `orchestrator/rounds/round-021/evidence/D2/attempt-1/check-D2-O.json`
+  - `orchestrator/rounds/round-021/evidence/D2/attempt-1/stage-verdict.json`
+  - `orchestrator/rounds/round-021/evidence/D2/attempt-1/trace-bundle.json`

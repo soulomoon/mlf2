@@ -1,5 +1,6 @@
 module MLF.Research.URI.R2.C1.Prototype.Artifact (
     writeD1Artifact,
+    writeD2Artifact,
     writeP1Artifact,
     writeP2Artifact,
     writeP3Artifact,
@@ -10,6 +11,7 @@ import System.Directory (createDirectoryIfMissing)
 import System.FilePath (takeDirectory)
 
 import MLF.Research.URI.R2.C1.Prototype.D1 (D1Execution(..), D1CheckArtifact(..))
+import MLF.Research.URI.R2.C1.Prototype.D2 (D2Execution(..), D2CheckArtifact(..))
 import MLF.Research.URI.R2.C1.Prototype.P2 (P2Execution(..), P2CheckArtifact(..))
 import MLF.Research.URI.R2.C1.Prototype.P3 (P3Execution(..), P3CheckArtifact(..))
 import MLF.Research.URI.R2.C1.Prototype.P4 (P4Execution(..), P4CheckArtifact(..), P4StageAuthority(..))
@@ -20,6 +22,13 @@ writeD1Artifact execution = do
     let path = ppArtifactPath (prototypePaths (prototypeRequest (d1AppReport execution)))
     createDirectoryIfMissing True (takeDirectory path)
     writeFile path (renderD1Artifact execution)
+    pure path
+
+writeD2Artifact :: D2Execution -> IO FilePath
+writeD2Artifact execution = do
+    let path = ppArtifactPath (prototypePaths (prototypeRequest (d2AppReport execution)))
+    createDirectoryIfMissing True (takeDirectory path)
+    writeFile path (renderD2Artifact execution)
     pure path
 
 writeP1Artifact :: PrototypeReport -> IO FilePath
@@ -99,14 +108,73 @@ renderD1Artifact execution =
             ++ [ ""
                , "## D1 Outcomes"
                , ""
-               , "- `D1-I`: `" ++ showCheckStatus "D1-I" (d1Checks execution) ++ "`"
-               , "- `D1-R`: `" ++ showCheckStatus "D1-R" (d1Checks execution) ++ "`"
-               , "- `D1-M`: `" ++ showCheckStatus "D1-M" (d1Checks execution) ++ "`"
+               , "- `D1-I`: `" ++ showD1CheckStatus "D1-I" (d1Checks execution) ++ "`"
+               , "- `D1-R`: `" ++ showD1CheckStatus "D1-R" (d1Checks execution) ++ "`"
+               , "- `D1-M`: `" ++ showD1CheckStatus "D1-M" (d1Checks execution) ++ "`"
                , "- Reproduced closely enough for D2: `" ++ (if d2Ready then "yes" else "no") ++ "`"
                , ""
                , "## Stage Result"
                , ""
                , "`" ++ d1StageResult execution ++ "`"
+               ]
+
+renderD2Artifact :: D2Execution -> String
+renderD2Artifact execution =
+    let report = d2AppReport execution
+        req = prototypeRequest report
+        attemptId = prAttemptId req
+    in unlines $
+        [ "# `D2` Replay-Mismatch Localization For `URI-R2-C1`"
+        , ""
+        , "Date: 2026-03-16"
+        , "Roadmap item: 2"
+        , "Stage: `D2`"
+        , "Attempt: " ++ show attemptId
+        , "Active subject: `URI-R2-C1`"
+        , "Active scenario: `uri-r2-c1-only-v1`"
+        , "Artifact kind: replay-mismatch localization"
+        , ""
+        , "## Inherited Authoritative Inputs"
+        , ""
+        , "- `" ++ d2InheritedSubjectTokenPath execution ++ "`"
+        , "- `" ++ d2InheritedP2CheckRPath execution ++ "`"
+        , "- `" ++ d2InheritedP2CheckWPath execution ++ "`"
+        , "- `" ++ d2InheritedP2StageVerdictPath execution ++ "`"
+        , "- `" ++ d2InheritedP2TraceBundlePath execution ++ "`"
+        , "- `" ++ d2InheritedD1CheckRPath execution ++ "`"
+        , "- `" ++ d2InheritedD1StageVerdictPath execution ++ "`"
+        , "- `" ++ d2InheritedD1TraceBundlePath execution ++ "`"
+        , "- `" ++ d2InheritedD1ReviewRecordPath execution ++ "`"
+        , ""
+        , "## Stage Input Interface"
+        , ""
+        , "- Shared entrypoint tuple: `{ research_entrypoint_id: uri-r2-c1-p2-replay-root-cause-v1, stage_selector: D2-mismatch-localization, scenario_id: uri-r2-c1-only-v1, attempt_id: "
+            ++ show attemptId
+            ++ " }`."
+        , "- Correlation id: `" ++ d2CorrelationId execution ++ "`."
+        , ""
+        , "## Evidence"
+        , ""
+        , "- Attempt-local evidence directory: `" ++ d2AttemptEvidenceRelativeDir attemptId ++ "`."
+        , "- Trace bundle: `" ++ d2TraceBundleRelativePath attemptId ++ "`."
+        ]
+            ++ map renderD2CheckLine (d2Checks execution)
+            ++ [ "- Divergence boundary statement: `" ++ d2DivergenceBoundary execution ++ "`."
+               , "- Owner account statement: `" ++ d2OwnerAccount execution ++ "`."
+               , "- Trace refs: " ++ unwords (map (\ref -> "`" ++ ref ++ "`") (d2TraceRefs execution))
+               , "- Observations:"
+               ]
+            ++ map ("- " ++) (d2TraceSummary execution)
+            ++ [ ""
+               , "## D2 Outcomes"
+               , ""
+               , "- `D2-T`: `" ++ showD2CheckStatus "D2-T" (d2Checks execution) ++ "`"
+               , "- `D2-L`: `" ++ showD2CheckStatus "D2-L" (d2Checks execution) ++ "`"
+               , "- `D2-O`: `" ++ showD2CheckStatus "D2-O" (d2Checks execution) ++ "`"
+               , ""
+               , "## Stage Result"
+               , ""
+               , "`" ++ d2StageResult execution ++ "`"
                ]
 
 renderP1Artifact :: PrototypeReport -> String
@@ -410,10 +478,27 @@ renderD1CheckLine check =
         ++ d1caEvidenceRef check
         ++ "`."
 
-showCheckStatus :: String -> [D1CheckArtifact] -> String
-showCheckStatus checkId checks =
+renderD2CheckLine :: D2CheckArtifact -> String
+renderD2CheckLine check =
+    let result = d2caResult check
+    in "- `"
+        ++ ckCheckId result
+        ++ "`: `"
+        ++ ckStatus result
+        ++ "` via `"
+        ++ d2caEvidenceRef check
+        ++ "`."
+
+showD1CheckStatus :: String -> [D1CheckArtifact] -> String
+showD1CheckStatus checkId checks =
     case filter (\check -> ckCheckId (d1caResult check) == checkId) checks of
         (check : _) -> ckStatus (d1caResult check)
+        [] -> "missing"
+
+showD2CheckStatus :: String -> [D2CheckArtifact] -> String
+showD2CheckStatus checkId checks =
+    case filter (\check -> ckCheckId (d2caResult check) == checkId) checks of
+        (check : _) -> ckStatus (d2caResult check)
         [] -> "missing"
 
 renderP2RejectionTriggers :: P2Execution -> String

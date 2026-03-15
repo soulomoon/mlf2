@@ -1,0 +1,13 @@
+{
+  "research_entrypoint_id": "uri-r2-c1-p2-replay-root-cause-v1",
+  "stage_selector": "D2-mismatch-localization",
+  "scenario_id": "uri-r2-c1-only-v1",
+  "attempt_id": 1,
+  "check_id": "D2-T",
+  "correlation_id": "uri-r2-c1-only-v1-d2-attempt-1",
+  "subject_id": "uri-r2-c1/cluster-1",
+  "evidence_ref": "orchestrator/rounds/round-021/evidence/D2/attempt-1/trace-bundle.json",
+  "verdict": "pass",
+  "rejection_trigger": "none",
+  "details": "aligned trace suffixes: generalize/uri-r2-c1-cluster-1/a-b-a-a-b -> scheme-to-type/uri-r2-c1-cluster-1/a-b-a-a-b -> reify-no-fallback/uri-r2-c1-cluster-1/t5-t5 -> witness-replay/uri-r2-c1-cluster-1/t9-n-a-a-n; inherited correlations: uri-r2-c1-only-v1-p2-attempt-2 => uri-r2-c1-only-v1-d1-attempt-1"
+}

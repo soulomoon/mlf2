@@ -1,0 +1,13 @@
+{
+  "research_entrypoint_id": "uri-r2-c1-p2-replay-root-cause-v1",
+  "stage_selector": "D2-mismatch-localization",
+  "scenario_id": "uri-r2-c1-only-v1",
+  "attempt_id": 1,
+  "check_id": "D2-L",
+  "correlation_id": "uri-r2-c1-only-v1-d2-attempt-1",
+  "subject_id": "uri-r2-c1/cluster-1",
+  "evidence_ref": "orchestrator/rounds/round-021/evidence/D2/attempt-1/trace-bundle.json",
+  "verdict": "pass",
+  "rejection_trigger": "none",
+  "details": "first divergence boundary=witness-replay/applyInstantiation-instbot-precondition; expected replay lane shape from no-fallback reification=t5 -> t5; observed witness replay path ends at applyInstantiation mismatch=InstBot expects ⊥, got: t9 -> t9"
+}
