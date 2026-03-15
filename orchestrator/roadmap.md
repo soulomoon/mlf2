@@ -31,6 +31,6 @@
    Depends on: item 2
    Completion notes: complete when `docs/plans/2026-03-15-uri-r2-c1-p3-safety-validation-prototype.md` is accepted, the reviewer record names the authoritative `P3` attempt, and the round records explicit bounded evidence for or against the same subject on local-SCC, structural-acyclicity, single-family ownership, and constructor-directed termination obligations.
 
-4. [pending] Execute the `P4` prototype decision gate for `URI-R2-C1`
+4. [done] Execute the `P4` prototype decision gate for `URI-R2-C1`
    Depends on: item 3
    Completion notes: complete when `docs/plans/2026-03-15-uri-r2-c1-p4-prototype-decision-gate.md` is accepted, the reviewer record names the authoritative `P4` attempt, and the final bounded outcome is recorded as exactly one of `reopen-handoff-track` or `hard-stop`.
