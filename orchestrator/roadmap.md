@@ -22,7 +22,7 @@
 
 ## Items
 
-1. [pending] Execute the `D1` replay-failure reproduction contract for `URI-R2-C1`
+1. [done] Execute the `D1` replay-failure reproduction contract for `URI-R2-C1`
    Depends on: the completed `P1` through `P4` prototype-evidence track, the authoritative `P1` subject token, and the accepted `P2` replay-failure artifact
    Completion notes: complete when `docs/plans/2026-03-16-uri-r2-c1-d1-replay-reproduction-contract.md` is accepted, the reviewer record names the authoritative `D1` attempt, and the round either reproduces the authoritative bounded replay failure under the root-cause entrypoint or records a bounded non-pass without widening.
 
