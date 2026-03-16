@@ -154,6 +154,14 @@
 
 # Implementation Notes
 
+## 2026-03-17 - Live orchestrator successor track now targets the bounded replay repair lane
+
+- The top-level `orchestrator/` no longer points at the completed `D1` through `D4` diagnostic roadmap as live work. That finished track is now explicit predecessor evidence for a bounded repair-track successor roadmap.
+- The live successor design source is `docs/superpowers/specs/2026-03-17-uri-r2-c1-p2-replay-repair-roadmap-design.md`, and the live roadmap now stages `R1` through `R4`: repair-boundary reproduction, bounded `InstBot` repair, locked replay-path verification, and a terminal repair decision gate.
+- The repair scope stays locked to `URI-R2-C1`, `uri-r2-c1-only-v1`, and `witness-replay/applyInstantiation-instbot-precondition`.
+- The v2 retry contract remains active, but its live retry-eligible stages are now `R1`, `R2`, and `R3`; `R4` is terminal and may not use accepted semantic retries.
+- This scaffold change does not repair production behavior by itself. It prepares the repo-local control plane for a bounded implementation campaign at `MLF.Elab.Inst.applyInstantiation` (`InstBot` branch).
+
 ## 2026-03-16 - `URI-R2-C1` replay root-cause successor track completed
 
 - The live top-level `orchestrator/` successor roadmap for the authoritative `P2-W` replay mismatch is now complete. Rounds `round-020` through `round-023` are accepted historical evidence, not active live work.
