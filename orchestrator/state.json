@@ -2,7 +2,7 @@
   "contract_version": 2,
   "base_branch": "codex/automatic-recursive-type-inference",
   "active_round_id": null,
-  "stage": "done",
+  "stage": "select-task",
   "current_task": null,
   "branch": null,
   "worktree_path": null,

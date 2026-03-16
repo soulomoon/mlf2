@@ -4,6 +4,22 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 92 `URI-R2-C1` P2 replay repair-track orchestrator scaffold (completed 2026-03-17)
+
+- Completed:
+  - refreshed the live top-level `orchestrator/` so it now succeeds the completed `D1` through `D4` diagnostic campaign while preserving `orchestrator/rounds/round-001` through `round-023` as historical evidence;
+  - wrote the approved repair-track design source at `docs/superpowers/specs/2026-03-17-uri-r2-c1-p2-replay-repair-roadmap-design.md`, defining a bounded `R1` through `R4` repair ladder rooted in `BUG-2026-03-16-001`;
+  - updated the live roadmap, machine state, retry-subloop references, verification contract, and role prompts so the next lawful run targets repair-boundary reproduction, bounded `InstBot` repair, locked replay verification, and a final `repair-accepted | repair-blocked` decision.
+- Verification:
+  - `python3 -m json.tool orchestrator/state.json`: PASS
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`: PASS
+  - `test -f docs/superpowers/specs/2026-03-17-uri-r2-c1-p2-replay-repair-roadmap-design.md && test -f orchestrator/retry-subloop.md`: PASS
+  - `git diff --check`: PASS
+- Rolling priorities (next):
+  1. Run `R1` on the new live roadmap before touching broader replay behavior or opening any regression-expansion track.
+  2. Keep every repair round locked to `URI-R2-C1`, `uri-r2-c1-only-v1`, and `witness-replay/applyInstantiation-instbot-precondition`.
+  3. Preserve completed rounds `round-020` through `round-023` as predecessor evidence instead of reopening the diagnostic track.
+
 ## Task 91 `URI-R2-C1` P2 replay root-cause orchestrator run (completed 2026-03-16)
 
 - Completed:

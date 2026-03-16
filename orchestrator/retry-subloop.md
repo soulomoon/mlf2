@@ -1,18 +1,18 @@
 # Retry Subloop Contract
 
-This file defines the live retry behavior for future `contract_version: 2` rounds on the current `URI-R2-C1` replay root-cause control plane.
+This file defines the live retry behavior for future `contract_version: 2` rounds on the current `URI-R2-C1` replay repair-track control plane.
 
 The current roadmap and subject boundary come from:
 
-- `docs/superpowers/specs/2026-03-16-uri-r2-c1-p2-replay-root-cause-roadmap-design.md`
+- `docs/superpowers/specs/2026-03-17-uri-r2-c1-p2-replay-repair-roadmap-design.md`
 - `docs/superpowers/specs/2026-03-16-uri-r2-c1-prototype-evidence-retry-subloop-amendment.md`
 
 ## Scope
 
-- `D1`, `D2`, and `D3` may retry inside the same round.
-- `D4` is aggregate-only:
+- `R1`, `R2`, and `R3` may retry inside the same round.
+- `R4` is aggregate-only:
   - review may reject it and send the same round back to `plan`;
-  - review may not emit `accepted + retry` for `D4`.
+  - review may not emit `accepted + retry` for `R4`.
 
 ## Machine State
 
@@ -35,7 +35,7 @@ Retry object fields:
 
 ## Review Output
 
-Every `D1` through `D3` review must record:
+Every `R1` through `R3` review must record:
 
 - `Implemented stage result`
 - `Attempt verdict`
@@ -52,7 +52,7 @@ Allowed combinations:
 Forbidden combinations:
 
 - `rejected + finalize`
-- `accepted + retry` for `D4`
+- `accepted + retry` for `R4`
 
 Use `Retry reason: none` and `Fix hypothesis: none` when a stage finalizes without another retry.
 
@@ -84,7 +84,7 @@ After review:
 
 ## Budget Rules
 
-- `max_attempts` is `100` for `D1`, `D2`, and `D3`
+- `max_attempts` is `100` for `R1`, `R2`, and `R3`
 - on exhaustion:
   - finalize the latest accepted attempt if one exists
   - otherwise stop with a controller blockage in `orchestrator/state.json`
@@ -97,5 +97,5 @@ After review:
 
 ## Historical Compatibility
 
-Rounds `round-016` through `round-019` remain historical prototype-evidence evidence.
+Rounds `round-020` through `round-023` remain historical repair-predecessor evidence.
 Do not rewrite them into the new retry schema.
