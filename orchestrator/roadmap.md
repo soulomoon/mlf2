@@ -25,7 +25,7 @@
 
 ## Items
 
-1. [pending] Execute the `R1` repair-boundary reproduction contract for `URI-R2-C1`
+1. [done] Execute the `R1` repair-boundary reproduction contract for `URI-R2-C1`
    Depends on: the completed `D1` through `D4` diagnostic track and `BUG-2026-03-16-001`
    Completion notes: complete when `docs/plans/2026-03-17-uri-r2-c1-r1-repair-boundary-reproduction.md` is accepted, the reviewer record names the authoritative `R1` attempt, and the round reproduces the localized repair target for the locked `URI-R2-C1` / `uri-r2-c1-only-v1` lane without widening beyond the accepted owner boundary.
 
