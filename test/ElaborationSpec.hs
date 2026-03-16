@@ -10,6 +10,7 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Set as Set
 import qualified MLF.Constraint.NodeAccess as NodeAccess
+import qualified MLF.Reify.Core as Reify
 import qualified SolvedFacadeTestUtil as SolvedTest
 
 import MLF.Frontend.Syntax (SurfaceExpr, Expr(..), Lit(..), SrcTy(..), SrcType, NormSrcType, mkSrcBound)
@@ -302,6 +303,81 @@ resultTypeInputsForArtifacts
                 (prRedirects pres)
                 defaultTraceConfig
     in (inputs, annCanon, ann0)
+
+data UriR2C1ReplayFixture = UriR2C1ReplayFixture
+    { uriR2C1ReplayScheme :: Elab.ElabScheme
+    , uriR2C1ReplaySchemeType :: Elab.ElabType
+    , uriR2C1ReplayNoFallbackType :: Elab.ElabType
+    , uriR2C1ReplayPhi :: Elab.Instantiation
+    }
+
+uriR2C1ReplayFixture :: IO UriR2C1ReplayFixture
+uriR2C1ReplayFixture = do
+    let expr =
+            EAnn
+                (ELam "x" (EVar "x"))
+                (STForall "a" Nothing (STArrow (STVar "a") (STVar "a")))
+    artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
+    let c1 = paConstraintNorm artifacts
+        solved = paSolved artifacts
+        (inputs, annCanon, _annPre) = resultTypeInputsForArtifacts artifacts
+    (inner, annNodeId, edgeId) <- case annCanon of
+        AAnn inner annNodeId edgeId ->
+            pure (inner, annNodeId, edgeId)
+        other -> do
+            expectationFailure ("Expected bounded URI-R2-C1 annotation fixture, got: " ++ show other)
+            fail "uriR2C1ReplayFixture"
+    let rootC = rtcCanonical inputs (annExprNode inner)
+        targetNode = schemeBodyTarget (rtcPresolutionView inputs) rootC
+        scopeRootNodePre0 = annExprNode inner
+        scopeRootNodePre =
+            IntMap.findWithDefault
+                scopeRootNodePre0
+                (getNodeId targetNode)
+                (gaSolvedToBase (rtcBindParentsGa inputs))
+    scopeRoot <- requireRight (resolveCanonicalScope c1 (rtcPresolutionView inputs) (rtcRedirects inputs) scopeRootNodePre)
+    (scheme, subst) <-
+        requireRight
+            (generalizeWithPlan
+                (rtcPlanBuilder inputs)
+                (rtcBindParentsGa inputs)
+                (rtcPresolutionView inputs)
+                scopeRoot
+                targetNode
+            )
+    namedSet <- requireRight (Elab.namedNodes (rtcPresolutionView inputs))
+    noFallbackTy <-
+        requireRight
+            (Reify.reifyTypeWithNamedSetNoFallback
+                (rtcPresolutionView inputs)
+                IntMap.empty
+                namedSet
+                (schemeBodyTarget (rtcPresolutionView inputs) annNodeId)
+            )
+    witness <- case IntMap.lookup (getEdgeId edgeId) (rtcEdgeWitnesses inputs) of
+        Just witness ->
+            pure witness
+        Nothing -> do
+            expectationFailure "Missing URI-R2-C1 witness replay edge witness"
+            fail "uriR2C1ReplayFixture"
+    phi <-
+        requireRight
+            (Elab.phiFromEdgeWitnessWithTrace
+                (rtcTraceConfig inputs)
+                (generalizeAtWithActive solved)
+                (rtcPresolutionView inputs)
+                (Just (rtcBindParentsGa inputs))
+                (Just (Elab.SchemeInfo scheme subst))
+                (IntMap.lookup (getEdgeId edgeId) (rtcEdgeTraces inputs))
+                witness
+            )
+    pure
+        UriR2C1ReplayFixture
+            { uriR2C1ReplayScheme = scheme
+            , uriR2C1ReplaySchemeType = Elab.schemeToType scheme
+            , uriR2C1ReplayNoFallbackType = noFallbackTy
+            , uriR2C1ReplayPhi = phi
+            }
 
 requirePipeline :: SurfaceExpr -> IO (Elab.ElabTerm, Elab.ElabType)
 requirePipeline expr =
@@ -1384,6 +1460,19 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             case Elab.applyInstantiation ty (Elab.InstBot ty) of
                 Left _ -> pure ()
                 Right t -> expectationFailure ("Expected strict InstBot failure, got: " ++ show t)
+
+        it "URI-R2-C1 witness replay reproduces BUG-2026-03-16-001 at applyInstantiation InstBot" $ do
+            fixture <- uriR2C1ReplayFixture
+            Elab.pretty (uriR2C1ReplaySchemeType fixture) `shouldBe` "∀(a ⩾ ⊥) ∀(b ⩾ a -> a) b"
+            Elab.pretty (uriR2C1ReplayNoFallbackType fixture) `shouldBe` "t5 -> t5"
+            Elab.pretty (uriR2C1ReplayPhi fixture) `shouldBe` "∀(⩾ ⊲t9); N; (∀(⩾ ⊲(a -> a)); N)"
+            case Elab.applyInstantiation (uriR2C1ReplaySchemeType fixture) (uriR2C1ReplayPhi fixture) of
+                Left (Elab.InstantiationError msg) ->
+                    msg `shouldBe` "InstBot expects ⊥, got: t9 -> t9"
+                Left err ->
+                    expectationFailure ("Expected InstBot mismatch, got: " ++ show err)
+                Right replayedTy ->
+                    expectationFailure ("Expected URI-R2-C1 replay failure, got: " ++ Elab.pretty replayedTy)
 
         it "normalizeInst roundtrip: rule 3 prefix-arg collapse preserves applyInstantiation" $ do
             -- Build an instantiation that matches rule 3: prefix ; intro ; app ; under beta (abstr beta ; elim) ; elim
