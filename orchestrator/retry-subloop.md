@@ -1,18 +1,18 @@
 # Retry Subloop Contract
 
-This file defines the live retry behavior for future `contract_version: 2` rounds on the current `URI-R2-C1` replay repair-track control plane.
+This file defines the live retry behavior for future `contract_version: 2` rounds on the current unannotated iso-recursive successor control plane.
 
 The current roadmap and subject boundary come from:
 
-- `docs/superpowers/specs/2026-03-17-uri-r2-c1-p2-replay-repair-roadmap-design.md`
+- `docs/superpowers/specs/2026-03-17-unannotated-iso-recursive-successor-roadmap-design.md`
 - `docs/superpowers/specs/2026-03-16-uri-r2-c1-prototype-evidence-retry-subloop-amendment.md`
 
 ## Scope
 
-- `R1`, `R2`, and `R3` may retry inside the same round.
-- `R4` is aggregate-only:
+- `U1`, `U2`, `U3`, `U4`, and `U5` may retry inside the same round.
+- `U6` is aggregate-only:
   - review may reject it and send the same round back to `plan`;
-  - review may not emit `accepted + retry` for `R4`.
+  - review may not emit `accepted + retry` for `U6`.
 
 ## Machine State
 
@@ -35,7 +35,7 @@ Retry object fields:
 
 ## Review Output
 
-Every `R1` through `R3` review must record:
+Every `U1` through `U6` review must record:
 
 - `Implemented stage result`
 - `Attempt verdict`
@@ -52,7 +52,7 @@ Allowed combinations:
 Forbidden combinations:
 
 - `rejected + finalize`
-- `accepted + retry` for `R4`
+- `accepted + retry` for `U6`
 
 Use `Retry reason: none` and `Fix hypothesis: none` when a stage finalizes without another retry.
 
@@ -84,7 +84,7 @@ After review:
 
 ## Budget Rules
 
-- `max_attempts` is `100` for `R1`, `R2`, and `R3`
+- `max_attempts` is `100` for `U1`, `U2`, `U3`, `U4`, and `U5`
 - on exhaustion:
   - finalize the latest accepted attempt if one exists
   - otherwise stop with a controller blockage in `orchestrator/state.json`
@@ -95,7 +95,15 @@ After review:
 - resume the exact recorded `plan`, `implement`, or `review` stage when interrupted
 - do not create a replacement round merely because a retry was interrupted
 
+## Roadmap-Update Rule
+
+After an accepted round finalizes and merges:
+
+- the guider may mark the completed item done;
+- the guider may refine later pending items or append the next bounded cycle;
+- the guider may not rewrite completed-item truth or silently widen the active subject.
+
 ## Historical Compatibility
 
-Rounds `round-020` through `round-023` remain historical repair-predecessor evidence.
+Rounds `round-001` through `round-027` remain historical predecessor evidence.
 Do not rewrite them into the new retry schema.

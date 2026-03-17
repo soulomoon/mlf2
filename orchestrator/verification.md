@@ -3,39 +3,48 @@
 ## Baseline Checks
 
 - Command: `git diff --check`
-  Why: every round must leave the tree free of whitespace and conflict-marker damage, including docs-only research rounds.
+  Why: every round must leave the tree free of whitespace and conflict-marker damage, including docs-only evidence rounds.
 - Command: `python3 -m json.tool orchestrator/state.json >/dev/null`
   Why: `orchestrator/state.json` is machine state and must remain valid JSON after every round.
 - Command: `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json`
   Why: future rounds on this successor track must run under the v2 retry-subloop machine-state contract.
-- Command: `rg -n '^\d+\\. \\[(pending|in-progress|done)\\]' orchestrator/roadmap.md`
+- Command: `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
   Why: the live roadmap must keep a parseable ordered item list with explicit status markers.
-- Command: `test -f docs/superpowers/specs/2026-03-17-uri-r2-c1-p2-replay-repair-roadmap-design.md`
-  Why: every round in this campaign is anchored to the approved repair-track roadmap design.
-- Command: `test -f docs/superpowers/specs/2026-03-16-uri-r2-c1-prototype-evidence-retry-subloop-amendment.md`
-  Why: the repair track inherits the approved v2 retry-subloop mechanics.
+- Command: `test -f docs/superpowers/specs/2026-03-17-unannotated-iso-recursive-successor-roadmap-design.md`
+  Why: every round in this campaign is anchored to the approved successor-roadmap design.
+- Command: `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
+  Why: the inherited automatic-recursive baseline remains the live boundary contract for this successor track.
+- Command: `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md`
+  Why: the prior unannotated `research-stop` remains required predecessor evidence and may not be silently bypassed.
+- Command: `test -f docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md`
+  Why: the repaired `URI-R2-C1` lane is the active inherited starting point for this successor track.
 - Command: `test -f orchestrator/retry-subloop.md`
   Why: the live control plane needs one repo-local operational source for retry-state, artifact, and transition rules.
 - Command: `cabal build all && cabal test`
   Why: the full repo gate is mandatory whenever a round touches `src/`, `src-public/`, `app/`, `test/`, or `mlf2.cabal`.
 - Command: reviewer-recorded continuity check against predecessor evidence
-  Why: each round must preserve completed rounds `001` through `023`, the accepted `D1` through `D4` diagnostic result, the approved repair-track design spec, and the predecessor recursive-types packet.
+  Why: each round must preserve completed rounds `001` through `027`, the inherited automatic-recursive boundary docs, the completed replay repair track, and the predecessor recursive-types packet.
 
 ## Task-Specific Checks
 
 - Add round-specific checks required by the selected roadmap item, especially:
-- bounded-scenario checks proving the active scope remains exactly `URI-R2-C1` and `uri-r2-c1-only-v1`;
-- localized-owner checks proving the round stays bounded to `witness-replay/applyInstantiation-instbot-precondition` and `MLF.Elab.Inst.applyInstantiation` (`InstBot` branch);
-- no-second-interface checks proving the repair track does not add a repair-only executable entrypoint or other alternate production path;
-- no-fallback checks proving the round does not introduce a convenience fallback, compatibility shim, or silent default-path widening;
-- `R1` checks proving the localized repair target is reproduced in implementation-facing terms for the locked scenario;
-- `R2` checks proving the production diff stays bounded to the accepted owner area and records one paper-faithful repair direction rather than a broad replay rewrite;
-- `R3` checks proving the authoritative replay path succeeds for the locked scenario and the old `InstBot expects ⊥` mismatch no longer occurs;
-- `R4` checks proving the final decision is exactly `repair-accepted` or `repair-blocked` and matches the accumulated `R1` through `R3` results and retry-budget outcomes;
-- retry-subloop checks proving `R1` through `R3` reviews record `attempt_verdict`, `stage_action`, `retry_reason`, and `fix_hypothesis`, and that only `accepted + finalize` becomes authoritative carry-forward;
+- live-subject checks proving the round stays inside the currently bound subject and does not silently widen beyond repaired `URI-R2-C1` unless the roadmap itself is explicitly amended first;
+- explicit-only-boundary checks proving the round does not silently enable broad unannotated recursive inference outside the selected bounded subject;
+- no-equi-recursive checks proving the round does not introduce implicit unfolding or equi-recursive equality as a success path;
+- no-cyclic-graph checks proving the round does not introduce cyclic structural graph encoding or graph-cycle exceptions;
+- single-subject / single-family checks proving the round does not widen into multi-SCC, cross-family, or search-wide recursive inference unless the roadmap explicitly authorizes that change;
+- no-second-interface checks proving the round does not add a research-only executable entrypoint or alternate production path;
+- no-fallback checks proving the round does not introduce a convenience fallback, compatibility shim, or default-path widening;
+- `U1` checks proving the accepted artifact binds the inherited baseline, the repaired live subject, and the current stop triggers concretely enough for later rounds;
+- `U2` checks proving the accepted artifact either clears or sharply narrows provenance-stable unannotated authority for the live subject without inventing authority by fallback or late repair;
+- `U3` checks proving the accepted artifact records whether one admissible local root/cluster exists with stable ownership and no heuristic ranking;
+- `U4` checks proving the accepted artifact records whether the current constructor-directed, acyclic, terminating solver discipline can admit the live subject without forbidden widening;
+- `U5` checks proving any production diff stays bounded to the currently cleared live subject and is backed by focused positive and negative examples plus preserved out-of-scope rejection behavior;
+- `U6` checks proving the final artifact records exactly one of `continue-bounded`, `widen-approved`, or `stop-blocked`, and that the outcome matches the accumulated accepted evidence and current bounded verification;
+- retry-subloop checks proving `U1` through `U5` reviews record `attempt_verdict`, `stage_action`, `retry_reason`, and `fix_hypothesis`, and that `accepted + retry` is never used for `U6`;
 - artifact-history checks proving earlier retry attempts remain immutable in `reviews/attempt-<n>.md` and the controller-owned `attempt-log.jsonl` rather than being silently overwritten;
-- predecessor-evidence continuity checks proving completed rounds `round-020` through `round-023` remain immutable and are consumed only as evidence;
-- docs-diff review when a round intentionally changes only `orchestrator/`, `docs/`, task artifacts, or bounded repair documentation;
+- roadmap-update checks proving accepted `update-roadmap` edits preserve completed-item truth, keep the next unfinished item concrete, and do not silently widen the live subject;
+- docs-diff review when a round intentionally changes only `orchestrator/`, `docs/`, or bounded campaign artifacts;
 - skip-note review when a round does not trigger the full Cabal gate, including the exact reason the reviewer judged the code-path gate out of scope.
 
 ## Approval Criteria
@@ -43,7 +52,7 @@
 - Every baseline check passes, or an omitted conditional check is explicitly justified in `review.md`.
 - Every task-specific check required by the selected stage passes.
 - `review.md` records commands, evidence, `Implemented stage result`, `Attempt verdict`, `Stage action`, `Retry reason`, and `Fix hypothesis`.
-- The round preserves bounded repair scope, localized-owner continuity, and predecessor-evidence continuity.
+- The round preserves the current live-subject boundary, inherited non-equi-recursive / non-cyclic-graph constraints, and predecessor-evidence continuity unless an accepted roadmap update explicitly changes the live plan.
 - No unresolved blocking issue remains.
 
 ## Reviewer Record Format
