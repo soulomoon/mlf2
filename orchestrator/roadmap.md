@@ -34,9 +34,9 @@
    Depends on: item 1
    Completion notes: completed in `round-029` (`accepted + finalize`) with authoritative record `orchestrator/rounds/round-029/review-record.json`, accepted artifact `docs/plans/2026-03-17-uri-r2-c1-u2-unannotated-authority-clearance.md`, and bounded result token `authority-narrowed` that keeps the live subject fixed to repaired `URI-R2-C1` without widening.
 
-3. [pending] Execute the `U3` uniqueness and owner-stability clearance for the live subject
+3. [done] Execute the `U3` uniqueness and owner-stability clearance for the live subject
    Depends on: item 2
-   Completion notes: complete when `docs/plans/2026-03-17-uri-r2-c1-u3-unannotated-uniqueness-owner-clearance.md` is accepted, the reviewer record names the authoritative `U3` attempt, and the round records whether the live subject has one admissible local root/cluster with stable ownership and no heuristic ranking.
+   Completion notes: completed in `round-030` (`accepted + finalize`) with authoritative record `orchestrator/rounds/round-030/review-record.json`, accepted artifact `docs/plans/2026-03-17-uri-r2-c1-u3-unannotated-uniqueness-owner-clearance.md`, and bounded result token `uniqueness-owner-stable-refuted` (no heuristic ranking, no subject widening, repaired `URI-R2-C1` still fixed as the live subject).
 
 4. [pending] Execute the `U4` constructor-directed / acyclicity / termination clearance for the live subject
    Depends on: item 3
