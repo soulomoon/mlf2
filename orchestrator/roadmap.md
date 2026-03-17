@@ -30,9 +30,9 @@
    Depends on: completed rounds `round-001` through `round-027`, especially the accepted automatic-recursive baseline/handoff documents and the completed `URI-R2-C1` repair track
    Completion notes: completed in `round-028` (`accepted + finalize`) with authoritative record `orchestrator/rounds/round-028/review-record.json`, accepted artifact `docs/plans/2026-03-17-uri-r2-c1-u1-unannotated-baseline-bind.md`, repaired `URI-R2-C1` explicitly bound as the live subject, and reviewer-visible hard-stop triggers preserved against broad automatic recursive inference.
 
-2. [pending] Execute the `U2` provenance-stable unannotated authority clearance for the live subject
+2. [done] Execute the `U2` provenance-stable unannotated authority clearance for the live subject
    Depends on: item 1
-   Completion notes: complete when `docs/plans/2026-03-17-uri-r2-c1-u2-unannotated-authority-clearance.md` is accepted, the reviewer record names the authoritative `U2` attempt, and the round either clears or sharply narrows the missing provenance-stable unannotated root/cluster authority for repaired `URI-R2-C1` without widening beyond the live subject.
+   Completion notes: completed in `round-029` (`accepted + finalize`) with authoritative record `orchestrator/rounds/round-029/review-record.json`, accepted artifact `docs/plans/2026-03-17-uri-r2-c1-u2-unannotated-authority-clearance.md`, and bounded result token `authority-narrowed` that keeps the live subject fixed to repaired `URI-R2-C1` without widening.
 
 3. [pending] Execute the `U3` uniqueness and owner-stability clearance for the live subject
    Depends on: item 2
