@@ -1,0 +1,35 @@
+# Round `round-032` Attempt `1` Review (`U5`)
+
+- Baseline checks:
+  - `git diff --check` -> pass (no output).
+  - `python3 -m json.tool orchestrator/state.json >/dev/null` -> pass.
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json` -> pass (`2:  "contract_version": 2,`, `13:  "retry": null`).
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md` -> pass (ordered `U1` through `U6` list intact, `U5` still pending pre-merge).
+  - `test -f docs/superpowers/specs/2026-03-17-unannotated-iso-recursive-successor-roadmap-design.md` -> pass.
+  - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md` -> pass.
+  - `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md` -> pass.
+  - `test -f docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md` -> pass.
+  - `test -f orchestrator/retry-subloop.md` -> pass.
+  - Full Cabal gate `cabal build all && cabal test` -> pass (`1124 examples, 0 failures`).
+- Task-specific checks:
+  - `U5-CONTRACT` -> pass: `rg -n 'Attempt: \`attempt-1\`|Retry state: \`null\`|Live subject: repaired \`URI-R2-C1\`|constructor-acyclic-termination-refuted|does not authorize broader unannotated recursive inference|does not pre-decide \`U6\`' docs/plans/2026-03-17-uri-r2-c1-u5-bounded-unannotated-implementation-slice.md` confirms `attempt-1`, `retry: null`, repaired `URI-R2-C1`, carried-forward `U4` fail-closed result, and explicit non-authorization of broader inference / `U6` preemption.
+  - `U5-DIFF-BOUNDED` -> pass: pre-review `git status --short` showed only `M src/MLF/Elab/Run/ResultType/Fallback.hs`, `M test/PipelineSpec.hs`, `?? docs/plans/2026-03-17-uri-r2-c1-u5-bounded-unannotated-implementation-slice.md`, and `?? orchestrator/rounds/round-032/`; tracked diff commands `git diff --name-only`, `git diff --stat`, and `git diff --unified=0 -- src/MLF/Elab/Run/ResultType/Fallback.hs test/PipelineSpec.hs` confirm the implementation stayed bounded to `Fallback.hs` plus `PipelineSpec.hs`, with the artifact/round docs remaining outside production scope.
+  - `U5-SUBJECT-BOUND` -> pass: the artifact keeps repaired `URI-R2-C1` as the only live subject, and `git diff --name-only -- src-public app mlf2.cabal orchestrator/state.json orchestrator/roadmap.md Bugs.md src/MLF/Elab/Inst.hs src/MLF/Research` returned no output, so no second interface, controller drift, replay-lane reopen, or subject widening landed.
+  - `U5-BOUNDARY` -> pass: the only production diff in `Fallback.hs` adds the debug-only `rootBindingIsLocalType` trace field after canonical scope resolution; it does not add equi-recursive reasoning, cyclic graph encoding, implicit unfolding, or fallback/default success behavior.
+  - `U5-FOCUSED-COVERAGE` -> pass: `cabal test mlf2-test --test-show-details=direct --test-options='--match "ARI-C1 feasibility characterization (bounded prototype-only)"'` passed with `3 examples, 0 failures`, covering the annotation-anchored recursive control, the corresponding unannotated non-`TMu` control, and the out-of-scope recursive proxy rejection across unchecked and checked entrypoints where applicable.
+  - `U5-NO-WIDEN-NO-FALLBACK` -> pass: the production diff adds only reviewer-auditable trace visibility, and the test diff only strengthens checked-path coverage; no compatibility shim, convenience fallback, default-path widening, cross-family search, or multi-SCC behavior was introduced.
+  - `U5-CONTINUITY` -> pass: continuity diff checks over the inherited baseline docs, the predecessor recursive-types packet, historical rounds `round-001` through `round-027`, and accepted `U1` through `U4` artifacts returned no output, so inherited baseline docs, predecessor packet, historical rounds, replay-repair evidence, and accepted `U1` through `U4` authority remain untouched.
+  - `U5-FULL-GATE` -> pass: fresh `cabal build all && cabal test` succeeded in the round worktree with `mlf2-test` reporting `1124 examples, 0 failures`.
+- Implemented stage result: `pass`
+- Attempt verdict: `accepted`
+- Stage action: `finalize`
+- Retry reason: `none`
+- Fix hypothesis: `none`
+- Decision summary:
+  - `U5` attempt-1 satisfies the round plan as one bounded result-type/pipeline hardening slice for repaired `URI-R2-C1`, with focused tests and the required implementation artifact.
+  - The diff preserves the accepted `U4` `constructor-acyclic-termination-refuted` boundary as fail-closed and does not widen into broad unannotated recursive inference.
+  - Retry-subloop legality is satisfied for `U5` with `accepted + finalize`.
+- Evidence summary:
+  - All baseline verification commands passed, including the mandatory full repo gate `cabal build all && cabal test`.
+  - Focused `U5` Hspec coverage passed with `3 examples, 0 failures`, confirming the bounded positive and negative controls remain green.
+  - Diff and continuity checks show no production drift beyond `Fallback.hs` and `PipelineSpec.hs`, no controller/history rewrites, and no public-interface or replay-lane widening.

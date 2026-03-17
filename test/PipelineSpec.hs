@@ -1027,10 +1027,15 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     isRecursiveArrow ty = case ty of
                         TArrow (TMu _ _) (TMu _ _) -> True
                         _ -> False
-                case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
-                    Left err -> expectationFailure (renderPipelineError err)
-                    Right (_term, ty) ->
-                        ty `shouldSatisfy` isRecursiveArrow
+                    pipelineRuns =
+                        [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr))
+                        , ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+                        ]
+                forM_ pipelineRuns $ \(label, result) ->
+                    case result of
+                        Left err -> expectationFailure (label ++ ": " ++ renderPipelineError err)
+                        Right (_term, ty) ->
+                            ty `shouldSatisfy` isRecursiveArrow
 
             it "does not infer recursive shape for the corresponding unannotated variant" $ do
                 let expr = ELam "x" (EVar "x")
@@ -1051,7 +1056,12 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     Left _ -> pure ()
                     Right (_term, ty) ->
                         expectationFailure
-                            ("Expected rejection for out-of-scope unannotated recursive proxy, got type: " ++ show ty)
+                            ("Expected rejection for unchecked out-of-scope unannotated recursive proxy, got type: " ++ show ty)
+                case runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr) of
+                    Left _ -> pure ()
+                    Right (_term, ty) ->
+                        expectationFailure
+                            ("Expected rejection for checked out-of-scope unannotated recursive proxy, got type: " ++ show ty)
 
         it "uses presolution-native solved artifacts" $ do
             artifacts <- requireRight (runPipelineArtifactsDefault Set.empty (ELam "x" (EVar "x")))
