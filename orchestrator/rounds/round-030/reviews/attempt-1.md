@@ -1,0 +1,35 @@
+# Round `round-030` Attempt `1` Review (`U3`)
+
+- Baseline checks:
+  - `git diff --check` -> pass.
+  - `python3 -m json.tool orchestrator/state.json >/dev/null` -> pass.
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json` -> pass (`contract_version: 2`, `retry: null` present).
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md` -> pass (ordered status list intact; `U3` still pending before merge/controller update).
+  - `test -f docs/superpowers/specs/2026-03-17-unannotated-iso-recursive-successor-roadmap-design.md` -> pass.
+  - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md` -> pass.
+  - `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md` -> pass.
+  - `test -f docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md` -> pass.
+  - `test -f orchestrator/retry-subloop.md` -> pass.
+  - Full Cabal gate `cabal build all && cabal test` -> correctly skipped (docs-only round; no edits under `src/`, `src-public/`, `app/`, `test/`, `mlf2.cabal`).
+- Task-specific checks:
+  - `U3-CONTRACT` -> pass: `Attempt: attempt-1`, `Retry state: null`, and bounded `U3` scope are explicit in the artifact.
+  - `U3-SUBJECT-BOUND` -> pass: artifact remains fixed to repaired `URI-R2-C1` and rejects cross-family/multi-SCC widening.
+  - `U3-BOUNDARY` -> pass: explicit-only / non-equi-recursive / non-cyclic-graph boundaries are restated and preserved.
+  - `U3-UNIQUENESS-NO-RANKING` -> pass: admissibility rubric is explicit, no-ranking rule is explicit, and exactly one final result token is declared in the result section.
+  - `U3-RESULT` -> pass: final token is `uniqueness-owner-stable-refuted` with rationale grounded in inherited `U2 authority-narrowed` evidence.
+  - `U3-NO-WIDEN-NO-FALLBACK` -> pass: no second interface, fallback, compatibility shim, or default-path widening introduced.
+  - `U3-CONTINUITY` -> pass: predecessor evidence continuity preserved (`round-028`/`round-029` authoritative review records, inherited baseline/research-stop/repair-gate docs, replay-repair rounds, and predecessor recursive-types packet all present and unmodified).
+  - `U3-DIFF-BOUNDED` -> pass: working tree changes are limited to round artifacts and the `U3` docs artifact (no production/test/codepath drift).
+- Implemented stage result: `pass`
+- Attempt verdict: `accepted`
+- Stage action: `finalize`
+- Retry reason: `none`
+- Fix hypothesis: `none`
+- Decision summary:
+  - The round implementation satisfies the `U3` plan contract and successor-roadmap design as a bounded docs-only uniqueness/owner-stability clearance for repaired `URI-R2-C1`.
+  - Evidence remains fail-closed (`uniqueness-owner-stable-refuted`) without heuristic ranking or boundary widening.
+  - Retry-subloop legality is satisfied for `U3` with `accepted + finalize`, and no controller-owned artifact was modified.
+- Evidence summary:
+  - Baseline verification contract commands all passed (except full Cabal gate intentionally out of scope with explicit docs-only justification).
+  - Artifact text confirms bounded subject, inherited boundary, no-ranking rule, and single final `U3` outcome token with rationale.
+  - Continuity checks confirm inherited authority chain (`U1`/`U2` finalized), predecessor evidence availability, and bounded diff scope.
