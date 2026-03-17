@@ -4,6 +4,22 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 94 unannotated iso-recursive successor orchestrator scaffold (completed 2026-03-17)
+
+- Completed:
+  - replaced the completed `URI-R2-C1` replay repair-track top-level `orchestrator/` with a new successor control plane aimed at bounded progress toward fully unannotated iso-recursive-type synthesis in the solver/pipeline;
+  - anchored the new live roadmap on repaired `URI-R2-C1`, preserved completed rounds `round-001` through `round-027` as inherited evidence, and reset `orchestrator/state.json` to idle `stage: "select-task"` with `last_completed_round: "round-027"`;
+  - wrote the approved successor design source at `docs/superpowers/specs/2026-03-17-unannotated-iso-recursive-successor-roadmap-design.md` and tailored the roadmap, retry contract, verification contract, and role prompts for a dynamic bounded-cycle loop (`U1` through `U6`).
+- Verification:
+  - `python3 -m json.tool orchestrator/state.json`: PASS
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`: PASS
+  - `test -f docs/superpowers/specs/2026-03-17-unannotated-iso-recursive-successor-roadmap-design.md && test -f orchestrator/retry-subloop.md`: PASS
+  - `git diff --check`: PASS
+- Rolling priorities (next):
+  1. Run `U1` on the new live roadmap before touching solver behavior: bind the inherited automatic-recursive baseline, the repaired `URI-R2-C1` subject, and the hard stop triggers concretely.
+  2. Keep the live subject fixed to repaired `URI-R2-C1` until an accepted roadmap update explicitly widens it.
+  3. Preserve the inherited explicit-only / non-equi-recursive / non-cyclic-graph boundary unless a later accepted roadmap update changes that boundary explicitly.
+
 ## Task 93 `URI-R2-C1` P2 replay repair-track orchestrator run (completed 2026-03-17)
 
 - Completed:

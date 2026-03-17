@@ -154,6 +154,13 @@
 
 # Implementation Notes
 
+## 2026-03-17 - Live orchestrator successor track now targets bounded progress toward unannotated iso-recursive inference
+
+- The top-level `orchestrator/` no longer points at the completed `URI-R2-C1` replay repair track as live work. That finished track is now predecessor evidence for a successor control plane that keeps making bounded progress toward unannotated iso-recursive solver/pipeline inference.
+- The live successor design source is `docs/superpowers/specs/2026-03-17-unannotated-iso-recursive-successor-roadmap-design.md`, and the initial roadmap now stages `U1` through `U6`: inherited-baseline bind, provenance authority clearance, uniqueness/owner-stability clearance, feasibility clearance, one bounded implementation slice, and a bounded next-widening decision gate.
+- The live subject starts from repaired `URI-R2-C1`, not from broad automatic recursive inference. The inherited explicit-only / non-equi-recursive / non-cyclic-graph boundary remains mandatory unless a later accepted roadmap update changes it explicitly.
+- The successor control plane is intentionally dynamic but fail-closed: after accepted rounds, the guider may refine future pending items or append another bounded cycle, but completed-item truth and subject-boundary continuity must remain intact.
+
 ## 2026-03-17 - `URI-R2-C1` repair track completed with bounded `InstBot` replay repair
 
 - The bounded replay repair track is now complete. The live successor roadmap `R1` through `R4` finished across `round-024` through `round-027`, and the live controller now rests at terminal `stage: "done"` with `last_completed_round: "round-027"`.
