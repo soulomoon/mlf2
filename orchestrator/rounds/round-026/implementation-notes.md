@@ -1,0 +1,3 @@
+- `R3` attempt 1 kept the active lane fixed to `URI-R2-C1` / `uri-r2-c1-only-v1` and treated `round-025` attempt 3 as inherited authoritative `R2 = pass` evidence rather than reopening the accepted `InstBot` repair.
+- The round stayed docs-and-evidence only: no production or test files changed, and inspection remained centered on `MLF.Elab.Inst.applyInstantiation` (`InstBot` branch), adjacent `MLF.Elab.TypeCheck` plumbing, and the focused `ElaborationSpec` / `UriR2C1PrototypeP1Spec` coverage.
+- Locked replay success, strict non-replay boundedness, predecessor continuity, and the full `cabal build all && cabal test` gate were rerun and passed; the canonical evidence lives in `docs/plans/2026-03-17-uri-r2-c1-r3-locked-replay-verification.md`.
