@@ -475,6 +475,10 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                 presolutionViewFinal = View.rtvPresolutionViewOverlay viewFinalBounded
             let scopeRootNodePre = rootForTypePre
             scopeRootPre <- bindingToElab (resolveCanonicalScope c1 presolutionViewFinal redirects scopeRootNodePre)
+            let rootBindingIsLocalType =
+                    case bindingScopeRefCanonical presolutionViewFinal rootC of
+                        Right TypeRef{} -> True
+                        _ -> False
             let scopeRootPost =
                     case bindingScopeRefCanonical presolutionViewFinal rootC of
                         Right ref -> canonicalizeScopeRef presolutionViewFinal redirects ref
@@ -692,6 +696,8 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                     ++ show targetC
                     ++ " scopeRoot="
                     ++ show scopeRoot
+                    ++ " rootBindingIsLocalType="
+                    ++ show rootBindingIsLocalType
                 )
             let ty = case sch of
                     Forall binds body -> foldr (\(n, b) t -> TForall n b t) body binds
