@@ -29,7 +29,7 @@
    Depends on: the completed `D1` through `D4` diagnostic track and `BUG-2026-03-16-001`
    Completion notes: complete when `docs/plans/2026-03-17-uri-r2-c1-r1-repair-boundary-reproduction.md` is accepted, the reviewer record names the authoritative `R1` attempt, and the round reproduces the localized repair target for the locked `URI-R2-C1` / `uri-r2-c1-only-v1` lane without widening beyond the accepted owner boundary.
 
-2. [pending] Execute the `R2` bounded `InstBot` repair for `URI-R2-C1`
+2. [done] Execute the `R2` bounded `InstBot` repair for `URI-R2-C1`
    Depends on: item 1
    Completion notes: complete when `docs/plans/2026-03-17-uri-r2-c1-r2-bounded-instbot-repair.md` is accepted, the reviewer record names the authoritative `R2` attempt, and the round lands one bounded paper-faithful repair at `MLF.Elab.Inst.applyInstantiation` without widening scope or introducing convenience fallback behavior.
 
