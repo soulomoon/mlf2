@@ -4,6 +4,21 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 95 unannotated iso-recursive successor orchestrator run (completed 2026-03-18)
+
+- Completed:
+  - executed the live top-level unannotated iso-recursive successor roadmap end to end through accepted rounds `round-028` through `round-033`, with all substantive guider/planner/implementer/reviewer/merger work delegated under the repo-local orchestrator contract;
+  - finalized `U1` as the inherited-baseline bind, `U2` as bounded `authority-narrowed`, `U3` as bounded `uniqueness-owner-stable-refuted`, `U4` as bounded `constructor-acyclic-termination-refuted`, `U5` as the bounded `ResultType.Fallback` hardening slice, and terminal `U6` as the bounded next-step decision `continue-bounded` on authoritative attempt `2`;
+  - returned `orchestrator/state.json` to terminal `stage: "done"` with `last_completed_round: "round-033"` and marked all live successor-roadmap items `done`.
+- Verification:
+  - `python3 -m json.tool orchestrator/state.json`: PASS
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`: PASS
+  - `git diff --check`: PASS
+- Rolling priorities (next):
+  1. Start a fresh bounded successor cycle only after an explicit roadmap update that interprets the accepted `continue-bounded` result without widening beyond repaired `URI-R2-C1`.
+  2. Keep the live subject fixed to repaired `URI-R2-C1` and preserve the inherited explicit-only / non-equi-recursive / non-cyclic-graph boundary unless a later accepted roadmap update changes that boundary explicitly.
+  3. Treat the accepted `U5` `ResultType.Fallback` hardening slice plus the accepted `U2`/`U3`/`U4` negative findings as the current bounded baseline; do not reinterpret those negative results as clearance for broad unannotated recursive inference.
+
 ## Task 94 unannotated iso-recursive successor orchestrator scaffold (completed 2026-03-17)
 
 - Completed:

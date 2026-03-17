@@ -160,3 +160,9 @@ tasks/
 - Primary source: `papers/these-finale-english.txt` (thesis)
 - Supplementary: `papers/xmlf.txt` (used only when the thesis is silent)
 - Document any conflicts or deviations from the papers.
+
+## Subagent Model
+- When creating a subagent via `spawn_agent`, explicitly set `model` to `"gpt-5.4"` by default.
+- Thinking level set to xhigh for all subagents by default.
+- Do not rely on inherited or platform-default subagent model selection.
+- Only use a different subagent model if the user explicitly requests it.
