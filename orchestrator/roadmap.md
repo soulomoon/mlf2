@@ -42,9 +42,9 @@
    Depends on: item 3
    Completion notes: completed in `round-031` (`accepted + finalize`) with authoritative record `orchestrator/rounds/round-031/review-record.json`, accepted artifact `docs/plans/2026-03-17-uri-r2-c1-u4-unannotated-feasibility-clearance.md`, and bounded result token `constructor-acyclic-termination-refuted` (repaired `URI-R2-C1` remains the fixed live subject; no equi-recursive, cyclic, fallback, or termination-weakened widening authorized).
 
-5. [pending] Execute the `U5` bounded solver/pipeline implementation slice for the still-bound live subject under the `U4` refuted result
+5. [done] Execute the `U5` bounded solver/pipeline implementation slice for the still-bound live subject under the `U4` refuted result
    Depends on: item 4
-   Completion notes: complete when `docs/plans/2026-03-17-uri-r2-c1-u5-bounded-unannotated-implementation-slice.md` is accepted, the reviewer record names the authoritative `U5` attempt, and the round lands exactly one bounded solver/pipeline slice for repaired `URI-R2-C1` that preserves the inherited explicit-only / non-equi-recursive / non-cyclic boundary and does not treat `U4` as clearance for equi-recursive, cyclic, fallback, or cross-subject behavior.
+   Completion notes: completed in `round-032` (`accepted + finalize`) with authoritative record `orchestrator/rounds/round-032/review-record.json`, accepted artifact `docs/plans/2026-03-17-uri-r2-c1-u5-bounded-unannotated-implementation-slice.md`, and bounded result token `result-type-pipeline-hardening-slice-landed` (exactly one repaired-`URI-R2-C1` slice in `src/MLF/Elab/Run/ResultType/Fallback.hs` plus focused `test/PipelineSpec.hs` coverage, while preserving the inherited explicit-only / non-equi-recursive / non-cyclic boundary and the accepted `U4` fail-closed non-widening result).
 
 6. [pending] Execute the `U6` end-to-end verification and next-widening decision gate
    Depends on: item 5
