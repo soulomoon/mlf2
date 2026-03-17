@@ -1,3 +1,10 @@
+## 2026-03-18 - Unannotated successor `U1` through `U6` runtime complete with bounded `continue-bounded` outcome
+
+- The live top-level successor roadmap is now complete through accepted rounds `round-028` through `round-033`. The controller finished the initial bounded `U1` through `U6` cycle and now rests at terminal `stage: "done"` with `last_completed_round: "round-033"`.
+- `U1` through `U4` remained docs-only evidence gates and all finalized fail-closed on the repaired `URI-R2-C1` live subject: `U1` bound the inherited baseline, `U2` narrowed provenance-stable authority, `U3` refuted uniqueness/owner stability without heuristic ranking, and `U4` refuted constructor-directed / acyclic / terminating admissibility without equi-recursive or cyclic widening.
+- `U5` landed exactly one bounded production slice in `MLF.Elab.Run.ResultType.Fallback`, with focused `PipelineSpec` coverage. The slice hardens the still-bound repaired `URI-R2-C1` path without authorizing broad unannotated recursive inference, and the full repo gate passed on the accepted round.
+- `U6` consumed the authoritative `U1` through `U5` chain plus fresh full-gate verification and finalized the bounded next-step token `continue-bounded`. The cycle therefore ends with evidence for another explicit bounded cycle, not with widening approval and not with a blocked stop.
+
 ### 2026-03-11 recursive-types orchestration packet
 
 - Added a repo-tracked, docs-only orchestration packet under `tasks/todo/2026-03-11-recursive-types-orchestration/` for the recursive-types campaign: task memory, milestone mechanism table, orchestration prompt, and authoritative JSONL event log now live together in one task folder.

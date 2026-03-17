@@ -1,0 +1,110 @@
+# Progress
+
+## 2026-03-18
+
+- Loaded `using-superpowers`, `planning-with-files`, `devotion`, `run-orchestrator-loop`, the repo-local orchestrator contract, retry rules, role files, and the controller reference docs.
+- Confirmed the controller is starting from an idle `select-task` state after completed `round-027`.
+- Reviewed task-workflow guidance, existing successor-roadmap context, prior orchestrator-run packets, and `.worktrees/` ignore status.
+- Created this task folder to track the current orchestrator-run session separately from earlier scaffold and runtime tasks.
+- Initialized `round-028` controller bookkeeping by creating `orchestrator/rounds/round-028/` and updating `orchestrator/state.json` so the active round is parked at `stage: "select-task"` before delegated task selection.
+- Delegated `select-task` for `round-028`; the guider chose roadmap item `U1` and wrote `orchestrator/rounds/round-028/selection.md`.
+- Created round branch `codex/round-028-u1-unannotated-baseline-bind` and worktree `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-028`.
+- Advanced `orchestrator/state.json` to `stage: "plan"` with `current_task: "U1"` and the selection artifact path recorded.
+- Delegated the `plan` stage for `round-028`; the planner wrote `orchestrator/rounds/round-028/plan.md` for bounded `U1` attempt-1 execution.
+- Synced `selection.md` and `plan.md` into `.worktrees/round-028/` so the round branch carries the active stage artifacts.
+- Delegated the `implement` stage for `round-028`; the implementer wrote the bounded `U1` bind artifact and round implementation notes in `.worktrees/round-028`.
+- Advanced `orchestrator/state.json` to `stage: "review"` and recorded the `U1` implementation artifact paths.
+- Delegated the `review` stage for `round-028`; the reviewer accepted `U1` attempt 1 with `Stage action: finalize` and wrote the immutable review snapshot plus authoritative `review-record.json`.
+- Advanced `orchestrator/state.json` to `stage: "merge"` and recorded the `U1` review artifact paths.
+- Delegated the `merge` stage for `round-028`; the merger marked the round squash-ready with title `U1: bind repaired URI-R2-C1 inherited baseline without widening`.
+- Committed the approved round branch as `0b5c401 U1: bind repaired URI-R2-C1 inherited baseline without widening`.
+- Squash-merged `codex/round-028-u1-unannotated-baseline-bind` into the base branch and committed the squashed result as `908da52 U1: bind repaired URI-R2-C1 inherited baseline without widening`.
+- Advanced `orchestrator/state.json` to `stage: "update-roadmap"`, cleared the active round fields, and set `last_completed_round` to `round-028`.
+- Delegated the `update-roadmap` stage for `round-028`; the guider marked `U1` done and kept `U2` as the next pending bounded item.
+- Committed the roadmap update as `9c5a963 orchestrator: mark U1 baseline bind complete`.
+- Prepared `round-029` in `orchestrator/state.json` at `stage: "select-task"` to continue the successor loop with the next pending item.
+- Delegated `select-task` for `round-029`; the guider chose roadmap item `U2` and wrote `orchestrator/rounds/round-029/selection.md`.
+- Created round branch `codex/round-029-u2-unannotated-authority-clearance` and worktree `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-029`.
+- Advanced `orchestrator/state.json` to `stage: "plan"` with `current_task: "U2"` and the selection artifact path recorded.
+- Delegated the `plan` stage for `round-029`; the planner wrote `orchestrator/rounds/round-029/plan.md` for bounded `U2` attempt-1 execution.
+- Synced `selection.md` and `plan.md` into `.worktrees/round-029/` so the round branch carries the active stage artifacts.
+- Delegated the `implement` stage for `round-029`; the implementer wrote the bounded `U2` authority artifact and round implementation notes in `.worktrees/round-029`.
+- Delegated the `review` stage for `round-029`; the reviewer accepted `U2` attempt 1 with `Stage action: finalize` and wrote the immutable review snapshot plus authoritative `review-record.json`.
+- Advanced `orchestrator/state.json` to `stage: "merge"` and recorded the `U2` implementation and review artifact paths.
+- Delegated the `merge` stage for `round-029`; the merger marked the round squash-ready with title `U2: narrow repaired URI-R2-C1 unannotated authority without widening`.
+- Committed the approved round branch as `a6b708a U2: narrow repaired URI-R2-C1 unannotated authority without widening`.
+- Squash-merged `codex/round-029-u2-unannotated-authority-clearance` into the base branch and committed the squashed result as `85560fe U2: narrow repaired URI-R2-C1 unannotated authority without widening`.
+- Advanced `orchestrator/state.json` to `stage: "update-roadmap"`, cleared the active round fields, and set `last_completed_round` to `round-029`.
+- Delegated the `update-roadmap` stage for `round-029`; the guider marked `U2` done and kept `U3` as the next pending bounded item.
+- Committed the roadmap update as `75860e7 orchestrator: mark U2 authority clearance complete`.
+- Prepared `round-030` in `orchestrator/state.json` at `stage: "select-task"` to continue the successor loop with the next pending item.
+- Delegated `select-task` for `round-030`; the guider chose roadmap item `U3` and wrote `orchestrator/rounds/round-030/selection.md`.
+- Created round branch `codex/round-030-u3-uniqueness-owner-clearance` and worktree `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-030`.
+- Advanced `orchestrator/state.json` to `stage: "plan"` with `current_task: "U3"` and the selection artifact path recorded.
+- Delegated the `plan` stage for `round-030`; the planner wrote `orchestrator/rounds/round-030/plan.md` for bounded `U3` attempt-1 execution.
+- Synced `selection.md` and `plan.md` into `.worktrees/round-030/` so the round branch carries the active stage artifacts.
+- Delegated the `implement` stage for `round-030`; the implementer wrote the bounded `U3` uniqueness/owner artifact and round implementation notes in `.worktrees/round-030`.
+- Advanced `orchestrator/state.json` to `stage: "review"` and recorded the `U3` implementation artifact paths.
+- Delegated the `review` stage for `round-030`; the reviewer accepted `U3` attempt 1 with `Stage action: finalize` and wrote the immutable review snapshot plus authoritative `review-record.json`.
+- Advanced `orchestrator/state.json` to `stage: "merge"` and recorded the `U3` review artifact paths.
+- Delegated the `merge` stage for `round-030`; the merger marked the round squash-ready with title `docs(u3): finalize URI-R2-C1 uniqueness owner-stability clearance`.
+- Committed the approved round branch as `0b0b286 docs(u3): finalize URI-R2-C1 uniqueness owner-stability clearance`.
+- Squash-merged `codex/round-030-u3-uniqueness-owner-clearance` into the base branch and committed the squashed result as `f6e5815 docs(u3): finalize URI-R2-C1 uniqueness owner-stability clearance`.
+- Advanced `orchestrator/state.json` to `stage: "update-roadmap"`, cleared the active round fields, and set `last_completed_round` to `round-030`.
+- Delegated the `update-roadmap` stage for `round-030`; the guider marked `U3` done and kept `U4` as the next pending bounded item.
+- Committed the roadmap update as `eb6b015 orchestrator: mark U3 owner-stability clearance complete`.
+- Prepared `round-031` in `orchestrator/state.json` at `stage: "select-task"` to continue the successor loop with the next pending item.
+- Delegated `select-task` for `round-031`; the guider chose roadmap item `U4` and wrote `orchestrator/rounds/round-031/selection.md`.
+- Created round branch `codex/round-031-u4-feasibility-clearance` and worktree `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-031`.
+- Advanced `orchestrator/state.json` to `stage: "plan"` with `current_task: "U4"` and the selection artifact path recorded.
+- Delegated the `plan` stage for `round-031`; the planner wrote `orchestrator/rounds/round-031/plan.md` for bounded `U4` attempt-1 execution.
+- Synced `selection.md` and `plan.md` into `.worktrees/round-031/` so the round branch carries the active stage artifacts.
+- Delegated the `implement` stage for `round-031`; the implementer wrote the bounded `U4` feasibility artifact and round implementation notes in `.worktrees/round-031`.
+- Advanced `orchestrator/state.json` to `stage: "review"` and recorded the `U4` implementation artifact paths.
+- Delegated the `review` stage for `round-031`; the reviewer accepted `U4` attempt 1 with `Stage action: finalize` and wrote the immutable review snapshot plus authoritative `review-record.json`.
+- Advanced `orchestrator/state.json` to `stage: "merge"` and recorded the `U4` review artifact paths.
+- Delegated the `merge` stage for `round-031`; the merger marked the round squash-ready with title `docs(u4): finalize URI-R2-C1 constructor-acyclic-termination feasibility clearance`.
+- Committed the approved round branch as `6a076ec docs(u4): finalize URI-R2-C1 constructor-acyclic-termination feasibility clearance`.
+- Squash-merged `codex/round-031-u4-feasibility-clearance` into the base branch and committed the squashed result as `f175b72 docs(u4): finalize URI-R2-C1 constructor-acyclic-termination feasibility clearance`.
+- Advanced `orchestrator/state.json` to `stage: "update-roadmap"`, cleared the active round fields, and set `last_completed_round` to `round-031`.
+- Delegated the `update-roadmap` stage for `round-031`; the guider marked `U4` done and tightened `U5` to stay concrete and bounded under the refuted `U4` outcome.
+- Committed the roadmap update as `c541e81 orchestrator: mark U4 feasibility clearance complete`.
+- Prepared `round-032` in `orchestrator/state.json` at `stage: "select-task"` to continue the successor loop with the next pending item.
+- Delegated `select-task` for `round-032`; the guider chose roadmap item `U5` and wrote `orchestrator/rounds/round-032/selection.md`.
+- Created round branch `codex/round-032-u5-bounded-implementation-slice` and worktree `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-032`.
+- Advanced `orchestrator/state.json` to `stage: "plan"` with `current_task: "U5"` and the selection artifact path recorded.
+- Delegated the `plan` stage for `round-032`; the planner wrote `orchestrator/rounds/round-032/plan.md` for bounded `U5` attempt-1 execution.
+- Synced `selection.md` and `plan.md` into `.worktrees/round-032/` so the round branch carries the active stage artifacts.
+- Delegated the `implement` stage for `round-032`; the implementer landed the bounded `U5` ResultType/Fallback slice, tightened focused PipelineSpec coverage, authored the `U5` artifact, and reported a green full `cabal build all && cabal test` gate.
+- Advanced `orchestrator/state.json` to `stage: "review"` and recorded the `U5` implementation artifact paths.
+- Delegated the `review` stage for `round-032`; the reviewer accepted `U5` attempt 1 with `Stage action: finalize` and confirmed the bounded code/test slice plus full repo gate remain green.
+- Advanced `orchestrator/state.json` to `stage: "merge"` and recorded the `U5` review artifact paths.
+- Delegated the `merge` stage for `round-032`; the merger marked the round squash-ready with title `pipeline(u5): harden bounded URI-R2-C1 result-type slice`.
+- Committed the approved round branch as `6d7cfba pipeline(u5): harden bounded URI-R2-C1 result-type slice`.
+- Squash-merged `codex/round-032-u5-bounded-implementation-slice` into the base branch and committed the squashed result as `1da06b2 pipeline(u5): harden bounded URI-R2-C1 result-type slice`.
+- Advanced `orchestrator/state.json` to `stage: "update-roadmap"`, cleared the active round fields, and set `last_completed_round` to `round-032`.
+- Delegated the `update-roadmap` stage for `round-032`; the guider marked `U5` done and kept `U6` as the next pending bounded item.
+- Committed the roadmap update as `5a056f2 orchestrator: mark U5 implementation slice complete`.
+- Prepared `round-033` in `orchestrator/state.json` at `stage: "select-task"` to continue the successor loop with the final pending item.
+- Delegated `select-task` for `round-033`; the guider chose roadmap item `U6` and wrote `orchestrator/rounds/round-033/selection.md`.
+- Created round branch `codex/round-033-u6-next-widening-decision-gate` and worktree `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-033`.
+- Advanced `orchestrator/state.json` to `stage: "plan"` with `current_task: "U6"` and the selection artifact path recorded.
+- Delegated the `plan` stage for `round-033`; the planner wrote `orchestrator/rounds/round-033/plan.md` for bounded `U6` attempt-1 execution.
+- Synced `selection.md` and `plan.md` into `.worktrees/round-033/` so the round branch carries the active stage artifacts.
+- Delegated the `implement` stage for `round-033`; the implementer wrote the aggregate `U6` decision artifact and round implementation notes, and re-ran the full repo gate successfully.
+- Advanced `orchestrator/state.json` to `stage: "review"` and recorded the `U6` implementation artifact paths.
+- Delegated the `review` stage for `round-033`; the reviewer rejected `U6` attempt 1 with `Stage action: retry` because the artifact's "Files Changed By This Round" section was not exact.
+- Advanced `orchestrator/state.json` back to `stage: "plan"` for `round-033` attempt 2 and recorded retry state plus the controller-owned `attempt-log.jsonl` path.
+- Delegated the retry `plan` stage for `round-033` attempt 2; the planner rewrote `plan.md` as a delta plan focused only on correcting the `U6` file-list exactness defect.
+- Delegated the retry `implement` stage for `round-033` attempt 2; the implementer corrected the `U6` file-list exactness defect and reran targeted exactness verification successfully.
+- Advanced `orchestrator/state.json` to `stage: "review"` for `round-033` attempt 2 while keeping the same retry state and branch/worktree.
+- Delegated the retry `review` stage for `round-033` attempt 2; the reviewer accepted `U6` with `Stage action: finalize`, wrote `reviews/attempt-2.md`, and created the authoritative `review-record.json`.
+- Cleared `retry` and advanced `orchestrator/state.json` to `stage: "merge"` for the accepted final round.
+- Delegated the `merge` stage for `round-033`; the merger marked the round squash-ready with title `docs(u6): finalize bounded URI-R2-C1 next-widening decision gate`.
+- Committed the approved round branch as `1058707 docs(u6): finalize bounded URI-R2-C1 next-widening decision gate`.
+- Squash-merged `codex/round-033-u6-next-widening-decision-gate` into the base branch and committed the squashed result as `759fcf5 docs(u6): finalize bounded URI-R2-C1 next-widening decision gate`.
+- Advanced `orchestrator/state.json` to `stage: "update-roadmap"`, cleared the active round fields, and set `last_completed_round` to `round-033`.
+- Delegated the `update-roadmap` stage for `round-033`; the guider marked `U6` done and closed the initial successor cycle with bounded outcome `continue-bounded`.
+- Committed the roadmap update as `799b696 orchestrator: mark U6 decision gate complete`.
+- Returned `orchestrator/state.json` to terminal `stage: "done"` with `last_completed_round: "round-033"`.
+- Updated `TODO.md`, `implementation_notes.md`, `CHANGELOG.md`, and `AGENTS.md` to reflect the completed successor run and the explicit `gpt-5.4` + `xhigh` subagent default.
