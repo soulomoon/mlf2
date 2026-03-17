@@ -37,6 +37,6 @@
    Depends on: item 2
    Completion notes: complete when `docs/plans/2026-03-17-uri-r2-c1-r3-locked-replay-verification.md` is accepted, the reviewer record names the authoritative `R3` attempt, and the round records bounded success of the authoritative replay path for `URI-R2-C1` / `uri-r2-c1-only-v1` without widened regression scope or second-interface behavior.
 
-4. [pending] Execute the `R4` repair decision gate for `URI-R2-C1`
+4. [done] Execute the `R4` repair decision gate for `URI-R2-C1`
    Depends on: item 3
    Completion notes: complete when `docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md` is accepted, the reviewer record names the authoritative `R4` attempt, and the final bounded outcome is recorded as exactly one of `repair-accepted` or `repair-blocked`.
