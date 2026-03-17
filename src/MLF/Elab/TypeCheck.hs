@@ -112,19 +112,20 @@ ensureContractiveInstantiation inst = case inst of
     InstSeq a b -> ensureContractiveInstantiation a >> ensureContractiveInstantiation b
 
 checkInstantiation :: Env -> ElabType -> Instantiation -> Either TypeCheckError ElabType
-checkInstantiation env ty inst = snd <$> evalInstantiationWith spec inst (0, env, ty)
+checkInstantiation env ty inst =
+    (\(_, _, ty') -> ty') <$> evalInstantiationWith spec inst (0, env, ty)
   where
     spec :: InstEvalSpec Env TypeCheckError
     spec = InstEvalSpec
-        { instBot = \tArg (k, _env', t) -> case t of
-            TBottom -> Right (k, tArg)
+        { instBot = \tArg (k, env', t) -> case t of
+            TBottom -> Right (k, env', tArg)
             _ -> Left (TCInstantiationError (InstBot tArg) t ("InstBot expects TBottom, got " ++ pretty t))
         , instAbstr = \v (k, env', t) ->
             case Map.lookup v (typeEnv env') of
                 Nothing -> Left (TCUnboundTypeVar v)
                 Just bound ->
                     if alphaEqType t bound
-                        then Right (k, TVar v)
+                        then Right (k, env', TVar v)
                         else Left (TCInstantiationError (InstAbstr v) t ("InstAbstr expects bound " ++ pretty bound))
         , instElimError = \inst0 t ->
             TCInstantiationError inst0 t ("InstElim expects forall, got " ++ pretty t)
@@ -132,6 +133,7 @@ checkInstantiation env ty inst = snd <$> evalInstantiationWith spec inst (0, env
             TCInstantiationError InstId t ("InstInside expects forall, got " ++ pretty t)
         , instUnderError = \phiInst t ->
             TCInstantiationError phiInst t ("InstUnder expects forall, got " ++ pretty t)
+        , instElimEnv = \_v _replacement env' -> env'
         , instUnderEnv = \v bound env' ->
             env' { typeEnv = Map.insert v bound (typeEnv env') }
         , renameBound = renameInstBound
