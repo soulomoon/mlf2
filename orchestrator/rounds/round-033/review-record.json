@@ -1,0 +1,35 @@
+{
+  "subject_id": "URI-R2-C1",
+  "scenario_id": "uri-r2-c1-only-v1",
+  "stage_id": "U6",
+  "attempt": 2,
+  "attempt_verdict": "accepted",
+  "stage_result": "pass",
+  "stage_action": "finalize",
+  "retry_reason": "none",
+  "fix_hypothesis": "none",
+  "status": "authoritative",
+  "authoritative_attempt": 2,
+  "authoritative_result": "pass",
+  "artifact_path": "docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md",
+  "review_snapshot": "orchestrator/rounds/round-033/reviews/attempt-2.md",
+  "checks": {
+    "U6-CONTRACT": "pass",
+    "U6-SUBJECT-BOUND": "pass",
+    "U6-BOUNDARY": "pass",
+    "U6-CONTINUITY": "pass",
+    "U6-FULL-GATE": "pass",
+    "U6-RESULT-TOKEN": "pass",
+    "U6-AGGREGATE-ONLY": "pass",
+    "U6-FILES-CHANGED": "pass",
+    "U6-RETRY-HISTORY": "pass"
+  },
+  "retry_summary": {
+    "attempts_run": 2,
+    "max_attempts": null,
+    "latest_accepted_attempt": 2,
+    "finalization_mode": "accepted-final",
+    "latest_retry_reason": "none"
+  },
+  "terminal_reason": "none"
+}
