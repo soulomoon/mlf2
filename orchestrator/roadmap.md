@@ -46,6 +46,6 @@
    Depends on: item 4
    Completion notes: completed in `round-032` (`accepted + finalize`) with authoritative record `orchestrator/rounds/round-032/review-record.json`, accepted artifact `docs/plans/2026-03-17-uri-r2-c1-u5-bounded-unannotated-implementation-slice.md`, and bounded result token `result-type-pipeline-hardening-slice-landed` (exactly one repaired-`URI-R2-C1` slice in `src/MLF/Elab/Run/ResultType/Fallback.hs` plus focused `test/PipelineSpec.hs` coverage, while preserving the inherited explicit-only / non-equi-recursive / non-cyclic boundary and the accepted `U4` fail-closed non-widening result).
 
-6. [pending] Execute the `U6` end-to-end verification and next-widening decision gate
+6. [done] Execute the `U6` end-to-end verification and next-widening decision gate
    Depends on: item 5
-   Completion notes: complete when `docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md` is accepted, the reviewer record names the authoritative `U6` attempt, and the round records exactly one bounded next-step result: `continue-bounded`, `widen-approved`, or `stop-blocked`.
+   Completion notes: completed in `round-033` (`accepted + finalize`) with authoritative record `orchestrator/rounds/round-033/review-record.json`, accepted artifact `docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md`, and bounded result token `continue-bounded` (the aggregate-only decision gate finalized the initial `U1` through `U6` cycle without widening beyond repaired `URI-R2-C1` and preserved the inherited explicit-only / non-equi-recursive / non-cyclic-graph boundary).
