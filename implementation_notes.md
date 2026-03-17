@@ -154,6 +154,13 @@
 
 # Implementation Notes
 
+## 2026-03-17 - `URI-R2-C1` repair track completed with bounded `InstBot` replay repair
+
+- The bounded replay repair track is now complete. The live successor roadmap `R1` through `R4` finished across `round-024` through `round-027`, and the live controller now rests at terminal `stage: "done"` with `last_completed_round: "round-027"`.
+- `R2` landed the accepted production repair at `MLF.Elab.Inst.applyInstantiation` (`InstBot` branch): the locked `URI-R2-C1` replay lane no longer trips the old `InstBot expects ⊥` mismatch, while strict non-replay `InstBot` misuse still fails closed.
+- `R3` revalidated that accepted repair on the exact `URI-R2-C1` / `uri-r2-c1-only-v1` lane without reopening broader replay work, and `R4` consumed the authoritative `R1` through `R3` record to finalize the bounded outcome `repair-accepted`.
+- The accepted repair track stayed bounded throughout: no second executable interface, no compatibility fallback, and no broadened replay/regression campaign were introduced.
+
 ## 2026-03-17 - Live orchestrator successor track now targets the bounded replay repair lane
 
 - The top-level `orchestrator/` no longer points at the completed `D1` through `D4` diagnostic roadmap as live work. That finished track is now explicit predecessor evidence for a bounded repair-track successor roadmap.
