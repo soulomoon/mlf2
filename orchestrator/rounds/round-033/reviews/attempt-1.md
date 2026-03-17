@@ -1,0 +1,38 @@
+# Round `round-033` Attempt `1` Review (`U6`)
+
+- Baseline checks:
+  - `git diff --check` -> pass (no output).
+  - `python3 -m json.tool orchestrator/state.json >/dev/null` -> pass.
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json` -> pass (`2:  "contract_version": 2,`, `13:  "retry": null`).
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md` -> pass (ordered `U1` through `U6` list intact, `U6` still pending pre-merge).
+  - `test -f docs/superpowers/specs/2026-03-17-unannotated-iso-recursive-successor-roadmap-design.md` -> pass.
+  - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md` -> pass.
+  - `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md` -> pass.
+  - `test -f docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md` -> pass.
+  - `test -f orchestrator/retry-subloop.md` -> pass.
+  - Continuity presence check via `python3` -> pass (`round-001..round-027 directories: present`; predecessor recursive-types packet present at `tasks/todo/2026-03-11-recursive-types-orchestration`; inherited baseline/repair docs present; replay-repair rounds `round-024` through `round-027` present).
+  - Authoritative record recheck via `python3` over `round-028` through `round-032` -> pass (each review record still includes `attempt_verdict`, `stage_action`, `retry_reason`, `fix_hypothesis`, and an existing authoritative artifact path).
+  - Full Cabal gate `cabal build all && cabal test` -> pass (`1124 examples, 0 failures`; `Test suite mlf2-test: PASS`).
+- Task-specific checks:
+  - `U6-CONTRACT` -> pass: `rg -n 'Attempt: \`attempt-1\`|Retry state: \`null\`|Live subject: repaired \`URI-R2-C1\`|Artifact kind: aggregate-only decision gate|accepted \+ retry|accepted \+ finalize|rejected \+ retry|does not mutate the roadmap|does not update the roadmap|Final next-step result token:' docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md` confirms `attempt-1`, `retry: null`, repaired `URI-R2-C1`, aggregate-only semantics, lawful `U6` terminal outcomes, the explicit `accepted + retry` prohibition, the roadmap non-mutation statement, and one final-result field.
+  - `U6-SUBJECT-BOUND` -> pass: the artifact keeps repaired `URI-R2-C1` as the only live subject, and `git status --short --untracked-files=all -- src src-public app test mlf2.cabal orchestrator/state.json orchestrator/roadmap.md Bugs.md` returned no output, so no production/test/controller drift or silent widening path landed.
+  - `U6-BOUNDARY` -> pass: the artifact restates and preserves the inherited explicit-only / non-equi-recursive / non-cyclic-graph boundary, and its decision summary expressly disallows broad automatic recursive inference, multi-SCC or cross-family widening, equi-recursive reasoning, implicit unfolding, cyclic structural graph encoding, fallback authority manufacture, compatibility shims, convenience fallbacks, and default-on widening.
+  - `U6-CONTINUITY` -> pass: accepted `U1` through `U5` review records remain parseable and authoritative, predecessor rounds `round-001` through `round-027` remain present, inherited baseline docs remain present, replay-repair rounds `round-024` through `round-027` remain present, and the predecessor recursive-types packet remains present.
+  - `U6-FULL-GATE` -> pass: fresh `cabal build all && cabal test` succeeded in the round worktree with `mlf2-test` reporting `1124 examples, 0 failures`.
+  - `U6-RESULT-TOKEN` -> pass: a `python3` validation script confirmed exactly one `Final next-step result token:` line and that the token is `continue-bounded`.
+  - `U6-AGGREGATE-ONLY` -> pass: the U6 artifact stays aggregate-only, records no roadmap mutation, and the working tree shows no production/test/API/controller edits.
+  - `U6-FILES-CHANGED` -> fail: the plan requires the artifact to record the exact files changed by round `033`, but [docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md](/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-033/docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md#L85) through [docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md](/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-033/docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md#L92) list only the U6 artifact and `implementation-notes.md`, while `git status --short --untracked-files=all -- docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md orchestrator/rounds/round-033` also shows `orchestrator/rounds/round-033/plan.md` and `orchestrator/rounds/round-033/selection.md`. The recorded file list is therefore not exact and does not satisfy Task 3 / Task 5 of the round plan.
+- Implemented stage result: `fail`
+- Attempt verdict: `rejected`
+- Stage action: `retry`
+- Retry reason: `u6-artifact-files-changed-list-not-exact`
+- Fix hypothesis: `Update the U6 artifact's "Files Changed By This Round" section so it matches the actual round-033 authored file set, including the existing round-owned plan/selection artifacts, then resubmit without widening scope or editing controller-owned state.`
+- Decision summary:
+  - The aggregate-only `U6` decision gate is otherwise well-formed: the live subject stays repaired `URI-R2-C1`, the inherited boundary stays explicit-only / non-equi-recursive / non-cyclic-graph, the authoritative `U1` through `U5` chain remains intact, and the fresh full repo gate passed.
+  - The artifact also records exactly one bounded next-step result token, `continue-bounded`, and does not silently widen into broader recursive inference.
+  - However, the artifact does not list the exact files changed by round `033`, so it misses an explicit round-contract requirement and cannot finalize.
+  - Under the `U6` retry-subloop rules, that defect must return `rejected + retry`.
+- Evidence summary:
+  - All baseline verification commands passed, including the mandatory full repo gate `cabal build all && cabal test`.
+  - Continuity checks confirmed the predecessor evidence chain is still present and accepted `U1` through `U5` records remain authoritative.
+  - The blocking issue is documentary exactness, not build/test failure or widening: the actual round-033 file set includes `orchestrator/rounds/round-033/plan.md` and `orchestrator/rounds/round-033/selection.md`, but the U6 artifact omits them from its "Files Changed By This Round" section.
