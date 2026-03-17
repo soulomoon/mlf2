@@ -442,6 +442,62 @@ shouldAlphaEqType :: Elab.ElabType -> Elab.ElabType -> Expectation
 shouldAlphaEqType actual expected =
     canonType actual `shouldBe` canonType expected
 
+shouldEqUpToTypeVarRenaming :: Elab.ElabType -> Elab.ElabType -> Expectation
+shouldEqUpToTypeVarRenaming actual expected =
+    canonAllTypeVars actual `shouldBe` canonAllTypeVars expected
+  where
+    canonAllTypeVars :: Elab.ElabType -> Elab.ElabType
+    canonAllTypeVars ty = let (_, _, ty') = go [] (0 :: Int) ty in ty'
+
+    allocName :: [(String, String)] -> Int -> String -> ([(String, String)], Int, String)
+    allocName env n v = case lookup v env of
+        Just v' -> (env, n, v')
+        Nothing ->
+            let v' = "a" ++ show n
+            in ((v, v') : env, n + 1, v')
+
+    go :: [(String, String)] -> Int -> Elab.ElabType -> ([(String, String)], Int, Elab.ElabType)
+    go env n ty = case ty of
+        Elab.TVar v ->
+            let (env', n', v') = allocName env n v
+            in (env', n', Elab.TVar v')
+        Elab.TCon c args ->
+            let (env', n', args') = goList env n (NE.toList args)
+            in (env', n', Elab.TCon c (NE.fromList args'))
+        Elab.TBase b -> (env, n, Elab.TBase b)
+        Elab.TBottom -> (env, n, Elab.TBottom)
+        Elab.TArrow a b ->
+            let (env1, n1, a') = go env n a
+                (env2, n2, b') = go env1 n1 b
+            in (env2, n2, Elab.TArrow a' b')
+        Elab.TForall v mb body ->
+            let (env1, n1, mb') = case mb of
+                    Nothing -> (env, n, Nothing)
+                    Just bound ->
+                        let (env', n', bound') = go env n (boundToType bound)
+                        in (env', n', Just (boundFromType bound'))
+                v' = "a" ++ show n1
+                envBody = (v, v') : env1
+                (_, n2, body') = go envBody (n1 + 1) body
+            in (env1, n2, Elab.TForall v' mb' body')
+        Elab.TMu v body ->
+            let v' = "a" ++ show n
+                envBody = (v, v') : env
+                (_, n', body') = go envBody (n + 1) body
+            in (env, n', Elab.TMu v' body')
+
+    goList
+        :: [(String, String)]
+        -> Int
+        -> [Elab.ElabType]
+        -> ([(String, String)], Int, [Elab.ElabType])
+    goList env n tys = case tys of
+        [] -> (env, n, [])
+        ty : rest ->
+            let (env1, n1, ty') = go env n ty
+                (env2, n2, rest') = goList env1 n1 rest
+            in (env2, n2, ty' : rest')
+
 -- | Drop top-level vacuous forall binders to compare equivalent schemes
 -- that differ only by unused quantifier wrappers.
 stripUnusedTopForalls :: Elab.ElabType -> Elab.ElabType
@@ -1461,18 +1517,41 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 Left _ -> pure ()
                 Right t -> expectationFailure ("Expected strict InstBot failure, got: " ++ show t)
 
-        it "URI-R2-C1 witness replay reproduces BUG-2026-03-16-001 at applyInstantiation InstBot" $ do
+        it "URI-R2-C1 witness replay stays alpha-equivalent to the locked no-fallback shape" $ do
             fixture <- uriR2C1ReplayFixture
             Elab.pretty (uriR2C1ReplaySchemeType fixture) `shouldBe` "∀(a ⩾ ⊥) ∀(b ⩾ a -> a) b"
             Elab.pretty (uriR2C1ReplayNoFallbackType fixture) `shouldBe` "t5 -> t5"
             Elab.pretty (uriR2C1ReplayPhi fixture) `shouldBe` "∀(⩾ ⊲t9); N; (∀(⩾ ⊲(a -> a)); N)"
-            case Elab.applyInstantiation (uriR2C1ReplaySchemeType fixture) (uriR2C1ReplayPhi fixture) of
+            replayedTy <-
+                requireRight
+                    (Elab.applyInstantiation (uriR2C1ReplaySchemeType fixture) (uriR2C1ReplayPhi fixture))
+            shouldEqUpToTypeVarRenaming replayedTy (uriR2C1ReplayNoFallbackType fixture)
+
+        it "InstInside(InstBot) still rejects explicit non-bottom bounds without replay variables" $ do
+            let ty = Elab.TForall "a" (Just (boundFromType (Elab.TBase (BaseTy "Int")))) (Elab.TVar "a")
+                inst = Elab.InstInside (Elab.InstBot (Elab.TBase (BaseTy "Int")))
+            case Elab.applyInstantiation ty inst of
                 Left (Elab.InstantiationError msg) ->
-                    msg `shouldBe` "InstBot expects ⊥, got: t9 -> t9"
+                    msg `shouldBe` "InstBot expects ⊥, got: Int"
                 Left err ->
-                    expectationFailure ("Expected InstBot mismatch, got: " ++ show err)
+                    expectationFailure ("Expected strict InstBot failure, got: " ++ show err)
                 Right replayedTy ->
-                    expectationFailure ("Expected URI-R2-C1 replay failure, got: " ++ Elab.pretty replayedTy)
+                    expectationFailure ("Expected strict InstBot failure, got: " ++ Elab.pretty replayedTy)
+
+        it "InstInside(InstBot (TVar _)) still rejects explicit non-bottom bounds outside the replay lane" $ do
+            let bound =
+                    Elab.TArrow
+                        (Elab.TVar "u")
+                        (Elab.TVar "u")
+                ty = Elab.TForall "a" (Just (boundFromType bound)) (Elab.TVar "a")
+                inst = Elab.InstInside (Elab.InstBot (Elab.TVar "x"))
+            case Elab.applyInstantiation ty inst of
+                Left (Elab.InstantiationError msg) ->
+                    msg `shouldBe` "InstBot expects ⊥, got: u -> u"
+                Left err ->
+                    expectationFailure ("Expected strict InstBot failure, got: " ++ show err)
+                Right replayedTy ->
+                    expectationFailure ("Expected strict InstBot failure, got: " ++ Elab.pretty replayedTy)
 
         it "normalizeInst roundtrip: rule 3 prefix-arg collapse preserves applyInstantiation" $ do
             -- Build an instantiation that matches rule 3: prefix ; intro ; app ; under beta (abstr beta ; elim) ; elim

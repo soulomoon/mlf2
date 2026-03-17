@@ -10,6 +10,7 @@ module MLF.Elab.Inst (
     splitForalls
 ) where
 
+import qualified Data.Map.Strict as Map
 import Data.Functor.Foldable (para)
 
 import MLF.Elab.Types
@@ -29,11 +30,12 @@ instMany :: [Instantiation] -> Instantiation
 instMany = foldr composeInst InstId
 
 data InstEvalSpec env err = InstEvalSpec
-    { instBot :: ElabType -> (Int, env, ElabType) -> Either err (Int, ElabType)
-    , instAbstr :: String -> (Int, env, ElabType) -> Either err (Int, ElabType)
+    { instBot :: ElabType -> (Int, env, ElabType) -> Either err (Int, env, ElabType)
+    , instAbstr :: String -> (Int, env, ElabType) -> Either err (Int, env, ElabType)
     , instElimError :: Instantiation -> ElabType -> err
     , instInsideError :: Instantiation -> ElabType -> err
     , instUnderError :: Instantiation -> ElabType -> err
+    , instElimEnv :: String -> ElabType -> env -> env
     , instUnderEnv :: String -> ElabType -> env -> env
     , renameBound :: String -> String -> Instantiation -> Instantiation
     }
@@ -42,26 +44,27 @@ evalInstantiationWith
     :: InstEvalSpec env err
     -> Instantiation
     -> (Int, env, ElabType)
-    -> Either err (Int, ElabType)
+    -> Either err (Int, env, ElabType)
 evalInstantiationWith spec inst = eval inst
   where
     eval = para instAlg
 
-    instElimFn errInst (k, _env', t) = case t of
+    instElimFn errInst (k, env', t) = case t of
         TForall v mbBound body -> do
             let bTy = maybe TBottom tyToElab mbBound
-            Right (k, substTypeCapture v bTy body)
+                env'' = instElimEnv spec v bTy env'
+            Right (k, env'', substTypeCapture v bTy body)
         _ -> Left (instElimError spec errInst t)
 
     instInsideFn errInst phiFn (k, env', t) = case t of
         TForall v mbBound body -> do
             let b0 = maybe TBottom tyToElab mbBound
-            (k1, b1) <- phiFn (k, env', b0)
+            (k1, _env'', b1) <- phiFn (k, env', b0)
             let mb' = case b1 of
                     TBottom -> Nothing
                     TVar{} -> Nothing
                     _ -> either (const Nothing) Just (elabToBound b1)
-            Right (k1, TForall v mb' body)
+            Right (k1, env', TForall v mb' body)
         _ -> Left (instInsideError spec errInst t)
 
     -- InstApp applies a concrete type argument directly to the front forall,
@@ -71,38 +74,40 @@ evalInstantiationWith spec inst = eval inst
     instAppFn argTy (k, env', t) = case t of
         TForall v mbBound body -> do
             let b0 = maybe TBottom tyToElab mbBound
-            (k1, checkedArg) <-
+            (k1, env'', checkedArg) <-
                 case mbBound of
                     Just _ | alphaEqType argTy b0 ->
-                        Right (k, b0)
+                        Right (k, env', b0)
                     _ ->
                         instBot spec argTy (k, env', b0)
-            Right (k1, substTypeCapture v checkedArg body)
+            let env''' = instElimEnv spec v checkedArg env''
+            Right (k1, env''', substTypeCapture v checkedArg body)
         _ ->
             Left
                 (instElimError spec (InstSeq (InstInside (InstBot argTy)) InstElim) t)
 
     instAlg inst0 = case inst0 of
-        InstIdF -> \(k, _env', t) -> Right (k, t)
+        InstIdF -> \(k, env', t) -> Right (k, env', t)
         InstSeqF (left, i1) (right, i2) ->
             \(k, env', t) ->
                 case (left, right) of
                     (InstInside (InstAbstr v), InstElim) ->
                         case t of
                             TForall name _mbBound body ->
-                                Right (k, substTypeCapture name (TVar v) body)
+                                let env'' = instElimEnv spec name (TVar v) env'
+                                in Right (k, env'', substTypeCapture name (TVar v) body)
                             _ -> Left (instElimError spec InstElim t)
                     _ -> do
-                        (k1, t1) <- i1 (k, env', t)
-                        i2 (k1, env', t1)
+                        (k1, env'', t1) <- i1 (k, env', t)
+                        i2 (k1, env'', t1)
         InstAppF argTy -> instAppFn argTy
         InstBotF tArg -> instBot spec tArg
         InstAbstrF v -> instAbstr spec v
         InstIntroF ->
-            \(k, _env', t) -> do
+            \(k, env', t) -> do
                 let used = freeTypeVarsType t
                     (fresh, k') = freshTypeNameFromCounter k used
-                Right (k', TForall fresh Nothing t)
+                Right (k', env', TForall fresh Nothing t)
         InstElimF -> instElimFn InstElim
         InstInsideF (_, phiFn) -> instInsideFn InstId phiFn
         InstUnderF vParam (phiInst, _phiFn) ->
@@ -111,8 +116,8 @@ evalInstantiationWith spec inst = eval inst
                     let b0 = maybe TBottom tyToElab mbBound
                         env'' = instUnderEnv spec v b0 env'
                         phi' = renameBound spec vParam v phiInst
-                    (k1, body') <- eval phi' (k, env'', body)
-                    Right (k1, TForall v mbBound body')
+                    (k1, _env''', body') <- eval phi' (k, env'', body)
+                    Right (k1, env', TForall v mbBound body')
                 _ -> Left (instUnderError spec phiInst t)
 
 -- | Apply an xMLF instantiation to an xMLF type (xmlf Fig. 3).
@@ -120,20 +125,37 @@ evalInstantiationWith spec inst = eval inst
 -- This is a *partial* function: it fails if the instantiation expects a certain
 -- type form (e.g. ∀ for `N`) but the type does not match.
 applyInstantiation :: ElabType -> Instantiation -> Either ElabError ElabType
-applyInstantiation ty inst = snd <$> evalInstantiationWith spec inst (0, (), ty)
+applyInstantiation ty inst = (\(_, _, ty') -> ty') <$> evalInstantiationWith spec inst (0, Map.empty, ty)
   where
+    resolveReplayVars :: Map.Map String ElabType -> ElabType -> ElabType
+    resolveReplayVars replayEnv ty0 =
+        Map.foldlWithKey'
+            (\tyAcc var replacement -> substTypeCapture var replacement tyAcc)
+            ty0
+            replayEnv
+
+    allowReplayBoundMatch :: Map.Map String ElabType -> ElabType -> ElabType -> Bool
+    allowReplayBoundMatch replayEnv tArg t =
+        let resolvedArg = resolveReplayVars replayEnv tArg
+        in not (alphaEqType resolvedArg tArg)
+            && alphaEqType resolvedArg t
+
     spec = InstEvalSpec
-        { instBot = \tArg (k, _env', t) -> case t of
-            TBottom -> Right (k, tArg)
+        { instBot = \tArg (k, replayEnv, t) -> case t of
+            TBottom -> Right (k, replayEnv, tArg)
+            _
+                | allowReplayBoundMatch replayEnv tArg t ->
+                    Right (k, replayEnv, t)
             _ -> Left (InstantiationError ("InstBot expects ⊥, got: " ++ pretty t))
-        , instAbstr = \v (k, _env', _t) -> Right (k, TVar v)
+        , instAbstr = \v (k, replayEnv, _t) -> Right (k, replayEnv, TVar v)
         , instElimError = \_inst0 t ->
             InstantiationError ("InstElim expects ∀, got: " ++ pretty t)
         , instInsideError = \_inst0 t ->
             InstantiationError ("InstInside expects ∀, got: " ++ pretty t)
         , instUnderError = \_inst0 t ->
             InstantiationError ("InstUnder expects ∀, got: " ++ pretty t)
-        , instUnderEnv = \_v _bound env' -> env'
+        , instElimEnv = \v replacement replayEnv -> Map.insert v replacement replayEnv
+        , instUnderEnv = \_v _bound replayEnv -> replayEnv
         , renameBound = renameInstBound
         }
 

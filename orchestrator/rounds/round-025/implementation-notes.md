@@ -1,0 +1,6 @@
+- `R2` attempt 2 replaced the rejected free-variable `matchType` escape hatch with replay-context threading inside `MLF.Elab.Inst.applyInstantiation`: later `InstBot` checks can reuse only substitutions established by earlier eliminations on the same replay path.
+- Added the missing `InstInside (InstBot (TVar "x"))` explicit-bound misuse regression, while keeping the locked `URI-R2-C1` replay success and the existing strict non-bottom rejection checks.
+- `MLF.Elab.TypeCheck` only changed to follow the shared evaluator plumbing; `cabal build all && cabal test` is still red on the same four `test/Research/UriR2C1PrototypeP1Spec.hs` expectation failures (`P2`, `D1`, `D2`, `D3`).
+- `R2` attempt 3 left the bounded `InstBot` repair unchanged and resolved the inherited full-gate blocker with `contract-scope` updates in `test/Research/UriR2C1PrototypeP1Spec.hs`.
+- The prototype spec now treats live post-repair reruns as current evidence (`P2-W = replay-domain-widening`, `D1/D2/D3 = semantic-negative`) while still asserting the historical predecessor contract through seeded review records and continuity diagnostics.
+- `cabal build all && cabal test` now passes (`1124 examples, 0 failures`).

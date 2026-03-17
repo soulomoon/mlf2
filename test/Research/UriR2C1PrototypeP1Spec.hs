@@ -186,7 +186,7 @@ spec = do
                     expectationFailure ("Expected default app mode, got: " ++ show other)
 
     describe "URI-R2-C1 P2 prototype entrypoint" $ do
-        it "allows attempt-2 reruns and records replay diagnostics as bounded non-pass" $ do
+        it "allows attempt-2 reruns and records live replay widening as bounded non-pass" $ do
             root <- freshRoot "p2-attempt-2-bounded-non-pass"
             _ <- seedAuthoritativeP1Token root
             report <- requirePrototypeReportFor stageSelectorP2 root 2
@@ -205,8 +205,8 @@ spec = do
 
             checkW <- readFile (attemptDirP2 root 2 </> "check-P2-W.json")
             extractStringField "verdict" checkW `shouldBe` Just "semantic-negative"
-            extractStringField "rejection_trigger" checkW `shouldBe` Just "partial-replay"
-            checkW `shouldSatisfy` isInfixOf "applyInstantiation diagnostic failed"
+            extractStringField "rejection_trigger" checkW `shouldBe` Just "replay-domain-widening"
+            checkW `shouldSatisfy` isInfixOf "witness replay produced t9 -> t9 but reification preserved t5 -> t5"
 
             stageVerdict <- readFile (attemptDirP2 root 2 </> "stage-verdict.json")
             extractStringField "subject_token_ref" stageVerdict `shouldBe` Nothing
@@ -359,7 +359,7 @@ spec = do
             doesDirectoryExist (attemptDirP4 root 1) >>= (`shouldBe` False)
 
     describe "URI-R2-C1 D1 replay root-cause entrypoint" $ do
-        it "runs D1 attempt-1 via the root-cause tuple and emits only the planned evidence files" $ do
+        it "runs D1 attempt-1 via the root-cause tuple and records continuity drift against the historical replay boundary" $ do
             root <- freshRoot "d1-attempt-1-pass"
             _ <- seedAuthoritativeReplayBoundary root
             report <- requireD1Report root 1
@@ -371,7 +371,7 @@ spec = do
                 , "stage-verdict.json"
                 , "trace-bundle.json"
                 ]
-            prototypeStageResult report `shouldBe` "pass"
+            prototypeStageResult report `shouldBe` "semantic-negative"
             doesFileExist (attemptDirD1 root 1 </> "subject-token.json") >>= (`shouldBe` False)
 
             mapM_ (assertInvocationMetadataForEntrypoint root attemptDirD1 1 replayRootCauseEntrypointId stageSelectorD1 (Just "D1"))
@@ -383,24 +383,26 @@ spec = do
                 ]
 
             checkI <- readFile (attemptDirD1 root 1 </> "check-D1-I.json")
-            extractStringField "verdict" checkI `shouldBe` Just "pass"
-            extractStringField "rejection_trigger" checkI `shouldBe` Just "none"
-            checkI `shouldSatisfy` isInfixOf "uri-r2-c1/cluster-1"
+            extractStringField "verdict" checkI `shouldBe` Just "semantic-negative"
+            extractStringField "rejection_trigger" checkI `shouldBe` Just "inconsistent-trace"
+            checkI `shouldSatisfy` isInfixOf "inherited P2-W trigger must remain partial-replay"
+            checkI `shouldSatisfy` isInfixOf "InstBot expects"
 
             checkR <- readFile (attemptDirD1 root 1 </> "check-D1-R.json")
-            extractStringField "verdict" checkR `shouldBe` Just "pass"
-            extractStringField "rejection_trigger" checkR `shouldBe` Just "partial-replay"
-            checkR `shouldSatisfy` isInfixOf "classification=exact-bounded-replay-failure"
-            checkR `shouldSatisfy` isInfixOf "applyInstantiation diagnostic failed"
+            extractStringField "verdict" checkR `shouldBe` Just "semantic-negative"
+            extractStringField "rejection_trigger" checkR `shouldBe` Just "replay-domain-widening"
+            checkR `shouldSatisfy` isInfixOf "classification=bounded-diagnostic-drift"
+            checkR `shouldSatisfy` isInfixOf "witness replay produced t9 -> t9 but reification preserved t5 -> t5"
 
             checkM <- readFile (attemptDirD1 root 1 </> "check-D1-M.json")
-            extractStringField "verdict" checkM `shouldBe` Just "pass"
-            checkM `shouldSatisfy` isInfixOf "target trigger=partial-replay"
+            extractStringField "verdict" checkM `shouldBe` Just "semantic-negative"
+            checkM `shouldSatisfy` isInfixOf "target trigger=replay-domain-widening"
             checkM `shouldSatisfy` isInfixOf "InstBot expects"
+            checkM `shouldSatisfy` isInfixOf "continuity=inherited P2-W trigger must remain partial-replay"
 
             stageVerdict <- readFile (attemptDirD1 root 1 </> "stage-verdict.json")
             extractStringField "subject_token_ref" stageVerdict `shouldBe` Nothing
-            extractStringField "stage_result" stageVerdict `shouldBe` Just "pass"
+            extractStringField "stage_result" stageVerdict `shouldBe` Just "semantic-negative"
             extractStringField "terminal_reason" stageVerdict `shouldBe` Just "none"
 
             artifact <- readFile (root </> "docs" </> "plans" </> "2026-03-16-uri-r2-c1-d1-replay-reproduction-contract.md")
@@ -486,7 +488,7 @@ spec = do
             afterFiles `shouldBe` baselineFiles
 
     describe "URI-R2-C1 D2 replay root-cause entrypoint" $ do
-        it "runs D2 attempt-1 via the root-cause tuple and emits mismatch-localization evidence" $ do
+        it "runs D2 attempt-1 via the root-cause tuple and reports continuity-blocked localization on live reruns" $ do
             root <- freshRoot "d2-attempt-1-pass"
             _ <- seedAuthoritativeReplayBoundary root
             _ <- requireD1Report root 1
@@ -500,7 +502,7 @@ spec = do
                 , "stage-verdict.json"
                 , "trace-bundle.json"
                 ]
-            prototypeStageResult report `shouldBe` "pass"
+            prototypeStageResult report `shouldBe` "semantic-negative"
             doesFileExist (attemptDirD2 root 1 </> "subject-token.json") >>= (`shouldBe` False)
 
             mapM_ (assertInvocationMetadataForEntrypoint root attemptDirD2 1 replayRootCauseEntrypointId stageSelectorD2 (Just "D2"))
@@ -510,34 +512,36 @@ spec = do
                 , "check-D2-O.json"
                 , "stage-verdict.json"
                 ]
+            historicalD1 <- readFile (root </> "orchestrator" </> "rounds" </> "round-020" </> "review-record.json")
+            extractStringField "stage_result" historicalD1 `shouldBe` Just "pass"
+            extractStringField "authoritative_result" historicalD1 `shouldBe` Just "pass"
 
             checkT <- readFile (attemptDirD2 root 1 </> "check-D2-T.json")
-            extractStringField "verdict" checkT `shouldBe` Just "pass"
-            extractStringField "rejection_trigger" checkT `shouldBe` Just "none"
-            checkT `shouldSatisfy` isInfixOf "aligned trace suffixes"
+            extractStringField "verdict" checkT `shouldBe` Just "semantic-negative"
+            extractStringField "rejection_trigger" checkT `shouldBe` Just "inconsistent-trace"
+            checkT `shouldSatisfy` isInfixOf "P2-W trigger must remain partial-replay"
+            checkT `shouldSatisfy` isInfixOf "D1 stage verdict must remain pass"
 
             checkL <- readFile (attemptDirD2 root 1 </> "check-D2-L.json")
-            extractStringField "verdict" checkL `shouldBe` Just "pass"
-            extractStringField "rejection_trigger" checkL `shouldBe` Just "none"
-            checkL `shouldSatisfy` isInfixOf "first divergence boundary=witness-replay/applyInstantiation-instbot-precondition"
-            checkL `shouldSatisfy` isInfixOf "InstBot expects"
+            extractStringField "verdict" checkL `shouldBe` Just "semantic-negative"
+            extractStringField "rejection_trigger" checkL `shouldBe` Just "inconsistent-trace"
+            checkL `shouldSatisfy` isInfixOf "cannot localize divergence while continuity mismatches remain"
 
             checkO <- readFile (attemptDirD2 root 1 </> "check-D2-O.json")
-            extractStringField "verdict" checkO `shouldBe` Just "pass"
-            extractStringField "rejection_trigger" checkO `shouldBe` Just "none"
-            checkO `shouldSatisfy` isInfixOf "owner=applyInstantiation semantics"
-            checkO `shouldSatisfy` isInfixOf "MLF.Elab.Inst.applyInstantiation"
+            extractStringField "verdict" checkO `shouldBe` Just "semantic-negative"
+            extractStringField "rejection_trigger" checkO `shouldBe` Just "inconsistent-trace"
+            checkO `shouldSatisfy` isInfixOf "cannot assign single owner while continuity mismatches remain"
 
             stageVerdict <- readFile (attemptDirD2 root 1 </> "stage-verdict.json")
             extractStringField "subject_token_ref" stageVerdict `shouldBe` Nothing
-            extractStringField "stage_result" stageVerdict `shouldBe` Just "pass"
+            extractStringField "stage_result" stageVerdict `shouldBe` Just "semantic-negative"
             extractStringField "terminal_reason" stageVerdict `shouldBe` Just "none"
 
             traceBundle <- readFile (attemptDirD2 root 1 </> "trace-bundle.json")
             extractStringField "divergence_boundary" traceBundle
-                `shouldBe` Just "witness-replay/applyInstantiation-instbot-precondition"
+                `shouldBe` Just "unresolved-continuity-blocked"
             extractStringField "owner_account" traceBundle
-                `shouldSatisfy` maybe False (isInfixOf "applyInstantiation semantics")
+                `shouldBe` Just "unresolved-owner-continuity-blocked"
 
             artifact <- readFile (root </> "docs" </> "plans" </> "2026-03-16-uri-r2-c1-d2-replay-mismatch-localization.md")
             artifact `shouldSatisfy` isInfixOf "Stage: `D2`"
@@ -595,7 +599,7 @@ spec = do
             doesDirectoryExist (attemptDirD2 root 1) >>= (`shouldBe` False)
 
     describe "URI-R2-C1 D3 replay root-cause entrypoint" $ do
-        it "runs D3 attempt-1 via the root-cause tuple and emits bounded fixability evidence" $ do
+        it "runs D3 attempt-1 via the root-cause tuple and reports bounded-negative continuity drift on live reruns" $ do
             root <- freshRoot "d3-attempt-1-pass"
             _ <- seedAuthoritativeReplayBoundary root
             _ <- requireD1Report root 1
@@ -611,7 +615,7 @@ spec = do
                 , "stage-verdict.json"
                 , "trace-bundle.json"
                 ]
-            prototypeStageResult report `shouldBe` "pass"
+            prototypeStageResult report `shouldBe` "semantic-negative"
             doesFileExist (attemptDirD3 root 1 </> "subject-token.json") >>= (`shouldBe` False)
 
             mapM_ (assertInvocationMetadataForEntrypoint root attemptDirD3 1 replayRootCauseEntrypointId stageSelectorD3 (Just "D3"))
@@ -621,37 +625,41 @@ spec = do
                 , "check-D3-V.json"
                 , "stage-verdict.json"
                 ]
+            historicalD2 <- readFile (root </> "orchestrator" </> "rounds" </> "round-021" </> "review-record.json")
+            extractStringField "stage_result" historicalD2 `shouldBe` Just "pass"
+            extractStringField "authoritative_result" historicalD2 `shouldBe` Just "pass"
 
             checkH <- readFile (attemptDirD3 root 1 </> "check-D3-H.json")
-            extractStringField "verdict" checkH `shouldBe` Just "pass"
-            extractStringField "rejection_trigger" checkH `shouldBe` Just "none"
-            checkH `shouldSatisfy` isInfixOf "H1 support established"
-            checkH `shouldSatisfy` isInfixOf "applyInstantiation-instbot-precondition"
+            extractStringField "verdict" checkH `shouldBe` Just "semantic-negative"
+            extractStringField "rejection_trigger" checkH `shouldBe` Just "inconsistent-trace"
+            checkH `shouldSatisfy` isInfixOf "continuity mismatch blocks D3-H"
+            checkH `shouldSatisfy` isInfixOf "D2-L verdict must remain pass"
 
             checkB <- readFile (attemptDirD3 root 1 </> "check-D3-B.json")
-            extractStringField "verdict" checkB `shouldBe` Just "pass"
-            extractStringField "rejection_trigger" checkB `shouldBe` Just "none"
-            checkB `shouldSatisfy` isInfixOf "no second executable interface"
+            extractStringField "verdict" checkB `shouldBe` Just "semantic-negative"
+            extractStringField "rejection_trigger" checkB `shouldBe` Just "inconsistent-trace"
+            checkB `shouldSatisfy` isInfixOf "continuity mismatch blocks D3-B"
 
             checkV <- readFile (attemptDirD3 root 1 </> "check-D3-V.json")
-            extractStringField "verdict" checkV `shouldBe` Just "pass"
-            extractStringField "rejection_trigger" checkV `shouldBe` Just "none"
-            checkV `shouldSatisfy` isInfixOf "repair-supporting"
+            extractStringField "verdict" checkV `shouldBe` Just "semantic-negative"
+            extractStringField "rejection_trigger" checkV `shouldBe` Just "inconsistent-trace"
+            checkV `shouldSatisfy` isInfixOf "bounded-negative"
 
             stageVerdict <- readFile (attemptDirD3 root 1 </> "stage-verdict.json")
             extractStringField "subject_token_ref" stageVerdict `shouldBe` Nothing
-            extractStringField "attempt_verdict" stageVerdict `shouldBe` Just "repair-supporting"
-            extractStringField "stage_result" stageVerdict `shouldBe` Just "pass"
+            extractStringField "attempt_verdict" stageVerdict `shouldBe` Just "bounded-negative"
+            extractStringField "stage_result" stageVerdict `shouldBe` Just "semantic-negative"
             extractStringField "terminal_reason" stageVerdict `shouldBe` Just "none"
 
             traceBundle <- readFile (attemptDirD3 root 1 </> "trace-bundle.json")
-            extractStringField "attempt_verdict" traceBundle `shouldBe` Just "repair-supporting"
+            extractStringField "attempt_verdict" traceBundle `shouldBe` Just "bounded-negative"
             extractStringField "fix_hypothesis" traceBundle
                 `shouldSatisfy` maybe False (isInfixOf "H1:")
             extractStringField "divergence_boundary" traceBundle
                 `shouldBe` Just "witness-replay/applyInstantiation-instbot-precondition"
             extractStringField "owner_account" traceBundle
                 `shouldSatisfy` maybe False (isInfixOf "MLF.Elab.Inst.applyInstantiation")
+            traceBundle `shouldSatisfy` isInfixOf "no second executable interface"
 
             artifact <- readFile (root </> "docs" </> "plans" </> "2026-03-16-uri-r2-c1-d3-bounded-fixability-probe.md")
             artifact `shouldSatisfy` isInfixOf "Stage: `D3`"
@@ -659,7 +667,7 @@ spec = do
             artifact `shouldSatisfy` isInfixOf "`D3-H`"
             artifact `shouldSatisfy` isInfixOf "`D3-B`"
             artifact `shouldSatisfy` isInfixOf "`D3-V`"
-            artifact `shouldSatisfy` isInfixOf "repair-supporting"
+            artifact `shouldSatisfy` isInfixOf "bounded-negative"
 
         it "rejects wrong scenario, stage, entrypoint, and out-of-range attempt before writing D3 evidence" $ do
             root <- freshRoot "d3-invalid-tuple"
