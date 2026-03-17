@@ -33,7 +33,7 @@
    Depends on: item 1
    Completion notes: complete when `docs/plans/2026-03-17-uri-r2-c1-r2-bounded-instbot-repair.md` is accepted, the reviewer record names the authoritative `R2` attempt, and the round lands one bounded paper-faithful repair at `MLF.Elab.Inst.applyInstantiation` without widening scope or introducing convenience fallback behavior.
 
-3. [pending] Execute the `R3` locked replay-path verification for `URI-R2-C1`
+3. [done] Execute the `R3` locked replay-path verification for `URI-R2-C1`
    Depends on: item 2
    Completion notes: complete when `docs/plans/2026-03-17-uri-r2-c1-r3-locked-replay-verification.md` is accepted, the reviewer record names the authoritative `R3` attempt, and the round records bounded success of the authoritative replay path for `URI-R2-C1` / `uri-r2-c1-only-v1` without widened regression scope or second-interface behavior.
 
