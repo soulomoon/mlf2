@@ -16,6 +16,7 @@
 - This control plane continues to use `contract_version: 2` retry semantics from `docs/superpowers/specs/2026-03-16-uri-r2-c1-prototype-evidence-retry-subloop-amendment.md` and `orchestrator/retry-subloop.md`.
 - The long-horizon direction is fully unannotated iso-recursive-type synthesis in the solver/pipeline, but the live campaign must move by bounded evidence and bounded implementation slices only.
 - The initial live subject stays fixed to the repaired `URI-R2-C1` lane. Later accepted roadmap updates may refine future pending items or append another bounded cycle, but they may not rewrite completed-item truth or silently widen the live subject.
+- `U1` is now finalized as accepted in `round-028`; the authoritative reviewer record is `orchestrator/rounds/round-028/review-record.json`.
 
 ## Status Legend
 
@@ -25,9 +26,9 @@
 
 ## Items
 
-1. [pending] Execute the `U1` inherited baseline and repaired-subject bind for unannotated iso-recursive inference
+1. [done] Execute the `U1` inherited baseline and repaired-subject bind for unannotated iso-recursive inference
    Depends on: completed rounds `round-001` through `round-027`, especially the accepted automatic-recursive baseline/handoff documents and the completed `URI-R2-C1` repair track
-   Completion notes: complete when `docs/plans/2026-03-17-uri-r2-c1-u1-unannotated-baseline-bind.md` is accepted, the reviewer record names the authoritative `U1` attempt, the live subject is explicitly bound to repaired `URI-R2-C1`, and the hard stop triggers that still forbid broad automatic recursive inference remain reviewer-visible.
+   Completion notes: completed in `round-028` (`accepted + finalize`) with authoritative record `orchestrator/rounds/round-028/review-record.json`, accepted artifact `docs/plans/2026-03-17-uri-r2-c1-u1-unannotated-baseline-bind.md`, repaired `URI-R2-C1` explicitly bound as the live subject, and reviewer-visible hard-stop triggers preserved against broad automatic recursive inference.
 
 2. [pending] Execute the `U2` provenance-stable unannotated authority clearance for the live subject
    Depends on: item 1
