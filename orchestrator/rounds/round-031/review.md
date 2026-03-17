@@ -1,0 +1,36 @@
+# Round `round-031` Attempt `1` Review (`U4`)
+
+- Baseline checks:
+  - `git diff --check` -> pass (no output).
+  - `python3 -m json.tool orchestrator/state.json >/dev/null` -> pass.
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json` -> pass (`2: "contract_version": 2`, `13: "retry": null`).
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md` -> pass (ordered `U1` through `U6` list intact, `U4` still pending pre-merge).
+  - `test -f docs/superpowers/specs/2026-03-17-unannotated-iso-recursive-successor-roadmap-design.md` -> pass.
+  - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md` -> pass.
+  - `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md` -> pass.
+  - `test -f docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md` -> pass.
+  - `test -f orchestrator/retry-subloop.md` -> pass.
+  - Full Cabal gate `cabal build all && cabal test` -> correctly skipped (docs-only round; `git status --short src src-public app test mlf2.cabal orchestrator/state.json orchestrator/roadmap.md Bugs.md` returned no output).
+- Task-specific checks:
+  - `U4-CONTRACT` -> pass: `Attempt: attempt-1`, `Retry state: null`, and `U4`-only feasibility scope are explicit in the artifact.
+  - `U4-SUBJECT-BOUND` -> pass: live subject remains repaired `URI-R2-C1`; no subject widening beyond the bound lane.
+  - `U4-BOUNDARY` -> pass: inherited explicit-only / non-equi-recursive / non-cyclic-graph boundary is restated and preserved.
+  - `U4-RUBRIC` -> pass: constructor-directed / acyclic / termination rubric is explicit and reject-path-only for implicit unfolding, equi-recursive equality/search, cyclic encoding, and termination weakening.
+  - `U4-RESULT` -> pass: exactly one final result line exists (`Result token: constructor-acyclic-termination-refuted`) with bounded rationale.
+  - `U4-NO-WIDEN-NO-FALLBACK` -> pass: no second interface, compatibility shim, fallback/default widening, cross-family, or multi-SCC promotion is introduced.
+  - `U4-NONPREEMPT` -> pass: artifact constrains implications to `U5` only and explicitly states it does not pre-decide `U6`.
+  - `U4-CONTINUITY` -> pass: predecessor evidence chain remains intact and unmodified (`round-028`/`029`/`030` review records, replay-repair `round-024`..`027` records, inherited baseline docs, rounds `001`..`030` status-clean, predecessor recursive-types packet present at `tasks/todo/2026-03-11-recursive-types-orchestration` and status-clean).
+  - `U4-DIFF-BOUNDED` -> pass: untracked working-set is bounded to `docs/plans/2026-03-17-uri-r2-c1-u4-unannotated-feasibility-clearance.md` plus round-031 stage docs; no production/test/controller drift.
+- Implemented stage result: `pass`
+- Attempt verdict: `accepted`
+- Stage action: `finalize`
+- Retry reason: `none`
+- Fix hypothesis: `none`
+- Decision summary:
+  - `U4` attempt-1 meets the round plan and successor-design contract as a bounded docs-only feasibility clearance for repaired `URI-R2-C1`.
+  - The artifact preserves inherited evidence continuity (`U1`/`U2`/`U3`) and fail-closed boundaries while recording one bounded `U4` outcome.
+  - Retry-subloop legality is satisfied for `U4` with `accepted + finalize`.
+- Evidence summary:
+  - Baseline verification contract commands passed; full Cabal gate was correctly out-of-scope with explicit docs-only justification.
+  - Artifact checks confirm bounded subject, preserved explicit-only/non-equi-recursive/non-cyclic constraints, one final result token, and no widening/fallback interface drift.
+  - Continuity and bounded-diff checks confirm no rewrites of inherited authority or predecessor history.
