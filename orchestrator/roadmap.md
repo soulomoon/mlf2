@@ -38,13 +38,13 @@
    Depends on: item 2
    Completion notes: completed in `round-030` (`accepted + finalize`) with authoritative record `orchestrator/rounds/round-030/review-record.json`, accepted artifact `docs/plans/2026-03-17-uri-r2-c1-u3-unannotated-uniqueness-owner-clearance.md`, and bounded result token `uniqueness-owner-stable-refuted` (no heuristic ranking, no subject widening, repaired `URI-R2-C1` still fixed as the live subject).
 
-4. [pending] Execute the `U4` constructor-directed / acyclicity / termination clearance for the live subject
+4. [done] Execute the `U4` constructor-directed / acyclicity / termination clearance for the live subject
    Depends on: item 3
-   Completion notes: complete when `docs/plans/2026-03-17-uri-r2-c1-u4-unannotated-feasibility-clearance.md` is accepted, the reviewer record names the authoritative `U4` attempt, and the round records whether the current solver discipline can admit the live subject without equi-recursion, cyclic structural graphs, or weakened termination guarantees.
+   Completion notes: completed in `round-031` (`accepted + finalize`) with authoritative record `orchestrator/rounds/round-031/review-record.json`, accepted artifact `docs/plans/2026-03-17-uri-r2-c1-u4-unannotated-feasibility-clearance.md`, and bounded result token `constructor-acyclic-termination-refuted` (repaired `URI-R2-C1` remains the fixed live subject; no equi-recursive, cyclic, fallback, or termination-weakened widening authorized).
 
-5. [pending] Execute the `U5` bounded solver/pipeline implementation slice for the cleared live subject
+5. [pending] Execute the `U5` bounded solver/pipeline implementation slice for the still-bound live subject under the `U4` refuted result
    Depends on: item 4
-   Completion notes: complete when `docs/plans/2026-03-17-uri-r2-c1-u5-bounded-unannotated-implementation-slice.md` is accepted, the reviewer record names the authoritative `U5` attempt, and the round lands exactly one bounded solver/pipeline slice for the currently cleared live subject without broad automatic recursive inference.
+   Completion notes: complete when `docs/plans/2026-03-17-uri-r2-c1-u5-bounded-unannotated-implementation-slice.md` is accepted, the reviewer record names the authoritative `U5` attempt, and the round lands exactly one bounded solver/pipeline slice for repaired `URI-R2-C1` that preserves the inherited explicit-only / non-equi-recursive / non-cyclic boundary and does not treat `U4` as clearance for equi-recursive, cyclic, fallback, or cross-subject behavior.
 
 6. [pending] Execute the `U6` end-to-end verification and next-widening decision gate
    Depends on: item 5
