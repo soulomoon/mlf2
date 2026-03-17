@@ -4,6 +4,21 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 93 `URI-R2-C1` P2 replay repair-track orchestrator run (completed 2026-03-17)
+
+- Completed:
+  - executed the live top-level repair-track roadmap end to end through accepted rounds `round-024` through `round-027`, with all substantive guider/planner/implementer/reviewer/merger work delegated under the repo-local orchestrator contract;
+  - finalized `R1` as the localized reproduction, `R2` as the bounded `InstBot` repair on authoritative attempt `3`, `R3` as locked replay-path verification, and terminal `R4` as the bounded repair decision gate with final outcome `repair-accepted`;
+  - returned `orchestrator/state.json` to terminal `stage: "done"` with `last_completed_round: "round-027"` and marked all live repair-track roadmap items `done`.
+- Verification:
+  - `python3 -m json.tool orchestrator/state.json`: PASS
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`: PASS
+  - `git diff --check`: PASS
+- Rolling priorities (next):
+  1. Treat the accepted `repair-accepted` result as the current bounded `URI-R2-C1` baseline; do not reopen this lane without new bounded evidence.
+  2. Preserve `round-024` through `round-027` together with predecessor rounds `round-020` through `round-023` as the authoritative replay-repair evidence chain.
+  3. Keep any future replay work locked to `URI-R2-C1`, `uri-r2-c1-only-v1`, and `witness-replay/applyInstantiation-instbot-precondition` unless a new roadmap explicitly widens scope.
+
 ## Task 92 `URI-R2-C1` P2 replay repair-track orchestrator scaffold (completed 2026-03-17)
 
 - Completed:
