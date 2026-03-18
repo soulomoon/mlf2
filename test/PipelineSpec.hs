@@ -51,7 +51,7 @@ import MLF.Constraint.Types.Witness (EdgeWitness(..), InstanceOp(..), InstanceWi
 import qualified MLF.Binding.Tree as Binding
 import MLF.Elab.Run.Provenance (buildTraceCopyMap, collectBaseNamedKeys)
 import MLF.Elab.Run.ResultType
-    ( ResultTypeInputs
+    ( ResultTypeInputs(..)
     , computeResultTypeFallback
     , mkResultTypeInputs
     )
@@ -1132,6 +1132,105 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                         Left err -> expectationFailure (label ++ ": " ++ renderPipelineError err)
                         Right (_term, ty) ->
                             ty `shouldSatisfy` (`matchesRecursiveArrow` expectedTy)
+
+            it "keeps retained-child fallback recursive through a same-lane local TypeRef root" $ do
+                let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+                    expr =
+                        ELet "k" (ELamAnn "x" recursiveAnn (EVar "x"))
+                            (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "k")) (EVar "u"))
+                    extractInnerLetRhs ann0 = case ann0 of
+                        ALet _ _ _ _ _ _ (AAnn (ALet _ _ _ _ _ rhs _ _) _ _) _ -> rhs
+                        _ -> error ("unexpected retained-child wrapper shape: " ++ show ann0)
+                    setVarBound nid newBound constraint =
+                        let tweak node = case node of
+                                TyVar{ tnId = varId } | varId == nid ->
+                                    TyVar{ tnId = varId, tnBound = Just newBound }
+                                _ -> node
+                        in constraint
+                            { cNodes =
+                                fromListNode
+                                    [ (nodeIdKey, tweak node)
+                                    | (nodeIdKey, node) <- toListNode (cNodes constraint)
+                                    ]
+                            }
+                    setTypeParent child mbParent constraint =
+                        let childKey = nodeRefKey (typeRef child)
+                            bindParents' = case mbParent of
+                                Nothing ->
+                                    IntMap.delete childKey (cBindParents constraint)
+                                Just parentRef ->
+                                    IntMap.insert childKey (parentRef, BindFlex) (cBindParents constraint)
+                        in constraint { cBindParents = bindParents' }
+                    wireSameLaneLocalRoot inputs rootNid childNid =
+                        let view0 = rtcPresolutionView inputs
+                            retainedTarget =
+                                case pvLookupVarBound view0 childNid of
+                                    Just boundNid -> boundNid
+                                    Nothing ->
+                                        error
+                                            ( "expected retained child bound for "
+                                                ++ show childNid
+                                            )
+                            rewrite =
+                                setVarBound rootNid retainedTarget
+                                    . setVarBound childNid retainedTarget
+                                    . setTypeParent childNid (Just (typeRef rootNid))
+                                    . setTypeParent rootNid Nothing
+                            baseConstraint' = rewrite (pvConstraint view0)
+                            canonicalConstraint' = rewrite (pvCanonicalConstraint view0)
+                            view' =
+                                view0
+                                    { pvConstraint = baseConstraint'
+                                    , pvLookupNode =
+                                        \nid -> NodeAccess.lookupNode baseConstraint' ((pvCanonical view0) nid)
+                                    , pvLookupVarBound =
+                                        \nid -> NodeAccess.lookupVarBound baseConstraint' ((pvCanonical view0) nid)
+                                    , pvLookupBindParent = NodeAccess.lookupBindParent baseConstraint'
+                                    , pvBindParents = cBindParents baseConstraint'
+                                    , pvCanonicalConstraint = canonicalConstraint'
+                                    }
+                            ga0 = rtcBindParentsGa inputs
+                            ga' =
+                                ga0
+                                    { gaBindParentsBase = cBindParents baseConstraint'
+                                    , gaBaseConstraint = baseConstraint'
+                                    }
+                        in inputs
+                            { rtcPresolutionView = view'
+                            , rtcBindParentsGa = ga'
+                            }
+                artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
+                let (inputs0, annCanon0, annPre0) = resultTypeInputsForArtifacts artifacts
+                    innerCanon = extractInnerLetRhs annCanon0
+                    innerPre = extractInnerLetRhs annPre0
+                    (retainedRoot, retainedChild) = case innerCanon of
+                        AApp _ (AVar _ nid) _ _ rootNid -> (rootNid, nid)
+                        _ -> error ("expected retained-child app shape, got " ++ show innerCanon)
+                    inputs = wireSameLaneLocalRoot inputs0 retainedRoot retainedChild
+                fallbackTy <- requireRight (computeResultTypeFallback inputs innerCanon innerPre)
+                containsMu fallbackTy `shouldBe` True
+
+            it "keeps retained-child lookup bounded to the same local TypeRef lane" $ do
+                fallbackSrc <- readFile "src/MLF/Elab/Run/ResultType/Fallback.hs"
+                fallbackSrc
+                    `shouldSatisfy`
+                        isInfixOf
+                            "sameLocalTypeLane child =\n                            case bindingScopeRefCanonical presolutionViewFinal child of"
+                fallbackSrc
+                    `shouldSatisfy`
+                        isInfixOf
+                            "in if rootBindingIsLocalType\n                        then pickCandidate (\\_parentRef child -> sameLocalTypeLane child)\n                        else pickCandidate (\\parentRef _child -> parentRef == scopeRoot)"
+
+            it "keeps retained-child fallback fail-closed when the same wrapper crosses a nested forall boundary" $ do
+                let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+                    expr =
+                        ELet "id" (ELam "z" (EVar "z"))
+                            (ELet "k" (EApp (EVar "id") (ELamAnn "x" recursiveAnn (EVar "x")))
+                                (EApp (ELam "y" (EVar "y")) (EVar "k")))
+                artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
+                let (inputs, annCanon, annPre) = resultTypeInputsForArtifacts artifacts
+                fallbackTy <- requireRight (computeResultTypeFallback inputs annCanon annPre)
+                containsMu fallbackTy `shouldBe` False
 
             it "does not infer recursive shape for the corresponding unannotated variant" $ do
                 let expr = ELam "x" (EVar "x")
