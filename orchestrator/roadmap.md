@@ -3,7 +3,7 @@
 ## Context
 
 - This top-level `orchestrator/` now succeeds the completed initial successor cycle whose accepted execution record ends at `orchestrator/rounds/round-033`.
-- Completed rounds `round-001` through `round-034` remain inherited baseline and predecessor evidence.
+- Completed rounds `round-001` through `round-037` remain inherited baseline and predecessor evidence.
 - The completed recursive-types packet under `tasks/todo/2026-03-11-recursive-types-orchestration/` remains immutable predecessor evidence.
 - The authoritative inherited automatic-recursive baseline and predecessor-boundary documents remain:
   - `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
@@ -17,14 +17,15 @@
   - `docs/plans/2026-03-17-uri-r2-c1-u4-unannotated-feasibility-clearance.md`
   - `docs/plans/2026-03-17-uri-r2-c1-u5-bounded-unannotated-implementation-slice.md`
   - `docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md`
-- The approved design source for this follow-on cycle is `docs/superpowers/specs/2026-03-18-unannotated-iso-recursive-continue-bounded-cycle-design.md`.
+- The approved design source for the first follow-on cycle is `docs/superpowers/specs/2026-03-18-unannotated-iso-recursive-continue-bounded-cycle-design.md`.
 - The accepted first follow-on bounded-cycle artifact is `docs/plans/2026-03-18-uri-r2-c1-c1-continue-bounded-target-bind.md`, finalized in `round-034` as the authoritative `C1` bind/selection record.
 - The accepted second follow-on bounded-cycle artifact is `docs/plans/2026-03-18-uri-r2-c1-c2-bounded-fail-closed-implementation-slice.md`, finalized in `round-035` as the authoritative `C2` fail-closed local-binding-only retention hardening record.
 - The accepted third follow-on bounded-cycle artifact is `docs/plans/2026-03-18-uri-r2-c1-c3-bounded-verification-gate.md`, finalized in `round-036` as the authoritative `C3` bounded verification/evidence consolidation record for the accepted local-binding-only fail-closed retention slice.
+- The accepted fourth follow-on bounded-cycle artifact is `docs/plans/2026-03-18-uri-r2-c1-c4-next-cycle-decision-gate.md`, finalized in `round-037` as the authoritative `C4` next-cycle decision record for the verified repaired `URI-R2-C1` local-binding-only fail-closed slice.
 - This control plane continues to use `contract_version: 2` retry semantics from `docs/superpowers/specs/2026-03-16-uri-r2-c1-prototype-evidence-retry-subloop-amendment.md` and `orchestrator/retry-subloop.md`.
 - The long-horizon direction remains fully unannotated iso-recursive-type synthesis in the solver/pipeline, but the live campaign must still move by bounded evidence and bounded implementation slices only.
 - The live subject remains fixed to repaired `URI-R2-C1`.
-- The accepted `U6` result `continue-bounded` means the next cycle must stay non-widening: it may continue with another bounded slice, but it may not reinterpret accepted negative findings as clearance or silently widen the subject/boundary.
+- The accepted `U6` result `continue-bounded` bound the first follow-on cycle to stay non-widening, and the accepted `C4` result `continue-bounded` now queues one more bounded non-widening cycle that must begin with another exact bind/selection step under repaired `URI-R2-C1`; it may not reinterpret accepted negative findings as clearance or silently widen the subject/boundary.
 
 ## Status Legend
 
@@ -46,6 +47,22 @@
    Depends on: item 2
    Completion notes: completed in accepted `round-036`; `docs/plans/2026-03-18-uri-r2-c1-c3-bounded-verification-gate.md` is the authoritative `C3` attempt and `orchestrator/rounds/round-036/review-record.json` finalized `attempt-1` as the accepted authoritative record, confirming that the accepted `C2` `rootBindingIsLocalType` fail-closed `ResultType.Fallback` / `PipelineSpec` slice stays stable under the bounded `ARI-C1 feasibility characterization (bounded prototype-only)` rerun, the current full-repo gate, and predecessor continuity checks, without widening beyond repaired `URI-R2-C1`.
 
-4. [pending] Execute the bounded `C4` next-cycle decision gate for the verified repaired `URI-R2-C1` local-binding-only fail-closed slice
+4. [done] Execute the bounded `C4` next-cycle decision gate for the verified repaired `URI-R2-C1` local-binding-only fail-closed slice
    Depends on: item 3
-   Completion notes: complete when `docs/plans/2026-03-18-uri-r2-c1-c4-next-cycle-decision-gate.md` is accepted, the reviewer record names the authoritative `C4` attempt, and the round records exactly one bounded next-step result for the already-verified repaired `URI-R2-C1` local-binding-only fail-closed lane: `continue-bounded`, `widen-approved`, or `stop-blocked`, without reopening `C1` selection, `C2` implementation, `C3` verification, or silently widening the live subject.
+   Completion notes: completed in accepted `round-037`; `docs/plans/2026-03-18-uri-r2-c1-c4-next-cycle-decision-gate.md` is the authoritative `C4` attempt and `orchestrator/rounds/round-037/review-record.json` finalized `attempt-1` as the accepted authoritative record, closing the first follow-on `C1` through `C4` cycle with result token `continue-bounded` for the already-verified repaired `URI-R2-C1` local-binding-only fail-closed lane, without reopening `C1` selection, `C2` implementation, `C3` verification, or widening the live subject/boundary.
+
+5. [pending] Execute the `E1` continue-bounded bind and exact next-slice target selection for repaired `URI-R2-C1` after the accepted local-binding-only fail-closed retention baseline
+   Depends on: item 4
+   Completion notes: complete when one accepted `E1` artifact binds the queued next cycle to repaired `URI-R2-C1` under accepted `C4 = continue-bounded`, preserves the explicit-only / non-equi-recursive / non-cyclic-graph boundary, and freezes exactly one next bounded non-widening slice that starts from the accepted `C2` / `C3` local-binding-only fail-closed retention baseline without reopening replay repair, `MLF.Elab.Inst`, or reinterpreting accepted `U2` / `U3` / `U4` negative findings as clearance.
+
+6. [pending] Execute the `E2` bounded fail-closed implementation slice frozen by `E1`
+   Depends on: item 5
+   Completion notes: complete when the exact `E1`-frozen repaired `URI-R2-C1` slice lands inside its explicitly bound ownership with focused verification and preserved fail-closed behavior outside that slice, without equi-recursive reasoning, cyclic structural graph encoding, replay reopen, multi-SCC widening, cross-family widening, or compatibility/default-path widening.
+
+7. [pending] Execute the `E3` bounded verification and evidence consolidation gate for the accepted `E2` slice
+   Depends on: item 6
+   Completion notes: complete when the accepted `E2` slice is reverified against the current bounded checks and predecessor continuity, and the authoritative record confirms that the repaired `URI-R2-C1` boundary still holds without widening.
+
+8. [pending] Execute the bounded `E4` next-cycle decision gate for the verified `E1`-frozen repaired `URI-R2-C1` slice
+   Depends on: item 7
+   Completion notes: complete when the accepted `E4` artifact and reviewer record name the authoritative `E4` attempt and the round records exactly one bounded next-step result for the already-verified `E1`-frozen repaired `URI-R2-C1` lane: `continue-bounded`, `widen-approved`, or `stop-blocked`, without reopening `E1` selection, `E2` implementation, `E3` verification, or silently widening the live subject.
