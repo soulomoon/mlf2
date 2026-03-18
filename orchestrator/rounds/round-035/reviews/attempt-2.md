@@ -1,0 +1,41 @@
+# Round `round-035` Attempt `2` Review (`C2`)
+
+- Baseline checks:
+  - `git diff --check` -> pass (no output).
+  - `python3 -m json.tool orchestrator/state.json >/dev/null` -> pass.
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json` -> pass (`2:  "contract_version": 2,`, `13:  "retry": null`).
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md` -> pass (ordered `C1` through `C4` list intact, `C2` still pending pre-merge).
+  - `test -f docs/superpowers/specs/2026-03-18-unannotated-iso-recursive-continue-bounded-cycle-design.md` -> pass.
+  - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md` -> pass.
+  - `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md` -> pass.
+  - `test -f docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md` -> pass.
+  - `test -f docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md` -> pass.
+  - `test -f orchestrator/retry-subloop.md` -> pass.
+  - Continuity presence check via `python3` -> pass (`round-001..round-033 directories: True`; predecessor recursive-types packet present at `tasks/todo/2026-03-11-recursive-types-orchestration`; replay-repair rounds `round-024` through `round-027` present; inherited boundary/repair docs present).
+  - Authoritative predecessor record recheck via `python3` over `round-028` through `round-033` -> pass (each review record remains `accepted + finalize` with `retry_reason: none`, `fix_hypothesis: none`, and existing artifact/snapshot paths).
+  - Full Cabal gate `cabal build all && cabal test` -> pass (`1127 examples, 0 failures`; `Test suite mlf2-test: PASS`).
+
+- Task-specific checks:
+  - `C2-CONTRACT` -> pass: `rg -n 'Attempt: \`attempt-2\`|Retry state: \`rejected attempt-1 -> retry\`|Live subject: repaired \`URI-R2-C1\`|rootBindingIsLocalType|computeResultTypeFallback|runPipelineElab|runPipelineElabChecked|do not reopen \`src/MLF/Elab/Run/ResultType/Fallback.hs\`' docs/plans/2026-03-18-uri-r2-c1-c2-bounded-fail-closed-implementation-slice.md orchestrator/rounds/round-035/implementation-notes.md` confirms `attempt-2`, the retry state, repaired `URI-R2-C1`, the bounded `rootBindingIsLocalType` retention lane, the same-case direct/unchecked/checked evidence, and the explicit no-reopen/no-widen statement in the canonical artifact and notes.
+  - `C2-BOUNDED-SLICE` -> pass: `git status --short --untracked-files=all`, `git diff --name-only`, `git diff --name-only -- . ':(exclude)src/MLF/Elab/Run/ResultType/Fallback.hs' ':(exclude)test/PipelineSpec.hs'`, and `git status --short --untracked-files=all | rg -n 'src/MLF/Elab/Inst|src/MLF/Research|src-public/|app/|mlf2\.cabal|orchestrator/state\.json|orchestrator/roadmap\.md|Bugs\.md'` confirm tracked code diffs remain limited to `src/MLF/Elab/Run/ResultType/Fallback.hs` plus `test/PipelineSpec.hs`, with untracked additions limited to the canonical `C2` artifact and round notes; no out-of-scope code, controller, roadmap, or bug-tracker paths changed.
+  - `C2-FALLBACK-ANCHOR` -> pass: `nl -ba src/MLF/Elab/Run/ResultType/Fallback.hs | sed -n '498,710p'` still shows the previously reviewed `rootBindingIsLocalType`-gated `targetPresolutionView`, `keepTargetFinal`, and non-local `else rootFinal` branch, so the retry cleared the missing evidence without reopening production logic beyond the existing bounded `Fallback.hs` anchor.
+  - `C2-SAME-CASE-COVERAGE` -> pass: `nl -ba test/PipelineSpec.hs | sed -n '1118,1169p'` shows one shared non-local proxy-wrapper expression `ELet "g" (ELamAnn "x" recursiveAnn (EVar "x")) (EApp (EVar "g") (EVar "g"))` at lines `1146`-`1147` and `1161`-`1162`, with direct `computeResultTypeFallback` fail-closed evidence at lines `1143`-`1151` and unchecked/checked `runPipelineElab`/`runPipelineElabChecked` fail-closed evidence at lines `1158`-`1168`; the stale unrelated `\f -> f f` entrypoint-negative example no longer occupies this bounded block.
+  - `C2-CANONICAL-ARTIFACT` -> pass: the canonical `C2` artifact now records the repaired same-case triplet (`computeResultTypeFallback`, unchecked `runPipelineElab`, checked `runPipelineElabChecked`) and states that `attempt-2` does not reopen `Fallback.hs`, `MLF.Elab.Inst`, replay repair, or any widening lane.
+  - `C2-RETRY-HISTORY` -> pass: `python3` over `orchestrator/rounds/round-035/attempt-log.jsonl` reports exactly one preserved `attempt=1` rejected entry pointing at `orchestrator/rounds/round-035/reviews/attempt-1.md`, and `test -f orchestrator/rounds/round-035/reviews/attempt-1.md` confirms the prior review snapshot remains intact.
+  - `C2-FOCUSED-BLOCK` -> pass: `cabal test mlf2-test --test-show-details=direct --test-options='--match "ARI-C1 feasibility characterization (bounded prototype-only)"'` passed with `6 examples, 0 failures`, covering the annotation-anchored control, local-binding direct-wrapper control, unannotated contrast, direct fail-closed reconstruction for `let g = (\x : mu a. a -> Int. x) in g g`, the `rootBindingIsLocalType` source guard, and the same-case unchecked/checked entrypoint rejection.
+  - `C2-CONTINUITY` -> pass: the continuity scripts confirm completed rounds `001` through `033`, inherited boundary docs, replay-repair rounds, the predecessor recursive-types packet, and accepted `U1` through `U6` review records all remain present and untouched.
+  - `C2-FULL-GATE` -> pass: fresh `cabal build all && cabal test` succeeded in the round worktree with `mlf2-test` reporting `1127 examples, 0 failures`.
+
+- Implemented stage result: `pass`
+- Attempt verdict: `accepted`
+- Stage action: `finalize`
+- Retry reason: `none`
+- Fix hypothesis: `none`
+- Decision summary:
+  - `attempt-2` repaired exactly the rejected gap: the same non-local proxy-wrapper case is now covered in one bounded `PipelineSpec` block through direct `computeResultTypeFallback`, unchecked `runPipelineElab`, and checked `runPipelineElabChecked`, and the canonical `C2` artifact records that same-case triplet.
+  - The round stayed inside the existing bounded `C2` slice. The live tracked code diff remains the existing `Fallback.hs` anchor plus `test/PipelineSpec.hs`, while the retry's additional evidence lives in the canonical artifact and round notes only; no `MLF.Elab.Inst`, replay, prototype, API, executable, build-surface, roadmap, state, or `Bugs.md` edits appeared.
+  - The focused `ARI-C1` block passes, the full repo gate passes, predecessor continuity remains intact, and no unresolved blocking issue remains. Under the retry-subloop contract, this stage now takes the lawful terminal path `accepted + finalize`.
+- Evidence summary:
+  - All required baseline checks passed, including state/roadmap validation and predecessor continuity rechecks.
+  - Line-level inspection confirms the same `g g` proxy-wrapper case now drives all three required negative checks and that the retry did not need to reopen production logic beyond the existing `Fallback.hs` anchor.
+  - Fresh verification evidence is green: the focused `ARI-C1` block passed with `6 examples, 0 failures`, and the full repo gate passed with `1127 examples, 0 failures`.

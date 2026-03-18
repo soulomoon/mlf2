@@ -38,9 +38,11 @@ import MLF.Constraint.Presolution
 import qualified MLF.Constraint.Presolution.View as PresolutionViewBoundary
 import MLF.Constraint.Presolution.TestSupport
     ( CopyMapping(..)
+    , EdgeArtifacts(..)
     , defaultPlanBuilder
     , toListInterior
     )
+import MLF.Constraint.Presolution.Plan.Context (GaBindParents(..))
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Solved (Solved)
 import MLF.Constraint.Types.Presolution (PresolutionSnapshot(..))
@@ -48,10 +50,17 @@ import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Witness (EdgeWitness(..), InstanceOp(..), InstanceWitness(..), ReplayContract(..))
 import qualified MLF.Binding.Tree as Binding
 import MLF.Elab.Run.Provenance (buildTraceCopyMap, collectBaseNamedKeys)
+import MLF.Elab.Run.ResultType
+    ( ResultTypeInputs
+    , computeResultTypeFallback
+    , mkResultTypeInputs
+    )
 import MLF.Elab.Run.Util
     ( canonicalizeTrace
+    , canonicalizeExpansion
     , canonicalizeWitness
     , chaseRedirects
+    , makeCanonicalizer
     )
 import SpecUtil
     ( collectVarNodes
@@ -116,6 +125,75 @@ matchesRecursiveArrow actual expected = case (actual, expected) of
         TForall _ mb body -> TForall "_" (fmap stripBoundNames mb) (stripMuNames body)
         TMu _ body -> TMu "_" (stripMuNames body)
         TBottom -> TBottom
+
+containsMu :: ElabType -> Bool
+containsMu ty = case ty of
+    TMu _ _ -> True
+    TArrow dom cod -> containsMu dom || containsMu cod
+    TCon _ args -> any containsMu args
+    TForall _ mb body -> maybe False containsMuBound mb || containsMu body
+    _ -> False
+  where
+    containsMuBound bound = case bound of
+        TArrow dom cod -> containsMu dom || containsMu cod
+        TBase _ -> False
+        TCon _ args -> any containsMu args
+        TForall _ mb body -> maybe False containsMuBound mb || containsMu body
+        TMu _ _ -> True
+        TBottom -> False
+
+resultTypeInputsForArtifacts :: PipelineArtifacts -> (ResultTypeInputs, AnnExpr, AnnExpr)
+resultTypeInputsForArtifacts
+    PipelineArtifacts
+        { paConstraintNorm = c1
+        , paPresolution = pres
+        , paSolved = solved0
+        , paAnnotated = ann0
+        } =
+    let solvedClean = Finalize.stepPruneSolvedBindParents solved0
+        canon = makeCanonicalizer (Solved.canonicalMap solvedClean) (prRedirects pres)
+        canonical = canonicalizeNode canon
+        annRedirected = applyRedirectsToAnn (prRedirects pres) ann0
+        annCanon = canonicalizeAnn canonical annRedirected
+        edgeWitnesses = IntMap.map (canonicalizeWitness canon) (prEdgeWitnesses pres)
+        edgeTraces = IntMap.map (canonicalizeTrace canon) (prEdgeTraces pres)
+        edgeExpansions = IntMap.map (canonicalizeExpansion canon) (prEdgeExpansions pres)
+        baseNodeKeys =
+            [ getNodeId nid
+            | (nid, _) <- toListNode (cNodes c1)
+            ]
+        baseToSolved =
+            IntMap.fromList
+                [ (baseKey, canonical (NodeId baseKey))
+                | baseKey <- baseNodeKeys
+                ]
+        solvedToBase =
+            foldl'
+                (\acc (baseKey, solvedNid) -> IntMap.insertWith (\_ existing -> existing) (getNodeId solvedNid) (NodeId baseKey) acc)
+                IntMap.empty
+                (IntMap.toList baseToSolved)
+        bindParentsGa =
+            GaBindParents
+                { gaBindParentsBase = cBindParents c1
+                , gaBaseConstraint = c1
+                , gaBaseToSolved = baseToSolved
+                , gaSolvedToBase = solvedToBase
+                }
+        inputs =
+            mkResultTypeInputs
+                canonical
+                EdgeArtifacts
+                    { eaEdgeExpansions = edgeExpansions
+                    , eaEdgeWitnesses = edgeWitnesses
+                    , eaEdgeTraces = edgeTraces
+                    }
+                (PresolutionViewBoundary.fromSolved solvedClean)
+                bindParentsGa
+                (defaultPlanBuilder defaultTraceConfig)
+                c1
+                (prRedirects pres)
+                defaultTraceConfig
+    in (inputs, annCanon, ann0)
 
 spec :: Spec
 spec = describe "Pipeline (Phases 1-5)" $ do
@@ -1037,31 +1115,57 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                         Right (_term, ty) ->
                             ty `shouldSatisfy` isRecursiveArrow
 
+            it "keeps local-binding recursive retention processable through a direct wrapper" $ do
+                let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+                    expr =
+                        ELet "id" (ELam "y" (EVar "y"))
+                            (ELamAnn "x" recursiveAnn (EVar "x"))
+                    expectedTy =
+                        TArrow (TMu "a" (TArrow (TVar "a") (TBase (BaseTy "Int"))))
+                            (TMu "a" (TArrow (TVar "a") (TBase (BaseTy "Int"))))
+                    pipelineRuns =
+                        [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr))
+                        , ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+                        ]
+                forM_ pipelineRuns $ \(label, result) ->
+                    case result of
+                        Left err -> expectationFailure (label ++ ": " ++ renderPipelineError err)
+                        Right (_term, ty) ->
+                            ty `shouldSatisfy` (`matchesRecursiveArrow` expectedTy)
+
             it "does not infer recursive shape for the corresponding unannotated variant" $ do
                 let expr = ELam "x" (EVar "x")
-                    containsMu ty = case ty of
-                        TMu _ _ -> True
-                        TArrow dom cod -> containsMu dom || containsMu cod
-                        TCon _ args -> any containsMu args
-                        TForall _ _ body -> containsMu body
-                        _ -> False
                 case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
                     Left err -> expectationFailure (renderPipelineError err)
                     Right (_term, ty) ->
                         containsMu ty `shouldBe` False
 
-            it "keeps out-of-scope unannotated recursive proxy unresolved" $ do
-                let expr = ELam "f" (EApp (EVar "f") (EVar "f"))
-                case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
-                    Left _ -> pure ()
-                    Right (_term, ty) ->
-                        expectationFailure
-                            ("Expected rejection for unchecked out-of-scope unannotated recursive proxy, got type: " ++ show ty)
-                case runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr) of
-                    Left _ -> pure ()
-                    Right (_term, ty) ->
-                        expectationFailure
-                            ("Expected rejection for checked out-of-scope unannotated recursive proxy, got type: " ++ show ty)
+            it "keeps non-local proxy fallback fail-closed in result-type reconstruction" $ do
+                let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+                    expr =
+                        ELet "g" (ELamAnn "x" recursiveAnn (EVar "x"))
+                            (EApp (EVar "g") (EVar "g"))
+                artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
+                let (inputs, annCanon, annPre) = resultTypeInputsForArtifacts artifacts
+                fallbackTy <- requireRight (computeResultTypeFallback inputs annCanon annPre)
+                containsMu fallbackTy `shouldBe` False
+
+            it "uses the local-binding gate when deciding retained fallback targets" $ do
+                fallbackSrc <- readFile "src/MLF/Elab/Run/ResultType/Fallback.hs"
+                fallbackSrc `shouldSatisfy` isInfixOf "rootBindingIsLocalType\n                        && ( rootHasMultiInst"
+                fallbackSrc `shouldSatisfy` isInfixOf "if rootBindingIsLocalType\n                                        then schemeBodyTarget targetPresolutionView rootC\n                                        else rootFinal"
+
+            it "keeps the same non-local proxy wrapper fail-closed at pipeline entrypoints" $ do
+                let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+                    expr =
+                        ELet "g" (ELamAnn "x" recursiveAnn (EVar "x"))
+                            (EApp (EVar "g") (EVar "g"))
+                    pipelineRuns =
+                        [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr))
+                        , ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+                        ]
+                forM_ pipelineRuns $ \(label, result) ->
+                    expectStrictPipelineFailure (label ++ " non-local proxy wrapper") result
 
         it "uses presolution-native solved artifacts" $ do
             artifacts <- requireRight (runPipelineArtifactsDefault Set.empty (ELam "x" (EVar "x")))
