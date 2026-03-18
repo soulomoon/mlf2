@@ -1,0 +1,36 @@
+{
+  "subject_id": "URI-R2-C1",
+  "scenario_id": "uri-r2-c1-only-v1",
+  "stage_id": "F1",
+  "attempt": 3,
+  "attempt_verdict": "accepted",
+  "stage_result": "pass",
+  "stage_action": "finalize",
+  "retry_reason": "none",
+  "fix_hypothesis": "none",
+  "status": "authoritative",
+  "authoritative_attempt": 3,
+  "authoritative_result": "pass",
+  "artifact_path": "docs/plans/2026-03-19-uri-r2-c1-f1-next-target-bind.md",
+  "review_snapshot": "orchestrator/rounds/round-042/reviews/attempt-3.md",
+  "checks": {
+    "F1-CANONICAL-ARTIFACT-PATH": "pass",
+    "F1-RETRY-DELTA-SCOPE": "pass",
+    "F1-ROUND-LOCAL-REVIEW-PATHS": "pass",
+    "F1-CONTRACT": "pass",
+    "F1-FROZEN-SLICE": "pass",
+    "F1-ANCHOR-ALIGNMENT": "pass",
+    "F1-OWNERSHIP": "pass",
+    "F1-EXCLUSIONS": "pass",
+    "F1-DOCS-ONLY": "pass",
+    "F1-SKIP-NOTE": "pass"
+  },
+  "retry_summary": {
+    "attempts_run": 3,
+    "max_attempts": 100,
+    "latest_accepted_attempt": 3,
+    "finalization_mode": "accepted-final",
+    "latest_retry_reason": "none"
+  },
+  "terminal_reason": "none"
+}

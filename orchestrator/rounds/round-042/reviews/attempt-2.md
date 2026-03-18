@@ -1,0 +1,49 @@
+# Round `round-042` Attempt `2` Review (`F1`)
+
+- Baseline checks:
+  - `git branch --show-current` -> pass (`codex/round-042-f1-next-target-bind`).
+  - `git diff --check` -> pass (no output).
+  - `python3 -m json.tool orchestrator/state.json >/dev/null` -> pass.
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json` -> pass (`2:  "contract_version": 2,`, `13:  "retry": null`).
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md` -> pass (`F1` remains pending pre-merge; ordered `C1` through `F4` list intact).
+  - `test -f docs/superpowers/specs/2026-03-18-unannotated-iso-recursive-continue-bounded-cycle-design.md` -> pass.
+  - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md` -> pass.
+  - `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md` -> pass.
+  - `test -f docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md` -> pass.
+  - `test -f docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md` -> pass.
+  - `test -f orchestrator/retry-subloop.md` -> pass.
+  - Continuity presence check via `python3` -> pass (`round_001_033_present=True`, `replay_repair_track=True`, `recursive_types_packet=True`, `boundary_doc=True`, `repair_doc=True`).
+  - Authoritative predecessor record recheck via `python3 -m json.tool` over `round-038` through `round-041` -> pass (`E1`, `E2`, `E3`, `E4` all `accepted + finalize` authoritative).
+  - `git status --short --untracked-files=all` -> pass (only docs/orchestrator packet files are untracked: `docs/plans/2026-03-19-uri-r2-c1-f1-next-target-bind.md`, `orchestrator/rounds/round-042/{attempt-log.jsonl,implementation-notes.md,plan.md,review.md,reviews/attempt-1.md,selection.md}`).
+  - `git diff --name-only` -> pass (no tracked diffs).
+  - `git diff --name-only -- . ':(exclude)docs/**' ':(exclude)orchestrator/**'` -> pass (no output).
+
+- Task-specific checks:
+  - `F1-CANONICAL-ARTIFACT-PATH` -> pass: `test -f docs/plans/2026-03-19-uri-r2-c1-f1-next-target-bind.md` returns `present`, `test -f docs/plans/2026-03-18-uri-r2-c1-f1-next-target-bind.md` returns `old_missing`, and the canonical-path-only `python3` check confirms `docs/plans/2026-03-19-uri-r2-c1-f1-next-target-bind.md`, `orchestrator/rounds/round-042/implementation-notes.md`, and `orchestrator/rounds/round-042/plan.md` all contain only `2026-03-19-uri-r2-c1-f1-next-target-bind.md` with no stale `2026-03-18` reference.
+  - `F1-CONTRACT` -> pass: `selection.md`, `plan.md`, and the canonical `F1` artifact keep the round fixed to repaired `URI-R2-C1`, preserve the inherited explicit-only / non-equi-recursive / non-cyclic boundary, and keep `F1` docs-only with no production/test edits.
+  - `F1-FROZEN-SLICE` -> pass: `rg -n '^The only frozen future \`F2\` target is:$|^Future \`F2\` ownership is frozen to exactly these files only:$' docs/plans/2026-03-19-uri-r2-c1-f1-next-target-bind.md` reports exactly one target header (`66:`) and one ownership header (`95:`), and the frozen slice remains the local-binding `rootIsSchemeAlias && rootBoundIsBaseLike` `keepTargetFinal` / `targetC` lane only.
+  - `F1-ANCHOR-ALIGNMENT` -> pass: `rg -n 'rootIsSchemeAlias|rootBoundIsBaseLike|keepTargetFinal|targetC|boundVarTarget' src/MLF/Elab/Run/ResultType/Fallback.hs` still reports the expected live anchors at lines `521`, `524`, `615`, `664`, `668`, `671`, `718`, and `rg -n 'ARI-C1 feasibility characterization \(bounded prototype-only\)' test/PipelineSpec.hs` still reports the focused block at line `1101`.
+  - `F1-OWNERSHIP` -> pass: the artifact still freezes future `F2` ownership only to `src/MLF/Elab/Run/ResultType/Fallback.hs` and `test/PipelineSpec.hs`, with `No second implementation family is selected in this artifact.`
+  - `F1-EXCLUSIONS` -> pass: the artifact still keeps `U2` / `U3` / `U4` binding, preserves the same-lane retained-child baseline as inherited context only, and keeps replay reopen, `MLF.Elab.Inst`, `rootHasMultiInst`, `instArgRootMultiBase`, second-interface work, equi-recursive reasoning, cyclic encoding, and broader widening families out of scope.
+  - `F1-DOCS-ONLY` -> pass: the packet remains docs/orchestrator only, with no tracked code/test/public/Cabal diff.
+  - `F1-SKIP-NOTE` -> pass: the artifact and implementation notes still explicitly justify skipping `cabal build all && cabal test` because `F1` is docs-only and touches none of `src/`, `src-public/`, `app/`, `test/`, or `mlf2.cabal`.
+  - `F1-ROUND-LOCAL-REVIEW-PATHS` -> fail: `orchestrator/rounds/round-042/plan.md:35-39` and `:67-70` still name the rejected review authority and evidence-only review-history files as `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-042/{review.md,reviews/attempt-1.md,attempt-log.jsonl,selection.md}` in the parent workspace, but `test -e /Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-042/review.md` and `test -e /Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-042/reviews/attempt-1.md` fail while the actual review packet lives under `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-042/...`. The retry therefore fixed the date-stamped canonical artifact path but still leaves the delta plan pointing two key review-history paths outside the active worktree packet.
+
+- Implemented stage result: `fail`
+- Attempt verdict: `rejected`
+- Stage action: `retry`
+- Retry reason: `f1-review-authority-path-mismatch`
+- Fix hypothesis: `Retarget the round-local review-history references in orchestrator/rounds/round-042/plan.md to the active /Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-042 packet (or use relative round-local paths) while preserving the now-correct 2026-03-19 canonical F1 artifact path, frozen F2 slice, exclusions, and docs-only verification semantics unchanged.`
+- Decision summary:
+  - Attempt-2 does repair the original `2026-03-18` versus `2026-03-19` artifact filename mismatch. The canonical artifact now exists at the planned `2026-03-19` path, the old path is absent, and the live artifact/plan/implementation-notes triad is date-path consistent.
+  - The frozen `F2` slice, future ownership, exclusions, docs-only scope, and full-gate skip note all remain intact and unchanged in substance from the rejected `attempt-1` packet.
+  - The packet is still not acceptable because the retry delta plan continues to cite missing parent-workspace review-history paths instead of the active worktree-local review packet for `review.md` and `reviews/attempt-1.md`. That leaves the retry context only partially normalized and keeps the round packet from being self-consistent.
+  - Under the retry contract, the lawful outcome remains `rejected + retry`.
+- Evidence summary:
+  - Canonical stage artifact: `docs/plans/2026-03-19-uri-r2-c1-f1-next-target-bind.md`
+  - Retry delta plan: `orchestrator/rounds/round-042/plan.md`
+  - Round notes: `orchestrator/rounds/round-042/implementation-notes.md`
+  - Frozen code/test anchors: `src/MLF/Elab/Run/ResultType/Fallback.hs`, `test/PipelineSpec.hs`
+  - Missing parent-workspace review-history paths named by the plan: `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-042/review.md`, `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-042/reviews/attempt-1.md`
+  - Actual round-local review-history paths: `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-042/orchestrator/rounds/round-042/review.md`, `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-042/orchestrator/rounds/round-042/reviews/attempt-1.md`
+  - Key predecessor authority: `orchestrator/rounds/round-038/review-record.json`, `orchestrator/rounds/round-039/review-record.json`, `orchestrator/rounds/round-040/review-record.json`, `orchestrator/rounds/round-041/review-record.json`
