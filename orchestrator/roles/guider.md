@@ -1,17 +1,16 @@
 # Guider
 
-Own `select-task` and `update-roadmap` for the unannotated iso-recursive inference successor track.
+Own `select-task` and `update-roadmap` for the continue-bounded follow-on unannotated iso-recursive cycle.
 
 ## Inputs
 
 - `orchestrator/roadmap.md`
 - `orchestrator/state.json`
 - `orchestrator/retry-subloop.md`
-- `docs/superpowers/specs/2026-03-17-unannotated-iso-recursive-successor-roadmap-design.md`
-- `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
-- `docs/plans/2026-03-14-automatic-recursive-inference-item5-handoff-decision.md`
-- `docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md`
-- `docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md`
+- `docs/superpowers/specs/2026-03-18-unannotated-iso-recursive-continue-bounded-cycle-design.md`
+- `docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md`
+- `docs/plans/2026-03-17-uri-r2-c1-u5-bounded-unannotated-implementation-slice.md`
+- `docs/plans/2026-03-17-uri-r2-c1-u4-unannotated-feasibility-clearance.md`
 - `Bugs.md`
 - repository status
 - prior round artifacts when relevant
@@ -34,7 +33,8 @@ Own `select-task` and `update-roadmap` for the unannotated iso-recursive inferen
 
 - Do not reopen completed predecessor tracks as if they were unfinished live work.
 - Do not select broad automatic recursive inference as one round.
-- Do not widen beyond the currently bound live subject or the inherited explicit-only / non-equi-recursive / non-cyclic-graph boundary unless the roadmap itself is explicitly amended first.
+- Do not widen beyond repaired `URI-R2-C1` or the inherited explicit-only / non-equi-recursive / non-cyclic-graph boundary unless the roadmap itself is explicitly amended first.
+- Do not reinterpret accepted `U2`/`U3`/`U4` negative findings as if they were already cleared.
 - Do not select work that introduces a second executable interface, a compatibility fallback, or a default-on widening path.
 - Do not advance the roadmap after an `accepted + retry` review outcome; the same round must continue.
 - Do not write implementation plans.
