@@ -1,0 +1,47 @@
+# Round `round-039` Attempt `2` Review (`E2`)
+
+- Baseline checks:
+  - `git diff --check` -> pass (no output).
+  - `python3 -m json.tool orchestrator/state.json >/dev/null` -> pass.
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json` -> pass (`2:  "contract_version": 2,`, `13:  "retry": null`).
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md` -> pass (ordered `C1` through `E4` list intact, `E2` still pending pre-merge).
+  - `test -f docs/superpowers/specs/2026-03-18-unannotated-iso-recursive-continue-bounded-cycle-design.md` -> pass.
+  - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md` -> pass.
+  - `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md` -> pass.
+  - `test -f docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md` -> pass.
+  - `test -f docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md` -> pass.
+  - `test -f orchestrator/retry-subloop.md` -> pass.
+  - Continuity presence check via `python3` -> pass (`round_001_033_present=True`, `replay_repair_track=True`, `recursive_types_packet=True`, `boundary_doc=True`, `repair_doc=True`).
+  - Authoritative predecessor record recheck via `python3` over `round-035` through `round-038` -> pass (`C2 accepted finalize none none`, `C3 accepted finalize none none`, `C4 accepted finalize none none`, `E1 accepted finalize none none`).
+  - Focused bounded block `cabal test mlf2-test --test-show-details=direct --test-options='--match "ARI-C1 feasibility characterization (bounded prototype-only)"'` -> pass (`9 examples, 0 failures`).
+  - Full Cabal gate `cabal build all && cabal test` -> pass (`1130 examples, 0 failures`; `Test suite mlf2-test: PASS`).
+
+- Task-specific checks:
+  - `E2-CONTRACT` -> pass: [`orchestrator/rounds/round-039/plan.md`](orchestrator/rounds/round-039/plan.md), [`docs/plans/2026-03-18-uri-r2-c1-e2-bounded-implementation-slice.md`](docs/plans/2026-03-18-uri-r2-c1-e2-bounded-implementation-slice.md), and [`orchestrator/rounds/round-039/implementation-notes.md`](orchestrator/rounds/round-039/implementation-notes.md) all record `attempt-2`, the retry state, repaired `URI-R2-C1`, the inherited explicit-only / non-equi-recursive / non-cyclic boundary, and the retained-child-only `Fallback.hs` slice.
+  - `E2-BOUNDED-SLICE` -> pass: `git branch --show-current` stays on `codex/round-039-e2-retained-child-hardening`; `git diff --name-only` reports only `src/MLF/Elab/Run/ResultType/Fallback.hs` and `test/PipelineSpec.hs`; `git diff --name-only -- . ':(exclude)src/MLF/Elab/Run/ResultType/Fallback.hs' ':(exclude)test/PipelineSpec.hs'` is empty; `git status --short --untracked-files=all | rg -n 'src/MLF/Elab/Inst|src/MLF/Research|src-public/|app/|mlf2\.cabal|orchestrator/state\.json|orchestrator/roadmap\.md|Bugs\.md'` returns no output. The retry stayed on the same branch/worktree and did not widen tracked ownership beyond the bounded code/test slice plus the allowed docs/review artifacts.
+  - `E2-FALLBACK-ANCHOR` -> pass: `nl -ba src/MLF/Elab/Run/ResultType/Fallback.hs | sed -n '610,670p'` shows the same `boundVarTarget` hunk reviewed in attempt-1: `sameLocalTypeLane`, `scopeRootPost`, `boundHasForallFrom`, `if rootBindingIsLocalType then pickCandidate (\_parentRef child -> sameLocalTypeLane child) else pickCandidate (\parentRef _child -> parentRef == scopeRoot)`, and the unchanged `keepTargetFinal` trigger families. This matches the accepted attempt-1 implementation anchor, so the retry introduced no new `Fallback.hs` diff beyond attempt-1.
+  - `E2-SAME-LANE-EVIDENCE` -> pass: `git show HEAD:test/PipelineSpec.hs | sed -n '1120,1185p'` confirms the pre-existing positive control `"keeps local-binding recursive retention processable through a direct wrapper"` was already present before the retry. `nl -ba test/PipelineSpec.hs | sed -n '1128,1218p'` now shows exactly one new behavioral retained-child same-lane success example at lines `1136-1211`: `"keeps retained-child fallback recursive through a same-lane local TypeRef root"`. That example drives `runPipelineArtifactsDefault` plus a bounded `computeResultTypeFallback` call, so the new evidence is behavioral rather than source-string-only.
+  - `E2-NEGATIVE-CONTRAST` -> pass: `nl -ba test/PipelineSpec.hs | sed -n '1218,1255p'` shows the retained nested-`forall` / nested-owner fail-closed contrast at lines `1224-1233`, and the focused `ARI-C1` run keeps that contrast green.
+  - `E2-CANONICAL-ARTIFACT` -> pass: `rg -n 'behavioral retained-child same-lane local|same-lane local `TypeRef`-root success example|nested-`forall` / nested-owner fail-closed contrast|retained-child lookup stays bounded to the same local `TypeRef` lane' docs/plans/2026-03-18-uri-r2-c1-e2-bounded-implementation-slice.md orchestrator/rounds/round-039/implementation-notes.md` confirms that the canonical `E2` artifact and the round notes explicitly record the new behavioral same-lane success evidence, the retained source guard, and the matched fail-closed contrast.
+  - `E2-EXCLUSIONS` -> pass: `rg -n 'rootHasMultiInst|instArgRootMultiBase|rootIsSchemeAlias && rootBoundIsBaseLike|sameLocalTypeLane|boundHasForallFrom|rootBindingIsLocalType' src/MLF/Elab/Run/ResultType/Fallback.hs` plus the bounded diff scope confirm the other `keepTargetFinal` trigger families remain unchanged and fail-closed. The notes also keep replay repair, `MLF.Elab.Inst`, `InstBot`, and broader widening lanes explicitly out of scope.
+  - `E2-RETRY-HISTORY` -> pass: [`orchestrator/rounds/round-039/attempt-log.jsonl`](orchestrator/rounds/round-039/attempt-log.jsonl) still preserves the rejected `attempt=1` record pointing at [`orchestrator/rounds/round-039/reviews/attempt-1.md`](orchestrator/rounds/round-039/reviews/attempt-1.md), and that prior snapshot remains intact. The current review is snapshotted separately to [`orchestrator/rounds/round-039/reviews/attempt-2.md`](orchestrator/rounds/round-039/reviews/attempt-2.md).
+  - `E2-FOCUSED-BLOCK` -> pass: `cabal test mlf2-test --test-show-details=direct --test-options='--match "ARI-C1 feasibility characterization (bounded prototype-only)"'` passed with `9 examples, 0 failures`, including the new same-lane success example, the retained same-lane source guard, and the nested-`forall` fail-closed contrast.
+  - `E2-CONTINUITY` -> pass: the continuity checks confirm completed rounds `001` through `033`, the replay-repair track, the predecessor recursive-types packet, and accepted review records for `round-035` through `round-038` all remain present and untouched.
+  - `E2-FULL-GATE` -> pass: fresh `cabal build all && cabal test` succeeded in the round worktree with `mlf2-test` reporting `1130 examples, 0 failures`.
+
+- Implemented stage result: `pass`
+- Attempt verdict: `accepted`
+- Stage action: `finalize`
+- Retry reason: `none`
+- Fix hypothesis: `none`
+- Decision summary:
+  - `attempt-2` repaired exactly the rejected gap. The bounded `ARI-C1` block now contains explicit retained-child same-lane success evidence plus the matched nested-`forall` fail-closed contrast, and the canonical `E2` artifact / implementation notes record both.
+  - The retry stayed bounded to repaired `URI-R2-C1` on the same branch/worktree. The production hunk remains the same `Fallback.hs` anchor already reviewed in attempt-1, the new work lives in `PipelineSpec` plus the allowed docs/review artifacts, and no widening into replay repair, `MLF.Elab.Inst`, alternate interfaces, or broader trigger families appeared.
+  - Fresh focused and full verification are green, predecessor continuity remains intact, and no unresolved blocking issue remains. Under the retry-subloop contract, the lawful terminal outcome is `accepted + finalize`.
+- Evidence summary:
+  - Round plan: `orchestrator/rounds/round-039/plan.md`
+  - Canonical stage artifact: `docs/plans/2026-03-18-uri-r2-c1-e2-bounded-implementation-slice.md`
+  - Round notes: `orchestrator/rounds/round-039/implementation-notes.md`
+  - Code/test diff: `src/MLF/Elab/Run/ResultType/Fallback.hs`, `test/PipelineSpec.hs`
+  - Retry history: `orchestrator/rounds/round-039/attempt-log.jsonl`, `orchestrator/rounds/round-039/reviews/attempt-1.md`, `orchestrator/rounds/round-039/reviews/attempt-2.md`
+  - Key predecessor authority: `orchestrator/rounds/round-035/review-record.json`, `orchestrator/rounds/round-036/review-record.json`, `orchestrator/rounds/round-037/review-record.json`, `orchestrator/rounds/round-038/review-record.json`

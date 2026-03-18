@@ -613,25 +613,35 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                                             _ -> False
                     in go IntSet.empty start0
                 boundVarTarget =
-                    case scopeRoot of
-                        GenRef gid ->
-                            let candidates =
-                                      [ ( canonicalFinal child
-                                      , canonicalFinal bnd
-                                      , canonicalFinal (schemeBodyTarget targetPresolutionView bnd)
-                                      , boundHasForallFrom bnd
-                                      )
-                                    | (childKey, (parentRef, _flag)) <- IntMap.toList (cBindParents (ChiQuery.chiCanonicalConstraint presolutionViewFinal))
-                                    , parentRef == GenRef gid
-                                    , TypeRef child <- [nodeRefFromKey childKey]
-                                    , Just bnd <- [View.rtvLookupVarBound viewFinalBounded (canonicalFinal child)]
-                                    ]
+                    let sameLocalTypeLane child =
+                            case bindingScopeRefCanonical presolutionViewFinal child of
+                                Right ref -> ref == scopeRootPost
+                                Left _ -> False
+                        candidatesFor keepCandidate =
+                            [ ( canonicalFinal child
+                              , canonicalFinal bnd
+                              , canonicalFinal (schemeBodyTarget targetPresolutionView bnd)
+                              , boundHasForallFrom bnd
+                              )
+                            | (childKey, (parentRef, _flag)) <- IntMap.toList (cBindParents (ChiQuery.chiCanonicalConstraint presolutionViewFinal))
+                            , TypeRef child <- [nodeRefFromKey childKey]
+                            , keepCandidate parentRef (canonicalFinal child)
+                            , Just bnd <- [View.rtvLookupVarBound viewFinalBounded (canonicalFinal child)]
+                            ]
+                        pickCandidate keepCandidate =
+                            let candidates = candidatesFor keepCandidate
                                 debugCandidates =
                                     if debugGaScopeEnabled traceCfg
                                         then
                                             debugGaScope traceCfg
                                                 ("runPipelineElab: boundVarTargetRoot="
                                                     ++ show boundVarTargetRoot
+                                                    ++ " scopeRoot="
+                                                    ++ show scopeRoot
+                                                    ++ " scopeRootPost="
+                                                    ++ show scopeRootPost
+                                                    ++ " rootBindingIsLocalType="
+                                                    ++ show rootBindingIsLocalType
                                                     ++ " candidates="
                                                     ++ show
                                                         [ (child, bnd, bndRoot, hasForall)
@@ -648,7 +658,9 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                                         , bndRoot == boundVarTargetRoot
                                         , not hasForall
                                         ]
-                        _ -> Nothing
+                    in if rootBindingIsLocalType
+                        then pickCandidate (\_parentRef child -> sameLocalTypeLane child)
+                        else pickCandidate (\parentRef _child -> parentRef == scopeRoot)
                 keepTargetFinal =
                     rootBindingIsLocalType
                         && ( rootHasMultiInst
