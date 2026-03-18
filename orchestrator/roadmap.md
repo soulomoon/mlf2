@@ -20,6 +20,7 @@
 - The approved design source for this follow-on cycle is `docs/superpowers/specs/2026-03-18-unannotated-iso-recursive-continue-bounded-cycle-design.md`.
 - The accepted first follow-on bounded-cycle artifact is `docs/plans/2026-03-18-uri-r2-c1-c1-continue-bounded-target-bind.md`, finalized in `round-034` as the authoritative `C1` bind/selection record.
 - The accepted second follow-on bounded-cycle artifact is `docs/plans/2026-03-18-uri-r2-c1-c2-bounded-fail-closed-implementation-slice.md`, finalized in `round-035` as the authoritative `C2` fail-closed local-binding-only retention hardening record.
+- The accepted third follow-on bounded-cycle artifact is `docs/plans/2026-03-18-uri-r2-c1-c3-bounded-verification-gate.md`, finalized in `round-036` as the authoritative `C3` bounded verification/evidence consolidation record for the accepted local-binding-only fail-closed retention slice.
 - This control plane continues to use `contract_version: 2` retry semantics from `docs/superpowers/specs/2026-03-16-uri-r2-c1-prototype-evidence-retry-subloop-amendment.md` and `orchestrator/retry-subloop.md`.
 - The long-horizon direction remains fully unannotated iso-recursive-type synthesis in the solver/pipeline, but the live campaign must still move by bounded evidence and bounded implementation slices only.
 - The live subject remains fixed to repaired `URI-R2-C1`.
@@ -41,10 +42,10 @@
    Depends on: item 1
    Completion notes: completed in accepted `round-035`; `docs/plans/2026-03-18-uri-r2-c1-c2-bounded-fail-closed-implementation-slice.md` is the authoritative `C2` attempt and `orchestrator/rounds/round-035/review-record.json` finalized `attempt-2` as the accepted authoritative record for the exact `C1`-frozen `rootBindingIsLocalType` local-`TypeRef` fail-closed hardening slice in `src/MLF/Elab/Run/ResultType/Fallback.hs`, with focused same-case coverage in `test/PipelineSpec.hs` across direct `computeResultTypeFallback`, unchecked `runPipelineElab`, and checked `runPipelineElabChecked`, while keeping wrapper/proxy-shaped retention fail-closed and preserving the repaired `URI-R2-C1` boundary.
 
-3. [pending] Execute the `C3` bounded verification and evidence consolidation gate for the accepted local-binding-only fail-closed retention slice
+3. [done] Execute the `C3` bounded verification and evidence consolidation gate for the accepted local-binding-only fail-closed retention slice
    Depends on: item 2
-   Completion notes: complete when `docs/plans/2026-03-18-uri-r2-c1-c3-bounded-verification-gate.md` is accepted, the reviewer record names the authoritative `C3` attempt, and the round records whether the accepted `C2` `rootBindingIsLocalType` fail-closed `ResultType.Fallback` / `PipelineSpec` slice stays stable under the bounded `ARI-C1 feasibility characterization (bounded prototype-only)` verification, current full-repo gate, and predecessor continuity checks, without widening beyond repaired `URI-R2-C1`.
+   Completion notes: completed in accepted `round-036`; `docs/plans/2026-03-18-uri-r2-c1-c3-bounded-verification-gate.md` is the authoritative `C3` attempt and `orchestrator/rounds/round-036/review-record.json` finalized `attempt-1` as the accepted authoritative record, confirming that the accepted `C2` `rootBindingIsLocalType` fail-closed `ResultType.Fallback` / `PipelineSpec` slice stays stable under the bounded `ARI-C1 feasibility characterization (bounded prototype-only)` rerun, the current full-repo gate, and predecessor continuity checks, without widening beyond repaired `URI-R2-C1`.
 
-4. [pending] Execute the `C4` next-cycle decision gate
+4. [pending] Execute the bounded `C4` next-cycle decision gate for the verified repaired `URI-R2-C1` local-binding-only fail-closed slice
    Depends on: item 3
-   Completion notes: complete when `docs/plans/2026-03-18-uri-r2-c1-c4-next-cycle-decision-gate.md` is accepted, the reviewer record names the authoritative `C4` attempt, and the round records exactly one bounded next-step result: `continue-bounded`, `widen-approved`, or `stop-blocked`.
+   Completion notes: complete when `docs/plans/2026-03-18-uri-r2-c1-c4-next-cycle-decision-gate.md` is accepted, the reviewer record names the authoritative `C4` attempt, and the round records exactly one bounded next-step result for the already-verified repaired `URI-R2-C1` local-binding-only fail-closed lane: `continue-bounded`, `widen-approved`, or `stop-blocked`, without reopening `C1` selection, `C2` implementation, `C3` verification, or silently widening the live subject.
