@@ -1,0 +1,46 @@
+# Round `round-041` Attempt `1` Review (`E4`)
+
+- Baseline checks:
+  - `git branch --show-current` -> pass (`codex/round-041-e4-next-cycle-decision`).
+  - `git diff --check` -> pass (no output).
+  - `python3 -m json.tool orchestrator/state.json >/dev/null` -> pass.
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json` -> pass (`2:  "contract_version": 2,`, `13:  "retry": null`).
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md` -> pass (ordered `C1` through `E4` list intact, `E4` still pending pre-merge).
+  - `test -f docs/superpowers/specs/2026-03-18-unannotated-iso-recursive-continue-bounded-cycle-design.md` -> pass.
+  - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md` -> pass.
+  - `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md` -> pass.
+  - `test -f docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md` -> pass.
+  - `test -f docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md` -> pass.
+  - `test -f orchestrator/retry-subloop.md` -> pass.
+  - Continuity presence check via `python3` -> pass (`round_001_033_present=True`, `replay_repair_track=True`, `recursive_types_packet=True`, `boundary_doc=True`, `repair_doc=True`).
+  - Authoritative predecessor record recheck via `python3` over `round-037` through `round-040` -> pass (`C4 accepted finalize authoritative`, `E1 accepted finalize authoritative`, `E2 accepted finalize authoritative`, `E3 accepted finalize authoritative`).
+  - `git status --short --untracked-files=all` -> pass (only `docs/plans/2026-03-18-uri-r2-c1-e4-next-cycle-decision-gate.md` plus round-local `orchestrator/rounds/round-041/{selection,plan,implementation-notes}.md` are untracked).
+  - `git diff --name-only` -> pass (no tracked diffs).
+  - `git diff --name-only -- . ':(exclude)docs/**' ':(exclude)orchestrator/**'` -> pass (no output).
+
+- Task-specific checks:
+  - `E4-CONTRACT` -> pass: `selection.md`, `plan.md`, the canonical `E4` artifact, and `implementation-notes.md` keep `attempt-1` aggregate-only/docs-only, fixed to repaired `URI-R2-C1`, and inside the inherited explicit-only / non-equi-recursive / non-cyclic boundary; `accepted + retry` is explicitly forbidden.
+  - `E4-CONTINUITY` -> pass: `orchestrator/rounds/round-037/review-record.json` through `orchestrator/rounds/round-040/review-record.json` are parseable, authoritative, and still point to the accepted `C4`, `E1`, `E2`, and `E3` canonical artifact paths with the expected authoritative attempts.
+  - `E4-RESULT-TOKEN` -> pass: `docs/plans/2026-03-18-uri-r2-c1-e4-next-cycle-decision-gate.md` records exactly one `Recorded next-step result token` line, and the recorded token is `continue-bounded`.
+  - `E4-EVIDENCE-CHAIN` -> pass: the canonical artifact carries forward only accepted `C4` / `E1` / `E2` / `E3` evidence plus continuity-only `Bugs.md` context, preserves the binding `U2` / `U3` / `U4` negative findings, and explains why `widen-approved` and `stop-blocked` are not lawful.
+  - `E4-BOUNDARY` -> pass: the artifact keeps repaired `URI-R2-C1` as the live subject, preserves the bounded `Fallback.hs` / `PipelineSpec.hs` ownership boundary, and restates the inherited explicit-only / non-equi-recursive / non-cyclic limits.
+  - `E4-DOCS-ONLY` -> pass: `git status --short --untracked-files=all` shows only the canonical `E4` doc plus round-local orchestrator files; `git diff --name-only` is empty; `git diff --name-only -- . ':(exclude)docs/**' ':(exclude)orchestrator/**'` is empty. No non-doc/code-path edits are present.
+  - `E4-SKIP-NOTE` -> pass: the artifact explicitly justifies skipping `cabal build all && cabal test` because `E4` is aggregate-only/docs-only and the accepted `E3` artifact already supplies the current bounded verification baseline.
+  - `E4-SCOPE-ALIGNMENT` -> pass: `selection.md` and `plan.md` align on the same aggregate-only `E4` decision-gate scope, and `implementation-notes.md` plus the canonical artifact align on the single recorded `continue-bounded` result.
+
+- Implemented stage result: `pass`
+- Attempt verdict: `accepted`
+- Stage action: `finalize`
+- Retry reason: `none`
+- Fix hypothesis: `none`
+- Decision summary:
+  - The `E4` packet stays aggregate-only and docs-only, records exactly one lawful next-step token, and does not reopen implementation, verification, or widening.
+  - The canonical artifact accurately preserves predecessor authority and explains why `continue-bounded` is lawful while `widen-approved` and `stop-blocked` are not.
+  - No blocking issue remains. The lawful outcome is `accepted + finalize`.
+- Evidence summary:
+  - Round plan: `orchestrator/rounds/round-041/plan.md`
+  - Canonical stage artifact: `docs/plans/2026-03-18-uri-r2-c1-e4-next-cycle-decision-gate.md`
+  - Round notes: `orchestrator/rounds/round-041/implementation-notes.md`
+  - Review snapshot: `orchestrator/rounds/round-041/reviews/attempt-1.md`
+  - Key predecessor authority: `orchestrator/rounds/round-037/review-record.json`, `orchestrator/rounds/round-038/review-record.json`, `orchestrator/rounds/round-039/review-record.json`, `orchestrator/rounds/round-040/review-record.json`
+  - Continuity context: `Bugs.md`

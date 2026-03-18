@@ -1,0 +1,27 @@
+{
+  "subject_id": "URI-R2-C1",
+  "scenario_id": "uri-r2-c1-only-v1",
+  "stage_id": "E4",
+  "attempt": 1,
+  "attempt_verdict": "accepted",
+  "stage_result": "pass",
+  "stage_action": "finalize",
+  "retry_reason": "none",
+  "fix_hypothesis": "none",
+  "status": "authoritative",
+  "authoritative_attempt": 1,
+  "authoritative_result": "pass",
+  "artifact_path": "docs/plans/2026-03-18-uri-r2-c1-e4-next-cycle-decision-gate.md",
+  "review_snapshot": "orchestrator/rounds/round-041/reviews/attempt-1.md",
+  "checks": {
+    "E4-CONTRACT": "pass",
+    "E4-CONTINUITY": "pass",
+    "E4-RESULT-TOKEN": "pass",
+    "E4-EVIDENCE-CHAIN": "pass",
+    "E4-BOUNDARY": "pass",
+    "E4-DOCS-ONLY": "pass",
+    "E4-SKIP-NOTE": "pass",
+    "E4-SCOPE-ALIGNMENT": "pass"
+  },
+  "terminal_reason": "none"
+}
