@@ -1,0 +1,47 @@
+# Round `round-042` Attempt `1` Review (`F1`)
+
+- Baseline checks:
+  - `git branch --show-current` -> pass (`codex/round-042-f1-next-target-bind`).
+  - `git diff --check` -> pass (no output).
+  - `python3 -m json.tool orchestrator/state.json >/dev/null` -> pass.
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json` -> pass (`2:  "contract_version": 2,`, `13:  "retry": null`).
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md` -> pass (ordered `C1` through `F4` list intact, `F1` still pending pre-merge).
+  - `test -f docs/superpowers/specs/2026-03-18-unannotated-iso-recursive-continue-bounded-cycle-design.md` -> pass.
+  - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md` -> pass.
+  - `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md` -> pass.
+  - `test -f docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md` -> pass.
+  - `test -f docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md` -> pass.
+  - `test -f orchestrator/retry-subloop.md` -> pass.
+  - Continuity presence check via `python3` -> pass (`round_001_033_present=True`, `replay_repair_track=True`, `recursive_types_packet=True`, `boundary_doc=True`, `repair_doc=True`).
+  - Authoritative predecessor record recheck via `python3` over `round-038` through `round-041` -> pass (`E1 accepted finalize authoritative`, `E2 accepted finalize authoritative`, `E3 accepted finalize authoritative`, `E4 accepted finalize authoritative`).
+  - `git status --short --untracked-files=all` -> pass (only `docs/plans/2026-03-18-uri-r2-c1-f1-next-target-bind.md` plus round-local `orchestrator/rounds/round-042/{selection,plan,implementation-notes}.md` are untracked).
+  - `git diff --name-only` -> pass (no tracked diffs).
+  - `git diff --name-only -- . ':(exclude)docs/**' ':(exclude)orchestrator/**'` -> pass (no output).
+
+- Task-specific checks:
+  - `F1-CONTRACT` -> pass: `selection.md`, `plan.md`, and the authored `F1` artifact keep the round fixed to repaired `URI-R2-C1`, preserve the inherited explicit-only / non-equi-recursive / non-cyclic boundary, and keep `F1` docs-only with no production/test edits.
+  - `F1-FROZEN-SLICE` -> pass: the authored artifact body before `## Verification Notes` contains exactly one `The only frozen future \`F2\` target is:` header and exactly one `Future \`F2\` ownership is frozen to exactly these files only:` header; that target is the local-binding `rootIsSchemeAlias && rootBoundIsBaseLike` `keepTargetFinal` / `targetC` lane only.
+  - `F1-ANCHOR-ALIGNMENT` -> pass: `src/MLF/Elab/Run/ResultType/Fallback.hs:521-686` still contains the named branch (`rootIsSchemeAlias`, `rootBoundIsBaseLike`, `keepTargetFinal`, `targetC`, and inherited `boundVarTarget` handling), and `test/PipelineSpec.hs:1101-1268` still contains the focused `ARI-C1 feasibility characterization (bounded prototype-only)` block that `F2` is supposed to extend.
+  - `F1-OWNERSHIP` -> pass: the artifact freezes future `F2` ownership only to `src/MLF/Elab/Run/ResultType/Fallback.hs` and `test/PipelineSpec.hs`, with no second implementation family selected.
+  - `F1-EXCLUSIONS` -> pass: the artifact keeps `U2`/`U3`/`U4` binding, preserves the same-lane retained-child baseline as inherited context only, and keeps replay reopen, `MLF.Elab.Inst`, `rootHasMultiInst`, `instArgRootMultiBase`, second-interface work, equi-recursive reasoning, cyclic encoding, and broader widening families out of scope.
+  - `F1-DOCS-ONLY` -> pass: `git status --short --untracked-files=all`, `git diff --name-only`, and `git diff --name-only -- . ':(exclude)docs/**' ':(exclude)orchestrator/**'` confirm a docs/orchestrator-only packet with no tracked code/test/public/Cabal diff.
+  - `F1-SKIP-NOTE` -> pass: the artifact and implementation notes explicitly justify skipping `cabal build all && cabal test` because `F1` is docs-only and touches none of `src/`, `src-public/`, `app/`, `test/`, or `mlf2.cabal`.
+  - `F1-CANONICAL-ARTIFACT-PATH` -> fail: `orchestrator/rounds/round-042/plan.md:5-6` and `orchestrator/rounds/round-042/plan.md:102-105` define the canonical `F1` artifact path as `docs/plans/2026-03-19-uri-r2-c1-f1-next-target-bind.md`, but `test -f docs/plans/2026-03-19-uri-r2-c1-f1-next-target-bind.md` returns `missing`, `git status --short --untracked-files=all` shows only `docs/plans/2026-03-18-uri-r2-c1-f1-next-target-bind.md`, and `orchestrator/rounds/round-042/implementation-notes.md:3-4` cites that same `2026-03-18` path instead. The packet therefore does not satisfy its own plan-defined canonical artifact location.
+
+- Implemented stage result: `fail`
+- Attempt verdict: `rejected`
+- Stage action: `retry`
+- Retry reason: `The packet is not self-consistent about the canonical F1 artifact path: the round plan requires a 2026-03-19 bind artifact, but the authored artifact and implementation notes use 2026-03-18, so the plan-named canonical artifact is missing.`
+- Fix hypothesis: `Choose one canonical F1 artifact path and make the plan, artifact filename, and implementation notes agree exactly. If 2026-03-18 is the intended stable cycle date, update the plan to that path; if 2026-03-19 is intended, rename the artifact and refresh its internal verification commands/notes. Keep the already-correct F1 scope, ownership, exclusions, and docs-only/full-gate-skip semantics unchanged.`
+- Decision summary:
+  - The round stays docs-only, preserves repaired `URI-R2-C1` and the inherited boundary, freezes exactly one bounded `F2` slice around the `rootIsSchemeAlias && rootBoundIsBaseLike` branch in `Fallback.hs`, keeps `PipelineSpec.hs` as the only test owner, preserves the exclusions, and records a lawful full-gate skip note.
+  - The packet is still not acceptable because the plan-defined canonical artifact path is absent and disagrees with the authored artifact and implementation notes, which leaves the authoritative `F1` handoff ambiguous for downstream stages.
+  - Under the retry contract, the lawful outcome is `rejected + retry`.
+- Evidence summary:
+  - Round plan: `orchestrator/rounds/round-042/plan.md`
+  - Authored stage artifact: `docs/plans/2026-03-18-uri-r2-c1-f1-next-target-bind.md`
+  - Missing plan-named artifact: `docs/plans/2026-03-19-uri-r2-c1-f1-next-target-bind.md`
+  - Round notes: `orchestrator/rounds/round-042/implementation-notes.md`
+  - Frozen code/test anchors: `src/MLF/Elab/Run/ResultType/Fallback.hs`, `test/PipelineSpec.hs`
+  - Key predecessor authority: `orchestrator/rounds/round-038/review-record.json`, `orchestrator/rounds/round-039/review-record.json`, `orchestrator/rounds/round-040/review-record.json`, `orchestrator/rounds/round-041/review-record.json`
+  - Continuity context: `Bugs.md`
