@@ -498,6 +498,10 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                 rootFinal = canonicalFinal rootC
                 nodesFinal = cNodes (pvConstraint presolutionViewFinal)
                 genNodesFinal = map snd (toListGen (cGenNodes (ChiQuery.chiConstraint presolutionViewFinal)))
+                targetPresolutionView =
+                    if rootBindingIsLocalType
+                        then presolutionViewFinal
+                        else presolutionView
                 rootBound =
                     case lookupNodeIn nodesFinal rootFinal of
                         Just TyVar{ tnBound = Just bnd } -> Just (canonicalFinal bnd)
@@ -518,7 +522,7 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                     rootIsSchemeRoot
                         && maybe False (const True) rootBound
                 rootBoundIsBaseLike = rootBoundIsBase
-                boundVarTargetRoot = canonicalFinal (schemeBodyTarget presolutionViewFinal rootC)
+                boundVarTargetRoot = canonicalFinal (schemeBodyTarget targetPresolutionView rootC)
                 (schemeRootSetFinal, schemeRootOwnerFinal) =
                     canonicalSchemeRootOwners
                         canonicalFinal
@@ -612,9 +616,9 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                     case scopeRoot of
                         GenRef gid ->
                             let candidates =
-                                    [ ( canonicalFinal child
+                                      [ ( canonicalFinal child
                                       , canonicalFinal bnd
-                                      , canonicalFinal (schemeBodyTarget presolutionViewFinal bnd)
+                                      , canonicalFinal (schemeBodyTarget targetPresolutionView bnd)
                                       , boundHasForallFrom bnd
                                       )
                                     | (childKey, (parentRef, _flag)) <- IntMap.toList (cBindParents (ChiQuery.chiCanonicalConstraint presolutionViewFinal))
@@ -646,10 +650,12 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                                         ]
                         _ -> Nothing
                 keepTargetFinal =
-                    rootHasMultiInst
-                        || instArgRootMultiBase
-                        || (rootIsSchemeAlias && rootBoundIsBaseLike)
-                        || maybe False (const True) boundVarTarget
+                    rootBindingIsLocalType
+                        && ( rootHasMultiInst
+                                || instArgRootMultiBase
+                                || (rootIsSchemeAlias && rootBoundIsBaseLike)
+                                || maybe False (const True) boundVarTarget
+                           )
             let targetC =
                     case baseTarget of
                         Just baseC -> baseC
@@ -661,8 +667,11 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                                         _ ->
                                             case boundVarTarget of
                                                 Just v -> v
-                                                Nothing -> schemeBodyTarget presolutionViewFinal rootC
-                                else schemeBodyTarget presolutionViewFinal rootC
+                                                Nothing -> schemeBodyTarget targetPresolutionView rootC
+                                else
+                                    if rootBindingIsLocalType
+                                        then schemeBodyTarget targetPresolutionView rootC
+                                        else rootFinal
             let bindParentsGaFinal =
                     case boundTarget of
                         Just baseN ->
@@ -692,8 +701,14 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                     ++ pretty sch
                     ++ " keepTargetBase="
                     ++ show (case baseTarget of { Just _ -> True; Nothing -> False })
+                    ++ " keepTargetFinal="
+                    ++ show keepTargetFinal
                     ++ " targetC="
                     ++ show targetC
+                    ++ " boundVarTarget="
+                    ++ show boundVarTarget
+                    ++ " boundVarTargetRoot="
+                    ++ show boundVarTargetRoot
                     ++ " scopeRoot="
                     ++ show scopeRoot
                     ++ " rootBindingIsLocalType="
