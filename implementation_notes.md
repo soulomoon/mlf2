@@ -1,3 +1,10 @@
+## 2026-03-18 - Live orchestrator refreshed for a continue-bounded follow-on cycle
+
+- The completed initial successor cycle (`U1` through `U6`, rounds `round-028` through `round-033`) is now predecessor evidence rather than live work. The live top-level control plane has been refreshed in place for one new bounded non-widening follow-on cycle.
+- The new approved scaffold source is `docs/superpowers/specs/2026-03-18-unannotated-iso-recursive-continue-bounded-cycle-design.md`. The live roadmap now stages `C1` through `C4`: continue-bounded target bind, one bounded fail-closed implementation slice, bounded verification, and a new decision gate.
+- The accepted `continue-bounded` outcome from `U6` is treated as permission for another bounded cycle only. It is not interpreted as widening approval.
+- The live subject remains fixed to repaired `URI-R2-C1`, and the inherited explicit-only / non-equi-recursive / non-cyclic-graph boundary remains mandatory unless a later accepted roadmap update changes it explicitly.
+
 ## 2026-03-18 - Unannotated successor `U1` through `U6` runtime complete with bounded `continue-bounded` outcome
 
 - The live top-level successor roadmap is now complete through accepted rounds `round-028` through `round-033`. The controller finished the initial bounded `U1` through `U6` cycle and now rests at terminal `stage: "done"` with `last_completed_round: "round-033"`.

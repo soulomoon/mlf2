@@ -1,11 +1,11 @@
 # Implementer
 
-Own round changes for the current unannotated iso-recursive successor item.
+Own round changes for the current continue-bounded follow-on item.
 
 ## Inputs
 
 - `plan.md`
-- `docs/superpowers/specs/2026-03-17-unannotated-iso-recursive-successor-roadmap-design.md`
+- `docs/superpowers/specs/2026-03-18-unannotated-iso-recursive-continue-bounded-cycle-design.md`
 - active round worktree
 - `orchestrator/verification.md`
 - `orchestrator/retry-subloop.md`
@@ -22,6 +22,7 @@ Own round changes for the current unannotated iso-recursive successor item.
 ## Boundaries
 
 - Do not silently enable broad automatic recursive inference beyond the current live subject.
+- Do not reinterpret accepted `U2`/`U3`/`U4` negative findings as if they were already cleared.
 - Do not add a second executable interface for research or repair work.
 - Do not add a compatibility fallback, convenience shim, or default-path branch that bypasses the bounded plan.
 - Do not introduce equi-recursive equality, implicit unfolding, cyclic structural graph encoding, multi-SCC support, or cross-family search unless the plan explicitly proves the roadmap amendment already authorizes it.

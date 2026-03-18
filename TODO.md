@@ -4,6 +4,21 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 96 unannotated continue-bounded cycle scaffold (completed 2026-03-18)
+
+- Completed:
+  - refreshed the live top-level `orchestrator/` so it now succeeds the completed initial successor cycle (`round-028` through `round-033`) with a new bounded non-widening follow-on cycle rooted in the accepted `continue-bounded` result;
+  - wrote the approved follow-on design source at `docs/superpowers/specs/2026-03-18-unannotated-iso-recursive-continue-bounded-cycle-design.md` and replaced the live roadmap, verification contract, and role prompts with the new `C1` through `C4` cycle;
+  - reset `orchestrator/state.json` to idle `stage: "select-task"` while preserving `last_completed_round: "round-033"` so future runtime execution can start the new cycle without rewriting accepted history.
+- Verification:
+  - `python3 -m json.tool orchestrator/state.json`: PASS
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`: PASS
+  - `git diff --check`: PASS
+- Rolling priorities (next):
+  1. Run `C1`, the continue-bounded bind and exact next-slice target selection, before opening any new production diff.
+  2. Keep the live subject fixed to repaired `URI-R2-C1` and preserve the inherited explicit-only / non-equi-recursive / non-cyclic-graph boundary unless a later accepted roadmap update explicitly changes it.
+  3. Treat accepted `U2`/`U3`/`U4` negative findings plus the bounded `U5` hardening slice as predecessor evidence; do not reinterpret them as clearance for broad unannotated recursive inference.
+
 ## Task 95 unannotated iso-recursive successor orchestrator run (completed 2026-03-18)
 
 - Completed:
