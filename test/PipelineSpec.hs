@@ -6,7 +6,7 @@ import Control.Monad (forM, forM_, unless, when)
 import Data.Char (isSpace)
 import Data.Either (isRight)
 import Data.List (isInfixOf, isPrefixOf, nub, sort)
-import Data.Maybe (catMaybes, isJust)
+import Data.Maybe (catMaybes, isJust, listToMaybe)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Set as Set
@@ -54,6 +54,7 @@ import MLF.Elab.Run.ResultType
     ( ResultTypeInputs(..)
     , computeResultTypeFallback
     , mkResultTypeInputs
+    , rtcEdgeTraces
     )
 import MLF.Elab.Run.Util
     ( canonicalizeTrace
@@ -1144,10 +1145,53 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                         { rtcPresolutionView = view'
                         , rtcBindParentsGa = ga'
                         }
+                ariClearVarBound nid constraint =
+                    let tweak node = case node of
+                            TyVar{ tnId = varId } | varId == nid ->
+                                TyVar{ tnId = varId, tnBound = Nothing }
+                            _ -> node
+                    in constraint
+                        { cNodes =
+                            fromListNode
+                                [ (nodeIdKey, tweak node)
+                                | (nodeIdKey, node) <- toListNode (cNodes constraint)
+                                ]
+                        }
                 makeLocalTypeRoot inputs rootNid =
                     rewriteResultTypeInputs (ariSetTypeParent rootNid Nothing) inputs
                 rebindRootTo inputs rootNid newBound =
                     rewriteResultTypeInputs (ariSetVarBound rootNid newBound) inputs
+                clearVarBoundInInputs inputs nid =
+                    rewriteResultTypeInputs (ariClearVarBound nid) inputs
+                duplicateReferencedTrace inputs eids =
+                    let traceFor eid =
+                            IntMap.lookup (getEdgeId eid) edgeTraces0
+                        edgeTraces0 = rtcEdgeTraces inputs
+                        matchingTrace =
+                            listToMaybe
+                                [ tr
+                                | eid <- eids
+                                , Just tr <- [traceFor eid]
+                                ]
+                        nextEdgeKey =
+                            case IntMap.lookupMax edgeTraces0 of
+                                Just (edgeKey, _trace) -> edgeKey + 1
+                                Nothing -> 0
+                    in case matchingTrace of
+                        Just tr ->
+                            inputs
+                                { rtcEdgeArtifacts =
+                                    (rtcEdgeArtifacts inputs)
+                                        { eaEdgeTraces =
+                                            IntMap.insert nextEdgeKey tr edgeTraces0
+                                        }
+                                }
+                        Nothing ->
+                            error
+                                ( "expected edge trace for "
+                                    ++ show eids
+                                    ++ " for local multi-inst fallback case"
+                                )
                 schemeAliasBaseLikeFallback keepLocalTypeRoot = do
                     let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
                         expr =
@@ -1183,6 +1227,29 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                                 rootNid
                                 (findIntBaseNode (rtcPresolutionView inputs1))
                     requireRight (computeResultTypeFallback inputs2 bodyCanon bodyPre)
+                localMultiInstFallback keepLocalTypeRoot = do
+                    let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+                        expr =
+                            ELet "k" (ELamAnn "x" recursiveAnn (EVar "x"))
+                                (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "k")) (EVar "u"))
+                        extractInnerLetRhs ann0 = case ann0 of
+                            ALet _ _ _ _ _ _ (AAnn (ALet _ _ _ _ _ rhs _ _) _ _) _ -> rhs
+                            _ -> error ("unexpected local multi-inst wrapper shape: " ++ show ann0)
+                    artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
+                    let (inputs0, annCanon0, annPre0) = resultTypeInputsForArtifacts artifacts
+                        innerCanon = extractInnerLetRhs annCanon0
+                        innerPre = extractInnerLetRhs annPre0
+                        (rootNid, childNid, edgeIds) = case innerCanon of
+                            AApp _ (AVar _ nid) funEid argEid appNid -> (appNid, nid, [funEid, argEid])
+                            other ->
+                                error ("expected local multi-inst app shape, got " ++ show other)
+                        inputs1 =
+                            if keepLocalTypeRoot
+                                then makeLocalTypeRoot inputs0 rootNid
+                                else inputs0
+                        inputs2 = clearVarBoundInInputs inputs1 childNid
+                        inputs3 = duplicateReferencedTrace inputs2 edgeIds
+                    requireRight (computeResultTypeFallback inputs3 innerCanon innerPre)
 
             it "keeps annotation-anchored recursive shape processable" $ do
                 let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
@@ -1332,6 +1399,26 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 fallbackTy `shouldBe` TBase (BaseTy "Int")
                 containsMu fallbackTy `shouldBe` False
 
+            it "keeps local multi-inst fallback on the local TypeRef lane" $ do
+                fallbackTy <- localMultiInstFallback True
+                case fallbackTy of
+                    TVar _ -> pure ()
+                    other ->
+                        expectationFailure
+                            ( "expected local multi-inst lane to retain the final target variable, got "
+                                ++ show other
+                            )
+
+            it "keeps the same multi-inst wrapper fail-closed once it leaves the local TypeRef lane" $ do
+                fallbackTy <- localMultiInstFallback False
+                case fallbackTy of
+                    TForall _ Nothing (TVar _) -> pure ()
+                    other ->
+                        expectationFailure
+                            ( "expected non-local multi-inst contrast to stay on the quantified fail-closed shell, got "
+                                ++ show other
+                            )
+
             it "does not infer recursive shape for the corresponding unannotated variant" $ do
                 let expr = ELam "x" (EVar "x")
                 case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
@@ -1351,16 +1438,32 @@ spec = describe "Pipeline (Phases 1-5)" $ do
 
             it "uses the local-binding gate when deciding retained fallback targets" $ do
                 fallbackSrc <- readFile "src/MLF/Elab/Run/ResultType/Fallback.hs"
-                fallbackSrc `shouldSatisfy` isInfixOf "rootBindingIsLocalType\n                        && ( rootHasMultiInst"
+                fallbackSrc
+                    `shouldSatisfy`
+                        isInfixOf
+                            "keepTargetFinal =\n                    rootBindingIsLocalType\n                        && ( rootLocalMultiInst"
+                fallbackSrc
+                    `shouldSatisfy`
+                        isInfixOf
+                            "rootLocalMultiInst =\n                    rootBindingIsLocalType\n                        && rootHasMultiInst"
                 fallbackSrc
                     `shouldSatisfy`
                         isInfixOf
                             "rootLocalSchemeAliasBaseLike =\n                    rootBindingIsLocalType\n                        && rootIsSchemeAlias\n                        && rootBoundIsBaseLike"
                 fallbackSrc `shouldSatisfy` isInfixOf "|| rootLocalSchemeAliasBaseLike"
+                fallbackSrc `shouldSatisfy` isInfixOf "|| rootLocalMultiInst"
                 fallbackSrc
                     `shouldSatisfy`
                         isInfixOf
-                            "if rootLocalSchemeAliasBaseLike\n                                        then rootFinal\n                                        else\n                                            case lookupNodeIn nodesFinal rootFinal of"
+                            "if rootLocalSchemeAliasBaseLike"
+                fallbackSrc
+                    `shouldSatisfy`
+                        isInfixOf
+                            "|| rootLocalMultiInst"
+                fallbackSrc
+                    `shouldSatisfy`
+                        isInfixOf
+                            "then rootFinal"
 
             it "keeps the same non-local proxy wrapper fail-closed at pipeline entrypoints" $ do
                 let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))

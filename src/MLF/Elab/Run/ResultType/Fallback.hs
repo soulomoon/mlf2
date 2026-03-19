@@ -522,6 +522,9 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                     rootIsSchemeRoot
                         && maybe False (const True) rootBound
                 rootBoundIsBaseLike = rootBoundIsBase
+                rootLocalMultiInst =
+                    rootBindingIsLocalType
+                        && rootHasMultiInst
                 rootLocalSchemeAliasBaseLike =
                     rootBindingIsLocalType
                         && rootIsSchemeAlias
@@ -667,7 +670,7 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                         else pickCandidate (\parentRef _child -> parentRef == scopeRoot)
                 keepTargetFinal =
                     rootBindingIsLocalType
-                        && ( rootHasMultiInst
+                        && ( rootLocalMultiInst
                                 || instArgRootMultiBase
                                 || rootLocalSchemeAliasBaseLike
                                 || maybe False (const True) boundVarTarget
@@ -679,6 +682,7 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                             if keepTargetFinal
                                 then
                                     if rootLocalSchemeAliasBaseLike
+                                        || rootLocalMultiInst
                                         then rootFinal
                                         else
                                             case lookupNodeIn nodesFinal rootFinal of
