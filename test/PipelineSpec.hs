@@ -1192,6 +1192,54 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                                     ++ show eids
                                     ++ " for local multi-inst fallback case"
                                 )
+                rewriteReferencedTrace rewrite eids inputs =
+                    let edgeTraces0 = rtcEdgeTraces inputs
+                        matchingTrace =
+                            listToMaybe
+                                [ (getEdgeId eid, tr)
+                                | eid <- eids
+                                , Just tr <- [IntMap.lookup (getEdgeId eid) edgeTraces0]
+                                ]
+                    in case matchingTrace of
+                        Just (edgeKey, tr) ->
+                            inputs
+                                { rtcEdgeArtifacts =
+                                    (rtcEdgeArtifacts inputs)
+                                        { eaEdgeTraces =
+                                            IntMap.insert edgeKey (rewrite tr) edgeTraces0
+                                        }
+                                }
+                        Nothing ->
+                            error
+                                ( "expected edge trace for "
+                                    ++ show eids
+                                    ++ " for local inst-arg multi-base case"
+                                )
+                findIntBaseNode view0 =
+                    case
+                        [ tnId node
+                        | (_nodeIdKey, node@TyBase{ tnBase = BaseTy "Int" }) <-
+                            toListNode (cNodes (pvConstraint view0))
+                        ]
+                    of
+                        baseNid : _ -> baseNid
+                        [] -> error "expected Int base node for local fallback case"
+                nextFreshNodeIds count constraint =
+                    let start =
+                            case toListNode (cNodes constraint) of
+                                [] -> 0
+                                nodes0 ->
+                                    maximum
+                                        [ getNodeId nodeIdKey
+                                        | (nodeIdKey, _node) <- nodes0
+                                        ]
+                                        + 1
+                    in fmap NodeId [start .. start + count - 1]
+                insertTyNodes newNodes constraint =
+                    constraint
+                        { cNodes =
+                            fromListNode (toListNode (cNodes constraint) ++ fmap (\node -> (tnId node, node)) newNodes)
+                        }
                 schemeAliasBaseLikeFallback keepLocalTypeRoot = do
                     let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
                         expr =
@@ -1203,15 +1251,6 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                             AVar _ nid -> nid
                             other ->
                                 error ("expected local scheme alias variable body, got " ++ show other)
-                        findIntBaseNode view0 =
-                            case
-                                [ tnId node
-                                | (_nodeIdKey, node@TyBase{ tnBase = BaseTy "Int" }) <-
-                                    toListNode (cNodes (pvConstraint view0))
-                                ]
-                            of
-                                baseNid : _ -> baseNid
-                                [] -> error "expected Int base node for scheme-alias/base-like fallback case"
                     artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
                     let (inputs0, annCanon0, annPre0) = resultTypeInputsForArtifacts artifacts
                         bodyCanon = extractVarBody annCanon0
@@ -1249,6 +1288,61 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                                 else inputs0
                         inputs2 = clearVarBoundInInputs inputs1 childNid
                         inputs3 = duplicateReferencedTrace inputs2 edgeIds
+                    requireRight (computeResultTypeFallback inputs3 innerCanon innerPre)
+                localInstArgMultiBaseFallback keepLocalTypeRoot = do
+                    let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+                        expr =
+                            ELet "k" (ELamAnn "x" recursiveAnn (EVar "x"))
+                                (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "k")) (EVar "u"))
+                        extractInnerLetRhs ann0 = case ann0 of
+                            ALet _ _ _ _ _ _ (AAnn (ALet _ _ _ _ _ rhs _ _) _ _) _ -> rhs
+                            _ -> error ("unexpected local inst-arg multi-base wrapper shape: " ++ show ann0)
+                        injectMultiBaseArgs inputs eids =
+                            let view0 = rtcPresolutionView inputs
+                                constraint0 = pvConstraint view0
+                                (bottomNid, binderA, argA, binderB, argB) =
+                                    case nextFreshNodeIds 5 constraint0 of
+                                        [nid0, nid1, nid2, nid3, nid4] ->
+                                            (nid0, nid1, nid2, nid3, nid4)
+                                        other ->
+                                            error
+                                                ( "expected five fresh node ids for local inst-arg multi-base case, got "
+                                                    ++ show other
+                                                )
+                                inputs' =
+                                    rewriteResultTypeInputs
+                                        ( insertTyNodes
+                                            [ TyBottom{ tnId = bottomNid }
+                                            , TyVar{ tnId = binderA, tnBound = Nothing }
+                                            , TyVar{ tnId = argA, tnBound = Just (findIntBaseNode view0) }
+                                            , TyVar{ tnId = binderB, tnBound = Nothing }
+                                            , TyVar{ tnId = argB, tnBound = Just bottomNid }
+                                            ]
+                                        )
+                                        inputs
+                            in rewriteReferencedTrace
+                                ( \tr ->
+                                    tr
+                                        { etBinderArgs =
+                                            etBinderArgs tr ++ [(binderA, argA), (binderB, argB)]
+                                        }
+                                )
+                                eids
+                                inputs'
+                    artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
+                    let (inputs0, annCanon0, annPre0) = resultTypeInputsForArtifacts artifacts
+                        innerCanon = extractInnerLetRhs annCanon0
+                        innerPre = extractInnerLetRhs annPre0
+                        (rootNid, childNid, edgeIds) = case innerCanon of
+                            AApp _ (AVar _ nid) funEid argEid appNid -> (appNid, nid, [funEid, argEid])
+                            other ->
+                                error ("expected local inst-arg multi-base app shape, got " ++ show other)
+                        inputs1 =
+                            if keepLocalTypeRoot
+                                then makeLocalTypeRoot inputs0 rootNid
+                                else inputs0
+                        inputs2 = clearVarBoundInInputs inputs1 childNid
+                        inputs3 = injectMultiBaseArgs inputs2 edgeIds
                     requireRight (computeResultTypeFallback inputs3 innerCanon innerPre)
 
             it "keeps annotation-anchored recursive shape processable" $ do
@@ -1419,6 +1513,26 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                                 ++ show other
                             )
 
+            it "keeps local inst-arg multi-base fallback on the local TypeRef lane" $ do
+                fallbackTy <- localInstArgMultiBaseFallback True
+                case fallbackTy of
+                    TVar _ -> pure ()
+                    other ->
+                        expectationFailure
+                            ( "expected local inst-arg multi-base lane to retain the final target variable, got "
+                                ++ show other
+                            )
+
+            it "keeps the same inst-arg multi-base wrapper fail-closed once it leaves the local TypeRef lane" $ do
+                fallbackTy <- localInstArgMultiBaseFallback False
+                case fallbackTy of
+                    TForall _ Nothing (TVar _) -> pure ()
+                    other ->
+                        expectationFailure
+                            ( "expected non-local inst-arg multi-base contrast to stay on the quantified fail-closed shell, got "
+                                ++ show other
+                            )
+
             it "does not infer recursive shape for the corresponding unannotated variant" $ do
                 let expr = ELam "x" (EVar "x")
                 case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
@@ -1441,7 +1555,11 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 fallbackSrc
                     `shouldSatisfy`
                         isInfixOf
-                            "keepTargetFinal =\n                    rootBindingIsLocalType\n                        && ( rootLocalMultiInst"
+                            "keepTargetFinal =\n                    rootBindingIsLocalType\n                        && ( rootLocalMultiInst\n                                || rootLocalInstArgMultiBase"
+                fallbackSrc
+                    `shouldSatisfy`
+                        isInfixOf
+                            "rootLocalInstArgMultiBase =\n                    rootBindingIsLocalType\n                        && instArgRootMultiBase"
                 fallbackSrc
                     `shouldSatisfy`
                         isInfixOf
@@ -1451,6 +1569,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                         isInfixOf
                             "rootLocalSchemeAliasBaseLike =\n                    rootBindingIsLocalType\n                        && rootIsSchemeAlias\n                        && rootBoundIsBaseLike"
                 fallbackSrc `shouldSatisfy` isInfixOf "|| rootLocalSchemeAliasBaseLike"
+                fallbackSrc `shouldSatisfy` isInfixOf "|| rootLocalInstArgMultiBase"
                 fallbackSrc `shouldSatisfy` isInfixOf "|| rootLocalMultiInst"
                 fallbackSrc
                     `shouldSatisfy`
@@ -1459,7 +1578,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 fallbackSrc
                     `shouldSatisfy`
                         isInfixOf
-                            "|| rootLocalMultiInst"
+                            "if rootLocalSchemeAliasBaseLike\n                                        || rootLocalMultiInst\n                                        || rootLocalInstArgMultiBase\n                                        then rootFinal"
                 fallbackSrc
                     `shouldSatisfy`
                         isInfixOf
