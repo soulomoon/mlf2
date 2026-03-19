@@ -1,0 +1,47 @@
+# Round `round-046` Attempt `2` Review (`G1`)
+
+- Baseline checks:
+  - `git branch --show-current` -> pass (`codex/round-046-g1-next-target-bind`).
+  - `git diff --check` -> pass (no output).
+  - `python3 -m json.tool orchestrator/state.json >/dev/null` -> pass.
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json` -> pass (`2:  "contract_version": 2,`, `13:  "retry": null`).
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md` -> pass (ordered `C1` through `G4` list intact; `G1` remains pending pre-merge at line `94`).
+  - `test -f docs/superpowers/specs/2026-03-18-unannotated-iso-recursive-continue-bounded-cycle-design.md` -> pass.
+  - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md` -> pass.
+  - `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md` -> pass.
+  - `test -f docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md` -> pass.
+  - `test -f docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md` -> pass.
+  - `test -f orchestrator/retry-subloop.md` -> pass.
+  - Continuity presence check via `python3` -> pass (`round_001_033_present=True`, `replay_repair_track=True`, `initial_successor_cycle=True`, `recursive_types_packet=True`, `boundary_doc=True`, `repair_doc=True`).
+  - Authoritative predecessor record recheck via `python3` over `round-042` through `round-045` -> pass (`round-042 F1 docs/plans/2026-03-19-uri-r2-c1-f1-next-target-bind.md`, `round-043 F2 docs/plans/2026-03-19-uri-r2-c1-f2-bounded-implementation-slice.md`, `round-044 F3 docs/plans/2026-03-19-uri-r2-c1-f3-bounded-verification-gate.md`, `round-045 F4 docs/plans/2026-03-19-uri-r2-c1-f4-next-cycle-decision-gate.md`).
+  - `git status --short --untracked-files=all -- src src-public app test mlf2.cabal` -> pass (no output; no code/test/Cabal paths changed).
+  - `git diff --name-only` -> pass (no tracked diffs).
+  - `git diff --name-only -- . ':(exclude)docs/**' ':(exclude)orchestrator/**'` -> pass (no tracked non-doc diffs).
+  - `git status --short --untracked-files=all | rg -n 'orchestrator/state\.json|orchestrator/roadmap\.md|Bugs\.md|src/|src-public/|app/|test/|mlf2\.cabal'` -> pass (no matches; controller-state, roadmap, bug-tracker, and code/test surfaces remain untouched in the round worktree).
+  - Conditional full repo gate omission -> justified: `cabal build all && cabal test` was not rerun because this retry remains docs-only/orchestrator-only and `git status --short --untracked-files=all -- src src-public app test mlf2.cabal` is empty.
+
+- Task-specific checks:
+  - `G1-CONTRACT` -> pass: `orchestrator/rounds/round-046/plan.md`, `docs/plans/2026-03-19-uri-r2-c1-g1-next-target-bind.md`, and `orchestrator/rounds/round-046/implementation-notes.md` align on `attempt-2` as a delta-only docs repair that preserves the original `G1` bind, repaired `URI-R2-C1`, the inherited explicit-only / non-equi-recursive / non-cyclic / no-second-interface / no-fallback boundary, and the existing docs-only full-gate skip.
+  - `G1-TARGET-FREEZE` -> pass: the canonical `G1` artifact still records exactly one future `G2` family, `rootHasMultiInst`, anchored to `Fallback.hs:240-248` and `Fallback.hs:668-693`; `instArgRootMultiBase` remains explicitly non-selected; future ownership remains frozen to `src/MLF/Elab/Run/ResultType/Fallback.hs` and `test/PipelineSpec.hs`; no second implementation family is selected.
+  - `G1-ANCHOR-READS` -> pass: `sed -n '230,360p' src/MLF/Elab/Run/ResultType/Fallback.hs` still shows the accepted `rootHasMultiInst` / `instArgRootMultiBase` computations, `sed -n '660,705p' src/MLF/Elab/Run/ResultType/Fallback.hs` still shows the accepted `keepTargetFinal` / `targetC` branch, and `rg -n 'ARI-C1 feasibility characterization \(bounded prototype-only\)' test/PipelineSpec.hs` still points to the existing bounded block only.
+  - `G1-SELECTION-FACTS` -> pass: `selection.md` now says `BUG-2026-03-16-001` is resolved, no longer claims `orchestrator/state.json` is modified, no longer cites the absent task folder as untracked packet evidence, and explains that the active `round-046` packet is non-pristine only because the round-local docs artifacts exist in the dedicated worktree. `test -e tasks/todo/2026-03-18-continue-bounded-orchestrator-run && echo exists || echo missing` returns `missing`, and `git status --short orchestrator/state.json` returns no output.
+  - `G1-DOCS-ONLY` -> pass: `git status --short --untracked-files=all` shows only the canonical `G1` doc plus round-local `attempt-log.jsonl`, `implementation-notes.md`, `plan.md`, `review.md`, `reviews/attempt-1.md`, and `selection.md`; no production, test, public API, executable, Cabal, controller-state, roadmap, or bug-tracker paths appear in the diff.
+  - `G1-CONTINUITY` -> pass: completed rounds `001` through `033`, the replay-repair track, the predecessor recursive-types packet, and authoritative `F1` / `F2` / `F3` / `F4` review records remain present and unchanged; accepted `E2` / `E3` and `F1` / `F2` / `F3` / `F4` history stays continuity-only and is not reopened by the retry.
+  - `G1-SKIP-NOTE` -> pass: `implementation-notes.md` still justifies skipping `cabal build all && cabal test` because the round and retry remain docs-only and do not edit `src/`, `src-public/`, `app/`, `test/`, or `mlf2.cabal`.
+  - `G1-RETRY-HISTORY` -> pass: `orchestrator/rounds/round-046/attempt-log.jsonl` preserves the rejected `attempt=1` record, `orchestrator/rounds/round-046/reviews/attempt-1.md` remains intact, and this review is snapshotted separately to `orchestrator/rounds/round-046/reviews/attempt-2.md`.
+
+- Implemented stage result: `pass`
+- Attempt verdict: `accepted`
+- Stage action: `finalize`
+- Retry reason: `none`
+- Fix hypothesis: `none`
+- Decision summary:
+  - `attempt-2` repaired exactly the rejected docs-only defect. `selection.md` now matches the current round-046 packet and `Bugs.md`, while the canonical `G1` artifact continues to freeze exactly one bounded `G2` family, `rootHasMultiInst`, with `instArgRootMultiBase` explicitly left out of scope.
+  - The retry stayed bounded to repaired `URI-R2-C1` on the same branch/worktree. No code/test/Cabal/controller-state/roadmap/bug-tracker paths changed, the accepted `Fallback.hs` / `PipelineSpec.hs` anchors remain the same, and the explicit full-gate skip remains justified.
+  - Predecessor continuity remains intact and no unresolved blocker remains. Under the retry-subloop contract, the lawful terminal outcome is `accepted + finalize`.
+- Evidence summary:
+  - Round plan: `orchestrator/rounds/round-046/plan.md`
+  - Canonical stage artifact: `docs/plans/2026-03-19-uri-r2-c1-g1-next-target-bind.md`
+  - Round notes: `orchestrator/rounds/round-046/implementation-notes.md`
+  - Retry history: `orchestrator/rounds/round-046/attempt-log.jsonl`, `orchestrator/rounds/round-046/reviews/attempt-1.md`, `orchestrator/rounds/round-046/reviews/attempt-2.md`
+  - Key predecessor authority: `orchestrator/rounds/round-042/review-record.json`, `orchestrator/rounds/round-043/review-record.json`, `orchestrator/rounds/round-044/review-record.json`, `orchestrator/rounds/round-045/review-record.json`
