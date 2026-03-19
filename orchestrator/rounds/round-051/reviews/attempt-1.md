@@ -1,0 +1,50 @@
+# Round `round-051` Attempt `1` Review (`H2`)
+
+- Baseline checks:
+  - `git branch --show-current` -> pass (`codex/round-051-h2-multi-base-hardening`).
+  - `git diff --check` -> pass (no output).
+  - `python3 -m json.tool orchestrator/state.json >/dev/null` -> pass.
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json` -> pass (`2:  "contract_version": 2,`, `18:  "retry": null`).
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md` -> pass (ordered `C1` through `H4` list intact; `H2` remains pending pre-merge at line `120`).
+  - `test -f docs/superpowers/specs/2026-03-20-unannotated-iso-recursive-continue-bounded-h-cycle-design.md` -> pass.
+  - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md` -> pass.
+  - `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md` -> pass.
+  - `test -f docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md` -> pass.
+  - `test -f docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md` -> pass.
+  - `test -f orchestrator/retry-subloop.md` -> pass.
+  - Continuity presence check via `python3` -> pass (`round_001_033_present=True`, `replay_repair_track=True`, `initial_successor_cycle=True`, `recursive_types_packet=True`, `boundary_doc=True`, `repair_doc=True`).
+  - Authoritative predecessor record recheck via `python3` over `orchestrator/rounds/round-050/review-record.json` -> pass (`H1 1 accepted finalize authoritative docs/plans/2026-03-20-uri-r2-c1-h1-next-target-bind.md`).
+  - Pre-review `git status --short --untracked-files=all` snapshot -> pass (tracked edits `orchestrator/state.json`, `src/MLF/Elab/Run/ResultType/Fallback.hs`, `test/PipelineSpec.hs`; untracked packet files `docs/plans/2026-03-20-uri-r2-c1-h2-bounded-implementation-slice.md`, `orchestrator/rounds/round-051/implementation-notes.md`, `orchestrator/rounds/round-051/plan.md`, and `orchestrator/rounds/round-051/selection.md`). The tracked `orchestrator/state.json` diff is the pre-existing controller-preparation change already called out by `selection.md`, not reviewer-owned drift.
+  - Pre-review `git diff --name-only -- src app src-public test mlf2.cabal` -> pass (`src/MLF/Elab/Run/ResultType/Fallback.hs`, `test/PipelineSpec.hs`).
+  - Pre-review `git diff --name-only -- . ':(exclude)src/MLF/Elab/Run/ResultType/Fallback.hs' ':(exclude)test/PipelineSpec.hs' ':(exclude)orchestrator/state.json'` -> pass (no output).
+  - `git diff --name-only -- orchestrator/roadmap.md Bugs.md docs/plans/2026-03-20-uri-r2-c1-h1-next-target-bind.md orchestrator/rounds/round-050/review-record.json` -> pass (no output; no roadmap, bug-tracker, frozen-`H1` artifact, or predecessor-history drift).
+  - `git diff --name-only -- orchestrator/state.json` -> pass for the expected controller-state diff only (`orchestrator/state.json`).
+
+- Task-specific checks:
+  - `H2-CONTRACT` -> pass: `selection.md`, `plan.md`, `implementation-notes.md`, and `docs/plans/2026-03-20-uri-r2-c1-h2-bounded-implementation-slice.md` all frame the round as `H2`, `attempt-1`, `retry: null`, fixed to repaired `URI-R2-C1`, and still inside the inherited explicit-only / non-equi-recursive / non-cyclic-graph / no-second-interface / no-fallback boundary.
+  - `H2-FROZEN-SLICE` -> pass: `rg -n 'The only frozen future `H2` target is:|instArgRootMultiBase|keepTargetFinal|targetC|rootHasMultiInst|rootLocalSchemeAliasBaseLike|boundVarTarget|Future `H2` ownership is frozen' docs/plans/2026-03-20-uri-r2-c1-h1-next-target-bind.md` confirms that accepted `H1` still freezes exactly one future `H2` target, the local-binding `instArgRootMultiBase` `keepTargetFinal` / `targetC` lane, while keeping `rootHasMultiInst`, `rootLocalSchemeAliasBaseLike`, and `boundVarTarget` as inherited context only and limiting future ownership to `src/MLF/Elab/Run/ResultType/Fallback.hs` and `test/PipelineSpec.hs`.
+  - `H2-FALLBACK-ANCHOR` -> pass: `nl -ba src/MLF/Elab/Run/ResultType/Fallback.hs | sed -n '520,700p'` shows the only production edits stay in the selected local block. `rootLocalInstArgMultiBase` is introduced at lines `528-530`, `keepTargetFinal` now gates on that explicit proof at lines `674-679`, and the selected `targetC` root-retention branch admits `rootFinal` for `rootLocalSchemeAliasBaseLike || rootLocalMultiInst || rootLocalInstArgMultiBase` at lines `685-697`. The upstream `instArgRootMultiBase` aggregation and the `baseTarget` fail-closed guards remain unchanged.
+  - `H2-OUT-OF-SCOPE-TRIGGERS` -> pass: `git diff --unified=0 -- src/MLF/Elab/Run/ResultType/Fallback.hs test/PipelineSpec.hs` shows the new authority is only the local proof `rootLocalInstArgMultiBase`; the raw `instArgRootMultiBase` aggregation is not widened into another subsystem, `boundVarTarget` remains only the downstream fallback path, and `git diff --name-only -- src app src-public test mlf2.cabal` confirms no diff touched `MLF.Elab.Inst`, `InstBot`, `src-public/`, `app/`, or `mlf2.cabal`.
+  - `H2-FOCUSED-COVERAGE` -> pass: `nl -ba test/PipelineSpec.hs | sed -n '1188,1590p'` shows one bounded helper for the selected lane at lines `1292-1346`, exactly one positive same-lane success example at lines `1516-1524`, exactly one matched fail-closed non-local contrast at lines `1526-1534`, and the refreshed source guard at lines `1553-1585`. `cabal test mlf2-test --test-show-details=direct --test-options='--match "ARI-C1 feasibility characterization (bounded prototype-only)"'` passes with `15 examples, 0 failures`.
+  - `H2-CANONICAL-ARTIFACT` -> pass: `rg -n 'rootLocalInstArgMultiBase|instArgRootMultiBase|keepTargetFinal|targetC|rootHasMultiInst|rootLocalSchemeAliasBaseLike|boundVarTarget|replay reopen|MLF\\.Elab\\.Inst|InstBot|non-local widening|cabal build all && cabal test|15 examples, 0 failures|1136 examples, 0 failures' docs/plans/2026-03-20-uri-r2-c1-h2-bounded-implementation-slice.md orchestrator/rounds/round-051/implementation-notes.md` confirms the canonical `H2` artifact records the selected proof, exact positive/negative examples, preserved exclusions, focused rerun, and full repo gate, and that `implementation-notes.md` mirrors the same bounded summary.
+  - `H2-DIFF-BOUNDARY` -> pass: the tracked code diff is limited to `src/MLF/Elab/Run/ResultType/Fallback.hs` and `test/PipelineSpec.hs`, while the only non-review untracked packet files are the canonical `H2` artifact plus `orchestrator/rounds/round-051/{implementation-notes,plan,selection}.md`. The only tracked non-code diff is the pre-existing controller-owned `orchestrator/state.json` change; no roadmap, bug-tracker, frozen-`H1`, or predecessor-history drift appears.
+  - `H2-CONTINUITY` -> pass: completed rounds `001` through `033`, the replay-repair track, the initial successor cycle, the predecessor recursive-types packet, the inherited automatic-recursive boundary docs, authoritative `H1`, and `Bugs.md` all remain present and unchanged. Accepted `U2` / `U3` / `U4` negative findings remain binding exclusions and are not reinterpreted as clearance in the `H2` artifact.
+  - `H2-FULL-GATE` -> pass: `cabal build all && cabal test` passes with `1136 examples, 0 failures`.
+
+- Implemented stage result: `pass`
+- Attempt verdict: `accepted`
+- Stage action: `finalize`
+- Retry reason: `none`
+- Fix hypothesis: `none`
+- Decision summary:
+  - The implementation stays inside the exact `H1`-frozen `URI-R2-C1` lane: one local-binding `instArgRootMultiBase` `keepTargetFinal` / `targetC` hardening slice in `Fallback.hs`, plus one bounded positive example and one matched fail-closed contrast in the existing `ARI-C1` block.
+  - The diff does not widen into replay reopen, `MLF.Elab.Inst`, `InstBot`, non-local widening, a second interface, or a convenience fallback path. `rootHasMultiInst`, `rootLocalSchemeAliasBaseLike`, and `boundVarTarget` remain inherited context only, not reopened target families.
+  - Fresh focused verification and the mandatory full repo gate are both green, and the canonical artifact records the bounded evidence for the selected slice. No blocking issue remains. The lawful outcome is `accepted + finalize`.
+- Evidence summary:
+  - Canonical stage artifact: `docs/plans/2026-03-20-uri-r2-c1-h2-bounded-implementation-slice.md`
+  - Production anchor: `src/MLF/Elab/Run/ResultType/Fallback.hs`
+  - Focused coverage: `test/PipelineSpec.hs`
+  - Round notes: `orchestrator/rounds/round-051/implementation-notes.md`
+  - Review snapshot: `orchestrator/rounds/round-051/reviews/attempt-1.md`
+  - Key predecessor authority: `orchestrator/rounds/round-050/review-record.json`
+  - Canonical continuity context: `Bugs.md`
