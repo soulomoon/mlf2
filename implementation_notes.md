@@ -1,3 +1,11 @@
+## 2026-03-20 - Live orchestrator refreshed for a bounded `H` cycle
+
+- The completed `G1` through `G4` cycle is now predecessor evidence rather than live work. The live top-level control plane has been refreshed in place for one new bounded non-widening `H1` through `H4` cycle.
+- The new approved scaffold source is `docs/superpowers/specs/2026-03-20-unannotated-iso-recursive-continue-bounded-h-cycle-design.md`. The live roadmap now stages `H1` through `H4`: continue-bounded target bind, one bounded fail-closed implementation slice, bounded verification, and a new decision gate.
+- The accepted `continue-bounded` outcome from `G4` is treated as permission for another bounded cycle only. It is not interpreted as widening approval.
+- The next bounded target family is the still-unselected local-binding `instArgRootMultiBase` `keepTargetFinal` / `targetC` lane; it remains out of scope until an accepted `H1` bind freezes it explicitly.
+- The live subject remains fixed to repaired `URI-R2-C1`, and the inherited explicit-only / non-equi-recursive / non-cyclic-graph boundary remains mandatory unless a later accepted roadmap update changes it explicitly.
+
 ## 2026-03-18 - Live orchestrator refreshed for a continue-bounded follow-on cycle
 
 - The completed initial successor cycle (`U1` through `U6`, rounds `round-028` through `round-033`) is now predecessor evidence rather than live work. The live top-level control plane has been refreshed in place for one new bounded non-widening follow-on cycle.
