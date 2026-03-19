@@ -4,6 +4,21 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 97 next bounded `H`-cycle scaffold (completed 2026-03-20)
+
+- Completed:
+  - cleaned the completed `G`-cycle control-plane residue by restoring the machine state for a fresh live cycle, archiving the finished orchestrator-run task packet, and reconciling the missing historical `round-047` `selection.md` / `plan.md` artifacts into the main checkout;
+  - wrote the approved next-cycle scaffold source at `docs/superpowers/specs/2026-03-20-unannotated-iso-recursive-continue-bounded-h-cycle-design.md`;
+  - refreshed the live top-level `orchestrator/` in place so it now succeeds the completed `G1` through `G4` cycle with one new bounded non-widening `H1` through `H4` cycle rooted in the accepted `G4 = continue-bounded` result and centered on the remaining local-binding `instArgRootMultiBase` lane.
+- Verification:
+  - `python3 -m json.tool orchestrator/state.json`: PASS
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`: PASS
+  - `git diff --check`: PASS
+- Rolling priorities (next):
+  1. Run `H1`, the continue-bounded bind and exact next-slice target selection for the remaining local-binding `instArgRootMultiBase` lane, before opening any new production diff.
+  2. Keep the live subject fixed to repaired `URI-R2-C1` and preserve the inherited explicit-only / non-equi-recursive / non-cyclic-graph boundary unless a later accepted roadmap update explicitly changes it.
+  3. Treat the accepted `G2` / `G3` / `G4` local multi-inst chain plus the still-binding `U2` / `U3` / `U4` negative findings as predecessor evidence only; do not reinterpret them as widening clearance.
+
 ## Task 96 unannotated continue-bounded cycle scaffold (completed 2026-03-18)
 
 - Completed:

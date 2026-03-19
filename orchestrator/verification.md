@@ -10,8 +10,8 @@
   Why: future rounds on this follow-on cycle must continue under the v2 retry-subloop machine-state contract.
 - Command: `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
   Why: the live roadmap must keep a parseable ordered item list with explicit status markers.
-- Command: `test -f docs/superpowers/specs/2026-03-18-unannotated-iso-recursive-continue-bounded-cycle-design.md`
-  Why: every round in the refreshed control plane is anchored to the approved continue-bounded follow-on design.
+- Command: `test -f docs/superpowers/specs/2026-03-20-unannotated-iso-recursive-continue-bounded-h-cycle-design.md`
+  Why: every round in the refreshed control plane is anchored to the approved next bounded `H`-cycle design.
 - Command: `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
   Why: the inherited automatic-recursive baseline remains the live boundary contract.
 - Command: `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md`
@@ -42,6 +42,10 @@
 - `C2` checks proving any production diff stays bounded to the selected target, is backed by focused positive and negative examples, and preserves fail-closed out-of-scope behavior;
 - `C3` checks proving the accepted artifact records current bounded verification/evidence for the selected slice without widening beyond repaired `URI-R2-C1`;
 - `C4` checks proving the final artifact records exactly one of `continue-bounded`, `widen-approved`, or `stop-blocked`, and that the outcome matches the accumulated accepted evidence and current bounded verification;
+- `H1` checks proving the accepted artifact binds the next bounded cycle to repaired `URI-R2-C1` and selects exactly the remaining local-binding `instArgRootMultiBase` `keepTargetFinal` / `targetC` family without re-clearing accepted negative evidence or reopening the accepted `G` chain;
+- `H2` checks proving any production diff stays bounded to the exact `H1`-selected `instArgRootMultiBase` slice, is backed by focused positive and negative examples, and preserves fail-closed out-of-scope behavior for `rootHasMultiInst`, `boundVarTarget`, non-local widening, and replay paths;
+- `H3` checks proving the accepted artifact records current bounded verification/evidence for the exact `H2` `instArgRootMultiBase` slice without widening beyond repaired `URI-R2-C1`;
+- `H4` checks proving the final artifact records exactly one of `continue-bounded`, `widen-approved`, or `stop-blocked`, and that the outcome matches the accumulated accepted `H3` evidence while preserving the exact `H1` / `H2` / `H3` boundary;
 - retry-subloop checks proving `C1` through `C3` reviews record `attempt_verdict`, `stage_action`, `retry_reason`, and `fix_hypothesis`, and that `accepted + retry` is never used for `C4`;
 - artifact-history checks proving earlier retry attempts remain immutable in `reviews/attempt-<n>.md` and the controller-owned `attempt-log.jsonl` rather than being silently overwritten;
 - roadmap-update checks proving accepted `update-roadmap` edits preserve completed-item truth, keep the next unfinished item concrete, and do not silently widen the live subject;
