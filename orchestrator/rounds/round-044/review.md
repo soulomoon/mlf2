@@ -1,0 +1,49 @@
+# Round `round-044` Attempt `1` Review (`F3`)
+
+- Baseline checks:
+  - `git branch --show-current` -> pass (`codex/round-044-f3-verification-gate`).
+  - `git diff --check` -> pass (no output).
+  - `python3 -m json.tool orchestrator/state.json >/dev/null` -> pass.
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json` -> pass (`2:  "contract_version": 2,`, `13:  "retry": null`).
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md` -> pass (ordered `C1` through `F4` list intact; `F3` remains pending pre-merge at line `84` and `F4` remains pending at line `88`).
+  - `test -f docs/superpowers/specs/2026-03-18-unannotated-iso-recursive-continue-bounded-cycle-design.md` -> pass.
+  - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md` -> pass.
+  - `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md` -> pass.
+  - `test -f docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md` -> pass.
+  - `test -f docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md` -> pass.
+  - `test -f orchestrator/retry-subloop.md` -> pass.
+  - Continuity presence check via `python3` -> pass (`round_001_033_present=True`, `replay_repair_track=True`, `initial_successor_cycle=True`, `recursive_types_packet=True`, `boundary_doc=True`, `repair_doc=True`).
+  - Authoritative predecessor record recheck via `python3` over `round-039` through `round-043` -> pass (`round-039 E2 accepted finalize authoritative docs/plans/2026-03-18-uri-r2-c1-e2-bounded-implementation-slice.md`, `round-040 E3 accepted finalize authoritative docs/plans/2026-03-18-uri-r2-c1-e3-bounded-verification-gate.md`, `round-041 E4 accepted finalize authoritative docs/plans/2026-03-18-uri-r2-c1-e4-next-cycle-decision-gate.md`, `round-042 F1 accepted finalize authoritative docs/plans/2026-03-19-uri-r2-c1-f1-next-target-bind.md`, `round-043 F2 accepted finalize authoritative docs/plans/2026-03-19-uri-r2-c1-f2-bounded-implementation-slice.md`).
+  - Pre-review `git status --short --untracked-files=all` snapshot -> pass (untracked packet files only `docs/plans/2026-03-19-uri-r2-c1-f3-bounded-verification-gate.md`, plus pre-existing round control files `orchestrator/rounds/round-044/plan.md` and `orchestrator/rounds/round-044/selection.md`).
+  - Pre-review `git diff --name-only` -> pass (no output; no tracked edits).
+  - `git diff --name-only -- src src-public app test mlf2.cabal` -> pass (no output; no production, public API, executable, test, or Cabal drift).
+  - `git diff --name-only -- orchestrator/state.json orchestrator/roadmap.md Bugs.md docs/plans/2026-03-19-uri-r2-c1-f2-bounded-implementation-slice.md orchestrator/rounds/round-043/review-record.json` -> pass (no output; no controller-state, roadmap, bug-tracker, predecessor-artifact, or predecessor-review-record drift).
+
+- Task-specific checks:
+  - `F3-CONTRACT` -> pass: `nl -ba docs/plans/2026-03-19-uri-r2-c1-f3-bounded-verification-gate.md | sed -n '1,246p'` shows lines `14-33` freeze `round-044` `F3` `attempt-1` as a docs-only verification gate over the accepted `F2` local-binding scheme-alias/base-like `keepTargetFinal` / `targetC` slice, keep the inherited explicit-only / non-equi-recursive / non-cyclic-graph boundary, and forbid production/test/controller-state/roadmap/`Bugs.md`/history edits.
+  - `F3-DOCS-ONLY` -> pass: `git diff --name-only` shows no tracked edits, `git diff --name-only -- src src-public app test mlf2.cabal` shows no code-path drift, and `git status --short --untracked-files=all` shows only the canonical `F3` doc plus the pre-existing untracked `plan.md` / `selection.md`.
+  - `F3-F2-CARRY-FORWARD` -> pass: the same `F3` artifact at lines `37-70` rebinds this stage to accepted authoritative `round-043` `F2`, points to `docs/plans/2026-03-19-uri-r2-c1-f2-bounded-implementation-slice.md`, and explicitly rechecks the local scheme-alias/base-like lane, the accepted negative findings, and replay-only `Bugs.md` continuity context without reopening replay repair.
+  - `F3-FALLBACK-ANCHOR` -> pass: `nl -ba src/MLF/Elab/Run/ResultType/Fallback.hs | sed -n '521,700p'` shows `rootLocalSchemeAliasBaseLike` at lines `525-528`, inherited `boundVarTarget` machinery at lines `619-667`, `keepTargetFinal` with unchanged trigger families at lines `668-674`, and `targetC` choosing `rootFinal` only for the local scheme-alias/base-like lane at lines `675-693`.
+  - `F3-BOUNDVARTARGET-ABSENT` -> pass: the `Fallback.hs` anchor keeps `boundVarTarget` as inherited context only, while `nl -ba test/PipelineSpec.hs | sed -n '1298,1385p'` shows the selected `F2` local scheme-alias/base-like examples at lines `1320-1333` and the guard-source check at lines `1352-1363` without using `boundVarTarget` as the accepted proof for this slice.
+  - `F3-OUT-OF-SCOPE-TRIGGERS` -> pass: `Fallback.hs:670-673` leaves `rootHasMultiInst` and `instArgRootMultiBase` unchanged and inherited-only, and the `F3` artifact lines `228-245` explicitly keep replay reopen, `MLF.Elab.Inst`, `InstBot`, non-local widening, equi-recursive reasoning, cyclic encoding, multi-SCC/cross-family widening, second-interface work, and compatibility/default-path widening out of scope.
+  - `F3-FOCUSED-RERUN` -> pass: `cabal test mlf2-test --test-show-details=direct --test-options='--match "ARI-C1 feasibility characterization (bounded prototype-only)"'` passes with `11 examples, 0 failures`, including the local scheme-alias/base-like local-`TypeRef` success example, the matched non-local fail-closed contrast, and the local-binding source-guard check.
+  - `F3-FULL-GATE` -> pass: `cabal build all && cabal test` passes fresh with `1132 examples, 0 failures`.
+  - `F3-CANONICAL-ARTIFACT` -> pass: `docs/plans/2026-03-19-uri-r2-c1-f3-bounded-verification-gate.md` exists at the canonical `F3` path and lines `128-226` record the fresh baseline checks, focused rerun, full repo gate, accepted-`F2` continuity recheck, docs-only diff evidence, and bounded stability conclusion.
+  - `F3-CONTINUITY` -> pass: `python3 -m json.tool orchestrator/rounds/round-043/review-record.json >/dev/null` passes; `rg -n 'rootLocalSchemeAliasBaseLike|keepTargetFinal|targetC|boundVarTarget|rootHasMultiInst|instArgRootMultiBase' docs/plans/2026-03-19-uri-r2-c1-f2-bounded-implementation-slice.md` confirms the accepted `F2` artifact still names the selected proof, `boundVarTarget` absence for the slice, and unchanged out-of-scope trigger families; completed predecessor evidence remains present and untouched through `round-001` to `round-043`.
+
+- Implemented stage result: `pass`
+- Attempt verdict: `accepted`
+- Stage action: `finalize`
+- Retry reason: `none`
+- Fix hypothesis: `none`
+- Decision summary:
+  - The canonical `F3` artifact stays docs-only and rechecks exactly the accepted `F2` local-binding scheme-alias/base-like `keepTargetFinal` / `targetC` slice under repaired `URI-R2-C1`.
+  - `boundVarTarget` remains inherited context rather than new authority for the selected slice, `rootHasMultiInst` / `instArgRootMultiBase` remain unchanged and out of scope, and there is no production/test/controller-state/roadmap/bug-tracker/predecessor drift.
+  - Fresh focused verification and the mandatory full repo gate both passed. No blocking issue remains. The lawful outcome is `accepted + finalize`.
+- Evidence summary:
+  - Canonical stage artifact: `docs/plans/2026-03-19-uri-r2-c1-f3-bounded-verification-gate.md`
+  - Production anchor rechecked read-only: `src/MLF/Elab/Run/ResultType/Fallback.hs`
+  - Focused coverage rechecked read-only: `test/PipelineSpec.hs`
+  - Review snapshot: `orchestrator/rounds/round-044/reviews/attempt-1.md`
+  - Key predecessor authority: `orchestrator/rounds/round-039/review-record.json`, `orchestrator/rounds/round-040/review-record.json`, `orchestrator/rounds/round-041/review-record.json`, `orchestrator/rounds/round-042/review-record.json`, `orchestrator/rounds/round-043/review-record.json`
+  - Canonical continuity context: `Bugs.md`

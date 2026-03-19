@@ -1,0 +1,29 @@
+{
+  "subject_id": "URI-R2-C1",
+  "scenario_id": "uri-r2-c1-only-v1",
+  "stage_id": "F3",
+  "attempt": 1,
+  "attempt_verdict": "accepted",
+  "stage_result": "pass",
+  "stage_action": "finalize",
+  "retry_reason": "none",
+  "fix_hypothesis": "none",
+  "status": "authoritative",
+  "authoritative_attempt": 1,
+  "authoritative_result": "pass",
+  "artifact_path": "docs/plans/2026-03-19-uri-r2-c1-f3-bounded-verification-gate.md",
+  "review_snapshot": "orchestrator/rounds/round-044/reviews/attempt-1.md",
+  "checks": {
+    "F3-CONTRACT": "pass",
+    "F3-DOCS-ONLY": "pass",
+    "F3-F2-CARRY-FORWARD": "pass",
+    "F3-FALLBACK-ANCHOR": "pass",
+    "F3-BOUNDVARTARGET-ABSENT": "pass",
+    "F3-OUT-OF-SCOPE-TRIGGERS": "pass",
+    "F3-FOCUSED-RERUN": "pass",
+    "F3-FULL-GATE": "pass",
+    "F3-CANONICAL-ARTIFACT": "pass",
+    "F3-CONTINUITY": "pass"
+  },
+  "terminal_reason": "none"
+}
