@@ -1099,6 +1099,91 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                             tyChecked `shouldSatisfy` matchesRecursiveArrow expectedTy
 
         describe "ARI-C1 feasibility characterization (bounded prototype-only)" $ do
+            let ariSetVarBound nid newBound constraint =
+                    let tweak node = case node of
+                            TyVar{ tnId = varId } | varId == nid ->
+                                TyVar{ tnId = varId, tnBound = Just newBound }
+                            _ -> node
+                    in constraint
+                        { cNodes =
+                            fromListNode
+                                [ (nodeIdKey, tweak node)
+                                | (nodeIdKey, node) <- toListNode (cNodes constraint)
+                                ]
+                        }
+                ariSetTypeParent child mbParent constraint =
+                    let childKey = nodeRefKey (typeRef child)
+                        bindParents' = case mbParent of
+                            Nothing ->
+                                IntMap.delete childKey (cBindParents constraint)
+                            Just parentRef ->
+                                IntMap.insert childKey (parentRef, BindFlex) (cBindParents constraint)
+                    in constraint { cBindParents = bindParents' }
+                rewriteResultTypeInputs rewrite inputs =
+                    let view0 = rtcPresolutionView inputs
+                        baseConstraint' = rewrite (pvConstraint view0)
+                        canonicalConstraint' = rewrite (pvCanonicalConstraint view0)
+                        view' =
+                            view0
+                                { pvConstraint = baseConstraint'
+                                , pvLookupNode =
+                                    \nid -> NodeAccess.lookupNode baseConstraint' ((pvCanonical view0) nid)
+                                , pvLookupVarBound =
+                                    \nid -> NodeAccess.lookupVarBound baseConstraint' ((pvCanonical view0) nid)
+                                , pvLookupBindParent = NodeAccess.lookupBindParent baseConstraint'
+                                , pvBindParents = cBindParents baseConstraint'
+                                , pvCanonicalConstraint = canonicalConstraint'
+                                }
+                        ga0 = rtcBindParentsGa inputs
+                        ga' =
+                            ga0
+                                { gaBindParentsBase = cBindParents baseConstraint'
+                                , gaBaseConstraint = baseConstraint'
+                                }
+                    in inputs
+                        { rtcPresolutionView = view'
+                        , rtcBindParentsGa = ga'
+                        }
+                makeLocalTypeRoot inputs rootNid =
+                    rewriteResultTypeInputs (ariSetTypeParent rootNid Nothing) inputs
+                rebindRootTo inputs rootNid newBound =
+                    rewriteResultTypeInputs (ariSetVarBound rootNid newBound) inputs
+                schemeAliasBaseLikeFallback keepLocalTypeRoot = do
+                    let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+                        expr =
+                            ELet "k" (ELamAnn "x" recursiveAnn (EVar "x")) (EVar "k")
+                        extractVarBody ann0 = case ann0 of
+                            ALet _ _ _ _ _ _ (AAnn body _ _) _ -> body
+                            _ -> error ("unexpected scheme-alias/base-like wrapper shape: " ++ show ann0)
+                        bodyRoot ann0 = case extractVarBody ann0 of
+                            AVar _ nid -> nid
+                            other ->
+                                error ("expected local scheme alias variable body, got " ++ show other)
+                        findIntBaseNode view0 =
+                            case
+                                [ tnId node
+                                | (_nodeIdKey, node@TyBase{ tnBase = BaseTy "Int" }) <-
+                                    toListNode (cNodes (pvConstraint view0))
+                                ]
+                            of
+                                baseNid : _ -> baseNid
+                                [] -> error "expected Int base node for scheme-alias/base-like fallback case"
+                    artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
+                    let (inputs0, annCanon0, annPre0) = resultTypeInputsForArtifacts artifacts
+                        bodyCanon = extractVarBody annCanon0
+                        bodyPre = extractVarBody annPre0
+                        rootNid = rtcCanonical inputs0 (bodyRoot annCanon0)
+                        inputs1 =
+                            if keepLocalTypeRoot
+                                then makeLocalTypeRoot inputs0 rootNid
+                                else inputs0
+                        inputs2 =
+                            rebindRootTo
+                                inputs1
+                                rootNid
+                                (findIntBaseNode (rtcPresolutionView inputs1))
+                    requireRight (computeResultTypeFallback inputs2 bodyCanon bodyPre)
+
             it "keeps annotation-anchored recursive shape processable" $ do
                 let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
                     expr = ELamAnn "x" recursiveAnn (EVar "x")
@@ -1232,6 +1317,21 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 fallbackTy <- requireRight (computeResultTypeFallback inputs annCanon annPre)
                 containsMu fallbackTy `shouldBe` False
 
+            it "keeps local scheme-alias/base-like fallback on the local TypeRef lane" $ do
+                fallbackTy <- schemeAliasBaseLikeFallback True
+                case fallbackTy of
+                    TForall _ Nothing (TBase (BaseTy "Int")) -> pure ()
+                    other ->
+                        expectationFailure
+                            ( "expected quantified Int result for local scheme-alias/base-like lane, got "
+                                ++ show other
+                            )
+
+            it "keeps the same scheme-alias/base-like wrapper fail-closed once it leaves the local TypeRef lane" $ do
+                fallbackTy <- schemeAliasBaseLikeFallback False
+                fallbackTy `shouldBe` TBase (BaseTy "Int")
+                containsMu fallbackTy `shouldBe` False
+
             it "does not infer recursive shape for the corresponding unannotated variant" $ do
                 let expr = ELam "x" (EVar "x")
                 case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
@@ -1252,7 +1352,15 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             it "uses the local-binding gate when deciding retained fallback targets" $ do
                 fallbackSrc <- readFile "src/MLF/Elab/Run/ResultType/Fallback.hs"
                 fallbackSrc `shouldSatisfy` isInfixOf "rootBindingIsLocalType\n                        && ( rootHasMultiInst"
-                fallbackSrc `shouldSatisfy` isInfixOf "if rootBindingIsLocalType\n                                        then schemeBodyTarget targetPresolutionView rootC\n                                        else rootFinal"
+                fallbackSrc
+                    `shouldSatisfy`
+                        isInfixOf
+                            "rootLocalSchemeAliasBaseLike =\n                    rootBindingIsLocalType\n                        && rootIsSchemeAlias\n                        && rootBoundIsBaseLike"
+                fallbackSrc `shouldSatisfy` isInfixOf "|| rootLocalSchemeAliasBaseLike"
+                fallbackSrc
+                    `shouldSatisfy`
+                        isInfixOf
+                            "if rootLocalSchemeAliasBaseLike\n                                        then rootFinal\n                                        else\n                                            case lookupNodeIn nodesFinal rootFinal of"
 
             it "keeps the same non-local proxy wrapper fail-closed at pipeline entrypoints" $ do
                 let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))

@@ -522,6 +522,10 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                     rootIsSchemeRoot
                         && maybe False (const True) rootBound
                 rootBoundIsBaseLike = rootBoundIsBase
+                rootLocalSchemeAliasBaseLike =
+                    rootBindingIsLocalType
+                        && rootIsSchemeAlias
+                        && rootBoundIsBaseLike
                 boundVarTargetRoot = canonicalFinal (schemeBodyTarget targetPresolutionView rootC)
                 (schemeRootSetFinal, schemeRootOwnerFinal) =
                     canonicalSchemeRootOwners
@@ -665,7 +669,7 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                     rootBindingIsLocalType
                         && ( rootHasMultiInst
                                 || instArgRootMultiBase
-                                || (rootIsSchemeAlias && rootBoundIsBaseLike)
+                                || rootLocalSchemeAliasBaseLike
                                 || maybe False (const True) boundVarTarget
                            )
             let targetC =
@@ -674,12 +678,15 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                         Nothing ->
                             if keepTargetFinal
                                 then
-                                    case lookupNodeIn nodesFinal rootFinal of
-                                        Just TyVar{} -> rootFinal
-                                        _ ->
-                                            case boundVarTarget of
-                                                Just v -> v
-                                                Nothing -> schemeBodyTarget targetPresolutionView rootC
+                                    if rootLocalSchemeAliasBaseLike
+                                        then rootFinal
+                                        else
+                                            case lookupNodeIn nodesFinal rootFinal of
+                                                Just TyVar{} -> rootFinal
+                                                _ ->
+                                                    case boundVarTarget of
+                                                        Just v -> v
+                                                        Nothing -> schemeBodyTarget targetPresolutionView rootC
                                 else
                                     if rootBindingIsLocalType
                                         then schemeBodyTarget targetPresolutionView rootC
