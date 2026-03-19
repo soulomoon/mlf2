@@ -1,0 +1,46 @@
+# Round `round-048` Attempt `1` Review (`G3`)
+
+- Baseline checks:
+  - `git branch --show-current` -> pass (`codex/round-048-g3-verification-gate`).
+  - `git diff --check` -> pass (no output).
+  - `python3 -m json.tool orchestrator/state.json >/dev/null` -> pass.
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json` -> pass (`2:  "contract_version": 2,`, `13:  "retry": null`).
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md` -> pass (ordered `C1` through `G4` list intact; `G3` remains pending pre-merge at line `104`).
+  - `test -f docs/superpowers/specs/2026-03-18-unannotated-iso-recursive-continue-bounded-cycle-design.md` -> pass.
+  - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md` -> pass.
+  - `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md` -> pass.
+  - `test -f docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md` -> pass.
+  - `test -f docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md` -> pass.
+  - `test -f orchestrator/retry-subloop.md` -> pass.
+  - Continuity presence check via `python3` -> pass (`round-001` through `round-033` evidence present, boundary docs present, predecessor recursive-types packet present).
+  - Authoritative predecessor record recheck via `python3` over `round-046` and `round-047` -> pass (`G1` finalized as authoritative on attempt `2` with artifact `docs/plans/2026-03-19-uri-r2-c1-g1-next-target-bind.md`; `G2` finalized as authoritative on attempt `1` with artifact `docs/plans/2026-03-19-uri-r2-c1-g2-bounded-implementation-slice.md`).
+  - Pre-review `git status --short --untracked-files=all` snapshot -> pass (untracked packet files only `docs/plans/2026-03-19-uri-r2-c1-g3-bounded-verification-gate.md`, `orchestrator/rounds/round-048/implementation-notes.md`, plus pre-existing round control files `orchestrator/rounds/round-048/plan.md` and `orchestrator/rounds/round-048/selection.md`).
+  - Pre-review `git diff --name-only` -> pass (no tracked diff).
+  - Pre-review `git diff --name-only -- . ':(exclude)docs/**' ':(exclude)orchestrator/**'` -> pass (no output).
+
+- Task-specific checks:
+  - `G3-CONTRACT` -> pass: `selection.md`, `plan.md`, `implementation-notes.md`, and `docs/plans/2026-03-19-uri-r2-c1-g3-bounded-verification-gate.md` all frame the round as `G3`, `attempt-1`, `retry: null`, fixed to repaired `URI-R2-C1`, and still inside the inherited explicit-only / non-equi-recursive / non-cyclic-graph / no-second-interface / no-fallback boundary.
+  - `G3-G1-G2-AUTHORITY` -> pass: `orchestrator/rounds/round-046/review-record.json` and `orchestrator/rounds/round-047/review-record.json` confirm the selected `G1` / `G2` chain is authoritative and finalized with no retry pending; `G3` treats that chain as inherited verification input only and does not reopen implementation or widen the target family.
+  - `G3-ANCHORS` -> pass: `nl -ba src/MLF/Elab/Run/ResultType/Fallback.hs | sed -n '520,705p'` shows `rootLocalMultiInst` at lines `525-527`, `keepTargetFinal` still gated by `rootBindingIsLocalType` while preserving `instArgRootMultiBase`, `rootLocalSchemeAliasBaseLike`, and `boundVarTarget` as separate trigger families at lines `671-677`, and `targetC` still choosing `rootFinal` only when `rootLocalSchemeAliasBaseLike || rootLocalMultiInst` holds at lines `678-697`. `nl -ba test/PipelineSpec.hs | sed -n '1360,1485p'` shows the retained-child baseline, the scheme-alias/base-like baseline, the local multi-inst success example at lines `1402-1410`, the matched non-local fail-closed contrast at lines `1412-1420`, the source-guard assertions naming `rootLocalMultiInst` at lines `1439-1466`, and the inherited non-local proxy fail-closed checks at lines `1468-1478`.
+  - `G3-FOCUSED-RERUN` -> pass: `cabal test mlf2-test --test-show-details=direct --test-options='--match "ARI-C1 feasibility characterization (bounded prototype-only)"'` passes with `13 examples, 0 failures`.
+  - `G3-FULL-GATE` -> pass: `cabal build all && cabal test` passes with `1134 examples, 0 failures`.
+  - `G3-DIFF-BOUNDARY` -> pass: the round remains docs-only. There is no tracked diff in the worktree, and the only untracked non-review files are the canonical `G3` artifact plus `orchestrator/rounds/round-048/{implementation-notes,plan,selection}.md`. No production, test, public API, executable, Cabal, roadmap, controller-state, or bug-tracker drift appears in the round worktree.
+  - `G3-CONTINUITY` -> pass: completed rounds `001` through `033`, the replay-repair track, the initial successor cycle, the predecessor recursive-types packet, the accepted boundary docs, and the authoritative `G1` / `G2` review records all remain present and unchanged; accepted `U2` / `U3` / `U4` negative findings remain preserved as binding exclusions and are not reinterpreted as clearance.
+
+- Implemented stage result: `pass`
+- Attempt verdict: `accepted`
+- Stage action: `finalize`
+- Retry reason: `none`
+- Fix hypothesis: `none`
+- Decision summary:
+  - The `G3` artifact stays inside the exact accepted `G2` lane: it re-verifies only the bounded local `rootLocalMultiInst` / `targetC -> rootFinal` path under repaired `URI-R2-C1`.
+  - The review found no widening into `instArgRootMultiBase`, `boundVarTarget`, non-local lanes, replay reopen, `MLF.Elab.Inst`, `InstBot`, equi-recursive reasoning, cyclic encoding, a second interface, or fallback conveniences.
+  - Fresh focused verification and the full repo gate are both green, the round is docs-only, the diff stays bounded to round-owned docs/orchestrator packet files, and predecessor continuity remains intact. No blocking issue remains. The lawful outcome is `accepted + finalize`.
+- Evidence summary:
+  - Canonical stage artifact: `docs/plans/2026-03-19-uri-r2-c1-g3-bounded-verification-gate.md`
+  - Read-only production anchor: `src/MLF/Elab/Run/ResultType/Fallback.hs`
+  - Read-only focused coverage anchor: `test/PipelineSpec.hs`
+  - Round notes: `orchestrator/rounds/round-048/implementation-notes.md`
+  - Review snapshot: `orchestrator/rounds/round-048/reviews/attempt-1.md`
+  - Key predecessor authority: `orchestrator/rounds/round-046/review-record.json`, `orchestrator/rounds/round-047/review-record.json`
+  - Canonical continuity context: `/Volumes/src/mlf4/Bugs.md`
