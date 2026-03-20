@@ -1,0 +1,51 @@
+# Round `round-054` Attempt `1` Review (`I1`)
+
+- Baseline checks:
+  - `git branch --show-current` -> pass (`codex/round-054-i1-next-target-bind`).
+  - `git diff --check` -> pass (no output).
+  - `python3 -m json.tool orchestrator/state.json >/dev/null` -> pass.
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json` -> pass (`2:  "contract_version": 2,`, `18:  "retry": null`).
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md` -> pass (ordered roadmap intact; item `21` / `I1` remains pending at line `135` pre-merge).
+  - `test -f docs/superpowers/specs/2026-03-20-unannotated-iso-recursive-continue-bounded-h-cycle-design.md` -> pass.
+  - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md` -> pass.
+  - `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md` -> pass.
+  - `test -f docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md` -> pass.
+  - `test -f docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md` -> pass.
+  - `test -f orchestrator/retry-subloop.md` -> pass.
+  - Continuity presence check via `python3` -> pass (`{"boundary_doc": true, "h4_doc": true, "initial_successor_cycle": true, "item5_handoff_doc": true, "recursive_types_packet": true, "replay_repair_track": true, "research_stop_doc": true, "round_001_033_present": true}`).
+  - `test -f docs/plans/2026-03-20-uri-r2-c1-h1-next-target-bind.md` -> pass.
+  - `test -f docs/plans/2026-03-20-uri-r2-c1-h2-bounded-implementation-slice.md` -> pass.
+  - `test -f docs/plans/2026-03-20-uri-r2-c1-h3-bounded-verification-gate.md` -> pass.
+  - `test -f docs/plans/2026-03-20-uri-r2-c1-h4-next-cycle-decision-gate.md` -> pass.
+  - Authoritative predecessor record recheck via `python3` over `orchestrator/rounds/round-053/review-record.json` -> pass (`{"artifact_path": true, "attempt": true, "attempt_verdict": true, "checks_all_pass": true, "stage_action": true, "stage_id": true, "status": true}`).
+  - Bug-tracker continuity check via `python3` over `/Volumes/src/mlf4/Bugs.md` -> pass (`{'open_empty': True, 'bug_resolved': True}`).
+  - `rg -n 'stale guider text|non-authoritative context drift|BUG-2026-03-16-001' orchestrator/rounds/round-053/review.md orchestrator/rounds/round-054/selection.md` -> pass (the stale open-bug sentence remains confined to guider-owned context and the accepted `round-053` review already marks it non-authoritative).
+  - Pre-review `git status --short --untracked-files=all` snapshot -> pass (tracked edit `orchestrator/state.json`; untracked packet files `docs/plans/2026-03-20-uri-r2-c1-i1-next-target-bind.md`, `orchestrator/rounds/round-054/implementation-notes.md`, `orchestrator/rounds/round-054/plan.md`, and `orchestrator/rounds/round-054/selection.md`). The tracked `orchestrator/state.json` diff is the pre-existing controller-preparation change, not implementer/reviewer drift.
+  - `git status --short --untracked-files=all -- src src-public app test mlf2.cabal` -> pass (no output; no code-path edits are present).
+  - `git diff --name-only -- . ':(exclude)docs/**' ':(exclude)orchestrator/**'` -> pass (no output).
+  - `git diff --name-only -- orchestrator/roadmap.md docs/plans/2026-03-20-uri-r2-c1-h1-next-target-bind.md docs/plans/2026-03-20-uri-r2-c1-h2-bounded-implementation-slice.md docs/plans/2026-03-20-uri-r2-c1-h3-bounded-verification-gate.md docs/plans/2026-03-20-uri-r2-c1-h4-next-cycle-decision-gate.md orchestrator/rounds/round-053/review-record.json` -> pass (no output; no frozen predecessor artifact, roadmap, or predecessor-review drift).
+  - Skip note: `cabal build all && cabal test` was intentionally not rerun. `I1` is docs-only by contract, and fresh `git status --short --untracked-files=all -- src src-public app test mlf2.cabal` plus `git diff --name-only -- . ':(exclude)docs/**' ':(exclude)orchestrator/**'` both returned no output.
+
+- Task-specific checks:
+  - `I1-CONTRACT` -> pass: `orchestrator/rounds/round-054/selection.md:7-13`, `orchestrator/rounds/round-054/selection.md:75-99`, `orchestrator/rounds/round-054/plan.md:5-39`, `orchestrator/rounds/round-054/implementation-notes.md:5-13`, and `docs/plans/2026-03-20-uri-r2-c1-i1-next-target-bind.md:4-32` all frame the round as `I1`, `attempt-1`, `retry: null`, repaired `URI-R2-C1`, and docs-only bind/selection work with the inherited explicit-only / non-equi-recursive / non-cyclic-graph / no-second-interface / no-fallback boundary preserved.
+  - `I1-H4-CORRECTED-AUTHORITY` -> pass: `docs/plans/2026-03-20-uri-r2-c1-i1-next-target-bind.md:34-76` correctly grounds authority in accepted `H4` plus `/Volumes/src/mlf4/Bugs.md`, not the stale guider sentence. Reviewer-run checks confirmed `orchestrator/rounds/round-053/review-record.json` remains authoritative finalize state for `H4`, `/Volumes/src/mlf4/Bugs.md` still has an empty `Open` section with `BUG-2026-03-16-001` resolved, and `orchestrator/rounds/round-053/review.md` already marked the stale guider sentence as non-authoritative drift.
+  - `I1-SELECTION` -> pass: `docs/plans/2026-03-20-uri-r2-c1-i1-next-target-bind.md:78-125` freezes exactly one next slice, and fresh source/test anchor checks confirm the rationale. `Fallback.hs:367-408` still guards `baseTarget` by singleton-base conditions plus `not rootHasMultiInst` and `not instArgRootMultiBase`; `Fallback.hs:681-701` still routes `targetC` through `baseTarget` before retained-target and `schemeBodyTarget`; `Fallback.hs:525-534` still names the already-consumed local trigger families; and the focused `ARI-C1` block in `test/PipelineSpec.hs` still covers retained-child, scheme-alias/base-like, multi-inst, inst-arg multi-base, and non-local proxy cases while `rg` against `baseTarget|boundTarget|rootBoundCandidates` returns no output.
+  - `I1-BOUNDARY` -> pass: `docs/plans/2026-03-20-uri-r2-c1-i1-next-target-bind.md:127-165` freezes future ownership to `src/MLF/Elab/Run/ResultType/Fallback.hs` and `test/PipelineSpec.hs`, limits future verification to one bounded `ARI-C1` extension, and explicitly keeps replay reopen, `MLF.Elab.Inst`, `InstBot`, `boundVarTarget`, non-local widening, `ResultType.View`, second-interface drift, fallback widening, equi-recursive reasoning, and cyclic structural encoding out of scope.
+  - `I1-DIFF-BOUNDARY` -> pass: the round remains docs/orchestrator-only before reviewer artifacts. `git status --short --untracked-files=all -- src src-public app test mlf2.cabal` returned no output, `git diff --name-only -- . ':(exclude)docs/**' ':(exclude)orchestrator/**'` returned no output, and no roadmap / `H1` / `H2` / `H3` / `H4` / predecessor-review drift appeared.
+  - `I1-CONTINUITY` -> pass: fresh continuity checks confirmed completed rounds `001` through `033`, the predecessor recursive-types packet, the inherited automatic-recursive boundary docs, the completed replay repair track, the completed initial successor cycle, and the accepted `H4` artifact are all still present. Targeted `rg` across the accepted `C`, `E`, `F`, `G`, and `H` artifacts confirms the predecessor-family history cited in the `I1` artifact: `C` established the local `rootBindingIsLocalType` / `schemeBodyTarget` / non-local fail-closed baseline, `E` consumed the retained-child `boundVarTarget` / nested-`forall` lane, `F` consumed the local scheme-alias/base-like lane, `G` consumed the local multi-inst lane, and `H` consumed the local `instArgRootMultiBase` / `targetC -> rootFinal` lane while preserving `baseTarget` rejection outside that selected lane.
+
+- Implemented stage result: `pass`
+- Attempt verdict: `accepted`
+- Stage action: `finalize`
+- Retry reason: `none`
+- Fix hypothesis: `none`
+- Decision summary:
+  - The round satisfies the `I1` reviewer contract. The implementer kept the work docs-only, corrected the stale bug-authority input, preserved the inherited bounded subject, and froze exactly one next bounded successor slice instead of widening into replay, `MLF.Elab.Inst`, `InstBot`, `boundVarTarget`, non-local fallback behavior, or a second interface.
+  - Fresh reviewer-run evidence is green: baseline state checks pass, accepted `H4` remains authoritative, the canonical bug tracker still shows no open bug authorizing replay reopen, the `baseTarget -> baseC` seam is still the next adjacent unselected lane in `Fallback.hs`, the focused `ARI-C1` block still omits `baseTarget` / `boundTarget` / `rootBoundCandidates`, and the current diff remains out of code paths.
+  - No blocking issue remains. The lawful outcome is `accepted + finalize`.
+- Evidence summary:
+  - Canonical stage artifact: `docs/plans/2026-03-20-uri-r2-c1-i1-next-target-bind.md`
+  - Round notes: `orchestrator/rounds/round-054/implementation-notes.md`
+  - Review snapshot: `orchestrator/rounds/round-054/reviews/attempt-1.md`
+  - Key predecessor authority: `orchestrator/rounds/round-053/review-record.json`
+  - Canonical bug authority: `/Volumes/src/mlf4/Bugs.md`
