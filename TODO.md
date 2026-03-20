@@ -4,6 +4,22 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 98 bounded `H`-cycle orchestrator runtime (completed 2026-03-20)
+
+- Completed:
+  - executed the live top-level continue-bounded control plane through accepted rounds `round-050` to `round-053`, with all substantive guider/planner/implementer/reviewer/merger work delegated under the repo-local orchestrator contract;
+  - finalized `H1` as the exact next-target bind for the remaining local-binding `instArgRootMultiBase` lane, `H2` as the bounded `rootLocalInstArgMultiBase` / `targetC -> rootFinal` implementation slice with focused `PipelineSpec` coverage and a passing full repo gate, `H3` as the bounded reverification/evidence consolidation gate for that exact lane, and `H4` as the bounded next-cycle decision `continue-bounded`;
+  - returned the live controller to idle `stage: "done"` after the guider recorded the accepted `H4` result and appended one new pending successor item `I1` as the next exact-target bind.
+- Verification:
+  - `cabal build all && cabal test`: PASS (accepted `H2` implementation round and accepted `H3` verification round both reran the full gate)
+  - `git diff --check`: PASS (reviewed rounds)
+  - `python3 -m json.tool orchestrator/state.json`: PASS
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`: PASS
+- Rolling priorities (next):
+  1. Run `I1`, the continue-bounded bind and exact next-slice target selection after accepted `H4 = continue-bounded`, before opening any new production diff.
+  2. Keep the live subject fixed to repaired `URI-R2-C1` and preserve the inherited explicit-only / non-equi-recursive / non-cyclic-graph boundary unless a later accepted roadmap update explicitly changes it.
+  3. Treat the accepted `H2` / `H3` local `rootLocalInstArgMultiBase` evidence plus the accepted `H4 = continue-bounded` result as predecessor evidence only; do not reinterpret them as replay, non-local, or cross-family widening clearance.
+
 ## Task 97 next bounded `H`-cycle scaffold (completed 2026-03-20)
 
 - Completed:
