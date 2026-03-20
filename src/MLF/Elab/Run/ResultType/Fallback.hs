@@ -532,6 +532,11 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                     rootBindingIsLocalType
                         && rootIsSchemeAlias
                         && rootBoundIsBaseLike
+                rootLocalSingleBase =
+                    rootBindingIsLocalType
+                        && IntSet.size rootBoundCandidates == 1
+                        && not rootHasMultiInst
+                        && not instArgRootMultiBase
                 boundVarTargetRoot = canonicalFinal (schemeBodyTarget targetPresolutionView rootC)
                 (schemeRootSetFinal, schemeRootOwnerFinal) =
                     canonicalSchemeRootOwners
@@ -680,8 +685,12 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                            )
             let targetC =
                     case baseTarget of
-                        Just baseC -> baseC
-                        Nothing ->
+                        Just baseC
+                            | rootLocalSingleBase -> baseC
+                        Just baseC
+                            | rootIsSchemeAlias
+                                && rootBoundIsBaseLike -> baseC
+                        _ ->
                             if keepTargetFinal
                                 then
                                     if rootLocalSchemeAliasBaseLike
