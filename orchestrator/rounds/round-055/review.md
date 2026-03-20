@@ -1,0 +1,45 @@
+# Round `round-055` Attempt `1` Review (`I2`)
+
+- Baseline checks:
+  - `git branch --show-current` -> pass (`codex/round-055-i2-single-base-hardening`).
+  - `git diff --check` -> pass (no output).
+  - `python3 -m json.tool orchestrator/state.json >/dev/null` -> pass.
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json` -> pass (`2:  "contract_version": 2,`, `18:  "retry": null`).
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md` -> pass (ordered roadmap intact; item `22` / `I2` remains pending at line `140` pre-merge).
+  - `test -f docs/superpowers/specs/2026-03-20-unannotated-iso-recursive-continue-bounded-h-cycle-design.md` -> pass.
+  - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md` -> pass.
+  - `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md` -> pass.
+  - `test -f docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md` -> pass.
+  - `test -f docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md` -> pass.
+  - `test -f orchestrator/retry-subloop.md` -> pass.
+  - Continuity presence check via `python3` -> pass (`{'round_001_033_present': True, 'recursive_types_packet': True, 'boundary_doc': True, 'item5_handoff_doc': True, 'research_stop_doc': True, 'replay_repair_track': True, 'initial_successor_cycle': True, 'h4_doc': True}`).
+  - Authoritative predecessor record recheck via `python3` over `orchestrator/rounds/round-054/review-record.json` -> pass (`I1` / `attempt-1` / `accepted` / `finalize` / `authoritative` / `docs/plans/2026-03-20-uri-r2-c1-i1-next-target-bind.md`).
+  - Bug-tracker continuity check via `python3` over `/Volumes/src/mlf4/Bugs.md` -> pass (`Open` remains empty; `BUG-2026-03-16-001` remains resolved only).
+  - Pre-review `git status --short --untracked-files=all` snapshot -> pass (`M orchestrator/state.json`, `M src/MLF/Elab/Run/ResultType/Fallback.hs`, `M test/PipelineSpec.hs`, `?? docs/plans/2026-03-20-uri-r2-c1-i2-bounded-implementation-slice.md`, `?? orchestrator/rounds/round-055/implementation-notes.md`, `?? orchestrator/rounds/round-055/plan.md`, `?? orchestrator/rounds/round-055/selection.md`). The tracked `orchestrator/state.json` diff is the pre-existing controller-preparation change, not implementer/reviewer drift.
+  - `rg -n 'rootLocalSingleBase|baseTarget|rootBoundCandidates|keepTargetFinal|targetC|rootLocalMultiInst|rootLocalInstArgMultiBase|rootLocalSchemeAliasBaseLike|boundVarTarget|schemeBodyTarget' src/MLF/Elab/Run/ResultType/Fallback.hs test/PipelineSpec.hs` -> pass (selected single-base proof and inherited families all remain visible in the bounded file set).
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "ARI-C1 feasibility characterization (bounded prototype-only)"'` -> pass (`17` examples, `0` failures).
+  - `cabal build all && cabal test` -> pass (`1138` examples, `0` failures).
+
+- Task-specific checks:
+  - `I2-CONTRACT` -> pass: `orchestrator/rounds/round-055/selection.md:11-13` and `orchestrator/rounds/round-055/selection.md:76-93` freeze the round to `I2` only, repaired `URI-R2-C1`, the inherited explicit-only / non-equi-recursive / non-cyclic-graph boundary, and the exact `baseTarget -> baseC` / same-lane `targetC` slice. `orchestrator/rounds/round-055/plan.md:5-15`, `orchestrator/rounds/round-055/plan.md:17-43`, `orchestrator/rounds/round-055/plan.md:135-147`, and `orchestrator/rounds/round-055/plan.md:176-257` keep the same scope and forbid replay reopen, `InstBot`, `boundVarTarget` widening, `boundTarget` overlay work, `ResultType.View`, `schemeBodyTarget` consolidation, non-local widening, and retained-target-family drift. `docs/plans/2026-03-20-uri-r2-c1-i2-bounded-implementation-slice.md:14-27` and `orchestrator/rounds/round-055/implementation-notes.md:5-14` match that contract for `attempt-1`.
+  - `I2-LIVE-SLICE` -> pass: `src/MLF/Elab/Run/ResultType/Fallback.hs:535-539` adds the explicit `rootLocalSingleBase` proof from the exact `I1` ingredients (`rootBindingIsLocalType`, singleton `rootBoundCandidates`, `not rootHasMultiInst`, `not instArgRootMultiBase`). `src/MLF/Elab/Run/ResultType/Fallback.hs:686-710` then routes `targetC` to `baseTarget` only for `rootLocalSingleBase`, while preserving the already-accepted scheme-alias/base-like route as the sole pre-existing non-selected `baseTarget` consumer. The `baseTarget` source of truth remains the existing block at `src/MLF/Elab/Run/ResultType/Fallback.hs:367-408`. In tests, `test/PipelineSpec.hs:1347-1373` introduces a helper that isolates the selected lane without turning on retained-target authority, `test/PipelineSpec.hs:1518-1525` adds the positive same-lane success plus non-local fail-closed contrast, and `test/PipelineSpec.hs:1591-1634` adds the source guard naming `rootLocalSingleBase` and checking that `targetC` still consults the selected `baseTarget` lane before retained-target and `schemeBodyTarget` fallbacks.
+  - `I2-BOUNDARY` -> pass: `src/MLF/Elab/Run/ResultType/Fallback.hs:679-685` shows `keepTargetFinal` still consists only of the inherited retained-target families (`rootLocalMultiInst`, `rootLocalInstArgMultiBase`, `rootLocalSchemeAliasBaseLike`, `boundVarTarget`), so `I2` did not turn `rootLocalSingleBase` into a fourth retained-target family. `docs/plans/2026-03-20-uri-r2-c1-i2-bounded-implementation-slice.md:45-56` records the same separation explicitly. Fresh diff inspection shows no edits under `src/MLF/Elab/Inst.hs`, `src/MLF/Elab/Run/ResultType/View.hs`, `app/`, `src-public/`, `mlf2.cabal`, `TODO.md`, `implementation_notes.md`, or `/Volumes/src/mlf4/Bugs.md`.
+  - `I2-VERIFICATION` -> pass: reviewer-rerun baseline checks all passed; the focused `ARI-C1` block passed with `17` examples and `0` failures; and the mandatory full gate `cabal build all && cabal test` passed with `1138` examples and `0` failures. `docs/plans/2026-03-20-uri-r2-c1-i2-bounded-implementation-slice.md:105-147` and `orchestrator/rounds/round-055/implementation-notes.md:16-29` accurately record the same verification set.
+  - `I2-DIFF-BOUNDARY` -> pass: the live worktree still shows the pre-existing controller-state diff in `orchestrator/state.json`, the expected code edits in `src/MLF/Elab/Run/ResultType/Fallback.hs` and `test/PipelineSpec.hs`, and the expected round docs in `docs/plans/2026-03-20-uri-r2-c1-i2-bounded-implementation-slice.md` plus `orchestrator/rounds/round-055/implementation-notes.md`. `orchestrator/rounds/round-055/plan.md` and `orchestrator/rounds/round-055/selection.md` remain present as pre-existing round packet files. No out-of-scope production/interface path drift appeared.
+  - `I2-CONTINUITY` -> pass: accepted predecessor continuity remains intact. `orchestrator/rounds/round-054/review-record.json` still makes `I1` the authoritative finalized bind for this exact slice, the continuity presence script confirms completed rounds `001` through `033`, the predecessor recursive-types packet, the inherited automatic-recursive boundary docs, the replay repair track, and the initial successor cycle are all still present, and `/Volumes/src/mlf4/Bugs.md` continues to show no open bug that would authorize replay reopen or broader widening. `implementation_notes.md:1-14` still records the accepted `H`-cycle and queued `I1` successor bind as predecessor context only.
+
+- Implemented stage result: `pass`
+- Attempt verdict: `accepted`
+- Stage action: `finalize`
+- Retry reason: `none`
+- Fix hypothesis: `none`
+- Decision summary:
+  - The round satisfies the `I2` reviewer contract. The implementation stays inside the exact `I1`-frozen local single-base lane, makes the required proof explicit, keeps `keepTargetFinal` unchanged as inherited retained-target context, and adds the required focused positive/negative `ARI-C1` coverage plus source guard.
+  - Fresh reviewer-run verification is green, including the focused bounded rerun and the mandatory full repo gate.
+  - No blocking issue remains. The lawful outcome is `accepted + finalize`.
+- Evidence summary:
+  - Canonical stage artifact: `docs/plans/2026-03-20-uri-r2-c1-i2-bounded-implementation-slice.md`
+  - Round notes: `orchestrator/rounds/round-055/implementation-notes.md`
+  - Review snapshot: `orchestrator/rounds/round-055/reviews/attempt-1.md`
+  - Key predecessor authority: `orchestrator/rounds/round-054/review-record.json`
+  - Canonical bug authority: `/Volumes/src/mlf4/Bugs.md`

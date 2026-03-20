@@ -1344,6 +1344,33 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                         inputs2 = clearVarBoundInInputs inputs1 childNid
                         inputs3 = injectMultiBaseArgs inputs2 edgeIds
                     requireRight (computeResultTypeFallback inputs3 innerCanon innerPre)
+                localSingleBaseFallback keepLocalTypeRoot = do
+                    let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+                        expr =
+                            ELet "k" (ELamAnn "x" recursiveAnn (EVar "x"))
+                                (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "k")) (EVar "u"))
+                        extractInnerLetRhs ann0 = case ann0 of
+                            ALet _ _ _ _ _ _ (AAnn (ALet _ _ _ _ _ rhs _ _) _ _) _ -> rhs
+                            _ -> error ("unexpected local single-base wrapper shape: " ++ show ann0)
+                    artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
+                    let (inputs0, annCanon0, annPre0) = resultTypeInputsForArtifacts artifacts
+                        innerCanon = extractInnerLetRhs annCanon0
+                        innerPre = extractInnerLetRhs annPre0
+                        (rootNid, childNid) = case innerCanon of
+                            AApp _ (AVar _ nid) _ _ appNid -> (appNid, nid)
+                            other ->
+                                error ("expected local single-base app shape, got " ++ show other)
+                        inputs1 =
+                            if keepLocalTypeRoot
+                                then makeLocalTypeRoot inputs0 rootNid
+                                else inputs0
+                        inputs2 =
+                            rewriteResultTypeInputs
+                                ( ariSetVarBound childNid (findIntBaseNode (rtcPresolutionView inputs1))
+                                . ariSetTypeParent childNid Nothing
+                                )
+                                inputs1
+                    requireRight (computeResultTypeFallback inputs2 innerCanon innerPre)
 
             it "keeps annotation-anchored recursive shape processable" $ do
                 let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
@@ -1488,6 +1515,20 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                                 ++ show other
                             )
 
+            it "keeps local single-base fallback on the local TypeRef lane" $ do
+                fallbackTy <- localSingleBaseFallback True
+                fallbackTy `shouldBe` TBase (BaseTy "Int")
+
+            it "keeps the same single-base wrapper fail-closed once it leaves the local TypeRef lane" $ do
+                fallbackTy <- localSingleBaseFallback False
+                case fallbackTy of
+                    TForall _ Nothing (TVar _) -> pure ()
+                    other ->
+                        expectationFailure
+                            ( "expected non-local single-base contrast to stay on the quantified fail-closed shell, got "
+                                ++ show other
+                            )
+
             it "keeps the same scheme-alias/base-like wrapper fail-closed once it leaves the local TypeRef lane" $ do
                 fallbackTy <- schemeAliasBaseLikeFallback False
                 fallbackTy `shouldBe` TBase (BaseTy "Int")
@@ -1550,8 +1591,20 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 fallbackTy <- requireRight (computeResultTypeFallback inputs annCanon annPre)
                 containsMu fallbackTy `shouldBe` False
 
-            it "uses the local-binding gate when deciding retained fallback targets" $ do
+            it "uses the local-binding gate when deciding local single-base and retained fallback targets" $ do
                 fallbackSrc <- readFile "src/MLF/Elab/Run/ResultType/Fallback.hs"
+                fallbackSrc
+                    `shouldSatisfy`
+                        isInfixOf
+                            "rootLocalSingleBase =\n                    rootBindingIsLocalType\n                        && IntSet.size rootBoundCandidates == 1\n                        && not rootHasMultiInst\n                        && not instArgRootMultiBase"
+                fallbackSrc
+                    `shouldSatisfy`
+                        isInfixOf
+                            "let targetC =\n                    case baseTarget of\n                        Just baseC\n                            | rootLocalSingleBase -> baseC"
+                fallbackSrc
+                    `shouldSatisfy`
+                        isInfixOf
+                            "then schemeBodyTarget targetPresolutionView rootC\n                                        else rootFinal"
                 fallbackSrc
                     `shouldSatisfy`
                         isInfixOf
@@ -1559,11 +1612,11 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 fallbackSrc
                     `shouldSatisfy`
                         isInfixOf
-                            "rootLocalInstArgMultiBase =\n                    rootBindingIsLocalType\n                        && instArgRootMultiBase"
+                            "rootLocalMultiInst =\n                    rootBindingIsLocalType\n                        && rootHasMultiInst"
                 fallbackSrc
                     `shouldSatisfy`
                         isInfixOf
-                            "rootLocalMultiInst =\n                    rootBindingIsLocalType\n                        && rootHasMultiInst"
+                            "rootLocalInstArgMultiBase =\n                    rootBindingIsLocalType\n                        && instArgRootMultiBase"
                 fallbackSrc
                     `shouldSatisfy`
                         isInfixOf
