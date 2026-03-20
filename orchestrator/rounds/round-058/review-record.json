@@ -1,0 +1,27 @@
+{
+  "subject_id": "URI-R2-C1",
+  "scenario_id": "uri-r2-c1-only-v1",
+  "stage_id": "J1",
+  "attempt": 1,
+  "attempt_verdict": "accepted",
+  "stage_result": "pass",
+  "stage_action": "finalize",
+  "retry_reason": "none",
+  "fix_hypothesis": "none",
+  "status": "authoritative",
+  "authoritative_attempt": 1,
+  "authoritative_result": "pass",
+  "artifact_path": "docs/plans/2026-03-20-uri-r2-c1-j1-next-target-bind.md",
+  "review_snapshot": "orchestrator/rounds/round-058/reviews/attempt-1.md",
+  "checks": {
+    "J1-CONTRACT": "pass",
+    "J1-CONTINUITY": "pass",
+    "J1-TARGET-FREEZE": "pass",
+    "J1-ANCHOR-READS": "pass",
+    "J1-DOCS-ONLY": "pass",
+    "J1-SKIP-NOTE": "pass",
+    "J1-RETRY-SCHEMA": "pass",
+    "J1-SCOPE-ALIGNMENT": "pass"
+  },
+  "terminal_reason": "none"
+}
