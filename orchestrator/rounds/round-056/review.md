@@ -1,0 +1,48 @@
+# Round `round-056` Attempt `2` Review (`I3`)
+
+- Baseline checks:
+  - `git branch --show-current` -> pass (`codex/round-056-i3-verification-gate`).
+  - `git diff --check` -> pass (no output).
+  - `python3 -m json.tool orchestrator/state.json >/dev/null` -> pass.
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json` -> pass (`2:  "contract_version": 2,`, `19:  "retry": {`).
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md` -> pass (ordered roadmap intact; item `23` / `I3` remains pending at line `145`, item `24` / `I4` remains pending at line `149` pre-merge).
+  - Required file-presence checks -> pass:
+    - `docs/superpowers/specs/2026-03-20-unannotated-iso-recursive-continue-bounded-h-cycle-design.md`
+    - `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
+    - `docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md`
+    - `docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md`
+    - `docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md`
+    - `docs/plans/2026-03-20-uri-r2-c1-i1-next-target-bind.md`
+    - `docs/plans/2026-03-20-uri-r2-c1-i2-bounded-implementation-slice.md`
+    - `orchestrator/retry-subloop.md`
+  - Continuity presence check via `python3` -> pass (`{'round_001_033_present': True, 'recursive_types_packet': True, 'boundary_doc': True, 'item5_handoff_doc': True, 'research_stop_doc': True, 'replay_repair_track': True, 'initial_successor_cycle': True, 'h4_doc': True}`).
+  - `python3 -m json.tool orchestrator/rounds/round-054/review-record.json >/dev/null && python3 -m json.tool orchestrator/rounds/round-055/review-record.json >/dev/null` -> pass.
+  - `python3` authoritative predecessor assertion over `round-054` / `round-055` review records -> pass (`I1` and `I2` remain `attempt=1`, `accepted`, `finalize`, `authoritative`, with the expected canonical artifact paths).
+  - Bug-tracker continuity check via `python3` over `/Volumes/src/mlf4/Bugs.md` -> pass (`## Open` remains empty).
+  - Implement-stage diff-boundary snapshot via `git status --short --untracked-files=all` -> pass (` M orchestrator/state.json`, `?? docs/plans/2026-03-20-uri-r2-c1-i3-bounded-verification-gate.md`, `?? orchestrator/rounds/round-056/attempt-log.jsonl`, `?? orchestrator/rounds/round-056/plan.md`, `?? orchestrator/rounds/round-056/review.md`, `?? orchestrator/rounds/round-056/reviews/attempt-1.md`, `?? orchestrator/rounds/round-056/selection.md`).
+  - `git diff --name-only -- . ':(exclude)docs/**' ':(exclude)orchestrator/**'` -> pass (no output; no implementation/test diff).
+
+- Task-specific checks:
+  - `I3-CONTRACT` -> pass: `orchestrator/rounds/round-056/selection.md`, `orchestrator/rounds/round-056/plan.md`, `orchestrator/verification.md`, `orchestrator/retry-subloop.md`, `docs/superpowers/specs/2026-03-18-unannotated-iso-recursive-continue-bounded-cycle-design.md`, `docs/superpowers/specs/2026-03-20-unannotated-iso-recursive-continue-bounded-h-cycle-design.md`, `implementation_notes.md`, and the refreshed canonical `I3` artifact all keep this retry fixed to repaired `URI-R2-C1`, docs-only, and bounded to reverifying only the accepted `I2` local single-base `rootLocalSingleBase` / `baseTarget -> baseC` / same-lane `targetC` lane without reopening implementation or widening the inherited explicit-only / non-equi-recursive / non-cyclic-graph boundary.
+  - `I3-ANCHORS` -> pass: `src/MLF/Elab/Run/ResultType/Fallback.hs:367-408` still carries the selected single-base `baseTarget` gate, `src/MLF/Elab/Run/ResultType/Fallback.hs:525-539` still exposes `rootLocalSingleBase` plus the preserved inherited trigger families, `src/MLF/Elab/Run/ResultType/Fallback.hs:630-710` still keeps `boundVarTarget` and `keepTargetFinal` outside the selected lane while routing `targetC` to `baseC` only for `rootLocalSingleBase`, and `test/PipelineSpec.hs:1347-1373`, `test/PipelineSpec.hs:1486-1496`, `test/PipelineSpec.hs:1508-1575`, and `test/PipelineSpec.hs:1594-1650` still show the focused helper, the same-lane positive example, the matched non-local fail-closed contrasts, the preserved inherited context cases, and the source-guard assertions. The canonical `I3` artifact's anchor narrative matches those read-only sources.
+  - `I3-RETRY-HISTORY` -> pass: `orchestrator/rounds/round-056/reviews/attempt-1.md` still preserves the accepted attempt-1 blocker packet unchanged, `orchestrator/rounds/round-056/attempt-log.jsonl` still records attempt `1` as `accepted + retry` for `i3-shell-missing-cabal`, and this review writes only the new attempt-2 live review plus immutable attempt-2 snapshot instead of rewriting earlier retry history.
+  - `I3-FRESH-VERIFICATION` -> pass: `command -v cabal` resolves to `/Users/ares/.ghcup/bin/cabal`, `cabal --version` reports `cabal-install version 3.16.1.0`, the exact focused rerun `cabal test mlf2-test --test-show-details=direct --test-options='--match "ARI-C1 feasibility characterization (bounded prototype-only)"'` exits `0` with `17 examples, 0 failures`, and the exact full repo gate `cabal build all && cabal test` exits `0` with `1138 examples, 0 failures`. The refreshed canonical `I3` artifact accurately records the same PATH proof and verification outcomes.
+  - `I3-DIFF-BOUNDARY` -> pass: reviewer reruns confirm that the implementation-stage work remains docs-only and read-only with respect to the accepted `I1` / `I2` slice. `git diff --name-only -- . ':(exclude)docs/**' ':(exclude)orchestrator/**'` stays empty, so no out-of-scope diff appears under `src/`, `test/`, `src-public/`, `app/`, or `mlf2.cabal`. The accepted `I2` implementation anchors in `Fallback.hs` and `PipelineSpec.hs` remain untouched.
+  - `I3-CONTINUITY` -> pass: `orchestrator/rounds/round-054/review-record.json` still makes `I1` authoritative, `orchestrator/rounds/round-055/review-record.json` still makes `I2` authoritative, the continuity presence script confirms completed rounds `001` through `033`, the predecessor recursive-types packet, the inherited automatic-recursive boundary docs, the replay repair track, the initial successor cycle, and the predecessor `H4` decision artifact are all still present, and `/Volumes/src/mlf4/Bugs.md` remains continuity-only context with no open issue authorizing replay reopen, `MLF.Elab.Inst`, `InstBot`, `boundVarTarget` widening, `boundTarget` overlay materialization, `View.hs`, `schemeBodyTarget` consolidation, or broader recursive widening.
+
+- Implemented stage result: `pass`
+- Attempt verdict: `accepted`
+- Stage action: `finalize`
+- Retry reason: `none`
+- Fix hypothesis: `none`
+- Decision summary:
+  - `I3` attempt-2 resolves the accepted attempt-1 blocker. The live shell now provides `cabal` on `PATH`, the exact focused bounded rerun passes, and the exact full repo gate passes.
+  - The refreshed canonical `I3` artifact records that new verification evidence without reopening `I1` / `I2`, without touching `Fallback.hs` or `PipelineSpec.hs`, and without widening beyond repaired `URI-R2-C1` or the inherited explicit-only / non-equi-recursive / non-cyclic-graph boundary.
+  - No blocking issue remains. The lawful review outcome is `accepted + finalize`.
+- Evidence summary:
+  - Canonical stage artifact: `docs/plans/2026-03-20-uri-r2-c1-i3-bounded-verification-gate.md`
+  - Review snapshot: `orchestrator/rounds/round-056/reviews/attempt-2.md`
+  - Preserved prior attempt snapshot: `orchestrator/rounds/round-056/reviews/attempt-1.md`
+  - Controller retry log: `orchestrator/rounds/round-056/attempt-log.jsonl`
+  - Key predecessor authority: `orchestrator/rounds/round-054/review-record.json`, `orchestrator/rounds/round-055/review-record.json`
+  - Canonical bug authority: `/Volumes/src/mlf4/Bugs.md`
