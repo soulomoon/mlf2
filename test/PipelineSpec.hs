@@ -54,6 +54,7 @@ import MLF.Elab.Run.ResultType
     ( ResultTypeInputs(..)
     , computeResultTypeFallback
     , mkResultTypeInputs
+    , rtcEdgeWitnesses
     , rtcEdgeTraces
     )
 import MLF.Elab.Run.Util
@@ -1344,6 +1345,57 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                         inputs2 = clearVarBoundInInputs inputs1 childNid
                         inputs3 = injectMultiBaseArgs inputs2 edgeIds
                     requireRight (computeResultTypeFallback inputs3 innerCanon innerPre)
+                localInstArgSingleBaseFallback keepLocalTypeRoot = do
+                    let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+                        expr =
+                            ELet "k" (ELamAnn "x" recursiveAnn (EVar "x"))
+                                (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "k")) (EVar "u"))
+                        extractInnerLetRhs ann0 = case ann0 of
+                            ALet _ _ _ _ _ _ (AAnn (ALet _ _ _ _ _ rhs _ _) _ _) _ -> rhs
+                            _ -> error ("unexpected local inst-arg singleton-base wrapper shape: " ++ show ann0)
+                        injectSingleBaseWitness inputs eid =
+                            let view0 = rtcPresolutionView inputs
+                                edgeWitnesses0 = rtcEdgeWitnesses inputs
+                                edgeKey = getEdgeId eid
+                                seedWitness =
+                                    case IntMap.lookup edgeKey edgeWitnesses0 of
+                                        Just ew -> ew
+                                        Nothing ->
+                                            case IntMap.elems edgeWitnesses0 of
+                                                ew0 : _ -> ew0 { ewEdgeId = eid }
+                                                [] ->
+                                                    error "expected an edge witness for local inst-arg singleton-base case"
+                                ew' =
+                                    seedWitness
+                                        { ewEdgeId = eid
+                                        , ewRight = findIntBaseNode view0
+                                        }
+                            in inputs
+                                { rtcEdgeArtifacts =
+                                    (rtcEdgeArtifacts inputs)
+                                        { eaEdgeWitnesses =
+                                            IntMap.insert edgeKey ew' edgeWitnesses0
+                                        }
+                                }
+                    artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
+                    let (inputs0, annCanon0, annPre0) = resultTypeInputsForArtifacts artifacts
+                        innerCanon = extractInnerLetRhs annCanon0
+                        innerPre = extractInnerLetRhs annPre0
+                        (rootNid, childNid, argEid) = case innerCanon of
+                            AApp _ (AVar _ nid) _funEid argEdgeId appNid -> (appNid, nid, argEdgeId)
+                            other ->
+                                error ("expected local inst-arg singleton-base app shape, got " ++ show other)
+                        inputs1 =
+                            if keepLocalTypeRoot
+                                then makeLocalTypeRoot inputs0 rootNid
+                                else inputs0
+                        inputs2 =
+                            if keepLocalTypeRoot
+                                then rebindRootTo inputs1 rootNid (findIntBaseNode (rtcPresolutionView inputs1))
+                                else inputs1
+                        inputs3 = clearVarBoundInInputs inputs2 childNid
+                        inputs4 = injectSingleBaseWitness inputs3 argEid
+                    requireRight (computeResultTypeFallback inputs4 innerCanon innerPre)
                 localSingleBaseFallback keepLocalTypeRoot = do
                     let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
                         expr =
@@ -1574,6 +1626,20 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                                 ++ show other
                             )
 
+            it "keeps local inst-arg-only singleton-base fallback on the local TypeRef lane" $ do
+                fallbackTy <- localInstArgSingleBaseFallback True
+                fallbackTy `shouldBe` TBase (BaseTy "Int")
+
+            it "keeps the same inst-arg-only singleton-base wrapper fail-closed once it leaves the local TypeRef lane" $ do
+                fallbackTy <- localInstArgSingleBaseFallback False
+                case fallbackTy of
+                    TForall _ Nothing (TVar _) -> pure ()
+                    other ->
+                        expectationFailure
+                            ( "expected non-local inst-arg-only singleton-base contrast to stay on the quantified fail-closed shell, got "
+                                ++ show other
+                            )
+
             it "does not infer recursive shape for the corresponding unannotated variant" $ do
                 let expr = ELam "x" (EVar "x")
                 case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
@@ -1600,7 +1666,15 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 fallbackSrc
                     `shouldSatisfy`
                         isInfixOf
+                            "rootLocalInstArgSingleBase =\n                    rootBindingIsLocalType\n                        && IntSet.null rootBaseBounds\n                        && IntSet.size instArgBaseBounds == 1\n                        && not rootHasMultiInst\n                        && not instArgRootMultiBase"
+                fallbackSrc
+                    `shouldSatisfy`
+                        isInfixOf
                             "let targetC =\n                    case baseTarget of\n                        Just baseC\n                            | rootLocalSingleBase -> baseC"
+                fallbackSrc
+                    `shouldSatisfy`
+                        isInfixOf
+                            "Just baseC\n                            | rootLocalInstArgSingleBase -> baseC"
                 fallbackSrc
                     `shouldSatisfy`
                         isInfixOf
