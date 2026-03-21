@@ -3,6 +3,14 @@
 ## Unreleased
 
 ### Changed
+- Accepted `round-068` `N1` as a docs-only post-`L2` roadmap-amendment
+  authority gate: the live successor control plane now records
+  `reopen-planning-only`, keeps the repaired `URI-R2-C1` queue closed as
+  predecessor evidence, preserves the inherited explicit-only /
+  non-equi-recursive / non-cyclic-graph / no-second-interface / no-fallback
+  boundary, makes the preserved generic scheme-alias / base-like `baseTarget`
+  route admissible for later `N2` selection only, and updates the live
+  roadmap so `N2` is the next bounded planning item.
 - Closed the repaired `URI-R2-C1` continue-bounded queue through accepted
   `L1` fail-closed and accepted `L2 = stop-blocked`, then scaffolded a fresh
   post-`L2` next-loop packet under
