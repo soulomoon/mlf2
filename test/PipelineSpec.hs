@@ -1267,6 +1267,40 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                                 rootNid
                                 (findIntBaseNode (rtcPresolutionView inputs1))
                     requireRight (computeResultTypeFallback inputs2 bodyCanon bodyPre)
+                localEmptyCandidateSchemeAliasBaseLikeFallback keepLocalTypeRoot = do
+                    let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+                        expr =
+                            ELet "k" (ELamAnn "x" recursiveAnn (EVar "x"))
+                                (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "k")) (EVar "u"))
+                        extractInnerLetRhs ann0 = case ann0 of
+                            ALet _ _ _ _ _ _ (AAnn (ALet _ _ _ _ _ rhs _ _) _ _) _ -> rhs
+                            _ ->
+                                error
+                                    ( "unexpected local empty-candidate scheme-alias/base-like wrapper shape: "
+                                        ++ show ann0
+                                    )
+                    artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
+                    let (inputs0, annCanon0, annPre0) = resultTypeInputsForArtifacts artifacts
+                        innerCanon = extractInnerLetRhs annCanon0
+                        innerPre = extractInnerLetRhs annPre0
+                        (rootNid, childNid) = case innerCanon of
+                            AApp _ (AVar _ nid) _ _ appNid -> (appNid, nid)
+                            other ->
+                                error
+                                    ( "expected local empty-candidate scheme-alias/base-like app shape, got "
+                                        ++ show other
+                                    )
+                        inputs1 =
+                            if keepLocalTypeRoot
+                                then makeLocalTypeRoot inputs0 rootNid
+                                else inputs0
+                        inputs2 =
+                            rebindRootTo
+                                inputs1
+                                rootNid
+                                (findIntBaseNode (rtcPresolutionView inputs1))
+                        inputs3 = clearVarBoundInInputs inputs2 childNid
+                    requireRight (computeResultTypeFallback inputs3 innerCanon innerPre)
                 localMultiInstFallback keepLocalTypeRoot = do
                     let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
                         expr =
@@ -1557,13 +1591,17 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 fallbackTy <- requireRight (computeResultTypeFallback inputs annCanon annPre)
                 containsMu fallbackTy `shouldBe` False
 
-            it "keeps local scheme-alias/base-like fallback on the local TypeRef lane" $ do
+            it "keeps local empty-candidate scheme-alias/base-like fallback on the local TypeRef lane" $ do
+                fallbackTy <- localEmptyCandidateSchemeAliasBaseLikeFallback True
+                fallbackTy `shouldBe` TBase (BaseTy "Int")
+
+            it "keeps the matched local scheme-alias/base-like continuity on the quantified rootFinal lane" $ do
                 fallbackTy <- schemeAliasBaseLikeFallback True
                 case fallbackTy of
                     TForall _ Nothing (TBase (BaseTy "Int")) -> pure ()
                     other ->
                         expectationFailure
-                            ( "expected quantified Int result for local scheme-alias/base-like lane, got "
+                            ( "expected quantified Int result for local scheme-alias/base-like continuity lane, got "
                                 ++ show other
                             )
 
@@ -1662,6 +1700,10 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 fallbackSrc
                     `shouldSatisfy`
                         isInfixOf
+                            "rootLocalEmptyCandidateSchemeAliasBaseLike =\n                    rootBindingIsLocalType\n                        && rootIsSchemeAlias\n                        && rootBoundIsBaseLike\n                        && IntSet.null rootBoundCandidates\n                        && IntSet.null instArgBaseBounds\n                        && not rootHasMultiInst\n                        && not instArgRootMultiBase"
+                fallbackSrc
+                    `shouldSatisfy`
+                        isInfixOf
                             "rootLocalSingleBase =\n                    rootBindingIsLocalType\n                        && IntSet.size rootBoundCandidates == 1\n                        && not rootHasMultiInst\n                        && not instArgRootMultiBase"
                 fallbackSrc
                     `shouldSatisfy`
@@ -1674,7 +1716,15 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 fallbackSrc
                     `shouldSatisfy`
                         isInfixOf
+                            "Just baseC\n                            | rootLocalEmptyCandidateSchemeAliasBaseLike -> baseC"
+                fallbackSrc
+                    `shouldSatisfy`
+                        isInfixOf
                             "Just baseC\n                            | rootLocalInstArgSingleBase -> baseC"
+                fallbackSrc
+                    `shouldSatisfy`
+                        isInfixOf
+                            "Just baseC\n                            | rootIsSchemeAlias\n                                && rootBoundIsBaseLike -> baseC"
                 fallbackSrc
                     `shouldSatisfy`
                         isInfixOf

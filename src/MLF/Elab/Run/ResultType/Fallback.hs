@@ -534,6 +534,14 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                         && IntSet.size instArgBaseBounds == 1
                         && not rootHasMultiInst
                         && not instArgRootMultiBase
+                rootLocalEmptyCandidateSchemeAliasBaseLike =
+                    rootBindingIsLocalType
+                        && rootIsSchemeAlias
+                        && rootBoundIsBaseLike
+                        && IntSet.null rootBoundCandidates
+                        && IntSet.null instArgBaseBounds
+                        && not rootHasMultiInst
+                        && not instArgRootMultiBase
                 rootLocalSchemeAliasBaseLike =
                     rootBindingIsLocalType
                         && rootIsSchemeAlias
@@ -695,6 +703,8 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                             | rootLocalSingleBase -> baseC
                         Just baseC
                             | rootLocalInstArgSingleBase -> baseC
+                        Just baseC
+                            | rootLocalEmptyCandidateSchemeAliasBaseLike -> baseC
                         Just baseC
                             | rootIsSchemeAlias
                                 && rootBoundIsBaseLike -> baseC
