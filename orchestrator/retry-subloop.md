@@ -1,18 +1,22 @@
 # Retry Subloop Contract
 
-This file defines the live retry behavior for future `contract_version: 2` rounds on the current unannotated iso-recursive successor control plane.
+This file defines the live retry behavior for future `contract_version: 2`
+rounds on the current post-`L2` automatic iso-recursive successor control
+plane.
 
 The current roadmap and subject boundary come from:
 
-- `docs/superpowers/specs/2026-03-17-unannotated-iso-recursive-successor-roadmap-design.md`
-- `docs/superpowers/specs/2026-03-16-uri-r2-c1-prototype-evidence-retry-subloop-amendment.md`
+- `tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
+- `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
+- `docs/plans/2026-03-21-uri-r2-c1-l1-next-target-bind.md`
+- `docs/plans/2026-03-21-uri-r2-c1-l2-post-l1-fail-closed-successor-decision-gate.md`
 
 ## Scope
 
-- `U1`, `U2`, `U3`, `U4`, and `U5` may retry inside the same round.
-- `U6` is aggregate-only:
+- `N1`, `N2`, `N3`, `N4`, `N5`, and `N6` may retry inside the same round.
+- `N7` is aggregate-only:
   - review may reject it and send the same round back to `plan`;
-  - review may not emit `accepted + retry` for `U6`.
+  - review may not emit `accepted + retry` for `N7`.
 
 ## Machine State
 
@@ -35,7 +39,7 @@ Retry object fields:
 
 ## Review Output
 
-Every `U1` through `U6` review must record:
+Every `N1` through `N7` review must record:
 
 - `Implemented stage result`
 - `Attempt verdict`
@@ -52,9 +56,10 @@ Allowed combinations:
 Forbidden combinations:
 
 - `rejected + finalize`
-- `accepted + retry` for `U6`
+- `accepted + retry` for `N7`
 
-Use `Retry reason: none` and `Fix hypothesis: none` when a stage finalizes without another retry.
+Use `Retry reason: none` and `Fix hypothesis: none` when a stage finalizes
+without another retry.
 
 ## Artifact Ownership
 
@@ -84,7 +89,7 @@ After review:
 
 ## Budget Rules
 
-- `max_attempts` is `100` for `U1`, `U2`, `U3`, `U4`, and `U5`
+- `max_attempts` is `100` for `N1`, `N2`, `N3`, `N4`, `N5`, and `N6`
 - on exhaustion:
   - finalize the latest accepted attempt if one exists
   - otherwise stop with a controller blockage in `orchestrator/state.json`
@@ -92,7 +97,8 @@ After review:
 ## Resume Rules
 
 - preserve the same round id, branch, and worktree during retries
-- resume the exact recorded `plan`, `implement`, or `review` stage when interrupted
+- resume the exact recorded `plan`, `implement`, or `review` stage when
+  interrupted
 - do not create a replacement round merely because a retry was interrupted
 
 ## Roadmap-Update Rule
@@ -101,9 +107,10 @@ After an accepted round finalizes and merges:
 
 - the guider may mark the completed item done;
 - the guider may refine later pending items or append the next bounded cycle;
-- the guider may not rewrite completed-item truth or silently widen the active subject.
+- the guider may not rewrite completed-item truth or silently widen the active
+  subject.
 
 ## Historical Compatibility
 
-Rounds `round-001` through `round-027` remain historical predecessor evidence.
+Rounds `round-001` through `round-067` remain historical predecessor evidence.
 Do not rewrite them into the new retry schema.
