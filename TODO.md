@@ -51,6 +51,14 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
     `src/MLF/Elab/Run/ResultType/Fallback.hs`, and refreshing the focused
     `PipelineSpec` behavior/source guards while preserving the accepted local
     continuity lanes unchanged.
+  - accepted `round-073` `N6` as the bounded verification/evidence
+    consolidation gate for that exact accepted `N5` non-local packet,
+    recording read-only `Fallback.hs` / `PipelineSpec.hs` anchors for the
+    explicit `rootNonLocalSchemeAliasBaseLike` proof and same-lane `targetC`
+    consumer, a fresh focused `ARI-C1 feasibility characterization (bounded
+    prototype-only)` rerun (`20 examples, 0 failures`), a fresh
+    `cabal build all && cabal test` gate (`1141 examples, 0 failures`), and
+    accepted-predecessor continuity without widening the live subject.
 - Verification:
   - docs-only scaffold anchored to
     `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`,
@@ -63,17 +71,21 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - accepted `round-071` docs-only reviewer checks: PASS
   - accepted `round-072` focused `ARI-C1 feasibility characterization (bounded prototype-only)` reviewer checks: PASS
   - accepted `round-072` full gate reviewer checks: `cabal build all && cabal test`: PASS
+  - accepted `round-073` docs-only reviewer checks: PASS
+  - accepted `round-073` focused `ARI-C1 feasibility characterization (bounded prototype-only)` verification evidence: PASS (`20 examples, 0 failures`)
+  - accepted `round-073` full gate verification evidence: `cabal build all && cabal test`: PASS (`1141 examples, 0 failures`)
 - Rolling priorities (next):
-  1. Run `N6`, the bounded verification and evidence consolidation gate for
-     the exact accepted `N5` non-local proof slice in
-     `MLF.Elab.Run.ResultType.Fallback` and its focused `PipelineSpec`
-     anchors under the active `N3` acceptance contract.
-  2. Treat accepted `N5` as bounded proof-slice evidence only; do not
-     reinterpret it as clearance to reopen replay, `MLF.Elab.Inst`,
-     `InstBot`, local-lane widening, or any other fallback family.
+  1. Run `N7`, the long-horizon automatic iso-recursive inference closure /
+     next-cycle decision gate that must aggregate the accepted `N6` evidence
+     into exactly one authoritative reopened-loop outcome:
+     `continue-bounded`, `stop-blocked`, or `completed`.
+  2. Treat accepted `N6` as evidence-only for the exact accepted non-local
+     `baseTarget -> baseC` proof slice; do not reinterpret it as clearance to
+     reopen replay, `MLF.Elab.Inst`, `InstBot`, local-lane widening, or any
+     other fallback family.
   3. Use
      `tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
-     as the authoritative next-loop roadmap scaffold, with `N6` now the next
+     as the authoritative next-loop roadmap scaffold, with `N7` now the next
      pending bounded item.
 
 ## Task 100 bounded `J`-cycle orchestrator runtime (in progress 2026-03-20)

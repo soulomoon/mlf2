@@ -3,6 +3,14 @@
 ## Unreleased
 
 ### Changed
+- Accepted `round-073` `N6` as the bounded verification/evidence
+  consolidation gate for the exact accepted `N5` non-local
+  `baseTarget -> baseC` proof slice: the live successor control plane now
+  records read-only `MLF.Elab.Run.ResultType.Fallback` / `PipelineSpec`
+  anchors, fresh focused `ARI-C1` and full repo gate evidence (`20` / `1141`
+  examples, `0 failures`), preserves `N3` / `N4` / `N5` continuity without
+  widening, and updates the live roadmap so `N7` is the next bounded
+  decision/closure item.
 - Accepted `round-072` `N5` as the bounded implementation slice for the exact
   `N4`-frozen non-local `baseTarget -> baseC` packet: the live successor
   control plane now records the explicit

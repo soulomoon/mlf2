@@ -7,11 +7,11 @@
   evidence whose accepted execution record ended at
   `orchestrator/rounds/round-067`, while the refreshed post-`L2` successor
   control plane now extends the accepted execution record through
-  `orchestrator/rounds/round-072`.
-- Completed rounds `round-001` through `round-072` remain authoritative
+  `orchestrator/rounds/round-073`.
+- Completed rounds `round-001` through `round-073` remain authoritative
   historical evidence: `round-001` through `round-067` are inherited baseline
-  and predecessor evidence, and `round-068` through `round-072` are accepted
-  successor-lane rounds for `N1`, `N2`, `N3`, `N4`, and `N5`.
+  and predecessor evidence, and `round-068` through `round-073` are accepted
+  successor-lane rounds for `N1`, `N2`, `N3`, `N4`, `N5`, and `N6`.
 - The completed recursive-types packet under
   `tasks/todo/2026-03-11-recursive-types-orchestration/` remains immutable
   predecessor evidence.
@@ -86,12 +86,24 @@
   `schemeAliasBaseLikeFallback False` / `True` and source-guard coverage in
   `test/PipelineSpec.hs`, and preserves every accepted local lane plus every
   blocked route unchanged.
+- The accepted `N6` artifact in
+  `docs/plans/2026-03-22-automatic-iso-recursive-base-target-non-local-bounded-verification-gate.md`
+  now consolidates fresh verifier-visible evidence for that exact accepted
+  `N5` slice only: read-only `Fallback.hs` / `PipelineSpec.hs` anchors for the
+  explicit `rootNonLocalSchemeAliasBaseLike` proof and same-lane `targetC`
+  consumer, a focused `ARI-C1 feasibility characterization (bounded
+  prototype-only)` rerun passing (`20 examples, 0 failures`), a fresh full
+  repo gate `cabal build all && cabal test` passing (`1141 examples, 0
+  failures`), and accepted-predecessor continuity across `L1`, `L2`, `N1`,
+  `N2`, `N3`, `N4`, and `N5`. It preserves the accepted local lanes and every
+  blocked route unchanged, records evidence only, and does not itself decide
+  `N7` or authorize any new target.
 - The long-horizon direction remains automatic iso-recursive type synthesis in
   the solver/pipeline, but the refreshed control plane remains bounded to the
-  accepted post-`L2` successor lane, has now completed bounded `N5`
-  implementation for the frozen packet, and must next complete bounded `N6`
-  verification/evidence consolidation for that exact slice before any `N7`
-  decision/closure can begin.
+  accepted post-`L2` successor lane, has now completed bounded `N6`
+  verification/evidence consolidation for the frozen packet, and must next
+  complete bounded `N7` decision/closure using that accepted evidence without
+  widening the subject.
 
 1. [done] Execute the `N1` post-`L2` roadmap-amendment authority gate for automatic iso-recursive inference
     Depends on: none
@@ -113,9 +125,9 @@
     Depends on: item 4
     Completion notes: completed by accepted `round-072` via `docs/plans/2026-03-22-automatic-iso-recursive-base-target-non-local-bounded-implementation-slice.md`, with reviewer final outcome `baseTarget-non-local-proof-slice-established`. `N5` preserves accepted `L1` / `L2` / `N1 = reopen-planning-only` / `N2 = baseTarget-planning-subject-selected` / `N3 = baseTarget-safety-acceptance-contract-established` / `N4 = baseTarget-exact-target-bind-established` continuity and lands exactly one bounded implementation slice for the frozen non-local generic scheme-root alias-bound / base-like `baseTarget -> baseC` packet in `src/MLF/Elab/Run/ResultType/Fallback.hs`: the existing generic `baseTarget` computation stays unchanged, one explicit `rootNonLocalSchemeAliasBaseLike` proof now names the selected non-local packet, only the same-lane generic `targetC` consumer is routed through that proof, and focused `schemeAliasBaseLikeFallback False` / `True` plus source-guard coverage in `test/PipelineSpec.hs` keep the selected non-local packet reviewer-visible while preserving the accepted local `rootFinal` and empty-candidate lanes unchanged. Repaired `URI-R2-C1`, replay reopen, `MLF.Elab.Inst` / `InstBot`, `boundVarTarget`, `boundTarget`, `schemeBodyTarget`, `src/MLF/Elab/Run/ResultType/View.hs`, every other fallback family, every different solver/pipeline subject, cross-family search, equi-recursive reasoning, implicit unfolding, cyclic encoding, graph-cycle exceptions, multi-SCC support, second-interface work, and no-fallback widening remain blocked.
 
-6. [pending] Execute the `N6` verification and evidence consolidation gate for the accepted `N5` slice
+6. [done] Execute the `N6` verification and evidence consolidation gate for the accepted `N5` slice
     Depends on: item 5
-    Completion notes: complete when the accepted `N6` artifact and reviewer record capture current bounded verification/evidence for the exact accepted `N5` non-local proof slice in `src/MLF/Elab/Run/ResultType/Fallback.hs` and its focused `test/PipelineSpec.hs` anchors under the active `N3` acceptance contract, together with any required focused/full gate evidence and predecessor continuity checks. `N6` must not reinterpret the accepted `N5` slice or the absence of further evidence as clearance for new targets, replay reopen, or broader recursion families.
+    Completion notes: completed by accepted `round-073` via `docs/plans/2026-03-22-automatic-iso-recursive-base-target-non-local-bounded-verification-gate.md`, with authoritative review result `pass` in `orchestrator/rounds/round-073/review-record.json`. `N6` preserves accepted `L1` / `L2` / `N1 = reopen-planning-only` / `N2 = baseTarget-planning-subject-selected` / `N3 = baseTarget-safety-acceptance-contract-established` / `N4 = baseTarget-exact-target-bind-established` / `N5 = baseTarget-non-local-proof-slice-established` continuity and consolidates fresh verifier-visible evidence for that exact accepted `N5` non-local `baseTarget -> baseC` proof slice only: read-only `Fallback.hs` / `PipelineSpec.hs` anchors for the explicit `rootNonLocalSchemeAliasBaseLike` proof and same-lane `targetC` arm, a focused `ARI-C1 feasibility characterization (bounded prototype-only)` rerun passing (`20 examples, 0 failures`), a fresh full repo gate `cabal build all && cabal test` passing (`1141 examples, 0 failures`), and predecessor continuity checks across `L1`, `L2`, `N1`, `N2`, `N3`, `N4`, and `N5`. `N6` remains evidence-only, preserves the accepted local lanes and every blocked route unchanged, and does not itself decide `N7` or authorize replay reopen, other fallback families, or broader recursion work.
 
 7. [pending] Execute the `N7` long-horizon automatic iso-recursive inference closure / next-cycle decision gate after the accepted `N6` evidence
     Depends on: item 6
