@@ -1,0 +1,29 @@
+{
+  "subject_id": "AUTOMATIC-ISO-RECURSIVE-POST-L2",
+  "scenario_id": "automatic-iso-recursive-post-l2-control-plane-v1",
+  "stage_id": "N7",
+  "attempt": 1,
+  "attempt_verdict": "accepted",
+  "stage_result": "pass",
+  "stage_action": "finalize",
+  "retry_reason": "none",
+  "fix_hypothesis": "none",
+  "status": "authoritative",
+  "authoritative_attempt": 1,
+  "authoritative_result": "pass",
+  "artifact_path": "docs/plans/2026-03-22-automatic-iso-recursive-base-target-non-local-next-cycle-decision-gate.md",
+  "review_snapshot": "orchestrator/rounds/round-074/reviews/attempt-1.md",
+  "checks": {
+    "N7-CONTRACT": "pass",
+    "N7-N1-N6-CONTINUITY": "pass",
+    "N7-DOCS-ONLY-DIFF-BOUNDARY": "pass",
+    "N7-NO-DRIFT-BASELINE": "pass",
+    "N7-SKIP-NOTE": "pass",
+    "N7-OUTCOME-MATRIX": "pass",
+    "N7-RETRY-SCHEMA": "pass",
+    "N7-IMMUTABILITY": "pass",
+    "N7-SCOPE-ALIGNMENT": "pass"
+  },
+  "final_outcome": "continue-bounded",
+  "terminal_reason": "none"
+}
