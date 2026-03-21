@@ -1595,7 +1595,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 fallbackTy <- localEmptyCandidateSchemeAliasBaseLikeFallback True
                 fallbackTy `shouldBe` TBase (BaseTy "Int")
 
-            it "keeps the matched local scheme-alias/base-like continuity on the quantified rootFinal lane" $ do
+            it "keeps the preserved local scheme-alias/base-like continuity on the quantified rootFinal lane" $ do
                 fallbackTy <- schemeAliasBaseLikeFallback True
                 case fallbackTy of
                     TForall _ Nothing (TBase (BaseTy "Int")) -> pure ()
@@ -1619,7 +1619,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                                 ++ show other
                             )
 
-            it "keeps the same scheme-alias/base-like wrapper fail-closed once it leaves the local TypeRef lane" $ do
+            it "keeps the selected non-local scheme-alias/base-like packet on the baseTarget -> baseC lane" $ do
                 fallbackTy <- schemeAliasBaseLikeFallback False
                 fallbackTy `shouldBe` TBase (BaseTy "Int")
                 containsMu fallbackTy `shouldBe` False
@@ -1695,7 +1695,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 fallbackTy <- requireRight (computeResultTypeFallback inputs annCanon annPre)
                 containsMu fallbackTy `shouldBe` False
 
-            it "uses the local-binding gate when deciding local single-base and retained fallback targets" $ do
+            it "keeps the explicit non-local scheme-alias/base-like proof separate from the preserved local lanes" $ do
                 fallbackSrc <- readFile "src/MLF/Elab/Run/ResultType/Fallback.hs"
                 fallbackSrc
                     `shouldSatisfy`
@@ -1712,6 +1712,10 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 fallbackSrc
                     `shouldSatisfy`
                         isInfixOf
+                            "rootNonLocalSchemeAliasBaseLike =\n                    not rootBindingIsLocalType\n                        && rootIsSchemeAlias\n                        && rootBoundIsBaseLike"
+                fallbackSrc
+                    `shouldSatisfy`
+                        isInfixOf
                             "let targetC =\n                    case baseTarget of\n                        Just baseC\n                            | rootLocalSingleBase -> baseC"
                 fallbackSrc
                     `shouldSatisfy`
@@ -1724,7 +1728,13 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 fallbackSrc
                     `shouldSatisfy`
                         isInfixOf
-                            "Just baseC\n                            | rootIsSchemeAlias\n                                && rootBoundIsBaseLike -> baseC"
+                            "Just baseC\n                            | rootLocalEmptyCandidateSchemeAliasBaseLike -> baseC\n                        Just baseC\n                            | rootNonLocalSchemeAliasBaseLike -> baseC"
+                fallbackSrc
+                    `shouldSatisfy`
+                        ( not
+                            . isInfixOf
+                                "Just baseC\n                            | rootIsSchemeAlias\n                                && rootBoundIsBaseLike -> baseC"
+                        )
                 fallbackSrc
                     `shouldSatisfy`
                         isInfixOf
