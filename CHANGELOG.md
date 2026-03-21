@@ -3,6 +3,15 @@
 ## Unreleased
 
 ### Changed
+- Closed the repaired `URI-R2-C1` continue-bounded queue through accepted
+  `L1` fail-closed and accepted `L2 = stop-blocked`, then scaffolded a fresh
+  post-`L2` next-loop packet under
+  `tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/`; the new
+  mechanism table / orchestrator prompt / JSONL log treat any further progress
+  toward automatic iso-recursive inference as blocked behind a separate roadmap
+  amendment plus a fresh selection.
+- Completed the bounded `K1` bind round in accepted `round-062`: the live control plane now freezes the next bounded `K2` implementation slice to the repaired local empty-candidate / no-inst-arg scheme-alias/base-like `baseTarget -> baseC` lane and its same-lane `targetC` use in `MLF.Elab.Run.ResultType.Fallback`, with future ownership limited to `Fallback.hs` and `PipelineSpec.hs`; the live roadmap now marks `K1` done and carries one new pending successor implementation item `K2`.
+- Completed the bounded `J` cycle through accepted rounds `round-058` through `round-061`: `J1` bound the local inst-arg-only singleton-base lane, `J2` landed that bounded `rootLocalInstArgSingleBase` / `baseTarget -> baseC` / same-lane `targetC` slice in `MLF.Elab.Run.ResultType.Fallback` with focused `PipelineSpec` coverage and a passing full repo gate, `J3` reverified that exact lane under fresh focused/full-gate evidence, and `J4` finalized the bounded next-step token `continue-bounded`; the live roadmap now marks `J1` through `J4` done and carries one new pending successor bind item `K1`.
 - Completed the bounded `H` cycle through accepted rounds `round-050` through `round-053`: `H1` bound the remaining local-binding `instArgRootMultiBase` lane, `H2` landed the bounded `rootLocalInstArgMultiBase` / `targetC -> rootFinal` slice in `MLF.Elab.Run.ResultType.Fallback` with focused `PipelineSpec` coverage and a passing full repo gate, `H3` reverified that exact lane under fresh focused/full-gate evidence, and `H4` finalized the bounded next-step token `continue-bounded`; the live roadmap now marks `H1` through `H4` done and carries one new pending successor bind item `I1`.
 - Cleaned the completed `G`-cycle control-plane residue, archived the finished continue-bounded orchestrator-run task packet, restored missing historical `round-047` `selection.md` / `plan.md` artifacts in the main checkout, and refreshed the live top-level `orchestrator/` for one new bounded `H1` through `H4` cycle rooted in accepted `G4 = continue-bounded`, with the next bounded target family fixed to the remaining local-binding `instArgRootMultiBase` lane.
 - Refreshed the live top-level `orchestrator/` after the accepted initial successor cycle: the control plane now targets one new bounded non-widening follow-on cycle (`C1` through `C4`) rooted in the accepted `continue-bounded` result, preserves rounds `001` through `033` as historical evidence, and resets `orchestrator/state.json` to idle `select-task` with `last_completed_round: "round-033"`.

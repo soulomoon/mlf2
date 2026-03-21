@@ -4,6 +4,76 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 101 post-`L2` automatic iso-recursive next-loop roadmap scaffold (completed 2026-03-21)
+
+- Completed:
+  - closed the repaired `URI-R2-C1` continue-bounded queue through accepted
+    `round-066` `L1` fail-closed bind and accepted `round-067`
+    `L2 = stop-blocked`, leaving no unfinished roadmap item inside the current
+    inherited explicit-only / non-equi-recursive / non-cyclic-graph /
+    no-second-interface / no-fallback boundary;
+  - created a fresh next-loop packet under
+    `tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/`, including
+    `task_plan.md`, `findings.md`, `progress.md`, `mechanism_table.md`,
+    `orchestrator_prompt.md`, and `orchestrator-log.jsonl`;
+  - recorded the provisional next-loop mechanism order around a separate
+    post-`L2` roadmap amendment, thesis-backed next-subject selection,
+    reopened-loop safety contract, exact target bind, minimal slice,
+    verification/decision, and long-horizon automatic iso-recursive inference
+    closure.
+- Verification:
+  - docs-only scaffold anchored to
+    `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`,
+    `docs/plans/2026-03-21-uri-r2-c1-l1-next-target-bind.md`,
+    `docs/plans/2026-03-21-uri-r2-c1-l2-post-l1-fail-closed-successor-decision-gate.md`,
+    `orchestrator/roadmap.md`, and `papers/these-finale-english.txt`
+- Rolling priorities (next):
+  1. Draft and accept a separate roadmap amendment that names exactly one next
+     live subject beyond `L2 = stop-blocked`.
+  2. Keep the preserved generic scheme-alias / base-like `baseTarget` route
+     blocked until that amendment and a fresh selection are both accepted.
+  3. Use
+     `tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
+     as the authoritative next-loop roadmap scaffold for any reopened automatic
+     iso-recursive inference campaign.
+
+## Task 100 bounded `J`-cycle orchestrator runtime (in progress 2026-03-20)
+
+- Completed so far:
+  - executed the live top-level continue-bounded control plane through accepted `round-058`, with all substantive guider/planner/implementer/reviewer/merger work delegated under the repo-local orchestrator contract;
+  - finalized `J1` as the exact next-target bind for the local inst-arg-only singleton-base `baseTarget -> baseC` / same-lane `targetC` lane, merged its accepted payload, and updated the live roadmap so `J2` became the next bounded successor item;
+  - finalized `J2` as the bounded local inst-arg-only singleton-base implementation slice, with the accepted payload merged and the live roadmap updated to queue bounded successors `J3` and `J4`;
+  - finalized `J3` as the bounded verification/evidence consolidation gate for that accepted lane, merged the accepted docs-only payload, and updated the live roadmap so `J4` became the bounded decision gate for the same lane;
+  - finalized `J4` as the bounded next-cycle decision gate for that accepted lane, merged the accepted docs-only payload, and updated the live roadmap to queue `K1` as the next fresh exact-target bind after `J4 = continue-bounded`;
+  - finalized `K1` as the bounded next-target bind that freezes the `K2` implementation slice to the local empty-candidate / no-inst-arg scheme-alias/base-like `baseTarget -> baseC` lane plus its same-lane `targetC` use, then updated the live roadmap to queue `K2`.
+- Verification so far:
+  - docs-only `J1` reviewer checks: PASS
+  - `python3 -m json.tool orchestrator/state.json`: PASS after opening active `round-063` with `last_completed_round: "round-062"`
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`: PASS after the guider marked `K1` done and left `K2` as the next pending bounded item
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "ARI-C1 feasibility characterization (bounded prototype-only)"'`: PASS in accepted `J2` attempt 1 (`19 examples, 0 failures`)
+  - `cabal build all && cabal test`: PASS in accepted `J3` attempt 1 (`1140 examples, 0 failures`)
+- Rolling priorities (next):
+  1. Run `K2`, the bounded implementation slice for the `K1`-frozen local empty-candidate / no-inst-arg scheme-alias/base-like `baseTarget -> baseC` / same-lane `targetC` lane.
+  2. Keep the live subject fixed to repaired `URI-R2-C1` and preserve the inherited explicit-only / non-equi-recursive / non-cyclic-graph boundary unless a later accepted roadmap update explicitly changes it.
+  3. Treat accepted `J1`, accepted `J2`, accepted `J3`, accepted `J4`, accepted `K1`, the completed `I2` / `I3` / `I4` local single-base chain, and the already-accepted scheme-alias/base-like `baseTarget` route as predecessor evidence only; do not reinterpret them as replay, non-local, or cross-family widening clearance.
+
+## Task 99 bounded `I`-cycle orchestrator runtime (completed 2026-03-20)
+
+- Completed:
+  - executed the live top-level continue-bounded control plane through accepted rounds `round-054` to `round-057`, with all substantive guider/planner/implementer/reviewer/merger work delegated under the repo-local orchestrator contract;
+  - finalized `I1` as the exact next-target bind for the local single-base `baseTarget -> baseC` / same-lane `targetC` lane, `I2` as the bounded implementation slice for that exact lane, `I3` as the bounded verification/evidence consolidation gate for that lane after retrying once to restore `cabal` on PATH, and `I4` as the bounded next-cycle decision `continue-bounded` after retrying once to correct stale bug-authority packet drift;
+  - returned the live controller to idle `stage: "done"` after the guider recorded the accepted `I4` result and appended one new pending successor item `J1` as the next exact-target bind.
+- Verification:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "ARI-C1 feasibility characterization (bounded prototype-only)"'`: PASS in accepted `I3` retry attempt 2 (`17 examples, 0 failures`)
+  - `cabal build all && cabal test`: PASS in accepted `I3` retry attempt 2 (`1138 examples, 0 failures`)
+  - docs-only `I4` reviewer checks: PASS, with no `src/` / `test/` / `mlf2.cabal` diff
+  - `python3 -m json.tool orchestrator/state.json`: PASS
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`: PASS
+- Rolling priorities (next):
+  1. Run `J1`, the continue-bounded bind and exact next-slice target selection after accepted `I4 = continue-bounded`, before opening any new production diff.
+  2. Keep the live subject fixed to repaired `URI-R2-C1` and preserve the inherited explicit-only / non-equi-recursive / non-cyclic-graph boundary unless a later accepted roadmap update explicitly changes it.
+  3. Treat the accepted `I2` / `I3` / `I4` local single-base chain plus the already-accepted scheme-alias/base-like `baseTarget` route outside that lane as predecessor evidence only; do not reinterpret them as replay, non-local, or cross-family widening clearance.
+
 ## Task 98 bounded `H`-cycle orchestrator runtime (completed 2026-03-20)
 
 - Completed:
