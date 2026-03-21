@@ -21,17 +21,26 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
     reopened-loop safety contract, exact target bind, minimal slice,
     verification/decision, and long-horizon automatic iso-recursive inference
     closure.
+  - accepted `round-068` `N1` as the docs-only post-`L2` roadmap-amendment
+    authority gate, reopening the successor control plane only at planning
+    scope, preserving the inherited explicit-only / non-equi-recursive /
+    non-cyclic-graph / no-second-interface / no-fallback boundary unchanged,
+    and making the preserved generic scheme-alias / base-like `baseTarget`
+    route admissible for later `N2` selection only.
 - Verification:
   - docs-only scaffold anchored to
     `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`,
     `docs/plans/2026-03-21-uri-r2-c1-l1-next-target-bind.md`,
     `docs/plans/2026-03-21-uri-r2-c1-l2-post-l1-fail-closed-successor-decision-gate.md`,
     `orchestrator/roadmap.md`, and `papers/these-finale-english.txt`
+  - accepted `round-068` docs-only reviewer checks: PASS
 - Rolling priorities (next):
-  1. Draft and accept a separate roadmap amendment that names exactly one next
-     live subject beyond `L2 = stop-blocked`.
+  1. Run `N2`, the thesis-backed next live-subject selection inside the
+     accepted `N1 = reopen-planning-only` lane, before binding any exact
+     implementation slice.
   2. Keep the preserved generic scheme-alias / base-like `baseTarget` route
-     blocked until that amendment and a fresh selection are both accepted.
+     admissible only for that `N2` selection; do not reinterpret admissibility
+     as implementation or verification readiness.
   3. Use
      `tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
      as the authoritative next-loop roadmap scaffold for any reopened automatic

@@ -4,8 +4,8 @@
 
 - This top-level `orchestrator/` now succeeds the completed repaired
   `URI-R2-C1` continue-bounded queue whose accepted execution record ends at
-  `orchestrator/rounds/round-067`.
-- Completed rounds `round-001` through `round-067` remain inherited baseline
+  `orchestrator/rounds/round-068`.
+- Completed rounds `round-001` through `round-068` remain inherited baseline
   and predecessor evidence.
 - The completed recursive-types packet under
   `tasks/todo/2026-03-11-recursive-types-orchestration/` remains immutable
@@ -28,22 +28,30 @@
   no-second-interface / no-fallback boundary remains mandatory until an accepted
   roadmap amendment explicitly changes it.
 - The accepted `L1` and `L2` artifacts close the prior repaired `URI-R2-C1`
-  queue. No reopened live subject is currently authorized. The preserved
-  generic scheme-alias / base-like `baseTarget` route remains blocked future
-  context only unless a separate roadmap amendment is accepted first and a fresh
-  selection later authorizes work.
+  queue. That queue remains closed predecessor evidence only.
+- The accepted `N1` artifact in
+  `docs/plans/2026-03-22-automatic-iso-recursive-post-l2-roadmap-amendment-authority-gate.md`
+  records the only lawful post-`L2` authority outcome as
+  `reopen-planning-only`: the successor lane reopens only for docs-first
+  planning, the inherited explicit-only / non-equi-recursive /
+  non-cyclic-graph / no-second-interface / no-fallback boundary remains fixed,
+  and implementation plus verification stay blocked.
+- Under accepted `N1` authority, the preserved generic scheme-alias /
+  base-like `baseTarget` route is admissible for later `N2` selection only.
+  No other replay path, fallback family, solver-wide route, cross-family route,
+  or code-changing slice is live.
 - The long-horizon direction remains automatic iso-recursive type synthesis in
-  the solver/pipeline, but this refreshed control plane must first establish a
-  lawful post-`L2` reopening path before any new bind, implementation, or
-  verification slice begins.
+  the solver/pipeline, but the refreshed control plane now reopens only at
+  planning scope and must still complete bounded `N2` / `N3` / `N4` authority
+  before any implementation or verification slice begins.
 
-1. [pending] Execute the `N1` post-`L2` roadmap-amendment authority gate for automatic iso-recursive inference
+1. [done] Execute the `N1` post-`L2` roadmap-amendment authority gate for automatic iso-recursive inference
     Depends on: none
-    Completion notes: complete when the accepted `N1` artifact and reviewer record name the authoritative attempt that lawfully reopens successor work beyond the accepted `L2 = stop-blocked` closure without silently reopening the exhausted repaired `URI-R2-C1` queue. The accepted artifact must preserve or explicitly revise the inherited explicit-only / non-equi-recursive / non-cyclic-graph / no-second-interface / no-fallback boundary, state whether the preserved generic scheme-alias / base-like `baseTarget` route remains blocked or becomes admissible for later selection, and forbid implementation or verification from beginning until later roadmap items explicitly authorize them.
+    Completion notes: completed by accepted `round-068` via `docs/plans/2026-03-22-automatic-iso-recursive-post-l2-roadmap-amendment-authority-gate.md`, which finalized the authoritative `N1` outcome as `reopen-planning-only`. `N1` preserves accepted `L1` / `L2` closure, keeps repaired `URI-R2-C1` closed as predecessor evidence only, preserves the inherited explicit-only / non-equi-recursive / non-cyclic-graph / no-second-interface / no-fallback boundary unchanged, makes the preserved generic scheme-alias / base-like `baseTarget` route admissible for later `N2` selection only, and keeps implementation plus verification blocked until later accepted roadmap items authorize them.
 
-2. [pending] Execute the `N2` thesis-backed next live-subject selection for the reopened loop
+2. [pending] Execute the `N2` thesis-backed next live-subject selection inside the accepted planning-only lane
     Depends on: item 1
-    Completion notes: complete when the accepted `N2` artifact and reviewer record name exactly one thesis-backed next live subject inside the authority created by `N1`, explicitly defer the rejected alternatives, and preserve the accepted `L1` / `L2` closure plus the inherited negative findings as predecessor evidence only. `N2` must not bind an implementation slice yet; it chooses the reopened subject only.
+    Completion notes: complete when the accepted `N2` artifact and reviewer record choose exactly one thesis-backed docs-first next live subject inside `N1 = reopen-planning-only`, explicitly preserve accepted `L1` / `L2` closure plus accepted `N1` planning-only authority as binding continuity, and defer every rejected alternative as still blocked. The preserved generic scheme-alias / base-like `baseTarget` route is admissible for this selection, but `N2` must not yet bind an implementation slice, reinterpret admissibility as readiness, or widen into replay reopen, cross-family search, solver-wide recursive inference, or any code-changing work.
 
 3. [pending] Execute the `N3` reopened-loop safety and acceptance contract for the selected subject
     Depends on: item 2
