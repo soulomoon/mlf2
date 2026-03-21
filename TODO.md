@@ -43,6 +43,14 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
     generic `targetC` consumer, and the matching
     `schemeAliasBaseLikeFallback False` regression anchor as the only
     in-scope target family.
+  - accepted `round-072` `N5` as the bounded implementation slice for that
+    exact `N4`-frozen packet, leaving the generic `baseTarget` computation
+    unchanged, naming the selected non-local packet explicitly with
+    `rootNonLocalSchemeAliasBaseLike`, routing only the same-lane generic
+    `targetC` consumer through that proof in
+    `src/MLF/Elab/Run/ResultType/Fallback.hs`, and refreshing the focused
+    `PipelineSpec` behavior/source guards while preserving the accepted local
+    continuity lanes unchanged.
 - Verification:
   - docs-only scaffold anchored to
     `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`,
@@ -53,21 +61,20 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - accepted `round-069` docs-only reviewer checks: PASS
   - accepted `round-070` docs-only reviewer checks: PASS
   - accepted `round-071` docs-only reviewer checks: PASS
+  - accepted `round-072` focused `ARI-C1 feasibility characterization (bounded prototype-only)` reviewer checks: PASS
+  - accepted `round-072` full gate reviewer checks: `cabal build all && cabal test`: PASS
 - Rolling priorities (next):
-  1. Run `N5`, the smallest safe slice for the frozen non-local generic
-     scheme-root alias-bound / base-like `baseTarget -> baseC` packet in
-     `MLF.Elab.Run.ResultType.Fallback`, while keeping the slice bounded to
-     its same-lane generic `targetC` use and the matching
-     `schemeAliasBaseLikeFallback False` regression anchor.
-  2. Keep every non-selected route, replay reopen, `InstBot`, local lanes,
-     and broader recursive-inference family blocked while `N5` stays inside
-     the accepted `N4` owner / inlining / binding-flag-reconstruction packet;
-     do not reinterpret `N4` target binding as verification or widening
-     clearance.
+  1. Run `N6`, the bounded verification and evidence consolidation gate for
+     the exact accepted `N5` non-local proof slice in
+     `MLF.Elab.Run.ResultType.Fallback` and its focused `PipelineSpec`
+     anchors under the active `N3` acceptance contract.
+  2. Treat accepted `N5` as bounded proof-slice evidence only; do not
+     reinterpret it as clearance to reopen replay, `MLF.Elab.Inst`,
+     `InstBot`, local-lane widening, or any other fallback family.
   3. Use
      `tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
-     as the authoritative next-loop roadmap scaffold for any reopened automatic
-     iso-recursive inference campaign.
+     as the authoritative next-loop roadmap scaffold, with `N6` now the next
+     pending bounded item.
 
 ## Task 100 bounded `J`-cycle orchestrator runtime (in progress 2026-03-20)
 

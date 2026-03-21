@@ -3,6 +3,14 @@
 ## Unreleased
 
 ### Changed
+- Accepted `round-072` `N5` as the bounded implementation slice for the exact
+  `N4`-frozen non-local `baseTarget -> baseC` packet: the live successor
+  control plane now records the explicit
+  `rootNonLocalSchemeAliasBaseLike` proof and dedicated same-lane `targetC`
+  arm in `MLF.Elab.Run.ResultType.Fallback`, keeps the accepted local lanes
+  unchanged, refreshes the focused `PipelineSpec` behavior/source guards, and
+  updates the live roadmap so `N6` is the next bounded verification/evidence
+  item.
 - Accepted `round-071` `N4` as the exact bounded target bind for the selected
   preserved generic scheme-alias / base-like `baseTarget` subject: the live
   successor control plane now freezes the non-local generic scheme-root
