@@ -32,6 +32,11 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
     `baseTarget` route as the only selected docs-first alias-bound /
     bound-inlining / binding-structure planning subject while keeping every
     alternative, implementation slice, and verification slice blocked.
+  - accepted `round-070` `N3` as the reopened-loop safety and acceptance
+    contract for that selected `baseTarget` planning subject, freezing the
+    verifier-checkable invariant audit, acceptance criteria, and explicit
+    no-go boundaries for alias-bound ownership, inverse-translation-safe
+    bound inlining, and binding-flag reconstruction.
 - Verification:
   - docs-only scaffold anchored to
     `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`,
@@ -40,14 +45,15 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
     `orchestrator/roadmap.md`, and `papers/these-finale-english.txt`
   - accepted `round-068` docs-only reviewer checks: PASS
   - accepted `round-069` docs-only reviewer checks: PASS
+  - accepted `round-070` docs-only reviewer checks: PASS
 - Rolling priorities (next):
-  1. Run `N3`, the reopened-loop safety and acceptance contract for the
-     selected preserved generic scheme-alias / base-like `baseTarget`
-     planning subject, before binding any exact target.
-  2. Keep the selected `baseTarget` route at planning scope only until an
-     accepted `N3` safety contract and a later accepted `N4` exact bind say
-     otherwise; do not reinterpret selection as implementation or verification
-     readiness.
+  1. Run `N4`, the exact bounded target bind for the selected preserved
+     generic scheme-alias / base-like `baseTarget` route, and keep the bind
+     constrained to the accepted `N3` invariant/acceptance contract.
+  2. Keep every non-selected route, replay reopen, `InstBot`, and any broader
+     recursive-inference family blocked while `N4` names one exact owner /
+     inlining / binding-flag-reconstruction slice; do not reinterpret `N3`
+     safety clearance as implementation or verification readiness.
   3. Use
      `tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
      as the authoritative next-loop roadmap scaffold for any reopened automatic

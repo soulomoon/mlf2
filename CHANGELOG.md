@@ -3,6 +3,13 @@
 ## Unreleased
 
 ### Changed
+- Accepted `round-070` `N3` as the reopened-loop safety and acceptance
+  contract for the selected preserved generic scheme-alias / base-like
+  `baseTarget` planning subject: the live successor control plane now freezes
+  verifier-checkable invariant axes and no-go conditions for alias-bound
+  ownership, inverse-translation-safe bound inlining, and binding-flag
+  reconstruction, while updating the live roadmap so `N4` is the next bounded
+  exact-target bind item.
 - Accepted `round-069` `N2` as the thesis-backed next live-subject selection
   inside the accepted `N1 = reopen-planning-only` lane: the live successor
   control plane now fixes the preserved generic scheme-alias / base-like
