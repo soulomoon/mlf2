@@ -3,10 +3,15 @@
 ## Context
 
 - This top-level `orchestrator/` now succeeds the completed repaired
-  `URI-R2-C1` continue-bounded queue whose accepted execution record ends at
-  `orchestrator/rounds/round-068`.
-- Completed rounds `round-001` through `round-068` remain inherited baseline
-  and predecessor evidence.
+  `URI-R2-C1` continue-bounded queue. That predecessor queue remains closed
+  evidence whose accepted execution record ended at
+  `orchestrator/rounds/round-067`, while the refreshed post-`L2` successor
+  control plane now extends the accepted execution record through
+  `orchestrator/rounds/round-069`.
+- Completed rounds `round-001` through `round-069` remain authoritative
+  historical evidence: `round-001` through `round-067` are inherited baseline
+  and predecessor evidence, and `round-068` plus `round-069` are accepted
+  successor-lane planning rounds for `N1` and `N2`.
 - The completed recursive-types packet under
   `tasks/todo/2026-03-11-recursive-types-orchestration/` remains immutable
   predecessor evidence.
@@ -40,22 +45,29 @@
   base-like `baseTarget` route is admissible for later `N2` selection only.
   No other replay path, fallback family, solver-wide route, cross-family route,
   or code-changing slice is live.
+- The accepted `N2` artifact in
+  `docs/plans/2026-03-22-automatic-iso-recursive-next-live-subject-selection.md`
+  now fixes the next live planning subject as the preserved generic
+  scheme-alias / base-like `baseTarget` route only. That subject remains a
+  docs-first alias-bound / bound-inlining / binding-structure planning lane;
+  implementation, verification, replay reopen, and every non-selected route
+  remain blocked.
 - The long-horizon direction remains automatic iso-recursive type synthesis in
   the solver/pipeline, but the refreshed control plane now reopens only at
-  planning scope and must still complete bounded `N2` / `N3` / `N4` authority
+  planning scope and must still complete bounded `N3` / `N4` authority
   before any implementation or verification slice begins.
 
 1. [done] Execute the `N1` post-`L2` roadmap-amendment authority gate for automatic iso-recursive inference
     Depends on: none
     Completion notes: completed by accepted `round-068` via `docs/plans/2026-03-22-automatic-iso-recursive-post-l2-roadmap-amendment-authority-gate.md`, which finalized the authoritative `N1` outcome as `reopen-planning-only`. `N1` preserves accepted `L1` / `L2` closure, keeps repaired `URI-R2-C1` closed as predecessor evidence only, preserves the inherited explicit-only / non-equi-recursive / non-cyclic-graph / no-second-interface / no-fallback boundary unchanged, makes the preserved generic scheme-alias / base-like `baseTarget` route admissible for later `N2` selection only, and keeps implementation plus verification blocked until later accepted roadmap items authorize them.
 
-2. [pending] Execute the `N2` thesis-backed next live-subject selection inside the accepted planning-only lane
+2. [done] Execute the `N2` thesis-backed next live-subject selection inside the accepted planning-only lane
     Depends on: item 1
-    Completion notes: complete when the accepted `N2` artifact and reviewer record choose exactly one thesis-backed docs-first next live subject inside `N1 = reopen-planning-only`, explicitly preserve accepted `L1` / `L2` closure plus accepted `N1` planning-only authority as binding continuity, and defer every rejected alternative as still blocked. The preserved generic scheme-alias / base-like `baseTarget` route is admissible for this selection, but `N2` must not yet bind an implementation slice, reinterpret admissibility as readiness, or widen into replay reopen, cross-family search, solver-wide recursive inference, or any code-changing work.
+    Completion notes: completed by accepted `round-069` via `docs/plans/2026-03-22-automatic-iso-recursive-next-live-subject-selection.md`, which finalized the authoritative `N2` outcome as `baseTarget-planning-subject-selected`. `N2` preserves accepted `L1` / `L2` closure plus accepted `N1 = reopen-planning-only` continuity, keeps repaired `URI-R2-C1` closed as predecessor evidence only, and selects exactly one thesis-backed docs-first next live subject: the preserved generic scheme-alias / base-like `baseTarget` route. That selection remains planning-only, explicitly defers every alternative as blocked, and does not bind an implementation slice, verification slice, replay reopen, cross-family search, solver-wide recursive inference route, or any code-changing work.
 
-3. [pending] Execute the `N3` reopened-loop safety and acceptance contract for the selected subject
+3. [pending] Execute the `N3` reopened-loop safety and acceptance contract for the selected preserved generic scheme-alias / base-like `baseTarget` planning subject
     Depends on: item 2
-    Completion notes: complete when the accepted `N3` artifact and reviewer record provide the verifier-checkable invariant audit, acceptance criteria, threatened-property boundaries, and no-go conditions required before any code-changing spike for the selected `N2` subject. `N3` must preserve or explicitly revise the inherited explicit-only / non-equi-recursive / non-cyclic-graph / no-second-interface / no-fallback boundary and must not silently authorize implementation beyond the stated contract.
+    Completion notes: complete when the accepted `N3` artifact and reviewer record provide the verifier-checkable invariant audit, acceptance criteria, threatened-property boundaries, and no-go conditions for the selected preserved generic scheme-alias / base-like `baseTarget` planning subject, specifically covering alias-bound ownership, bound inlining, and binding-flag reconstruction inside accepted `N1 = reopen-planning-only`. `N3` must preserve accepted `L1` / `L2` / `N1` / `N2` continuity, keep repaired `URI-R2-C1` closed as predecessor evidence only, preserve or explicitly revise the inherited explicit-only / non-equi-recursive / non-cyclic-graph / no-second-interface / no-fallback boundary, and keep every non-selected route blocked. `N3` remains docs-only safety-contract work; it must not yet bind the exact `N4` target or authorize implementation or verification beyond the stated contract.
 
 4. [pending] Execute the `N4` exact bounded target bind for the reopened loop
     Depends on: item 3
