@@ -3,6 +3,13 @@
 ## Unreleased
 
 ### Changed
+- Accepted `round-069` `N2` as the thesis-backed next live-subject selection
+  inside the accepted `N1 = reopen-planning-only` lane: the live successor
+  control plane now fixes the preserved generic scheme-alias / base-like
+  `baseTarget` route as the only selected docs-first alias-bound /
+  bound-inlining / binding-structure planning subject, keeps repaired
+  `URI-R2-C1` closed as predecessor evidence, and updates the live roadmap so
+  `N3` is the next bounded safety-contract item.
 - Accepted `round-068` `N1` as a docs-only post-`L2` roadmap-amendment
   authority gate: the live successor control plane now records
   `reopen-planning-only`, keeps the repaired `URI-R2-C1` queue closed as

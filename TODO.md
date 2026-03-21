@@ -27,6 +27,11 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
     non-cyclic-graph / no-second-interface / no-fallback boundary unchanged,
     and making the preserved generic scheme-alias / base-like `baseTarget`
     route admissible for later `N2` selection only.
+  - accepted `round-069` `N2` as the thesis-backed next live-subject
+    selection, fixing the preserved generic scheme-alias / base-like
+    `baseTarget` route as the only selected docs-first alias-bound /
+    bound-inlining / binding-structure planning subject while keeping every
+    alternative, implementation slice, and verification slice blocked.
 - Verification:
   - docs-only scaffold anchored to
     `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`,
@@ -34,13 +39,15 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
     `docs/plans/2026-03-21-uri-r2-c1-l2-post-l1-fail-closed-successor-decision-gate.md`,
     `orchestrator/roadmap.md`, and `papers/these-finale-english.txt`
   - accepted `round-068` docs-only reviewer checks: PASS
+  - accepted `round-069` docs-only reviewer checks: PASS
 - Rolling priorities (next):
-  1. Run `N2`, the thesis-backed next live-subject selection inside the
-     accepted `N1 = reopen-planning-only` lane, before binding any exact
-     implementation slice.
-  2. Keep the preserved generic scheme-alias / base-like `baseTarget` route
-     admissible only for that `N2` selection; do not reinterpret admissibility
-     as implementation or verification readiness.
+  1. Run `N3`, the reopened-loop safety and acceptance contract for the
+     selected preserved generic scheme-alias / base-like `baseTarget`
+     planning subject, before binding any exact target.
+  2. Keep the selected `baseTarget` route at planning scope only until an
+     accepted `N3` safety contract and a later accepted `N4` exact bind say
+     otherwise; do not reinterpret selection as implementation or verification
+     readiness.
   3. Use
      `tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
      as the authoritative next-loop roadmap scaffold for any reopened automatic
