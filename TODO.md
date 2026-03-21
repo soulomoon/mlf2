@@ -37,6 +37,12 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
     verifier-checkable invariant audit, acceptance criteria, and explicit
     no-go boundaries for alias-bound ownership, inverse-translation-safe
     bound inlining, and binding-flag reconstruction.
+  - accepted `round-071` `N4` as the exact bounded target bind, freezing the
+    non-local generic scheme-root alias-bound / base-like `baseTarget -> baseC`
+    packet in `src/MLF/Elab/Run/ResultType/Fallback.hs`, its same-lane
+    generic `targetC` consumer, and the matching
+    `schemeAliasBaseLikeFallback False` regression anchor as the only
+    in-scope target family.
 - Verification:
   - docs-only scaffold anchored to
     `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`,
@@ -46,14 +52,18 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - accepted `round-068` docs-only reviewer checks: PASS
   - accepted `round-069` docs-only reviewer checks: PASS
   - accepted `round-070` docs-only reviewer checks: PASS
+  - accepted `round-071` docs-only reviewer checks: PASS
 - Rolling priorities (next):
-  1. Run `N4`, the exact bounded target bind for the selected preserved
-     generic scheme-alias / base-like `baseTarget` route, and keep the bind
-     constrained to the accepted `N3` invariant/acceptance contract.
-  2. Keep every non-selected route, replay reopen, `InstBot`, and any broader
-     recursive-inference family blocked while `N4` names one exact owner /
-     inlining / binding-flag-reconstruction slice; do not reinterpret `N3`
-     safety clearance as implementation or verification readiness.
+  1. Run `N5`, the smallest safe slice for the frozen non-local generic
+     scheme-root alias-bound / base-like `baseTarget -> baseC` packet in
+     `MLF.Elab.Run.ResultType.Fallback`, while keeping the slice bounded to
+     its same-lane generic `targetC` use and the matching
+     `schemeAliasBaseLikeFallback False` regression anchor.
+  2. Keep every non-selected route, replay reopen, `InstBot`, local lanes,
+     and broader recursive-inference family blocked while `N5` stays inside
+     the accepted `N4` owner / inlining / binding-flag-reconstruction packet;
+     do not reinterpret `N4` target binding as verification or widening
+     clearance.
   3. Use
      `tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
      as the authoritative next-loop roadmap scaffold for any reopened automatic
