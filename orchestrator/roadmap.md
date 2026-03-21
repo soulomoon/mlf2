@@ -7,11 +7,11 @@
   evidence whose accepted execution record ended at
   `orchestrator/rounds/round-067`, while the refreshed post-`L2` successor
   control plane now extends the accepted execution record through
-  `orchestrator/rounds/round-070`.
-- Completed rounds `round-001` through `round-070` remain authoritative
+  `orchestrator/rounds/round-071`.
+- Completed rounds `round-001` through `round-071` remain authoritative
   historical evidence: `round-001` through `round-067` are inherited baseline
-  and predecessor evidence, and `round-068` through `round-070` are accepted
-  successor-lane planning rounds for `N1`, `N2`, and `N3`.
+  and predecessor evidence, and `round-068` through `round-071` are accepted
+  successor-lane planning rounds for `N1`, `N2`, `N3`, and `N4`.
 - The completed recursive-types packet under
   `tasks/todo/2026-03-11-recursive-types-orchestration/` remains immutable
   predecessor evidence.
@@ -60,11 +60,26 @@
   admissibility gates for alias-bound ownership / bound inlining /
   binding-flag reconstruction, and keeps the exact `N4` bind plus every
   blocked route unbound.
+- The accepted `N4` artifact in
+  `docs/plans/2026-03-22-automatic-iso-recursive-base-target-exact-target-bind.md`
+  now freezes the exact bounded target for that selected `baseTarget`
+  planning subject: the preserved non-local generic scheme-root alias-bound /
+  base-like `baseTarget -> baseC` packet in
+  `src/MLF/Elab/Run/ResultType/Fallback.hs`, limited to the existing generic
+  `baseTarget` computation, the same-lane generic `targetC` consumer, and the
+  non-local `schemeAliasBaseLikeFallback False` regression anchor. It
+  preserves accepted `L1` / `L2` / `N1` / `N2` / `N3` continuity, keeps local
+  lanes, repaired `URI-R2-C1`, replay reopen, `MLF.Elab.Inst` / `InstBot`,
+  `boundVarTarget`, `boundTarget`, `schemeBodyTarget`,
+  `src/MLF/Elab/Run/ResultType/View.hs`, every other fallback family, every
+  different solver/pipeline subject, and broader recursive widening blocked,
+  and still does not authorize `N5` implementation or verification by
+  default.
 - The long-horizon direction remains automatic iso-recursive type synthesis in
   the solver/pipeline, but the refreshed control plane now reopens only at
-  planning scope and must still complete bounded `N4` target binding before
-  any `N5` design or implementation slice begins, with `N6` still required
-  before any bounded verification/evidence closure is claimed.
+  planning scope and has now completed bounded `N4` target binding; it must
+  next complete one bounded `N5` design or implementation slice for that
+  frozen packet before any `N6` verification/evidence closure can begin.
 
 1. [done] Execute the `N1` post-`L2` roadmap-amendment authority gate for automatic iso-recursive inference
     Depends on: none
@@ -78,13 +93,13 @@
     Depends on: item 2
     Completion notes: completed by accepted `round-070` via `docs/plans/2026-03-22-automatic-iso-recursive-base-target-safety-acceptance-contract.md`, with reviewer final outcome `baseTarget-safety-acceptance-contract-established`. `N3` preserves accepted `L1` / `L2` / `N1 = reopen-planning-only` / `N2 = baseTarget-planning-subject-selected` continuity, keeps repaired `URI-R2-C1` closed as predecessor evidence only, freezes the verifier-checkable invariant audit and acceptance criteria for the selected preserved generic scheme-alias / base-like `baseTarget` planning subject, and keeps replay reopen, `MLF.Elab.Inst` / `InstBot`, every non-selected route, and the exact `N4` target still blocked. `N3` remains docs-only safety-contract work and does not authorize implementation or verification beyond the stated contract.
 
-4. [pending] Execute the `N4` exact bounded target bind for the reopened loop
+4. [done] Execute the `N4` exact bounded target bind for the reopened loop
     Depends on: item 3
-    Completion notes: complete when the accepted `N4` artifact and reviewer record freeze exactly one bounded target inside the selected preserved generic scheme-alias / base-like `baseTarget` route and prove that the target satisfies the accepted `N3` contract. The bind must name the owner binder, owned bound, exact edge or translation step under study, the inverse-translation-safe bound-inlining story, and the structural / variance evidence for binding-flag reconstruction, while explicitly keeping repaired `URI-R2-C1`, replay reopen, `MLF.Elab.Inst` / `InstBot`, `boundVarTarget`, `boundTarget`, `schemeBodyTarget`, `src/MLF/Elab/Run/ResultType/View.hs`, every other fallback family, every different solver/pipeline subject, cross-family search, equi-recursive reasoning, implicit unfolding, cyclic encoding, graph-cycle exceptions, multi-SCC support, second-interface work, and no-fallback widening out of scope.
+    Completion notes: completed by accepted `round-071` via `docs/plans/2026-03-22-automatic-iso-recursive-base-target-exact-target-bind.md`, with reviewer final outcome `baseTarget-exact-target-bind-established`. `N4` preserves accepted `L1` / `L2` / `N1 = reopen-planning-only` / `N2 = baseTarget-planning-subject-selected` / `N3 = baseTarget-safety-acceptance-contract-established` continuity and freezes exactly one bounded target inside the selected preserved generic scheme-alias / base-like `baseTarget` route: the preserved non-local generic scheme-root alias-bound / base-like `baseTarget -> baseC` packet in `src/MLF/Elab/Run/ResultType/Fallback.hs`, limited to the existing generic `baseTarget` computation, the downstream same-lane generic `targetC` consumer, and the non-local `schemeAliasBaseLikeFallback False` regression anchor. The accepted bind fixes the owner binder, owned bound, exact translation step, inverse-translation-safe bound-inlining story, and structural / variance binding-flag reconstruction story for that one packet only, while keeping repaired `URI-R2-C1`, replay reopen, `MLF.Elab.Inst` / `InstBot`, every accepted local lane, `boundVarTarget`, `boundTarget`, `schemeBodyTarget`, `src/MLF/Elab/Run/ResultType/View.hs`, every other fallback family, every different solver/pipeline subject, cross-family search, equi-recursive reasoning, implicit unfolding, cyclic encoding, graph-cycle exceptions, multi-SCC support, second-interface work, and no-fallback widening out of scope. `N4` remains docs-only target-binding work and does not itself authorize `N5` implementation or verification.
 
-5. [pending] Execute the `N5` minimal design or implementation slice for the `N4`-selected target
+5. [pending] Execute the `N5` minimal design or implementation slice for the exact `N4`-frozen non-local `baseTarget -> baseC` packet
     Depends on: item 4
-    Completion notes: complete when the accepted `N5` artifact and reviewer record land exactly one smallest safe slice for the frozen `N4` target. The slice may be design-only, tests-only, or code-changing, but it must stay bounded to the `N4` target, preserve the accepted predecessor closures, and avoid silent widening into solver-wide recursive inference.
+    Completion notes: complete when the accepted `N5` artifact and reviewer record land exactly one smallest safe slice for the frozen non-local generic scheme-root alias-bound / base-like `baseTarget -> baseC` packet named by `N4`. That slice must stay bounded to the existing generic `baseTarget` computation plus downstream same-lane generic `targetC` consumer and the directly corresponding non-local `schemeAliasBaseLikeFallback False` regression anchor. The slice may be design-only, tests-only, or code-changing, but it must preserve the exact owner-binder / owned-bound pair, inverse-translation-safe bound-inlining story, and structural / variance binding-flag reconstruction frozen by `N4`, keep the accepted local `rootFinal` and empty-candidate lanes unchanged, preserve accepted `L1` / `L2` / `N1` / `N2` / `N3` / `N4` continuity, and avoid silent widening into repaired `URI-R2-C1`, replay reopen, `MLF.Elab.Inst` / `InstBot`, `boundVarTarget`, `boundTarget`, `schemeBodyTarget`, `src/MLF/Elab/Run/ResultType/View.hs`, any other fallback family, any different solver/pipeline subject, cross-family search, equi-recursive reasoning, implicit unfolding, cyclic encoding, graph-cycle exceptions, multi-SCC support, second-interface work, or no-fallback loosening.
 
 6. [pending] Execute the `N6` verification and evidence consolidation gate for the accepted `N5` slice
     Depends on: item 5

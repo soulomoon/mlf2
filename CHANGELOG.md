@@ -3,6 +3,14 @@
 ## Unreleased
 
 ### Changed
+- Accepted `round-071` `N4` as the exact bounded target bind for the selected
+  preserved generic scheme-alias / base-like `baseTarget` subject: the live
+  successor control plane now freezes the non-local generic scheme-root
+  alias-bound / base-like `baseTarget -> baseC` packet in
+  `MLF.Elab.Run.ResultType.Fallback` as the only in-scope target, together
+  with its same-lane generic `targetC` use and corresponding
+  `schemeAliasBaseLikeFallback False` regression anchor, while updating the
+  live roadmap so `N5` is the next bounded slice stage.
 - Accepted `round-070` `N3` as the reopened-loop safety and acceptance
   contract for the selected preserved generic scheme-alias / base-like
   `baseTarget` planning subject: the live successor control plane now freezes
