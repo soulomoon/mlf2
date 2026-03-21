@@ -26,3 +26,10 @@
   `baseTarget -> baseC` proof slice: fresh focused/full verification remained
   green, predecessor continuity held through `N5`, and the live control plane
   should now treat `N7` as the next bounded decision/closure item.
+- Accepted `round-074` now finalizes `N7` as the authoritative bounded
+  closure / next-cycle decision gate with outcome `continue-bounded`: the
+  exact accepted non-local `baseTarget -> baseC` packet remains the one
+  current bounded verified packet from this loop, the long-horizon automatic
+  iso-recursive inference goal is still unresolved, and any further work now
+  requires a separate roadmap amendment / update before a new bounded cycle
+  can begin.

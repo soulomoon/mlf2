@@ -12,7 +12,9 @@ toward automatic iso-recursive type inference.
 3. Scaffold `mechanism_table.md`, `orchestrator_prompt.md`, and
    `orchestrator-log.jsonl` — completed
 4. Sync adjacent guidance surfaces (`TODO.md`, `CHANGELOG.md`) — completed
-5. Future execution of the reopened loop after an accepted roadmap amendment —
+5. Execute and record accepted `N1` through `N7` reopened-loop outcomes in
+   the live control plane — completed
+6. Future post-`N7` roadmap amendment / update before any new bounded cycle —
    pending
 
 ## Constraints
@@ -25,6 +27,9 @@ toward automatic iso-recursive type inference.
 - Treat the preserved generic scheme-alias / base-like `baseTarget` route as
   blocked future work until a separate roadmap amendment and fresh selection are
   accepted.
+- Treat accepted `N7 = continue-bounded` as one bounded verified packet only;
+  it does not itself complete long-horizon automatic iso-recursive inference
+  or authorize any new target, slice, or widening.
 - Treat the mechanism order in this packet as provisional until the next
   roadmap amendment is accepted.
 
