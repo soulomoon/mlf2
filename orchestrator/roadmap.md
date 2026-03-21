@@ -7,11 +7,11 @@
   evidence whose accepted execution record ended at
   `orchestrator/rounds/round-067`, while the refreshed post-`L2` successor
   control plane now extends the accepted execution record through
-  `orchestrator/rounds/round-069`.
-- Completed rounds `round-001` through `round-069` remain authoritative
+  `orchestrator/rounds/round-070`.
+- Completed rounds `round-001` through `round-070` remain authoritative
   historical evidence: `round-001` through `round-067` are inherited baseline
-  and predecessor evidence, and `round-068` plus `round-069` are accepted
-  successor-lane planning rounds for `N1` and `N2`.
+  and predecessor evidence, and `round-068` through `round-070` are accepted
+  successor-lane planning rounds for `N1`, `N2`, and `N3`.
 - The completed recursive-types packet under
   `tasks/todo/2026-03-11-recursive-types-orchestration/` remains immutable
   predecessor evidence.
@@ -52,10 +52,19 @@
   docs-first alias-bound / bound-inlining / binding-structure planning lane;
   implementation, verification, replay reopen, and every non-selected route
   remain blocked.
+- The accepted `N3` artifact in
+  `docs/plans/2026-03-22-automatic-iso-recursive-base-target-safety-acceptance-contract.md`
+  now establishes the verifier-checkable safety and acceptance contract for
+  that selected `baseTarget` planning subject. It preserves accepted `L1` /
+  `L2` / `N1` / `N2` continuity, freezes the threatened-property audit and
+  admissibility gates for alias-bound ownership / bound inlining /
+  binding-flag reconstruction, and keeps the exact `N4` bind plus every
+  blocked route unbound.
 - The long-horizon direction remains automatic iso-recursive type synthesis in
   the solver/pipeline, but the refreshed control plane now reopens only at
-  planning scope and must still complete bounded `N3` / `N4` authority
-  before any implementation or verification slice begins.
+  planning scope and must still complete bounded `N4` target binding before
+  any `N5` design or implementation slice begins, with `N6` still required
+  before any bounded verification/evidence closure is claimed.
 
 1. [done] Execute the `N1` post-`L2` roadmap-amendment authority gate for automatic iso-recursive inference
     Depends on: none
@@ -65,13 +74,13 @@
     Depends on: item 1
     Completion notes: completed by accepted `round-069` via `docs/plans/2026-03-22-automatic-iso-recursive-next-live-subject-selection.md`, which finalized the authoritative `N2` outcome as `baseTarget-planning-subject-selected`. `N2` preserves accepted `L1` / `L2` closure plus accepted `N1 = reopen-planning-only` continuity, keeps repaired `URI-R2-C1` closed as predecessor evidence only, and selects exactly one thesis-backed docs-first next live subject: the preserved generic scheme-alias / base-like `baseTarget` route. That selection remains planning-only, explicitly defers every alternative as blocked, and does not bind an implementation slice, verification slice, replay reopen, cross-family search, solver-wide recursive inference route, or any code-changing work.
 
-3. [pending] Execute the `N3` reopened-loop safety and acceptance contract for the selected preserved generic scheme-alias / base-like `baseTarget` planning subject
+3. [done] Execute the `N3` reopened-loop safety and acceptance contract for the selected preserved generic scheme-alias / base-like `baseTarget` planning subject
     Depends on: item 2
-    Completion notes: complete when the accepted `N3` artifact and reviewer record provide the verifier-checkable invariant audit, acceptance criteria, threatened-property boundaries, and no-go conditions for the selected preserved generic scheme-alias / base-like `baseTarget` planning subject, specifically covering alias-bound ownership, bound inlining, and binding-flag reconstruction inside accepted `N1 = reopen-planning-only`. `N3` must preserve accepted `L1` / `L2` / `N1` / `N2` continuity, keep repaired `URI-R2-C1` closed as predecessor evidence only, preserve or explicitly revise the inherited explicit-only / non-equi-recursive / non-cyclic-graph / no-second-interface / no-fallback boundary, and keep every non-selected route blocked. `N3` remains docs-only safety-contract work; it must not yet bind the exact `N4` target or authorize implementation or verification beyond the stated contract.
+    Completion notes: completed by accepted `round-070` via `docs/plans/2026-03-22-automatic-iso-recursive-base-target-safety-acceptance-contract.md`, with reviewer final outcome `baseTarget-safety-acceptance-contract-established`. `N3` preserves accepted `L1` / `L2` / `N1 = reopen-planning-only` / `N2 = baseTarget-planning-subject-selected` continuity, keeps repaired `URI-R2-C1` closed as predecessor evidence only, freezes the verifier-checkable invariant audit and acceptance criteria for the selected preserved generic scheme-alias / base-like `baseTarget` planning subject, and keeps replay reopen, `MLF.Elab.Inst` / `InstBot`, every non-selected route, and the exact `N4` target still blocked. `N3` remains docs-only safety-contract work and does not authorize implementation or verification beyond the stated contract.
 
 4. [pending] Execute the `N4` exact bounded target bind for the reopened loop
     Depends on: item 3
-    Completion notes: complete when the accepted `N4` artifact and reviewer record freeze exactly one bounded target inside the selected `N2` subject and the accepted `N3` safety contract, together with any same-lane selection use required by that exact target. `N4` must name future ownership boundaries precisely and forbid implementation on any other family, replay path, non-local route, or broader trigger.
+    Completion notes: complete when the accepted `N4` artifact and reviewer record freeze exactly one bounded target inside the selected preserved generic scheme-alias / base-like `baseTarget` route and prove that the target satisfies the accepted `N3` contract. The bind must name the owner binder, owned bound, exact edge or translation step under study, the inverse-translation-safe bound-inlining story, and the structural / variance evidence for binding-flag reconstruction, while explicitly keeping repaired `URI-R2-C1`, replay reopen, `MLF.Elab.Inst` / `InstBot`, `boundVarTarget`, `boundTarget`, `schemeBodyTarget`, `src/MLF/Elab/Run/ResultType/View.hs`, every other fallback family, every different solver/pipeline subject, cross-family search, equi-recursive reasoning, implicit unfolding, cyclic encoding, graph-cycle exceptions, multi-SCC support, second-interface work, and no-fallback widening out of scope.
 
 5. [pending] Execute the `N5` minimal design or implementation slice for the `N4`-selected target
     Depends on: item 4
