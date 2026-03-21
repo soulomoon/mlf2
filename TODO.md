@@ -59,6 +59,15 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
     prototype-only)` rerun (`20 examples, 0 failures`), a fresh
     `cabal build all && cabal test` gate (`1141 examples, 0 failures`), and
     accepted-predecessor continuity without widening the live subject.
+  - accepted `round-074` `N7` as the bounded closure / next-cycle decision
+    gate for that exact accepted evidence chain, recording the authoritative
+    reopened-loop result `continue-bounded`, preserving the exact non-local
+    `baseTarget -> baseC` packet as the one current bounded verified packet,
+    keeping the inherited explicit-only / non-equi-recursive /
+    non-cyclic-graph / no-second-interface / no-fallback boundary plus the
+    blocked-route set unchanged, and updating the live roadmap so a separate
+    post-`N7` roadmap amendment / update (`N8`) is now required before any
+    new bounded cycle can begin.
 - Verification:
   - docs-only scaffold anchored to
     `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`,
@@ -74,19 +83,20 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - accepted `round-073` docs-only reviewer checks: PASS
   - accepted `round-073` focused `ARI-C1 feasibility characterization (bounded prototype-only)` verification evidence: PASS (`20 examples, 0 failures`)
   - accepted `round-073` full gate verification evidence: `cabal build all && cabal test`: PASS (`1141 examples, 0 failures`)
+  - accepted `round-074` docs-only reviewer checks: PASS
 - Rolling priorities (next):
-  1. Run `N7`, the long-horizon automatic iso-recursive inference closure /
-     next-cycle decision gate that must aggregate the accepted `N6` evidence
-     into exactly one authoritative reopened-loop outcome:
-     `continue-bounded`, `stop-blocked`, or `completed`.
-  2. Treat accepted `N6` as evidence-only for the exact accepted non-local
-     `baseTarget -> baseC` proof slice; do not reinterpret it as clearance to
-     reopen replay, `MLF.Elab.Inst`, `InstBot`, local-lane widening, or any
-     other fallback family.
+  1. Run `N8`, the separate post-`N7 = continue-bounded` roadmap amendment /
+     update that must interpret the accepted `round-074` result without
+     silently widening scope before any new bounded cycle can begin.
+  2. Treat accepted `N5`, `N6`, and `N7` as predecessor evidence only for the
+     exact accepted non-local `baseTarget -> baseC` proof slice; do not
+     reinterpret that chain as clearance to reopen replay, `MLF.Elab.Inst`,
+     `InstBot`, local-lane widening, or any other fallback family.
   3. Use
      `tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
-     as the authoritative next-loop roadmap scaffold, with `N7` now the next
-     pending bounded item.
+     together with `orchestrator/roadmap.md` as the authoritative successor
+     scaffold, with `N7` preserved as completed `continue-bounded` evidence
+     and `N8` now the next pending bounded docs-only item.
 
 ## Task 100 bounded `J`-cycle orchestrator runtime (in progress 2026-03-20)
 

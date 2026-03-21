@@ -3,6 +3,15 @@
 ## Unreleased
 
 ### Changed
+- Accepted `round-074` `N7` as the bounded closure / next-cycle decision gate
+  for the exact accepted non-local `baseTarget -> baseC` evidence chain: the
+  live successor control plane now records the authoritative reopened-loop
+  result `continue-bounded`, preserves that exact packet as the one current
+  bounded verified slice without widening the inherited explicit-only /
+  non-equi-recursive / non-cyclic-graph / no-second-interface / no-fallback
+  boundary, and updates the live roadmap so a separate post-`N7` roadmap
+  amendment / update (`N8`) is required before any new bounded cycle can
+  begin.
 - Accepted `round-073` `N6` as the bounded verification/evidence
   consolidation gate for the exact accepted `N5` non-local
   `baseTarget -> baseC` proof slice: the live successor control plane now
