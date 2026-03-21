@@ -12,3 +12,7 @@
 - 2026-03-21: scaffolded `mechanism_table.md`, `orchestrator_prompt.md`, and
   `orchestrator-log.jsonl` for the next loop and synced `TODO.md` /
   `CHANGELOG.md` to point at the new post-`L2` packet.
+- 2026-03-22: reviewed accepted `round-073` (`N6`) artifacts and synced the
+  live post-`L2` control-plane docs so `orchestrator/roadmap.md`,
+  `TODO.md`, and `CHANGELOG.md` record the accepted verification/evidence
+  consolidation gate and advance the next pending bounded item to `N7`.
