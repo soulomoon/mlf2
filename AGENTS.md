@@ -136,6 +136,7 @@ tasks/
 - For orchestrated loop campaigns, also keep `mechanism_table.md`, `orchestrator_prompt.md`, and `orchestrator-log.jsonl` in the same task folder; treat the JSONL file as the authoritative round log.
 - When a repo-local top-level `orchestrator/` exists, treat it as the live successor control plane for repo-wide round execution: `orchestrator/state.json` is machine state, `orchestrator/roadmap.md` is the live roadmap, and `orchestrator/verification.md`, `orchestrator/retry-subloop.md`, plus `orchestrator/roles/*.md` define the round contract.
 - If that top-level `orchestrator/` explicitly takes over an older task-folder campaign, keep the predecessor packet immutable as historical evidence unless a round explicitly says it is updating a human-facing summary; do not rewrite the predecessor authoritative log.
+- For repo-local orchestrator runtime, `stage: "done"` is non-terminal whenever `orchestrator/roadmap.md` still has `[pending]` or `[in-progress]` items. In that state, the controller must continue immediately into the next `select-task` transition instead of stopping or replying as if the loop were complete.
 - Re-read `task_plan.md` before major decisions, and update phase status after each completed phase.
 - Log all errors and recovery attempts in `task_plan.md`; do not repeat the same failed action unchanged.
 - Write discoveries to `findings.md` throughout execution and keep `progress.md` as the running session log.
