@@ -87,6 +87,15 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
     the live roadmap so a fresh docs-only subject-specific safety and
     acceptance contract (`N10`) is now required before any new exact target,
     implementation slice, or verification slice can begin.
+  - accepted `round-077` `N10` as the reopened-loop safety and acceptance
+    contract for the selected `boundVarTarget` planning subject, recording the
+    authoritative outcome
+    `boundVarTarget-safety-acceptance-contract-established`, preserving the
+    earlier `baseTarget` selection, earlier `N3` contract, exact accepted
+    non-local `baseTarget -> baseC` packet, and repaired-queue retained-child
+    packet as predecessor evidence only, and updating the live roadmap so a
+    fresh docs-only exact bounded target bind (`N11`) is now required before
+    any implementation slice or verification slice can begin.
 - Verification:
   - docs-only scaffold anchored to
     `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`,
@@ -105,24 +114,28 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - accepted `round-074` docs-only reviewer checks: PASS
   - accepted `round-075` docs-only reviewer checks: PASS
   - accepted `round-076` docs-only reviewer checks: PASS
+  - accepted `round-077` docs-only reviewer checks: PASS
 - Rolling priorities (next):
-  1. Run `N10`, the docs-only safety and acceptance contract for the selected
-     `boundVarTarget` planning subject, before opening any new exact target,
-     implementation slice, or verification slice.
-  2. Treat accepted `N5`, `N6`, `N7`, `N8`, and `N9` as predecessor
+  1. Run `N11`, the docs-only exact bounded target bind for the selected
+     `boundVarTarget` planning subject under accepted `N10`, before opening
+     any implementation slice or verification slice.
+  2. Treat accepted `N5`, `N6`, `N7`, `N8`, `N9`, and `N10` as predecessor
      evidence/authority only for the exact accepted non-local
      `baseTarget -> baseC` proof slice, the reopened planning-only successor
-     lane, and the selected `boundVarTarget` planning subject; do not
+     lane, the selected `boundVarTarget` planning subject, and its
+     subject-specific safety contract; do not
      reinterpret that chain as clearance to reopen replay,
      `MLF.Elab.Inst`, `InstBot`, local-lane widening, or any other fallback
-     family, and do not treat `N9` as an exact-target bind.
+     family, and do not treat `N10` as an exact-target bind or as
+     implementation/verification clearance.
   3. Use
      `tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
      together with `orchestrator/roadmap.md` as the authoritative successor
      scaffold, with `N7` preserved as the still-unresolved long-horizon row,
      `N8` preserved as completed planning-only authority evidence, `N9`
-     preserved as completed planning-only subject-selection evidence, and
-     `N10` now the next pending bounded docs-only contract item.
+     preserved as completed planning-only subject-selection evidence, `N10`
+     preserved as completed safety/acceptance-contract evidence, and `N11`
+     now the next pending bounded docs-only exact-target-bind item.
 
 ## Task 100 bounded `J`-cycle orchestrator runtime (in progress 2026-03-20)
 
