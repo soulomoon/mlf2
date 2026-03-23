@@ -3,6 +3,15 @@
 ## Unreleased
 
 ### Changed
+- Accepted `round-076` `N9` as the thesis-backed next live-subject selection
+  inside the accepted `N8 = reopen-planning-only-successor-lane`: the live
+  successor control plane now records the authoritative outcome
+  `boundVarTarget-planning-subject-selected`, preserves the earlier
+  `baseTarget` selection plus the exact accepted non-local
+  `baseTarget -> baseC` packet as predecessor evidence only without widening
+  the inherited explicit-only / non-equi-recursive / non-cyclic-graph /
+  no-second-interface / no-fallback boundary, and updates the live roadmap so
+  `N10` is the next bounded docs-only safety/acceptance-contract item.
 - Accepted `round-075` `N8` as the separate post-`N7` roadmap-amendment
   authority gate for the exact accepted non-local `baseTarget -> baseC`
   evidence chain: the live successor control plane now records the
@@ -10,7 +19,7 @@
   exact packet as predecessor evidence only without widening the inherited
   explicit-only / non-equi-recursive / non-cyclic-graph /
   no-second-interface / no-fallback boundary, and updates the live roadmap so
-  `N9` is the next bounded docs-only next live-subject selection item.
+  `N9` became the next bounded docs-only next live-subject selection item.
 - Accepted `round-074` `N7` as the bounded closure / next-cycle decision gate
   for the exact accepted non-local `baseTarget -> baseC` evidence chain: the
   live successor control plane now records the authoritative reopened-loop

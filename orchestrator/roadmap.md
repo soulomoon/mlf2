@@ -120,13 +120,14 @@
   bind a new exact target, authorize implementation, or authorize
   verification.
 - The long-horizon direction remains automatic iso-recursive type synthesis in
-  the solver/pipeline. Accepted `round-075` has now completed bounded `N8`
-  roadmap authority with authoritative outcome
-  `reopen-planning-only-successor-lane`: the long-horizon goal remains
-  unresolved, the exact accepted non-local `baseTarget -> baseC` packet is
-  predecessor evidence only, and the next lawful work is one fresh docs-only
-  next live-subject selection before any new bounded target, implementation
-  slice, or verification slice can start.
+  the solver/pipeline. Accepted `round-076` has now completed bounded `N9`
+  next live-subject selection with authoritative outcome
+  `boundVarTarget-planning-subject-selected`: the long-horizon goal remains
+  unresolved, the exact accepted non-local `baseTarget -> baseC` packet and
+  the earlier `baseTarget` lane remain predecessor evidence only, and the
+  next lawful work is one fresh docs-only safety/acceptance contract for the
+  selected `boundVarTarget` planning subject before any new bounded target,
+  implementation slice, or verification slice can start.
 
 1. [done] Execute the `N1` post-`L2` roadmap-amendment authority gate for automatic iso-recursive inference
     Depends on: none
@@ -160,6 +161,10 @@
     Depends on: item 7
     Completion notes: completed by accepted `round-075` via `docs/plans/2026-03-22-automatic-iso-recursive-post-n7-roadmap-amendment-authority-gate.md`, with authoritative review result `pass` in `orchestrator/rounds/round-075/review-record.json` and final outcome `reopen-planning-only-successor-lane`. `N8` preserves accepted `L1` / `L2` / `N1 = reopen-planning-only` / `N2 = baseTarget-planning-subject-selected` / `N3 = baseTarget-safety-acceptance-contract-established` / `N4 = baseTarget-exact-target-bind-established` / `N5 = baseTarget-non-local-proof-slice-established` / `N6` / `N7 = continue-bounded` continuity, keeps the exact accepted non-local `baseTarget -> baseC` packet as predecessor evidence only, preserves the inherited explicit-only / non-equi-recursive / non-cyclic-graph / no-second-interface / no-fallback boundary plus the blocked-route set unchanged, authorizes exactly one fresh docs-first successor-planning lane for later bounded next live-subject selection only, and still does not choose the next live subject, bind a new exact target, authorize implementation, or authorize verification.
 
-9. [pending] Execute the thesis-backed next live-subject selection inside the accepted `N8 = reopen-planning-only-successor-lane`
+9. [done] Execute the thesis-backed next live-subject selection inside the accepted `N8 = reopen-planning-only-successor-lane`
     Depends on: item 8
-    Completion notes: complete when an accepted docs-only artifact selects exactly one bounded next live subject for the reopened planning-only successor lane without silently widening scope. The accepted artifact must treat the exact accepted non-local `baseTarget -> baseC` packet as predecessor evidence only, explicitly defer every non-selected route, and keep target binding, implementation, verification, replay reopen, other fallback families, and every different solver/pipeline subject blocked until later accepted roadmap items authorize them.
+    Completion notes: completed by accepted `round-076` via `docs/plans/2026-03-23-automatic-iso-recursive-bound-var-target-next-live-subject-selection.md`, with authoritative review result `pass` in `orchestrator/rounds/round-076/review-record.json` and final outcome `boundVarTarget-planning-subject-selected`. `N9` preserves accepted `L1` / `L2` / `N1 = reopen-planning-only` / `N2 = baseTarget-planning-subject-selected` / `N3 = baseTarget-safety-acceptance-contract-established` / `N4 = baseTarget-exact-target-bind-established` / `N5 = baseTarget-non-local-proof-slice-established` / `N6` / `N7 = continue-bounded` / `N8 = reopen-planning-only-successor-lane` continuity, treats the earlier `baseTarget` selection plus the exact accepted non-local `baseTarget -> baseC` packet as predecessor evidence only, selects exactly one fresh planning-only next live subject for the reopened successor lane, and fixes that subject to the preserved retained-child / nested-`forall` / binding-structure `boundVarTarget` route in `MLF.Elab.Run.ResultType.Fallback`. `N9` explicitly defers every non-selected route and still does not bind a new exact target, authorize implementation, or authorize verification.
+
+10. [pending] Execute the reopened-loop safety and acceptance contract for the selected `boundVarTarget` planning subject
+    Depends on: item 9
+    Completion notes: complete when an accepted docs-only artifact establishes one verifier-checkable invariant audit, acceptance contract, negative-boundary list, and fail-closed conditions for the selected retained-child / nested-`forall` / binding-structure `boundVarTarget` lane without silently widening scope. The accepted artifact must treat the earlier `baseTarget` selection, the exact accepted non-local `baseTarget -> baseC` packet, and the repaired-queue retained-child packet as predecessor evidence only, and must keep exact target binding, implementation, verification, replay reopen, other fallback families, and every different solver/pipeline subject blocked until later accepted roadmap items authorize them.
