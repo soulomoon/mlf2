@@ -7,11 +7,12 @@
   evidence whose accepted execution record ended at
   `orchestrator/rounds/round-067`, while the refreshed post-`L2` successor
   control plane now extends the accepted execution record through
-  `orchestrator/rounds/round-074`.
-- Completed rounds `round-001` through `round-074` remain authoritative
+  `orchestrator/rounds/round-075`.
+- Completed rounds `round-001` through `round-075` remain authoritative
   historical evidence: `round-001` through `round-067` are inherited baseline
-  and predecessor evidence, and `round-068` through `round-074` are accepted
-  successor-lane rounds for `N1`, `N2`, `N3`, `N4`, `N5`, `N6`, and `N7`.
+  and predecessor evidence, and `round-068` through `round-075` are accepted
+  successor-lane rounds for `N1`, `N2`, `N3`, `N4`, `N5`, `N6`, `N7`, and
+  `N8`.
 - The completed recursive-types packet under
   `tasks/todo/2026-03-11-recursive-types-orchestration/` remains immutable
   predecessor evidence.
@@ -107,14 +108,25 @@
   inference goal remains unresolved, the inherited boundary and blocked-route
   set remain unchanged, and any further work must begin with a separate future
   roadmap amendment / update before any new bounded cycle can start.
+- The accepted `N8` artifact in
+  `docs/plans/2026-03-22-automatic-iso-recursive-post-n7-roadmap-amendment-authority-gate.md`
+  now interprets that accepted `N7 = continue-bounded` result into the
+  authoritative roadmap-amendment outcome
+  `reopen-planning-only-successor-lane`: the exact accepted non-local
+  `baseTarget -> baseC` packet remains predecessor evidence only, one fresh
+  docs-first successor-planning lane is now admissible for later bounded
+  next live-subject selection only, the inherited boundary plus blocked-route
+  set remain unchanged, and `N8` still does not choose a new live subject,
+  bind a new exact target, authorize implementation, or authorize
+  verification.
 - The long-horizon direction remains automatic iso-recursive type synthesis in
-  the solver/pipeline. Accepted `round-074` has now completed bounded `N7`
-  decision/closure for the exact accepted `N6` evidence with authoritative
-  outcome `continue-bounded`: one bounded verified `baseTarget -> baseC`
-  packet is established, the long-horizon goal remains unresolved, and any
-  further work must begin with a separate future roadmap amendment / update
-  before any new target, implementation slice, or verification slice can
-  start.
+  the solver/pipeline. Accepted `round-075` has now completed bounded `N8`
+  roadmap authority with authoritative outcome
+  `reopen-planning-only-successor-lane`: the long-horizon goal remains
+  unresolved, the exact accepted non-local `baseTarget -> baseC` packet is
+  predecessor evidence only, and the next lawful work is one fresh docs-only
+  next live-subject selection before any new bounded target, implementation
+  slice, or verification slice can start.
 
 1. [done] Execute the `N1` post-`L2` roadmap-amendment authority gate for automatic iso-recursive inference
     Depends on: none
@@ -144,6 +156,10 @@
     Depends on: item 6
     Completion notes: completed by accepted `round-074` via `docs/plans/2026-03-22-automatic-iso-recursive-base-target-non-local-next-cycle-decision-gate.md`, with authoritative review result `pass` in `orchestrator/rounds/round-074/review-record.json` and final outcome `continue-bounded`. `N7` preserves accepted `L1` / `L2` / `N1 = reopen-planning-only` / `N2 = baseTarget-planning-subject-selected` / `N3 = baseTarget-safety-acceptance-contract-established` / `N4 = baseTarget-exact-target-bind-established` / `N5 = baseTarget-non-local-proof-slice-established` / `N6` continuity, confirms the exact accepted non-local `baseTarget -> baseC` packet remains the current bounded verified packet with no tracked code/public/exe/Cabal drift, keeps the inherited explicit-only / non-equi-recursive / non-cyclic-graph / no-second-interface / no-fallback boundary plus replay reopen, `MLF.Elab.Inst`, `InstBot`, accepted local lanes, `boundVarTarget`, `boundTarget`, `schemeBodyTarget`, `src/MLF/Elab/Run/ResultType/View.hs`, every other fallback family, every different solver/pipeline subject, cross-family search, equi-recursive reasoning, cyclic encoding, multi-SCC support, second-interface work, and no-fallback widening blocked, and records that the long-horizon goal remains unresolved so any further work requires a separate future roadmap amendment / update before any new bounded cycle can begin.
 
-8. [pending] Execute a separate post-`N7 = continue-bounded` roadmap amendment / update before any new bounded cycle
+8. [done] Execute a separate post-`N7 = continue-bounded` roadmap amendment / update before any new bounded cycle
     Depends on: item 7
-    Completion notes: complete when an accepted docs-only artifact interprets the accepted `N7 = continue-bounded` result into exactly one bounded next-step authority outcome without silently widening scope: either keep additional work closed, or authorize exactly one fresh planning-only bounded successor lane. The accepted artifact must preserve completed-item truth, treat the accepted non-local `baseTarget -> baseC` packet as predecessor evidence only, and keep replay reopen, other fallback families, other solver/pipeline subjects, and any implementation or verification work blocked until that authority is explicit.
+    Completion notes: completed by accepted `round-075` via `docs/plans/2026-03-22-automatic-iso-recursive-post-n7-roadmap-amendment-authority-gate.md`, with authoritative review result `pass` in `orchestrator/rounds/round-075/review-record.json` and final outcome `reopen-planning-only-successor-lane`. `N8` preserves accepted `L1` / `L2` / `N1 = reopen-planning-only` / `N2 = baseTarget-planning-subject-selected` / `N3 = baseTarget-safety-acceptance-contract-established` / `N4 = baseTarget-exact-target-bind-established` / `N5 = baseTarget-non-local-proof-slice-established` / `N6` / `N7 = continue-bounded` continuity, keeps the exact accepted non-local `baseTarget -> baseC` packet as predecessor evidence only, preserves the inherited explicit-only / non-equi-recursive / non-cyclic-graph / no-second-interface / no-fallback boundary plus the blocked-route set unchanged, authorizes exactly one fresh docs-first successor-planning lane for later bounded next live-subject selection only, and still does not choose the next live subject, bind a new exact target, authorize implementation, or authorize verification.
+
+9. [pending] Execute the thesis-backed next live-subject selection inside the accepted `N8 = reopen-planning-only-successor-lane`
+    Depends on: item 8
+    Completion notes: complete when an accepted docs-only artifact selects exactly one bounded next live subject for the reopened planning-only successor lane without silently widening scope. The accepted artifact must treat the exact accepted non-local `baseTarget -> baseC` packet as predecessor evidence only, explicitly defer every non-selected route, and keep target binding, implementation, verification, replay reopen, other fallback families, and every different solver/pipeline subject blocked until later accepted roadmap items authorize them.

@@ -68,6 +68,16 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
     blocked-route set unchanged, and updating the live roadmap so a separate
     post-`N7` roadmap amendment / update (`N8`) is now required before any
     new bounded cycle can begin.
+  - accepted `round-075` `N8` as the separate post-`N7` roadmap-amendment
+    authority gate, recording the authoritative outcome
+    `reopen-planning-only-successor-lane`, preserving the exact accepted
+    non-local `baseTarget -> baseC` packet as predecessor evidence only,
+    preserving the inherited explicit-only / non-equi-recursive /
+    non-cyclic-graph / no-second-interface / no-fallback boundary plus the
+    blocked-route set unchanged, and updating the live roadmap so a fresh
+    docs-only next live-subject selection (`N9`) is now required before any
+    new bounded target, implementation slice, or verification slice can
+    begin.
 - Verification:
   - docs-only scaffold anchored to
     `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`,
@@ -84,19 +94,23 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - accepted `round-073` focused `ARI-C1 feasibility characterization (bounded prototype-only)` verification evidence: PASS (`20 examples, 0 failures`)
   - accepted `round-073` full gate verification evidence: `cabal build all && cabal test`: PASS (`1141 examples, 0 failures`)
   - accepted `round-074` docs-only reviewer checks: PASS
+  - accepted `round-075` docs-only reviewer checks: PASS
 - Rolling priorities (next):
-  1. Run `N8`, the separate post-`N7 = continue-bounded` roadmap amendment /
-     update that must interpret the accepted `round-074` result without
-     silently widening scope before any new bounded cycle can begin.
-  2. Treat accepted `N5`, `N6`, and `N7` as predecessor evidence only for the
-     exact accepted non-local `baseTarget -> baseC` proof slice; do not
-     reinterpret that chain as clearance to reopen replay, `MLF.Elab.Inst`,
-     `InstBot`, local-lane widening, or any other fallback family.
+  1. Run `N9`, the thesis-backed next live-subject selection inside accepted
+     `N8 = reopen-planning-only-successor-lane`, before opening any new
+     exact target, implementation slice, or verification slice.
+  2. Treat accepted `N5`, `N6`, `N7`, and `N8` as predecessor
+     evidence/authority only for the exact accepted non-local
+     `baseTarget -> baseC` proof slice plus the reopened planning-only
+     successor lane; do not reinterpret that chain as clearance to reopen
+     replay, `MLF.Elab.Inst`, `InstBot`, local-lane widening, or any other
+     fallback family.
   3. Use
      `tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
      together with `orchestrator/roadmap.md` as the authoritative successor
-     scaffold, with `N7` preserved as completed `continue-bounded` evidence
-     and `N8` now the next pending bounded docs-only item.
+     scaffold, with `N7` preserved as the still-unresolved long-horizon row,
+     `N8` preserved as completed planning-only authority evidence, and `N9`
+     now the next pending bounded docs-only selection item.
 
 ## Task 100 bounded `J`-cycle orchestrator runtime (in progress 2026-03-20)
 
