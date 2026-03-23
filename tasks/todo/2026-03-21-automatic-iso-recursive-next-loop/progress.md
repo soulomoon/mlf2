@@ -30,3 +30,11 @@
   refreshes
   `TODO.md` / `CHANGELOG.md` consistently without editing roadmap-controller
   state or production code.
+- 2026-03-23: reviewed accepted `round-076` (`N9`) artifacts and synced the
+  live post-`L2` control-plane docs plus active task packet notes so
+  `orchestrator/roadmap.md` marks `N9` done with authoritative
+  `boundVarTarget-planning-subject-selected`, appends bounded docs-only
+  successor item `N10` for the selected subject's safety/acceptance contract,
+  updates the task packet status/docs to reflect the new selected
+  `boundVarTarget` planning lane, and refreshes `TODO.md` / `CHANGELOG.md`
+  consistently without editing roadmap-controller state or production code.
