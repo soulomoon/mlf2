@@ -46,3 +46,14 @@
   The next bounded work is now the docs-only subject-specific
   safety/acceptance contract for `boundVarTarget`; target binding,
   implementation, and verification remain blocked.
+- Accepted `round-077` now finalizes `N10` as the authoritative post-`N9`
+  subject-specific safety/acceptance-contract outcome
+  `boundVarTarget-safety-acceptance-contract-established`: the fresh successor
+  lane now has one verifier-checkable invariant audit / acceptance-criteria /
+  no-go contract for the selected retained-child / nested-`forall` /
+  binding-structure `boundVarTarget` subject, while the earlier `baseTarget`
+  selection, the earlier `N3` contract, the exact accepted non-local
+  `baseTarget -> baseC` packet, and the repaired-queue retained-child packet
+  remain predecessor evidence only. The next bounded work is now the docs-only
+  exact target bind for `boundVarTarget`; implementation and verification
+  remain blocked.

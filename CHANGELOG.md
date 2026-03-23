@@ -3,6 +3,16 @@
 ## Unreleased
 
 ### Changed
+- Accepted `round-077` `N10` as the reopened-loop safety and acceptance
+  contract for the selected `boundVarTarget` planning subject: the live
+  successor control plane now records the authoritative outcome
+  `boundVarTarget-safety-acceptance-contract-established`, preserves the
+  earlier `baseTarget` selection, earlier `N3` contract, exact accepted
+  non-local `baseTarget -> baseC` packet, and repaired-queue retained-child
+  packet as predecessor evidence only without widening the inherited
+  explicit-only / non-equi-recursive / non-cyclic-graph /
+  no-second-interface / no-fallback boundary, and updates the live roadmap so
+  `N11` is the next bounded docs-only exact-target-bind item.
 - Accepted `round-076` `N9` as the thesis-backed next live-subject selection
   inside the accepted `N8 = reopen-planning-only-successor-lane`: the live
   successor control plane now records the authoritative outcome

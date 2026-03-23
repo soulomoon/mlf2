@@ -19,7 +19,9 @@ toward automatic iso-recursive type inference.
 7. Future post-`N8` thesis-backed next live-subject selection inside the
    accepted planning-only successor lane — completed
 8. Future post-`N9` subject-specific safety/acceptance contract for the
-   selected `boundVarTarget` planning subject — pending
+   selected `boundVarTarget` planning subject — completed
+9. Future post-`N10` exact bounded target bind for the selected
+   `boundVarTarget` planning subject — pending
 
 ## Constraints
 
@@ -41,10 +43,14 @@ toward automatic iso-recursive type inference.
 - Accepted `N9 = boundVarTarget-planning-subject-selected` fixes exactly one
   fresh planning subject for the post-`N8` successor lane, but does not bind
   an exact target or authorize implementation or verification.
+- Accepted `N10 = boundVarTarget-safety-acceptance-contract-established`
+  freezes the subject-specific invariant audit, acceptance criteria, and
+  no-go boundaries for that selected lane, but still does not bind an exact
+  target or authorize implementation or verification.
 - Treat the original mechanism order in this packet as historical /
-  provisional successor evidence after accepted `N9`; the next lawful fresh
-  work is the bounded docs-only subject-specific safety/acceptance contract
-  step for `boundVarTarget`, and any wider decomposition still requires later
+  provisional successor evidence after accepted `N10`; the next lawful fresh
+  work is the bounded docs-only exact target bind step for `boundVarTarget`
+  under accepted `N10`, and any wider decomposition still requires later
   accepted roadmap authority.
 
 ## Errors / Recovery
