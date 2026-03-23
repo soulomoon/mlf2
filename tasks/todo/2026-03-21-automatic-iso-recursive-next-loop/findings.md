@@ -36,3 +36,13 @@
   selected yet, and the next bounded work must therefore be docs-only
   next-subject selection rather than target binding, implementation, or
   verification.
+- Accepted `round-076` now finalizes `N9` as the authoritative post-`N8`
+  next live-subject selection outcome
+  `boundVarTarget-planning-subject-selected`: the fresh successor lane now
+  has exactly one selected retained-child / nested-`forall` /
+  binding-structure planning subject, while the earlier `baseTarget`
+  selection, the exact accepted non-local `baseTarget -> baseC` packet, and
+  the repaired-queue retained-child packet remain predecessor evidence only.
+  The next bounded work is now the docs-only subject-specific
+  safety/acceptance contract for `boundVarTarget`; target binding,
+  implementation, and verification remain blocked.
