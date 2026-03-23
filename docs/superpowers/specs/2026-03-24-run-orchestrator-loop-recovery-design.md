@@ -1,7 +1,7 @@
 # Run-Orchestrator-Loop Delegation Recovery Design
 
 Date: 2026-03-24
-Status: draft for review
+Status: reviewer-approved; awaiting user review
 Scope: shared `run-orchestrator-loop` skill only
 
 ## Goal
@@ -75,6 +75,9 @@ moving, provided all of the following remain true:
 - Preserve the existing stage order and role ownership.
 - Preserve the existing requirement that substantive stage work be delegated to
   real subagents.
+- Define `recovery-investigator` as a shared-skill-owned recovery role whose
+  source of truth lives alongside the shared skill, not in repo-local role
+  files.
 
 ## Non-Goals
 
@@ -143,6 +146,14 @@ Outputs:
 The recovery investigator must not perform guider/planner/implementer/
 reviewer/merger substantive work.
 
+The shared skill must define where this role comes from. The intended model is:
+
+- the controller resolves repo-local guider/planner/implementer/reviewer/
+  merger sources exactly as it does today; and
+- `recovery-investigator` is resolved from a shared-skill-owned prompt or
+  reference bundled with `run-orchestrator-loop`, because repo-local contracts
+  do not define it.
+
 ### 4. Permit broad controller-owned recovery actions
 
 After reading the recovery investigator’s output, the controller may take any
@@ -177,6 +188,10 @@ If the artifact is still not trustworthy, recovery continues.
 The shared skill should stop only when the recovery investigator concludes that
 no lawful real-subagent path remains.
 
+For this spec, an available delegation mechanism means a controller-usable path
+that can still launch a qualifying real subagent for the needed recovery or
+stage work without requiring the controller to simulate that role itself.
+
 Examples:
 
 - every available delegation mechanism for the required role has failed;
@@ -185,6 +200,14 @@ Examples:
 - the environment cannot run any qualifying real subagent for that stage.
 
 Only then should the controller record a precise blockage or `resume_error`.
+
+Exception:
+
+If the controller cannot launch any qualifying real subagent for the recovery
+investigation itself, it may record blockage directly from controller-visible
+evidence. In that case the controller should not pretend the recovery
+investigator ran; it should record that recovery investigation was itself
+unavailable.
 
 ## Recovery-Investigator Boundary
 
@@ -225,11 +248,9 @@ Minimum change set:
   - add the recovery-investigator role and allowed controller recovery actions.
 - `references/resume-rules.md`
   - define how an active round resumes after a non-observable delegated stage.
-
-Optional change:
-
-- add one new reference document if the recovery algorithm would otherwise make
-  `SKILL.md` or the existing references too dense.
+- `references/recovery-investigator.md`
+  - define the shared-skill-owned recovery-investigator role, its inputs,
+    outputs, and hard boundaries.
 
 ## Acceptance Criteria
 
@@ -242,10 +263,15 @@ of the following unambiguous:
   recovering;
 - the controller uses a dedicated real-subagent recovery investigator before
   concluding it is blocked;
+- the spec names the shared-skill source of truth for `recovery-investigator`
+  so implementation does not drift into repo-local role resolution changes;
 - the controller may switch delegation mechanisms when necessary without
   violating the “real subagent only” rule;
 - the controller may perform broad controller-owned repair actions but still
   may not impersonate the blocked role; and
+- when no qualifying real subagent can be launched for recovery investigation
+  itself, the controller may record precise blockage directly from
+  controller-visible evidence; and
 - terminal blockage is recorded only after available lawful recovery paths are
   exhausted.
 
