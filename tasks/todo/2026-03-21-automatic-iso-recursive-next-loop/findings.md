@@ -8,11 +8,6 @@
     accepted `ResultType.Fallback` / `PipelineSpec` lane set.
   - `L2` converted that fail-closed result into the authoritative bounded
     outcome `stop-blocked`.
-- The preserved generic scheme-alias / base-like `baseTarget` route is not
-  current authority. It remains blocked behind a separate future roadmap
-  amendment plus a fresh selection.
-- The next campaign must therefore begin with authority work, not
-  implementation work.
 - A useful next-loop decomposition is:
   1. post-`L2` roadmap amendment authority
   2. thesis-backed next live-subject selection
@@ -33,3 +28,11 @@
   iso-recursive inference goal is still unresolved, and any further work now
   requires a separate roadmap amendment / update before a new bounded cycle
   can begin.
+- Accepted `round-075` now finalizes `N8` as the authoritative post-`N7`
+  roadmap-amendment authority outcome
+  `reopen-planning-only-successor-lane`: the exact accepted non-local
+  `baseTarget -> baseC` packet is predecessor evidence only, one fresh
+  docs-first successor-planning lane is now lawful, no next live subject is
+  selected yet, and the next bounded work must therefore be docs-only
+  next-subject selection rather than target binding, implementation, or
+  verification.

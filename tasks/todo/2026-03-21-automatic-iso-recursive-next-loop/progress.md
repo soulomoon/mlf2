@@ -21,3 +21,12 @@
   `orchestrator/roadmap.md` marks `N7` done with authoritative
   `continue-bounded`, appends bounded docs-only successor item `N8`, and
   preserves the inherited boundary plus current blocked-route set unchanged.
+- 2026-03-23: reviewed accepted `round-075` (`N8`) artifacts and synced the
+  live post-`L2` control-plane docs plus active task packet notes so
+  `orchestrator/roadmap.md` marks `N8` done with authoritative
+  `reopen-planning-only-successor-lane`, appends bounded docs-only successor
+  item `N9` for next live-subject selection, updates the task packet
+  status/docs to reflect the reopened planning-only successor lane, and
+  refreshes
+  `TODO.md` / `CHANGELOG.md` consistently without editing roadmap-controller
+  state or production code.
