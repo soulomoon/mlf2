@@ -1,0 +1,33 @@
+{
+  "subject_id": "AUTOMATIC-ISO-RECURSIVE-POST-L2",
+  "scenario_id": "automatic-iso-recursive-post-l2-control-plane-v1",
+  "stage_id": "N9",
+  "attempt": 1,
+  "attempt_verdict": "accepted",
+  "stage_result": "pass",
+  "stage_action": "finalize",
+  "retry_reason": "none",
+  "fix_hypothesis": "none",
+  "status": "authoritative",
+  "authoritative_attempt": 1,
+  "authoritative_result": "pass",
+  "artifact_path": "docs/plans/2026-03-23-automatic-iso-recursive-bound-var-target-next-live-subject-selection.md",
+  "review_snapshot": "orchestrator/rounds/round-076/reviews/attempt-1.md",
+  "checks": {
+    "N9-CONTRACT": "pass",
+    "N9-N8-CONTINUITY": "pass",
+    "N9-SINGLE-SUBJECT-SELECTION": "pass",
+    "N9-PREDECESSOR-EVIDENCE-ONLY": "pass",
+    "N9-THESIS-BASIS": "pass",
+    "N9-CODE-ANCHOR-CONTINUITY": "pass",
+    "N9-BOUNDARY-PRESERVATION": "pass",
+    "N9-DEFERRED-ALTERNATIVES": "pass",
+    "N9-DIFF-BOUNDARY": "pass",
+    "N9-SKIP-NOTE": "pass",
+    "N9-IMMUTABILITY": "pass",
+    "N9-RETRY-SCHEMA": "pass",
+    "N9-SCOPE-ALIGNMENT": "pass"
+  },
+  "final_outcome": "boundVarTarget-planning-subject-selected",
+  "terminal_reason": "none"
+}
