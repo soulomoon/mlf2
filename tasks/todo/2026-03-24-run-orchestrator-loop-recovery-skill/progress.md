@@ -1,0 +1,30 @@
+# Progress
+
+- 2026-03-24: Loaded `brainstorming`, `writing-skills`, `test-driven-development`, the current shared `run-orchestrator-loop` skill, and its reference docs.
+- 2026-03-24: Confirmed the user-approved direction: broad controller recovery discretion, constrained by a dedicated recovery-investigator subagent, scoped to the shared skill only.
+- 2026-03-24: Wrote the design spec at `docs/superpowers/specs/2026-03-24-run-orchestrator-loop-recovery-design.md`.
+- 2026-03-24: Committed the initial spec document as `3609c5d Document orchestrator delegation recovery design`.
+- 2026-03-24: Ran the first spec-review subagent pass; it correctly flagged two planning gaps around shared ownership of `recovery-investigator` and the direct-blockage path when no recovery subagent can be launched.
+- 2026-03-24: Revised the spec to add a shared-skill-owned `references/recovery-investigator.md` source of truth, define “available delegation mechanism,” and allow direct controller-recorded blockage only when recovery investigation itself cannot launch.
+- 2026-03-24: Ran a second spec-review pass; it approved the spec for planning with only non-blocking advisory recommendations, so the next step is user review of the written spec.
+- 2026-03-24: The user approved the written spec and requested continuation into planning.
+- 2026-03-24: Wrote the implementation plan at `docs/superpowers/plans/2026-03-24-run-orchestrator-loop-recovery.md` and recorded the handoff paths in `tasks/todo/2026-03-24-run-orchestrator-loop-recovery-skill/orchestrator_prompt.md`.
+- 2026-03-24: Ran the first plan-review pass; it correctly flagged missing `recovery-investigator` contract details, missing mechanism-switch / exhaustion language in `SKILL.md`, and incomplete same-round/same-branch/same-worktree/same-stage verification coverage.
+- 2026-03-24: Revised the plan to include the full shared `recovery-investigator` contract, explicit mechanism-switch and exhaustion requirements, and stronger resume-invariant verification checks.
+- 2026-03-24: Ran a second plan-review pass; it correctly flagged two remaining gaps around preserving `current_task` / retry attempt during recovery and re-checking observability before leaving recovery.
+- 2026-03-24: Revised the plan again to include the `current_task` / retry-attempt freeze rule, the explicit observability re-check gate, and the advisory `substantive stage reviewer` boundary wording in delegation verification.
+- 2026-03-24: Ran a third plan-review pass; it found one remaining source-of-truth gap in Task 1 around forbidding substantive stage work inside `recovery-investigator.md`.
+- 2026-03-24: Revised the plan to add that final boundary plus the reviewer’s advisory checks for the direct-blockage exception and unchanged repo-local role resolution. The next re-review would exceed the skill’s review-loop cap, so the updated plan is being surfaced directly to the user.
+- 2026-03-24: Created an isolated implementation worktree at `/Users/ares/.config/superpowers/worktrees/orchestratorpattern/run-orchestrator-loop-recovery` on branch `codex/run-orchestrator-loop-recovery` to avoid unrelated source-checkout edits.
+- 2026-03-24: Executed Task 1 in the isolated worktree, added `references/recovery-investigator.md`, and passed both spec review and code-quality review (`f52410cdb173d54d80ed6720a0e62148d3480fb2`).
+- 2026-03-24: Executed Task 2, updated `SKILL.md`, fixed one review-found overview ambiguity about when direct blockage is allowed, and passed both review gates (`2ce5cac14066c76733df44de4f8ac0901ce155d1`).
+- 2026-03-24: Executed Task 3, updated `delegation-boundaries.md` and `resume-rules.md`, fixed one review-found ambiguity around controller-vs-investigator diagnosis ownership, and passed both review gates (`67f9a38b212d1d4a38a3ba2d009a8a5ec77f9659`).
+- 2026-03-24: Executed Task 4, aligned the final verification phrase in `SKILL.md`, then fixed a review-found cross-document mismatch so every direct-blockage rule now requires that no qualifying `recovery-investigator` can launch through any available delegation mechanism (`3b23b93304dc8fc1082afb18329e64b7512a071f`).
+- 2026-03-24: Ran a final whole-implementation review; it found two remaining recovery-path risks around persisting blockage before stopping and `recovery-investigator` controller-owned writes/repairs.
+- 2026-03-24: Applied the final whole-implementation fixes, requiring precise blockage recording in `orchestrator/state.json` before user-facing stop behavior and making `recovery-investigator` explicitly diagnosis/recommendation-only with controller-owned writes/repairs forbidden (`3ddeb19646a9c7bcbf8314e881606bb6da6c9d32`).
+- 2026-03-24: Re-ran the final whole-implementation review; it approved the completed four-file shared-skill change, and fresh local verification also passed (`final-verification-ok`, clean `git diff --check`, clean worktree). 
+- 2026-03-24: Reviewed the completed implementation in `/Users/ares/.config/superpowers/worktrees/orchestratorpattern/run-orchestrator-loop-recovery` across the approved git range `01a8ae6b571e80e5c656e0c3fbce0a59208a6c2b..3b23b93304dc8fc1082afb18329e64b7512a071f`.
+- 2026-03-24: Verified the range touches only the four approved shared-skill files, inspected the exact diff and final line-numbered contents, and reran the plan’s final assertion bundle plus `git diff --check`; both passed.
+- 2026-03-24: Logged two review findings: stale “stop and tell the user” wording still weakens the new direct-blockage persistence rule, and `recovery-investigator.md` still does not explicitly ban controller-owned repo/state mutations.
+- 2026-03-24: Re-reviewed the follow-up implementation at `3ddeb19646a9c7bcbf8314e881606bb6da6c9d32`, inspected the incremental diff from `3b23b93304dc8fc1082afb18329e64b7512a071f`, reread the final line-numbered files, and reran the plan verification bundle plus `git diff --check`.
+- 2026-03-24: Confirmed both previously reported issues are fixed and found no new problems in the approved four-file scope.

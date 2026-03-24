@@ -96,6 +96,33 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
     packet as predecessor evidence only, and updating the live roadmap so a
     fresh docs-only exact bounded target bind (`N11`) is now required before
     any implementation slice or verification slice can begin.
+  - accepted `round-078` `N11` as the docs-only exact bounded target bind for
+    the selected `boundVarTarget` planning subject, freezing exactly one
+    same-lane local `TypeRef` retained-child `boundVarTarget -> targetC`
+    packet in `src/MLF/Elab/Run/ResultType/Fallback.hs` while keeping the
+    earlier `baseTarget` lane, `schemeBodyTarget`, replay reopen, and every
+    broader fallback family as predecessor evidence or blocked future work
+    only.
+  - accepted `round-079` `N12` as the bounded implementation slice for that
+    exact `N11` packet, leaving the `boundVarTarget` candidate search
+    unchanged, introducing the explicit
+    `sameLaneLocalRetainedChildTarget` proof, routing only the same-lane
+    retained-child `keepTargetFinal` / `targetC` consumer through that proof,
+    refreshing focused `PipelineSpec` coverage, and passing both the focused
+    `ARI-C1` rerun and the full repo gate.
+  - accepted `round-080` `N13` as the bounded verification/evidence
+    consolidation gate for that exact accepted `N12` packet, recording
+    read-only `Fallback.hs` / `PipelineSpec.hs` anchors, a focused
+    `ARI-C1 feasibility characterization (bounded prototype-only)` rerun
+    passing (`20 examples, 0 failures`), and a fresh `cabal build all &&
+    cabal test` gate passing (`1141 examples, 0 failures`) without widening
+    the live subject.
+  - accepted `round-081` `N14` as the bounded next-cycle decision gate for
+    that exact accepted evidence chain, recording the sole lawful token
+    `continue-bounded`, preserving the verified same-lane retained-child
+    `boundVarTarget -> targetC` packet as bounded evidence only, and updating
+    the live roadmap so no successor lane or next bounded cycle is authorized
+    or bound without a separate future roadmap amendment/update.
 - Verification:
   - docs-only scaffold anchored to
     `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`,
@@ -115,19 +142,25 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - accepted `round-075` docs-only reviewer checks: PASS
   - accepted `round-076` docs-only reviewer checks: PASS
   - accepted `round-077` docs-only reviewer checks: PASS
+  - accepted `round-078` docs-only reviewer checks: PASS
+  - accepted `round-079` focused `ARI-C1 feasibility characterization (bounded prototype-only)` reviewer checks: PASS (`20 examples, 0 failures`)
+  - accepted `round-079` full gate reviewer checks: `cabal build all && cabal test`: PASS (`1141 examples, 0 failures`)
+  - accepted `round-080` docs-only reviewer checks: PASS
+  - accepted `round-080` focused `ARI-C1 feasibility characterization (bounded prototype-only)` verification evidence: PASS (`20 examples, 0 failures`)
+  - accepted `round-080` full gate verification evidence: `cabal build all && cabal test`: PASS (`1141 examples, 0 failures`)
+  - accepted `round-081` docs-only reviewer checks: PASS
 - Rolling priorities (next):
-  1. Run `N11`, the docs-only exact bounded target bind for the selected
-     `boundVarTarget` planning subject under accepted `N10`, before opening
-     any implementation slice or verification slice.
-  2. Treat accepted `N5`, `N6`, `N7`, `N8`, `N9`, and `N10` as predecessor
-     evidence/authority only for the exact accepted non-local
-     `baseTarget -> baseC` proof slice, the reopened planning-only successor
-     lane, the selected `boundVarTarget` planning subject, and its
-     subject-specific safety contract; do not
-     reinterpret that chain as clearance to reopen replay,
-     `MLF.Elab.Inst`, `InstBot`, local-lane widening, or any other fallback
-     family, and do not treat `N10` as an exact-target bind or as
-     implementation/verification clearance.
+  1. No live successor-roadmap item remains after accepted `N14`; the
+     controller should stay idle until a separate future roadmap amendment or
+     update explicitly creates new authority.
+  2. Treat accepted `N11`, `N12`, `N13`, and `N14` as bounded evidence only
+     for the exact same-lane retained-child `boundVarTarget -> targetC`
+     packet; do not reinterpret that chain as clearance to reopen replay,
+     `MLF.Elab.Inst`, `InstBot`, `schemeBodyTarget`, the earlier `baseTarget`
+     lane, or any other fallback family.
+  3. Preserve the inherited explicit-only / non-equi-recursive /
+     non-cyclic-graph / no-second-interface / no-fallback boundary unless a
+     later accepted roadmap amendment explicitly changes it.
   3. Use
      `tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
      together with `orchestrator/roadmap.md` as the authoritative successor
