@@ -1579,6 +1579,18 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     `shouldSatisfy`
                         isInfixOf
                             "in if rootBindingIsLocalType\n                        then pickCandidate (\\_parentRef child -> sameLocalTypeLane child)\n                        else pickCandidate (\\parentRef _child -> parentRef == scopeRoot)"
+                fallbackSrc
+                    `shouldSatisfy`
+                        isInfixOf
+                            "sameLaneLocalRetainedChildTarget =\n                    if rootBindingIsLocalType\n                        then boundVarTarget\n                        else Nothing"
+                fallbackSrc
+                    `shouldSatisfy`
+                        isInfixOf
+                            "keepTargetFinal =\n                    rootBindingIsLocalType\n                        && ( rootLocalMultiInst\n                                || rootLocalInstArgMultiBase\n                                || rootLocalSchemeAliasBaseLike\n                                || maybe False (const True) sameLaneLocalRetainedChildTarget\n                           )"
+                fallbackSrc
+                    `shouldSatisfy`
+                        isInfixOf
+                            "case sameLaneLocalRetainedChildTarget of\n                                                        Just v -> v\n                                                        Nothing -> schemeBodyTarget targetPresolutionView rootC"
 
             it "keeps retained-child fallback fail-closed when the same wrapper crosses a nested forall boundary" $ do
                 let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
