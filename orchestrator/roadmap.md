@@ -52,28 +52,34 @@
    non-cyclic-graph / no-second-interface / no-fallback boundary remains
    unchanged, and no production behavior was widened.
 
-2. [pending] Audit the current architectural constraints against the capability contract
+2. [done] Audit the current architectural constraints against the capability contract
    Depends on: item 1
-   Completion notes: classify the inherited `iso-recursive`,
-   `non-equi-recursive`, `non-cyclic-graph`, and `no-fallback` constraints as
-   `keep`, `revise`, or `unknown` against the accepted item-1 capability
-   contract and family matrix. The audit must state which constraints appear
-   compatible with the defined repo-level target, which families in `P1`-`P6`
-   or `N1`-`N6` each constraint appears to support or block, and whether
-   general inference still appears plausible inside the current architecture
-   without silently revising semantics, representation, interfaces, or
-   fallback behavior. This item remains docs-only unless the roadmap is
-   explicitly amended later.
+   Completion notes: accepted in `round-083` via
+   `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architectural-constraint-audit.md`.
+   The inherited four-constraint audit is now complete: `iso-recursive =
+   keep`, `non-equi-recursive = keep`, `non-cyclic-graph = unknown`, and
+   `no-fallback = keep`. The accepted item-2 read is still bounded and
+   docs-only: the repo-level target remains unresolved because the
+   `non-cyclic-graph` constraint is not yet shown either sufficient or
+   blocking for representative `P2`-`P6` pressure, especially around
+   non-local propagation, binder/owner sensitivity, nested polymorphism,
+   reconstruction visibility, and bounded `N6` termination pressure. No
+   architecture revision, semantic widening, interface addition, or fallback
+   widening was authorized.
 
 3. [pending] Generalize the accepted packet history into a reusable mechanism map
    Depends on: items 1, 2
    Completion notes: extract reusable mechanism families from accepted bounded
-   evidence rather than selecting another narrow lane. The output should cover
-   recursive-shape discovery, binder / owner placement, target / consumer
-   alignment, local versus non-local propagation, interaction with polymorphism
-   and instantiation, reconstruction obligations, and fail-closed ambiguity
-   handling. The result should explain multiple accepted packets and make clear
-   what still lacks a general mechanism.
+   evidence rather than selecting another narrow lane, and use them to test
+   the open item-2 pressure point: whether representative `P2`-`P5` families
+   can be explained inside the inherited acyclic (`non-cyclic-graph`) model
+   without packet-specific exceptions. The output should cover recursive-shape
+   discovery, binder / owner placement, target / consumer alignment, local
+   versus non-local propagation, interaction with polymorphism and
+   instantiation, reconstruction obligations, and fail-closed ambiguity
+   handling. The result should explain multiple accepted packets, state which
+   mechanism obligations still remain missing for the acyclic model, and stop
+   short of search/termination design or an architecture decision.
 
 4. [pending] Design the search, ambiguity, and termination model for general recursive inference
    Depends on: items 1, 2, 3
