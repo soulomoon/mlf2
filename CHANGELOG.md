@@ -3,6 +3,16 @@
 ## Unreleased
 
 ### Changed
+- Completed the remaining post-`L2` `boundVarTarget` successor lane through
+  accepted rounds `round-078` through `round-081`: `N11` froze the exact
+  same-lane local `TypeRef` retained-child `boundVarTarget -> targetC`
+  packet, `N12` landed the bounded `sameLaneLocalRetainedChildTarget` proof
+  slice in `MLF.Elab.Run.ResultType.Fallback` plus focused
+  `PipelineSpec` coverage, `N13` reverified that exact packet with fresh
+  focused/full-gate evidence (`20` / `1141` examples, `0 failures`), and
+  `N14` finalized the bounded next-step token `continue-bounded`; the live
+  `orchestrator/roadmap.md` now has no pending successor item, and any future
+  work must begin with a separate roadmap amendment/update.
 - Accepted `round-077` `N10` as the reopened-loop safety and acceptance
   contract for the selected `boundVarTarget` planning subject: the live
   successor control plane now records the authoritative outcome
