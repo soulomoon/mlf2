@@ -67,28 +67,39 @@
    architecture revision, semantic widening, interface addition, or fallback
    widening was authorized.
 
-3. [pending] Generalize the accepted packet history into a reusable mechanism map
+3. [done] Generalize the accepted packet history into a reusable mechanism map
    Depends on: items 1, 2
-   Completion notes: extract reusable mechanism families from accepted bounded
-   evidence rather than selecting another narrow lane, and use them to test
-   the open item-2 pressure point: whether representative `P2`-`P5` families
-   can be explained inside the inherited acyclic (`non-cyclic-graph`) model
-   without packet-specific exceptions. The output should cover recursive-shape
-   discovery, binder / owner placement, target / consumer alignment, local
-   versus non-local propagation, interaction with polymorphism and
-   instantiation, reconstruction obligations, and fail-closed ambiguity
-   handling. The result should explain multiple accepted packets, state which
-   mechanism obligations still remain missing for the acyclic model, and stop
-   short of search/termination design or an architecture decision.
+   Completion notes: accepted in `round-084` via
+   `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-mechanism-map.md`.
+   The accepted mechanism map now explains two bounded predecessor chains
+   (`N4`-`N7` `baseTarget -> baseC` and `N11`-`N14`
+   `boundVarTarget -> targetC`) through one seven-family vocabulary covering
+   recursive-shape discovery, binder / owner placement, target / consumer
+   alignment, local versus non-local propagation, interaction with
+   polymorphism and instantiation, reconstruction obligations, and
+   fail-closed ambiguity / unsafe-case handling. The bounded acyclic-model
+   read is still partial: `P2`-`P4` are only partially explained, `P5`
+   remains negative-only / unresolved, and the accepted record still depends
+   on named packet guards rather than a general search policy. No search
+   model, full reconstruction contract, coverage campaign, or architecture
+   decision was authorized.
 
 4. [pending] Design the search, ambiguity, and termination model for general recursive inference
    Depends on: items 1, 2, 3
-   Completion notes: define when recursive inference is considered, when it is
-   forbidden, how competing recursive candidates are compared, when ambiguity
-   must fail closed, and why the resulting search still terminates. This item
-   may include bounded prototype planning if earlier accepted items make that
-   lawful, but it must not silently widen beyond the accepted capability
-   contract and architectural audit.
+   Completion notes: starting from the accepted item-3 mechanism map, define
+   one bounded search / admissibility / termination model for the inherited
+   acyclic architecture. The output must state how anchor-first
+   recursive-shape discovery produces candidate targets, how owner / binder
+   placement and target / consumer alignment constrain local versus non-local
+   propagation, when nested-`forall` / owner-crossing / competing-candidate
+   situations must fail closed, and why the resulting search terminates
+   without cyclic graphs, multi-SCC search, or fallback. It must address the
+   named item-3 debt around packet-specific guards
+   (`rootNonLocalSchemeAliasBaseLike`, `sameLaneLocalRetainedChildTarget`,
+   `boundHasForallFrom`, `not hasForall`) by either lifting them into general
+   admissibility rules or recording them as unresolved blockers. Stop short
+   of the full reconstruction contract, the coverage campaign, or an
+   architecture decision.
 
 5. [pending] Define the full-pipeline reconstruction and validation contract
    Depends on: items 1, 3, 4
