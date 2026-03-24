@@ -7,12 +7,12 @@
   evidence whose accepted execution record ended at
   `orchestrator/rounds/round-067`, while the refreshed post-`L2` successor
   control plane now extends the accepted execution record through
-  `orchestrator/rounds/round-080`.
-- Completed rounds `round-001` through `round-080` remain authoritative
+  `orchestrator/rounds/round-081`.
+- Completed rounds `round-001` through `round-081` remain authoritative
   historical evidence: `round-001` through `round-067` are inherited baseline
-  and predecessor evidence, and `round-068` through `round-080` are accepted
+  and predecessor evidence, and `round-068` through `round-081` are accepted
   successor-lane rounds for `N1`, `N2`, `N3`, `N4`, `N5`, `N6`, `N7`, `N8`,
-  `N9`, `N10`, `N11`, `N12`, and `N13`.
+  `N9`, `N10`, `N11`, `N12`, `N13`, and `N14`.
 - The completed recursive-types packet under
   `tasks/todo/2026-03-11-recursive-types-orchestration/` remains immutable
   predecessor evidence.
@@ -174,8 +174,22 @@
   preserves `schemeBodyTarget` as neighboring boundary context only; keeps the
   earlier `baseTarget` lane and accepted repaired-queue retained-child packet
   as predecessor evidence only; and does not itself decide `N14` or authorize
-  any widening. The next lawful work is now one bounded aggregate-only
-  next-cycle decision gate for that exact verified packet.
+  any widening. At that point, the next lawful work was one bounded
+  aggregate-only next-cycle decision gate for that exact verified packet.
+- The accepted `N14` artifact in
+  `docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-same-lane-retained-child-next-cycle-decision-gate.md`
+  now aggregates that accepted `N13` evidence chain into the authoritative
+  next-cycle outcome `continue-bounded`: the exact accepted same-lane local
+  `TypeRef` retained-child `boundVarTarget -> targetC` packet remains one
+  bounded verified packet only, `stop-blocked` and `completed` are explicitly
+  rejected on the same evidence, the long-horizon automatic iso-recursive
+  inference goal remains unresolved, the inherited boundary and blocked-route
+  set remain unchanged, the earlier `baseTarget` lane and accepted
+  repaired-queue retained-child packet remain predecessor evidence only, and
+  no next bounded cycle is yet authorized or bound because any future work
+  must begin with a separate future roadmap amendment / update before any new
+  live subject, exact target, implementation slice, or verification slice may
+  begin.
 
 1. [done] Execute the `N1` post-`L2` roadmap-amendment authority gate for automatic iso-recursive inference
     Depends on: none
@@ -229,6 +243,8 @@
     Depends on: item 12
     Completion notes: completed by accepted `round-080` via `docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-same-lane-retained-child-bounded-verification-gate.md`, with authoritative review result `pass` in `orchestrator/rounds/round-080/review-record.json`. `N13` preserves accepted `L1` / `L2` / `N1 = reopen-planning-only` / `N2 = baseTarget-planning-subject-selected` / `N3 = baseTarget-safety-acceptance-contract-established` / `N4 = baseTarget-exact-target-bind-established` / `N5 = baseTarget-non-local-proof-slice-established` / `N6` / `N7 = continue-bounded` / `N8 = reopen-planning-only-successor-lane` / `N9 = boundVarTarget-planning-subject-selected` / `N10 = boundVarTarget-safety-acceptance-contract-established` / `N11 = boundVarTarget-exact-target-bind-established` / `N12 = boundVarTarget-same-lane-retained-child-proof-slice-established` continuity and consolidates fresh verifier-visible evidence for the exact accepted `N11`-frozen / `N12`-implemented same-lane local `TypeRef` retained-child `boundVarTarget -> targetC` packet only: read-only `Fallback.hs` / `PipelineSpec.hs` anchors for the unchanged `boundVarTarget` search, the explicit `sameLaneLocalRetainedChildTarget` proof, the dedicated `keepTargetFinal` / retained-child `targetC` routing, the nested-`forall` fail-closed contrast, and the preserved local/non-local continuity guards, plus a focused `ARI-C1 feasibility characterization (bounded prototype-only)` rerun passing (`20 examples, 0 failures`) and a fresh full repo gate `cabal build all && cabal test` passing (`1141 examples, 0 failures`). `N13` remains evidence-only, keeps `schemeBodyTarget` as neighboring boundary context only, keeps the earlier `baseTarget` lane and accepted repaired-queue retained-child packet as predecessor evidence only, and does not itself decide `N14` or authorize replay reopen, `MLF.Elab.Inst` / `InstBot`, `boundTarget`, `schemeBodyTarget` as a live subject, `src/MLF/Elab/Run/ResultType/View.hs`, other fallback families, other solver/pipeline subjects, cross-family search, equi-recursive reasoning, implicit unfolding, cyclic encoding, multi-SCC support, second-interface work, or no-fallback widening.
 
-14. [pending] Execute the bounded next-cycle decision gate after the accepted `N13` evidence for the selected `boundVarTarget` lane
+14. [done] Execute the bounded next-cycle decision gate after the accepted `N13` evidence for the selected `boundVarTarget` lane
     Depends on: item 13
-    Completion notes: complete when an accepted aggregate-only docs artifact consumes the accepted `round-080` / `N13` evidence chain and records exactly one bounded next-step outcome for the verified `N11`-frozen / `N12`-implemented / `N13`-reverified same-lane local `TypeRef` retained-child `boundVarTarget -> targetC` packet, preserves accepted `L1` / `L2` / `N1` through `N13` continuity, keeps the inherited explicit-only / non-equi-recursive / non-cyclic-graph / no-second-interface / no-fallback boundary unchanged, and treats every non-selected route as still blocked or predecessor evidence only. This item remains aggregate-only, does not silently widen the live subject, and does not rewrite predecessor authority.
+    Completion notes: completed by accepted `round-081` via `docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-same-lane-retained-child-next-cycle-decision-gate.md`, with authoritative review result `pass` in `orchestrator/rounds/round-081/review-record.json` and final outcome `continue-bounded`. `N14` preserves accepted `L1` / `L2` / `N1 = reopen-planning-only` / `N2 = baseTarget-planning-subject-selected` / `N3 = baseTarget-safety-acceptance-contract-established` / `N4 = baseTarget-exact-target-bind-established` / `N5 = baseTarget-non-local-proof-slice-established` / `N6` / `N7 = continue-bounded` / `N8 = reopen-planning-only-successor-lane` / `N9 = boundVarTarget-planning-subject-selected` / `N10 = boundVarTarget-safety-acceptance-contract-established` / `N11 = boundVarTarget-exact-target-bind-established` / `N12 = boundVarTarget-same-lane-retained-child-proof-slice-established` / `N13` continuity and records exactly one lawful aggregate-only next-step token for the verified `N11`-frozen / `N12`-implemented / `N13`-reverified same-lane local `TypeRef` retained-child `boundVarTarget -> targetC` packet: `continue-bounded`. It explicitly rejects `stop-blocked` and `completed` on the same evidence, keeps the inherited explicit-only / non-equi-recursive / non-cyclic-graph / no-second-interface / no-fallback boundary unchanged, preserves the earlier `baseTarget` lane and accepted repaired-queue retained-child packet as predecessor evidence only, and records that the long-horizon automatic iso-recursive inference goal remains unresolved so no next bounded cycle is yet authorized or bound and any future work must begin with a separate future roadmap amendment / update before any new live subject, exact target, implementation slice, or verification slice may begin.
+
+No further pending roadmap item is recorded at this time. Accepted `N14 = continue-bounded` preserves the exact verified packet as bounded evidence only and does not itself authorize or bind a successor lane, next bounded cycle, or next roadmap item; any later work must start with a separate future roadmap amendment / update.
