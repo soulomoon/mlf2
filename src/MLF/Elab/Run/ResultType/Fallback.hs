@@ -694,12 +694,16 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                     in if rootBindingIsLocalType
                         then pickCandidate (\_parentRef child -> sameLocalTypeLane child)
                         else pickCandidate (\parentRef _child -> parentRef == scopeRoot)
+                sameLaneLocalRetainedChildTarget =
+                    if rootBindingIsLocalType
+                        then boundVarTarget
+                        else Nothing
                 keepTargetFinal =
                     rootBindingIsLocalType
                         && ( rootLocalMultiInst
                                 || rootLocalInstArgMultiBase
                                 || rootLocalSchemeAliasBaseLike
-                                || maybe False (const True) boundVarTarget
+                                || maybe False (const True) sameLaneLocalRetainedChildTarget
                            )
             let targetC =
                     case baseTarget of
@@ -722,7 +726,7 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                                             case lookupNodeIn nodesFinal rootFinal of
                                                 Just TyVar{} -> rootFinal
                                                 _ ->
-                                                    case boundVarTarget of
+                                                    case sameLaneLocalRetainedChildTarget of
                                                         Just v -> v
                                                         Nothing -> schemeBodyTarget targetPresolutionView rootC
                                 else
