@@ -135,16 +135,18 @@
    admitted pockets remain inside the inherited acyclic model and the
    accepted item-2 `non-cyclic-graph = unknown` risk is still unresolved.
 
-7. [pending] Make the architecture decision and successor-plan choice from the bounded-subset-only coverage result
+7. [done] Make the architecture decision and successor-plan choice from the bounded-subset-only coverage result
    Depends on: items 2, 6
-   Completion notes: using the accepted item-2 audit and accepted item-6
-   `bounded subset only` result, record exactly one strategic outcome for
-   this refreshed control plane: continue within the current architecture,
-   pursue targeted boundary revision, or stop. The decision must account for
-   zero `stable visible persistence` rows, blocker debt in both admitted
-   families, nested-`forall` remaining reject-side only, and the still-live
-   `non-cyclic-graph = unknown` risk without reinterpreting bounded evidence
-   as broad generality. If continuing, name one concrete bounded successor
-   cycle. If revising, name the first lawful revision gate and the boundary
-   under review. If stopping, preserve predecessor truth and state why broader
-   work is not yet justified.
+   Completion notes: accepted in `round-088` via
+   `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architecture-decision-and-successor-plan-choice.md`.
+   The refreshed control plane now records exactly one strategic outcome from
+   the accepted item-2 audit plus accepted item-6 `bounded subset only`
+   result: `continue within the current architecture`. The accepted bounded
+   successor choice is one same-lane retained-child stable-visible-persistence
+   gate inside the inherited acyclic model. This remains bounded evidence
+   only: zero rows have reached `stable visible persistence`, both admitted
+   families still carry blocker debt, nested-`forall` pressure remains
+   reject-side only, and `non-cyclic-graph = unknown` remains a live
+   architecture-pressure point. No targeted boundary revision, broad
+   general-capability claim, product-posture decision, or production widening
+   was authorized.
