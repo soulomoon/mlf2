@@ -39,26 +39,31 @@
 
 ## Items
 
-1. [pending] Define the repo-level capability contract and evaluation corpus for general automatic iso-recursive inference
+1. [done] Define the repo-level capability contract and evaluation corpus for general automatic iso-recursive inference
    Depends on:
-   Completion notes: produce one docs-first artifact that turns the strategic
-   roadmap into a concrete capability contract for this repo. It must define
-   what "general automatic iso-recursive inference" means here, distinguish
-   bounded packet evidence from general capability, identify the required
-   positive and negative corpus families, and state explicit success / failure
-   criteria around soundness, thesis-faithfulness, termination, and
-   explainability. This item must cite the inherited baseline plus accepted
-   `N14` continuity and must leave code and solver behavior unchanged.
+   Completion notes: accepted in `round-082` via
+   `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-capability-contract-and-evaluation-corpus.md`.
+   The repo now has a docs-first capability contract that defines the
+   repo-level target, separates bounded predecessor evidence from any general
+   capability claim, names the minimum positive / negative family matrix
+   (`P1`-`P6`, `N1`-`N6`), and records later success / no-claim gates around
+   soundness, thesis-faithfulness, termination, and explainability. The
+   inherited explicit-only / iso-recursive / non-equi-recursive /
+   non-cyclic-graph / no-second-interface / no-fallback boundary remains
+   unchanged, and no production behavior was widened.
 
 2. [pending] Audit the current architectural constraints against the capability contract
    Depends on: item 1
    Completion notes: classify the inherited `iso-recursive`,
    `non-equi-recursive`, `non-cyclic-graph`, and `no-fallback` constraints as
-   `keep`, `revise`, or `unknown`, record which appear compatible with the
-   defined capability target and which look like likely blockers, and state
-   whether general inference still appears plausible inside the current
-   architecture. This item remains docs-only unless the roadmap is explicitly
-   amended later.
+   `keep`, `revise`, or `unknown` against the accepted item-1 capability
+   contract and family matrix. The audit must state which constraints appear
+   compatible with the defined repo-level target, which families in `P1`-`P6`
+   or `N1`-`N6` each constraint appears to support or block, and whether
+   general inference still appears plausible inside the current architecture
+   without silently revising semantics, representation, interfaces, or
+   fallback behavior. This item remains docs-only unless the roadmap is
+   explicitly amended later.
 
 3. [pending] Generalize the accepted packet history into a reusable mechanism map
    Depends on: items 1, 2
