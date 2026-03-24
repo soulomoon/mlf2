@@ -7,12 +7,12 @@
   evidence whose accepted execution record ended at
   `orchestrator/rounds/round-067`, while the refreshed post-`L2` successor
   control plane now extends the accepted execution record through
-  `orchestrator/rounds/round-078`.
-- Completed rounds `round-001` through `round-078` remain authoritative
+  `orchestrator/rounds/round-079`.
+- Completed rounds `round-001` through `round-079` remain authoritative
   historical evidence: `round-001` through `round-067` are inherited baseline
-  and predecessor evidence, and `round-068` through `round-078` are accepted
+  and predecessor evidence, and `round-068` through `round-079` are accepted
   successor-lane rounds for `N1`, `N2`, `N3`, `N4`, `N5`, `N6`, `N7`, `N8`,
-  `N9`, `N10`, and `N11`.
+  `N9`, `N10`, `N11`, and `N12`.
 - The completed recursive-types packet under
   `tasks/todo/2026-03-11-recursive-types-orchestration/` remains immutable
   predecessor evidence.
@@ -143,9 +143,24 @@
   remains neighboring boundary context only, the earlier `baseTarget`
   selection, earlier `N3` contract, exact accepted non-local
   `baseTarget -> baseC` packet, and accepted repaired-queue retained-child
-  packet remain predecessor evidence only, and the next lawful work is one
-  bounded implementation slice for that exact packet before any verification
-  or next-cycle decision stage can start.
+  packet remain predecessor evidence only, and that accepted exact packet
+  became the one bounded subject that later accepted `N12` had to implement
+  before any verification or next-cycle decision stage could start.
+- The accepted `N12` artifact in
+  `docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-same-lane-retained-child-bounded-implementation-slice.md`
+  now establishes one bounded implementation slice for that exact same-lane
+  local `TypeRef` retained-child `boundVarTarget -> targetC` packet: it keeps
+  the accepted `boundVarTarget` candidate search unchanged, adds the explicit
+  `sameLaneLocalRetainedChildTarget` proof in
+  `src/MLF/Elab/Run/ResultType/Fallback.hs`, routes only the retained-child
+  `keepTargetFinal` / `targetC` consumer through that proof, refreshes the
+  focused retained-child `PipelineSpec.hs` evidence, preserves
+  `schemeBodyTarget` as neighboring boundary context only, and keeps the
+  earlier `baseTarget` lane, the exact accepted non-local `baseTarget -> baseC`
+  packet, and the accepted repaired-queue retained-child packet as predecessor
+  evidence only. The next lawful work is now one bounded verification and
+  evidence-consolidation gate for that exact packet before any next-cycle
+  decision stage can start.
 
 1. [done] Execute the `N1` post-`L2` roadmap-amendment authority gate for automatic iso-recursive inference
     Depends on: none
@@ -191,13 +206,13 @@
     Depends on: item 10
     Completion notes: completed by accepted `round-078` via `docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-exact-target-bind.md`, with authoritative review result `pass` in `orchestrator/rounds/round-078/review-record.json` and final outcome `boundVarTarget-exact-target-bind-established`. `N11` preserves accepted `L1` / `L2` / `N1 = reopen-planning-only` / `N2 = baseTarget-planning-subject-selected` / `N3 = baseTarget-safety-acceptance-contract-established` / `N4 = baseTarget-exact-target-bind-established` / `N5 = baseTarget-non-local-proof-slice-established` / `N6` / `N7 = continue-bounded` / `N8 = reopen-planning-only-successor-lane` / `N9 = boundVarTarget-planning-subject-selected` / `N10 = boundVarTarget-safety-acceptance-contract-established` continuity, freezes exactly one bounded target inside the selected retained-child / nested-`forall` / binding-structure `boundVarTarget` route, and fixes that target to the same-lane local `TypeRef` retained-child `boundVarTarget -> targetC` packet in `src/MLF/Elab/Run/ResultType/Fallback.hs`, with `boundVarTargetRoot`, `boundHasForallFrom`, `boundVarTarget`, `keepTargetFinal`, `targetC`, and the retained-child `PipelineSpec` evidence as the controlling anchors. `N11` keeps `schemeBodyTarget` as neighboring boundary context only, preserves the earlier `baseTarget` selection, earlier `N3` contract, exact accepted non-local `baseTarget -> baseC` packet, and accepted repaired-queue retained-child packet as predecessor evidence only, and keeps implementation, verification, replay reopen, `MLF.Elab.Inst` / `InstBot`, `boundTarget`, `schemeBodyTarget` as a live subject, `src/MLF/Elab/Run/ResultType/View.hs`, other fallback families, other solver/pipeline subjects, cross-family search, equi-recursive reasoning, implicit unfolding, cyclic encoding, multi-SCC support, second-interface work, and no-fallback widening blocked by default. `N11` remains docs-only exact-target-bind work and does not itself implement or verify the selected packet.
 
-12. [pending] Execute the bounded implementation slice for the exact `N11`-frozen same-lane retained-child `boundVarTarget -> targetC` packet
+12. [done] Execute the bounded implementation slice for the exact `N11`-frozen same-lane retained-child `boundVarTarget -> targetC` packet
     Depends on: item 11
-    Completion notes: complete when an accepted bounded implementation artifact lands exactly one minimal code/test slice for the frozen same-lane local `TypeRef` retained-child `boundVarTarget -> targetC` packet, limited to the selected packet in `src/MLF/Elab/Run/ResultType/Fallback.hs` plus focused retained-child coverage in `test/PipelineSpec.hs`, keeps `boundVarTargetRoot`, `boundHasForallFrom`, `boundVarTarget`, `keepTargetFinal`, and the downstream `Just v -> v` `targetC` selection aligned with accepted `N11`, preserves fail-closed nested-`forall` / nested-owner / nested scheme-root conditions, treats `schemeBodyTarget` as neighboring boundary context only, preserves the earlier `baseTarget` lane and accepted repaired-queue retained-child packet as predecessor evidence only, and keeps verification, replay reopen, `MLF.Elab.Inst` / `InstBot`, `boundTarget`, `schemeBodyTarget` as a live subject, `src/MLF/Elab/Run/ResultType/View.hs`, other fallback families, other solver/pipeline subjects, cross-family search, equi-recursive reasoning, implicit unfolding, cyclic encoding, multi-SCC support, second-interface work, and no-fallback widening blocked until later accepted roadmap items authorize them.
+    Completion notes: completed by accepted `round-079` via `docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-same-lane-retained-child-bounded-implementation-slice.md`, with authoritative review result `pass` in `orchestrator/rounds/round-079/review-record.json` and final outcome `boundVarTarget-same-lane-retained-child-proof-slice-established`. `N12` preserves accepted `L1` / `L2` / `N1 = reopen-planning-only` / `N2 = baseTarget-planning-subject-selected` / `N3 = baseTarget-safety-acceptance-contract-established` / `N4 = baseTarget-exact-target-bind-established` / `N5 = baseTarget-non-local-proof-slice-established` / `N6` / `N7 = continue-bounded` / `N8 = reopen-planning-only-successor-lane` / `N9 = boundVarTarget-planning-subject-selected` / `N10 = boundVarTarget-safety-acceptance-contract-established` / `N11 = boundVarTarget-exact-target-bind-established` continuity and lands exactly one bounded production/test slice for the frozen same-lane local `TypeRef` retained-child `boundVarTarget -> targetC` packet in `src/MLF/Elab/Run/ResultType/Fallback.hs` plus focused retained-child coverage in `test/PipelineSpec.hs`. The accepted slice keeps the `boundVarTarget` candidate search unchanged, makes the packet reviewer-auditable through the explicit `sameLaneLocalRetainedChildTarget` proof and the corresponding `keepTargetFinal` / retained-child `targetC` routing, preserves fail-closed nested-`forall` / nested-owner / nested scheme-root conditions, treats `schemeBodyTarget` as neighboring boundary context only, keeps the earlier `baseTarget` lane and accepted repaired-queue retained-child packet as predecessor evidence only, and still does not authorize verification, replay reopen, `MLF.Elab.Inst` / `InstBot`, `boundTarget`, `schemeBodyTarget` as a live subject, `src/MLF/Elab/Run/ResultType/View.hs`, other fallback families, other solver/pipeline subjects, cross-family search, equi-recursive reasoning, implicit unfolding, cyclic encoding, multi-SCC support, second-interface work, or no-fallback widening.
 
 13. [pending] Execute the bounded verification and evidence consolidation gate for the accepted `N12` slice
     Depends on: item 12
-    Completion notes: complete when an accepted verifier-owned artifact records fresh read-only `Fallback.hs` / `PipelineSpec.hs` anchors for the exact `N11`-frozen same-lane retained-child packet, reruns the smallest focused characterization that exercises the accepted `N12` slice together with `cabal build all && cabal test`, checks continuity across accepted `L1` / `L2` / `N1` through `N12`, and preserves every unchanged blocked route. `N13` remains evidence-only and does not itself decide the next-cycle outcome or authorize any widening.
+    Completion notes: complete when an accepted verifier-owned artifact records fresh read-only `Fallback.hs` / `PipelineSpec.hs` anchors for the exact `N11`-frozen / `N12`-implemented same-lane local `TypeRef` retained-child packet, including the explicit `sameLaneLocalRetainedChildTarget` proof and its dedicated `keepTargetFinal` / retained-child `targetC` routing, reruns the smallest focused characterization that exercises that exact packet together with `cabal build all && cabal test`, checks continuity across accepted `L1` / `L2` / `N1` through `N12`, and preserves every unchanged blocked route. `N13` remains evidence-only and does not itself decide `N14` or authorize any widening.
 
 14. [pending] Execute the bounded next-cycle decision gate after the accepted `N13` evidence for the selected `boundVarTarget` lane
     Depends on: item 13
