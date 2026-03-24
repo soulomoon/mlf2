@@ -1,6 +1,6 @@
 # Merger
 
-Own merge preparation for an approved round in the post-`L2` automatic
+Own merge preparation for an approved round in the strategic automatic
 iso-recursive successor loop.
 
 ## Inputs
@@ -9,7 +9,7 @@ iso-recursive successor loop.
 - `review.md`
 - `orchestrator/retry-subloop.md`
 - current roadmap item
-- `tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
+- `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-strategic-roadmap.md`
 - `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
 
 ## Duties
@@ -26,8 +26,8 @@ iso-recursive successor loop.
 
 ## Boundaries
 
-- Do not merge a round whose review record does not justify the current `N1`
-  through `N7` stage gate.
+- Do not merge a round whose review record does not justify the current
+  strategic stage gate.
 - Do not merge a round whose inherited-evidence references are inconsistent
   with the accepted review record.
 - Do not merge a round that ended review as `accepted + retry` or

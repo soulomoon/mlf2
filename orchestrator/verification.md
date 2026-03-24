@@ -4,7 +4,7 @@
 
 - Command: `git diff --check`
   Why: every round must leave the tree free of whitespace and conflict-marker
-  damage, including docs-only evidence rounds.
+  damage, including docs-only strategic rounds.
 - Command: `python3 -m json.tool orchestrator/state.json >/dev/null`
   Why: `orchestrator/state.json` is machine state and must remain valid JSON
   after every round.
@@ -14,24 +14,18 @@
 - Command: `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
   Why: the live roadmap must keep a parseable ordered item list with explicit
   status markers.
+- Command: `test -f docs/plans/2026-03-25-general-automatic-iso-recursive-inference-strategic-roadmap.md`
+  Why: the refreshed control plane is derived from the human-facing strategic
+  roadmap and must not silently drift away from it.
 - Command: `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
   Why: the inherited automatic-recursive baseline remains the live boundary
   contract.
-- Command: `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md`
-  Why: the prior unannotated `research-stop` remains required predecessor
-  evidence and may not be silently bypassed.
-- Command: `test -f docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md`
-  Why: the repaired `URI-R2-C1` lane remains the accepted predecessor repair
-  baseline for the exhausted queue.
-- Command: `test -f docs/plans/2026-03-21-uri-r2-c1-l1-next-target-bind.md`
-  Why: `L1` remains the authoritative fail-closed bind proving the prior queue
-  had no fresh lawful exact successor slice.
-- Command: `test -f docs/plans/2026-03-21-uri-r2-c1-l2-post-l1-fail-closed-successor-decision-gate.md`
-  Why: `L2` remains the authoritative `stop-blocked` closeout for the prior
-  queue.
-- Command: `test -f tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
-  Why: the refreshed control plane is derived from the approved post-`L2`
-  next-loop packet.
+- Command: `test -f docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-same-lane-retained-child-next-cycle-decision-gate.md`
+  Why: accepted `N14` is the immediate predecessor result whose
+  `continue-bounded` outcome this strategic program now succeeds.
+- Command: `test -f orchestrator/rounds/round-081/review-record.json`
+  Why: the final accepted review record from the predecessor control plane must
+  remain present as continuity evidence.
 - Command: `test -f orchestrator/retry-subloop.md`
   Why: the live control plane needs one repo-local operational source for
   retry-state, artifact, and transition rules.
@@ -39,64 +33,52 @@
   Why: the full repo gate is mandatory whenever a round touches `src/`,
   `src-public/`, `app/`, `test/`, or `mlf2.cabal`.
 - Command: reviewer-recorded continuity check against predecessor evidence
-  Why: each round must preserve completed rounds `001` through `067`, the
+  Why: each round must preserve completed rounds `001` through `081`, the
   inherited automatic-recursive boundary docs, the predecessor recursive-types
-  packet, and the accepted `L1` / `L2` closeout unless an accepted roadmap
-  update explicitly changes the live plan.
+  packet, the exhausted post-`L2` successor loop, and the strategic roadmap
+  source unless an accepted roadmap update explicitly changes the live plan.
 
 ## Task-Specific Checks
 
 - Add round-specific checks required by the selected roadmap item, especially:
-- live-subject-authority checks proving the round does not silently reopen the
-  exhausted repaired `URI-R2-C1` queue or begin a new subject without accepted
-  roadmap authority;
-- explicit-only-boundary checks proving the round does not silently enable broad
-  unannotated recursive inference outside the selected bounded subject;
-- no-equi-recursive checks proving the round does not introduce implicit
-  unfolding or equi-recursive equality as a success path;
-- no-cyclic-graph checks proving the round does not introduce cyclic structural
-  graph encoding or graph-cycle exceptions;
-- single-subject / single-family checks proving the round does not widen into
-  multi-SCC, cross-family, or search-wide recursive inference unless the
-  roadmap explicitly authorizes that change;
-- no-second-interface checks proving the round does not add a research-only
-  executable entrypoint or alternate production path;
-- no-fallback checks proving the round does not introduce a convenience
-  fallback, compatibility shim, or default-path widening;
-- no-implicit-clearance checks proving the preserved generic scheme-alias /
-  base-like `baseTarget` route is not treated as authorized merely because the
-  old queue ended `stop-blocked`;
-- `N1` checks proving the accepted artifact lawfully reopens post-`L2` work,
-  preserves or explicitly revises the inherited boundary, and does not silently
-  authorize implementation or verification;
-- `N2` checks proving the accepted artifact chooses exactly one thesis-backed
-  next live subject and explicitly defers rejected alternatives;
-- `N3` checks proving the accepted artifact records the invariant audit,
-  acceptance criteria, and no-go conditions required before any code-changing
-  recursive-inference slice is authorized;
-- `N4` checks proving the accepted artifact binds exactly one bounded target and
-  states explicit future ownership / out-of-scope exclusions;
-- `N5` checks proving any production diff stays bounded to the exact `N4`
-  target, is backed by focused positive and negative examples when code changes
-  are involved, and preserves fail-closed out-of-scope behavior;
-- `N6` checks proving the accepted artifact records current bounded
-  verification/evidence for the exact `N5` slice without silently widening
-  beyond the accepted reopened subject;
-- `N7` checks proving the final artifact records exactly one of
-  `continue-bounded`, `stop-blocked`, or `completed`, and that the outcome
-  matches the accumulated accepted evidence and current bounded verification
-  while preserving predecessor continuity;
-- retry-subloop checks proving `N1` through `N6` reviews record
+- capability-definition checks proving item 1 defines a concrete target, a
+  representative corpus, and explicit success / failure conditions rather than
+  broad aspiration language only;
+- constraint-audit checks proving item 2 classifies the inherited boundaries as
+  `keep`, `revise`, or `unknown` and explicitly states whether the current
+  architecture still appears plausible;
+- mechanism-map checks proving item 3 generalizes accepted packet evidence into
+  reusable mechanism families instead of selecting another narrow packet;
+- search-model checks proving item 4 defines candidate generation, ambiguity
+  handling, rejection conditions, and termination discipline without hidden
+  heuristic widening;
+- reconstruction-contract checks proving item 5 states how inferred recursion
+  must survive solver, elaboration, reconstruction, and output surfaces;
+- coverage-campaign checks proving item 6 spans representative local /
+  non-local, retained-child / alias-bound, nested-`forall`, ambiguity,
+  termination, and reconstruction-heavy families rather than a convenience
+  subset;
+- architecture-decision checks proving item 7 records exactly one explicit
+  outcome and does not blur together "continue within current architecture,"
+  "revise the boundary," and "stop";
+- inherited-boundary checks proving rounds do not silently enable broad
+  automatic recursive inference, equi-recursive reasoning, cyclic structural
+  graphs, multi-SCC search, second interfaces, or convenience fallbacks unless
+  the accepted roadmap item explicitly makes that lawful;
+- predecessor-continuity checks proving accepted `N14` and earlier rounds are
+  treated as bounded predecessor evidence rather than as implicit clearance for
+  a wider live subject;
+- retry-subloop checks proving retry-capable item reviews record
   `attempt_verdict`, `stage_action`, `retry_reason`, and `fix_hypothesis`, and
-  that `accepted + retry` is never used for `N7`;
+  that `accepted + retry` is never used for the final aggregate decision item;
 - artifact-history checks proving earlier retry attempts remain immutable in
   `reviews/attempt-<n>.md` and the controller-owned `attempt-log.jsonl` rather
   than being silently overwritten;
 - roadmap-update checks proving accepted `update-roadmap` edits preserve
   completed-item truth, keep the next unfinished item concrete, and do not
-  silently widen the live subject;
+  silently widen the strategic live subject;
 - docs-diff review when a round intentionally changes only `orchestrator/`,
-  `docs/`, or bounded campaign artifacts;
+  `docs/`, or strategic campaign artifacts;
 - skip-note review when a round does not trigger the full Cabal gate,
   including the exact reason the reviewer judged the code-path gate out of
   scope.
@@ -109,8 +91,9 @@
 - `review.md` records commands, evidence, `Implemented stage result`,
   `Attempt verdict`, `Stage action`, `Retry reason`, and `Fix hypothesis`.
 - The round preserves the current live-subject boundary, inherited
-  non-equi-recursive / non-cyclic-graph constraints, and predecessor-evidence
-  continuity unless an accepted roadmap update explicitly changes the live plan.
+  non-equi-recursive / non-cyclic-graph constraints, predecessor-evidence
+  continuity, and strategic-goal framing unless an accepted roadmap update
+  explicitly changes the live plan.
 - No unresolved blocking issue remains.
 
 ## Reviewer Record Format

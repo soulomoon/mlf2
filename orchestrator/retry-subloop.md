@@ -1,22 +1,22 @@
 # Retry Subloop Contract
 
 This file defines the live retry behavior for future `contract_version: 2`
-rounds on the current post-`L2` automatic iso-recursive successor control
+rounds on the current strategic automatic iso-recursive successor control
 plane.
 
 The current roadmap and subject boundary come from:
 
-- `tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
+- `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-strategic-roadmap.md`
 - `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
-- `docs/plans/2026-03-21-uri-r2-c1-l1-next-target-bind.md`
-- `docs/plans/2026-03-21-uri-r2-c1-l2-post-l1-fail-closed-successor-decision-gate.md`
+- `docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-same-lane-retained-child-next-cycle-decision-gate.md`
+- `orchestrator/roadmap.md`
 
 ## Scope
 
-- `N1`, `N2`, `N3`, `N4`, `N5`, and `N6` may retry inside the same round.
-- `N7` is aggregate-only:
+- roadmap items `1` through `6` may retry inside the same round.
+- roadmap item `7` is aggregate-only:
   - review may reject it and send the same round back to `plan`;
-  - review may not emit `accepted + retry` for `N7`.
+  - review may not emit `accepted + retry` for item `7`.
 
 ## Machine State
 
@@ -39,7 +39,7 @@ Retry object fields:
 
 ## Review Output
 
-Every `N1` through `N7` review must record:
+Every strategic-loop review must record:
 
 - `Implemented stage result`
 - `Attempt verdict`
@@ -56,7 +56,7 @@ Allowed combinations:
 Forbidden combinations:
 
 - `rejected + finalize`
-- `accepted + retry` for `N7`
+- `accepted + retry` for item `7`
 
 Use `Retry reason: none` and `Fix hypothesis: none` when a stage finalizes
 without another retry.
@@ -89,7 +89,7 @@ After review:
 
 ## Budget Rules
 
-- `max_attempts` is `100` for `N1`, `N2`, `N3`, `N4`, `N5`, and `N6`
+- `max_attempts` is `100` for roadmap items `1` through `6`
 - on exhaustion:
   - finalize the latest accepted attempt if one exists
   - otherwise stop with a controller blockage in `orchestrator/state.json`
@@ -106,11 +106,12 @@ After review:
 After an accepted round finalizes and merges:
 
 - the guider may mark the completed item done;
-- the guider may refine later pending items or append the next bounded cycle;
+- the guider may refine later pending items or append the next bounded cycle or
+  decision gate;
 - the guider may not rewrite completed-item truth or silently widen the active
-  subject.
+  strategic subject or revise architecture without saying so.
 
 ## Historical Compatibility
 
-Rounds `round-001` through `round-067` remain historical predecessor evidence.
-Do not rewrite them into the new retry schema.
+Rounds `round-001` through `round-081` remain historical predecessor evidence.
+Do not rewrite them into the refreshed retry schema.
