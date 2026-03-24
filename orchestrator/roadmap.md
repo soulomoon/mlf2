@@ -84,30 +84,33 @@
    model, full reconstruction contract, coverage campaign, or architecture
    decision was authorized.
 
-4. [pending] Design the search, ambiguity, and termination model for general recursive inference
+4. [done] Design the search, ambiguity, and termination model for general recursive inference
    Depends on: items 1, 2, 3
-   Completion notes: starting from the accepted item-3 mechanism map, define
-   one bounded search / admissibility / termination model for the inherited
-   acyclic architecture. The output must state how anchor-first
-   recursive-shape discovery produces candidate targets, how owner / binder
-   placement and target / consumer alignment constrain local versus non-local
-   propagation, when nested-`forall` / owner-crossing / competing-candidate
-   situations must fail closed, and why the resulting search terminates
-   without cyclic graphs, multi-SCC search, or fallback. It must address the
-   named item-3 debt around packet-specific guards
-   (`rootNonLocalSchemeAliasBaseLike`, `sameLaneLocalRetainedChildTarget`,
-   `boundHasForallFrom`, `not hasForall`) by either lifting them into general
-   admissibility rules or recording them as unresolved blockers. Stop short
-   of the full reconstruction contract, the coverage campaign, or an
-   architecture decision.
+   Completion notes: accepted in `round-085` via
+   `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-search-model.md`.
+   The repo now has one bounded search / admissibility / ambiguity /
+   termination model for the inherited acyclic architecture: recursive
+   inference is anchor-first, lawful candidates are limited to the accepted
+   non-local alias-bound / base-like family and the accepted same-lane
+   retained-child family, the named item-3 guards are lifted into bounded
+   admissibility rules, nested-`forall` / owner-crossing /
+   competing-candidate situations remain fail-closed, and bounded termination
+   is tied to finite acyclic anchors, finite ancestry, finite lane-bounded
+   routes, and no reopening loops. This remains bounded evidence only:
+   positive `P5` success, full-pipeline reconstruction, representative
+   coverage, and the architecture decision remain open.
 
 5. [pending] Define the full-pipeline reconstruction and validation contract
    Depends on: items 1, 3, 4
-   Completion notes: state how inferred recursive structure must survive solver
-   state, elaboration, reification / reconstruction, and user-visible output
-   surfaces, and define the corresponding validation requirements. This item
-   must make clear what evidence is needed before any solver-side success can
-   count as a repo-level capability.
+   Completion notes: starting from the accepted item-4 search model, define
+   one bounded docs-only contract for how an admitted recursive candidate must
+   persist through solver state, elaboration, reification / reconstruction,
+   and internal/public output surfaces, and how that persistence is
+   validated. The output must name the concrete evidence trail required across
+   those phases and the fail-closed conditions for recursion that disappears,
+   changes family, crosses a quantified boundary, or only survives via manual
+   interpretation / fallback-like reasoning. Stop short of the representative
+   coverage campaign or the item-7 architecture decision.
 
 6. [pending] Run a representative coverage and feasibility campaign
    Depends on: items 2, 4, 5
