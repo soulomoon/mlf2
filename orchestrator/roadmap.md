@@ -100,26 +100,38 @@
    positive `P5` success, full-pipeline reconstruction, representative
    coverage, and the architecture decision remain open.
 
-5. [pending] Define the full-pipeline reconstruction and validation contract
+5. [done] Define the full-pipeline reconstruction and validation contract
    Depends on: items 1, 3, 4
-   Completion notes: starting from the accepted item-4 search model, define
-   one bounded docs-only contract for how an admitted recursive candidate must
-   persist through solver state, elaboration, reification / reconstruction,
-   and internal/public output surfaces, and how that persistence is
-   validated. The output must name the concrete evidence trail required across
-   those phases and the fail-closed conditions for recursion that disappears,
-   changes family, crosses a quantified boundary, or only survives via manual
-   interpretation / fallback-like reasoning. Stop short of the representative
-   coverage campaign or the item-7 architecture decision.
+   Completion notes: accepted in `round-086` via
+   `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-full-pipeline-reconstruction-and-validation-contract.md`.
+   The repo now has one bounded full-pipeline persistence contract for the
+   two item-4-admitted families. It freezes one persistence tuple
+   (family, recursive-shape anchor, owner / binder frame, target / consumer
+   route, quantified-boundary-clear status, and output-surface recursive
+   visibility), one phase-and-surface ledger from solver admission through
+   public output, and one lawful outcome vocabulary:
+   `stable visible persistence`, `admitted but not reconstruction-visible /
+   blocker debt`, and `fail-closed rejection`. The non-local alias-bound /
+   base-like family remains blocker debt while the visible read stays
+   `TBase (BaseTy "Int")` / `containsMu False`; the same-lane retained-child
+   family remains the strongest bounded candidate but still needs explicit
+   end-to-end continuity evidence before it counts as stable visible
+   persistence. Representative coverage and the architecture decision remain
+   open.
 
 6. [pending] Run a representative coverage and feasibility campaign
    Depends on: items 2, 4, 5
-   Completion notes: validate the chosen mechanism and search model across
-   representative local / non-local, retained-child / alias-bound,
-   nested-`forall`, binder-sensitive, ambiguity, termination, and
-   reconstruction-heavy families. The output must say whether the accumulated
+   Completion notes: using the accepted item-5 persistence tuple,
+   phase-and-surface ledger, and bounded outcome vocabulary, classify
+   representative capability-corpus families across both admitted item-4
+   families plus nested-`forall` reject-side, ambiguity-reject,
+   termination-pressure, binder-sensitive, and reconstruction-heavy pressure.
+   The output must say which cases achieve `stable visible persistence`,
+   which remain `admitted but not reconstruction-visible / blocker debt`, and
+   which stay `fail-closed rejection`, then state whether the accumulated
    evidence supports broad generality, a bounded subset only, or an
-   architectural dead end.
+   architectural dead end. Stop short of the item-7 architecture choice or
+   any boundary revision.
 
 7. [pending] Make the architecture decision and successor-plan choice
    Depends on: items 2, 6
