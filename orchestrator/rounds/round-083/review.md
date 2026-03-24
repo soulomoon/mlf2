@@ -1,0 +1,62 @@
+# Round `round-083` Attempt `1` Review (`item-2`)
+
+- Baseline checks:
+  - `git branch --show-current` -> pass (`codex/round-083-item-2-constraint-audit`).
+  - `git status --short --untracked-files=all` -> pass for the bounded docs-only round payload before reviewer outputs (`M orchestrator/state.json` is the controller-owned state transition, plus `?? docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architectural-constraint-audit.md`, `?? orchestrator/rounds/round-083/implementation-notes.md`, `?? orchestrator/rounds/round-083/plan.md`, and `?? orchestrator/rounds/round-083/selection.md`).
+  - `git ls-files --others --exclude-standard` -> pass with the same four untracked round files only before reviewer outputs.
+  - `git diff --check` -> pass (no output).
+  - `rg -n '[ \t]+$' docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architectural-constraint-audit.md orchestrator/rounds/round-083/implementation-notes.md orchestrator/rounds/round-083/plan.md orchestrator/rounds/round-083/selection.md` -> pass (no trailing-whitespace matches).
+  - `rg -n '^(<<<<<<<|=======|>>>>>>>)' docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architectural-constraint-audit.md orchestrator/rounds/round-083/implementation-notes.md orchestrator/rounds/round-083/plan.md orchestrator/rounds/round-083/selection.md` -> pass (no conflict-marker matches).
+  - `python3 -m json.tool orchestrator/state.json >/dev/null` -> pass.
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json` -> pass (`2:  "contract_version": 2,`, `18:  "retry": null`).
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md` -> pass (item `1` remains done and items `2` through `7` remain parseable and pending).
+  - Required artifact-presence checks -> pass for `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-strategic-roadmap.md`, `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`, `docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-same-lane-retained-child-next-cycle-decision-gate.md`, `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-capability-contract-and-evaluation-corpus.md`, `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architectural-constraint-audit.md`, `docs/plans/2026-03-21-uri-r2-c1-l1-next-target-bind.md`, `docs/plans/2026-03-21-uri-r2-c1-l2-post-l1-fail-closed-successor-decision-gate.md`, `docs/plans/2026-03-11-recursive-types-roadmap.md`, `tasks/todo/2026-03-11-recursive-types-orchestration/`, `orchestrator/rounds/round-081/review-record.json`, and `orchestrator/retry-subloop.md`.
+  - Historical continuity inventory -> pass: `python3` over `orchestrator/rounds` reported `missing_round_dirs=[]` for `round-001` through `round-081`; `round-081` remains `accepted finalize authoritative continue-bounded`; and `round-082` remains `accepted finalize authoritative repo-level-capability-contract-and-evaluation-corpus-defined`.
+  - Pre-write reviewer-target check -> pass: `find orchestrator/rounds/round-083 -maxdepth 2 -type f | sort` returned only `orchestrator/rounds/round-083/implementation-notes.md`, `orchestrator/rounds/round-083/plan.md`, and `orchestrator/rounds/round-083/selection.md` before reviewer outputs, and `test ! -f orchestrator/rounds/round-083/review.md && test ! -f orchestrator/rounds/round-083/review-record.json && test ! -f orchestrator/rounds/round-083/reviews/attempt-1.md` passed.
+
+- Task-specific checks:
+  - `ITEM2-CONSTRAINT-AUDIT-CONTRACT` -> pass: `selection.md`, `plan.md`, and `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architectural-constraint-audit.md` align on `round-083` / `item-2` / `attempt-1` / `retry: null` as one docs-only audit of the four inherited constraints only. The canonical artifact explicitly stays audit-only and forbids code/test/public/Cabal/state/roadmap/retry-contract/Bugs drift plus mechanism-map, search-model, reconstruction-contract, coverage-campaign, and final-decision widening.
+  - `ITEM2-PLAN-ALIGNMENT` -> pass: the canonical artifact satisfies the round plan's concrete deliverables. It cites the inherited baseline contract, the accepted item-1 capability contract, and accepted `N14`; defines the allowed `keep` / `revise` / `unknown` rubric; provides one audit summary across the four inherited constraints; reasserts the inherited explicit-only / iso-recursive / non-equi-recursive / non-cyclic-graph / no-second-interface / no-fallback boundary; and records one bounded item-2 plausibility read plus later-item ownership.
+  - `ITEM2-BOUNDARY-CONTINUITY` -> pass: manual diff review plus `rg -n 'no second interface is authorized|a second executable or interface|compatibility, convenience, or default-path fallback widening|equi-recursive reasoning or implicit unfolding|cyclic structural graph encoding or multi-SCC search|Item `2` still classifies only the inherited no-fallback production principle, not a new fifth interface axis' docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architectural-constraint-audit.md` found no silent widening into broad automatic recursive inference, equi-recursive semantics, cyclic graphs, multi-SCC search, second interfaces, or fallback behavior. The highest-risk `non-cyclic-graph` axis is correctly held at `unknown` rather than silently revised or generalized.
+  - `ITEM2-PREDECESSOR-CONTINUITY` -> pass: `round-001` through `round-081` remain present, `round-081` authoritative continuity is intact, `round-082` authoritative item-1 continuity is intact, the exhausted post-`L2` successor-loop artifacts remain present, the predecessor recursive-types packet docs remain present, and `rg -n '2026-03-14-automatic-recursive-inference-baseline-contract|2026-03-25-general-automatic-iso-recursive-inference-capability-contract-and-evaluation-corpus|2026-03-24-automatic-iso-recursive-bound-var-target-same-lane-retained-child-next-cycle-decision-gate|bounded predecessor continuity only' docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architectural-constraint-audit.md` confirmed that the new artifact treats accepted `N14` as bounded predecessor continuity only rather than as general authority.
+  - `ITEM2-FAMILY-CLASSIFICATION` -> pass: `rg -n 'Classification meanings|Audit summary|`iso-recursive` \| `keep`|`non-equi-recursive` \| `keep`|`non-cyclic-graph` \| `unknown`|`no-fallback` \| `keep`' docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architectural-constraint-audit.md` matched the required four classifications, and `rg -n 'Positive-family support|Positive-family block|Positive-family unresolved|Negative-family guard role|Negative-family block|Negative-family unresolved|Apparent pressure points|Why this does not overreach' docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architectural-constraint-audit.md` confirmed that each constraint records the required support / block / unresolved reads across the `P1`-`P6` / `N1`-`N6` family matrix.
+  - `ITEM2-PLAUSIBILITY-GATE` -> pass: `rg -n 'Current item-2 read:' docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architectural-constraint-audit.md` plus manual inspection confirmed that the artifact records one bounded outcome only: general automatic iso-recursive inference remains unresolved because `non-cyclic-graph` stays `unknown`. `rg -n 'item `3` must generalize accepted bounded packets into reusable mechanisms|item `4` must define candidate generation, ambiguity rejection, and termination discipline|item `5` must define how inferred recursion survives solver|item `6` must run representative `P2`-`P6` plus `N4` / `N6` coverage|item `7` owns the final architecture decision' docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architectural-constraint-audit.md` matched the required later-item ownership without making an item-`7` architecture decision early.
+  - `ITEM2-DOCS-ONLY-DIFF-BOUNDARY` -> pass: `git diff --name-only -- src test src-public app mlf2.cabal` returned no output; `git status --short --untracked-files=all -- src test src-public app mlf2.cabal` returned no output; `git diff --name-only -- . ':(exclude)docs/**' ':(exclude)orchestrator/**'` returned no output; `git status --short --untracked-files=all -- . ':(exclude)docs/**' ':(exclude)orchestrator/**'` returned no output; `git diff --name-only -- orchestrator/roadmap.md Bugs.md orchestrator/retry-subloop.md orchestrator/verification.md` returned no output; and `git status --short --untracked-files=all -- orchestrator/roadmap.md Bugs.md orchestrator/retry-subloop.md orchestrator/verification.md` returned no output. Reviewer found no tracked or untracked non-doc drift outside the controller-owned `orchestrator/state.json`.
+  - `ITEM2-SKIP-NOTE` -> pass: `cabal build all && cabal test` was lawfully omitted because this round changes only documentation (`docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architectural-constraint-audit.md` plus the round-local `orchestrator/rounds/round-083/implementation-notes.md`) and the diff remains outside `src/`, `src-public/`, `app/`, `test`, and `mlf2.cabal`.
+  - `ITEM2-IMMUTABILITY` -> pass: prior reviewer artifacts were absent before this write, earlier round history remains present, and this review writes fresh reviewer-owned outputs without rewriting prior attempts or predecessor authority.
+  - `ITEM2-RETRY-SCHEMA` -> pass: `orchestrator/retry-subloop.md` allows `accepted + finalize` for roadmap item `2` and requires `Implemented stage result`, `Attempt verdict`, `Stage action`, `Retry reason`, and `Fix hypothesis`. This review records the required fields, and because the stage finalizes, `Retry reason: none` and `Fix hypothesis: none` are correct.
+
+- Implemented stage result:
+  - `pass`
+
+- Attempt verdict:
+  - `accepted`
+
+- Stage action:
+  - `finalize`
+
+- Retry reason:
+  - `none`
+
+- Fix hypothesis:
+  - `none`
+
+- Decision summary:
+  - No blocking finding was discovered in the item-2 architectural-constraint audit. The round stays docs-only, preserves the inherited automatic-recursive boundary, and turns the strategic roadmap's architectural audit gate into a bounded four-constraint classification without silently widening semantics, representation, interfaces, or fallback behavior.
+  - The lawful review result is `accepted + finalize`.
+
+- Evidence summary:
+  - Canonical stage artifact: `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architectural-constraint-audit.md`
+  - Round selection: `orchestrator/rounds/round-083/selection.md`
+  - Round plan: `orchestrator/rounds/round-083/plan.md`
+  - Round implementation notes: `orchestrator/rounds/round-083/implementation-notes.md`
+  - Strategic roadmap source: `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-strategic-roadmap.md`
+  - Accepted item-1 capability contract: `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-capability-contract-and-evaluation-corpus.md`
+  - Inherited baseline contract: `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
+  - Accepted predecessor decision gate: `docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-same-lane-retained-child-next-cycle-decision-gate.md`
+  - Post-`L2` continuity anchors: `docs/plans/2026-03-21-uri-r2-c1-l1-next-target-bind.md` and `docs/plans/2026-03-21-uri-r2-c1-l2-post-l1-fail-closed-successor-decision-gate.md`
+  - Recursive-types predecessor anchors: `docs/plans/2026-03-11-recursive-types-roadmap.md` and `tasks/todo/2026-03-11-recursive-types-orchestration/`
+  - Authoritative predecessor review records: `orchestrator/rounds/round-081/review-record.json` and `orchestrator/rounds/round-082/review-record.json`
+  - Retry contract: `orchestrator/retry-subloop.md`
+  - Review snapshot: `orchestrator/rounds/round-083/reviews/attempt-1.md`
+  - Authoritative review record: `orchestrator/rounds/round-083/review-record.json`
